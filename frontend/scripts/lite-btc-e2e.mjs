@@ -71,4 +71,10 @@ const cr = await r.json();
 console.log('comment', r.status, cr.status);
 if (r.status !== 201 || cr.status !== 'ok') { console.log('FAIL: comment did not persist'); process.exit(1); }
 
-console.log('RESULT: BTC LOGIN + WRITE + COMMENT E2E PASS');
+// 8. VOTE + REBLOG (Lumen-local engagement)
+r = await fetch(`${BASE}/api/lite/vote`, { method: 'POST', headers: { ...CSRF, cookie: cookieHeader(jar) }, body: JSON.stringify({ author: 'blocktrades', permlink: 'a-hive-post-permlink', weight: 10000 }) });
+console.log('vote', r.status, (await r.json()).ok === true ? 'ok' : 'FAIL');
+r = await fetch(`${BASE}/api/lite/reblog`, { method: 'POST', headers: { ...CSRF, cookie: cookieHeader(jar) }, body: JSON.stringify({ author: 'blocktrades', permlink: 'a-hive-post-permlink' }) });
+console.log('reblog', r.status, (await r.json()).ok === true ? 'ok' : 'FAIL');
+
+console.log('RESULT: BTC LOGIN + WRITE + COMMENT + VOTE + REBLOG E2E PASS');

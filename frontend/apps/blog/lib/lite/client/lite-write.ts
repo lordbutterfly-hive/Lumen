@@ -67,6 +67,38 @@ export async function createLitePost(input: LitePostInput): Promise<LiteWriteRes
   }
 }
 
+/** Cast/change/remove a Lumen-local vote (weight 0 removes it). */
+export async function liteVote(author: string, permlink: string, weight: number): Promise<LiteWriteResult> {
+  try {
+    const res = await fetch('/api/lite/vote', {
+      method: 'POST',
+      headers: JSON_POST,
+      body: JSON.stringify({ author, permlink, weight })
+    });
+    const b = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+    if (res.ok && b?.ok) return { status: 'ok' };
+    return { status: 'error', message: friendly(res.status, b?.error) };
+  } catch {
+    return { status: 'error', message: 'Network error — please try again.' };
+  }
+}
+
+/** Reblog / un-reblog a post (Lumen-local). */
+export async function liteReblog(author: string, permlink: string, undo = false): Promise<LiteWriteResult> {
+  try {
+    const res = await fetch('/api/lite/reblog', {
+      method: 'POST',
+      headers: JSON_POST,
+      body: JSON.stringify({ author, permlink, undo })
+    });
+    const b = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+    if (res.ok && b?.ok) return { status: 'ok' };
+    return { status: 'error', message: friendly(res.status, b?.error) };
+  } catch {
+    return { status: 'error', message: 'Network error — please try again.' };
+  }
+}
+
 /** Follow / unfollow another Lumen (lite) account by display name. */
 export async function liteFollow(followeeName: string, unfollow = false): Promise<LiteFollowResult> {
   try {

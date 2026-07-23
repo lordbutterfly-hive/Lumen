@@ -15,6 +15,7 @@ import NoDataError from '@/blog/components/no-data-error';
 import { useSSRObserver } from '@/blog/components/observer-provider';
 import MarketTab from '@/blog/features/prediction-market/market-tab';
 import MediumPostCard from './medium-post-card';
+import LiteFeedStrip from './lite-feed-strip';
 
 // TODO: move to i18n
 const LABELS = {
@@ -195,7 +196,10 @@ export default function FeedTabs() {
           </div>
         )
       ) : (
-        <EntryFeed sort={FOR_YOU_SORT} tag="" observer={observer} />
+        <>
+          <LiteFeedStrip />
+          <EntryFeed sort={FOR_YOU_SORT} tag="" observer={observer} />
+        </>
       )}
     </div>
   );

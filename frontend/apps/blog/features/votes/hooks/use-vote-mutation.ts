@@ -7,6 +7,8 @@ import { getLogger } from '@ui/lib/logging';
 import { toast } from '@ui/components/hooks/use-toast';
 import { handleError } from '@ui/lib/handle-error';
 import { scheduleInvalidations, scheduleValidatedRefetch } from '@/blog/lib/react-query';
+import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { liteVote } from '@/blog/lib/lite/client/lite-write';
 
 const logger = getLogger('app');
 
@@ -92,6 +94,7 @@ function optimisticUpdateTotalVotes(
  * @return {*}
  */
 export function useVoteMutation() {
+  const { user } = useUserClient();
   const queryClient = useQueryClient();
   const cleanupRef = useRef<(() => void) | null>(null);
 
@@ -147,6 +150,13 @@ export function useVoteMutation() {
 
     mutationFn: async (params: { voter: string; author: string; permlink: string; weight: number }) => {
       const { voter, author, permlink, weight } = params;
+      // Keyless lite account: record a Lumen-local vote (not on-chain — a vote is
+      // attributed to the signer, so it can't be proxied per-user).
+      if (user.account_tier === 'lite') {
+        const result = await liteVote(author, permlink, weight);
+        if (result.status !== 'ok') throw new Error(result.message);
+        return { voter, author, permlink, weight, broadcastResult: undefined as unknown as TransactionBroadcastResult };
+      }
       // Use observe: false - don't wait for blockchain confirmation
       // A successful broadcast guarantees inclusion in the blockchain
       const broadcastResult: TransactionBroadcastResult = await transactionService.upVote(

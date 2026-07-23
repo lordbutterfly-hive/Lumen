@@ -11,6 +11,7 @@ import { Button } from '@hive/ui';
 import DialogLogin from '@/blog/components/dialog-login';
 import { handleError } from '@ui/lib/handle-error';
 import { useTranslation } from '@/blog/i18n/client';
+import { liteFollow } from '@/blog/lib/lite/client/lite-write';
 
 const ButtonsContainer = ({
   username,
@@ -75,6 +76,13 @@ const ButtonsContainer = ({
     }
   };
   const handlerFollow = async () => {
+    // Keyless lite account: follows are Lumen-local (no on-chain custom_json),
+    // recorded via /api/lite/follow. Works for other Lumen accounts.
+    if (user.account_tier === 'lite') {
+      const result = await liteFollow(username, isFollow);
+      if (result.status === 'error') handleError(new Error(result.message), { method: 'lite-follow', params: { username } });
+      return;
+    }
     if (!isFollow) {
       try {
         await followMutation.mutateAsync({ username });

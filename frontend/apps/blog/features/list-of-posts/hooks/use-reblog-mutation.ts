@@ -2,6 +2,8 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { TransactionBroadcastResult, transactionService } from '@transaction/index';
 import { toast } from '@ui/components/hooks/use-toast';
 import { handleError } from '@ui/lib/handle-error';
+import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { liteReblog } from '@/blog/lib/lite/client/lite-write';
 
 /**
  * Makes reblog transaction.
@@ -11,9 +13,17 @@ import { handleError } from '@ui/lib/handle-error';
  */
 export function useReblogMutation() {
   const queryClient = useQueryClient();
+  const { user } = useUserClient();
   const reblogMutation = useMutation({
     mutationFn: async (params: { author: string; permlink: string; username: string }) => {
       const { author, permlink, username } = params;
+
+      // Keyless lite account: Lumen-local reblog (not proxied on-chain).
+      if (user.account_tier === 'lite') {
+        const result = await liteReblog(author, permlink);
+        if (result.status !== 'ok') throw new Error(result.message);
+        return { author, permlink, username, broadcastResult: undefined as unknown as TransactionBroadcastResult };
+      }
 
       const broadcastResult: TransactionBroadcastResult = await transactionService.reblog(author, permlink, {
         observe: true
