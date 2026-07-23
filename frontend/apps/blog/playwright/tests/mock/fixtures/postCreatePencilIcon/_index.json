@@ -1,0 +1,19 @@
+{
+  "testName": "postCreatePencilIcon",
+  "base": "postCreate",
+  "generatedAt": "2026-05-08T11:35:10.000Z",
+  "overlayFiles": [
+    "0002-bridge.list_communities.json",
+    "0003-bridge.get_ranked_posts.json",
+    "0007-bridge.get_follow_list.json",
+    "0011-bridge.get_community.json",
+    "0012-bridge.get_post_header.json",
+    "0013-bridge.get_post.json",
+    "0014-bridge.get_discussion.json",
+    "0015-bridge.get_follow_list.json",
+    "0016-GET_hivesense-api_posts_guest4test_post-04-fixture-test-pencil-icon-post_similar.json",
+    "0017-condenser_api.get_reblogged_by.json",
+    "0018-bridge.list_community_roles.json",
+    "0019-database_api.list_votes.json"
+  ]
+}

@@ -1,0 +1,80 @@
+'use client';
+
+import { useTranslation } from '@/blog/i18n/client';
+import DialogLogin from '@/blog/components/dialog-login';
+
+interface WitnessesStatsBarProps {
+  hpAprPercent: number | null;
+  hbdInterestRatePercent: number | null;
+  witnessCount: number;
+  votesLeft: number;
+  isLoggedIn: boolean;
+  hasProxy: boolean;
+  proxyAccount: string;
+}
+
+const STAT_VALUE_CLASS = 'font-sans tabular-nums';
+
+/**
+ * Real, chain-derived stats: current HP staking APR and HBD savings rate
+ * (`chain.calculateHpApr` / dynamic_global_properties.hbd_interest_rate —
+ * both network-wide figures, not per-witness), how many witnesses are
+ * being shown, and how many of the viewer's 30 witness votes remain.
+ *
+ * The design handoff's mock stats (block reward / total daily / avg
+ * top-20) require Hive's inflation-schedule constants, which aren't
+ * exposed through any API this app calls — showing them would mean
+ * inventing a formula with no source to verify it against, so this bar
+ * surfaces the real numbers the chain actually gives us instead.
+ */
+export default function WitnessesStatsBar({
+  hpAprPercent,
+  hbdInterestRatePercent,
+  witnessCount,
+  votesLeft,
+  isLoggedIn,
+  hasProxy,
+  proxyAccount
+}: WitnessesStatsBarProps) {
+  const { t } = useTranslation('common_blog');
+
+  return (
+    <div
+      className="my-5 flex flex-wrap items-center gap-[26px] rounded-2xl border border-[#ebebeb] bg-[#fbfbfa] px-[22px] py-4 font-sans text-[13.5px] text-[#6b7280]"
+      data-testid="witnesses-stats-bar"
+    >
+      <span>
+        {t('witnesses.stats.hp_apr')}{' '}
+        <strong className={`${STAT_VALUE_CLASS} text-[#2f7d4f]`}>
+          {hpAprPercent !== null ? `${hpAprPercent.toFixed(2)}%` : '—'}
+        </strong>
+      </span>
+      <span>
+        {t('witnesses.stats.hbd_rate')}{' '}
+        <strong className={`${STAT_VALUE_CLASS} text-[#161511]`}>
+          {hbdInterestRatePercent !== null ? `${hbdInterestRatePercent.toFixed(2)}%` : '—'}
+        </strong>
+      </span>
+      <span>
+        {t('witnesses.stats.witness_count')}{' '}
+        <strong className={`${STAT_VALUE_CLASS} text-[#161511]`}>{witnessCount || '—'}</strong>
+      </span>
+
+      {!isLoggedIn ? (
+        <DialogLogin>
+          <button type="button" className="ml-auto font-semibold text-[#c0392b] hover:text-[#96271b]">
+            {t('witnesses.stats.log_in_to_vote')}
+          </button>
+        </DialogLogin>
+      ) : hasProxy ? (
+        <span className="ml-auto font-semibold text-[#c0392b]" data-testid="witnesses-stats-proxy-active">
+          {t('witnesses.stats.proxy_active', { proxy: proxyAccount })}
+        </span>
+      ) : (
+        <span className="ml-auto font-semibold text-[#c0392b]" data-testid="witnesses-stats-votes-left">
+          {t('witnesses.stats.votes_left', { count: votesLeft })}
+        </span>
+      )}
+    </div>
+  );
+}

@@ -1,0 +1,39 @@
+# ---- dependencies ----
+node_modules/
+.pnpm-store/
+.yarn/
+
+# ---- build output / compiled artifacts (rebuilt from source) ----
+.next/
+out/
+dist/
+build/
+*.wasm
+bin/
+*.test
+
+# ---- env & secrets (real values are never committed; use the *.example templates) ----
+.env
+.env.*
+!.env*.example
+
+# ---- python ----
+__pycache__/
+*.py[cod]
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+
+# ---- go ----
+vendor/
+
+# ---- os / editor / logs ----
+.DS_Store
+Thumbs.db
+*.swp
+*.log
+.idea/
+.vscode/

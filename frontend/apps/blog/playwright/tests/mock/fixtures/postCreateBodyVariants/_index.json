@@ -1,0 +1,32 @@
+{
+  "testName": "postCreateBodyVariants",
+  "base": "postCreate",
+  "generatedAt": "2026-05-08T11:35:10.000Z",
+  "overlayFiles": [
+    "0008-bridge.get_post_header.json",
+    "0009-bridge.get_post.json",
+    "0010-bridge.get_discussion.json",
+    "0011-bridge.get_follow_list.json",
+    "0012-GET_hivesense-api_posts_guest4test_post-11-fixture-test-mention-post_similar.json",
+    "0013-database_api.list_votes.json",
+    "0014-condenser_api.get_reblogged_by.json",
+    "0015-bridge.get_post_header.json",
+    "0016-bridge.get_post.json",
+    "0017-bridge.get_discussion.json",
+    "0018-GET_hivesense-api_posts_guest4test_post-12-fixture-test-html-link-post_similar.json",
+    "0019-database_api.list_votes.json",
+    "0020-condenser_api.get_reblogged_by.json",
+    "0021-bridge.get_post_header.json",
+    "0022-bridge.get_post.json",
+    "0023-bridge.get_discussion.json",
+    "0024-GET_hivesense-api_posts_guest4test_post-13-fixture-test-emoji-post_similar.json",
+    "0025-condenser_api.get_reblogged_by.json",
+    "0026-database_api.list_votes.json",
+    "0027-bridge.get_post_header.json",
+    "0028-bridge.get_post.json",
+    "0029-bridge.get_discussion.json",
+    "0030-GET_hivesense-api_posts_guest4test_post-14-fixture-test-long-text-post_similar.json",
+    "0031-database_api.list_votes.json",
+    "0032-condenser_api.get_reblogged_by.json"
+  ]
+}

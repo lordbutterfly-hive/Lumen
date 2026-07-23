@@ -1,0 +1,13 @@
+{
+  "testName": "postCreateCommunity",
+  "base": "postCreate",
+  "generatedAt": "2026-05-08T11:35:10.000Z",
+  "overlayFiles": [
+    "0002-bridge.list_communities.json",
+    "0003-bridge.get_ranked_posts.json",
+    "0007-bridge.get_follow_list.json",
+    "0011-bridge.get_community.json",
+    "0012-bridge.get_community.json",
+    "0013-bridge.get_post_header.json"
+  ]
+}

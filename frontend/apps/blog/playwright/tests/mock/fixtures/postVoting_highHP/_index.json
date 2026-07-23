@@ -1,0 +1,8 @@
+{
+  "testName": "postVoting_highHP",
+  "base": "postVoting",
+  "generatedAt": "2026-05-05T10:38:22.258Z",
+  "overlayFiles": [
+    "0003-database_api.find_accounts.json"
+  ]
+}

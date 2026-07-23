@@ -1,0 +1,10 @@
+{
+  "testName": "postVoting_highHP_upvoted",
+  "base": "postVoting",
+  "generatedAt": "2026-05-05T10:38:22.261Z",
+  "overlayFiles": [
+    "0003-database_api.find_accounts.json",
+    "0005-bridge.get_ranked_posts.json",
+    "0009-database_api.list_votes.json"
+  ]
+}

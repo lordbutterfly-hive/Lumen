@@ -1,0 +1,708 @@
+import { Locator, Page, expect } from '@playwright/test';
+import { PostPage } from './postPage';
+import { ProfilePage } from './profilePage';
+
+/**
+ * Common viewport sizes for responsive testing
+ */
+export const MOBILE_VIEWPORT = { width: 375, height: 667 }; // iPhone SE
+export const TABLET_VIEWPORT = { width: 768, height: 1024 }; // iPad
+
+export class HomePage {
+  readonly page: Page;
+  readonly postPage: PostPage;
+  readonly getLifestyleCommunityInMySubscriptions: Locator;
+  readonly getPostListTrending: Locator;
+  readonly getPostListNew: Locator;
+  readonly getPostListHot: Locator;
+  readonly getPostListPayouts: Locator;
+  readonly getPostListMuted: Locator;
+  readonly getCommunityNameElement: Locator;
+  readonly getTrendingCommunitiesSideBar: Locator;
+  readonly getTrendingCommunitiesSideBarLinks: Locator;
+  readonly getTrandingCommunitiesHeader: Locator;
+  readonly getMyFriendsSidebarLink: Locator;
+  readonly getMyCommunitiesSidebarLink: Locator;
+  readonly getExploreCommunities: Locator;
+  readonly getLeoFinanceCommunitiesLink: Locator;
+  readonly getHeaderLeoCommunities: Locator;
+  readonly getWorldmappinCommunitiesLink: Locator;
+  readonly getHeaderWorldmappinCommunities: Locator;
+  readonly getLifestyleCommunityLink: Locator;
+  readonly getHomeNavLink: Locator;
+  readonly getNavPostsLink: Locator;
+  readonly getNavProposalsLink: Locator;
+  readonly getNavWitnessesLink: Locator;
+  readonly getNavOurdAppsLink: Locator;
+  readonly getNavHbauthLink: Locator;
+  readonly getNavHbauthButton: Locator;
+  readonly getNavSearchInput: Locator;
+  readonly getNavSearchLink: Locator;
+  readonly getNavSearchAIInput: Locator;
+  readonly getNavSearchClassicInput: Locator;
+  readonly getNavSearchTagsInput: Locator;
+  readonly getNavUserAvatar: Locator;
+  readonly getNavCreatePost: Locator;
+  readonly getNavSidebarMenu: any;
+  readonly getNavProfileMenuContent: any;
+  readonly getNavSidebarMenuContent: Locator;
+  readonly getNavSidebarMenuContentCloseButton: Locator;
+  readonly getHeaderAllCommunities: Locator;
+  readonly getMainTimeLineOfPosts: any;
+  readonly getPostCardAvatar: Locator;
+  readonly getPostCardFooter: Locator;
+  readonly getUpvoteButton: Locator;
+  readonly getFirstPostUpvoteButton: Locator;
+  readonly getFirstPostUpvoteButtonIcon: Locator;
+  readonly firstPostCardUpvoteButtonLocator: Locator;
+  readonly firstPostCardDownvoteButtonLocator: Locator;
+  readonly getSecondPostDownvoteButton: Locator;
+  readonly getSecondPostDownvoteButtonIcon: Locator;
+  readonly getUpvoteButtonTooltip: Locator;
+  readonly getDownvoteButton: Locator;
+  readonly getReblogCountDisplay: Locator;
+  readonly getFirstPostDownvoteButton: Locator;
+  readonly getDownvoteButtonTooltip: Locator;
+  readonly getFirstPostDownvoteButtonTooltip: Locator;
+  readonly getFirstPostUpvoteButtonTooltip: Locator;
+  readonly getFirstPostResponseButton: Locator;
+  readonly getFirstPostResponseButtonTooltip: Locator;
+  readonly getFirstPostCardFooter: Locator;
+  readonly getFirstPostListItem: Locator;
+  readonly getFirstPostListItemReblogButton: Locator;
+  readonly getFirstPostCardAvatar: Locator;
+  readonly getFirstPostAuthor: Locator;
+  readonly getFirstPostAuthorReputation: Locator;
+  readonly getFirstPostCardCommunityLink: Locator;
+  readonly getFirstPostCardCategoryLink: Locator;
+  readonly getFirstPostCardTimestampLink: Locator;
+  readonly getFirstPostTitle: any;
+  readonly getFirstPostPayout: Locator;
+  readonly getFirstPostPayoutTooltip: Locator;
+  readonly getFirstPostVotes: Locator;
+  readonly getFirstPostVotesTooltip: Locator;
+  readonly getFirstPostChildren: Locator;
+  readonly getFirstPostChildernIcon: Locator;
+  readonly getFirstPostChildernCommentNumber: Locator;
+  readonly getFirstPostChildernTooltip: Locator;
+  readonly getFirstPostReblogCountDisplay: Locator;
+  readonly getFirstPostReblogCountTooltip: Locator;
+  readonly getSecondPostReblogCountDisplay: Locator;
+  readonly getSecondPostReblogCountTooltip: Locator;
+  readonly getPostChildren: Locator;
+  readonly getBody: Locator;
+  readonly getThemeModeButton: Locator;
+  readonly getThemeModeItem: Locator;
+  readonly getFilterPosts: Locator;
+  readonly getFilterPostsList: Locator;
+  readonly getCardExploreHive: Locator;
+  readonly getCardExploreHiveTitle: Locator;
+  readonly getCardExploreHiveLinks: Locator;
+  readonly getCardUserShortcuts: Locator;
+  readonly getCardUserShortcutsTitle: Locator;
+  readonly getCardUserShortcutsLinks: Locator;
+  readonly postTitle: Locator;
+  readonly postDescription: Locator;
+  readonly loginBtn: Locator;
+  readonly signupBtn: Locator;
+  readonly loginModal: Locator;
+  readonly loginModalHeader: Locator;
+  readonly loginModalUsernameInput: Locator;
+  readonly loginModalPasswordInput: Locator;
+  readonly loginModalHiveAuthText: Locator;
+  readonly loginModalKeepLoggedInText: Locator;
+  readonly hivsignerBtn: Locator;
+  readonly signupPageHeader: Locator;
+  readonly postReputationTooltip: Locator;
+  readonly postCardAffiliationTag: Locator;
+  readonly postCardPoweredUp100Trigger: Locator;
+  readonly postCardPoweredUp100TriggerLink: Locator;
+  readonly postCardPoweredUp100Tooltip: Locator;
+  readonly toggleLanguage: Locator;
+  readonly languageMenu: Locator;
+  readonly languageMenuPl: Locator;
+  readonly themeMode: Locator;
+  readonly articleTitle: Locator;
+  readonly articleBodyString: string;
+  readonly articleAuthor: string;
+  readonly userPopoverCardContent: string;
+  readonly profileFollowBtn: string;
+  readonly commentCard: string;
+  readonly commentListItem: string;
+  readonly postsImages: string;
+  readonly postAuthor: string;
+  readonly profileAvatar: string;
+
+  // for logged in user
+  readonly profileAvatarButton: Locator;
+
+  constructor(page: Page) {
+    this.page = page;
+    this.postPage = new PostPage(page);
+    this.getLifestyleCommunityInMySubscriptions = page
+        .locator('ul')
+        .filter({ hasText: /^Lifestyle$/ })
+        .getByRole('link');
+    this.getPostListTrending = page.getByTestId('post-list-trending');
+    this.getPostListNew = page.getByTestId('post-list-created');
+    this.getPostListHot = page.getByTestId('post-list-hot');
+    this.getPostListPayouts = page.getByTestId('post-list-payout');
+    this.getPostListMuted = page.getByTestId('post-list-muted');
+    this.getTrendingCommunitiesSideBar = page.locator('[data-testid="card-trending-comunities"]');
+    this.getTrendingCommunitiesSideBarLinks = this.getTrendingCommunitiesSideBar.locator('div ul li a');
+    this.getTrandingCommunitiesHeader = this.getTrendingCommunitiesSideBar
+      .locator('a')
+      .getByText('All posts');
+    this.getMyFriendsSidebarLink = this.getTrendingCommunitiesSideBar
+      .locator('a')
+      .getByText('My friends');
+    this.getMyCommunitiesSidebarLink = this.getTrendingCommunitiesSideBar
+      .locator('a')
+      .getByText('My communities');
+    this.getExploreCommunities = page.locator('[data-testid="explore-communities-link"]'); // page.getByText('Explore communities...');
+    this.getLeoFinanceCommunitiesLink = this.getTrendingCommunitiesSideBar
+      .locator('a')
+      .getByText('LeoFinance');
+    this.getCommunityNameElement = page.getByTestId('community-name');
+    this.getHeaderLeoCommunities = page.locator('[data-testid="community-name"]').getByText('LeoFinance');
+    this.getWorldmappinCommunitiesLink = this.getTrendingCommunitiesSideBar.locator('a:text("Worldmappin")');
+    this.getHeaderWorldmappinCommunities = page
+      .locator('[data-testid="community-name"]')
+      .getByText('Worldmappin');
+    this.getLifestyleCommunityLink = page.getByTestId('card-trending-comunities').getByText('Lifestyle');
+    this.getHomeNavLink = page.locator('header a span:text("Hive Blog")');
+    this.getNavPostsLink = page.locator('[data-testid="nav-posts-link"]');
+    this.getNavProposalsLink = page.locator('[data-testid="nav-proposals-link"]');
+    this.getNavWitnessesLink = page.locator('[data-testid="nav-witnesses-link"]');
+    this.getNavOurdAppsLink = page.locator('[data-testid="nav-our-dapps-link"]');
+    this.getHeaderAllCommunities = page.locator('[data-testid="card-trending-comunities"]');
+    this.getMainTimeLineOfPosts = page.locator('li[data-testid="post-list-item"]');
+    this.getFirstPostListItem = this.getMainTimeLineOfPosts.nth(0).locator('div').first();
+    this.getFirstPostListItemReblogButton = this.getFirstPostListItem.getByTestId('post-card-reblog');
+    this.getPostCardAvatar = page.locator('[data-testid="post-card-avatar"]');
+    this.getFirstPostCardAvatar = this.getPostCardAvatar.first();
+    this.getFirstPostAuthor = page.locator('[data-testid="post-author"]').first();
+    this.getFirstPostAuthorReputation = page.locator('[data-testid="post-author-reputation"]').first();
+    this.getFirstPostCardCommunityLink = page.locator('[data-testid="post-card-community"]').first();
+    this.getFirstPostCardCategoryLink = page.locator('[data-testid="post-card-category"]').first();
+    this.getFirstPostCardTimestampLink = page.locator('[data-testid="post-card-timestamp"]').first();
+    this.getFirstPostTitle = page.locator('li[data-testid="post-list-item"] h3 a').first();
+    this.getFirstPostPayout = page.locator('[data-testid="post-payout"]').first();
+    this.getFirstPostPayoutTooltip = page.locator('[data-testid="payout-post-card-tooltip"]').first();
+    this.getFirstPostVotes = page.locator('[data-testid="post-total-votes"]').first();
+    this.getFirstPostVotesTooltip = page.locator('[data-testid="post-card-votes-tooltip"]').first();
+    this.getFirstPostResponseButton = page.locator('[data-testid="post-card-response-link"]').first();
+    this.getFirstPostResponseButtonTooltip = page.locator('[data-testid="post-card-responses"]');
+    this.getFirstPostChildren = page.locator('[data-testid="post-children"]').first();
+    this.getFirstPostChildernIcon = this.getFirstPostChildren.locator('a:nth-of-type(1)');
+    this.getFirstPostChildernCommentNumber = this.getFirstPostChildren.locator('a:nth-of-type(2)');
+    this.getFirstPostChildernTooltip = page.locator('[data-testid="post-card-responses"]');
+    this.getPostChildren = page.locator('[data-testid="post-children"]');
+    this.getPostCardFooter = page.locator('[data-testid="post-card-footer"]');
+    this.getUpvoteButton = page.locator('[data-testid="upvote-button"]');
+    this.getFirstPostUpvoteButton = this.getUpvoteButton.first();
+    this.getFirstPostUpvoteButtonIcon = this.getFirstPostUpvoteButton.locator('svg');
+    this.firstPostCardUpvoteButtonLocator = page
+      .locator('[data-testid="post-card-footer"]')
+      .first()
+      .locator('[data-testid="upvote-button"]')
+      .locator('svg');
+    this.firstPostCardDownvoteButtonLocator = page
+      .locator('[data-testid="post-card-footer"]')
+      .first()
+      .locator('[data-testid="downvote-button"]')
+      .locator('svg');
+    this.getSecondPostDownvoteButton = page
+      .getByTestId('post-list-item')
+      .nth(1)
+      .getByTestId('downvote-button');
+    this.getSecondPostDownvoteButtonIcon = this.getSecondPostDownvoteButton.locator('svg');
+    this.getFirstPostCardFooter = this.getPostCardFooter.first();
+    this.getUpvoteButtonTooltip = page.locator('[data-testid="upvote-button-tooltip"]');
+    this.getFirstPostUpvoteButtonTooltip = this.getUpvoteButtonTooltip.first();
+    this.getDownvoteButton = page.locator('[data-testid="downvote-button"]');
+    this.getFirstPostDownvoteButton = this.getDownvoteButton.first();
+    this.getDownvoteButtonTooltip = page.locator('[data-testid="downvote-button-tooltip"]');
+    this.getFirstPostDownvoteButtonTooltip = this.getDownvoteButtonTooltip.first();
+    // Reblog button on list pages (interactive - opens confirmation dialog)
+    this.getReblogCountDisplay = page.locator('[data-testid="post-card-reblog-count"]');
+    this.getFirstPostReblogCountDisplay = this.getReblogCountDisplay.first();
+    this.getFirstPostReblogCountTooltip = page.locator('[data-testid="post-card-reblog-count-tooltip"]').first();
+    this.getSecondPostReblogCountDisplay = this.getReblogCountDisplay.nth(1);
+    this.getSecondPostReblogCountTooltip = page.locator('[data-testid="post-card-reblog-count-tooltip"]').nth(1);
+    this.getBody = page.locator('body');
+    this.getThemeModeButton = page.locator('[data-testid="theme-mode"]');
+    this.getThemeModeItem = page.locator('[data-testid="theme-mode-item"]');
+    this.getFilterPosts = page.locator('[data-testid="posts-filter"]');
+    this.getFilterPostsList = page.locator('[data-testid="posts-filter-list"]');
+    this.getCardExploreHive = page.locator('[data-testid="card-explore-hive-desktop"]');
+    this.getCardExploreHiveTitle = this.getCardExploreHive.locator('div h3');
+    this.getCardExploreHiveLinks = this.getCardExploreHive.locator('div ul li');
+    this.getCardUserShortcuts = page.locator('[data-testid="card-user-shortcuts"]');
+    this.getCardUserShortcutsTitle = this.getCardUserShortcuts.locator('div h3');
+    this.getCardUserShortcutsLinks = this.getCardUserShortcuts.locator('div ul li');
+    this.getNavHbauthLink = page.locator('[data-testid="navbar-hbauth-link"]');
+    this.getNavHbauthButton = this.getNavHbauthLink.locator('button');
+    // this.getNavSearchInput = page.locator('header div nav input[type="search"]'); // old one
+    this.getNavSearchInput = page.locator('input[type="search"]');
+    this.getNavSearchLink = page.locator('[data-testid="navbar-search-link"]');
+    this.getNavSearchAIInput = page.getByPlaceholder('AI Search', { exact: true });
+    this.getNavSearchClassicInput = page.getByPlaceholder('Search...', { exact: true });
+    this.getNavSearchTagsInput = page.getByPlaceholder('Search tags...');
+    this.getNavUserAvatar = page.locator('[data-testid="profile-menu"]');
+    this.getNavProfileMenuContent = page.locator('[data-testid="profile-menu-content"]');
+    this.getNavCreatePost = page.locator('[data-testid="nav-pencil"]');
+    this.getNavSidebarMenu = page.locator('[data-testid="nav-sidebar-menu-button"]');
+    this.getNavSidebarMenuContent = page.locator('[data-testid="nav-sidebar-menu-content"]');
+    this.getNavSidebarMenuContentCloseButton = page.locator(
+      '[data-testid="nav-sidebar-menu-content"] > button'
+    );
+    this.postTitle = page.locator('[data-testid="post-title"] a');
+    this.postDescription = page.locator('[data-testid="post-description"]');
+    this.loginBtn = page.locator('[data-testid="login-btn"]');
+    this.signupBtn = page.locator('[data-testid="signup-btn"]');
+    this.loginModal = page.locator('[role="dialog"]');
+    this.loginModalHeader = page.locator('h2');
+    this.loginModalUsernameInput = page.locator('[name="username"]');
+    this.loginModalPasswordInput = page.locator('[name="password"]');
+    this.loginModalHiveAuthText = page.locator('[for="hiveAuth"]');
+    this.loginModalKeepLoggedInText = page.locator('[for="remember"]');
+    this.hivsignerBtn = page.locator('[data-testid="hivesigner-button"]');
+    this.signupPageHeader = page.locator('h1.pb-3');
+    this.postReputationTooltip = page.locator('[data-testid="post-reputation-tooltip"]');
+    this.postCardAffiliationTag = page.locator('[data-testid="affiliation-tag-badge"]');
+    this.postCardPoweredUp100Trigger = page.locator('[data-testid="powered-up-100-trigger"]');
+    this.postCardPoweredUp100TriggerLink = this.postCardPoweredUp100Trigger.locator('a');
+    this.postCardPoweredUp100Tooltip = page.locator('[data-testid="powered-up-100-tooltip"]');
+    this.toggleLanguage = page.locator('[data-testid="toggle-language"]').first();
+    this.languageMenu = page.locator('[role="menuitem"]');
+    this.languageMenuPl = page.locator('[data-testid="pl"]').locator('..');
+    this.themeMode = page.locator('[data-testid="theme-mode"]');
+    this.articleTitle = page.locator('[data-testid="article-title"]');
+    this.articleBodyString = '#articleBody';
+    this.articleAuthor = '[data-testid="author-name-link"]';
+    this.userPopoverCardContent = '[data-testid="user-popover-card-content"]';
+    this.profileFollowBtn = '[data-testid="profile-follow-button"]';
+    this.commentCard = '[data-testid="comment-card-description"]';
+    this.commentListItem = '[data-testid="comment-list-item"]';
+    this.postsImages = '[data-testid="post-image"]';
+    this.postAuthor = '[data-testid="post-author"]';
+    this.profileAvatar = '[data-testid="profile-avatar-button"]';
+
+    // for logged in user
+    this.profileAvatarButton = page.locator('[data-testid="profile-avatar-button"]');
+  }
+
+  async goto() {
+    await this.page.goto('/');
+    await this.page.waitForLoadState('domcontentloaded');
+    await this.page.waitForSelector(this.getMainTimeLineOfPosts['_selector']);
+  }
+
+  async gotoSpecificUrl(url: string) {
+    await this.page.goto(`${url}`);
+    await this.page.waitForLoadState('domcontentloaded');
+  }
+
+  async moveToHomePage() {
+    await this.getHomeNavLink.click();
+    await expect(this.getHeaderAllCommunities).toBeVisible();
+  }
+
+  async moveToLeoFinanceCommunities() {
+    await this.getLeoFinanceCommunitiesLink.click();
+    // await this.page.waitForRequest('https://api.hive.blog/');
+    await expect(this.getHeaderLeoCommunities).toBeVisible();
+  }
+
+  async moveToWorldmappinCommunities() {
+    await this.getWorldmappinCommunitiesLink.click();
+    await expect(this.getHeaderWorldmappinCommunities).toBeVisible();
+  }
+
+  async moveToExploreCommunities() {
+    await this.getExploreCommunities.click();
+  }
+
+  async moveToFirstPostAuthorProfilePage() {
+    const profilePage = new ProfilePage(this.page);
+    const firstPostAuthorNick = await this.getFirstPostAuthor.innerText();
+    // Click the post's author name link
+    await this.getFirstPostAuthor.click();
+
+    // Validate that you moved to the clicked post author profile page
+    await this.page.waitForSelector(profilePage.profileName['_selector']);
+    expect(await profilePage.profileName).toBeVisible();
+    await profilePage.profilePostsLink.click();
+    await this.page.waitForSelector(profilePage.page.locator('[data-testid="user-post-menu"]')['_selector']);
+    const firstPostAuthorNameProfilePage = await this.page.locator('[data-testid="post-author"]').first();
+    await expect('@' + firstPostAuthorNick).toMatch(await firstPostAuthorNameProfilePage.innerText());
+  }
+
+  async moveToFirstPostAuthorProfilePageByAvatar() {
+    const profilePage = new ProfilePage(this.page);
+    const firstPostAuthorNick = await this.getFirstPostAuthor.innerText();
+    // Click the post's author avatar link
+    await this.getFirstPostCardAvatar.click();
+
+    // Validate that you moved to the clicked post author profile page
+    await this.page.waitForSelector(profilePage.profileName['_selector']);
+    expect(await profilePage.profileName).toBeVisible();
+    await profilePage.profilePostsLink.click();
+    await this.page.waitForSelector(profilePage.page.locator('[data-testid="user-post-menu"]')['_selector']);
+    const firstPostAuthorNameProfilePage = await this.page.locator('[data-testid="post-author"]').first();
+    await expect('@' + firstPostAuthorNick).toMatch(await firstPostAuthorNameProfilePage.innerText());
+  }
+
+  async moveToFirstPostCommunityOrCategory() {
+    const profilePage = new ProfilePage(this.page);
+    const firstPostAuthorNick = await this.getFirstPostAuthor.innerText();
+
+    if (await this.getFirstPostCardCommunityLink.isVisible()) {
+      const firstPostCardCommunityLink = await this.getFirstPostCardCommunityLink;
+      const firstPostCardCommunityLinkText = await this.getFirstPostCardCommunityLink.textContent();
+
+      firstPostCardCommunityLink.click();
+      await this.page.waitForSelector(
+        await this.page.locator('[data-testid="community-info-sidebar"]')['_selector']
+      );
+      expect(await this.page.locator('[data-testid="community-name"]').textContent()).toBe(
+        await firstPostCardCommunityLinkText
+      );
+      await expect(await this.page.locator('[data-testid="community-name-unmoderated"]').textContent()).toBe(
+        'Community'
+      );
+    } else if (await this.getFirstPostCardCategoryLink.isVisible()) {
+      const firstPostCardCategoryLink = await this.getFirstPostCardCategoryLink;
+      const firstPostCardCategoryLinkText = await this.getFirstPostCardCategoryLink.textContent();
+
+      firstPostCardCategoryLink.click();
+      await this.page.waitForSelector(
+        this.page.locator('[data-testid="community-info-sidebar"]')['_selector']
+      );
+      expect(await this.page.locator('[data-testid="community-name"]').textContent()).toBe(
+        await firstPostCardCategoryLinkText
+      );
+      expect(await this.page.locator('[data-testid="community-name-unmoderated"]').textContent()).toBe(
+        'Unmoderated tag'
+      );
+    }
+  }
+
+  async moveToFirstPostContentByClickingTimestamp() {
+    const profilePage = new ProfilePage(this.page);
+    const firstPostCardTitle = await this.getFirstPostTitle.textContent();
+    // Click the post's timestamp link
+    await this.getFirstPostCardTimestampLink.click();
+    await this.page.waitForSelector(this.page.locator('[data-testid="article-title"]')['_selector']);
+    expect(await this.page.locator('[data-testid="article-title"]').textContent()).toBe(firstPostCardTitle);
+  }
+
+  async moveToFirstPostContentByClickingTitilePostCard() {
+    const firstPostCardTitle = await this.getFirstPostTitle.textContent();
+    // Click the post's title link
+    await this.postTitle.first().click();
+    await this.page.waitForSelector(this.page.locator('[data-testid="article-title"]')['_selector']);
+    expect(await this.page.locator('[data-testid="article-title"]').textContent()).toBe(firstPostCardTitle);
+  }
+
+  async moveToFirstPostContentByClickingDescriptionPostCard() {
+    const firstPostCardTitle = await this.getFirstPostTitle.textContent();
+    // Click the post's description link
+    await this.postDescription.first().click();
+    await this.page.waitForSelector(this.page.locator('[data-testid="article-title"]')['_selector']);
+    expect(await this.page.locator('[data-testid="article-title"]').textContent()).toBe(firstPostCardTitle);
+  }
+
+/**
+   * Find and navigate to the first post that has comments count > 0.
+   * Note: This only checks the comment count badge, not whether comments are actually visible.
+   * For non-logged users who need to verify visible comments, use commentsTestHelper instead.
+   */
+  async moveToTheFirstPostWithCommentsNumberMoreThanZero() {
+    const postsCard = await this.getMainTimeLineOfPosts.all();
+    const postsComments = await this.getPostChildren.all();
+
+    for (let postIndex = 0; postIndex < postsComments.length; postIndex++) {
+      const numberOfCommentsInPost = postsComments[postIndex];
+      const postTitle = postsCard[postIndex].locator('[data-testid="post-title"] a');
+      const commentsCount = await numberOfCommentsInPost.textContent();
+
+      if (commentsCount !== '0') {
+        const postTitleText = await postTitle.textContent();
+
+        await postTitle.click();
+        await this.postPage.articleAuthorData.waitFor({ state: 'visible' });
+        await expect(this.postPage.articleTitle).toBeVisible();
+        expect(await this.postPage.articleTitle.textContent()).toBe(postTitleText);
+
+        break;
+      }
+    }
+  }
+
+  async moveToTheFirstPostCommentContantPageByClickingResponses() {
+    const firstPostCardTitle = await this.getFirstPostTitle.textContent();
+
+    // Click the post's responses link
+    await this.getFirstPostChildren.click();
+    await this.page.waitForSelector(await this.page.locator('[data-testid="article-title"]')['_selector']);
+    expect(await this.page.locator('[data-testid="article-title"]').textContent()).toBe(firstPostCardTitle);
+  }
+
+  async moveToNavPostsPage() {
+    const url = env('API_ENDPOINT');
+    await this.getNavPostsLink.click();
+    await expect(this.page.url()).toBe(`https://${url}/trending`);
+  }
+
+  async moveToNavProposalsPage() {
+    const pagePromise = await this.page.context().waitForEvent('page');
+    await this.getNavProposalsLink.click();
+    await this.page.$eval('[data-testid="nav-proposals-link"]', (el) => el.removeAttribute('target'));
+    const newPage = await pagePromise;
+    // await this.page.waitForSelector(this.page.locator('[data-testid="proposals-body"]')['_selector']);
+    expect(await newPage.url().includes(`/proposals`)).toBeTruthy();
+  }
+
+  async moveToNavWitnessesPage() {
+    const pagePromise = this.page.context().waitForEvent('page');
+    await this.getNavWitnessesLink.click();
+    await this.page.$eval('[data-testid="nav-witnesses-link"]', (el) => el.removeAttribute('target'));
+    const newPage = await pagePromise;
+    // await this.page.waitForSelector(this.page.locator('[data-testid="witness-table-body"]')['_selector']);
+    await expect(newPage.url().includes(`/~witnesses`)).toBeTruthy();
+  }
+
+  async moveToNavOurdAppsPage() {
+    const pagePromise = this.page.context().waitForEvent('page');
+    await this.getNavOurdAppsLink.click();
+    const newPage = await pagePromise;
+    await expect(newPage.url()).toBe(`https://hive.io/eco/`);
+  }
+
+  async isTrendingCommunitiesVisible() {
+    await expect(this.getTrandingCommunitiesHeader).toBeVisible();
+    await expect(this.getExploreCommunities).toHaveText(/Explore communities.../);
+    await expect(this.getExploreCommunities).toBeEnabled();
+  }
+
+  async mainPostsTimelineVisible(amountOfPosts: number) {
+    // Validate that there are 20 posts displayed on HomePage as default (without scrolldown)
+    await expect(this.getMainTimeLineOfPosts).toHaveCount(amountOfPosts);
+  }
+
+  async getElementCssPropertyValue(element: Locator, cssProperty: string) {
+    const bcg = await element.evaluate((ele, css) => {
+      return window.getComputedStyle(ele).getPropertyValue(css);
+    }, cssProperty);
+    // return value of element's css property
+    return bcg;
+  }
+
+  // Theme mode: Light, Dark, System
+  async changeThemeMode(thememode: string) {
+    await this.getThemeModeButton.click();
+    await this.getThemeModeItem.locator(`span:text(\"${thememode}\")`).click();
+    await this.page.waitForLoadState('domcontentloaded');
+  }
+
+  async validateThemeModeIsLight() {
+    expect(await this.getElementCssPropertyValue(this.getBody, 'background-color')).toBe(
+      'rgb(247, 247, 247)'
+    );
+  }
+
+  async validateThemeModeIsSystem() {
+    expect(await this.getElementCssPropertyValue(this.getBody, 'background-color')).toBe(
+      'rgb(247, 247, 247)'
+    );
+  }
+
+  async validateThemeModeIsDark() {
+    await this.page.waitForLoadState('domcontentloaded');
+    expect(await this.getElementCssPropertyValue(this.getBody, 'background-color')).toBe('rgb(34, 38, 42)');
+  }
+
+  async validateDarkModeByClass() {
+    await this.page.waitForLoadState('domcontentloaded');
+    await expect(this.page.locator('html')).toHaveClass(/dark/);
+  }
+
+  async validateLightModeByClass() {
+    await this.page.waitForLoadState('domcontentloaded');
+    await expect(this.page.locator('html')).not.toHaveClass(/dark/);
+  }
+
+  async validateFirstPostPayoutWithTooltip() {
+    await expect(this.getFirstPostPayout).toBeVisible();
+    await expect(this.getFirstPostPayout).toHaveText(/\$\d+/);
+    await this.getFirstPostPayout.hover();
+    await expect(this.getFirstPostPayoutTooltip).toBeVisible({ timeout: 15000 });
+  }
+
+  async validateFirstPostVotesWithTooltip() {
+    await expect(this.getFirstPostVotes).toBeVisible();
+    await this.getFirstPostVotes.hover();
+    await expect(this.getFirstPostVotesTooltip).toBeVisible({ timeout: 15000 });
+    const votes = await this.getFirstPostVotes.textContent();
+    expect(await this.getFirstPostVotesTooltip.textContent()).toBe(votes + ' votes' + votes + ' votes');
+  }
+
+  async validateFirstPostResponsesWithTooltip() {
+    await expect(this.getFirstPostChildernCommentNumber).toBeVisible();
+    await expect(this.getFirstPostChildernIcon).toBeVisible();
+    await this.getFirstPostChildernCommentNumber.hover();
+    await expect(this.getFirstPostChildernTooltip).toBeVisible({ timeout: 15000 });
+    const n = await this.getFirstPostChildernCommentNumber.textContent();
+    if (n === '0') {
+      expect(await this.getFirstPostChildernTooltip.textContent()).toContain('No responses. Click to respond');
+    } else if (n === '1') {
+      expect(await this.getFirstPostChildernTooltip.textContent()).toContain(`${n} response. Click to respond`);
+    } else {
+      expect(await this.getFirstPostChildernTooltip.textContent()).toContain(`${n} responses. Click to respond`);
+    }
+  }
+
+  async validateFirstPostHeaderElements() {
+    await expect(this.getFirstPostAuthor).toBeVisible();
+    await expect(this.getFirstPostCardTimestampLink).toBeVisible();
+    const authorCursor = await this.getElementCssPropertyValue(this.getFirstPostAuthor, 'cursor');
+    expect(authorCursor).toBe('pointer');
+    const timestampCursor = await this.getElementCssPropertyValue(this.getFirstPostCardTimestampLink, 'cursor');
+    expect(timestampCursor).toBe('pointer');
+    if (await this.getFirstPostCardCommunityLink.isVisible()) {
+      const c = await this.getElementCssPropertyValue(this.getFirstPostCardCommunityLink, 'cursor');
+      expect(c).toBe('pointer');
+    }
+    if (await this.getFirstPostCardCategoryLink.isVisible()) {
+      const c = await this.getElementCssPropertyValue(this.getFirstPostCardCategoryLink, 'cursor');
+      expect(c).toBe('pointer');
+    }
+  }
+
+  async validateFirstPostUpvoteButtonWithTooltip() {
+    await expect(this.getFirstPostUpvoteButton).toBeVisible();
+    await expect(this.getFirstPostUpvoteButton.locator('svg')).toBeVisible();
+    await this.getFirstPostUpvoteButton.hover();
+    await expect(this.getFirstPostUpvoteButtonTooltip).toBeVisible({ timeout: 15000 });
+    expect(await this.getFirstPostUpvoteButtonTooltip.textContent()).toContain('Upvote');
+  }
+
+  async validateFirstPostDownvoteButtonWithTooltip() {
+    await expect(this.getFirstPostDownvoteButton).toBeVisible();
+    await expect(this.getFirstPostDownvoteButton.locator('svg')).toBeVisible();
+    await this.getFirstPostDownvoteButton.hover();
+    await expect(this.getFirstPostDownvoteButtonTooltip).toBeVisible({ timeout: 15000 });
+    expect(await this.getFirstPostDownvoteButtonTooltip.textContent()).toContain('Downvote');
+  }
+
+  async validateFirstPostReblogCountWithTooltip() {
+    await expect(this.getFirstPostReblogCountDisplay).toBeVisible();
+    await this.getFirstPostReblogCountDisplay.hover();
+    await expect(this.getFirstPostReblogCountTooltip).toBeVisible();
+    expect(await this.getFirstPostReblogCountTooltip.textContent()).toMatch(/reblog/i);
+  }
+
+  async validateFirstPostReputationWithTooltip() {
+    await expect(this.getFirstPostAuthorReputation).toBeVisible();
+    await expect(this.getFirstPostAuthorReputation).toHaveAttribute('title', 'Reputation');
+  }
+
+  async moveToMutedPosts() {
+    await this.getFilterPosts.click();
+    // Scope to the open dropdown — a page-wide getByText('Muted') also
+    // matches any post-card description whose body contains the word
+    // (real Hive content occasionally surfaces such posts into trending,
+    // see e.g. @acidyo/what-the-fuck-is-up), tripping strict mode.
+    await this.getFilterPostsList.getByText('Muted').click();
+    await expect(this.getFirstPostTitle).toBeVisible();
+  }
+
+  async moveToFirstPost() {
+    await this.postTitle.first().hover();
+    await this.postTitle.first().click({ force: true });
+  }
+
+  async moveToWelcomePage() {
+    await this.getNavSidebarMenu.click();
+    await this.getNavSidebarMenuContent.getByRole('button', { name: 'Welcome' }).click();
+    await this.page.waitForTimeout(5000);
+    await expect(this.page.getByText('Welcome to Hive!')).toBeVisible();
+    await expect(this.page).toHaveURL('welcome');
+  }
+
+  async moveToFaqPage() {
+    await this.getNavSidebarMenu.click();
+    await this.getNavSidebarMenuContent.getByRole('button', { name: 'FAQ' }).click();
+    await this.page.waitForTimeout(5000);
+    await expect(this.page.getByRole('heading', { name: 'Hive.blog FAQ' })).toBeVisible();
+    await expect(this.page).toHaveURL('faq.html');
+  }
+
+  async moveToPrivacyPolicyPage() {
+    await this.getNavSidebarMenu.click();
+    await this.getNavSidebarMenuContent.getByRole('button', { name: 'Privacy Policy' }).click();
+    await this.page.waitForTimeout(5000);
+    await expect(this.page.locator('h1').getByText('Privacy Policy')).toBeVisible();
+    await expect(this.page).toHaveURL('privacy.html');
+  }
+
+  async moveToTermsOfServicePage() {
+    await this.getNavSidebarMenu.click();
+    await this.getNavSidebarMenuContent.getByRole('button', { name: 'Terms of Service' }).click();
+    await this.page.waitForTimeout(5000);
+    await expect(this.page.locator('div').getByText('Terms of Service')).toBeVisible();
+    await expect(this.page).toHaveURL('tos.html');
+  }
+
+  // Tranding All Posts
+  async validateAllPostspageIsLoaded() {
+    await this.page.waitForLoadState('domcontentloaded');
+    await this.page.waitForSelector(this.getMainTimeLineOfPosts['_selector']);
+    await expect(this.getFilterPosts).toHaveText('Trending');
+  }
+
+  // Click to close the profile menu - click the center of the home page community and filter header
+  async clickToCloseProfileMenu(){
+    await this.getCommunityNameElement
+        .locator('..')
+        .locator('..')
+        .click({ force: true });
+  }
+
+  /**
+   * Navigate to homepage with mobile viewport
+   */
+  async gotoMobile() {
+    await this.page.setViewportSize(MOBILE_VIEWPORT);
+    await this.page.goto('/');
+    await this.page.waitForLoadState('domcontentloaded');
+    await expect(this.getMainTimeLineOfPosts.first()).toBeVisible({ timeout: 15000 });
+  }
+
+  /**
+   * Navigate to homepage with tablet viewport
+   */
+  async gotoTablet() {
+    await this.page.setViewportSize(TABLET_VIEWPORT);
+    await this.page.goto('/');
+    await this.page.waitForLoadState('domcontentloaded');
+    await expect(this.getMainTimeLineOfPosts.first()).toBeVisible({ timeout: 15000 });
+  }
+
+  /**
+   * Close sidebar menu by pressing Escape
+   */
+  async closeSidebar() {
+    await this.page.keyboard.press('Escape');
+    await expect(this.getNavSidebarMenuContent).not.toBeVisible();
+  }
+
+  /**
+   * Get count of posts in the main timeline
+   */
+  async getPostsCount(): Promise<number> {
+    return await this.getMainTimeLineOfPosts.count();
+  }
+}

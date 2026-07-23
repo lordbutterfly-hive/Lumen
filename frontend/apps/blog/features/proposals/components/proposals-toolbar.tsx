@@ -1,0 +1,65 @@
+'use client';
+
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@hive/ui';
+import { cn } from '@ui/lib/utils';
+import { useTranslation } from '@/blog/i18n/client';
+import { ProposalSort, ProposalTab } from '../lib/proposals-types';
+
+const TABS: ProposalTab[] = ['all', 'active', 'upcoming', 'expired'];
+const SORTS: ProposalSort[] = ['votes', 'newest', 'daily_pay', 'ending_soon'];
+
+interface Props {
+  tab: ProposalTab;
+  onTabChange: (tab: ProposalTab) => void;
+  sort: ProposalSort;
+  onSortChange: (sort: ProposalSort) => void;
+}
+
+/** Segmented tab control (All/Active/Upcoming/Expired) + a real sort dropdown. */
+export default function ProposalsToolbar({ tab, onTabChange, sort, onSortChange }: Props) {
+  const { t } = useTranslation('common_blog');
+
+  return (
+    <div className="mb-4 flex flex-wrap items-center justify-between gap-4" data-testid="proposals-toolbar">
+      <div role="tablist" className="flex gap-1.5 rounded-xl border border-[#ebedf0] bg-[#f4f5f7] p-[5px]">
+        {TABS.map((t2) => (
+          <button
+            key={t2}
+            type="button"
+            role="tab"
+            aria-selected={tab === t2}
+            onClick={() => onTabChange(t2)}
+            data-testid={`proposals-tab-${t2}`}
+            className={cn(
+              'rounded-lg px-[15px] py-2 font-sans text-[13.5px] font-semibold transition-colors',
+              tab === t2
+                ? 'bg-white text-[#161511] shadow-[0_1px_2px_rgba(20,18,10,0.08)]'
+                : 'bg-transparent text-[#6b7280] hover:text-[#161511]'
+            )}
+          >
+            {t(`proposals.tabs.${t2}`)}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex items-center gap-2 font-sans text-[13px] text-[#6b7280]">
+        {t('proposals.toolbar.sort_label')}
+        <Select value={sort} onValueChange={(value) => onSortChange(value as ProposalSort)}>
+          <SelectTrigger
+            className="h-auto w-auto gap-1.5 rounded-[10px] border-[#e4e6e9] px-3.5 py-2 font-sans text-[13px] font-semibold text-[#3f4650]"
+            data-testid="proposals-sort-select"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {SORTS.map((s) => (
+              <SelectItem key={s} value={s}>
+                {t(`proposals.sort.${s}`)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+    </div>
+  );
+}

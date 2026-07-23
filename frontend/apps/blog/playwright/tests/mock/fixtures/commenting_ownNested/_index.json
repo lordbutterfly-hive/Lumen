@@ -1,0 +1,8 @@
+{
+  "testName": "commenting_ownNested",
+  "base": "commenting",
+  "generatedAt": "2026-05-05T10:38:22.269Z",
+  "overlayFiles": [
+    "0004-bridge.get_discussion.json"
+  ]
+}

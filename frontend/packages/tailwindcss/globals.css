@@ -1,0 +1,363 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 0, 0%, 20%;
+    --background-secondary: 0 0% 97%;
+    --background-tertiary: 214, 32%, 91%;
+
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 47.4% 11.2%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 47.4% 11.2%;
+    --card-no-content: 102, 50%, 96%;
+    --card-empty-border: 0, 0%, 93%;
+
+    --border: 0, 0%, 93%;
+    --thread-line: 0 0% 87%;
+    --input: 214.3 31.8% 91.4%;
+
+    --primary: 221, 27%, 13%;
+    --primary-foreground: 210 40% 98%;
+
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+
+    --destructive: 0, 70%, 51%;
+    --destructive-foreground: 210 40% 98%;
+    --destructive-icon: 0, 70%, 51%; /* same as destructive in light mode */
+
+    --link: 0, 70%, 45%;
+
+    --ring: 215 20.2% 65.1%;
+
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    --background: 210, 10%, 19%;
+    --foreground: 213 31% 91%;
+    --background-secondary: 210, 11%, 15%;
+    --background-tertiary: 217, 19%, 27%;
+
+    --muted: 223 47% 11%;
+    --muted-foreground: 215.4 16.3% 56.9%;
+
+    --popover: 224 71% 4%;
+    --popover-foreground: 215 20.2% 65.1%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 47.4% 11.2%;
+    --card-no-content: 207, 21%, 8%;
+    --card-empty-border: 210, 10%, 19%;
+
+    --border: 216 34% 17%;
+    --thread-line: 216 15% 28%;
+    --input: 216 34% 17%;
+
+    --primary: 210 40% 98%;
+    --primary-foreground: 222.2 47.4% 1.2%;
+
+    --secondary: 222.2 47.4% 11.2%;
+    --secondary-foreground: 210 40% 98%;
+
+    --accent: 216 34% 17%;
+    --accent-foreground: 210 40% 98%;
+
+    --destructive: 0, 90%, 65%; /* red - higher lightness for dark mode readability */
+    --destructive-foreground: 210 40% 98%;
+    --destructive-icon: 350, 85%, 48%; /* darker red for icons/badges */
+
+    --link: 0, 90%, 65%;
+
+    --ring: 216 34% 17%;
+
+    --radius: 0.5rem;
+  }
+}
+
+@layer base {
+  input[type='number']::-webkit-outer-spin-button,
+  input[type='number']::-webkit-inner-spin-button,
+  input[type='number'] {
+    -webkit-appearance: none;
+    margin: 0;
+    -moz-appearance: textfield !important;
+  }
+  html {
+    scroll-padding-top: 5rem; /* 80px = sticky navbar (h-16/64px) + visual buffer */
+  }
+  * {
+    @apply border-border;
+  }
+  body {
+    font-feature-settings:
+      'rlig' 1,
+      'calt' 1;
+  }
+}
+
+.prose :where(code):not(:where([class~='not-prose'], [class~='not-prose'] *)):after,
+.prose :where(code):not(:where([class~='not-prose'], [class~='not-prose'] *)):before {
+  content: none;
+}
+
+.twitter-tweet,
+.instagram-embed {
+  display: flex;
+  justify-content: center;
+}
+
+#twitter-widget-0 {
+  border-radius: 15px;
+}
+.pull-left {
+  float: left;
+  padding-right: 1rem;
+  max-width: 50%;
+}
+
+.pull-right {
+  float: right;
+  padding-left: 1rem;
+  max-width: 50%;
+}
+
+.pull-columns {
+  display: flex;
+  gap: 1rem;
+}
+
+.pull-columns > .pull-left,
+.pull-columns > .pull-right {
+  flex: 1;
+  float: none;
+  max-width: none;
+  padding: 0;
+}
+
+@media (max-width: 640px) {
+  .pull-columns {
+    flex-direction: column;
+  }
+}
+
+.preview-description,
+.preview-rules {
+  @apply text-xs;
+}
+.preview-description p,
+.preview-rules p {
+  margin: 0;
+  padding: 0 0 1rem 0;
+}
+.preview-description ul,
+.preview-rules ul {
+  margin: 0;
+  padding: 0;
+  list-style-type: '-';
+}
+
+.preview-description ul li,
+.preview-rules ul li {
+  margin: 0;
+}
+
+.preview-description ul > li,
+.preview-rules ul > li {
+  @apply py-1;
+}
+.prose a.link-external,
+.prose a {
+  position: relative;
+  display: inline;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.prose a.link-external:after {
+  content: '';
+  background: url(./assets/external-icon.svg);
+  background-size: cover;
+  display: inline-block;
+  width: 0.7em;
+  height: 0.7em;
+  top: 0.05em;
+  margin-inline-start: 0.1em;
+  margin-inline-end: 0.1em;
+  opacity: 0.5;
+}
+
+.prose .phishy {
+  display: inline;
+  color: red;
+}
+
+#articleBody .videoWrapper,
+.prose .videoWrapper {
+  position: relative;
+  width: 100%;
+  height: 0;
+  padding-bottom: 56.25%;
+}
+
+#articleBody .videoWrapper iframe,
+.prose .videoWrapper iframe {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 75vw;
+}
+
+#articleBody .youtube-facade,
+.prose .youtube-facade {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#articleBody .youtube-facade img,
+.prose .youtube-facade img {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+#articleBody .youtube-facade:hover .youtube-play-btn,
+.prose .youtube-facade:hover .youtube-play-btn {
+  transform: scale(1.1);
+}
+
+#articleBody .youtube-play-btn,
+.prose .youtube-play-btn {
+  position: relative;
+  z-index: 1;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  transition: transform 0.1s ease-in-out;
+}
+
+#articleBody .youtube-play-btn svg,
+.prose .youtube-play-btn svg {
+  display: block;
+}
+
+#articleBody .twitterWrapper,
+.prose .twitterWrapper {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  max-width: 550px;
+  margin: 0 auto;
+}
+
+#articleBody .twitterWrapper > iframe,
+.prose .twitterWrapper > iframe {
+  width: 100% !important;
+  max-width: 550px;
+  height: 600px;
+  max-height: 80vh;
+  overflow: hidden;
+}
+
+/* Instagram embed wrapper */
+#articleBody .instagramWrapper,
+.prose .instagramWrapper {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  max-width: 540px;
+  margin: 0 auto;
+}
+
+#articleBody .instagramWrapper iframe,
+.prose .instagramWrapper iframe {
+  width: 100% !important;
+  max-width: 540px;
+  height: 800px;
+  border: none;
+  overflow: hidden;
+}
+
+/* Auto-detect RTL text direction per paragraph/block element.
+   unicode-bidi: plaintext makes the browser determine paragraph direction
+   from the content (Unicode BiDi algorithm) instead of inheriting from
+   the document's dir attribute. This ensures Arabic/Urdu/Hebrew paragraphs
+   are right-aligned regardless of the reader's UI language. */
+.prose p,
+.prose h1,
+.prose h2,
+.prose h3,
+.prose h4,
+.prose h5,
+.prose h6,
+.prose li,
+.prose blockquote,
+.prose td,
+.prose th {
+  unicode-bidi: plaintext;
+}
+
+.prose .text-rtl {
+  direction: rtl;
+  text-align: right;
+}
+
+.markdown-view {
+  word-wrap: break-word;
+  word-break: break-word;
+  hyphens: none;
+}
+
+/* Fix table cell content rendering - issue #632 */
+.prose table td a,
+.prose table th a {
+  word-break: normal;
+  white-space: nowrap;
+}
+
+.prose table td,
+.prose table th {
+  vertical-align: middle;
+  padding: 8px 12px;
+}
+
+details {
+  padding: 10px 10px;
+  outline-offset: 2px;
+  background-color: #f8f8f8;
+  outline: dotted 1px #f8f8f8;
+  margin: 10px 0;
+}
+
+.dark details {
+  background-color: #2c2c2c;
+  outline: dotted 1px #2c2c2c;
+}
+summary {
+  text-align: right;
+  cursor: pointer;
+}

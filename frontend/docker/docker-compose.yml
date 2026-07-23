@@ -1,0 +1,53 @@
+services:
+  denser-blog:
+    image: registry.gitlab.syncad.com/hive/denser/blog:${VERSION:?VERSION required}
+    ports:
+      - "${BLOG_HOST_PORTS:-3000}:3000"
+    environment:
+      PORT: 3000
+    # HOSTNAME=0.0.0.0 ensures the app binds to all interfaces, required for Docker networking
+    command: ["sh", "-c", "HOSTNAME=0.0.0.0 node ./apps/blog/server.js"]
+    volumes:
+      - ${BLOG_ENV_FILE:?BLOG_ENV_FILE must be set}:/app/apps/.env:ro
+    deploy:
+      replicas: ${BLOG_REPLICAS:-1}
+      update_config:
+        order: start-first
+        failure_action: rollback
+      rollback_config:
+        order: start-first
+    # Use dedicated /api/health endpoint to avoid TransformStream corruption.
+    # Root (/) redirects to /trending which uses streaming; health checkers close
+    # connections early, corrupting the stream. See: github.com/vercel/next.js/discussions/75995
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  denser-wallet:
+    image: registry.gitlab.syncad.com/hive/denser/wallet:${VERSION:?VERSION required}
+    ports:
+      - "4000:3000"
+    environment:
+      PORT: 3000
+    # HOSTNAME=0.0.0.0 ensures the app binds to all interfaces, required for Docker networking
+    command: ["sh", "-c", "HOSTNAME=0.0.0.0 node ./apps/wallet/server.js"]
+    volumes:
+      - ${WALLET_ENV_FILE:?WALLET_ENV_FILE must be set}:/app/apps/.env:ro
+    deploy:
+      replicas: 1
+      update_config:
+        order: start-first
+        failure_action: rollback
+      rollback_config:
+        order: start-first
+    # Use dedicated /api/health endpoint to avoid TransformStream corruption.
+    # See: github.com/vercel/next.js/discussions/75995
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s

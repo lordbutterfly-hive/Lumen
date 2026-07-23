@@ -1,0 +1,130 @@
+"""Q1 — does the feed personalize? Baselines, CF ablation, rep-term decomposition."""
+from __future__ import annotations
+import sys
+sys.path.insert(0, "/tmp/claude-1004/-home-clauderfly/fa2f34ba-7811-45c8-a634-26cb2cbffb1b/scratchpad/algo")
+from simworld import (build_world, SimGateway, build_norm, EPOCH, NOW, TOPICS, COMMUNITY,
+                      ndcg_at_k, mean_rel_at_k, overlap_at_k, spearman)
+import numpy as np
+from recsys.contracts import ViewerProfile
+from recsys.config import Settings, ALSConfig, ScoreWeights
+from recsys.pipeline import rank_feed, build_trust_snapshot, TrustPolicy
+
+world = build_world(seed=7)
+gw = SimGateway(world)
+norm = build_norm(world)
+settings = Settings()
+
+# curated seeds: top-2 reputation authors per topic (a plausible deploy list)
+seeds = set()
+for t in TOPICS:
+    tops = sorted([a for a in world.authors() if a.topic == t], key=lambda a: -a.reputation)[:2]
+    seeds.update(a.name for a in tops)
+snap = build_trust_snapshot(gw, settings, since=EPOCH, now=NOW, trusted_seeds=frozenset(seeds))
+print(f"world: {len(world.posts)} posts, {len(world.accounts)} accounts, "
+      f"{len(world.edges)} edges, snapshot creds={len(snap.graph_creds)} rings={len(snap.ring_members)}")
+
+def viewer_for(name: str) -> ViewerProfile:
+    acct = world.accounts[name]
+    return ViewerProfile(account=name, follows=world.follows[name],
+                         subscribed_communities=frozenset({COMMUNITY[acct.topic]}))
+
+def feed(v: ViewerProfile, s=settings, sn=snap):
+    # trust_policy=WARN: this OFFLINE harness measures pre-hardening Phase-0 behaviour, incl.
+    # the deliberate snapshot=None section [D]. Production defaults to FAIL_CLOSED and would
+    # refuse a no-snapshot call. WARN serves a byte-identical feed to the pre-R2 default in
+    # every case (with a snapshot it is unused; without one it serves the same permissive feed),
+    # so no q1 measurement drifts. Matches the q3/q5 migration.
+    return [sc.post for sc in rank_feed(v, gw, norm, now=NOW, since=EPOCH, settings=s,
+                                        snapshot=sn, trust_policy=TrustPolicy.WARN)]
+
+# ---- opposite-interest pair ----
+va_name, vb_name = "v-photo-00", "v-crypto-00"
+va, vb = viewer_for(va_name), viewer_for(vb_name)
+fa, fb = feed(va), feed(vb)
+print(f"\n[A] opposite-interest overlap top-20: {overlap_at_k(fa, fb)} / 20  "
+      f"(feed sizes {len(fa)}, {len(fb)})")
+def topic_share(f, topic):
+    top = f[:20]
+    return sum(1 for p in top if world.accounts[p.author].topic == topic) / max(len(top),1)
+print(f"    {va_name}: own-topic share of top-20 = {topic_share(fa,'photo'):.2f}; "
+      f"{vb_name}: {topic_share(fb,'crypto'):.2f}")
+
+# ---- all-viewer nDCG vs baselines ----
+pop_stake = sorted(world.posts, key=lambda p: -sum(v.rshares for v in p.votes if v.rshares > 0))
+pop_count = sorted(world.posts, key=lambda p: -(len({v.voter for v in p.votes if v.rshares>0})
+                                                + p.children + p.reblog_count))
+rng = np.random.default_rng(1)
+algo_nd, pops_nd, popc_nd, rand_nd, algo_mr, pops_mr = [], [], [], [], [], []
+sample_viewers = [f"v-{t}-{j:02d}" for t in TOPICS for j in range(4)]
+for name in sample_viewers:
+    v = viewer_for(name)
+    f = feed(v)
+    algo_nd.append(ndcg_at_k(f, name, world)); algo_mr.append(mean_rel_at_k(f, name, world))
+    pops_nd.append(ndcg_at_k(pop_stake, name, world)); pops_mr.append(mean_rel_at_k(pop_stake, name, world))
+    popc_nd.append(ndcg_at_k(pop_count, name, world))
+    rnd = []
+    for _ in range(60):
+        idx = rng.permutation(len(world.posts))[:20]
+        rnd.append(ndcg_at_k([world.posts[i] for i in idx], name, world))
+    rand_nd.append(float(np.mean(rnd)))
+print(f"\n[B] nDCG@20 over {len(sample_viewers)} viewers (global ideal=1.0):")
+print(f"    algorithm        : {np.mean(algo_nd):.3f} +/- {np.std(algo_nd):.3f}")
+print(f"    stake-trending   : {np.mean(pops_nd):.3f} +/- {np.std(pops_nd):.3f}   <- incumbent")
+print(f"    engagement-pop   : {np.mean(popc_nd):.3f} +/- {np.std(popc_nd):.3f}")
+print(f"    random           : {np.mean(rand_nd):.3f} +/- {np.std(rand_nd):.3f}")
+print(f"    mean ground-truth rel@20: algo {np.mean(algo_mr):.3f} vs stake-trending {np.mean(pops_mr):.3f}")
+
+# ---- CF/ALS ablation: same snapshot, cf_weight=0 ----
+s_nocf = Settings(als=ALSConfig(cf_weight=0.0))
+diffs, taus, nd_on, nd_off = [], [], [], []
+for name in sample_viewers:
+    v = viewer_for(name)
+    f_on, f_off = feed(v), feed(v, s=s_nocf)
+    diffs.append(20 - overlap_at_k(f_on, f_off))
+    common = [p.key for p in f_on if p.key in {q.key for q in f_off}]
+    pos_on = {p.key: i for i, p in enumerate(f_on)}
+    pos_off = {p.key: i for i, p in enumerate(f_off)}
+    taus.append(spearman([pos_on[k] for k in common], [pos_off[k] for k in common]))
+    nd_on.append(ndcg_at_k(f_on, name, world)); nd_off.append(ndcg_at_k(f_off, name, world))
+print(f"\n[C] ALS-CF ablation (cf_weight 1.5 -> 0): top-20 changed posts "
+      f"mean {np.mean(diffs):.1f}/20; full-list Spearman {np.nanmean(taus):.3f}; "
+      f"nDCG on {np.mean(nd_on):.3f} vs off {np.mean(nd_off):.3f}")
+
+# ---- no-snapshot mode (the honest Phase-0 default: snapshot=None) ----
+nd_nosnap, sizes_ns, sizes_s = [], [], []
+for name in sample_viewers:
+    v = viewer_for(name)
+    f_ns = feed(v, sn=None)
+    nd_nosnap.append(ndcg_at_k(f_ns, name, world))
+    sizes_ns.append(len(f_ns)); sizes_s.append(len(feed(v)))
+print(f"\n[D] snapshot=None (Phase-0 default): nDCG {np.mean(nd_nosnap):.3f} "
+      f"(with snapshot {np.mean(algo_nd):.3f}); feed size {np.mean(sizes_ns):.0f} vs {np.mean(sizes_s):.0f}")
+
+# ---- personalization vs global: same-topic viewers, and score-term decomposition ----
+fa2 = feed(viewer_for("v-photo-01"))
+print(f"\n[E] same-topic pair (v-photo-00 vs v-photo-01) top-20 overlap: {overlap_at_k(fa, fa2)}/20")
+
+# vote vs rep correlation + rep marginal
+scored = rank_feed(va, gw, norm, now=NOW, since=EPOCH, settings=settings, snapshot=snap)
+vn = [sc.score.vote_norm for sc in scored]; rn = [sc.score.rep_norm for sc in scored]
+on = [sc.score.organic for sc in scored]
+print(f"\n[F] corr over {len(scored)} scored candidates (viewer {va_name}):")
+print(f"    Pearson(vote_norm, rep_norm) = {np.corrcoef(vn, rn)[0,1]:.3f}")
+print(f"    Pearson(vote_norm, organic)  = {np.corrcoef(vn, on)[0,1]:.3f}")
+w_norep = ScoreWeights(vote=1/9, reputation=0.0, organic=8/9)
+s_norep = Settings(weights=w_norep)
+ch, tau2 = [], []
+for name in sample_viewers[:8]:
+    v = viewer_for(name)
+    f1, f2 = feed(v), feed(v, s=s_norep)
+    ch.append(20 - overlap_at_k(f1, f2))
+    common = [p.key for p in f1 if p.key in {q.key for q in f2}]
+    p1 = {p.key: i for i, p in enumerate(f1)}; p2 = {p.key: i for i, p in enumerate(f2)}
+    tau2.append(spearman([p1[k] for k in common], [p2[k] for k in common]))
+print(f"    rep-term removed (0.111/0/0.889): top-20 changed mean {np.mean(ch):.1f}/20, "
+      f"Spearman {np.nanmean(tau2):.3f}")
+
+# how much of top-20 is explained by pure global popularity ordering?
+gpop20 = {p.key for p in pop_count[:20]}
+shares = [len({p.key for p in feed(viewer_for(n))[:20]} & gpop20) for n in sample_viewers[:8]]
+print(f"\n[G] top-20 posts also in GLOBAL engagement-pop top-20: mean {np.mean(shares):.1f}/20")

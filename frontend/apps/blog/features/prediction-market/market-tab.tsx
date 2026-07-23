@@ -1,0 +1,251 @@
+'use client';
+
+import { useMemo, useState } from 'react';
+import type { TFunction } from 'i18next';
+import { cn } from '@ui/lib/utils';
+import { handleError } from '@ui/lib/handle-error';
+import { useTranslation } from '@/blog/i18n/client';
+import { useMarket } from './use-market';
+import BucketBars from './bucket-bars';
+import BetForm from './bet-form';
+import PriceChart, { type ChartSeries } from './price-chart';
+import MarketStatusChip from './market-status-chip';
+import Countdown from './countdown';
+import { buildOutcomeColorMap } from './outcome-colors';
+
+// Maps the contract's void-reason codes to the matching translation key. Each
+// branch below calls the translation function with a literal key string so the
+// translation-usage checker can see it — no dynamically-built key names.
+function voidReasonText(t: TFunction<'common_blog', undefined>, reason: string | undefined): string {
+  switch (reason) {
+    case 'underfunded':
+      return t('prediction_market.void_reason.underfunded');
+    case 'zero_winner':
+      return t('prediction_market.void_reason.zero_winner');
+    case 'window_lapsed':
+      return t('prediction_market.void_reason.window_lapsed');
+    case 'stale_feed':
+      return t('prediction_market.void_reason.stale_feed');
+    case 'tick_window_missed':
+      return t('prediction_market.void_reason.tick_window_missed');
+    default:
+      return t('prediction_market.void_reason.default');
+  }
+}
+
+const RANGES = ['1H', '1D', '1W', 'All'] as const;
+const CHART_POINTS = 8; // width of the flat placeholder series
+
+// The "Prediction Market" center tab — a Coinbase-style single-market view over
+// the parimutuel pool data layer. Pool framing only: no contracts, no fixed
+// odds, no open-interest / 24h-vol.
+export default function MarketTab() {
+  const { t } = useTranslation('common_blog');
+  const { round, isUnavailable, isLoading, isError, refetch, myPosition, claim, isClaiming } = useMarket();
+  const [range, setRange] = useState<(typeof RANGES)[number]>('All');
+
+  const onClaim = async () => {
+    if (!round) return;
+    try {
+      await claim();
+    } catch (error) {
+      handleError(error, { method: 'predictionMarketClaim', params: { roundId: round.roundId } });
+    }
+  };
+
+  const colors = useMemo(() => (round ? buildOutcomeColorMap(round.buckets) : {}), [round]);
+
+  // No historical series exists yet (readRound has no time dimension) — draw a
+  // flat line at each outcome's live share and mark it a placeholder.
+  const series: ChartSeries[] = useMemo(
+    () =>
+      round
+        ? round.buckets.map((bucket) => ({
+            label: bucket.label,
+            color: colors[bucket.id],
+            points: Array<number>(CHART_POINTS).fill(bucket.oddsPct),
+            end: bucket.oddsPct
+          }))
+        : [],
+    [round, colors]
+  );
+
+  // Honest, non-conflated failure states. Order matters: an unprovisioned market
+  // is neither "loading" nor "no round"; a read error is not "no round open".
+  if (isUnavailable) {
+    return <p className="py-16 text-center font-sans text-sm text-[#6b7280]">{t('prediction_market.unavailable')}</p>;
+  }
+  if (isLoading) {
+    return (
+      <div className="py-16">
+        <div className="mx-auto h-64 w-full max-w-3xl animate-pulse rounded-[20px] bg-[#f1f3f5]" />
+      </div>
+    );
+  }
+  if (isError) {
+    return (
+      <div className="py-16 text-center">
+        <p className="font-sans text-sm text-[#6b7280]">{t('prediction_market.load_error')}</p>
+        <button
+          type="button"
+          onClick={() => void refetch()}
+          className="mt-3 rounded-[12px] border border-[#e2e4e7] bg-white px-4 py-2 font-sans text-sm font-semibold text-[#161511] transition-colors hover:border-[#161511]"
+        >
+          {t('prediction_market.retry')}
+        </button>
+      </div>
+    );
+  }
+  if (!round) {
+    return <p className="py-16 text-center font-sans text-sm text-[#6b7280]">{t('prediction_market.no_round')}</p>;
+  }
+
+  const isResolved = round.status === 'settled' || round.status === 'void';
+  const hasPosition = Boolean(myPosition && myPosition.totalStaked > 0);
+  const closesDate = new Date(round.closesAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+
+  return (
+    <div className="pt-6 font-sans text-[#161511]">
+      <div className="overflow-hidden rounded-[20px] border border-[#ebebeb] bg-white shadow-[0_1px_3px_rgba(20,18,10,0.04)]">
+        {/* Header */}
+        <div className="border-b border-[#f0f0f0] px-7 pb-5 pt-[22px]">
+          <div className="flex items-start justify-between gap-4">
+            <h1 className="font-sans text-[30px] font-semibold leading-tight tracking-[-0.02em] text-[#161511]">
+              {round.question}
+            </h1>
+            <MarketStatusChip status={round.status} />
+          </div>
+          <div className="mt-3 flex flex-wrap gap-x-[22px] gap-y-1 font-sans text-[13.5px] text-[#6b7280]">
+            <span>
+              <strong className="font-semibold text-[#2a2822]">{t('prediction_market.ref')}</strong> ${round.referencePrice.toFixed(3)}
+            </span>
+            <span>
+              <strong className="font-semibold text-[#2a2822]">{t('prediction_market.pool')}</strong>{' '}
+              <span className="tabular-nums">{round.totalPool.toFixed(0)}</span> {round.asset}
+            </span>
+            <span>
+              <strong className="font-semibold tabular-nums text-[#2a2822]">{round.bettors}</strong> {t('prediction_market.bettors')}
+            </span>
+            {round.status === 'open' && (
+              <span>
+                <strong className="font-semibold text-[#2a2822]">{t('prediction_market.locks')}</strong>{' '}
+                <Countdown closesAt={round.closesAt} className="tabular-nums" />
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Body: bet panel (left) + odds chart (right) */}
+        <div className="grid grid-cols-1 md:grid-cols-[300px_1fr]">
+          <div className="p-[26px] md:border-r md:border-[#f0f0f0]">
+            {round.status === 'open' ? (
+              <BetForm round={round} />
+            ) : round.status === 'locked' ? (
+              <p className="font-sans text-sm text-[#6b7280]">{t('prediction_market.locked')}</p>
+            ) : (
+              <p className="font-sans text-sm text-[#161511]">
+                {round.status === 'void'
+                  ? t('prediction_market.round_voided', { reason: voidReasonText(t, round.voidReason) })
+                  : t('prediction_market.settled_at', { price: round.settlementPrice ?? '', asset: round.asset })}
+              </p>
+            )}
+          </div>
+
+          <div className="p-[26px] md:px-7">
+            {/* Legend */}
+            <div className="mb-[18px] flex flex-wrap gap-x-[18px] gap-y-2">
+              {round.buckets.map((bucket) => (
+                <div key={bucket.id} className="flex items-center gap-2">
+                  <span className="h-[9px] w-[9px] rounded-full" style={{ backgroundColor: colors[bucket.id] }} aria-hidden="true" />
+                  <span className="font-sans text-[13.5px] font-medium text-[#3f4650]">{bucket.label}</span>
+                  <span className="font-sans text-[13.5px] font-bold tabular-nums text-[#161511]">{bucket.oddsPct}¢</span>
+                </div>
+              ))}
+            </div>
+
+            <PriceChart series={series} placeholder />
+
+            {/* Range switch (visual only — no history to slice yet) */}
+            <div className="mt-2 flex justify-center gap-1.5">
+              {RANGES.map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  onClick={() => setRange(r)}
+                  className={cn(
+                    'rounded-lg px-3.5 py-1.5 font-sans text-xs font-semibold transition-colors',
+                    range === r ? 'bg-[#f1f3f5] text-[#161511]' : 'text-[#9ca3af] hover:text-[#161511]'
+                  )}
+                >
+                  {r}
+                </button>
+              ))}
+            </div>
+
+            {/* Pool odds ladder */}
+            <div className="mt-[26px] border-t border-[#f0f0f0] pt-[22px]">
+              <div className="mb-3.5 font-sans text-[12.5px] font-bold uppercase tracking-[0.05em] text-[#6b7280]">
+                {t('prediction_market.pool_odds')}
+              </div>
+              <BucketBars buckets={round.buckets} size="full" />
+            </div>
+          </div>
+        </div>
+
+        {/* Pool-safe key stats (no open-interest / 24h-vol) */}
+        <div className="grid grid-cols-2 border-t border-[#f0f0f0] sm:grid-cols-4">
+          <KeyStat label={t('prediction_market.pool')} value={`${round.totalPool.toFixed(0)} ${round.asset}`} />
+          <KeyStat label={t('prediction_market.bettors')} value={String(round.bettors)} />
+          <KeyStat label={t('prediction_market.ref')} value={`$${round.referencePrice.toFixed(3)}`} />
+          <KeyStat label={t('prediction_market.closes')} value={closesDate} last />
+        </div>
+      </div>
+
+      {hasPosition && myPosition && (
+        <div className="mt-5 rounded-[18px] border border-[#ebebeb] bg-white p-5 shadow-[0_1px_2px_rgba(20,18,10,0.03)]">
+          <h3 className="mb-3 font-sans text-sm font-semibold text-[#161511]">{t('prediction_market.my_position')}</h3>
+          <ul className="space-y-1 font-sans text-sm">
+            {round.buckets
+              .filter((bucket) => (myPosition.stakeByBucket[bucket.id] ?? 0) > 0)
+              .map((bucket) => (
+                <li key={bucket.id} className="flex justify-between">
+                  <span className="text-[#6b7280]">{bucket.label}</span>
+                  <span className="tabular-nums text-[#161511]">
+                    {(myPosition.stakeByBucket[bucket.id] ?? 0).toFixed(3)} {round.asset}
+                  </span>
+                </li>
+              ))}
+          </ul>
+          <div className="mt-2 flex items-center justify-between border-t border-[#f0f0f0] pt-2 font-sans text-sm">
+            <span className="text-[#6b7280]">{t('prediction_market.total_staked')}</span>
+            <span className="font-semibold tabular-nums text-[#161511]">
+              {myPosition.totalStaked.toFixed(3)} {round.asset}
+            </span>
+          </div>
+          {isResolved &&
+            (myPosition.claimed ? (
+              <p className="mt-3 text-center font-sans text-sm text-[#6b7280]">{t('prediction_market.claimed')}</p>
+            ) : (
+              <button
+                type="button"
+                onClick={() => void onClaim()}
+                disabled={isClaiming}
+                className="mt-3 w-full rounded-[14px] bg-[#1a1a17] py-3 font-sans text-sm font-semibold text-white transition-colors hover:bg-black disabled:opacity-50"
+              >
+                {t('prediction_market.claim')}
+              </button>
+            ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function KeyStat({ label, value, last }: { label: string; value: string; last?: boolean }) {
+  return (
+    <div className={cn('px-6 py-[18px]', !last && 'border-r border-[#f0f0f0]')}>
+      <div className="mb-1.5 font-sans text-[11.5px] font-bold uppercase tracking-[0.05em] text-[#6b7280]">{label}</div>
+      <div className="font-sans text-[19px] font-bold tabular-nums text-[#161511]">{value}</div>
+    </div>
+  );
+}

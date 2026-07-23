@@ -1,0 +1,306 @@
+import Big from 'big.js';
+import dayjs from 'dayjs';
+import { RcAccount } from '@hiveio/wax';
+import {
+  SavingsWithdrawals,
+  IProposal,
+  IGetProposalsParams,
+  IProposalVote,
+  IVestingDelegation,
+  OwnerHistory,
+  IRecentTradesData,
+  IOpenOrdersData,
+  IOrdersData,
+  IMarketStatistics,
+  IDirectDelegation,
+  IGetOperationsByAccountResponse,
+  HiveOperation,
+  HiveOpTypeSchema,
+  IWitness
+} from '@hive/common-hiveio-packages/wax';
+import { commonVariables } from '@ui/lib/common-variables';
+import { getChain } from '@transaction/lib/chain';
+
+export declare type Bignum = string;
+
+export type ProposalData = Omit<IProposal, 'daily_pay' | 'total_votes'> & {
+  total_votes: Big;
+  daily_pay: { amount: Big };
+};
+
+export const getOpTypes = async (): Promise<HiveOpTypeSchema[]> => {
+  const chain = await getChain();
+  return await chain.restApi['hafah-api']['operation-types']();
+};
+
+export const getWitnessesByVote = async (limit: number): Promise<IWitness[]> => {
+  const chain = await getChain();
+  // Use max int64 value as starting point since API iterates downward from the start point
+  // This ensures we get witnesses sorted by votes in descending order
+  const response = await chain.api.database_api.list_witnesses({
+    // @ts-ignore Ignore first parameter type as JavaScript number cannot represent int64 accurately
+    start: ["9223372036854775807", ''],
+    limit,
+    order: 'by_vote_name'
+  });
+  return response.witnesses;
+};
+
+export const findRcAccounts = async (username: string): Promise<{ rc_accounts: RcAccount[] }> => {
+  const chain = await getChain();
+  return chain.api.rc_api.find_rc_accounts({ accounts: [username] });
+};
+
+export const getDirectDelegations = async (account: string): Promise<IDirectDelegation> => {
+  const chain = await getChain();
+  return chain.api.rc_api.list_rc_direct_delegations({ limit: 1000, start: [account, ''] });
+};
+
+export const DEFAULT_PARAMS_FOR_PROPOSALS: IGetProposalsParams = {
+  start: [],
+  limit: 30,
+  order: 'by_total_votes',
+  order_direction: 'descending',
+  status: 'votable'
+};
+
+export const getProposals = async (params?: Partial<IGetProposalsParams>): Promise<IProposal[]> => {
+  try {
+    const chain = await getChain();
+    const response = await chain.api.database_api.list_proposals({
+      ...DEFAULT_PARAMS_FOR_PROPOSALS,
+      ...params
+    });
+    return response.proposals;
+  } catch (error) {
+    throw error;
+  }
+};
+
+export interface IListItemProps {
+  proposalData: ProposalData;
+  totalShares: Big;
+  totalVestingFund: Big;
+  voted: boolean;
+}
+
+/**
+ * Fetches vesting delegations for a user using database_api.list_vesting_delegations
+ * @param username - Account name to fetch delegations for
+ * @param from - Starting delegatee for pagination (empty string for first page)
+ * @param limit - Maximum number of delegations to return (max 1000)
+ * @returns Array of vesting delegations with NaiAsset format for vesting_shares
+ */
+export const getVestingDelegations = async (
+  username: string,
+  from: string = '',
+  limit: number = 1000
+): Promise<IVestingDelegation[]> => {
+  const chain = await getChain();
+  const response = await chain.api.database_api.list_vesting_delegations({
+    start: [username, from],
+    limit,
+    order: 'by_delegation'
+  });
+  // Filter to only include delegations where the user is the delegator
+  return response.delegations.filter(d => d.delegator === username);
+};
+
+const walletOperations = [
+  'transfer_operation',
+  'transfer_to_vesting_operation',
+  'withdraw_vesting_operation',
+  'interest_operation',
+  'liquidity_reward_operation',
+  'transfer_to_savings_operation',
+  'transfer_from_savings_operation',
+  'escrow_transfer_operation',
+  'cancel_transfer_from_savings_operation',
+  'escrow_approve_operation',
+  'escrow_dispute_operation',
+  'escrow_release_operation',
+  'fill_convert_request_operation',
+  'fill_order_operation',
+  'claim_reward_balance_operation',
+  'author_reward_operation'
+];
+
+export const getAccountOperations = async (
+  username: string,
+  page: number | undefined = undefined,
+  pageSize: number = 500,
+  observer: string
+): Promise<IGetOperationsByAccountResponse> => {
+  const chain = await getChain();
+  const opTypes = await getOpTypes();
+  const operationTypesIds = walletOperations
+    .map((operationName) => opTypes.find((opType) => opType.operation_name === operationName)?.op_type_id)
+    .filter((id) => id != null) // filters out undefined/null
+    .map((id) => id?.toString());
+  const accountOperations = await chain.restApi['hivemind-api'].accountsOperations({
+    'account-name': username,
+    page,
+    'page-size': pageSize,
+    'operation-types': operationTypesIds.toString(),
+    'observer-name': observer !== '' ? observer : commonVariables.defaultObserver
+  });
+  return accountOperations;
+};
+
+export type IAuthorReward = {
+  author: string;
+  curators_vesting_payout: string;
+  hbd_payout: string;
+  hive_payout: string;
+  payout_must_be_claimed: boolean;
+  permlink: string;
+  vesting_payout: string;
+  author_rewards?: string;
+  beneficiary_payout_value?: string;
+  curator_payout_value?: string;
+  payout?: string;
+  reward?: string;
+  total_payout_value?: string;
+  curator?: string;
+};
+export type ICurationReward = {
+  author_rewards: string;
+  beneficiary_payout_value: string;
+  curator_payout_value: string;
+  payout: string;
+  total_payout_value: string;
+  reward: string;
+  curator: string;
+  author?: string;
+  curators_vesting_payout?: string;
+  hbd_payout?: string;
+  hive_payout?: string;
+  payout_must_be_claimed?: boolean;
+  permlink?: string;
+  vesting_payout?: string;
+};
+
+const financialReportOperations = [
+  'curation_reward_operation',
+  'author_reward_operation',
+  'producer_reward_operation',
+  'comment_reward_operation',
+  'comment_benefactor_reward_operation',
+  'interest_operation',
+  'proposal_pay_operation',
+  'dhf_funding_operation',
+  'transfer_operation'
+];
+
+export const getFinancialReportOperations = async (
+  username: string,
+  pageSize: number = 500
+): Promise<HiveOperation[]> => {
+  const chain = await getChain();
+  const opTypes = await getOpTypes();
+  const operationTypesIds = financialReportOperations
+    .map((operationName) => opTypes.find((opType) => opType.operation_name === operationName)?.op_type_id)
+    .filter((id) => id != null)
+    .map((id) => id?.toString());
+  const accountOperations = await chain.restApi['hivemind-api'].accountsOperations({
+    'account-name': username,
+    'operation-types': operationTypesIds.toString(),
+    'page-size': pageSize
+  });
+  return accountOperations.operations_result;
+};
+
+export const getRestApiAccountRewardsHistory = async (
+  username: string,
+  op_type: 'author_reward_operation' | 'curation_reward_operation',
+  limit: number = 20
+): Promise<HiveOperation[]> => {
+  const chain = await getChain();
+  const opTypes = await chain.restApi['hafah-api']['operation-types']();
+  const opTypeId = opTypes.find((opType) => opType.operation_name === op_type)?.op_type_id;
+  const operations = (
+    await chain.restApi['hivemind-api'].accountsOperations({
+      'account-name': username,
+      'operation-types': opTypeId?.toString(),
+      'page-size': limit
+    })
+  ).operations_result;
+  return operations;
+};
+
+export const getProposalVotes = async (
+  proposalId: number,
+  voter: string = '',
+  limit: number = 1000
+): Promise<IProposalVote[]> => {
+  const chain = await getChain();
+  const result = await chain.api.database_api.list_proposal_votes({
+    start: [proposalId, voter],
+    limit,
+    order: 'by_proposal_voter',
+    order_direction: 'ascending',
+    status: 'all'
+  });
+  return result.proposal_votes.filter((x) => x.proposal.proposal_id === proposalId);
+};
+
+export const getUserVotes = async (voter: string, limit: number = 1000): Promise<IProposalVote[]> => {
+  const chain = await getChain();
+  const result = await chain.api.database_api.list_proposal_votes({
+    start: [voter],
+    limit,
+    order: 'by_voter_proposal',
+    order_direction: 'ascending',
+    status: 'all'
+  });
+  return result.proposal_votes.filter((x) => x.voter === voter);
+};
+
+export const getMarketStatistics = async (): Promise<IMarketStatistics> => {
+  const chain = await getChain();
+  return chain.api.market_history_api.get_ticker({});
+};
+
+export const getOrderBook = async (limit: number = 500): Promise<IOrdersData> => {
+  const chain = await getChain();
+  return chain.api.market_history_api.get_order_book({ limit });
+};
+
+export const getOpenOrder = async (user: string): Promise<IOpenOrdersData[]> => {
+  const chain = await getChain();
+  const response = await chain.api.database_api.list_limit_orders({
+    start: [user, 0],
+    limit: 1000,
+    order: 'by_account'
+  });
+  return response.orders.filter((order) => order.seller === user);
+};
+
+export const getTradeHistory = async (limit: number = 1000): Promise<IRecentTradesData[]> => {
+  const chain = await getChain();
+  const todayEarlier = dayjs().subtract(10, 'hour').format().split('+')[0];
+  const todayNow = dayjs().format().split('+')[0];
+  const response = await chain.api.market_history_api.get_trade_history({
+    start: todayEarlier,
+    end: todayNow,
+    limit
+  });
+  return response.trades;
+};
+
+export const getRecentTrades = async (limit: number = 1000): Promise<IRecentTradesData[]> => {
+  const chain = await getChain();
+  const response = await chain.api.market_history_api.get_recent_trades({ limit });
+  return response.trades;
+};
+
+export const getSavingsWithdrawals = async (account: string): Promise<SavingsWithdrawals> => {
+  const chain = await getChain();
+  return chain.api.database_api.find_savings_withdrawals({ account: account });
+};
+
+export const getOwnerHistory = async (account: string): Promise<OwnerHistory> => {
+  const chain = await getChain();
+  const result = await chain.api.database_api.find_owner_histories({ owner: account });
+  return result.owner_auths;
+};

@@ -1,0 +1,9 @@
+{
+  "testName": "postVoting_downvoted",
+  "base": "postVoting",
+  "generatedAt": "2026-05-05T10:38:22.258Z",
+  "overlayFiles": [
+    "0005-bridge.get_ranked_posts.json",
+    "0009-database_api.list_votes.json"
+  ]
+}

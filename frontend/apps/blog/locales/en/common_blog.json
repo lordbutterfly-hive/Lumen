@@ -1,0 +1,1239 @@
+{
+  "global": {
+    "no_rewards": "No rewards pending redemption.",
+    "loading": "Loading",
+    "publishing": "Publishing...",
+    "confirmed_indexing": "Confirmed on blockchain. Waiting for indexing...",
+    "indexing_slow": "Indexing is taking longer than usual. This is normal during high traffic.",
+    "indexing_timeout": "Post indexing timed out. Your post may still appear shortly — try reloading the page.",
+    "reload_page": "Reload page",
+    "something_went_wrong": "Something went wrong",
+    "unavailable_for_legal_reasons": "Unavailable For Legal Reasons",
+    "time_ago": {
+      "a_few_seconds": " a few seconds ago",
+      "seconds": " seconds ago",
+      "minutes": " minutes ago",
+      "a_minute": " a minute ago",
+      "hours": " hours ago",
+      "an_hour": " an hour ago",
+      "days": " days ago",
+      "a_day": " a day ago",
+      "months": " months ago",
+      "a_month": " a month ago",
+      "years": " years ago",
+      "a_year": " a year ago"
+    },
+    "months": {
+      "first": "January",
+      "second": "February",
+      "third": "March",
+      "fourth": "April",
+      "fifth": "May",
+      "sixth": "June",
+      "seventh": "July",
+      "eighth": "August",
+      "ninth": "September",
+      "tenth": "October",
+      "eleventh": "November",
+      "twelfth": "December"
+    },
+    "time": {
+      "a_few_seconds": " a few seconds",
+      "seconds": " seconds",
+      "minutes": " minutes",
+      "a_minute": " a minute",
+      "hours": " hours",
+      "an_hour": " an hour",
+      "days": " days",
+      "a_day": " a day",
+      "months": " months",
+      "a_month": " a month",
+      "years": " years",
+      "a_year": " a year"
+    }
+  },
+  "navigation": {
+    "main_nav_bar": {
+      "posts": "Posts",
+      "proposals": "Proposals",
+      "witnesses": "Witnesses",
+      "out_dapps": "Our dApps",
+      "login": "Login",
+      "sign_up": "Sign up",
+      "search": "Search",
+      "light": "Light",
+      "dark": "Dark",
+      "system": "System",
+      "create_post": "Create Post",
+      "theme": "Theme",
+      "language": "Language",
+      "menu_panel": "Menu Panel"
+    },
+    "sidebar": {
+      "welcome": "Welcome",
+      "stolen_account_recovery": "Stolen Account Recovery",
+      "change_account_password": "Change Account Password",
+      "vote_for_witnesses": "Vote for Witnesses",
+      "faq": "FAQ",
+      "hive_proposals": "Hive Proposals",
+      "openhive_chat": "OpenHive Chat",
+      "developer_portal": "Developer Portal",
+      "hive_whitepaper": "Hive Whitepaper",
+      "privacy_policy": "Privacy Policy",
+      "terms_of_service": "Terms of Service"
+    },
+    "communities_nav": {
+      "my_friends": "My friends",
+      "all_posts": "All posts",
+      "trending_communities": "Trending Communities",
+      "explore_communities": "Explore communities..."
+    },
+    "explore_nav": {
+      "explore_hive": "Explore Hive",
+      "what_is_hive": "What is Hive",
+      "hive_dapps": "Hive dApps",
+      "blockexplorer": "Blockexplorer",
+      "vote_for_witnesses": "Vote for Witnesses",
+      "hive_proposals": "Hive Proposals"
+    },
+    "profile_navbar": {
+      "blog": "Blog",
+      "posts": "Posts",
+      "replies": "Replies",
+      "social": "Social",
+      "notifications": "Notifications",
+      "wallet": "Wallet",
+      "settings": "Settings",
+      "block_explorer": "Block Explorer"
+    },
+    "profile_posts_tab_navbar": {
+      "posts": "Posts",
+      "comments": "Comments",
+      "payouts": "Payouts"
+    },
+    "profile_social_tab_navbar": {
+      "badges": "Badges",
+      "activity": "Activity",
+      "personal": "Personal",
+      "meetups": "Meetups",
+      "challenges": "Challenges"
+    },
+    "profile_notifications_tab_navbar": {
+      "unclaimed_rewards": "Unclaimed rewards: ",
+      "no_notifications_yet": "No notifications yet",
+      "redeem": "Redeem",
+      "mark_all": "Mark all as read",
+      "all": "All",
+      "replies": "Replies",
+      "mentions": "Mentions",
+      "follows": "Follows",
+      "upvotes": "Upvotes",
+      "reblogs": "Reblogs",
+      "end_of_notifications": "End of notifications",
+      "notifications_90_day_limit": "Notifications are only available for the last 90 days.",
+      "reputation_at_time": "Reputation at time of notification"
+    },
+    "user_menu": {
+      "profile": "Profile",
+      "notifications": "Notifications",
+      "comments": "Comments",
+      "replies": "Replies",
+      "toggle_theme": "Theme",
+      "toggle_lang": "Language",
+      "wallet": "Wallet",
+      "logout": "Logout",
+      "logged_in_with": "Logged in with {{method}}",
+      "login_method": {
+        "hbauth": "Safe Storage",
+        "keychain": "Hive Keychain",
+        "peakvault": "PeakVault",
+        "metamask": "MetaMask",
+        "google": "Google Drive",
+        "hiveauth": "HiveAuth",
+        "wif": "WIF Key",
+        "hivesigner": "HiveSigner"
+      }
+    }
+  },
+  "select_sort": {
+    "posts_sort": {
+      "trending": "Trending",
+      "hot": "Hot",
+      "new": "New",
+      "payouts": "Payouts",
+      "muted": "Muted"
+    },
+    "communitie_sort": {
+      "rank": "Rank",
+      "subscribers": "Subscribers",
+      "new": "New"
+    },
+    "sort_comments": {
+      "sort": "Sort:",
+      "trending": "Trending",
+      "votes": "Votes",
+      "age": "Age",
+      "filter_label": "Comment filtering",
+      "filtered_count": "{{count}} filtered"
+    },
+    "search_sorter": {
+      "newest": "Newest",
+      "popularity": "Popularity",
+      "relevance": "Relevance"
+    }
+  },
+  "cards": {
+    "reblogged": "reblogged",
+    "content_removed": "Content removed for copyright and/or privacy violations.",
+    "badges": {
+      "pinned": "Pinned"
+    },
+    "post_card": {
+      "reputation_title": "Reputation",
+      "in": "in",
+      "downvote_warning": "Downvoting a post can decrease pending rewards and make it less visible. Common reasons:",
+      "reason_1": "• Disagreement on rewards",
+      "reason_2": "• Fraud or plagiarism",
+      "reason_3": "• Hate speech or trolling",
+      "reason_4": "• Miscategorized content or spam",
+      "upvote": "Upvote",
+      "undo_upvote": "Undo your upvote",
+      "undo_upvote_percent": "Undo your upvote {{votePercent}}%",
+      "downvote": "Downvote",
+      "undo_downvote": "Undo your downvote",
+      "undo_downvote_percent": "Undo your downvote {{votePercent}}%",
+      "no_votes": "no votes",
+      "vote": "1 vote",
+      "votes": "{{votes}} votes",
+      "no_responses": "No responses. ",
+      "response": "1 response. ",
+      "responses": "{{responses}} responses. ",
+      "click_to_respond": "Click to respond",
+      "reblog": "Reblog",
+      "you_reblogged": "You reblogged",
+      "no_reblogs": "no reblogs",
+      "reblog_count_one": "1 reblog",
+      "reblog_count": "{{count}} reblogs",
+      "you_upvoted": "You upvoted {{votePercent}}%",
+      "you_downvoted": "You downvoted {{votePercent}}%",
+      "you_voted": "You voted {{votePercent}}%",
+      "vote_polling_error_message_title": "Warning",
+      "vote_polling_error_message_description": "Failure in checking if user's vote has been included.",
+      "powered_up_100": "100% Hive Power"
+    },
+    "comment_card": {
+      "reveal_comment": "Reveal Comment",
+      "hide_comment": "Hide Comment",
+      "one_reply": "reply",
+      "replies": "replies",
+      "reply": "Reply",
+      "edit": "Edit",
+      "delete": "Delete",
+      "will_be_hidden": "Will be hidden due to low rating ",
+      "load_more": "Load more",
+      "reason_muted": "muted by you",
+      "reason_downvoted": "downvoted",
+      "reason_blacklisted": "blacklisted",
+      "reason_community_moderation": "muted by community moderator",
+      "reason_community_type": "not allowed in this community",
+      "reason_parent_muted": "parent content is muted",
+      "reason_low_reputation": "low reputation",
+      "reason_community_role": "muted in community"
+    }
+  },
+  "alert_dialog_reblog": {
+    "action": "OK",
+    "cancel": "Cancel",
+    "description": "This post will be added to your blog and shared with your followers.",
+    "already_reblogged": "You have already reblogged this post.",
+    "title": "Reblog This Post"
+  },
+  "vote_removal_dialog": {
+    "remove_upvote_title": "Remove Upvote",
+    "remove_upvote_description": "Removing your vote will reset your curation rewards for this post.",
+    "remove_downvote_title": "Remove Downvote",
+    "remove_downvote_description": "Removing your vote.",
+    "confirm": "OK",
+    "cancel": "Cancel"
+  },
+  "amount_hover_card": {
+    "pending_payout_amount": "Pending payout amount: ${{value}}",
+    "breakdown": "Breakdown:",
+    "payout_in": "Payout in",
+    "past_payouts": "Past Payouts ${{value}}",
+    "author": "Author ${{value}}",
+    "curators": "Curators ${{value}}",
+    "max_accepted_payout": "Max accepted payout: ${{value}}"
+  },
+  "login_form": {
+    "cancel_button": "Cancel",
+    "keep_me_logged_in": "Keep me logged in",
+    "login_button": "Submit",
+    "more_login_methods": "more login methods",
+    "password_hbauth_placeholder": "Hbauth password to unlock key",
+    "password_placeholder": "Posting private key",
+    "reset_button": "Reset",
+    "this_operation_requires_your_key_or_master_password": "This operation requires your {{authType}} key or Master password.",
+    "title_action_login": "Login",
+    "title_action_unlock_key": "Unlock Key",
+    "title_action_add_key": "Add Key",
+    "title_hbauth_form": "Hbauth: ",
+    "use_hbauth": "Use Hbauth",
+    "use_hiveauth": "Use HiveAuth",
+    "use_keychain": "Use Keychain",
+    "use_peakvault": "Use PeakVault",
+    "username_placeholder": "Enter your username",
+    "other_signin_options": "Other sign in options",
+    "other_signin_description": "Enter your username and select a sign in method",
+    "google_password_placeholder": "Password to unlock Google Drive wallet",
+    "google_tooltip": "Sign in using a Hive wallet stored in your Google Drive. Create one at auth.openhive.network",
+    "google_wallet_not_found_title": "Google Drive Wallet Not Found",
+    "google_wallet_not_found_description": "Your Google Drive does not contain a Hive wallet file. You need to create one first using Hive Bridge.",
+    "google_wallet_not_found_help": "Hive Bridge is a secure application that helps you create and store a Hive wallet in your Google Drive. This allows you to sign Hive transactions without installing browser extensions.",
+    "google_key_not_found_title": "Key Not Found in Wallet",
+    "google_key_not_found_description": "No stored Hive {{keyType}} key found for user {{username}} in Google Drive wallet.",
+    "go_to_hive_bridge": "Go to Hive Bridge",
+    "completing_google_auth": "Completing Google authorization..."
+  },
+  "user_profile": {
+    "reputation": "Reputation",
+    "mute_button": "Mute",
+    "unmute_button": "Unmute",
+    "unfollow_button": "Unfollow",
+    "follow_button": "Follow",
+    "hive_buzz_badge_title": "This is {{username}}'s level badged earned from Hivebuzz programs",
+    "user_level_title": "{{username}} is a {{level}} (based on staked VESTS). Click for more stats on HiveBuzz.",
+    "twitter_badge_title": "To get the Twitter badge, link your account at HivePosh.com",
+    "joined": "Joined",
+    "active": "Active",
+    "no_posts_yet": "Looks like @{{username}} hasn't made any posts yet!",
+    "no_blogging_yet": "Looks like @{{username}} hasn't started blogging yet!",
+    "no_pending_payouts": "No pending payouts.",
+    "load_newer": "Load Newer",
+    "nothing_more_to_load": "Nothing more to load",
+    "empty_feed_not_following": "You haven't followed anyone yet! Follow other users to see their posts here.",
+    "no_replies_yet": "@{{username}} hasn't had any replies yet.",
+    "no_notifications_yet": "@{{username}} hasn't had any notifications yet.",
+    "lists": {
+      "follower_count": {
+        "zero": "No followers",
+        "one": "1 follower",
+        "other": "{{value}} followers"
+      },
+      "followed_count": {
+        "zero": "Not following anybody",
+        "one": "1 following",
+        "other": "{{value}} following"
+      },
+      "post_count": {
+        "zero": "No posts",
+        "one": "1 post",
+        "other": "{{value}} posts"
+      },
+      "followers_label": "Followers",
+      "posts_label": "Posts",
+      "following_label": "Following",
+      "blacklisted_users": "Blacklisted Users",
+      "muted_users": "Muted Users",
+      "followed_blacklists": "Followed Blacklists",
+      "followed_muted_lists": "Followed Muted Lists",
+      "followers_pages": "Followers page {{current}} from {{total}}",
+      "followed_pages": "Followed page {{current}} from {{total}}",
+      "list": {
+        "unblacklist": "unblacklist",
+        "unmute": "unmute",
+        "unfollow_blacklist": "unfollow blacklist",
+        "unfollow_muted_list": "unfollow muted list",
+        "what_is_this": "What Is This?",
+        "show_or_hide_descripton_one": "This is the new decentralized list system. From here you can manage your own mute list or blacklist, as well as subscribe to the mute lists and blacklists of other users. There are some new fields on the ",
+        "show_or_hide_descripton_two": " page where you can set a description of how you choose who you've added to your lists and if there are any actions that account can take to get removed from them. You can see the descriptions of the lists of other accounts by browsing directly to their personal blacklist or mute list page. These links can be found on their profile page below the follower information. To get started, we recommend that you follow the blacklists/mute lists of these accounts: hive.blog",
+        "settings": "Settings",
+        "list_description": "List Description: ",
+        "add_account_to_list": "Add Account(s) To List",
+        "single_account": "(single account or comma separated list)",
+        "add_to_list": "Add to list",
+        "description_not_added": "User hasn't added a description to their blacklist yet",
+        "empty_list": "There are no users on this list yet",
+        "search_this_list": "Search This List",
+        "accounts_blacklisted_by": "Accounts Blacklisted By {{username}}",
+        "accounts_muted_by": "Accounts Muted By {{username}}",
+        "reset_options": "Reset Options",
+        "reset_blacklist": "Reset Blacklist",
+        "reset_muted_list": "Reset Muted List",
+        "reset_followed_blacklists": "Reset Followed Blacklists",
+        "reset_followed_muted_list": "Reset Followed Muted Lists",
+        "reset_all_lists": "Reset All Follows/Lists",
+        "busy_button": "BUSY, PLEASE WAIT",
+        "first_button": "First",
+        "previous_button": "Previous",
+        "next_button": "Next",
+        "last_button": "Last",
+        "viewing_page": "Viewing Page {{current}} of {{total}}",
+        "users_on_list": "Users On List: {{number}}"
+      }
+    },
+    "social_tab": {
+      "community_subscriptions_title": "Community Subscriptions",
+      "the_author_has_subscribed_to_the_following": "The author has subscribed to the following Hive Communities",
+      "badges_and_achievements_title": "Badges and achievements",
+      "these_are_badges_received_by_the_author": "These are badges received by the author via the third-party apps ",
+      "view_badges_on": "View badges on",
+      "you_dont_have_any_subscriptions": "Welcome! You don't have any subscriptions yet."
+    },
+    "notifications_tab": {
+      "voted_on_your_post": "@{{username}} voted on your post {{amount}}",
+      "replied_on_your_post": "@{{username}} replied to your post",
+      "replied_to_your_comment": "@{{username}} replied to your comment",
+      "reblogged_on_your_post": "@{{username}} reblogged your post",
+      "followed_you": "@{{username}} followed you",
+      "mentioned_you_and_others": "@{{username}} mentioned you and {{others}} others",
+      "subscribed_to": "@{{username}} subscribed to {{community}}"
+    }
+  },
+  "communities": {
+    "set_title_for_user": "Set Title for @{{username}}",
+    "mute": "Mute",
+    "save": "Save",
+    "unmute": "Unmute",
+    "post_comment": " post/comment",
+    "please_provide_a_note": "Please provide a note regarding your decision to mute this content.",
+    "notes": "Notes",
+    "pin": "Pin",
+    "unpin": "Unpin",
+    "edit_title": "Edit Title",
+    "edit_roles": "Edit Roles",
+    "edit_props": "Settings",
+    "roles": "Roles",
+    "user_roles": "User roles",
+    "account": "Account",
+    "role": "Role",
+    "title": "Title",
+    "add_user": "Add user",
+    "add_user_role": "Add User Role",
+    "set_the_role_of_a_user_in_this_community": "Set the role of a user in this community.",
+    "username": "Username",
+    "role_permissions": "Role Permissions",
+    "owner": "Owner",
+    "mod": "Moderator",
+    "member": "Member",
+    "guest": "Guest",
+    "muted": "Muted",
+    "description_owner": "assign Admins",
+    "description_admin": "edit settings, assign mods",
+    "description_mod": "mute, pin, set user titles",
+    "description_member": "listed on leadership team",
+    "description_guest": "default; can post and comment",
+    "description_muted": "new posts automaticly muted",
+    "admin": "Admin",
+    "admins": "admins",
+    "subscribers": "subscribers",
+    "authors": "authors",
+    "posts": "posts",
+    "communities": "Communities",
+    "community": "Community",
+    "search": "Search...",
+    "no_results": "No results for your search",
+    "latest_subscribers": "Latest {{username}} Subscribers",
+    "unmoderated_tag": "Unmoderated tag",
+    "buttons": {
+      "subscribe": "Subscribe",
+      "new_post": "New post",
+      "activity_log": "Activity Log",
+      "subscribers": "subscribers",
+      "leave": "Leave",
+      "joined": "Joined"
+    },
+    "titles": {
+      "pending_rewards": "pending rewards",
+      "active_posters": "active posters",
+      "leadership": "Leadership",
+      "description": "Description",
+      "rules": "Rules",
+      "language": "Language"
+    },
+    "edit_props_dialog": {
+      "community_settings": "Community Settings",
+      "title": "Title*",
+      "save": "Save",
+      "cancel": "Cancel",
+      "about": "About",
+      "description": "Description",
+      "flag_text": "Rules(one per line)",
+      "lang": "Language",
+      "sav": "Save",
+      "community_settings_description": "What does your community stand for?",
+      "assigned_owner_account": "Assigned owner account",
+      "communities_are_built": "Communities are built on top a special Hive account",
+      "next": "Next",
+      "nsfw": "NSFW",
+      "i_have_saved_password": "I have securely saved my owner name and password.",
+      "payment_confirm": "This operation will cost 3 HIVE. I understand*",
+      "manage_confirm": "I understand, to manage {{communityName}} account I have to use {{username}} keys*",
+      "go_to_community": "Go to your community ",
+      "community_created": "Community created!!!",
+      "languages": {
+        "en": "English",
+        "kr": "Korean",
+        "zh": "Chinese",
+        "ms": "Malay",
+        "pl": "Polish",
+        "pt": "Portuguese",
+        "ru": "Russian",
+        "it": "Italian",
+        "de": "German",
+        "es": "Spanish",
+        "sv": "Swedish"
+      },
+      "errors": {
+        "required": "Required",
+        "maximum_characters": "Maximum {{value}} characters",
+        "minimum_characters": "Minimum {{value}} characters"
+      }
+    }
+  },
+  "post_content": {
+    "close_post_editor": "Are you sure you want to close the post editor?",
+    "in": "in",
+    "reputation_title": "Reputation",
+    "blacklists": "Blacklists",
+    "blacklisted": "Blacklisted",
+    "if_comment": {
+      "you_are_viewing_a_single_comments_thread_from": "You are viewing a single comment's thread from",
+      "view_the_full_context": "View the full context",
+      "view_the_direct_parent": "View the direct parent"
+    },
+    "header": {
+      "hover_author": {
+        "follow_button": "Follow",
+        "followers": "Followers",
+        "following": "Following",
+        "joined": "Joined"
+      },
+      "edited": "edited"
+    },
+    "body": {
+      "copyright": "This post is not available due to a copyright claim.",
+      "content_were_hidden": "Content were hidden due to low ratings.",
+      "content_hidden_community_moderation": "Content hidden by community moderators.",
+      "content_hidden_community_type": "Content hidden: author not allowed to post in this community.",
+      "content_hidden_parent_muted": "Content hidden because parent content is muted.",
+      "content_hidden_low_reputation": "Content hidden due to low author reputation.",
+      "content_hidden_community_role": "Content hidden: author is muted in this community.",
+      "show": "Show",
+      "Image_not_shown": "Image not shown due to low ratings",
+      "leave_this_app": "You are about to leave this app.",
+      "the_link_youve_clicked": "The link you've clicked on will lead you to the following website:",
+      "we_are_just_verifying": "We are just verifying with you that you want to continue.",
+      "open_link": "Open Link"
+    },
+    "footer": {
+      "and_more": "and {{value}} more",
+      "in": "in",
+      "by": "by",
+      "upvote": "Upvote",
+      "downvote": "Downvote",
+      "no_votes": "no votes",
+      "vote": "1 vote",
+      "votes": "{{votes}} votes",
+      "reblog": "Reblog",
+      "you_reblogged": "You reblogged",
+      "reply": "Reply",
+      "edit": "Edit",
+      "no_responses": "No responses. ",
+      "response": "1 response. ",
+      "responses": "{{responses}} responses. ",
+      "share_on": "Share on ",
+      "share_form": {
+        "copy": "COPY",
+        "copied": "Copied!",
+        "share_this_link": "Share this post",
+        "url_to_this_post": "URL to this post:",
+        "markdown_code_for_a_link_to_this_post": "Markdown code for a link to this post:",
+        "open_in_alternative": "Open in alternative Hive dApps",
+        "open_in": "Open in Block Explorers"
+      },
+      "comment": {
+        "disable_editor": "Close editor",
+        "editing": "Editing comment",
+        "replying": "Replying",
+        "reply": "Reply",
+        "insert_images": "Insert images by dragging & dropping, pasting from the clipboard, or by ",
+        "selecting_them": "selecting them.",
+        "post": "Post",
+        "cancel": "Cancel",
+        "preview": "Preview",
+        "markdown_styling_guide": "Markdown Styling Guide",
+        "exit_editor": "Are you sure you want to exit the comment editor?",
+        "exit_editor_description": "Your draft will be discarded and cannot be recovered.",
+        "discard": "Discard",
+        "power_up": "Power up 100%",
+        "decline_payout": "Decline Payout",
+        "rewards": "Rewards: ",
+        "account_stats": "Account stats:",
+        "resource_credits": "Resource Credits (RC) level: {{value}}%",
+        "update_settings": "Update settings",
+        "full_in": "Full in: ",
+        "shadow_draft_found": "An unsaved reply was found for this thread.",
+        "shadow_draft_recover": "Recover",
+        "shadow_draft_discard": "Discard"
+      }
+    },
+    "flag": {
+      "flag_post": "Flag post",
+      "flag_description": "Please provide a note regarding your decision to flag this post, it will be reviewed by community moderators.",
+      "community_rules": "Community rules",
+      "cancel": "Cancel",
+      "ok": "OK"
+    }
+  },
+  "submit_page": {
+    "log_in_to_post": "Log in to make a post.",
+    "clean_post_editor": "Are you sure you want to clear the post editor?",
+    "cover_image": "Select your cover image:",
+    "my_communities": "My Communities",
+    "others_communities": "Others Communities",
+    "disable_side": "Disable side-by-side editor",
+    "enable_side": "Enable side-by-side editor",
+    "disable_sync_scroll": "Disable synchronized scrolling",
+    "enable_sync_scroll": "Enable synchronized scrolling",
+    "string_must_contain": "String must contain at least {{num}} character(s)",
+    "must_contain_only": "Must contain only letters and numbers",
+    "hide_preview": "Hide preview",
+    "show_preview": "Show preview",
+    "preview_placeholder": "Start typing to see a preview of your post",
+    "metadata_section": "Metadata",
+    "publishing_section": "Publishing",
+    "title": "Title",
+    "insert_images_by_dragging": "Insert images by dragging & dropping or by ",
+    "insert_images_info": "Selecting image is provide in editor toolbar via picture icon",
+    "insert_images_text": "Select image",
+    "uploading_image": "Uploading image...",
+    "selecting_them": "selecting them",
+    "post_summary": "Post summary(for posts & SEO, max 140 chars)",
+    "enter_your_tags": "Enter your tags separated by a space",
+    "author_if_different": "Author(if different from current account)",
+    "post_options": "Post options:",
+    "author_rewards": "Author rewards:",
+    "reward_options_final": "Payout has been declined and cannot be changed",
+    "reward_options_restrictive": "Reward options can only be made more restrictive",
+    "advanced_settings": "Advanced settings",
+    "account_stats": "Account stats:",
+    "resource_credits": "Resource Credits (RC) level: {{value}}%",
+    "posting_to": "Posting to:",
+    "my_blog": "My blog",
+    "preview": "Preview",
+    "submit": "Submit",
+    "clean": "Clean",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "cancel_confirmation_description": "Your changes will be discarded and cannot be recovered.",
+    "enter_title": "Enter a title to submit",
+    "enter_content": "Enter content to submit",
+    "enter_title_and_content": "Enter a title and content to submit",
+    "enter_tags": "Enter at least one tag to submit",
+    "markdown_styling_guide": "Markdown Styling Guide",
+    "power_up": " Power up 100%",
+    "maximum_characters": "Maximum {{num}} characters",
+    "markdown_not_supported": "Markdown is not supported here",
+    "html_not_supported": "HTML is not supported here",
+    "hive_link_converted": "Blog link converted",
+    "hive_link_converted_count": "{{count}} Hive blog link(s) converted to relative path",
+    "undo": "Undo",
+    "convert_hive_links": "Convert Hive links",
+    "convert_hive_links_tooltip": "Automatically converts pasted links from Hive blog frontends to frontend-agnostic relative paths, so your post works on any Hive app",
+    "optimize_images": "Optimize images",
+    "optimize_images_tooltip": "Resize and compress images before upload for faster uploads and smaller file sizes. Converts unsupported formats (HEIC/HEIF) automatically.",
+    "uploading_images": "Uploading {{count}} images...",
+    "image_processing_failed": "failed",
+    "image_too_large_gif": "GIF is too large. Maximum size is 15MB.",
+    "advanced_tooltip": "Here you can set post options such as author rewards split, max accepted payout, beneficiaries & post templates",
+    "advanced_settings_dialog": {
+      "load": "Load",
+      "template_loaded": "Template loaded",
+      "changes_saved": "Changes saved",
+      "advanced_settings": "Advanced settings",
+      "maximum_accepted_payout": "Maximum Accepted Payout",
+      "beneficiaries": "Beneficiaries: {{num}} set",
+      "value_of_the_maximum": "HBD value of the maximum payout this post will receive.",
+      "no_limit": "No limit",
+      "decline_payout": "Decline Payout",
+      "custom_value": "Custom value",
+      "cannot_be_less_than": "Value cannot be less than 0",
+      "cannot_be_more_than": "Value cannot be more than 999999",
+      "author_rewards": "Author rewards",
+      "what_type_of_tokens": "What type of tokens do you want as rewards from this post?",
+      "power_up": " Power up 100%",
+      "default": "Default: ",
+      "update": "Update",
+      "delete": "Delete",
+      "your_percent": "Your percent cannot be less than 0",
+      "beneficiaries_cannot": "Beneficiaries cannot be repeated",
+      "account_name": "Account name should be longer",
+      "beneficiary_cannot_be_self": "Cannot specify self as beneficiary",
+      "beneficiary_percent_invalid": "Beneficiary percentage must be from 1-100",
+      "bad_actor": "Use caution sending to this account. Please double check your spelling for possible phishing.",
+      "add_account": "Add Account",
+      "post_templates": "Post templates",
+      "manage_your_post_templates": "Manage your post templates, other settings here will also be saved/loaded.",
+      "choose_a_template_to_load": "Choose a template to load",
+      "no_templates_found": "No templates found",
+      "name_of_a_new_template": "Name of a new template",
+      "template_name_is_taken": "Template name is taken",
+      "save": "Save",
+      "delete_template": "Delete Template"
+    },
+    "category_selector": {
+      "required": "Required when post to My Blog",
+      "tag_your_story": "Tags up to 8",
+      "select_a_tag": "Select a tag",
+      "maximum_tag_length_is_24_characters": "Maximum tag length is 24 characters",
+      "use_limited_amount_of_categories": "Please use only {{amount}} tags",
+      "use_only_lowercase_letters": "Use only lowercase letters",
+      "use_one_dash": "Use only one dash",
+      "use_spaces_to_separate_tags": "Use spaces to separate tags",
+      "use_only_allowed_characters": "Use only lowercase letters, digits and one dash",
+      "must_start_with_a_letter": "Must start with a letter",
+      "must_end_with_a_letter_or_number": "Must end with a letter or number",
+      "must_not_include_hivemind_community_owner": "Post already has hive tag by default, please do not include another 'hive-' tag.",
+      "tags_cannot_be_repeated": "Tags cannot be repeated"
+    },
+    "shadow_draft_found": "Unsaved post found",
+    "shadow_draft_description": "A post was broadcast but may not have been indexed yet. Would you like to recover the content?",
+    "shadow_draft_recover": "Recover",
+    "shadow_draft_discard": "Discard"
+  },
+  "search_page": {
+    "placeholder": "Search",
+    "no_results": "Nothing was found.",
+    "error": "There was an error"
+  },
+  "settings_page": {
+    "invalid_url": "Invalid URL",
+    "name_is_too_long": "Name is too long",
+    "name_must_not_begin_with": "Name must not begin with @",
+    "about_is_too_long": "About is too long",
+    "location_is_too_long": "Location is too long",
+    "website_url_is_too_long": "Website URL is too long",
+    "public_profile_settings": "Public Profile Settings",
+    "witness_owner_is_too_long": "Witness owner username is too long",
+    "witness_description_is_too_long": "Witness description is too long",
+    "description_is_too_long": "Description is too long",
+    "preferences": "Preferences",
+    "not_safe_for_work_nsfw_content": "Not safe for work (NSFW) content",
+    "always_hide": "Always hide",
+    "always_warn": "Always warn",
+    "always_show": "Always show",
+    "choose_default_blog_payout": "Blog post rewards",
+    "choose_default_comment_payout": "Comment post rewards",
+    "choose_language": "Choose Language",
+    "muted_users": "Muted Users",
+    "unmute": "unmute",
+    "decline_payout": " Decline Payout",
+    "power_up": "Power Up 100%",
+    "update": "Update",
+    "upload_image": "Upload an image",
+    "uploading_image": "Uploading image",
+    "profile_image_url": "Profile picture url",
+    "cover_image_url": "Cover image url (Optimal: 2048 x 512 px)",
+    "profile_name": "Display Name",
+    "profile_about": "About",
+    "profile_location": "Location",
+    "profile_website": "Website",
+    "blacklist_description": "Blacklist Description",
+    "mute_list_description": "Mute List Description",
+    "profile_witness_owner": "Witness owner",
+    "profile_witness_description": "Witness description",
+    "saved": "Saved!",
+    "choose_preferred_api_endpoint": "Choose Your Preferred API Node",
+    "default_beneficiaries": "Referral System",
+    "default_beneficiaries_enabled": "Use Default Beneficiaries",
+    "default_beneficiaries_disabled": "Opt-Out Referral System",
+    "advanced": "Advanced",
+    "api_endpoint_options": "API Endpoint Options",
+    "endpoint": "Endpoint",
+    "preferred": "Preferred?",
+    "remove": "Remove",
+    "add_api_endpoint": "Add API Endpoint",
+    "reset_endpoints": "Reset Endpoints",
+    "error_bad_url": "This appears to be a bad URL, please check it and try again",
+    "error_bad_cookie": "Unable to get endpoints from cookie",
+    "error_already_exists": "This endpoint is already in the list",
+    "error_cant_remove_active": "You can't remove the current preferred endpoint. Please select a new preferred endpoint first",
+    "error_cant_remove_all": "You must have at least one endpoint in the list",
+    "changes_saved": "Changes saved"
+  },
+  "four_oh_four": {
+    "this_page_does_not_exist": "Sorry! This page does not exist.",
+    "not_to_worry": "Not to worry. You can head back to",
+    "our_homepage": "our homepage",
+    "new_posts": "new posts",
+    "hot_posts": "hot posts",
+    "trending_posts": "trending posts",
+    "muted_posts": "muted posts"
+  },
+  "retention": {
+    "tier": {
+      "ember": "Ember",
+      "spark": "Spark",
+      "candle": "Candle",
+      "torch": "Torch",
+      "lantern": "Lantern",
+      "beacon": "Beacon",
+      "halo": "Halo",
+      "aurora": "Aurora",
+      "lumen": "Lumen"
+    },
+    "task": {
+      "show_up": "Show up",
+      "read": "Read a post",
+      "react": "React to a post",
+      "reply": "Reply to someone",
+      "create": "Create a post"
+    },
+    "gate": {
+      "engagement": "Engagement received",
+      "tenure": "Account tenure",
+      "active_weeks": "Active weeks"
+    },
+    "level": "Level {{n}}",
+    "level_pill": "Lv {{n}}",
+    "xp_progress": "{{xp}}/{{total}} XP",
+    "xp_to_next": "{{remaining}} XP to Level {{next}}",
+    "day_streak": "{{days}}-day streak",
+    "daily_tasks": "Daily tasks",
+    "tasks_progress": "{{done}}/{{total}}",
+    "member_since": "Member since {{year}}",
+    "gate_title": "What's gating your next promotion"
+  },
+  "wallet": {
+    "page_title": "Wallet",
+    "loading": "Loading wallet…",
+    "login_required": "Log in to see your Hive wallet.",
+    "login_button": "Log in",
+    "hive_card": {
+      "name": "HIVE",
+      "description": "Hive's primary token",
+      "send": "Send"
+    },
+    "staked": {
+      "title": "Staked HIVE",
+      "badge": "HP",
+      "apr": "~{{apr}}% APR",
+      "description": "Also known as HP or Hive Power. Powers governance, voting and rewards.",
+      "power_down_notice": "Power down scheduled in {{days}} days (~{{amount}} HIVE, {{weeks}} weeks left)",
+      "stop": "STOP",
+      "total_label": "Total {{amount}} HP",
+      "stake": "Stake",
+      "unstake": "Unstake"
+    },
+    "delegated": {
+      "out": "Delegated out",
+      "accounts_count": "Delegated to {{count}} accounts",
+      "none": "You have no active delegations out.",
+      "manage": "Manage delegations →"
+    },
+    "hbd_card": {
+      "name": "HBD",
+      "description": "US dollar pegged token backed by HIVE",
+      "send": "Send"
+    },
+    "savings": {
+      "label": "Savings Vault",
+      "heading": "Savings Vault",
+      "description": "Held separately from your spendable balances. Withdrawals unlock after a 3-day security delay.",
+      "hive_title": "HIVE Savings",
+      "hive_unlock_badge": "3-day unlock",
+      "hive_description": "Time-locked HIVE. Withdrawals take 3 days to clear. No interest.",
+      "hbd_title": "HBD Savings",
+      "hbd_apr_badge": "{{apr}}% APR",
+      "hbd_description": "Earns interest while held. Last payment: {{date}}",
+      "hbd_description_never": "Earns interest while held. No interest paid yet.",
+      "claimable": "{{amount}} claimable",
+      "deposit": "Deposit",
+      "withdraw": "Withdraw",
+      "claim_now": "Claim now"
+    },
+    "estimated_value": {
+      "title": "Estimated Account Value",
+      "description": "USD value of all Hive tokens in your wallet."
+    },
+    "market": {
+      "hive_via": "1 HIVE ≈ {{btc}} BTC",
+      "hive_source": "HIVE / BTC via CoinGecko",
+      "hbd_price_label": "HBD price in the Internal Hive Market.",
+      "hbd_source": "Low-volume exchanges report {{price}} USD via CoinGecko.",
+      "view_more": "View more market stats →",
+      "unavailable": "Price unavailable"
+    },
+    "advanced": {
+      "title": "Advanced",
+      "description": "Power-user tools for your Hive account.",
+      "delegate": { "label": "Delegate HP", "sub": "Lend Hive Power to others" },
+      "claim_account": { "label": "Claim account tokens", "sub": "Create claimed accounts" },
+      "convert": { "label": "Convert HBD → HIVE", "sub": "3.5 day conversion" },
+      "recurring": { "label": "Recurring transfers", "sub": "Schedule payments" },
+      "savings": { "label": "Savings", "sub": "Deposit or withdraw" }
+    },
+    "dialogs": {
+      "common": {
+        "from": "From",
+        "to": "To",
+        "amount": "Amount",
+        "memo": "Memo (public)",
+        "balance": "Balance",
+        "cancel": "Cancel",
+        "confirm": "Confirm",
+        "next": "Next",
+        "recipient_not_found": "Account not found",
+        "recipient_required": "Recipient is required",
+        "amount_positive": "Amount must be greater than 0",
+        "amount_exceeds_balance": "Amount exceeds available balance",
+        "amount_precision": "Amount has too many decimal places",
+        "success_title": "Transaction broadcast",
+        "error_title": "Transaction failed"
+      },
+      "send": {
+        "title": "Send {{currency}}",
+        "description": "Transfer {{currency}} to another Hive account."
+      },
+      "power_up": {
+        "title": "Power Up",
+        "description": "Convert liquid HIVE into Hive Power (HP)."
+      },
+      "power_down": {
+        "title": "Power Down",
+        "description": "Schedule a 13-week Hive Power withdrawal.",
+        "per_week": "≈ {{amount}} HIVE per payment, across 13 weekly payments",
+        "already_active": "A power down is already in progress: {{remaining}} HIVE remaining."
+      },
+      "stop_power_down": {
+        "title": "Stop power down",
+        "description": "This cancels your active power down schedule. You keep the remaining Hive Power staked.",
+        "confirm": "Stop power down"
+      },
+      "delegate": {
+        "title": "Delegate Hive Power",
+        "description": "Lend HP to another account. Set the amount to 0 to revoke an existing delegation."
+      },
+      "savings_deposit": {
+        "title": "Deposit to {{currency}} Savings",
+        "description": "Move {{currency}} into your savings balance."
+      },
+      "savings_withdraw": {
+        "title": "Withdraw {{currency}} from Savings",
+        "description": "Withdrawals clear after a 3-day delay."
+      },
+      "convert": {
+        "title": "Convert HBD → HIVE",
+        "description": "Locks HBD and delivers HIVE at the market-median price after 3.5 days."
+      },
+      "recurring": {
+        "title": "Recurring transfer",
+        "description": "Schedule an automatic repeating transfer.",
+        "recurrence_hours": "Repeat every (hours, min 24)",
+        "executions": "Number of payments (min 2)"
+      },
+      "claim_account": {
+        "title": "Claim account token",
+        "description": "Use a claimed-account token to create a new Hive account.",
+        "pending": "{{count}} claimed account token(s) available",
+        "pending_none": "No claimed account tokens available yet.",
+        "new_account": "New account name",
+        "todo_notice": "Key generation for the new account isn't wired up yet, so this can't be submitted from here. The form is ready — only the broadcast step is pending."
+      }
+    }
+  },
+  "profile": {
+    "following": "Following",
+    "wallet": "Wallet",
+    "overflow_menu_label": "More options",
+    "overflow": {
+      "view_on_explorer": "View on chain explorer"
+    },
+    "stats": {
+      "hp": "HP"
+    },
+    "tabs": {
+      "comments": "Comments"
+    },
+    "league": {
+      "title": "{{tier}} league"
+    },
+    "comment": {
+      "replying_to_prefix": "replying to",
+      "in_community_prefix": "in",
+      "empty": "@{{username}} hasn't commented yet."
+    }
+  },
+  "witnesses": {
+    "title": "Hive Witnesses",
+    "subtitle": "Block Producers",
+    "intro": "Witnesses run consensus nodes and secure the chain, and make governance decisions for Hive's future. Each account can vote for up to 30 witnesses, weighted by Hive Power.",
+    "unknown_version": "unknown",
+    "no_description": "No witness statement provided.",
+    "no_results": "No witnesses match your filters.",
+    "error": {
+      "description": "We couldn't load the witness list — this is a connection problem, not an empty list.",
+      "retry": "Retry"
+    },
+    "own_data_error": {
+      "message": "Couldn't load your votes and proxy status.",
+      "retry": "Retry"
+    },
+    "announcement_link_aria": "Open {{witness}}'s witness announcement",
+    "apr_tooltip": "Current network HP staking APR — the same for every witness, since it reflects what your staked HP earns, not the witness itself.",
+    "view_toggle": {
+      "aria_label": "Table view",
+      "general": "General",
+      "params": "Params"
+    },
+    "stats": {
+      "hp_apr": "HP staking APR",
+      "hbd_rate": "HBD savings rate",
+      "witness_count": "Witnesses tracked",
+      "votes_left": "{{count}} votes left",
+      "proxy_active": "Voting via proxy @{{proxy}}",
+      "log_in_to_vote": "Log in to vote for witnesses"
+    },
+    "columns": {
+      "rank": "#",
+      "witness": "Witness",
+      "votes": "Votes",
+      "last_block": "Last block",
+      "miss": "Miss",
+      "price": "Price",
+      "apr": "APR",
+      "creation_fee": "Creation fee",
+      "max_block_size": "Max block size",
+      "subsidy_budget": "Subsidy budget",
+      "vote": "Vote"
+    },
+    "block_age": {
+      "never": "never",
+      "now": "now",
+      "seconds_ago": "{{count}}s ago",
+      "minutes_ago": "{{count}}m ago",
+      "hours_ago": "{{count}}h ago",
+      "days_ago": "{{count}}d ago"
+    },
+    "vote": {
+      "add_aria": "Vote for witness {{witness}}",
+      "remove_aria": "Remove vote for witness {{witness}}",
+      "login_required_aria": "Log in to vote for witnesses",
+      "proxy_blocks_voting": "You have an active witness proxy. Clear it in the Set a proxy card before voting for witnesses directly.",
+      "votes_unavailable": "Couldn't load your vote status — refresh to see whether you've voted for this witness."
+    },
+    "filters": {
+      "title": "Filters",
+      "witness_group": "Witness",
+      "name_group": "Name",
+      "version_group": "Version",
+      "search_placeholder": "Search witnesses…",
+      "any_version": "Any version",
+      "active": "Active",
+      "disabled_stale": "Disabled / Stale",
+      "top20": "Top 20",
+      "approved": "Approved"
+    },
+    "proxy_card": {
+      "title": "Set a proxy",
+      "description": "Delegate your witness votes to an account you trust to vote on your behalf.",
+      "current_description": "Your witness votes are currently delegated to @{{proxy}}.",
+      "set_button": "Set proxy account",
+      "clear_button": "Clear proxy"
+    },
+    "proxy_dialog": {
+      "set_title": "Set a witness proxy",
+      "clear_title": "Clear your witness proxy",
+      "set_description": "Enter the account you want to vote for witnesses on your behalf. This replaces your own witness votes until you clear the proxy.",
+      "clear_description": "This clears your proxy (currently @{{proxy}}) so you can vote for witnesses directly again.",
+      "account_placeholder": "Proxy account name",
+      "invalid_account": "That account couldn't be found on Hive.",
+      "verify_error": "Couldn't verify that account — please try again.",
+      "set_confirm": "Set proxy",
+      "clear_confirm": "Clear proxy",
+      "submitting": "Submitting…"
+    },
+    "toast": {
+      "voted": "You voted for witness {{witness}}.",
+      "unvoted": "You removed your vote for witness {{witness}}.",
+      "proxy_set": "Your witness votes are now delegated to @{{proxy}}.",
+      "proxy_cleared": "Your witness proxy was cleared."
+    }
+  },
+  "proposals": {
+    "header": {
+      "title": "Decentralized Hive Fund",
+      "intro": "An on-chain system where anyone can submit funding proposals and stakeholders vote on which get funded. Read more in the",
+      "faq_link": "FAQ",
+      "new_proposal": "New proposal"
+    },
+    "stats": {
+      "daily_funded": "Daily funded",
+      "hbd_stabilizer": "HBD stabilizer",
+      "max_daily_budget": "Max daily budget",
+      "total_budget": "Total budget"
+    },
+    "tabs": {
+      "all": "All",
+      "active": "Active",
+      "upcoming": "Upcoming",
+      "expired": "Expired"
+    },
+    "toolbar": {
+      "sort_label": "Sort"
+    },
+    "sort": {
+      "votes": "Votes",
+      "newest": "Newest",
+      "daily_pay": "Daily pay",
+      "ending_soon": "Ending soon"
+    },
+    "status": {
+      "active": "Active",
+      "inactive": "Upcoming",
+      "expired": "Expired"
+    },
+    "list": {
+      "heading": "Funded proposals",
+      "empty": "No proposals match this filter."
+    },
+    "error": {
+      "description": "We couldn't load the proposals — this is a connection problem, not an empty fund.",
+      "retry": "Retry"
+    },
+    "card": {
+      "by": "by",
+      "vote_value": "Vote value",
+      "support": "Support",
+      "unsupport": "Un-support",
+      "support_pending": "Submitting…",
+      "votes_unavailable": "Vote status unavailable",
+      "daily_pay": "Daily pay",
+      "remaining": "Remaining {{count}} days",
+      "paid": "Paid",
+      "to_pay": "To pay",
+      "requested": "Requested",
+      "below_threshold": "Below funding threshold",
+      "starts": "Starts {{date}}",
+      "ended": "Ended {{date}}"
+    },
+    "vote_toast": {
+      "supported_title": "Proposal supported",
+      "supported_description": "Your vote has been broadcast.",
+      "unsupported_title": "Vote removed",
+      "unsupported_description": "Your support for this proposal has been withdrawn."
+    },
+    "return_card": {
+      "title": "Your return proposal",
+      "description": "Votes above the #0 \"return proposal\" threshold are the ones that get funded. Move the line by voting.",
+      "label": "Return threshold"
+    },
+    "proxy_card": {
+      "title": "Set a proxy",
+      "description": "Delegate your proposal votes to an account you trust to vote on your behalf.",
+      "set_button": "Set proxy account",
+      "change_button": "Change proxy account"
+    },
+    "proxy_dialog": {
+      "title": "Set a proposal proxy",
+      "description": "Enter the account you want to vote on proposals on your behalf. This also delegates your witness votes — a proxy always covers both.",
+      "current": "Currently delegated to @{{proxy}}.",
+      "input_label": "Proxy account",
+      "input_placeholder": "Account name",
+      "submit": "Set proxy",
+      "clear": "Clear proxy",
+      "submitting": "Submitting…",
+      "errors": {
+        "invalid_format": "That's not a valid Hive account name.",
+        "self_proxy": "You can't set yourself as your own proxy.",
+        "not_found": "@{{proxy}} couldn't be found on Hive.",
+        "verify_failed": "Couldn't verify that account — please try again."
+      }
+    },
+    "proxy_toast": {
+      "set_title": "Proxy set",
+      "set_description": "Your governance votes are now delegated to @{{proxy}}.",
+      "cleared_title": "Proxy cleared",
+      "cleared_description": "You can now vote directly again."
+    },
+    "new_dialog": {
+      "title": "New proposal",
+      "description": "Creating a proposal requires an existing post authored by you, marked as a funding request.",
+      "permlink_label": "Post permlink",
+      "permlink_placeholder": "your-post-permlink",
+      "subject_label": "Subject",
+      "subject_placeholder": "Proposal title",
+      "receiver_label": "Receiver account (defaults to you)",
+      "daily_pay_label": "Daily pay (HBD)",
+      "start_date_label": "Start date",
+      "end_date_label": "End date",
+      "fee_note": "Creating a proposal costs a fee (10 HBD, plus 1 HBD per day beyond 60 days), paid automatically from your account to the DHF.",
+      "submit": "Create proposal",
+      "submitting": "Submitting…",
+      "toast": {
+        "title": "Proposal created",
+        "description": "Your proposal has been broadcast to the chain."
+      },
+      "errors": {
+        "post_not_found": "No post found at @{{creator}}/{{permlink}} — create the post first, then link it here."
+      }
+    }
+  },
+  "prediction_market": {
+    "heading": "Prediction Market",
+    "ref": "Ref",
+    "pool": "Pool",
+    "bettors": "bettors",
+    "locks": "Locks",
+    "locks_in": "Locks in",
+    "closes": "Closes",
+    "view_market": "View market",
+    "make_prediction": "Make your prediction",
+    "pick_outcome": "Pick an outcome",
+    "backing": "You're backing",
+    "pool_share": "pool share",
+    "buy_in": "Buy in",
+    "buy_in_aria": "Buy in ({{asset}})",
+    "est_payout": "Est. payout",
+    "est_payout_caption": "Est. payout · finalizes at close",
+    "place_bet": "Place bet",
+    "placing": "Placing…",
+    "login_to_bet": "Log in to bet",
+    "fine_print": "Settles on the Hive witness feed · HBD/HIVE peg",
+    "pool_odds": "Pool odds",
+    "chart_caption": "Live odds · price history coming soon",
+    "chart_aria_label": "Pool odds over time",
+    "my_position": "Your position",
+    "total_staked": "Total staked",
+    "claim": "Claim",
+    "claimed": "Claimed",
+    "no_round": "No market is open right now — check back next week.",
+    "unavailable": "The prediction market isn't available yet — check back soon.",
+    "unavailable_widget": "Prediction market isn't available yet.",
+    "load_error": "Couldn't load the market.",
+    "retry": "Retry",
+    "locked": "Betting closed — settling soon.",
+    "status": {
+      "live": "LIVE",
+      "locked": "LOCKED",
+      "settled": "SETTLED",
+      "void": "VOID"
+    },
+    "void_reason": {
+      "underfunded": "fewer than two buckets got bets — everyone refunded",
+      "zero_winner": "no one bet on the bucket that won — everyone refunded",
+      "window_lapsed": "nobody settled the round in time",
+      "stale_feed": "the price feed was down too long",
+      "tick_window_missed": "the price feed did not update in time to settle fairly",
+      "default": "refunded"
+    },
+    "round_voided": "Round voided — {{reason}}.",
+    "settled_at": "Settled at {{price}} {{asset}}/HIVE.",
+    "countdown": {
+      "days_hours": "{{days}}d {{hours}}h",
+      "hours_minutes": "{{hours}}h {{minutes}}m",
+      "minutes": "{{minutes}}m"
+    }
+  }
+}

@@ -1,0 +1,383 @@
+import { expect, test } from '@playwright/test';
+import { HomePage } from '../support/pages/homePage';
+import { ProfilePage } from '../support/pages/profilePage';
+import { ApiHelper } from '../support/apiHelper';
+import { PostPage } from '../support/pages/postPage';
+import { CommentViewPage } from '../support/pages/commentViewPage';
+import { CommunitiesPage } from '../support/pages/communitiesPage';
+import { LoginToVoteDialog } from '../support/pages/loginToVoteDialog';
+import { LoginForm } from '../support/pages/loginForm';
+
+test.describe('Replies Tab in Profile page of @gtg', () => {
+  let homePage: HomePage;
+  let profilePage: ProfilePage;
+  let apiHelper: ApiHelper;
+  let commentViewPage: CommentViewPage;
+
+  test.beforeEach(async ({ page }) => {
+    homePage = new HomePage(page);
+    profilePage = new ProfilePage(page);
+    apiHelper = new ApiHelper(page);
+    commentViewPage = new CommentViewPage(page);
+  });
+
+  test('Replies Tab of @gtg is loaded', async ({ page }) => {
+    await profilePage.gotoRepliesProfilePage('@gtg');
+    await profilePage.profileRepliesTabIsSelected();
+  });
+
+  test('validate amount of comment list items before and after loading more cards', async ({ page }) => {
+    await profilePage.gotoRepliesProfilePage('@gtg');
+    await profilePage.profileRepliesTabIsSelected();
+
+    const commentListItemsBeforeLoadMore = await profilePage.postBlogItem.all();
+    expect(await commentListItemsBeforeLoadMore.length).toBe(20);
+
+    await profilePage.page.keyboard.down('End');
+
+    // Wait for new comments to load with dynamic timeout
+    await page.waitForFunction(
+      () => document.querySelectorAll('[data-testid="post-list-item"]').length >= 40,
+      { timeout: 10000 }
+    );
+
+    const commentListItemsAfterScrollDown = await profilePage.postBlogItem.all();
+    expect(await commentListItemsAfterScrollDown.length).toBeGreaterThanOrEqual(40);
+    expect(await commentListItemsAfterScrollDown.length).toBeLessThanOrEqual(80);
+
+    // Verify that new comments were actually loaded
+    expect(await commentListItemsAfterScrollDown.length).toBeGreaterThan(commentListItemsBeforeLoadMore.length);
+  });
+
+  test('move to the comment view page after clicking the card title', async ({ page }) => {
+    await profilePage.gotoRepliesProfilePage('@gtg');
+    await profilePage.profileRepliesTabIsSelected();
+
+    const firstCommentCardTitle: any = await profilePage.postTitle.first().textContent();
+    const firstCommentCardDescription: any = await profilePage.postDescription
+      .first()
+      .textContent();
+    const firstCommentCardDescriptionDots: any = await firstCommentCardDescription.replace(/\u2026/g, '');
+    const firstCommentCardDescriptionWitoutSpaces: any = await firstCommentCardDescriptionDots.replace(
+      /\s/g,
+      ''
+    );
+    // console.log('firstCommentCardDescriptionDots: ', firstCommentCardDescriptionDots);
+    // console.log('firstCommentCardDescriptionWitoutSpaces: ', firstCommentCardDescriptionWitoutSpaces);
+    await profilePage.postTitle.first().click();
+    await profilePage.page.waitForSelector(profilePage.repliesCommentListItemArticleTitle['_selector']);
+    await expect(commentViewPage.getReArticleTitle).toHaveText(firstCommentCardTitle);
+    // console.log('commentContentWithoutSpaces: ', await commentContentWithoutSpaces);
+
+    if (await page.getByText(/Content (were hidden due to low ratings|hidden (by community moderators|because parent content is muted|due to low author reputation)|hidden: author (not allowed to post in this community|is muted in this community))\./).isVisible()) {
+      await page.locator('button').getByText('Show').click();
+      const commentContent: any = await commentViewPage.getMainCommentContent.textContent();
+      const commentContentWithoutUrl: any = await commentContent.replace(/https?:\/\/\S+/g, '');
+      const commentContentWithoutSpaces: any = await commentContentWithoutUrl.replace(/\s/g, '');
+      await expect(commentContentWithoutSpaces).toContain(firstCommentCardDescriptionWitoutSpaces);
+    }
+    else {
+      const commentContent: any = await commentViewPage.getMainCommentContent.textContent();
+      const commentContentWithoutUrl: any = await commentContent.replace(/https?:\/\/\S+/g, '');
+      const commentContentWithoutSpaces: any = await commentContentWithoutUrl.replace(/\s/g, '');
+      await expect(commentContentWithoutSpaces).toContain(firstCommentCardDescriptionWitoutSpaces);
+    }
+  });
+
+  test('move to the comment view page after clicking the card description', async ({ page }) => {
+    await profilePage.gotoRepliesProfilePage('@gtg');
+    await profilePage.profileRepliesTabIsSelected();
+
+    if (await profilePage.postDescription.first().isVisible()) {
+      const firstCommentCardTitle: any = await profilePage.postTitle.first().textContent();
+      const firstCommentCardDescription: any = await profilePage.postDescription
+        .first()
+        .textContent();
+      const firstCommentCardDescriptionDots: any = await firstCommentCardDescription.replace(/\u2026/g, '');
+      const firstCommentCardDescriptionWitoutSpaces: any = await firstCommentCardDescriptionDots.replace(
+        /\s/g,
+        ''
+      );
+      await profilePage.postDescription.first().click();
+      await expect(commentViewPage.getReArticleTitle).toHaveText(firstCommentCardTitle);
+
+      if (await page.getByText(/Content (were hidden due to low ratings|hidden (by community moderators|because parent content is muted|due to low author reputation)|hidden: author (not allowed to post in this community|is muted in this community))\./).isVisible()) {
+        await page.locator('button').getByText('Show').click();
+        const commentContent: any = await commentViewPage.getMainCommentContent.textContent();
+        const commentContentWithoutUrl: any = await commentContent.replace(/https?:\/\/\S+/g, '');
+        const commentContentWithoutSpaces: any = await commentContentWithoutUrl.replace(/\s/g, '');
+        await expect(commentContentWithoutSpaces).toContain(firstCommentCardDescriptionWitoutSpaces);
+      }
+      else {
+        const commentContent: any = await commentViewPage.getMainCommentContent.textContent();
+        const commentContentWithoutUrl: any = await commentContent.replace(/https?:\/\/\S+/g, '');
+        const commentContentWithoutSpaces: any = await commentContentWithoutUrl.replace(/\s/g, '');
+        await expect(commentContentWithoutSpaces).toContain(firstCommentCardDescriptionWitoutSpaces);
+      }
+    } else {
+      await console.log('There is no post description');
+    }
+  });
+
+  test.skip('move to the profile page after clicking avatar of the first comment card', async ({ page }) => {
+    await profilePage.gotoRepliesProfilePage('@gtg');
+    await profilePage.profileRepliesTabIsSelected();
+
+    const firstCommentCardNickName: any = await profilePage.postAvatar
+      .first()
+      .getAttribute('href');
+
+    // Click avatar of the first comment card
+    await profilePage.postAvatar.first().click();
+    await profilePage.page.waitForSelector(profilePage.profileBlogPostsList['_selector']);
+
+    if (await profilePage.postBlogItem.first().isVisible()) {
+      await profilePage.page.waitForSelector(page.locator('[data-testid="post-list-item"]')['_selector']);
+      await profilePage.moveToPostsTab();
+      await profilePage.profilePostsTabIsSelected();
+      const profilePagePostAuthor: any = await profilePage.postsPostAuthor.first().textContent();
+      // Validate the comment author name is the same as autor post in the profile page in posts tab
+      await expect(await firstCommentCardNickName).toContain(await profilePagePostAuthor);
+    } else {
+      const notBloggingYet: string = await profilePage.userHasNotStartedBloggingYetMsg.textContent();
+      await expect(notBloggingYet).toMatch(
+        /^Looks like @\b\w+(?:-\w+)?\b hasn't started blogging yet!$/
+      );
+    }
+  });
+
+  test.skip('move to the profile page after clicking nickname of the first comment card', async ({ page }) => {
+    await profilePage.gotoRepliesProfilePage('@gtg');
+    await profilePage.profileRepliesTabIsSelected();
+
+    const firstCommentCardNickName: any = await profilePage.repliesCommentListItemAvatarLink
+      .first()
+      .getAttribute('href');
+
+    // Click nickname of the first comment card
+    await profilePage.postsPostAuthor.first().click();
+    await profilePage.page.waitForSelector(profilePage.profileBlogPostsList['_selector']);
+
+    if (await profilePage.postBlogItem.first().isVisible()) {
+      await profilePage.page.waitForSelector(page.locator('[data-testid="post-list-item"]')['_selector']);
+      await profilePage.moveToPostsTab();
+      await profilePage.profilePostsTabIsSelected();
+      const profilePagePostAuthor: any = await profilePage.postsPostAuthor.first().textContent();
+      // Validate the comment author name is the same as autor post in the profile page in posts tab
+      await expect(await firstCommentCardNickName).toContain(await profilePagePostAuthor);
+    } else {
+      const notBloggingYet: string = await profilePage.userHasNotStartedBloggingYetMsg.textContent();
+      await expect(notBloggingYet).toMatch(
+        /^Looks like @\b\w+(?:-\w+)?\b hasn't started blogging yet!$/
+      );
+    }
+  });
+
+  test('move to the community page after clicking community/category link of the first comment card', async ({
+    page
+  }) => {
+    let communityPage = new CommunitiesPage(page);
+
+    await profilePage.gotoRepliesProfilePage('@gtg');
+    await profilePage.profileRepliesTabIsSelected();
+
+    const firstCommentCardCommunityName: any = await profilePage.postCommunityLink
+      .first()
+      .textContent();
+
+    await profilePage.postCommunityLink.first().click();
+    await expect(communityPage.communityNameTitle).toHaveText(firstCommentCardCommunityName);
+
+    if (await !firstCommentCardCommunityName.includes('#')) {
+      await expect(communityPage.communityInfoSidebar.locator('h3')).toHaveText(
+        firstCommentCardCommunityName
+      );
+      await communityPage.quickValidataCommunitiesPageIsLoaded(firstCommentCardCommunityName);
+    }
+  });
+
+  test('move to the comment view page after clicking timestamp link of the first comment card', async ({
+    page
+  }) => {
+    await profilePage.gotoRepliesProfilePage('@gtg');
+    await profilePage.profileRepliesTabIsSelected();
+
+    const firstCommentCardTitle: any = await profilePage.postTitle.first().textContent();
+    const firstCommentCardDescription: any = await profilePage.postDescription
+      .first()
+      .textContent();
+    const firstCommentCardDescriptionDots: any = await firstCommentCardDescription.replace(/\u2026/g, '');
+    const firstCommentCardDescriptionWitoutSpaces: any = await firstCommentCardDescriptionDots.replace(
+      /\s/g,
+      ''
+    );
+    await profilePage.postTimestamp.first().click();
+    await expect(commentViewPage.getReArticleTitle).toHaveText(firstCommentCardTitle);
+
+    if (await page.getByText(/Content (were hidden due to low ratings|hidden (by community moderators|because parent content is muted|due to low author reputation)|hidden: author (not allowed to post in this community|is muted in this community))\./).isVisible()) {
+      await page.locator('button').getByText('Show').click();
+      const commentContent: any = await commentViewPage.getMainCommentContent.textContent();
+      const commentContentWithoutUrl: any = await commentContent.replace(/https?:\/\/\S+/g, '');
+      const commentContentWithoutSpaces: any = await commentContentWithoutUrl.replace(/\s/g, '');
+      await expect(commentContentWithoutSpaces).toContain(firstCommentCardDescriptionWitoutSpaces);
+    }
+    else {
+      const commentContent: any = await commentViewPage.getMainCommentContent.textContent();
+      const commentContentWithoutUrl: any = await commentContent.replace(/https?:\/\/\S+/g, '');
+      const commentContentWithoutSpaces: any = await commentContentWithoutUrl.replace(/\s/g, '');
+      await expect(commentContentWithoutSpaces).toContain(firstCommentCardDescriptionWitoutSpaces);
+    }
+  });
+
+  test('move to the login page after clicking upvote of the first comment card', async ({ page }) => {
+    let loginDialog = new LoginForm(page);
+
+    await profilePage.gotoRepliesProfilePage('@gtg');
+    await profilePage.profileRepliesTabIsSelected();
+
+    // Validate upvote button structure
+    await profilePage.validateCommentUpvoteButtonStructure();
+
+    // Hover upvote button
+    await profilePage.postUpvoteButton.first().hover();
+    await profilePage.page.waitForTimeout(1000);
+    // Validate the tooltip message
+    const tooltipText = await profilePage.postUpvoteTooltip.textContent();
+    expect(['UpvoteUpvote', 'UpvoteVoting on Content after their payout does not generate any new rewardsUpvoteVoting on Content after their payout does not generate any new rewards']).toContain(tooltipText);
+
+    await profilePage.postUpvoteButton.first().click();
+    await loginDialog.validateDefaultLoginFormIsLoaded();
+    await loginDialog.closeLoginForm();
+  });
+
+  test('move to the login page after clicking downvote of the first comment card', async ({ page }) => {
+    let loginDialog = new LoginForm(page);
+
+    await profilePage.gotoRepliesProfilePage('@gtg');
+    await profilePage.profileRepliesTabIsSelected();
+
+    // Validate downvote button structure
+    await profilePage.validateCommentDownvoteButtonStructure();
+
+    // Hover Downvote button
+    await profilePage.postDownvoteButton.first().hover();
+    await profilePage.page.waitForTimeout(1000);
+    // Validate the tooltip message
+    const tooltipText = await profilePage.postDownvoteTooltip.textContent();
+    expect(['DownvoteDownvote', 'DownvoteVoting on Content after their payout does not generate any new rewardsDownvoteVoting on Content after their payout does not generate any new rewards']).toContain(tooltipText);
+
+    await profilePage.postDownvoteButton.first().click();
+    await loginDialog.validateDefaultLoginFormIsLoaded();
+    await loginDialog.closeLoginForm();
+  });
+
+  test('validate payout of the first comment card', async ({ page }) => {
+    await profilePage.gotoRepliesProfilePage('@gtg');
+    await profilePage.profileRepliesTabIsSelected();
+
+    await profilePage.validateCommentPayoutVisible();
+    const firstPostPayoutText = await profilePage.repliesCommentListItemPayout.first().textContent();
+    if (firstPostPayoutText !== '$0.00') {
+      await profilePage.repliesCommentListItemPayout.first().hover();
+      await expect(profilePage.repliesCommentListItemPayoutTooltip.first()).toBeVisible({ timeout: 15000 });
+    }
+  });
+
+  test('validate votes of the first comment card', async ({ page }) => {
+    await profilePage.gotoRepliesProfilePage('@gtg');
+    await profilePage.profileRepliesTabIsSelected();
+
+    const firstCommentCardVote = await profilePage.postVotes.nth(0);
+    const firstCommentCardVoteText = await profilePage.postVotes.nth(0).textContent();
+
+    if (Number(firstCommentCardVoteText) > 1) {
+      // more than 1 vote
+      await expect(firstCommentCardVote).toBeVisible();
+      await firstCommentCardVote.hover();
+      await profilePage.page.waitForTimeout(1000);
+      await expect(await profilePage.postVotesTooltip.nth(0)).toContainText(/\d+\s*votes\s*\d+\s*votes/);
+    } else if (Number(firstCommentCardVoteText) == 1) {
+      // equal 1 vote
+      await expect(firstCommentCardVote).toBeVisible();
+      await firstCommentCardVote.hover();
+      await profilePage.page.waitForTimeout(1000);
+      await expect(await profilePage.postVotesTooltip.nth(0)).toHaveText('1 vote1 vote');
+    } else {
+      // no vote
+      await expect(firstCommentCardVote).toBeVisible();
+      await firstCommentCardVote.hover();
+      await profilePage.page.waitForTimeout(1000);
+      await expect(await profilePage.postVotesTooltip.nth(0)).toHaveText('no votesno votes');
+    }
+  });
+
+  test('move to the comment view page after clicking respond', async ({ page }) => {
+    await profilePage.gotoRepliesProfilePage('@gtg');
+    await profilePage.profileRepliesTabIsSelected();
+
+    const firstCommentCardRespond: any = await profilePage.repliesCommentListItemRespond.first();
+    const firstCommentCardTitle: any = await profilePage.postTitle.first().textContent();
+    const firstCommentCardDescription: any = await profilePage.postDescription
+      .first()
+      .textContent();
+    const firstCommentCardDescriptionDots: any = await firstCommentCardDescription.replace(/\u2026/g, '');
+    const firstCommentCardDescriptionWitoutSpaces: any = await firstCommentCardDescriptionDots.replace(
+      /\s/g,
+      ''
+    );
+
+    await firstCommentCardRespond.click();
+
+    await expect(commentViewPage.getReArticleTitle).toHaveText(firstCommentCardTitle);
+
+    if (await page.getByText(/Content (were hidden due to low ratings|hidden (by community moderators|because parent content is muted|due to low author reputation)|hidden: author (not allowed to post in this community|is muted in this community))\./).isVisible()) {
+      await page.locator('button').getByText('Show').click();
+      const commentContent: any = await commentViewPage.getMainCommentContent.textContent();
+      const commentContentWithoutUrl: any = await commentContent.replace(/https?:\/\/\S+/g, '');
+      const commentContentWithoutSpaces: any = await commentContentWithoutUrl.replace(/\s/g, '');
+      await expect(commentContentWithoutSpaces).toContain(firstCommentCardDescriptionWitoutSpaces);
+    }
+    else {
+      const commentContent: any = await commentViewPage.getMainCommentContent.textContent();
+      const commentContentWithoutUrl: any = await commentContent.replace(/https?:\/\/\S+/g, '');
+      const commentContentWithoutSpaces: any = await commentContentWithoutUrl.replace(/\s/g, '');
+      await expect(commentContentWithoutSpaces).toContain(firstCommentCardDescriptionWitoutSpaces);
+    }
+  });
+
+  test.skip('validate styles and tooltips of response button', async ({ page }) => {
+    await profilePage.gotoRepliesProfilePage('@gtg');
+    await profilePage.profileRepliesTabIsSelected();
+
+    const firstCommentCardRespond: any = await profilePage.repliesCommentListItemRespond.first();
+    const firstCommentCardRespondText: any = await profilePage.repliesCommentListItemRespond
+      .first()
+      .textContent();
+
+    if (Number(firstCommentCardRespondText) > 1) {
+      // more than 1 responses
+      await expect(firstCommentCardRespond).toBeVisible();
+      await firstCommentCardRespond.hover();
+      await profilePage.page.waitForTimeout(1000);
+      await expect(await profilePage.postResponseTooltip.nth(0)).toContainText(
+        'responses. Click to respond'
+      );
+    } else if (Number(firstCommentCardRespondText) == 1) {
+      // equal 1 response
+      await expect(firstCommentCardRespond).toBeVisible();
+      await firstCommentCardRespond.hover();
+      await profilePage.page.waitForTimeout(1000);
+      await expect(await profilePage.postResponseTooltip.nth(0)).toHaveText(
+        '1 response. Click to respond'
+      );
+    } else {
+      // no response
+      await expect(firstCommentCardRespond).toBeVisible();
+      await firstCommentCardRespond.hover();
+      await profilePage.page.waitForTimeout(1000);
+      await expect(await profilePage.postResponseTooltip.nth(0)).toHaveText(
+        'No responses. Click to respond'
+      );
+    }
+  });
+});

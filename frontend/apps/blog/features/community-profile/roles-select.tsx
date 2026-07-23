@@ -1,0 +1,43 @@
+'use client';
+
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@ui/components/select';
+import { Roles, rolesLevels } from './lib/utils';
+import { useTranslation } from '@/blog/i18n/client';
+
+const RolesSelect = ({
+  loggedUserLevel,
+  value,
+  onValueChange,
+  disabled,
+  testId
+}: {
+  loggedUserLevel: number;
+  value: Roles;
+  onValueChange: (value: Roles) => void;
+  disabled: boolean;
+  testId?: string;
+}) => {
+  const { t } = useTranslation('common_blog');
+
+  return (
+    <Select value={value} onValueChange={(e: Roles) => onValueChange(e)} disabled={disabled}>
+      <SelectTrigger data-testid={testId}>
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {rolesLevels.map((role) =>
+          role.value < loggedUserLevel ? (
+            <SelectItem
+              key={role.name}
+              value={role.name}
+              data-testid={`community-role-option-${role.name}`}
+            >
+              {t(`communities.${role.name}`)}
+            </SelectItem>
+          ) : null
+        )}
+      </SelectContent>
+    </Select>
+  );
+};
+export default RolesSelect;

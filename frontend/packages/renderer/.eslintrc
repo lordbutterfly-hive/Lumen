@@ -1,0 +1,6 @@
+{
+  "extends": "@engrave/eslint-config-engrave",
+  "parserOptions": {
+    "project": "./tsconfig.eslint.json"
+  }
+}

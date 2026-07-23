@@ -1,0 +1,313 @@
+/* Component that represents other (secondary) auth options */
+import { FC, useEffect, useState } from 'react';
+import { z } from 'zod';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+
+import {
+  Button,
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormMessage,
+  Input,
+  Label,
+  RadioGroup,
+  RadioGroupItem,
+  Separator
+} from '@hive/ui';
+import { Icons } from '@hive/ui/components/icons';
+import { Steps } from '../form';
+import Step from '../step';
+import { username } from '@smart-signer/lib/auth/utils';
+import { KeyType, LoginType } from '@smart-signer/types/common';
+import { handleError } from '@ui/lib/handle-error';
+import { hasCompatibleKeychain } from '@smart-signer/lib/signer/signer-keychain';
+import { hasCompatibleGoogleDriveProvider } from '@smart-signer/lib/signer/signer-google-drive';
+import { hasCompatibleMetaMask } from '@smart-signer/lib/signer/signer-metamask';
+import { hasCompatiblePeakvault } from '@smart-signer/lib/signer/signer-peakvault';
+import { logger } from '@ui/lib/logger';
+
+export interface MethodsProps {
+  onSetStep: (step: Steps) => void;
+  i18nNamespace: string;
+  preferredKeyTypes: KeyType[];
+  username: string;
+  onUsernameChange: (username: string) => void;
+  sign: (loginType: LoginType, username: string, keyType: KeyType) => Promise<void>;
+  submit: (username: string) => Promise<void>;
+}
+
+const formSchema = z.object({
+  username,
+  keyType: z.nativeEnum(KeyType, {
+    invalid_type_error: 'Invalid keyType',
+    required_error: 'keyType is required'
+  }),
+  loginType: z.nativeEnum(LoginType, {
+    invalid_type_error: 'Invalid loginType',
+    required_error: 'loginType is required'
+  })
+});
+type MethodsFormValues = z.infer<typeof formSchema>;
+
+const Methods: FC<MethodsProps> = ({
+  onSetStep,
+  i18nNamespace = 'smart-signer',
+  preferredKeyTypes,
+  username,
+  onUsernameChange,
+  sign,
+  submit
+}) => {
+  const [loading, setLoading] = useState(false);
+  const form = useForm<MethodsFormValues>({
+    resolver: zodResolver(formSchema),
+    defaultValues: {
+      username: username,
+      keyType: preferredKeyTypes[0],
+      loginType: LoginType.hbauth
+    },
+    mode: 'onChange'
+  });
+
+  const [isKeychainSupported, setIsKeychainSupported] = useState(false);
+  const [isPeakvaultSupported, setIsPeakvaultSupported] = useState(false);
+  const [isMetaMaskSupported, setIsMetaMaskSupported] = useState(false);
+  const [isGoogleSupported, setIsGoogleSupported] = useState(false);
+
+  useEffect(() => {
+    setIsKeychainSupported(hasCompatibleKeychain());
+    setIsPeakvaultSupported(hasCompatiblePeakvault());
+    setIsGoogleSupported(hasCompatibleGoogleDriveProvider());
+    hasCompatibleMetaMask().then((supported) => {
+      setIsMetaMaskSupported(supported);
+    }).catch((error) => {
+      logger.error('Error checking MetaMask compatibility: %s', error instanceof Error ? error.message : String(error));
+    });
+  }, []);
+
+  useEffect(() => {
+    form.trigger('keyType');
+
+    return () => {
+      form.reset();
+    };
+  }, [form]);
+
+  useEffect(() => {
+    const formUsername = form.getValues('username');
+    if (formUsername !== username) {
+      onUsernameChange(formUsername);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.getValues('username'), onUsernameChange]);
+
+  async function onSubmit(_loginType: LoginType) {
+    try {
+      setLoading(true);
+      form.setValue('loginType', _loginType);
+
+      const { username, keyType, loginType } = form.getValues();
+
+      await sign(loginType, username, keyType);
+      await submit(username);
+    } catch (error: unknown) {
+      handleError(error);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <Step
+      loading={loading}
+      title="Other sign in options"
+      description={
+        <div>
+          <div data-testid="other-signin-options-description">
+            Enter your username and select a sign in method
+          </div>
+        </div>
+      }
+    >
+      <Form {...form}>
+        <form className="space-y-4" name="signin" onSubmit={form.handleSubmit(() => null)}>
+          {/* Username */}
+          <FormField
+            control={form.control}
+            name="username"
+            render={({ field, formState: { errors } }) => (
+              <FormItem>
+                <FormControl>
+                  {/* Place holder, enter username if there is no user, otherwise select user from menu or enter new user*/}
+                  <div className="relative flex">
+                    <Input
+                      placeholder="Username"
+                      type="text"
+                      autoComplete="username"
+                      {...field}
+                      data-testid="other-signin-options-username-input"
+                    />
+                  </div>
+                  {/* Show select menu if there is length of auth users */}
+                </FormControl>
+                {errors.username && (
+                  <FormMessage className="font-normal" data-testid="other-signin-username-error-msg">
+                    {errors.username?.message!}
+                  </FormMessage>
+                )}
+              </FormItem>
+            )}
+          />
+
+          {/* Key Type selection is shown if there is more than one preferred key type */}
+          {preferredKeyTypes.length > 1 && (
+            <FormField
+              control={form.control}
+              name="keyType"
+              render={({ field }) => (
+                <FormItem>
+                  <FormControl>
+                    <RadioGroup
+                      className="mb-8 flex"
+                      onValueChange={field.onChange}
+                      defaultValue={field.value}
+                      {...field}
+                    >
+                      {preferredKeyTypes.map((type) => {
+                        return (
+                          <div key={type} className="flex items-center space-x-2">
+                            <RadioGroupItem value={type} id={type} />
+                            <Label htmlFor={type} className="capitalize">
+                              {type}
+                            </Label>
+                          </div>
+                        );
+                      })}
+                    </RadioGroup>
+                  </FormControl>
+                  <FormMessage className="font-normal" />
+                </FormItem>
+              )}
+            />
+          )}
+
+          <div className="flex flex-col items-start">
+            <Button
+              disabled={!form.formState.isValid || !isMetaMaskSupported}
+              className="flex w-full justify-start py-6"
+              type="button"
+              variant="ghost"
+              onClick={form.handleSubmit(() => onSubmit(LoginType.metamask))}
+              data-testid="metamask-extension-button"
+            >
+              <Icons.metamask className="mr-4 h-8 w-8" />
+              MetaMask extension
+            </Button>
+
+            <Separator className="my-1 w-full" />
+            <Button
+              disabled={!form.formState.isValid || !isGoogleSupported}
+              className="flex w-full justify-start py-6"
+              type="button"
+              variant="ghost"
+              onClick={form.handleSubmit(() => onSubmit(LoginType.google))}
+              data-testid="google-button"
+            >
+              <Icons.google className="mr-4 h-8 w-8" />
+              Google Account
+            </Button>
+
+            <Separator className="my-1 w-full" />
+
+            <Button
+              disabled={!form.formState.isValid || !isKeychainSupported}
+              className="flex w-full justify-start py-6"
+              type="button"
+              variant="ghost"
+              onClick={form.handleSubmit(() => onSubmit(LoginType.keychain))}
+              data-testid="hive-keychain-extension-button"
+            >
+              <Icons.hivekeychain className="mr-4 h-8 w-8" />
+              Hive Keychain extension
+            </Button>
+
+            <Separator className="my-1 w-full" />
+
+            <Button
+              disabled={!form.formState.isValid || !isPeakvaultSupported}
+              className="flex w-full justify-start py-6"
+              type="button"
+              variant="ghost"
+              onClick={form.handleSubmit(() => onSubmit(LoginType.peakvault))}
+              data-testid="peakvault-extension-button"
+            >
+              <Icons.peakvault className="mr-4 h-8 w-8" />
+              PeakVault extension
+            </Button>
+
+            <Separator className="my-1 w-full" />
+
+            <Button
+              disabled={!form.formState.isValid}
+              className="flex w-full py-6"
+              type="button"
+              variant="ghost"
+              onClick={form.handleSubmit(() => onSubmit(LoginType.wif))}
+              data-testid="sign-in-with-wif-button"
+            >
+              <div className="flex flex-1 items-center">
+                <Icons.keyRound className="mr-4 h-8 w-8" />
+                Sign in with WIF (Legacy)
+              </div>
+            </Button>
+
+            <Separator className="my-1 w-full" />
+
+            <Button
+              disabled
+              className="flex w-full py-6"
+              type="button"
+              variant="ghost"
+              data-testid="hive-auth-button"
+            >
+              <div className="flex flex-1 items-center">
+                <Icons.hiveauth className="mr-4 h-8 w-8" />
+                HiveAuth
+              </div>
+            </Button>
+
+            <Separator className="my-1 w-full" />
+
+            <Button
+              disabled
+              className="flex w-full justify-start py-6"
+              type="button"
+              variant="ghost"
+              data-testid="hive-signer-button"
+            >
+              <Icons.hivesigner className="mr-4 h-8 w-8" />
+              HiveSigner
+            </Button>
+
+            <Button
+              className="mt-8 w-full"
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                onSetStep(Steps.SAFE_STORAGE_LOGIN);
+              }}
+              data-testid="go-back-button"
+            >
+              <Icons.chevronLeft className="mr-2 h-4 w-4" /> Go back
+            </Button>
+          </div>
+        </form>
+      </Form>
+    </Step>
+  );
+};
+
+export default Methods;

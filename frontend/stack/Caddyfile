@@ -1,0 +1,54 @@
+{
+	# debug
+	http_port {$API_HTTP_PORT}
+	https_port {$API_HTTPS_PORT}
+}
+
+{$PUBLIC_HOSTNAME}:{$AUTH_PORT} {
+	reverse_proxy denser-auth:{$AUTH_PORT}
+	tls internal
+	# tls /etc/caddy/certs/cert.pem /etc/caddy/certs/key.pem
+}
+
+{$PUBLIC_HOSTNAME}:{$BLOG_PORT} {
+	reverse_proxy denser-blog:{$BLOG_PORT} {
+		# ECON-1 (PRUNED 2026-07-22): OVERWRITE any client-supplied X-Forwarded-For
+		# with the real remote host, so the lite-account per-IP rate limits (which
+		# read the trusted-proxy boundary in lib/lite/http/ip.ts) can never be
+		# defeated by a forged header. Any real production edge (cloud LB/CDN) in
+		# front of this MUST do the same and set LITE_TRUSTED_PROXY_COUNT to match.
+		header_up X-Forwarded-For {remote_host}
+	}
+	tls internal
+	# tls /etc/caddy/certs/cert.pem /etc/caddy/certs/key.pem
+}
+
+{$PUBLIC_HOSTNAME}:{$WALLET_PORT} {
+	reverse_proxy denser-wallet:{$WALLET_PORT}
+	tls internal
+	# tls /etc/caddy/certs/cert.pem /etc/caddy/certs/key.pem
+}
+
+{$PUBLIC_HOSTNAME}:{$API_HTTP_PORT} {
+	redir https://{$PUBLIC_HOSTNAME}:{$API_HTTPS_PORT}{uri} permanent
+}
+
+{$PUBLIC_HOSTNAME}:{$API_HTTPS_PORT} {
+	# Add CORS headers
+	header {
+		Access-Control-Allow-Origin "*"
+		Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+		Access-Control-Allow-Headers "DNT,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Content-Range,Range"
+		Access-Control-Max-Age "3600"
+	}
+	reverse_proxy docker:80 {
+		header_up host {$PUBLIC_HOSTNAME}
+		# remove any CORS headers sent by stack's inner Caddy
+		header_down -Access-Control-Allow-Origin
+		header_down -Access-Control-Allow-Methods
+		header_down -Access-Control-Allow-Headers
+		header_down -Access-Control-Max-Age
+	}
+	tls internal
+	# tls /etc/caddy/certs/cert.pem /etc/caddy/certs/key.pem
+}

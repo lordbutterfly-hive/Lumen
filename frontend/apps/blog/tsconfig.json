@@ -1,0 +1,36 @@
+{
+  "extends": "@hive/tsconfig/base.json",
+  "compilerOptions": {
+    "moduleResolution": "Bundler",
+    "baseUrl": ".",
+    "paths": {
+      "@/blog/*": [
+        "./*"
+      ],
+      "@smart-signer/*": [
+        "../../packages/smart-signer/*"
+      ],
+      "@transaction/*": [
+        "../../packages/transaction/*"
+      ],
+      "@ui/*": [
+        "../../packages/ui/*"
+      ]
+    },
+    "module": "esnext",
+    "strictNullChecks": true
+  },
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts",
+    "../../packages/ui/elements/common/layout.tsx",
+    "../../packages/ui/components/time-ago.tsx",
+    "../../packages/ui/components/card-skeleton.tsx"
+  ],
+  "exclude": [
+    "node_modules",
+    "playwright"
+  ]
+}

@@ -1,0 +1,134 @@
+'use client';
+
+import { useMemo, useState } from 'react';
+import clsx from 'clsx';
+import { Link } from '@hive/ui';
+import { proxifyImageSrc } from '@ui/lib/proxify-images';
+import { getDefaultImageUrl, getUserAvatarUrl } from '@ui/lib/avatar-utils';
+import { customEndsWith } from '@/blog/lib/ends-with';
+import {
+  extractPictureFromPostBody,
+  extractUrlsFromJsonString,
+  extractYouTubeVideoIds
+} from '@/blog/lib/utils';
+import { Entry } from '@hive/common-hiveio-packages/wax';
+
+// Match condenser's 256x512 to share image cache at images.hive.blog
+const UX_IMAGE_WIDTH = 256;
+const UX_IMAGE_HEIGHT = 512;
+
+export function find_first_img(post: Entry) {
+  try {
+    if (
+      post.json_metadata.links &&
+      post.json_metadata.links[0] &&
+      customEndsWith(post.json_metadata.links[0].slice(0, post.json_metadata.links[0].length - 1), [
+        'png',
+        'webp',
+        'jpeg',
+        'jpg'
+      ])
+    ) {
+      return proxifyImageSrc(
+        post.json_metadata.links[0].slice(0, post.json_metadata.links[0].length - 1),
+        UX_IMAGE_WIDTH,
+        UX_IMAGE_HEIGHT
+      );
+    }
+    if (post.original_entry && post.original_entry.json_metadata.images) {
+      return proxifyImageSrc(post.original_entry.json_metadata.images[0], UX_IMAGE_WIDTH, UX_IMAGE_HEIGHT);
+    }
+    if (post.original_entry && post.original_entry.json_metadata.image) {
+      return proxifyImageSrc(post.original_entry.json_metadata.image[0], UX_IMAGE_WIDTH, UX_IMAGE_HEIGHT);
+    }
+    if (post.json_metadata.image && post.json_metadata.image[0]) {
+      if (post.json_metadata.image[0].includes('youtu-')) {
+        return proxifyImageSrc(
+          `https://img.youtube.com/vi/${post.json_metadata.image[0].slice(6)}/0.jpg`,
+          UX_IMAGE_WIDTH,
+          UX_IMAGE_HEIGHT
+        );
+      }
+      return proxifyImageSrc(post.json_metadata.image[0], UX_IMAGE_WIDTH, UX_IMAGE_HEIGHT);
+    }
+    const regex_any_img = /!\[.*?\]\((.*?)\)/;
+    const match = post.body.match(regex_any_img);
+    if (match && match[1]) {
+      return proxifyImageSrc(match[1], UX_IMAGE_WIDTH, UX_IMAGE_HEIGHT);
+    }
+    if (post.json_metadata.images && post.json_metadata.images[0]) {
+      return proxifyImageSrc(post.json_metadata.images[0], UX_IMAGE_WIDTH, UX_IMAGE_HEIGHT);
+    }
+    if (post.json_metadata.flow?.pictures && post.json_metadata.flow?.pictures[0]) {
+      return proxifyImageSrc(post.json_metadata.flow?.pictures[0].url, UX_IMAGE_WIDTH, UX_IMAGE_HEIGHT);
+    }
+    const youtube_id = extractYouTubeVideoIds(extractUrlsFromJsonString(post.body));
+    if (youtube_id[0]) {
+      return proxifyImageSrc(`https://img.youtube.com/vi/${youtube_id[0]}/0.jpg`, UX_IMAGE_WIDTH, UX_IMAGE_HEIGHT);
+    }
+    if (Array.isArray(post.json_metadata?.tags) && post.json_metadata.tags.includes('nsfw')) {
+      return proxifyImageSrc(getUserAvatarUrl(post.author, 'small'), UX_IMAGE_WIDTH, UX_IMAGE_HEIGHT);
+    }
+    const pictures_extracted = extractPictureFromPostBody(extractUrlsFromJsonString(post.body));
+    if (pictures_extracted[0]) {
+      return proxifyImageSrc(pictures_extracted[0], UX_IMAGE_WIDTH, UX_IMAGE_HEIGHT);
+    }
+    const regex_for_peakd = /https:\/\/files\.peakd\.com\/[^\s]+\.jpg/;
+    const peakd_img = post.body.match(regex_for_peakd);
+    if (peakd_img !== null) {
+      return proxifyImageSrc(peakd_img[0], UX_IMAGE_WIDTH, UX_IMAGE_HEIGHT);
+    }
+    const regexgif = /<img\s+src="([^"]+)"/;
+    const matchgif = post.body.match(regexgif);
+    if (matchgif && matchgif[1]) {
+      return proxifyImageSrc(matchgif[1], UX_IMAGE_WIDTH, UX_IMAGE_HEIGHT);
+    }
+    // Last fallback: use user profile image if available, otherwise use avatar
+    if (!post.title.includes('RE: ') && post.depth === 0) {
+      return getUserAvatarUrl(post.author, 'large');
+    }
+    return '';
+  } catch (e) {
+    console.error('Error in find_first_img:', e);
+    return '';
+  }
+}
+
+export default function PostImage({ post }: { post: Entry }) {
+  // Use stable identifiers as dependencies - the image won't change for the same post
+  const cardImage = useMemo(
+    () => find_first_img(post),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [post.author, post.permlink]
+  );
+  const [image, setImage] = useState<string>(cardImage);
+
+  return (
+    <>
+      {image ? (
+        <Link
+          href={`/${post.category}/@${post.author}/${post.permlink}`}
+          data-testid="post-image"
+          className={clsx({ hidden: post.stats?.gray })}
+        >
+          <div className="relative flex h-[210px] items-center overflow-hidden bg-transparent sm:h-[360px] md:mr-3.5 md:max-h-[80px] md:w-fit md:min-w-[130px] md:max-w-[130px]">
+            <picture className="articles__feature-img h-ful w-full">
+              <source
+                srcSet={image}
+                media="(min-width: 1000px)"
+                onError={() => setImage(getDefaultImageUrl())}
+              />
+              <img
+                srcSet={image}
+                alt="Post image"
+                loading="lazy"
+                className="w-full"
+                onError={() => setImage(getDefaultImageUrl())}
+              />
+            </picture>
+          </div>
+        </Link>
+      ) : null}
+    </>
+  );
+}

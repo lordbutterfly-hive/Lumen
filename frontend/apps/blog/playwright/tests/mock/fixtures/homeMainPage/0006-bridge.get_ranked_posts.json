@@ -1,0 +1,1523 @@
+{
+  "httpMethod": "POST",
+  "requestPath": "/",
+  "requestBody": {
+    "jsonrpc": "2.0",
+    "method": "bridge.get_ranked_posts",
+    "params": {
+      "sort": "payout",
+      "start_author": "",
+      "start_permlink": "",
+      "limit": 20,
+      "tag": "",
+      "observer": "hive.blog"
+    },
+    "id": 1
+  },
+  "requestHash": "179ed85e305dda16",
+  "method": "bridge.get_ranked_posts",
+  "params": {
+    "sort": "payout",
+    "start_author": "",
+    "start_permlink": "",
+    "limit": 20,
+    "tag": "",
+    "observer": "hive.blog"
+  },
+  "response": {
+    "id": 1,
+    "jsonrpc": "2.0",
+    "result": [
+      {
+        "active_votes": [
+          {
+            "rshares": 215371208682362,
+            "voter": "smooth"
+          },
+          {
+            "rshares": 380379406674459,
+            "voter": "blocktrades"
+          },
+          {
+            "rshares": 5316964224,
+            "voter": "gandalf"
+          },
+          {
+            "rshares": 66326673680072,
+            "voter": "gtg"
+          },
+          {
+            "rshares": 3468073542488,
+            "voter": "arcange"
+          }
+        ],
+        "author": "hbd.funder",
+        "author_payout_value": "0.000 HBD",
+        "author_reputation": 100.93,
+        "beneficiaries": [
+          {
+            "account": "hbdstabilizer",
+            "weight": 10000
+          }
+        ],
+        "blacklists": [],
+        "body": "The rewards for this comment are set to 100% beneficiary going to the @hbdstabilizer account.",
+        "category": "hbd",
+        "children": 0,
+        "created": "2026-04-15T04:56:09",
+        "curator_payout_value": "0.000 HBD",
+        "depth": 1,
+        "is_paidout": false,
+        "json_metadata": {
+          "app": "beem/0.24.26",
+          "tags": [
+            "hbd"
+          ]
+        },
+        "max_accepted_payout": "1000000.000 HBD",
+        "net_rshares": 841540678674184,
+        "parent_author": "hbd.funder",
+        "parent_permlink": "upvote-this-post-to-fund-hbdstabilizer",
+        "payout": 74.699,
+        "payout_at": "2026-04-22T04:56:09",
+        "pending_payout_value": "74.699 HBD",
+        "percent_hbd": 10000,
+        "permlink": "re-upvote-this-post-to-fund-hbdstabilizer-20260415t045608z",
+        "post_id": 149813328,
+        "reblogs": 0,
+        "replies": [],
+        "stats": {
+          "flag_weight": 0,
+          "gray": false,
+          "hide": false,
+          "total_votes": 33
+        },
+        "title": "RE: Upvote this post to fund @hbdstabilizer",
+        "updated": "2026-04-15T04:56:09",
+        "url": "/hbd/@hbd.funder/upvote-this-post-to-fund-hbdstabilizer#@hbd.funder/re-upvote-this-post-to-fund-hbdstabilizer-20260415t045608z"
+      },
+      {
+        "active_votes": [
+          {
+            "rshares": 215371208682362,
+            "voter": "smooth"
+          },
+          {
+            "rshares": 380379406674459,
+            "voter": "blocktrades"
+          },
+          {
+            "rshares": 5316964224,
+            "voter": "gandalf"
+          },
+          {
+            "rshares": 66328080500070,
+            "voter": "gtg"
+          },
+          {
+            "rshares": 3468073542488,
+            "voter": "arcange"
+          }
+        ],
+        "author": "hbd.funder",
+        "author_payout_value": "0.000 HBD",
+        "author_reputation": 100.93,
+        "beneficiaries": [
+          {
+            "account": "hbdstabilizer",
+            "weight": 10000
+          }
+        ],
+        "blacklists": [],
+        "body": "The rewards for this comment are set to 100% beneficiary going to the @hbdstabilizer account.",
+        "category": "hbd",
+        "children": 0,
+        "created": "2026-04-15T04:56:15",
+        "curator_payout_value": "0.000 HBD",
+        "depth": 1,
+        "is_paidout": false,
+        "json_metadata": {
+          "app": "beem/0.24.26",
+          "tags": [
+            "hbd"
+          ]
+        },
+        "max_accepted_payout": "1000000.000 HBD",
+        "net_rshares": 841487793320776,
+        "parent_author": "hbd.funder",
+        "parent_permlink": "upvote-this-post-to-fund-hbdstabilizer",
+        "payout": 74.694,
+        "payout_at": "2026-04-22T04:56:15",
+        "pending_payout_value": "74.694 HBD",
+        "percent_hbd": 10000,
+        "permlink": "re-upvote-this-post-to-fund-hbdstabilizer-20260415t045615z",
+        "post_id": 149813331,
+        "reblogs": 0,
+        "replies": [],
+        "stats": {
+          "flag_weight": 0,
+          "gray": false,
+          "hide": false,
+          "total_votes": 31
+        },
+        "title": "RE: Upvote this post to fund @hbdstabilizer",
+        "updated": "2026-04-15T04:56:15",
+        "url": "/hbd/@hbd.funder/upvote-this-post-to-fund-hbdstabilizer#@hbd.funder/re-upvote-this-post-to-fund-hbdstabilizer-20260415t045615z"
+      },
+      {
+        "active_votes": [
+          {
+            "rshares": 215371208682362,
+            "voter": "smooth"
+          },
+          {
+            "rshares": 380379406674459,
+            "voter": "blocktrades"
+          },
+          {
+            "rshares": 5316964224,
+            "voter": "gandalf"
+          },
+          {
+            "rshares": 66325277117962,
+            "voter": "gtg"
+          },
+          {
+            "rshares": 3468071488700,
+            "voter": "arcange"
+          }
+        ],
+        "author": "hbd.funder",
+        "author_payout_value": "0.000 HBD",
+        "author_reputation": 100.93,
+        "beneficiaries": [
+          {
+            "account": "hbdstabilizer",
+            "weight": 10000
+          }
+        ],
+        "blacklists": [],
+        "body": "The rewards for this comment are set to 100% beneficiary going to the @hbdstabilizer account.",
+        "category": "hbd",
+        "children": 0,
+        "created": "2026-04-15T04:56:03",
+        "curator_payout_value": "0.000 HBD",
+        "depth": 1,
+        "is_paidout": false,
+        "json_metadata": {
+          "app": "beem/0.24.26",
+          "tags": [
+            "hbd"
+          ]
+        },
+        "max_accepted_payout": "1000000.000 HBD",
+        "net_rshares": 838572472190436,
+        "parent_author": "hbd.funder",
+        "parent_permlink": "upvote-this-post-to-fund-hbdstabilizer",
+        "payout": 74.435,
+        "payout_at": "2026-04-22T04:56:03",
+        "pending_payout_value": "74.435 HBD",
+        "percent_hbd": 10000,
+        "permlink": "re-upvote-this-post-to-fund-hbdstabilizer-20260415t045602z",
+        "post_id": 149813327,
+        "reblogs": 0,
+        "replies": [],
+        "stats": {
+          "flag_weight": 0,
+          "gray": false,
+          "hide": false,
+          "total_votes": 33
+        },
+        "title": "RE: Upvote this post to fund @hbdstabilizer",
+        "updated": "2026-04-15T04:56:03",
+        "url": "/hbd/@hbd.funder/upvote-this-post-to-fund-hbdstabilizer#@hbd.funder/re-upvote-this-post-to-fund-hbdstabilizer-20260415t045602z"
+      },
+      {
+        "active_votes": [
+          {
+            "rshares": 215371208682362,
+            "voter": "smooth"
+          },
+          {
+            "rshares": 380379406674459,
+            "voter": "blocktrades"
+          },
+          {
+            "rshares": 5316964224,
+            "voter": "gandalf"
+          },
+          {
+            "rshares": 66328090768789,
+            "voter": "gtg"
+          },
+          {
+            "rshares": 3468073542488,
+            "voter": "arcange"
+          }
+        ],
+        "author": "hbd.funder",
+        "author_payout_value": "0.000 HBD",
+        "author_reputation": 100.93,
+        "beneficiaries": [
+          {
+            "account": "hbdstabilizer",
+            "weight": 10000
+          }
+        ],
+        "blacklists": [],
+        "body": "The rewards for this comment are set to 100% beneficiary going to the @hbdstabilizer account.",
+        "category": "hbd",
+        "children": 0,
+        "created": "2026-04-15T04:56:21",
+        "curator_payout_value": "0.000 HBD",
+        "depth": 1,
+        "is_paidout": false,
+        "json_metadata": {
+          "app": "beem/0.24.26",
+          "tags": [
+            "hbd"
+          ]
+        },
+        "max_accepted_payout": "1000000.000 HBD",
+        "net_rshares": 841740051313159,
+        "parent_author": "hbd.funder",
+        "parent_permlink": "upvote-this-post-to-fund-hbdstabilizer",
+        "payout": 72.902,
+        "payout_at": "2026-04-22T04:56:21",
+        "pending_payout_value": "72.902 HBD",
+        "percent_hbd": 10000,
+        "permlink": "re-upvote-this-post-to-fund-hbdstabilizer-20260415t045622z",
+        "post_id": 149813332,
+        "reblogs": 0,
+        "replies": [],
+        "stats": {
+          "flag_weight": 0,
+          "gray": false,
+          "hide": false,
+          "total_votes": 34
+        },
+        "title": "RE: Upvote this post to fund @hbdstabilizer",
+        "updated": "2026-04-15T04:56:21",
+        "url": "/hbd/@hbd.funder/upvote-this-post-to-fund-hbdstabilizer#@hbd.funder/re-upvote-this-post-to-fund-hbdstabilizer-20260415t045622z"
+      },
+      {
+        "active_votes": [
+          {
+            "rshares": 215371208682362,
+            "voter": "smooth"
+          },
+          {
+            "rshares": 380379406674459,
+            "voter": "blocktrades"
+          },
+          {
+            "rshares": 5316964224,
+            "voter": "gandalf"
+          },
+          {
+            "rshares": 66338361167002,
+            "voter": "gtg"
+          },
+          {
+            "rshares": 3468169666041,
+            "voter": "arcange"
+          }
+        ],
+        "author": "hbd.funder",
+        "author_payout_value": "0.000 HBD",
+        "author_reputation": 100.93,
+        "beneficiaries": [
+          {
+            "account": "hbdstabilizer",
+            "weight": 10000
+          }
+        ],
+        "blacklists": [],
+        "body": "The rewards for this comment are set to 100% beneficiary going to the @hbdstabilizer account.",
+        "category": "hbd",
+        "children": 0,
+        "created": "2026-04-15T04:56:54",
+        "curator_payout_value": "0.000 HBD",
+        "depth": 1,
+        "is_paidout": false,
+        "json_metadata": {
+          "app": "beem/0.24.26",
+          "tags": [
+            "hbd"
+          ]
+        },
+        "max_accepted_payout": "1000000.000 HBD",
+        "net_rshares": 841472939484321,
+        "parent_author": "hbd.funder",
+        "parent_permlink": "upvote-this-post-to-fund-hbdstabilizer",
+        "payout": 72.88,
+        "payout_at": "2026-04-22T04:56:54",
+        "pending_payout_value": "72.880 HBD",
+        "percent_hbd": 10000,
+        "permlink": "re-upvote-this-post-to-fund-hbdstabilizer-20260415t045654z",
+        "post_id": 149813345,
+        "reblogs": 0,
+        "replies": [],
+        "stats": {
+          "flag_weight": 0,
+          "gray": false,
+          "hide": false,
+          "total_votes": 32
+        },
+        "title": "RE: Upvote this post to fund @hbdstabilizer",
+        "updated": "2026-04-15T04:56:54",
+        "url": "/hbd/@hbd.funder/upvote-this-post-to-fund-hbdstabilizer#@hbd.funder/re-upvote-this-post-to-fund-hbdstabilizer-20260415t045654z"
+      },
+      {
+        "active_votes": [
+          {
+            "rshares": 215371208682362,
+            "voter": "smooth"
+          },
+          {
+            "rshares": 380379406674459,
+            "voter": "blocktrades"
+          },
+          {
+            "rshares": 5316964224,
+            "voter": "gandalf"
+          },
+          {
+            "rshares": 66332300894160,
+            "voter": "gtg"
+          },
+          {
+            "rshares": 3468073542488,
+            "voter": "arcange"
+          }
+        ],
+        "author": "hbd.funder",
+        "author_payout_value": "0.000 HBD",
+        "author_reputation": 100.93,
+        "beneficiaries": [
+          {
+            "account": "hbdstabilizer",
+            "weight": 10000
+          }
+        ],
+        "blacklists": [],
+        "body": "The rewards for this comment are set to 100% beneficiary going to the @hbdstabilizer account.",
+        "category": "hbd",
+        "children": 0,
+        "created": "2026-04-15T04:56:27",
+        "curator_payout_value": "0.000 HBD",
+        "depth": 1,
+        "is_paidout": false,
+        "json_metadata": {
+          "app": "beem/0.24.26",
+          "tags": [
+            "hbd"
+          ]
+        },
+        "max_accepted_payout": "1000000.000 HBD",
+        "net_rshares": 841534061276818,
+        "parent_author": "hbd.funder",
+        "parent_permlink": "upvote-this-post-to-fund-hbdstabilizer",
+        "payout": 72.863,
+        "payout_at": "2026-04-22T04:56:27",
+        "pending_payout_value": "72.863 HBD",
+        "percent_hbd": 10000,
+        "permlink": "re-upvote-this-post-to-fund-hbdstabilizer-20260415t045628z",
+        "post_id": 149813333,
+        "reblogs": 0,
+        "replies": [],
+        "stats": {
+          "flag_weight": 0,
+          "gray": false,
+          "hide": false,
+          "total_votes": 35
+        },
+        "title": "RE: Upvote this post to fund @hbdstabilizer",
+        "updated": "2026-04-15T04:56:27",
+        "url": "/hbd/@hbd.funder/upvote-this-post-to-fund-hbdstabilizer#@hbd.funder/re-upvote-this-post-to-fund-hbdstabilizer-20260415t045628z"
+      },
+      {
+        "active_votes": [
+          {
+            "rshares": 215371208682362,
+            "voter": "smooth"
+          },
+          {
+            "rshares": 380379406674459,
+            "voter": "blocktrades"
+          },
+          {
+            "rshares": 5316964224,
+            "voter": "gandalf"
+          },
+          {
+            "rshares": 66333707670295,
+            "voter": "gtg"
+          },
+          {
+            "rshares": 3468169666041,
+            "voter": "arcange"
+          }
+        ],
+        "author": "hbd.funder",
+        "author_payout_value": "0.000 HBD",
+        "author_reputation": 100.93,
+        "beneficiaries": [
+          {
+            "account": "hbdstabilizer",
+            "weight": 10000
+          }
+        ],
+        "blacklists": [],
+        "body": "The rewards for this comment are set to 100% beneficiary going to the @hbdstabilizer account.",
+        "category": "hbd",
+        "children": 0,
+        "created": "2026-04-15T04:56:36",
+        "curator_payout_value": "0.000 HBD",
+        "depth": 1,
+        "is_paidout": false,
+        "json_metadata": {
+          "app": "beem/0.24.26",
+          "tags": [
+            "hbd"
+          ]
+        },
+        "max_accepted_payout": "1000000.000 HBD",
+        "net_rshares": 841527539704186,
+        "parent_author": "hbd.funder",
+        "parent_permlink": "upvote-this-post-to-fund-hbdstabilizer",
+        "payout": 72.862,
+        "payout_at": "2026-04-22T04:56:36",
+        "pending_payout_value": "72.862 HBD",
+        "percent_hbd": 10000,
+        "permlink": "re-upvote-this-post-to-fund-hbdstabilizer-20260415t045635z",
+        "post_id": 149813338,
+        "reblogs": 0,
+        "replies": [],
+        "stats": {
+          "flag_weight": 0,
+          "gray": false,
+          "hide": false,
+          "total_votes": 35
+        },
+        "title": "RE: Upvote this post to fund @hbdstabilizer",
+        "updated": "2026-04-15T04:56:36",
+        "url": "/hbd/@hbd.funder/upvote-this-post-to-fund-hbdstabilizer#@hbd.funder/re-upvote-this-post-to-fund-hbdstabilizer-20260415t045635z"
+      },
+      {
+        "active_votes": [
+          {
+            "rshares": 215371208682362,
+            "voter": "smooth"
+          },
+          {
+            "rshares": 380379406674459,
+            "voter": "blocktrades"
+          },
+          {
+            "rshares": 5316964224,
+            "voter": "gandalf"
+          },
+          {
+            "rshares": 66336954423723,
+            "voter": "gtg"
+          },
+          {
+            "rshares": 3468169666041,
+            "voter": "arcange"
+          }
+        ],
+        "author": "hbd.funder",
+        "author_payout_value": "0.000 HBD",
+        "author_reputation": 100.93,
+        "beneficiaries": [
+          {
+            "account": "hbdstabilizer",
+            "weight": 10000
+          }
+        ],
+        "blacklists": [],
+        "body": "The rewards for this comment are set to 100% beneficiary going to the @hbdstabilizer account.",
+        "category": "hbd",
+        "children": 0,
+        "created": "2026-04-15T04:56:48",
+        "curator_payout_value": "0.000 HBD",
+        "depth": 1,
+        "is_paidout": false,
+        "json_metadata": {
+          "app": "beem/0.24.26",
+          "tags": [
+            "hbd"
+          ]
+        },
+        "max_accepted_payout": "1000000.000 HBD",
+        "net_rshares": 841474585633868,
+        "parent_author": "hbd.funder",
+        "parent_permlink": "upvote-this-post-to-fund-hbdstabilizer",
+        "payout": 72.858,
+        "payout_at": "2026-04-22T04:56:48",
+        "pending_payout_value": "72.858 HBD",
+        "percent_hbd": 10000,
+        "permlink": "re-upvote-this-post-to-fund-hbdstabilizer-20260415t045648z",
+        "post_id": 149813344,
+        "reblogs": 0,
+        "replies": [],
+        "stats": {
+          "flag_weight": 0,
+          "gray": false,
+          "hide": false,
+          "total_votes": 32
+        },
+        "title": "RE: Upvote this post to fund @hbdstabilizer",
+        "updated": "2026-04-15T04:56:48",
+        "url": "/hbd/@hbd.funder/upvote-this-post-to-fund-hbdstabilizer#@hbd.funder/re-upvote-this-post-to-fund-hbdstabilizer-20260415t045648z"
+      },
+      {
+        "active_votes": [
+          {
+            "rshares": 215371208682362,
+            "voter": "smooth"
+          },
+          {
+            "rshares": 380379406674459,
+            "voter": "blocktrades"
+          },
+          {
+            "rshares": 5316964224,
+            "voter": "gandalf"
+          },
+          {
+            "rshares": 66333707670295,
+            "voter": "gtg"
+          },
+          {
+            "rshares": 3468169666041,
+            "voter": "arcange"
+          }
+        ],
+        "author": "hbd.funder",
+        "author_payout_value": "0.000 HBD",
+        "author_reputation": 100.93,
+        "beneficiaries": [
+          {
+            "account": "hbdstabilizer",
+            "weight": 10000
+          }
+        ],
+        "blacklists": [],
+        "body": "The rewards for this comment are set to 100% beneficiary going to the @hbdstabilizer account.",
+        "category": "hbd",
+        "children": 0,
+        "created": "2026-04-15T04:56:42",
+        "curator_payout_value": "0.000 HBD",
+        "depth": 1,
+        "is_paidout": false,
+        "json_metadata": {
+          "app": "beem/0.24.26",
+          "tags": [
+            "hbd"
+          ]
+        },
+        "max_accepted_payout": "1000000.000 HBD",
+        "net_rshares": 841472181471864,
+        "parent_author": "hbd.funder",
+        "parent_permlink": "upvote-this-post-to-fund-hbdstabilizer",
+        "payout": 72.857,
+        "payout_at": "2026-04-22T04:56:42",
+        "pending_payout_value": "72.857 HBD",
+        "percent_hbd": 10000,
+        "permlink": "re-upvote-this-post-to-fund-hbdstabilizer-20260415t045641z",
+        "post_id": 149813342,
+        "reblogs": 0,
+        "replies": [],
+        "stats": {
+          "flag_weight": 0,
+          "gray": false,
+          "hide": false,
+          "total_votes": 33
+        },
+        "title": "RE: Upvote this post to fund @hbdstabilizer",
+        "updated": "2026-04-15T04:56:42",
+        "url": "/hbd/@hbd.funder/upvote-this-post-to-fund-hbdstabilizer#@hbd.funder/re-upvote-this-post-to-fund-hbdstabilizer-20260415t045641z"
+      },
+      {
+        "active_votes": [
+          {
+            "rshares": 7607161800236,
+            "voter": "blocktrades"
+          },
+          {
+            "rshares": 7445123237050,
+            "voter": "alpha"
+          },
+          {
+            "rshares": 2865348404,
+            "voter": "robsteady"
+          },
+          {
+            "rshares": 1172505410097,
+            "voter": "kenny-crane"
+          },
+          {
+            "rshares": 25682148586,
+            "voter": "good-karma"
+          }
+        ],
+        "author": "snapie",
+        "author_payout_value": "0.000 HBD",
+        "author_reputation": 69.7,
+        "author_role": "admin",
+        "author_title": "",
+        "beneficiaries": [],
+        "blacklists": [],
+        "body": "Hello frenz… 🐝\n\nI’ve been a busy little bee.\n\nLike… *really busy.*\n\nBehind the scenes I’ve been cooking up a batch of upgrades that turned out way bigger than I expected. What started as “a few tweaks” turned into a full-on transformation.\n\nThis one’s a **bit wild.**\n\n\n![98ac53b1-48e0-476b-8c01-43e45ee083a3.png](https://files.peakd.com/file/peakd-hive/meno/23uQjvQQ2VN1qZ4DKfDTZ8CobHecEfAwQYMhA7fH5XkkE9Bqz4Qh8BaxnZwsVC8M6XVjq.png)\n\n\nWe’re rolling it out on Android first (gotta test the honey before serving it 🍯), and once everything feels smooth, iOS will follow right behind.\n\nNow… I could hit you with a wall of tech jargon…\n\n…but let me show you what this actually means for you 👇\n--\n\n# 🚀 What’s New on Snapie\n## 🎙️ OpenPods (Hangouts) Are Here!\n\nYou can now jump into live audio rooms inside Snapie.\n\nThink:\n\n- Poice rooms for a Podcasts\n- Chill conversations\n- Spontaneous debates\n- Late-night rambling with internet strangers\n\nBut better… because it’s ours.\n\nYou can:\n\n- Create your own room (by clicking on the mic icon 🎙️ next to search)\n- Join others instantly \n- Chat while talking 🗨️\n- Raise your hand to speak ✋ (civilized bees only 🐝)\n- Even record the session 🔴 and turn it into a Snap\n\nAnd here’s the fun part…\n\n![Snapie Pods](https://hackmd.io/_uploads/B156EK2hZg.jpg)\n\n\n\n👉 When you create a room, it automatically gets announced to the community as a Snap!\n\nNo shouting into the void. Snapie’s got your back.\n\n## 💰 Your Wallet… Finally Makes Sense\n\nI fixed something that lowkey bothered me for a while.\n\nYou can now actually see what’s happening with your wallet.\n\n- Who sent you funds\n- What you sent out\n- Rewards, power-ups, power-downs\n- Clean timestamps like “2h ago”\n\nNo more guessing or opening other apps. No more “wait… where did that go?”\n\nIt just works.\n\n## 🖼️ Images That Don’t Feel Like 2009\n\nThis one’s simple… but huge.\n\nYou can now:\n- 👉 Swipe through images like a normal human being\n\n- Tap a photo → opens full screen\n- Swipe left/right through all images\n- See your position (like 2 / 5)\n\nIt feels like social media should feel.\n\nFinally.\n\n## 🔐 Active Keys… But Make It Safe\n\nAlright, this one matters.\n\nYou can now securely add your Active Key with:\n\n- Biometric protection (FaceID / fingerprint / PIN)\n- Proper validation\n- Clear “Full Access” vs “Posting Only” indicators\n\nTranslation:\n\n- 👉 More power when you need it\n- 👉 Safety when you don’t\n\nNo weird compromises.\n\n## 👥 Multiple Accounts (About Time)\n\nIf you’re juggling accounts… I got you.\n\nYou can now:\n\n- Add multiple accounts\n- Switch between them easily\n- Remove them if needed\n\nNo log-out, log-in circus anymore.\n\n**Just tap → switch → done.**\n\n## 🧠 Posts Actually Render Properly Now\n\nThis one is subtle… until you notice it.\n\n- Hashtags are clickable (hsnap's tags looked broken)\n- Markup Profile links work\n- Images render correctly (through a proxy, shoutout to louis88 for this safety bug)\n- Videos, tweets, embeds… all behave right\n\nBasically:\n\n- 👉 Things look the way they were meant to look\n\n- 🐛 And Yeah… I Squashed a Ton of Bugs\n\nNot the fun kind of bugs. (can't think of a single fun one right now either)\n\nThe annoying ones.\n\nLogin weirdness → fixed\nAndroid quirks → handled\nRandom crashes → hunted down\n\n**Snapie went full exterminator this week.**\n\n## 📊 The “I Didn’t Sleep Much” Section\n- 150+ commits\n- 10+ major updates\n- 6 big new features\n- Dozens of fixes\n\nNot saying I turned into a heartless machine…\n\n…but I might be more robot than bee now 🤖🐝\n\n## 🔮 What’s Next?\n\nI’m not slowing down.\n\n\nNext up:\n\n- Polishing Hangouts (this one’s gonna evolve fast)\n- Making the wallet even better (savings, claims, etc)\n- Performance upgrades\n- iOS rollout\n\n## 🐝 Final Words\n\nThis update… it’s different.\n\nSnapie is starting to feel less like “an app I’m building out of love” and more like…\n\n### 👉 a place people can actually hang out\n\nAnd that’s the whole point.\n\nSo go try it. Break it. Tell me what feels off.\n\nI’m listening 👀\n\n— Snapie 🐝\n\n---\n\n<center><a href=\"https://about.snapie.io\">About Snapie</a></center>",
+        "category": "hive-178315",
+        "children": 25,
+        "community": "hive-178315",
+        "community_title": "Snapie",
+        "created": "2026-04-15T03:28:06",
+        "curator_payout_value": "0.000 HBD",
+        "depth": 0,
+        "is_paidout": false,
+        "json_metadata": {
+          "app": "peakd/2026.4.3",
+          "format": "markdown",
+          "image": [
+            "https://files.peakd.com/file/peakd-hive/meno/23uQjvQQ2VN1qZ4DKfDTZ8CobHecEfAwQYMhA7fH5XkkE9Bqz4Qh8BaxnZwsVC8M6XVjq.png",
+            "https://hackmd.io/_uploads/B156EK2hZg.jpg"
+          ],
+          "tags": [
+            "hive",
+            "snapie",
+            "devlog",
+            "hiveproject",
+            "pob",
+            "android"
+          ],
+          "users": []
+        },
+        "max_accepted_payout": "1000000.000 HBD",
+        "net_rshares": 647168506204871,
+        "payout": 64.931,
+        "payout_at": "2026-04-22T03:28:06",
+        "pending_payout_value": "64.931 HBD",
+        "percent_hbd": 10000,
+        "permlink": "snapies-cooking-something-big-and-its-finally-ready-",
+        "post_id": 149812724,
+        "reblogs": 18,
+        "replies": [],
+        "stats": {
+          "flag_weight": 0,
+          "gray": false,
+          "hide": false,
+          "total_votes": 627
+        },
+        "title": "Snapie’s Cooking Something Big (and it’s finally ready 🐝🔥)",
+        "updated": "2026-04-15T03:28:06",
+        "url": "/hive-178315/@snapie/snapies-cooking-something-big-and-its-finally-ready-"
+      },
+      {
+        "active_votes": [
+          {
+            "rshares": 228242047960834,
+            "voter": "blocktrades"
+          },
+          {
+            "rshares": 2305817252,
+            "voter": "leprechaun"
+          },
+          {
+            "rshares": 17109213765,
+            "voter": "good-karma"
+          },
+          {
+            "rshares": 502283485649,
+            "voter": "roelandp"
+          },
+          {
+            "rshares": 1974450761,
+            "voter": "matt-a"
+          }
+        ],
+        "author": "palomap3",
+        "author_payout_value": "0.000 HBD",
+        "author_reputation": 74.61,
+        "author_role": "member",
+        "author_title": "",
+        "beneficiaries": [
+          {
+            "account": "hive-14396",
+            "weight": 500
+          }
+        ],
+        "blacklists": [],
+        "body": "![IMG_1537.JPG](https://files.peakd.com/file/peakd-hive/palomap3/Ep7w3BnEfmCFkrdGExFbr2m6crkZACJUkXU5AY1z8zrjMuWNLMPKJ4gjmHbsSqfy89w.JPG)\n\n[Click here to read this post in **English**](#english)\n\n<img src=\"https://images.hive.blog/DQmeL6nS5tVdW3yAg896jjF7qwgqV3Bbowtank5sARnQSNN/ENES--Spanish.png\"> \n\nHola querido hiver.\n\nEn [esta publicación](https://peakd.com/hive-163772/@palomap3/mobility-city-el-futuro-de-la-movilidad-mobility-city-the-future-of-mobility) de hace dos semanas te decía que había ido a ver, además del edificio y museo, un par de exposiciones. Aquí te muestro la primera de ellas, [Opel Love](https://www.mobilitycity.es/explora/historico-de-exposiciones/opel-love/). La ciudad de Zaragoza está muy vinculada a esta marca de automóviles porque en 1982 comenzó a funcionar la fábrica de la próxima localidad de Figueruelas, suponiendo un gran impulso económico para la región. Es rara la persona que aquí no tiene a alguien cercano que trabaje o haya trabajado en esa factoría, que en la actualidad pertenece al grupo Stellantis. \n\n![IMG_1508.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EouCzRaqVgZDGDMVxtPHKtHrQ7S1W3imoCZdLoVE5ychEGfcW2ij7ZtAavrBUuYj7ND.JPG)\n\n![IMG_1509.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EpGU8SZr8qvKsQhKEVsh468FdNbXp2jQ9LPEEjV34V7YYADEXtcpQATrjA73Aa8VCNu.JPG)\n\nPero... ¿sabías que su fundador, Adam Opel, comenzó su andadura fabricando máquinas de coser? Luego vendrían las bicicletas, motocicletas hasta llegar a los coches, pero lo más curioso de todo es que fue su viuda quien comenzó la línea de fabricación de automóviles. Algo nada habitual para aquella época de finales del siglo XIX.\n\n![IMG_1511.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EoiYcdEZjZxDAfsiWW3QiPFL5RErZKHsTpnhiFtb88Sv58bfkG84LWakZtBYPFEm6cY.JPG)\n\n![IMG_1512.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EpJb4RbYyHQUZrxKMvCJhm5FZybnsXG1EhF6M86wA1VVDCjQBdugMJwfnDCSkAGDVaY.JPG)\n\n![IMG_1514.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EouB6EcajmexHy4THscJ4NDSGdEi43VYNDMFdDFtvKJb9Joyw9ftssSu2Vx27dNvXuZ.JPG)\n\n![IMG_1516.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EogQiAK4dtGunkkN2kemNMQ2dgZC4DBUaGsuUDE8tdKobqKDE78WN1GVNS8jcoYkvN8.JPG)\n\nLa exposición comienza con algunos ejemplares de esos primeros objetos. A partir de aquí se podía fotografiar cada pieza individualmente. Cada modelo tenía su cartel explicativo, con una breve descripción de su historia y datos como el período de producción, las unidades que se fabricaron, medidas del motor, su peso en vacío y hasta el precio de venta en marcos alemanes. Escribiré debajo de cada uno su fecha y nombre, si quieres saber más datos sobre alguno de ellos pregúntame en los comentarios y te responderé, pues hice fotos de cada cartel explicativo que no incluyo aquí para que no se haga un post excesivamente largo. También encontrarás información ampliada en el enlace de la exposición que dejo al principio. Si haces click sobre el nombre de cada vehículo accedes a una página con más datos sobre él. \n\n![IMG_1519.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EpLhud7b8puSE4fTEgeFhmWUS8FoAdkJLBXgszdxUaLu1armB2Vk6ChEcdTTc3DFrRY.JPG)\n\n1928 Motoclub 500. Durante un tiempo Opel fabricó también motocicletas. \n\nA partir de aquí te mostraré los automóviles, gran parte de ellos prototipos que no han salido nunca de su lugar de origen hasta esta exposición. Están algo desordenados de fechas porque el recorrido lógico que seguíamos todos los visitantes era en el orden en que te los presento. Es el único punto negativo que encontré a la muestra, la verdad, porque por lo demás me pareció fantástica.\n\n![IMG_1520.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EpEJfm1tbmzpRzsHUjv9HBxGdEw9DZP4JbrErqi6dZVmr8bdnB6vhDBQigkE1efeHAZ.JPG)\n\n1899 Patent-Motorwagen “Lutzmann”.\n\nEl primero de todos por ser el más antiguo lo considero el más valioso a nivel histórico. Es como una carroza a la que le faltan los caballos.\n\n![IMG_1522.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EpA5uEUN2bDtZRrRSA4AR6EJy8uEeW1FG1tXJkC5m8J5pzBAPEbMu8m2pyd8wPuZe5N.JPG)\n\n1909 4/8 CV “Doktorwagen”\n\nSu nombre evoca a los primeros profesionales que adquirieron este modelo, principalmente médicos y veterinarios que lo utilizaban en sus desplazamientos a domicilio.\n\n![IMG_1524.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EpGSDVUmh5x7m2TL5FP1LUtsjGGYcQEovvb3Zo6z8dgm7Q3jqvNPoR6KNu2ow84cScx.JPG)\n\n1924 4/12 CV “Laubfrosch”\n\nSu apodo significa rana arborícola. Hace referencia a su color por ser lo que destacaba frente al resto de automóviles de su época que eran de color negro.\n\n![IMG_1526.JPG](https://files.peakd.com/file/peakd-hive/palomap3/Ep5qzUmshrKS86SoifC9s3WaBTTwiAHk2x9ygtFaMvip44FSUELY9r2zzfKrBKaN9sn.JPG)\n\n1974 OSV 40\n\nAquí hacemos el primer salto temporal. Las siglas significan Opel Safety Vehicle y significó un gran avance en el diseño de elementos de protección para los pasajeros.\n\n![IMG_1528.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EokgT9rJh7zjXUBjsuRdBXLRPJDgtxkguK7cXJhTirDEqDeUUnQyf8TUSYyXeyL9bJL.JPG)\n\n1971 Elektro GT\n\nEl coche eléctrico lleva muchos años inventado. En este caso es prácticamente una batería enorme con ruedas, puedes verla ocupando lo que debían ser los asientos traseros y del copiloto.\n\n![IMG_1532.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EpJZU9Ur2gsZJ4V4TAWCLq9dHC3frs7oN6V3511FdChnSko2KQZaqXNQLHMZa4nGFEs.JPG)\n\n1969 CD (Coupé Diplomat) Concept \"Wireframe\"\n\nEste es un prototipo inspirado por la llegada del hombre a la Luna. Además de estar presentado sin carrocería tiene la particularidad de que se podía elevar hidráulicamente hacia arriba.\n\n![IMG_1534.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EpT64Gkq9jWDrLiimTJCBP71rnAb5VmCWMUi5f9yxQUCavCv8q5H3PR3Ue9xuzgFbxx.JPG)\n\n1982 Corsa A\n\nEste es el primer modelo de coche que se fabricó en Zaragoza, entre los más de 14 millones de unidades que vendió entre todas sus generaciones. Un coche reconocible que todavía circula por las calles.\n\n![IMG_1538.JPG](https://files.peakd.com/file/peakd-hive/palomap3/23wqu7cow2sTX3jxuSZKCYfPuvSgZoawfUND3qStXbpfhtLnDfXfCg64XySWyYynU4A2W.JPG)\n\n2021 Manta GSe ElektroMOD\n\nTerminando la primera gran hilera de vehículos aparcados en paralelo, en medio de la sala, los ojos se van hacia el flamante coche amarillo no solo por su llamativo color, sino por el luminoso cartel que ocupa su morro y que puedes apreciar en la foto de portada. Es la versión eléctrica moderna de un modelo popular en los años 70-80 con una estética que las recuerda. \n\n![IMG_1541.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EprUZrwiY4XwJi1fFUKUb6khNYGmkMKsMqx7hCJvGHNBFvXHEEKhPH4foBU8YhFHFyT.JPG)\n\n1994 Scamp 2\n\nDetrás del anterior, formando un pequeño conjunto tenemos un par de coches más cortos. Este primero se basa en el Corsa de segunda generación con la carrocería más alta, un anticipo a los SUV urbanos que tan frecuentes son ahora y que entonces eran una novedad.\n\n![IMG_1553.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EpGSgfkppgRDbn45yC6fXiy7xqvevFjdFYYDUwby2aBVGntnP9ZD1587T47g3k6y2zx.JPG)\n\n1995 MAXX\n\nLa otra propuesta para la ciudad es este otro compacto que recuerda al Renault Twingo.\n\n![IMG_1539.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EpQzisg7zFfTWRW1TqTp9J1A3f2j3nrCJxdR7yWQgcSJFTeGmA55z6ZXrGag4Qmgw2V.JPG)\n\nVamos rodeando los tres modelos anteriores por el fondo de la sala. En este área tenemos más paneles informativos interesantes. El primero está dedicado a la historia de la fábrica de Opel de Zaragoza.\n\n![IMG_1542.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EokfWYZFdt1235h5jJXkDuBrDL7o2CiCRAcj93K4dtHya89SFDjjHmRS2M84eHnfmj6.JPG)\n\nPero también nos muestran la ciudad de origen de la marca, Rüsselsheim, donde todo comenzó y de donde provienen las piezas que tenemos la oportunidad de disfrutar.\n\n![IMG_1545.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EpJaVN6T1WWNNNwyUH7gcJehunY7io6xaUFAVR1Kxwn6YgCZRxnF8fyxy4xv8nLKEdA.JPG)\n\n![IMG_1544.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EpCBKQTLKRJi5DiAYe2cUdGxCju5pqSJqxDbJi9AKbrrZbkVYMDzHZXwExrPN3kRAP7.JPG)\n\n1996 Calibra V6 4X4 ITC\n\nTambién hay espacio para un coche que participó en la International Touring Car Championship (ITC) pilotado por Manuel Reuter. Si te preguntas por el resultado, hubo doblete: Reuters ganó el título de pilotos y Opel la competición de constructores.\n\n![IMG_1548.JPG](https://files.peakd.com/file/peakd-hive/palomap3/Eos3HehvHghtxXLxt9ZVoydNTZaHtwp7UAeLz9ZxgDztfmPRpn3JhcEXQXbp2YBs88H.JPG)\n\n2018 GT X Experimental\n\nAntecesor del actual Mokka en versión eléctrica.\n\n![IMG_1555.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EpCBohDtJS83CkF8D6DfNWWJMaXTCs1R4G3y35RJ5rQRdsup5ZpuX4uzSBNjxcJqKit.JPG)\n\n2011 RAKe\n\nEste futurista modelo es como una moto con cuatro ruedas por la disposición del interior. También es eléctrico y aspiraba a ser un superventas entre los jóvenes que se quedó en el intento.\n\n![IMG_1552.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EoCm5xeBa7Xtq6f75EFPAA99HSQRXrkJAxU5qxzpCUhAXidJ3y8zVZmCbJnwSXL3RQZ.JPG)\n\nEn el siguiente panel tenemos la evolución del logotipo de Opel desde sus inicios hasta la actualidad. Una curiosa lección de diseño gráfico y tipografía.\n\n![IMG_1558.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EoAdaj9R2VPMPtpG8jbGe5zASUSHLp3t9EbkDb23Q3xdZV49FVqMBwGcEpTNxA7sDsZ.JPG)\n\n![IMG_1559.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EoH1s84fxWiS8w45c6gdi7ZeUyJxuVvycGo4dVzj7BZ1Fz7fKUdxHmEwRXteNtJUddL.JPG)\n\nOtro panel doble nos muestra los principales hitos en la historia de Opel. Aunque el título aparece bilingüe no había versión en inglés...\n\n![IMG_1560.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EpGS9mKqEEvpb8Vj5C198e8r1qSq3nxW7RCAmN12E92xEwUdGthdkVrC5axBqZZtVZG.JPG)\n\n![IMG_1561.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EoiVHY6eXFD4WK8zfTTjvV63ytUsn1Ew8SLFX12aQCfZxVzSkL8eZ4j2CyV9JFVFqWc.JPG)\n\n1939 Admiral\n\nY llegamos a los modelos de lujo, los más espectaculares de la muestra. El Admiral se vendía como \n\n> Todo lo que un automovilista exigente pueda desear se encuentra reunido en él.\n\nAsí fue hasta que al final de la II Guerra Mundial dejó de fabricarse por la desaparición de su mercado. Resurgió en 1964 completamente renovado. \n\n![IMG_1563.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EoEsUHUJ4XTFBPA43qrH1J3JVvwfMYYhLFVnAakJ7w1fAWnPvHPmewjK1NcczE8W745.JPG)\n\n![IMG_1564.JPG](https://files.peakd.com/file/peakd-hive/palomap3/Eoc921jqfRhMUPbKjqxcteMw7KZexcRSoRtx4gDATgT9ZLEqpEytqZfzfDNxqamNjQX.JPG)\n\n1956 Kapitän “Opel 2 millones”\n\nEste es el que me habría llevado a mi casa, jajaja. Sigue la moda de los clásicos coches estadounidenses de los años 50. Pero este es muy, muy especial: el destino quiso que este vehículo fuera la unidad 2 millones. Para celebrarlo, las superficies cromadas se recubrieron con oro de 24 quilates y este es el resultado. ¡Los ojos me hacían chiribitas!\n\n![IMG_1566.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EouAEXy9avNfo2uEADq2j4VFf1zjywaJ4HtTrvzTfjA1tzWR3YPCtS51DUGZbo6hCcR.JPG)\n\n![IMG_1567.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EokeckbB5Y4PaphfkPmdgwPjuQYMycdUpNBnnBVrupMftqi6swRrJNdDUFrXKHoJuA5.JPG)\n\n1969 Kapitän B\n\nSegunda generación del modelo anterior que se aleja por completo del lujo tanto por dentro como por fuera.\n\n![IMG_1569.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EoiXd55zfNeFAErAaFPinZtpnbDsNVA7Zbh5VpUL2c3bNc1PZi2gNf5HjpS41seDaSf.JPG)\n\n1982 Corsa Spider\n\nVersión monoplaza del Corsa cuya novedad más curiosa era que el reproductor de casetes se podía extraer y utilizarse como walkman.\n\nLlegamos al final de esta muestra donde hay un coche para dar gusto a cualquier persona y es una maravilla para los aficionados al mundo del motor. Espero que la haya disfrutado.\n\nHasta la próxima publicación. Mientras tanto, ¡cuídate! \n\n<center><img src=\"https://images.hive.blog/DQmfDaSmTz3y8oavngRrr5mmVhrTXheYoEU4qhGUS7pq3xh/HiveDivider.png\"></center>\n\nHerramientas: Cámara iPhone 13 Pro, editor de fotos Mac. \nMis publicaciones en [Worldmappin pinchando aquí](https://worldmappin.com/@palomap3)\nSi te gusta lo que publico, únete a mi [Fanbase pinchando aquí](https://hive.vote/dash.php?fan=palomap3&i=2)\n\n![B67FB7A6-2E4B-43FD-BE20-57543B8993A2_4_5005_c.jpeg](https://files.peakd.com/file/peakd-hive/palomap3/23tmerjFT3bacskjaLCHwJcKiNucG1oEiEzj9BNLMfBBevvri9W4G7eDRveawxvcGY472.jpeg)\n\n©️Copyright 2026 Paloma Peña Pérez. Todos los derechos reservados. \n\n<center><img src=\"https://images.hive.blog/DQmfDaSmTz3y8oavngRrr5mmVhrTXheYoEU4qhGUS7pq3xh/HiveDivider.png\"></center>\n\n![IMG_1537.JPG](https://files.peakd.com/file/peakd-hive/palomap3/Ep7w3BnEfmCFkrdGExFbr2m6crkZACJUkXU5AY1z8zrjMuWNLMPKJ4gjmHbsSqfy89w.JPG)\n\n**English** <a id=\"english\"></a>\n\n<img src=\"https://images.hive.blog/DQmaZM4tL8n3UjZ9YvYNmEQ1oAvfm6QJzMBHuMtr9JqdVS2/ENES--English.png\">\n\nHi, dear hiver.\n\nIn [this post](https://peakd.com/hive-163772/@palomap3/mobility-city-el-futuro-de-la-movilidad-mobility-city-the-future-of-mobility) from two weeks ago, I mentioned that I’d gone to see a couple of exhibitions, as well as the building and museum. Here I’ll show you the first of them, [Opel Love](https://www.mobilitycity.es/explora/historico-de-exposiciones/opel-love/). The city of Zaragoza has close ties to this car brand because in 1982 the factory in the nearby town of Figueruelas began operating, providing a major economic boost for the region. It’s rare to find anyone here who doesn’t have a relative or friend who works or has worked at that factory, which now belongs to the Stellantis group. \n\n![IMG_1508.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EouCzRaqVgZDGDMVxtPHKtHrQ7S1W3imoCZdLoVE5ychEGfcW2ij7ZtAavrBUuYj7ND.JPG)\n\n![IMG_1509.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EpGU8SZr8qvKsQhKEVsh468FdNbXp2jQ9LPEEjV34V7YYADEXtcpQATrjA73Aa8VCNu.JPG)\n\nBut... did you know that its founder, Adam Opel, began his career manufacturing sewing machines? Next came bicycles and motorcycles, before moving on to cars, but the most curious thing of all is that it was his widow who started the car manufacturing line. Something quite unusual for that time, at the end of the 19th century.\n\n![IMG_1511.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EoiYcdEZjZxDAfsiWW3QiPFL5RErZKHsTpnhiFtb88Sv58bfkG84LWakZtBYPFEm6cY.JPG)\n\n![IMG_1512.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EpJb4RbYyHQUZrxKMvCJhm5FZybnsXG1EhF6M86wA1VVDCjQBdugMJwfnDCSkAGDVaY.JPG)\n\n![IMG_1514.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EouB6EcajmexHy4THscJ4NDSGdEi43VYNDMFdDFtvKJb9Joyw9ftssSu2Vx27dNvXuZ.JPG)\n\n![IMG_1516.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EogQiAK4dtGunkkN2kemNMQ2dgZC4DBUaGsuUDE8tdKobqKDE78WN1GVNS8jcoYkvN8.JPG)\n\nThe exhibition begins with a few examples of those early models. From here on, you could photograph each piece individually. Each model had its own information panel, with a brief description of its history and details such as the production period, the number of units manufactured, engine specifications, kerb weight and even the retail price in German marks. I’ll write the date and name under each one; if you’d like to know more about any of them, just ask me in the comments and I’ll reply, as I took photos of every information sign but haven’t included them here to avoid making this post too long. You’ll also find further details via the exhibition link I’ve provided at the start. If you click on the name of each vehicle, you’ll be taken to a page with more information about it. \n\n![IMG_1519.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EpLhud7b8puSE4fTEgeFhmWUS8FoAdkJLBXgszdxUaLu1armB2Vk6ChEcdTTc3DFrRY.JPG)\n\n1928 Motoclub 500. For a time, Opel also manufactured motorcycles. \n\nFrom here on, I’ll show you the cars, most of which are prototypes that have never left their place of origin until this exhibition. They’re a bit out of order chronologically because the logical route we visitors all followed was in the order in which I’m presenting them to you. That’s the only downside I found with the exhibition, to be honest, because otherwise I thought it was fantastic.\n\n![IMG_1520.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EpEJfm1tbmzpRzsHUjv9HBxGdEw9DZP4JbrErqi6dZVmr8bdnB6vhDBQigkE1efeHAZ.JPG)\n\n1899 Patent-Motorwagen “Lutzmann”.\n\nAs the oldest of them all, I consider it the most historically valuable. It’s like a carriage without horses.\n\n![IMG_1522.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EpA5uEUN2bDtZRrRSA4AR6EJy8uEeW1FG1tXJkC5m8J5pzBAPEbMu8m2pyd8wPuZe5N.JPG)\n\n1909 4/8 CV “Doktorwagen”\n\nIts name evokes the first professionals who purchased this model, mainly doctors and vets who used it for their home visits.\n\n![IMG_1524.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EpGSDVUmh5x7m2TL5FP1LUtsjGGYcQEovvb3Zo6z8dgm7Q3jqvNPoR6KNu2ow84cScx.JPG)\n\n1924 4/12 CV “Laubfrosch”\n\nIts nickname means ‘tree frog’. It refers to its colour, which made it stand out from the other cars of its era, which were black.\n\n![IMG_1526.JPG](https://files.peakd.com/file/peakd-hive/palomap3/Ep5qzUmshrKS86SoifC9s3WaBTTwiAHk2x9ygtFaMvip44FSUELY9r2zzfKrBKaN9sn.JPG)\n\n1974 OSV 40\n\nHere we take our first leap forward in time. The acronym stands for Opel Safety Vehicle and represented a major breakthrough in the design of passenger safety features.\n\n![IMG_1528.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EokgT9rJh7zjXUBjsuRdBXLRPJDgtxkguK7cXJhTirDEqDeUUnQyf8TUSYyXeyL9bJL.JPG)\n\n1971 Elektro GT\n\nThe electric car has been around for many years. In this case, it is practically a huge battery on wheels; you can see it taking up what must have been the rear and front passenger seats.\n\n![IMG_1532.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EpJZU9Ur2gsZJ4V4TAWCLq9dHC3frs7oN6V3511FdChnSko2KQZaqXNQLHMZa4nGFEs.JPG)\n\n1969 CD (Coupé Diplomat) Concept ‘Wireframe’\n\nThis is a prototype inspired by the moon landing. As well as being presented without a body, it has the unique feature of being able to be raised hydraulically.\n\n![IMG_1534.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EpT64Gkq9jWDrLiimTJCBP71rnAb5VmCWMUi5f9yxQUCavCv8q5H3PR3Ue9xuzgFbxx.JPG)\n\n1982 Corsa A\n\nThis is the first car model to be manufactured in Zaragoza, one of the more than 14 million units sold across all its generations. A recognisable car that can still be seen on the roads today.\n\n![IMG_1538.JPG](https://files.peakd.com/file/peakd-hive/palomap3/23wqu7cow2sTX3jxuSZKCYfPuvSgZoawfUND3qStXbpfhtLnDfXfCg64XySWyYynU4A2W.JPG)\n\n2021 Manta GSe ElektroMOD\n\nAs we reach the end of the first long row of cars parked in parallel in the middle of the hall, our eyes are drawn to the brand-new yellow car, not only because of its striking colour, but also because of the bright sign on its bonnet, which you can see in the cover photo. It is the modern electric version of a popular model from the 1970s and 1980s, with a design that evokes that era. \n\n![IMG_1541.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EprUZrwiY4XwJi1fFUKUb6khNYGmkMKsMqx7hCJvGHNBFvXHEEKhPH4foBU8YhFHFyT.JPG)\n\n1994 Scamp 2\n\nBehind the previous model, forming a small group, we have a couple of shorter cars. This first one is based on the second-generation Corsa with a taller body, a precursor to the urban SUVs that are so common now and were a novelty back then.\n\n![IMG_1553.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EpGSgfkppgRDbn45yC6fXiy7xqvevFjdFYYDUwby2aBVGntnP9ZD1587T47g3k6y2zx.JPG)\n\n1995 MAXX\n\nThe other option for city driving is this compact car, which is reminiscent of the Renault Twingo.\n\n![IMG_1539.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EpQzisg7zFfTWRW1TqTp9J1A3f2j3nrCJxdR7yWQgcSJFTeGmA55z6ZXrGag4Qmgw2V.JPG)\n\nWe walk around the three models mentioned above at the back of the hall. In this area, there are more interesting information panels. The first is dedicated to the history of the Opel factory in Zaragoza.\n\n![IMG_1542.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EokfWYZFdt1235h5jJXkDuBrDL7o2CiCRAcj93K4dtHya89SFDjjHmRS2M84eHnfmj6.JPG)\n\nBut they also show us the brand’s home town, Rüsselsheim, where it all began and where the cars we have the chance to enjoy come from.\n\n![IMG_1545.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EpJaVN6T1WWNNNwyUH7gcJehunY7io6xaUFAVR1Kxwn6YgCZRxnF8fyxy4xv8nLKEdA.JPG)\n\n![IMG_1544.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EpCBKQTLKRJi5DiAYe2cUdGxCju5pqSJqxDbJi9AKbrrZbkVYMDzHZXwExrPN3kRAP7.JPG)\n\n1996 Calibra V6 4x4 ITC\n\nThere is also room for a car that competed in the International Touring Car Championship (ITC), driven by Manuel Reuter. If you’re wondering about the result, it was a one-two finish: Reuter won the drivers’ title and Opel the manufacturers’ championship.\n\n![IMG_1548.JPG](https://files.peakd.com/file/peakd-hive/palomap3/Eos3HehvHghtxXLxt9ZVoydNTZaHtwp7UAeLz9ZxgDztfmPRpn3JhcEXQXbp2YBs88H.JPG)\n\n2018 GT X Experimental\n\nPredecessor of the current Mokka in electric form.\n\n![IMG_1555.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EpCBohDtJS83CkF8D6DfNWWJMaXTCs1R4G3y35RJ5rQRdsup5ZpuX4uzSBNjxcJqKit.JPG)\n\n2011 RAKe\n\nThis futuristic model is like a four-wheeled motorbike due to the layout of its interior. It is also electric and aimed to be a bestseller among young people, but never quite made it.\n\n![IMG_1552.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EoCm5xeBa7Xtq6f75EFPAA99HSQRXrkJAxU5qxzpCUhAXidJ3y8zVZmCbJnwSXL3RQZ.JPG)\n\nThe next panel shows the evolution of the Opel logo from its beginnings to the present day. A fascinating lesson in graphic design and typography.\n\n![IMG_1558.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EoAdaj9R2VPMPtpG8jbGe5zASUSHLp3t9EbkDb23Q3xdZV49FVqMBwGcEpTNxA7sDsZ.JPG)\n\n![IMG_1559.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EoH1s84fxWiS8w45c6gdi7ZeUyJxuVvycGo4dVzj7BZ1Fz7fKUdxHmEwRXteNtJUddL.JPG)\n\nAnother double panel shows us the main milestones in Opel’s history. Although the title appears in two languages, there was no English version...\n\n![IMG_1560.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EpGS9mKqEEvpb8Vj5C198e8r1qSq3nxW7RCAmN12E92xEwUdGthdkVrC5axBqZZtVZG.JPG)\n\n![IMG_1561.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EoiVHY6eXFD4WK8zfTTjvV63ytUsn1Ew8SLFX12aQCfZxVzSkL8eZ4j2CyV9JFVFqWc.JPG)\n\n1939 Admiral\n\nAnd now we come to the luxury models, the most spectacular in the exhibition. The Admiral was marketed as \n\n> Everything a discerning motorist could wish for is brought together in this car.\n\nThis remained the case until production ceased at the end of the Second World War due to the disappearance of its market. It re-emerged in 1964, completely revamped. \n\n![IMG_1563.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EoEsUHUJ4XTFBPA43qrH1J3JVvwfMYYhLFVnAakJ7w1fAWnPvHPmewjK1NcczE8W745.JPG)\n\n![IMG_1564.JPG](https://files.peakd.com/file/peakd-hive/palomap3/Eoc921jqfRhMUPbKjqxcteMw7KZexcRSoRtx4gDATgT9ZLEqpEytqZfzfDNxqamNjQX.JPG)\n\n1956 Kapitän “Opel 2 Million”\n\nThis is the one I would have taken home, ha ha ha. It follows the trend of classic American cars from the 1950s. But this one is very, very special: as fate would have it, this vehicle was the 2 millionth unit produced. To celebrate, the chrome surfaces were coated in 24-carat gold, and this is the result. It was a real eye-catcher!\n\n![IMG_1566.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EouAEXy9avNfo2uEADq2j4VFf1zjywaJ4HtTrvzTfjA1tzWR3YPCtS51DUGZbo6hCcR.JPG)\n\n![IMG_1567.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EokeckbB5Y4PaphfkPmdgwPjuQYMycdUpNBnnBVrupMftqi6swRrJNdDUFrXKHoJuA5.JPG)\n\n1969 Kapitän B\n\nSecond generation of the previous model, which moves completely away from luxury both inside and out.\n\n![IMG_1569.JPG](https://files.peakd.com/file/peakd-hive/palomap3/EoiXd55zfNeFAErAaFPinZtpnbDsNVA7Zbh5VpUL2c3bNc1PZi2gNf5HjpS41seDaSf.JPG)\n\n1982 Corsa Spider\n\nA single-seater version of the Corsa, whose most curious feature was that the cassette player could be removed and used as a Walkman.\n\nWe’ve reached the end of this exhibition, which has something to delight everyone and is a real treat for motoring enthusiasts. I hope you’ve enjoyed it.\n\nUntil the next post. In the meantime, take care! \n\n[//]:# (!worldmappin 41.66738 lat -0.90499 long  d3scr)\n\n<center><img src=\"https://images.hive.blog/DQmfDaSmTz3y8oavngRrr5mmVhrTXheYoEU4qhGUS7pq3xh/HiveDivider.png\"></center>\n\nTools: iPhone 13 Pro camera, Mac photo editor.\nTranslated with [DeepL](https://www.deepl.com/)\nMy publications in [Worldmappin by clicking here](https://worldmappin.com/@palomap3)\nIf you like my content, join my [Fanbase clicking here](https://hive.vote/dash.php?fan=palomap3&i=2)\n\n![B67FB7A6-2E4B-43FD-BE20-57543B8993A2_4_5005_c.jpeg](https://files.peakd.com/file/peakd-hive/palomap3/23tmerjFT3bacskjaLCHwJcKiNucG1oEiEzj9BNLMfBBevvri9W4G7eDRveawxvcGY472.jpeg)\n\n©️Copyright 2026 Paloma Peña Pérez. All rights reserved.",
+        "category": "hive-14396",
+        "children": 30,
+        "community": "hive-14396",
+        "community_title": "Photo-essay",
+        "created": "2026-04-15T18:01:48",
+        "curator_payout_value": "0.000 HBD",
+        "depth": 0,
+        "is_paidout": false,
+        "json_metadata": {
+          "app": "peakd/2026.4.3",
+          "format": "markdown",
+          "image": [
+            "https://files.peakd.com/file/peakd-hive/palomap3/Ep7w3BnEfmCFkrdGExFbr2m6crkZACJUkXU5AY1z8zrjMuWNLMPKJ4gjmHbsSqfy89w.JPG",
+            "https://images.hive.blog/DQmeL6nS5tVdW3yAg896jjF7qwgqV3Bbowtank5sARnQSNN/ENES--Spanish.png",
+            "https://files.peakd.com/file/peakd-hive/palomap3/EouCzRaqVgZDGDMVxtPHKtHrQ7S1W3imoCZdLoVE5ychEGfcW2ij7ZtAavrBUuYj7ND.JPG",
+            "https://files.peakd.com/file/peakd-hive/palomap3/EpGU8SZr8qvKsQhKEVsh468FdNbXp2jQ9LPEEjV34V7YYADEXtcpQATrjA73Aa8VCNu.JPG",
+            "https://files.peakd.com/file/peakd-hive/palomap3/EoiYcdEZjZxDAfsiWW3QiPFL5RErZKHsTpnhiFtb88Sv58bfkG84LWakZtBYPFEm6cY.JPG",
+            "https://files.peakd.com/file/peakd-hive/palomap3/EpJb4RbYyHQUZrxKMvCJhm5FZybnsXG1EhF6M86wA1VVDCjQBdugMJwfnDCSkAGDVaY.JPG",
+            "https://files.peakd.com/file/peakd-hive/palomap3/EouB6EcajmexHy4THscJ4NDSGdEi43VYNDMFdDFtvKJb9Joyw9ftssSu2Vx27dNvXuZ.JPG",
+            "https://files.peakd.com/file/peakd-hive/palomap3/EogQiAK4dtGunkkN2kemNMQ2dgZC4DBUaGsuUDE8tdKobqKDE78WN1GVNS8jcoYkvN8.JPG",
+            "https://files.peakd.com/file/peakd-hive/palomap3/EpLhud7b8puSE4fTEgeFhmWUS8FoAdkJLBXgszdxUaLu1armB2Vk6ChEcdTTc3DFrRY.JPG",
+            "https://files.peakd.com/file/peakd-hive/palomap3/EpEJfm1tbmzpRzsHUjv9HBxGdEw9DZP4JbrErqi6dZVmr8bdnB6vhDBQigkE1efeHAZ.JPG",
+            "https://files.peakd.com/file/peakd-hive/palomap3/EpA5uEUN2bDtZRrRSA4AR6EJy8uEeW1FG1tXJkC5m8J5pzBAPEbMu8m2pyd8wPuZe5N.JPG",
+            "https://files.peakd.com/file/peakd-hive/palomap3/EpGSDVUmh5x7m2TL5FP1LUtsjGGYcQEovvb3Zo6z8dgm7Q3jqvNPoR6KNu2ow84cScx.JPG",
+            "https://files.peakd.com/file/peakd-hive/palomap3/Ep5qzUmshrKS86SoifC9s3WaBTTwiAHk2x9ygtFaMvip44FSUELY9r2zzfKrBKaN9sn.JPG",
+            "https://files.peakd.com/file/peakd-hive/palomap3/EokgT9rJh7zjXUBjsuRdBXLRPJDgtxkguK7cXJhTirDEqDeUUnQyf8TUSYyXeyL9bJL.JPG",
+            "https://files.peakd.com/file/peakd-hive/palomap3/EpJZU9Ur2gsZJ4V4TAWCLq9dHC3frs7oN6V3511FdChnSko2KQZaqXNQLHMZa4nGFEs.JPG"
+          ],
+          "tags": [
+            "spanish",
+            "photography",
+            "photo-essay",
+            "exhibition",
+            "cars",
+            "museum",
+            "motors",
+            "thealliance",
+            "pimp",
+            "tribes"
+          ],
+          "users": [
+            "palomap3"
+          ]
+        },
+        "max_accepted_payout": "1000000.000 HBD",
+        "net_rshares": 613082103957894,
+        "payout": 61.387,
+        "payout_at": "2026-04-22T18:01:48",
+        "pending_payout_value": "61.387 HBD",
+        "percent_hbd": 10000,
+        "permlink": "exposicion-opel-love-opel-love-exhibition",
+        "post_id": 149819500,
+        "reblogs": 14,
+        "replies": [],
+        "stats": {
+          "flag_weight": 0,
+          "gray": false,
+          "hide": false,
+          "total_votes": 1101
+        },
+        "title": "Exposición Opel Love // Opel Love Exhibition",
+        "updated": "2026-04-15T18:01:48",
+        "url": "/hive-14396/@palomap3/exposicion-opel-love-opel-love-exhibition"
+      },
+      {
+        "active_votes": [
+          {
+            "rshares": 215371208682362,
+            "voter": "smooth"
+          },
+          {
+            "rshares": 380379406674459,
+            "voter": "blocktrades"
+          },
+          {
+            "rshares": 5316964224,
+            "voter": "gandalf"
+          },
+          {
+            "rshares": 3468169666041,
+            "voter": "arcange"
+          },
+          {
+            "rshares": 200933951484,
+            "voter": "ura-soul"
+          }
+        ],
+        "author": "hbd.funder",
+        "author_payout_value": "0.000 HBD",
+        "author_reputation": 100.93,
+        "beneficiaries": [
+          {
+            "account": "hbdstabilizer",
+            "weight": 10000
+          }
+        ],
+        "blacklists": [],
+        "body": "The rewards for this comment are set to 100% beneficiary going to the @hbdstabilizer account.",
+        "category": "hbd",
+        "children": 0,
+        "created": "2026-04-15T04:57:00",
+        "curator_payout_value": "0.000 HBD",
+        "depth": 1,
+        "is_paidout": false,
+        "json_metadata": {
+          "app": "beem/0.24.26",
+          "tags": [
+            "hbd"
+          ]
+        },
+        "max_accepted_payout": "1000000.000 HBD",
+        "net_rshares": 656909811083218,
+        "parent_author": "hbd.funder",
+        "parent_permlink": "upvote-this-post-to-fund-hbdstabilizer",
+        "payout": 56.901,
+        "payout_at": "2026-04-22T04:57:00",
+        "pending_payout_value": "56.901 HBD",
+        "percent_hbd": 10000,
+        "permlink": "re-upvote-this-post-to-fund-hbdstabilizer-20260415t045701z",
+        "post_id": 149813348,
+        "reblogs": 0,
+        "replies": [],
+        "stats": {
+          "flag_weight": 0,
+          "gray": false,
+          "hide": false,
+          "total_votes": 25
+        },
+        "title": "RE: Upvote this post to fund @hbdstabilizer",
+        "updated": "2026-04-15T04:57:00",
+        "url": "/hbd/@hbd.funder/upvote-this-post-to-fund-hbdstabilizer#@hbd.funder/re-upvote-this-post-to-fund-hbdstabilizer-20260415t045701z"
+      },
+      {
+        "active_votes": [
+          {
+            "rshares": 215371208682362,
+            "voter": "smooth"
+          },
+          {
+            "rshares": 380379406674459,
+            "voter": "blocktrades"
+          },
+          {
+            "rshares": 5316964224,
+            "voter": "gandalf"
+          },
+          {
+            "rshares": 3468169666041,
+            "voter": "arcange"
+          },
+          {
+            "rshares": 200933951484,
+            "voter": "ura-soul"
+          }
+        ],
+        "author": "hbd.funder",
+        "author_payout_value": "0.000 HBD",
+        "author_reputation": 100.93,
+        "beneficiaries": [
+          {
+            "account": "hbdstabilizer",
+            "weight": 10000
+          }
+        ],
+        "blacklists": [],
+        "body": "The rewards for this comment are set to 100% beneficiary going to the @hbdstabilizer account.",
+        "category": "hbd",
+        "children": 0,
+        "created": "2026-04-15T04:57:06",
+        "curator_payout_value": "0.000 HBD",
+        "depth": 1,
+        "is_paidout": false,
+        "json_metadata": {
+          "app": "beem/0.24.26",
+          "tags": [
+            "hbd"
+          ]
+        },
+        "max_accepted_payout": "1000000.000 HBD",
+        "net_rshares": 656442602505109,
+        "parent_author": "hbd.funder",
+        "parent_permlink": "upvote-this-post-to-fund-hbdstabilizer",
+        "payout": 56.836,
+        "payout_at": "2026-04-22T04:57:06",
+        "pending_payout_value": "56.836 HBD",
+        "percent_hbd": 10000,
+        "permlink": "re-upvote-this-post-to-fund-hbdstabilizer-20260415t045707z",
+        "post_id": 149813350,
+        "reblogs": 0,
+        "replies": [],
+        "stats": {
+          "flag_weight": 0,
+          "gray": false,
+          "hide": false,
+          "total_votes": 19
+        },
+        "title": "RE: Upvote this post to fund @hbdstabilizer",
+        "updated": "2026-04-15T04:57:06",
+        "url": "/hbd/@hbd.funder/upvote-this-post-to-fund-hbdstabilizer#@hbd.funder/re-upvote-this-post-to-fund-hbdstabilizer-20260415t045707z"
+      },
+      {
+        "active_votes": [
+          {
+            "rshares": 21537075868237,
+            "voter": "smooth"
+          },
+          {
+            "rshares": 44974334464,
+            "voter": "fractalnode"
+          },
+          {
+            "rshares": 140965160042,
+            "voter": "pnc"
+          },
+          {
+            "rshares": 4661634503,
+            "voter": "leprechaun"
+          },
+          {
+            "rshares": 1172582875130,
+            "voter": "kenny-crane"
+          }
+        ],
+        "author": "keychain",
+        "author_payout_value": "0.000 HBD",
+        "author_reputation": 74.83,
+        "beneficiaries": [
+          {
+            "account": "hive.fund",
+            "weight": 10000
+          }
+        ],
+        "blacklists": [],
+        "body": "![](https://hackmd.io/_uploads/B1Sz1IEsbe.png)\n\n\nA lot has happened this past year, and if you've followed @keychain account posts, you know that we have continued building, improving, and expanding Hive Keychain across our mobile apps, browser extensions, and supporting infrastructure.\n\nLet's start with some numbers to put Hive Keychain in perspective:\n\n![5](https://hackmd.io/_uploads/S1QJCHNsZg.png)\n\n\nFor a detailed breakdown of how resources have been used, please refer to our transparency report:\n👉 [Transparency Report](https://peakd.com/hive-139531/@keychain/hive-keychain-dhf-and-transparency-update)\n\nThe current proposal is coming to an end, but there is still much we want to achieve to continue strengthening Hive’s ecosystem — which is why we are submitting this new proposal.\n\n---\n\n## Hive Keychain DHF\n\nThis new proposal will start immediately after the current one ends, with no overlap between the two.\n\nOur vision remains unchanged and continues to focus on three main goals:\n\n**Development**: Maintaining, improving, and expanding our extensions, mobile apps, and infrastructure based on user needs and ecosystem demand.\n\n**Cooperation**: Working with dApps and services both inside and outside of our Hive ecosystem.\n\n**Bridging Hive**: Expanding Hive’s reach through multichain integrations, starting with EVM (now in internal testing phase).\n\n---\n\n# I. Development\n\nDeveloping and maintaining Hive Keychain products remains our core objective.\n\nThe following sections highlight both what has been achieved and what we aim to improve next across this full stack.\n\n---\n\n## 1/ Keychain Extension\n\nOur extension remains at the forefront of development and continues to be the first platform to introduce new features. \n\n### Some highlights from this year:\n\n* Introduced Keyless Mode for travelers, nomads or single use of a borrowed device\n* Started the integration of several on/off ramp, swap and bridge providers for Hive and non-Hive cryptos\n* Expanded anonymous request capabilities\n* Introduced new requests and detailed history for operations such as savings and escrow transactions\n* Added more information on the confirmation pages for better verification\n* Improved RPC handling\n* Improved the Hive Multisig integration\n* Added Shortcuts to change account and navigate through the extension instantly\n* Started internal testing  of the EVM  integration. More on this below (see 3/)\n* Prepared a [key change and account recovery tool](https://recovery.hive-keychain.com)\n* Continuous UX and performance improvements\n* Implemented all new features introduced by the Hard Fork: extended multisig window, multiple recurrent transfers to the same user, new Voting Mana calculation\n\nWe also have a few features that have already been developed but will be shipped with EVM as they are used on both ecosystems:\n* A proper contact list\n* A standardized warning system\n* Customizable push notifications   \n\n### Next steps:\n\n* Improve EVM UX based on our several rounds of testing. After the current internal round of testing, we will go through a closed Alpha, then an open Beta. More on this in section III/\n* Keep enhancing our notifications system by making it more beginner-friendly\n* Continue implementing community-requested features\n* Add support for Hive-x402 for Hive native payments ([Read more](https://peakd.com/hive-139531/@ecency/hive-joins-the-internet-native))\n* Introduce our Gamification system (on both extension and mobile), to encourage user retention on Hive, by giving incentives to try different dApps. This is still in the ideation stage, but here are some ideas we have in mind:\n    - Show users'stats with a leaderboard for each parameter.\n    - Reward them for healthy, productive, or socially valuable actions with an XP system.\n    - Display badges, levels, and progress bars inside Keychain.\n    - Trigger optional shareables for social media or Hive posts.\n    - Create campaigns with other dApps to promote all Hive dApps beyond our Ecosystem page. \n* Maintain compatibility with future Hive Hardforks\n* Introduce new Partnerships and chain integrations\n* Add Lite Account support when available\n* Add a more streamlined Ticker Action page\n* Add support for more hardware wallets\n* Introduce an interactive Onboarding Guide for new users\n* Users / Devs support\n* More in the III/ Multichain section\n\n---\n\n## 2/ Keychain Mobile\n\nMobile continues to be one of our main focuses. It is now very close to full parity with the extension in terms of features, except, of course, for the coming EVM integration. On top of that, our in-App browser is now packed with new features which make your everyday mobile Hive experience even better!\n\n### Some highlights from this year:\n\n* Improved browser navigation through gestures\n* Enhanced favorites & history Management (introduced reordering and deletion through gestures)\n* Added the Dynamic Hive Engine RPC to avoid intrusive \"Change RPC\" popups\n* Download Media and Find in Page browser features\n* Ability to \"Open\", \"Open in another tab\", \"Copy link\", or \"Share\" a link after a long press in the browser\n* Security updates and account management improvements\n* Swap integrations and feature parity with extension\n* Big refactor of the login now allows direct biometrics login rather than necessitating both the PIN and biometrics\n* Browser navigation state is now preserved across restarts\n* Added a way to change the login PIN code\n* Performance and UX refinements\n* Expanded anonymous request capabilities\n* Introduced new requests and detailed history for operations such as savings and escrow transactions\n* Added more information on the confirmation pages for better verification\n* Implemented all new features introduced by the Hard Fork: extended multisig window, multiple recurrent transfers to the same user, and new Voting Mana calculation\n* New languages added\n\n### Next steps:\n\n* Bring full EVM support to mobile. We made a clear separation between our EVM UI/UX and the utilities that can be shared between the extension and the mobile Apps. This will cut our development time drastically, although it will remain a huge endeavour.\n* Continue improving browser usability\n* Expand feature parity with extension\n* Optimize performance and stability\n* Introduce the gamification system\n* Introduce an interactive Onboarding Guide for new users\n* Add light accounts when they come out\n* Enable NFC capabilities and integrate the Debit Card (we are currently waiting for the @hivedebit team to provide us their SDK)\n* Introduce portfolio and ticker widgets for iOS\n* Enable import of accounts through a .kc file, as is already possible on the extension side\n* Implement OTA (over the air) updates on mobile so we can deliver faster updates directly in-App)\n* Add support for Hive-x402 (see in 1/)\n* Submit an appeal to Apple after they forced us to remove the 'Conversion' core chain feature from the App\n\n\n---\n\n## 3/ Keychain Swaps\n\nKeychain Swap continues to play a central role in connecting tokens across Hive and beyond. This year, we improved safety and reliability (better price handling, failure cases, and routing) while integrating providers such as StealthEX and Changelly to open direct paths between Hive assets and the wider crypto ecosystem.\n\nThe next evolution is the introduction of a full aggregator experience inside Keychain. The first version will combine Portfolio, Buy, Sell, Swap, and Bridge into a single interface, powered by multiple providers (6 to start). This will allow users to seamlessly move between Hive, L2 tokens, and external chains while always getting the best route based on price and reliability.\n\nBeyond UX, this is a key part of our business model: by aggregating liquidity and routing across providers, Keychain can begin generating sustainable revenue, helping reduce long-term dependency on DHF funding while continuing to deliver core infrastructure to the ecosystem.\n\nWe already started working on the Aggregator, and here is a sneak peek for you:\n\n![](https://hackmd.io/_uploads/rJV8dNth-l.png)\n![](https://hackmd.io/_uploads/S1EUuVt3-e.png)\n\n\n\n### Next steps:\n\n* Expand routing across multiple swap providers, aggregators, and bridges to provide the fastest and cheapest routes\n* Integrate EVM-compatible assets\n* Launch the full Aggregator \n* Improve rates, reliability, and execution efficiency across providers\n* Improve and expand our Swap Widget capabilities to match our in-app Swap.\n\n---\n\n## 4/ SDK & Playground\n\nDeveloper tooling remains a priority for easy access to all devs to our ecosystem and Hive. Making it easy to integrate Hive Keychain into any dapps is the fastest way to deploy any project on Hive, and for that, we:\n\n* Revamped the Playground (Gitbook-style interface) \n* Expanded request support for savings and all escrow transactions (transfer, accept, reject, dispute)\n* Improved documentation and testing tools\n\n\n![](https://hackmd.io/_uploads/Bysm_vjhbg.png)\n\n\n\n### Next steps:\n\n* Continue improving developer onboarding processes \n* Expand SDK capabilities with EVM requests\n* Support new request types and integrations (including EVM)\n* Update our landing page with all the information about EVM integration and new partnerships\n* Create a Keychain AI Skill to make it even easier to integrate Keychain\n\n---\n\n## 5/ Infrastructure & Backend\n\nOur backend infrastructure has evolved significantly, especially with the introduction of multichain (EVM) support.\n\nA key component of this is the development of a light node system, a heavy backend layer that continuously monitors addresses across supported chains. This is necessary in order to provide advanced features that are not readily available on public RPCs, while mitigating the costs of using third-party providers.\n\nSupporting this level of functionality requires a robust and scalable infrastructure, with significant DevOps work to maintain uptime and performance while adding multiple third-party integrations to enrich data and capabilities\n\n**This backend layer powers critical features such as:**\n- Full transaction history across all chains\n- Token and NFT discovery and metadata enrichment\n- Smart contract interaction analysis\n- Gas fee oracles and transaction gas estimation\n- Cross-chain asset visibility\n\nAs Keychain evolves into a multichain wallet, this infrastructure becomes a core pillar of the product, ensuring a seamless and reliable experience for users across all supported ecosystems. \n\n---\n\n## 6/ And much more\n\nOver the past year, we have continued delivering features across all components of our stack, including several core projects that power our ecosystem. Beyond the extension, mobile apps, swaps, and SDK, our work also spans:\n\n- **Keychain Store:** the easiest way for merchant payments + global map, powering 77 businesses (mostly in Venezuela) to accept HBD payments in their store \n- **Hive Multisig:** is now maintained by the Keychain team to provide multisig and 2FA on Hive [here](https://multisig.hive-keychain.com/)\n- **Landing Page:** [hive-keychain.com](https://hive-keychain.com/) with a new look, more languages, and better SEO performance \n- **Keychain Commons:** shared utilities across projects\n- **Tools:** [Hive QR Code generator](https://qr.hive-keychain.com/), [recovery tool](https://recovery.hive-keychain.com/), [our dashboard](https://dashboard.hive-keychain.com/) and more\n\n---\n\n# II. Cooperation\n\n## 1/ On Hive\n\nWe continue working closely with projects across the Hive ecosystem:\n\n* Supporting dApps with Keychain integration\n* Adding new dApps to our Hive ecosystem screens, for easy dApp discovery on both extension and mobile\n* Collaborating on onboarding and UX improvements\n* Contributing to ecosystem-wide features (multisig, 2fa)\n* Creating social campaigns with different dApps using our social channels\n\nFuture cooperations:\n- implementing the Hive Debit Card as soon as their SDK is ready\n- adding Hive-built swaps and bridges when production-ready (Magi swaps, wrapped HIVE, etc.)\n\n## 2/ Outside of Hive\n\nWe are actively expanding Hive’s reach beyond its current ecosystem:\n\n* Partnerships with swap providers and aggregators\n* Discussions with external crypto companies and L1 blockchains\n* Pushing for HIVE / HBD listing whenever possible\n\nSome providers we've contacted already support Hive, while others are evaluating integration. These efforts aim to make Hive more accessible and connected globally. We're also looking into digital and physical debit card providers to see if there are some possibilities for Hive integration.\n\nYou can find more details about this topic in our latest [transparency report](https://peakd.com/hive-139531/@keychain/hive-keychain-dhf-and-transparency-update).\n\n---\n\n# III. Multichain\n\nMultichain integration has become a major focus of our work over the past year and represents a significant investment of time and resources from the team. Although this code hasn't been deployed to production yet, it can be found in the `feature/evm` branch that is currently 697 commits ahead of the `master` branch. We strongly believe this major update will be a game-changer for Hive, as it will enable the ecosystem to connect directly with the broader crypto landscape rather than operate in isolation.\n\nEVM integration is not just about adding new chains; it is about bringing liquidity, users, and interoperability to Hive, while making it easier for developers from outside ecosystems to interact with Hive using familiar standards. \n\nWe are currently in the internal testing phase of our EVM integration. This stage focuses on validating core flows, ensuring stability, and identifying edge cases before exposing the feature more broadly. Once we're satisfied with this, we will continue with a closed alpha testing phase with a few selected testers and finally, a wider open alpha, on which anyone will be able to participate.\n\nWe will actively look for testers willing to spend time using the product and providing meaningful feedback, as these testing phases will be critical to ensuring a solid transition to a multichain wallet.\n\n![](https://hackmd.io/_uploads/Hyj-_Rjnbe.png)\n\n\n\nOur first version aims to provide a full-fledged EVM wallet experience on 7 of the most popular EVM chains: Ethereum, Base, BSC, Optimism, Polygon, Avalanche, and Arbitrum, as well as their testnets.\n\nTo list a few of the many features we've implemented:\n\n- Account creation and management across selected EVM chains\n- Automatic token and NFT discovery\n- RPC handling\n- Full history\n- Account value\n- Token and NFT transfers\n- Contact list\n- Automatically switch to the chain the current dApp is using\n- Login and Transaction signing for EVM dApps\n- Gas fee calculation\n- Spam token/NFT detection\n- ENS detection\n- EVM Swaps\n- Smart contract analysis\n- Security warnings during dApp requests\n\n![13](https://hackmd.io/_uploads/HJt5e53hbx.jpg)\n![14](https://hackmd.io/_uploads/B1Kqe53nWx.jpg)\n![15](https://hackmd.io/_uploads/rJYqxc22Zl.jpg)\n![16](https://hackmd.io/_uploads/S1Fqg5hhWe.jpg)\n\n\n\nNext steps:\n\n- Improve EVM UX and stability based on testing feedback\n- Expand supported features\n- Add chain coverage \n- Bring EVM support to mobile\n- Strengthen interoperability between Hive and EVM ecosystems\n- Add onboarding funnels from EVM users to Hive\n\n---\n\n# IV. Additional Work\n\n## 1/ Support\n\nWe continue to provide support through Discord and community channels, helping users and developers integrate and troubleshoot.\n\n## 2/ Community Growth\n\nWe continue expanding Hive Keychain’s presence beyond Hive through social platforms (X, Linkedin) and partnerships.\n\n## 3/ Infrastructure\n\nWe maintain and scale backend systems required to support our APIs, swaps, multisig, as well as our current multichain integration. \n\n---\n\n# V. Budget\n\nFor this new proposal, we are reducing our budget to 540 HBD/day, a 10% decrease from our past proposal, in order to lower a bit our impact on the DHF. Our medium-term goal is to reduce further our proposal's budget once we have a stable income from our swap aggregation services.\nThis cut, along with a non-negligible increase in our infrastructure and API costs due to the multichain integration, will translate into a 24% cut of our development costs. This has been rendered possible by the rapid improvement of AI technology, which allows us to greatly increase our output while reducing the manpower involved. That being said, there are limits to this, especially for software as security-sensitive as a crypto wallet.\nAfter these changes, our monthly budget will look as follows.\n\n- Development (2 full-time senior devs, 1 part-time): $ 11,400\n- CM & Ecosystem growth: $ 850\n- Tools (AI): $ 440\n- Tools (others): $ 130\n- Admin: ~ $ 1,000\n- Infrastructure: ~ $ 900\n- EVM third-party providers: ~ $ 480\n- Misc: ~ $ 1,000\n- Total: $ 16,200\n\nFor more information about these different items, read our [transparency post](https://peakd.com/hive-139531/@keychain/hive-keychain-dhf-and-transparency-update).\n\n---\n\n# VI. Commitments\n\n* Keep our extensions, mobile apps, and main projects open-source\n* Continue regular updates and transparency posts\n* Deliver features aligned with the proposal scope\n* Strive to generate more revenue through our swap features, in order to reduce our reliance on the DHF. Publish revenue publicly.\n* Include Hive in any way possible in all marketing efforts and collaborations with new partners. \n\n\n---\n\n# VII. Our Team\n\n@stoodkev : Founder - [Witness](https://hivesigner.com/sign/account-witness-vote?witness=stoodkev&approve=1)\n@cedricguillas : Lead Developer\n@manuphotos : Ecosystem Growth Lead - [Witness](https://hivesigner.com/sign/account-witness-vote?witness=hivecuba&approve=1)\n@yabapmatt : Advisor - [Witness](https://hivesigner.com/sign/account-witness-vote?witness=yabapmatt&approve=1)\n\n\n---\n\n# VIII. Downloads & Contact\n\nFind all apps, extensions, and resources here:\n👉 [Landing page](https://hive-keychain.com/)\n\nFor support and discussions:\n👉 [Discord link](https://discord.gg/XWgvP4f7Jg)\n\n\n---\n\n\n### Support Hive Keychain development by voting for this proposal (#373) on [PeakD](https://peakd.com/me/proposals/373),  or with [HiveSigner](https://hivesigner.com/sign/update-proposal-votes?proposal_ids=%5B373%5D&approve=true).\n\n---\n\n*100% of the rewards of this post are going to the DHF*\n\n",
+        "category": "hive",
+        "children": 53,
+        "created": "2026-04-15T08:31:51",
+        "curator_payout_value": "0.000 HBD",
+        "depth": 0,
+        "is_paidout": false,
+        "json_metadata": {
+          "app": "peakd/2026.4.3",
+          "format": "markdown",
+          "image": [
+            "https://hackmd.io/_uploads/B1Sz1IEsbe.png",
+            "https://hackmd.io/_uploads/S1QJCHNsZg.png",
+            "https://hackmd.io/_uploads/rJV8dNth-l.png",
+            "https://hackmd.io/_uploads/S1EUuVt3-e.png",
+            "https://hackmd.io/_uploads/Bysm_vjhbg.png",
+            "https://hackmd.io/_uploads/Hyj-_Rjnbe.png",
+            "https://hackmd.io/_uploads/HJt5e53hbx.jpg",
+            "https://hackmd.io/_uploads/B1Kqe53nWx.jpg",
+            "https://hackmd.io/_uploads/rJYqxc22Zl.jpg",
+            "https://hackmd.io/_uploads/S1Fqg5hhWe.jpg"
+          ],
+          "tags": [
+            "hive",
+            "hivedev",
+            "dhf",
+            "keychain",
+            "proposal",
+            "dev"
+          ],
+          "users": [
+            "keychain",
+            "ecency",
+            "hivedebit",
+            "stoodkev",
+            "cedricguillas",
+            "manuphotos",
+            "yabapmatt"
+          ]
+        },
+        "max_accepted_payout": "1000000.000 HBD",
+        "net_rshares": 483132091702535,
+        "payout": 46.804,
+        "payout_at": "2026-04-22T08:31:51",
+        "pending_payout_value": "46.804 HBD",
+        "percent_hbd": 10000,
+        "permlink": "hive-keychain-development-proposal-2026",
+        "post_id": 149814589,
+        "reblogs": 17,
+        "replies": [],
+        "stats": {
+          "flag_weight": 2,
+          "gray": false,
+          "hide": false,
+          "total_votes": 648
+        },
+        "title": "Hive Keychain Development Proposal 2026",
+        "updated": "2026-04-15T08:33:12",
+        "url": "/hive/@keychain/hive-keychain-development-proposal-2026"
+      },
+      {
+        "active_votes": [
+          {
+            "rshares": 21880110787578,
+            "voter": "steempty"
+          },
+          {
+            "rshares": 114113676105679,
+            "voter": "blocktrades"
+          },
+          {
+            "rshares": 444981990,
+            "voter": "nanzo-scoop"
+          },
+          {
+            "rshares": 14101146323,
+            "voter": "ak2020"
+          },
+          {
+            "rshares": 819186899,
+            "voter": "emily-cook"
+          }
+        ],
+        "author": "acidyo",
+        "author_payout_value": "0.000 HBD",
+        "author_reputation": 83.91,
+        "author_role": "mod",
+        "author_title": "",
+        "beneficiaries": [
+          {
+            "account": "zing.fund",
+            "weight": 1000
+          }
+        ],
+        "blacklists": [],
+        "body": "Been continuing to build on the holo swarm game lately, constantly adding things so thought I'd show you a bit more about what exists so far. \n\nThis'll probably be the more serious minigame with many different modes and systems before I start tackling some things in the main game which is written in unity. \n\nAnyway, let me know what you think! \n\nhttps://www.youtube.com/watch?v=UnYMu0P6408",
+        "category": "hive-131131",
+        "children": 31,
+        "community": "hive-131131",
+        "community_title": "Holozing Community",
+        "created": "2026-04-15T01:58:09",
+        "curator_payout_value": "0.000 HBD",
+        "depth": 0,
+        "is_paidout": false,
+        "json_metadata": {
+          "app": "peakd/2026.4.3",
+          "format": "markdown",
+          "image": [],
+          "tags": [
+            "holo",
+            "swarm",
+            "day",
+            "5"
+          ],
+          "users": []
+        },
+        "max_accepted_payout": "1000000.000 HBD",
+        "net_rshares": 344737703421554,
+        "payout": 34.528,
+        "payout_at": "2026-04-22T01:58:09",
+        "pending_payout_value": "34.528 HBD",
+        "percent_hbd": 10000,
+        "permlink": "holo-swarm-day-5",
+        "post_id": 149812120,
+        "reblogs": 4,
+        "replies": [],
+        "stats": {
+          "flag_weight": 2,
+          "gray": false,
+          "hide": false,
+          "total_votes": 507
+        },
+        "title": "Holo Swarm day 4",
+        "updated": "2026-04-16T05:23:21",
+        "url": "/hive-131131/@acidyo/holo-swarm-day-5"
+      },
+      {
+        "active_votes": [
+          {
+            "rshares": -10768512934119,
+            "voter": "smooth"
+          },
+          {
+            "rshares": 1257865435,
+            "voter": "tuck-fheman"
+          },
+          {
+            "rshares": 11310674294,
+            "voter": "drifter1"
+          },
+          {
+            "rshares": 199943327823,
+            "voter": "team"
+          },
+          {
+            "rshares": 47333432155,
+            "voter": "kevinwong"
+          }
+        ],
+        "author": "darine.darine",
+        "author_payout_value": "0.000 HBD",
+        "author_reputation": 74.29,
+        "author_role": "guest",
+        "author_title": "",
+        "beneficiaries": [],
+        "blacklists": [],
+        "body": " ![IMG_20260415_125548_967.jpg](https://images.hive.blog/DQmfGiGgdyNqQGL85XWnYYAgcDCm6vbCnQ2WLdg2MJ9pGHm/IMG_20260415_125548_967.jpg) \n\nThe next morning in Istanbul, which was our last day there, wasn’t very pleasant. I was really happy to be back in Istanbul, and one of our main goals was to see the major landmarks again — especially a few of the main mosques — but this time to go inside them. However, that morning, after we woke up, we found out that unfortunately our friend couldn’t join us at all — meaning he also couldn’t take us to the landmarks — so our plans had to be canceled.\nWith our flight coming up fairly soon, taking public transport to the city center, which was quite far from our apartment, and then heading back in the opposite direction would have been too risky. So, we packed our things, checked out of our place, and went to look for the metro to figure out how to get tickets, since taking a taxi all the way to the airport was too expensive.\n\n ![IMG_20260409_232208_726.JPG](https://images.hive.blog/DQmaG2e1jqBPDZEoKSJVJg8XUQtrdobg9h8cAXcj2LXK6do/IMG_20260409_232208_726.JPG) \n\nWe left all our bags in the building’s security office (and there was plenty of them — don’t forget, we had moved out of our car before, where we had plenty of belongings. If you want the full story, go back to my previous article about nighttime Istanbul), and set off to explore, walking along the sloping morning streets.\n\nİn Istanbul there's this street called \"Halaskargazi\". İgnore all negative people in your life the way you ignored that name 😁😂😂😂 (For all my other very observant to details friends, which actually read it, please, also don't mind them)\nSo, it was the closest main street to our apartment, and the easiest way to reach subway going there.\nAfter going down and reaching Halaskargazi Street, we were greeted by the morning bustle of Istanbul. Along the street, you could see beautiful old architecture mixed with modern buildings. This place truly blends the two aesthetics in a very harmonious way.\n\n![IMG_20260409_231232_428.JPG](https://images.hive.blog/DQmPKGTy8FmKA3MWnBnkNLYbCaxT2T4Z5jzVagdFys8Fwto/IMG_20260409_231232_428.JPG)\n\nAround us, there were many little details that added uniqueness and charm to the city, and one of those was a beautiful decoration:\n\n![IMG_20260409_231847_670.JPG](https://images.hive.blog/DQmQUdj73a4WYmktnSsGcnknvnTDzmf1vWwHZLwmz9BCxvJ/IMG_20260409_231847_670.JPG)\n\nA wide rack full of different flowers, waiting to be bought to light up someones day ✨ \nThis is one of my favorite things in cities, because it looks so incredibly bright, and really adds life!\n\n ![IMG_20260410_204219_534.JPG](https://images.hive.blog/DQmSpZ7BRHvxJef1d5rBx6cbiak3knXS9GPu3ree7hy5NfV/IMG_20260410_204219_534.JPG) \nWhich flower in this \"big bouquet\" do you like the most? My favourite ones are the sunflowers and lilies ✨🌻🌸\n\n![IMG_20260409_231214_546.JPG](https://images.hive.blog/DQmeAE5Dwcy7n9ZLPByoKMv4cozgETwnb7C6TszNoEWBDKg/IMG_20260409_231214_546.JPG)\n\nAs I mentioned in my previous article, Istanbul is a city of great opportunities, and every day —especially in the morning — you can see people heading somewhere, trying to achieve their dreams. And this morning was no exception. There were people everywhere, all of them in a hurry.\n\n![IMG_20260409_231226_897.jpg](https://images.hive.blog/DQmfXdbtuSFcC75r8WRchv2Hukn1izj2WLM9xuCvAbMJx8c/IMG_20260409_231226_897.jpg)\n\n![IMG_20260409_231223_012.JPG](https://images.hive.blog/DQmWWpgBnwuHmUQmWNdwf1dCUf6gKusa4kmSKLLLgj6hwRq/IMG_20260409_231223_012.JPG)\n\nWe started walking along the street, searching for a metro entrance. Finally, we found one, went down, and approached the ticket machines. But unfortunately, the system seemed too complicated for us to understand. We couldn’t figure out how to use the machine to get tickets—it seemed like you needed a special card, and we had no idea how to get one. Our friend wasn’t responding at that moment either. Maybe it wasn’t even possible for tourists 🤷🏼‍♀️.\n\n ![IMG_20260410_040543_641.jpg](https://images.hive.blog/DQmXBeKgFXHGhMFWX2yb6PzWv71uAfTqRM4XWJxV2q4soJu/IMG_20260410_040543_641.jpg) \n\n(The owner of the bike relaxing on their vehicle)😸😸😸\n\nSo, with the disappointment of realizing we would have to take an incredibly expensive taxi after all, we came back up from underground and decided to go into a café to eat before the flight.\n\n![IMG_20260409_231251_638.JPG](https://images.hive.blog/DQmQmJmRtLRkx1XHRD5KdN5uB9xuMsGeAtTk3SqWSwArAmo/IMG_20260409_231251_638.JPG)\n\n ![IMG_20260409_204241_876.jpg](https://images.hive.blog/DQmUWmDjMYUGebfnczp8UniRDtJP8nPftfKh3uQAoYX2BD8/IMG_20260409_204241_876.jpg) \n\nThe café’s atmosphere felt cozy compared to all the city chaos outside. We ordered a “healthy food vs fast food” combo (fries and a salad), ate before the flight, and then headed back to our bags.\n \nOn the way, we saw how people were filming an advertisement of some brand, and it was extremely interesting to watch. You really can see in this city constantly around interesting actions, new projects, or opportunities. A real flow of movement.\n\n\n![IMG_20260410_014635_431.jpg](https://images.hive.blog/DQmd19pNRppwwftUCSxKwDa8DAU28VyNsjWfK5MC4QHjfma/IMG_20260410_014635_431.jpg)\n\n\n\nHaving finally gone back up to our bags, the security guard called a taxi, and our journey began. Putting all the bags into the trunk, we set off on a kind of “excursion” around all of Istanbul, because ohhh, with these morning traffic jams, it would be a long ride.\n\nDriving out, we were immediately met with a sea of cars on the roads. And so, we were also met with the worry about whether we would even make it to the plane. At the same time, the driver had a big responsibility to get us there. A long road, a big cost, a big risk, but at the same time, nothing depended on him in this situation.\n\n![IMG_20260410_014620_232.jpg](https://images.hive.blog/DQmdvsGvYBY7MrF9exwofqvWcEoYMTkEPvywei5HZd24xcP/IMG_20260410_014620_232.jpg)\n\n![IMG_20260410_014659_345.JPG](https://images.hive.blog/DQmTfy5NKvhc4YzMzjM4hhAzcZ5Dh5wgSxMzvBDunXuSTrX/IMG_20260410_014659_345.JPG)\n\nIn the first minutes, we were driving through quieter streets, although they still had heavy traffic. We stood for so long that you could observe how locals calmly live their lives. On these quiet streets, since they are at a strong slope ahead while we were standing, you could look at the beautiful view of how architecture mixes with nature in the city. The greenery made the city more alive, brighter and fresher. Among the trees, glass skyscrapers were rising, which seemed to reach the clouds, compared to the small residential houses standing nearby.\n\n![IMG_20260410_014653_170.JPG](https://images.hive.blog/DQma6zxq5emzRmzxHpb5nBCkZzdZSf1T2Rf4NJNpSjacoZg/IMG_20260410_014653_170.JPG)\n\n![IMG_20260410_211446_641.jpg](https://images.hive.blog/DQmeAwHxDbBfy3TCcxnC4g7wscho9uu1kYXHp6bbMU5Bw4B/IMG_20260410_211446_641.jpg)\n\n![IMG_20260410_211450_203.jpg](https://images.hive.blog/DQmdcctDRgYXhW5PUNabCNMBPJtABVVpEMV8w4jWymDcME7/IMG_20260410_211450_203.jpg)\n\n And as soon as we drove onto the bridge — what an incredible sight it was.\nLeaning my head out of the open taxi window, my hair was flying in every direction, and that is the feeling of freedom! Yes, I know I’m breaking every safety rule — but just this once, right? 😀 (please, I know you absolutely shouldn’t do this; some people reading this were probably already ready to list all the possible consequences of such a “joke”, it was just a brief moment).\n\n![IMG_20260410_211459_737.JPG](https://images.hive.blog/DQmcqN4i1UJA8X8y4KYRC89exsmTBarYHvyERoqF3brBhQ8/IMG_20260410_211459_737.JPG.)\n\n ![IMG_20260414_215644.jpg](https://images.hive.blog/DQmePsaM6Va9Cjp1ojwdVmxSZYYq2Xx3ZdaaVS4SA1gibrZ/IMG_20260414_215644.jpg) \n\nThe view from the bridge is breathtaking. In daylight, the city was no less impressive. From up there, you can see the entire bay with endless sea which flows all the way into the horizon, ships going around there all day long, along with the architecture tightly wrapping around it on both sides of the land. Among it stands the same Ortaköy Mosque I mentioned in my previous post. In the daylight, it looked even more elegant. İt's light blue roof harmonically matched the water. \nThe water shimmered under the morning sun, turning into silver ✨🌊\n\n ![IMG_20260414_214214.jpg](https://images.hive.blog/DQmYW6g46i4dRF8KSUFqPyzaJBmQV7u2tTc9j5548nwnteg/IMG_20260414_214214.jpg) \n\n🇹🇷🇹🇷🇹🇷🇹🇷🇹🇷🇹🇷🇹🇷🇹🇷🇹🇷🇹🇷🇹🇷🇹🇷🇹🇷🇹🇷\n\nFrom the other side of the bridge, you could see the Istanbul hills. \nA wide view of Istanbul opened up before us. On the hill called Çamlıca, large red Turkish flags fluttered in the wind, immediately drawing attention by their bright colour. They rose above the green trees and dense buildings, adding contrast to the calm blue sky.\nIn my last post, i was writing about the beautiful view over the Bosphorus, and i was noticing how lively and green the hill on the other side was. Now, i read that i was looking at the Çamlıca hill. And so, i wanted to know why it was called that way, and so — the name comes from Turkish word Çam, meaning \"Pine\". Now, it all makes sense. You can see a lot of pines in between the architecture, especially from the other side 🌲\n\n![IMG_20260414_214637.jpg](https://images.hive.blog/DQmQhTHGfHS9waHibAoGbvGoDBoQMvnTKchKgRmKuyGgAFU/IMG_20260414_214637.jpg)\n\n[//]:# (!worldmappin 41.02626 lat 29.06759 long  d3scr)\n\n![IMG_20260414_215115.jpg](https://images.hive.blog/DQmNeNX41392rjyhp5hcieie3RiGyqNcn63sv22PNQU7rxH/IMG_20260414_215115.jpg)\n\nOn the other part of the hill, stood the large Çamlıca Mosque with several tall minarets and a large central dome. It stood out clearly against the bright sky and immediately attracted attention. This mosque, wasn't ancient. Planning of building started in 2000 year, and the ones leading the project were two architects Bahar Mizrak\nand Hayriye Gül Totu. The building process started in 2013 and ended in 2019 as I read. Their design of the Mosque even won a second place in a competition! \nAround the mosque were dense blocks of houses, so colourful, each different, combined together perfectly, and made a unique Turkish style pattern. It's such a lively hill, also full of those bright green pines, made a perfect view together. Those houses seemed to rise up the slopes, creating the feeling of a multi-layered city. Some buildings looked more modern, others - older, but together they formed a beautiful cityscape. Even though there was such a big mosque, underneath you could see another one, smaller. I don't really know why they built another one, but it looks quite interesting. \n\n ![IMG_20260414_133340.jpg](https://images.hive.blog/DQmSL8KBg2iiz3qwRqosSJsSJfcuKGzsQ4CdoYGnwYh3Jdr/IMG_20260414_133340.jpg) \n\nNext, after driving a little, we saw another landmark from the side - Çamlıca Tower. I was fascinated by its strange design, and it stood so beautifully on that hill! The height of the tower is about 369 meters, which makes it the tallest building in Istanbul, and the fact that it also stands on a hill (Çamlıca, from which its name comes), makes it very visible from many points of the city.\nIt was built as a replacement for dozens of old television towers and antennas that used to spoil the appearance of the city, in 2020. Now most of Istanbul's TV and radio signals are transmitted from here.\nIt also serves as an observation deck. Inside there are observation platforms from which you can see a panorama of the entire city, including the Bosphorus. There is also a restaurant and a cafe where you can sit with a view of Istanbul. Unfortunately, this time we did not visit anything, but next time I hope we will be able to visit here too.  Its design was made in such a way that it harmoniously blends into the nature around it.\n\n![IMG_20260414_131552_523.JPG](https://images.hive.blog/DQmeNYeUBcguY1UiMeE1nVjW79NyNhmCyRRgKwrGw8LAS8Q/IMG_20260414_131552_523.JPG)\n\n![IMG_20260414_131554_561.JPG](https://images.hive.blog/DQmPiKfxfKe7QNn3rvjXndYdWxp2CJtVG2JivWqheBjc9oQ/IMG_20260414_131554_561.JPG)\n\nOn the exit from the city, there was some interesting modern architecture, it looked like some futuristic city 🛸\n\n![IMG_20260414_131600_481.jpg](https://images.hive.blog/DQmRAXJTUmdz8PR5p95SgYam3w6YuFQ3BbmoB9HiiX2xsW8/IMG_20260414_131600_481.jpg)\n\nAnd thank goodness, our Taxi driver was too professional to make us not make it to our flight, so we quickly passed the control, came on board, and waved goodbye to Istanbul 👋🏼 I really hope to come one day again, and visit every place properly, but this time, even though we couldn't go anywhere, we saw so many places. İt was actually like an excursion! 🚖\n\nBye bye everyone! 🇹🇷🕌",
+        "category": "hive-163772",
+        "children": 16,
+        "community": "hive-163772",
+        "community_title": "Worldmappin",
+        "created": "2026-04-15T10:06:54",
+        "curator_payout_value": "0.000 HBD",
+        "depth": 0,
+        "is_paidout": false,
+        "json_metadata": {
+          "app": "hive.blog/0.9",
+          "author": "",
+          "format": "markdown+html",
+          "image": [
+            ""
+          ],
+          "summary": "",
+          "tags": [
+            "travel",
+            "ocd",
+            "photography",
+            "architecture",
+            "history",
+            "qurator",
+            "worldmappin",
+            "istanbul"
+          ]
+        },
+        "max_accepted_payout": "1000000.000 HBD",
+        "net_rshares": 335220820924304,
+        "payout": 33.636,
+        "payout_at": "2026-04-22T10:06:54",
+        "pending_payout_value": "33.636 HBD",
+        "percent_hbd": 10000,
+        "permlink": "the-taxi-excursion-morning-in-istanbul",
+        "post_id": 149815197,
+        "reblogs": 7,
+        "replies": [],
+        "stats": {
+          "flag_weight": 3,
+          "gray": false,
+          "hide": false,
+          "total_votes": 1491
+        },
+        "title": "The Taxi excursion 🚕 Morning in Istanbul",
+        "updated": "2026-04-16T14:20:03",
+        "url": "/hive-163772/@darine.darine/the-taxi-excursion-morning-in-istanbul"
+      },
+      {
+        "active_votes": [
+          {
+            "rshares": 32143175032361,
+            "voter": "abit"
+          },
+          {
+            "rshares": 26915673526915,
+            "voter": "adm"
+          },
+          {
+            "rshares": 23273646283,
+            "voter": "good-karma"
+          },
+          {
+            "rshares": 669034822076,
+            "voter": "ace108"
+          },
+          {
+            "rshares": 1085488544,
+            "voter": "kaykunoichi"
+          }
+        ],
+        "author": "cutehive.com",
+        "author_payout_value": "0.000 HBD",
+        "author_reputation": 69.69,
+        "author_role": "guest",
+        "author_title": "",
+        "beneficiaries": [],
+        "blacklists": [],
+        "body": "While using **HIVE READER MINI**, a friend recently asked me a very practical question:  \n>👉 *How can I find the TXID of a deposit I made to an exchange (such as Binance)?*\n\nThis made me realize that although HIVE READER already supports viewing wallet records and account activities, **it didn’t display the TXID**, which can be inconvenient in certain scenarios.\n\n\n![image.png](https://images.hive.blog/DQmUUcd7YkQ9ekWcHZ1RoPCK3WuEExM2795yyH6WYdiSmkN/image.png)\n\n\nWhen dealing with exchanges, **the TXID (transaction hash) is one of the most critical pieces of information**, as it allows the other party to quickly locate your transaction.\n\nSo, I’ve added this feature to HIVE READER MINI to make things easier for everyone 👇\n\n---\n\n## ✨ Key Update: Full TXID Display Support\n\nYou can now directly view the transaction ID (TXID) in:\n\n- Wallet Activity  \n- Activities  \n\n---\n\n## 🧩 Technical Improvements\n\nThis update goes beyond UI enhancements and includes backend optimizations:\n\n- **Data Model Extension**  \n  The Activity interface now includes a new `trx_id` field to store the transaction hash from the Hive blockchain.\n\n- **Service Layer Optimization**  \n  Updated the `getHistory` and `getWalletHistory` methods in `hiveService.ts`:  \n  👉 Automatically extracts and stores the TXID for each operation when fetching account history from Hive nodes.\n\n\n![ed2a96425f2c9b0588c48409855b3569.png](https://images.hive.blog/DQmWWJQmoYoyDQNDjt6DPhAoQs9NQrbEkxC2XJHKh9DEabG/ed2a96425f2c9b0588c48409855b3569.png)\n\n\n## 🖥️ UI Enhancements: Clearer and More Intuitive\n\n### 📌 JSON Modal Upgrade (JsonModal)\n\nWhen you click the activity icon to view raw JSON data:\n\n- If a TXID is present  \n- It will be displayed prominently at the top of the modal in **orange text** under the **TXID** section\n\nThis makes it easy to spot at a glance.\n\n---\n\n## ⚡ New Feature: One-Click TXID Copy\n\nTo further improve usability, a quick copy feature has been added:\n\n- 🆕 **Copy Button**  \n  A small copy icon is now displayed next to the TXID\n\n- ⚡ **One-Click Copy**  \n  Click the icon to instantly copy the TXID to your clipboard\n\n- ✅ **Visual Feedback**  \n  The icon briefly changes to a checkmark (✔) to confirm a successful copy\n\n- 🔄 **Independent State Management**  \n  The TXID copy function works independently from the “Copy Full JSON” button for more precise interaction\n\n\n![image.png](https://images.hive.blog/DQmUQSsN373Gzr5ep93KNKThMrHaPnt2brBCXtJTwvQHzi7/image.png)\n\n\n## 🚀 Practical Benefits\n\nWith TXID support, you can now:\n\n- Quickly provide transaction proof to exchanges (e.g., Binance)  \n- Easily look up transactions in Hive block explorers  \n- Improve efficiency in troubleshooting and asset tracking  \n\n---\n\n## 🌐 Current Version\n\n✅ **Version: v2.7.8**  \n👉 https://reader.cutehive.com\n\n\n\nWe always listen to user feedback, and this update is a direct result of a real-world use case. We’ll continue refining and improving the tool to make it more practical and user-friendly.\n\n**Step by step, contributing to the growth of the HIVE ecosystem.**",
+        "category": "hive-139531",
+        "children": 2,
+        "community": "hive-139531",
+        "community_title": "HiveDevs",
+        "created": "2026-04-15T08:43:30",
+        "curator_payout_value": "0.000 HBD",
+        "depth": 0,
+        "is_paidout": false,
+        "json_metadata": {
+          "app": "hiveblog/0.1",
+          "format": "markdown",
+          "image": [
+            "https://images.hive.blog/DQmUUcd7YkQ9ekWcHZ1RoPCK3WuEExM2795yyH6WYdiSmkN/image.png",
+            "https://images.hive.blog/DQmWWJQmoYoyDQNDjt6DPhAoQs9NQrbEkxC2XJHKh9DEabG/ed2a96425f2c9b0588c48409855b3569.png",
+            "https://images.hive.blog/DQmUQSsN373Gzr5ep93KNKThMrHaPnt2brBCXtJTwvQHzi7/image.png"
+          ],
+          "links": [
+            "https://reader.cutehive.com"
+          ],
+          "tags": [
+            "hive",
+            "blockchain",
+            "development",
+            "cutehive",
+            "reader"
+          ]
+        },
+        "max_accepted_payout": "1000000.000 HBD",
+        "net_rshares": 321243875549919,
+        "payout": 32.233,
+        "payout_at": "2026-04-22T08:43:30",
+        "pending_payout_value": "32.233 HBD",
+        "percent_hbd": 10000,
+        "permlink": "hive-reader-mini-update-txid-support-now-live-v2-7-8",
+        "post_id": 149814641,
+        "reblogs": 5,
+        "replies": [],
+        "stats": {
+          "flag_weight": 0,
+          "gray": false,
+          "hide": false,
+          "total_votes": 189
+        },
+        "title": "🔧 HIVE READER MINI Update: TXID Support Now Live (v2.7.8)",
+        "updated": "2026-04-15T08:43:30",
+        "url": "/hive-139531/@cutehive.com/hive-reader-mini-update-txid-support-now-live-v2-7-8"
+      },
+      {
+        "active_votes": [
+          {
+            "rshares": 7607031796073,
+            "voter": "blocktrades"
+          },
+          {
+            "rshares": 7445123237050,
+            "voter": "alpha"
+          },
+          {
+            "rshares": 16552755681,
+            "voter": "roelandp"
+          },
+          {
+            "rshares": 5719007125,
+            "voter": "jza"
+          },
+          {
+            "rshares": 17341079137024,
+            "voter": "arcange"
+          }
+        ],
+        "author": "hiveyucatan",
+        "author_payout_value": "0.000 HBD",
+        "author_reputation": 59.69,
+        "author_role": "admin",
+        "author_title": "",
+        "beneficiaries": [
+          {
+            "account": "commentrewarder",
+            "weight": 300
+          },
+          {
+            "account": "null",
+            "weight": 200
+          }
+        ],
+        "blacklists": [],
+        "body": "<center>\n\n\n![hiveyucatanniversary.jpg](https://files.peakd.com/file/peakd-hive/hiveyucatan/23wgcQwuKs9Jr15CsedeCrL74tLM6YjsPT8zMK3M278tcKEqa9jKcxAA6VPmkvUFfu6cQ.jpg)\n\n</center>\n\n\n\n\n<div class=\"text-justify\">\n\n\n> I don’t know if you’ve heard the saying, “If the world ends, I’m heading to Yucatán.” Well, this year we don’t just have that excuse—our community is about to celebrate its first anniversary. We’ve grown gradually because all our onboarding has been one-on-one. We’ve never had a real-life MeetUp, and what better reason to have one than to celebrate this milestone?\n\n> That’s why the team—@hiveyucatan, @konchix, and yours truly, @gr33nm4ster—decided to throw a party, but a party inviting all Hive-ians who are in the area or who want to come see how we celebrate in Yucatán.\n\n> That celebration will take place in a few months, and we’ve already gotten to work. I’ve talked to some Hive-ian OGs and, taking their advice, we’re starting to build the Web2 presence that Hive Yucatán will have outside of Web3—specifically on Facebook and TikTok, since they’re the most viral platforms. Right now we already have a Facebook page. I know nobody likes Facebook anymore, for many reasons that every Hive-ian is well aware of, but the vast majority of people who now dream of becoming influencers on Facebook are trying to monetize on that social network, and honestly, with content that would be valued more on Hive. With Meta’s centralized system, not only does it put your content at risk in terms of ownership—since Meta itself has been the one actually generating money from those posts since day one—but it also doesn’t give a single cent to the content creator for the goals they ask of you.\n\n\n\n\n___\n\n\n\n\nNo se si han escuchado el dicho: \"Si se acaba el mundo me voy a Yucatán\", pues este año no solo tenemos ese pretexto, sino que nuestra comunidad esta por celebrar 1 año de estar activa. Hemos crecido paulatinamente porque todo los onboardings han sido persona a persona. Nunca hemos tenido un Meet Up en vida real y que mejor motivo que la celebración de este suceso.\n\nPor eso el equipo de @hiveyucatan @konchix y un servidor @gr33nm4ster nos decidimos a hacer una fiesta, pero una fiesta invitando todos los Hive-ians que estén por la zona o que quieran venir a ver de que manera festejamos en Yucatán.\n\nEse festejo sucederá en unos meses y ya pusimos manos a la obra, he platicado con algunos Hive-ians OGs y escuchando sus consejos, estamos comenzando a construir el entorno Web2 que tendrá Hive Yucatán fuera de Web3 y serán Facebook y Tik-Tok por ser las mas virales. Ahora mismo ya tenemos el Facebook, lo sé a nadie le gusta Facebook ya, por múltiples razones que todo Hive-ian consiente conoce, pero el grueso de las personas que ahora sueñan con ser influencers en Facebook están intentando monetizar en esa red social y sinceramente con un contenido que en Hive se valoraría mas y que Meta con su sistema centralizado además de que pone en riesgo su contenido en el sentido de pertenecía el que realmente genera dinero por dichas publicaciones es el mismo Meta desde el día 1 y no da ni un centavo al creador del contenido los objetivos que te piden.\n</div>\n\n<center>\n\n![FireShot Capture 690 - (1) Facebook - [www.facebook.com].png](https://files.peakd.com/file/peakd-hive/hiveyucatan/23ycuYCKNEQueyGPMFzNhXNSGiNEbAhhd9FmbAFdxp1beooBPow1VQMHyLUzuvjuMwnXK.png)\n\n[Comunidad Oficial en Facebook de Hive Yucatán](https://www.facebook.com/profile.php?id=61573297656576)\n\n</center>\n\n\n\n<div class=\"text-justify\">\n\n\n\n\n\n> We’ll be launching on TikTok soon, and I’ve already reached out to some of my connections—OG content creators in my country who get a lot of traffic on their X Spaces or do live interviews on YouTube. I hope to connect with one of them soon and discuss the project.\n\n> We’re looking for content creators in the area who are already producing original, copyright-free content that they haven’t been able to monetize, or who value the true security of their data and content despite their efforts and following all of Facebook’s pesky rules. I know Hive isn’t a solution in that regard, but it’s a means to an end. The goal is to grow the number of creators within Web3 in the area using the ones we already have—meaning those same creators will bring others along.\n\n> We’ve started sharing posts from Yucatecan Hive-ians in the Facebook community without paying any advertising fees to Meta, and we’re already seeing very good engagement numbers. I’m using Reels from our HiveFest8 to generate hype, but honestly, we don’t know how far this could go—or if it’ll just be my family, me, and a few friends. In the end, what matters is celebrating.\n\n> Our intention isn’t to profit from this celebration but to give Hive a boost from the other end of Mexico. We did this in 2023 on Mexico’s northern border in Rosarito with Hive Fest8, and also in central Mexico with Talent Land in 2024 and 2025.\n\n\n> We thought, why not hold it now in southeastern Mexico? It has more of a Caribbean feel and undoubtedly the best beaches in Mexico, plus Mérida is known as the “White City”—not only because its streets are usually very clean but also because it has one of the lowest crime rates in the entire country.\n\n> I don’t know how much it cost to organize the events I mentioned that took place in Mexico, but I’m sure that for much less than what was spent on those, we can put on our own anniversary celebration. That’s why I’m working on a Google form to invite local brands to participate, local speakers who want to take the stage, sponsors, local digital media outlets that want to be media partners, and volunteer staff, all with the goal of a win-win collaboration model. For example: if they want the main stage, they would have to provide the venue; if they want to promote their brands on the stages or screens, they would have to offer something else; or if they want to be mentioned as a main sponsor, they could donate merchandise, etc... \n\n\n\n\n\n\n\n\n___\n\n\n\nPróximamente comenzaremos ya en Tik-Tok y ya he mandado mensajes a algunas conexiones con personas builders OGs en mi país que tienen mucho trafico en sus Space en X o entrevistas en vivo en YouTube, espero pescar una pronto y platicar del proyecto.\n\nEstamos en busca de Creadores y creadoras de contenido en la zona que ya hagan contenido original y sin problemas copyright que no hayan logrado monetizar o valoren la verdadera seguridad de sus datos y de su contenido a pesar de su esfuerzo y de seguir todas las dichosas reglas  de Facebook, se que en eso Hive no es una solución, pero es un medio para la meta, el objetivo es ir creciendo en cantidad de creadores y creadoras dentro de Web3 de la zona con los que ya tenemos o sea que esos mismos vayan jalando a otros.\n\nHemos comenzado a compartir las publicaciones de los hive-ians yucatecos en la comunidad de Facebook sin pagar nada de publicidad en Meta y ya tenemos muy buenos números en cuanto a interacciones. Estoy usando Reels de muestro HiveFest8 para causar Hype, pero en realidad no sabemos hasta donde podría llegar esto, o si solo seremos mi familia y yo y algunos amigos, al final lo que importa es celebrar.\n\nNuestra intención no es lucrar con esta celebración sino darle un impulso desde la otra punta de México a Hive lo hicimos en 2023 en la frontera norte de México en Rosarito con el Hive Fest8, también en el centro de México con el Talent land 2024 y 2025.\n\nNosotros pensamos, porqué no hacerlo ahora en el sureste mexicano? Que tiene mas toque del caribe y sin duda las mejores playas de México, además de conocerse por lo menos la ciudad de Mérida como la ciudad blanca no solo por sus calles normalmente muy limpias sino por su baja taza de delincuencia en todo el país.\n\nNo se cuanto haya costado hacer los eventos que mencioné que se efectuaron en México pero estoy seguro que con mucho menos de lo que se gastó en aquellos podemos hacer notros nuestra celebración de aniversario y por eso mismo estoy trabajando en un formulario de Google para invitar marcas locales a participar, Speakers locales que quieran tomar tarima, Sponsors, Medios digitales locales que quieran ser Media Partners, Staff Voluntarios, todo buscando con un modelo de colaboración Win-Win, por ejemplo: si quieren Main stage pues tendrían que dar el local, si quieren promocionar sus marcas en las tarimas o pantallas tendrían que dar alguna otra cosa o quieren que se les mencionen como patrocinador principal la donación de Merch, etc... \n\n\n\n\n\n\n\n\n\n![FireShot Capture 665 - Aniversario de Hive Yucatán - Formularios de Google - [docs.google.com].png](https://files.peakd.com/file/peakd-hive/hiveyucatan/23vsop9taWeMrgyHJ1EoSJpMwLLLy4YVzis1gMktqj43gczXaukaRvTVYg8Y95E9g3bRn.png)\n\n\n<center><sub>Ya estamos haciendo el Formulario casi está listo. Cuando se termine en Hive será el primer lugar donde se publicará. </sub></center>\n\n\n\n> That’s the plan we’ve been following so far. We might change course if we receive any support or suggestions, but for now, we’re using that form and the funds coming in from the percentages that active members of the Hive Yucatán community voluntarily designate as beneficiaries to the @hiveyucatan account in their posts. And what we’re accumulating, we’re converting to BTC via DCA thanks to V4V.app, so that on the day of the celebration—or as it approaches—we can decide whether it’s better to sell that BTC or take out a loan against it, to have more funds for the following year, because our plan is to do this every year.\n\n> Why every year? Because we have many locations that vary in climate and biome—some drier, others more humid, and others truly idyllic—but there’s something special here: it’s never cold, making it the perfect setting to host multiple events over the years. These locations are all within a four-hour drive of the safest place, Mérida, the White City. \n\n> Among the ideas is the concept of having a community ambassador each year. Since this is the first anniversary and she is the longest-standing Hive-ian in the Hive Yucatán community, @sweetgemstone will be this year’s ambassador. But starting next year, we’ll hold a contest to determine who will be the ambassador for the following year, and so on. For this, we’d look to projects that have organized similar events for guidance, such as @hiveredcarpet, well, that’s one idea.\n\n\n> Another central theme of this celebration will be Mayan culture, with a particular focus on Yucatán, which will be prominent in the festivities, dance, music, and local customs of the host city, Mérida, Yucatán, Mexico. But this may change, since even within those three states that make up the former Yucatán Republic, each has its own history—one I’m sure I’ll share with you later. But even though these cities are so close to one another, they each have their own customs and traditions, which shows that Mexico is a cultural mosaic.  \n\n\n> Finally, I want to thank you for your attention and mention that in promoting the event on Web2, I’m using videos from the first time Hive performed in Mexico—specifically content from Hive Fest 8 Ola Surfista. So, if anyone who was there doesn’t want their images used, please let me know in the comments, and I’ll edit the Web2 content.\n\n> We’ll soon be sharing updates on how the planning for our big event is going—stay tuned; things are sure to get even more interesting.\n\n> We’re considering ways for current Hive-ians to invite at least one more person, which would double our onboarding numbers. We’re also planning activities where everyone attending the event—in addition to learning from the speakers—can participate in workshops to promote key products, DApps, or updates currently being released, especially since the bulk of DHF funds are now being allocated to developers. In my humble opinion, if everyone were to organize a celebration in their country or region of the world where Hive has already arrived, it would be a better strategy for expanding more quickly and thus achieving what we’ve always sought: mass adoption. \n\nBest wishes from the @hiveyucatan Team.\n\nAnd to wrap things up, here’s a music video by a Mexican artist named Natalia Lafourcade, which was inspired by and filmed in Yucatán over 12 years ago.\n\n\nhttps://www.youtube.com/watch?v=N7dT0sUH5EY\n\n\n\n\n___\n\nEse es el plan que estamos llevando hasta ahora, podríamos cambiar de plan si recibimos algún tipo de apoyo o sugerencia, pero por ahora ese formulario y los fondos que llegan desde porcentajes que estamos poniendo forma voluntaria de beneficiario a la cuenta @hiveyucatan entre toda la comunidad activa en Hive Yucatán en sus publicaciones. Y lo que vamos acumulando lo estamos haciendo DCA de BTC gracias a V4V.app, para que el día del festejo o cuando ya se acerque decidamos que es mejor si vender ese BTC o pedir un Loans por el, para tener mas fondos para el año siguiente, porque nuestra idea es hacerlo cada año.\n\nPorqué cada año? Porque tenemos muchos lugares que cambian en tipo de bioma de clima , unos mas secos otros mas húmedos otros muy paradisiacos, pero hay algo especial aquí nuca hay frio, lo que lo hace un espacio perfecto para tener múltiples cedes a través de los años. Con lugares diferentes pero no tienen ni 4 horas de distancia en carro del lugar mas seguro que es Mérida la Ciudad Blanca. \n\nEntre las ideas esta el punto de tener una embajadora de la comunidad cada año, este por ser el primer aniversario y ser la Hive-ian con mas antigüedad en la comunidad de Hive Yucatán será @sweetgemstone, pero el siguiente año incluso tendremos un certamen para ver quien sería la embajadora del siguiente año y así sucesivamente, para esto buscaríamos proyectos que hayan hecho eventos de ese tipo para orientarnos como @hiveredcarpet, bueno eso es una idea.\n\nTambién como temática para esta celebración será la cultura maya con inclinación yucateca la que predomine en el festejo, la danza, la música y de las costumbres del lugar que será sede, Mérida Yucatán México. Pero puede cambiar pues en solo esos tres estados que representan la antigua republica yucateca que eso también tiene su historia que seguro luego les contaré. Pero cada ciudad a pesar de ser tan cercanas tienen sus propios usos y costumbres, eso demuestra que México es un mosaico cultural.  \n\n\nPor ultimo quiero agradecer su atención y mencionar que en la promoción del evento en Web2 estoy usando videos de la Primera vez que Hive tocó tierras mexicanas el contenido del Hive Fest 8 Ola Surfista así que si alguien que haya estado ahí, no quiere que se usen sus imágenes me lo puede hacer saber en los comentarios y yo editaré el contenido de Web2.\n\nPróximamente estaremos compartiendo actualizaciones de como va el proceso de nuestro gran evento, espérenlo, seguro las cosas se pondrán mas interesantes. Tenemos en mente dinámicas y formas donde los que ya son Hive-ian inviten por lo menos a uno mas y tendríamos el doble de onboardings, como también dinámicas pensadas en que todos los que asistan a la fiesta, aparte de llevarse todo el aprendizaje de los speakers, hacer talleres para impulsar principales productos, Dapps o actualizaciones que están saliendo en estos momentos cuando el grueso de los fondos de la DHF esta sirviendo para los desarrolladores, en mi humilde manera de pensar es que que si cada quien hiciera una celebración por país o zona en el mundo donde ya haya llegado Hive sería una mejor estrategia para expandirnos mas rápido y así lograr lo que siempre hemos buscado la adopción masiva.  \n\nLes deseamos éxitos el Team @hiveyucatan.\n\n  \n</div>\n\n",
+        "category": "hive-126376",
+        "children": 21,
+        "community": "hive-126376",
+        "community_title": "Hive Yucatán",
+        "created": "2026-04-14T23:54:54",
+        "curator_payout_value": "0.000 HBD",
+        "depth": 0,
+        "is_paidout": false,
+        "json_metadata": {
+          "app": "peakd/2026.4.3",
+          "author": "gr33nm4ster",
+          "description": "Hive Yucatán's upcoming anniversary. / Próximo aniversario de Hive Yucatán.",
+          "format": "markdown",
+          "image": [
+            "https://files.peakd.com/file/peakd-hive/hiveyucatan/23wgcQwuKs9Jr15CsedeCrL74tLM6YjsPT8zMK3M278tcKEqa9jKcxAA6VPmkvUFfu6cQ.jpg",
+            "https://files.peakd.com/file/peakd-hive/hiveyucatan/23ycuYCKNEQueyGPMFzNhXNSGiNEbAhhd9FmbAFdxp1beooBPow1VQMHyLUzuvjuMwnXK.png",
+            "https://files.peakd.com/file/peakd-hive/hiveyucatan/23vsop9taWeMrgyHJ1EoSJpMwLLLy4YVzis1gMktqj43gczXaukaRvTVYg8Y95E9g3bRn.png"
+          ],
+          "links": [
+            "https://www.youtube.com/watch?v=N7dT0sUH5EY"
+          ],
+          "tags": [
+            "meetup",
+            "mexico",
+            "hiveyucatan",
+            "aniversary",
+            "aliento",
+            "hivealive",
+            "neoxian"
+          ],
+          "users": [
+            "hiveyucatan",
+            "konchix",
+            "gr33nm4ster",
+            "sweetgemstone",
+            "hiveredcarpet",
+            "hiveyucatan."
+          ]
+        },
+        "max_accepted_payout": "1000000.000 HBD",
+        "net_rshares": 302496764651523,
+        "payout": 30.353,
+        "payout_at": "2026-04-21T23:54:54",
+        "pending_payout_value": "30.353 HBD",
+        "percent_hbd": 10000,
+        "permlink": "hive-yucatans-upcoming-anniversary-proximo-aniversario-de-hive-yucatan-engspa-informsation-1",
+        "post_id": 149811365,
+        "reblogs": 8,
+        "replies": [],
+        "stats": {
+          "flag_weight": 0,
+          "gray": false,
+          "hide": false,
+          "is_pinned": true,
+          "total_votes": 446
+        },
+        "title": " Hive Yucatán's upcoming anniversary. / Próximo aniversario de Hive Yucatán. ENG/SPA Information #1",
+        "updated": "2026-04-15T08:35:39",
+        "url": "/hive-126376/@hiveyucatan/hive-yucatans-upcoming-anniversary-proximo-aniversario-de-hive-yucatan-engspa-informsation-1"
+      },
+      {
+        "active_votes": [
+          {
+            "rshares": 2213145767,
+            "voter": "gavvet"
+          },
+          {
+            "rshares": 131570644874,
+            "voter": "kevinwong"
+          },
+          {
+            "rshares": 6075124854,
+            "voter": "leprechaun"
+          },
+          {
+            "rshares": 479768963,
+            "voter": "justtryme90"
+          },
+          {
+            "rshares": 681986918,
+            "voter": "tim-beck"
+          }
+        ],
+        "author": "hanshotfirst",
+        "author_payout_value": "0.000 HBD",
+        "author_reputation": 79.75,
+        "beneficiaries": [],
+        "blacklists": [],
+        "body": "I am a sucker for documentaries on Netflix. I really like the ones that are about non-violent crime, sports and just weird stuff. So Untold: Chess Mates is right up my alley.\n\n![](https://images.indianexpress.com/2026/04/CHESS-MATES-IMAGE.jpg)\n\nThis documentary is about a modern chess rivalry between a young, brash, loud and obnoxious named Hans Niemann, and an arrogant guy who happens to be the greatest chess player in the world today Magnus Carlsen.\n\nIf you think you haven't heard about this rivalry, I assure you that you are wrong EVERYONE has heard of this rivalry. Don't believe me? Well remember that story a few years ago about the guy who got accused of using anal beads connected to a remote \"buzzer\" to cheat at chess? Of course you do. See I told you that you knew about this story. Even the brilliant and hilarious show Always Sunny in Philadelphia did an episode poking fun of the scandal.\n\nYep. This documentary is about that controversy and the events leading up to it as well as the aftermath. As always, I won't give any spoilers but they do get into that part of the story quite a bit and you get to hear directly from both Niemann and Carlsen. A big part of the documentary investigates the scandal surrounding Hans Niemann's shock win over Magnus Carlsen at the 2022 Sinquefield Cup. It was so shocking that to this day, Carlsen refuses to believe Niemann did not cheat.\n\nBut there is much more to the story. Because I had only heard of the anal beads portion of this story... OK for the uninitiated I guess I should tell you what that is all about. You see, at these major chess championships, they actually frisk the players and use wands to make sure they are not carrying any electronic devices that could help them to cheat. well apparently there is an \"adult toy\" that can go inside a person. The device has a remote control that makes it vibrate. According to the legend, people thought Niemann had this device inside him while a person with a computer buzzed him when his hand hovered over the correct piece to move. You'll have to watch the documentary for more information.\n\n![](https://static0.colliderimages.com/wordpress/wp-content/uploads/2024/11/frank-reynolds-playing-chess-while-trying-to-cheat-in-frank-vs-russia-it-s-always-sunny-in-philadelphia.jpg?q=70&fit=crop&w=825&dpr=1)\n\nSo back to the rest of the story. Because I had only heard that a new up and coming player had been accused of cheating, I automatically thought this story would be about a scrappy underdog who tries to take down the arrogant Goliath of the chess world. Boy was I wrong. It turns out that the underdog was an insufferable douche-bag. He became famous for throwing tantrums when losing and trash talking and being incredible disrespectful and unsportsmanlike when winning. Some people like him for bringing excitement to the game. Cool. To each their own. But to me he was/is just an asshole.\n\nWow. So would this be a movie where I end up rooting for the Goliath to crush the classless newbie? Nope. Because Magnus Carlsen is quite unlikable as well. I have never been the absolute best in the world at anything. I will never be the best in the world at anything, so it is hard for me to know the impact that being objectively the greatest at something has on ones psyche and demeanor. Based on how Carlsen comes across, at least for him, it made him nearly as insufferable as Niemann.\n\n![](https://s.yimg.com/os/en/time_72/cf16d35b3b0be85959edf1568b09c709)\n\nSo I really had no one to root for in this story. But that is OK. It is the story that is the star, not either of the players. I still found it completely fascinating and extremely well made. The Untold series has never let me down.\n\nSo what do you all think? Any chess fans out there? Anybody like either of these guys?\n\nIf you are into games besides chess, you have to check this out!\n\nf you want to get free tokens from an insanely cool new gaming platform, please check this out!\n\nhttps://omenx-starter-guide.netlify.app/\n\n​\n\n![ \"Screenshot 2026-04-05 at 3.57.18 PM.png\"](https://images.hive.blog/DQmauLMQhWZAvgihq6WkjFfdwtxHDgsqxSDZCCPZNWGqMrC/Screenshot%202026-04-05%20at%203.57.18%E2%80%AFPM.png)",
+        "category": "moviereview",
+        "children": 18,
+        "created": "2026-04-15T03:17:42",
+        "curator_payout_value": "0.000 HBD",
+        "depth": 0,
+        "is_paidout": false,
+        "json_metadata": {
+          "app": "hiveblog/0.1",
+          "format": "html",
+          "image": [
+            "https://images.indianexpress.com/2026/04/CHESS-MATES-IMAGE.jpg",
+            "https://static0.colliderimages.com/wordpress/wp-content/uploads/2024/11/frank-reynolds-playing-chess-while-trying-to-cheat-in-frank-vs-russia-it-s-always-sunny-in-philadelphia.jpg?q=70&amp;fit=crop&amp;w=825&amp;dpr=1",
+            "https://images.hive.blog/DQmauLMQhWZAvgihq6WkjFfdwtxHDgsqxSDZCCPZNWGqMrC/Screenshot%202026-04-05%20at%203.57.18%E2%80%AFPM.png"
+          ],
+          "links": [
+            "https://s.yimg.com/os/en/time_72/cf16d35b3b0be85959edf1568b09c709"
+          ],
+          "tags": [
+            "moviereview",
+            "movies",
+            "chess",
+            "games",
+            "thepub"
+          ]
+        },
+        "max_accepted_payout": "1000000.000 HBD",
+        "net_rshares": 300876513203599,
+        "payout": 29.513,
+        "payout_at": "2026-04-22T03:17:42",
+        "pending_payout_value": "29.513 HBD",
+        "percent_hbd": 10000,
+        "permlink": "a-geeky-guy-s-guide-to-untold-chess-mates",
+        "post_id": 149812626,
+        "reblogs": 2,
+        "replies": [],
+        "stats": {
+          "flag_weight": 0,
+          "gray": false,
+          "hide": false,
+          "total_votes": 332
+        },
+        "title": "A Geeky Guy's Guide to Untold: Chess Mates",
+        "updated": "2026-04-15T03:17:42",
+        "url": "/moviereview/@hanshotfirst/a-geeky-guy-s-guide-to-untold-chess-mates"
+      },
+      {
+        "active_votes": [
+          {
+            "rshares": 26915673526915,
+            "voter": "adm"
+          },
+          {
+            "rshares": 71080354831,
+            "voter": "josepimpo"
+          },
+          {
+            "rshares": 1781333596608,
+            "voter": "slider2990"
+          },
+          {
+            "rshares": 624022126511,
+            "voter": "danielsaori"
+          },
+          {
+            "rshares": 57667737679524,
+            "voter": "themarkymark"
+          }
+        ],
+        "author": "buildawhale",
+        "author_payout_value": "0.000 HBD",
+        "author_reputation": 92.54,
+        "beneficiaries": [
+          {
+            "account": "null",
+            "weight": 10000
+          }
+        ],
+        "blacklists": [],
+        "body": "burn comment",
+        "category": "burnpost",
+        "children": 2,
+        "created": "2026-04-15T15:11:09",
+        "curator_payout_value": "0.000 HBD",
+        "depth": 1,
+        "is_paidout": false,
+        "json_metadata": {
+          "app": "leothreads/0.3"
+        },
+        "max_accepted_payout": "1000000.000 HBD",
+        "net_rshares": 288979918780537,
+        "parent_author": "buildawhale",
+        "parent_permlink": "1776265804323382351",
+        "payout": 29.002,
+        "payout_at": "2026-04-22T15:11:09",
+        "pending_payout_value": "29.002 HBD",
+        "percent_hbd": 10000,
+        "permlink": "re-1776265804323382351-20260415t151108z",
+        "post_id": 149817977,
+        "reblogs": 0,
+        "replies": [],
+        "stats": {
+          "flag_weight": 1,
+          "gray": false,
+          "hide": false,
+          "total_votes": 47
+        },
+        "title": "RE: Burn Post",
+        "updated": "2026-04-15T15:11:09",
+        "url": "/burnpost/@buildawhale/1776265804323382351#@buildawhale/re-1776265804323382351-20260415t151108z"
+      }
+    ]
+  },
+  "responseStatus": 200,
+  "responseContentType": "application/json"
+}

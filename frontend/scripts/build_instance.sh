@@ -1,0 +1,159 @@
+#! /bin/bash
+
+set -e
+
+print_help () {
+    cat <<-EOF
+Usage: $0 <source directory> [OPTION[=VALUE]]...
+
+Build a Denser Docker image
+by default tagged as 'registry.gitlab.syncad.com/hive/denser:latest'
+OPTIONS:
+  --registry=URL        Docker registry to assign the image to (default: 'registry.gitlab.syncad.com/hive/denser')
+  --tag=TAG             Docker tag to be build (default: 'latest')
+  --progress=TYPE       Determines how to display build progress (default: 'auto')
+  --app-scope=SCOPE     App scope (eg. '@hive/auth')
+  --app-path=PATH       App path (eg. '/apps/auth')
+  --app-name=NAME       App name (eg. 'auth')
+  --help|-h|-?          Display this help screen and exit
+  
+  For subdirectory builds, set BASE_PATH environment variable:
+    BASE_PATH=/blog $0 ...
+EOF
+}
+
+export CI_REGISTRY_IMAGE=${CI_REGISTRY_IMAGE:-"registry.gitlab.syncad.com/hive/denser"}
+export TAG=${TAG:-"latest"}
+export TURBO_APP_SCOPE=${TURBO_APP_SCOPE:-}
+export TURBO_APP_PATH=${TURBO_APP_PATH:-}
+export TURBO_APP_NAME=${TURBO_APP_NAME:-}
+export BASE_PATH=${BASE_PATH:-""}
+PROGRESS_DISPLAY=${PROGRESS_DISPLAY:-"auto"}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --registry=*)
+        arg="${1#*=}"
+        export CI_REGISTRY_IMAGE="$arg"
+        ;;
+    --tag=*)
+        arg="${1#*=}"
+        export TAG="$arg"
+        ;;
+    --progress=*)
+        arg="${1#*=}"
+        PROGRESS_DISPLAY="$arg"
+        ;;
+    --app-scope=*)
+        arg="${1#*=}"
+        TURBO_APP_SCOPE="$arg"
+        ;;
+    --app-path=*)
+        arg="${1#*=}"
+        TURBO_APP_PATH="$arg"
+        ;;
+    --app-name=*)
+        arg="${1#*=}"
+        TURBO_APP_NAME="$arg"
+        ;;
+    --help|-h|-?)
+        print_help
+        exit 0
+        ;;
+    *)
+        if [ -z "$SRCROOTDIR" ];
+        then
+          SRCROOTDIR="${1}"
+        else
+          echo "ERROR: '$1' is not a valid option/positional argument"
+          echo
+          print_help
+          exit 2
+        fi
+        ;;
+    esac
+    shift
+done
+
+# Throw exceptions or provide sane defaults if turbo variables are not set.
+TURBO_APP_NAME=${TURBO_APP_NAME:?"App name must be set"}
+TURBO_APP_PATH=${TURBO_APP_PATH:-"/apps/${TURBO_APP_NAME}"}
+TURBO_APP_SCOPE=${TURBO_APP_SCOPE:-"@hive/${TURBO_APP_NAME}"}
+
+TARGET="local-build"
+if [ -n "${CI:-}" ];
+then
+    TARGET="ci-build"
+fi
+
+pushd "$SRCROOTDIR"
+
+# All the variables below must be declared and assigned separately
+# for 'set -e' to work correctly. See https://www.shellcheck.net/wiki/SC2155
+# for an explanation
+
+BUILD_TIME="$(date -uIseconds)"
+export BUILD_TIME
+
+GIT_COMMIT_SHA="$(git rev-parse HEAD || true)"
+if [ -z "$GIT_COMMIT_SHA" ]; then
+  GIT_COMMIT_SHA="[unknown]"
+fi
+export GIT_COMMIT_SHA
+
+GIT_CURRENT_BRANCH="$(git branch --show-current || true)"
+if [ -z "$GIT_CURRENT_BRANCH" ]; then
+  GIT_CURRENT_BRANCH="$(git describe --abbrev=0 --all | sed 's/^.*\///' || true)"
+  if [ -z "$GIT_CURRENT_BRANCH" ]; then
+    GIT_CURRENT_BRANCH="[unknown]"
+  fi
+fi
+export GIT_CURRENT_BRANCH
+
+GIT_LAST_LOG_MESSAGE="$(git log -1 --pretty=%B || true)"
+if [ -z "$GIT_LAST_LOG_MESSAGE" ]; then
+  GIT_LAST_LOG_MESSAGE="[unknown]"
+fi
+export GIT_LAST_LOG_MESSAGE
+
+GIT_LAST_COMMITTER="$(git log -1 --pretty="%an <%ae>" || true)"
+if [ -z "$GIT_LAST_COMMITTER" ]; then
+  GIT_LAST_COMMITTER="[unknown]"
+fi
+export GIT_LAST_COMMITTER
+
+GIT_LAST_COMMIT_DATE="$(git log -1 --pretty="%aI" || true)"
+if [ -z "$GIT_LAST_COMMIT_DATE" ]; then
+  GIT_LAST_COMMIT_DATE="[unknown]"
+fi
+export GIT_LAST_COMMIT_DATE
+
+./scripts/write-version.sh ".${TURBO_APP_PATH}/version.json"
+
+# Attempt to login to Docker Hub if credentials are available (increases rate limit)
+if [ -n "${DOCKERHUB_USER:-}" ] && [ -n "${DOCKERHUB_PASSWORD:-}" ]; then
+  echo "Logging in to Docker Hub to increase rate limits..."
+  echo "$DOCKERHUB_PASSWORD" | docker login -u "$DOCKERHUB_USER" --password-stdin docker.io || true
+fi
+
+# Retry docker buildx bake with exponential backoff to handle transient Docker Hub rate limiting
+max_attempts=5
+attempt=1
+delay=60
+while [ $attempt -le $max_attempts ]; do
+  echo "Docker build attempt $attempt/$max_attempts..."
+  if docker buildx bake --provenance=false --progress="$PROGRESS_DISPLAY" "$TARGET"; then
+    echo "Docker build succeeded"
+    break
+  fi
+  if [ $attempt -eq $max_attempts ]; then
+    echo "Docker build failed after $max_attempts attempts"
+    exit 1
+  fi
+  echo "Attempt $attempt failed, retrying in ${delay}s..."
+  sleep $delay
+  attempt=$((attempt + 1))
+  delay=$((delay * 2))
+done
+
+popd

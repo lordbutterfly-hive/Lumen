@@ -1,0 +1,14 @@
+{
+  "extends": "@hive/tsconfig/base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@ui/*": ["./*"],
+      "@transaction/*": ["../../packages/transaction/*"],
+      "@smart-signer/*": ["../../packages/smart-signer/*"],
+      "@hive/common-hiveio-packages/*": ["../common-hiveio-packages/src/*"]
+    }
+  },
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+  "exclude": ["node_modules"]
+}
