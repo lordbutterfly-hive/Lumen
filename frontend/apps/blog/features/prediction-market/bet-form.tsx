@@ -5,6 +5,7 @@ import { cn } from '@ui/lib/utils';
 import { Icons } from '@ui/components/icons';
 import { handleError } from '@ui/lib/handle-error';
 import { useTranslation } from '@/blog/i18n/client';
+import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useMarket } from './use-market';
 import { estimateBetPayout } from './lib/estimate-payout';
 import { buildOutcomeColorMap } from './outcome-colors';
@@ -25,6 +26,10 @@ function fmt(n: number): string {
 export default function BetForm({ round }: { round: RoundState }) {
   const { t } = useTranslation('common_blog');
   const { placeBet, isPlacingBet, loggedIn } = useMarket();
+  const { user } = useUserClient();
+  // A lite account has no Hive keys or on-chain funds, so it cannot sign or fund a
+  // bet — gate the CTA behind an upgrade instead of letting it error on click.
+  const isLite = user.account_tier === 'lite';
   const colors = useMemo(() => buildOutcomeColorMap(round.buckets), [round.buckets]);
 
   const [selectedId, setSelectedId] = useState<string | null>(round.buckets[0]?.id ?? null);
@@ -189,15 +194,17 @@ export default function BetForm({ round }: { round: RoundState }) {
 
       <button
         type="button"
-        disabled={!loggedIn || !isValid || isPlacingBet}
+        disabled={!loggedIn || isLite || !isValid || isPlacingBet}
         onClick={submit}
         className="mt-5 w-full rounded-[14px] bg-[#1a1a17] py-[15px] font-sans text-[15.5px] font-semibold text-white transition-colors hover:bg-black disabled:opacity-50"
       >
         {!loggedIn
           ? t('prediction_market.login_to_bet')
-          : isPlacingBet
-            ? t('prediction_market.placing')
-            : t('prediction_market.place_bet')}
+          : isLite
+            ? t('prediction_market.upgrade_to_bet')
+            : isPlacingBet
+              ? t('prediction_market.placing')
+              : t('prediction_market.place_bet')}
       </button>
 
       <p className="mt-3 text-center font-sans text-[11.5px] leading-[1.5] text-[#9ca3af]">{t('prediction_market.fine_print')}</p>

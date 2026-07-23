@@ -26,7 +26,10 @@ interface Method {
 // key-BACKUP restore, NEVER identity — the "two Googles" trap the login guards.
 const METHODS: Method[] = [
   { name: 'Hive Keychain', hint: 'Browser extension', glyph: 'K', bg: '#c0392b' },
-  { name: 'HiveAuth', hint: 'Approve on your phone', glyph: 'H', bg: '#3182ce' },
+  // HiveAuth: the signer exists, but the QR flow isn't wired into this dialog yet
+  // (the inner method button is disabled). Label it honestly instead of showing an
+  // available row that dead-ends. Re-enable once the QR ceremony is wired.
+  { name: 'HiveAuth', hint: 'Coming soon', glyph: 'H', bg: '#3182ce', tag: 'coming' },
   { name: 'PeakVault', hint: 'Browser extension', glyph: 'P', bg: '#805ad5' },
   { name: 'MetaMask', hint: 'Sign with your MetaMask-held Hive keys', glyph: 'M', bg: '#e07b3e' },
   { name: 'Google Drive', hint: 'Restore a Hive key you backed up — not a Lumen login', glyph: 'D', bg: '#2f7d4f' },
