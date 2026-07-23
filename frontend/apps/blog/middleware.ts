@@ -22,10 +22,7 @@ export const middleware = createMiddleware({
       'https://player.twitch.tv',
       'https://open.spotify.com',
       'https://3speak.tv',
-      'https://odysee.com',
-      'https://openhive.chat',
-      // Allow denser OAuth flow inside RC iframe
-      'https://blog.openhive.network'
+      'https://odysee.com'
     ],
     reportUri: '/api/csp-report'
   }
