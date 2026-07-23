@@ -24,6 +24,7 @@ import { Entry } from '@hive/common-hiveio-packages/wax';
 import RendererContainer from '../post-rendering/rendererContainer';
 import { getLogger } from '@ui/lib/logging';
 import { useCommentMutation, useUpdateCommentMutation } from '../post-rendering/hooks/use-comment-mutations';
+import { createLitePost } from '@/blog/lib/lite/client/lite-write';
 import { handleError } from '@ui/lib/handle-error';
 import { commentClassName } from '../post-rendering/comment-list-item';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
@@ -238,6 +239,17 @@ export function ReplyTextbox({
         } catch (error) {
           handleError(error, { method: 'updateComment', params: updateCommentParams });
           throw error;
+        }
+      } else if (user.account_tier === 'lite') {
+        // Keyless lite account can't sign a comment op — proxy the reply to Hive
+        // via /api/lite/posts (frontend account broadcasts it under the parent).
+        const result = await createLitePost({
+          body: text,
+          parentRef: { type: 'chain', author: username, permlink }
+        });
+        if (result.status !== 'ok') {
+          handleError(new Error(result.message), { method: 'lite-comment', params: { username, permlink } });
+          throw new Error(result.message);
         }
       } else {
         const commentParams = {

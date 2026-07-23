@@ -27,7 +27,7 @@ function buildCommentOp(job: PublishJob): CommentOp {
     buildJsonMetadata({ tags: p.tags, userId: p.userId, postId: p.postId, displayName: p.displayName })
   );
   return {
-    parentAuthor: '',
+    parentAuthor: p.parentAuthor,
     parentPermlink: p.parentPermlink,
     author: p.author,
     permlink: p.permlink,

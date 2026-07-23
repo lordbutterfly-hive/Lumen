@@ -11,6 +11,8 @@ import { Entry } from "@hive/common-hiveio-packages/wax";
 import { parseTags } from "@/blog/features/post-editor/lib/utils";
 import { usePostMutation } from "@/blog/features/post-editor/hooks/use-post-mutation";
 import { AccountFormValues } from "@/blog/features/post-editor/types";
+import { useUserClient } from "@smart-signer/lib/auth/use-user-client";
+import { createLitePost } from "@/blog/lib/lite/client/lite-write";
 
 const logger = getLogger("app");
 
@@ -60,6 +62,7 @@ export function usePostFormActions({
 }: UsePostFormActionsParams) {
   const router = useRouter();
   const postMutation = usePostMutation();
+  const { user } = useUserClient();
 
   // Ref always holds the latest editor value (updated immediately, even before debounced form sync)
   const latestPostAreaRef = useRef(storedPost.postArea || defaultValues.postArea);
@@ -97,6 +100,36 @@ export function usePostFormActions({
     const postBody = latestPostAreaRef.current || data.postArea;
 
     const tags = parseTags(data.tags);
+
+    // LITE fork: a keyless lite account cannot sign a comment op in-browser, so
+    // its advanced post is proxied via /api/lite/posts (the frontend account
+    // broadcasts it to Hive). Skip the entire wax/Keychain path below.
+    if (user.account_tier === "lite") {
+      setIsSubmitting(true);
+      if (btnRef.current) btnRef.current.disabled = true;
+      const result = await createLitePost({
+        tier: "advanced",
+        title: data.title,
+        body: postBody,
+        summary: data.postSummary,
+        tags,
+        community: data.category
+      });
+      if (btnRef.current) btnRef.current.disabled = false;
+      setIsSubmitting(false);
+      if (result.status === "ok") {
+        hasSubmittedRef.current = true;
+        removePost();
+        latestPostAreaRef.current = defaultValues.postArea;
+        form.reset(defaultValues);
+        setPreviewContent(undefined);
+        await router.push(withBasePath("/"), undefined);
+      } else {
+        handleError(new Error(result.message), { method: "lite-post", params: { title: data.title } });
+      }
+      return;
+    }
+
     const maxAcceptedPayout = await createAsset((data.maxAcceptedPayout * 1000).toString(), "HBD");
     const postPermlink = await createPermlink(data?.title ?? "", username);
     const permlinInEditMode = post_s?.permlink;

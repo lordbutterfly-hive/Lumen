@@ -10,6 +10,7 @@ import { cn } from '@ui/lib/utils';
 import { setStorageItem, StorageTTL } from '@ui/lib/storage-with-ttl';
 import { withBasePath } from '@ui/lib/path-utils';
 import DialogLogin from '@/blog/components/dialog-login';
+import { createLitePost } from '@/blog/lib/lite/client/lite-write';
 
 // TODO: move to i18n (t('...'))
 const LABELS = {
@@ -37,9 +38,30 @@ export default function ShortFormComposer() {
   const router = useRouter();
   const [text, setText] = useState('');
   const [isFocused, setIsFocused] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // A lite account has no Hive keys, so it cannot sign in-browser: its short
+  // post is proxied via /api/lite/posts instead of the Keychain/wax editor.
+  const isLite = user.account_tier === 'lite';
   const isExpanded = isFocused || text.length > 0;
+
+  const submitLite = async () => {
+    const trimmed = text.trim();
+    if (trimmed === '' || submitting) return;
+    setSubmitting(true);
+    setError(null);
+    const result = await createLitePost({ body: trimmed });
+    setSubmitting(false);
+    if (result.status === 'ok') {
+      setText('');
+      setIsFocused(false);
+      router.refresh();
+    } else {
+      setError(result.message);
+    }
+  };
 
   // Auto-grow the textarea to fit its content (only mounted when expanded).
   useEffect(() => {
@@ -164,16 +186,17 @@ export default function ShortFormComposer() {
           {LABELS.fullStory}
         </button>
         <div className="flex items-center gap-3">
+          {error ? <span className="text-xs text-red-600">{error}</span> : null}
           <span className="text-xs tabular-nums text-muted-foreground">{text.length}</span>
           <Button
             type="button"
             variant="default"
             size="sm"
             className="rounded-[11px] bg-[#1a1a17] px-[22px] font-semibold text-white hover:bg-[#1a1a17]/90"
-            disabled={text.trim() === ''}
-            onClick={openEditor}
+            disabled={text.trim() === '' || submitting}
+            onClick={isLite ? submitLite : openEditor}
           >
-            {LABELS.postButton}
+            {submitting ? 'Posting…' : LABELS.postButton}
           </Button>
         </div>
       </div>

@@ -45,10 +45,25 @@ function autoTitle(body: string): string {
 
 /** Freeze the exact content the publisher will broadcast (spec §D.3). */
 function buildPayload(post: LumenPost): PublishPayload {
+  // Resolve the on-chain parent so a lite reply broadcasts as a real reply, not a
+  // root post. A chain parent replies directly under the Hive author/permlink; a
+  // lite parent replies under the frontend account's deterministic permlink for
+  // that post; no parent is a root post (parent_author='').
+  const parent = post.parentRef;
+  let parentAuthor = '';
+  let parentPermlink = post.community ?? post.tags[0] ?? 'lumen';
+  if (parent?.type === 'chain') {
+    parentAuthor = parent.author;
+    parentPermlink = parent.permlink;
+  } else if (parent?.type === 'lite') {
+    parentAuthor = liteConfig.frontendAccount;
+    parentPermlink = buildPermlink(parent.id);
+  }
   return {
     author: liteConfig.frontendAccount, // on-chain author (§D.1)
     permlink: buildPermlink(post.postId),
-    parentPermlink: post.community ?? post.tags[0] ?? 'lumen',
+    parentAuthor,
+    parentPermlink,
     title: post.title,
     body: post.body,
     tags: post.tags,

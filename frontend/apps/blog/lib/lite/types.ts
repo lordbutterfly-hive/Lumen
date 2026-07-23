@@ -100,7 +100,8 @@ export type PublishJobStatus =
 export interface PublishPayload {
   author: string; // the frontend Hive account (on-chain author)
   permlink: string; // deterministic, retry-stable
-  parentPermlink: string; // category/community tag for a root post
+  parentAuthor: string; // '' for a root post; the Hive/lite parent author for a reply
+  parentPermlink: string; // category/community tag for a root post; parent permlink for a reply
   title: string;
   body: string; // pre-footer; the worker appends the footer at publish time
   tags: string[];
