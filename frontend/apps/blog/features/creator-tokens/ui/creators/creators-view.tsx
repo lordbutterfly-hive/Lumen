@@ -89,6 +89,7 @@ const CreatorCard: FC<{ c: CreatorTokenSummary }> = ({ c }) => (
 const CreatorsView: FC = () => {
   const [sort, setSort] = useState<Sort>('reliable');
   const [showNew, setShowNew] = useState(true);
+  const [answersOnly, setAnswersOnly] = useState(false);
   const { creators: liveCreators, newCreators: liveNew } = useCreatorList();
 
   const creators = useMemo(() => {
@@ -107,8 +108,8 @@ const CreatorsView: FC = () => {
       // No launch timestamp in the mock — smallest market ≈ newest.
       list.sort((a, b) => a.marketCapUsd - b.marketCapUsd);
     }
-    return list;
-  }, [sort, liveCreators]);
+    return answersOnly ? list.filter((c) => c.delivery.available) : list;
+  }, [sort, liveCreators, answersOnly]);
 
   const rightRail = (
     <div className="flex flex-col gap-5 pt-[26px]">
@@ -158,9 +159,12 @@ const CreatorsView: FC = () => {
             );
           })}
         </div>
-        <span className="rounded-full border border-[#c0392b] bg-[#fbeeec] px-[15px] py-2 text-[13px] font-semibold text-[#c0392b]">
+        <button
+          onClick={() => setAnswersOnly((v) => !v)}
+          className={`rounded-full border px-[15px] py-2 text-[13px] font-semibold ${answersOnly ? 'border-[#c0392b] bg-[#fbeeec] text-[#c0392b]' : 'border-[#e4e6e9] bg-white text-[#6b7280] hover:border-[#c0392b]'}`}
+        >
           {COPY.answers}
-        </span>
+        </button>
       </div>
 
       {showNew ? (

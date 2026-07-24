@@ -54,7 +54,7 @@ const HoldingRow: FC<{ h: TokenHolding }> = ({ h }) => (
       {['Buy', 'Sell', 'Spend', 'Send'].map((label) => (
         <Link
           key={label}
-          href={`/creators/${h.handle}`}
+          href={`/creators/${h.handle}?a=${label.toLowerCase()}`}
           className="rounded-[9px] border border-[#e4e6e9] bg-white px-3 py-2 text-[12.5px] font-semibold text-[#3f4650] hover:bg-[#f1f3f5]"
         >
           {label}

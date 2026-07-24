@@ -28,6 +28,8 @@ export interface PortfolioAsk {
   dueLabel?: string;
   /** amber < 24h. */
   urgent?: boolean;
+  /** The buyer's question/brief (captured at ask time; shown to the creator). */
+  question?: string;
   /** The answer text (answered). */
   answer?: string;
 }

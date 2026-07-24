@@ -1,6 +1,8 @@
 'use client';
 
 import { useCallback, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { QUERY_KEY } from '@smart-signer/lib/query-keys';
 import { csrfHeaderName } from '@smart-signer/lib/csrf-protection';
 
 /**
@@ -64,17 +66,42 @@ async function friendlyError(res: Response): Promise<string> {
 }
 
 export function useLiteLogin() {
+  const queryClient = useQueryClient();
   const [nameStatus, setNameStatus] = useState<NameStatus>({ state: 'idle' });
   const checkTimer = useRef<ReturnType<typeof setTimeout>>();
   const checkSeq = useRef(0);
 
-  const resolveFrom = useCallback(async (res: Response): Promise<ResolveOutcome> => {
-    if (!res.ok) return { status: 'error', message: await friendlyError(res) };
-    const body = (await res.json().catch(() => null)) as { status?: string } | null;
-    if (body?.status === 'authenticated') return { status: 'authenticated' };
-    if (body?.status === 'needs_name') return { status: 'needs_name' };
-    return { status: 'error', message: GENERIC };
-  }, []);
+  // Write the fresh lite user into the React-Query ['user'] cache (mirrors the
+  // real Hive login's use-sign-in.onSuccess) so header/composer/vote/follow
+  // re-render as logged-in immediately. router.refresh() alone can't — ['user']
+  // has refetchOnMount:false and initialData from localStorage (L1).
+  const applyUser = useCallback(
+    (user: unknown) => {
+      if (!user || typeof user !== 'object') return;
+      queryClient.setQueryData([QUERY_KEY.user], user);
+      const username = (user as { username?: string }).username;
+      if (username) {
+        const secure = typeof location !== 'undefined' && location.protocol === 'https:' ? '; Secure' : '';
+        document.cookie = `observer=${username}; path=/; SameSite=Lax${secure}`;
+      }
+      queryClient.invalidateQueries();
+    },
+    [queryClient]
+  );
+
+  const resolveFrom = useCallback(
+    async (res: Response): Promise<ResolveOutcome> => {
+      if (!res.ok) return { status: 'error', message: await friendlyError(res) };
+      const body = (await res.json().catch(() => null)) as { status?: string; user?: unknown } | null;
+      if (body?.status === 'authenticated') {
+        applyUser(body.user);
+        return { status: 'authenticated' };
+      }
+      if (body?.status === 'needs_name') return { status: 'needs_name' };
+      return { status: 'error', message: GENERIC };
+    },
+    [applyUser]
+  );
 
   const google = useCallback(
     async (idToken: string): Promise<ResolveOutcome> => {
@@ -120,12 +147,15 @@ export function useLiteLogin() {
         headers: JSON_POST,
         body: JSON.stringify({ displayName, captchaToken })
       });
-      const body = (await res.json().catch(() => null)) as { status?: string; message?: string } | null;
+      const body = (await res.json().catch(() => null)) as { status?: string; message?: string; user?: unknown } | null;
       if (!res.ok) return { status: 'error', message: body?.message || (await friendlyError(res)) };
-      if (body?.status === 'ok') return { status: 'ok' };
+      if (body?.status === 'ok') {
+        applyUser(body.user);
+        return { status: 'ok' };
+      }
       return { status: 'error', message: body?.message || GENERIC };
     },
-    []
+    [applyUser]
   );
 
   // Debounced availability check for live name-pick feedback (read-only route).

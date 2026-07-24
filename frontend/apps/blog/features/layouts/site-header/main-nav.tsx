@@ -31,7 +31,7 @@ export function MainNav() {
           rel="noopener noreferrer"
           className={cn(
             'flex h-full items-center border-b-2 border-background transition-colors hover:border-destructive hover:text-destructive',
-            pathname === '/proposals"' ? 'text-destructive' : 'text-primary'
+            pathname === '/proposals' ? 'text-destructive' : 'text-primary'
           )}
           data-testid="nav-proposals-link"
         >

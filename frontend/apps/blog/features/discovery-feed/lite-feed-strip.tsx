@@ -1,6 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
+import { Link } from '@hive/ui';
 import { Avatar, AvatarFallback } from '@ui/components';
 import TimeAgo from '@ui/components/time-ago';
 import { getPostSummary } from '@/blog/lib/utils';
@@ -31,28 +32,33 @@ function LitePostCard({ entry }: { entry: Entry }) {
   const dek = getPostSummary(entry.json_metadata, entry.body);
   const image = typeof entry.json_metadata?.image === 'string' ? entry.json_metadata.image : '';
   const initial = (entry.author?.[0] ?? 'L').toUpperCase();
-  return (
-    <article className="border-b border-[#ececec] py-8">
+  // A lite post gets a real Hive URL only once broadcast (permlink stops being the
+  // local `lite-<id>` placeholder). Link then; render non-interactive until then,
+  // so it's never a dead click target.
+  const published = !entry.permlink.startsWith('lite-');
+  const body = (
+    <>
       <div className="mb-2 flex items-center gap-2 font-sans text-sm">
         <Avatar className="h-6 w-6">
           <AvatarFallback className="bg-[#f0ead9] text-[12px] text-[#9a7b2e]">{initial}</AvatarFallback>
         </Avatar>
         <span className="font-medium text-[#161511]">{entry.author}</span>
-        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700">
-          via Lumen
-        </span>
+        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700">via Lumen</span>
         <span className="text-xs text-muted-foreground">
           · <TimeAgo date={entry.created} />
         </span>
       </div>
-      {entry.title ? (
-        <h3 className="font-serif text-2xl font-bold leading-snug text-[#161511]">{entry.title}</h3>
-      ) : null}
+      {entry.title ? <h3 className="font-serif text-2xl font-bold leading-snug text-[#161511]">{entry.title}</h3> : null}
       {dek ? <p className="mt-1 line-clamp-3 font-serif text-lg text-[#4b5563]">{dek}</p> : null}
-      {image ? (
-        <img src={image} alt="" className="mt-3 max-h-44 w-full rounded-lg object-cover" />
-      ) : null}
-    </article>
+      {image ? <img src={image} alt="" className="mt-3 max-h-44 w-full rounded-lg object-cover" /> : null}
+    </>
+  );
+  return published ? (
+    <Link href={`/${entry.category}/@${entry.author}/${entry.permlink}`} className="block border-b border-[#ececec] py-8 transition-colors hover:bg-[#faf9f7]">
+      {body}
+    </Link>
+  ) : (
+    <article className="border-b border-[#ececec] py-8">{body}</article>
   );
 }
 
@@ -66,7 +72,7 @@ export default function LiteFeedStrip() {
   return (
     <div>
       {data.map((entry) => (
-        <LitePostCard key={entry.permlink} entry={entry} />
+        <LitePostCard key={`${entry.author}-${entry.permlink}`} entry={entry} />
       ))}
     </div>
   );

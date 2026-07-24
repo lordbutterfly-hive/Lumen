@@ -33,7 +33,6 @@ function voidReasonText(t: TFunction<'common_blog', undefined>, reason: string |
   }
 }
 
-const RANGES = ['1H', '1D', '1W', 'All'] as const;
 const CHART_POINTS = 8; // width of the flat placeholder series
 
 // The "Prediction Market" center tab — a Coinbase-style single-market view over
@@ -42,7 +41,6 @@ const CHART_POINTS = 8; // width of the flat placeholder series
 export default function MarketTab() {
   const { t } = useTranslation('common_blog');
   const { round, isUnavailable, isLoading, isError, refetch, myPosition, claim, isClaiming } = useMarket();
-  const [range, setRange] = useState<(typeof RANGES)[number]>('All');
 
   const onClaim = async () => {
     if (!round) return;
@@ -164,23 +162,6 @@ export default function MarketTab() {
             </div>
 
             <PriceChart series={series} placeholder />
-
-            {/* Range switch (visual only — no history to slice yet) */}
-            <div className="mt-2 flex justify-center gap-1.5">
-              {RANGES.map((r) => (
-                <button
-                  key={r}
-                  type="button"
-                  onClick={() => setRange(r)}
-                  className={cn(
-                    'rounded-lg px-3.5 py-1.5 font-sans text-xs font-semibold transition-colors',
-                    range === r ? 'bg-[#f1f3f5] text-[#161511]' : 'text-[#9ca3af] hover:text-[#161511]'
-                  )}
-                >
-                  {r}
-                </button>
-              ))}
-            </div>
 
             {/* Pool odds ladder */}
             <div className="mt-[26px] border-t border-[#f0f0f0] pt-[22px]">

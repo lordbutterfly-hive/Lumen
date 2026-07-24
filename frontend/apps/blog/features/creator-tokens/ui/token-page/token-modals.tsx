@@ -5,7 +5,7 @@ import type { Service, TokenMarketDetail } from '../../market/token-detail';
 import { buyQuote, sellQuote, serviceTokens } from '../../market/curve';
 import { usdPrice, usdWhole } from '../../market/format';
 
-export type TokenDialog = 'buy' | 'sell' | 'ask' | 'inter' | null;
+export type TokenDialog = 'buy' | 'sell' | 'ask' | 'send' | 'inter' | null;
 
 const ModalShell: FC<{ width: number; onClose: () => void; children: ReactNode }> = ({ width, onClose, children }) => (
   <div
@@ -196,8 +196,9 @@ const SellModal: FC<{ m: TokenMarketDetail; onSell: (tokens: number) => void; on
   );
 };
 
-const AskModal: FC<{ m: TokenMarketDetail; service: Service | null; onSpend: (usd: number, serviceName?: string, deadlineDays?: number) => void; onClose: () => void }> = ({ m, service, onSpend, onClose }) => {
+const AskModal: FC<{ m: TokenMarketDetail; service: Service | null; onSpend: (usd: number, serviceName?: string, deadlineDays?: number, question?: string) => void; onClose: () => void }> = ({ m, service, onSpend, onClose }) => {
   const [deadline, setDeadline] = useState(7);
+  const [question, setQuestion] = useState('');
   const usd = service?.usd ?? 10;
   const tokens = serviceTokens(usd, m.priceUsd);
   const held = m.position?.tokens ?? 0;
@@ -207,6 +208,8 @@ const AskModal: FC<{ m: TokenMarketDetail; service: Service | null; onSpend: (us
       <ModalHead title={`Ask @${m.handle}`} onClose={onClose} />
       <div className="px-6 pb-6 pt-[18px]">
         <textarea
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
           placeholder={`What do you want to ask @${m.handle}?`}
           className="h-[120px] w-full resize-y rounded-xl border border-[#e4e6e9] px-4 py-3.5 font-serif text-[15px] leading-[1.5] text-[#161511] outline-none focus:border-[#c0392b]"
         />
@@ -233,7 +236,7 @@ const AskModal: FC<{ m: TokenMarketDetail; service: Service | null; onSpend: (us
         <button
           onClick={() => {
             if (canAfford) {
-              onSpend(usd, service?.name, deadline);
+              onSpend(usd, service?.name, deadline, question);
               onClose();
             }
           }}
@@ -242,6 +245,41 @@ const AskModal: FC<{ m: TokenMarketDetail; service: Service | null; onSpend: (us
         >
           {canAfford ? `Send question — ${tok(tokens)} tokens` : `You need ${tok(tokens)} @${m.handle} tokens — buy some first`}
         </button>
+      </div>
+    </ModalShell>
+  );
+};
+
+const SendModal: FC<{ m: TokenMarketDetail; onTransfer: (tokens: number) => void; onClose: () => void }> = ({ m, onTransfer, onClose }) => {
+  const held = m.position?.tokens ?? 0;
+  const [to, setTo] = useState('');
+  const [amt, setAmt] = useState('');
+  const tokens = parseFloat(amt.replace(/,/g, '')) || 0;
+  const valid = to.trim().length > 0 && Number.isFinite(tokens) && tokens > 0 && tokens <= held;
+  return (
+    <ModalShell width={420} onClose={onClose}>
+      <ModalHead title={`Send @${m.handle} tokens`} onClose={onClose} />
+      <div className="px-6 pb-6 pt-[18px]">
+        <label className="mb-1.5 block text-[12.5px] font-semibold text-[#6b7280]">To (Lumen or Hive name)</label>
+        <input value={to} onChange={(e) => setTo(e.target.value)} placeholder="@name" className="mb-3.5 w-full rounded-xl border border-[#e4e6e9] px-4 py-3 text-[15px] font-semibold text-[#161511] outline-none" />
+        <div className="mb-1.5 flex items-center justify-between">
+          <label className="text-[12.5px] font-semibold text-[#6b7280]">Amount (tokens)</label>
+          <button onClick={() => setAmt(String(held))} className="border-0 bg-transparent text-[12.5px] font-semibold text-[#c0392b]">Max ({tok(held)})</button>
+        </div>
+        <input value={amt} onChange={(e) => setAmt(e.target.value)} inputMode="decimal" placeholder="0" className="mb-3.5 w-full rounded-xl border border-[#e4e6e9] px-4 py-3 text-[22px] font-bold tabular-nums text-[#161511] outline-none" />
+        <button
+          onClick={() => {
+            if (valid) {
+              onTransfer(tokens);
+              onClose();
+            }
+          }}
+          disabled={!valid}
+          className="w-full rounded-[13px] bg-[#1a1a17] py-[15px] text-[15px] font-bold text-white hover:bg-black disabled:opacity-50"
+        >
+          {tokens > held ? 'More than you hold' : `Send ${tok(tokens)} tokens`}
+        </button>
+        <div className="mt-2.5 text-center text-xs text-[#9ca3af]">Transfers are free and instant on Lumen. Never blocked by billing.</div>
       </div>
     </ModalShell>
   );
@@ -278,12 +316,14 @@ const TokenModals: FC<{
   service: Service | null;
   onBuy: (usd: number) => void;
   onSell: (tokens: number) => void;
-  onSpend: (usd: number, serviceName?: string, deadlineDays?: number) => void;
+  onSpend: (usd: number, serviceName?: string, deadlineDays?: number, question?: string) => void;
+  onTransfer: (tokens: number) => void;
   onClose: () => void;
-}> = ({ dialog, market, service, onBuy, onSell, onSpend, onClose }) => {
+}> = ({ dialog, market, service, onBuy, onSell, onSpend, onTransfer, onClose }) => {
   if (dialog === 'buy') return <BuyModal m={market} onBuy={onBuy} onClose={onClose} />;
   if (dialog === 'sell') return <SellModal m={market} onSell={onSell} onClose={onClose} />;
   if (dialog === 'ask') return <AskModal m={market} service={service} onSpend={onSpend} onClose={onClose} />;
+  if (dialog === 'send') return <SendModal m={market} onTransfer={onTransfer} onClose={onClose} />;
   if (dialog === 'inter') return <InterstitialModal handle={market.handle} onClose={onClose} />;
   return null;
 };

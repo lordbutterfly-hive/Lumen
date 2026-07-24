@@ -1,9 +1,10 @@
 'use client';
 
 import { FC, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import type { Service } from '../../market/token-detail';
 import { serviceTokens } from '../../market/curve';
-import { useTokenMarket } from '../../market/store';
+import { useTokenMarket, useIsFollowingCreator, toggleCreatorFollow, transferTokens } from '../../market/store';
 import { usdPrice, usdWhole } from '../../market/format';
 import TokenShell from '../token-shell';
 import PriceChart from './price-chart';
@@ -21,9 +22,22 @@ const tok = (n: number) => n.toFixed(2);
 
 const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
   const { market, buy, sell, spend } = useTokenMarket(handle);
+  const following = useIsFollowingCreator(handle);
   const [dialog, setDialog] = useState<TokenDialog>(null);
   const [service, setService] = useState<Service | null>(null);
   const [range, setRange] = useState('1W');
+  const searchParams = useSearchParams();
+
+  // Deep-link an action from the Your-Tokens row buttons (?a=buy|sell|spend|send).
+  useEffect(() => {
+    const a = searchParams?.get('a');
+    if (a === 'buy' || a === 'sell' || a === 'send') setDialog(a);
+    else if (a === 'spend' && market.services[0]) {
+      setService(market.services[0]);
+      setDialog('ask');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
   const d = market.delivery;
   const supplyPct = Math.min(100, Math.round((market.supply / market.cap) * 100));
   const up = market.changePctWeek >= 0;
@@ -82,8 +96,11 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
           </div>
           <p className="mt-0.5 font-serif text-[14.5px] text-[#4b5563]">{market.what}</p>
         </div>
-        <button className="rounded-[11px] border border-[#e4e6e9] bg-white px-5 py-2.5 text-sm font-semibold text-[#3f4650] hover:bg-[#f6f7f8]">
-          Follow
+        <button
+          onClick={() => toggleCreatorFollow(handle)}
+          className={`rounded-[11px] border px-5 py-2.5 text-sm font-semibold ${following ? 'border-[#c0392b] bg-[#fef2f0] text-[#c0392b]' : 'border-[#e4e6e9] bg-white text-[#3f4650] hover:bg-[#f6f7f8]'}`}
+        >
+          {following ? 'Following' : 'Follow'}
         </button>
       </div>
 
@@ -240,7 +257,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
               <button onClick={() => setDialog('sell')} className="rounded-[10px] border border-[#e4e6e9] bg-white px-4 py-2.5 text-[13px] font-semibold text-[#3f4650] hover:bg-[#f1f3f5]">
                 Sell
               </button>
-              <button className="rounded-[10px] border border-[#e4e6e9] bg-white px-4 py-2.5 text-[13px] font-semibold text-[#3f4650] hover:bg-[#f1f3f5]">Send</button>
+              <button onClick={() => setDialog('send')} className="rounded-[10px] border border-[#e4e6e9] bg-white px-4 py-2.5 text-[13px] font-semibold text-[#3f4650] hover:bg-[#f1f3f5]">Send</button>
               <button onClick={() => openAsk(market.services[0])} className="rounded-[10px] bg-[#1a1a17] px-4 py-2.5 text-[13px] font-semibold text-white hover:bg-black">
                 Spend
               </button>
@@ -262,6 +279,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
         onBuy={buy}
         onSell={sell}
         onSpend={spend}
+        onTransfer={(tokens) => transferTokens(handle, tokens)}
         onClose={() => setDialog(null)}
       />
     </TokenShell>

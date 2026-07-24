@@ -208,7 +208,7 @@ export function sell(handle: string, tokens: number): void {
 }
 
 /** Spend tokens on a USD-priced service (tokens = USD ÷ live price). */
-export function spend(handle: string, usd: number, serviceName = 'Ask a question', deadlineDays = 7): void {
+export function spend(handle: string, usd: number, serviceName = 'Ask a question', deadlineDays = 7, question = ''): void {
   if (handle === STUDIO_HANDLE) return; // #2: can't ask your own token (would let you answer yourself for commission)
   const m = getMarket(handle);
   if (!Number.isFinite(usd) || usd <= 0 || m.priceUsd <= 0) return;
@@ -226,7 +226,8 @@ export function spend(handle: string, usd: number, serviceName = 'Ask a question
     state: 'awaiting',
     costUsd: usd,
     tokens: Math.round(tokensSpent * 100) / 100,
-    dueLabel: `Answer due in ${deadlineDays}d`
+    dueLabel: `Answer due in ${deadlineDays}d`,
+    question: question.trim() || undefined
   });
   emit();
 }
@@ -235,7 +236,7 @@ export interface TokenMarketActions {
   market: TokenMarketDetail;
   buy: (usdGross: number) => void;
   sell: (tokens: number) => void;
-  spend: (usd: number, serviceName?: string, deadlineDays?: number) => void;
+  spend: (usd: number, serviceName?: string, deadlineDays?: number, question?: string) => void;
 }
 
 export function useTokenMarket(handle: string): TokenMarketActions {
@@ -248,7 +249,7 @@ export function useTokenMarket(handle: string): TokenMarketActions {
     market,
     buy: (usd) => buy(handle, usd),
     sell: (tokens) => sell(handle, tokens),
-    spend: (usd, serviceName, deadlineDays) => spend(handle, usd, serviceName, deadlineDays)
+    spend: (usd, serviceName, deadlineDays, question) => spend(handle, usd, serviceName, deadlineDays, question)
   };
 }
 
@@ -337,6 +338,42 @@ export function reclaimAsk(id: string): void {
 
 export function useMyAsks(): PortfolioAsk[] {
   return useSyncExternalStore(subscribe, () => outgoingAsksSnapshot, () => outgoingAsksSnapshot);
+}
+
+// ---- Follow a creator (Lumen-local; the token-page Follow button) ----
+const creatorFollows = new Set<string>();
+export function toggleCreatorFollow(handle: string): void {
+  if (creatorFollows.has(handle)) creatorFollows.delete(handle);
+  else creatorFollows.add(handle);
+  emit();
+}
+export function useIsFollowingCreator(handle: string): boolean {
+  return useSyncExternalStore(
+    subscribe,
+    () => creatorFollows.has(handle),
+    () => creatorFollows.has(handle)
+  );
+}
+
+// ---- Transfer your own tokens to another user (Lumen-local; recipient is
+// display-only in the mock — this just debits the sender's position). ----
+export function transferTokens(handle: string, tokens: number): void {
+  const m = markets.get(handle);
+  if (!m || !Number.isFinite(tokens) || tokens <= 0) return;
+  const held = m.position?.tokens ?? 0;
+  const n = Math.min(tokens, held);
+  if (n <= 0) return;
+  markets.set(handle, reprice({ ...m, position: withPosition(m, held - n, m.position?.heldDays ?? 0) }));
+  emit();
+}
+
+// ---- Retire your own token: winds the market down (Buy stops, Sell/reclaim stay
+// open — the windingDown read-side was already built; this is the missing writer). ----
+export function retireOwnToken(): void {
+  const m = markets.get(STUDIO_HANDLE);
+  if (!m) return;
+  markets.set(STUDIO_HANDLE, { ...m, windingDown: true });
+  emit();
 }
 
 // ------------------------------ Creator Studio -------------------------------

@@ -29,7 +29,10 @@ interface ServerSummary {
 
 async function fetchRetention(username: string): Promise<RetentionSummary> {
   const local = mockSummary(username);
-  if (RETENTION_SOURCE !== 'api') return local;
+  // Default to the REAL chain-derived route; only fall back to the demo mock when
+  // explicitly asked (NEXT_PUBLIC_RETENTION_SOURCE=mock) — never show fabricated
+  // rank/XP as if it were the user's own (N3).
+  if (RETENTION_SOURCE === 'mock') return local;
 
   const res = await fetch(`/api/streak/${encodeURIComponent(username)}`);
   if (!res.ok) throw new Error(`retention fetch failed: ${res.status}`);

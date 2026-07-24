@@ -9,6 +9,7 @@ import {
   raiseCap,
   claimTradeFees,
   sell,
+  retireOwnToken,
   STUDIO_HANDLE
 } from '../../market/store';
 import type { PortfolioAsk } from '../../market/portfolio';
@@ -63,7 +64,12 @@ const AnswerModal: FC<{ ask: PortfolioAsk; onClose: () => void }> = ({ ask, onCl
     <div onClick={onClose} className="fixed inset-0 z-[60] flex items-center justify-center bg-[rgba(20,18,10,0.4)] p-5 backdrop-blur-[2px]">
       <div onClick={(e) => e.stopPropagation()} className="w-[500px] max-w-full rounded-[20px] bg-white p-6 shadow-[0_20px_60px_rgba(20,18,10,0.25)]">
         <div className="mb-2 font-serif text-xl font-semibold text-[#161511]">Answer this {ask.service.toLowerCase()}</div>
-        <p className="mb-3 text-[13px] text-[#6b7280]">Kept private on Lumen — only this holder sees it. Never posted to Hive.</p>
+        {ask.question ? (
+          <div className="mb-3 rounded-[10px] border border-[#ebebeb] bg-[#f6f7f8] px-3.5 py-3 font-serif text-[14px] leading-[1.55] text-[#2a2822]">
+            {ask.question}
+          </div>
+        ) : null}
+        <p className="mb-3 text-[13px] text-[#6b7280]">Your answer is kept private on Lumen — only this holder sees it. Never posted to Hive.</p>
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
@@ -91,10 +97,48 @@ const AnswerModal: FC<{ ask: PortfolioAsk; onClose: () => void }> = ({ ask, onCl
   );
 };
 
+const RetireModal: FC<{ onConfirm: () => void; onClose: () => void }> = ({ onConfirm, onClose }) => {
+  const [confirm, setConfirm] = useState('');
+  const ok = confirm.trim().toLowerCase().replace(/^@/, '') === STUDIO_HANDLE;
+  return (
+    <div onClick={onClose} className="fixed inset-0 z-[60] flex items-center justify-center bg-[rgba(20,18,10,0.4)] p-5 backdrop-blur-[2px]">
+      <div onClick={(e) => e.stopPropagation()} className="w-[500px] max-w-full rounded-[20px] border border-[#f0c9c2] bg-white p-6 shadow-[0_20px_60px_rgba(20,18,10,0.25)]">
+        <div className="mb-2 font-serif text-xl font-semibold text-[#c0392b]">End your creator token?</div>
+        <ul className="mb-4 space-y-1.5 font-serif text-[13.5px] leading-[1.5] text-[#4b5563]">
+          <li>· The market freezes now — no new buys or asks.</li>
+          <li>· You’re removed from discovery.</li>
+          <li>· Every holder is refunded at the floor.</li>
+          <li>· Asks you’ve received still resolve — answer them to get paid.</li>
+          <li>· Your delivery record is lost — coming back means a new token.</li>
+          <li>· This can’t be undone.</li>
+        </ul>
+        <label className="mb-1.5 block text-[12.5px] font-semibold text-[#6b7280]">Type your handle (@{STUDIO_HANDLE}) to confirm</label>
+        <input value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder={`@${STUDIO_HANDLE}`} className="mb-4 w-full rounded-xl border border-[#e4e6e9] px-4 py-3 text-[15px] font-semibold outline-none" />
+        <div className="flex gap-3">
+          <button onClick={onClose} className="flex-1 rounded-xl border border-[#e4e6e9] py-3 text-[14px] font-semibold text-[#6b7280]">Cancel</button>
+          <button
+            onClick={() => {
+              if (ok) {
+                onConfirm();
+                onClose();
+              }
+            }}
+            disabled={!ok}
+            className="flex-1 rounded-xl bg-[#c0392b] py-3 text-[14px] font-semibold text-white hover:bg-[#96271b] disabled:opacity-50"
+          >
+            End my token
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const CreatorStudio: FC = () => {
   const { market, inbox, subDaysLeft, tradeFeeClaimableUsd, commissionEarnedUsd, launched } = useStudio();
   const [section, setSection] = useState<Section>('overview');
   const [answering, setAnswering] = useState<PortfolioAsk | null>(null);
+  const [retireOpen, setRetireOpen] = useState(false);
   const [capInput, setCapInput] = useState(String(market.cap));
   const [sellInput, setSellInput] = useState('');
   // Keep the cap field in sync with the committed cap after a successful raise (#3).
@@ -180,6 +224,7 @@ const CreatorStudio: FC = () => {
                     <div className={`text-[12.5px] font-semibold ${a.urgent ? 'text-[#b45309]' : 'text-[#6b7280]'}`}>{a.dueLabel}</div>
                   </div>
                   <div className="mt-1 text-[12.5px] tabular-nums text-[#6b7280]">{usdWhole(a.costUsd)} · {tok(a.tokens)} tokens escrowed</div>
+                  {a.question ? <p className="mt-1.5 line-clamp-2 font-serif text-[13px] text-[#4b5563]">“{a.question}”</p> : null}
                   <div className="mt-3">
                     <button onClick={() => setAnswering(a)} className="rounded-[10px] bg-[#c0392b] px-4 py-2 text-[13px] font-semibold text-white hover:bg-[#96271b]">Answer</button>
                   </div>
@@ -251,7 +296,13 @@ const CreatorStudio: FC = () => {
               If you stop paying, your token’s market winds down, holders are refunded at the floor, and your delivery record resets — coming back means a new token. Answering and cashing out are never blocked by billing.
             </p>
             <div className="mt-5 border-t border-[#f1f3f5] pt-4">
-              <button disabled className="rounded-[10px] border border-[#e4e6e9] px-4 py-2 text-[13px] font-semibold text-[#9ca3af]">End this token · Coming soon</button>
+              {market.windingDown ? (
+                <div className="text-[13px] font-semibold text-[#b45309]">This token is winding down — holders are being refunded at the floor. Answering and cashing out still work.</div>
+              ) : (
+                <button onClick={() => setRetireOpen(true)} className="rounded-[10px] border border-[#f0c9c2] px-4 py-2 text-[13px] font-semibold text-[#c0392b] hover:bg-[#fef2f0]">
+                  End this token
+                </button>
+              )}
             </div>
           </Card>
         ) : null}
@@ -292,6 +343,7 @@ const CreatorStudio: FC = () => {
       </div>
 
       {answering ? <AnswerModal ask={answering} onClose={() => setAnswering(null)} /> : null}
+      {retireOpen ? <RetireModal onConfirm={retireOwnToken} onClose={() => setRetireOpen(false)} /> : null}
     </TokenShell>
   );
 };
