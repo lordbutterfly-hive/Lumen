@@ -1,22 +1,31 @@
 'use client';
 
 import { FC, useEffect, useState } from 'react';
-import type { Service, TokenMarketDetail } from '../../market/token-detail';
+import type { Service } from '../../market/token-detail';
 import { serviceTokens } from '../../market/curve';
+import { useTokenMarket } from '../../market/store';
 import { usdPrice, usdWhole } from '../../market/format';
 import TokenShell from '../token-shell';
 import PriceChart from './price-chart';
 import TokenModals, { type TokenDialog } from './token-modals';
 
 const RANGES = ['1D', '1W', '1M', 'All'];
+
+// Slice the price series to the selected range (the mock chart is a short window,
+// so shorter ranges show a tighter tail). Keeps at least 2 points to plot a line.
+function chartForRange(chart: number[], range: string): number[] {
+  const n = range === '1D' ? 3 : range === '1W' ? 6 : range === '1M' ? 9 : chart.length;
+  return chart.slice(-Math.max(2, n));
+}
 const tok = (n: number) => n.toFixed(2);
 
-const TokenMarketView: FC<{ market: TokenMarketDetail }> = ({ market }) => {
+const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
+  const { market, buy, sell, spend } = useTokenMarket(handle);
   const [dialog, setDialog] = useState<TokenDialog>(null);
   const [service, setService] = useState<Service | null>(null);
   const [range, setRange] = useState('1W');
   const d = market.delivery;
-  const supplyPct = Math.round((market.supply / market.cap) * 100);
+  const supplyPct = Math.min(100, Math.round((market.supply / market.cap) * 100));
   const up = market.changePctWeek >= 0;
 
   // Market interstitial — first view per creator, per session.
@@ -131,7 +140,7 @@ const TokenMarketView: FC<{ market: TokenMarketDetail }> = ({ market }) => {
             <div className="mt-5 flex gap-3">
               <button
                 onClick={() => setDialog('buy')}
-                disabled={market.windingDown}
+                disabled={market.windingDown || market.supply >= market.cap}
                 className="flex-1 rounded-xl bg-[#c0392b] py-3.5 text-[15px] font-bold text-white hover:bg-[#a5301f] disabled:opacity-50"
               >
                 Buy
@@ -145,7 +154,7 @@ const TokenMarketView: FC<{ market: TokenMarketDetail }> = ({ market }) => {
             </div>
           </div>
           <div>
-            <PriceChart points={market.chart} />
+            <PriceChart points={chartForRange(market.chart, range)} />
             <div className="mt-2.5 flex justify-center gap-1.5">
               {RANGES.map((r) => {
                 const on = range === r;
@@ -246,7 +255,15 @@ const TokenMarketView: FC<{ market: TokenMarketDetail }> = ({ market }) => {
         soon after buying, an early-exit fee applies (it fades to zero over 6 weeks).
       </p>
 
-      <TokenModals dialog={dialog} market={market} service={service} onClose={() => setDialog(null)} />
+      <TokenModals
+        dialog={dialog}
+        market={market}
+        service={service}
+        onBuy={buy}
+        onSell={sell}
+        onSpend={spend}
+        onClose={() => setDialog(null)}
+      />
     </TokenShell>
   );
 };

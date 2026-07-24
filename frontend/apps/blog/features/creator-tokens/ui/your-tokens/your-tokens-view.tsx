@@ -3,7 +3,8 @@
 import { FC, useMemo, useState } from 'react';
 import { Link } from '@hive/ui';
 import type { PortfolioAsk, TokenHolding } from '../../market/portfolio';
-import { MOCK_ASKS, MOCK_HOLDINGS, portfolioTotals } from '../../market/portfolio';
+import { portfolioTotals } from '../../market/portfolio';
+import { useMyHoldings, useMyAsks, reclaimAsk } from '../../market/store';
 import { usdPrice } from '../../market/format';
 import TokenShell from '../token-shell';
 
@@ -91,7 +92,7 @@ const AskCard: FC<{ a: PortfolioAsk }> = ({ a }) => {
       {reclaimable ? (
         <div className="mt-3 flex items-center justify-between gap-3">
           <div className="text-[13px] text-[#8a5a20]">You get {a.tokens.toFixed(2)} tokens back to your balance — in full.</div>
-          <button className="rounded-[10px] bg-[#b45309] px-4 py-2 text-[13px] font-semibold text-white hover:bg-[#8a4207]">Get your tokens back</button>
+          <button onClick={() => reclaimAsk(a.id)} className="rounded-[10px] bg-[#b45309] px-4 py-2 text-[13px] font-semibold text-white hover:bg-[#8a4207]">Get your tokens back</button>
         </div>
       ) : null}
     </div>
@@ -100,9 +101,11 @@ const AskCard: FC<{ a: PortfolioAsk }> = ({ a }) => {
 
 const YourTokensView: FC = () => {
   const [tab, setTab] = useState<'holdings' | 'asks'>('holdings');
-  const totals = useMemo(() => portfolioTotals(MOCK_HOLDINGS), []);
+  const holdings = useMyHoldings();
+  const asks = useMyAsks();
+  const totals = useMemo(() => portfolioTotals(holdings), [holdings]);
   const weekChange = 4.1;
-  const reclaimable = MOCK_ASKS.filter((a) => a.state === 'reclaimable').length;
+  const reclaimable = asks.filter((a) => a.state === 'reclaimable').length;
 
   const rightRail = (
     <div className="flex flex-col gap-5 pt-[26px]">
@@ -155,9 +158,13 @@ const YourTokensView: FC = () => {
       {tab === 'holdings' ? (
         <>
           <div className="flex flex-col gap-2.5">
-            {MOCK_HOLDINGS.map((h) => (
-              <HoldingRow key={h.handle} h={h} />
-            ))}
+            {holdings.length === 0 ? (
+              <p className="py-8 text-center font-serif text-sm text-[#9ca3af]">
+                You don’t hold any creator tokens yet. Browse creators and buy in to start.
+              </p>
+            ) : (
+              holdings.map((h) => <HoldingRow key={h.handle} h={h} />)
+            )}
           </div>
           <p className="mt-4 font-serif text-[12.5px] leading-[1.55] text-[#9ca3af]">
             Token prices float — the floor value is the least you’re guaranteed back. Selling and reclaiming work in every market state.
@@ -165,9 +172,13 @@ const YourTokensView: FC = () => {
         </>
       ) : (
         <div className="flex flex-col gap-2.5">
-          {MOCK_ASKS.map((a) => (
-            <AskCard key={a.id} a={a} />
-          ))}
+          {asks.length === 0 ? (
+            <p className="py-8 text-center font-serif text-sm text-[#9ca3af]">
+              No asks yet. Spend your tokens on a creator’s service from their token page.
+            </p>
+          ) : (
+            asks.map((a) => <AskCard key={a.id} a={a} />)
+          )}
         </div>
       )}
     </TokenShell>

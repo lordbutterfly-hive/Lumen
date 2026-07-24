@@ -1,9 +1,12 @@
 import type { Metadata } from 'next';
-import { MOCK_TOKEN_DETAIL } from '@/blog/features/creator-tokens/market/token-detail';
+import { redirect } from 'next/navigation';
 import TokenMarketView from '@/blog/features/creator-tokens/ui/token-page/token-market-view';
 
 export function generateMetadata({ params }: { params: { handle: string } }): Metadata {
-  const handle = decodeURIComponent(params.handle).replace(/^@/, '');
+  // Next.js already URL-decodes the dynamic segment, so DON'T decode again —
+  // decodeURIComponent on an already-decoded value containing a bare '%'
+  // (e.g. /creators/abc%25 → "abc%") throws URIError and 500s the page.
+  const handle = params.handle.replace(/^@/, '');
   return {
     title: `@${handle} token`,
     description: `The live creator-token market for @${handle} on Lumen — price, market cap, floor, delivery record, and the services you spend the token on.`
@@ -19,6 +22,13 @@ export function generateMetadata({ params }: { params: { handle: string } }): Me
  * TODO(live): fetch the market for `params.handle` from the indexer; renders the
  * mock @ada detail until the contract is deployed.
  */
-export default function CreatorTokenPage() {
-  return <TokenMarketView market={MOCK_TOKEN_DETAIL} />;
+export default function CreatorTokenPage({ params }: { params: { handle: string } }) {
+  // Next.js already URL-decodes the dynamic segment, so DON'T decode again —
+  // decodeURIComponent on an already-decoded value containing a bare '%'
+  // (e.g. /creators/abc%25 → "abc%") throws URIError and 500s the page.
+  const handle = params.handle.replace(/^@/, '');
+  // Your own token (STUDIO_HANDLE = 'you') isn't a public trading page — it's
+  // managed in the Studio. Redirecting also closes the self-dealing loop (#2).
+  if (handle === 'you') redirect('/creators/studio');
+  return <TokenMarketView handle={handle} />;
 }

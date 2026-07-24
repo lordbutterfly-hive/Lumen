@@ -33,11 +33,14 @@ const ModalHead: FC<{ title: string; onClose: () => void }> = ({ title, onClose 
 
 const tok = (n: number) => n.toFixed(2);
 
-const BuyModal: FC<{ m: TokenMarketDetail; onClose: () => void }> = ({ m, onClose }) => {
+const BuyModal: FC<{ m: TokenMarketDetail; onBuy: (usd: number) => void; onClose: () => void }> = ({ m, onBuy, onClose }) => {
   const [amt, setAmt] = useState('50');
   const [adv, setAdv] = useState(false);
-  const usd = parseFloat(amt) || 0;
+  const [maxPrice, setMaxPrice] = useState((m.priceUsd * 1.05).toFixed(2));
+  const usd = parseFloat(amt.replace(/,/g, '')) || 0; // strip thousands separators ("1,000" → 1000, not 1)
   const q = buyQuote(usd, m);
+  const maxP = parseFloat(maxPrice.replace(/,/g, ''));
+  const overMax = adv && Number.isFinite(maxP) && maxP > 0 && q.priceAfter > maxP; // slippage guard
   return (
     <ModalShell width={460} onClose={onClose}>
       <ModalHead title={`Buy @${m.handle} token`} onClose={onClose} />
@@ -82,9 +85,12 @@ const BuyModal: FC<{ m: TokenMarketDetail; onClose: () => void }> = ({ m, onClos
             <label className="mb-1.5 block text-xs text-[#6b7280]">Max price per token</label>
             <div className="flex items-center rounded-[10px] border border-[#e4e6e9] px-3.5 py-2.5">
               <span className="font-bold text-[#9ca3af]">$</span>
-              <input defaultValue={(m.priceUsd * 1.05).toFixed(2)} className="ml-0.5 flex-1 border-0 text-[15px] font-semibold tabular-nums outline-none" />
+              <input value={maxPrice} onChange={(e) => setMaxPrice(e.target.value)} inputMode="decimal" className="ml-0.5 flex-1 border-0 text-[15px] font-semibold tabular-nums outline-none" />
             </div>
             <div className="mt-1.5 text-[11.5px] text-[#9ca3af]">Don’t buy above this — the curve moves as others trade.</div>
+            {overMax ? (
+              <div className="mt-1.5 text-[11.5px] font-semibold text-[#b45309]">Your buy would push the price to {usdPrice(q.priceAfter)}, above your max — lower the amount or raise the cap.</div>
+            ) : null}
           </div>
         ) : null}
         <div className="mb-3 rounded-[10px] bg-[#f6f7f8] px-3.5 py-3 text-[12.5px] leading-[1.5] text-[#6b7280]">
@@ -94,7 +100,16 @@ const BuyModal: FC<{ m: TokenMarketDetail; onClose: () => void }> = ({ m, onClos
           This token’s price floats. The floor ({usdPrice(m.floorUsd)}) is the least you’re guaranteed back; sell soon after
           buying and an early-exit fee applies.
         </p>
-        <button className="w-full rounded-[13px] bg-[#c0392b] py-[15px] text-[15px] font-bold text-white hover:bg-[#a5301f]">
+        <button
+          onClick={() => {
+            if (Number.isFinite(usd) && usd > 0 && !overMax) {
+              onBuy(usd);
+              onClose();
+            }
+          }}
+          disabled={!Number.isFinite(usd) || usd <= 0 || overMax}
+          className="w-full rounded-[13px] bg-[#c0392b] py-[15px] text-[15px] font-bold text-white hover:bg-[#a5301f] disabled:opacity-50"
+        >
           Buy — {usdWhole(usd)}
         </button>
         <div className="mt-2.5 text-center text-xs text-[#9ca3af]">One signature confirms your buy.</div>
@@ -103,10 +118,10 @@ const BuyModal: FC<{ m: TokenMarketDetail; onClose: () => void }> = ({ m, onClos
   );
 };
 
-const SellModal: FC<{ m: TokenMarketDetail; onClose: () => void }> = ({ m, onClose }) => {
+const SellModal: FC<{ m: TokenMarketDetail; onSell: (tokens: number) => void; onClose: () => void }> = ({ m, onSell, onClose }) => {
   const held = m.position?.tokens ?? 0;
   const [amt, setAmt] = useState(String(held || 0));
-  const tokens = parseFloat(amt) || 0;
+  const tokens = parseFloat(amt.replace(/,/g, '')) || 0;
   const q = sellQuote(tokens, m, m.position?.heldDays ?? 999);
   const feePctLabel = Math.round(q.exitFeePct * 100);
   return (
@@ -163,7 +178,16 @@ const SellModal: FC<{ m: TokenMarketDetail; onClose: () => void }> = ({ m, onClo
             <span className="font-bold text-[#2f7d4f]">{usdPrice(q.receiveUsd)}</span>
           </div>
         </div>
-        <button className="w-full rounded-[13px] bg-[#1a1a17] py-[15px] text-[15px] font-bold text-white hover:bg-black">
+        <button
+          onClick={() => {
+            if (Number.isFinite(tokens) && tokens > 0) {
+              onSell(tokens);
+              onClose();
+            }
+          }}
+          disabled={!Number.isFinite(tokens) || tokens <= 0 || held <= 0}
+          className="w-full rounded-[13px] bg-[#1a1a17] py-[15px] text-[15px] font-bold text-white hover:bg-black disabled:opacity-50"
+        >
           Sell — get ~{usdPrice(q.receiveUsd)}
         </button>
         <div className="mt-2.5 text-center text-xs text-[#9ca3af]">Selling is always available — even if this market winds down.</div>
@@ -172,10 +196,12 @@ const SellModal: FC<{ m: TokenMarketDetail; onClose: () => void }> = ({ m, onClo
   );
 };
 
-const AskModal: FC<{ m: TokenMarketDetail; service: Service | null; onClose: () => void }> = ({ m, service, onClose }) => {
+const AskModal: FC<{ m: TokenMarketDetail; service: Service | null; onSpend: (usd: number, serviceName?: string, deadlineDays?: number) => void; onClose: () => void }> = ({ m, service, onSpend, onClose }) => {
   const [deadline, setDeadline] = useState(7);
   const usd = service?.usd ?? 10;
   const tokens = serviceTokens(usd, m.priceUsd);
+  const held = m.position?.tokens ?? 0;
+  const canAfford = held >= tokens && Number.isFinite(tokens);
   return (
     <ModalShell width={500} onClose={onClose}>
       <ModalHead title={`Ask @${m.handle}`} onClose={onClose} />
@@ -204,8 +230,17 @@ const AskModal: FC<{ m: TokenMarketDetail; service: Service | null; onClose: () 
           />
           <span className="w-[70px] text-right text-[14px] font-bold tabular-nums text-[#161511]">{deadline} days</span>
         </div>
-        <button className="w-full rounded-[13px] bg-[#1a1a17] py-[15px] text-[15px] font-semibold text-white hover:bg-black">
-          Send question — {tok(tokens)} tokens
+        <button
+          onClick={() => {
+            if (canAfford) {
+              onSpend(usd, service?.name, deadline);
+              onClose();
+            }
+          }}
+          disabled={!canAfford}
+          className="w-full rounded-[13px] bg-[#1a1a17] py-[15px] text-[15px] font-semibold text-white hover:bg-black disabled:opacity-50"
+        >
+          {canAfford ? `Send question — ${tok(tokens)} tokens` : `You need ${tok(tokens)} @${m.handle} tokens — buy some first`}
         </button>
       </div>
     </ModalShell>
@@ -237,15 +272,18 @@ const InterstitialModal: FC<{ handle: string; onClose: () => void }> = ({ onClos
   </ModalShell>
 );
 
-const TokenModals: FC<{ dialog: TokenDialog; market: TokenMarketDetail; service: Service | null; onClose: () => void }> = ({
-  dialog,
-  market,
-  service,
-  onClose
-}) => {
-  if (dialog === 'buy') return <BuyModal m={market} onClose={onClose} />;
-  if (dialog === 'sell') return <SellModal m={market} onClose={onClose} />;
-  if (dialog === 'ask') return <AskModal m={market} service={service} onClose={onClose} />;
+const TokenModals: FC<{
+  dialog: TokenDialog;
+  market: TokenMarketDetail;
+  service: Service | null;
+  onBuy: (usd: number) => void;
+  onSell: (tokens: number) => void;
+  onSpend: (usd: number, serviceName?: string, deadlineDays?: number) => void;
+  onClose: () => void;
+}> = ({ dialog, market, service, onBuy, onSell, onSpend, onClose }) => {
+  if (dialog === 'buy') return <BuyModal m={market} onBuy={onBuy} onClose={onClose} />;
+  if (dialog === 'sell') return <SellModal m={market} onSell={onSell} onClose={onClose} />;
+  if (dialog === 'ask') return <AskModal m={market} service={service} onSpend={onSpend} onClose={onClose} />;
   if (dialog === 'inter') return <InterstitialModal handle={market.handle} onClose={onClose} />;
   return null;
 };

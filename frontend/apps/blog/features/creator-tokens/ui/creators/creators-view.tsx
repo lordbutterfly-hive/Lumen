@@ -3,7 +3,7 @@
 import { FC, useMemo, useState } from 'react';
 import { Link } from '@hive/ui';
 import type { CreatorTokenSummary } from '../../market/types';
-import { MOCK_CREATORS, MOCK_NEW_CREATORS } from '../../market/mock';
+import { useCreatorList } from '../../market/store';
 import { usdCompact, usdPrice, usdWhole } from '../../market/format';
 import TokenShell from '../token-shell';
 
@@ -31,6 +31,13 @@ const SORTS: { id: Sort; label: string }[] = [
   { id: 'fastest', label: 'Fastest' },
   { id: 'new', label: 'New' }
 ];
+
+// Rough hours from a "~6h" / "~2h" / "~1d" response-time string, for the Fastest sort.
+function responseHours(s: string): number {
+  const m = s.match(/([\d.]+)\s*([hd])/i);
+  if (!m) return 9999;
+  return parseFloat(m[1]) * (m[2].toLowerCase() === 'd' ? 24 : 1);
+}
 
 const DeliveryStrip: FC<{ marks: boolean[] }> = ({ marks }) => (
   <div className="mb-2.5 flex gap-1">
@@ -82,16 +89,26 @@ const CreatorCard: FC<{ c: CreatorTokenSummary }> = ({ c }) => (
 const CreatorsView: FC = () => {
   const [sort, setSort] = useState<Sort>('reliable');
   const [showNew, setShowNew] = useState(true);
+  const { creators: liveCreators, newCreators: liveNew } = useCreatorList();
 
   const creators = useMemo(() => {
-    const list = [...MOCK_CREATORS];
+    const list = [...liveCreators];
     // Reliability is the ONLY ranking metric — never price/cap/volume. Missing
     // record sorts last (missing ≠ perfect), never rank-boosted.
     if (sort === 'reliable') {
       list.sort((a, b) => Number(b.delivery.available) - Number(a.delivery.available) || b.delivery.completionPct - a.delivery.completionPct);
+    } else if (sort === 'fastest') {
+      list.sort(
+        (a, b) =>
+          Number(b.delivery.available) - Number(a.delivery.available) ||
+          responseHours(a.delivery.typicalResponse) - responseHours(b.delivery.typicalResponse)
+      );
+    } else if (sort === 'new') {
+      // No launch timestamp in the mock — smallest market ≈ newest.
+      list.sort((a, b) => a.marketCapUsd - b.marketCapUsd);
     }
     return list;
-  }, [sort]);
+  }, [sort, liveCreators]);
 
   const rightRail = (
     <div className="flex flex-col gap-5 pt-[26px]">
@@ -158,7 +175,7 @@ const CreatorsView: FC = () => {
             </button>
           </div>
           <div className="flex gap-3.5 overflow-x-auto pb-1">
-            {MOCK_NEW_CREATORS.map((c) => (
+            {liveNew.map((c) => (
               <Link
                 key={c.handle}
                 href={`/creators/${c.handle}`}
