@@ -129,3 +129,60 @@ func ExitTaxOn(p *big.Int, taxBps uint64) *big.Int {
 	}
 	return mMulDivCeil(p, new(big.Int).SetUint64(taxBps), big.NewInt(10000))
 }
+
+// ---------------------------------------------------------------------------
+// WHERE THE EXIT TAX LANDS — 50/50 creator/platform (USER RULING, 2026-07-27).
+//
+// This SUPERSEDES RULING J's "all to treasury" destination. J chose treasury by
+// elimination and its reasoning still holds against what it was compared to —
+// leaving the tax in the reserve breaks R === area(S) and re-opens the drain
+// (SA-1, measured 1,322x), and paying it to remaining holders let a whale
+// recover 97.5% of their own tax through their retained balance and alts while
+// a 1%-of-supply fan paid the full 19.9%. Neither of those is reopened here.
+//
+// What J never weighed is that treasury made the exit tax a PLATFORM TRADING
+// FEE of up to 20% — a fourth revenue line that appears nowhere in the locked
+// revenue model (10 HBD/month subscription + 12% service commission + the 5%
+// platform trade fee), arrived as a side effect of a security fix, and is the
+// single worst fact for the securities question, since transaction-based
+// compensation to the platform is exactly what the zero-trading-fee ruling
+// existed to avoid. Splitting it in half moves the larger share of the skim
+// onto the creator, where it reads as funding the person doing the work rather
+// than as a toll we collect.
+//
+// It rides the trade fee's EXISTING rail, deliberately: creator half accrues to
+// kFeeBal (pull-claimable, never pushed — our own friend.tech teardown found a
+// creator who cannot receive a pushed fee bricks every buy and sell forever),
+// platform half to kTreasury. No new key family, no new claim path, no new
+// aggregate anything can revert on (RULING G holds structurally).
+//
+// THE SPLIT IS EXACT, NOT ROUNDED TWICE: creatorHalf = floor(tax/2) and the
+// platform takes the REMAINDER, so the two always re-sum to tax with zero dust
+// created or destroyed. This is what keeps the C-18 split equality
+// (p == net + tax + feeC + feeP) true as written — `tax` is unchanged in size,
+// only in destination, so every existing money-conservation test still holds.
+//
+// SELF-SELL GUARD: when the seller IS the creator, the whole tax goes to
+// treasury. Otherwise a creator would refund half their own exit tax to
+// themselves on every dump of their own token — a 50% discount on the exact
+// behaviour the tax exists to deter, available only to the one account that
+// can also move the price. (The pre-existing 5% creator trade fee has the same
+// shape and is NOT changed here: it is a ruled design (F8) and at 5% the
+// incentive is a quarter the size. Flagged, not silently altered.)
+func accrueExitTax(s Store, creator, seller string, tax *big.Int) {
+	if tax == nil || tax.Sign() <= 0 {
+		return
+	}
+	if seller == creator {
+		addMoney(s, kTreasury(), tax)
+		return
+	}
+	creatorHalf := new(big.Int).Div(tax, big.NewInt(2))
+	platformHalf := new(big.Int).Sub(tax, creatorHalf)
+	if creatorHalf.Sign() > 0 {
+		addMoney(s, kFeeBal(creator), creatorHalf)
+	}
+	if platformHalf.Sign() > 0 {
+		addMoney(s, kTreasury(), platformHalf)
+	}
+}

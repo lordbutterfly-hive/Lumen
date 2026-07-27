@@ -140,7 +140,7 @@ func TestAskHappyPath(t *testing.T) {
 		t.Fatalf("sanity: commission = %s, want 120 (12%% of 1000)", commission)
 	}
 
-	res, err := Ask(s, asker1, creator1, block, maxCredits, commission, "cid-1", MinAskDeadline)
+	res, err := askAt0(s, asker1, creator1, block, maxCredits, commission, "cid-1", MinAskDeadline)
 	if err != nil {
 		t.Fatalf("Ask: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestAskMaxCreditsMissingOrZeroRejected(t *testing.T) {
 	s := NewMemStore()
 	// No market setup needed: the maxCredits guard fires before
 	// RequireInflowOpen is ever reached.
-	_, err := Ask(s, asker1, creator1, 1000, big.NewInt(0), big.NewInt(0), "cid", MinAskDeadline)
+	_, err := askAt0(s, asker1, creator1, 1000, big.NewInt(0), big.NewInt(0), "cid", MinAskDeadline)
 	if err == nil {
 		t.Fatal("expected error for maxCredits=0")
 	}
@@ -217,7 +217,7 @@ func TestAskMaxCreditsMissingOrZeroRejected(t *testing.T) {
 		t.Fatalf("symbol = %q, want %q (err=%v)", askErrSymbol(err), ErrInput, err)
 	}
 
-	_, err = Ask(s, asker1, creator1, 1000, nil, big.NewInt(0), "cid", MinAskDeadline)
+	_, err = askAt0(s, asker1, creator1, 1000, nil, big.NewInt(0), "cid", MinAskDeadline)
 	if err == nil {
 		t.Fatal("expected error for maxCredits=nil")
 	}
@@ -225,7 +225,7 @@ func TestAskMaxCreditsMissingOrZeroRejected(t *testing.T) {
 		t.Fatalf("symbol = %q, want %q (err=%v)", askErrSymbol(err), ErrInput, err)
 	}
 
-	_, err = Ask(s, asker1, creator1, 1000, big.NewInt(-5), big.NewInt(0), "cid", MinAskDeadline)
+	_, err = askAt0(s, asker1, creator1, 1000, big.NewInt(-5), big.NewInt(0), "cid", MinAskDeadline)
 	if err == nil {
 		t.Fatal("expected error for maxCredits<0")
 	}
@@ -268,7 +268,7 @@ func TestAskMaxCreditsSlippageGuard(t *testing.T) {
 	// 4000 at rate 500 -> ceil = 8 credits, over the signed cap of 2.
 	setMoney(s, kFace(creator1), big.NewInt(4000)) // 4x spike
 
-	_, err := Ask(s, asker1, creator1, block, maxCredits, commission, "cid", MinAskDeadline)
+	_, err := askAt0(s, asker1, creator1, block, maxCredits, commission, "cid", MinAskDeadline)
 	if err == nil {
 		t.Fatal("expected the spiked-face ask to revert, not silently spend more credits")
 	}
@@ -287,7 +287,7 @@ func TestAskMaxCreditsSlippageGuard(t *testing.T) {
 	// asker actually quoted) must still succeed — the guard must not be
 	// off-by-one.
 	setMoney(s, kFace(creator1), big.NewInt(1000))
-	res, err := Ask(s, asker1, creator1, block, maxCredits, commission, "cid", MinAskDeadline)
+	res, err := askAt0(s, asker1, creator1, block, maxCredits, commission, "cid", MinAskDeadline)
 	if err != nil {
 		t.Fatalf("ask at exactly maxCredits should succeed: %v", err)
 	}
@@ -311,7 +311,7 @@ func TestAskCommissionUnderpaidRejected(t *testing.T) {
 	owed := commissionOwedFor(big.NewInt(1000)) // 120
 	underpaid := new(big.Int).Sub(owed, big.NewInt(1))
 
-	_, err := Ask(s, asker1, creator1, block, maxCredits, underpaid, "cid", MinAskDeadline)
+	_, err := askAt0(s, asker1, creator1, block, maxCredits, underpaid, "cid", MinAskDeadline)
 	if err == nil {
 		t.Fatal("expected error for underpaid commission")
 	}
@@ -332,7 +332,7 @@ func TestAskCommissionUnderpaidRejected(t *testing.T) {
 	}
 
 	// Exactly the floor amount must be accepted.
-	res, err := Ask(s, asker1, creator1, block, maxCredits, owed, "cid", MinAskDeadline)
+	res, err := askAt0(s, asker1, creator1, block, maxCredits, owed, "cid", MinAskDeadline)
 	if err != nil {
 		t.Fatalf("exact commission should be accepted: %v", err)
 	}
@@ -364,7 +364,7 @@ func TestAskCommissionOverpaidRejected(t *testing.T) {
 	owed := commissionOwedFor(big.NewInt(1000)) // 120
 	overpaid := new(big.Int).Add(owed, big.NewInt(1))
 
-	_, err := Ask(s, asker1, creator1, block, maxCredits, overpaid, "cid", MinAskDeadline)
+	_, err := askAt0(s, asker1, creator1, block, maxCredits, overpaid, "cid", MinAskDeadline)
 	if err == nil {
 		t.Fatal("REGRESSION: an overpaid commission was accepted — the old >= lower-bound check is back")
 	}
@@ -383,7 +383,7 @@ func TestAskCommissionOverpaidRejected(t *testing.T) {
 	// A GROSSLY overpaid commission (a 4x-style spike, the exact shape H2
 	// names) must be refused the same way, not just an off-by-one.
 	grosslyOverpaid := new(big.Int).Mul(owed, big.NewInt(4))
-	if _, err := Ask(s, asker1, creator1, block, maxCredits, grosslyOverpaid, "cid", MinAskDeadline); err == nil {
+	if _, err := askAt0(s, asker1, creator1, block, maxCredits, grosslyOverpaid, "cid", MinAskDeadline); err == nil {
 		t.Fatal("REGRESSION: a 4x-overpaid commission was accepted")
 	} else if askErrSymbol(err) != ErrBalance {
 		t.Fatalf("symbol = %q, want %q (err=%v)", askErrSymbol(err), ErrBalance, err)
@@ -391,7 +391,7 @@ func TestAskCommissionOverpaidRejected(t *testing.T) {
 
 	// Exactly the owed amount must still be accepted — the fix must not have
 	// tightened the bound into rejecting the correct value too.
-	res, err := Ask(s, asker1, creator1, block, maxCredits, owed, "cid", MinAskDeadline)
+	res, err := askAt0(s, asker1, creator1, block, maxCredits, owed, "cid", MinAskDeadline)
 	if err != nil {
 		t.Fatalf("exact commission should be accepted: %v", err)
 	}
@@ -461,7 +461,7 @@ func TestAskCreditsRoundingWiredCorrectly(t *testing.T) {
 	activateMarket(s, creator1, askBlock)
 
 	commission := commissionOwedFor(big.NewInt(101))
-	res, err := Ask(s, asker1, creator1, askBlock, big.NewInt(20), commission, "cid", MinAskDeadline)
+	res, err := askAt0(s, asker1, creator1, askBlock, big.NewInt(20), commission, "cid", MinAskDeadline)
 	if err != nil {
 		t.Fatalf("Ask: %v", err)
 	}
@@ -481,11 +481,11 @@ func TestAskDeadlineOutOfBandRejected(t *testing.T) {
 	s := NewMemStore()
 	// No market setup needed: the deadline-band guard fires before
 	// RequireInflowOpen.
-	_, err := Ask(s, asker1, creator1, 1000, big.NewInt(1), big.NewInt(0), "cid", MinAskDeadline-1)
+	_, err := askAt0(s, asker1, creator1, 1000, big.NewInt(1), big.NewInt(0), "cid", MinAskDeadline-1)
 	if err == nil || askErrSymbol(err) != ErrInput {
 		t.Fatalf("below MinAskDeadline: err=%v, want ErrInput", err)
 	}
-	_, err = Ask(s, asker1, creator1, 1000, big.NewInt(1), big.NewInt(0), "cid", MaxAskDeadline+1)
+	_, err = askAt0(s, asker1, creator1, 1000, big.NewInt(1), big.NewInt(0), "cid", MaxAskDeadline+1)
 	if err == nil || askErrSymbol(err) != ErrInput {
 		t.Fatalf("above MaxAskDeadline: err=%v, want ErrInput", err)
 	}
@@ -504,8 +504,12 @@ func TestAskSignatureCannotAcceptCallerSuppliedRate(t *testing.T) {
 	if fn.Kind() != reflect.Func {
 		t.Fatal("core.Ask is not a function")
 	}
-	// s, caller, creator, block, maxCredits, commissionHbdPaid, contentHash, deadlineBlocks
-	const wantParams = 8
+	// s, caller, creator, block, maxCredits, commissionHbdPaid, contentHash,
+	// deadlineBlocks, offeringID (2026-07-27 — which named service this ask
+	// buys; 0 == the legacy `face` price). Still no `rate`: the settlement
+	// rate remains derived inside core, never caller-supplied, which is the
+	// property this test exists to pin.
+	const wantParams = 9
 	if fn.NumIn() != wantParams {
 		t.Fatalf("core.Ask has %d parameters, want %d — signature shape changed; re-verify no `rate` parameter was reintroduced", fn.NumIn(), wantParams)
 	}
@@ -598,7 +602,7 @@ func TestAsk_RefusesWhenOracleUnavailable(t *testing.T) {
 	setMoney(s, kBal(creator1, asker1), big.NewInt(5000))
 
 	commission := commissionOwedFor(big.NewInt(1000))
-	_, err := Ask(s, asker1, creator1, block, big.NewInt(1000), commission, "cid", MinAskDeadline)
+	_, err := askAt0(s, asker1, creator1, block, big.NewInt(1000), commission, "cid", MinAskDeadline)
 	if err == nil {
 		t.Fatal("REGRESSION: Ask succeeded with no oracle — the PAR fallback is back")
 	}
@@ -629,7 +633,7 @@ func TestAsk_SettlesAtTWAPWhenAvailable(t *testing.T) {
 	commission := commissionOwedFor(big.NewInt(1000))
 	wantCredits := creditsForAsk(big.NewInt(1000), big.NewInt(2000)) // ceil(1000/2000) = 1
 
-	res, err := Ask(s, asker1, creator1, askBlock, wantCredits, commission, "cid", MinAskDeadline)
+	res, err := askAt0(s, asker1, creator1, askBlock, wantCredits, commission, "cid", MinAskDeadline)
 	if err != nil {
 		t.Fatalf("Ask: %v", err)
 	}
@@ -764,7 +768,7 @@ func TestAnswerBooksCommissionExactlyOnce(t *testing.T) {
 	commission := commissionOwedFor(big.NewInt(1000))
 	maxCredits := big.NewInt(3)
 
-	askRes, err := Ask(s, asker1, creator1, block, maxCredits, commission, "cid", MinAskDeadline)
+	askRes, err := askAt0(s, asker1, creator1, block, maxCredits, commission, "cid", MinAskDeadline)
 	if err != nil {
 		t.Fatalf("Ask: %v", err)
 	}
@@ -982,7 +986,7 @@ func TestReclaimNoCommissionCharged(t *testing.T) {
 	commission := commissionOwedFor(big.NewInt(1000))
 	maxCredits := big.NewInt(3)
 
-	seedRes, err := Ask(s, asker2, creator1, block, maxCredits, commission, "seed-cid", MinAskDeadline)
+	seedRes, err := askAt0(s, asker2, creator1, block, maxCredits, commission, "seed-cid", MinAskDeadline)
 	if err != nil {
 		t.Fatalf("seed Ask: %v", err)
 	}
@@ -995,7 +999,7 @@ func TestReclaimNoCommissionCharged(t *testing.T) {
 	}
 
 	// This test's OWN ask, which will be reclaimed unanswered.
-	askRes, err := Ask(s, asker1, creator1, block, maxCredits, commission, "cid", MinAskDeadline)
+	askRes, err := askAt0(s, asker1, creator1, block, maxCredits, commission, "cid", MinAskDeadline)
 	if err != nil {
 		t.Fatalf("Ask: %v", err)
 	}
@@ -1033,7 +1037,7 @@ func TestReclaimReturnsCommissionInFull(t *testing.T) {
 	commission := commissionOwedFor(big.NewInt(1000)) // 120
 	maxCredits := big.NewInt(3)
 
-	askRes, err := Ask(s, asker1, creator1, block, maxCredits, commission, "cid", MinAskDeadline)
+	askRes, err := askAt0(s, asker1, creator1, block, maxCredits, commission, "cid", MinAskDeadline)
 	if err != nil {
 		t.Fatalf("Ask: %v", err)
 	}

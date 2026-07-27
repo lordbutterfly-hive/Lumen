@@ -458,7 +458,7 @@ func TestSettlement_OneDerivationForAllThreeServicePaths(t *testing.T) {
 
 	s := build()
 	setMoney(s, kFace(creator1), face)
-	askRes, err := Ask(s, asker1, creator1, q, big.NewInt(1), commission, "cid", MinAskDeadline)
+	askRes, err := askAt0(s, asker1, creator1, q, big.NewInt(1), commission, "cid", MinAskDeadline)
 	if err != nil {
 		t.Fatalf("Ask: %v", err)
 	}
@@ -528,11 +528,11 @@ func TestSettlementRefusalGatesNoOutflow(t *testing.T) {
 	// avg_ceil 16,320 so marker 15,000 clears C5 by 4x; spot 37,093 above).
 	askBlock := seedSettleObs(s, creator, regBlock+10, big.NewInt(15_000))
 	commission := commissionOwedFor(big.NewInt(10_000))
-	askA, err := Ask(s, holder1, creator, askBlock, big.NewInt(1), commission, "to-answer", MaxAskDeadline)
+	askA, err := askAt0(s, holder1, creator, askBlock, big.NewInt(1), commission, "to-answer", MaxAskDeadline)
 	if err != nil {
 		t.Fatalf("Ask(to-answer): %v", err)
 	}
-	askR, err := Ask(s, holder2, creator, askBlock, big.NewInt(1), commission, "to-reclaim", MinAskDeadline)
+	askR, err := askAt0(s, holder2, creator, askBlock, big.NewInt(1), commission, "to-reclaim", MinAskDeadline)
 	if err != nil {
 		t.Fatalf("Ask(to-reclaim): %v", err)
 	}
@@ -545,7 +545,7 @@ func TestSettlementRefusalGatesNoOutflow(t *testing.T) {
 		t.Fatal("premise broken: settlement still prices after the quiet gap")
 	}
 	// New service inflows are refused now — that is ALL the refusal gates.
-	if _, err := Ask(s, holder1, creator, quiet, big.NewInt(10), commission, "refused", MinAskDeadline); err == nil {
+	if _, err := askAt0(s, holder1, creator, quiet, big.NewInt(10), commission, "refused", MinAskDeadline); err == nil {
 		t.Fatal("premise broken: Ask succeeded while settlement refuses")
 	}
 

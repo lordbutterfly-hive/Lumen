@@ -224,7 +224,7 @@ func buildDemoScenario() (*core.MemStore, *indexer.Index, uint64) {
 	// * CommissionBps / 10000), not merely be >= it.
 	commissionOwed := new(big.Int).Mul(big.NewInt(face), big.NewInt(int64(core.CommissionBps)))
 	commissionOwed.Div(commissionOwed, big.NewInt(10000))
-	askResult := must2(core.Ask(store, "reader1", "danerin", askBlock, big.NewInt(1), commissionOwed, "demo-content-hash", core.MinAskDeadline))
+	askResult := must2(core.Ask(store, "reader1", "danerin", askBlock, big.NewInt(1), commissionOwed, "demo-content-hash", core.MinAskDeadline, 0))
 	log(core.EvAsked("danerin", "reader1", askBlock, askResult.Seq, askResult.CreditsSpent, askResult.CommissionHbd, askResult.RateUsed, core.MinAskDeadline, "demo-content-hash"))
 
 	return store, ix, demoBlock

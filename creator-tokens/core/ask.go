@@ -133,11 +133,12 @@ type escrowRec struct {
 	answerHash    string
 	commissionHbd *big.Int
 	acqBlock      uint64 // the asker's wacq at escrow-out (0 == unclocked)
+	offeringID    uint64 // which named service this ask bought (0 == the legacy `face` price)
 }
 
-// Packed layout: asker|credits|deadline|status|commissionHbd|acqBlock|contentHash|answerHash.
+// Packed layout: asker|credits|deadline|status|commissionHbd|acqBlock|offeringID|contentHash|answerHash.
 //
-// asker/status/credits/deadline/commissionHbd/acqBlock are all closed
+// asker/status/credits/deadline/commissionHbd/acqBlock/offeringID are all closed
 // alphabets (validAccount, the 3 status consts, decimal digits) that
 // structurally cannot contain "|". contentHash and answerHash are the only free-form
 // fields — Ask and Answer both reject a "|" in them at the door (see
@@ -145,22 +146,38 @@ type escrowRec struct {
 // before commissionHbd was added: SplitN's final element absorbs anything
 // remaining, so even if a future caller ever failed to validate one of them,
 // only answerHash (the true last field) could silently swallow a stray "|",
-// never a money field. commissionHbd and acqBlock are both inserted
+// never a money field. commissionHbd, acqBlock and offeringID are all inserted
 // between status and contentHash rather than appended at the end so this
 // ordering is preserved. This format round-trips exactly with no escaping needed —
 // matching the rest of the codebase (errors.go, keys.go concatenate fields
 // without escaping too).
+//
+// offeringID (2026-07-27) records WHICH named service the ask was opened
+// against — 0 meaning the legacy single `face` price (offerings.go). It is
+// recorded at Ask time and never re-read for money: the escrow's own `credits`
+// and `commissionHbd` are what Answer and Reclaim settle, so deleting or
+// repricing an offering afterwards cannot move a single base unit of an ask
+// already in flight. It exists so the delivery record and the buyer's receipt
+// can name the service that was bought.
+//
+// ★ THE FIELD COUNT IS LOAD-BEARING. This layout is positional and unpackEscrow
+// demands an EXACT count, so adding a field is a breaking change to every
+// reader — parser, fixtures, and the frontend payload contract must move in one
+// commit. A 2026-07-24 audit caught the previous insertion (acqBlock) having
+// been made without updating the parser, which silently shifted contentHash
+// into answerHash on every read. That is why the count check below is exact.
 func packEscrow(r escrowRec) string {
 	return r.asker + "|" + r.credits.String() + "|" +
 		strconv.FormatUint(r.deadline, 10) + "|" + r.status + "|" +
 		r.commissionHbd.String() + "|" +
 		strconv.FormatUint(r.acqBlock, 10) + "|" +
+		strconv.FormatUint(r.offeringID, 10) + "|" +
 		r.contentHash + "|" + r.answerHash
 }
 
 func unpackEscrow(v string) (escrowRec, bool) {
-	p := strings.SplitN(v, "|", 8)
-	if len(p) != 8 {
+	p := strings.SplitN(v, "|", 9)
+	if len(p) != 9 {
 		return escrowRec{}, false
 	}
 	credits, ok := new(big.Int).SetString(p[1], 10)
@@ -179,11 +196,16 @@ func unpackEscrow(v string) (escrowRec, bool) {
 	if err != nil {
 		return escrowRec{}, false
 	}
+	offeringID, err := strconv.ParseUint(p[6], 10, 64)
+	if err != nil {
+		return escrowRec{}, false
+	}
 	return escrowRec{
 		asker: p[0], credits: credits, deadline: deadline,
 		status: p[3], commissionHbd: commissionHbd,
 		acqBlock:    acqBlock,
-		contentHash: p[6], answerHash: p[7],
+		offeringID:  offeringID,
+		contentHash: p[7], answerHash: p[8],
 	}, true
 }
 
@@ -255,7 +277,7 @@ func commissionOwedFor(face *big.Int) *big.Int {
 // on how many credits this ask may cost, mirroring what transfer.allow
 // already is for the commission's HBD leg — see the guard below for why it
 // is needed even though rate itself is now tamper-resistant.
-func Ask(s Store, caller, creator string, block uint64, maxCredits *big.Int, commissionHbdPaid *big.Int, contentHash string, deadlineBlocks uint64) (*AskResult, error) {
+func Ask(s Store, caller, creator string, block uint64, maxCredits *big.Int, commissionHbdPaid *big.Int, contentHash string, deadlineBlocks uint64, offeringID uint64) (*AskResult, error) {
 	if !validAccount(caller) {
 		return nil, newErr(ErrInput, "invalid caller")
 	}
@@ -288,9 +310,30 @@ func Ask(s Store, caller, creator string, block uint64, maxCredits *big.Int, com
 		return nil, err
 	}
 
-	face := getMoney(s, kFace(creator))
-	if !mGt(face, mZero()) {
-		return nil, newErr(ErrState, "creator has no face price set")
+	// WHICH PRICE THIS ASK SETTLES AT (2026-07-27). offeringID 0 is the legacy
+	// single `face` price and reads exactly the key it always did — the audited
+	// path is untouched. A nonzero id names one of the creator's posted services
+	// (offerings.go) and settles at THAT service's own banded price. Everything
+	// downstream — settleSpend, maxCredits, the commission leg, the escrow — is
+	// identical either way, because from here on there is only "the HBD price
+	// this ask is denominated in".
+	//
+	// The lookup is LIVE, at execution, for the same reason the face read was:
+	// the slippage caps below (maxCredits on the token leg, the exact-match
+	// commission on the HBD leg) are what bound a price that moved between the
+	// asker signing and this call executing. A deleted offering reads 0 and is
+	// refused here, so a withdrawn service can never be bought.
+	var face *big.Int
+	if offeringID == 0 {
+		face = getMoney(s, kFace(creator))
+		if !mGt(face, mZero()) {
+			return nil, newErr(ErrState, "creator has no face price set")
+		}
+	} else {
+		face = OfferingPrice(s, creator, offeringID)
+		if !mGt(face, mZero()) {
+			return nil, newErr(ErrNotFound, "no such offering")
+		}
 	}
 
 	// Settlement derivation + RULING C guards (settlement.go): the rate is
@@ -380,6 +423,7 @@ func Ask(s Store, caller, creator string, block uint64, maxCredits *big.Int, com
 		status: askPending, contentHash: contentHash, answerHash: "",
 		commissionHbd: commissionHbdPaid,
 		acqBlock:      acqAtEscrow,
+		offeringID:    offeringID,
 	})
 	setU64(s, kSeq(creator), seq+1)
 

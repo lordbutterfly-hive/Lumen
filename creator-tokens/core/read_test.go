@@ -206,7 +206,7 @@ func TestWithdrawTreasury_EndToEnd_RevenueNoLongerPermanentlyLocked(t *testing.T
 	setMoney(s, kFace(creator), big.NewInt(10_000))
 	askBlock := seedSettleObs(s, creator, regBlock+10, big.NewInt(15_000))
 	commission := commissionOwedFor(big.NewInt(10_000))
-	askRes, err := Ask(s, "asker", creator, askBlock, big.NewInt(1), commission, "cid", MinAskDeadline)
+	askRes, err := askAt0(s, "asker", creator, askBlock, big.NewInt(1), commission, "cid", MinAskDeadline)
 	if err != nil {
 		t.Fatalf("Ask: %v", err)
 	}

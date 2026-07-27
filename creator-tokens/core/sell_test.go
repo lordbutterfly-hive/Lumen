@@ -124,10 +124,17 @@ func TestSell_WorkedExample_InstantRoundTrip_FullRateTax(t *testing.T) {
 	if pnl.Cmp(big.NewInt(-2205)) != 0 {
 		t.Fatalf("attacker P&L = %s, want −2205 (both fees + the full gross tax)", pnl)
 	}
-	// Treasury received the tax 1,103 PLUS the platform fee half (RULING J/K).
-	wantTrea := mAdd(mAdd(treasury0, big.NewInt(1103)), rs.FeePlatform)
+	// Treasury received the PLATFORM HALF of the 1,103 tax plus the platform
+	// fee half (2026-07-27 split); the creator's claimable pot received the
+	// other tax half. The attacker's P&L above is unaffected — the split moves
+	// where the tax lands, never how much is assessed.
+	taxC, taxP := exitTaxSplit(c, "attacker", big.NewInt(1103))
+	wantTrea := mAdd(mAdd(treasury0, taxP), rs.FeePlatform)
 	if got := getMoney(s, kTreasury()); got.Cmp(wantTrea) != 0 {
-		t.Fatalf("treasury = %s, want %s (gross tax + platform fee half)", got, wantTrea)
+		t.Fatalf("treasury = %s, want %s (platform half of the tax + platform fee half)", got, wantTrea)
+	}
+	if reunited := mAdd(taxC, taxP); reunited.Cmp(big.NewInt(1103)) != 0 {
+		t.Fatalf("tax split leaked: %s != assessed 1103", reunited)
 	}
 	// The seller's balance went to 0 (full exit); wacq NOT touched by the sell.
 	if got := getMoney(s, kBal(c, "attacker")); !mIsZero(got) {
@@ -177,12 +184,20 @@ func TestSell_WorkedExample_AttackerGain_FullRateTax_ToTreasury(t *testing.T) {
 		t.Fatalf("dump = p %s tax %s net %s, want 224684/44937/157279",
 			rs.Gross, rs.Tax, rs.Net)
 	}
-	// RULING J: the WHOLE tax went to the treasury (plus the platform fee
-	// half). There is no pot, no per-holder claimable, no path by which
-	// alice — or anyone — gets a unit of it back.
-	wantTrea := mAdd(mAdd(treasury0, rs.Tax), rs.FeePlatform)
+	// The tax is split 50/50 creator/platform (2026-07-27). What has NOT
+	// changed is the property this assertion exists for: alice — the seller —
+	// gets back not one unit of it. Her half goes to the CREATOR's claimable
+	// pot, an account she does not control, so there is still no path by which
+	// a seller recovers their own exit tax. (That was the whole defect the
+	// deleted holder-distribution pot had: the seller's retained balance and
+	// alts recovered up to 97.5% of it.)
+	taxC, taxP := exitTaxSplit(c, "alice", rs.Tax)
+	wantTrea := mAdd(mAdd(treasury0, taxP), rs.FeePlatform)
 	if got := getMoney(s, kTreasury()); got.Cmp(wantTrea) != 0 {
-		t.Fatalf("treasury = %s, want %s (full tax + platform fee half)", got, wantTrea)
+		t.Fatalf("treasury = %s, want %s (platform half of the tax + platform fee half)", got, wantTrea)
+	}
+	if reunited := mAdd(taxC, taxP); reunited.Cmp(rs.Tax) != 0 {
+		t.Fatalf("tax split leaked: %s != assessed %s", reunited, rs.Tax)
 	}
 	// Honest disclosure, asserted: alice STILL nets a profit (157,279 −
 	// 154,721 = 2,558) — funded entirely by bob's later buy, never by the
@@ -242,10 +257,14 @@ func TestSell_WorkedExample_VictimSellsAtLoss_StillPaysFullTax(t *testing.T) {
 		t.Fatalf("victim sell = p %s tax %s net %s, want 34685/6937/24280 (K1: loss is not sheltered)",
 			rs.Gross, rs.Tax, rs.Net)
 	}
-	// Treasury got the gross tax + the platform fee half.
-	wantTrea := mAdd(mAdd(treasury0, big.NewInt(6937)), rs.FeePlatform)
+	// Treasury got the PLATFORM HALF of the gross tax + the platform fee half
+	// (2026-07-27 split); the creator's pot got the other tax half. The point
+	// of this test is unchanged: a seller at a LOSS still pays the full gross
+	// tax — it is just no longer all collected by one account.
+	_, taxP := exitTaxSplit(c, "victim", big.NewInt(6937))
+	wantTrea := mAdd(mAdd(treasury0, taxP), rs.FeePlatform)
 	if got := getMoney(s, kTreasury()); got.Cmp(wantTrea) != 0 {
-		t.Fatalf("treasury = %s, want %s (gross tax + platform fee half)", got, wantTrea)
+		t.Fatalf("treasury = %s, want %s (platform half of gross tax + platform fee half)", got, wantTrea)
 	}
 }
 
@@ -303,10 +322,11 @@ func TestSell_TaxDecay_Midpoint_FullRate_ToTreasury(t *testing.T) {
 		t.Fatalf("mid-decay sell = τ%d p %s tax %s net %s, want 1000/12025/1203/9620",
 			rs.TaxBps, rs.Gross, rs.Tax, rs.Net)
 	}
-	// RULING J: treasury got the tax + the platform fee half.
-	wantTreasury := mAdd(mAdd(treasuryBefore, big.NewInt(1203)), rs.FeePlatform)
+	// Treasury got the platform half of the tax + the platform fee half.
+	_, taxP := exitTaxSplit("creatora", "holder", big.NewInt(1203))
+	wantTreasury := mAdd(mAdd(treasuryBefore, taxP), rs.FeePlatform)
 	if got := getMoney(s, kTreasury()); got.Cmp(wantTreasury) != 0 {
-		t.Fatalf("treasury = %s, want %s (tax + platform fee half)", got, wantTreasury)
+		t.Fatalf("treasury = %s, want %s (platform half of the tax + platform fee half)", got, wantTreasury)
 	}
 }
 
@@ -396,12 +416,22 @@ func TestSell_WhaleTax_UnrecoverableAcrossTranchesAndAccounts(t *testing.T) {
 	if tax1.Sign() <= 0 {
 		t.Fatalf("single-shot whale tax = %s, want > 0 (the scenario must be in the taxed regime)", tax1)
 	}
-	// Every unit is in the treasury; the whale has no claim on any of it —
-	// structurally: there is no pot, no claimable key, no claim function.
+	// Every unit of the tax landed in one of its two destinations — treasury
+	// (platform half + the platform fee half) and the CREATOR's claimable pot
+	// (creator half + the creator fee half) — and the whale has a claim on
+	// NEITHER. That is the property this test exists for and the split does not
+	// weaken it: kFeeBal is keyed by the creator, and ClaimTradeFees pays the
+	// caller their OWN pot, so "creatora" is the only account that can ever
+	// draw the creator half. The whale has no pot, no claimable key, and no
+	// function that would pay them one unit back.
 	deltaTrea := new(big.Int).Sub(getMoney(s1, kTreasury()), trea01)
-	feesToTrea := new(big.Int).Sub(deltaTrea, tax1)
-	if feesToTrea.Sign() < 0 {
-		t.Fatalf("treasury delta %s < tax %s — tax leaked somewhere else", deltaTrea, tax1)
+	deltaPot := new(big.Int).Sub(getMoney(s1, kFeeBal(c1)), mZero())
+	collected := mAdd(deltaTrea, deltaPot)
+	if collected.Cmp(tax1) < 0 {
+		t.Fatalf("treasury+creator-pot delta %s < tax %s — tax leaked somewhere else", collected, tax1)
+	}
+	if got := getMoney(s1, kFeeBal("whale")); !mIsZero(got) {
+		t.Fatalf("whale has a claimable pot of %s — the exit tax must be unrecoverable by the seller", got)
 	}
 
 	// ★ CHUNKING IS CLOSED (RULING K1, 2026-07-22). Previously RULING J1's

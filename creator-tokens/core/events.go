@@ -399,3 +399,42 @@ func EvRefundPushed(creator, actor, holder string, block uint64, creditsBurned, 
 func EvClosed(creator, actor string, block uint64) string {
 	return evOpen("closed", creator, actor, block) + `}`
 }
+
+// ---- offering catalogue (2026-07-27) -------------------------------------
+//
+// Three more events, taking the set from twelve to fifteen. They carry NO
+// money: an offering is a posted price, and no HBD or token moves when one is
+// created, repriced or withdrawn — the money events (asked/answered/reclaimed)
+// already cover every fund flow an offering can lead to, and `asked` now
+// carries the offeringId so an indexer can attribute a settlement to the
+// service that was bought without joining on anything.
+//
+// The creator is always the actor (all three are creator-only, active-auth
+// gated), so evOpen's creator/actor pair is deliberately the same account here
+// rather than a distinct signer — same shape as faceChanged/capChanged.
+
+// EvOfferingCreated — CreateOffering (offerings.go).
+func EvOfferingCreated(creator, actor string, block, id uint64, title string, price *big.Int) string {
+	return evOpen("offeringCreated", creator, actor, block) +
+		`,"offeringId":` + evU64(id) +
+		`,"title":"` + evJSONEscape(title) + `"` +
+		`,"price":"` + evMoney(price) + `"}`
+}
+
+// EvOfferingUpdated — SetOfferingPrice / SetOfferingTitle. Carries both the
+// title and the price either side of the change, so an indexer folds one shape
+// for both edits and diffs to see which moved.
+func EvOfferingUpdated(creator, actor string, block, id uint64, title string, oldPrice, newPrice *big.Int) string {
+	return evOpen("offeringUpdated", creator, actor, block) +
+		`,"offeringId":` + evU64(id) +
+		`,"title":"` + evJSONEscape(title) + `"` +
+		`,"oldPrice":"` + evMoney(oldPrice) + `"` +
+		`,"newPrice":"` + evMoney(newPrice) + `"}`
+}
+
+// EvOfferingDeleted — DeleteOffering. The offering leaves the shop; escrows
+// already opened against this id are untouched and settle normally.
+func EvOfferingDeleted(creator, actor string, block, id uint64) string {
+	return evOpen("offeringDeleted", creator, actor, block) +
+		`,"offeringId":` + evU64(id) + `}`
+}

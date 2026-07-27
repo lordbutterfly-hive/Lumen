@@ -63,6 +63,59 @@ func kSessionPriceSetAt(c string) string    { return mk(c, "spsa") } // block of
 func kSessionPriceAnchor(c string) string   { return mk(c, "spa") }  // session price at the current band window's open
 func kSessionPriceAnchorAt(c string) string { return mk(c, "spaa") } // block the current session-price band window opened
 
+// ---- per-incarnation offering catalogue (N named priced offers, 2026-07-27) ----
+//
+// A creator posts up to MaxOfferings named services ("15-min call", "custom
+// song"), each with its OWN HBD price under its OWN 2x/7d anti-rug band — the
+// same setBandedPrice helper offer_price.go already uses, for the same reason
+// (a buyer holding tokens to spend on a specific service is protected against a
+// price spike on THAT service). Offering id 0 is RESERVED and never allocated:
+// it denotes the legacy single `face` price, so Ask(offeringId=0) is the
+// byte-for-byte audited face path and every existing test keeps its meaning.
+//
+// THE EPOCH, and why it exists. Every other per-incarnation key is cleared
+// one-by-one in Register's reset block. That is impossible here: ids are
+// MONOTONE (kOfferNext never rewinds, for kSeq's exact reason — an escrow
+// records the id it was asked against, and a reused id would silently relabel a
+// past incarnation's settlement history), so the live-id set is sparse and
+// enumerating it would be O(next), an unbounded loop inside registration. The
+// epoch is bumped by Register instead: every offering key of the dead
+// incarnation becomes unreachable in ONE write, which is the same O(1) argument
+// the kAcqBlock exception makes, without the enumeration. Nothing leaks across
+// incarnations — not a price, not a band anchor, not a title.
+//
+// A LIVE escrow cannot straddle an epoch bump, so an escrow's offeringId always
+// resolves in the current epoch: escrowed credits keep kSupply > 0, and
+// CloseIfDrained refuses to close a market with supply outstanding, so a market
+// cannot reach CLOSED (the precondition for re-registration) while any escrow
+// is still PENDING. TestOfferings_LiveEscrowCannotStraddleEpoch pins this.
+//
+// Id 0 doubles as the counter slot (there is no offering 0), so the two
+// per-market counters need no separate field tags and cannot collide with a
+// real offering's keys.
+
+func kOfferEpoch(c string) string { return mk(c, "oep") } // monotone offering-namespace epoch, bumped by Register
+
+func mko(c string, epoch, id uint64, field string) string {
+	return "m|" + c + "|o|" + strconv.FormatUint(epoch, 10) + "|" + strconv.FormatUint(id, 10) + "|" + field
+}
+
+func kOfferNext(c string, e uint64) string { return mko(c, e, 0, "next") } // next id to allocate (first is 1)
+
+// kOfferIds holds the LIVE ids as a comma-separated list, at most MaxOfferings
+// long. It exists so listing a creator's shop is a single bounded read instead
+// of a scan over the monotone id space — ids are sparse after any churn, so
+// "iterate 1..next" would be an unbounded loop on a read path. The list IS the
+// live set (its length is the live count); there is no second counter to drift
+// out of sync with it.
+func kOfferIds(c string, e uint64) string { return mko(c, e, 0, "ids") }
+
+func kOfferPrice(c string, e, id uint64) string    { return mko(c, e, id, "p") }   // HBD base units, 0 == deleted/unset
+func kOfferAnchor(c string, e, id uint64) string   { return mko(c, e, id, "pa") }  // price at the band window's open
+func kOfferAnchorAt(c string, e, id uint64) string { return mko(c, e, id, "paa") } // block the band window opened
+func kOfferSetAt(c string, e, id uint64) string    { return mko(c, e, id, "psa") } // block of the last price change
+func kOfferTitle(c string, e, id uint64) string    { return mko(c, e, id, "t") }   // display label, free-form
+
 // ---- entitlements (spend-to-unlock, permanent) ----
 //
 // ent|<creator>|<buyer>|<postId> — set to "1" when `buyer` has permanently

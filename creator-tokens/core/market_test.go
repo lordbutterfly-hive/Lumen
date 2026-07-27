@@ -321,7 +321,7 @@ func TestRegister_ReRegisterAfterAbandonedEscrowResolvedByThirdParty(t *testing.
 	// windows — resetObsRings/seedSettleObs, ask_test.go).
 	askBlock := seedSettleObs(s, creator, regBlock+10, big.NewInt(15_000))
 	commission := commissionOwedFor(big.NewInt(10_000))
-	askRes, err := Ask(s, asker, creator, askBlock, big.NewInt(1), commission, "abandoned-ask", MinAskDeadline)
+	askRes, err := askAt0(s, asker, creator, askBlock, big.NewInt(1), commission, "abandoned-ask", MinAskDeadline)
 	if err != nil {
 		t.Fatalf("Ask: %v", err)
 	}
@@ -967,7 +967,7 @@ func TestRetire_C_RevenueBypassClosed(t *testing.T) {
 		t.Fatalf("Buy after the notice: err=%v, want ErrState", err)
 	}
 	// Ask refuses (the inflow gate is the only phase check in ask.go).
-	if _, err := Ask(s, "buyer", creator, probe, big.NewInt(1000), big.NewInt(0), "cid", MinAskDeadline); err == nil || errSymbol(err) != ErrState {
+	if _, err := askAt0(s, "buyer", creator, probe, big.NewInt(1000), big.NewInt(0), "cid", MinAskDeadline); err == nil || errSymbol(err) != ErrState {
 		t.Fatalf("Ask after the notice: err=%v, want ErrState", err)
 	}
 	if err := Renew(s, creator, creator, probe, 1, subFee(1)); err == nil || errSymbol(err) != ErrState {

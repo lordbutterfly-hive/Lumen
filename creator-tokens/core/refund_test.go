@@ -168,6 +168,7 @@ func TestRefund_K2_WindDownTaxMatchesCurveExit(t *testing.T) {
 		t.Fatal(err)
 	}
 	treaBefore := getMoney(sw, kTreasury())
+	feeCBefore := getMoney(sw, kFeeBal("windcrea"))
 	// Inside the retire notice (RULING K3: inWindDown → Refund open), still
 	// fresh (held 2 blocks ⇒ τ=2000). gross = floor(R·n/n) = R.
 	gross := refundPayout(Rwind, big.NewInt(n), getMoney(sw, kSupply("windcrea")))
@@ -189,9 +190,18 @@ func TestRefund_K2_WindDownTaxMatchesCurveExit(t *testing.T) {
 	if wdTax.Cmp(sell.Tax) != 0 {
 		t.Fatalf("K2: wind-down tax %s != curve-exit tax %s — the Retire escape hatch is not closed", wdTax, sell.Tax)
 	}
-	// The tax actually landed in the treasury, and net = gross − tax.
-	if got := new(big.Int).Sub(getMoney(sw, kTreasury()), treaBefore); got.Cmp(wdTax) != 0 {
-		t.Fatalf("treasury delta %s != wind-down tax %s", got, wdTax)
+	// The tax actually landed — split 50/50 creator/platform (2026-07-27) —
+	// and net = gross − tax. Both halves are checked, plus their sum, so a
+	// rounding bug in the split cannot hide behind two plausible balances.
+	wdTaxC, wdTaxP := exitTaxSplit("windcrea", "whale", wdTax)
+	if got := new(big.Int).Sub(getMoney(sw, kTreasury()), treaBefore); got.Cmp(wdTaxP) != 0 {
+		t.Fatalf("treasury delta %s != platform half of the wind-down tax %s", got, wdTaxP)
+	}
+	if got := new(big.Int).Sub(getMoney(sw, kFeeBal("windcrea")), feeCBefore); got.Cmp(wdTaxC) != 0 {
+		t.Fatalf("creator pot delta %s != creator half of the wind-down tax %s", got, wdTaxC)
+	}
+	if reunited := mAdd(wdTaxC, wdTaxP); reunited.Cmp(wdTax) != 0 {
+		t.Fatalf("tax split leaked: %s != assessed %s", reunited, wdTax)
 	}
 	if net.Cmp(new(big.Int).Sub(gross, wdTax)) != 0 {
 		t.Fatalf("net %s != gross %s − tax %s", net, gross, wdTax)
@@ -274,8 +284,14 @@ func TestRefund_HappyPath_NoCommission(t *testing.T) {
 	if got := getMoney(s, kReserve(creator)); got.Cmp(big.NewInt(900)) != 0 {
 		t.Fatalf("reserve = %s, want 900 (decremented by exactly the GROSS payout)", got)
 	}
-	if got := new(big.Int).Sub(getMoney(s, kTreasury()), treaBefore); got.Cmp(tax) != 0 {
-		t.Fatalf("treasury delta = %s, want the K2 tax %s", got, tax)
+	// Split 50/50 (2026-07-27): treasury takes the platform half, the creator's
+	// claimable pot the other. Sum still equals every unit assessed.
+	taxC, taxP := exitTaxSplit(creator, "alice", tax)
+	if got := new(big.Int).Sub(getMoney(s, kTreasury()), treaBefore); got.Cmp(taxP) != 0 {
+		t.Fatalf("treasury delta = %s, want the platform half %s of the K2 tax %s", got, taxP, tax)
+	}
+	if reunited := mAdd(taxC, taxP); reunited.Cmp(tax) != 0 {
+		t.Fatalf("tax split leaked: %s != assessed %s", reunited, tax)
 	}
 }
 
@@ -1042,8 +1058,16 @@ func TestSolvency_NoParCap_FullUnwindDrainsTheWholeReserve(t *testing.T) {
 	if got := getMoney(s, kReserve(creator)); !mIsZero(got) {
 		t.Fatalf("stranded residual = %s, want exactly 0 (C-24: a complete wind-down drains the reserve)", got)
 	}
-	if got := new(big.Int).Sub(getMoney(s, kTreasury()), treaBefore); got.Cmp(tax) != 0 {
-		t.Fatalf("treasury delta = %s, want the K2 tax %s", got, tax)
+	// Split 50/50 (2026-07-27). What this test actually pins — that a complete
+	// wind-down strands NOTHING — is unchanged: the reserve hits exactly 0
+	// above, and every unit of tax carved from the payout is accounted for
+	// across the two destinations.
+	sTaxC, sTaxP := exitTaxSplit(creator, holder, tax)
+	if got := new(big.Int).Sub(getMoney(s, kTreasury()), treaBefore); got.Cmp(sTaxP) != 0 {
+		t.Fatalf("treasury delta = %s, want the platform half %s of the K2 tax %s", got, sTaxP, tax)
+	}
+	if reunited := mAdd(sTaxC, sTaxP); reunited.Cmp(tax) != 0 {
+		t.Fatalf("tax split leaked: %s != assessed %s", reunited, tax)
 	}
 
 	// Still inert afterwards: supply is 0, no balance remains to present,

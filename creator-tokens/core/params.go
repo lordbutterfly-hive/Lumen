@@ -107,6 +107,24 @@ const MaxFace int64 = 10_000_000 // 10,000.000 HBD
 // carries only this dust floor and the fixed MaxFace ceiling (tip.go).
 const MinTip int64 = 100 // 0.100 HBD
 
+// ---- offering catalogue ----
+
+// MaxOfferings bounds how many LIVE named offerings one creator may post at a
+// time (offerings.go). Two reasons, both structural rather than cosmetic: an
+// unbounded catalogue is an unbounded read for any client rendering the shop
+// (the batch-size bound every array-taking surface in this codebase carries),
+// and the cap is what makes DeleteOffering's slot accounting meaningful. It
+// bounds LIVE offerings, never ids ever issued — ids are monotone by design
+// (keys.go), so a creator may churn through as many as they are willing to pay
+// Hive transaction fees for, holding at most this many at once.
+const MaxOfferings uint64 = 20
+
+// MaxOfferTitleLen bounds the display label. A title is free-form buyer-facing
+// text, so it is length-capped and "|"-rejected at the door for the same reason
+// contentHash is (ask.go): every event and packed record in this codebase
+// concatenates fields without escaping.
+const MaxOfferTitleLen int = 64
+
 // ---- supply cap ----
 
 // MinCap / MaxCap bound the creator-set outstanding-credit cap. The cap is the

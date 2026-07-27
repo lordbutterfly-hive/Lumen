@@ -691,7 +691,7 @@ func fzActAsk(t *testing.T, rng *rand.Rand, w *fzWorld, tr *fzTrace) {
 	deadline := fzBoundaryUint64(rng, MinAskDeadline, MaxAskDeadline)
 	contentHash := fmt.Sprintf("cid-%d-%d", w.block, rng.Int63())
 
-	res, err := Ask(w.s, asker, c, w.block, maxCredits, commission, contentHash, deadline)
+	res, err := askAt0(w.s, asker, c, w.block, maxCredits, commission, contentHash, deadline)
 	tr.add("Ask(asker=%s creator=%s block=%d maxCredits=%v commission=%v deadline=%d face=%s) -> res=%+v err=%v",
 		asker, c, w.block, maxCredits, commission, deadline, face, res, err)
 
@@ -1656,7 +1656,7 @@ func TestFuzzRoundingFavorsReserve(t *testing.T) {
 
 			owed := commissionOwedFor(big.NewInt(face))
 			maxCredits := fzCeilDiv(big.NewInt(face), rate) // the asker's own cap == the exact expected spend
-			res, err := Ask(s, asker, creator, askBlock, maxCredits, owed, "cid", MinAskDeadline)
+			res, err := askAt0(s, asker, creator, askBlock, maxCredits, owed, "cid", MinAskDeadline)
 			if err != nil {
 				t.Fatalf("iter %d: Ask(face=%d rate=%s): %v", i, face, rate, err)
 			}
@@ -1874,7 +1874,7 @@ func TestFuzzBoundarySweep(t *testing.T) {
 				deadline = 0
 			}
 			owed := commissionOwedFor(big.NewInt(10_000))
-			_, err := Ask(s, "fzbadasker", creator, askBlock, big.NewInt(1_000_000), owed, "cid", deadline)
+			_, err := askAt0(s, "fzbadasker", creator, askBlock, big.NewInt(1_000_000), owed, "cid", deadline)
 			inBand := deadline >= MinAskDeadline && deadline <= MaxAskDeadline
 			if inBand && err != nil {
 				t.Fatalf("Ask.deadline: v=%d INSIDE [%d,%d] but rejected: %v", deadline, MinAskDeadline, MaxAskDeadline, err)

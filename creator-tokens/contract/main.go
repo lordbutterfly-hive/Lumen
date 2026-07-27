@@ -136,6 +136,11 @@ func inputErr(msg string) *core.Err { return &core.Err{Symbol: core.ErrInput, Ms
 func authErr(msg string) *core.Err  { return &core.Err{Symbol: core.ErrAuth, Msg: msg} }
 func stateErr(msg string) *core.Err { return &core.Err{Symbol: core.ErrState, Msg: msg} }
 
+// notFoundErr mirrors the three above for the offering catalogue: asking
+// against an id that was never created (or has been deleted) is a NOT_FOUND,
+// not a malformed input and not a market-state problem.
+func notFoundErr(msg string) *core.Err { return &core.Err{Symbol: core.ErrNotFound, Msg: msg} }
+
 // nativeInt64 narrows a *big.Int to int64 for the native HiveDraw/HiveTransfer
 // SDK calls (which take int64, not *big.Int). Mirrors
 // hive-price-market/contract/main.go's nativeInt64 exactly: abort — not
@@ -319,24 +324,21 @@ func parseBigDecimal(s string) (*big.Int, bool) { return parse.BigDecimal(s) }
 // lets core.Ask compute the REAL, binding creditsSpent internally from core's
 // own private helpers.
 
-// coreFaceKey reproduces core/keys.go: mk(c,"face") = "m|"+c+"|face".
-func coreFaceKey(creator string) string {
-	return "m|" + creator + "|face"
-}
-
-// readFace reproduces core/util.go's getMoney read convention (missing or
-// malformed ⇒ zero, never a panic) for the one field quote needs that core
-// exposes no getter for.
-func readFace(creator string) *big.Int {
-	v, ok := store.Get(coreFaceKey(creator))
-	if !ok || v == "" {
-		return big.NewInt(0)
-	}
-	n, ok2 := new(big.Int).SetString(v, 10)
-	if !ok2 || n.Sign() < 0 {
-		return big.NewInt(0)
-	}
-	return n
+// ★ THE LAST DUPLICATE IS GONE TOO (2026-07-27). coreFaceKey/readFace —
+// a hand-copied "m|"+creator+"|face" key builder — are DELETED. The comment
+// above justified them as "the one field quote needs that core exposes no
+// getter for", and that was already untrue (core.Face, core/read.go), but the
+// offering catalogue is what makes the duplicate actively unsafe: an offering's
+// key carries a per-incarnation EPOCH, so any wrapper-side key copy would read
+// a dead incarnation's price the moment a creator re-registers.
+//
+// Both former call sites (`ask` and `quote`) now go through
+// core.OfferingPrice(store, creator, offeringID), which returns the `face`
+// price for id 0 and the named offering's own banded price otherwise — the
+// same single accessor core.Ask itself binds, so a wrapper preview and the
+// binding execution can never disagree about what a service costs.
+func readPrice(creator string, offeringID uint64) *big.Int {
+	return core.OfferingPrice(store, creator, offeringID)
 }
 
 // ceilDiv DELETED (RULING C, 2026-07-21): its one consumer was quote's
@@ -777,9 +779,19 @@ func Ask(a *string) *string {
 	// with an opaque SDK error instead of core.Ask's precise "creator has no
 	// face price set". Mirror quote's own face<=0 guard so the asker gets that
 	// exact clear STATE error and no zero-amount draw is ever attempted.
-	face := readFace(creator)
+	// offeringId (2026-07-27): absent ⇒ 0 ⇒ the legacy single `face` price, so
+	// every existing client payload keeps its exact meaning. A nonzero id names
+	// one of the creator's posted services and prices this ask at THAT
+	// offering's own banded price. A deleted or never-created id reads 0 and is
+	// refused right here, before any HBD is drawn.
+	offeringID := jsonU64(payload, "offeringId")
+	face := readPrice(creator, offeringID)
 	if face.Sign() <= 0 {
-		handleErr(stateErr("creator has no face price set"))
+		if offeringID == 0 {
+			handleErr(stateErr("creator has no face price set"))
+		} else {
+			handleErr(notFoundErr("no such offering"))
+		}
 		return nil
 	}
 	// H2 + DEFECT 5 FIX (2026-07-21): draw only the EXACT commission owed on
@@ -792,7 +804,7 @@ func Ask(a *string) *string {
 	owed := core.CommissionOwedFor(face)
 
 	sdk.HiveDraw(nativeInt64(owed), sdk.AssetHbd) // commission leg, pull FIRST, EXACTLY owed
-	res, err := core.Ask(store, caller, creator, block, maxCredits, owed, contentHash, deadlineBlocks)
+	res, err := core.Ask(store, caller, creator, block, maxCredits, owed, contentHash, deadlineBlocks, offeringID)
 	if err != nil {
 		handleErr(err)
 		return nil
@@ -1360,9 +1372,16 @@ func Quote(a *string) *string {
 	phase := core.Phase(store, creator, block)
 	inflowsOpen := phase == core.StateActive || phase == core.StateOverdue
 
-	face := readFace(creator)
+	// Same offeringId convention as `ask` — a quote must preview the price the
+	// real ask will bind, for the id the client is about to sign against.
+	offeringID := jsonU64(payload, "offeringId")
+	face := readPrice(creator, offeringID)
 	if face.Sign() <= 0 {
-		handleErr(stateErr("creator has no face price set"))
+		if offeringID == 0 {
+			handleErr(stateErr("creator has no face price set"))
+		} else {
+			handleErr(notFoundErr("no such offering"))
+		}
 		return nil
 	}
 
@@ -1447,4 +1466,159 @@ func QuoteSell(a *string) *string {
 		`","tax":"` + bigStr(res.Tax) + `","fee":"` + bigStr(res.Fee) +
 		`","net":"` + bigStr(res.Net) + `","taxBps":` + u64s(res.TaxBps) +
 		`,"heldBlocks":` + u64s(res.HeldBlocks) + `}`)
+}
+
+// ===================================
+// Offering catalogue (2026-07-27) — the creator's shop
+// ===================================
+//
+// Four writes + one read wiring core/offerings.go: a creator posts up to
+// MaxOfferings named services, each with its own HBD price under its own 2x/7d
+// anti-rug band, and a buyer asks against one of them (`ask`'s offeringId).
+//
+// ALL FOUR ARE ACTIVE-AUTH GATED (C1), exactly like setFace/setCap and for the
+// same reason: a posting key is delegated to every dApp a creator ever logs
+// into, and repricing someone's services IS a value operation even though no
+// HBD moves in the call. An attacker holding a posting key who could set a
+// service to MaxFace would extract the difference from the creator's own
+// buyers on the very next ask.
+//
+// NONE of them gate on pause/phase beyond requireOpenCreatorMarket's
+// exists-and-not-CLOSED check (enforced inside core): posting a price moves no
+// funds, and the standing guardrail is that billing state never gates anything.
+// The ask AGAINST an offering is the inflow, and it is already behind
+// RequireInflowOpen in core.Ask.
+
+// Payload: {"title":"<string>","price":<uint64 HBD base units>}. Creates a new
+// offering and returns its id.
+//
+//go:wasmexport createOffering
+func CreateOffering(a *string) *string {
+	payload := payloadStr(a)
+	caller := currentCaller()
+	if err := requireActiveAuth(caller); err != nil {
+		handleErr(err)
+		return nil
+	}
+	block := currentBlock()
+
+	title := jsonStr(payload, "title")
+	price, ok := i64FromU64(jsonU64(payload, "price"))
+	if !ok {
+		handleErr(inputErr("price overflows int64"))
+		return nil
+	}
+
+	id, err := core.CreateOffering(store, caller, caller, block, title, price)
+	if err != nil {
+		handleErr(err)
+		return nil
+	}
+	sdk.Log(core.EvOfferingCreated(caller, caller, block, id, title, core.OfferingPrice(store, caller, id)))
+	return strPtr(`{"creator":"` + jsonEscape(caller) + `","offeringId":` + u64s(id) +
+		`,"title":"` + jsonEscape(title) + `","price":` + i64s(price) + `}`)
+}
+
+// Payload: {"offeringId":<uint64>,"newPrice":<uint64 HBD base units>}. Reprices
+// one offering under its own 2x/7d band.
+//
+//go:wasmexport setOfferingPrice
+func SetOfferingPrice(a *string) *string {
+	payload := payloadStr(a)
+	caller := currentCaller()
+	if err := requireActiveAuth(caller); err != nil {
+		handleErr(err)
+		return nil
+	}
+	block := currentBlock()
+
+	id := jsonU64(payload, "offeringId")
+	newPrice, ok := i64FromU64(jsonU64(payload, "newPrice"))
+	if !ok {
+		handleErr(inputErr("newPrice overflows int64"))
+		return nil
+	}
+
+	// Pre-read for the event, same requirement as setFace's oldFace: core
+	// returns only an error, so the previous value has to be captured here.
+	oldPrice := core.OfferingPrice(store, caller, id)
+	if err := core.SetOfferingPrice(store, caller, caller, block, id, newPrice); err != nil {
+		handleErr(err)
+		return nil
+	}
+	sdk.Log(core.EvOfferingUpdated(caller, caller, block, id, core.OfferingTitle(store, caller, id), oldPrice, core.OfferingPrice(store, caller, id)))
+	return strPtr(`{"creator":"` + jsonEscape(caller) + `","offeringId":` + u64s(id) + `,"price":` + i64s(newPrice) + `}`)
+}
+
+// Payload: {"offeringId":<uint64>,"title":"<string>"}. Relabels an offering.
+// Deliberately does NOT touch the price or its band window — renaming a service
+// is not a repricing and must neither earn band headroom nor spend it.
+//
+//go:wasmexport setOfferingTitle
+func SetOfferingTitle(a *string) *string {
+	payload := payloadStr(a)
+	caller := currentCaller()
+	if err := requireActiveAuth(caller); err != nil {
+		handleErr(err)
+		return nil
+	}
+	block := currentBlock()
+
+	id := jsonU64(payload, "offeringId")
+	title := jsonStr(payload, "title")
+
+	if err := core.SetOfferingTitle(store, caller, caller, id, title); err != nil {
+		handleErr(err)
+		return nil
+	}
+	price := core.OfferingPrice(store, caller, id)
+	sdk.Log(core.EvOfferingUpdated(caller, caller, block, id, title, price, price))
+	return strPtr(`{"creator":"` + jsonEscape(caller) + `","offeringId":` + u64s(id) + `,"title":"` + jsonEscape(title) + `"}`)
+}
+
+// Payload: {"offeringId":<uint64>}. Withdraws a service from the shop: no new
+// asks against it, a freed catalogue slot, and its price and band anchors
+// zeroed so a future offering can never inherit a dead one's anchor. Escrows
+// already opened against this id are NOT touched — their credits, deadline and
+// answer/reclaim windows are unchanged, so a creator cannot strand a buyer's
+// funds by withdrawing a service after being paid for it.
+//
+//go:wasmexport deleteOffering
+func DeleteOffering(a *string) *string {
+	payload := payloadStr(a)
+	caller := currentCaller()
+	if err := requireActiveAuth(caller); err != nil {
+		handleErr(err)
+		return nil
+	}
+	block := currentBlock()
+
+	id := jsonU64(payload, "offeringId")
+	if err := core.DeleteOffering(store, caller, caller, id); err != nil {
+		handleErr(err)
+		return nil
+	}
+	sdk.Log(core.EvOfferingDeleted(caller, caller, block, id))
+	return strPtr(`{"creator":"` + jsonEscape(caller) + `","offeringId":` + u64s(id) + `}`)
+}
+
+// Payload: {"creator":"<account>"}. PURE READ — returns the creator's live
+// shop. Bounded by MaxOfferings, so this is a single bounded list read and
+// never a scan of the id space.
+//
+//go:wasmexport listOfferings
+func ListOfferings(a *string) *string {
+	payload := payloadStr(a)
+	creator := jsonStr(payload, "creator")
+
+	out := `{"creator":"` + jsonEscape(creator) + `","offerings":[`
+	for i, o := range core.ListOfferings(store, creator) {
+		if i > 0 {
+			out += ","
+		}
+		out += `{"offeringId":` + u64s(o.ID) +
+			`,"title":"` + jsonEscape(o.Title) + `"` +
+			`,"price":"` + o.PriceHbd.String() + `"}`
+	}
+	return strPtr(out + `]}`)
 }

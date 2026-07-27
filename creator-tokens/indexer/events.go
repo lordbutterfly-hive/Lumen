@@ -30,7 +30,45 @@ const (
 	KindRefunded     EventKind = "refunded"
 	KindRefundPushed EventKind = "refundPushed"
 	KindClosed       EventKind = "closed"
+
+	// Offering catalogue (2026-07-27) — the creator's shop. These carry NO
+	// money: an offering is a posted price, and the money events
+	// (asked/answered/reclaimed) already cover every fund flow one can lead
+	// to. `asked` now carries OfferingID so a settlement can be attributed to
+	// the service that was bought without joining on anything.
+	KindOfferingCreated EventKind = "offeringCreated"
+	KindOfferingUpdated EventKind = "offeringUpdated"
+	KindOfferingDeleted EventKind = "offeringDeleted"
 )
+
+type OfferingCreatedEvent struct {
+	Creator    string `json:"creator"`
+	Actor      string `json:"actor"`
+	Block      uint64 `json:"block"`
+	OfferingID uint64 `json:"offeringId"`
+	Title      string `json:"title"`
+	Price      string `json:"price"`
+}
+
+// OfferingUpdatedEvent covers both a reprice and a relabel: an indexer folds
+// one shape and diffs Old/New to see which moved. A relabel emits equal
+// prices; a reprice emits the title unchanged.
+type OfferingUpdatedEvent struct {
+	Creator    string `json:"creator"`
+	Actor      string `json:"actor"`
+	Block      uint64 `json:"block"`
+	OfferingID uint64 `json:"offeringId"`
+	Title      string `json:"title"`
+	OldPrice   string `json:"oldPrice"`
+	NewPrice   string `json:"newPrice"`
+}
+
+type OfferingDeletedEvent struct {
+	Creator    string `json:"creator"`
+	Actor      string `json:"actor"`
+	Block      uint64 `json:"block"`
+	OfferingID uint64 `json:"offeringId"`
+}
 
 // envelope is decoded first, from every raw log line, purely to sniff "ev"
 // (and "v", captured but not yet branched on — see Event.Version) before
@@ -191,6 +229,10 @@ type Event struct {
 	Refunded     *RefundedEvent
 	RefundPushed *RefundPushedEvent
 	Closed       *ClosedEvent
+
+	OfferingCreated *OfferingCreatedEvent
+	OfferingUpdated *OfferingUpdatedEvent
+	OfferingDeleted *OfferingDeletedEvent
 }
 
 // ParseEvent decodes one RawEvent's Data into a typed Event.
@@ -296,6 +338,24 @@ func ParseEvent(raw RawEvent) (Event, error) {
 			return Event{}, &ParseError{Raw: raw, Cause: err}
 		}
 		ev.Closed = &p
+	case KindOfferingCreated:
+		var p OfferingCreatedEvent
+		if err := json.Unmarshal([]byte(raw.Data), &p); err != nil {
+			return Event{}, &ParseError{Raw: raw, Cause: err}
+		}
+		ev.OfferingCreated = &p
+	case KindOfferingUpdated:
+		var p OfferingUpdatedEvent
+		if err := json.Unmarshal([]byte(raw.Data), &p); err != nil {
+			return Event{}, &ParseError{Raw: raw, Cause: err}
+		}
+		ev.OfferingUpdated = &p
+	case KindOfferingDeleted:
+		var p OfferingDeletedEvent
+		if err := json.Unmarshal([]byte(raw.Data), &p); err != nil {
+			return Event{}, &ParseError{Raw: raw, Cause: err}
+		}
+		ev.OfferingDeleted = &p
 	default:
 		ev.Unknown = true
 	}

@@ -303,10 +303,8 @@ func Refund(s Store, caller, creator string, block uint64, credits *big.Int, min
 		// Kept as the same defense-in-depth every subMoney call carries.
 		return nil, err
 	}
-	if tax.Sign() > 0 {
-		addMoney(s, kTreasury(), tax) // RULING J/K destination — one addMoney, no pot
-	}
-	return net, nil // the holder RECEIVES net (gross − tax); the wrapper transfers exactly this
+	accrueExitTax(s, creator, caller, tax) // 50/50 creator/platform, self-sell to treasury (exittax.go)
+	return net, nil                        // the holder RECEIVES net (gross − tax); the wrapper transfers exactly this
 }
 
 // RefundHolder is the permissionless push half of the same mechanism (SPEC
@@ -489,9 +487,7 @@ func RefundHolder(s Store, caller, creator, holder string, block uint64) (*big.I
 	if err := subMoney(s, kReserve(creator), gross); err != nil {
 		return nil, err // unreachable; see Refund's identical comment
 	}
-	if tax.Sign() > 0 {
-		addMoney(s, kTreasury(), tax)
-	}
+	accrueExitTax(s, creator, holder, tax) // the pushed-out HOLDER is the seller here, not the caller
 	return net, nil
 }
 

@@ -201,7 +201,7 @@ func TestAsk_ET2_UnansweredEscrowPreservesClock(t *testing.T) {
 		}
 		rq := q + 1 + MinAskDeadline + ReclaimGrace + 1
 		if ask {
-			ar, err := Ask(s, "fan", c, q+1, big.NewInt(5), CommissionOwedFor(getMoney(s, kFace(c))), "cid", MinAskDeadline)
+			ar, err := askAt0(s, "fan", c, q+1, big.NewInt(5), CommissionOwedFor(getMoney(s, kFace(c))), "cid", MinAskDeadline)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -260,7 +260,7 @@ func TestAsk_ET2_ClockConservedThroughReclaim(t *testing.T) {
 
 	// Ask escrows everything, then RECLAIM (unanswered): the clock returns
 	// exactly (age-neutral).
-	ar, err := Ask(s, "fan", c, q+1, big.NewInt(5), CommissionOwedFor(getMoney(s, kFace(c))), "cid", MinAskDeadline)
+	ar, err := askAt0(s, "fan", c, q+1, big.NewInt(5), CommissionOwedFor(getMoney(s, kFace(c))), "cid", MinAskDeadline)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -478,6 +478,7 @@ func TestRefundHolder_EXITTAX1_FreshPushRefused(t *testing.T) {
 	// (1) THE GRIEF IS REFUSED — a stranger cannot force the fresh victim out.
 	balB, supB := getMoney(s, kBal(creator, victim)), getMoney(s, kSupply(creator))
 	resB, treaB := getMoney(s, kReserve(creator)), getMoney(s, kTreasury())
+	feeCB := getMoney(s, kFeeBal(creator))
 	if _, err := RefundHolder(s, griefer, creator, victim, pushBlock); errSymbol(err) != ErrState {
 		t.Fatalf("EXITTAX-1: a fresh holder's permissionless push must be REFUSED, got err=%v", err)
 	}
@@ -498,8 +499,19 @@ func TestRefundHolder_EXITTAX1_FreshPushRefused(t *testing.T) {
 	if selfNet.Cmp(big.NewInt(800000)) != 0 {
 		t.Fatalf("self-Refund net = %s, want 800000 (gross 1,000,000 − 20%% tax 200,000)", selfNet)
 	}
-	if got := new(big.Int).Sub(getMoney(s, kTreasury()), treaB); got.Cmp(big.NewInt(200000)) != 0 {
-		t.Fatalf("treasury gained %s on the self-Refund, want the 200000 tax", got)
+	// Split 50/50 (2026-07-27): the victim is not the creator, so treasury
+	// takes 100,000 and the creator's claimable pot the other 100,000. The
+	// point of the assertion is unchanged — the full 200,000 tax was collected
+	// and the victim got none of it back.
+	vTaxC, vTaxP := exitTaxSplit(creator, victim, big.NewInt(200000))
+	if got := new(big.Int).Sub(getMoney(s, kTreasury()), treaB); got.Cmp(vTaxP) != 0 {
+		t.Fatalf("treasury gained %s on the self-Refund, want the platform half %s", got, vTaxP)
+	}
+	if got := new(big.Int).Sub(getMoney(s, kFeeBal(creator)), feeCB); got.Cmp(vTaxC) != 0 {
+		t.Fatalf("creator pot gained %s on the self-Refund, want the creator half %s", got, vTaxC)
+	}
+	if reunited := mAdd(vTaxC, vTaxP); reunited.Cmp(big.NewInt(200000)) != 0 {
+		t.Fatalf("tax split leaked: %s != assessed 200000", reunited)
 	}
 }
 

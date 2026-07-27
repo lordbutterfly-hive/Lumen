@@ -404,6 +404,8 @@ func TestSchemaContract_KindConstantsCoverEveryEvName(t *testing.T) {
 		"registered": true, "renewed": true, "faceChanged": true, "capChanged": true,
 		"prepaid": true, "transferred": true, "asked": true, "answered": true,
 		"reclaimed": true, "refunded": true, "refundPushed": true, "closed": true,
+		// Offering catalogue (2026-07-27) — three more, taking twelve to fifteen.
+		"offeringCreated": true, "offeringUpdated": true, "offeringDeleted": true,
 	}
 
 	cases := []struct {
@@ -422,9 +424,12 @@ func TestSchemaContract_KindConstantsCoverEveryEvName(t *testing.T) {
 		{"refunded", EvRefunded("c", "a", 1, big.NewInt(1), big.NewInt(1))},
 		{"refundPushed", EvRefundPushed("c", "a", "h", 1, big.NewInt(1), big.NewInt(1))},
 		{"closed", EvClosed("c", "a", 1)},
+		{"offeringCreated", EvOfferingCreated("c", "a", 1, 1, "15-min call", big.NewInt(2500))},
+		{"offeringUpdated", EvOfferingUpdated("c", "a", 1, 1, "15-min call", big.NewInt(2500), big.NewInt(3000))},
+		{"offeringDeleted", EvOfferingDeleted("c", "a", 1, 1)},
 	}
-	if len(cases) != 12 {
-		t.Fatalf("test setup bug: expected exactly 12 constructors (events.go's own file doc: \"Twelve events\"), got %d", len(cases))
+	if len(cases) != 15 {
+		t.Fatalf("test setup bug: expected exactly 15 constructors (twelve money/state events plus the three offering-catalogue events), got %d", len(cases))
 	}
 	for _, c := range cases {
 		m := scDecode(t, c.out)

@@ -391,7 +391,9 @@ type cfWorld struct {
 	trea0    *big.Int // kTreasury() at start
 	sumFeeC  *big.Int
 	sumFeeP  *big.Int
-	sumTax   *big.Int // Σ assessed tax — ALL to the treasury (RULING J)
+	sumTax   *big.Int // Σ assessed tax — split 50/50 creator/platform (2026-07-27)
+	sumTaxC  *big.Int // Σ the creator's half (0 for a creator selling their own token)
+	sumTaxP  *big.Int // Σ the platform's half (the WHOLE tax on a creator's own sell)
 
 	spent    map[string]*big.Int // per-actor Σ TotalDue
 	received map[string]*big.Int // per-actor Σ Net
@@ -490,6 +492,8 @@ func cfNewWorld(t *testing.T, seed int64, seqIdx int, s *MemStore, creator strin
 		sumFeeC:  mZero(),
 		sumFeeP:  mZero(),
 		sumTax:   mZero(),
+		sumTaxC:  mZero(),
+		sumTaxP:  mZero(),
 		spent:      map[string]*big.Int{},
 		received:   map[string]*big.Int{},
 	}
@@ -532,17 +536,27 @@ func cfCheck(t *testing.T, w *cfWorld, label string) {
 		w.fail(t, "I3 VIOLATED after %s: supply %s != Σ balances %s", label, S, sumBal)
 	}
 
-	// ---- C-19 + RULING J: the fee never touches the reserve, and the
-	// treasury holds its start + every platform fee half + EVERY unit of
-	// assessed tax (the destination is unconditional — no pot exists). ----
+	// ---- C-19 + the tax destination: the fee never touches the reserve, the
+	// creator's pot holds its start + every creator fee half + its half of
+	// every assessed tax, and the treasury holds its start + every platform
+	// fee half + the platform's half. ----
 	gotFeeC := getMoney(w.s, kFeeBal(w.creator))
-	if gotFeeC.Cmp(mAdd(w.feeC0, w.sumFeeC)) != 0 {
-		w.fail(t, "fee accrual broken after %s: kFeeBal(creator) %s != %s", label, gotFeeC, mAdd(w.feeC0, w.sumFeeC))
+	wantFeeC := mAdd(mAdd(w.feeC0, w.sumFeeC), w.sumTaxC)
+	if gotFeeC.Cmp(wantFeeC) != 0 {
+		w.fail(t, "fee accrual broken after %s: kFeeBal(creator) %s != feeC0+ΣfeeC+ΣtaxC %s", label, gotFeeC, wantFeeC)
 	}
 	gotTrea := getMoney(w.s, kTreasury())
-	wantTrea := mAdd(mAdd(w.trea0, w.sumFeeP), w.sumTax)
+	wantTrea := mAdd(mAdd(w.trea0, w.sumFeeP), w.sumTaxP)
 	if gotTrea.Cmp(wantTrea) != 0 {
-		w.fail(t, "TREASURY LEDGER VIOLATED after %s: kTreasury() %s != trea0+ΣfeeP+Σtax %s (RULING J)", label, gotTrea, wantTrea)
+		w.fail(t, "TREASURY LEDGER VIOLATED after %s: kTreasury() %s != trea0+ΣfeeP+ΣtaxP %s", label, gotTrea, wantTrea)
+	}
+
+	// ---- NOTHING LEAKS: the two halves must re-sum to every unit assessed.
+	// This is the property the pre-split "all to treasury" assertion was
+	// really protecting, restated so a rounding bug in the split cannot hide
+	// behind two individually-plausible balances. ----
+	if reunited := mAdd(w.sumTaxC, w.sumTaxP); reunited.Cmp(w.sumTax) != 0 {
+		w.fail(t, "TAX SPLIT LEAKED after %s: ΣtaxC+ΣtaxP = %s != Σtax %s", label, reunited, w.sumTax)
 	}
 
 	// (RULING K deleted the per-holder cost basis — no basis-hygiene invariant
@@ -648,6 +662,9 @@ func cfDoSell(t *testing.T, w *cfWorld, actor string, deltaS *big.Int) {
 	w.sumFeeC = mAdd(w.sumFeeC, r.FeeCreator)
 	w.sumFeeP = mAdd(w.sumFeeP, r.FeePlatform)
 	w.sumTax = mAdd(w.sumTax, r.Tax)
+	taxC, taxP := exitTaxSplit(w.creator, actor, r.Tax)
+	w.sumTaxC = mAdd(w.sumTaxC, taxC)
+	w.sumTaxP = mAdd(w.sumTaxP, taxP)
 	w.received[actor] = mAdd(w.received[actor], r.Net)
 	w.logf("SELL  %-8s dS=%-7s block=%d -> held=%d τ=%dbps p=%s tax=%s net=%s",
 		actor, deltaS, w.block, r.HeldBlocks, r.TaxBps, r.Gross, r.Tax, r.Net)
@@ -1086,9 +1103,16 @@ func TestCurveFuzz_EarlyBuyerProfitsWhenOthersBuy_ByDesign(t *testing.T) {
 		if sr.Gross.Cmp(cfBI(224_684)) != 0 || sr.Tax.Cmp(cfBI(44_937)) != 0 || sr.Net.Cmp(cfBI(157_279)) != 0 {
 			t.Fatalf("fresh dump: gross=%s tax=%s net=%s, want 224684/44937/157279", sr.Gross, sr.Tax, sr.Net)
 		}
-		wantTrea := mAdd(mAdd(trea0, sr.Tax), sr.FeePlatform)
+		// The tax is split 50/50 (2026-07-27): alice is not the creator, so
+		// the treasury takes the platform half plus the platform fee half, and
+		// the creator's claimable pot takes the other tax half.
+		taxC, taxP := exitTaxSplit(c, "alice", sr.Tax)
+		wantTrea := mAdd(mAdd(trea0, taxP), sr.FeePlatform)
 		if got := getMoney(s, kTreasury()); got.Cmp(wantTrea) != 0 {
-			t.Fatalf("treasury = %s, want %s (RULING J: the whole tax)", got, wantTrea)
+			t.Fatalf("treasury = %s, want %s (platform half of the tax + platform fee)", got, wantTrea)
+		}
+		if reunited := mAdd(taxC, taxP); reunited.Cmp(sr.Tax) != 0 {
+			t.Fatalf("tax split leaked: %s != assessed %s", reunited, sr.Tax)
 		}
 		profit := new(big.Int).Sub(sr.Net, alice.TotalDue)
 		if profit.Cmp(cfBI(2558)) != 0 {

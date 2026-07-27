@@ -347,7 +347,7 @@ func (e *Engine) doAskExecute(asker, creator string, maxCredits, commission *big
 	var res *core.AskResult
 	e.coreCall("ask", ev, func() error {
 		var err error
-		res, err = core.Ask(e.Store, asker, creator, e.Block, maxCredits, commission, contentHash, deadlineBlocks)
+		res, err = core.Ask(e.Store, asker, creator, e.Block, maxCredits, commission, contentHash, deadlineBlocks, 0)
 		return err
 	})
 	if ev.OK {

@@ -644,7 +644,7 @@ func TestHarness_FullLifecycle_EndToEnd(t *testing.T) {
 		// SettlementRate == rate at every block this loop asks at — see the
 		// RECORD OBSERVATIONS step above), making this the tightest
 		// legitimate cap, not a generous one.
-		res, err := Ask(s, asker, alice, block, wantCredits, commission, tag, deadlineBlocks)
+		res, err := askAt0(s, asker, alice, block, wantCredits, commission, tag, deadlineBlocks)
 		hzMustOK(t, err, "Ask("+tag+")")
 		if res.CreditsSpent.Cmp(wantCredits) != 0 {
 			t.Fatalf("Ask(%s): spent %s credits, want %s", tag, res.CreditsSpent, wantCredits)
@@ -916,7 +916,7 @@ func TestHarness_Guardrail_FrozenNeverGatesFunds(t *testing.T) {
 	// state, then used to compute the tightest legitimate maxCredits.
 	inFlightRate, err := AskRate(s, creator, inFlightBlock)
 	hzMustOK(t, err, "AskRate (in-flight ask)")
-	askInFlight, err := Ask(s, "holdera", creator, inFlightBlock, creditsForAsk(big.NewInt(face), inFlightRate), commission, "inflight-1", MaxAskDeadline)
+	askInFlight, err := askAt0(s, "holdera", creator, inFlightBlock, creditsForAsk(big.NewInt(face), inFlightRate), commission, "inflight-1", MaxAskDeadline)
 	hzMustOK(t, err, "Ask(inflight)")
 
 	// A second ask whose window will already have closed by the time we
@@ -924,7 +924,7 @@ func TestHarness_Guardrail_FrozenNeverGatesFunds(t *testing.T) {
 	toReclaimBlock := inFlightBlock + 10
 	toReclaimRate, err := AskRate(s, creator, toReclaimBlock)
 	hzMustOK(t, err, "AskRate (to-reclaim ask)")
-	askToReclaim, err := Ask(s, "holderb", creator, toReclaimBlock, creditsForAsk(big.NewInt(face), toReclaimRate), commission, "reclaim-me-1", MinAskDeadline)
+	askToReclaim, err := askAt0(s, "holderb", creator, toReclaimBlock, creditsForAsk(big.NewInt(face), toReclaimRate), commission, "reclaim-me-1", MinAskDeadline)
 	hzMustOK(t, err, "Ask(to-reclaim)")
 
 	frozenTestBlock := frozenStart + 2000
@@ -975,7 +975,7 @@ func TestHarness_Guardrail_FrozenNeverGatesFunds(t *testing.T) {
 		// maxCredits=1500 is an arbitrary valid (positive) cap — this call is
 		// rejected by RequireInflowOpen (FROZEN) before it ever reaches the
 		// maxCredits guard, so its exact value doesn't matter here.
-		_, err := Ask(s, "holderc", creator, frozenTestBlock, big.NewInt(1500), commission, "should-be-rejected", MinAskDeadline)
+		_, err := askAt0(s, "holderc", creator, frozenTestBlock, big.NewInt(1500), commission, "should-be-rejected", MinAskDeadline)
 		hzMustErr(t, err, ErrState, "Ask while FROZEN")
 		after := hzSnapshotAll(s)
 		if changed := hzChangedKeys(before, after); len(changed) != 0 {
@@ -1363,7 +1363,7 @@ func TestHarness_ReRegistration_AfterClosed(t *testing.T) {
 	oldAskBlock := lastOldObs + 50 // still OVERDUE: paidUntil < oldAskBlock < frozenStart
 	oldRateGot, err := AskRate(s, creator, oldAskBlock)
 	hzMustOK(t, err, "AskRate (old life)")
-	oldAsk, err := Ask(s, oldHolder, creator, oldAskBlock, creditsForAsk(big.NewInt(1000), oldRateGot), commissionOwedFor(big.NewInt(1000)), "old-life-ask", MinAskDeadline)
+	oldAsk, err := askAt0(s, oldHolder, creator, oldAskBlock, creditsForAsk(big.NewInt(1000), oldRateGot), commissionOwedFor(big.NewInt(1000)), "old-life-ask", MinAskDeadline)
 	hzMustOK(t, err, "Ask (old life)")
 	if oldAsk.Seq != 0 {
 		t.Fatalf("old life's first ask got seq %d, want 0", oldAsk.Seq)
@@ -1515,4 +1515,38 @@ func TestHarness_ReRegistration_AfterClosed(t *testing.T) {
 			hzMustErr(t, err, ErrOracle, "SettlementRate before the new life's long window fills")
 		}
 	})
+}
+
+// askAt0 is the pre-offering-catalogue Ask, pinned at offering id 0 — the
+// legacy single `face` price (offerings.go, 2026-07-27). Every test written
+// before the catalogue existed calls this, which is exactly the point: id 0 is
+// specified to be the byte-for-byte old behaviour, so the whole pre-existing
+// ask suite passing UNCHANGED through this shim is the evidence for that claim.
+// Offering-specific behaviour is tested against nonzero ids in offerings_test.go.
+func askAt0(s Store, caller, creator string, block uint64, maxCredits, commissionHbdPaid *big.Int, contentHash string, deadlineBlocks uint64) (*AskResult, error) {
+	return Ask(s, caller, creator, block, maxCredits, commissionHbdPaid, contentHash, deadlineBlocks, 0)
+}
+
+// exitTaxSplit mirrors accrueExitTax's destination rule (exittax.go, USER
+// RULING 2026-07-27) for tests: the exit tax is split 50/50, creator half to
+// kFeeBal (the pull-claimable trade-fee rail), platform half to kTreasury —
+// EXCEPT when the seller is the creator, where the whole tax goes to treasury
+// so a creator cannot refund half their own exit tax to themselves.
+//
+// creatorHalf = floor(tax/2) and platform takes the REMAINDER, so the two
+// always re-sum to tax exactly. Tests assert both halves AND the sum: the
+// property that matters is not where the tax lands but that every assessed
+// unit lands SOMEWHERE — a split that lost a base unit to rounding would be a
+// leak, which is precisely what the pre-split "all to treasury" assertions
+// were protecting.
+func exitTaxSplit(creator, seller string, tax *big.Int) (creatorHalf, platformHalf *big.Int) {
+	if tax == nil || tax.Sign() <= 0 {
+		return mZero(), mZero()
+	}
+	if seller == creator {
+		return mZero(), new(big.Int).Set(tax)
+	}
+	creatorHalf = new(big.Int).Div(tax, big.NewInt(2))
+	platformHalf = new(big.Int).Sub(tax, creatorHalf)
+	return creatorHalf, platformHalf
 }

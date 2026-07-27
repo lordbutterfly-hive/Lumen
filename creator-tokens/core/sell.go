@@ -348,9 +348,7 @@ func Sell(s Store, caller, creator string, block uint64, deltaS *big.Int, minNet
 	// gate an outflow (RULING G satisfied structurally). THE PREVIOUS
 	// VERSION distributed this to the holders of record via taxpot.go's
 	// accumulator — deleted; see the file header for the measured autopsy.
-	if r.Tax.Sign() > 0 {
-		addMoney(s, kTreasury(), r.Tax)
-	}
+	accrueExitTax(s, creator, caller, r.Tax)
 	accrueTradeFee(s, creator, r.FeeCreator, r.FeePlatform)
 	// The curve IS the price source (RULINGS "WIRING"). S_BEFORE: both trade
 	// directions record the marginal rate at the TOP of the traded slice

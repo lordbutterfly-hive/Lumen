@@ -564,6 +564,16 @@ func registerApply(s Store, creator string, block uint64, face, cap int64) {
 	setU64(s, kSessionPriceAnchorAt(creator), 0)
 	setU64(s, kSessionPriceSetAt(creator), 0)
 
+	// PER-INCARNATION OFFERING CATALOGUE (2026-07-27): the same per-incarnation
+	// reset as the eight keys above and for the identical reason — a returning
+	// creator must never inherit a dead incarnation's posted price, band anchor
+	// or service list (the H4 bug class). It is ONE write rather than a
+	// key-by-key clear because offering ids are monotone and therefore sparse,
+	// so enumerating them would be an unbounded loop inside registration; the
+	// epoch bump makes the whole dead catalogue unreachable at once. See
+	// keys.go for the full argument and the live-escrow-cannot-straddle proof.
+	bumpOfferEpoch(s, creator)
+
 	setU64(s, kPaidUntil(creator), block+SubscriptionPeriod)
 	setMoney(s, kFace(creator), big.NewInt(face)) // kFace is money-typed, see SetFace
 	setU64(s, kFaceSetAt(creator), block)         // the posted face counts as the first "set", starting the anti-rug clock immediately
