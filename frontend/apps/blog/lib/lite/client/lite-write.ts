@@ -37,6 +37,12 @@ export interface LitePostInput {
   tier?: 'normal' | 'advanced';
   /** Present for a comment/reply: the parent lite post or on-chain thread. */
   parentRef?: { type: 'lite'; id: string } | { type: 'chain'; author: string; permlink: string };
+  /**
+   * Set to edit an existing post instead of creating one. Without this the server
+   * has no way to tell an edit from a new post, and an "edit" silently becomes a
+   * duplicate — which is exactly what the lite composer did before this existed.
+   */
+  editOfPostId?: string;
 }
 
 /** Create a lite post or comment (identity comes from the session, never the body). */
@@ -52,7 +58,8 @@ export async function createLitePost(input: LitePostInput): Promise<LiteWriteRes
         summary: input.summary,
         tags: input.tags,
         community: input.community,
-        parentRef: input.parentRef
+        parentRef: input.parentRef,
+        editOfPostId: input.editOfPostId
       })
     });
     const b = (await res.json().catch(() => null)) as
@@ -112,6 +119,41 @@ export async function liteFollow(followeeName: string, unfollow = false): Promis
       | null;
     if (res.ok && b?.ok) return { status: 'ok', following: !!b.following };
     return { status: 'error', message: friendly(res.status, b?.error) };
+  } catch {
+    return { status: 'error', message: 'Network error — please try again.' };
+  }
+}
+
+/**
+ * Edit an existing lite post. The publisher re-broadcasts the same permlink, which
+ * Hive treats as an edit; the on-chain parent is pinned server-side and never
+ * changes (the chain forbids it).
+ */
+export async function editLitePost(
+  postId: string,
+  input: Omit<LitePostInput, 'editOfPostId'>
+): Promise<LiteWriteResult> {
+  return createLitePost({ ...input, editOfPostId: postId });
+}
+
+/**
+ * Delete a lite post. Hidden from Lumen immediately; the on-chain object is removed
+ * if Hive still allows it (no replies, no net-positive votes, not paid out) and
+ * otherwise blanked. Either way this resolves as a success.
+ */
+export async function deleteLitePost(postId: string): Promise<LiteWriteResult> {
+  try {
+    const res = await fetch(`/api/lite/posts/${encodeURIComponent(postId)}`, {
+      method: 'DELETE',
+      headers: JSON_POST
+    });
+    const b = (await res.json().catch(() => null)) as
+      | { status?: string; error?: string; message?: string }
+      | null;
+    if (!res.ok || b?.status !== 'ok') {
+      return { status: 'error', message: b?.message || friendly(res.status, b?.error) };
+    }
+    return { status: 'ok' };
   } catch {
     return { status: 'error', message: 'Network error — please try again.' };
   }

@@ -5,6 +5,7 @@ import * as posts from '../repositories/post-repository';
 import * as publishJobs from '../repositories/publish-job-repository';
 import * as rateLimit from '../antispam/rate-limit';
 import { buildPermlink } from '../publisher/permlink';
+import { reserveContainerParent } from '../publisher/container';
 import { ulid } from '../ids';
 import { preScreen } from './pre-screen';
 
@@ -43,22 +44,52 @@ function autoTitle(body: string): string {
   return firstLine.length <= 60 ? firstLine : `${firstLine.slice(0, 57)}...`;
 }
 
-/** Freeze the exact content the publisher will broadcast (spec §D.3). */
-function buildPayload(post: LumenPost): PublishPayload {
-  // Resolve the on-chain parent so a lite reply broadcasts as a real reply, not a
-  // root post. A chain parent replies directly under the Hive author/permlink; a
-  // lite parent replies under the frontend account's deterministic permlink for
-  // that post; no parent is a root post (parent_author='').
-  const parent = post.parentRef;
-  let parentAuthor = '';
-  let parentPermlink = post.community ?? post.tags[0] ?? 'lumen';
-  if (parent?.type === 'chain') {
-    parentAuthor = parent.author;
-    parentPermlink = parent.permlink;
-  } else if (parent?.type === 'lite') {
-    parentAuthor = liteConfig.frontendAccount;
-    parentPermlink = buildPermlink(parent.id);
+/** The on-chain thing a post hangs off: a real Hive post, a lite post, or a container. */
+interface OnChainParent {
+  author: string;
+  permlink: string;
+}
+
+/**
+ * The parent a user explicitly chose, if any. `null` means "no explicit parent" —
+ * which is every ordinary post, and those go under the rolling container.
+ */
+function explicitParent(parentRef: ParentRef | null): OnChainParent | null {
+  if (parentRef?.type === 'chain') {
+    return { author: parentRef.author, permlink: parentRef.permlink };
   }
+  if (parentRef?.type === 'lite') {
+    return { author: liteConfig.frontendAccount, permlink: buildPermlink(parentRef.id) };
+  }
+  return null;
+}
+
+/**
+ * The container parent for a post, pinned so it can never change.
+ *
+ * Hive asserts "The parent of a comment cannot change."
+ * (hive_evaluator_social.cpp:294/302), so an edit published after the container
+ * rotated must still name the container the create used. First publish pins it;
+ * every later payload reuses it.
+ */
+async function containerParentFor(postId: string): Promise<OnChainParent> {
+  const pinned = await posts.getPublishParent(postId);
+  if (pinned) return pinned;
+  const container = await reserveContainerParent();
+  // First-write-wins: a concurrent job's value is returned instead, if it got there
+  // first, and the slot we just reserved is simply left unused.
+  return posts.pinPublishParent(postId, container.author, container.permlink);
+}
+
+/** Freeze the exact content the publisher will broadcast (spec §D.3). */
+function buildPayload(post: LumenPost, parent: OnChainParent | null): PublishPayload {
+  // Every lite post broadcasts as a comment, never a root post (decision
+  // 2026-07-27) — Hive caps root posts at one per 5 minutes per account but
+  // replies at one per 3 seconds. `parent` is resolved by the caller BEFORE the
+  // post row is committed, so a failure to reserve a container can never leave a
+  // post row with no publish path (the orphan bug found by the 2026-07-28 burst).
+  const parentAuthor = parent?.author ?? '';
+  const parentPermlink = parent?.permlink ?? post.community ?? post.tags[0] ?? 'lumen';
   return {
     author: liteConfig.frontendAccount, // on-chain author (§D.1)
     permlink: buildPermlink(post.postId),
@@ -104,6 +135,23 @@ export async function createLitePost(
     if (!existing || existing.userId !== sessionUser.userId) {
       return { status: 'error', code: 'not_found', message: 'Post not found.' };
     }
+    // A deleted post takes no further edits. Nothing else enforced this, so an
+    // edit could have resurrected content the user had removed.
+    if (existing.deletedAt || existing.deletedLocally) {
+      return { status: 'error', code: 'deleted', message: 'That post has been deleted.' };
+    }
+    // Edits were exempt from every cap, which made them a queue-starvation vector:
+    // the publishing account can broadcast ~20 things a minute in total, so an edit
+    // loop could hold up everyone else's posts. Hive imposes no edit limit at all
+    // (the old 24-hour window is dead code past HF17), so this cap is the only bound.
+    const editRate = await rateLimit.enforceEditRate(sessionUser.userId);
+    if (!editRate.ok) {
+      return {
+        status: 'error',
+        code: 'edit_rate_limited',
+        message: 'You have edited a lot today — please try again tomorrow.'
+      };
+    }
     const updated = await posts.updatePostContent(req.editOfPostId, {
       title,
       body,
@@ -112,21 +160,25 @@ export async function createLitePost(
       thumbnailUrl: req.thumbnailUrl ?? null,
       feedVisibility
     });
-    const payload = buildPayload(updated);
-    if (updated.hivePermlink) {
-      // Already on chain -> broadcast an edit to the same permlink.
+    const editParent = explicitParent(updated.parentRef) ?? (await containerParentFor(updated.postId));
+    const payload = buildPayload(updated, editParent);
+    const version = await posts.bumpEditVersion(updated.postId);
+
+    if (!updated.hivePermlink && (await publishJobs.updatePendingPayload(updated.postId, payload))) {
+      // Not on chain yet and the create job is still pending: rewrite that job's
+      // content. One broadcast total, carrying the edited text.
+      return { status: 'ok', post: updated };
+    }
+    // Coalesce: if an edit is already queued for this post, replace its content so
+    // the newest text wins. Otherwise queue one. Two separate jobs would let an
+    // older edit land last and silently revert the newer one.
+    if (!(await publishJobs.replacePendingUpdate(updated.postId, payload))) {
       await publishJobs.enqueue({
         postId: updated.postId,
         jobType: 'update',
-        idempotencyKey: `${updated.postId}:update:${ulid()}`,
-        payload
-      });
-    } else if (!(await publishJobs.updatePendingPayload(updated.postId, payload))) {
-      // No pending create job to refresh (already claimed) -> enqueue an update.
-      await publishJobs.enqueue({
-        postId: updated.postId,
-        jobType: 'update',
-        idempotencyKey: `${updated.postId}:update:${ulid()}`,
+        // Versioned, not random: distinct per edit (so a later edit is never
+        // swallowed as a duplicate) but stable for retries of the same edit.
+        idempotencyKey: `${updated.postId}:update:v${version}`,
         payload
       });
     }
@@ -146,6 +198,14 @@ export async function createLitePost(
     };
   }
 
+  // Reserve the on-chain parent BEFORE committing the post row. If the container
+  // cannot be reserved, the request fails with nothing written — the alternative
+  // (create first, reserve after) is what orphaned a post under concurrent load on
+  // 2026-07-28: the row was committed, the reservation threw, and nothing ever
+  // enqueued it.
+  const explicit = explicitParent(req.parentRef ?? null);
+  const reserved = explicit ?? (await reserveContainerParent());
+
   const post = await posts.createPost({
     userId: sessionUser.userId,
     displayNameSnapshot: sessionUser.username, // immutable name at post time -> footer (§D.4)
@@ -161,12 +221,15 @@ export async function createLitePost(
     feedVisibility,
     shard: liteConfig.frontendAccount || null
   });
-  // Enqueue the proxy-publish (outbox). Idempotent on post_id:create.
+  // Pin the parent to the row, then enqueue the proxy-publish (outbox). Idempotent
+  // on post_id:create. `reconcileOrphans` (publisher) is the backstop if the
+  // process dies between these two writes.
+  const parent = explicit ?? (await posts.pinPublishParent(post.postId, reserved.author, reserved.permlink));
   await publishJobs.enqueue({
     postId: post.postId,
     jobType: 'create',
     idempotencyKey: `${post.postId}:create`,
-    payload: buildPayload(post)
+    payload: buildPayload(post, parent)
   });
   return { status: 'ok', post };
 }
@@ -186,4 +249,73 @@ export async function getLiteUserPosts(
 
 export async function getLitePost(postId: string): Promise<LumenPost | null> {
   return posts.getPostById(postId);
+}
+
+/**
+ * Re-enqueue posts that have no publish job (orphans).
+ *
+ * A post row is committed before its job is enqueued, so a crash between those two
+ * writes leaves a post that would silently never reach Hive. A 30-post concurrent
+ * burst produced exactly one such orphan on 2026-07-28 (the container reservation
+ * threw after the row was committed); the reservation order is fixed now, and this
+ * is the backstop for every other way those two writes can come apart.
+ *
+ * Safe to call repeatedly: `enqueue` is idempotent on `post_id:create`.
+ */
+export async function reconcileOrphans(limit = 25): Promise<number> {
+  const orphans = await posts.listOrphaned(limit);
+  let repaired = 0;
+  for (const post of orphans) {
+    const parent =
+      explicitParent(post.parentRef) ?? (await containerParentFor(post.postId));
+    const job = await publishJobs.enqueue({
+      postId: post.postId,
+      jobType: 'create',
+      idempotencyKey: `${post.postId}:create`,
+      payload: buildPayload(post, parent)
+    });
+    if (job) repaired++;
+  }
+  return repaired;
+}
+
+export type DeletePostResult =
+  | { status: 'ok'; onChain: boolean }
+  | { status: 'error'; code: string; message: string };
+
+/**
+ * Delete a lite post.
+ *
+ * Two cases, and the difference matters:
+ *  - **Not published yet** — hide it and cancel the pending publish job. Nothing
+ *    ever reaches Hive, so there is nothing to undo.
+ *  - **Already on chain** — hide it locally and queue a `delete` job. The worker
+ *    tries a real `delete_comment`; Hive refuses that once a comment has replies,
+ *    net-positive votes, or has paid out, so the worker falls back to blanking the
+ *    content. Either way the user's view of "deleted" is honoured immediately.
+ *
+ * Idempotent: deleting twice is not an error.
+ */
+export async function deleteLitePost(userId: string, postId: string): Promise<DeletePostResult> {
+  const existing = await posts.getPostById(postId);
+  if (!existing || existing.userId !== userId) {
+    return { status: 'error', code: 'not_found', message: 'Post not found.' };
+  }
+
+  const post = (await posts.markDeleted(postId, userId)) ?? existing;
+
+  if (!post.hivePermlink) {
+    // Never broadcast: drop the queued create outright.
+    await publishJobs.cancelPending(postId, 'post deleted before it was published');
+    return { status: 'ok', onChain: false };
+  }
+
+  const parent = explicitParent(post.parentRef) ?? (await containerParentFor(post.postId));
+  await publishJobs.enqueue({
+    postId: post.postId,
+    jobType: 'delete',
+    idempotencyKey: `${post.postId}:delete`,
+    payload: buildPayload(post, parent)
+  });
+  return { status: 'ok', onChain: true };
 }

@@ -21,9 +21,14 @@ import (
 // forceFrozen pushes a market (already set up via setupMarket) into a
 // FROZEN-shaped state: paidUntil in the past, past its grace window too.
 // Mirrors prepay_test.go's TestTransferCredits_WorksRegardlessOfBillingPhase.
+//
+// kPaidUntil alone is sufficient: naturalPhase (market.go) derives FROZEN
+// lazily from paidUntil+GraceBlocks, so any query block >= 50+GraceBlocks
+// already reads FROZEN with no other key involved (there used to be a second
+// write here, to a kFrozenAt key that nothing in this package ever read —
+// deleted, see keys.go).
 func forceFrozen(s Store, creator string) {
 	setU64(s, kPaidUntil(creator), 50)
-	setU64(s, kFrozenAt(creator), 50+GraceBlocks)
 }
 
 // wdNet computes the NET wind-down payout a holder receives under RULING K2:

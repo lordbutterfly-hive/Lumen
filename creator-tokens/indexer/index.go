@@ -12,7 +12,8 @@ import (
 // (SPEC-CREATOR-KEYS.md §1.5) holds only the CURRENT escrow set and CURRENT
 // balances; it has no memory of a resolved ask, a past face price, or a
 // former holder. Everything queryable here is a REPLAY of ../core/events.go's
-// twelve event shapes, nothing more.
+// Ev* event shapes (plus a handful of contract-only ones — see events.go's
+// own file doc), nothing more.
 //
 // Deliberately NOT provided anywhere in this file, or reachable through it:
 // any aggregate of amounts moved (Σ prepaid, Σ asked, Σ transferred) as a
@@ -49,7 +50,8 @@ type DeliveryOutcome struct {
 	Asker          string
 	AskedBlock     uint64
 	ResolvedBlock  uint64
-	Answered       bool   // true=answered (kept), false=reclaimed (missed)
+	Answered       bool   // true=answered (kept)
+	Declined       bool   // creator said no inside the window — NOT a miss (core/delivery.go)
 	ResponseBlocks uint64 // ResolvedBlock-AskedBlock; meaningful only when Answered
 }
 
@@ -57,12 +59,27 @@ type DeliveryOutcome struct {
 type marketData struct {
 	creator string
 
-	// lastFace/lastCap/closed are a REPLAY of registered/faceChanged/
-	// capChanged/closed events — audit/cross-check only, never authoritative
-	// (see file doc and MarketSummary's own doc).
+	// lastFace/lastCap/closed/retired are a REPLAY of registered/faceChanged/
+	// capChanged/closed/retired events — audit/cross-check only, never
+	// authoritative (see file doc and MarketSummary's own doc).
 	lastFace *big.Int
 	lastCap  *big.Int
 	closed   bool
+
+	// retired mirrors a "retired" event (contract-only, ../contract/main.go's
+	// `retire` entrypoint — see indexer/events.go's KindRetired doc). This is
+	// DELIBERATELY a separate flag from `closed`, never folded into it: Retire
+	// (core/market.go) forces the market straight to FROZEN — an irreversible
+	// wind-down where Sell has already closed and Refund is the open exit —
+	// while `closed` mirrors the market reaching the later, terminal CLOSED
+	// state (core.CloseIfDrained, which additionally requires supply==0).
+	// Conflating the two would tell a consumer a retiring-but-not-yet-drained
+	// market (holders may still be owed a Refund) has ALREADY fully wound
+	// down, which is false. Reset on re-registration exactly like `closed`
+	// (see foldKnownEventLocked's KindRegistered case) — core itself resets
+	// kRetiredAt to 0 on every Register call (market.go), so a returning
+	// creator's new incarnation is never born already retired.
+	retired bool
 
 	// balances[holder] = current LIQUID credits (matches contract's own
 	// kBal semantics exactly: I3, "supply == Σ bal + credits currently
@@ -163,7 +180,48 @@ type Index struct {
 	treasuryHbd       *big.Int
 	reclaimOutflowHbd *big.Int
 
+	// holderCreators/askerAsks (DESIGN + IMPLEMENTATION, 2026-07-28 — see the
+	// handoff report for the full feasibility writeup) are the two GLOBAL
+	// reverse indexes ../frontend's real data layer already calls TODAY with
+	// no backing implementation anywhere:
+	// features/creator-tokens/lib/vsc-data-source.ts's readWallet/readMyAsks
+	// fetch `/holders/{holder}/positions` and `/askers/{asker}/asks` — this
+	// package has no HTTP server (out of scope to build one here), but
+	// neither did any INDEX QUERY exist to back such an endpoint with, which
+	// is the actual gap this closes, mirroring how DeliveryRecord/
+	// MarketSummary/TreasuryHbd already exist as query+DTO pairs with no HTTP
+	// server built around them yet.
+	//
+	// Both are safe, honest OVER-approximations by design, matching the
+	// frontend's own already-written consumption pattern exactly: readWallet
+	// re-reads live chain state for every candidate creator this returns and
+	// filters to `tokensHeld > 0` there; readMyAsks re-reads the live escrow
+	// for every candidate (creator,seq) this returns. So a creator/ask this
+	// holder/asker no longer has anything live to show for costs one wasted
+	// read, never a wrong answer — the one failure mode that matters
+	// (silently OMITTING a real position/ask) cannot happen as long as every
+	// balance/escrow mutation in foldKnownEventLocked also updates its
+	// matching reverse index (see noteHolderCreator's call sites).
+	//
+	// NEVER reset by a re-registration (see foldKnownEventLocked's
+	// KindRegistered case, which resets m.balances/m.escrows but not
+	// these) — a holder who held a prior, now-reset incarnation's tokens
+	// still gets a live read that correctly comes back empty; dropping the
+	// history here would risk the opposite, worse failure (an active
+	// position missed because this Index guessed it was stale).
+	holderCreators map[string]map[string]struct{} // holder -> set of creators ever touched
+	askerAsks      map[string][]AskRef             // asker -> every (creator,seq) ever asked, in ask order
+
 	stats Stats
+}
+
+// AskRef identifies one escrow by its (creator, seq) join key — the same pair
+// core/ask.go's escrow map is keyed by. AskerAsks returns these so a caller
+// (the wasm wrapper has no reverse asker->escrow index of its own — see
+// AskerAsks' own doc) can resolve each one against a live chain read.
+type AskRef struct {
+	Creator string
+	Seq     uint64
 }
 
 // NewIndex returns an empty Index ready for Ingest/Poll.
@@ -173,7 +231,31 @@ func NewIndex() *Index {
 		seenKeys:          make(map[string]struct{}),
 		treasuryHbd:       big.NewInt(0),
 		reclaimOutflowHbd: big.NewInt(0),
+		holderCreators:    make(map[string]map[string]struct{}),
+		askerAsks:         make(map[string][]AskRef),
 	}
+}
+
+// noteHolderCreator records that `holder` has had a balance-affecting event
+// on `creator`'s market — called from every addBal/subBal call site in
+// foldKnownEventLocked, never from marketData.addBal/subBal themselves
+// (those are plain per-market helpers with no back-reference to the owning
+// Index; duplicating the one-line call at each site is simpler and safer
+// than threading a back-pointer through marketData for this alone). A blank
+// holder is a no-op — no wire shape in this package's recognized events ever
+// produces one for a field this is called with, but this guards against a
+// hypothetical future caller the same way parseAmount guards against
+// upstream corruption rather than assuming it away.
+func (ix *Index) noteHolderCreator(holder, creator string) {
+	if holder == "" {
+		return
+	}
+	set, ok := ix.holderCreators[holder]
+	if !ok {
+		set = make(map[string]struct{})
+		ix.holderCreators[holder] = set
+	}
+	set[creator] = struct{}{}
 }
 
 func (ix *Index) market(creator string) *marketData {
@@ -329,6 +411,7 @@ func (ix *Index) foldKnownEventLocked(ev Event, raw RawEvent) bool {
 		// those two fields for why).
 		if m.closed {
 			m.closed = false
+			m.retired = false // mirrors core's own kRetiredAt reset to 0 on Register (market.go)
 			m.deliveryOutcomes = nil
 			m.escrows = make(map[uint64]*escrowEntry)
 			m.balances = make(map[string]*big.Int)
@@ -393,6 +476,7 @@ func (ix *Index) foldKnownEventLocked(ev Event, raw RawEvent) bool {
 		}
 		m := ix.market(p.Creator)
 		m.addBal(p.Actor, credits)
+		ix.noteHolderCreator(p.Actor, p.Creator)
 		m.history = append(m.history, raw)
 
 	case KindTransferred:
@@ -404,6 +488,8 @@ func (ix *Index) foldKnownEventLocked(ev Event, raw RawEvent) bool {
 		m := ix.market(p.Creator)
 		m.subBal(p.Actor, amount)
 		m.addBal(p.To, amount)
+		ix.noteHolderCreator(p.Actor, p.Creator)
+		ix.noteHolderCreator(p.To, p.Creator)
 		m.history = append(m.history, raw)
 
 	case KindAsked:
@@ -421,6 +507,15 @@ func (ix *Index) foldKnownEventLocked(ev Event, raw RawEvent) bool {
 		m := ix.market(p.Creator)
 		m.subBal(p.Actor, creditsSpent)
 		m.escrows[p.Seq] = &escrowEntry{asker: p.Actor, askedBlock: p.Block}
+		ix.noteHolderCreator(p.Actor, p.Creator)
+		// AskerAsks (DESIGN + IMPLEMENTATION, 2026-07-28): (creator,seq) is a
+		// permanently unique join key across every incarnation of this
+		// market — core/market.go's own doc: kSeq is "DELIBERATELY MONOTONE
+		// ACROSS INCARNATIONS," never reset by a re-registration — so
+		// appending here, unconditionally and never cleared, cannot collide
+		// with a later incarnation's own asks the way m.escrows (reset on
+		// re-registration, a LOCAL per-market map) safely can.
+		ix.askerAsks[p.Actor] = append(ix.askerAsks[p.Actor], AskRef{Creator: p.Creator, Seq: p.Seq})
 		m.history = append(m.history, raw)
 
 	case KindAnswered:
@@ -432,6 +527,7 @@ func (ix *Index) foldKnownEventLocked(ev Event, raw RawEvent) bool {
 		}
 		m := ix.market(p.Creator)
 		m.addBal(p.Creator, creditsToCreator)
+		ix.noteHolderCreator(p.Creator, p.Creator)
 		m.commissionBookedHbd = new(big.Int).Add(m.commissionBookedHbd, commissionHbd)
 		ix.treasuryHbd = new(big.Int).Add(ix.treasuryHbd, commissionHbd)
 		if esc, known := m.escrows[p.Seq]; known && !esc.resolved {
@@ -458,7 +554,13 @@ func (ix *Index) foldKnownEventLocked(ev Event, raw RawEvent) bool {
 			return false
 		}
 		m := ix.market(p.Creator)
-		m.addBal(p.Actor, credits) // actor == the escrow's own asker (Reclaim's own auth check)
+		// p.Asker, NEVER p.Actor: Reclaim is permissionless, so Actor may be a
+		// keeper or any stranger pushing an abandoned escrow, while the chain
+		// always credits the escrow's own asker (core/ask.go Reclaim). Crediting
+		// Actor mis-attributed every third-party reclaim — the balance mirror
+		// silently diverged from chain state with no error anywhere.
+		m.addBal(p.Asker, credits)
+		ix.noteHolderCreator(p.Asker, p.Creator)
 		m.commissionReturnedHbd = new(big.Int).Add(m.commissionReturnedHbd, commissionHbd)
 		ix.reclaimOutflowHbd = new(big.Int).Add(ix.reclaimOutflowHbd, commissionHbd)
 		if esc, known := m.escrows[p.Seq]; known && !esc.resolved {
@@ -466,6 +568,33 @@ func (ix *Index) foldKnownEventLocked(ev Event, raw RawEvent) bool {
 			m.deliveryOutcomes = append(m.deliveryOutcomes, DeliveryOutcome{
 				Seq: p.Seq, Asker: esc.asker, AskedBlock: esc.askedBlock,
 				ResolvedBlock: p.Block, Answered: false,
+			})
+		}
+		m.history = append(m.history, raw)
+
+	case KindDeclined:
+		// Same money as a reclaim (credits and the whole commission go back to
+		// the asker), a DIFFERENT record: the creator answered promptly with
+		// "no" inside the answer window instead of going silent, which the
+		// contract counts as delivery, not as a miss (core/delivery.go). Folding
+		// this as a reclaim would show a conscientious creator the same delivery
+		// record as an absent one.
+		p := ev.Declined
+		credits, ok1 := parseAmount(p.Credits)
+		commissionHbd, ok2 := parseAmount(p.CommissionHbd)
+		if !ok1 || !ok2 {
+			return false
+		}
+		m := ix.market(p.Creator)
+		m.addBal(p.Asker, credits)
+		ix.noteHolderCreator(p.Asker, p.Creator)
+		m.commissionReturnedHbd = new(big.Int).Add(m.commissionReturnedHbd, commissionHbd)
+		ix.reclaimOutflowHbd = new(big.Int).Add(ix.reclaimOutflowHbd, commissionHbd)
+		if esc, known := m.escrows[p.Seq]; known && !esc.resolved {
+			esc.resolved = true
+			m.deliveryOutcomes = append(m.deliveryOutcomes, DeliveryOutcome{
+				Seq: p.Seq, Asker: esc.asker, AskedBlock: esc.askedBlock,
+				ResolvedBlock: p.Block, Answered: false, Declined: true,
 			})
 		}
 		m.history = append(m.history, raw)
@@ -481,6 +610,7 @@ func (ix *Index) foldKnownEventLocked(ev Event, raw RawEvent) bool {
 		}
 		m := ix.market(p.Creator)
 		m.subBal(p.Actor, credits)
+		ix.noteHolderCreator(p.Actor, p.Creator)
 		m.history = append(m.history, raw)
 
 	case KindRefundPushed:
@@ -494,6 +624,7 @@ func (ix *Index) foldKnownEventLocked(ev Event, raw RawEvent) bool {
 		}
 		m := ix.market(p.Creator)
 		m.subBal(p.Holder, burned)
+		ix.noteHolderCreator(p.Holder, p.Creator)
 		m.history = append(m.history, raw)
 
 	case KindClosed:
@@ -501,6 +632,198 @@ func (ix *Index) foldKnownEventLocked(ev Event, raw RawEvent) bool {
 		m := ix.market(p.Creator)
 		m.closed = true // idempotent set — a duplicate "closed" (core.CloseIfDrained's own documented idempotent return) is a harmless repeat
 		m.history = append(m.history, raw)
+
+	case KindBought:
+		// DEFECT FIX: KindBought/KindSold were entirely missing before this
+		// fix — every buy and every sell fell through ParseEvent's default
+		// Unknown path (Stats.Unknown++, nothing folded), so Position/
+		// HolderList silently drifted from chain truth the moment the
+		// bonding curve went live (Buy/Sell replaced the deleted PAR mint as
+		// the ONLY issuance path). See indexer/events.go's KindBought doc.
+		p := ev.Bought
+		minted, ok1 := parseAmount(p.Minted)
+		if !ok1 {
+			return false
+		}
+		if _, ok := parseAmount(p.Cost); !ok { // audit-only — the curve leg into kReserve; live reserve is a direct chain read, never this package's job (file doc)
+			return false
+		}
+		if _, ok := parseAmount(p.Fee); !ok { // audit-only — EvBought's wire shape carries only the COMBINED trade fee, never the FeeCreator/FeePlatform split BuyResult computes internally, so this Index cannot attribute any portion of it to the treasury or a creator's pull-claimable balance (see events.go's BoughtEvent doc and the handoff note)
+			return false
+		}
+		if _, ok := parseAmount(p.TotalDue); !ok { // audit-only — Cost+Fee, the wrapper's single HiveDraw amount; never a credits/token amount
+			return false
+		}
+		m := ix.market(p.Creator)
+		// Buy mints straight into the buyer's OWN balance (buy.go:
+		// "bal/wacq update via creditInflow") — the SAME kBal ledger
+		// Ask/Transfer/Refund/Sell all share, so this is an ordinary addBal
+		// against the existing balance map, not a new one.
+		m.addBal(p.Actor, minted)
+		ix.noteHolderCreator(p.Actor, p.Creator)
+		m.history = append(m.history, raw)
+
+	case KindSold:
+		p := ev.Sold
+		sold, ok1 := parseAmount(p.Sold)
+		if !ok1 {
+			return false
+		}
+		if _, ok := parseAmount(p.Gross); !ok { // audit-only — the curve leg debited from kReserve; not tracked, chain-read-only (same reasoning as Bought's Cost)
+			return false
+		}
+		tax, okTax := parseAmount(p.Tax)
+		if !okTax {
+			return false
+		}
+		if _, ok := parseAmount(p.Fee); !ok { // audit-only — same combined-total limitation as Bought's Fee: no FeeCreator/FeePlatform split on the wire
+			return false
+		}
+		if _, ok := parseAmount(p.Net); !ok { // audit-only — Net is the seller's HBD payout (sdk.HiveTransfer), NEVER a credits/token amount, so it is never folded into m.balances; mirrors RefundedEvent.Payout's identical audit-only treatment (index.go's KindRefunded case above)
+			return false
+		}
+		m := ix.market(p.Creator)
+		// The FULL slice leaves the seller's balance and the market's supply
+		// on-chain (sell.go: "no burn, no withheld tokens") — the balance
+		// debit is the TOKEN COUNT sold, never gross/net (those are HBD, not
+		// credits/tokens).
+		m.subBal(p.Actor, sold)
+		ix.noteHolderCreator(p.Actor, p.Creator)
+		// The exit tax is a real, UNSPLIT addMoney straight to the GLOBAL
+		// kTreasury() (sell.go, RULING J/K: "one addMoney, no aggregate, no
+		// distribution") — the SAME global key EvRegistered.feePaid/
+		// EvRenewed.paid/EvAnswered.commissionHbd already fold into via
+		// ix.treasuryHbd (see TreasuryHbd's own doc). Leaving this out would
+		// make TreasuryHbd() silently under-count reality from the moment
+		// Sell starts running — exactly the same class of silent drift this
+		// whole fix exists to close. (Sell's Fee, unlike Tax, is NOT folded
+		// here — see the audit-only check above for why: it is an unsplit
+		// total and no portion of it is known to reach the treasury.)
+		ix.treasuryHbd = new(big.Int).Add(ix.treasuryHbd, tax)
+		m.history = append(m.history, raw)
+
+	case KindRetired:
+		// Contract-only event, not from core/events.go — see KindRetired's
+		// own doc (indexer/events.go) and marketData.retired's own doc above
+		// for why this is a SEPARATE flag from `closed`, never folded into
+		// it.
+		p := ev.Retired
+		m := ix.market(p.Creator)
+		m.retired = true
+		m.history = append(m.history, raw)
+
+	case KindOfferingCreated:
+		// DEFECT FIX, 2026-07-28: this case, and the two Offering* cases below
+		// it, did not exist at all. ParseEvent (events.go) has recognized and
+		// correctly TYPED offeringCreated/offeringUpdated/offeringDeleted since
+		// the offering catalogue shipped (2026-07-27) — ev.Unknown reads false
+		// and ev.OfferingCreated/Updated/Deleted decode correctly — but with no
+		// matching `case` here, execution fell straight through this switch to
+		// the unconditional `return true` at its end. That is WORSE than
+		// Stats.Unknown: ingestOneLocked reads a true return as "folded
+		// successfully" and increments Stats.Ingested, so a real deployment's
+		// own documented health check ("alert if Malformed/Unknown grows
+		// unexpectedly," Stats' own doc) would see nothing wrong, while every
+		// offering event silently did NOTHING — no ix.market() call, no
+		// m.history append — so it could never appear in EventHistory (the
+		// audit surface, task spec item 3) and no creator's market was even
+		// created in this Index by an offering event alone. See the `default`
+		// case at the end of this switch, added alongside this fix, for why
+		// this exact class of gap cannot recur silently again.
+		//
+		// No money moves here (events.go's own doc: "an offering is a posted
+		// price, and no HBD or token moves when one is created") — Price is
+		// still validated (not merely appended raw) for the same reason every
+		// other fold validates every documented money-shaped field, audit-only
+		// or not (this function's own doc, and index_test.go's
+		// TestIndex_MalformedAuditOnlyFieldRejectsWholeEvent) — a garbled Price
+		// must not silently enter the audit log looking legitimate.
+		p := ev.OfferingCreated
+		if _, ok := parseAmount(p.Price); !ok {
+			return false
+		}
+		m := ix.market(p.Creator)
+		m.history = append(m.history, raw)
+
+	case KindOfferingUpdated:
+		// Same DEFECT FIX as KindOfferingCreated above — see that case's
+		// comment. Covers both a reprice and a relabel (events.go's own doc);
+		// either way both price fields are validated before this event is
+		// allowed into the audit log.
+		p := ev.OfferingUpdated
+		if _, ok := parseAmount(p.OldPrice); !ok {
+			return false
+		}
+		if _, ok := parseAmount(p.NewPrice); !ok {
+			return false
+		}
+		m := ix.market(p.Creator)
+		m.history = append(m.history, raw)
+
+	case KindOfferingDeleted:
+		// Same DEFECT FIX as KindOfferingCreated above. No money-shaped field
+		// at all (events.go's OfferingDeletedEvent carries only creator/actor/
+		// block/offeringId), so there is nothing to parseAmount here — this is
+		// a pure history/audit entry, the same shape KindClosed already uses.
+		p := ev.OfferingDeleted
+		m := ix.market(p.Creator)
+		m.history = append(m.history, raw)
+
+	case KindTreasuryWithdrawn:
+		// Contract-only event (events.go's KindTreasuryWithdrawn doc) — the
+		// owner's withdrawal from the GLOBAL kTreasury() pot. Deliberately
+		// NOT routed through ix.market(...): the wire carries no "creator" at
+		// all (core.WithdrawTreasury is owner-gated and touches kTreasury()
+		// alone, never any per-market key — core/read.go's own doc: "not a
+		// per-market function at all"), so there is no single creator's
+		// history this belongs in. This is the debit half TreasuryHbd's own
+		// doc had already flagged as missing ("the pure MONOTONIC sum, no
+		// debit path off kTreasury today claim ... is ALREADY STALE") — a
+		// real owner withdrawal, unfolded, would leave TreasuryHbd() only
+		// ever growing, silently overstating the live kTreasury() balance
+		// forever after the first withdrawal.
+		p := ev.TreasuryWithdrawn
+		amount, ok := parseAmount(p.Amount)
+		if !ok {
+			return false
+		}
+		ix.treasuryHbd = new(big.Int).Sub(ix.treasuryHbd, amount)
+
+	case KindTradeFeesClaimed:
+		// Contract-only event (events.go's KindTradeFeesClaimed doc). Unlike
+		// treasuryWithdrawn, THIS is per-creator — Actor doubles as the
+		// creator identifier (kFeeBal is always keyed by the creator whose
+		// market accrued the fee — core/tradefee.go's accrueTradeFee, called
+		// only from buy.go/sell.go with `creator`, never any other account).
+		// Audit-only: kFeeBal is a SEPARATE pull pot from kTreasury
+		// (core/read.go's FeeBalanceOf: "neither reserve nor treasury"), so a
+		// claim here must NEVER touch ix.treasuryHbd — doing so would double
+		// count money that was never in the treasury to begin with. Not a
+		// credits/token balance either (this is an HBD payout, mirroring
+		// RefundedEvent.Payout's identical audit-only treatment), so it never
+		// touches m.balances.
+		p := ev.TradeFeesClaimed
+		if _, ok := parseAmount(p.Amount); !ok {
+			return false
+		}
+		m := ix.market(p.Actor)
+		m.history = append(m.history, raw)
+
+	default:
+		// FAIL CLOSED (added alongside the Offering* fix above, 2026-07-28):
+		// any Kind ParseEvent recognizes (Unknown==false) but that has no
+		// explicit case above is now counted as Malformed rather than
+		// silently returning true and doing nothing. Before this default
+		// existed, exactly that silent-success gap is what let
+		// offeringCreated/offeringUpdated/offeringDeleted ship recognized by
+		// ParseEvent yet completely unfolded here for a full day, inflating
+		// Stats.Ingested while never touching any market or history — the
+		// one health signal (Stats.Malformed/Unknown) a real deployment is
+		// told to alert on never fired. Every Kind ParseEvent can currently
+		// produce with Unknown==false has an explicit case above; reaching
+		// this default means a NEW kind was added to events.go's switch
+		// without a matching fold here, and that must be loud, not silent.
+		return false
 	}
 	return true
 }
@@ -631,6 +954,7 @@ type DeliveryRecord struct {
 	Creator           string
 	AnsweredCount     int
 	MissedCount       int
+	DeclinedCount     int      // creator said no inside the answer window and refunded in full — delivery, not a miss (core/delivery.go)
 	PendingCount      int      // asked but neither answered nor reclaimed yet — a live gauge, NOT windowed (see doc below), NOT self-deal-filtered (see DeliveryRecord's own method doc)
 	ResponseBlocks    []uint64 // one per ANSWERED, non-self-dealt ask in the window, in resolution order; never one for a reclaim (there is no "response time" for an ask nobody answered)
 	DistinctAskers    int      // count of distinct non-self-dealt askers contributing to AnsweredCount+MissedCount in this window (M1 fix)
@@ -638,7 +962,8 @@ type DeliveryRecord struct {
 }
 
 // DeliveryRecord summarizes DeliveryHistory over the most recent `window`
-// resolved asks. AnsweredCount+MissedCount+SelfDealtExcluded always sums to
+// resolved asks. AnsweredCount+MissedCount+DeclinedCount+SelfDealtExcluded
+// always sums to
 // min(window, len(DeliveryHistory(creator))) (self-dealt outcomes are still
 // counted, just routed to SelfDealtExcluded instead of Answered/Missed —
 // see the struct's own M1 doc). PendingCount is deliberately NOT subject to
@@ -685,10 +1010,17 @@ func (ix *Index) DeliveryRecord(creator string, window int) DeliveryRecord {
 			continue
 		}
 		distinctAskers[d.Asker] = struct{}{}
-		if d.Answered {
+		switch {
+		case d.Answered:
 			rec.AnsweredCount++
 			rec.ResponseBlocks = append(rec.ResponseBlocks, d.ResponseBlocks)
-		} else {
+		case d.Declined:
+			// Its own bucket, counted as neither delivered-with-an-answer nor
+			// missed: the contract treats a decline as running your shop
+			// properly (core/delivery.go recordDelivery), and it carries no
+			// response TIME worth averaging into the answered stats.
+			rec.DeclinedCount++
+		default:
 			rec.MissedCount++
 		}
 	}
@@ -736,12 +1068,22 @@ func (ix *Index) EventHistory(creator string) []RawEvent {
 // nil-vs-zero distinction exists for (a market can legitimately never have
 // posted a face of exactly "0" on-chain — MinFace forbids it — but it can
 // completely legitimately have zero lifetime commission activity).
+//
+// Retired (DEFECT FIX, 2026-07-28) mirrors a "retired" event — see
+// marketData.retired's own doc for why this is DELIBERATELY separate from
+// Closed: Retire forces an irreversible FROZEN wind-down (Sell already
+// closed, Refund the open exit) which is NOT the same fact as Closed (the
+// later, terminal state that additionally requires supply==0). Before this
+// fix `retired` was not recognized at all (Stats.Unknown), so this field did
+// not exist and a retiring market was indistinguishable from a healthy one
+// until it eventually also fully drained.
 type MarketSummary struct {
 	Creator               string
 	Known                 bool // false if this Index has never observed any event for creator
 	LastFace              *big.Int
 	LastCap               *big.Int
 	Closed                bool
+	Retired               bool
 	CommissionBookedHbd   *big.Int
 	CommissionReturnedHbd *big.Int
 }
@@ -753,7 +1095,7 @@ func (ix *Index) MarketSummary(creator string) MarketSummary {
 	if !ok {
 		return MarketSummary{Creator: creator}
 	}
-	s := MarketSummary{Creator: creator, Known: true, Closed: m.closed}
+	s := MarketSummary{Creator: creator, Known: true, Closed: m.closed, Retired: m.retired}
 	if m.lastFace != nil {
 		s.LastFace = new(big.Int).Set(m.lastFace)
 	}
@@ -769,18 +1111,31 @@ func (ix *Index) MarketSummary(creator string) MarketSummary {
 // contract's GLOBAL treasury balance (kTreasury(), keys.go:15 — "where
 // commission + subscription land," a SINGLE key shared by every market, not
 // scoped per creator) — the sum of every EvRegistered.feePaid,
-// EvRenewed.paid, and EvAnswered.commissionHbd this Index has ever folded,
-// across every creator (M4 fix, 2026-07-21: closes "the indexer can never
-// serve as a solvency cross-check" — see PRUNED-ADJUDICATION-2026-07-21.md).
+// EvRenewed.paid, EvAnswered.commissionHbd, and (DEFECT FIX, 2026-07-28)
+// EvSold.Tax this Index has ever folded, across every creator (M4 fix,
+// 2026-07-21: closes "the indexer can never serve as a solvency cross-check"
+// — see PRUNED-ADJUDICATION-2026-07-21.md). EvSold.Tax is included because
+// sell.go's exit tax is a real, UNSPLIT addMoney to this same kTreasury() key
+// (RULING J/K) — omitting it once Sell started trading would have made this
+// total silently under-count reality forever, the identical bug class the
+// rest of this fix closes for balances. EvBought/EvSold's Fee fields are
+// deliberately NOT folded here: both wire shapes carry only the COMBINED
+// trade fee (no FeeCreator/FeePlatform split), so no portion of either is
+// attributable to the treasury from the event alone.
 //
 // AUDIT/CROSS-CHECK ONLY, same disclaimer as MarketSummary: SPEC-CREATOR-
 // KEYS.md §2.5 routes the LIVE balance through a direct chain read; this is
-// a REPLAY, not a substitute for one. It is also — by construction — a pure
-// MONOTONIC sum: core has no debit path off kTreasury() today (that gap is
-// C2 in the same adjudication, out of this package's scope to fix), so this
-// total should track kTreasury()'s live value exactly for as long as that
-// remains true, and will need a corresponding debit-event fold the day a
-// withdrawTreasury-shaped entrypoint ships.
+// a REPLAY, not a substitute for one. NOTE (found while fixing the above,
+// out of this fix's scope): the "pure MONOTONIC sum, no debit path off
+// kTreasury today" claim this doc used to make is ALREADY STALE —
+// ../contract/main.go's `withdrawTreasury` entrypoint is live and hand-logs
+// its own `{"ev":"treasuryWithdrawn",...}` line (main.go, WithdrawTreasury),
+// which this package does not recognize either (falls into Stats.Unknown,
+// same as `retired` did before this fix, and same as `tradeFeesClaimed`,
+// ClaimTradeFees's own hand-built log). Neither is one of the two defects
+// this change was scoped to fix; flagged here and in the handoff report for
+// whoever picks up the treasury-debit side next, rather than silently left
+// for a future reader to rediscover as "surely this is still monotonic."
 func (ix *Index) TreasuryHbd() *big.Int {
 	ix.mu.RLock()
 	defer ix.mu.RUnlock()
@@ -802,4 +1157,75 @@ func (ix *Index) ReclaimOutflowHbd() *big.Int {
 	ix.mu.RLock()
 	defer ix.mu.RUnlock()
 	return new(big.Int).Set(ix.reclaimOutflowHbd)
+}
+
+// ---------------------------------------------------------------------------
+// Reverse-index query surface (DESIGN + IMPLEMENTATION, 2026-07-28)
+//
+// ../frontend's real data layer (features/creator-tokens/lib/vsc-data-
+// source.ts) already calls `/holders/{holder}/positions` and
+// `/askers/{asker}/asks` today — endpoints this package never had any query
+// to back, on a package that has no HTTP server at all. HolderCreators and
+// AskerAsks below are that missing query surface — the two methods a future
+// HTTP layer would wrap one-to-one into those two endpoints, exactly the same
+// gap between "query exists here" and "HTTP server exists somewhere else"
+// every other query in this file already has (DeliveryRecord/MarketSummary/
+// TreasuryHbd all predate any server too).
+//
+// FEASIBILITY, verified against the actual frontend call sites (not
+// invented): vsc-data-source.ts's readWallet only needs each result object to
+// carry a `creator` field (it extracts that and re-reads full position data
+// live: "const creators = positions.map(p => getJsonProp(p,'creator'))...");
+// readMyAsks only needs `{creator, seq}` pairs (same live-reread pattern:
+// "state[kEscrow(p.creator, p.seq)]"). Neither caller needs this package to
+// serve a computed balance or escrow status over the wire — both already
+// treat this index as a pure "where should I even look" hint and re-verify
+// against the chain themselves. That is exactly the shape this fold can
+// support: every balance/escrow mutation already flows through one of a
+// small, enumerable set of call sites (see noteHolderCreator's doc and the
+// askerAsks append in the KindAsked case), so maintaining both reverse
+// indexes incrementally, in the same pass, is a few one-line additions, not
+// a new subsystem.
+// ---------------------------------------------------------------------------
+
+// HolderCreators returns every creator whose market `holder` has EVER had a
+// balance-affecting event on (prepaid/transferred/asked/answered/reclaimed/
+// declined/refunded/refundPushed/bought/sold — see noteHolderCreator's call
+// sites for the exhaustive list), sorted for determinism. This is
+// intentionally an OVER-approximation, not a live "currently holds tokens"
+// answer (Position/HolderList already serve that, scoped to one creator at a
+// time) — see the file-level doc above for why an over-inclusive candidate
+// list is safe here (the caller re-reads live state and filters) while an
+// under-inclusive one would not be.
+func (ix *Index) HolderCreators(holder string) []string {
+	ix.mu.RLock()
+	defer ix.mu.RUnlock()
+	set, ok := ix.holderCreators[holder]
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(set))
+	for c := range set {
+		out = append(out, c)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// AskerAsks returns every (creator,seq) `asker` has EVER asked, oldest first
+// — every resolved AND still-pending ask alike (mirrors readMyAsks' own
+// "re-read the live escrow to learn its current status" pattern; this
+// package does not pre-filter by status here any more than HolderCreators
+// pre-filters by current balance). nil if `asker` has never asked anything
+// this Index has observed.
+func (ix *Index) AskerAsks(asker string) []AskRef {
+	ix.mu.RLock()
+	defer ix.mu.RUnlock()
+	refs := ix.askerAsks[asker]
+	if refs == nil {
+		return nil
+	}
+	out := make([]AskRef, len(refs))
+	copy(out, refs)
+	return out
 }

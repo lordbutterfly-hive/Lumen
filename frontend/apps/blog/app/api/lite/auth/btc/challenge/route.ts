@@ -16,7 +16,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const blocked = guardWrite(req);
   if (blocked) return blocked;
   // ECON-1-SIBLING (PRUNED 2026-07-22): per-source cap on the upstream funnel.
-  if (!(await enforceChallengeRate(getClientIp(req)))) {
+  if (!(await enforceChallengeRate(getClientIp(req), 'btc'))) {
     return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
   }
 

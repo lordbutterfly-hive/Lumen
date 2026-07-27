@@ -127,6 +127,43 @@ func U64(payload, key string) uint64 {
 	return n
 }
 
+// U64Field is U64 with a validity signal, for the fields where 0 is a
+// MEANINGFUL value rather than a harmless default.
+//
+// WHY THIS EXISTS (2026-07-27). U64 returns 0 for anything it cannot parse —
+// missing, quoted ("7"), negative, or garbage — and that is safe for every
+// field whose 0 hits a downstream floor and refuses. `offeringId` is the one
+// field where it is NOT safe: 0 is a valid, always-live alternative target
+// (the creator's legacy single face price), so a payload of {"offeringId":"7"}
+// silently settles against the FACE price instead of offering 7, with no
+// revert — the creator is underpaid and nothing in the receipt says why. Any
+// caller fully controls their own raw payload, so this is craftable, not just
+// an honest client bug.
+//
+// ABSENT is still valid and still means 0: every pre-offerings client payload
+// must keep its exact meaning. Only PRESENT-BUT-UNPARSEABLE is rejected.
+func U64Field(payload, key string) (uint64, bool) {
+	i := findKey(payload, key)
+	if i < 0 {
+		return 0, true // absent — the caller's documented default applies
+	}
+	for i < len(payload) && isJSONSpace(payload[i]) {
+		i++
+	}
+	start := i
+	for i < len(payload) && payload[i] >= '0' && payload[i] <= '9' {
+		i++
+	}
+	if i == start {
+		return 0, false // present, but not an unquoted non-negative decimal
+	}
+	n, err := strconv.ParseUint(payload[start:i], 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
 // BigDecimal parses a base-10, non-negative big.Int money string exactly like
 // core/money.go's (unexported) parseMoney. Duplicated (not imported) from
 // core because the wasm wrapper cannot import unexported core helpers and

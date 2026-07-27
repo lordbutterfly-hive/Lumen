@@ -162,3 +162,62 @@ func TestExitTaxOn_ChunkingNeverEvades_Property(t *testing.T) {
 // Sell by TestSell_ChunkingCannotEvade (sell_test.go). Nothing here replaces
 // the deleted cap tests: there is no cap left to test.
 // ---------------------------------------------------------------------------
+
+// TestExitTax_NoCreatorExitTax_OneRuleForEveryone pins USER RULING 2026-07-28:
+// "there should be no creator exit tax — their tokens are subject to the same
+// maturity as any other token."
+//
+// Two independent claims, because the ruling has two halves:
+//  1. THE RATE comes from maturity and nothing else. A creator and a stranger
+//     holding equally-aged tokens are charged the identical rate.
+//  2. THE DESTINATION is the same 50/50 split for every seller. The deleted
+//     `seller == creator` guard used to route 100% to treasury; it was a name
+//     check that any second account walked around for free (see accrueExitTax's
+//     doc), and NOTHING IN THIS SUITE COVERED IT — it could have been removed
+//     by accident and no test would have noticed. This test exists so the
+//     rule that replaced it cannot drift the same way.
+func TestExitTax_NoCreatorExitTax_OneRuleForEveryone(t *testing.T) {
+	const creator = "somecreator"
+	tax := big.NewInt(1000)
+
+	// (2) destination: identical split whoever sells.
+	sellers := []struct {
+		name   string
+		seller string
+	}{
+		{"a stranger sells", "randomholder"},
+		{"the creator sells their own tokens", creator},
+	}
+	for _, tc := range sellers {
+		s := NewMemStore()
+		accrueExitTax(s, creator, tc.seller, tax)
+		gotCreator := getMoney(s, kFeeBal(creator))
+		gotTreasury := getMoney(s, kTreasury())
+		if gotCreator.Cmp(big.NewInt(500)) != 0 || gotTreasury.Cmp(big.NewInt(500)) != 0 {
+			t.Fatalf("%s: creator=%s treasury=%s, want 500/500 — the split must not depend on WHO sells",
+				tc.name, gotCreator, gotTreasury)
+		}
+		// Nothing created, nothing destroyed, whoever sold.
+		if sum := new(big.Int).Add(gotCreator, gotTreasury); sum.Cmp(tax) != 0 {
+			t.Fatalf("%s: halves sum to %s, want exactly the tax %s", tc.name, sum, tax)
+		}
+	}
+
+	// (1) rate: maturity alone decides it. Same age => same rate, and the
+	// creator's own account is not special-cased anywhere in the derivation.
+	s := NewMemStore()
+	now := uint64(5_000_000)
+	age := ExitTaxDecayBlocks / 3 // a third of the way down the decay
+	for _, h := range []string{creator, "randomholder"} {
+		setMoney(s, kBal(creator, h), big.NewInt(100))
+		setU64(s, kAcqBlock(creator, h), now-age)
+	}
+	creatorRate := ExitTaxBpsAt(heldBlocksAt(s, creator, creator, now))
+	strangerRate := ExitTaxBpsAt(heldBlocksAt(s, creator, "randomholder", now))
+	if creatorRate != strangerRate {
+		t.Fatalf("creator charged %d bps vs stranger %d bps at identical maturity", creatorRate, strangerRate)
+	}
+	if creatorRate == 0 {
+		t.Fatal("fixture is inert: pick an age inside the decay window so the comparison means something")
+	}
+}

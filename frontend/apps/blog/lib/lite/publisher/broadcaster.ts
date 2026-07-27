@@ -30,6 +30,15 @@ export interface PostBroadcaster {
   broadcastComment(op: CommentOp): Promise<{ trxId: string }>;
   /** Crash-after-broadcast guard: was this (author, permlink) already published? */
   postExists(author: string, permlink: string): Promise<boolean>;
+  /**
+   * Hard-delete a comment. Hive REFUSES this if the comment has replies, has
+   * net-positive vote weight, or has already paid out
+   * (hive_evaluator_social.cpp:60,66,68-69), so callers must be ready to fall back
+   * to blanking the content instead. Throwing is the normal outcome, not a bug.
+   */
+  deleteComment(author: string, permlink: string): Promise<{ trxId: string }>;
+  /** Can this comment be hard-deleted right now? (replies / net votes / payout) */
+  canDelete(author: string, permlink: string): Promise<boolean>;
 }
 
 let broadcaster: PostBroadcaster | null = null;

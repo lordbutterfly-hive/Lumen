@@ -39,6 +39,7 @@ import { DEFAULT_OBSERVER } from '@/blog/lib/utils';
 import { getBasePath } from '@ui/lib/path-utils';
 import { useQuery } from '@tanstack/react-query';
 import { getCommunity, getDiscussion, getListCommunityRoles, getPost } from '@transaction/lib/bridge-api';
+import { fetchLiteEntryByPermlink } from '@/blog/lib/lite/client/lite-post-fetch';
 import { Entry } from '@hive/common-hiveio-packages/wax';
 import { getActiveVotes } from '@transaction/lib/hive-api';
 import { getSimilarPostsByPost, isPostStub } from '@transaction/lib/hivesense-api';
@@ -143,7 +144,14 @@ const PostContent = () => {
   const postInCommunity = isCommunity(category);
   const { data: postData, isLoading: postIsLoading } = useQuery({
     queryKey: ['postData', author, permlink, observer],
-    queryFn: () => getPost(author, permlink, observer),
+    // Lumen lite posts are not fetchable by their display name (it is not a Hive
+    // account), so fall back to resolving by permlink through our own API.
+    queryFn: async () => {
+      const fromChain = await getPost(author, permlink, observer).catch(() => null);
+      if (fromChain) return fromChain;
+      const lite = await fetchLiteEntryByPermlink(permlink);
+      return (lite as typeof fromChain) ?? fromChain;
+    },
     enabled: !!author && !!permlink,
     initialData: initialPostData ?? undefined,
     initialDataUpdatedAt: initialPostData ? Date.now() : undefined,

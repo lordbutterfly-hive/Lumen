@@ -2,6 +2,8 @@ package core
 
 import (
 	"math/big"
+	"os"
+	"regexp"
 	"sort"
 	"testing"
 )
@@ -270,7 +272,7 @@ func TestSchemaContract_Transferred(t *testing.T) {
 func TestSchemaContract_Asked(t *testing.T) {
 	const evName = "asked"
 	const ref = "indexer/events.go:102-112 (AskedEvent)"
-	out := EvAsked("aliceperry", "holderone", 12_700_000, 3, big.NewInt(42), big.NewInt(120), big.NewInt(2000), 28800, "cid-realistic-hash-abc123")
+	out := EvAsked("aliceperry", "holderone", 12_700_000, 3, big.NewInt(42), big.NewInt(120), big.NewInt(2000), 28800, "cid-realistic-hash-abc123", 3)
 	m := scDecode(t, out)
 
 	scWantStr(t, evName, m, "ev", "asked", "indexer/events.go:27 (KindAsked)")
@@ -284,7 +286,12 @@ func TestSchemaContract_Asked(t *testing.T) {
 	scWantStr(t, evName, m, "rate", "2000", "indexer/events.go:109 (AskedEvent.Rate)")
 	scWantNum(t, evName, m, "deadlineBlocks", 28800, "indexer/events.go:110 (AskedEvent.DeadlineBlocks)")
 	scWantStr(t, evName, m, "contentHash", "cid-realistic-hash-abc123", "indexer/events.go:111 (AskedEvent.ContentHash)")
-	scWantFieldCount(t, evName, m, 11, ref)
+	// offeringId (2026-07-27): WHICH service this ask bought, 0 == the legacy
+	// face price. The indexer's own doc claimed `asked` already carried it
+	// while the field did not exist — this line is what stops that claim from
+	// being a lie again.
+	scWantNum(t, evName, m, "offeringId", 3, "indexer/events.go (AskedEvent.OfferingID)")
+	scWantFieldCount(t, evName, m, 12, ref)
 
 	// This is the event GAP 2's own example (index.go:325-340): a rename of
 	// "creditsSpent" alone would make indexer's AskedEvent.CreditsSpent
@@ -320,7 +327,7 @@ func TestSchemaContract_Reclaimed(t *testing.T) {
 	const ref = "indexer/events.go:133-140 (ReclaimedEvent)"
 	// M4 fix (2026-07-21): commissionHbd added — the HBD Reclaim hands back
 	// to the asker in full (I5), previously invisible to any replay.
-	out := EvReclaimed("aliceperry", "holderthree", 12_720_000, 4, big.NewInt(60), big.NewInt(72))
+	out := EvReclaimed("aliceperry", "holderthree", 12_720_000, 4, big.NewInt(60), big.NewInt(72), "holderthree")
 	m := scDecode(t, out)
 
 	scWantStr(t, evName, m, "ev", "reclaimed", "indexer/events.go:29 (KindReclaimed)")
@@ -331,7 +338,12 @@ func TestSchemaContract_Reclaimed(t *testing.T) {
 	scWantNum(t, evName, m, "seq", 4, "indexer/events.go:137 (ReclaimedEvent.Seq)")
 	scWantStr(t, evName, m, "credits", "60", "indexer/events.go:138 (ReclaimedEvent.Credits)")
 	scWantStr(t, evName, m, "commissionHbd", "72", "indexer/events.go:139 (ReclaimedEvent.CommissionHbd)")
-	scWantFieldCount(t, evName, m, 8, ref)
+	// asker (2026-07-27) — WHO WAS PAID, which is not `actor`: reclaim is
+	// permissionless, so actor may be a keeper pushing an abandoned escrow. The
+	// indexer folds the credits to THIS field; dropping it would silently
+	// re-introduce crediting the caller.
+	scWantStr(t, evName, m, "asker", "holderthree", "indexer/events.go (ReclaimedEvent.Asker)")
+	scWantFieldCount(t, evName, m, 9, ref)
 }
 
 func TestSchemaContract_Refunded(t *testing.T) {
@@ -406,6 +418,18 @@ func TestSchemaContract_KindConstantsCoverEveryEvName(t *testing.T) {
 		"reclaimed": true, "refunded": true, "refundPushed": true, "closed": true,
 		// Offering catalogue (2026-07-27) — three more, taking twelve to fifteen.
 		"offeringCreated": true, "offeringUpdated": true, "offeringDeleted": true,
+		// declined (2026-07-27) — the creator refusing a job in full. A code
+		// review caught that it was pinned by NOTHING here: absent from this
+		// map, absent from the cases list, and no TestSchemaContract_Declined,
+		// so core and the indexer could drift on it undetected.
+		"declined": true,
+		// bought/sold (WAVE D) — the bonding curve's mint/redeem pair, and now
+		// the ONLY issuance path. They were missing from the indexer entirely
+		// until 2026-07-27: every buy and every sell parsed to Unknown and was
+		// never folded, so the indexer's balances would have drifted from chain
+		// truth with every single trade, silently, forever. Pinned here so that
+		// can never recur.
+		"bought": true, "sold": true,
 	}
 
 	cases := []struct {
@@ -418,18 +442,21 @@ func TestSchemaContract_KindConstantsCoverEveryEvName(t *testing.T) {
 		{"capChanged", EvCapChanged("c", "a", 1, 1, 2)},
 		{"prepaid", EvPrepaid("c", "a", 1, big.NewInt(1), big.NewInt(1))},
 		{"transferred", EvTransferred("c", "a", "b", 1, big.NewInt(1))},
-		{"asked", EvAsked("c", "a", 1, 1, big.NewInt(1), big.NewInt(1), big.NewInt(1), 1, "h")},
+		{"asked", EvAsked("c", "a", 1, 1, big.NewInt(1), big.NewInt(1), big.NewInt(1), 1, "h", 0)},
 		{"answered", EvAnswered("c", "a", 1, 1, big.NewInt(1), big.NewInt(1), "h")},
-		{"reclaimed", EvReclaimed("c", "a", 1, 1, big.NewInt(1), big.NewInt(1))},
+		{"reclaimed", EvReclaimed("c", "a", 1, 1, big.NewInt(1), big.NewInt(1), "k")},
 		{"refunded", EvRefunded("c", "a", 1, big.NewInt(1), big.NewInt(1))},
 		{"refundPushed", EvRefundPushed("c", "a", "h", 1, big.NewInt(1), big.NewInt(1))},
 		{"closed", EvClosed("c", "a", 1)},
 		{"offeringCreated", EvOfferingCreated("c", "a", 1, 1, "15-min call", big.NewInt(2500))},
 		{"offeringUpdated", EvOfferingUpdated("c", "a", 1, 1, "15-min call", big.NewInt(2500), big.NewInt(3000))},
 		{"offeringDeleted", EvOfferingDeleted("c", "a", 1, 1)},
+		{"declined", EvDeclined("c", "a", 1, 1, big.NewInt(1), big.NewInt(1), "k")},
+		{"bought", EvBought("c", "a", 1, big.NewInt(1), big.NewInt(1), big.NewInt(1), big.NewInt(1))},
+		{"sold", EvSold("c", "a", 1, big.NewInt(1), big.NewInt(1), big.NewInt(1), big.NewInt(1), big.NewInt(1), 1, 1)},
 	}
-	if len(cases) != 15 {
-		t.Fatalf("test setup bug: expected exactly 15 constructors (twelve money/state events plus the three offering-catalogue events), got %d", len(cases))
+	if len(cases) != 18 {
+		t.Fatalf("test setup bug: expected exactly 18 constructors (twelve money/state events, the three offering-catalogue events, declined, and the bought/sold curve pair), got %d", len(cases))
 	}
 	for _, c := range cases {
 		m := scDecode(t, c.out)
@@ -439,6 +466,52 @@ func TestSchemaContract_KindConstantsCoverEveryEvName(t *testing.T) {
 		}
 		if !indexerKinds[ev] {
 			t.Fatalf("core emits \"ev\":%q but indexer/events.go:20-33 has NO matching Kind* constant — ParseEvent would silently classify this as Unknown (indexer/events.go:288-289) and it would never fold into any query. Add the Kind constant to indexer/events.go, or fix core's constructor name.", ev)
+		}
+	}
+}
+
+// TestSchemaContract_EveryConstructorIsPinned closes the hole that let the
+// `declined`, `bought` and `sold` events ship with NO cross-package pin at all.
+//
+// The sibling test above asserts `len(cases) != N`, which sounds like a
+// tripwire and is not one: it counts the literal list it is standing next to,
+// so adding a constructor to core/events.go and forgetting to add it there
+// leaves both numbers consistent and the test green. That is exactly what
+// happened three times — and `bought`/`sold` are the bonding curve's only
+// issuance path, so the indexer silently dropped every trade.
+//
+// This test derives the expected count from the SOURCE instead: it counts the
+// `evOpen("...")` calls in events.go, which is the one thing that cannot be
+// forgotten, because writing one IS how you add an event. Add a constructor and
+// this test fails until it is pinned above.
+func TestSchemaContract_EveryConstructorIsPinned(t *testing.T) {
+	src, err := os.ReadFile("events.go")
+	if err != nil {
+		t.Fatalf("cannot read events.go to count constructors: %v", err)
+	}
+	names := map[string]bool{}
+	for _, m := range regexp.MustCompile(`evOpen\("([a-zA-Z]+)"`).FindAllStringSubmatch(string(src), -1) {
+		names[m[1]] = true
+	}
+	if len(names) == 0 {
+		t.Fatal("found no evOpen calls in events.go — this test's own premise is broken, fix it rather than deleting it")
+	}
+	// Every event core can emit must appear in the pinned kind set.
+	pinned := map[string]bool{
+		"registered": true, "renewed": true, "faceChanged": true, "capChanged": true,
+		"prepaid": true, "transferred": true, "asked": true, "answered": true,
+		"reclaimed": true, "declined": true, "refunded": true, "refundPushed": true,
+		"closed": true, "bought": true, "sold": true,
+		"offeringCreated": true, "offeringUpdated": true, "offeringDeleted": true,
+	}
+	for ev := range names {
+		if !pinned[ev] {
+			t.Fatalf("core/events.go emits \"ev\":%q but it is NOT pinned by TestSchemaContract_KindConstantsCoverEveryEvName. An unpinned event can drift from indexer/events.go undetected — which is how `bought`/`sold` came to be dropped silently by the indexer. Add it to BOTH the indexerKinds map and the cases list there (and add a Kind constant + fold on the indexer side), or remove the constructor.", ev)
+		}
+	}
+	for ev := range pinned {
+		if !names[ev] {
+			t.Fatalf("the pinned set names %q but core/events.go has no evOpen(%q) — a constructor was renamed or deleted; update this test and the indexer together.", ev, ev)
 		}
 	}
 }

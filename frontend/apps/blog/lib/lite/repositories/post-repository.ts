@@ -29,6 +29,8 @@ interface PostRow {
   shard: string | null;
   edit_of_post_id: string | null;
   deleted_locally: boolean;
+  deleted_at: Date | null;
+  edit_version: number;
   created_at: Date;
   published_at: Date | null;
 }
@@ -54,6 +56,8 @@ function mapPost(r: PostRow): LumenPost {
     shard: r.shard,
     editOfPostId: r.edit_of_post_id,
     deletedLocally: r.deleted_locally,
+    deletedAt: r.deleted_at,
+    editVersion: Number(r.edit_version ?? 0),
     createdAt: r.created_at,
     publishedAt: r.published_at
   };
@@ -228,4 +232,103 @@ export async function resolveByHiveBatch(
     userId: r.user_id,
     displayName: r.display_name_snapshot
   }));
+}
+
+/**
+ * The on-chain parent this post was first published under (container or reply
+ * target), or null if it has never been pinned.
+ */
+export async function getPublishParent(
+  postId: string
+): Promise<{ author: string; permlink: string } | null> {
+  const res = await query<{ publish_parent_author: string | null; publish_parent_permlink: string | null }>(
+    `SELECT publish_parent_author, publish_parent_permlink FROM lumen_post WHERE post_id = $1`,
+    [postId]
+  );
+  const row = res.rows[0];
+  if (!row?.publish_parent_author || !row.publish_parent_permlink) return null;
+  return { author: row.publish_parent_author, permlink: row.publish_parent_permlink };
+}
+
+/**
+ * Pin the on-chain parent, FIRST WRITE WINS — later calls return the pinned value
+ * and change nothing. Hive rejects any edit that repoints a comment
+ * ("The parent of a comment cannot change.", hive_evaluator_social.cpp:294/302),
+ * so this must never be overwritten once a post has been published under it.
+ */
+export async function pinPublishParent(
+  postId: string,
+  author: string,
+  permlink: string
+): Promise<{ author: string; permlink: string }> {
+  const res = await query<{ publish_parent_author: string; publish_parent_permlink: string }>(
+    `UPDATE lumen_post
+        SET publish_parent_author = COALESCE(publish_parent_author, $2),
+            publish_parent_permlink = COALESCE(publish_parent_permlink, $3)
+      WHERE post_id = $1
+      RETURNING publish_parent_author, publish_parent_permlink`,
+    [postId, author, permlink]
+  );
+  const row = res.rows[0];
+  if (!row) throw new Error(`pinPublishParent: post ${postId} not found`);
+  return { author: row.publish_parent_author, permlink: row.publish_parent_permlink };
+}
+
+/**
+ * Posts with NO publish job at all — the orphan case. A post row is committed
+ * before its job is enqueued, so a crash (or a thrown container reservation, the
+ * bug found by the 2026-07-28 burst test) can leave a post that would never
+ * publish. `reconcileOrphans` in the publisher re-enqueues these.
+ *
+ * Excludes locally deleted posts and anything already on chain.
+ */
+export async function listOrphaned(limit: number): Promise<LumenPost[]> {
+  const res = await query<PostRow>(
+    `SELECT p.* FROM lumen_post p
+      WHERE p.deleted_locally = false
+        AND p.hive_permlink IS NULL
+        AND NOT EXISTS (SELECT 1 FROM publish_job j WHERE j.post_id = p.post_id)
+      ORDER BY p.post_id
+      LIMIT $1`,
+    [limit]
+  );
+  return res.rows.map(mapPost);
+}
+
+/** Bump and return the post's edit counter — drives per-edit idempotency keys. */
+export async function bumpEditVersion(postId: string): Promise<number> {
+  const res = await query<{ edit_version: number }>(
+    `UPDATE lumen_post SET edit_version = edit_version + 1 WHERE post_id = $1
+     RETURNING edit_version`,
+    [postId]
+  );
+  if (!res.rows[0]) throw new Error(`bumpEditVersion: post ${postId} not found`);
+  return Number(res.rows[0].edit_version);
+}
+
+/**
+ * Mark a post deleted. `deletedLocally` hides it from our surfaces immediately;
+ * `deleted_at` is the audit stamp and the guard that refuses later edits. Whether
+ * the on-chain object can be hard-deleted is decided by the worker (Hive refuses to
+ * delete a comment that has replies or net-positive votes).
+ */
+export async function markDeleted(postId: string, userId: string): Promise<LumenPost | null> {
+  const res = await query<PostRow>(
+    `UPDATE lumen_post
+        SET deleted_locally = true, deleted_at = COALESCE(deleted_at, now())
+      WHERE post_id = $1 AND user_id = $2
+      RETURNING *`,
+    [postId, userId]
+  );
+  return res.rows[0] ? mapPost(res.rows[0]) : null;
+}
+
+/** How many of this user's posts actually reached Hive — a real trust signal. */
+export async function countPublishedByUser(userId: string): Promise<number> {
+  const res = await query<{ n: string }>(
+    `SELECT count(*)::text AS n FROM lumen_post
+      WHERE user_id = $1 AND hive_permlink IS NOT NULL AND deleted_locally = false`,
+    [userId]
+  );
+  return Number(res.rows[0]?.n ?? 0);
 }

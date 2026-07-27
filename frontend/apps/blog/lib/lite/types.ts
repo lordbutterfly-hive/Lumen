@@ -5,7 +5,7 @@
  */
 
 export type AccountTier = 'lite' | 'full';
-export type AuthMethod = 'google_passkey' | 'btc_wallet';
+export type AuthMethod = 'google_passkey' | 'btc_wallet' | 'evm_wallet';
 export type ChallengePurpose = 'login' | 'post_attestation' | 'stepup';
 export type UserStatus = 'active' | 'suspended' | 'upgraded' | 'banned';
 export type NameReservationStatus = 'pending' | 'active';
@@ -36,6 +36,8 @@ export interface LumenAuthCredential {
   /** google: verified `sub`; btc: lower(address). Unique per (method, externalRef). */
   externalRef: string;
   network: string | null;
+  /** hash160(compressed pubkey), BTC only: stable across every address encoding. */
+  keyFingerprint: string | null;
   webauthnCredentialId: string | null;
   webauthnPublicKeyCose: Buffer | null;
   webauthnSignCount: number;
@@ -147,6 +149,30 @@ export interface LumenPost {
   shard: string | null;
   editOfPostId: string | null;
   deletedLocally: boolean;
+  /** Audit stamp + the guard that refuses edits after deletion. */
+  deletedAt: Date | null;
+  /** Increments per edit; drives per-edit publish-job idempotency keys. */
+  editVersion: number;
   createdAt: Date;
   publishedAt: Date | null;
+}
+
+/**
+ * A rolling container root post. Every lite post is published as a comment under
+ * one of these, because Hive caps root posts at one per 5 minutes per account
+ * (HIVE_MIN_ROOT_COMMENT_INTERVAL) but replies at one per 3 seconds
+ * (HIVE_MIN_REPLY_INTERVAL). Rotates when `childCount` reaches `maxChildren`.
+ */
+export interface LumenContainer {
+  containerId: string;
+  hiveAuthor: string;
+  hivePermlink: string;
+  /** opening = root post not on chain yet; open = accepting children; closed = full. */
+  status: 'opening' | 'open' | 'closed';
+  childCount: number;
+  maxChildren: number;
+  openedAt: Date;
+  publishedAt: Date | null;
+  closedAt: Date | null;
+  lastError: string | null;
 }

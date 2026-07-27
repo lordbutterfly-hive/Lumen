@@ -359,6 +359,45 @@ func RetiredAt(s Store, creator string) (uint64, bool) {
 // priced by the K2 wind-down tax. See TestZZ_NoticeWindowBankRun for the
 // before/after.
 func RequireInflowOpen(s Store, creator string, block uint64) error {
+	if err := requireMarketAcceptsMoney(s, creator, block); err != nil {
+		return err
+	}
+	// DELIVERY GATE (RULING E, delivery.go — built 2026-07-27). A creator who
+	// has ignored paying customers past the ruled threshold stops taking new
+	// PURCHASES for a fixed penalty window. This is the ONLY place delivery
+	// standing is ever consulted, on purpose: every outflow — Sell, Refund,
+	// RefundHolder, Answer, Decline, Reclaim, ClaimTradeFees — reaches its
+	// money without passing through this function, so the standing guardrail
+	// (non-payment AND non-delivery never gate funds) holds structurally
+	// rather than by remembering to check for it in each rail.
+	if delinquent, until := DeliveryStanding(s, creator, block); delinquent {
+		return newErr(ErrState, "creator is delinquent on delivery: new purchases are closed until block "+evU64(until)+" (every payout, and paying the subscription, stays open)")
+	}
+	return nil
+}
+
+// requireMarketAcceptsMoney is RequireInflowOpen WITHOUT the delivery gate:
+// paused, retired and phase only. It is the gate for money that is not a
+// PURCHASE — today that is exactly Renew.
+//
+// WHY RENEW MUST NOT SEE THE DELIVERY GATE (defect found by code review,
+// 2026-07-27, and it was fatal). Renew was calling RequireInflowOpen, so a
+// delivery penalty blocked the creator from paying their subscription. The
+// penalty runs DelinquencyBlocks (7 days); the subscription's OVERDUE grace is
+// GraceBlocks (5 days). So a penalty landing anywhere near a renewal date ran
+// PAST the grace, the market crossed into FROZEN — where Renew is illegal
+// forever, because wind-down is terminal — and a self-clearing 7-day penalty
+// became permanent destruction of the market, taking every holder onto the
+// flat pro-rata wind-down rail with it. An attacker only had to time three
+// junk asks. Renew is permissionless, so not even a fan could rescue it.
+//
+// It is also wrong on principle. A subscription payment is not new money
+// entering the MARKET: it buys no tokens, touches no reserve, and goes to the
+// platform treasury. It is the creator paying their bill — the one act that
+// keeps them alive and lets them work off the penalty. Blocking a debtor from
+// paying you is not a penalty, it is a trap. The gate exists to stop a
+// non-delivering creator taking MORE customer money, and a renewal takes none.
+func requireMarketAcceptsMoney(s Store, creator string, block uint64) error {
 	if globalInflowPaused(s) {
 		return newErr(ErrPaused, "inflows are globally paused")
 	}
@@ -542,28 +581,6 @@ func registerApply(s Store, creator string, block uint64, face, cap int64) {
 	// window from a defunct incarnation's block.)
 	setU64(s, kRetiredAt(creator), 0)
 
-	// PER-INCARNATION OFFER PRICES (2026-07-21 defect): keys.go and
-	// offer_price.go both CLAIMED "Register clears kUnlockPrice/kSessionPrice
-	// and their band anchors back to 0" — and Register did not. It was a
-	// false comment, and the bug it described was real and is the H4 bug
-	// class exactly: setBandedPrice opens a fresh 2x/7d window only when the
-	// stored price reads 0, so a returning creator's unlock/session price
-	// stayed pinned to the DEAD incarnation's price and anchor. Two
-	// consequences, both bad: the new market silently offered content at a
-	// price the creator never posted in this life, and the anti-rug band was
-	// measured against a defunct anchor (the identical defect the kFaceAnchor
-	// reset above exists to close). All eight keys are cleared here so the
-	// returning creator re-posts through setBandedPrice's initial-posting
-	// branch. The comments in keys.go and offer_price.go are now true.
-	setMoney(s, kUnlockPrice(creator), mZero())
-	setMoney(s, kUnlockPriceAnchor(creator), mZero())
-	setU64(s, kUnlockPriceAnchorAt(creator), 0)
-	setU64(s, kUnlockPriceSetAt(creator), 0)
-	setMoney(s, kSessionPrice(creator), mZero())
-	setMoney(s, kSessionPriceAnchor(creator), mZero())
-	setU64(s, kSessionPriceAnchorAt(creator), 0)
-	setU64(s, kSessionPriceSetAt(creator), 0)
-
 	// PER-INCARNATION OFFERING CATALOGUE (2026-07-27): the same per-incarnation
 	// reset as the eight keys above and for the identical reason — a returning
 	// creator must never inherit a dead incarnation's posted price, band anchor
@@ -573,6 +590,20 @@ func registerApply(s Store, creator string, block uint64, face, cap int64) {
 	// epoch bump makes the whole dead catalogue unreachable at once. See
 	// keys.go for the full argument and the live-escrow-cannot-straddle proof.
 	bumpOfferEpoch(s, creator)
+
+	// DELIVERY STANDING IS PER-INCARNATION (defect found by code review,
+	// 2026-07-27). The three delivery keys are plain per-market keys, so
+	// without this a re-registered market inherits the DEAD incarnation's miss
+	// counter and, worse, its unexpired delinquency — a brand-new market with
+	// no customers and no history would open with its inflows already refused,
+	// for a penalty earned by a market that no longer exists. Exactly the
+	// stale-per-incarnation-state bug class as the kObsIdx/kFaceAnchor resets
+	// above, and it also restores the premise launch.go's launchBuyCheck
+	// relies on: immediately after registerApply a market cannot be delinquent,
+	// so the first Buy is still infallible.
+	setU64(s, kMissCount(creator), 0)
+	setU64(s, kDeliveredCount(creator), 0)
+	setU64(s, kDelinquentUntil(creator), 0)
 
 	setU64(s, kPaidUntil(creator), block+SubscriptionPeriod)
 	setMoney(s, kFace(creator), big.NewInt(face)) // kFace is money-typed, see SetFace
@@ -609,11 +640,6 @@ func registerApply(s Store, creator string, block uint64, face, cap int64) {
 //     (A live PENDING escrow cannot survive into a new incarnation anyway:
 //     escrowed credits keep kSupply > 0, which CloseIfDrained refuses to
 //     close on and registerCheck refuses to register over.)
-//
-//   - kEntitlement(c, buyer, postId) — PERMANENT BY RULING (keys.go: "tied to
-//     the unlock EVENT not a live balance"). A fan who paid to unlock a post
-//     keeps that access; it is not per-incarnation state, it is a delivered
-//     good. Also per-(buyer,post) and therefore unbounded.
 //
 //   - kFeeBal(creator) — EARNED MONEY, pull-claimable (tradefee.go), not
 //     market state. Clearing it would confiscate fees the creator already
@@ -662,7 +688,11 @@ func Renew(s Store, caller, creator string, block uint64, periods uint64, paid *
 	if marketRetired(s, creator) {
 		return newErr(ErrState, "market is retiring; the wind-down is terminal and cannot be renewed back to life (re-register after it closes)")
 	}
-	if err := RequireInflowOpen(s, creator, block); err != nil {
+	// requireMarketAcceptsMoney, NOT RequireInflowOpen: a delivery penalty must
+	// never stop a creator paying their subscription (see that function's doc —
+	// doing so ran a 7-day penalty past the 5-day grace and destroyed the market
+	// permanently).
+	if err := requireMarketAcceptsMoney(s, creator, block); err != nil {
 		return err
 	}
 
@@ -820,6 +850,28 @@ func requireOpenCreatorMarket(s Store, caller, creator string) error {
 	}
 	if getStr(s, kState(creator)) == StateClosed {
 		return newErr(ErrState, "market closed; re-register instead")
+	}
+	return nil
+}
+
+// requireShopEditable is requireOpenCreatorMarket plus "and this market is not
+// already dying" — the guard the offering catalogue writers use (offerings.go).
+//
+// WHY THE SHOP IS STRICTER THAN SetFace/SetCap (2026-07-27). Retire is
+// irreversible and closes inflows immediately (RequireInflowOpen consults
+// marketRetired), so an offering created or repriced after Retire can NEVER be
+// bought: every Ask against it is refused for as long as the market exists.
+// Listing a service at a price nobody can ever pay is not a harmless no-op —
+// listOfferings is the buyer-facing shop, and a freshly posted, freshly priced
+// item there reads as available. SetFace and SetCap deliberately keep the
+// looser guard: they mutate a single scalar that the wind-down rails ignore
+// entirely, and tightening them would change behaviour their own tests pin.
+func requireShopEditable(s Store, caller, creator string) error {
+	if err := requireOpenCreatorMarket(s, caller, creator); err != nil {
+		return err
+	}
+	if marketRetired(s, creator) {
+		return newErr(ErrState, "market is retiring: the shop is closed (existing escrows still resolve normally)")
 	}
 	return nil
 }

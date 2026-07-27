@@ -19,8 +19,8 @@ import (
 //   - the C5 divergence tripwire (TestSettlementRate_C5Tripwire)
 //   - the long ring's storage semantics (TestRecordObs_LongRingSpacing,
 //     TestAskRateLong_MinimumHistory)
-//   - RULING C3: one derivation for Ask, Unlock AND Book
-//     (TestSettlement_OneDerivationForAllThreeServicePaths)
+//   - RULING C3: one derivation for every token-settled service, pinned via
+//     Ask (TestSettlement_AskUsesTheRuledDerivation)
 //   - a settlement refusal can never gate an outflow, end-to-end
 //     (TestSettlementRefusalGatesNoOutflow)
 //   - a lone attacker writing observations every block for hours cannot move
@@ -431,17 +431,16 @@ func TestAskRateLong_MinimumHistory(t *testing.T) {
 	}
 }
 
-// ---- RULING C3: one derivation for all three service paths -----------------
+// ---- RULING C3: one derivation for every token-settled service ------------
 
-func TestSettlement_OneDerivationForAllThreeServicePaths(t *testing.T) {
+func TestSettlement_AskUsesTheRuledDerivation(t *testing.T) {
 	// A divergent-window fixture (short 1500, long 2000, spot 2680): the
-	// min is 1500. All THREE token-settled service paths must use exactly
-	// it. THE PREVIOUS RULED DESIGN (v1 RULING 3c) priced Unlock off the
-	// long window ALONE — here that would be 2000 — and that was backwards:
-	// longest = stalest = highest rate = fewest tokens = LEAST
+	// min is 1500. Every token-settled service path must use exactly it —
+	// THE PREVIOUS RULED DESIGN (v1 RULING 3c) priced the old spend-to-unlock
+	// feature off the long window ALONE — here that would be 2000 — and that
+	// was backwards: longest = stalest = highest rate = fewest tokens = LEAST
 	// creator-favouring, measured as a permanent 100 HBD entitlement sold
-	// for 12.111 HBD. If Unlock ever reads 2000 here while Ask reads 1500,
-	// that defect is back.
+	// for 12.111 HBD.
 	const q = uint64(500_000)
 	build := func() Store {
 		s := NewMemStore()
@@ -453,7 +452,7 @@ func TestSettlement_OneDerivationForAllThreeServicePaths(t *testing.T) {
 		return s
 	}
 	want := big.NewInt(1500)
-	face := big.NewInt(1000) // ceil(1000/1500) = 1 credit on every path
+	face := big.NewInt(1000) // ceil(1000/1500) = 1 credit
 	commission := commissionOwedFor(face)
 
 	s := build()
@@ -465,26 +464,6 @@ func TestSettlement_OneDerivationForAllThreeServicePaths(t *testing.T) {
 	if askRes.RateUsed.Cmp(want) != 0 {
 		t.Fatalf("Ask.RateUsed = %s, want %s", askRes.RateUsed, want)
 	}
-
-	s = build()
-	setMoney(s, kUnlockPrice(creator1), face)
-	unRes, err := Unlock(s, asker1, creator1, q, "post-1", big.NewInt(1), commission)
-	if err != nil {
-		t.Fatalf("Unlock: %v", err)
-	}
-	if unRes.RateUsed.Cmp(want) != 0 {
-		t.Fatalf("Unlock.RateUsed = %s, want %s — Unlock must use the SAME min() as Ask (RULING C3), never the long window alone", unRes.RateUsed, want)
-	}
-
-	s = build()
-	setMoney(s, kSessionPrice(creator1), face)
-	bkRes, err := Book(s, asker1, creator1, q, big.NewInt(1), commission, "brief-1", MinAskDeadline)
-	if err != nil {
-		t.Fatalf("Book: %v", err)
-	}
-	if bkRes.RateUsed.Cmp(want) != 0 {
-		t.Fatalf("Book.RateUsed = %s, want %s", bkRes.RateUsed, want)
-	}
 }
 
 // ---- a settlement refusal gates NO funds -----------------------------------
@@ -493,10 +472,10 @@ func TestSettlement_OneDerivationForAllThreeServicePaths(t *testing.T) {
 // task demands: "Refusing to price is an INFLOW refusal and gates no funds —
 // prove no outflow can be blocked by it."
 //
-// The structural half: the ONLY package callers of SettlementRate/settleSpend
-// are Ask, Unlock and Book — new-service inflows, all RequireInflowOpen-
-// gated. Escrow RESOLUTION (Answer/Reclaim) settles at the escrow's RECORDED
-// credit amount; the curve rails (Sell) and the wind-down rails (Refund/
+// The structural half: the ONLY package caller of SettlementRate/settleSpend
+// is Ask — a new-service inflow, RequireInflowOpen-gated. Escrow RESOLUTION
+// (Answer/Reclaim) settles at the escrow's RECORDED credit amount; the curve
+// rails (Sell) and the wind-down rails (Refund/
 // RefundHolder) price off (S, R) directly; fee/treasury exits move recorded
 // balances. None of them can even reach a settlement refusal.
 //

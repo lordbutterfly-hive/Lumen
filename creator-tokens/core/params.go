@@ -14,8 +14,18 @@ const BlocksPerDay uint64 = 28800
 // Charged ONLY on delivered service — never on a refund.
 const CommissionBps uint64 = 1200
 
-// MaxCommissionBps bounds any future governance change to the commission.
-const MaxCommissionBps uint64 = 2000
+// THERE IS NO MaxCommissionBps. It existed as `const MaxCommissionBps uint64 =
+// 2000`, documented as bounding "any future governance change to the
+// commission" — and it bounded nothing, because CommissionBps above is a
+// compile-time const with no setter anywhere in the contract. There is no
+// governance path to cap.
+//
+// DELETED rather than left in place for exactly the reason this file gives for
+// deleting RegistrationFee below: a named, exported protocol parameter that
+// nothing enforces is a dead safety parameter — it reads as a protection that
+// is not there, and it is the class that gets wired up by accident later. If a
+// commission setter is ever added, the cap gets added WITH it, enforced at the
+// setter, and tested there.
 
 // REGISTRATION IS FREE — there is deliberately NO RegistrationFee constant.
 // USER-RULED (LOCKED-MECHANISM "Revenue", 2026-07-21), reversing SPEC §1.4's
@@ -68,7 +78,7 @@ const FaceBandWindow uint64 = 7 * BlocksPerDay
 // MinFace / MaxFace bound the posted ask price in HBD base units. A face below
 // MinFace would let rounding degenerate; above MaxFace is a fat-finger guard.
 // The same [MinFace, MaxFace] range and the same FaceBand (2x/7d) bound the
-// per-utility unlock/session prices (offer_price.go) — one bound, one band, so
+// creator shop's per-offering prices (offerings.go) — one bound, one band, so
 // the anti-rug guarantee is identical across every priced offering.
 //
 // ★ SET-2 FIX (adversarial fix round 1, 2026-07-22) — MinFace was 100
@@ -79,7 +89,7 @@ const FaceBandWindow uint64 = 7 * BlocksPerDay
 // an average of curve prices and price(i) >= BasePrice for every i. So every
 // face in [100, 499] was PERMANENTLY UNSETTLEABLE while Register and SetFace
 // happily accepted it — a creator could post a documented-minimum price,
-// see it accepted, and then have every single Ask/Unlock/Book refuse, with
+// see it accepted, and then have every single Ask refuse, with
 // recovery throttled to 2x per 7 days (three windows, 21 days, from 100).
 // A configuration error must fail at the configuration call, not silently at
 // the revenue call.
@@ -98,14 +108,34 @@ const FaceBandWindow uint64 = 7 * BlocksPerDay
 // price is quadratic in supply), so a face legal at launch can still go dead
 // as the market appreciates — see settlement.go's ServiceFaceRange, which
 // exports the live window, and the honest product limit recorded there.
-const MinFace int64 = 508        // LIVE-1 (PRUNED 2026-07-22): reachable C4 floor at S==2, not ceil(BasePrice/2)=500
+// MinFace is a POSTED price, and only 100%-CommissionBps of a posted price
+// reaches the token leg the C4 floor actually measures (splitFace, ask.go —
+// USER RULING 2026-07-27). 508 was the reachable C4 floor at S==2 in token-leg
+// terms; grossed up it is 577, the smallest posted face whose token leg still
+// clears it (577-floor(577*1200/10000) = 577-69 = 508; 576 gives 507 and is
+// therefore dead on arrival). TestSettlement_SET2_MinFaceClearsC4Floor pins
+// the two together so they can never drift apart again.
+const MinFace int64 = 577        // LIVE-1 (PRUNED 2026-07-22) grossed up for the commission carve-out (2026-07-27)
 const MaxFace int64 = 10_000_000 // 10,000.000 HBD
 
-// MinTip bounds a tip below which rounding degenerates (same floor rationale as
-// MinFace). A tip is buyer-chosen and UN-banded (a gift has no prepaid
-// purchasing-power expectation to protect, unlike the priced offerings), so it
-// carries only this dust floor and the fixed MaxFace ceiling (tip.go).
-const MinTip int64 = 100 // 0.100 HBD
+// THERE IS NO MinTip, and there is no tip.go. `const MinTip int64 = 100`
+// used to sit here, documented as bounding "a tip below which rounding
+// degenerates ... carries only this dust floor and the fixed MaxFace ceiling
+// (tip.go)" — and it bounded nothing: no Tip function, no tip entrypoint, no
+// tip.go file, and no other reference to MinTip anywhere in this repository
+// (core, contract, cmd, keeper, indexer, or sim) ever existed alongside it.
+// Whatever tipping feature this was written for was never built, or was
+// removed before this constant was, and nobody deleted the constant with it.
+//
+// DELETED for exactly the reason this file deletes every other unenforced
+// parameter (see MaxCommissionBps and RegistrationFee above): a named,
+// exported protocol constant that nothing enforces is a dead safety
+// parameter — it reads as a protection that is there when it is not, and it
+// is the class of defect that gets wired up by accident later, or worse,
+// relied upon by a caller who assumes it is already checked somewhere. If a
+// tip mechanism is ever built, its own floor gets added WITH it, enforced at
+// the call site that spends it, and tested there — not resurrected from a
+// constant that spent its whole life unread.
 
 // ---- offering catalogue ----
 
@@ -125,6 +155,21 @@ const MaxOfferings uint64 = 20
 // concatenates fields without escaping.
 const MaxOfferTitleLen int = 64
 
+// MaxHashLen bounds the free-form commitment strings an escrow carries —
+// contentHash (the asker's question) and answerHash (the creator's delivery
+// attestation). Both are content addresses, not content: a CIDv1 is 59 bytes
+// and a sha256 hex digest is 64, so 128 is generous for anything that is
+// honestly a hash while refusing a body pasted into the field.
+//
+// WHY IT IS BOUNDED AT ALL, stated because the absence was the inconsistency:
+// every OTHER free-form buyer-facing field in this contract is length-capped at
+// the door (MaxOfferTitleLen above, for exactly this reason), and these two are
+// the ones that end up in a PERMANENT packed escrow record. An unbounded field
+// concatenated into a stored record is the batch-size class of defect — no
+// individual write is wrong, and nothing bounds the total. Rejecting at the
+// door is the same discipline validOfferTitle applies.
+const MaxHashLen int = 128
+
 // ---- supply cap ----
 
 // MinCap / MaxCap bound the creator-set outstanding-credit cap. The cap is the
@@ -136,6 +181,31 @@ const MaxCap int64 = 1_000_000_000
 // ---- escrow ----
 
 // MinAskDeadline / MaxAskDeadline bound how long a creator has to answer.
+// ---- delivery gate (RULING E, built 2026-07-27) ----
+//
+// A MISS is objective and needs no oracle: an escrow still PENDING at
+// deadline+ReclaimGrace was not delivered, full stop. A creator who does not
+// want a job can Decline it for free (ask.go) — full refund including the
+// commission, and explicitly NOT a miss — so a miss means the creator ignored
+// a paying customer until the window closed. That is why the threshold can be
+// this strict without punishing anyone acting in good faith.
+//
+// MinMissesForDelinquency is a floor on the SAMPLE, not on the offence: with
+// one ask in flight, one miss is 100% and would otherwise convict instantly.
+// MaxMissBps then judges the rate, so a busy creator who misses 3 of 100 is
+// fine and a quiet one who misses 3 of 4 is not.
+const MinMissesForDelinquency uint64 = 3
+const MaxMissBps uint64 = 2500 // 25% of resolved asks
+
+// DelinquencyBlocks is how long inflows stay shut after crossing the
+// threshold. It is a FIXED, self-clearing penalty rather than a condition to
+// be cured, because the cure would be circular: delinquency refuses new asks,
+// and only new answered asks could improve the ratio, so a rate-based release
+// would be a life sentence served by a creator with no way to appeal it. Seven
+// days is long enough to cost a real creator real money and short enough that
+// an honest one who was ill or offline is not destroyed by it.
+const DelinquencyBlocks uint64 = 7 * BlocksPerDay
+
 const MinAskDeadline uint64 = BlocksPerDay      // 1 day
 const MaxAskDeadline uint64 = 30 * BlocksPerDay // 30 days
 
@@ -166,7 +236,7 @@ const MinObsCount uint64 = 8
 // least MinObsBlocks (1200). The live set is always the last ObsWindow (32)
 // observations, so ANY market that traded more than 32 times inside an hour
 // evicted its own history, its window span fell below 1200, and every
-// settlement path (Ask, Unlock, Book — and SettlementRate itself) refused
+// settlement path (Ask — and SettlementRate itself) refused
 // with "observations span less than the minimum window". Measured on the
 // real package: 31 trades/1200 blocks priced fine, 33 killed it. Two
 // consequences, both bad: (a) SUCCESS was the trigger — a market busy enough
@@ -424,8 +494,8 @@ const ExitTaxDecayBlocks uint64 = 42 * BlocksPerDay
 // 0.1 HBD MinFace service cost 100 tokens where correct pricing costs 1 —
 // a 100x overcharge), and fired on ordinary conditions (a market quiet 3
 // days, a >20% move). RULING C: settlement must REFUSE instead. Refusing is
-// an INFLOW refusal only — Ask/Unlock/Book are the only settlement callers
-// and all are RequireInflowOpen-gated inflows; no outflow anywhere calls
+// an INFLOW refusal only — Ask is the only settlement caller
+// and is a RequireInflowOpen-gated inflow; no outflow anywhere calls
 // settlement (proven by TestSettlementRefusalGatesNoOutflow).
 // ---------------------------------------------------------------------------
 

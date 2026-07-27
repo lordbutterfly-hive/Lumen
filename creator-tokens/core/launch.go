@@ -186,6 +186,19 @@ func RegisterWithFirstBuy(s Store, caller, creator string, block uint64, face, c
 //	                               phase is ACTIVE. (Even in the impossible
 //	                               overflow case paidUntil < block, the phase
 //	                               would be OVERDUE — still inflow-open.)
+//	                               DELIVERY STANDING (added 2026-07-27):
+//	                               registerApply zeroes all three delivery
+//	                               keys, so DeliveryStanding is not delinquent
+//	                               and the gate cannot fire. THIS ENUMERATION
+//	                               IS LOAD-BEARING — a code review caught that
+//	                               adding the delivery gate to
+//	                               RequireInflowOpen silently falsified this
+//	                               proof, and the panic below is what an
+//	                               unlisted new refusal condition buys you.
+//	                               Any future condition added to
+//	                               RequireInflowOpen MUST be listed here and
+//	                               proved false at this point, or moved out of
+//	                               the launch path.
 //	n != nil && n > 0            — proved below.
 //	supply+n <= cap              — supply is 0 (registerCheck refused a
 //	                               non-zero one and registerApply does not

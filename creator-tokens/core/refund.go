@@ -114,7 +114,7 @@ import "math/big"
 //	Refund       −floor(R·c/S)                 wind-down only (inWindDown)
 //	RefundHolder −floor(R·bal/S)               wind-down only (inWindDown)
 //
-// Register/Renew/SetFace/SetCap/Retire, Ask/Answer/Reclaim, Unlock/Book,
+// Register/Renew/SetFace/SetCap/Retire, Ask/Answer/Reclaim,
 // TransferCredits, ClaimTradeFees/WithdrawTreasury, pause: ΔR = 0
 // structurally (they move token balances or separate HBD legs). Both Sell's
 // tax leg (RULING J) and the wind-down tax leg (RULING K2) credit kTreasury
@@ -303,7 +303,7 @@ func Refund(s Store, caller, creator string, block uint64, credits *big.Int, min
 		// Kept as the same defense-in-depth every subMoney call carries.
 		return nil, err
 	}
-	accrueExitTax(s, creator, caller, tax) // 50/50 creator/platform, self-sell to treasury (exittax.go)
+	accrueExitTax(s, creator, caller, tax) // 50/50 creator/platform, one rule for every seller (exittax.go)
 	return net, nil                        // the holder RECEIVES net (gross − tax); the wrapper transfers exactly this
 }
 

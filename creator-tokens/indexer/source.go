@@ -6,24 +6,37 @@ import "errors"
 // contract-output. One contract call ⇒ one TransactionOutput ⇒ (today) at
 // most one log line for every entrypoint in ../contract/main.go, each of
 // which calls sdk.Log at most once.
+//
+// JSON TAGS (DEFECT FIX, 2026-07-28): these four fields used to carry NO
+// `json:"..."` tags at all, so encoding/json fell back to their bare Go
+// names — "OutputID"/"BlockHeight"/"Seq"/"Data" — the ONE wire shape in this
+// entire package NOT in the lowercase-camelCase convention every other DTO
+// here follows (PositionView, HolderListView, DeliveryRecordView,
+// MarketSummaryView, TreasurySummaryView — api.go). That mismatch is latent
+// today (EventHistoryView, api.go, is the only DTO that embeds RawEvent
+// directly, and nothing in this repo currently decodes its JSON output), but
+// it is exactly the kind of boundary a future frontend consumer would trip
+// on silently: every other field in this API reads `creator`/`holders`/
+// `answeredCount`; this one alone would read `OutputID`/`BlockHeight`. Tagged
+// now, before anything depends on the untagged shape, rather than after.
 type RawEvent struct {
 	// OutputID is the contract-output CID this log line came from
 	// (ContractOutput.id in go-vsc-node's GQL schema). Opaque beyond being a
 	// stable, unique identifier — Index uses (OutputID, Seq) together as the
 	// de-duplication key that makes Ingest safe to call twice with
 	// overlapping batches (see index.go's Poll/restart doc).
-	OutputID string
+	OutputID string `json:"outputId"`
 	// BlockHeight is the Magi block height the output was produced at —
 	// NOT the Hive L1 anchor height. Advisory only (ordering/display);
 	// RawEvent order as returned by EventSource.Events is authoritative,
 	// not this field.
-	BlockHeight int64
+	BlockHeight int64 `json:"blockHeight"`
 	// Seq disambiguates multiple log lines within the SAME output, 0-based,
 	// in emission order within that output.
-	Seq int
+	Seq int `json:"seq"`
 	// Data is the raw JSON log line exactly as sdk.Log emitted it — the
 	// output of one of core/events.go's Ev* constructors, unchanged.
-	Data string
+	Data string `json:"data"`
 }
 
 // Cursor opaquely identifies a position in the event stream. Callers must

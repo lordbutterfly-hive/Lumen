@@ -83,7 +83,13 @@ func main() {
 		// package would show alongside a sweep report (task spec: "read...
 		// its HolderList and DeliveryRecord in particular").
 		rec := ix.DeliveryRecord(v.Creator, 12)
-		fmt.Printf("      (context only, not a sweep input) delivery record: answered=%d missed=%d pending=%d\n", rec.AnsweredCount, rec.MissedCount, rec.PendingCount)
+		// declined (RULING E's delivery gate, 2026-07-27) is its own bucket —
+		// neither answered nor missed (core/delivery.go: a prompt "no" refunds
+		// the asker in full and is not a black mark). Omitting it here used to
+		// silently understate a creator's real delivery activity: a creator who
+		// only ever declines showed answered=0 missed=0 with nothing to explain
+		// why, as if they had never resolved a single ask.
+		fmt.Printf("      (context only, not a sweep input) delivery record: answered=%d declined=%d missed=%d pending=%d\n", rec.AnsweredCount, rec.DeclinedCount, rec.MissedCount, rec.PendingCount)
 	}
 	fmt.Println()
 
@@ -142,8 +148,17 @@ func buildDemoScenario() (*core.MemStore, *indexer.Index, uint64) {
 
 	const (
 		registeredBlock = uint64(1_000_000)
-		face            = int64(500)
-		marketCap       = int64(1_000_000)
+		// face was 500 until the 2026-07-27 commission carve-out: MinFace is now
+		// 577 (params.go — grossed up so the POST-COMMISSION token leg still
+		// clears the C4 settlement floor), so 500 is no longer a legal posted
+		// price and every core.Register call below reverted with "face out of
+		// range [MinFace, MaxFace]" — this demo PANICKED at startup (must()
+		// wraps every core.* error) until this fix. 1000 is comfortably above
+		// MinFace and matches BasePrice, so it reads as an obviously-valid
+		// round number rather than a value chosen to just barely clear the
+		// floor.
+		face      = int64(1000)
+		marketCap = int64(1_000_000)
 	)
 	lapseBlock := registeredBlock + core.SubscriptionPeriod + core.GraceBlocks // FROZEN begins here
 	demoBlock := lapseBlock + 500                                              // "now": comfortably into wind-down for the lapsed markets
@@ -153,13 +168,20 @@ func buildDemoScenario() (*core.MemStore, *indexer.Index, uint64) {
 		log(core.EvRegistered(creator, creator, registeredBlock, face, marketCap, big.NewInt(0)))
 	}
 	// RULING A (2026-07-21): the PAR mint is deleted; Buy on the curve is the
-	// only issuance path. The demo mints via core.Buy and logs the existing
-	// prepaid event shape (paid = TotalDue, minted = tokens) purely so the
-	// indexer's holder discovery keeps working — a dedicated buy/sell event
-	// schema is a Wave-D item, flagged in the RULING-A report.
+	// only issuance path. WAVE D has since shipped the real event for it
+	// (core.EvBought / indexer's KindBought) — this demo used to fake a
+	// "prepaid" log line here instead (paid = TotalDue, minted = tokens)
+	// because that was the only shape the indexer recognized at the time.
+	// That workaround is now STALE: logging "prepaid" for a real Buy hides
+	// the actual action from anything that reads the event kind (an operator
+	// dashboard would see this creator as having never had a single trade),
+	// and indexer/events.go's ParseEvent would now fold it as a legacy
+	// PAR-mint credit instead of the curve trade it actually was. Use the
+	// real event and the real fields (Minted/Cost/Fee/TotalDue) core.Buy
+	// itself returns.
 	buy := func(creator, holder string, tokens int64) {
 		res := must2(core.Buy(store, holder, creator, registeredBlock+1, big.NewInt(tokens)))
-		log(core.EvPrepaid(creator, holder, registeredBlock+1, res.TotalDue, big.NewInt(tokens)))
+		log(core.EvBought(creator, holder, registeredBlock+1, res.Minted, res.Cost, res.Fee, res.TotalDue))
 	}
 
 	// aliceart: FROZEN, three holders still owed a refund -- the ordinary case.
@@ -174,7 +196,7 @@ func buildDemoScenario() (*core.MemStore, *indexer.Index, uint64) {
 	must(core.Register(store, "bobmusic", "bobmusic", activeRegisteredBlock, face, marketCap))
 	log(core.EvRegistered("bobmusic", "bobmusic", activeRegisteredBlock, face, marketCap, big.NewInt(0)))
 	bobBuy := must2(core.Buy(store, "listener1", "bobmusic", activeRegisteredBlock+1, big.NewInt(40)))
-	log(core.EvPrepaid("bobmusic", "listener1", activeRegisteredBlock+1, bobBuy.TotalDue, big.NewInt(40)))
+	log(core.EvBought("bobmusic", "listener1", activeRegisteredBlock+1, bobBuy.Minted, bobBuy.Cost, bobBuy.Fee, bobBuy.TotalDue))
 
 	// carlwrites: FROZEN, but its one holder already self-refunded (the pull
 	// path, `refund`) before this sweep ever ran -- HolderList is already
@@ -196,12 +218,17 @@ func buildDemoScenario() (*core.MemStore, *indexer.Index, uint64) {
 	// demo now feeds a real two-ring history the way live trading would:
 	// 12 constant-rate observations spaced core.LongObsSpacing apart. The
 	// marker rate 1000 sits in the coherent band for this market (S=600:
-	// C5 tripwire needs rate >= ceil(area/S)/4 = 921; the C4 minimum-price
-	// guard needs rate <= 2·face = 1000; spot(600) = 6670 stays the ceiling)
-	// so settlement = min(1000, 1000, 6670) = 1000 and the ask costs
-	// ceil(500/1000) = 1 credit. THE PREVIOUS VERSION recorded nothing and
-	// relied on PAR — under RULING C that ask would refuse and this demo
-	// would panic at startup.
+	// C5 tripwire needs rate >= ceil(area/S)/4 = 921; spot(600) = 6670 stays
+	// the ceiling). The C4 minimum-price guard needs rate <= 2·tokenLeg —
+	// tokenLeg, NOT the raw posted face, since the 2026-07-27 commission
+	// carve-out (ask.go's splitFace): the buyer's posted face is the TOTAL
+	// they pay, split into an 88% token leg and the 12% HBD commission
+	// BEFORE settlement ever sees it. At face=1000, tokenLeg = 1000 − 120 =
+	// 880, so C4 needs rate <= 1760 — 1000 clears it — and the ask costs
+	// ceil(tokenLeg/rate) = ceil(880/1000) = 1 credit. So settlement =
+	// min(1000, 1000, 6670) = 1000. THE PREVIOUS VERSION recorded nothing
+	// and relied on PAR — under RULING C that ask would refuse and this
+	// demo would panic at startup.
 	//
 	// 33 markers, not 12: the funding Buy above already fed both rings ONE
 	// observation at the curve's own marginal rate (6670), which the
@@ -225,7 +252,7 @@ func buildDemoScenario() (*core.MemStore, *indexer.Index, uint64) {
 	commissionOwed := new(big.Int).Mul(big.NewInt(face), big.NewInt(int64(core.CommissionBps)))
 	commissionOwed.Div(commissionOwed, big.NewInt(10000))
 	askResult := must2(core.Ask(store, "reader1", "danerin", askBlock, big.NewInt(1), commissionOwed, "demo-content-hash", core.MinAskDeadline, 0))
-	log(core.EvAsked("danerin", "reader1", askBlock, askResult.Seq, askResult.CreditsSpent, askResult.CommissionHbd, askResult.RateUsed, core.MinAskDeadline, "demo-content-hash"))
+	log(core.EvAsked("danerin", "reader1", askBlock, askResult.Seq, askResult.CreditsSpent, askResult.CommissionHbd, askResult.RateUsed, core.MinAskDeadline, "demo-content-hash", 0))
 
 	return store, ix, demoBlock
 }

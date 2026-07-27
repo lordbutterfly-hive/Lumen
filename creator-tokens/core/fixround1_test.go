@@ -409,9 +409,15 @@ func TestSettlement_SET3_SmallSupplyStillPrices(t *testing.T) {
 		rate := SpotRate(big.NewInt(S))
 		seedSettleObs(s, c, base, rate)
 		q := base + (stObsCount-1)*LongObsSpacing + 50
-		// cheapest face that clears C4 (ceil(rate/2)) -> exactly 1 credit
-		face := new(big.Int).Add(rate, big.NewInt(1))
-		face.Div(face, big.NewInt(2))
+		// The cheapest POSTED face the contract itself declares legal — asking
+		// ServiceFaceRange instead of recomputing ceil(rate/2) keeps this test
+		// honest across the commission carve-out (USER RULING 2026-07-27: C4
+		// measures the TOKEN leg, so the legal posted floor is grossed up by
+		// the commission and is no longer ceil(rate/2)). Still exactly 1 credit.
+		face, _, err := ServiceFaceRange(s, c, q)
+		if err != nil {
+			t.Fatalf("SET-3: S=%d ServiceFaceRange refused: %v", S, err)
+		}
 		quote, err := SettleSpend(s, c, q, face)
 		if err != nil {
 			t.Fatalf("SET-3: S=%d a one-credit service refused: %v", S, err)

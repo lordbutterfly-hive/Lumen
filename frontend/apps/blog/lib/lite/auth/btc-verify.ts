@@ -33,7 +33,21 @@ export function bindMessage(nonce: string): string {
  * different address (SEQ-1). Not secret; just a binding.
  */
 export function addressChallengeHash(address: string): string {
-  return createHash('sha256').update(address.trim().toLowerCase()).digest('hex');
+  // Case-folded only for bech32; base58 case is significant (see normalizeBtcAddress).
+  return createHash('sha256').update(normalizeBtcAddress(address)).digest('hex');
+}
+
+/**
+ * Storage/lookup form of a BTC address.
+ *
+ * Only bech32 may be lowercased (BIP-173 defines it as case-insensitive). Legacy and
+ * P2SH addresses are base58, where upper and lower case are DISTINCT symbols, so
+ * lowercasing them stores a string that is not the user's real address — and in
+ * principle lets two different addresses collide on one key. Fixed 2026-07-28.
+ */
+export function normalizeBtcAddress(address: string): string {
+  const trimmed = address.trim();
+  return /^(bc1|tb1|bcrt1)/i.test(trimmed) ? trimmed.toLowerCase() : trimmed;
 }
 
 export function isTaproot(address: string): boolean {

@@ -162,19 +162,52 @@ func ExitTaxOn(p *big.Int, taxBps uint64) *big.Int {
 // (p == net + tax + feeC + feeP) true as written — `tax` is unchanged in size,
 // only in destination, so every existing money-conservation test still holds.
 //
-// SELF-SELL GUARD: when the seller IS the creator, the whole tax goes to
-// treasury. Otherwise a creator would refund half their own exit tax to
-// themselves on every dump of their own token — a 50% discount on the exact
-// behaviour the tax exists to deter, available only to the one account that
-// can also move the price. (The pre-existing 5% creator trade fee has the same
-// shape and is NOT changed here: it is a ruled design (F8) and at 5% the
-// incentive is a quarter the size. Flagged, not silently altered.)
+// THERE IS NO CREATOR EXIT TAX (USER-RULED 2026-07-28). One rule, for every
+// token: the rate comes from MATURITY and nothing else, and the destination is
+// the same 50/50 split no matter whose hand the tokens are in. The creator's
+// own tokens are subject to exactly the same maturity as anyone else's.
+//
+// WHAT WAS HERE AND WHY IT IS GONE — a SELF-SELL GUARD that routed 100% of the
+// tax to treasury when `seller == creator`, on the reasoning that otherwise a
+// creator refunds half their own exit tax to themselves. The reasoning was
+// sound; the mechanism never worked, and TOKEN MATURITY made that decisive:
+//
+//   - It was a NAME CHECK facing an adversary with unbounded identities. A
+//     creator moves tokens to a second account they control and sells there;
+//     the guard sees a different string and the 50% rebate lands anyway.
+//   - Before maturity travelled, walking around it COST something real: the
+//     alt re-aged to fresh and paid the full 20%, so for a matured creator the
+//     bypass was self-defeating. That accidental friction was the only thing
+//     the guard ever had. Maturity now travels with the tokens (holdclock.go,
+//     transfer.go), so the alt sells at the creator's own rate and THE BYPASS
+//     IS FREE — one extra transaction, no cost, same rebate.
+//   - It is not detectable, even in principle. Whether an account is "the
+//     creator's alt" is a fact about the off-chain identity graph; contract
+//     state contains no term that ranges over it, and the alt is identical to
+//     an unrelated holder in every observable. No test and no future guard can
+//     separate them. (Same purchasable-weight indistinguishability RULING A and
+//     RULING J already paid to learn twice.)
+//   - So all it did was charge MORE to creators who sell under their own name
+//     than to creators who know about second accounts — pushing exits into
+//     unlabeled alts, which is worse for transparency and worse for the
+//     securities posture the 50/50 split was introduced to improve.
+//
+// A dead safety parameter is worse than none: it invites reliance on a
+// protection that is not there. This is the same call params.go made when it
+// DELETED RegistrationFee rather than keeping it at zero.
+//
+// THE HONEST NUMBER, stated so nobody has to rediscover it: because the
+// creator receives the creator half of every exit tax on their own market, a
+// creator selling their own tokens gets half of their own tax back — an
+// effective ~10% at the maximum rate, not 20%. That was ALREADY the true
+// outcome via an alt; deleting the guard makes the on-chain numbers mean what
+// they say. If 10% is ever judged too weak a deterrent, the lever is the SPLIT
+// (or routing 100% to treasury for everyone), never an identity check.
+//
+// The pre-existing 5% creator trade fee has the identical shape and the
+// identical bypass, and is likewise NOT identity-checked (ruled design, F8).
 func accrueExitTax(s Store, creator, seller string, tax *big.Int) {
 	if tax == nil || tax.Sign() <= 0 {
-		return
-	}
-	if seller == creator {
-		addMoney(s, kTreasury(), tax)
 		return
 	}
 	creatorHalf := new(big.Int).Div(tax, big.NewInt(2))

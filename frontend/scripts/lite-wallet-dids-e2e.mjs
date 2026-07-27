@@ -1,0 +1,13 @@
+import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
+const BASE='http://localhost:3000', IP='10.31.4.4';
+const H={'content-type':'application/json','x-csrf-token':'1','x-forwarded-for':IP};
+const jar={}; const grab=r=>{for(const c of (r.headers.getSetCookie?.()??[]))jar[c.split('=')[0]]=c.split(';')[0].split('=').slice(1).join('=');};
+const CH=()=>({...H,cookie:Object.entries(jar).map(([k,v])=>`${k}=${v}`).join('; ')});
+const a=privateKeyToAccount(generatePrivateKey());
+let r=await fetch(`${BASE}/api/lite/auth/evm/challenge`,{method:'POST',headers:H,body:JSON.stringify({address:a.address})});grab(r);const ch=await r.json();
+const sig=await a.signMessage({message:ch.message});
+r=await fetch(`${BASE}/api/lite/auth/evm/verify`,{method:'POST',headers:CH(),body:JSON.stringify({address:a.address,signature:sig,nonce:ch.nonce})});grab(r);
+r=await fetch(`${BASE}/api/lite/auth/name`,{method:'POST',headers:CH(),body:JSON.stringify({displayName:'didtest'+a.address.slice(2,8).toLowerCase()})});grab(r);
+console.log('signup:',(await r.json()).status);
+r=await fetch(`${BASE}/api/lite/wallet/dids`,{headers:CH()});
+console.log('wallet DIDs:',JSON.stringify(await r.json(),null,1));

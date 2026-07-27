@@ -82,10 +82,15 @@ func TestTransferCredits_HappyPath(t *testing.T) {
 	if R, S := getMoney(s, kReserve(creator)), getMoney(s, kSupply(creator)); R.Cmp(Area(S)) != 0 {
 		t.Fatalf("R = %s != area(%s) = %s after transfer — the equality invariant broke on a ΔR=0 op", R, S, Area(S))
 	}
-	// Clock legs: the RECIPIENT is clocked at the transfer block (C-14 —
-	// fresh account, wNew == block exactly); the SENDER's clock is untouched.
-	if w := holderAcqBlock(s, creator, "bob"); w != 250 {
-		t.Fatalf("bob's wacq = %d, want the transfer block 250 (transferred-in tokens are FRESH)", w)
+	// Clock legs. ★ EXPECTATION CHANGED (TOKEN MATURITY, USER-RULED
+	// 2026-07-27): the recipient used to be clocked at the TRANSFER block (250),
+	// which destroyed the maturity of every moved token. Maturity now belongs to
+	// the tokens and travels with them, so bob's 200 tokens arrive carrying
+	// alice's own clock — 200, the block she bought them at — and bob's account
+	// was empty, so the merge stores it exactly (the oldBal == 0 branch). The
+	// SENDER's clock is untouched either way: a debit never re-ages a remainder.
+	if w := holderAcqBlock(s, creator, "bob"); w != 200 {
+		t.Fatalf("bob's wacq = %d, want alice's own acquisition block 200 (maturity travels WITH the tokens)", w)
 	}
 	if w := holderAcqBlock(s, creator, "alice"); w != 200 {
 		t.Fatalf("alice's wacq = %d, want 200 unchanged (a debit never re-ages the remainder)", w)
@@ -132,15 +137,23 @@ func TestTransferCredits_RecipientClockReAverages_LaunderingClosed(t *testing.T)
 	}
 }
 
-// RULING K deleted the cost basis, so a transfer moves ONLY the tokens and
-// re-ages the recipient's hold clock to FRESH. (The old
-// TestTransferCredits_MovesProportionalBasis_Conserved tested the deleted
-// basis-conservation machinery; the clock property that survives — the sybil/
-// OTC consequence — is what this pins.) A whale splitting a position across
-// accounts before a dump changes nothing recoverable: the recipient's fresh
-// clock only ever raises the exit-tax RATE, and under K1 every slice pays τ ×
-// its own gross proceeds with no gain cap to exploit.
-func TestTransferCredits_ReAgesRecipientClockToFresh(t *testing.T) {
+// ★ RENAMED AND RE-AIMED (TOKEN MATURITY, USER-RULED 2026-07-27). This test was
+// TestTransferCredits_ReAgesRecipientClockToFresh and asserted that a transfer
+// re-ages the recipient to the transfer block. That behaviour was PROVEN DEFECT
+// 2 — the mirror image of the age sponge — because it destroyed the maturity of
+// every moved token, so an honest holder moving their own position between their
+// own accounts paid the full 20% on tokens the protocol had already agreed owed
+// nothing. Every assertion below is KEPT (nothing was deleted to make the fix
+// pass); only the recipient's expected clock changes, from the transfer block to
+// the sender's own — which is the ruling.
+//
+// What still holds, and is what the old test was really protecting: a whale
+// splitting a position across accounts before a dump gains nothing. Maturity is
+// size-weighted and conserved (properties P1/P2), so splitting moves the rate
+// around without creating any, and under K1 every slice pays τ × its own gross
+// proceeds with no gain cap to exploit — splitting a sale strictly over-pays by
+// ceil superadditivity.
+func TestTransferCredits_RecipientInheritsSenderClock_MaturityTravels(t *testing.T) {
 	s := NewMemStore()
 	creator := "creatorb"
 	setupMarket(s, creator, 100, 1_000_000)
@@ -156,13 +169,21 @@ func TestTransferCredits_ReAgesRecipientClockToFresh(t *testing.T) {
 	if got := getMoney(s, kBal(creator, "alice")); got.Cmp(big.NewInt(200)) != 0 {
 		t.Fatalf("alice balance = %s, want 200 (kept)", got)
 	}
-	// bob's inherited tokens carry a FRESH clock (block 250) — max rate.
-	if w := holderAcqBlock(s, creator, "bob"); w != 250 {
-		t.Fatalf("bob wacq = %d, want the transfer block 250 (fresh clock, max rate)", w)
+	// bob's inherited tokens carry ALICE's clock (block 200) — the maturity she
+	// earned moves with the tokens she sent, and is gone from what she kept.
+	if w := holderAcqBlock(s, creator, "bob"); w != 200 {
+		t.Fatalf("bob wacq = %d, want alice's acquisition block 200 (maturity travels with the tokens)", w)
 	}
-	// alice's remainder keeps its own (older) clock — the debit does not re-age it.
+	// alice's remainder keeps its own clock — the debit does not re-age it.
 	if w := holderAcqBlock(s, creator, "alice"); w != 200 {
 		t.Fatalf("alice wacq = %d, want unchanged 200 (a send does not re-age the remainder)", w)
+	}
+	// The two now read the SAME rate at every block: 300 tokens' worth of
+	// maturity was neither created nor destroyed by moving 100 of them.
+	for _, q := range []uint64{250, 250 + ExitTaxDecayBlocks / 2, 250 + ExitTaxDecayBlocks} {
+		if a, b := ExitTaxBpsAt(heldBlocksAt(s, creator, "alice", q)), ExitTaxBpsAt(heldBlocksAt(s, creator, "bob", q)); a != b {
+			t.Fatalf("at block %d alice pays %d bps and bob %d bps on tokens of identical provenance", q, a, b)
+		}
 	}
 }
 
@@ -218,9 +239,10 @@ func TestTransferCredits_WorksRegardlessOfBillingPhase(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Force the market into a lapsed/FROZEN-shaped state.
+	// Force the market into a lapsed/FROZEN-shaped state: naturalPhase
+	// (market.go) derives FROZEN lazily from paidUntil+GraceBlocks alone, so
+	// this one write is sufficient for any query block >= 50+GraceBlocks.
 	setU64(s, kPaidUntil(creator), 50)
-	setU64(s, kFrozenAt(creator), 50+GraceBlocks)
 
 	if err := TransferCredits(s, creator, "alice", "bob", 50+GraceBlocks+10, big.NewInt(100)); err != nil {
 		t.Fatalf("transfer must work even when the market is FROZEN/lapsed: %v", err)

@@ -24,7 +24,8 @@ const LABELS = {
   homeAriaLabel: 'Lumen home',
   write: 'Write',
   notifications: 'Notifications',
-  login: 'Log in'
+  login: 'Log in',
+  hiveKeys: 'Use Hive keys'
 };
 
 /**
@@ -194,15 +195,29 @@ const AppHeader: FC = () => {
               </Tooltip>
             </TooltipProvider>
           ) : (
-            <DialogLogin>
-              <Button
-                variant="ghost"
-                className="whitespace-nowrap text-base hover:text-destructive"
-                data-testid="login-btn"
-              >
-                {LABELS.login}
-              </Button>
-            </DialogLogin>
+            /* /login is the Lumen entry point (Google / Bitcoin / EVM / Keychain).
+               Nothing in the site linked to it, which made the whole lite-account
+               journey unreachable for a real visitor. The keys-only DialogLogin stays
+               for existing Hive users. */
+            <>
+              <Link href="/login" data-testid="login-link">
+                <Button
+                  variant="ghost"
+                  className="whitespace-nowrap text-base hover:text-destructive"
+                >
+                  {LABELS.login}
+                </Button>
+              </Link>
+              <DialogLogin>
+                <Button
+                  variant="ghost"
+                  className="hidden whitespace-nowrap text-base hover:text-destructive md:inline-flex"
+                  data-testid="login-btn"
+                >
+                  {LABELS.hiveKeys}
+                </Button>
+              </DialogLogin>
+            </>
           )}
         </div>
       </div>

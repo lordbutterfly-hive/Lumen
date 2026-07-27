@@ -39,9 +39,17 @@ func cloneStore(s *MemStore) *MemStore {
 	return c
 }
 
-// bounceRefresh moves `amt` tokens x->y then y->x at `block`, re-aging BOTH
-// clocks toward `block` (the griefer's free liveness-poison lever). Requires x
-// to hold >= amt at the start.
+// bounceRefresh moves `amt` tokens x->y then y->x at `block`. This USED TO
+// re-age both clocks toward `block` — it was the griefer's free liveness-poison
+// lever, and the whole reason EXITTAX-DOS-1 existed.
+//
+// ★ IT IS NOW INERT (TOKEN MATURITY, USER-RULED 2026-07-27). Maturity travels
+// with the tokens, so a round trip returns the position exactly as it left:
+// x -> y donates x's own maturity, y -> x hands the same maturity back, and the
+// size-weighted average is exactly age-neutral over the pair. The helper is KEPT
+// and still called at every site it was called at, because "the bounce changes
+// nothing" is now itself the regression worth pinning — bounceAssertInert below
+// is what each caller asserts instead of the old "the clock went fresh".
 func bounceRefresh(t *testing.T, s Store, creator, x, y string, block uint64, amt int64) {
 	t.Helper()
 	if err := TransferCredits(s, creator, x, y, block, big.NewInt(amt)); err != nil {
@@ -49,6 +57,77 @@ func bounceRefresh(t *testing.T, s Store, creator, x, y string, block uint64, am
 	}
 	if err := TransferCredits(s, creator, y, x, block, big.NewInt(amt)); err != nil {
 		t.Fatalf("bounce %s->%s: %v", y, x, err)
+	}
+}
+
+// bounceAssertInert runs a bounce and proves it cannot manufacture freshness —
+// the structural death of the EXITTAX-DOS-1 refresh lever. Two clauses, and the
+// split between them is the honest part:
+//
+//   - ALWAYS: the two accounts' combined capped age-weight (Σ bal·min(age, Dt))
+//     does not INCREASE. A bounce may redistribute maturity between the two —
+//     that is the ruled "you're allowed to trade it" — but whatever one gains the
+//     other lost, so no bounce, and no number of bounces, can add any.
+//   - WHEN THE TWO ARE EQUALLY AGED (the actual griefing setup: two accounts the
+//     attacker funded together): the bounce is EXACTLY inert, both rates
+//     unchanged. This is the precise form of "the perpetual-refresh lever is
+//     dead" — the attacker's own two accounts have nothing to trade each other.
+//
+// Asserting unconditional rate-invariance would be FALSE and would be asserting
+// something this design does not claim: if one side genuinely holds fresher
+// tokens, sending them really does hand that freshness over.
+func bounceAssertInert(t *testing.T, s Store, creator, x, y string, block uint64, amt int64) {
+	t.Helper()
+	rate := func(h string) uint64 { return ExitTaxBpsAt(heldBlocksAt(s, creator, h, block)) }
+	weight := func() *big.Int {
+		w := big.NewInt(0)
+		for _, h := range []string{x, y} {
+			age := heldBlocksAt(s, creator, h, block) // already capped at the window
+			w.Add(w, new(big.Int).Mul(getMoney(s, kBal(creator, h)), new(big.Int).SetUint64(age)))
+		}
+		return w
+	}
+	rxBefore, ryBefore := rate(x), rate(y)
+	wBefore := weight()
+
+	bounceRefresh(t, s, creator, x, y, block, amt)
+
+	if wAfter := weight(); wAfter.Cmp(wBefore) > 0 {
+		t.Fatalf("EXITTAX-DOS-1: a two-account bounce MANUFACTURED maturity — combined age-weight %s -> %s. "+
+			"Transfers may move maturity, never create it.", wBefore, wAfter)
+	}
+	if rxBefore == ryBefore {
+		for _, h := range []string{x, y} {
+			if got := rate(h); got != rxBefore {
+				t.Fatalf("EXITTAX-DOS-1: bouncing between two EQUALLY-AGED accounts moved %s's rate %d -> %d bps. "+
+					"An attacker's own two accounts have no maturity to trade each other; the round trip must be "+
+					"exactly age-neutral and the perpetual-refresh lever dead.", h, rxBefore, got)
+			}
+		}
+	}
+}
+
+// dosFreshenClock writes a maximally-fresh hold clock directly, the same idiom
+// (and for the same reason) as fixround3_test.go's "simulate a griefer keeping
+// BOTH positions maximally fresh".
+//
+// ★ WHY A DIRECT WRITE IS NOW THE ONLY WAY TO REACH THIS STATE, and why that is
+// a RESULT rather than a shortcut: the backstop below must be proven against a
+// still-taxed holder AT the window boundary. Reaching that state used to be free
+// (bounce a token). It is now impossible through any public path in a wind-down
+// market, because (a) maturity is conserved by transfers, so no bounce, split or
+// chain can raise anyone's rate above what their own tokens carry, and (b)
+// RequireInflowOpen closes EVERY inflow the moment a market retires or freezes
+// (market.go), so no new maturity can enter to be donated. The one residual
+// channel is the creator answering a still-pending escrow during wind-down
+// (Answer is deadline-gated, not phase-gated, and credits the creator a fresh
+// clock — bounded by MaxAskDeadline, 30 days, which is inside the 42-day
+// window). So the backstop is NOT dead code, its trigger is simply no longer
+// attacker-reachable, and it stays tested here against the strongest possible
+// case: a MAXIMALLY fresh clock.
+func dosFreshenClock(s Store, creator string, block uint64, holders ...string) {
+	for _, h := range holders {
+		setU64(s, kAcqBlock(creator, h), block)
 	}
 }
 
@@ -83,12 +162,16 @@ func TestRefundHolder_EXITTAXDOS1_TwoAccountBounceBounded(t *testing.T) {
 	}
 	const open = uint64(1000)
 
-	// (1) ONE SHORT of the window: a fresh bounce keeps the push REFUSED — the
-	// EXITTAX-1 fresh-holder protection is intact inside the first six weeks.
+	// (1) ONE SHORT of the window: a still-taxed holder keeps the push REFUSED —
+	// the EXITTAX-1 fresh-holder protection is intact inside the first six weeks.
 	short := open + ExitTaxDecayBlocks - 1
-	bounceRefresh(t, s, c, a, g, short, 2)
+	// The bounce that used to manufacture that freshness is now INERT — asserted,
+	// not assumed. The still-taxed clock is then written directly (see
+	// dosFreshenClock for why no public path can produce it any more).
+	bounceAssertInert(t, s, c, a, g, short, 2)
+	dosFreshenClock(s, c, short, g, a)
 	if bps := ExitTaxBpsAt(heldBlocksAt(s, c, g, short)); bps == 0 {
-		t.Fatalf("fixture: griefer clock should be fresh after the bounce, got 0 bps")
+		t.Fatalf("fixture: griefer clock should be fresh, got 0 bps")
 	}
 	if _, err := RefundHolder(s, "keeper", c, g, short); errSymbol(err) != ErrState {
 		t.Fatalf("one short of the window a fresh push must still be REFUSED, got err=%v", err)
@@ -97,9 +180,10 @@ func TestRefundHolder_EXITTAXDOS1_TwoAccountBounceBounded(t *testing.T) {
 		t.Fatal("market must not be closeable one short of the backstop window")
 	}
 
-	// (2) AT the window: the SAME fresh bounce cannot stop the sweep any more.
+	// (2) AT the window: not even a MAXIMALLY fresh clock can stop the sweep.
 	at := open + ExitTaxDecayBlocks
-	bounceRefresh(t, s, c, a, g, at, 2) // both clocks now maximally fresh again
+	bounceAssertInert(t, s, c, a, g, at, 2)
+	dosFreshenClock(s, c, at, g, a) // both clocks maximally fresh — the worst case
 	if bps := ExitTaxBpsAt(heldBlocksAt(s, c, a, at)); bps == 0 {
 		t.Fatalf("fixture: accomplice clock should be fresh at the window, got 0 bps")
 	}
@@ -159,9 +243,10 @@ func TestRefundHolder_NOTICE1DoS_NaturalFreezeRefreshBounded(t *testing.T) {
 	// a still-taxed (fresh-clock) holder cannot be force-pushed there — the
 	// fix-round-1 EXITTAX-1/NOTICE-1 fresh-holder protection is preserved.
 	inside := freezeAt + ExitTaxDecayBlocks - 1
-	bounceRefresh(t, s, c, sybil, g, inside, 1)
+	bounceAssertInert(t, s, c, sybil, g, inside, 1)
+	dosFreshenClock(s, c, inside, g)
 	if bps := ExitTaxBpsAt(heldBlocksAt(s, c, g, inside)); bps == 0 {
-		t.Fatal("fixture: griefer clock should be fresh after the bounce")
+		t.Fatal("fixture: griefer clock should be fresh")
 	}
 	if _, err := RefundHolder(s, "keeper", c, g, inside); errSymbol(err) != ErrState {
 		t.Fatalf("inside window: a refreshed (fresh-clock) holder push must be REFUSED, got %v", err)
@@ -170,7 +255,8 @@ func TestRefundHolder_NOTICE1DoS_NaturalFreezeRefreshBounded(t *testing.T) {
 	// AT the window (measured from the natural freeze block, NOT the holder's
 	// refreshable clock): the sweep fires despite the refresh. Drain and close.
 	at := freezeAt + ExitTaxDecayBlocks
-	bounceRefresh(t, s, c, sybil, g, at, 1)
+	bounceAssertInert(t, s, c, sybil, g, at, 1)
+	dosFreshenClock(s, c, at, g, sybil) // worst case: both maximally fresh
 	for _, h := range []string{g, sybil} {
 		if _, err := RefundHolder(s, "keeper", c, h, at); err != nil {
 			t.Fatalf("AT the window: push of %s must fire: %v", h, err)
@@ -197,6 +283,14 @@ func TestRefundHolder_NOTICE1DoS_NaturalFreezeRefreshBounded(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestRefundHolder_OUTFLOWK2_TinyPoisonWindowBoundary(t *testing.T) {
+	// ★ FIXTURE CHANGED (TOKEN MATURITY, 2026-07-27), attack STRENGTH unchanged.
+	// mallory's poison stash used to be bought in the same block as bob's
+	// position; the transfer then re-aged the received slice to `block`
+	// regardless, so any stash worked. Maturity now travels WITH the tokens, so a
+	// poison only bites if the poisoner's tokens genuinely carry LESS maturity
+	// than the victim's. mallory therefore buys 1000 blocks after bob, and the
+	// retire moves with it — the market must still be ACTIVE for mallory to buy
+	// at all, which is itself the point (see the atBlk half below).
 	build := func() (*MemStore, string, string, uint64) {
 		s := NewMemStore()
 		const c, bob, mallory = "alice", "bob", "mallory"
@@ -207,17 +301,19 @@ func TestRefundHolder_OUTFLOWK2_TinyPoisonWindowBoundary(t *testing.T) {
 		if _, err := Buy(s, bob, c, t0, big.NewInt(50000)); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := Buy(s, mallory, c, t0, big.NewInt(1)); err != nil {
+		poisonBuy := t0 + 1000
+		if _, err := Buy(s, mallory, c, poisonBuy, big.NewInt(1)); err != nil {
 			t.Fatal(err)
 		}
-		if err := Retire(s, c, c, t0); err != nil { // wind-down opens at t0
+		if err := Retire(s, c, c, poisonBuy); err != nil { // wind-down opens here
 			t.Fatal(err)
 		}
-		return s, c, bob, t0
+		return s, c, bob, poisonBuy
 	}
 
-	// Boundary: at open+ExitTaxDecayBlocks-1 the poison keeps the push refused;
-	// at open+ExitTaxDecayBlocks it cannot.
+	// Boundary, first half: one short of open+ExitTaxDecayBlocks the poison still
+	// works (mallory's stash is genuinely 1000 blocks fresher than bob's) and
+	// still keeps the push refused — the in-window fresh-holder protection.
 	sShort, c, bob, open := build()
 	shortBlk := open + ExitTaxDecayBlocks - 1
 	if err := TransferCredits(sShort, c, "mallory", bob, shortBlk, big.NewInt(1)); err != nil {
@@ -230,16 +326,32 @@ func TestRefundHolder_OUTFLOWK2_TinyPoisonWindowBoundary(t *testing.T) {
 		t.Fatalf("one short of the window, the poison must still refuse the push, got %v", err)
 	}
 
+	// Boundary, second half. TWO things are asserted here now.
 	sAt, c2, bob2, open2 := build()
 	atBlk := open2 + ExitTaxDecayBlocks
+
+	// (a) ★ THE POISON IS STRUCTURALLY DEAD AT THE BOUNDARY. By open+decay every
+	// token in a wind-down market has matured — no inflow can have entered since
+	// the wind-down opened (RequireInflowOpen refuses a retired market), and
+	// transfers only move maturity that already exists. So mallory's dust arrives
+	// carrying a FULL window of maturity and cannot move bob's rate at all.
 	if err := TransferCredits(sAt, c2, "mallory", bob2, atBlk, big.NewInt(1)); err != nil {
 		t.Fatal(err)
 	}
-	if bps := ExitTaxBpsAt(heldBlocksAt(sAt, c2, bob2, atBlk)); bps == 0 {
-		t.Fatal("fixture: the 1-unit poison should have flipped bob's tax nonzero at the boundary too")
+	if bps := ExitTaxBpsAt(heldBlocksAt(sAt, c2, bob2, atBlk)); bps != 0 {
+		t.Fatalf("OUTFLOW-K-2: at the boundary the 1-unit poison moved bob to %d bps; in a wind-down market "+
+			"no fresh maturity can exist, so the poison must be inert", bps)
+	}
+
+	// (b) THE BACKSTOP IS STILL PROVEN, against the strongest case the gate can
+	// ever face: a MAXIMALLY fresh clock (only reachable now by direct write —
+	// see dosFreshenClock). At the boundary nothing may block the sweep.
+	dosFreshenClock(sAt, c2, atBlk, bob2)
+	if bps := ExitTaxBpsAt(heldBlocksAt(sAt, c2, bob2, atBlk)); bps != MaxExitTaxBps {
+		t.Fatalf("fixture: written clock should read the max rate, got %d", bps)
 	}
 	if _, err := RefundHolder(sAt, "keeper", c2, bob2, atBlk); err != nil {
-		t.Fatalf("AT the window the poison must NOT block the sweep: %v", err)
+		t.Fatalf("AT the window a maximally-fresh clock must NOT block the sweep: %v", err)
 	}
 	if bal := getMoney(sAt, kBal(c2, bob2)); bal.Sign() != 0 {
 		t.Fatalf("bob balance after the forced sweep = %s, want 0", bal)

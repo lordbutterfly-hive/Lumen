@@ -3,6 +3,7 @@ package core
 import (
 	"math/big"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -468,12 +469,85 @@ func TestAskCreditsRoundingWiredCorrectly(t *testing.T) {
 	if res.RateUsed.Cmp(big.NewInt(10)) != 0 {
 		t.Fatalf("RateUsed = %s, want 10 (the seeded TWAP)", res.RateUsed)
 	}
-	// ceil(101/10) = 11, floor would be 10.
-	if res.CreditsSpent.Cmp(big.NewInt(11)) != 0 {
-		t.Fatalf("CreditsSpent = %s, want 11 (ceil of 101/10)", res.CreditsSpent)
+	// USER RULING 2026-07-27 — the posted face is the buyer's TOTAL. face=101
+	// splits into commission floor(101*1200/10000) = 12 and a token leg of 89,
+	// so the settled count is ceil(89/10) = 9 (floor would be 8). Before the
+	// ruling this settled the FULL 101 in tokens (11) AND drew the 12 on top,
+	// charging 113 for a "101" service.
+	if res.CreditsSpent.Cmp(big.NewInt(9)) != 0 {
+		t.Fatalf("CreditsSpent = %s, want 9 (ceil of the 89 token leg / 10)", res.CreditsSpent)
 	}
-	if got := getMoney(s, kBal(creator1, asker1)); got.Cmp(big.NewInt(1_000_000-11)) != 0 {
-		t.Fatalf("asker balance = %s, want %d", got, 1_000_000-11)
+	if got := getMoney(s, kBal(creator1, asker1)); got.Cmp(big.NewInt(1_000_000-9)) != 0 {
+		t.Fatalf("asker balance = %s, want %d", got, 1_000_000-9)
+	}
+	// The legs re-sum to the posted face exactly: 89 + 12 == 101.
+	if sum := new(big.Int).Add(big.NewInt(89), commission); sum.Cmp(big.NewInt(101)) != 0 {
+		t.Fatalf("legs = %s, want the posted face 101", sum)
+	}
+}
+
+// TestAsk_PostedFaceIsTheBuyersTotal pins USER RULING 2026-07-27: the price a
+// creator posts is the TOTAL the buyer parts with. The 12% commission is
+// carved OUT of it (token leg 88% + HBD leg 12% == 100%), never added on top.
+//
+// THE DEFECT THIS EXISTS TO CATCH, precisely: before the ruling, Ask settled
+// the token leg at the FULL posted face and the wrapper ALSO drew the 12% in
+// HBD, so a creator's "9090" service cost the buyer 9090 in tokens PLUS 1090
+// in HBD = 10,180 — a 12% surcharge disclosed nowhere, in no quote, on no
+// screen. If anyone ever re-derives one leg from the posted face and the other
+// from the token leg, this test fails.
+//
+// Fixture arithmetic, chosen so nothing is hidden by rounding: face 9090 splits
+// into commission floor(9090*1200/10000) = 1090 and a token leg of exactly
+// 8000, which at the seeded rate 2000 is exactly 4 credits with no ceil
+// remainder at all.
+func TestAsk_PostedFaceIsTheBuyersTotal(t *testing.T) {
+	s := NewMemStore()
+	curveMarket(s, creator1, 1000)
+	const posted = int64(9090)
+	setMoney(s, kFace(creator1), big.NewInt(posted))
+	setMoney(s, kBal(creator1, asker1), big.NewInt(50_000))
+	askBlock := seedSettleObs(s, creator1, 1000, big.NewInt(2000))
+	activateMarket(s, creator1, askBlock)
+
+	commission := commissionOwedFor(big.NewInt(posted))
+	if commission.Cmp(big.NewInt(1090)) != 0 {
+		t.Fatalf("commission = %s, want 1090 (12%% of the posted face)", commission)
+	}
+	// The two legs must re-sum to the posted face EXACTLY — no dust created,
+	// none destroyed, at the integers.
+	tokenLeg := new(big.Int).Sub(big.NewInt(posted), commission)
+	if tokenLeg.Cmp(big.NewInt(8000)) != 0 {
+		t.Fatalf("token leg = %s, want 8000", tokenLeg)
+	}
+
+	res, err := askAt0(s, asker1, creator1, askBlock, big.NewInt(10), commission, "cid", MinAskDeadline)
+	if err != nil {
+		t.Fatalf("Ask: %v", err)
+	}
+	// 4 credits, NOT the 5 the full posted face would have cost
+	// (ceil(9090/2000) = 5) — that difference IS the surcharge being removed.
+	if res.CreditsSpent.Cmp(big.NewInt(4)) != 0 {
+		t.Fatalf("CreditsSpent = %s, want 4 (the 8000 token leg at rate 2000); 5 would mean the buyer is still paying the full face in tokens AND the commission on top", res.CreditsSpent)
+	}
+	// What the buyer actually parted with, valued at the settlement rate:
+	// 4 credits * 2000 = 8000 of token value + 1090 HBD == the posted 9090.
+	spentValue := new(big.Int).Mul(res.CreditsSpent, res.RateUsed)
+	total := new(big.Int).Add(spentValue, commission)
+	if total.Cmp(big.NewInt(posted)) != 0 {
+		t.Fatalf("buyer's total = %s (%s in tokens + %s HBD), want exactly the posted face %d", total, spentValue, commission, posted)
+	}
+
+	// And the creator receives the whole token leg on Answer — the commission
+	// is the platform's cut of the posted price, never a second charge.
+	if _, err := Answer(s, creator1, creator1, askBlock+1, res.Seq, "ans"); err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+	if got := getMoney(s, kBal(creator1, creator1)); got.Cmp(big.NewInt(4)) != 0 {
+		t.Fatalf("creator credits after Answer = %s, want the escrowed 4", got)
+	}
+	if got := getMoney(s, kTreasury()); got.Cmp(commission) != 0 {
+		t.Fatalf("treasury = %s, want exactly the commission %s", got, commission)
 	}
 }
 
@@ -625,13 +699,18 @@ func TestAsk_SettlesAtTWAPWhenAvailable(t *testing.T) {
 	// S=200 so the spot arm (2680) sits ABOVE the seeded 2000 and the min
 	// resolves to the TWAP; C4 boundary passes exactly (face·2 == rate).
 	curveMarket(s, creator1, 200)
-	setMoney(s, kFace(creator1), big.NewInt(1000))
+	// POSTED face 1136, not 1000: C4 measures the TOKEN leg after the
+	// commission carve-out (USER RULING 2026-07-27), and 1136 is the exact
+	// posted price whose leg is 1136-floor(1136*1200/10000) = 1136-136 = 1000,
+	// i.e. exactly rate/2 — so this fixture still sits ON the C4 boundary,
+	// which is the whole point of it.
+	setMoney(s, kFace(creator1), big.NewInt(1136))
 	setMoney(s, kBal(creator1, asker1), big.NewInt(5000))
 	askBlock := seedSettleObs(s, creator1, 1000, big.NewInt(2000))
 	activateMarket(s, creator1, askBlock)
 
-	commission := commissionOwedFor(big.NewInt(1000))
-	wantCredits := creditsForAsk(big.NewInt(1000), big.NewInt(2000)) // ceil(1000/2000) = 1
+	commission := commissionOwedFor(big.NewInt(1136))
+	wantCredits := creditsForAsk(big.NewInt(1000), big.NewInt(2000)) // ceil(tokenLeg 1000/2000) = 1
 
 	res, err := askAt0(s, asker1, creator1, askBlock, wantCredits, commission, "cid", MinAskDeadline)
 	if err != nil {
@@ -1164,5 +1243,38 @@ func TestAnswerReclaimWindowsDisjoint(t *testing.T) {
 					b, succA1, succR1, succA2, succR2)
 			}
 		}
+	}
+}
+
+// TestAsk_FreeFormHashesAreLengthBounded — contentHash and answerHash end up in
+// a PERMANENT packed escrow record, so they are capped at the door like every
+// other free-form field in this contract (MaxOfferTitleLen's own reasoning).
+// Before MaxHashLen they were bounded only by the outer Hive transaction size,
+// which this contract does not control and did not cite.
+func TestAsk_FreeFormHashesAreLengthBounded(t *testing.T) {
+	s := NewMemStore()
+	curveMarket(s, creator1, 1000)
+	setMoney(s, kFace(creator1), big.NewInt(9090))
+	setMoney(s, kBal(creator1, asker1), big.NewInt(50_000))
+	askBlock := seedSettleObs(s, creator1, 1000, big.NewInt(2000))
+	activateMarket(s, creator1, askBlock)
+	commission := commissionOwedFor(big.NewInt(9090))
+
+	long := strings.Repeat("a", MaxHashLen+1)
+	if _, err := askAt0(s, asker1, creator1, askBlock, big.NewInt(10), commission, long, MinAskDeadline); err == nil {
+		t.Fatal("an over-long contentHash was accepted into a permanent record")
+	}
+	// Exactly at the cap is legal — the bound must not be off by one, or a
+	// legitimate 128-char address is refused.
+	atCap := strings.Repeat("a", MaxHashLen)
+	res, err := askAt0(s, asker1, creator1, askBlock, big.NewInt(10), commission, atCap, MinAskDeadline)
+	if err != nil {
+		t.Fatalf("a contentHash of exactly MaxHashLen was refused: %v", err)
+	}
+	if _, err := Answer(s, creator1, creator1, askBlock+1, res.Seq, long); err == nil {
+		t.Fatal("an over-long answerHash was accepted")
+	}
+	if _, err := Answer(s, creator1, creator1, askBlock+1, res.Seq, atCap); err != nil {
+		t.Fatalf("an answerHash of exactly MaxHashLen was refused: %v", err)
 	}
 }

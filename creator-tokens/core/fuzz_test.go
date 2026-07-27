@@ -1623,7 +1623,14 @@ func TestFuzzRoundingFavorsReserve(t *testing.T) {
 			// and the pure-math paths cover those; THIS test's subject is the
 			// end-to-end wiring through Ask, which now legitimately refuses
 			// incoherent (face, rate) combinations by design.
-			face := int64(5322) + rng.Int63n(MaxFace-5322)
+			// 5322 was the smallest face that could clear the C4 floor at the
+			// lowest rate this sweep generates. USER RULING 2026-07-27 made the
+			// posted face a GROSS price, of which only ~88% is the token leg
+			// C4 actually measures, so the smallest legal POSTED face grosses
+			// up to 6047 (6047-floor(6047*1200/10000) = 6047-725 = 5322; 6046
+			// yields 5321 and is refused). Generating below this would make the
+			// rate range empty, not test anything weaker.
+			face := int64(6047) + rng.Int63n(MaxFace-6047)
 			if err := Register(s, creator, creator, regBlock, face, MaxCap); err != nil {
 				t.Fatalf("iter %d: setup Register: %v", i, err)
 			}
@@ -1637,7 +1644,12 @@ func TestFuzzRoundingFavorsReserve(t *testing.T) {
 			if byCap := (face + 249) / 250; byCap > loRate {
 				loRate = byCap
 			}
-			hiRate := 2 * face
+			// C4 binds on the TOKEN LEG, not the posted face (settlement.go's
+			// settlePosted): the legal ceiling is rate <= 2*tokenLeg, so this
+			// bound is computed from the leg. Using 2*face here would generate
+			// pairs the contract must legitimately refuse and read the refusal
+			// as a rounding bug.
+			hiRate := 2 * (face - (face*1200)/10000)
 			if hiRate > 106_000 {
 				hiRate = 106_000
 			}
@@ -1655,7 +1667,12 @@ func TestFuzzRoundingFavorsReserve(t *testing.T) {
 			askBlock := seedSettleObs(s, creator, regBlock+10, rate)
 
 			owed := commissionOwedFor(big.NewInt(face))
-			maxCredits := fzCeilDiv(big.NewInt(face), rate) // the asker's own cap == the exact expected spend
+			// USER RULING 2026-07-27: the posted face is the buyer's TOTAL, so
+			// only face minus the commission settles in tokens. Recomputed here
+			// from first principles (not via splitFace) so this stays an
+			// INDEPENDENT model of what the contract should charge.
+			tokenLeg := new(big.Int).Sub(big.NewInt(face), owed)
+			maxCredits := fzCeilDiv(tokenLeg, rate) // the asker's own cap == the exact expected spend
 			res, err := askAt0(s, asker, creator, askBlock, maxCredits, owed, "cid", MinAskDeadline)
 			if err != nil {
 				t.Fatalf("iter %d: Ask(face=%d rate=%s): %v", i, face, rate, err)
@@ -1664,24 +1681,31 @@ func TestFuzzRoundingFavorsReserve(t *testing.T) {
 				t.Fatalf("iter %d: RateUsed = %s, want the seeded TWAP %s (min(short,long,spot) did not resolve to the marker)", i, res.RateUsed, rate)
 			}
 
-			want := fzCeilDiv(big.NewInt(face), rate)
+			want := fzCeilDiv(tokenLeg, rate)
 			if res.CreditsSpent.Cmp(want) != 0 {
-				t.Fatalf("iter %d: ROUNDING VIOLATION: face=%d rate=%s got CreditsSpent=%s, independent ceil(face/rate)=%s",
-					i, face, rate, res.CreditsSpent, want)
+				t.Fatalf("iter %d: ROUNDING VIOLATION: face=%d (tokenLeg=%s) rate=%s got CreditsSpent=%s, independent ceil(tokenLeg/rate)=%s",
+					i, face, tokenLeg, rate, res.CreditsSpent, want)
+			}
+			// The buyer's two legs must re-sum to the posted face EXACTLY —
+			// the whole point of the ruling. No dust may be created or lost by
+			// the split at any face in the fuzzed range.
+			if sum := new(big.Int).Add(tokenLeg, owed); sum.Cmp(big.NewInt(face)) != 0 {
+				t.Fatalf("iter %d: SPLIT LOST VALUE: tokenLeg=%s + commission=%s = %s, want face=%d",
+					i, tokenLeg, owed, sum, face)
 			}
 			// The defining ceiling property, checked directly: spending one
 			// FEWER credit must always undershoot face.
 			oneLess := new(big.Int).Sub(res.CreditsSpent, big.NewInt(1))
 			if oneLess.Sign() > 0 {
 				got := new(big.Int).Mul(oneLess, rate)
-				if got.Cmp(big.NewInt(face)) >= 0 {
-					t.Fatalf("iter %d: CreditsSpent=%s is not minimal for face=%d at rate=%s: one less (%s) still covers it (%s)",
-						i, res.CreditsSpent, face, rate, oneLess, got)
+				if got.Cmp(tokenLeg) >= 0 {
+					t.Fatalf("iter %d: CreditsSpent=%s is not minimal for tokenLeg=%s at rate=%s: one less (%s) still covers it (%s)",
+						i, res.CreditsSpent, tokenLeg, rate, oneLess, got)
 				}
 			}
 			covered := new(big.Int).Mul(res.CreditsSpent, rate)
-			if covered.Cmp(big.NewInt(face)) < 0 {
-				t.Fatalf("iter %d: RESERVE SHORTCHANGED: CreditsSpent=%s * rate=%s = %s < face=%d", i, res.CreditsSpent, rate, covered, face)
+			if covered.Cmp(tokenLeg) < 0 {
+				t.Fatalf("iter %d: RESERVE SHORTCHANGED: CreditsSpent=%s * rate=%s = %s < tokenLeg=%s (face=%d)", i, res.CreditsSpent, rate, covered, tokenLeg, face)
 			}
 		}
 		t.Logf("AskCreditsAlwaysCeilsNeverShortchangesReserve: %d randomized (face,rate) pairs, all ceil-exact (seed=%d)", iterations, seed)

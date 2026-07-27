@@ -6,10 +6,20 @@
 // actors with distinct behaviour profiles (reliable/flaky/abandoner/
 // price-mover creators; fans/one-shot askers/speculators/traders; a keeper;
 // synthetic oracle feeds) against the real core.Register/Renew/SetFace/
-// SetCap/Prepay/TransferCredits/Ask/Answer/Reclaim/Refund/RefundHolder/
-// CloseIfDrained/RecordObs, asserting a set of fund invariants after every
-// single call and halting loudly (with the seed and the exact triggering
-// event) the instant any of them breaks.
+// SetCap/Buy/TransferCredits/Ask/Answer/Reclaim/Refund/RefundHolder/
+// CloseIfDrained/RecordObs/WithdrawTreasury, asserting a set of fund
+// invariants after every single call and halting loudly (with the seed and
+// the exact triggering event) the instant any of them breaks.
+//
+// ★ FIXED: this list used to say "Prepay" — deleted along with the PAR-mint
+// mechanism (RULING A, RULINGS-v2-2026-07-21; core.Buy on the bonding curve
+// is the only issuance path now, verified against sim/actions.go and
+// sim/engine.go, which call core.Buy, never core.Prepay) — and was missing
+// WithdrawTreasury, which sim/ does call. NOT YET exercised by sim/ as of
+// this pass (verified the same way): Sell, Decline, CreateOffering/
+// SetOfferingPrice/SetOfferingTitle/DeleteOffering, ClaimTradeFees, Retire —
+// flagged in the handoff report as a coverage gap in sim/ itself (out of
+// this fix's ownership), not claimed as exercised here.
 //
 // Usage:
 //

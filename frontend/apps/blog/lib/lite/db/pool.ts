@@ -52,3 +52,31 @@ export async function withTransaction<T>(fn: (client: PoolClient) => Promise<T>)
     client.release();
   }
 }
+
+/**
+ * Run `fn` while holding a Postgres advisory lock, or skip it if another process
+ * holds the lock. Returns null when the lock could not be taken.
+ *
+ * Needed by the publisher: the 3-second broadcast pacer is a process-local variable,
+ * so two overlapping drains (likely once a backlog exists, since one drain call can
+ * run ~84 seconds) would each believe it was safe to broadcast and collide on Hive's
+ * reply interval. Job claiming is already multi-worker safe; pacing was the only
+ * thing that wasn't.
+ */
+export async function withAdvisoryLock<T>(key: number, fn: () => Promise<T>): Promise<T | null> {
+  const client = await getPool().connect();
+  try {
+    const { rows } = await client.query<{ locked: boolean }>(
+      'SELECT pg_try_advisory_lock($1) AS locked',
+      [key]
+    );
+    if (!rows[0]?.locked) return null;
+    try {
+      return await fn();
+    } finally {
+      await client.query('SELECT pg_advisory_unlock($1)', [key]);
+    }
+  } finally {
+    client.release();
+  }
+}

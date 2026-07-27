@@ -38,6 +38,23 @@ export const liteConfig = {
   pruneBodyAfterPublish: process.env.LITE_PRUNE_BODY_AFTER_PUBLISH !== 'no', // default TRUE — Hive is source of truth (decision 2026-07-22)
   /** Cloudflare Turnstile secret for signup CAPTCHA (empty = disabled). */
   turnstileSecret: process.env.LITE_TURNSTILE_SECRET || '',
+  /**
+   * Per-account daily EDIT cap. Every edit is another broadcast competing for the
+   * publishing account's ~20-per-minute budget, and Hive itself imposes no edit
+   * limit, so this is the only bound. Generous: real editing never hits it.
+   */
+  editsPerDay: Number(process.env.LITE_EDITS_PER_DAY || 40),
+  /**
+   * Per-IP daily cap on wallet challenge/verify attempts. Separate from (and much
+   * larger than) the signup cap: proving wallet ownership is cheap and repeated on
+   * every login, so sharing the signup budget locked out NAT'd users.
+   */
+  challengePerIpPerDay: Number(process.env.LITE_CHALLENGE_PER_IP_PER_DAY || 200),
+  /**
+   * Per-IP daily cap on name-availability lookups. Uncapped it was free ammunition
+   * against Hive's API (two upstream calls per request) and an enumeration surface.
+   */
+  lookupPerIpPerDay: Number(process.env.LITE_LOOKUP_PER_IP_PER_DAY || 300),
   /** Per-IP signup cap per day (anti-Sybil, §H). */
   signupPerIpPerDay: Number(process.env.LITE_SIGNUP_PER_IP_PER_DAY || 20),
   /**
@@ -60,7 +77,23 @@ export const liteConfig = {
   // account after upgrading, so there is no money to collect, hold, or settle
   // here — the entire earnings subsystem was removed.
   /** Shared secret for the recsys ingestion endpoints (empty = endpoints disabled). */
-  recsysToken: process.env.LITE_RECSYS_TOKEN || ''
+  recsysToken: process.env.LITE_RECSYS_TOKEN || '',
+  /**
+   * DEV-ONLY posting WIF for the publisher account. Production MUST leave this
+   * empty and inject a KMS-backed broadcaster via `setBroadcaster` instead — an
+   * env-var private key is a dev convenience, not a deployment pattern. The
+   * bootstrap refuses to use this in production (see publisher/hive-broadcaster).
+   */
+  publisherPostingWif: process.env.LITE_PUBLISHER_POSTING_WIF || '',
+  /** Shared secret for the publisher drain endpoint (empty = endpoint disabled). */
+  publisherToken: process.env.LITE_PUBLISHER_TOKEN || '',
+  /**
+   * Children per container post before rotating to a fresh one (decision
+   * 2026-07-27: 1000, matching the ~1000-reply pattern observed on LeoThreads).
+   * Rotation costs one root post, so it is bounded by Hive's 5-minute root-post
+   * rule — keep this high enough that rotation is rare.
+   */
+  containerMaxChildren: Number(process.env.LITE_CONTAINER_MAX_CHILDREN || 1000)
 } as const;
 
 /**

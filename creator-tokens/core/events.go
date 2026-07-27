@@ -85,31 +85,34 @@ import (
 //     is a foot-gun the first time that replay ever drifts from truth (a
 //     missed event, a reorg, a bug). Recording it here for the caller to
 //     fill in makes the audit log self-verifying instead.
-//   - core.Answer's own AnswerResult (ask.go, a different agent's file)
-//     returns only CreditsToCreator — never the commissionHbd it books to
-//     kTreasury() in that SAME call ("addMoney(s, kTreasury(),
-//     rec.commissionHbd)"), even though Answer already has that exact value
-//     on hand as rec.commissionHbd at the point it does so. EvAnswered's
-//     commissionHbd parameter (M4 fix, 2026-07-21) has no clean source from
-//     AnswerResult alone today. RECOMMENDED FIX, out of this file's
-//     ownership to make: add a `CommissionHbd *big.Int` field to
-//     AnswerResult, mirroring ReclaimResult.CommissionHbd's existing shape
-//     exactly (both are the same rec.commissionHbd value, just surfaced at
-//     the two different resolution points of the same escrow). Until that
-//     lands, the wasm wrapper has no other clean way to obtain this value —
-//     unlike oldFace/oldCap/creditsBurned above, a pre-call Store read is
-//     not an option here, because ask.go's escrowRec/unpackEscrow are
-//     unexported. See the handoff report for this recommendation.
+// THIRD GAP, CLOSED — kept here as a corrected historical note rather than
+// silently deleted, because the surrounding two gaps above are still open and
+// a reader scanning this list needs to know this one no longer belongs with
+// them. This used to say: "core.Answer's own AnswerResult ... returns only
+// CreditsToCreator — never the commissionHbd ... RECOMMENDED FIX, out of this
+// file's ownership to make: add a CommissionHbd *big.Int field to
+// AnswerResult." That fix landed the same day (ask.go, 2026-07-21):
+// AnswerResult now carries CommissionHbd directly, mirroring
+// ReclaimResult.CommissionHbd's shape exactly, and the wasm wrapper's
+// `answer` entrypoint reads it straight off the result (no Store pre-read
+// needed, unlike oldFace/oldCap/creditsBurned above). Leaving the old
+// "no clean source exists" claim in place after the field shipped would have
+// sent the next reader hunting for a workaround to a problem that was already
+// solved.
 //
-// See the handoff report for the concrete integration note: ../contract's
+// INTEGRATION STATE, CORRECTED: this used to also claim "../contract's
 // current main.go, as it stands, does NOT call any of the constructors in
-// this file — it hand-builds its own sdk.Log JSON inline at each entrypoint,
-// with different event names and a narrower field set (no feePaid/paid/
-// deadlineBlocks/contentHash/answerHash/oldFace/oldCap/creditsBurned logged
-// anywhere today). Wiring main.go's twelve sdk.Log call sites to call
-// Ev*(...) here instead is a small, mechanical follow-up this file was
-// written to make trivial — not done here, since ../contract is out of this
-// change's ownership.
+// this file — it hand-builds its own sdk.Log JSON inline at each entrypoint
+// ... Wiring main.go's twelve sdk.Log call sites to call Ev*(...) here
+// instead is a small, mechanical follow-up ... not done here." That was true
+// when this file was first written and has not been true for a while:
+// contract/main.go's register/renew/setFace/setCap/transfer/ask/answer/
+// decline/reclaim/refund/buy/sell/refundHolder/closeIfDrained/
+// createOffering/setOfferingPrice/setOfferingTitle/deleteOffering
+// entrypoints all call the corresponding core.Ev*(...) constructor in this
+// file today. The oldFace/oldCap/creditsBurned pre-reads two gaps above
+// describe are exactly what main.go's setFace/setCap/refundHolder
+// entrypoints actually do, correctly, right before their core call.
 const evSchemaVersion = 1
 
 // ---- shared encoding helpers -------------------------------------------
@@ -172,9 +175,22 @@ func evOpen(name, creator, actor string, block uint64) string {
 // creator"), but the field stays named actor, not creator-twice, for a
 // uniform shape across all twelve events. face/cap are Register's posted
 // values (int64 in core's own signature, rendered here as a base-10 string
-// like every other amount); feePaid is the exact amount Register's own
-// caller proved paid (core books the full amount, not just the
-// RegistrationFee floor — see market.go's comment on that call site).
+// like every other amount).
+//
+// feePaid is ALWAYS ZERO now, and that is not a placeholder — it is the
+// whole point. REGISTRATION IS FREE (USER-RULED 2026-07-21, params.go):
+// core.Register/registerCheck/registerApply take no fee parameter at all any
+// more, and there is deliberately no RegistrationFee constant left to book
+// "the full amount of" — see params.go's own deletion note. This doc used to
+// say "feePaid is the exact amount Register's own caller proved paid (core
+// books the full amount, not just the RegistrationFee floor)," which
+// described a paid-registration mechanism that no longer exists anywhere in
+// this package. The parameter is kept, always fed a literal 0 by the wasm
+// wrapper (contract/main.go's `register` entrypoint), purely so this event's
+// wire shape does not change out from under an existing indexer/consumer —
+// removing the field would be the breaking change this file's own "append-
+// only wire format" rule (above) forbids just as much as repurposing it
+// would be.
 func EvRegistered(creator, actor string, block uint64, face, cap int64, feePaid *big.Int) string {
 	return evOpen("registered", creator, actor, block) +
 		`,"face":"` + evI64(face) + `"` +
@@ -259,13 +275,22 @@ func EvTransferred(creator, actor, to string, block uint64, amount *big.Int) str
 // shows the effective price actually paid at that block, which
 // creditsSpent alone does not (two asks can spend the same credits at two
 // different rates if face also changed between them).
-func EvAsked(creator, actor string, block, seq uint64, creditsSpent, commissionHbd, rate *big.Int, deadlineBlocks uint64, contentHash string) string {
+// offeringID identifies WHICH service this ask bought (0 == the legacy single
+// face price). Added 2026-07-27: the indexer's own doc already claimed `asked`
+// carried it — "so a settlement can be attributed to the service that was
+// bought without joining on anything" — but the field did not exist, so no
+// consumer could tell a $25 call from a $200 song, or check that a settlement
+// used the price that was posted at the time. State has no memory of a
+// resolved ask (ask.go), so if this event omits it the attribution is gone for
+// good.
+func EvAsked(creator, actor string, block, seq uint64, creditsSpent, commissionHbd, rate *big.Int, deadlineBlocks uint64, contentHash string, offeringID uint64) string {
 	return evOpen("asked", creator, actor, block) +
 		`,"seq":` + evU64(seq) +
 		`,"creditsSpent":"` + evMoney(creditsSpent) + `"` +
 		`,"commissionHbd":"` + evMoney(commissionHbd) + `"` +
 		`,"rate":"` + evMoney(rate) + `"` +
 		`,"deadlineBlocks":` + evU64(deadlineBlocks) +
+		`,"offeringId":` + evU64(offeringID) +
 		`,"contentHash":"` + evJSONEscape(contentHash) + `"}`
 }
 
@@ -297,9 +322,14 @@ func EvAnswered(creator, actor string, block, seq uint64, creditsToCreator, comm
 		`,"answerHash":"` + evJSONEscape(answerHash) + `"}`
 }
 
-// EvReclaimed — Reclaim (ask.go). actor is always == the escrow's own
-// stored asker (Reclaim's own auth check: "caller != rec.asker" is
-// rejected). seq matches the EvAsked this event resolves.
+// EvReclaimed — Reclaim (ask.go). actor is the CALLER who triggered this
+// reclaim — NOT necessarily the escrow's asker. (This doc used to claim
+// "actor is always == the escrow's own stored asker (Reclaim's own auth
+// check: 'caller != rec.asker' is rejected)"; that described a guard Reclaim
+// no longer has, and never has since the H1 defect fix, 2026-07-21, made
+// Reclaim permissionless — see the very next paragraph, which was added at
+// the same time and already says so. asker below, not actor, is who was
+// actually paid.) seq matches the EvAsked this event resolves.
 //
 // commissionHbd (M4 fix, 2026-07-21 — PRUNED-ADJUDICATION-2026-07-21.md;
 // supersedes this doc's own former "No commission leg" claim, which
@@ -314,11 +344,34 @@ func EvAnswered(creator, actor string, block, seq uint64, creditsToCreator, comm
 // Reclaim actually paid out. See ../indexer/index.go's
 // Index.ReclaimOutflowHbd, which folds this field into a GLOBAL running
 // total of every commission HBD unit ever handed back this way.
-func EvReclaimed(creator, actor string, block, seq uint64, credits, commissionHbd *big.Int) string {
+// asker (added 2026-07-27) is WHO WAS ACTUALLY PAID, and it is not optional.
+// Reclaim is permissionless (H1): `actor` is whoever submitted the transaction,
+// which may be a keeper or any passing stranger pushing an abandoned escrow,
+// while the credits and the commission always go to the escrow's own asker. An
+// indexer folding `actor` as the recipient credits the wrong account every time
+// a third party reclaims — and it cannot recover the right one from its own
+// escrow map either, since an index that started mid-stream never saw the Ask.
+func EvReclaimed(creator, actor string, block, seq uint64, credits, commissionHbd *big.Int, asker string) string {
 	return evOpen("reclaimed", creator, actor, block) +
 		`,"seq":` + evU64(seq) +
 		`,"credits":"` + evMoney(credits) + `"` +
-		`,"commissionHbd":"` + evMoney(commissionHbd) + `"}`
+		`,"commissionHbd":"` + evMoney(commissionHbd) + `"` +
+		`,"asker":"` + evJSONEscape(asker) + `"}`
+}
+
+// EvDeclined — Decline (ask.go, RULING E's delivery gate, 2026-07-27). Same
+// money shape as EvReclaimed (credits and the whole commission go back to the
+// asker) but a DIFFERENT event, deliberately: a reclaim means the creator went
+// silent until the window closed, a decline means they answered promptly with
+// "no". Only one of those is a black mark, and an indexer that could not tell
+// them apart would show a conscientious creator the same delivery record as an
+// absent one. actor is always == creator (Decline is creator-only).
+func EvDeclined(creator, actor string, block, seq uint64, credits, commissionHbd *big.Int, asker string) string {
+	return evOpen("declined", creator, actor, block) +
+		`,"seq":` + evU64(seq) +
+		`,"credits":"` + evMoney(credits) + `"` +
+		`,"commissionHbd":"` + evMoney(commissionHbd) + `"` +
+		`,"asker":"` + evJSONEscape(asker) + `"}`
 }
 
 // EvRefunded — Refund (refund.go, [AGENT 4]). actor pulls their OWN refund

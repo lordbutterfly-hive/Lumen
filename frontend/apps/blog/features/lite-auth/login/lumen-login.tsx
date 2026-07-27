@@ -4,8 +4,8 @@ import { FC, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import DialogLogin from '@/blog/components/dialog-login';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
-import { useLiteLogin } from './use-lite-login';
-import BtcConnectDialog from './btc-connect-dialog';
+import { useLiteLogin, type WalletChain } from './use-lite-login';
+import WalletConnectDialog from './wallet-connect-dialog';
 import HiveSigninPanel from './hive-signin-panel';
 
 // TODO i18n — staged copy while the redesign lands (mirrors app-header's LABELS
@@ -21,6 +21,8 @@ const COPY = {
   keychainSub: 'Your existing Hive account — keys stay on your device.',
   btcTitle: 'Continue with a Bitcoin wallet',
   btcSub: 'Sign a message to prove ownership — no payment, no gas.',
+  evmTitle: 'Continue with an Ethereum wallet',
+  evmSub: 'MetaMask, Rainbow, any EVM wallet — a signature, not a transaction.',
   namePick: 'Pick your Lumen name',
   namePickSub: 'This is how you’ll appear across Lumen. You can’t change it later, so choose well.',
   nameRules: 'Lowercase letters, numbers and dashes. 3–16 characters.',
@@ -40,7 +42,8 @@ const LumenLogin: FC = () => {
   const { nameStatus, checkName, createAccount } = useLiteLogin();
 
   const [view, setView] = useState<View>('default');
-  const [btcOpen, setBtcOpen] = useState(false);
+  // Which wallet dialog is open (null = none). One dialog serves both chains.
+  const [walletOpen, setWalletOpen] = useState<WalletChain | null>(null);
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -143,7 +146,7 @@ const LumenLogin: FC = () => {
 
                   {/* Bitcoin wallet — Lumen Lite, no keys. */}
                   <button
-                    onClick={() => setBtcOpen(true)}
+                    onClick={() => setWalletOpen('btc')}
                     className="flex h-14 w-full cursor-pointer items-center gap-3 rounded-[14px] border border-[#e4e6e9] bg-white px-4 text-left hover:border-[#f7931a] hover:bg-[#fffaf3]"
                   >
                     <span className="flex h-[34px] w-[34px] flex-shrink-0 items-center justify-center rounded-[9px] bg-[#f7931a] text-base font-extrabold text-white">
@@ -152,6 +155,20 @@ const LumenLogin: FC = () => {
                     <span className="min-w-0 flex-1">
                       <span className="block text-[15px] font-semibold text-[#161511]">{COPY.btcTitle}</span>
                       <span className="block text-xs text-[#6b7280]">{COPY.btcSub}</span>
+                    </span>
+                  </button>
+
+                  {/* EVM wallet — Lumen Lite, no keys. Same proof shape as BTC. */}
+                  <button
+                    onClick={() => setWalletOpen('evm')}
+                    className="flex h-14 w-full cursor-pointer items-center gap-3 rounded-[14px] border border-[#e4e6e9] bg-white px-4 text-left hover:border-[#627eea] hover:bg-[#f8f9ff]"
+                  >
+                    <span className="flex h-[34px] w-[34px] flex-shrink-0 items-center justify-center rounded-[9px] bg-[#627eea] text-base font-extrabold text-white">
+                      ◈
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[15px] font-semibold text-[#161511]">{COPY.evmTitle}</span>
+                      <span className="block text-xs text-[#6b7280]">{COPY.evmSub}</span>
                     </span>
                   </button>
                 </div>
@@ -242,15 +259,16 @@ const LumenLogin: FC = () => {
         <a href="/faq.html" className="text-[#9ca3af]">Help</a>
       </div>
 
-      {btcOpen ? (
-        <BtcConnectDialog
-          onClose={() => setBtcOpen(false)}
+      {walletOpen ? (
+        <WalletConnectDialog
+          chain={walletOpen}
+          onClose={() => setWalletOpen(null)}
           onAuthenticated={() => {
-            setBtcOpen(false);
+            setWalletOpen(null);
             goHome();
           }}
           onNeedsName={() => {
-            setBtcOpen(false);
+            setWalletOpen(null);
             setView('name');
           }}
         />

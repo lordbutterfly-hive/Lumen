@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { configuredImagesEndpoint } from '@hive/ui/config/public-vars';
 import { isHiveAccountNameValid } from '@hive/transaction';
+import { isLiteDisplayName } from '@/blog/lib/lite/render/lite-identity';
 
 /**
  * Proxy endpoint for user avatars that prevents caching
@@ -42,6 +43,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     });
 
     if (!response.ok || !response.body) {
+      // A Lumen lite account has no Hive account and therefore no hosted avatar, so
+      // the image hoster 404s and every surface that renders this as a bare
+      // background-image showed a blank square. Serve a generated initial-letter
+      // avatar instead — the same idea as the feed strip's AvatarFallback, but here so
+      // that every consumer of /api/avatar benefits without touching each one.
+      if (await isLiteDisplayName(username)) {
+        return initialAvatar(username);
+      }
       return NextResponse.json({ error: 'Failed to fetch avatar' }, { status: response.status });
     }
 
@@ -65,3 +74,25 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 }
 
+
+/**
+ * Deterministic initial-letter avatar. Same name always yields the same colour, so a
+ * user's avatar does not change between page loads.
+ */
+function initialAvatar(username: string): NextResponse {
+  const letter = (username.trim()[0] ?? '?').toUpperCase();
+  let hash = 0;
+  for (const ch of username) hash = (hash * 31 + ch.charCodeAt(0)) % 360;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96" role="img" aria-label="${letter}">
+  <rect width="96" height="96" fill="hsl(${hash} 45% 42%)"/>
+  <text x="48" y="62" text-anchor="middle" font-family="system-ui,sans-serif" font-size="46" font-weight="600" fill="#fff">${letter}</text>
+</svg>`;
+  return new NextResponse(svg, {
+    status: 200,
+    headers: {
+      'Content-Type': 'image/svg+xml',
+      // Cacheable: it is a pure function of the name.
+      'Cache-Control': 'public, max-age=86400'
+    }
+  });
+}

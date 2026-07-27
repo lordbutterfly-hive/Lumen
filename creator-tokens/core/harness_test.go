@@ -869,7 +869,12 @@ func TestHarness_Guardrail_FrozenNeverGatesFunds(t *testing.T) {
 		// fixture needs face and marker in the token's own order of
 		// magnitude (C4: face·2 >= rate; C5: rate >= average/4). Same
 		// reasoning as the lifecycle test's face change above.
-		face   int64 = 30_000 // 30.000 HBD
+		// 30,000 -> 34,000 (commission carve-out, USER RULING 2026-07-27):
+		// C4 measures the TOKEN LEG, not the posted face, and the leg is
+		// 34,000-4,080 = 29,920, so 2·leg = 59,840 still clears the 56,000
+		// marker below. At the old 30,000 the leg was 26,400 and 2·leg =
+		// 52,800 < 56,000 — the fixture, not the guard, was what broke.
+		face   int64 = 34_000 // 34.000 HBD
 		capVal int64 = 1000000
 	)
 	regBlock := uint64(2_000_000)
@@ -1345,10 +1350,12 @@ func TestHarness_ReRegistration_AfterClosed(t *testing.T) {
 	// RULING C re-shape: 12 markers spaced LongObsSpacing apart (both rings
 	// must price — see the lifecycle test), and the marker moved 7777 ->
 	// 1900: at S=1000 the C5 tripwire needs rate >= ceil(Area(1000)/1000)/4
-	// = 1455 and the C4 min-price guard needs rate <= 2·face = 2000, so the
-	// old distinct marker must sit in [1455, 2000].
+	// = 1455 and the C4 min-price guard needs rate <= 2·tokenLeg(1000) = 1760
+	// (the commission carve-out, USER RULING 2026-07-27: C4 measures the token
+	// leg, and 1000-120 = 880), so the old distinct marker must sit in
+	// [1455, 1760] — it was 1900 when C4 still measured the full posted face.
 	hzResetObs(s, creator) // see hzResetObs: the funding Buy already fed both rings
-	const oldRate = 1900   // an obviously old/distinct marker value
+	const oldRate = 1700   // an obviously old/distinct marker value
 	lastOldObs := frozenStart - 100
 	oldObsBlocks := make([]uint64, stObsCount)
 	for i := range oldObsBlocks {

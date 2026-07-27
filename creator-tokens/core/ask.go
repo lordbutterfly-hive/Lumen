@@ -87,6 +87,12 @@ const (
 	askPending   = "PENDING"
 	askAnswered  = "ANSWERED"
 	askReclaimed = "RECLAIMED"
+	// askDeclined — the creator turned this job down inside the answer window
+	// and handed everything back (Decline, RULING E, 2026-07-27). Distinct
+	// from RECLAIMED so the record shows WHO ended it: an asker taking their
+	// money back after being ignored is a black mark on the creator, a creator
+	// saying "I can't take this" promptly is not.
+	askDeclined = "DECLINED"
 )
 
 // escrowRec is the unpacked form of one e|<creator>|<seq> record.
@@ -102,7 +108,7 @@ const (
 // and idempotent — see Ask/Answer/Reclaim below.
 // acqBlock (the hold-clock half of the ET-2 fix, adversarial fix round 1,
 // 2026-07-22) is the escrowed slice's OWN weighted-average acquisition block
-// at the instant Ask/Book took the tokens out of the holder's balance. It
+// at the instant Ask took the tokens out of the holder's balance. It
 // exists so an escrow that delivers NOTHING can be undone exactly: Reclaim
 // puts the tokens back with the AGE they left with, instead of re-aging them
 // to fresh. Before it, one unanswered ask re-aged the asker's clock, which
@@ -239,6 +245,37 @@ func commissionOwedFor(face *big.Int) *big.Int {
 	return mMulBpsDiv(face, CommissionBps)
 }
 
+// splitFace divides a creator's POSTED price into the two legs a buyer pays:
+// the token leg that reaches the creator, and the HBD commission leg that
+// reaches the platform.
+//
+// USER RULING 2026-07-27 — THE PRICE ON THE SCREEN IS THE PRICE THE BUYER
+// PAYS. A creator who posts "custom song — 200 HBD" means the buyer parts with
+// 200 HBD of value in total; the platform's 12% is CARVED OUT of that, never
+// added on top. This restores what SPEC §1.7.3 always specified ("the asker
+// signs one transaction carrying both a transfer.allow intent for the 12% in
+// HBD and the token spend for the creator's 88%"). The code had drifted to
+// settling the token leg at the FULL posted face while ALSO drawing the 12%
+// separately, so a posted "200" actually cost the buyer 224 — a surcharge that
+// appeared in no quote, on no screen, and in no spec.
+//
+// THE TWO LEGS SUM TO EXACTLY THE POSTED FACE, always: commission is
+// floor(face·CommissionBps/10000) and the token leg takes the REMAINDER, so
+// the integer division can only ever round in the CREATOR's favour, by at most
+// one base unit, and never against the buyer. This mirrors accrueExitTax's
+// floor-then-remainder split (exittax.go) for the same reason: two independent
+// roundings would create or destroy dust, one rounding plus a remainder
+// cannot.
+//
+// Callers must never split a face themselves — settlement.go's settlePosted is
+// the single door, so a quote can never disagree with the settlement it
+// previews.
+func splitFace(face *big.Int) (tokenLeg, commission *big.Int) {
+	commission = commissionOwedFor(face)
+	tokenLeg = new(big.Int).Sub(face, commission)
+	return tokenLeg, commission
+}
+
 // SettlementRate MOVED to settlement.go and CHANGED SHAPE (RULING C,
 // RULINGS-v2-2026-07-21): it now returns (rate, error) and REFUSES when no
 // safe rate exists, instead of falling back to PAR.
@@ -255,7 +292,7 @@ func commissionOwedFor(face *big.Int) *big.Int {
 // 1 — a 100x overcharge), and the fallback fired on ordinary conditions (a
 // market quiet 3 days, a >20% move). See settlement.go for the ruled
 // replacement: rate = min(TWAP_short, TWAP_long, spot) + the depth/spend/
-// min-price guards, all of it shared verbatim by Ask, Unlock and Book.
+// min-price guards, all of it shared verbatim by Ask below.
 
 // Ask opens an escrowed ask against creator: creditsForAsk(face, rate)
 // credits move out of the caller's balance into a new escrow record, and a
@@ -286,6 +323,9 @@ func Ask(s Store, caller, creator string, block uint64, maxCredits *big.Int, com
 	}
 	if contentHash == "" {
 		return nil, newErr(ErrInput, "empty content hash")
+	}
+	if len(contentHash) > MaxHashLen {
+		return nil, newErr(ErrInput, "contentHash too long")
 	}
 	if strings.Contains(contentHash, "|") {
 		return nil, newErr(ErrInput, "contentHash must not contain '|'")
@@ -344,7 +384,7 @@ func Ask(s Store, caller, creator string, block uint64, maxCredits *big.Int, com
 	// gate funds). THE PREVIOUS VERSION settled at PAR whenever the TWAP was
 	// unavailable, which overcharged the asker by exactly the factor `spot`
 	// on a live code path — see settlement.go's autopsy.
-	q, err := settleSpend(s, creator, block, face)
+	q, err := settlePosted(s, creator, block, face)
 	if err != nil {
 		return nil, err
 	}
@@ -389,7 +429,12 @@ func Ask(s Store, caller, creator string, block uint64, maxCredits *big.Int, com
 	// only that amount (bounded by the asker's own signed transfer.allow
 	// cap) — this is the credit leg's maxCredits cap, mirrored onto the HBD
 	// leg.
-	if owed := commissionOwedFor(face); commissionHbdPaid.Cmp(owed) != 0 {
+	// The owed amount comes off the SAME quote the credits came from
+	// (settlePosted, settlement.go) rather than being recomputed from `face`
+	// here: the two legs must always be the two halves of one split, so that a
+	// future change to the commission model cannot move one leg and leave the
+	// other reading a stale face.
+	if commissionHbdPaid.Cmp(q.CommissionHbd) != 0 {
 		return nil, newErr(ErrBalance, "commission must exactly equal commissionOwedFor(face) at execution (not more, not less)")
 	}
 
@@ -458,6 +503,9 @@ func Answer(s Store, caller, creator string, block, seq uint64, answerHash strin
 	if answerHash == "" {
 		return nil, newErr(ErrInput, "empty answer hash")
 	}
+	if len(answerHash) > MaxHashLen {
+		return nil, newErr(ErrInput, "answerHash too long")
+	}
 	if strings.Contains(answerHash, "|") {
 		return nil, newErr(ErrInput, "answerHash must not contain '|'")
 	}
@@ -473,16 +521,34 @@ func Answer(s Store, caller, creator string, block, seq uint64, answerHash strin
 		return nil, newErr(ErrState, "answer window closed")
 	}
 
-	// Chokepoint credit (holdclock.go): re-averages the creator's hold clock
-	// toward `block` — LOCKED-MECHANISM: wacq resets on ANY inflow, so
-	// service-earned tokens are exit-taxed as fresh, exactly like bought
-	// ones. Infallible (RULING G). RULING K deleted the cost basis, so the
-	// credit carries only the balance and the clock.
-	creditInflow(s, creator, creator, rec.credits, block)
+	// Chokepoint credit (holdclock.go): the escrowed tokens reach the creator
+	// carrying the MATURITY THEY ALREADY HAD — rec.acqBlock, the asker's own
+	// clock recorded at escrow-out — re-averaged into whatever the creator
+	// already holds. Infallible (RULING G). RULING K deleted the cost basis,
+	// so the credit carries only the balance and the clock.
+	//
+	// THIS REVERSES THE OLD RULE ("wacq resets on ANY inflow, so service-earned
+	// tokens are exit-taxed as fresh"), and the reversal is TOKEN MATURITY
+	// (USER-RULED 2026-07-27) applied consistently. The old rule made delivery a
+	// maturity INCINERATOR: a buyer who had held for six weeks and spent those
+	// tokens on a service destroyed the maturity in the act of paying — the
+	// exact confiscation the transfer fix just removed, wearing a different hat.
+	// It also left conservation an INEQUALITY (maturity could be burned but
+	// never minted), and an inequality is the shape a future leak hides inside;
+	// carrying the clock makes it an equality that can be asserted.
+	//
+	// It grants no new capability: the asker could always have moved the same
+	// tokens with the same clock via TransferCredits, so nothing is reachable
+	// here that was not reachable before. And it is symmetric with the two rails
+	// that already carry rec.acqBlock — Reclaim and Decline both return the
+	// escrow age-neutral, so an escrow that is ANSWERED must not be the one path
+	// that destroys age.
+	creditInflowAt(s, creator, creator, rec.credits, rec.acqBlock, block)
 	addMoney(s, kTreasury(), rec.commissionHbd)
 	rec.status = askAnswered
 	rec.answerHash = answerHash
 	saveEscrow(s, creator, seq, rec)
+	recordDelivery(s, creator, rec.asker) // delivery gate (delivery.go) — counters only
 
 	return &AnswerResult{CreditsToCreator: rec.credits, CommissionHbd: rec.commissionHbd}, nil
 }
@@ -549,7 +615,7 @@ func Reclaim(s Store, caller, creator string, block, seq uint64) (*ReclaimResult
 	// Chokepoint credit (holdclock.go). ET-2 FIX (2026-07-22, hold-clock half
 	// kept by RULING K): the tokens go back to the asker with EXACTLY the
 	// acquisition clock they left with — a nothing-happened escrow is restored
-	// to nothing-happened. rec.acqBlock was written by Ask/Book from the
+	// to nothing-happened. rec.acqBlock was written by Ask from the
 	// asker's own state at escrow-out and can only ever be paid to rec.asker,
 	// so it is conserved rather than created; the age-weight identity in
 	// escrowRec's doc shows the round trip is exactly age-neutral, i.e. the
@@ -564,6 +630,99 @@ func Reclaim(s Store, caller, creator string, block, seq uint64) (*ReclaimResult
 	creditInflowAt(s, creator, rec.asker, rec.credits, rec.acqBlock, block)
 	rec.status = askReclaimed
 	saveEscrow(s, creator, seq, rec)
+	// Delivery gate (delivery.go): reaching this line IS the definition of a
+	// miss — the window guard above proves this escrow sat PENDING past
+	// deadline+ReclaimGrace. recordMiss is infallible and returns nothing, so
+	// it can never make this outflow revert (RULING G); the asker's money is
+	// already back above regardless of what it decides about the creator.
+	recordMiss(s, creator, rec.asker, block)
+
+	return &ReclaimResult{CreditsReturned: rec.credits, CommissionHbd: rec.commissionHbd, Asker: rec.asker}, nil
+}
+
+// Decline is the creator's free, honest "no": it returns the asker's credits
+// AND the full commission inside the SAME window an Answer would be legal in,
+// and it is explicitly NOT a miss (RULING E, 2026-07-27).
+//
+// WHY THIS EXISTS AT ALL. Without it the delivery gate would punish the wrong
+// thing. A creator who is asked for something they cannot do — out of scope,
+// out of time, a job they simply do not want — would have exactly two options:
+// answer badly, or ignore it and take a miss. Decline makes saying no cost
+// nothing, which is what lets the miss counter mean "you ignored a paying
+// customer" rather than "you are selective". It is also what makes griefing
+// pointless: a hostile asker who floods a creator with junk asks to
+// manufacture misses can be cleared out for free, and pays a real commission
+// and a real wait for the privilege of trying.
+//
+// NO COMMISSION IS KEPT, deliberately, on the same principle as Reclaim (I5,
+// SPEC §1.7.2 rule 4 — "we are paid for delivered service only"): nothing was
+// delivered here, so the platform takes nothing. A commission retained on
+// decline would be a fee for saying no, and would quietly re-create the
+// incentive to ignore asks instead.
+//
+// IT IS NEUTRAL IN THE GATE — NEITHER A DELIVERY NOR A MISS (see the full
+// reasoning inline below, at the point the code actually enforces it). An
+// earlier version of this doc said "it counts as a DELIVERY, not a neutral
+// event," which was true of an earlier version of the CODE and stopped being
+// true when a 2026-07-27 code review found that reasoning only holds if the
+// decline is prompt — which nothing here measures (see the inline comment
+// right after saveEscrow for the actual argument). Stated here again, plainly,
+// because this is the doc comment the next reader sees first: Decline never
+// calls recordDelivery or recordMiss.
+//
+// The wasm wrapper pays CommissionHbd back to Result.Asker (never to whoever
+// submitted the transaction), state first and transfer second — the same CEI
+// ordering `reclaim` already uses.
+func Decline(s Store, caller, creator string, block, seq uint64) (*ReclaimResult, error) {
+	if caller != creator {
+		return nil, newErr(ErrAuth, "creator only")
+	}
+	rec, ok := loadEscrow(s, creator, seq)
+	if !ok {
+		return nil, newErr(ErrNotFound, "no such escrow")
+	}
+	if rec.status != askPending {
+		return nil, newErr(ErrState, "escrow not pending")
+	}
+	// The ANSWER window, exactly — a creator may not decline a job whose
+	// window has already closed. Past the deadline the escrow belongs to the
+	// reclaim rail and the miss is already earned; letting a creator decline
+	// there would be a retroactive eraser for a customer they had already
+	// ignored, which is the one thing this whole gate is built to prevent.
+	if block > rec.deadline {
+		return nil, newErr(ErrState, "answer window closed")
+	}
+
+	// Same age-neutral restoration Reclaim performs: the asker gets their
+	// tokens back carrying exactly the acquisition clock they left with, so a
+	// nothing-happened escrow is restored to nothing-happened and the creator's
+	// refusal cannot re-age (and therefore cannot exit-tax) the asker.
+	creditInflowAt(s, creator, rec.asker, rec.credits, rec.acqBlock, block)
+	rec.status = askDeclined
+	saveEscrow(s, creator, seq, rec)
+	// A DECLINE IS NEUTRAL IN THE GATE: it is neither a delivery nor a miss.
+	// It used to count as a DELIVERY, on the reasoning that promptly clearing
+	// your inbox is running your shop properly — but a code review (2026-07-27)
+	// showed that reasoning only holds if the decline IS prompt, and this call
+	// carries nothing that measures promptness. The escrow records its deadline
+	// and the asker's token age, never the block the ask was opened at, so
+	// "declined quickly" and "declined at the last legal block, after the
+	// customer waited the entire window for nothing" are indistinguishable
+	// here. Counting the second as delivery let maximal stalling produce a
+	// perfect record.
+	//
+	// Neutral is the honest reading and it keeps every property the gate needs:
+	//   - declining is still FREE for the creator — it can never earn a miss,
+	//     which is what makes saying no cost nothing;
+	//   - the anti-grief rail still works — junk asks aimed at manufacturing
+	//     misses are cleared away and simply leave no trace in the ratio;
+	//   - and it can no longer pad the denominator, so it cannot dilute real
+	//     misses (the same hole the self-deal filter closes from the other
+	//     side).
+	// Declines are still counted and shown SEPARATELY by the indexer, which is
+	// the right home for "this creator declines everything": that is a
+	// reputation signal for a buyer to weigh, not a solvency question for the
+	// contract to enforce.
 
 	return &ReclaimResult{CreditsReturned: rec.credits, CommissionHbd: rec.commissionHbd, Asker: rec.asker}, nil
 }

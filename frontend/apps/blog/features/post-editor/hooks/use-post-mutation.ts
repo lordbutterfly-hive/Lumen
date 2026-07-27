@@ -2,6 +2,8 @@ import { NaiAsset } from '@hiveio/wax';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { transactionService } from '@transaction/index';
+import { litePostIdOf } from '@/blog/lib/lite/render/lite-post-id';
+import { deleteLitePost } from '@/blog/lib/lite/client/lite-write';
 import { Beneficiarie } from '@hive/common-hiveio-packages/wax';
 import { toast } from '@ui/components/hooks/use-toast';
 import { getLogger } from '@ui/lib/logging';
@@ -259,6 +261,19 @@ export function useDeletePostMutation() {
   const deletePostMutation = useMutation({
     mutationFn: async (params: { permlink: string }) => {
       const { permlink } = params;
+
+      // LITE fork: a keyless lite account has no Hive key — its session carries a
+      // deliberate poison-pill signer — so the wax path below cannot serve it. The
+      // proxy account performs the removal via our own API. The Lumen post id is
+      // recoverable from the permlink (lib/lite/render/lite-post-id.ts). Same return
+      // shape as the wax path so onSuccess/onError stay untouched.
+      const litePostId = litePostIdOf({ permlink });
+      if (litePostId && user?.account_tier === 'lite') {
+        const result = await deleteLitePost(litePostId);
+        if (result.status !== 'ok') throw new Error(result.message);
+        return { ...params, broadcastResult: undefined };
+      }
+
       const broadcastResult = await transactionService.deleteComment(permlink, { observe: false });
       const response = { ...params, broadcastResult };
       return response;

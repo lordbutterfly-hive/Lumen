@@ -23,6 +23,12 @@ const nextConfig = {
   experimental: {
     outputFileTracingRoot: path.join(__dirname, '../..'),
     instrumentationHook: true
+    // DO NOT add `serverComponentsExternalPackages` for @hiveio/beekeeper or
+    // @hiveio/wax. It makes the lite publisher's WASM signer work, but it also
+    // makes EVERY page 500 ("Element type is invalid… got: undefined") — verified
+    // on clean builds 2026-07-27, with either package listed. The publisher opts
+    // out per-module instead, via `webpackIgnore` runtime imports in
+    // lib/lite/publisher/hive-broadcaster.ts.
   },
   // Worker files need specific headers (security headers are applied via middleware)
   async headers() {
@@ -84,6 +90,14 @@ const nextConfig = {
   webpack: (config, { isServer }) => {
     if (!isServer) {
       config.resolve.fallback = { fs: false, module: false };
+    }
+
+    // Reown AppKit -> @coinbase/cdp-sdk imports the undeclared '@x402/*' peers.
+    if (Array.isArray(config.resolve.alias)) {
+      config.resolve.alias.push({ name: '@x402', alias: false });
+    } else {
+      config.resolve.alias = config.resolve.alias || {};
+      config.resolve.alias['@x402'] = false;
     }
 
     config.plugins.push(

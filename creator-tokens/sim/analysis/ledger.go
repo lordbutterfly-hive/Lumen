@@ -62,7 +62,8 @@ type escrowHold struct {
 type MoneyIn struct {
 	Registration   *big.Int
 	Subscription   *big.Int
-	Prepay         *big.Int
+	Prepay         *big.Int // dead since RULING A deleted the PAR mint (core/transfer.go's file doc) — kept at 0 so a synthetic pre-RULING-A trace still replays; see Buy below for the live issuance path
+	Buy            *big.Int // RULING A: cost + trade fee drawn from a buyer's wallet on core.Buy — the ONLY live issuance path now
 	CommissionHeld *big.Int // paid in at ask time, whether or not later earned back or returned
 	Total          *big.Int
 }
@@ -70,6 +71,7 @@ type MoneyIn struct {
 type MoneyOut struct {
 	Refunds             *big.Int
 	ReclaimedCommission *big.Int
+	Sold                *big.Int // RULING K: net curve proceeds (gross - exit tax - trade fee) paid OUT to a seller via core.Sell
 	TreasuryWithdrawn   *big.Int // Upgrade 1 (C2): protocol revenue paid OUT to the owner via WithdrawTreasury
 	Total               *big.Int
 }
@@ -80,7 +82,15 @@ type Holdings struct {
 	ReserveTotal        *big.Int
 	EscrowHeldByCreator map[string]*big.Int // commission still HELD on a PENDING escrow, by creator
 	EscrowHeldTotal     *big.Int
-	Total               *big.Int
+	// FeePotsByCreator / FeePotsTotal (RULING F8): the creator halves of every
+	// trade fee (Buy/Sell) and every K2 exit tax (Sell/Refund/RefundHolder),
+	// pull-claimable via ClaimTradeFees (core/tradefee.go), keyed by creator —
+	// neither reserve nor treasury, its own resting bucket in the identity
+	// exactly like the live engine's own conservation check had to learn
+	// (sim/engine.go's checkInvariants, "FIXED 2026-07-21" comment).
+	FeePotsByCreator map[string]*big.Int
+	FeePotsTotal     *big.Int
+	Total            *big.Int
 }
 
 // ActorLedger is one actor's personal HBD statement: what they put in, what
@@ -109,11 +119,12 @@ type ActorLedger struct {
 	RegistrationFeesPaid          *big.Int // fees this actor personally paid to register a market (as a creator)
 	SubscriptionFeesPaid          *big.Int // fees this actor personally paid to renew ANY creator's subscription (self or as a fan — API.md: "a fan can keep a creator alive")
 	TransferredAway               *big.Int // PAR value of credits this actor voluntarily gave away via TransferCredits — a deliberate gift/sale, not a loss the design failed to anticipate
+	TradeFeesPaid                 *big.Int // the 10% trade fee this actor personally paid on curve Buys — an intended cost (RULING A/F8), not a loss; the matching cost basis (the reserve leg) is what CreditsHeldValue prices
 
 	// Unexplained = PaidIn - (ReceivedOut + CreditsHeldValue + PendingEscrowCommission
 	//               + PendingEscrowCreditsValue + CommissionOnAnsweredAsks
 	//               + CreditsConsumedOnAnsweredAsks + RegistrationFeesPaid
-	//               + SubscriptionFeesPaid + TransferredAway)
+	//               + SubscriptionFeesPaid + TransferredAway + TradeFeesPaid)
 	// A positive Unexplained means this actor is worse off by an amount the
 	// design does not account for — see AnalyzeLedger's doc below for what
 	// this does and does not include.
@@ -185,6 +196,7 @@ func newActorLedger(actor string) *ActorLedger {
 		RegistrationFeesPaid:          zeroBig(),
 		SubscriptionFeesPaid:          zeroBig(),
 		TransferredAway:               zeroBig(),
+		TradeFeesPaid:                 zeroBig(),
 		Unexplained:                   zeroBig(),
 	}
 }
@@ -215,11 +227,12 @@ func newActorLedger(actor string) *ActorLedger {
 func AnalyzeLedger(tr *Trace) LedgerReport {
 	rpt := LedgerReport{
 		FirstBadEvent: -1,
-		Entered:       MoneyIn{Registration: zeroBig(), Subscription: zeroBig(), Prepay: zeroBig(), CommissionHeld: zeroBig(), Total: zeroBig()},
-		Left:          MoneyOut{Refunds: zeroBig(), ReclaimedCommission: zeroBig(), TreasuryWithdrawn: zeroBig(), Total: zeroBig()},
+		Entered:       MoneyIn{Registration: zeroBig(), Subscription: zeroBig(), Prepay: zeroBig(), Buy: zeroBig(), CommissionHeld: zeroBig(), Total: zeroBig()},
+		Left:          MoneyOut{Refunds: zeroBig(), ReclaimedCommission: zeroBig(), Sold: zeroBig(), TreasuryWithdrawn: zeroBig(), Total: zeroBig()},
 		Sits: Holdings{
 			Treasury: zeroBig(), ReservesByCreator: map[string]*big.Int{}, ReserveTotal: zeroBig(),
-			EscrowHeldByCreator: map[string]*big.Int{}, EscrowHeldTotal: zeroBig(), Total: zeroBig(),
+			EscrowHeldByCreator: map[string]*big.Int{}, EscrowHeldTotal: zeroBig(),
+			FeePotsByCreator: map[string]*big.Int{}, FeePotsTotal: zeroBig(), Total: zeroBig(),
 		},
 		TreasuryFinal:       zeroBig(),
 		TreasuryMaxObserved: zeroBig(),
@@ -239,6 +252,7 @@ func AnalyzeLedger(tr *Trace) LedgerReport {
 	faceKnown := map[string]bool{}
 	paidUntil := map[string]uint64{}
 	bal := map[string]map[string]*big.Int{} // creator -> holder -> balance
+	feePots := map[string]*big.Int{}         // creator -> pull-claimable trade-fee/exit-tax creator half (kFeeBal, RULING F8)
 	nextSeq := map[string]uint64{}
 	escrows := map[string]map[uint64]*escrowHold{} // creator -> seq -> hold (present only while PENDING)
 	treasury := zeroBig()
@@ -381,6 +395,66 @@ func AnalyzeLedger(tr *Trace) LedgerReport {
 			a := getActor(ev.Actor)
 			a.PaidIn = new(big.Int).Add(a.PaidIn, hbdPaid)
 
+		case "buy":
+			// RULING A: the ONLY live issuance path (prepay's PAR mint is
+			// dead). Mirrors core/buy.go exactly: cost enters kReserve in
+			// full, the 10% trade fee splits 5/5 to kFeeBal(creator) (pull,
+			// F8) and kTreasury, and the buyer's wallet is drawn cost+fee
+			// (totalDue) — sim/actions.go's doBuy records exactly these three
+			// numbers.
+			tokens, okT := argBig(ev, "tokens")
+			cost, okC := argBig(ev, "cost")
+			fee, okF := argBig(ev, "fee")
+			totalDue, okD := argBig(ev, "totalDue")
+			if !okT || !okC || !okF || !okD {
+				rpt.Notes = append(rpt.Notes, fmt.Sprintf("event %d (buy by %s): missing Args.tokens/cost/fee/totalDue, skipped in ledger", i, ev.Actor))
+				continue
+			}
+			feeCreator, feePlatform := splitHalf(fee)
+			reserve[c] = new(big.Int).Add(get(reserve, c), cost)
+			supply[c] = new(big.Int).Add(get(supply, c), tokens)
+			addBal(c, ev.Actor, tokens)
+			treasury = new(big.Int).Add(treasury, feePlatform)
+			feePots[c] = new(big.Int).Add(get(feePots, c), feeCreator)
+			entered = new(big.Int).Add(entered, totalDue)
+			sits = new(big.Int).Add(sits, totalDue) // == cost + feeCreator + feePlatform
+			rpt.Entered.Buy = new(big.Int).Add(rpt.Entered.Buy, totalDue)
+			a := getActor(ev.Actor)
+			a.PaidIn = new(big.Int).Add(a.PaidIn, totalDue)
+			a.TradeFeesPaid = new(big.Int).Add(a.TradeFeesPaid, fee)
+
+		case "sell":
+			// RULING K: the complementary curve exit. Mirrors core/sell.go
+			// exactly: the reserve pays the FULL gross slice; the K2 exit tax
+			// and the 10% trade fee both split 5/5 creator/platform
+			// (exittax.go/tradefee.go); the seller receives net = gross - tax
+			// - fee. sim/actions.go's doSell records sold/gross/tax/fee/net.
+			sold, okS := argBig(ev, "sold")
+			gross, okG := argBig(ev, "gross")
+			tax, okX := argBig(ev, "tax")
+			fee, okF := argBig(ev, "fee")
+			net, okN := argBig(ev, "net")
+			if !okS || !okG || !okX || !okF || !okN {
+				rpt.Notes = append(rpt.Notes, fmt.Sprintf("event %d (sell by %s): missing Args.sold/gross/tax/fee/net, skipped in ledger", i, ev.Actor))
+				continue
+			}
+			taxCreator, taxPlatform := splitHalf(tax)
+			feeCreator, feePlatform := splitHalf(fee)
+			reserve[c] = new(big.Int).Sub(get(reserve, c), gross)
+			if reserve[c].Sign() < 0 {
+				markBad(i, fmt.Sprintf("event %d (sell by %s on %s): reserve went NEGATIVE (%s) — I1 solvency violated; the sold slice's gross (%s) exceeded this creator's replayed reserve",
+					i, ev.Actor, c, reserve[c], gross), new(big.Int).Set(reserve[c]))
+			}
+			supply[c] = new(big.Int).Sub(get(supply, c), sold)
+			addBal(c, ev.Actor, new(big.Int).Neg(sold))
+			treasury = new(big.Int).Add(treasury, new(big.Int).Add(taxPlatform, feePlatform))
+			feePots[c] = new(big.Int).Add(get(feePots, c), new(big.Int).Add(taxCreator, feeCreator))
+			left = new(big.Int).Add(left, net)
+			sits = new(big.Int).Sub(sits, net) // reserve -gross, treasury/feePots +tax+fee, net == gross-tax-fee
+			rpt.Left.Sold = new(big.Int).Add(rpt.Left.Sold, net)
+			a := getActor(ev.Actor)
+			a.ReceivedOut = new(big.Int).Add(a.ReceivedOut, net)
+
 		case "ask":
 			commissionPaid, ok := argBig(ev, "commissionHbdPaid")
 			if !ok {
@@ -499,19 +573,40 @@ func AnalyzeLedger(tr *Trace) LedgerReport {
 				rpt.Notes = append(rpt.Notes, fmt.Sprintf("event %d (refund by %s on %s): OK refund with replayed supply<=0 — this package's shadow supply has diverged from the real contract's, ledger entry skipped", i, ev.Actor, c))
 				continue
 			}
-			payout := refundPayout(r, credits, s)
-			reserve[c] = new(big.Int).Sub(r, payout)
+			gross := refundPayout(r, credits, s)
+			reserve[c] = new(big.Int).Sub(r, gross)
 			if reserve[c].Sign() < 0 {
 				markBad(i, fmt.Sprintf("event %d (refund by %s on %s): reserve went NEGATIVE (%s) — I1 solvency violated; the requested credits (%s) exceeded what this creator's replayed supply (%s) could support",
 					i, ev.Actor, c, reserve[c], credits, s), new(big.Int).Set(reserve[c]))
 			}
 			supply[c] = new(big.Int).Sub(s, credits)
 			addBal(c, ev.Actor, new(big.Int).Neg(credits))
-			left = new(big.Int).Add(left, payout)
-			sits = new(big.Int).Sub(sits, payout)
-			rpt.Left.Refunds = new(big.Int).Add(rpt.Left.Refunds, payout)
+			// K2: the same hold-time exit tax the curve charges is carved from
+			// the gross pro-rata slice, 50/50 creator/platform (exittax.go).
+			// The tax RATE depends on the caller's hold clock, which this
+			// package deliberately does not reimplement independently (same
+			// reasoning journey.go gives for not reimplementing the TWAP: an
+			// independent shadow of a clock this subtle risks silently
+			// drifting and then lying with confidence) — so the tax amount is
+			// sourced from the trace's own "exitTax" Arg (present only when
+			// nonzero — sim/actions.go's doRefund), and the reserve debit
+			// above stays an INDEPENDENT reimplementation via refundPayout.
+			tax, _ := argBig(ev, "exitTax") // absent/zero => a fully-matured caller, taxBps==0
+			if tax == nil {
+				tax = zeroBig()
+			}
+			net := new(big.Int).Sub(gross, tax)
+			if net.Sign() < 0 {
+				net = zeroBig() // unreachable given tax<=gross always; defensive floor, never a negative payout
+			}
+			taxCreator, taxPlatform := splitHalf(tax)
+			treasury = new(big.Int).Add(treasury, taxPlatform)
+			feePots[c] = new(big.Int).Add(get(feePots, c), taxCreator)
+			left = new(big.Int).Add(left, net)
+			sits = new(big.Int).Sub(sits, net) // reserve -gross, treasury/feePots +tax, net == gross-tax
+			rpt.Left.Refunds = new(big.Int).Add(rpt.Left.Refunds, net)
 			a := getActor(ev.Actor)
-			a.ReceivedOut = new(big.Int).Add(a.ReceivedOut, payout)
+			a.ReceivedOut = new(big.Int).Add(a.ReceivedOut, net)
 
 		case "refundHolder":
 			holder, okH := argStr(ev, "holder")
@@ -529,19 +624,32 @@ func AnalyzeLedger(tr *Trace) LedgerReport {
 				rpt.Notes = append(rpt.Notes, fmt.Sprintf("event %d (refundHolder by %s targeting %s on %s): OK with replayed supply<=0, skipped", i, ev.Actor, holder, c))
 				continue
 			}
-			payout := refundPayout(r, credits, s)
-			reserve[c] = new(big.Int).Sub(r, payout)
+			gross := refundPayout(r, credits, s)
+			reserve[c] = new(big.Int).Sub(r, gross)
 			if reserve[c].Sign() < 0 {
 				markBad(i, fmt.Sprintf("event %d (refundHolder by %s targeting %s on %s): reserve went NEGATIVE (%s) — I1 solvency violated",
 					i, ev.Actor, holder, c, reserve[c]), new(big.Int).Set(reserve[c]))
 			}
 			supply[c] = new(big.Int).Sub(s, credits)
 			setBal(c, holder, zeroBig())
-			left = new(big.Int).Add(left, payout)
-			sits = new(big.Int).Sub(sits, payout)
-			rpt.Left.Refunds = new(big.Int).Add(rpt.Left.Refunds, payout)
+			// K2 tax, on the pushed HOLDER's clock — same reasoning and same
+			// Args-sourced amount as the "refund" case above.
+			tax, _ := argBig(ev, "exitTax")
+			if tax == nil {
+				tax = zeroBig()
+			}
+			net := new(big.Int).Sub(gross, tax)
+			if net.Sign() < 0 {
+				net = zeroBig()
+			}
+			taxCreator, taxPlatform := splitHalf(tax)
+			treasury = new(big.Int).Add(treasury, taxPlatform)
+			feePots[c] = new(big.Int).Add(get(feePots, c), taxCreator)
+			left = new(big.Int).Add(left, net)
+			sits = new(big.Int).Sub(sits, net)
+			rpt.Left.Refunds = new(big.Int).Add(rpt.Left.Refunds, net)
 			a := getActor(holder) // API.md rule 2: RefundHolder pays the HOLDER, never the caller
-			a.ReceivedOut = new(big.Int).Add(a.ReceivedOut, payout)
+			a.ReceivedOut = new(big.Int).Add(a.ReceivedOut, net)
 
 		case "transfer":
 			to, okTo := argStr(ev, "to")
@@ -631,10 +739,18 @@ func AnalyzeLedger(tr *Trace) LedgerReport {
 			rpt.Sits.EscrowHeldTotal = new(big.Int).Add(rpt.Sits.EscrowHeldTotal, h.commissionHbd)
 		}
 	}
-	rpt.Sits.Total = new(big.Int).Add(rpt.Sits.Treasury, new(big.Int).Add(rpt.Sits.ReserveTotal, rpt.Sits.EscrowHeldTotal))
+	for c, p := range feePots {
+		if p.Sign() != 0 {
+			rpt.Sits.FeePotsByCreator[c] = p
+		}
+		rpt.Sits.FeePotsTotal = new(big.Int).Add(rpt.Sits.FeePotsTotal, p)
+	}
+	rpt.Sits.Total = new(big.Int).Add(rpt.Sits.Treasury, new(big.Int).Add(rpt.Sits.ReserveTotal,
+		new(big.Int).Add(rpt.Sits.EscrowHeldTotal, rpt.Sits.FeePotsTotal)))
 	rpt.Entered.Total = new(big.Int).Add(rpt.Entered.Registration, new(big.Int).Add(rpt.Entered.Subscription,
-		new(big.Int).Add(rpt.Entered.Prepay, rpt.Entered.CommissionHeld)))
-	rpt.Left.Total = new(big.Int).Add(rpt.Left.Refunds, new(big.Int).Add(rpt.Left.ReclaimedCommission, rpt.Left.TreasuryWithdrawn))
+		new(big.Int).Add(rpt.Entered.Prepay, new(big.Int).Add(rpt.Entered.Buy, rpt.Entered.CommissionHeld))))
+	rpt.Left.Total = new(big.Int).Add(rpt.Left.Refunds, new(big.Int).Add(rpt.Left.ReclaimedCommission,
+		new(big.Int).Add(rpt.Left.Sold, rpt.Left.TreasuryWithdrawn)))
 
 	// Finalize the treasury-exit verdict (Upgrade 1 / C2).
 	rpt.TreasuryFinal = new(big.Int).Set(treasury)
@@ -698,6 +814,7 @@ func AnalyzeLedger(tr *Trace) LedgerReport {
 		explained.Add(explained, a.RegistrationFeesPaid)
 		explained.Add(explained, a.SubscriptionFeesPaid)
 		explained.Add(explained, a.TransferredAway)
+		explained.Add(explained, a.TradeFeesPaid)
 		a.Unexplained = new(big.Int).Sub(a.PaidIn, explained)
 		if a.Unexplained.Sign() > 0 {
 			rpt.UnintendedLoss = append(rpt.UnintendedLoss, a)
@@ -726,13 +843,14 @@ func (r LedgerReport) render(b *strings.Builder) {
 		fmt.Fprintf(b, "Identity DOES NOT CLOSE. Divergence at first violation: %s base units.\n", r.Divergence)
 		fmt.Fprintf(b, "First bad event: %s\n", r.FirstBadReason)
 	}
-	fmt.Fprintf(b, "\nEntered: registration=%s subscription=%s prepay=%s commission-held-at-ask=%s TOTAL=%s\n",
-		r.Entered.Registration, r.Entered.Subscription, r.Entered.Prepay, r.Entered.CommissionHeld, r.Entered.Total)
-	fmt.Fprintf(b, "Left:    refunds=%s reclaimed-commission=%s treasury-withdrawn=%s TOTAL=%s\n",
-		r.Left.Refunds, r.Left.ReclaimedCommission, r.Left.TreasuryWithdrawn, r.Left.Total)
-	fmt.Fprintf(b, "Sits:    treasury=%s reserves(%d creators)=%s escrow-held(%d creators)=%s TOTAL=%s\n",
+	fmt.Fprintf(b, "\nEntered: registration=%s subscription=%s prepay=%s buy=%s commission-held-at-ask=%s TOTAL=%s\n",
+		r.Entered.Registration, r.Entered.Subscription, r.Entered.Prepay, r.Entered.Buy, r.Entered.CommissionHeld, r.Entered.Total)
+	fmt.Fprintf(b, "Left:    refunds=%s reclaimed-commission=%s sold=%s treasury-withdrawn=%s TOTAL=%s\n",
+		r.Left.Refunds, r.Left.ReclaimedCommission, r.Left.Sold, r.Left.TreasuryWithdrawn, r.Left.Total)
+	fmt.Fprintf(b, "Sits:    treasury=%s reserves(%d creators)=%s escrow-held(%d creators)=%s fee-pots(%d creators)=%s TOTAL=%s\n",
 		r.Sits.Treasury, len(r.Sits.ReservesByCreator), r.Sits.ReserveTotal,
-		len(r.Sits.EscrowHeldByCreator), r.Sits.EscrowHeldTotal, r.Sits.Total)
+		len(r.Sits.EscrowHeldByCreator), r.Sits.EscrowHeldTotal,
+		len(r.Sits.FeePotsByCreator), r.Sits.FeePotsTotal, r.Sits.Total)
 
 	// Treasury exit (Upgrade 1 / C2) — the reachable-exit check that
 	// distinguishes "sits with a legal exit" from "sits, frozen forever."

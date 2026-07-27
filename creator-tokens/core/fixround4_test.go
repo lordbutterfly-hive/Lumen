@@ -72,14 +72,24 @@ func TestOUTFLOWCLIFF1_SellClockFrontRun_GuardStops(t *testing.T) {
 	t1 := t0 + ExitTaxDecayBlocks // bob EXACTLY fully decayed => 0% tax
 
 	s := fr4Setup(t, MaxCap)
-	// mallory's poison stash: 1 token bought cheap at genesis. A one-time SUNK
-	// cost; its own age is irrelevant — the transfer re-ages the RECEIVED slice
-	// to `block` regardless of how long mallory held it.
-	if _, err := Buy(s, "mallory", "alice", 1000, big.NewInt(1)); err != nil {
-		t.Fatalf("mallory Buy: %v", err)
-	}
 	if _, err := Buy(s, "bob", "alice", t0, big.NewInt(B)); err != nil {
 		t.Fatalf("bob Buy: %v", err)
+	}
+	// ★ FIXTURE CHANGED (TOKEN MATURITY, 2026-07-27), attack UNCHANGED in shape,
+	// strength and cost. mallory's poison stash used to be 1 token bought at
+	// genesis, and the old comment here said in as many words that "its own age
+	// is irrelevant — the transfer re-ages the RECEIVED slice to `block`
+	// regardless of how long mallory held it". That is exactly PROVEN DEFECT 2,
+	// and it is now false: maturity travels with the tokens, so an ANCIENT stash
+	// donates a full window of maturity and cannot poison anyone. The front-run
+	// is therefore mounted with a stash that genuinely carries no maturity —
+	// bought in the front-run block itself. The attacker's cost is now a real
+	// curve purchase at the current price rather than a one-time genesis sunk
+	// cost, which is a strict INCREASE in the cost of the attack this guard
+	// exists to stop; the guard is proven against the cheaper-per-attempt
+	// version below regardless.
+	if _, err := Buy(s, "mallory", "alice", t1, big.NewInt(1)); err != nil {
+		t.Fatalf("mallory Buy: %v", err)
 	}
 	fr4RArea(t, s, "alice")
 
@@ -159,14 +169,25 @@ func TestOUTFLOWCLIFF1_RefundClockFrontRun_GuardStops(t *testing.T) {
 	t1 := t0 + ExitTaxDecayBlocks
 
 	s := fr4Setup(t, MaxCap)
-	if _, err := Buy(s, "mallory", "alice", 1000, big.NewInt(1)); err != nil {
-		t.Fatalf("mallory Buy: %v", err)
-	}
 	if _, err := Buy(s, "bob", "alice", t0, big.NewInt(B)); err != nil {
 		t.Fatalf("bob Buy: %v", err)
 	}
+	// ★ FIXTURE CHANGED (TOKEN MATURITY, 2026-07-27) — same reason as the Sell
+	// twin, with one extra constraint that is itself the finding: in a WIND-DOWN
+	// market every inflow is closed (RequireInflowOpen refuses a retired market),
+	// so a poisoner cannot acquire fresh maturity after the wind-down opens. The
+	// stash must therefore be bought BEFORE the retire, and it poisons only for
+	// as long as it is genuinely fresher than the victim. mallory buys 1000
+	// blocks after bob and the retire moves with it, which still reproduces the
+	// exact 0 -> 1 bps cliff at t1. Past open+ExitTaxDecayBlocks the wind-down
+	// poison is structurally impossible — pinned by
+	// TestRefundHolder_OUTFLOWK2_TinyPoisonWindowBoundary.
+	poisonBuy := t0 + 1000
+	if _, err := Buy(s, "mallory", "alice", poisonBuy, big.NewInt(1)); err != nil {
+		t.Fatalf("mallory Buy: %v", err)
+	}
 	// Retire so the wind-down (flat pro-rata Refund) rail is open at t1.
-	if err := Retire(s, "alice", "alice", t0); err != nil {
+	if err := Retire(s, "alice", "alice", poisonBuy); err != nil {
 		t.Fatalf("Retire: %v", err)
 	}
 	fr4RArea(t, s, "alice")

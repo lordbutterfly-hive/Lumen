@@ -186,7 +186,7 @@ func Owner(s Store) string { return getStr(s, kOwner()) }
 // kPaused() at all (see refund.go's and sell.go's file-level comments), so
 // flipping this switch can never freeze a holder's exit, a beneficiary's
 // earned fees, or a creator's ability to finish delivering — only the
-// RequireInflowOpen paths (Register/Renew/Buy/Ask/Unlock/Book) are
+// RequireInflowOpen paths (Register/Renew/Buy/Ask) are
 // affected. (ClaimTax, once in this list, is gone with the RULING-J holder
 // distribution — no holder tax share exists to freeze.)
 func SetPaused(s Store, paused bool) {

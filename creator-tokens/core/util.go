@@ -102,8 +102,40 @@ func subMoney(s Store, key string, delta *big.Int) error {
 // — authenticating the caller is the chain's job, not ours, and the proven
 // hive-price-market contract validates nothing beyond non-emptiness for exactly
 // this reason.
+// MaxAccountLen — the sanity bound on an account identifier, derived from the
+// LONGEST identity Magi can actually hand this contract as a caller, with real
+// headroom. It was 96, which is SIX characters above the longest identity Magi
+// supports today and BELOW the one it is about to.
+//
+// The arithmetic, so the next person can re-derive it instead of trusting this
+// comment (measured against go-vsc-node/lib/dids/btc.go's own prefixes):
+//
+//	Hive               "hive:" + <=16                              =  21
+//	EVM     did:pkh:eip155:1:      + 0x + 40 hex                    =  59
+//	BTC     did:pkh:bip122:<32-hex chain id>: is a 48-char prefix, so:
+//	          P2PKH "1…" / P2SH "3…"      (34)                      =  82
+//	          P2WPKH "bc1q…"              (42)                      =  90  <- longest SUPPORTED today
+//	          P2WSH  "bc1q…"              (62)                      = 110  <- REJECTED by 96
+//	          Taproot "bc1p…" (P2TR)      (62)                      = 110  <- REJECTED by 96
+//
+// Magi's DID parser currently accepts only P2PKH, P2SH and P2WPKH (btc.go's own
+// type switch), and rejects taproot with a literal "not supported, Phase 2".
+// So at 96 nothing REAL was blocked — and that is exactly why it was dangerous:
+// the day Magi ships Phase 2 taproot, every one of those users would have been
+// refused by THIS contract with a meaningless "invalid account", and the cause
+// would have been a constant in a different repository chosen when only Hive
+// names existed. Taproot is already the default in several major wallets, so
+// that day is a question of when.
+//
+// 160 clears every form above with room for a longer future address encoding,
+// and is still a real bound: it is a sanity limit on state-key size, never a
+// security control. The security property is the '|' rejection below — state
+// keys are built by concatenation, so a delimiter in an account name could
+// forge another account's key. Length has nothing to do with that.
+const MaxAccountLen = 160
+
 func validAccount(a string) bool {
-	if len(a) == 0 || len(a) > 96 {
+	if len(a) == 0 || len(a) > MaxAccountLen {
 		return false
 	}
 	for i := 0; i < len(a); i++ {

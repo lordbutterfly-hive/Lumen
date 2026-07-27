@@ -141,8 +141,11 @@ func TestH2SetFaceDropSandwichRejected(t *testing.T) {
 	asker := eng.pop.HolderNames[0]
 
 	// Pin a known face so the two commission figures provably differ, then
-	// register (Register anchors the band at this face).
+	// register (Register anchors the band at this face). Also pin a large
+	// cap so the small buys below (see the oracle warm-up note) never brush
+	// a per-seed-random ceiling.
 	eng.creators[creator].InitialFace = 4000
+	eng.creators[creator].InitialCap = 1_000_000
 	eng.doRegister(creator)
 	if eng.haltErr != nil {
 		t.Fatalf("register halted: %v", eng.haltErr)
@@ -151,20 +154,70 @@ func TestH2SetFaceDropSandwichRejected(t *testing.T) {
 		t.Fatalf("face = %s, want 4000", core.Face(eng.Store, creator))
 	}
 
-	// Fund the asker with credits so the CONTROL ask can actually settle.
-	// PORTED off the deleted PAR mint (doPrepay): Buy on the curve is the
-	// only issuance path, and the argument is a TOKEN count now, not an HBD
-	// amount. The asker's wallet must cover cost+fee, so this also tops the
-	// wallet up first — doBuy silently refuses an unaffordable buy (it
-	// models the chain's HiveDraw), which would have made the control ask
-	// fail for the wrong reason.
+	// Fund the asker generously — plenty at the curve's low-supply prices
+	// for everything below, including the ten small buys that build the
+	// oracle history.
 	eng.pop.Actors[asker].HBD = addBig(eng.pop.Actors[asker].HBD, big.NewInt(1_000_000_000))
-	eng.doBuy(asker, creator, big.NewInt(8000))
-	if eng.haltErr != nil {
-		t.Fatalf("buy halted: %v", eng.haltErr)
+
+	// ORACLE FIXTURE FIX (this test used to fail before even reaching the H2
+	// guard, refused by settlement.go's settlePosted/twap.go's twapWindowRead
+	// with ErrOracle "fewer than the minimum distinct-block observations").
+	// settlePosted prices EVERY ask off min(short TWAP, long TWAP, spot), and
+	// both TWAP rings refuse to price at all until they hold a minimum COUNT
+	// of distinct-block samples spanning a minimum BLOCK WINDOW (twap.go). The
+	// only production writer of those rings is core.Buy/Sell (RecordObs is
+	// fed by the curve — "the curve IS the price source"), so a fixture that
+	// wants a real settlement must build a real trading history the same way,
+	// not poke the rings directly.
+	//
+	// The LONG ring is the binding one: it needs >= LongMinObsCount (8)
+	// samples spanning >= LongMinObsBlocks (2 days = 57,600 blocks), each
+	// written >= LongObsSpacing (6,300 blocks) apart (twap.go's RecordObs
+	// dedup). Nine buys exactly LongObsSpacing apart, followed by a tenth
+	// after one further (still un-clamped) gap, span 58,400 blocks end to
+	// end — comfortably past the 57,600 floor with no single gap exceeding
+	// LongMaxObsWeightBlocks (12,600), so none of the accumulated dwell
+	// weight is clamped away either (twapWindowRead's second, independent
+	// "un-clamped weight" check).
+	//
+	// EACH buy is deliberately SMALL (20 tokens) and evenly spaced: the curve
+	// (curve.go) is steep enough that supply, not calendar time, is what
+	// breaks settlement. A big buy here (the old fixture bought 8,000 in one
+	// shot) pushes the market's own supply — and with it the curve's average
+	// "backing per token" and marginal "spot" price — high enough that a
+	// 4,000-unit face can no longer clear settlement.go's own guards: RULING
+	// C4's minimum-price floor (a face must be at least half of one token's
+	// value) and RULING C5's divergence tripwire (backing must stay within
+	// 4x the settlement rate) become UNSATISFIABLE together once supply
+	// passes roughly 700 tokens at this curve (verified directly against
+	// core.Area/core.SpotRate: at supply 8,000 the C4 floor alone requires
+	// face >= ~116,000). Conversely, too LOW a supply starves RULING C2's
+	// OTHER guard — the settlement spend cap (a single ask may not settle
+	// more than 5% of supply in credits) — which a supply of just a few tens
+	// of tokens fails outright. 200 tokens, built in even 20-token steps (so
+	// no single step moves the curve's price more than ~14%, comfortably
+	// under twap.go's MaxRateDeviationBps), sits in the window where face
+	// 4000 clears every settlement guard for BOTH the control face (4000)
+	// and the dropped sandwich face (3000) at once (verified directly
+	// against core.Area/core.SpotRate before writing this fixture).
+	const warmupBuy = 20
+	const warmupRounds = 9
+	for i := 0; i < warmupRounds; i++ {
+		eng.Block = genesisBlock + uint64(i)*core.LongObsSpacing
+		eng.doBuy(asker, creator, big.NewInt(warmupBuy))
+		if eng.haltErr != nil {
+			t.Fatalf("warm-up buy %d halted: %v", i, eng.haltErr)
+		}
 	}
-	if got := core.BalanceOf(eng.Store, creator, asker); got.Cmp(big.NewInt(8000)) != 0 {
-		t.Fatalf("asker credits = %s, want 8000 (the funding Buy did not land)", got)
+	// The final observation, one more (safely un-clamped) gap later: this is
+	// also the asker's top-up to the balance the rest of the test expects.
+	eng.Block = genesisBlock + uint64(warmupRounds-1)*core.LongObsSpacing + 8000
+	eng.doBuy(asker, creator, big.NewInt(20))
+	if eng.haltErr != nil {
+		t.Fatalf("top-up buy halted: %v", eng.haltErr)
+	}
+	if got := core.BalanceOf(eng.Store, creator, asker); got.Cmp(big.NewInt(200)) != 0 {
+		t.Fatalf("asker credits = %s, want 200 (the warm-up/top-up buys did not land)", got)
 	}
 
 	oldOwed := bpsFloorBig(big.NewInt(4000), core.CommissionBps) // 480
@@ -196,6 +249,20 @@ func TestH2SetFaceDropSandwichRejected(t *testing.T) {
 	}
 	if sandwich.ErrSym != "BALANCE" || !strings.Contains(sandwich.ErrMsg, "commission must exactly equal") {
 		t.Errorf("expected the H2 exact-commission rejection, got %s: %s", sandwich.ErrSym, sandwich.ErrMsg)
+	}
+
+	// PROOF the guard is rejecting the MISMATCH specifically, not the ask in
+	// general once the face has moved (the fixture's oracle history could in
+	// principle still be one settlement guard away from failing on ANY ask
+	// executed at the new face — this rules that out): the CORRECT commission
+	// at the current, dropped face (owed = floor(3000*1200/10000) = 360) must
+	// succeed at the same block, against the same asker, same oracle state.
+	newOwed := bpsFloorBig(big.NewInt(3000), core.CommissionBps) // 360
+	eng.doAskExecute(asker, creator, maxCredits, newOwed, "cid-honest-at-new-face", core.MinAskDeadline)
+	honest := eng.Trace.Events[len(eng.Trace.Events)-1]
+	if honest.Action != "ask" || !honest.OK {
+		t.Fatalf("an ask paying the CORRECT commission (360) at the dropped face (3000) should succeed — if it doesn't, the sandwich rejection above proves nothing about the H2 guard specifically; got OK=%v err=%s/%s",
+			honest.OK, honest.ErrSym, honest.ErrMsg)
 	}
 }
 

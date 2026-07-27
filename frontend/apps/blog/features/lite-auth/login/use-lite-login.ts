@@ -33,10 +33,16 @@ export type NameStatus =
   | { state: 'available' }
   | { state: 'unavailable'; reason: string };
 
-export interface BtcChallenge {
+export interface WalletChallenge {
   nonce: string;
   message: string;
 }
+
+/** @deprecated use WalletChallenge — kept so existing imports keep compiling. */
+export type BtcChallenge = WalletChallenge;
+
+/** Which wallet family a proof came from; picks the /api/lite/auth/{btc,evm} pair. */
+export type WalletChain = 'btc' | 'evm';
 
 // CSRF defense is the presence of this custom header (see lib/lite/http/csrf.ts);
 // the app's other authed fetches send the same [name, '1'] pair.
@@ -115,22 +121,28 @@ export function useLiteLogin() {
     [resolveFrom]
   );
 
-  const btcChallenge = useCallback(
-    async (address: string): Promise<BtcChallenge | { status: 'error'; message: string }> => {
-      const res = await fetch('/api/lite/auth/btc/challenge', {
+  // BTC and EVM share one flow (challenge -> sign the exact message -> verify);
+  // only the route pair and the signature encoding differ, and the server owns
+  // the encoding. One helper each, chain-parameterised.
+  const walletChallenge = useCallback(
+    async (
+      chain: WalletChain,
+      address: string
+    ): Promise<WalletChallenge | { status: 'error'; message: string }> => {
+      const res = await fetch(`/api/lite/auth/${chain}/challenge`, {
         method: 'POST',
         headers: JSON_POST,
         body: JSON.stringify({ address })
       });
       if (!res.ok) return { status: 'error', message: await friendlyError(res) };
-      return (await res.json()) as BtcChallenge;
+      return (await res.json()) as WalletChallenge;
     },
     []
   );
 
-  const btcVerify = useCallback(
-    async (address: string, signature: string, nonce: string): Promise<ResolveOutcome> => {
-      const res = await fetch('/api/lite/auth/btc/verify', {
+  const walletVerify = useCallback(
+    async (chain: WalletChain, address: string, signature: string, nonce: string): Promise<ResolveOutcome> => {
+      const res = await fetch(`/api/lite/auth/${chain}/verify`, {
         method: 'POST',
         headers: JSON_POST,
         body: JSON.stringify({ address, signature, nonce })
@@ -138,6 +150,16 @@ export function useLiteLogin() {
       return resolveFrom(res);
     },
     [resolveFrom]
+  );
+
+  const btcChallenge = useCallback(
+    (address: string) => walletChallenge('btc', address),
+    [walletChallenge]
+  );
+
+  const btcVerify = useCallback(
+    (address: string, signature: string, nonce: string) => walletVerify('btc', address, signature, nonce),
+    [walletVerify]
   );
 
   const createAccount = useCallback(
@@ -189,5 +211,14 @@ export function useLiteLogin() {
     }, 350);
   }, []);
 
-  return { nameStatus, checkName, google, btcChallenge, btcVerify, createAccount };
+  return {
+    nameStatus,
+    checkName,
+    google,
+    walletChallenge,
+    walletVerify,
+    btcChallenge,
+    btcVerify,
+    createAccount
+  };
 }

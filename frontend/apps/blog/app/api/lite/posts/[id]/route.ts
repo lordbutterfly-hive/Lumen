@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
-import { guardRead } from '@/blog/lib/lite/http/guard';
-import { getLitePost } from '@/blog/lib/lite/content/post-service';
-import { dbPostToEntry } from '@/blog/lib/lite/render/db-post-to-entry';
+import { guardRead, guardWrite } from '@/blog/lib/lite/http/guard';
+import { getLiteSession } from '@/blog/lib/lite/http/session';
+import { deleteLitePost, getLitePost } from '@/blog/lib/lite/content/post-service';
+import { liteEntryForPost } from '@/blog/lib/lite/render/lite-entry';
 
 const logger = getLogger('app');
 
@@ -19,9 +20,51 @@ export async function GET(
     if (!post || post.deletedLocally || post.feedVisibility === 'hidden') {
       return NextResponse.json({ error: 'not_found' }, { status: 404 });
     }
-    return NextResponse.json({ entry: dbPostToEntry(post), post });
+    // Overlaid entry, not the raw row: a published post's body lives on chain
+    // (pruneBodyAfterPublish drops our copy), and the identity overlay is applied
+    // there too.
+    const entry = await liteEntryForPost(post);
+    if (!entry) return NextResponse.json({ error: 'not_found' }, { status: 404 });
+    return NextResponse.json({ entry, post });
   } catch (error) {
     logger.error(error, 'Lite post fetch failed');
+    return NextResponse.json({ error: 'server_error' }, { status: 500 });
+  }
+}
+
+/**
+ * DELETE /api/lite/posts/:id — the post owner removes their post.
+ *
+ * Hides it from Lumen immediately, then queues the on-chain removal. Hive only
+ * allows a true delete while a comment has no replies, no net-positive votes and
+ * has not paid out (hive_evaluator_social.cpp:60,66,68-69); the worker falls back to
+ * blanking the content when that is refused, so "delete" always succeeds from the
+ * user's point of view.
+ */
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: { id: string } }
+): Promise<NextResponse> {
+  const blocked = guardWrite(req);
+  if (blocked) return blocked;
+
+  const session = await getLiteSession();
+  const user = session.user;
+  if (!user?.userId || user.account_tier !== 'lite') {
+    return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  }
+
+  try {
+    const result = await deleteLitePost(user.userId, params.id);
+    if (result.status === 'error') {
+      return NextResponse.json(
+        { error: result.code, message: result.message },
+        { status: result.code === 'not_found' ? 404 : 400 }
+      );
+    }
+    return NextResponse.json({ status: 'ok', onChain: result.onChain });
+  } catch (error) {
+    logger.error(error, 'Lite post delete failed');
     return NextResponse.json({ error: 'server_error' }, { status: 500 });
   }
 }

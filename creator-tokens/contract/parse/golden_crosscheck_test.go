@@ -66,9 +66,28 @@ func TestGoldenCrossCheck_FrontendPayloadsParse(t *testing.T) {
 		t.Fatal("no fixtures in captured_payloads.json — the TS harness must have produced zero captures")
 	}
 
-	// Every one of the 11 write actions must be represented — a silent drop
-	// (an action that stopped emitting an op) would otherwise pass unnoticed.
-	wantActions := []string{"register", "renew", "setFace", "setCap", "prepay", "ask", "answer", "reclaim", "refund", "refundHolder", "transfer"}
+	// Every write action the frontend's E2E harness captures a fixture for
+	// must be represented — a silent drop (an action that stopped emitting an
+	// op) would otherwise pass unnoticed.
+	//
+	// ★ FIXED: this list still said "prepay" — the `prepay` wasmexport
+	// entrypoint was DELETED (RULING A, RULINGS-v2-2026-07-21: core.Buy on
+	// the bonding curve replaced the PAR mint as the only issuance path), so
+	// captured_payloads.json can never contain it again and this test failed
+	// unconditionally ("golden fixtures missing action \"prepay\"") the
+	// instant the harness was re-run against the current frontend — verified
+	// directly. It was also MISSING "buy", "sell" and "retire", three actions
+	// captured_payloads.json's own fixtures already demonstrate the frontend
+	// emits today, so this list had silently stopped protecting the exact
+	// three actions most likely to regress next.
+	//
+	// "refund"/"refundHolder" are deliberately NOT required here: neither
+	// currently has a fixture in captured_payloads.json (the frontend's own
+	// vsc-data-path.e2e.ts harness does not yet exercise either write path),
+	// so requiring them would fail this test for a frontend gap this package
+	// cannot fix or verify — see the handoff report for that gap, flagged
+	// precisely rather than silently worked around.
+	wantActions := []string{"register", "renew", "setFace", "setCap", "buy", "sell", "ask", "answer", "reclaim", "retire", "transfer"}
 	seen := map[string]bool{}
 	for _, fx := range doc.Fixtures {
 		seen[fx.Action] = true

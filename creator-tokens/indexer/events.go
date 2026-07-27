@@ -2,8 +2,10 @@ package indexer
 
 import "encoding/json"
 
-// events.go — typed decoders for ../core/events.go's twelve Ev* wire
-// shapes. This package is a STANDALONE consumer of the LOG FORMAT (the JSON
+// events.go — typed decoders for ../core/events.go's Ev* wire shapes, PLUS a
+// handful of contract-only events ../contract/main.go hand-builds itself
+// (see KindRetired/KindTreasuryWithdrawn/KindTradeFeesClaimed's own docs
+// below). This package is a STANDALONE consumer of the LOG FORMAT (the JSON
 // string), never of core's internal Store machinery — it does not import
 // creator-tokens/core at all, matching the boundary discipline
 // hive-price-market/indexer/events.go documents for the identical
@@ -12,9 +14,24 @@ import "encoding/json"
 // ever changes a field name, this file has to be updated by hand — that is
 // the deliberate cost of the decoupling, not an oversight.
 //
-// EventKind identifies which of the twelve shapes a RawEvent decodes to.
-// The string values are exactly the "ev" field core/events.go's evOpen
-// writes.
+// DELIBERATELY NOT RECOGNIZED (fall to Unknown/Stats.Unknown, named and
+// justified here rather than silently dropped — see ParseEvent's own doc for
+// the mechanics): "init" (../contract/main.go's `init` owner-bootstrap log —
+// not a core-module event at all, and this package tracks no owner/init
+// concept) and "paused"/"unpaused" (the `pause`/`unpause` entrypoints' own
+// hand-built logs — the GLOBAL inbound-pause switch, kPaused(), is not
+// scoped to any single creator market and no query surface in this package
+// depends on it: SPEC-CREATOR-KEYS.md §2.5 routes live pause/Phase status
+// through a direct chain read, exactly like Closed/LastFace/LastCap already
+// are for this package's own MarketSummary — see that type's doc). If a
+// future consumer needs replayed pause history, it can be added deliberately
+// (its own scope, its own decision), same convention this package already
+// applies to trading-volume aggregates (index.go's file doc).
+//
+// EventKind identifies which shape a RawEvent decodes to. The string values
+// are exactly the "ev" field core/events.go's evOpen writes, or (for the
+// contract-only kinds) exactly what ../contract/main.go's own hand-built
+// sdk.Log(...) calls emit.
 type EventKind string
 
 const (
@@ -27,9 +44,23 @@ const (
 	KindAsked        EventKind = "asked"
 	KindAnswered     EventKind = "answered"
 	KindReclaimed    EventKind = "reclaimed"
+	KindDeclined     EventKind = "declined"
 	KindRefunded     EventKind = "refunded"
 	KindRefundPushed EventKind = "refundPushed"
 	KindClosed       EventKind = "closed"
+
+	// Bought/Sold (WAVE D, 2026-07-27) — core/buy.go's Buy and core/sell.go's
+	// Sell, the bonding-curve mint/redeem pair that is now the market's ONLY
+	// issuance path (prepay.go's PAR mint is deleted). These two were MISSING
+	// from this package from the moment WAVE D shipped until this fix: with no
+	// KindBought/KindSold, ParseEvent's own documented graceful-degradation
+	// default (indexer/events.go's own doc above) sent every "bought"/"sold"
+	// log line down the Unknown path — counted in Stats.Unknown, never folded —
+	// so every buy and every sell silently vanished from Position/HolderList/
+	// EventHistory. No crash, no error: just balances that drift further from
+	// chain truth with every trade, for as long as this went unnoticed.
+	KindBought EventKind = "bought"
+	KindSold   EventKind = "sold"
 
 	// Offering catalogue (2026-07-27) — the creator's shop. These carry NO
 	// money: an offering is a posted price, and the money events
@@ -39,6 +70,59 @@ const (
 	KindOfferingCreated EventKind = "offeringCreated"
 	KindOfferingUpdated EventKind = "offeringUpdated"
 	KindOfferingDeleted EventKind = "offeringDeleted"
+
+	// KindRetired is DIFFERENT IN KIND from every other constant in this
+	// block: it is NOT one of core/events.go's Ev* constructors. Retire
+	// (core/market.go) is called directly from ../contract/main.go's `retire`
+	// entrypoint, which hand-builds its own sdk.Log JSON inline — verified
+	// against contract/main.go directly (Retire's own wasmexport function) —
+	// exactly the pattern events.go's own file doc already warns about
+	// ("../contract's current main.go... hand-builds its own sdk.Log JSON
+	// inline at each entrypoint"). RetiredEvent (below) declares no "v" field
+	// at all — harmless either way (envelope.V is captured but never branched
+	// on) — and there is no schema_contract_test.go pin on
+	// the core side (that file only exercises core/events.go's Ev*
+	// constructors; there is no EvRetired to exercise). Recognizing it here
+	// is still correct and necessary: Retire is a real, permanent, on-chain
+	// state transition (an irreversible forced-FROZEN wind-down marker,
+	// core/market.go's kRetiredAt) that was previously invisible to this
+	// package — MarketSummary had no way to distinguish a retiring market
+	// from a healthy one, only ever learning about a market's terminal state
+	// much later, if and when it also fully drains to a "closed" event.
+	KindRetired EventKind = "retired"
+
+	// KindTreasuryWithdrawn — DEFECT FIX, 2026-07-28. Like KindRetired, this is
+	// NOT one of core/events.go's Ev* constructors: ../contract/main.go's
+	// `withdrawTreasury` entrypoint hand-builds its own log —
+	// `{"ev":"treasuryWithdrawn","actor":"...","amount":"...","block":N}` —
+	// verified directly against WithdrawTreasury's wasmexport function. This was
+	// entirely unrecognized before this fix (Stats.Unknown), which mattered more
+	// than a typical missing kind: index.go's own TreasuryHbd() doc had FLAGGED
+	// itself as already-stale the moment this entrypoint shipped ("the pure
+	// MONOTONIC sum, no debit path off kTreasury today claim ... is ALREADY
+	// STALE") — without this fix, TreasuryHbd() could only ever grow, so it
+	// would silently overstate the real kTreasury() balance forever after the
+	// owner's first withdrawal, exactly the kind of drift this package exists to
+	// avoid. NO "creator" field on the wire at all (owner-only, not a per-market
+	// action) — see index.go's KindTreasuryWithdrawn fold for why this is folded
+	// GLOBALLY, never through ix.market(...).
+	KindTreasuryWithdrawn EventKind = "treasuryWithdrawn"
+
+	// KindTradeFeesClaimed — DEFECT FIX, 2026-07-28. Also contract-only:
+	// ../contract/main.go's `claimTradeFees` entrypoint hand-builds
+	// `{"ev":"tradeFeesClaimed","actor":"...","amount":"...","block":N}`,
+	// logged only when the claimed amount is nonzero (mirrors refundHolder's own
+	// M3 zero-payout gating). No "creator" field on the wire either, but unlike
+	// treasuryWithdrawn this IS per-market: core.ClaimTradeFees pays out
+	// kFeeBal(caller), and every accrual into that key (core/tradefee.go's
+	// accrueTradeFee, called from buy.go/sell.go) is always keyed by the
+	// CREATOR whose market the trade happened on — never any other account — so
+	// `actor` here doubles as the creator identifier, the same "actor always ==
+	// creator" shape registered/faceChanged/capChanged/answered already use.
+	// kFeeBal is a SEPARATE pull pot from kTreasury (core/read.go's
+	// FeeBalanceOf: "neither reserve nor treasury"), so claiming it must never
+	// touch ix.treasuryHbd — see index.go's fold for the audit-only treatment.
+	KindTradeFeesClaimed EventKind = "tradeFeesClaimed"
 )
 
 type OfferingCreatedEvent struct {
@@ -146,7 +230,11 @@ type AskedEvent struct {
 	CommissionHbd  string `json:"commissionHbd"`
 	Rate           string `json:"rate"`
 	DeadlineBlocks uint64 `json:"deadlineBlocks"`
-	ContentHash    string `json:"contentHash"`
+	// OfferingID is which service was bought (0 == the legacy face price).
+	// Wired 2026-07-27 — the comment above this block promised it long before
+	// ../core/events.go actually emitted it.
+	OfferingID  uint64 `json:"offeringId"`
+	ContentHash string `json:"contentHash"`
 }
 
 // AnsweredEvent — CommissionHbd (M4 fix, 2026-07-21) is the HBD commission
@@ -168,6 +256,14 @@ type AnsweredEvent struct {
 // in full here, never having reached the treasury (../core/events.go's
 // EvReclaimed doc has the full rationale). Folded into
 // Index.ReclaimOutflowHbd's running total (index.go).
+//
+// Actor vs Asker (2026-07-27): Actor is whoever SUBMITTED the reclaim —
+// permissionless (H1), so possibly a keeper or an unrelated third party —
+// while Asker is who was actually PAID. Fold the credits to Asker, never to
+// Actor: the previous handler credited Actor and silently mis-attributed every
+// keeper-pushed reclaim, and it could not have recovered the right account from
+// its own escrow map either, since an index that started mid-stream never saw
+// the Ask.
 type ReclaimedEvent struct {
 	Creator       string `json:"creator"`
 	Actor         string `json:"actor"`
@@ -175,6 +271,24 @@ type ReclaimedEvent struct {
 	Seq           uint64 `json:"seq"`
 	Credits       string `json:"credits"`
 	CommissionHbd string `json:"commissionHbd"`
+	Asker         string `json:"asker"`
+}
+
+// DeclinedEvent — the creator turned a job down inside the answer window and
+// handed back credits AND the whole commission (core/ask.go Decline, RULING
+// E's delivery gate). Money shape is identical to a reclaim; the distinction is
+// the RECORD: a reclaim means the creator went silent until the window closed,
+// a decline means they answered promptly with "no". Only the first is a black
+// mark, so these must never be folded into the same bucket. Actor is always the
+// creator (Decline is creator-only); Asker is who was paid.
+type DeclinedEvent struct {
+	Creator       string `json:"creator"`
+	Actor         string `json:"actor"`
+	Block         uint64 `json:"block"`
+	Seq           uint64 `json:"seq"`
+	Credits       string `json:"credits"`
+	CommissionHbd string `json:"commissionHbd"`
+	Asker         string `json:"asker"`
 }
 
 type RefundedEvent struct {
@@ -204,6 +318,96 @@ type ClosedEvent struct {
 	Block   uint64 `json:"block"`
 }
 
+// BoughtEvent — Buy (core/buy.go), WAVE D. Actor is the buyer. Minted is the
+// exact token amount minted straight into the buyer's OWN balance (the SAME
+// kBal ledger Ask/Transfer/Refund all share — buy.go: "bal/wacq update via
+// creditInflow"), so index.go's fold credits it with the ordinary addBal, not
+// a new balance map. Cost is the curve leg that entered kReserve (audit-only
+// here — live reserve is a direct chain read, never this package's job, see
+// index.go's file doc); Fee is the TOTAL trade fee (core's BuyResult splits
+// it FeeCreator/FeePlatform internally, but core.EvBought's own signature
+// only takes the combined total, so this package cannot attribute any
+// portion of it to the treasury or a creator's pull-claimable balance — see
+// index.go's KindBought fold comment); TotalDue == Cost+Fee, the wrapper's
+// single HiveDraw amount from the buyer (audit-only, not a credits amount).
+type BoughtEvent struct {
+	Creator  string `json:"creator"`
+	Actor    string `json:"actor"`
+	Block    uint64 `json:"block"`
+	Minted   string `json:"minted"`
+	Cost     string `json:"cost"`
+	Fee      string `json:"fee"`
+	TotalDue string `json:"totalDue"`
+}
+
+// SoldEvent — Sell (core/sell.go), WAVE D. Actor is the seller. Sold is the
+// exact token amount debited from the seller's balance (the same kBal ledger
+// — index.go's fold uses the ordinary subBal); Gross is the curve leg debited
+// from kReserve (audit-only, chain-read-only concern, same reasoning as
+// BoughtEvent.Cost); Tax is the exit tax — the WHOLE amount, unsplit, added
+// straight to the GLOBAL treasury (sell.go, RULING J/K: "one addMoney, no
+// aggregate, no distribution") — this is the one field here index.go DOES
+// fold into a running total (Index.TreasuryHbd), because unlike Fee below it
+// is never partial; Fee is the TOTAL trade fee, same combined-total
+// limitation as BoughtEvent.Fee (core.SellResult splits FeeCreator/
+// FeePlatform, but EvSold's own signature only carries the sum); Net is the
+// seller's HBD payout (sdk.HiveTransfer) — audit-only, NEVER folded into any
+// credits/token balance (mirrors RefundedEvent.Payout's identical treatment:
+// this is money paid to a wallet, not a ledger balance this package tracks).
+// TaxBps/HeldBlocks are the exit-tax rate actually applied and the hold clock
+// it was read from — bare numbers, audit-only, no running total.
+type SoldEvent struct {
+	Creator    string `json:"creator"`
+	Actor      string `json:"actor"`
+	Block      uint64 `json:"block"`
+	Sold       string `json:"sold"`
+	Gross      string `json:"gross"`
+	Tax        string `json:"tax"`
+	Fee        string `json:"fee"`
+	Net        string `json:"net"`
+	TaxBps     uint64 `json:"taxBps"`
+	HeldBlocks uint64 `json:"heldBlocks"`
+}
+
+// ---- contract-only events (NOT part of core/events.go's Ev* schema) -------
+//
+// RetiredEvent decodes ../contract/main.go's hand-built `retired` log (the
+// `retire` entrypoint) — see KindRetired's own doc for why this one is
+// different from every other event in this file. No money. This struct
+// declares no "v" field at all, so a "v" on the wire (present or absent — the
+// hand-built contract-only logs are not guaranteed to agree with each other
+// or stay stable on this point, unlike core/events.go's Ev* constructors,
+// which all share evOpen's fixed envelope) is simply ignored by
+// json.Unmarshal rather than read into Version.
+type RetiredEvent struct {
+	Creator string `json:"creator"`
+	Actor   string `json:"actor"`
+	Block   uint64 `json:"block"`
+}
+
+// TreasuryWithdrawnEvent decodes ../contract/main.go's hand-built
+// `treasuryWithdrawn` log (the `withdrawTreasury` entrypoint) — see
+// KindTreasuryWithdrawn's own doc. Deliberately no "creator" field: this is a
+// GLOBAL kTreasury() debit, not scoped to any single creator's market — see
+// index.go's fold for why that means this event is never routed through
+// ix.market(...) or any per-creator history.
+type TreasuryWithdrawnEvent struct {
+	Actor  string `json:"actor"`
+	Block  uint64 `json:"block"`
+	Amount string `json:"amount"`
+}
+
+// TradeFeesClaimedEvent decodes ../contract/main.go's hand-built
+// `tradeFeesClaimed` log (the `claimTradeFees` entrypoint) — see
+// KindTradeFeesClaimed's own doc for why Actor doubles as the creator
+// identifier here (kFeeBal is always keyed by the creator whose market
+// accrued the fee), even though the wire has no separate "creator" field.
+type TradeFeesClaimedEvent struct {
+	Actor  string `json:"actor"`
+	Block  uint64 `json:"block"`
+	Amount string `json:"amount"`
+}
+
 // Event is the parsed result of one RawEvent. Exactly one of the typed
 // pointer fields is non-nil, selected by Kind — EXCEPT when Unknown is
 // true, in which case none are populated and Kind holds whatever the source
@@ -226,13 +430,22 @@ type Event struct {
 	Asked        *AskedEvent
 	Answered     *AnsweredEvent
 	Reclaimed    *ReclaimedEvent
+	Declined     *DeclinedEvent
 	Refunded     *RefundedEvent
 	RefundPushed *RefundPushedEvent
 	Closed       *ClosedEvent
+	Bought       *BoughtEvent
+	Sold         *SoldEvent
 
 	OfferingCreated *OfferingCreatedEvent
 	OfferingUpdated *OfferingUpdatedEvent
 	OfferingDeleted *OfferingDeletedEvent
+
+	// Retired/TreasuryWithdrawn/TradeFeesClaimed — see each Kind's own doc:
+	// contract-only, not from core/events.go.
+	Retired           *RetiredEvent
+	TreasuryWithdrawn *TreasuryWithdrawnEvent
+	TradeFeesClaimed  *TradeFeesClaimedEvent
 }
 
 // ParseEvent decodes one RawEvent's Data into a typed Event.
@@ -245,10 +458,11 @@ type Event struct {
 //     key). The caller (Index.Ingest) counts and skips it; ParseEvent
 //     itself never panics.
 //  2. Data is valid JSON with a recognized "ev" field, but the value isn't
-//     one of the twelve known kinds (e.g. a future event type added to
-//     core/events.go that this package hasn't been taught yet, or "init" —
-//     the contract's owner-bootstrap log, which is NOT one of the twelve
-//     core-module events this package tracks) ⇒ NOT an error. Returns
+//     one of the known kinds (e.g. a future event type added to
+//     core/events.go that this package hasn't been taught yet, or one of
+//     the three DELIBERATELY-ignored contract-only logs named at this
+//     file's own top doc — "init", "paused", "unpaused" — none of which are
+//     core-module events) ⇒ NOT an error. Returns
 //     Event{Kind: <that string>, Unknown: true, Raw: raw}, nil. This is the
 //     graceful-degradation path: an old indexer binary must keep
 //     processing every OTHER event correctly forever, never crash or
@@ -320,6 +534,12 @@ func ParseEvent(raw RawEvent) (Event, error) {
 			return Event{}, &ParseError{Raw: raw, Cause: err}
 		}
 		ev.Reclaimed = &p
+	case KindDeclined:
+		var p DeclinedEvent
+		if err := json.Unmarshal([]byte(raw.Data), &p); err != nil {
+			return Event{}, &ParseError{Raw: raw, Cause: err}
+		}
+		ev.Declined = &p
 	case KindRefunded:
 		var p RefundedEvent
 		if err := json.Unmarshal([]byte(raw.Data), &p); err != nil {
@@ -338,6 +558,36 @@ func ParseEvent(raw RawEvent) (Event, error) {
 			return Event{}, &ParseError{Raw: raw, Cause: err}
 		}
 		ev.Closed = &p
+	case KindBought:
+		var p BoughtEvent
+		if err := json.Unmarshal([]byte(raw.Data), &p); err != nil {
+			return Event{}, &ParseError{Raw: raw, Cause: err}
+		}
+		ev.Bought = &p
+	case KindSold:
+		var p SoldEvent
+		if err := json.Unmarshal([]byte(raw.Data), &p); err != nil {
+			return Event{}, &ParseError{Raw: raw, Cause: err}
+		}
+		ev.Sold = &p
+	case KindRetired:
+		var p RetiredEvent
+		if err := json.Unmarshal([]byte(raw.Data), &p); err != nil {
+			return Event{}, &ParseError{Raw: raw, Cause: err}
+		}
+		ev.Retired = &p
+	case KindTreasuryWithdrawn:
+		var p TreasuryWithdrawnEvent
+		if err := json.Unmarshal([]byte(raw.Data), &p); err != nil {
+			return Event{}, &ParseError{Raw: raw, Cause: err}
+		}
+		ev.TreasuryWithdrawn = &p
+	case KindTradeFeesClaimed:
+		var p TradeFeesClaimedEvent
+		if err := json.Unmarshal([]byte(raw.Data), &p); err != nil {
+			return Event{}, &ParseError{Raw: raw, Cause: err}
+		}
+		ev.TradeFeesClaimed = &p
 	case KindOfferingCreated:
 		var p OfferingCreatedEvent
 		if err := json.Unmarshal([]byte(raw.Data), &p); err != nil {

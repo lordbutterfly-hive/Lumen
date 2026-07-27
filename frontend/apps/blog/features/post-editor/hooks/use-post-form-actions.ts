@@ -13,6 +13,7 @@ import { usePostMutation } from "@/blog/features/post-editor/hooks/use-post-muta
 import { AccountFormValues } from "@/blog/features/post-editor/types";
 import { useUserClient } from "@smart-signer/lib/auth/use-user-client";
 import { createLitePost } from "@/blog/lib/lite/client/lite-write";
+import { litePostIdOf } from "@/blog/lib/lite/render/lite-post-id";
 
 const logger = getLogger("app");
 
@@ -107,14 +108,30 @@ export function usePostFormActions({
     if (user.account_tier === "lite") {
       setIsSubmitting(true);
       if (btnRef.current) btnRef.current.disabled = true;
+      // EDIT vs CREATE. This branch used to ignore editMode entirely, so saving an
+      // edit created a SECOND post instead of changing the first. The lite post id
+      // travels in the entry's json_metadata (lumen_post_id), written by the
+      // publisher — the on-chain permlink is not our row id.
+      const liteEditId = editMode ? litePostIdOf(post_s) : undefined;
       const result = await createLitePost({
         tier: "advanced",
         title: data.title,
         body: postBody,
         summary: data.postSummary,
         tags,
-        community: data.category
+        community: data.category,
+        editOfPostId: liteEditId
       });
+      if (editMode && !liteEditId) {
+        // Fail loudly rather than silently duplicating the post.
+        if (btnRef.current) btnRef.current.disabled = false;
+        setIsSubmitting(false);
+        handleError(new Error("Could not identify which Lumen post to edit."), {
+          method: "lite-post-edit",
+          params: { title: data.title }
+        });
+        return;
+      }
       if (btnRef.current) btnRef.current.disabled = false;
       setIsSubmitting(false);
       if (result.status === "ok") {

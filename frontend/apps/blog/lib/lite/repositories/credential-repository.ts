@@ -7,6 +7,7 @@ interface CredentialRow {
   user_id: string;
   method: string;
   external_ref: string;
+  key_fingerprint: string | null;
   network: string | null;
   webauthn_credential_id: string | null;
   webauthn_public_key_cose: Buffer | null;
@@ -25,6 +26,7 @@ function mapCredential(r: CredentialRow): LumenAuthCredential {
     userId: r.user_id,
     method: r.method as AuthMethod,
     externalRef: r.external_ref,
+    keyFingerprint: r.key_fingerprint,
     network: r.network,
     webauthnCredentialId: r.webauthn_credential_id,
     webauthnPublicKeyCose: r.webauthn_public_key_cose,
@@ -50,6 +52,8 @@ export interface CreateCredentialInput {
   emailHash?: string | null;
   deviceLabel?: string | null;
   isPrimary?: boolean;
+  /** hash160(compressed pubkey) — one key, one credential (BTC). */
+  keyFingerprint?: string | null;
 }
 
 export async function createCredential(input: CreateCredentialInput): Promise<LumenAuthCredential> {
@@ -57,8 +61,8 @@ export async function createCredential(input: CreateCredentialInput): Promise<Lu
     `INSERT INTO lumen_auth_credential (
        credential_id, user_id, method, external_ref, network,
        webauthn_credential_id, webauthn_public_key_cose, webauthn_sign_count,
-       email_ciphertext, email_hash, device_label, is_primary
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+       email_ciphertext, email_hash, device_label, is_primary, key_fingerprint
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
     [
       ulid(),
       input.userId,
@@ -71,13 +75,30 @@ export async function createCredential(input: CreateCredentialInput): Promise<Lu
       input.emailCiphertext ?? null,
       input.emailHash ?? null,
       input.deviceLabel ?? null,
-      input.isPrimary ?? false
+      input.isPrimary ?? false,
+      input.keyFingerprint ?? null
     ]
   );
   return mapCredential(rows[0]);
 }
 
 /** Resolve a binder to its account. This is the login lookup (spec §A.1). */
+/**
+ * Find a credential by the KEY that signed, not by the address it was encoded as.
+ * One Bitcoin key yields three address formats; matching on the fingerprint is what
+ * stops the same key registering three accounts.
+ */
+export async function findByFingerprint(
+  method: AuthMethod,
+  keyFingerprint: string
+): Promise<LumenAuthCredential | null> {
+  const res = await query<CredentialRow>(
+    `SELECT * FROM lumen_auth_credential WHERE method = $1 AND key_fingerprint = $2`,
+    [method, keyFingerprint]
+  );
+  return res.rows[0] ? mapCredential(res.rows[0]) : null;
+}
+
 export async function findByMethodAndRef(
   method: AuthMethod,
   externalRef: string
@@ -128,4 +149,13 @@ export async function updateSignCount(
     [credentialId, newSignCount]
   );
   return (rowCount ?? 0) > 0;
+}
+
+/** Backfill the key fingerprint onto a credential that predates the column. */
+export async function setKeyFingerprint(credentialId: string, keyFingerprint: string): Promise<void> {
+  await query(
+    `UPDATE lumen_auth_credential SET key_fingerprint = $2
+      WHERE credential_id = $1 AND key_fingerprint IS NULL`,
+    [credentialId, keyFingerprint]
+  );
 }

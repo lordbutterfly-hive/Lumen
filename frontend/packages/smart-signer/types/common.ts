@@ -60,9 +60,10 @@ export interface OAuthState {
  * the auth-service enforces a TTL on `issuedAt`. See spec §A.1.
  */
 export interface LiteSignupState {
-    method: 'google_passkey' | 'btc_wallet';
-    externalRef: string;            // google: verified sub; btc: lower(address)
-    network?: string;               // btc only
+    method: 'google_passkey' | 'btc_wallet' | 'evm_wallet';
+    externalRef: string;            // google: verified sub; btc/evm: lower(address)
+    network?: string;               // btc/evm only ('bitcoin' | 'testnet' | 'eip155')
+    keyFingerprint?: string;        // btc only — hash160(pubkey); one key, one account
     emailCiphertextB64?: string;    // google only — envelope-encrypted, never rendered
     emailHash?: string;             // google only — abuse-blocklist join
     issuedAt: number;               // epoch ms, for TTL

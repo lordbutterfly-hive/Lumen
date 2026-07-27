@@ -18,6 +18,7 @@ import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import DialogLogin from '@/blog/components/dialog-login';
 import { useFollowMutation, useUnfollowMutation } from '@/blog/features/mute-follow/hooks/use-follow-mutations';
 import { useMuteMutation, useUnmuteMutation } from '@/blog/features/mute-follow/hooks/use-mute-mutations';
+import { liteFollow } from '@/blog/lib/lite/client/lite-write';
 import { useFollowingInfiniteQuery } from '@/blog/features/account-lists/hooks/use-following-infinitequery';
 
 /**
@@ -69,8 +70,20 @@ export default function ProfileActions({
   const busy =
     following.isLoading || followMutation.isPending || unfollowMutation.isPending || mute.isLoading;
 
+  // A lite account has no Hive key, so the wax follow path cannot work for it. This
+  // is the same fork that already exists in mute-follow/buttons-container.tsx — the
+  // profile page was simply never given it, so Follow errored here while working
+  // everywhere else.
+  const isLite = user.account_tier === 'lite';
+
   const handleFollowClick = async () => {
     try {
+      if (isLite) {
+        const result = await liteFollow(username, isFollow);
+        if (result.status !== 'ok') throw new Error(result.message);
+        await following.refetch?.();
+        return;
+      }
       if (isFollow) await unfollowMutation.mutateAsync({ username });
       else await followMutation.mutateAsync({ username });
     } catch (error) {
@@ -115,7 +128,14 @@ export default function ProfileActions({
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-52">
-          <DropdownMenuItem onClick={handleMuteClick} disabled={busy} className="cursor-pointer">
+          {/* Mute is deliberately hidden for lite accounts: there is no lite mute
+              backend (no /api/lite/mute route exists), so the control could only ever
+              fail. Better absent than broken — restore it when the route lands. */}
+          <DropdownMenuItem
+            onClick={handleMuteClick}
+            disabled={busy}
+            className={cn('cursor-pointer', isLite && 'hidden')}
+          >
             {isMute ? t('user_profile.unmute_button') : t('user_profile.mute_button')}
           </DropdownMenuItem>
           {explorerHost ? (

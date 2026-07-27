@@ -5,7 +5,15 @@ import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { verifyGoogleIdToken } from '@/blog/lib/lite/auth/google-verify';
 import { encryptEmail, emailHash } from '@/blog/lib/lite/auth/email-crypto';
 import { consumeChallenge } from '@/blog/lib/lite/repositories/challenge-repository';
-import { verifyBtcSignature, bindMessage, btcNetwork, isTaproot } from '@/blog/lib/lite/auth/btc-verify';
+import { verifyBtcSignature, bindMessage, btcNetwork, isTaproot, normalizeBtcAddress } from '@/blog/lib/lite/auth/btc-verify';
+import { btcKeyFingerprint } from '@/blog/lib/lite/auth/btc-key-fingerprint';
+import {
+  verifyEvmSignature,
+  bindMessage as evmBindMessage,
+  evmNetwork,
+  isEvmAddress,
+  normalizeEvmAddress
+} from '@/blog/lib/lite/auth/evm-verify';
 import { bindMethod } from '@/blog/lib/lite/auth/auth-service';
 
 const logger = getLogger('app');
@@ -87,8 +95,36 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       if (!verifyBtcSignature({ address, message: bindMessage(nonce), signatureBase64: signature })) {
         return NextResponse.json({ error: 'bad_signature' }, { status: 401 });
       }
-      const result = await bindMethod(user.userId, 'btc_wallet', address.trim().toLowerCase(), {
-        network: btcNetwork(address)
+      const result = await bindMethod(user.userId, 'btc_wallet', normalizeBtcAddress(address), {
+        network: btcNetwork(address),
+        keyFingerprint: btcKeyFingerprint(bindMessage(nonce), signature) ?? undefined
+      });
+      return result.status === 'ok'
+        ? NextResponse.json({ status: 'ok' })
+        : NextResponse.json(result, { status: 409 });
+    }
+
+    if (method === 'evm') {
+      const address = body?.address;
+      const signature = body?.signature;
+      const nonce = body?.nonce;
+      if (typeof address !== 'string' || typeof signature !== 'string' || typeof nonce !== 'string') {
+        return NextResponse.json({ error: 'invalid_request' }, { status: 400 });
+      }
+      if (!isEvmAddress(address)) {
+        return NextResponse.json({ error: 'invalid_address' }, { status: 400 });
+      }
+      // Same step-up rule as BTC (SEQ-1): a user-bound 'stepup' challenge, and the
+      // signed message is the distinct evmBindMessage, never the login message.
+      const consumed = await consumeChallenge(nonce, 'stepup');
+      if (!consumed || consumed.userId !== user.userId) {
+        return NextResponse.json({ error: 'invalid_or_expired_challenge' }, { status: 401 });
+      }
+      if (!(await verifyEvmSignature({ address, message: evmBindMessage(nonce), signature }))) {
+        return NextResponse.json({ error: 'bad_signature' }, { status: 401 });
+      }
+      const result = await bindMethod(user.userId, 'evm_wallet', normalizeEvmAddress(address), {
+        network: evmNetwork()
       });
       return result.status === 'ok'
         ? NextResponse.json({ status: 'ok' })

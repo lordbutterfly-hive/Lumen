@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
 import { guardWrite } from '@/blog/lib/lite/http/guard';
+import { getClientIp } from '@/blog/lib/lite/http/ip';
+import { enforceChallengeRate } from '@/blog/lib/lite/antispam/rate-limit';
 import { verifyGoogleIdToken } from '@/blog/lib/lite/auth/google-verify';
 import { encryptEmail, emailHash } from '@/blog/lib/lite/auth/email-crypto';
 import { resolveLogin } from '@/blog/lib/lite/auth/auth-service';
@@ -15,6 +17,11 @@ const logger = getLogger('app');
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const blocked = guardWrite(req);
   if (blocked) return blocked;
+  // This endpoint had NO per-source cap while both wallet paths did, so it was the
+  // open door: unlimited Google sign-in/sign-up attempts from one source.
+  if (!(await enforceChallengeRate(getClientIp(req), 'google'))) {
+    return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+  }
 
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
   const idToken = body?.idToken;

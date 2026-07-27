@@ -29,25 +29,59 @@ import "math/big"
 // defects the old direct-kBal version carried; RULING K removed the cost-
 // basis leg J1 had added, since the exit tax no longer caps at realized gain):
 //
-//	sender    → debitBalance:  removes the tokens. The sender's own clock is
-//	           NOT touched (their remainder is as old as it was).
-//	recipient → creditInflow:  the recipient's hold clock RE-AVERAGES TOWARD
-//	           `block` — a transfer-in re-ages the recipient toward FRESH, the
-//	           maximum-tax direction.
+//	sender    → debitBalance:    removes the tokens. The sender's own clock is
+//	             NOT touched (their remainder is as old as it was).
+//	recipient → creditInflowAt:  the moved tokens arrive carrying the SENDER's
+//	             own hold clock, capped at one decay window, and re-average into
+//	             whatever the recipient already holds.
 //
-// The clock leg is the LOCKED-MECHANISM's own rule ("reset on any
-// inflow/transfer — so alts and fresh accounts always pay the max") and
-// kills a test-proven exit-tax bypass: the old version moved kBal without
-// touching kAcqBlock, so 100 fresh tokens routed through an account holding
-// 1 six-week-old token inherited its 0% tax wholesale — one transfer
-// converted a 20% exit tax into 0%. Now the average runs the other way: the
-// aged dust is swamped by the fresh size and the position pays ~max tax.
-// The re-average can only ever move a clock FORWARD (C-13), so no transfer
-// pattern can ever fake age — it can only donate it.
+// ---------------------------------------------------------------------------
+// TOKEN MATURITY (USER-RULED 2026-07-27) — THE INCOMING SLICE CARRIES THE
+// SENDER'S CLOCK, NOT `block`. This REVERSES the "a transfer-in is always
+// maximally fresh" rule that stood here, and the reversal is the ruling:
+// "TOKEN MATURITY — applies to everyone, you're allowed to trade it, it still
+// fulfils its purpose." Maturity belongs to the TOKENS and travels with them.
+//
+// WHAT THE OLD RULE ACTUALLY DID, stated plainly because it read as the safe
+// direction and was not: crediting the recipient at age `block` DESTROYED
+// maturity on every move. An honest holder who had held for the full six weeks
+// and moved their own position between their own two accounts — cold wallet to
+// hot, a custody rotation, a split for accounting — was reset to age 0 and paid
+// the FULL 20% on tokens the protocol had already agreed owed nothing. That is
+// not a conservative rounding; it is a confiscation triggered by an operation
+// the system explicitly permits in every phase, and it fell on exactly the
+// long-term holder the decay exists to reward. Property P3 measures it: under
+// the old rule a self-custody move of 265 of 312 six-week-old tokens turned a
+// 0-tax exit into a 111,786-unit one.
+//
+// WHY CARRYING THE CLOCK CANNOT LAUNDER, which is what the old rule was
+// defending against. The clock arrives CAPPED at ExitTaxDecayBlocks of age
+// (creditInflowAt's acqSlice cap) and merges by SIZE-WEIGHTED AVERAGE, so the
+// market-wide age-weight ledger Σ balance·min(age, window) is CONSERVED by a
+// transfer and STRICTLY REDUCED by the average's floor — never increased. A
+// sender cannot give away age they do not have, cannot give away more than one
+// window of it, and cannot keep what they gave: their remainder holds the same
+// clock over fewer tokens. So maturity can be MOVED but not MINTED, which is
+// precisely the ruling. Property P2 asserts that ledger after every operation.
+//
+// THE OTC CASE, disclosed rather than engineered against (the same honest-limit
+// discipline exittax.go's header uses): an aged holder can now sell their
+// maturity along with their tokens, and the buyer inherits the decayed rate.
+// Under the old rule they could not — but they could always achieve the same
+// system-wide result by selling ON the curve at their own 0% and letting the
+// buyer re-buy, so the tax collected is unchanged; what moves is who does the
+// selling. This is the ruled "you're allowed to trade it", and it is bounded:
+// the seller's maturity is finite, conserved, and gone once sold.
+//
+// The re-average still can only ever move a clock FORWARD (C-13) relative to
+// the capped inputs, so no transfer pattern can fake age — it can only relocate
+// it.
+// ---------------------------------------------------------------------------
 //
 // `block` is in the signature since RULING A precisely because the clock leg
 // needs "now"; the wasm wrapper passes the same chain block every other
-// entrypoint gets.
+// entrypoint gets. It is still load-bearing: `block` is what the maturity cap
+// is measured against on BOTH legs of the average.
 func TransferCredits(s Store, creator, from, to string, block uint64, amount *big.Int) error {
 	// validAccount on ALL THREE — each is concatenated into kBal/kAcqBlock/
 	// kBasis keys with no escaping, so a '|' in any of them is a
@@ -77,15 +111,28 @@ func TransferCredits(s Store, creator, from, to string, block uint64, amount *bi
 		return newErr(ErrBalance, "insufficient balance")
 	}
 
+	// The maturity the moved tokens carry: the SENDER's own clock, read BEFORE
+	// anything moves. debitBalance deliberately does not touch it (the sender's
+	// remainder keeps exactly the clock it had), so the read order is not
+	// load-bearing for correctness — it is written this way so the value being
+	// moved is visibly the sender's pre-transfer state and nothing else.
+	//
+	// An UNSET sender clock (0 — a fixture-seeded or otherwise never-clocked
+	// balance) degrades inside creditInflowAt to `block`, i.e. maximally FRESH:
+	// unclocked tokens carry no maturity to give, which is the treasury-
+	// favouring direction and matches holdclock.go's zero-value convention on
+	// every other path.
+	acqFrom := holderAcqBlock(s, creator, from)
+
 	if err := debitBalance(s, creator, from, amount); err != nil {
 		return err // unreachable given the check above; defense-in-depth
 	}
-	// The recipient's balance grows and their hold clock re-averages toward
-	// `block` — a transfer-in is an inflow, so it re-ages the recipient to
-	// FRESH (maximum exit tax RATE), which is what makes OTC laundering a
-	// risk-transfer discount rather than a tax escape (RULING J residual truth
-	// #3). RULING K deleted the cost basis, so nothing else moves with the
-	// tokens. Infallible (holdclock.go).
-	creditInflow(s, creator, to, amount, block)
+	// The recipient's balance grows and the moved tokens' own maturity —
+	// capped at ExitTaxDecayBlocks inside creditInflowAt — re-averages into
+	// whatever they already hold. Maturity travels with the tokens and is
+	// neither created nor destroyed by the move (see the file header; properties
+	// P2/P3). RULING K deleted the cost basis, so nothing else moves with them.
+	// Infallible (holdclock.go).
+	creditInflowAt(s, creator, to, amount, acqFrom, block)
 	return nil
 }

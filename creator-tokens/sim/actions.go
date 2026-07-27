@@ -61,6 +61,50 @@ func bpsFloorBig(total *big.Int, bps uint64) *big.Int {
 	return p.Div(p, big.NewInt(10000))
 }
 
+// tokenLegOf mirrors ask.go's splitFace's token leg exactly (USER RULING
+// 2026-07-27, the commission carve-out): tokenLeg = face - commission,
+// commission = floor(face*CommissionBps/10000) via the exported
+// core.CommissionOwedFor. This is the amount settlement.go's settleSpend
+// actually prices in credits (ceil(tokenLeg/rate)) — the commission leg is
+// billed separately in HBD, never in credits. Every credits-needed ESTIMATE
+// in this file (askIntent/ensureCreditsForAsk/oneShotSequence) must divide
+// THIS by rate, never the bare posted face: dividing the full face was the
+// PRE-CARVE-OUT model (the token leg used to be the full face, with the
+// commission drawn on top) and now systematically over-estimates the
+// credits a real ask will actually spend by ~CommissionBps, understating how
+// many actors this simulator lets attempt an ask they could genuinely
+// afford — core.Ask itself is unaffected (it derives the real, binding
+// number from settlePosted internally regardless of what this simulator
+// estimates), but a stale estimate here still means the sim proves a
+// population behaviour ("X% of asks were skipped as unaffordable") that
+// does not match what would actually happen on-chain.
+func tokenLegOf(face *big.Int) *big.Int {
+	return subBig(face, core.CommissionOwedFor(face))
+}
+
+// mulDivFloorBig mirrors core/money.go's private mMulDiv exactly —
+// floor(a*b/c) — for the ONE place this simulator needs to recompute a core
+// money formula rather than read a result core already returned: refund.go's
+// documented refundPayout, gross(c) = floor(R·c/S) (refund.go's file header).
+// core exports no QuoteRefund and Refund/RefundHolder return only the NET
+// (gross − tax) they pay out, so doRefund/doRefundHolder below recover the
+// exact tax core carved as gross − net, using this to recompute gross from
+// the SAME (reserve, credits, supply) triple core used, captured before the
+// call. All operands here are non-negative money quantities, so big.Int's
+// Div (Euclidean division) coincides with floor division, exactly as
+// mMulDiv's own p.Div(p, c) does.
+func mulDivFloorBig(a, b, c *big.Int) *big.Int {
+	if c == nil || c.Sign() == 0 {
+		// Unreachable given the callers below (a refund only ever succeeds
+		// against a nonzero supply — refund.go's own I3 argument) — kept as
+		// the same defense-in-depth every "provably can't happen" divide in
+		// this codebase carries.
+		return zeroBig()
+	}
+	p := new(big.Int).Mul(a, b)
+	return p.Div(p, c)
+}
+
 // ===========================================================================
 // core.* call wrappers. Every one of these calls exactly one real core.*
 // mutator against e.Store, updates this simulator's own shadow ledgers ONLY
@@ -297,7 +341,9 @@ func (e *Engine) askIntent(asker, creator string) {
 	if err != nil {
 		return
 	}
-	creditsEstimate := ceilDivBig(face, rate)
+	// tokenLegOf, not the bare face: settlement prices only the token leg
+	// (face - commission) in credits — see tokenLegOf's doc.
+	creditsEstimate := ceilDivBig(tokenLegOf(face), rate)
 	if creditsEstimate.Sign() <= 0 {
 		return
 	}
@@ -507,6 +553,70 @@ func (e *Engine) doReclaim(caller, asker, creator string, seq uint64) {
 	e.recordEvent(ev)
 }
 
+// doSell redeems deltaS of the caller's tokens along the curve (core.Sell) —
+// the ACTIVE/OVERDUE-market exit rail that complements doRefund's wind-down
+// rail below. Before this wrapper existed, this simulator could drive NO
+// action at all against core.Sell: every holder's only modelled exit was
+// doRefund, which core.Refund gates to inWindDown ONLY (FROZEN/CLOSED). A
+// holder on a market that never winds down within the run (a
+// RoleCreatorReliable creator who renews forever, say) therefore had no exit
+// whatsoever in the SIMULATION, even though Sell is open and correct on the
+// real contract the whole time — a pure simulator gap that the dead-end
+// analysis (sim/analysis/journey.go) was, until this fix landed alongside it,
+// misreading as a genuine stuck-value finding. See speculatorTick, which now
+// picks this rail instead of a doomed doRefund while a market is still
+// trading.
+func (e *Engine) doSell(caller, creator string, deltaS *big.Int) {
+	if deltaS == nil || deltaS.Sign() <= 0 {
+		return
+	}
+
+	ev := e.newEvent("sell", caller, creator)
+	ev.Args["tokens"] = bigStr(deltaS)
+
+	beforeReserve := core.Reserve(e.Store, creator)
+	beforeSupply := core.Supply(e.Store, creator)
+	beforeBal := core.BalanceOf(e.Store, creator, caller)
+
+	var res *core.SellResult
+	e.coreCall("sell", ev, func() error {
+		var err error
+		res, err = core.Sell(e.Store, caller, creator, e.Block, deltaS)
+		return err
+	})
+	if ev.OK {
+		actor := e.pop.Actors[caller]
+		actor.HBD = addBig(actor.HBD, res.Net)
+		e.totalHbdOut = addBig(e.totalHbdOut, res.Net)
+
+		// Two separate HBD legs land in kTreasury on a Sell, and both must be
+		// mirrored into treasuryShadow (this simulator's only window onto
+		// kTreasury — see engine.go's field doc): the trade fee's platform
+		// half (accrueTradeFee, tradefee.go — identical to doBuy's own
+		// FeePlatform handling above) and the exit tax's platform half
+		// (accrueExitTax's 50/50 split, exittax.go — identical treatment to
+		// doRefund/doRefundHolder below). Sell's result exposes Tax directly
+		// (unlike Refund's, which returns only the net), so no reconstruction
+		// is needed here.
+		creatorTaxHalf := new(big.Int).Div(res.Tax, big.NewInt(2)) // accrueExitTax's own split, mirrored exactly
+		platformTaxHalf := subBig(res.Tax, creatorTaxHalf)
+		e.treasuryShadow = addBig(e.treasuryShadow, platformTaxHalf)
+		e.treasuryShadow = addBig(e.treasuryShadow, res.FeePlatform)
+
+		ev.Args["sold"] = bigStr(res.Sold)
+		ev.Args["gross"] = bigStr(res.Gross)
+		ev.Args["tax"] = bigStr(res.Tax)
+		ev.Args["fee"] = bigStr(res.Fee)
+		ev.Args["net"] = bigStr(res.Net)
+		ev.Deltas["wallet:"+caller] = "+" + bigStr(res.Net)
+		ev.Deltas["treasuryShadow"] = "+" + bigStr(addBig(platformTaxHalf, res.FeePlatform))
+		ev.Deltas["reserve"] = deltaStr(beforeReserve, core.Reserve(e.Store, creator))
+		ev.Deltas["supply"] = deltaStr(beforeSupply, core.Supply(e.Store, creator))
+		ev.Deltas["balance:"+caller] = deltaStr(beforeBal, core.BalanceOf(e.Store, creator, caller))
+	}
+	e.recordEvent(ev)
+}
+
 func (e *Engine) doRefund(caller, creator string, credits *big.Int) {
 	if credits == nil || credits.Sign() <= 0 {
 		return
@@ -529,6 +639,33 @@ func (e *Engine) doRefund(caller, creator string, credits *big.Int) {
 		actor := e.pop.Actors[caller]
 		actor.HBD = addBig(actor.HBD, payout)
 		e.totalHbdOut = addBig(e.totalHbdOut, payout)
+
+		// K2 WIND-DOWN EXIT TAX, 50/50 SPLIT (exittax.go's accrueExitTax):
+		// core.Refund returns only the NET (gross − tax) it pays the caller,
+		// with no exported way to read the tax it carved back out — so this
+		// simulator recovers it: gross = floor(beforeReserve*credits/
+		// beforeSupply) is refund.go's own documented refundPayout formula,
+		// evaluated on the (reserve, supply) pair read BEFORE the call (the
+		// same pair core.Refund itself reads), and tax = gross − payout is
+		// exactly what accrueExitTax then split. The platform half of that
+		// tax lands in kTreasury — this simulator's ONLY window onto
+		// kTreasury is treasuryShadow (core exports no live treasury getter,
+		// see engine.go's field doc), so every credit to it must be mirrored
+		// here or the HBD-conservation identity silently drifts by exactly
+		// the missed amount, which is exactly what was happening: a taxed
+		// refund halted checkInvariants short by the platform half. The
+		// creator half lands in kFeeBal, which checkInvariants already reads
+		// LIVE via core.FeeBalanceOf (feePotsTotal) — so it must NOT also be
+		// added to any shadow here, or it would be double-counted.
+		gross := mulDivFloorBig(beforeReserve, credits, beforeSupply)
+		tax := subBig(gross, payout)
+		if tax.Sign() > 0 {
+			creatorHalf := new(big.Int).Div(tax, big.NewInt(2)) // accrueExitTax's own split, mirrored exactly
+			platformHalf := subBig(tax, creatorHalf)
+			e.treasuryShadow = addBig(e.treasuryShadow, platformHalf)
+			ev.Args["exitTax"] = bigStr(tax)
+			ev.Deltas["treasuryShadow"] = "+" + bigStr(platformHalf)
+		}
 
 		ev.Args["payout"] = bigStr(payout)
 		ev.Deltas["wallet:"+caller] = "+" + bigStr(payout)
@@ -558,6 +695,23 @@ func (e *Engine) doRefundHolder(pusher, creator, holder string) {
 			holderActor.HBD = addBig(holderActor.HBD, payout)
 		}
 		e.totalHbdOut = addBig(e.totalHbdOut, payout)
+
+		// Same K2 tax recovery as doRefund above: RefundHolder pushes the
+		// pushed HOLDER's entire balance, so beforeBal (read above, pre-call)
+		// IS the `credits` refundPayout was evaluated against — gross =
+		// floor(beforeReserve*beforeBal/beforeSupply), tax = gross − payout,
+		// platform half mirrored into treasuryShadow (creator half already
+		// covered live via feePotsTotal — see doRefund's comment for the
+		// full reasoning, identical here).
+		gross := mulDivFloorBig(beforeReserve, beforeBal, beforeSupply)
+		tax := subBig(gross, payout)
+		if tax.Sign() > 0 {
+			creatorHalf := new(big.Int).Div(tax, big.NewInt(2))
+			platformHalf := subBig(tax, creatorHalf)
+			e.treasuryShadow = addBig(e.treasuryShadow, platformHalf)
+			ev.Args["exitTax"] = bigStr(tax)
+			ev.Deltas["treasuryShadow"] = "+" + bigStr(platformHalf)
+		}
 
 		ev.Args["payout"] = bigStr(payout)
 		ev.Deltas["wallet:"+holder] = "+" + bigStr(payout)
@@ -891,7 +1045,8 @@ func (e *Engine) ensureCreditsForAsk(name, creator string) {
 	if err != nil {
 		return
 	}
-	need := ceilDivBig(face, rate)
+	// tokenLegOf, not the bare face — see tokenLegOf's doc.
+	need := ceilDivBig(tokenLegOf(face), rate)
 	bal := core.BalanceOf(e.Store, creator, name)
 	if cmpBig(bal, need) >= 0 {
 		return
@@ -944,8 +1099,8 @@ func (e *Engine) oneShotSequence(name string) {
 	// wallet affords at the live curve price — if short, they buy what they
 	// can, which will very likely then fail Ask's own balance guard: the
 	// same honest "couldn't quite afford it" outcome as before, on the
-	// curve).
-	need := ceilDivBig(face, rate)
+	// curve). tokenLegOf, not the bare face — see tokenLegOf's doc.
+	need := ceilDivBig(tokenLegOf(face), rate)
 	if aff := e.maxAffordableTokens(target, actor.HBD); cmpBig(need, aff) > 0 {
 		need = aff
 	}
@@ -1008,16 +1163,27 @@ func (e *Engine) speculatorTick(name string) {
 				}
 			}
 		}
-	default: // opportunistic redeem -- more eager once the market is FROZEN
+	default: // opportunistic redeem -- Sell while the market trades (the ONLY
+		// rail core opens in that state — core.Refund refuses outside wind-
+		// down, see refund.go's/sell.go's rail-switch docs), Refund at
+		// wind-down; more eager once the market is FROZEN/CLOSED, since a
+		// wind-down position is the one actually worth cashing all the way
+		// out.
 		bal := core.BalanceOf(e.Store, target, name)
 		if bal.Sign() > 0 {
+			phase := core.Phase(e.Store, target, e.Block)
+			windingDown := phase == core.StateFrozen || phase == core.StateClosed
 			frac := int64(4)
-			if core.Phase(e.Store, target, e.Block) == core.StateFrozen {
+			if windingDown {
 				frac = 1
 			}
 			amount := new(big.Int).Div(bal, big.NewInt(frac))
 			if amount.Sign() > 0 {
-				e.doRefund(name, target, amount)
+				if windingDown {
+					e.doRefund(name, target, amount)
+				} else {
+					e.doSell(name, target, amount)
+				}
 			}
 		}
 	}

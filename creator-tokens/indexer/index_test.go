@@ -138,6 +138,112 @@ func TestIndex_CanonicalScenario(t *testing.T) {
 	}
 }
 
+// TestIndex_HolderCreatorsReverseIndex is the DESIGN + IMPLEMENTATION for the
+// missing `/holders/{holder}/positions` backing query (task spec: "what
+// consumers need and cannot get" — ../frontend's vsc-data-source.ts already
+// calls this endpoint with no index behind it anywhere). Checks every holder
+// in the canonical scenario against exactly how each touched alice's market:
+// bob/carol/dave via prepaid/asked/transferred/refunded/refundPushed, alice
+// herself via answered's creator-credit, and — the important NEGATIVE case —
+// fan1 (Renew's payer, which never touches a balance) and keeper1
+// (RefundHolder's permissionless PUSHER, never the paid holder) must NOT
+// appear, proving this is scoped to genuine balance-affecting events, not
+// every account name that ever appears in any event.
+func TestIndex_HolderCreatorsReverseIndex(t *testing.T) {
+	ix := NewIndex()
+	ix.Ingest(mustDrain(t, buildCanonicalScenario()))
+
+	for _, holder := range []string{"alice", "bob", "carol", "dave"} {
+		got := ix.HolderCreators(holder)
+		want := []string{"alice"}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("HolderCreators(%s) = %v, want %v", holder, got, want)
+		}
+	}
+	for _, notAHolder := range []string{"fan1", "keeper1"} {
+		if got := ix.HolderCreators(notAHolder); got != nil {
+			t.Errorf("HolderCreators(%s) = %v, want nil (renew's payer / refundHolder's pusher never touches a balance)", notAHolder, got)
+		}
+	}
+	if got := ix.HolderCreators("nobody"); got != nil {
+		t.Errorf("HolderCreators(nobody) = %v, want nil", got)
+	}
+}
+
+// TestIndex_HolderCreatorsAcrossMultipleMarkets proves the reverse index is
+// genuinely global (spans every creator this Index has observed, not just
+// one market at a time the way Position/HolderList are scoped) and sorted.
+func TestIndex_HolderCreatorsAcrossMultipleMarkets(t *testing.T) {
+	ix := NewIndex()
+	ix.Ingest([]RawEvent{
+		{OutputID: "o1", Data: `{"ev":"registered","v":1,"creator":"zeta","actor":"zeta","block":1,"face":"100","cap":"1000","feePaid":"0"}`},
+		{OutputID: "o2", Data: `{"ev":"bought","v":1,"creator":"zeta","actor":"holder1","block":2,"minted":"10","cost":"10","fee":"1","totalDue":"11"}`},
+		{OutputID: "o3", Data: `{"ev":"registered","v":1,"creator":"alpha","actor":"alpha","block":1,"face":"100","cap":"1000","feePaid":"0"}`},
+		{OutputID: "o4", Data: `{"ev":"bought","v":1,"creator":"alpha","actor":"holder1","block":2,"minted":"10","cost":"10","fee":"1","totalDue":"11"}`},
+	})
+	got := ix.HolderCreators("holder1")
+	want := []string{"alpha", "zeta"} // sorted, spanning both markets
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("HolderCreators(holder1) = %v, want %v", got, want)
+	}
+}
+
+// TestIndex_AskerAsksReverseIndex is the DESIGN + IMPLEMENTATION for the
+// missing `/askers/{asker}/asks` backing query. bob asks twice (seq0, seq3 —
+// one resolved, one still pending, proving BOTH are returned since this
+// package leaves status resolution to the caller's own live re-read, same as
+// HolderCreators leaves balance resolution to the caller); carol and dave ask
+// once each. The creator herself (alice) never asks her own market in this
+// scenario, so AskerAsks("alice") must be empty.
+func TestIndex_AskerAsksReverseIndex(t *testing.T) {
+	ix := NewIndex()
+	ix.Ingest(mustDrain(t, buildCanonicalScenario()))
+
+	if got, want := ix.AskerAsks("bob"), []AskRef{{Creator: "alice", Seq: 0}, {Creator: "alice", Seq: 3}}; !reflect.DeepEqual(got, want) {
+		t.Errorf("AskerAsks(bob) = %v, want %v (seq0 resolved + seq3 still pending, both returned)", got, want)
+	}
+	if got, want := ix.AskerAsks("carol"), []AskRef{{Creator: "alice", Seq: 1}}; !reflect.DeepEqual(got, want) {
+		t.Errorf("AskerAsks(carol) = %v, want %v", got, want)
+	}
+	if got, want := ix.AskerAsks("dave"), []AskRef{{Creator: "alice", Seq: 2}}; !reflect.DeepEqual(got, want) {
+		t.Errorf("AskerAsks(dave) = %v, want %v", got, want)
+	}
+	if got := ix.AskerAsks("alice"); got != nil {
+		t.Errorf("AskerAsks(alice) = %v, want nil (alice never asks her own market in this scenario)", got)
+	}
+	if got := ix.AskerAsks("nobody"); got != nil {
+		t.Errorf("AskerAsks(nobody) = %v, want nil", got)
+	}
+}
+
+// TestIndex_AskerAsksSurvivesReRegistration proves seq's cross-incarnation
+// monotonicity (core/market.go: kSeq is "DELIBERATELY MONOTONE ACROSS
+// INCARNATIONS") means AskerAsks is safe to NEVER clear on re-registration,
+// unlike m.escrows (a local, per-incarnation map that IS cleared) — an ask
+// from a prior incarnation remains a valid, non-colliding (creator,seq) join
+// key forever.
+func TestIndex_AskerAsksSurvivesReRegistration(t *testing.T) {
+	ix := NewIndex()
+	ix.Ingest([]RawEvent{
+		{OutputID: "o1", Data: `{"ev":"registered","v":1,"creator":"c1","actor":"c1","block":1,"face":"100","cap":"1000","feePaid":"0"}`},
+		{OutputID: "o2", Data: `{"ev":"asked","v":1,"creator":"c1","actor":"alice","block":2,"seq":0,"creditsSpent":"10","commissionHbd":"1","rate":"100","deadlineBlocks":1,"contentHash":"h"}`},
+		{OutputID: "o3", Data: `{"ev":"reclaimed","v":1,"creator":"c1","actor":"alice","block":100,"seq":0,"credits":"10","commissionHbd":"1","asker":"alice"}`},
+		// c1 winds all the way down and closes, then re-registers — a new
+		// incarnation whose OWN seq0 is a DIFFERENT escrow than alice's old one
+		// (kSeq never resets, so a real chain could never actually reissue
+		// seq0 here — this fixture is deliberately unrealistic on that one
+		// point purely to prove AskerAsks does not get wiped by the reset that
+		// DOES clear m.escrows/m.balances).
+		{OutputID: "o4", Data: `{"ev":"closed","v":1,"creator":"c1","actor":"keeper1","block":200}`},
+		{OutputID: "o5", Data: `{"ev":"registered","v":1,"creator":"c1","actor":"c1","block":300,"face":"200","cap":"2000","feePaid":"0"}`},
+	})
+	got := ix.AskerAsks("alice")
+	want := []AskRef{{Creator: "c1", Seq: 0}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("AskerAsks(alice) = %v, want %v (must survive the re-registration reset that clears m.escrows)", got, want)
+	}
+}
+
 // assertScenarioState re-runs every assertion TestIndex_CanonicalScenario
 // makes, parameterized over an already-populated Index — the shared
 // verifier the determinism/idempotency tests below use to prove two
@@ -474,6 +580,20 @@ func TestIndex_MalformedAuditOnlyFieldRejectsWholeEvent(t *testing.T) {
 		{"asked.rate", `{"ev":"asked","v":1,"creator":"c1","actor":"a","block":1,"seq":1,"creditsSpent":"100","commissionHbd":"10","rate":"` + bad + `","deadlineBlocks":1,"contentHash":"h"}`},
 		{"refunded.payout", `{"ev":"refunded","v":1,"creator":"c1","actor":"a","block":1,"credits":"100","payout":"` + bad + `"}`},
 		{"refundPushed.payout", `{"ev":"refundPushed","v":1,"creator":"c1","actor":"keeper","block":1,"holder":"h","creditsBurned":"100","payout":"` + bad + `"}`},
+		// bought/sold/offering*/tradeFeesClaimed audit-only fields — added in
+		// this audit pass, same coverage gap as the original nine cases above
+		// (these newer kinds shipped with no malformed-audit-only-field
+		// regression coverage at all until now).
+		{"bought.cost", `{"ev":"bought","v":1,"creator":"c1","actor":"a","block":1,"minted":"10","cost":"` + bad + `","fee":"1","totalDue":"11"}`},
+		{"bought.fee", `{"ev":"bought","v":1,"creator":"c1","actor":"a","block":1,"minted":"10","cost":"10","fee":"` + bad + `","totalDue":"11"}`},
+		{"bought.totalDue", `{"ev":"bought","v":1,"creator":"c1","actor":"a","block":1,"minted":"10","cost":"10","fee":"1","totalDue":"` + bad + `"}`},
+		{"sold.gross", `{"ev":"sold","v":1,"creator":"c1","actor":"a","block":1,"sold":"10","gross":"` + bad + `","tax":"1","fee":"1","net":"8","taxBps":500,"heldBlocks":1}`},
+		{"sold.fee", `{"ev":"sold","v":1,"creator":"c1","actor":"a","block":1,"sold":"10","gross":"10","tax":"1","fee":"` + bad + `","net":"8","taxBps":500,"heldBlocks":1}`},
+		{"sold.net", `{"ev":"sold","v":1,"creator":"c1","actor":"a","block":1,"sold":"10","gross":"10","tax":"1","fee":"1","net":"` + bad + `","taxBps":500,"heldBlocks":1}`},
+		{"offeringCreated.price", `{"ev":"offeringCreated","v":1,"creator":"c1","actor":"c1","block":1,"offeringId":1,"title":"t","price":"` + bad + `"}`},
+		{"offeringUpdated.oldPrice", `{"ev":"offeringUpdated","v":1,"creator":"c1","actor":"c1","block":1,"offeringId":1,"title":"t","oldPrice":"` + bad + `","newPrice":"200"}`},
+		{"offeringUpdated.newPrice", `{"ev":"offeringUpdated","v":1,"creator":"c1","actor":"c1","block":1,"offeringId":1,"title":"t","oldPrice":"100","newPrice":"` + bad + `"}`},
+		{"tradeFeesClaimed.amount", `{"ev":"tradeFeesClaimed","actor":"c1","amount":"` + bad + `","block":1}`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -511,10 +631,19 @@ func TestIndex_MalformedPrimaryFieldRejectsWholeEvent(t *testing.T) {
 		{"asked.creditsSpent", `{"ev":"asked","v":1,"creator":"c1","actor":"a","block":1,"seq":1,"creditsSpent":"` + bad + `","commissionHbd":"10","rate":"1000","deadlineBlocks":1,"contentHash":"h"}`},
 		{"answered.creditsToCreator", `{"ev":"answered","v":1,"creator":"c1","actor":"c1","block":1,"seq":1,"creditsToCreator":"` + bad + `","commissionHbd":"10","answerHash":"h"}`},
 		{"answered.commissionHbd", `{"ev":"answered","v":1,"creator":"c1","actor":"c1","block":1,"seq":1,"creditsToCreator":"100","commissionHbd":"` + bad + `","answerHash":"h"}`},
-		{"reclaimed.credits", `{"ev":"reclaimed","v":1,"creator":"c1","actor":"a","block":1,"seq":1,"credits":"` + bad + `","commissionHbd":"10"}`},
-		{"reclaimed.commissionHbd", `{"ev":"reclaimed","v":1,"creator":"c1","actor":"a","block":1,"seq":1,"credits":"100","commissionHbd":"` + bad + `"}`},
+		{"reclaimed.credits", `{"ev":"reclaimed","v":1,"creator":"c1","actor":"a","block":1,"seq":1,"credits":"` + bad + `","commissionHbd":"10","asker":"a"}`},
+		{"reclaimed.commissionHbd", `{"ev":"reclaimed","v":1,"creator":"c1","actor":"a","block":1,"seq":1,"credits":"100","commissionHbd":"` + bad + `","asker":"a"}`},
 		{"refunded.credits", `{"ev":"refunded","v":1,"creator":"c1","actor":"a","block":1,"credits":"` + bad + `","payout":"10"}`},
 		{"refundPushed.creditsBurned", `{"ev":"refundPushed","v":1,"creator":"c1","actor":"keeper","block":1,"holder":"h","creditsBurned":"` + bad + `","payout":"10"}`},
+		// declined/bought/sold/treasuryWithdrawn primary fields — added in
+		// this audit pass, same coverage gap as the original twelve cases
+		// above.
+		{"declined.credits", `{"ev":"declined","v":1,"creator":"c1","actor":"c1","block":1,"seq":1,"credits":"` + bad + `","commissionHbd":"10","asker":"a"}`},
+		{"declined.commissionHbd", `{"ev":"declined","v":1,"creator":"c1","actor":"c1","block":1,"seq":1,"credits":"100","commissionHbd":"` + bad + `","asker":"a"}`},
+		{"bought.minted", `{"ev":"bought","v":1,"creator":"c1","actor":"a","block":1,"minted":"` + bad + `","cost":"10","fee":"1","totalDue":"11"}`},
+		{"sold.sold", `{"ev":"sold","v":1,"creator":"c1","actor":"a","block":1,"sold":"` + bad + `","gross":"10","tax":"1","fee":"1","net":"8","taxBps":500,"heldBlocks":1}`},
+		{"sold.tax", `{"ev":"sold","v":1,"creator":"c1","actor":"a","block":1,"sold":"10","gross":"10","tax":"` + bad + `","fee":"1","net":"8","taxBps":500,"heldBlocks":1}`},
+		{"treasuryWithdrawn.amount", `{"ev":"treasuryWithdrawn","actor":"owner","amount":"` + bad + `","block":1}`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -638,7 +767,7 @@ func TestIndex_DeliveryRecord_PureSelfDealsReportZeroAndAreVisible(t *testing.T)
 	src.Push(`{"ev":"asked","v":1,"creator":"selfdealer","actor":"selfdealer","block":20,"seq":1,"creditsSpent":"100","commissionHbd":"12","rate":"1000000","deadlineBlocks":28800,"contentHash":"q1"}`)
 	src.Push(`{"ev":"answered","v":1,"creator":"selfdealer","actor":"selfdealer","block":25,"seq":1,"creditsToCreator":"100","commissionHbd":"12","answerHash":"a1"}`)
 	src.Push(`{"ev":"asked","v":1,"creator":"selfdealer","actor":"selfdealer","block":30,"seq":2,"creditsSpent":"100","commissionHbd":"12","rate":"1000000","deadlineBlocks":28800,"contentHash":"q2"}`)
-	src.Push(`{"ev":"reclaimed","v":1,"creator":"selfdealer","actor":"selfdealer","block":40000,"seq":2,"credits":"100","commissionHbd":"12"}`)
+	src.Push(`{"ev":"reclaimed","v":1,"creator":"selfdealer","actor":"selfdealer","block":40000,"seq":2,"credits":"100","commissionHbd":"12","asker":"selfdealer"}`)
 
 	ix := NewIndex()
 	ix.Ingest(mustDrain(t, src))
@@ -737,7 +866,7 @@ func TestIndex_TreasuryAndReclaimOutflow_AskAnswerAskReclaim(t *testing.T) {
 	// Ask -> Reclaim: commission returns to the asker, never reaching treasury.
 	src.Push(`{"ev":"prepaid","v":1,"creator":"writer1","actor":"reader2","block":19,"hbdPaid":"500","creditsMinted":"500"}`)
 	src.Push(`{"ev":"asked","v":1,"creator":"writer1","actor":"reader2","block":20,"seq":1,"creditsSpent":"500","commissionHbd":"60","rate":"1000000","deadlineBlocks":28800,"contentHash":"q1"}`)
-	src.Push(`{"ev":"reclaimed","v":1,"creator":"writer1","actor":"reader2","block":40000,"seq":1,"credits":"500","commissionHbd":"60"}`)
+	src.Push(`{"ev":"reclaimed","v":1,"creator":"writer1","actor":"reader2","block":40000,"seq":1,"credits":"500","commissionHbd":"60","asker":"reader2"}`)
 
 	ix := NewIndex()
 	ix.Ingest(mustDrain(t, src))
@@ -799,7 +928,7 @@ func TestIndex_MalformedCommissionHbdRejectsWholeEventNoPartialUpdate(t *testing
 
 	t.Run("reclaimed.commissionHbd", func(t *testing.T) {
 		ix := NewIndex()
-		ix.Ingest([]RawEvent{{OutputID: "o1", Data: `{"ev":"reclaimed","v":1,"creator":"c1","actor":"bob","block":1,"seq":1,"credits":"100","commissionHbd":"` + bad + `"}`}})
+		ix.Ingest([]RawEvent{{OutputID: "o1", Data: `{"ev":"reclaimed","v":1,"creator":"c1","actor":"bob","block":1,"seq":1,"credits":"100","commissionHbd":"` + bad + `","asker":"bob"}`}})
 
 		if got := ix.Position("c1", "bob"); got.Sign() != 0 {
 			t.Errorf("Position(c1,bob) = %s, want 0 (no partial credit application)", got)
@@ -838,7 +967,7 @@ func TestIndex_ReRegistrationClearsClosedLatchAndDeliveryRecord(t *testing.T) {
 	// -- incarnation 1: register, ask+reclaim (a MISSED mark), then close --
 	src.Push(`{"ev":"registered","v":1,"creator":"comeback","actor":"comeback","block":1,"face":"100","cap":"1000000","feePaid":"10000"}`)
 	src.Push(`{"ev":"asked","v":1,"creator":"comeback","actor":"bob","block":10,"seq":0,"creditsSpent":"50","commissionHbd":"12","rate":"1000000","deadlineBlocks":28800,"contentHash":"q0"}`)
-	src.Push(`{"ev":"reclaimed","v":1,"creator":"comeback","actor":"bob","block":40000,"seq":0,"credits":"50","commissionHbd":"12"}`)
+	src.Push(`{"ev":"reclaimed","v":1,"creator":"comeback","actor":"bob","block":40000,"seq":0,"credits":"50","commissionHbd":"12","asker":"bob"}`)
 	src.Push(`{"ev":"closed","v":1,"creator":"comeback","actor":"","block":40001}`)
 	// -- incarnation 2: re-register --
 	src.Push(`{"ev":"registered","v":1,"creator":"comeback","actor":"comeback","block":50000,"face":"200","cap":"2000000","feePaid":"10000"}`)
@@ -931,5 +1060,285 @@ func TestIndex_ReRegistrationOfNeverClosedMarketIsANoOp(t *testing.T) {
 	}
 	if got := ix.Position("c1", "alice"); got.Cmp(big.NewInt(400)) != 0 {
 		t.Errorf("Position(c1,alice) = %s, want 400 (500 prepaid - 100 spent on the ask; must not be wiped)", got)
+	}
+}
+
+// TestIndex_BoughtAndSoldFoldBalancesCorrectly is the DEFECT 1 regression:
+// before this fix, KindBought/KindSold did not exist at all, so a real
+// "bought"/"sold" log line fell into ParseEvent's Unknown default — counted
+// in Stats.Unknown, never folded, meaning every holder's replayed balance
+// silently diverged from chain truth the instant the bonding curve (Buy is
+// now the ONLY issuance path) started trading. This ingests one realistic
+// bought and one realistic sold event and checks three things together:
+// (1) the buyer's balance increases by exactly the minted token amount, (2)
+// the seller's balance decreases by exactly the sold token amount (NOT by
+// gross/net/any HBD-shaped field — those are money, not credits/tokens, and
+// must never touch the balance map), and (3) Stats.Unknown stays at 0.
+func TestIndex_BoughtAndSoldFoldBalancesCorrectly(t *testing.T) {
+	ix := NewIndex()
+	ix.Ingest([]RawEvent{
+		{OutputID: "o1", Data: `{"ev":"registered","v":1,"creator":"carol","actor":"carol","block":1000,"face":"5000","cap":"1000000","feePaid":"0"}`},
+		// A realistic buy: dave mints 100 tokens at a curve cost of 1050,
+		// paying a 10 trade fee on top (totalDue 1060 — never a credits/token
+		// amount, so it must not show up in dave's balance).
+		{OutputID: "o2", Data: `{"ev":"bought","v":1,"creator":"carol","actor":"dave","block":1010,"minted":"100","cost":"1050","fee":"10","totalDue":"1060"}`},
+		// A realistic sell: dave sells 40 of those 100 tokens. gross=420,
+		// tax=21 (to the treasury), fee=4 (to the pull pots), net=395 (dave's
+		// actual HBD payout) — NONE of gross/tax/fee/net are token amounts;
+		// only `sold` (40) may ever debit dave's balance.
+		{OutputID: "o3", Data: `{"ev":"sold","v":1,"creator":"carol","actor":"dave","block":1020,"sold":"40","gross":"420","tax":"21","fee":"4","net":"395","taxBps":500,"heldBlocks":10}`},
+	})
+
+	if got := ix.Position("carol", "dave"); got.Cmp(big.NewInt(60)) != 0 {
+		t.Fatalf("Position(carol,dave) = %s, want 60 (100 minted - 40 sold; a wrong balance here means gross/net/cost/fee leaked into the credits ledger instead of just `minted`/`sold`)", got)
+	}
+
+	stats := ix.Stats()
+	if stats.Unknown != 0 {
+		t.Errorf("Stats.Unknown = %d, want 0 (bought/sold must be recognized, not fall through to Unknown)", stats.Unknown)
+	}
+	if stats.Malformed != 0 {
+		t.Errorf("Stats.Malformed = %d, want 0", stats.Malformed)
+	}
+	if stats.Ingested != 3 {
+		t.Errorf("Stats.Ingested = %d, want 3", stats.Ingested)
+	}
+
+	// The exit tax is a real, unsplit addMoney to the GLOBAL treasury
+	// (sell.go, RULING J/K) — TreasuryHbd() must include it or it silently
+	// under-counts kTreasury() from the moment Sell starts running. Buy's
+	// fee/cost never reach the treasury in a way this event's wire shape can
+	// attribute (no FeeCreator/FeePlatform split on the wire), so the only
+	// contribution here is registered.feePaid(0) + sold.tax(21) = 21.
+	if got := ix.TreasuryHbd(); got.Cmp(big.NewInt(21)) != 0 {
+		t.Errorf("TreasuryHbd() = %s, want 21 (feePaid 0 + sell's exit tax 21)", got)
+	}
+}
+
+// TestIndex_RetiredEventIsRecognizedAndDistinctFromClosed verifies the
+// `retired` finding: main.go's `retire` entrypoint really does emit a
+// hand-built `{"ev":"retired",...}` log (verified directly against
+// contract/main.go), which this Index previously did not recognize at all
+// (Stats.Unknown). It also pins that Retired is NOT the same fact as Closed:
+// a retiring market has NOT necessarily fully drained.
+func TestIndex_RetiredEventIsRecognizedAndDistinctFromClosed(t *testing.T) {
+	ix := NewIndex()
+	ix.Ingest([]RawEvent{
+		{OutputID: "o1", Data: `{"ev":"registered","v":1,"creator":"erin","actor":"erin","block":1,"face":"1000","cap":"100000","feePaid":"0"}`},
+		{OutputID: "o2", Data: `{"ev":"retired","creator":"erin","actor":"erin","block":50}`},
+	})
+
+	stats := ix.Stats()
+	if stats.Unknown != 0 {
+		t.Errorf("Stats.Unknown = %d, want 0 (retired must be recognized, not fall through to Unknown)", stats.Unknown)
+	}
+
+	s := ix.MarketSummary("erin")
+	if !s.Retired {
+		t.Error("MarketSummary(erin).Retired = false, want true")
+	}
+	if s.Closed {
+		t.Error("MarketSummary(erin).Closed = true, want false — retiring is NOT the same fact as fully closed/drained")
+	}
+
+	// Re-registration (a new incarnation) must reset Retired back to false,
+	// exactly mirroring core's own kRetiredAt reset to 0 on every Register
+	// call (market.go) — but ONLY after the market has actually reached
+	// `closed` (Register's own on-chain guard requires state "" or CLOSED;
+	// see foldKnownEventLocked's KindRegistered case for why the reset is
+	// keyed on m.closed).
+	ix.Ingest([]RawEvent{
+		{OutputID: "o3", Data: `{"ev":"closed","v":1,"creator":"erin","actor":"keeper1","block":60}`},
+		{OutputID: "o4", Data: `{"ev":"registered","v":1,"creator":"erin","actor":"erin","block":70,"face":"2000","cap":"200000","feePaid":"0"}`},
+	})
+	s2 := ix.MarketSummary("erin")
+	if s2.Retired {
+		t.Error("MarketSummary(erin).Retired = true after re-registration, want false (new incarnation starts fresh, mirroring core's own kRetiredAt reset)")
+	}
+}
+
+// TestIndex_OfferingEventsAreFoldedIntoHistory is THE headline DEFECT FIX of
+// this audit pass. Before this fix, foldKnownEventLocked's switch had NO case
+// for KindOfferingCreated/KindOfferingUpdated/KindOfferingDeleted, even
+// though ParseEvent (events.go) had recognized and correctly TYPED all three
+// since the offering catalogue shipped. With no matching case, execution fell
+// straight through the switch to the unconditional `return true` at its end —
+// WORSE than falling to Stats.Unknown, because ingestOneLocked reads a true
+// return as "folded successfully" and increments Stats.Ingested. A real
+// deployment's own documented health check ("alert if Malformed/Unknown grows
+// unexpectedly," Stats' own doc) would show nothing wrong while every single
+// offering event silently did nothing: no ix.market() call (so a creator
+// whose ONLY observed events were offering events was never even created in
+// this Index), no m.history append (so EventHistory — the audit surface,
+// task spec item 3 — permanently omitted every offering event, forever).
+//
+// This ingests ONLY offering events (deliberately no `registered` event
+// first) to prove the bug in its starkest form: before the fix, `ix.markets`
+// stayed completely empty and MarketSummary("faye").Known read false despite
+// three "successfully ingested" events about faye.
+func TestIndex_OfferingEventsAreFoldedIntoHistory(t *testing.T) {
+	ix := NewIndex()
+	ix.Ingest([]RawEvent{
+		{OutputID: "o1", Data: `{"ev":"offeringCreated","v":1,"creator":"faye","actor":"faye","block":10,"offeringId":1,"title":"15-min call","price":"2500"}`},
+		{OutputID: "o2", Data: `{"ev":"offeringUpdated","v":1,"creator":"faye","actor":"faye","block":20,"offeringId":1,"title":"15-min call","oldPrice":"2500","newPrice":"3000"}`},
+		{OutputID: "o3", Data: `{"ev":"offeringDeleted","v":1,"creator":"faye","actor":"faye","block":30,"offeringId":1}`},
+	})
+
+	stats := ix.Stats()
+	if stats.Ingested != 3 {
+		t.Errorf("Stats.Ingested = %d, want 3", stats.Ingested)
+	}
+	if stats.Unknown != 0 || stats.Malformed != 0 {
+		t.Errorf("Stats = %+v, want Unknown=0 Malformed=0 (offering events are recognized, well-formed, and must fold cleanly)", stats)
+	}
+
+	// THE ACTUAL BUG: before the fix, none of this was true — ix.market()
+	// was never called for any of the three events, so "faye" never became a
+	// known creator in this Index despite Stats.Ingested claiming 3 events
+	// were successfully processed about her.
+	if !ix.MarketSummary("faye").Known {
+		t.Fatal("MarketSummary(faye).Known = false, want true — an offering event must create/touch faye's market like every other known event kind does")
+	}
+	if got := len(ix.EventHistory("faye")); got != 3 {
+		t.Fatalf("EventHistory(faye) length = %d, want 3 — offering events must appear in the audit log like every other folded event; a length of 0 here is the exact silent-drop defect this test pins", got)
+	}
+}
+
+// TestIndex_UnrecognizedKindCannotSilentlyNoOp is the structural regression
+// for the fix alongside the offering fold above: foldKnownEventLocked now has
+// a `default: return false` case, so ANY Kind ParseEvent recognizes
+// (Unknown==false) but that this switch has no explicit case for is counted
+// as Malformed — loud — rather than silently returning true and doing
+// nothing. This cannot be exercised through the public API today (every Kind
+// ParseEvent can produce now has an explicit case), which is itself the
+// point: this test exists so that the NEXT time a Kind constant is added to
+// events.go without a matching case here, Stats.Malformed (a metric a real
+// deployment is told to alert on) climbs immediately instead of the bug
+// hiding for a day the way the offering catalogue's did.
+//
+// This test documents the invariant by construction rather than by poking a
+// private code path: every kind this package's own exhaustiveness sweep
+// (events_test.go's TestParseEvent_EveryDeclaredKindRoundTrips) knows about
+// must also be accepted (Ingested, not Malformed) here — the two sweeps
+// together prove there is currently no gap between "ParseEvent recognizes
+// it" and "index.go folds it."
+func TestIndex_UnrecognizedKindCannotSilentlyNoOp(t *testing.T) {
+	samples := []string{
+		`{"ev":"registered","v":1,"creator":"c","actor":"a","block":1,"face":"1","cap":"1","feePaid":"1"}`,
+		`{"ev":"renewed","v":1,"creator":"c","actor":"a","block":1,"periods":1,"paid":"1"}`,
+		`{"ev":"faceChanged","v":1,"creator":"c","actor":"a","block":1,"oldFace":"1","newFace":"2"}`,
+		`{"ev":"capChanged","v":1,"creator":"c","actor":"a","block":1,"oldCap":"1","newCap":"2"}`,
+		`{"ev":"prepaid","v":1,"creator":"c","actor":"a","block":1,"hbdPaid":"1","creditsMinted":"1"}`,
+		`{"ev":"transferred","v":1,"creator":"c","actor":"a","block":1,"to":"b","amount":"1"}`,
+		`{"ev":"asked","v":1,"creator":"c","actor":"a","block":1,"seq":1,"creditsSpent":"1","commissionHbd":"1","rate":"1","deadlineBlocks":1,"offeringId":0,"contentHash":"h"}`,
+		`{"ev":"answered","v":1,"creator":"c","actor":"a","block":1,"seq":1,"creditsToCreator":"1","commissionHbd":"1","answerHash":"h"}`,
+		`{"ev":"reclaimed","v":1,"creator":"c","actor":"a","block":1,"seq":1,"credits":"1","commissionHbd":"1","asker":"a"}`,
+		`{"ev":"declined","v":1,"creator":"c","actor":"c","block":1,"seq":1,"credits":"1","commissionHbd":"1","asker":"a"}`,
+		`{"ev":"refunded","v":1,"creator":"c","actor":"a","block":1,"credits":"1","payout":"1"}`,
+		`{"ev":"refundPushed","v":1,"creator":"c","actor":"a","block":1,"holder":"h","creditsBurned":"1","payout":"1"}`,
+		`{"ev":"closed","v":1,"creator":"c","actor":"a","block":1}`,
+		`{"ev":"bought","v":1,"creator":"c","actor":"a","block":1,"minted":"1","cost":"1","fee":"1","totalDue":"1"}`,
+		`{"ev":"sold","v":1,"creator":"c","actor":"a","block":1,"sold":"1","gross":"1","tax":"1","fee":"1","net":"1","taxBps":1,"heldBlocks":1}`,
+		`{"ev":"offeringCreated","v":1,"creator":"c","actor":"c","block":1,"offeringId":1,"title":"t","price":"1"}`,
+		`{"ev":"offeringUpdated","v":1,"creator":"c","actor":"c","block":1,"offeringId":1,"title":"t","oldPrice":"1","newPrice":"2"}`,
+		`{"ev":"offeringDeleted","v":1,"creator":"c","actor":"c","block":1,"offeringId":1}`,
+		`{"ev":"retired","creator":"c","actor":"c","block":1}`,
+		`{"ev":"treasuryWithdrawn","actor":"owner","amount":"1","block":1}`,
+		`{"ev":"tradeFeesClaimed","actor":"c","amount":"1","block":1}`,
+	}
+	for i, data := range samples {
+		ix := NewIndex()
+		ix.Ingest([]RawEvent{{OutputID: "o1", Data: data}})
+		stats := ix.Stats()
+		if stats.Ingested != 1 || stats.Malformed != 0 || stats.Unknown != 0 {
+			t.Errorf("sample %d (%s): stats = %+v, want Ingested=1 Malformed=0 Unknown=0 — every kind this package declares must actually fold, not silently no-op nor fall to Unknown", i, data, stats)
+		}
+	}
+}
+
+// TestIndex_TreasuryWithdrawnDebitsGlobalTreasury is the DEFECT FIX for the
+// missing debit path index.go's own TreasuryHbd() doc had flagged as stale:
+// "the pure MONOTONIC sum, no debit path off kTreasury today claim ... is
+// ALREADY STALE." Before this fix, `treasuryWithdrawn` fell entirely to
+// Stats.Unknown and TreasuryHbd() could only ever grow — a real owner
+// withdrawal would leave this Index's replayed treasury balance silently
+// overstating the live kTreasury() key forever after.
+func TestIndex_TreasuryWithdrawnDebitsGlobalTreasury(t *testing.T) {
+	ix := NewIndex()
+	ix.Ingest([]RawEvent{
+		{OutputID: "o1", Data: `{"ev":"registered","v":1,"creator":"carol","actor":"carol","block":1,"face":"1000","cap":"100000","feePaid":"5000"}`},
+		{OutputID: "o2", Data: `{"ev":"treasuryWithdrawn","actor":"ownerbot","amount":"3000","block":100}`},
+	})
+
+	stats := ix.Stats()
+	if stats.Unknown != 0 {
+		t.Errorf("Stats.Unknown = %d, want 0 (treasuryWithdrawn must be recognized, not fall through to Unknown)", stats.Unknown)
+	}
+	if stats.Malformed != 0 {
+		t.Errorf("Stats.Malformed = %d, want 0", stats.Malformed)
+	}
+	if got := ix.TreasuryHbd(); got.Cmp(big.NewInt(2000)) != 0 { // 5000 registered.feePaid - 3000 withdrawn
+		t.Errorf("TreasuryHbd() = %s, want 2000 (feePaid 5000 - withdrawn 3000) — the debit path must actually subtract, not merely parse-and-ignore", got)
+	}
+
+	// GLOBAL, not per-market: withdrawTreasury carries no "creator" at all
+	// (owner-gated, touches kTreasury() alone — core/read.go's own doc), so
+	// this event must never be attributed to any single creator's history.
+	if got := len(ix.EventHistory("carol")); got != 1 {
+		t.Errorf("EventHistory(carol) length = %d, want 1 (only the registered event — treasuryWithdrawn has no creator to attribute to)", got)
+	}
+}
+
+// TestIndex_TreasuryWithdrawnCanExceedNaiveZeroFloor proves the fold performs
+// an ordinary signed subtraction (matching core.WithdrawTreasury's own
+// bounded-by-chain-state semantics, not a floor-at-zero clamp this package
+// would have to invent): if this Index started replay mid-stream (a poller
+// that began tailing after some treasury activity it never saw), a withdrawal
+// can legitimately debit below whatever partial total this Index itself has
+// observed. Silently clamping at zero would hide exactly that "my own replay
+// is incomplete" signal from a consumer relying on TreasuryHbd() as a
+// cross-check.
+func TestIndex_TreasuryWithdrawnCanExceedNaiveZeroFloor(t *testing.T) {
+	ix := NewIndex()
+	ix.Ingest([]RawEvent{
+		{OutputID: "o1", Data: `{"ev":"treasuryWithdrawn","actor":"ownerbot","amount":"500","block":100}`},
+	})
+	if got := ix.TreasuryHbd(); got.Sign() >= 0 {
+		t.Errorf("TreasuryHbd() = %s, want negative (a withdrawal this Index never saw the matching inflow for must go negative, not clamp at 0, to surface the incomplete-replay signal honestly)", got)
+	}
+}
+
+// TestIndex_TradeFeesClaimedIsScopedToCreatorAndNeverTouchesTreasury is the
+// DEFECT FIX for `tradeFeesClaimed`. Before this fix it fell entirely to
+// Stats.Unknown. Two properties must both hold: (1) Actor doubles as the
+// creator identifier and the event lands in THAT creator's own EventHistory
+// (kFeeBal is always keyed by the creator whose market accrued the fee —
+// core/tradefee.go's accrueTradeFee, called only from buy.go/sell.go with
+// `creator`), and (2) it must NEVER be folded into ix.treasuryHbd — kFeeBal
+// is a separate pull pot from kTreasury (core/read.go's FeeBalanceOf:
+// "neither reserve nor treasury"), so double-counting it as treasury revenue
+// would overstate kTreasury() by money that was never there.
+func TestIndex_TradeFeesClaimedIsScopedToCreatorAndNeverTouchesTreasury(t *testing.T) {
+	ix := NewIndex()
+	ix.Ingest([]RawEvent{
+		{OutputID: "o1", Data: `{"ev":"registered","v":1,"creator":"carol","actor":"carol","block":1,"face":"1000","cap":"100000","feePaid":"5000"}`},
+		{OutputID: "o2", Data: `{"ev":"tradeFeesClaimed","actor":"carol","amount":"250","block":100}`},
+	})
+
+	stats := ix.Stats()
+	if stats.Unknown != 0 {
+		t.Errorf("Stats.Unknown = %d, want 0 (tradeFeesClaimed must be recognized, not fall through to Unknown)", stats.Unknown)
+	}
+
+	if got := len(ix.EventHistory("carol")); got != 2 {
+		t.Errorf("EventHistory(carol) length = %d, want 2 (registered + tradeFeesClaimed, scoped to carol via Actor)", got)
+	}
+	if got := ix.TreasuryHbd(); got.Cmp(big.NewInt(5000)) != 0 {
+		t.Errorf("TreasuryHbd() = %s, want 5000 (unchanged by the claim — kFeeBal is a SEPARATE pot from kTreasury, claiming it must never inflate/deflate the treasury total)", got)
+	}
+	// Never a credits/token balance either — this is an HBD payout audit
+	// entry, mirroring RefundedEvent.Payout's identical treatment.
+	if got := ix.Position("carol", "carol"); got.Sign() != 0 {
+		t.Errorf("Position(carol,carol) = %s, want 0 (a trade-fee claim must never touch the credits/token balance ledger)", got)
 	}
 }

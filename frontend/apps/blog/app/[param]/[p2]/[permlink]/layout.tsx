@@ -2,6 +2,7 @@ import { Metadata } from 'next';
 import React, { PropsWithChildren } from 'react';
 import { notFound } from 'next/navigation';
 import { getPostCached } from '@/blog/lib/cached-api';
+import { liteEntryForPermlink } from '@/blog/lib/lite/render/lite-entry';
 import { getObserverFromCookies } from '@/blog/lib/auth-utils';
 import { isValidUserParam } from '@/blog/utils/validate-links';
 import { getLogger } from '@ui/lib/logging';
@@ -26,7 +27,15 @@ export async function generateMetadata({
 
   try {
     // Use cached version - deduplicated with page's prefetch within the same request
-    const post = await getPostCached(author, permlink, observer);
+    // Same lite fallback as the page: Hivemind has nothing under a lite display
+    // name, so a Lumen post would otherwise get generic "Hive Blog" metadata and
+    // share previews. Resolved from the permlink, which identifies the post itself.
+    // `.catch(() => null)` matters: for an unknown author the bridge call REJECTS
+    // rather than returning null, which would jump straight to the catch below and
+    // silently hand back generic "Hive" metadata.
+    const post =
+      (await getPostCached(author, permlink, observer).catch(() => null)) ??
+      (await liteEntryForPermlink(permlink, observer));
 
     const title = post?.title ? `${post.title} ` : 'Hive Blog';
     const description =

@@ -1,6 +1,7 @@
 package core
 
 import (
+	"encoding/json"
 	"math/big"
 	"strings"
 	"testing"
@@ -59,7 +60,7 @@ func TestOfferings_IdZeroIsTheFacePrice(t *testing.T) {
 func TestOfferings_AskSettlesAtTheOfferingPrice(t *testing.T) {
 	s, c := offSetup(t)
 	// Two offerings at clearly different prices, both far from the face.
-	cheap, err := CreateOffering(s, c, c, 2000, "quick question", 40_000)
+	cheap, err := CreateOffering(s, c, c, 2000, "quick question", 50_000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,8 +68,8 @@ func TestOfferings_AskSettlesAtTheOfferingPrice(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := OfferingPrice(s, c, cheap); got.Cmp(big.NewInt(40_000)) != 0 {
-		t.Fatalf("cheap offering price = %s, want 40000", got)
+	if got := OfferingPrice(s, c, cheap); got.Cmp(big.NewInt(50_000)) != 0 {
+		t.Fatalf("cheap offering price = %s, want 50000", got)
 	}
 	if got := OfferingPrice(s, c, dear); got.Cmp(big.NewInt(800_000)) != 0 {
 		t.Fatalf("dear offering price = %s, want 800000", got)
@@ -87,7 +88,7 @@ func TestOfferings_AskSettlesAtTheOfferingPrice(t *testing.T) {
 	// builds one and returns the block to query at.
 	qb := seedSettleObs(s, c, 2000, SpotRate(getMoney(s, kSupply(c))))
 	setU64(s, kPaidUntil(c), qb+SubscriptionPeriod)
-	cheapRes, err := Ask(s, "buyer", c, qb, big.NewInt(1_000_000), commissionOwedFor(big.NewInt(40_000)), "q1", MinAskDeadline, cheap)
+	cheapRes, err := Ask(s, "buyer", c, qb, big.NewInt(1_000_000), commissionOwedFor(big.NewInt(50_000)), "q1", MinAskDeadline, cheap)
 	if err != nil {
 		t.Fatalf("ask against the cheap offering: %v", err)
 	}
@@ -344,6 +345,536 @@ func TestOfferings_TitleValidation(t *testing.T) {
 	}
 	if _, err := CreateOffering(s, c, c, 2000, strings.Repeat("x", MaxOfferTitleLen), 1000); err != nil {
 		t.Fatalf("a title of exactly MaxOfferTitleLen must be accepted: %v", err)
+	}
+}
+
+// ---- DEFECT FIX: the band survives delete+recreate (2026-07-27) ----------
+//
+// The proven bypass, restated: CreateOffering routed a brand-new id through
+// setBandedPrice's initial-posting branch unconditionally, because a fresh
+// id's OWN price key always reads 0. DeleteOffering frees that id's price/
+// anchor, and ids are never reused (kSeq's reason) — so create at MinFace, get
+// correctly refused jumping straight to 10,000,000, delete, recreate FRESH
+// under the SAME title at 10,000,000, and it succeeded: a ~19,685x jump with
+// zero elapsed time. The fix anchors the band to the (creator, epoch,
+// NORMALIZED title) instead of the id — the tests below prove the bypass is
+// closed, that the fix does not fire on a genuinely new or genuinely expired
+// title, and that a rename cannot be used to launder around it either.
+
+func TestOfferings_DeleteRecreateCannotBypassTheBand(t *testing.T) {
+	s, c := offSetup(t)
+	id, err := CreateOffering(s, c, c, 2000, "custom song", MinFace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Sanity: the direct jump is refused on the LIVE id (unchanged behaviour).
+	if err := SetOfferingPrice(s, c, c, 2001, id, 10_000_000); err == nil {
+		t.Fatal("a >2x jump on the live id succeeded, want the band to refuse")
+	}
+	if err := DeleteOffering(s, c, c, id); err != nil {
+		t.Fatal(err)
+	}
+	// THE PROVEN BYPASS: recreate fresh under the identical title at the
+	// price that was just correctly refused.
+	if _, err := CreateOffering(s, c, c, 2002, "custom song", 10_000_000); err == nil {
+		t.Fatal("BYPASS: delete+recreate accepted a price the live id had just refused")
+	} else if e, ok := err.(*Err); !ok || e.Symbol != ErrInput {
+		t.Fatalf("want ErrInput, got %v", err)
+	}
+}
+
+func TestOfferings_TitleAnchorSurvivesCaseAndWhitespaceDodge(t *testing.T) {
+	s, c := offSetup(t)
+	id, err := CreateOffering(s, c, c, 2000, "Custom Song", MinFace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := DeleteOffering(s, c, c, id); err != nil {
+		t.Fatal(err)
+	}
+	// A cosmetically different spelling of the SAME title must not dodge the
+	// anchor: different case, and leading/trailing whitespace.
+	if _, err := CreateOffering(s, c, c, 2001, "  custom song  ", 10_000_000); err == nil {
+		t.Fatal("BYPASS: whitespace-padded retitle dodged the anchor")
+	}
+	if _, err := CreateOffering(s, c, c, 2002, "CUSTOM SONG", 10_000_000); err == nil {
+		t.Fatal("BYPASS: upper-cased retitle dodged the anchor")
+	}
+}
+
+func TestOfferings_HonestFirstTimePostingStillFree(t *testing.T) {
+	s, c := offSetup(t)
+	// Two titles NEVER used before in this epoch: any in-range price must be
+	// accepted, at both ends of [MinFace, MaxFace] — the fix must not turn
+	// honest first-time posting into a false positive.
+	if _, err := CreateOffering(s, c, c, 2000, "brand new service never seen before", MinFace); err != nil {
+		t.Fatalf("first-ever posting at MinFace refused: %v", err)
+	}
+	if _, err := CreateOffering(s, c, c, 2000, "another brand new service", MaxFace); err != nil {
+		t.Fatalf("first-ever posting at MaxFace refused: %v", err)
+	}
+}
+
+func TestOfferings_DeleteRecreateWithinBandStillSucceeds(t *testing.T) {
+	s, c := offSetup(t)
+	id, err := CreateOffering(s, c, c, 2000, "call", 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := DeleteOffering(s, c, c, id); err != nil {
+		t.Fatal(err)
+	}
+	// Exactly 2x, the legitimate edge, via delete+recreate instead of
+	// SetOfferingPrice: must be treated identically to an in-place reprice.
+	id2, err := CreateOffering(s, c, c, 2001, "call", 2000)
+	if err != nil {
+		t.Fatalf("a legitimate 2x change via delete+recreate was refused: %v", err)
+	}
+	// WINDOW CONTINUITY: the anchor's ORIGIN must not have moved to the
+	// recreate block, or a second delete+recreate would wrongly earn a
+	// SECOND 2x on top of the first (4x total) with zero elapsed time. The
+	// anchor is still 1000 (from the original create), so 2001 is already at
+	// the ceiling — one more unit must be refused.
+	if err := DeleteOffering(s, c, c, id2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CreateOffering(s, c, c, 2002, "call", 2001); err == nil {
+		t.Fatal("BYPASS: a second delete+recreate compounded past the original window's 2x ceiling")
+	}
+}
+
+// TestOfferings_ExpiredWindowRecreateCannotJumpUnbounded — DEFECT 3,
+// corrected (2026-07-27). This test previously asserted the OPPOSITE of its
+// current name: that a recreate after the title's window "expired" must
+// succeed at ANY price, including a ~17,331x jump from MinFace to MaxFace,
+// "exactly like first-time posting". That assertion was pinning the exact
+// defect-3 bypass an independent review found: a price that had been posted
+// once and then deleted, with nothing repricing it since, "expires" exactly
+// like a price that had been LIVE and STABLE for the same 7 days — and the
+// old code could not tell the two apart, so it let BOTH recreate completely
+// unbanded. "Any price stable for 7 days... can therefore be deleted and
+// recreated at any price" is not first-time posting, it's a rug with a
+// built-in 7-day fuse. The corrected behaviour: an expired window is banded
+// against the LAST KNOWN price, exactly like a live id's own reprice after
+// its window rolls over (setBandedPrice's own "window expired" branch) — a
+// delete+recreate can never do BETTER than simply holding the id would have.
+func TestOfferings_ExpiredWindowRecreateCannotJumpUnbounded(t *testing.T) {
+	s, c := offSetup(t)
+	const start = 2000
+	id, err := CreateOffering(s, c, c, start, "call", MinFace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := DeleteOffering(s, c, c, id); err != nil {
+		t.Fatal(err)
+	}
+	// One block short of the window: still active, still banded against the
+	// original anchor.
+	if _, err := CreateOffering(s, c, c, start+FaceBandWindow-1, "call", MaxFace); err == nil {
+		t.Fatal("a recreate one block before the window elapsed was NOT banded")
+	}
+	// THE PROVEN BYPASS: the window has now genuinely elapsed, but that is
+	// NOT a license to jump anywhere — a ~17,331x move must still be refused.
+	if _, err := CreateOffering(s, c, c, start+FaceBandWindow, "call", MaxFace); err == nil {
+		t.Fatal("BYPASS: an expired title window granted a fully unbanded recreate — the exact 'stable price is one delete away from unbounded' exploit")
+	} else if e, ok := err.(*Err); !ok || e.Symbol != ErrInput {
+		t.Fatalf("want ErrInput, got %v", err)
+	}
+	// The honest counterpart: exactly like a LIVE id whose window just rolled
+	// over, a legitimate 2x change from the last known price still succeeds —
+	// the window reopens, it does not vanish.
+	if _, err := CreateOffering(s, c, c, start+FaceBandWindow+1, "call", MinFace*2); err != nil {
+		t.Fatalf("a legitimate 2x recreate after the window expired was refused: %v", err)
+	}
+}
+
+func TestOfferings_ReRegistrationWipesTitleAnchorsToo(t *testing.T) {
+	s, c := offSetup(t)
+	id, err := CreateOffering(s, c, c, 2000, "call", MinFace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Sanity: still banded pre-registration.
+	if _, err := CreateOffering(s, c, c, 2001, "call", 10_000_000); err == nil {
+		t.Fatal("a second live 'call' at 10,000,000 should have been refused by the shared anchor")
+	}
+	if err := DeleteOffering(s, c, c, id); err != nil {
+		t.Fatal(err)
+	}
+
+	setStr(s, kState(c), StateClosed)
+	if err := Register(s, c, c, 3000, 2500, 1000); err != nil {
+		t.Fatalf("re-register: %v", err)
+	}
+
+	// The SAME title, in the NEW epoch, must be freely priceable — a
+	// re-registration is a fresh start (SPEC §1.7.5), and the title anchor is
+	// epoch-scoped exactly like the rest of the catalogue (kOfferEpoch).
+	if _, err := CreateOffering(s, c, c, 3001, "call", 10_000_000); err != nil {
+		t.Fatalf("a title anchor survived re-registration: %v", err)
+	}
+}
+
+func TestOfferings_RenameCannotLaunderAFreshTitleClaim(t *testing.T) {
+	s, c := offSetup(t)
+	// The second-order variant of the same bypass: relabel a banded
+	// offering to a title that has never been used, delete it, and try to
+	// recreate FRESH under the new name — must be refused exactly as if the
+	// creator had never renamed at all.
+	id, err := CreateOffering(s, c, c, 2000, "foo", MinFace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := SetOfferingTitle(s, c, c, id, "bar"); err != nil {
+		t.Fatal(err)
+	}
+	if err := DeleteOffering(s, c, c, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CreateOffering(s, c, c, 2001, "bar", 10_000_000); err == nil {
+		t.Fatal("BYPASS: rename-then-delete-then-recreate dodged the anchor")
+	}
+	// The honest in-band price must still work under the new name.
+	if _, err := CreateOffering(s, c, c, 2002, "bar", 900); err != nil {
+		t.Fatalf("an honest in-band recreate under the renamed title was refused: %v", err)
+	}
+}
+
+// ---- DEFECT 1: a rename ONTO an already-anchored title bypassed the band --
+//
+// The proven attack: MinFace correctly refuses a direct >2x jump on the live
+// id. Post a THROWAWAY offering under a virgin title at MaxFace (free — first
+// -time posting takes no band at all). Delete the REAL, protected offering.
+// Rename the throwaway ONTO the real title. The old code inherited the
+// destination's band ONLY when that title's slot was virgin; when it was
+// ALREADY anchored (as here), the whole `if` was skipped — no check on the
+// price moving in, at all — so the throwaway's MaxFace lands under the
+// protected name, a jump the direct path had just correctly refused.
+
+func TestOfferings_RenameOntoAnchoredTitleCannotLaunderThePrice(t *testing.T) {
+	s, c := offSetup(t)
+	real, err := CreateOffering(s, c, c, 2000, "custom song", MinFace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Sanity: the direct jump is refused on the live id.
+	if err := SetOfferingPrice(s, c, c, 2001, real, MaxFace); err == nil {
+		t.Fatal("a direct jump on the live id succeeded, want the band to refuse")
+	}
+	// The throwaway: a virgin title, so posting is free.
+	tmp, err := CreateOffering(s, c, c, 2002, "tmp throwaway", MaxFace)
+	if err != nil {
+		t.Fatalf("first-time posting of the throwaway: %v", err)
+	}
+	if err := DeleteOffering(s, c, c, real); err != nil {
+		t.Fatal(err)
+	}
+	// THE PROVEN BYPASS: rename the throwaway onto the now-freed, protected
+	// title.
+	if err := SetOfferingTitle(s, c, c, tmp, "custom song"); err == nil {
+		t.Fatal("BYPASS: renaming a throwaway onto an anchored title moved an unbanded price in")
+	} else if e, ok := err.(*Err); !ok || e.Symbol != ErrInput {
+		t.Fatalf("want ErrInput, got %v", err)
+	}
+	// The refused rename must not have moved anything: the throwaway keeps
+	// its own price and title untouched.
+	if got := OfferingPrice(s, c, tmp); got.Cmp(big.NewInt(MaxFace)) != 0 {
+		t.Fatalf("the throwaway's own price changed as a side effect of a refused rename: got %s", got)
+	}
+	if got := OfferingTitle(s, c, tmp); got != "tmp throwaway" {
+		t.Fatalf("the throwaway's own title changed as a side effect of a refused rename: got %q", got)
+	}
+}
+
+// TestOfferings_RenameOntoAnchoredTitleSucceedsWithinBand is the honest
+// counterpart: the fix must not "refuse every rename onto an anchored title",
+// only ones that would move a price outside that title's own band.
+func TestOfferings_RenameOntoAnchoredTitleSucceedsWithinBand(t *testing.T) {
+	s, c := offSetup(t)
+	real, err := CreateOffering(s, c, c, 2000, "custom song", 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := DeleteOffering(s, c, c, real); err != nil {
+		t.Fatal(err)
+	}
+	// A different offering, priced legitimately WITHIN "custom song"'s band
+	// (anchor 1000, so up to 2000).
+	other, err := CreateOffering(s, c, c, 2001, "other service", 1900)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := SetOfferingTitle(s, c, c, other, "custom song"); err != nil {
+		t.Fatalf("an honest in-band rename onto an anchored title was refused: %v", err)
+	}
+	if got := OfferingTitle(s, c, other); got != "custom song" {
+		t.Fatalf("title = %q, want %q", got, "custom song")
+	}
+	// The rename must still never move the price.
+	if got := OfferingPrice(s, c, other); got.Cmp(big.NewInt(1900)) != 0 {
+		t.Fatalf("rename moved the price: got %s, want unchanged 1900", got)
+	}
+}
+
+// TestOfferings_RenameCheckUsesTheTighterOfAnchorAndLastPrice pins a
+// second-order gap this fix deliberately closed while designing the DEFECT-1
+// rename check: SetOfferingTitle cannot see the current block (no signature
+// change — see its own doc), so it cannot tell an ACTIVE window (which
+// setBandedPrice would band against the ANCHOR) from an EXPIRED one (which it
+// would band against the title's LAST KNOWN PRICE instead). Checking against
+// the anchor ALONE is not safe: if the last known price has legitimately
+// drifted to the bottom of the anchor's own band (still valid — cur can be
+// anywhere in [anchor/2, anchor*2] mid-window), an anchor-only check can admit
+// a price a same-moment EXPIRED check would refuse. The fix checks against the
+// INTERSECTION of both possible true bands, which can never be looser than
+// either.
+func TestOfferings_RenameCheckUsesTheTighterOfAnchorAndLastPrice(t *testing.T) {
+	s, c := offSetup(t)
+	// "custom song" opens its window at 2000 (anchor=2000), then legitimately
+	// drops to 1000 within the SAME window — still valid: 1000 = anchor/2,
+	// the exact floor of the 2x band (and still >= MinFace).
+	real, err := CreateOffering(s, c, c, 2000, "custom song", 2000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := SetOfferingPrice(s, c, c, 2001, real, 1000); err != nil {
+		t.Fatalf("a legitimate in-window drop to the band floor was refused: %v", err)
+	}
+	if err := DeleteOffering(s, c, c, real); err != nil {
+		t.Fatal(err)
+	}
+	// A throwaway priced at 3000: within the STALE anchor's own band
+	// ([1000,4000]), but OUTSIDE what an expired check against the real last
+	// price (1000, band [500,2000]) would allow.
+	tmp, err := CreateOffering(s, c, c, 2002, "tmp throwaway", 3000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := SetOfferingTitle(s, c, c, tmp, "custom song"); err == nil {
+		t.Fatal("BYPASS: an anchor-only check let a price through that the title's real last-known-price band would refuse")
+	} else if e, ok := err.(*Err); !ok || e.Symbol != ErrInput {
+		t.Fatalf("want ErrInput, got %v", err)
+	}
+	// The honest counterpart: a price that fits BOTH the anchor's band AND
+	// the last-known-price's band must still be allowed.
+	tmp2, err := CreateOffering(s, c, c, 2003, "tmp2 throwaway", 1800)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := SetOfferingTitle(s, c, c, tmp2, "custom song"); err != nil {
+		t.Fatalf("a price within BOTH possible bands was wrongly refused: %v", err)
+	}
+}
+
+// ---- DEFECT 2: an ordinary reprice laundered a foreign anchor -------------
+//
+// The proven chain in the original review was rename (defect 1) THEN an
+// ordinary reprice, which unconditionally copied the id's OWN anchor onto the
+// title. Defect 1's fix above already refuses the rename step, so that exact
+// two-step chain can no longer reach the vulnerable state through the normal
+// API. This test isolates defect 2's OWN mechanism directly — by writing to
+// this id's cached anchor the way a successful-but-now-refused rename used
+// to, bypassing the normal entry points on purpose — to prove SetOfferingPrice
+// itself no longer trusts an id's own (possibly foreign, possibly stale)
+// cached anchor for anything: it bands against, and only ever refreshes, the
+// TITLE's own persistent state. This is a second, independent guard: even if
+// some other future code path ever got a foreign value into an id's cache,
+// this test proves SetOfferingPrice cannot be tricked into laundering it.
+func TestOfferings_OrdinaryRepriceCannotLaunderAForeignAnchor(t *testing.T) {
+	s, c := offSetup(t)
+	id, err := CreateOffering(s, c, c, 2000, "custom song", 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate an id whose OWN cached anchor has, by some means outside the
+	// normal API, come to carry a foreign, much looser value than the
+	// title's real anchor (1000) — exactly what the old rename-then-reprice
+	// chain produced. defect 1's own fix means this can no longer happen via
+	// SetOfferingTitle; this line reproduces the resulting STATE directly so
+	// defect 2's mechanism is tested in isolation.
+	epoch := offerEpoch(s, c)
+	setMoney(s, kOfferAnchor(c, epoch, id), big.NewInt(MaxFace))
+	setU64(s, kOfferAnchorAt(c, epoch, id), 2000)
+
+	// An ordinary, honest, in-band reprice (against the TITLE's real 1000
+	// anchor) must still succeed...
+	if err := SetOfferingPrice(s, c, c, 2001, id, 1900); err != nil {
+		t.Fatalf("an honest in-band reprice was refused: %v", err)
+	}
+	// ...and must NOT have laundered the tampered MaxFace anchor onto the
+	// title: a follow-up jump that only the foreign anchor would permit must
+	// still be refused.
+	if err := SetOfferingPrice(s, c, c, 2002, id, MaxFace); err == nil {
+		t.Fatal("BYPASS: an ordinary reprice laundered a foreign anchor into the title, then a follow-up jump used it")
+	}
+}
+
+// ---- DEFECT 4: a visually identical title dodged the anchor --------------
+//
+// normalizeOfferTitle used to be ToLower(TrimSpace) only: no internal
+// whitespace collapse, no zero-width/format-character stripping. A buyer
+// sees "custom song" and "custom  song" (two spaces) — or "custom song" with
+// an invisible zero-width joiner spliced in — as the IDENTICAL service, but
+// the old normalization keyed them to different anchors, each starting
+// virgin.
+
+func TestOfferings_InternalWhitespaceAndZeroWidthCannotDodgeTheAnchor(t *testing.T) {
+	s, c := offSetup(t)
+	id, err := CreateOffering(s, c, c, 2000, "custom song", MinFace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := DeleteOffering(s, c, c, id); err != nil {
+		t.Fatal(err)
+	}
+
+	// Two internal spaces where the original had one.
+	if _, err := CreateOffering(s, c, c, 2001, "custom  song", MaxFace); err == nil {
+		t.Fatal("BYPASS: an internal-whitespace-run variant dodged the anchor")
+	}
+	// A zero-width joiner (U+200D) spliced into the middle — visually
+	// identical to a buyer, byte-different without normalization.
+	if _, err := CreateOffering(s, c, c, 2002, "custom‍ song", MaxFace); err == nil {
+		t.Fatal("BYPASS: a zero-width-joiner variant dodged the anchor")
+	}
+	// A leading zero-width space.
+	if _, err := CreateOffering(s, c, c, 2003, "​custom song", MaxFace); err == nil {
+		t.Fatal("BYPASS: a leading zero-width-space variant dodged the anchor")
+	}
+	// A tab in place of the internal space.
+	if _, err := CreateOffering(s, c, c, 2004, "custom\tsong", MaxFace); err == nil {
+		t.Fatal("BYPASS: a tab-for-space variant dodged the anchor")
+	}
+}
+
+// TestOfferings_NormalizationDoesNotCollapseGenuinelyDifferentTitles is the
+// honest counterpart: the fix must narrow collisions, not homogenize
+// everything. A genuinely different title (even one that also happens to
+// have a double space) is its own, freely-priceable title, and legitimate
+// unicode/emoji/punctuation titles are unaffected.
+func TestOfferings_NormalizationDoesNotCollapseGenuinelyDifferentTitles(t *testing.T) {
+	s, c := offSetup(t)
+	if _, err := CreateOffering(s, c, c, 2000, "custom song", MinFace); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CreateOffering(s, c, c, 2000, "custom  poem", MaxFace); err != nil {
+		t.Fatalf("a genuinely different title was wrongly banded: %v", err)
+	}
+	if _, err := CreateOffering(s, c, c, 2000, "🎵 custom song — ₿ special €dition 日本語", MaxFace); err != nil {
+		t.Fatalf("a legitimate unicode/emoji title was wrongly banded: %v", err)
+	}
+}
+
+// ---- DEFECT FIX: raw control bytes in a title break the event log --------
+//
+// validOfferTitle rejected only '|' and ','. A title containing a raw
+// newline/tab/NUL/BEL is accepted and embedded UNESCAPED into
+// EvOfferingCreated/EvOfferingUpdated (events.go's evJSONEscape escapes only
+// '"' and '\'), and the resulting log line fails encoding/json.Unmarshal —
+// verified directly below — so indexer/events.go's ParseEvent drops the
+// event silently. The fix rejects bytes < 0x20 and 0x7f at the one door
+// every title passes through.
+
+func TestOfferings_TitleControlBytesRejected(t *testing.T) {
+	s, c := offSetup(t)
+	bad := []struct {
+		name  string
+		title string
+	}{
+		{"newline", "evil\ntitle"},
+		{"tab", "evil\ttitle"},
+		{"nul", "evil\x00title"},
+		{"bel(0x07)", "evil\x07title"},
+		{"del(0x7f)", "evil\x7ftitle"},
+	}
+	for _, tc := range bad {
+		if _, err := CreateOffering(s, c, c, 2000, tc.title, 1000); err == nil {
+			t.Fatalf("%s: control-byte title accepted, want refusal", tc.name)
+		} else if e, ok := err.(*Err); !ok || e.Symbol != ErrInput {
+			t.Fatalf("%s: want ErrInput, got %v", tc.name, err)
+		}
+	}
+}
+
+// TestOfferings_ShopClosesOnRetireButDeleteStillWorks — a retired market's
+// shop is read-only for NEW listings and price/title changes, but DELETE is
+// the one exception (DEFECT 5 FIX, 2026-07-27, corrected from
+// TestOfferings_ShopClosesOnRetire which previously asserted delete was ALSO
+// refused after Retire).
+//
+// Retire permanently closes inflows (RequireInflowOpen consults
+// marketRetired), so anything listed or repriced afterwards can never be
+// bought by anyone — the shop is the buyer-facing catalogue, and a fresh
+// listing there reads as available. That is still true and still enforced
+// below for Create/SetPrice/SetTitle. But a prior change widened
+// DeleteOffering's OWN guard to the same requireShopEditable, which took away
+// a retiring creator's only way to pull a listing nobody can ever buy again —
+// the opposite of what the guard is for. DeleteOffering moves no funds and
+// never touches an escrow already opened against the id (existing escrows
+// resolve on the answer/reclaim rails, which never consult the shop at all),
+// so there is no fund-safety reason to refuse it once retired.
+func TestOfferings_ShopClosesOnRetireButDeleteStillWorks(t *testing.T) {
+	s, c := offSetup(t)
+	id, err := CreateOffering(s, c, c, 2000, "call", 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Retire(s, c, c, 2100); err != nil {
+		t.Fatalf("Retire: %v", err)
+	}
+	if _, err := CreateOffering(s, c, c, 2200, "new service", 1000); err == nil {
+		t.Fatal("created a new offering on a RETIRED market — nobody could ever buy it")
+	}
+	if err := SetOfferingPrice(s, c, c, 2200, id, 1500); err == nil {
+		t.Fatal("repriced an offering on a RETIRED market")
+	}
+	if err := SetOfferingTitle(s, c, c, id, "renamed"); err == nil {
+		t.Fatal("retitled an offering on a RETIRED market")
+	}
+	// THE FIX: delete must still work — the creator's only way to withdraw a
+	// listing after retiring.
+	if err := DeleteOffering(s, c, c, id); err != nil {
+		t.Fatalf("BYPASS-OF-A-DIFFERENT-KIND: delete must still work on a RETIRED market, got: %v", err)
+	}
+	if got := OfferingPrice(s, c, id); got.Sign() != 0 {
+		t.Fatalf("deleted offering still prices at %s after retire, want 0", got)
+	}
+	if got := OfferingTitle(s, c, id); got != "" {
+		t.Fatalf("deleted offering still titled %q after retire, want empty", got)
+	}
+}
+
+func TestOfferings_TitleUnicodeAndEmojiAccepted(t *testing.T) {
+	s, c := offSetup(t)
+	title := "🎵 custom song — ₿ special €dition 日本語"
+	id, err := CreateOffering(s, c, c, 2000, title, 1000)
+	if err != nil {
+		t.Fatalf("a legitimate unicode/emoji/currency title was refused: %v", err)
+	}
+	if got := OfferingTitle(s, c, id); got != title {
+		t.Fatalf("title round-tripped as %q, want %q", got, title)
+	}
+}
+
+// TestOfferings_ControlByteWouldHaveBrokenTheEventLog documents the actual
+// mechanism the validOfferTitle fix closes, independent of the fix itself:
+// EvOfferingCreated is a pure string builder (events.go) that performs no
+// validation of its own by design ("meant to be called only AFTER the
+// corresponding core.* call already succeeded") — so this calls it directly
+// with a title CreateOffering would now refuse, to prove that title would
+// have produced an event line encoding/json.Unmarshal cannot parse, exactly
+// as indexer/events.go's ParseEvent would receive it.
+func TestOfferings_ControlByteWouldHaveBrokenTheEventLog(t *testing.T) {
+	line := EvOfferingCreated("c", "c", 2000, 1, "evil\ntitle", big.NewInt(1000))
+	var v map[string]any
+	if err := json.Unmarshal([]byte(line), &v); err == nil {
+		t.Fatal("a raw newline in the title did NOT break json.Unmarshal — the proven mechanism no longer holds, re-check the defect")
+	}
+	// A title validOfferTitle still accepts (unicode/emoji) must parse fine.
+	clean := EvOfferingCreated("c", "c", 2000, 1, "🎵 custom song ₿", big.NewInt(1000))
+	if err := json.Unmarshal([]byte(clean), &v); err != nil {
+		t.Fatalf("a clean unicode title's event line failed to parse: %v", err)
 	}
 }
 

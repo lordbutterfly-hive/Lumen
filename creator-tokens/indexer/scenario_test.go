@@ -49,7 +49,7 @@ func buildCanonicalScenario() *MockEventSource {
 	src.Push(`{"ev":"asked","v":1,"creator":"alice","actor":"bob","block":300,"seq":0,"creditsSpent":"500","commissionHbd":"120","rate":"1000000","deadlineBlocks":28800,"contentHash":"q1"}`)
 	src.Push(`{"ev":"answered","v":1,"creator":"alice","actor":"alice","block":350,"seq":0,"creditsToCreator":"500","commissionHbd":"120","answerHash":"a1"}`)
 	src.Push(`{"ev":"asked","v":1,"creator":"alice","actor":"carol","block":400,"seq":1,"creditsSpent":"300","commissionHbd":"100","rate":"900000","deadlineBlocks":28800,"contentHash":"q2"}`)
-	src.Push(`{"ev":"reclaimed","v":1,"creator":"alice","actor":"carol","block":430000,"seq":1,"credits":"300","commissionHbd":"100"}`)
+	src.Push(`{"ev":"reclaimed","v":1,"creator":"alice","actor":"carol","block":430000,"seq":1,"credits":"300","commissionHbd":"100","asker":"carol"}`)
 	src.Push(`{"ev":"asked","v":1,"creator":"alice","actor":"dave","block":500,"seq":2,"creditsSpent":"200","commissionHbd":"80","rate":"1100000","deadlineBlocks":28800,"contentHash":"q3"}`)
 	src.Push(`{"ev":"answered","v":1,"creator":"alice","actor":"alice","block":540,"seq":2,"creditsToCreator":"200","commissionHbd":"80","answerHash":"a3"}`)
 	src.Push(`{"ev":"asked","v":1,"creator":"alice","actor":"bob","block":600,"seq":3,"creditsSpent":"150","commissionHbd":"60","rate":"1000000","deadlineBlocks":28800,"contentHash":"q4"}`)

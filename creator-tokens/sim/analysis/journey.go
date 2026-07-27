@@ -11,19 +11,34 @@ import (
 //
 // At every point in the trace, for every actor, this file asks: given the
 // value they hold (a credit balance, or an open ask escrow), is there a
-// legal action that gets them out? Two exit routes matter for credits:
-// Refund (self-pull) and TransferCredits. One matters for an open ask:
+// legal action that gets them out? THREE exit routes matter for credits:
+// Sell (curve, while the market trades), Refund (flat pro-rata pull, at
+// wind-down) and TransferCredits (always). One matters for an open ask:
 // Reclaim (asker) or Answer (creator, on the asker's behalf).
 //
 // # What reading core proves before any trace is even run
 //
-// core/refund.go's Refund and core/prepay.go's TransferCredits carry NO
-// phase or pause gate at all (API.md rule 3: "outflows never pause"; rule 4:
-// "the billing state must never gate funds"). Their only guard is balance
-// sufficiency. So a positive-balance holder ALWAYS has at least one legal
-// action, in every phase including FROZEN and CLOSED, by construction — a
-// pure credit-holder dead end should be UNREACHABLE under this code. This
-// file both states that (as a static claim, clearly labeled) and checks it
+// core/transfer.go's TransferCredits carries NO phase or pause gate at all
+// (API.md rule 3: "outflows never pause"; rule 4: "the billing state must
+// never gate funds") — its only guard is balance sufficiency, in every phase
+// including FROZEN and CLOSED.
+//
+// core/refund.go's Refund is DIFFERENT (RULING A/K3, RULINGS-v2-2026-07-21/
+// 22 — this file used to claim it had no phase gate either; it does now, and
+// that update IS this comment): Refund/RefundHolder are gated to inWindDown
+// ONLY (naturally FROZEN/CLOSED, or an irreversible Retire — Retire is never
+// driven by this simulator's actor set, so in practice this is exactly
+// "FROZEN or CLOSED"). While the market is NOT winding down, the complementary
+// rail is open instead — core/sell.go's Sell, the exact curve proceeds — and
+// refund.go/sell.go's own file headers prove the two rails partition every
+// (creator, block) with NO gap and NO overlap. So the correct static claim is:
+// a positive-balance holder ALWAYS has at least one legal exit — Sell OR
+// Refund, whichever the CURRENT phase opens — in every phase, by construction.
+// A refund refused specifically because the market is not winding down is
+// EXPECTED, not a dead end, exactly because Sell is open in that same state;
+// AnalyzeDeadEnds below only escalates a failed refund into an anomaly when
+// the market WAS in wind-down (i.e. when core's own rule says it should have
+// worked). This file both states the (corrected) claim and checks it
 // dynamically against the actual trace (see AnomalyScan below) — a negative
 // result here is itself a real finding worth reporting, not a non-event.
 //
@@ -173,12 +188,13 @@ type DeadEndReport struct {
 func (r DeadEndReport) render(b *strings.Builder) {
 	fmt.Fprintf(b, "--- 2. DEAD ENDS ---\n")
 
-	fmt.Fprintf(b, "STATIC (from reading core/refund.go, core/prepay.go): Refund and TransferCredits\n")
-	fmt.Fprintf(b, "carry no phase/pause gate — a positive-balance credit holder always has >=1\n")
-	fmt.Fprintf(b, "legal action, in every phase, by construction.\n")
+	fmt.Fprintf(b, "STATIC (from reading core/refund.go, core/sell.go, core/transfer.go): TransferCredits\n")
+	fmt.Fprintf(b, "carries no phase/pause gate; Refund/RefundHolder open only at wind-down and Sell is\n")
+	fmt.Fprintf(b, "the complementary open rail everywhere else (the two partition every phase with no\n")
+	fmt.Fprintf(b, "gap) — so a positive-balance credit holder always has >=1 legal exit, by construction.\n")
 	fmt.Fprintf(b, "DYNAMIC: %d refund/transfer attempts scanned, %d final positive credit balances,\n",
 		r.RefundTransferAttempts, r.FinalPositiveBalances)
-	fmt.Fprintf(b, "         0 credit-holder dead ends found.\n")
+	fmt.Fprintf(b, "         %d credit-holder dead end(s) found (see PERSISTENT below).\n", len(r.Persistent))
 	fmt.Fprintf(b, "CLOSED markets: %d derived, %d with a residual balance or open escrow (should be 0).\n",
 		r.ClosedMarkets, r.ClosedMarketResiduals)
 
@@ -339,15 +355,39 @@ func AnalyzeDeadEnds(tr *Trace) DeadEndReport {
 			case "refund":
 				credits, ok := argBig(ev, "credits")
 				if ok && getBal(c, ev.Actor).Cmp(credits) >= 0 && getBal(c, ev.Actor).Sign() > 0 {
-					rpt.Anomalies = append(rpt.Anomalies, InvariantAnomaly{
-						Kind: "refund-blocked", EventIndex: i, Block: ev.Block, Actor: ev.Actor, Creator: c,
-						Detail: fmt.Sprintf("requested %s credits, held >= that many, still refused: %s: %s", credits, ev.ErrSym, ev.ErrMsg),
-					})
-					rpt.Persistent = append(rpt.Persistent, PersistentDeadEnd{
-						Actor: ev.Actor, Creator: c, Block: ev.Block,
-						Holding: fmt.Sprintf("%s credits", credits), AttemptedAction: "refund",
-						Reason: ev.ErrSym + ": " + ev.ErrMsg, EventIndex: i,
-					})
+					// RULING A/K3's two-rail switch (core/refund.go, core/
+					// sell.go): Refund opens ONLY at wind-down (FROZEN/CLOSED
+					// here — Retire is never driven by this simulator). While
+					// the market is still trading, refusing Refund with
+					// EXACTLY that rail-switch reason is BY DESIGN — Sell is
+					// the open rail in that same state, proven gap-free
+					// against Refund by the two files' own headers. So this
+					// is expected, NOT an anomaly, ONLY when both hold: the
+					// market is NOT winding down, AND the refusal is that
+					// specific rail-switch guard (core/refund.go's exact
+					// message). Any other reason for refusing a
+					// sufficient-balance refund — including this same
+					// "insufficient credits"-flavoured message a stale
+					// balance-tracking bug could produce, wind-down or not —
+					// is still a genuine anomaly.
+					ph := derivePhase(closed[c], paidUntil[c], ev.Block, grace)
+					windingDown := ph == PhaseFrozen || ph == PhaseClosed
+					isExpectedRailSwitch := !windingDown && ev.ErrSym == ErrStateSym && strings.Contains(ev.ErrMsg, "opens only at wind-down")
+					if !isExpectedRailSwitch {
+						rpt.Anomalies = append(rpt.Anomalies, InvariantAnomaly{
+							Kind: "refund-blocked", EventIndex: i, Block: ev.Block, Actor: ev.Actor, Creator: c,
+							Detail: fmt.Sprintf("requested %s credits, held >= that many (phase=%s), still refused: %s: %s", credits, ph, ev.ErrSym, ev.ErrMsg),
+						})
+						rpt.Persistent = append(rpt.Persistent, PersistentDeadEnd{
+							Actor: ev.Actor, Creator: c, Block: ev.Block,
+							Holding: fmt.Sprintf("%s credits", credits), AttemptedAction: "refund",
+							Reason: ev.ErrSym + ": " + ev.ErrMsg, EventIndex: i,
+						})
+					}
+					// else: NOT winding down, and refused for exactly the
+					// rail-switch reason — Sell (the curve rail) is the
+					// actor's open exit here, so this refusal is expected,
+					// not a dead end.
 				}
 			case "transfer":
 				amount, ok := argBig(ev, "amount")

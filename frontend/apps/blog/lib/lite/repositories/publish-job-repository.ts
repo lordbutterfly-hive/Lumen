@@ -61,18 +61,41 @@ export async function enqueue(input: EnqueueInput): Promise<PublishJob | null> {
 }
 
 /**
- * Atomically claim the oldest ready job. FOR UPDATE SKIP LOCKED lets multiple
- * workers/shards run without double-processing a row (spec §D.3).
+ * Atomically claim the next job, FAIRLY.
+ *
+ * Ordering is by the author's `last_publish_at` (oldest first), not by job age, so
+ * one user queueing 50 posts cannot delay everyone else — each user's turn comes
+ * round before that user's second item. This needs PERSISTED state: a recomputed
+ * ROW_NUMBER() rank cannot do it (`FOR UPDATE` is illegal with a window function;
+ * the CTE workaround locks the whole pending queue and serialises every worker; and
+ * a rank recomputed per claim just lets the heavy user win again immediately —
+ * all three verified against a real Postgres by the 2026-07-28 review).
+ *
+ * `FOR UPDATE OF j` locks only the job row, so workers still run concurrently.
+ *
+ * The NOT EXISTS clause serialises per POST: never two in-flight jobs for the same
+ * post. Without it an `update` can overtake its own `create`, and because Hive's
+ * comment op is an upsert (the evaluator branches purely on "does this permlink
+ * exist"), the late create would be applied as an EDIT — silently reverting the
+ * user's newer text with no error anywhere.
  */
 export async function claimNext(workerId: string): Promise<PublishJob | null> {
   const { rows } = await query<JobRow>(
     `UPDATE publish_job SET status = 'publishing', claimed_at = now(), claimed_by = $1,
        attempts = attempts + 1
      WHERE job_id = (
-       SELECT job_id FROM publish_job
-        WHERE status = 'pending' AND next_attempt_at <= now()
-        ORDER BY next_attempt_at ASC
-        FOR UPDATE SKIP LOCKED
+       SELECT j.job_id
+         FROM publish_job j
+         JOIN lumen_post p ON p.post_id = j.post_id
+         JOIN lumen_user u ON u.user_id = p.user_id
+        WHERE j.status = 'pending'
+          AND j.next_attempt_at <= now()
+          AND NOT EXISTS (
+                SELECT 1 FROM publish_job x
+                 WHERE x.post_id = j.post_id AND x.status = 'publishing'
+              )
+        ORDER BY COALESCE(u.last_publish_at, 'epoch'::timestamptz) ASC, j.next_attempt_at ASC
+        FOR UPDATE OF j SKIP LOCKED
         LIMIT 1
      )
      RETURNING *`,
@@ -81,10 +104,47 @@ export async function claimNext(workerId: string): Promise<PublishJob | null> {
   return rows[0] ? mapJob(rows[0]) : null;
 }
 
+/**
+ * Mark published and stamp the author's fair-queue marker in one go, so the next
+ * claim prefers somebody else.
+ */
 export async function markPublished(jobId: string): Promise<void> {
-  await query(`UPDATE publish_job SET status = 'published', last_error = NULL WHERE job_id = $1`, [
-    jobId
-  ]);
+  await query(
+    `WITH done AS (
+       UPDATE publish_job SET status = 'published', last_error = NULL
+        WHERE job_id = $1
+       RETURNING post_id
+     )
+     UPDATE lumen_user u
+        SET last_publish_at = now()
+       FROM done JOIN lumen_post p ON p.post_id = done.post_id
+      WHERE u.user_id = p.user_id`,
+    [jobId]
+  );
+}
+
+/**
+ * Return jobs stranded in 'publishing' by a worker that died mid-flight.
+ *
+ * Without this they sit forever: nothing retries them, and the post never appears.
+ * Worse, it is the window in which an edit can overtake a create (see claimNext) —
+ * so this is data-loss prevention, not tidiness. `attempts` was already incremented
+ * at claim time, so a reaped job keeps its retry budget honest.
+ *
+ * The postExists guard in the worker makes a re-run safe even if the original
+ * broadcast actually landed.
+ */
+export async function reapStuck(olderThanSeconds: number): Promise<number> {
+  const { rowCount } = await query(
+    `UPDATE publish_job
+        SET status = 'pending',
+            last_error = COALESCE(last_error, '') || ' [reaped: worker vanished while publishing]',
+            next_attempt_at = now()
+      WHERE status = 'publishing'
+        AND claimed_at < now() - make_interval(secs => $1)`,
+    [olderThanSeconds]
+  );
+  return rowCount ?? 0;
 }
 
 /** Retriable failure: back the job off to pending for a later attempt. */
@@ -123,4 +183,39 @@ export async function updatePendingPayload(postId: string, payload: PublishPaylo
     [postId, JSON.stringify(payload)]
   );
   return (rowCount ?? 0) > 0;
+}
+
+/**
+ * Collapse a burst of edits: replace the payload of the pending `update` job for
+ * this post if one exists, so the newest text wins and the queue does not grow one
+ * job per save.
+ *
+ * Without this, two edits become two jobs; if the first backs off and the second
+ * succeeds, the OLDER edit lands last and silently reverts the newer text.
+ * Only touches 'pending' rows — never one already mid-flight.
+ */
+export async function replacePendingUpdate(
+  postId: string,
+  payload: PublishPayload
+): Promise<boolean> {
+  const { rowCount } = await query(
+    `UPDATE publish_job SET payload_snapshot = $2, next_attempt_at = now()
+      WHERE post_id = $1 AND job_type = 'update' AND status = 'pending'`,
+    [postId, JSON.stringify(payload)]
+  );
+  return (rowCount ?? 0) > 0;
+}
+
+/**
+ * Drop any not-yet-broadcast job for a post — used when a post is deleted before it
+ * ever reached Hive. Deliberately does NOT touch a job already 'publishing': that
+ * one may be mid-broadcast, and the delete job queued afterwards will clean up.
+ */
+export async function cancelPending(postId: string, reason: string): Promise<number> {
+  const { rowCount } = await query(
+    `UPDATE publish_job SET status = 'rejected', last_error = $2
+      WHERE post_id = $1 AND status = 'pending'`,
+    [postId, reason]
+  );
+  return rowCount ?? 0;
 }

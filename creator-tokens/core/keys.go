@@ -28,40 +28,46 @@ func kSupply(c string) string       { return mk(c, "sup") }  // credits outstand
 func kReserve(c string) string      { return mk(c, "res") }  // HBD held for this market
 func kPaidUntil(c string) string    { return mk(c, "pu") }   // subscription expiry, block height
 func kState(c string) string        { return mk(c, "st") }   // MarketState
-func kFrozenAt(c string) string     { return mk(c, "fz") }   // block the freeze took effect
 func kRegisteredAt(c string) string { return mk(c, "reg") }  // block of registration
 func kSeq(c string) string          { return mk(c, "seq") }  // escrow sequence counter
 
-// ---- per-utility priced offers (access-credit utility, 2026-07-21) ----
-//
-// Unlock and Session are OPTIONAL, separately-priced creator offers, each with
-// its own 2x/7d anti-rug band (SetUnlockPrice/SetSessionPrice, offer_price.go)
-// mirroring kFace's own band keys (face/fsa/fan/faa). Unlike face, they are NOT
-// posted at Register — they start UNSET (0), so a returning creator re-posts
-// them fresh. New field tags, no collision with any existing tag
-// (face/fsa/fan/faa/cap/sup/res/pu/st/fz/reg/seq/rat).
-//
-// ★ CORRECTED 2026-07-21: this comment used to assert that all of these "are
-// cleared back to 0 on re-registration (Register, same H4 anti-rug reset the
-// face anchor gets)". THAT WAS FALSE — Register cleared kObsIdx, kFaceAnchor
-// and kFaceAnchorAt and nothing else, so a returning creator's unlock/session
-// price and BAND ANCHOR both survived from the dead incarnation: the new
-// market silently offered content at a price never posted in this life, and
-// setBandedPrice measured the 2x/7d band against a defunct anchor (the exact
-// H4 defect, one file over). Register now really does clear all EIGHT of
-// these keys, so the claim is true as written — see market.go's
-// per-incarnation reset block and its enumeration of what is deliberately
-// NOT cleared.
+// THERE IS NO kFrozenAt. `func kFrozenAt(c string) string { return mk(c,
+// "fz") }` — "block the freeze took effect" — used to sit here. Nothing in
+// this package ever wrote or read it: Phase (market.go) derives FROZEN
+// LAZILY from kPaidUntil+GraceBlocks alone (API.md's rule — "never store the
+// phase as truth"), so there is no freeze BLOCK to stamp; naturalPhase can
+// always recompute it on demand. Two test fixtures (refund_test.go's
+// forceFrozen, transfer_test.go's identical inline setup) wrote to it under
+// the name "force the market into a ... FROZEN-shaped state," implying the
+// write did something — it did not; both fixtures reach FROZEN purely via
+// their own kPaidUntil write, at any query block >= paidUntil+GraceBlocks,
+// exactly like every other FROZEN fixture in this package that never touched
+// this key at all. DELETED per this file's own precedent (see keys.go's
+// bonding-curve section above for the RULING A4/J/K deletions): an unused key
+// builder, kept alongside a comment asserting a write that never happens, is
+// the same class of defect as an unenforced exported constant — it reads as
+// meaningful and is not. The tag "fz" is free; nothing is deployed, so no
+// migration collision is possible (RetiredAt's kRetiredAt, which DOES need a
+// real stamp because Retire is a discrete action at an arbitrary block, not
+// derivable from paidUntil, is the actual analog this key was probably
+// modelled on and never needed to be).
 
-func kUnlockPrice(c string) string         { return mk(c, "up") }   // unlock price, HBD base units
-func kUnlockPriceSetAt(c string) string    { return mk(c, "upsa") } // block of last unlock-price change
-func kUnlockPriceAnchor(c string) string   { return mk(c, "upa") }  // unlock price at the current band window's open
-func kUnlockPriceAnchorAt(c string) string { return mk(c, "upaa") } // block the current unlock-price band window opened
-
-func kSessionPrice(c string) string         { return mk(c, "sp") }   // session price, HBD base units
-func kSessionPriceSetAt(c string) string    { return mk(c, "spsa") } // block of last session-price change
-func kSessionPriceAnchor(c string) string   { return mk(c, "spa") }  // session price at the current band window's open
-func kSessionPriceAnchorAt(c string) string { return mk(c, "spaa") } // block the current session-price band window opened
+// ---- delivery standing (RULING E's delivery gate, built 2026-07-27) ----
+//
+// The subscription proves a creator is still THERE; these three keys prove
+// they are still DELIVERING. Kept deliberately separate from the payment
+// ladder (kPaidUntil/kState): payment and delivery are two independent facts
+// about a creator, and folding them into one state string would make it
+// impossible to say "paid up but not delivering" — which is exactly the
+// creator this gate exists to catch. See delivery.go.
+//
+// Both counters are per ASSESSMENT WINDOW, not lifetime: crossing the
+// threshold serves a penalty window and then resets them, so a creator can
+// always climb back out. A lifetime counter would be a permanent sentence
+// after three bad weeks in year one.
+func kMissCount(c string) string       { return mk(c, "dmc") } // unanswered-past-deadline escrows this window
+func kDeliveredCount(c string) string  { return mk(c, "ddc") } // answered + declined escrows this window
+func kDelinquentUntil(c string) string { return mk(c, "ddu") } // block until which inflows are refused (0 = clear)
 
 // ---- per-incarnation offering catalogue (N named priced offers, 2026-07-27) ----
 //
@@ -116,16 +122,69 @@ func kOfferAnchorAt(c string, e, id uint64) string { return mko(c, e, id, "paa")
 func kOfferSetAt(c string, e, id uint64) string    { return mko(c, e, id, "psa") } // block of the last price change
 func kOfferTitle(c string, e, id uint64) string    { return mko(c, e, id, "t") }   // display label, free-form
 
-// ---- entitlements (spend-to-unlock, permanent) ----
+// kOfferTitleAnchor / kOfferTitleAnchorAt — DEFECT FIX (2026-07-27): the
+// per-(creator, epoch, NORMALIZED-title) anti-rug anchor that survives an
+// offering's id lifecycle. offerings.go's CreateOffering has the full
+// argument; short version: ids are monotone (kOfferNext never rewinds) and
+// DeleteOffering frees the id's own kOfferPrice/kOfferAnchor/kOfferAnchorAt,
+// so an id-keyed anchor can never survive a delete+recreate of the SAME
+// service — proven: create at 508, get correctly refused jumping straight to
+// 10,000,000 on that id, delete it, recreate FRESH under the identical title
+// at 10,000,000, and it succeeds, because a brand-new id always reads its own
+// price key as 0 and takes setBandedPrice's initial-posting branch
+// unconditionally. The anti-rug PURPOSE (protect a buyer holding tokens meant
+// for a specific priced SERVICE) is about the title a buyer recognizes, not
+// the ephemeral id naming it in the live-id list, so the anchor durable
+// enough to matter has to be keyed by the title instead.
 //
-// ent|<creator>|<buyer>|<postId> — set to "1" when `buyer` has permanently
-// unlocked `postId` on `creator`'s market (Unlock, unlock.go). PERMANENT: never
-// cleared, tied to the unlock EVENT not a live balance (Ruling 10 — selling all
-// credits never revokes access). buyer and creator are validAccount (no '|');
-// Unlock rejects a '|' in postId at the door, so the three-part key is
-// unambiguous, exactly as kBal/kEscrow rely on the same '|'-free invariants.
-func kEntitlement(c, buyer, postId string) string {
-	return "ent|" + c + "|" + buyer + "|" + postId
+// Epoch-scoped exactly like every other offering key: bumpOfferEpoch
+// (Register, called on every re-registration) makes every mko(...) key of a
+// dead incarnation unreachable in ONE write, and this anchor rides that same
+// reset for free — nothing extra to clear, and a returning creator correctly
+// starts with a blank slate.
+//
+// Field tags "ta|" and "taa|" are chosen so the two can never collide with
+// each other, or with the existing id=0 field tags ("next", "ids"), for ANY
+// title text: "ta|"+X and "taa|"+Y differ at their 3rd byte ('|' vs 'a') no
+// matter what X and Y are, and neither can equal a pipe-free literal like
+// "next"/"ids" (those never contain '|'; these always do). The title itself
+// can never contain '|' (validOfferTitle rejects it at the door), so
+// "ta|"+normTitle round-trips unambiguously back to normTitle.
+func kOfferTitleAnchor(c string, e uint64, normTitle string) string {
+	return mko(c, e, 0, "ta|"+normTitle)
+}
+func kOfferTitleAnchorAt(c string, e uint64, normTitle string) string {
+	return mko(c, e, 0, "taa|"+normTitle)
+}
+
+// kOfferTitlePrice / kOfferTitleSetAt — DEFECT 1/2/3 FIX (2026-07-27): the
+// title's own persistent "cur" and "last changed" fields, completing the
+// title-level mirror of setBandedPrice's full 4-key contract
+// (price/anchor/anchorAt/setAt) alongside kOfferTitleAnchor/
+// kOfferTitleAnchorAt above. Before this, the title level tracked ONLY the
+// window-open reference (anchor/anchorAt) and every write that could move a
+// title's EFFECTIVE price (CreateOffering, SetOfferingPrice, SetOfferingTitle)
+// had its own bespoke, partial rule for when to trust or refresh it — which is
+// exactly how a rename could skip the gate entirely (defect 1), how a
+// following reprice could then unconditionally launder the id's own foreign
+// anchor back onto the title (defect 2), and how an expired-but-nonzero title
+// could be routed into a brand-new id's initial-posting branch with NO band
+// at all (defect 3). With the title carrying its OWN full price state,
+// offerings.go's applyTitleBandedPrice can call setBandedPrice ITSELF against
+// these keys — the identical helper, the identical window math, ONE call
+// site for every path that can change what a title effectively costs — so
+// none of the three can diverge from it again.
+//
+// Field tags "tp|" and "tsa|" round-trip unambiguously exactly like "ta|"/
+// "taa|" above: "tp|"+X differs from "ta|"+Y and "taa|"+Y at byte index 1
+// ('p' vs 'a'), differs from "tsa|"+Y at byte index 1 ('p' vs 's'), and from
+// "next"/"ids" at byte index 0; "tsa|"+X differs from "ta|"/"taa|"/"tp|" at
+// byte index 1 ('s' vs 'a'/'a'/'p') and from "next"/"ids" at byte index 0.
+func kOfferTitlePrice(c string, e uint64, normTitle string) string {
+	return mko(c, e, 0, "tp|"+normTitle)
+}
+func kOfferTitleSetAt(c string, e uint64, normTitle string) string {
+	return mko(c, e, 0, "tsa|"+normTitle)
 }
 
 // ---- balances ----
@@ -152,8 +211,7 @@ func kObsIdx(c string) string        { return "tw|" + c + "|n" }
 //
 // Added as a separate, clearly-marked block per API.md's foundation-file rule.
 // New prefixes "acq|"/"fee|" — no collision with any existing tag
-// (face/fsa/fan/faa/cap/sup/res/pu/st/fz/reg/seq/rat/up/upsa/upa/upaa/sp/
-// spsa/spa/spaa) or prefix (m|/bal|/e|/ent|/tw|).
+// (face/fsa/fan/faa/cap/sup/res/pu/st/fz/reg/seq/rat) or prefix (m|/bal|/e|/tw|).
 //
 // DELETED HERE (RULING A4): kHoldWeightSum ("hw"), the WA = Σ bal·wacq
 // aggregate the withdrawn v1 RULING 1 wind-down needed. Any rule dividing an
@@ -211,7 +269,7 @@ func kFeeBal(account string) string { return "fee|" + account }
 // ---- long price observations (settlement, RULING C1) ----
 //
 // Added as a separate, clearly-marked block per API.md's foundation-file rule.
-// New prefix "twl|" — no collision with any existing prefix (m|/bal|/e|/ent|/
+// New prefix "twl|" — no collision with any existing prefix (m|/bal|/e|/
 // tw|/acq|/bas|/fee|): "twl|x" and "tw|x" differ at byte 3 because creator
 // names can never contain '|' (validAccount), so the two families are
 // disjoint for every creator.

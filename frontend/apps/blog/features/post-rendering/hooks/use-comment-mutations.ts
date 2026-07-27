@@ -9,6 +9,8 @@ import { getLogger } from '@ui/lib/logging';
 import { handleError } from '@ui/lib/handle-error';
 import { scheduleInvalidations, scheduleValidatedRefetch } from '@/blog/lib/react-query';
 import { setStorageItem, removeStorageItem, StorageTTL } from '@ui/lib/storage-with-ttl';
+import { litePostIdOf } from '@/blog/lib/lite/render/lite-post-id';
+import { deleteLitePost, editLitePost } from '@/blog/lib/lite/client/lite-write';
 
 const logger = getLogger('app');
 
@@ -285,6 +287,20 @@ export function useUpdateCommentMutation() {
       observer: string;
     }) => {
       const { parentAuthor, parentPermlink, permlink, body, discussionPermlink } = params;
+
+      // LITE fork: a keyless lite account has no Hive key — its session deliberately
+      // carries a poison-pill signer — so the wax path below cannot work for it. The
+      // proxy account re-broadcasts the edit instead, through our own API. The Lumen
+      // post id is recoverable from the permlink (lib/lite/render/lite-post-id.ts).
+      // Returns the same shape as the wax path so onSuccess/onError stay untouched.
+      const liteEditId = litePostIdOf({ permlink });
+      if (liteEditId) {
+        const result = await editLitePost(liteEditId, { body, tier: 'normal' });
+        if (result.status !== 'ok') throw new Error(result.message);
+        logger.info('Done lite comment edit: %o', { permlink, liteEditId });
+        return { ...params, broadcastResult: undefined };
+      }
+
       const broadcastResult = await transactionService.updateComment(
         parentAuthor,
         parentPermlink,
@@ -395,6 +411,17 @@ export function useDeleteCommentMutation() {
       observer: string;
     }) => {
       const { permlink, discussionPermlink } = params;
+      // LITE fork — see the edit fork above for why the wax path cannot serve a
+      // keyless account. Backend: DELETE /api/lite/posts/:id (hides it immediately,
+      // then removes it on chain if Hive still allows, else blanks it).
+      const litePostId = litePostIdOf({ permlink });
+      if (litePostId) {
+        const result = await deleteLitePost(litePostId);
+        if (result.status !== 'ok') throw new Error(result.message);
+        logger.info('Done lite comment delete: %o', { permlink, litePostId });
+        return { ...params, broadcastResult: undefined };
+      }
+
       const broadcastResult = await transactionService.deleteComment(permlink, { observe: false });
       logger.info('Done delete comment transaction: %o', { discussionPermlink, broadcastResult });
       return { ...params, broadcastResult };

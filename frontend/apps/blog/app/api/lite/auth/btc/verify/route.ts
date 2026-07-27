@@ -4,7 +4,8 @@ import { guardWrite } from '@/blog/lib/lite/http/guard';
 import { getClientIp } from '@/blog/lib/lite/http/ip';
 import { enforceChallengeRate } from '@/blog/lib/lite/antispam/rate-limit';
 import { consumeChallenge } from '@/blog/lib/lite/repositories/challenge-repository';
-import { verifyBtcSignature, loginMessage, btcNetwork, isTaproot, addressChallengeHash } from '@/blog/lib/lite/auth/btc-verify';
+import { verifyBtcSignature, loginMessage, btcNetwork, isTaproot, addressChallengeHash, normalizeBtcAddress } from '@/blog/lib/lite/auth/btc-verify';
+import { btcKeyFingerprint } from '@/blog/lib/lite/auth/btc-key-fingerprint';
 import { resolveLogin } from '@/blog/lib/lite/auth/auth-service';
 
 const logger = getLogger('app');
@@ -18,7 +19,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const blocked = guardWrite(req);
   if (blocked) return blocked;
   // ECON-1-SIBLING (PRUNED 2026-07-22): per-source cap on the upstream funnel.
-  if (!(await enforceChallengeRate(getClientIp(req)))) {
+  if (!(await enforceChallengeRate(getClientIp(req), 'btc'))) {
     return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
   }
 
@@ -48,8 +49,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (!ok) {
       return NextResponse.json({ error: 'bad_signature' }, { status: 401 });
     }
-    const result = await resolveLogin('btc_wallet', address.trim().toLowerCase(), {
-      network: btcNetwork(address)
+    // Fingerprint the KEY, not the address: one key has three address encodings and
+    // would otherwise be able to register three accounts.
+    const result = await resolveLogin('btc_wallet', normalizeBtcAddress(address), {
+      network: btcNetwork(address),
+      keyFingerprint: btcKeyFingerprint(loginMessage(nonce), signature) ?? undefined
     });
     return NextResponse.json(result);
   } catch (error) {

@@ -98,11 +98,14 @@ func LoadTrace(path string) (*Trace, error) {
 }
 
 // knownActions is the canonical action set, copied verbatim from
-// sim/trace.go's Event.Action doc comment (2026-07-21 read). Fourteen entries
-// as of the Upgrade-1 (C2 treasury exit) sim enhancement, which added
-// "withdrawTreasury" — kept as a live list rather than a rounded number so
-// coverage.go's "which actions were exercised" question has one unambiguous
-// denominator.
+// sim/trace.go's Event.Action doc comment (2026-07-21 read). Sixteen entries
+// as of RULING A's curve rewrite, which added "buy" (the replacement
+// issuance path for the deleted PAR "prepay" mint — sim/actions.go's doBuy;
+// "prepay" is kept in this list since it is still a legal, if now-dead,
+// synthetic action older fixtures in this package construct directly) and
+// "sell" (RULING K's complementary curve exit — sim/actions.go's doSell) —
+// kept as a live list rather than a rounded number so coverage.go's "which
+// actions were exercised" question has one unambiguous denominator.
 //
 // "withdrawTreasury" is a GLOBAL, phaseless action (it targets kTreasury,
 // never a per-market key — see knownGlobalActions in coverage.go): it is
@@ -110,7 +113,7 @@ func LoadTrace(path string) (*Trace, error) {
 // phase x action combo grid, since a treasury withdrawal is never scoped to
 // any single market's lifecycle phase.
 var knownActions = []string{
-	"register", "renew", "setFace", "setCap", "prepay", "transfer",
+	"register", "renew", "setFace", "setCap", "prepay", "buy", "sell", "transfer",
 	"ask", "answer", "reclaim", "refund", "refundHolder", "closeIfDrained",
 	"recordObs", "withdrawTreasury",
 }
@@ -201,6 +204,21 @@ func refundPayout(reserve, credits, supply *big.Int) *big.Int {
 		return new(big.Int).Set(credits)
 	}
 	return payout
+}
+
+// splitHalf mirrors the ONE split formula this codebase uses everywhere two
+// pull pots share a fee/tax total — core/tradefee.go's tradeFeeOn (creator =
+// floor(fee/2), platform = remainder) and core/exittax.go's accrueExitTax
+// (creator = floor(tax/2), platform = remainder): the creator half floors,
+// the platform half takes the odd unit, so the two always re-sum to the
+// input exactly with zero dust created or destroyed.
+func splitHalf(total *big.Int) (creatorHalf, platformHalf *big.Int) {
+	if total == nil || total.Sign() <= 0 {
+		return zeroBig(), zeroBig()
+	}
+	creatorHalf = new(big.Int).Rsh(total, 1) // floor(total/2)
+	platformHalf = new(big.Int).Sub(total, creatorHalf)
+	return creatorHalf, platformHalf
 }
 
 // derivePhase mirrors core/market.go's Phase() exactly: a stored CLOSED is

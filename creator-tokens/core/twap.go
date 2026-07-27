@@ -322,10 +322,11 @@ func AskRate(s Store, creator string, block uint64) (*big.Int, error) {
 
 // askRateLong is the 7-day window read (RULING C1's TWAP_long). Package-
 // private: nothing outside settlement.go should consume the long window
-// alone — v1 RULING 3c priced Unlock off the long TWAP ALONE and that was
-// backwards (longest = stalest = highest rate = fewest tokens = LEAST
-// creator-favouring; a 100 HBD permanent entitlement went for 12.111 HBD).
-// The long window is only ever one arm of settlement's min().
+// alone — v1 RULING 3c priced the old spend-to-unlock feature off the long
+// TWAP ALONE and that was backwards (longest = stalest = highest rate =
+// fewest tokens = LEAST creator-favouring; a 100 HBD permanent entitlement
+// went for 12.111 HBD). The long window is only ever one arm of settlement's
+// min().
 func askRateLong(s Store, creator string, block uint64) (*big.Int, error) {
 	return twapWindowRead(s, creator, block, twapRingCfg{
 		obsKey:    kObsLong,

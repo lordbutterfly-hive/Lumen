@@ -285,6 +285,10 @@ func jsonStr(payload, key string) string { return parse.Str(payload, key) }
 // first.
 func jsonU64(payload, key string) uint64 { return parse.U64(payload, key) }
 
+// jsonU64Field — see parse.U64Field: use this, never jsonU64, for any field
+// where 0 is a meaningful value a caller could reach by sending garbage.
+func jsonU64Field(payload, key string) (uint64, bool) { return parse.U64Field(payload, key) }
+
 // parseBigDecimal parses a base-10, non-negative big.Int money string exactly
 // like core/money.go's (unexported) parseMoney. Duplicated here because this
 // wrapper cannot import unexported core helpers and must not modify core/ —
@@ -316,8 +320,8 @@ func parseBigDecimal(s string) (*big.Int, bool) { return parse.BigDecimal(s) }
 //
 // RULING C (2026-07-21): the last remaining duplicate — quote's local
 // ceilDiv creditsForAsk preview — is DELETED too: core now exports
-// core.SettleSpend (settlement.go), the exact rate+credits derivation Ask/
-// Unlock/Book bind internally, so `quote` previews with shared code instead
+// core.SettleSpend (settlement.go), the exact rate+credits derivation Ask
+// binds internally, so `quote` previews with shared code instead
 // of a copy, refusals included.
 //
 // SAFETY NOTE: nothing remaining here is on a fund-moving path. `ask` itself
@@ -411,7 +415,19 @@ func Init(a *string) *string {
 		return nil
 	}
 	store.Set("owner", caller)
-	sdk.Log(`{"ev":"init","owner":"` + jsonEscape(caller) + `"}`)
+	// GAP (hunted, not closed here — see the handoff report): this is a
+	// hand-built sdk.Log, not a core.Ev* constructor call, exactly the class
+	// of defect events.go's own file doc warns about ("no schema test can
+	// pin them"). No EvInit exists in core/events.go to call instead — adding
+	// one is a core/ change, outside this fix's ownership (contract/**,
+	// cmd/**, keeper/** only). indexer/events.go's ParseEvent already
+	// documents "init" as deliberately out of its twelve tracked event kinds
+	// (the owner-bootstrap log carries no fund-relevant state), so this one
+	// is LOW severity by design — unlike treasuryWithdrawn/tradeFeesClaimed
+	// below, which move real money and are NOT tracked by the indexer today.
+	// "v":1 added for schema-version consistency with every other event this
+	// file emits, even without a typed constructor behind it.
+	sdk.Log(`{"ev":"init","v":1,"owner":"` + jsonEscape(caller) + `"}`)
 	return strPtr(`{"owner":"` + jsonEscape(caller) + `"}`)
 }
 
@@ -422,17 +438,19 @@ func Init(a *string) *string {
 // the global pause key correctly (globalInflowPaused), but nothing ever SET
 // it, and Init's own stored owner (above) was never read again by anything.
 // This is the fix for both halves at once — core.Owner/core.SetPaused
-// (core/prepay.go; see that file's own "Owner / global-pause accessors"
-// section for why they live there instead of read.go) give this entrypoint
-// a real accessor rather than a second hand-duplicated literal key.
+// (core/read.go's "Owner / global-pause accessors" section — relocated there
+// from the now-DELETED core/prepay.go when the PAR mint was removed, RULING
+// A, RULINGS-v2-2026-07-21) give this entrypoint a real accessor rather than
+// a second hand-duplicated literal key.
 //
-// Blocks ONLY Register/Renew/Prepay/Ask — every path routed through
-// RequireInflowOpen (core/market.go, core/ask.go). Refund, RefundHolder,
-// Reclaim, Answer and TransferCredits never consult this switch at all (see
-// core/refund.go's, core/prepay.go's and core/ask.go's own file-level
-// comments: "outflows never pause"), so pausing can never freeze a holder's
-// ability to exit, a creator's ability to finish answering an outstanding
-// ask, or a transfer of already-owned credits — this is the user's
+// Blocks ONLY Register/Renew/Buy/Ask — every path routed through
+// RequireInflowOpen (core/market.go, core/buy.go, core/ask.go). Refund,
+// RefundHolder, Reclaim, Answer, Decline and TransferCredits never consult
+// this switch at all (see core/refund.go's, core/transfer.go's and
+// core/ask.go's own file-level comments: "outflows never pause"), so pausing
+// can never freeze a holder's ability to exit, a creator's ability to
+// finish answering an outstanding ask, or a transfer of already-owned
+// credits — this is the user's
 // non-negotiable rule and it holds structurally, not by convention, because
 // this entrypoint touches only the one global switch those functions never
 // read.
@@ -450,12 +468,16 @@ func Pause(a *string) *string {
 		return nil
 	}
 	core.SetPaused(store, true)
-	sdk.Log(`{"ev":"paused","actor":"` + jsonEscape(caller) + `"}`)
+	// GAP (hunted, not closed here — see Init's identical note and the
+	// handoff report): hand-built sdk.Log, no EvPaused constructor exists in
+	// core/events.go to call instead (a core/ change, outside this fix's
+	// ownership). "v":1 added for schema-version consistency.
+	sdk.Log(`{"ev":"paused","v":1,"actor":"` + jsonEscape(caller) + `"}`)
 	return strPtr(`{"paused":true}`)
 }
 
 // Payload: {} (ignored). Owner-only, the exact inverse of Pause above —
-// restores new registrations, renewals, prepayments and asks. See Pause's
+// restores new registrations, renewals, buys and asks. See Pause's
 // doc for the full reasoning; nothing here needs repeating beyond noting
 // this entrypoint is what makes the pause temporary rather than a one-way
 // switch with no way back for a market not yet FROZEN/CLOSED.
@@ -473,7 +495,11 @@ func Unpause(a *string) *string {
 		return nil
 	}
 	core.SetPaused(store, false)
-	sdk.Log(`{"ev":"unpaused","actor":"` + jsonEscape(caller) + `"}`)
+	// GAP (hunted, not closed here — see Init's identical note and the
+	// handoff report): hand-built sdk.Log, no EvUnpaused constructor exists
+	// in core/events.go to call instead (a core/ change, outside this fix's
+	// ownership). "v":1 added for schema-version consistency.
+	sdk.Log(`{"ev":"unpaused","v":1,"actor":"` + jsonEscape(caller) + `"}`)
 	return strPtr(`{"paused":false}`)
 }
 
@@ -784,7 +810,17 @@ func Ask(a *string) *string {
 	// one of the creator's posted services and prices this ask at THAT
 	// offering's own banded price. A deleted or never-created id reads 0 and is
 	// refused right here, before any HBD is drawn.
-	offeringID := jsonU64(payload, "offeringId")
+	// PRESENT-BUT-UNPARSEABLE is refused rather than defaulted (parse.U64Field,
+	// 2026-07-27): 0 names the legacy face price, so silently falling back to
+	// it would settle against the WRONG, cheaper service and underpay the
+	// creator, with nothing in the receipt to show why. `quote` refuses it too
+	// — a preview that answers a malformed id with a price is worse than the
+	// refusal the ask itself will give.
+	offeringID, idOK := jsonU64Field(payload, "offeringId")
+	if !idOK {
+		handleErr(inputErr("offeringId must be an unquoted non-negative integer"))
+		return nil
+	}
 	face := readPrice(creator, offeringID)
 	if face.Sign() <= 0 {
 		if offeringID == 0 {
@@ -809,7 +845,7 @@ func Ask(a *string) *string {
 		handleErr(err)
 		return nil
 	}
-	sdk.Log(core.EvAsked(creator, caller, block, res.Seq, res.CreditsSpent, res.CommissionHbd, res.RateUsed, deadlineBlocks, contentHash))
+	sdk.Log(core.EvAsked(creator, caller, block, res.Seq, res.CreditsSpent, res.CommissionHbd, res.RateUsed, deadlineBlocks, contentHash, offeringID))
 	return strPtr(`{"creator":"` + jsonEscape(creator) + `","seq":` + u64s(res.Seq) + `,"creditsSpent":"` + bigStr(res.CreditsSpent) + `","commissionHbd":"` + bigStr(res.CommissionHbd) + `","rate":"` + res.RateUsed.String() + `"}`)
 }
 
@@ -829,7 +865,15 @@ func Answer(a *string) *string {
 	}
 	block := currentBlock()
 
-	seq := jsonU64(payload, "seq")
+	// seq is STRICT: escrow #0 is a real, live escrow, so a malformed seq must
+	// never silently default to it (parse.U64Field, 2026-07-27 — the same
+	// 0-is-meaningful hazard closed for offeringId; a code review caught that
+	// the escrow rails still had it).
+	seq, seqOK := jsonU64Field(payload, "seq")
+	if !seqOK {
+		handleErr(inputErr("seq must be an unquoted non-negative integer"))
+		return nil
+	}
 	answerHash := jsonStr(payload, "answerHash")
 
 	res, err := core.Answer(store, caller, caller, block, seq, answerHash)
@@ -875,6 +919,54 @@ func Answer(a *string) *string {
 // their own HBD payouts, and the same "pay the rightful owner, never the
 // pusher" shape `refundHolder` already established.
 //
+// decline — the creator's free "no" (RULING E's delivery gate, 2026-07-27).
+// Returns the asker's credits AND the whole commission inside the same window
+// an answer would be legal in, and does NOT count as a missed delivery.
+//
+// This is what makes the delivery gate fair: without it, a creator asked for
+// something they cannot do must either answer badly or take a black mark for
+// ignoring it. It is also the anti-griefing rail — junk asks aimed at
+// manufacturing misses can be cleared out for free.
+//
+// Payment ordering mirrors `reclaim` exactly: state first, HBD second, and the
+// commission goes to res.Asker, never to the caller (here they are the same
+// account only because Decline is creator-only — the ask's asker is a
+// different party entirely, and paying `caller` would send the refund to the
+// creator instead of the customer).
+//
+//go:wasmexport decline
+func Decline(a *string) *string {
+	payload := payloadStr(a)
+	caller := currentCaller()
+	if err := requireActiveAuth(caller); err != nil {
+		handleErr(err)
+		return nil
+	}
+	block := currentBlock()
+
+	creator := jsonStr(payload, "creator")
+	// seq is STRICT: escrow #0 is a real, live escrow, so a malformed seq must
+	// never silently default to it (parse.U64Field, 2026-07-27 — the same
+	// 0-is-meaningful hazard closed for offeringId; a code review caught that
+	// the escrow rails still had it).
+	seq, seqOK := jsonU64Field(payload, "seq")
+	if !seqOK {
+		handleErr(inputErr("seq must be an unquoted non-negative integer"))
+		return nil
+	}
+
+	res, err := core.Decline(store, caller, creator, block, seq) // state mutated FIRST
+	if err != nil {
+		handleErr(err)
+		return nil
+	}
+	if res.CommissionHbd != nil && res.CommissionHbd.Sign() > 0 {
+		sdk.HiveTransfer(sdk.Address(res.Asker), nativeInt64(res.CommissionHbd), sdk.AssetHbd) // THEN pay the commission back to the ASKER
+	}
+	sdk.Log(core.EvDeclined(creator, caller, block, seq, res.CreditsReturned, res.CommissionHbd, res.Asker))
+	return strPtr(`{"creator":"` + jsonEscape(creator) + `","seq":` + u64s(seq) + `,"asker":"` + jsonEscape(res.Asker) + `","creditsReturned":"` + bigStr(res.CreditsReturned) + `","commissionRefundedHbd":"` + bigStr(res.CommissionHbd) + `"}`)
+}
+
 //go:wasmexport reclaim
 func Reclaim(a *string) *string {
 	payload := payloadStr(a)
@@ -886,7 +978,15 @@ func Reclaim(a *string) *string {
 	block := currentBlock()
 
 	creator := jsonStr(payload, "creator")
-	seq := jsonU64(payload, "seq")
+	// seq is STRICT: escrow #0 is a real, live escrow, so a malformed seq must
+	// never silently default to it (parse.U64Field, 2026-07-27 — the same
+	// 0-is-meaningful hazard closed for offeringId; a code review caught that
+	// the escrow rails still had it).
+	seq, seqOK := jsonU64Field(payload, "seq")
+	if !seqOK {
+		handleErr(inputErr("seq must be an unquoted non-negative integer"))
+		return nil
+	}
 
 	res, err := core.Reclaim(store, caller, creator, block, seq) // state mutated FIRST
 	if err != nil {
@@ -905,7 +1005,7 @@ func Reclaim(a *string) *string {
 	// model. `caller` is logged as actor (the permissionless pusher/keeper,
 	// matching EvRefundPushed's identical actor-vs-recipient shape), never
 	// as who was paid.
-	sdk.Log(core.EvReclaimed(creator, caller, block, seq, res.CreditsReturned, res.CommissionHbd))
+	sdk.Log(core.EvReclaimed(creator, caller, block, seq, res.CreditsReturned, res.CommissionHbd, res.Asker))
 	return strPtr(`{"creator":"` + jsonEscape(creator) + `","seq":` + u64s(seq) + `,"asker":"` + jsonEscape(res.Asker) + `","creditsReturned":"` + bigStr(res.CreditsReturned) + `","commissionRefundedHbd":"` + bigStr(res.CommissionHbd) + `"}`)
 }
 
@@ -1241,7 +1341,28 @@ func WithdrawTreasury(a *string) *string {
 		return nil
 	}
 	sdk.HiveTransfer(sdk.Address(caller), nativeInt64(paid), sdk.AssetHbd) // THEN pay the owner
-	sdk.Log(`{"ev":"treasuryWithdrawn","actor":"` + jsonEscape(caller) + `","amount":"` + bigStr(paid) + `","block":` + u64s(block) + `}`)
+	// GAP (hunted, not closed here — see the handoff report). This is a
+	// hand-built sdk.Log, not a core.Ev* constructor call — and unlike
+	// init/pause/unpause above, this one is NOT low severity: it moves real
+	// HBD off the ONE pot (kTreasury) every other treasury-crediting event
+	// (registered.feePaid, renewed.paid, answered.commissionHbd, sold.tax)
+	// feeds into indexer/index.go's Index.TreasuryHbd(), and indexer/events.go
+	// has no KindTreasuryWithdrawn to recognize it — this event falls into
+	// Stats.Unknown today, exactly like `retired` did before the indexer added
+	// KindRetired (indexer/events.go's own KindRetired doc), except nobody has
+	// done the equivalent fix for this one yet. Consequently
+	// Index.TreasuryHbd() is monotonically-increasing-only: a real withdrawal
+	// silently vanishes from its running total, so it can OVERSTATE the true
+	// on-chain treasury balance by every unit ever withdrawn — the exact
+	// "indexer can never serve as a solvency cross-check" gap M4 was written
+	// to close, reopened here. index.go's own TreasuryHbd doc already flags
+	// this by name ("NOTE... whoever picks up the treasury-debit side next").
+	// The real fix needs core/events.go (a new EvTreasuryWithdrawn
+	// constructor) and indexer/events.go+index.go (KindTreasuryWithdrawn,
+	// folded as a SUBTRACTION from treasuryHbd) — both outside this fix's
+	// ownership (contract/**, cmd/**, keeper/** only). "v":1 added here for
+	// schema-version consistency in the meantime.
+	sdk.Log(`{"ev":"treasuryWithdrawn","v":1,"actor":"` + jsonEscape(caller) + `","amount":"` + bigStr(paid) + `","block":` + u64s(block) + `}`)
 	return strPtr(`{"owner":"` + jsonEscape(caller) + `","amount":"` + bigStr(paid) + `"}`)
 }
 
@@ -1255,7 +1376,7 @@ func WithdrawTreasury(a *string) *string {
 // a phase to wait out) but a total fund LOCK with no invocable path out at all.
 // This wires the pull, mirroring withdrawTreasury's CEI shape exactly, so it
 // can never again be forgotten when buy/sell land. It is DISTINCT from — and
-// not covered by — the disclosed "missing buy/sell/unlock/book entrypoints"
+// not covered by — the disclosed "missing buy/sell entrypoints"
 // Wave-D item (see the sell/quote block below).
 //
 // PURE OUTFLOW: core.ClaimTradeFees consults NO pause, NO phase, NO
@@ -1286,7 +1407,19 @@ func ClaimTradeFees(a *string) *string {
 	}
 	if paid != nil && paid.Sign() > 0 {
 		sdk.HiveTransfer(sdk.Address(caller), nativeInt64(paid), sdk.AssetHbd) // THEN pay the creator their claimed fees
-		sdk.Log(`{"ev":"tradeFeesClaimed","actor":"` + jsonEscape(caller) + `","amount":"` + bigStr(paid) + `","block":` + u64s(block) + `}`)
+		// GAP (hunted, not closed here — see withdrawTreasury's identical note
+		// and the handoff report): hand-built sdk.Log, no EvTradeFeesClaimed
+		// constructor exists in core/events.go, and indexer/events.go has no
+		// KindTradeFeesClaimed either — this event falls into Stats.Unknown
+		// today (indexer/index.go's TreasuryHbd doc names this exact gap: "same
+		// as `tradeFeesClaimed`, ClaimTradeFees's own hand-built log"). This one
+		// moves the CREATOR's own pull-claimable trade-fee half
+		// (kFeeBal(account), RULING F8/K2's 50/50 split), not the global
+		// treasury, so it does not corrupt Index.TreasuryHbd() the way an
+		// unrecognized treasuryWithdrawn does — but it is still a real HBD
+		// outflow with zero audit trail in the event stream. "v":1 added for
+		// schema-version consistency.
+		sdk.Log(`{"ev":"tradeFeesClaimed","v":1,"actor":"` + jsonEscape(caller) + `","amount":"` + bigStr(paid) + `","block":` + u64s(block) + `}`)
 	}
 	return strPtr(`{"account":"` + jsonEscape(caller) + `","amount":"` + bigStr(paid) + `"}`)
 }
@@ -1306,7 +1439,7 @@ func ClaimTradeFees(a *string) *string {
 // fund movement, and paidUntil is left untouched. Creator-only (core.Retire
 // enforces caller==creator internally via requireOpenCreatorMarket, the same
 // guard SetFace/SetCap use), so `creator` is read from the payload exactly
-// like renew/prepay/reclaim (legitimate payload data, not an identity claim)
+// like renew/reclaim/decline (legitimate payload data, not an identity claim)
 // rather than always being caller: a caller who is not the named creator
 // simply gets core's own creator-only AUTH rejection.
 //
@@ -1328,7 +1461,19 @@ func Retire(a *string) *string {
 		handleErr(err)
 		return nil
 	}
-	sdk.Log(`{"ev":"retired","creator":"` + jsonEscape(creator) + `","actor":"` + jsonEscape(caller) + `","block":` + u64s(block) + `}`)
+	// GAP (hunted, partially closed elsewhere — see the handoff report): still
+	// a hand-built sdk.Log, no EvRetired constructor exists in core/events.go
+	// to call instead (a core/ change, outside this fix's ownership). UNLIKE
+	// init/pause/unpause/treasuryWithdrawn/tradeFeesClaimed above, this one IS
+	// already recognized on the read side — indexer/events.go's KindRetired
+	// explicitly decodes this exact shape as a documented, deliberate
+	// exception (its own doc: "NOT one of core/events.go's Ev* constructors
+	// ... Recognizing it here is still correct and necessary"). "v":1 added
+	// for schema-version consistency; harmless to the indexer's decode (its
+	// RetiredEvent struct has no "v" field of its own, so this is simply
+	// captured in the generic envelope and ignored, exactly like every other
+	// field this event doesn't declare).
+	sdk.Log(`{"ev":"retired","v":1,"creator":"` + jsonEscape(creator) + `","actor":"` + jsonEscape(caller) + `","block":` + u64s(block) + `}`)
 	return strPtr(`{"creator":"` + jsonEscape(creator) + `"}`)
 }
 
@@ -1363,18 +1508,36 @@ func Quote(a *string) *string {
 	creator := jsonStr(payload, "creator")
 
 	// DEFECT 3 FIX (2026-07-21): also return the market's current Phase and an
-	// inflowsOpen boolean derived from it. Without this, quote previewed an
-	// actionable "ask will cost X" for a FROZEN/CLOSED market where the real
-	// `ask` would revert at core.Ask's RequireInflowOpen gate — a client had
-	// no signal to disable the ask action. inflowsOpen mirrors exactly the
-	// phases that gate admits (ACTIVE or OVERDUE); FROZEN and CLOSED are closed
-	// to new asks, so a client keys the ask button off this flag.
+	// inflowsOpen boolean. Without this, quote previewed an actionable "ask
+	// will cost X" for a market where the real `ask` would revert at
+	// core.Ask's RequireInflowOpen gate — a client had no signal to disable
+	// the ask action.
+	//
+	// inflowsOpen ASKS THE GATE ITSELF rather than re-deriving from Phase
+	// (fixed 2026-07-27 after a code review caught the drift). The old version
+	// mirrored "ACTIVE or OVERDUE", which was a complete enumeration of that
+	// gate's conditions when it was written and stopped being one the moment
+	// the delivery gate was added: a delinquent creator's quote reported
+	// inflows OPEN, so a buyer keyed their button off it, signed, and the ask
+	// reverted. Delegating means this flag cannot fall behind the gate again —
+	// the pause switch and the retire mark are covered for free by the same
+	// change.
 	phase := core.Phase(store, creator, block)
-	inflowsOpen := phase == core.StateActive || phase == core.StateOverdue
+	inflowsOpen := core.RequireInflowOpen(store, creator, block) == nil
 
 	// Same offeringId convention as `ask` — a quote must preview the price the
 	// real ask will bind, for the id the client is about to sign against.
-	offeringID := jsonU64(payload, "offeringId")
+	// PRESENT-BUT-UNPARSEABLE is refused rather than defaulted (parse.U64Field,
+	// 2026-07-27): 0 names the legacy face price, so silently falling back to
+	// it would settle against the WRONG, cheaper service and underpay the
+	// creator, with nothing in the receipt to show why. `quote` refuses it too
+	// — a preview that answers a malformed id with a price is worse than the
+	// refusal the ask itself will give.
+	offeringID, idOK := jsonU64Field(payload, "offeringId")
+	if !idOK {
+		handleErr(inputErr("offeringId must be an unquoted non-negative integer"))
+		return nil
+	}
 	face := readPrice(creator, offeringID)
 	if face.Sign() <= 0 {
 		if offeringID == 0 {
@@ -1393,7 +1556,13 @@ func Quote(a *string) *string {
 		return nil
 	}
 
-	commissionOwed := core.CommissionOwedFor(face) // DEFECT 5: the one shared core formula, not a wrapper copy
+	// The commission comes off the SAME quote as the credits (settlePosted,
+	// settlement.go) rather than being recomputed here: the two legs a buyer
+	// pays must always be the two halves of ONE split of ONE posted face, or a
+	// preview can quote a total the settlement will not charge. Identical value
+	// to core.CommissionOwedFor(face) today — this makes it identical by
+	// construction rather than by coincidence.
+	commissionOwed := q.CommissionHbd
 
 	return strPtr(`{"creator":"` + jsonEscape(creator) + `","rate":"` + q.Rate.String() + `","face":"` + face.String() + `","creditsPerAsk":"` + q.Credits.String() + `","commissionOwedHbd":"` + commissionOwed.String() + `","phase":"` + jsonEscape(phase) + `","inflowsOpen":` + boolStr(inflowsOpen) + `}`)
 }

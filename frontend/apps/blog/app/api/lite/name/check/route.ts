@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
 import { guardRead } from '@/blog/lib/lite/http/guard';
+import { getClientIp } from '@/blog/lib/lite/http/ip';
+import { enforceLookupRate } from '@/blog/lib/lite/antispam/rate-limit';
 import { checkNameAvailability } from '@/blog/lib/lite/names/vetting';
 
 const logger = getLogger('app');
@@ -12,6 +14,11 @@ const logger = getLogger('app');
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const blocked = guardRead();
   if (blocked) return blocked;
+  // Uncapped this fans out two Hive API calls per request — free ammunition
+  // against Hive and a name-enumeration surface.
+  if (!(await enforceLookupRate(getClientIp(req)))) {
+    return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+  }
 
   const name = req.nextUrl.searchParams.get('name');
   if (!name) {

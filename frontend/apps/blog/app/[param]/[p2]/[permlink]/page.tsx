@@ -1,5 +1,6 @@
 import PostContent from './content';
 import { getPostCached } from '@/blog/lib/cached-api';
+import { liteChainCoordinates, liteEntryForPermlink } from '@/blog/lib/lite/render/lite-entry';
 import { getCommunity, getDiscussion, getFollowList } from '@transaction/lib/bridge-api';
 import { getObserverFromCookies } from '@/blog/lib/auth-utils';
 import { isUsernameValid, isPermlinkValid, isValidUserParam } from '@/blog/utils/validate-links';
@@ -54,11 +55,30 @@ const PostPage = async ({
     ]);
 
     postData = postResult.status === 'fulfilled' ? (postResult.value ?? null) : null;
+
+    // Lumen lite post fallback. Hivemind has nothing under a lite display name (it
+    // is not a Hive account), and a lite post's real on-chain author is the shared
+    // publishing account. The permlink identifies the post on its own, so resolve
+    // from that — never from the author segment — and present the lite identity.
+    if (!postData) {
+      postData = await liteEntryForPermlink(permlink, observer);
+    }
     if (postResult.status === 'rejected') {
       logger.error(postResult.reason, 'Error fetching post data:');
     }
 
     discussionData = discussionResult.status === 'fulfilled' ? (discussionResult.value ?? null) : null;
+
+    // Same problem as the post itself, one level down: the discussion was fetched
+    // under the URL's author, which for a lite post is a display name Hivemind has
+    // never heard of — so every reply under a lite post was invisible. Retry with the
+    // post's REAL on-chain coordinates.
+    if (!discussionData) {
+      const chain = await liteChainCoordinates(permlink);
+      if (chain) {
+        discussionData = await getDiscussion(chain.author, chain.permlink, observer).catch(() => null);
+      }
+    }
     if (discussionResult.status === 'rejected') {
       logger.error(discussionResult.reason, 'Error fetching discussion data:');
     }

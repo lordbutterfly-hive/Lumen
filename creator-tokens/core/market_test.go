@@ -1077,7 +1077,7 @@ func TestSetFace_BandBothDirectionsAndWindowBoundary(t *testing.T) {
 	}{
 		{"inside window, at upper boundary (old*2) succeeds", FaceBandWindow - 1, 1000, 2000, true, ""},
 		{"inside window, one past upper boundary fails", FaceBandWindow - 1, 1000, 2001, false, ErrInput},
-		{"inside window, at MinFace floor (old/2=500 is below it post-LIVE-1) succeeds", FaceBandWindow - 1, 1000, 508, true, ""},
+		{"inside window, at MinFace floor (old/2=500 is below it post-LIVE-1 and post-commission-carve-out) succeeds", FaceBandWindow - 1, 1000, 577, true, ""},
 		{"inside window, one below lower boundary fails", FaceBandWindow - 1, 1000, 499, false, ErrInput},
 		{"at the window boundary: anchor refreshes, so exactly 2x succeeds", FaceBandWindow, 1000, 2000, true, ""},
 		{"at the window boundary: the band still binds — 9x is refused", FaceBandWindow, 1000, 9000, false, ErrInput},
@@ -1797,65 +1797,6 @@ func TestRegister_RefusesToInheritReserveOrSupply(t *testing.T) {
 			t.Fatalf("a genuinely wound-down market must re-register: %v", err)
 		}
 	})
-}
-
-// TestRegister_ClearsUnlockAndSessionPricesAndAnchors — keys.go and
-// offer_price.go both CLAIMED Register cleared these and it did not. The
-// surviving price meant a returning creator's brand-new market silently
-// offered content at a price they never posted in this life; the surviving
-// ANCHOR meant the 2x/7d anti-rug band was measured against a defunct
-// incarnation's reference (the H4 defect, one file over).
-func TestRegister_ClearsUnlockAndSessionPricesAndAnchors(t *testing.T) {
-	s := NewMemStore()
-	const creator = "offerpricecreator"
-	regBlock := uint64(1000)
-	mustRegister(t, s, creator, regBlock, 1000, 1000)
-	if err := SetUnlockPrice(s, creator, creator, regBlock+1, 8000); err != nil {
-		t.Fatalf("SetUnlockPrice: %v", err)
-	}
-	if err := SetSessionPrice(s, creator, creator, regBlock+1, 9000); err != nil {
-		t.Fatalf("SetSessionPrice: %v", err)
-	}
-	setStr(s, kState(creator), StateClosed) // supply and reserve are both 0
-
-	reReg := regBlock + 2
-	if err := Register(s, creator, creator, reReg, 1000, 1000); err != nil {
-		t.Fatalf("re-Register: %v", err)
-	}
-
-	for _, kv := range []struct {
-		name string
-		key  string
-	}{
-		{"unlock price", kUnlockPrice(creator)},
-		{"unlock anchor", kUnlockPriceAnchor(creator)},
-		{"session price", kSessionPrice(creator)},
-		{"session anchor", kSessionPriceAnchor(creator)},
-	} {
-		if got := getMoney(s, kv.key); !mIsZero(got) {
-			t.Fatalf("%s = %s after re-registration, want 0 — the new incarnation must not offer a price the creator never posted", kv.name, got)
-		}
-	}
-	for _, kv := range []struct {
-		name string
-		key  string
-	}{
-		{"unlock anchorAt", kUnlockPriceAnchorAt(creator)},
-		{"unlock setAt", kUnlockPriceSetAt(creator)},
-		{"session anchorAt", kSessionPriceAnchorAt(creator)},
-		{"session setAt", kSessionPriceSetAt(creator)},
-	} {
-		if got := getU64(s, kv.key); got != 0 {
-			t.Fatalf("%s = %d after re-registration, want 0 — a stale band anchor defeats the 2x/7d anti-rug guarantee", kv.name, got)
-		}
-	}
-
-	// And the band really does reopen: the very next posting is an INITIAL
-	// posting, free to land anywhere in [MinFace, MaxFace] — far outside 2x
-	// of the dead incarnation's 8000 — instead of being banded to it.
-	if err := SetUnlockPrice(s, creator, creator, reReg+1, MinFace); err != nil {
-		t.Fatalf("first unlock-price posting of the new incarnation was banded against the DEAD one: %v", err)
-	}
 }
 
 // TestRegister_DoesNotResetTheEscrowSequence — a DELIBERATE non-clear, and

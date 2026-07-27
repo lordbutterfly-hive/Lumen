@@ -7,6 +7,7 @@ import { getLiteSession } from '../http/session';
 import { vetNameFormat } from '../names/vetting';
 import * as users from '../repositories/user-repository';
 import * as creds from '../repositories/credential-repository';
+import { siblingBtcAddresses } from './btc-key-fingerprint';
 import * as names from '../repositories/name-reservation-repository';
 
 /**
@@ -20,6 +21,8 @@ const RESERVE_TTL_S = 15 * 60; // pending name reservation
 
 export interface AuthExtras {
   network?: string;
+  /** BTC only: hash160(compressed pubkey) — one key, one account. */
+  keyFingerprint?: string;
   emailCiphertextB64?: string;
   emailHash?: string;
 }
@@ -57,13 +60,40 @@ async function issueSession(u: LumenUser): Promise<User> {
  * A verified credential resolves to an existing account (-> session) or, if the
  * binder is unknown, stashes a provisional signup and asks for a name.
  */
+/**
+ * Find a pre-fingerprint credential belonging to the same key, by looking up the
+ * other addresses that key can produce. An address cannot be reversed into a public
+ * key, so old NULL-fingerprint rows are unreachable any other way.
+ */
+async function findBySiblingAddress(method: AuthMethod, keyFingerprint?: string) {
+  if (method !== 'btc_wallet' || !keyFingerprint) return null;
+  for (const sibling of siblingBtcAddresses(keyFingerprint)) {
+    const found = await creds.findByMethodAndRef(method, sibling);
+    if (found) return found;
+  }
+  return null;
+}
+
 export async function resolveLogin(
   method: AuthMethod,
   externalRef: string,
   extras: AuthExtras = {}
 ): Promise<ResolveResult> {
-  const binder = await creds.findByMethodAndRef(method, externalRef);
+  // Address first, then the KEY. One Bitcoin key yields three address formats, so
+  // without the fingerprint check the same key would create a second account when a
+  // wallet presents a different encoding of it. Matching the key logs them into the
+  // account they already have.
+  const binder =
+    (await creds.findByMethodAndRef(method, externalRef)) ??
+    (extras.keyFingerprint ? await creds.findByFingerprint(method, extras.keyFingerprint) : null) ??
+    (await findBySiblingAddress(method, extras.keyFingerprint));
   if (binder) {
+    // Heal credentials created before fingerprints existed: they hold NULL, which no
+    // fingerprint lookup can ever match, so without this a legacy key keeps its
+    // ability to claim one extra account forever.
+    if (extras.keyFingerprint && !binder.keyFingerprint) {
+      await creds.setKeyFingerprint(binder.credentialId, extras.keyFingerprint);
+    }
     const user = await users.findUserById(binder.userId);
     if (!user) throw new Error('Auth binder references a missing user');
     if (user.status === 'banned' || user.status === 'suspended') {
@@ -87,6 +117,7 @@ export async function resolveLogin(
     method,
     externalRef,
     network: extras.network,
+    keyFingerprint: extras.keyFingerprint,
     emailCiphertextB64: extras.emailCiphertextB64,
     emailHash: extras.emailHash,
     issuedAt: Date.now()
@@ -157,6 +188,7 @@ export async function completeSignup(displayNameRaw: string): Promise<SignupResu
       method: pending.method,
       externalRef: pending.externalRef,
       network: pending.network ?? null,
+      keyFingerprint: pending.keyFingerprint ?? null,
       emailCiphertext,
       emailHash: pending.emailHash ?? null,
       isPrimary: true
@@ -184,7 +216,12 @@ export async function bindMethod(
   externalRef: string,
   extras: AuthExtras = {}
 ): Promise<BindResult> {
-  const existing = await creds.findByMethodAndRef(method, externalRef);
+  // Address AND key: binding must refuse a key that already belongs to someone,
+  // even when presented under a different address encoding — otherwise the
+  // three-addresses-per-key trick just moves from signup to linking.
+  const existing =
+    (await creds.findByMethodAndRef(method, externalRef)) ??
+    (extras.keyFingerprint ? await creds.findByFingerprint(method, extras.keyFingerprint) : null);
   if (existing) {
     if (existing.userId === userId) return { status: 'ok' }; // idempotent
     return {
@@ -201,6 +238,7 @@ export async function bindMethod(
     method,
     externalRef,
     network: extras.network ?? null,
+    keyFingerprint: extras.keyFingerprint ?? null,
     emailCiphertext,
     emailHash: extras.emailHash ?? null,
     isPrimary: false

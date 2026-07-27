@@ -127,7 +127,7 @@ func TestEvHelpers_U64AndI64(t *testing.T) {
 // hash that ask.go/Answer already reject '|' in, but not '"').
 func TestEvJSONEscape_PreventsFieldInjection(t *testing.T) {
 	evil := `x","injected":"pwned`
-	out := EvAsked("creator1", evil, 10, 1, big.NewInt(5), big.NewInt(1), big.NewInt(1000), 28800, "hash1")
+	out := EvAsked("creator1", evil, 10, 1, big.NewInt(5), big.NewInt(1), big.NewInt(1000), 28800, "hash1", 0)
 	m := decode(t, out) // must still be valid, single-object JSON
 	wantStr(t, m, "actor", evil)
 	if _, present := m["injected"]; present {
@@ -203,7 +203,7 @@ func TestEvTransferred(t *testing.T) {
 }
 
 func TestEvAsked(t *testing.T) {
-	out := EvAsked("alice", "bob", 600, 7, big.NewInt(42), big.NewInt(1200), big.NewInt(1_000_000), 28800, "abc123hash")
+	out := EvAsked("alice", "bob", 600, 7, big.NewInt(42), big.NewInt(1200), big.NewInt(1_000_000), 28800, "abc123hash", 3)
 	m := decode(t, out)
 	wantStr(t, m, "ev", "asked")
 	wantStr(t, m, "actor", "bob")
@@ -235,7 +235,7 @@ func TestEvAnswered_NilCommissionRendersZero(t *testing.T) {
 }
 
 func TestEvReclaimed(t *testing.T) {
-	out := EvReclaimed("alice", "bob", 800, 7, big.NewInt(42), big.NewInt(504))
+	out := EvReclaimed("alice", "bob", 800, 7, big.NewInt(42), big.NewInt(504), "carol")
 	m := decode(t, out)
 	wantStr(t, m, "ev", "reclaimed")
 	wantStr(t, m, "actor", "bob")
@@ -245,7 +245,7 @@ func TestEvReclaimed(t *testing.T) {
 }
 
 func TestEvReclaimed_NilCommissionRendersZero(t *testing.T) {
-	out := EvReclaimed("alice", "bob", 800, 7, big.NewInt(42), nil)
+	out := EvReclaimed("alice", "bob", 800, 7, big.NewInt(42), nil, "carol")
 	m := decode(t, out)
 	wantStr(t, m, "commissionHbd", "0")
 }
@@ -317,9 +317,9 @@ func TestEvAmountFieldsAreAlwaysStrings(t *testing.T) {
 		{"capChanged", EvCapChanged("c", "a", 1, 1, 2), []string{"oldCap", "newCap"}},
 		{"prepaid", EvPrepaid("c", "a", 1, big.NewInt(1), big.NewInt(1)), []string{"hbdPaid", "creditsMinted"}},
 		{"transferred", EvTransferred("c", "a", "b", 1, big.NewInt(1)), []string{"amount"}},
-		{"asked", EvAsked("c", "a", 1, 1, big.NewInt(1), big.NewInt(1), big.NewInt(1), 1, "h"), []string{"creditsSpent", "commissionHbd", "rate"}},
+		{"asked", EvAsked("c", "a", 1, 1, big.NewInt(1), big.NewInt(1), big.NewInt(1), 1, "h", 0), []string{"creditsSpent", "commissionHbd", "rate"}},
 		{"answered", EvAnswered("c", "a", 1, 1, big.NewInt(1), big.NewInt(1), "h"), []string{"creditsToCreator", "commissionHbd"}},
-		{"reclaimed", EvReclaimed("c", "a", 1, 1, big.NewInt(1), big.NewInt(1)), []string{"credits", "commissionHbd"}},
+		{"reclaimed", EvReclaimed("c", "a", 1, 1, big.NewInt(1), big.NewInt(1), "k"), []string{"credits", "commissionHbd"}},
 		{"refunded", EvRefunded("c", "a", 1, big.NewInt(1), big.NewInt(1)), []string{"credits", "payout"}},
 		{"refundPushed", EvRefundPushed("c", "a", "h", 1, big.NewInt(1), big.NewInt(1)), []string{"creditsBurned", "payout"}},
 	}
@@ -343,7 +343,7 @@ func TestEvAmountFieldsAreAlwaysStrings(t *testing.T) {
 // counts, never money, and must be bare (unquoted) JSON numbers — matching
 // hive-price-market/indexer/events.go's roundId/outcome/winner convention.
 func TestEvBlockSeqDeadlineAreAlwaysBareNumbers(t *testing.T) {
-	out := EvAsked("c", "a", 42, 7, big.NewInt(1), big.NewInt(1), big.NewInt(1), 28800, "h")
+	out := EvAsked("c", "a", 42, 7, big.NewInt(1), big.NewInt(1), big.NewInt(1), 28800, "h", 0)
 	m := decode(t, out)
 	for _, f := range []string{"v", "block", "seq", "deadlineBlocks"} {
 		v, ok := m[f]
@@ -368,9 +368,9 @@ func TestEvSchemaVersionIsStableAcrossAllEvents(t *testing.T) {
 		EvCapChanged("c", "a", 1, 1, 2),
 		EvPrepaid("c", "a", 1, big.NewInt(1), big.NewInt(1)),
 		EvTransferred("c", "a", "b", 1, big.NewInt(1)),
-		EvAsked("c", "a", 1, 1, big.NewInt(1), big.NewInt(1), big.NewInt(1), 1, "h"),
+		EvAsked("c", "a", 1, 1, big.NewInt(1), big.NewInt(1), big.NewInt(1), 1, "h", 0),
 		EvAnswered("c", "a", 1, 1, big.NewInt(1), big.NewInt(1), "h"),
-		EvReclaimed("c", "a", 1, 1, big.NewInt(1), big.NewInt(1)),
+		EvReclaimed("c", "a", 1, 1, big.NewInt(1), big.NewInt(1), "k"),
 		EvRefunded("c", "a", 1, big.NewInt(1), big.NewInt(1)),
 		EvRefundPushed("c", "a", "h", 1, big.NewInt(1), big.NewInt(1)),
 		EvClosed("c", "a", 1),

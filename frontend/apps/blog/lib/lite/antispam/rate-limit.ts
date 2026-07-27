@@ -1,6 +1,7 @@
 import { liteConfig } from '../config';
 import * as users from '../repositories/user-repository';
 import * as rateRepo from '../repositories/rate-limit-repository';
+import * as posts from '../repositories/post-repository';
 import { getUserCaps } from './trust';
 import { ageDays, dayKey } from './windows';
 
@@ -18,10 +19,43 @@ export async function enforcePostRate(
 ): Promise<RateResult> {
   const user = await users.findUserById(userId);
   if (!user) return { ok: false, reason: 'unknown_user' };
-  const caps = getUserCaps(user.trustScore, ageDays(user.createdAt));
+  // publishedPosts is a real signal (trust_score is written by nothing), so the tier
+  // can actually grow instead of everyone sitting on T0 forever.
+  const published = await posts.countPublishedByUser(userId);
+  const caps = getUserCaps(user.trustScore, ageDays(user.createdAt), published);
   const limit = action === 'comment' ? caps.commentsPerDay : caps.postsPerDay;
   const allowed = await rateRepo.checkAndConsume(`user:${userId}`, action, limit, dayKey());
   return allowed ? { ok: true } : { ok: false, reason: 'daily_cap' };
+}
+
+/**
+ * Per-account daily cap on EDITS.
+ *
+ * Edits were exempt from every limit, which made them a queue-starvation vector:
+ * every edit is another broadcast, the publishing account can only broadcast about
+ * 20 things a minute in total, and Hive imposes no edit limit of its own (the old
+ * 24-hour edit window is dead code past HF17). So an edit loop could stall every
+ * other user's posts. Generous enough that real editing never notices.
+ */
+export async function enforceEditRate(userId: string): Promise<RateResult> {
+  const allowed = await rateRepo.checkAndConsume(
+    `user:${userId}`,
+    'edit',
+    liteConfig.editsPerDay,
+    dayKey()
+  );
+  return allowed ? { ok: true } : { ok: false, reason: 'daily_edit_cap' };
+}
+
+/**
+ * Per-IP cap on cheap read lookups — currently the name-availability check.
+ *
+ * That endpoint was completely uncapped and fans out to TWO Hive API calls per
+ * request, so it was free ammunition against Hive as well as an enumeration
+ * surface. Generous, because a real person typing a name triggers it repeatedly.
+ */
+export async function enforceLookupRate(ip: string): Promise<boolean> {
+  return rateRepo.checkAndConsume(`ip:${ip}`, 'lookup', liteConfig.lookupPerIpPerDay, dayKey());
 }
 
 /** Per-IP signup cap — an independent limiter from the per-account caps (§H). */
@@ -35,8 +69,22 @@ export async function enforceSignupRate(ip: string): Promise<boolean> {
  * cap, allowing unbounded challenge-row creation. Keyed on the trusted-boundary
  * IP, using the same daily budget as signup.
  */
-export async function enforceChallengeRate(ip: string): Promise<boolean> {
-  return rateRepo.checkAndConsume(`ip:${ip}`, 'btc_challenge', liteConfig.signupPerIpPerDay, dayKey());
+export async function enforceChallengeRate(
+  ip: string,
+  scope: 'btc' | 'evm' | 'google' = 'btc'
+): Promise<boolean> {
+  // Per-chain bucket. This used to be one hardcoded 'btc_challenge' counter shared
+  // by BOTH chains AND consumed twice per login (challenge + verify), so the real
+  // ceiling was ~10 logins/day/IP across all wallets — which blocks legitimate
+  // users behind office/mobile NAT long before it inconveniences an attacker.
+  // Also given its own budget, an order of magnitude above signup: proving you own
+  // a wallet is cheap and repeatable, creating an account is not.
+  return rateRepo.checkAndConsume(
+    `ip:${ip}`,
+    `${scope}_challenge`,
+    liteConfig.challengePerIpPerDay,
+    dayKey()
+  );
 }
 
 /**

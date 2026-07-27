@@ -200,7 +200,7 @@ type Engine struct {
 
 	oracleWalks map[string]*oracleWalkState // oracle actor name -> its running synthetic price state
 
-	treasuryShadow      *big.Int // registration + subscription fees + booked (answered) commissions
+	treasuryShadow      *big.Int // registration + subscription fees + booked (answered) commissions + the platform half of every K2 exit tax (Refund/RefundHolder)
 	heldCommissionTotal *big.Int // commission HELD in open escrows (Ask'd, not yet Answered or Reclaimed)
 	totalHbdIn          *big.Int // every HBD unit ever pulled from an actor's wallet into the contract
 	totalHbdOut         *big.Int // every HBD unit ever paid from the contract back to an actor
