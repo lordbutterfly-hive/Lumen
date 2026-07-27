@@ -94,6 +94,58 @@ export function kRegisteredAt(c: string): string {
 export function kSeq(c: string): string {
   return mk(c, 'seq');
 }
+// keys.go kRetiredAt ("rat") — the RULING-D retire notice mark. STORED AS
+// block+1 so that 0 can encode "never retired"; decodeRetiredAt below is the
+// one place that offset is undone. Phase() folds it in as MAX(natural,
+// retired), so a client that never reads this key shows a retired market as
+// tradeable ACTIVE right up until the buy reverts.
+export function kRetiredAt(c: string): string {
+  return mk(c, 'rat');
+}
+// keys.go kFeeBal ("fee|<account>") — PULL-claimable trade-fee balance, the
+// creator's 5% half of every trade fee (RULING F8: the fee is NEVER pushed).
+// Keyed by ACCOUNT, not by market: one pot per beneficiary across all their
+// markets. Neither reserve nor treasury — its own resting bucket.
+export function kFeeBal(account: string): string {
+  return `fee|${toDid(account)}`;
+}
+// keys.go kAcqBlock ("acq|<creator>|<holder>") — the weighted-average
+// acquisition block (`wacq`), the hold clock the exit-tax RATE keys on. Reset
+// toward `now` on every inflow, so a fresh or sybil account always looks
+// maximally fresh. UNSET (0) reads as "never clocked" and must be treated as
+// maximally FRESH (max tax), never as ancient — holdclock.go's own direction,
+// and getting it backwards would preview a 0% tax on a position the chain
+// taxes at 20%.
+export function kAcqBlock(c: string, holder: string): string {
+  return `acq|${toDid(c)}|${toDid(holder)}`;
+}
+export function kTreasury(): string {
+  return 'treasury';
+}
+export function kOwner(): string {
+  return 'owner';
+}
+// keys.go kObsLong ("twl|") — the 7-day settlement observation ring (RULING
+// C1), sampled at most once per LongObsSpacing blocks. Disjoint from the
+// short "tw|" ring: creator names can never contain '|'.
+export function kObsLong(c: string, i: number): string {
+  return `twl|${toDid(c)}|${i}`;
+}
+export function kObsLongIdx(c: string): string {
+  return `twl|${toDid(c)}|n`;
+}
+
+/**
+ * Undo kRetiredAt's block+1 encoding: the chain stores `block+1` so that a
+ * stored 0 (or an absent key) unambiguously means "never retired" even for a
+ * market retired at block 0. Returns null for never-retired, else the real
+ * retire height.
+ */
+export function decodeRetiredAt(raw: string | null | undefined): number | null {
+  const v = parseStrictBaseUnits(raw);
+  if (v === null || v === 0) return null;
+  return v - 1;
+}
 export function kBal(c: string, holder: string): string {
   return `bal|${toDid(c)}|${toDid(holder)}`;
 }
@@ -127,30 +179,52 @@ export function toU64(value: string | null | undefined): number {
 // 7th field is "everything after" even if it contained a literal '|'. ──
 export interface ParsedEscrow {
   asker: string;
-  creditsBaseUnits: number;
+  /**
+   * ★ A WHOLE TOKEN COUNT, not a 3-decimal base-units amount. ask.go's
+   * creditsForAsk is ceil(face/rate) where `rate` is HBD base units PER
+   * TOKEN, so the quotient is a token count and the escrow debits the same
+   * whole-token balance Buy/Sell move. Renamed from `creditsBaseUnits`
+   * precisely so the old name can no longer invite a baseUnitsToHuman()
+   * divide — that would understate every escrowed amount by 1000x.
+   */
+  tokensEscrowed: number;
   deadlineBlock: number;
   status: 'PENDING' | 'ANSWERED' | 'RECLAIMED';
+  /** The asker's hold clock, carried through the escrow so reclaiming cannot launder a fresh position into an aged, untaxed one. */
+  acqBlock: number;
   contentHash: string;
   answerHash: string;
 }
 
 export function parseEscrow(v: string): ParsedEscrow | null {
-  // ask.go's packEscrow now emits SEVEN fields:
-  //   asker|credits|deadline|status|commissionHbd|contentHash|answerHash
-  // commissionHbd was inserted before the two free-form fields when the
-  // commission moved into escrow (so it is returned on reclaim rather than
-  // forfeited). Reading the old six-field layout silently put the commission
-  // into contentHash and a pipe-joined pair into answerHash.
+  // ★ EIGHT fields as of the curve pivot (ask.go packEscrow, verified at
+  // source 2026-07-24 — Go reads it back with strings.SplitN(v, "|", 8)):
+  //
+  //   asker|credits|deadline|status|commissionHbd|acqBlock|contentHash|answerHash
+  //
+  // `acqBlock` was INSERTED before the two free-form fields: an escrow now
+  // carries the asker's hold clock so the credits it holds keep their
+  // acquisition age across the escrow round-trip (otherwise escrowing and
+  // reclaiming would launder a fresh position into an aged, untaxed one).
+  //
+  // THIS PARSER READ SEVEN. Against real eight-field state it silently put
+  // acqBlock into contentHash and a pipe-joined `contentHash|answerHash` pair
+  // into answerHash — the EXACT failure mode the six-to-seven migration
+  // documented one revision earlier, repeated. Only the first 7 delimiters
+  // are structural; the 8th field is "everything after" even if it contains
+  // a literal '|', matching SplitN's own semantics.
   const parts: string[] = [];
   let rest = v;
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 7; i++) {
     const idx = rest.indexOf('|');
     if (idx < 0) return null;
     parts.push(rest.slice(0, idx));
     rest = rest.slice(idx + 1);
   }
   parts.push(rest);
-  const [asker, creditsStr, deadlineStr, status, commissionHbdStr, contentHash, answerHash] = parts;
+  const [asker, creditsStr, deadlineStr, status, commissionHbdStr, acqBlockStr, contentHash, answerHash] = parts;
+  const acqBlock = parseStrictBaseUnits(acqBlockStr);
+  if (acqBlock === null) return null;
   // Integer-strict (M-f): credits/commissionHbd are unpacked in Go via
   // big.Int.SetString(s,10) (money.go parseMoney), deadline via
   // strconv.ParseUint — NEITHER accepts a decimal point, so a naive
@@ -164,7 +238,7 @@ export function parseEscrow(v: string): ParsedEscrow | null {
   const deadlineBlock = parseStrictBaseUnits(deadlineStr);
   if (deadlineBlock === null) return null;
   if (status !== 'PENDING' && status !== 'ANSWERED' && status !== 'RECLAIMED') return null;
-  return { asker, creditsBaseUnits, deadlineBlock, status, contentHash, answerHash };
+  return { asker, tokensEscrowed: creditsBaseUnits, deadlineBlock, status, acqBlock, contentHash, answerHash };
 }
 
 // ── Minimal GQL client — plain fetch, scoped to this feature. Same two
@@ -251,15 +325,28 @@ export class CreatorTokensGqlClient {
 // ── Decoding: turn parsed chain state into the domain shapes types.ts
 // declares. ──
 
-/** The one Market shape readMarket() resolves with on a genuine read failure — see creator-tokens-data-source.ts's own interface doc for why this is a resolve, not a reject. */
+/**
+ * The one Market shape readMarket() resolves with on a genuine read failure —
+ * see creator-tokens-data-source.ts's own interface doc for why this is a
+ * resolve, not a reject.
+ *
+ * ★ CURVE-PIVOT UPDATE (2026-07-24): rewritten to the post-pivot Market shape
+ * (types.ts) — capTokens/supplyTokens (integer counts, not the deleted PAR
+ * capCredits/supplyCredits), canBuy (not canPrepay), retiredAtBlock (RULING D
+ * — null here, matching "unknown" rather than claiming "never retired"),
+ * floorPriceHbd/spotPriceHbd/reserveCoverage (the curve's own derived
+ * display fields, replacing refundPricePerCredit). All zeroed/null exactly
+ * like every other field on this UNKNOWN placeholder — this is a "couldn't
+ * read the chain" marker, never a claim about real state.
+ */
 export function unknownMarket(creator: string): Market {
   return {
     creator,
     faceHbd: 0,
     faceSetAtBlock: 0,
     faceBand: { minHbd: 0, maxHbd: 0, bandActive: false, windowEndsAtBlock: 0 },
-    capCredits: 0,
-    supplyCredits: 0,
+    capTokens: 0,
+    supplyTokens: 0,
     reserveHbd: 0,
     paidUntilBlock: 0,
     paidUntilAt: Date.now(),
@@ -268,9 +355,12 @@ export function unknownMarket(creator: string): Market {
     graceExpiresAtBlock: 0,
     graceExpiresAt: Date.now(),
     globalInflowPaused: false,
-    canPrepay: false,
+    canBuy: false,
     canAsk: false,
-    refundPricePerCredit: 0
+    retiredAtBlock: null,
+    floorPriceHbd: 0,
+    spotPriceHbd: 0,
+    reserveCoverage: 0
   };
 }
 
@@ -285,7 +375,11 @@ export function buildAskFromParsed(creator: string, seq: number, parsed: ParsedE
     creator,
     seq,
     asker: parsed.asker,
-    creditsEscrowed: baseUnitsToHuman(parsed.creditsBaseUnits),
+    // NO baseUnitsToHuman: escrowed amounts are whole tokens (see
+    // ParsedEscrow.tokensEscrowed) — dividing by 1000 here understated every
+    // ask in the UI by three orders of magnitude.
+    tokensEscrowed: parsed.tokensEscrowed,
+    acqBlock: parsed.acqBlock,
     deadlineBlock: parsed.deadlineBlock,
     deadlineAt: blockToEpochMs(parsed.deadlineBlock, head),
     reclaimableAtBlock,

@@ -46,7 +46,32 @@ export type JsonFieldType =
 // `transferCredits` fix could have regressed into if `.toFixed(3)` or a
 // human-decimal string had been used instead of a base-unit integer string.
 
-export type ActionPayloadSpec = Record<string, JsonFieldType>;
+/**
+ * A field the wrapper reads only when present. main.go gates these on a
+ * non-empty read (`if raw := jsonStr(payload, "minNet"); raw != ""`), so
+ * OMITTING the key is legal and meaningful — for minNet it opts out of the
+ * slippage guard entirely, for firstBuy it means "plain registration". A
+ * present-but-malformed value is still an ERROR on the contract side, never
+ * silently dropped, so when the key IS sent it must satisfy its type.
+ *
+ * Never send an optional key with an empty string to mean "absent": for
+ * `minNet` that is indistinguishable from absent to the wrapper, but for the
+ * money fields the checker below would reject it, which is the safer failure.
+ */
+export interface OptionalFieldSpec {
+  type: JsonFieldType;
+  optional: true;
+}
+
+export type ActionPayloadSpec = Record<string, JsonFieldType | OptionalFieldSpec>;
+
+function fieldType(spec: JsonFieldType | OptionalFieldSpec): JsonFieldType {
+  return typeof spec === 'string' ? spec : spec.type;
+}
+
+function isOptional(spec: JsonFieldType | OptionalFieldSpec): boolean {
+  return typeof spec !== 'string' && spec.optional === true;
+}
 
 // ── Ground truth. One entry per wasmexport entrypoint in main.go that a
 // write action in this feature calls. Every field cites the exact main.go
@@ -58,57 +83,128 @@ export type ActionPayloadSpec = Record<string, JsonFieldType>;
 // doc), so a payload that still sent it would be harmless but is no longer
 // "exactly what the wrapper parses" — this spec (and the builders in
 // op-builders.ts) intentionally omit it. ──
+// ★ RE-VERIFIED LINE-BY-LINE AGAINST main.go 2026-07-24, after the bonding-
+// curve pivot. THREE ENTRIES WERE STALE AND WOULD HAVE REVERTED ON EVERY
+// CALL:
+//   - `register` carried `feePaid`. Registration is FREE now (core/launch.go
+//     deleted the fee); main.go's register never reads that key, and it
+//     gained an OPTIONAL `firstBuy` instead.
+//   - `prepay` no longer exists at all — core/prepay.go was DELETED by the
+//     pivot. Its replacement is `buy` (the curve), not a renamed prepay.
+//   - `ask` carried `commissionHbdPaid`. main.go's ask no longer reads it:
+//     the wrapper computes the exact commission itself via
+//     core.CommissionOwedFor, because core.Ask requires it to match EXACTLY
+//     (the H2 fix) and any client-side copy could only ever drift into
+//     bricking every ask.
+// Ten curve/lifecycle entrypoints (buy/sell/retire/claimTradeFees/
+// closeIfDrained/withdrawTreasury/pause/unpause + the read-only quoteBuy/
+// quoteSell) had NO spec at all.
 export const ACTION_PAYLOAD_SPECS: Record<string, ActionPayloadSpec> = {
   register: {
-    face: 'number', // main.go:426 jsonU64(payload, "face")
-    cap: 'number', // main.go:431 jsonU64(payload, "cap")
-    feePaid: 'moneyString' // main.go:436 parseBigDecimal(jsonStr(payload, "feePaid"))
+    face: 'number', // main.go:512 i64FromU64(jsonU64(payload, "face"))
+    cap: 'number', // main.go:517 i64FromU64(jsonU64(payload, "cap"))
+    // main.go:527 `if raw := jsonStr(payload, "firstBuy"); raw != ""` — the
+    // OPTIONAL atomic creator first buy. Absent/0 == plain registration. When
+    // present it executes an ORDINARY core.Buy at FULL curve cost plus the
+    // full 10% trade fee in the same state transition: zero premine, no
+    // discount. Structurally un-front-runnable, but NOT an anti-snipe device
+    // (BasePrice does that work) — never describe it as one in the UI.
+    firstBuy: { type: 'moneyString', optional: true }
   },
   renew: {
-    creator: 'string', // main.go:464 jsonStr(payload, "creator")
-    periods: 'number', // main.go:465 jsonU64(payload, "periods")
-    paid: 'moneyString' // main.go:466 parseBigDecimal(jsonStr(payload, "paid"))
+    creator: 'string', // main.go:573
+    periods: 'number', // main.go:574
+    paid: 'moneyString' // main.go:575
   },
   setFace: {
-    newFace: 'number' // main.go:492 jsonU64(payload, "newFace")
+    newFace: 'number' // main.go:605
   },
   setCap: {
-    newCap: 'number' // main.go:515 jsonU64(payload, "newCap")
+    newCap: 'number' // main.go:632
   },
-  prepay: {
-    creator: 'string', // main.go:542 jsonStr(payload, "creator")
-    hbdPaid: 'moneyString' // main.go:543 parseBigDecimal(jsonStr(payload, "hbdPaid"))
+  // ---- the curve rails (WAVE D) ----
+  buy: {
+    creator: 'string', // main.go:1009
+    // WHOLE TOKENS, not 3-decimal base units — see contract-math.ts's unit
+    // note. Slippage is the buyer's OWN signed transfer.allow on the single
+    // HiveDraw of TotalDue; there is deliberately no in-payload cost cap.
+    tokens: 'moneyString' // main.go:1010
+  },
+  sell: {
+    creator: 'string', // main.go:1054
+    tokens: 'moneyString', // main.go:1055
+    // main.go:1062 — OPTIONAL signed floor on Net. Absent == NO guard (the
+    // escape hatch that keeps an exit from ever being trapped); present but
+    // malformed == a hard error, never a silent zero.
+    minNet: { type: 'moneyString', optional: true }
   },
   ask: {
-    creator: 'string', // main.go:613 jsonStr(payload, "creator")
-    contentHash: 'string', // main.go:614 jsonStr(payload, "contentHash")
-    deadlineBlocks: 'number', // main.go:615 jsonU64(payload, "deadlineBlocks")
-    commissionHbdPaid: 'moneyString', // parseBigDecimal(jsonStr(payload, "commissionHbdPaid"))
-    maxCredits: 'moneyString' // REQUIRED: parseBigDecimal(jsonStr(payload, "maxCredits")); core.Ask rejects nil/zero
+    creator: 'string', // main.go:765
+    contentHash: 'string', // main.go:766
+    deadlineBlocks: 'number', // main.go:767
+    maxCredits: 'moneyString' // main.go:768 — REQUIRED; core.Ask rejects nil/zero
   },
   answer: {
-    seq: 'number', // main.go:651 jsonU64(payload, "seq")
-    answerHash: 'string' // main.go:652 jsonStr(payload, "answerHash")
+    seq: 'number', // main.go:820
+    answerHash: 'string' // main.go:821
   },
   reclaim: {
-    creator: 'string', // main.go:678 jsonStr(payload, "creator")
-    seq: 'number' // main.go:679 jsonU64(payload, "seq")
+    creator: 'string', // main.go:876
+    seq: 'number' // main.go:877
   },
   refund: {
-    creator: 'string', // main.go:706 jsonStr(payload, "creator")
-    credits: 'moneyString' // main.go:707 parseBigDecimal(jsonStr(payload, "credits"))
+    creator: 'string', // main.go:938
+    credits: 'moneyString', // main.go:939
+    minNet: { type: 'moneyString', optional: true } // main.go:966
   },
   refundHolder: {
-    creator: 'string', // main.go:743 jsonStr(payload, "creator")
-    holder: 'string' // main.go:744 jsonStr(payload, "holder")
+    creator: 'string', // main.go:1117
+    holder: 'string' // main.go:1118
   },
   // The wasm export is `transfer` (//go:wasmexport transfer) — NOT
   // `transferCredits`. Ten of eleven action names matched; this one did not,
   // so every transfer would have dispatched to an unknown action on-chain.
   transfer: {
-    creator: 'string', // main.go:573 jsonStr(payload, "creator")
-    to: 'string', // main.go:574 jsonStr(payload, "to")
-    amount: 'moneyString' // main.go:575 parseBigDecimal(jsonStr(payload, "amount"))
+    creator: 'string', // main.go:675
+    to: 'string', // main.go:676
+    amount: 'moneyString' // main.go:688
+  },
+  retire: {
+    creator: 'string' // main.go:1313 — creator-only, ONCE-ONLY, starts the 5-day notice
+  },
+  // No payload fields at all: the caller IS the beneficiary (core.ClaimTradeFees
+  // zeroes kFeeBal(caller) and returns the debited amount to transfer back).
+  claimTradeFees: {},
+  closeIfDrained: {
+    creator: 'string' // main.go:1167
+  },
+  withdrawTreasury: {
+    amount: 'moneyString' // main.go:1220 — owner-gated inside core
+  },
+  pause: {},
+  unpause: {}
+};
+
+/**
+ * READ-ONLY preview entrypoints. Specced for the same drift protection, but
+ * kept OUT of ACTION_PAYLOAD_SPECS because they are never broadcast as a
+ * write — they carry no auth and mutate nothing. Listed here so a future
+ * rename on the Go side still trips a checker if these are ever called
+ * through a node that evaluates them.
+ */
+export const READ_PAYLOAD_SPECS: Record<string, ActionPayloadSpec> = {
+  quote: { creator: 'string' }, // main.go:1351
+  quoteBuy: {
+    creator: 'string', // main.go:1398
+    tokens: 'moneyString' // main.go:1399
+  },
+  quoteSell: {
+    creator: 'string', // main.go:1432
+    // The exit tax is the HOLDER's own hold clock, so the holder to preview
+    // is a PAYLOAD field — that is what keeps this a pure, caller-independent
+    // read. The real `sell` still requires that holder's own active auth.
+    holder: 'string', // main.go:1433
+    tokens: 'moneyString' // main.go:1434
   }
 };
 
@@ -143,7 +239,7 @@ export function assertPayloadShape(action: string, payload: Record<string, unkno
   const actualKeys = Object.keys(payload);
 
   for (const key of expectedKeys) {
-    if (!(key in payload)) problems.push(`missing key "${key}"`);
+    if (!(key in payload) && !isOptional(spec[key])) problems.push(`missing key "${key}"`);
   }
   for (const key of actualKeys) {
     if (!(key in spec)) problems.push(`unexpected key "${key}" (main.go's ${action} entrypoint never reads it — see the payload doc comment above ${action}'s wasmexport in main.go)`);
@@ -151,7 +247,16 @@ export function assertPayloadShape(action: string, payload: Record<string, unkno
   for (const key of expectedKeys) {
     if (!(key in payload)) continue;
     const value = payload[key];
-    const kind = spec[key];
+    // An optional key that IS present must still satisfy its type: main.go
+    // treats a present-but-malformed optional as a hard error, never as
+    // absent. `undefined` is the one thing callers must not send — it
+    // serialises away entirely, so reject it here rather than let it look
+    // like a deliberate omission.
+    if (value === undefined) {
+      problems.push(`"${key}" is present but undefined — omit the key entirely to mean "absent", never send undefined`);
+      continue;
+    }
+    const kind = fieldType(spec[key]);
     if (kind === 'number') {
       if (typeof value !== 'number' || !Number.isFinite(value)) {
         problems.push(`"${key}" must be a bare JSON number (main.go reads it via jsonU64, an UNQUOTED integer) — got ${typeof value} (${JSON.stringify(value)})`);
@@ -188,18 +293,30 @@ export function assertPayloadShape(action: string, payload: Record<string, unkno
 // runtime tripwire for the ONE way that guarantee could still regress: a
 // future edit to buildOp() itself (e.g. someone re-adding an optional
 // posting-auth parameter "just for one case") without updating this list.
+// VERIFIED 2026-07-24 by walking every //go:wasmexport in main.go: ALL 18
+// write entrypoints call requireActiveAuth(currentCaller()) — including the
+// curve rails, and including the ones that look permissionless in core
+// (closeIfDrained, refundHolder). There is no write on this contract that a
+// posting key may sign. `prepay` is gone (core/prepay.go deleted).
 export const WRITE_ACTIONS_REQUIRING_ACTIVE_AUTH: readonly string[] = [
   'register',
   'renew',
   'setFace',
   'setCap',
-  'prepay',
+  'buy',
+  'sell',
   'ask',
   'answer',
   'reclaim',
   'refund',
   'refundHolder',
-  'transfer'
+  'transfer',
+  'retire',
+  'claimTradeFees',
+  'closeIfDrained',
+  'withdrawTreasury',
+  'pause',
+  'unpause'
 ];
 
 /**

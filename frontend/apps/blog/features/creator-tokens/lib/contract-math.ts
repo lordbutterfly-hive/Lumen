@@ -43,7 +43,13 @@ export const BLOCKS_PER_DAY = 28_800; // ~3s/block
 export const MS_PER_BLOCK = 3_000;
 
 export const COMMISSION_BPS = 1_200; // 12%
-export const REGISTRATION_FEE_BASE_UNITS = 10_000; // 10.000 HBD
+// REGISTRATION IS FREE (LOCKED-MECHANISM "Revenue", USER-RULED 2026-07-21):
+// core/launch.go deleted both the RegistrationFee constant and `register`'s
+// own feePaid parameter — the spam filter is the Hive account cost plus the
+// identity binding. The old REGISTRATION_FEE_BASE_UNITS export is gone rather
+// than zeroed: a caller that still sent a feePaid field would now be REJECTED
+// by main.go's register entrypoint (it no longer reads that key, and
+// assertPayloadShape treats an unread key as a violation).
 export const SUBSCRIPTION_FEE_BASE_UNITS = 10_000;
 export const SUBSCRIPTION_PERIOD_BLOCKS = 30 * BLOCKS_PER_DAY;
 export const MAX_PREPAID_PERIODS = 12;
@@ -52,7 +58,12 @@ export const GRACE_BLOCKS = 5 * BLOCKS_PER_DAY; // OVERDUE -> FROZEN
 
 export const FACE_BAND_NUMERATOR = 2; // 2x/7d anti-rug band
 export const FACE_BAND_WINDOW_BLOCKS = 7 * BLOCKS_PER_DAY;
-export const MIN_FACE_BASE_UNITS = 100;
+// MinFace was raised 100 -> 500 (SET-2) -> 508 (LIVE-1, PRUNED 2026-07-22):
+// it is pinned to the GLOBAL-MINIMUM reachable settlement floor (the C4
+// face*2 >= rate guard at S == 2), not to ceil(BasePrice/2). A client that
+// still validated against 100 would let a creator sign a `register`/`setFace`
+// the contract rejects, burning their RC for a guaranteed revert.
+export const MIN_FACE_BASE_UNITS = 508;
 export const MAX_FACE_BASE_UNITS = 10_000_000;
 
 export const MIN_CAP_CREDITS_BASE_UNITS = 1;
@@ -69,12 +80,40 @@ export const MAX_RATE_DEVIATION_BPS = 2_000; // 20%, measured against the window
 export const MAX_OBS_WEIGHT_BLOCKS = 2_400; // ~2h dwell clamp per observation
 export const MAX_STALE_BLOCKS = 3 * BLOCKS_PER_DAY;
 
-export const PAR_BASE_UNITS_PER_CREDIT = 1;
+// =====================================================================
+// THE BONDING CURVE (core/curve.go + params.go) — the 2026-07-21 pivot.
+// PAR IS GONE. There is no PAR_BASE_UNITS_PER_CREDIT any more: core/prepay.go
+// was DELETED, and with it the "1 credit == 1 HBD base unit at issuance"
+// identity this file used to encode. A token's price now MOVES along
+//
+//     price(i) = BasePrice + (CurveLinNum·i + CurveQuadNum·i²) / CurveDenom
+//
+// and the reserve is the exact integer area under it.
+//
+// ★ UNIT CHANGE — THE 1000x TRAP. Under PAR a "credit" was a 3-decimal
+// quantity that shared HBD's own granularity, so baseUnitsToHuman() applied
+// to both. Under the curve, SUPPLY AND TOKEN AMOUNTS ARE WHOLE INTEGER
+// TOKENS (curve.go indexes price by the token ordinal i; area(S) multiplies
+// S by BasePrice directly), while HBD stays 3-decimal base units. One token
+// costs ~1.008 HBD at launch. Passing a token count through
+// baseUnitsToHuman() would understate it by exactly 1000x — never do it.
+// Use the *Tokens helpers for token quantities and baseUnitsToHuman() only
+// for HBD.
+// =====================================================================
+
+export const BASE_PRICE_BASE_UNITS = 1_000; // params.go BasePrice — 1.000 HBD, the RULING-H anti-snipe intercept
+export const CURVE_LIN_NUM = 63_000; // params.go CurveLinNum   (a = 63/8)
+export const CURVE_QUAD_NUM = 21; // params.go CurveQuadNum     (b = 21/8000)
+export const CURVE_DENOM = 8_000; // params.go CurveDenom — the ONE rounding site
+
+export const TRADE_FEE_BPS = 1_000; // params.go TradeFeeBps — 10%, split 5/5 creator/platform
+export const MAX_EXIT_TAX_BPS = 2_000; // params.go MaxExitTaxBps — 20% at h == 0
+export const EXIT_TAX_DECAY_BLOCKS = 42 * BLOCKS_PER_DAY; // params.go ExitTaxDecayBlocks — 6 weeks to 0
 
 // ---- money: base-unit integer <-> human 3-decimal number ----
 // Mirrors features/prediction-market/lib/vsc-money.ts's ASSET_DECIMALS/SCALE
-// convention exactly (HBD and credits both carry 3 decimals; PAR is 1:1 so
-// credits inherit HBD's own granularity — prepay.go: "PAR performs NO division").
+// convention exactly. HBD carries 3 decimals. TOKENS DO NOT — see the unit
+// note above; they are whole integers on the curve.
 
 export const ASSET_DECIMALS = 3;
 const SCALE = 10 ** ASSET_DECIMALS;
@@ -149,15 +188,232 @@ function mulBpsFloor(total: number, bps: number): number {
 }
 
 // =====================================================================
+// Curve primitives — ported term-for-term from core/curve.go.
+//
+// ALL of this is BigInt internally and that is NOT defensive habit: the
+// quadratic leg alone overflows JS safe-integer arithmetic well inside the
+// protocol's own reachable range. At S = 283,000 (params.go's practical
+// ceiling) the pyramidal number P(S) = S(S+1)(2S+1)/6 is ~1.5e16 — already
+// past Number.MAX_SAFE_INTEGER (9.007e15) BEFORE the x21 multiply. A float
+// port would silently misprice large markets rather than fail.
+//
+// NEVER round the linear and quadratic legs independently: curve.go's own
+// recheck PROVED that breaks the round-trip equality (L5) in 65% of cases.
+// There is exactly ONE floor, on the single common-denominator division.
+// =====================================================================
+
+const BIG_BASE = BigInt(BASE_PRICE_BASE_UNITS);
+const BIG_LIN = BigInt(CURVE_LIN_NUM);
+const BIG_QUAD = BigInt(CURVE_QUAD_NUM);
+const BIG_DEN = BigInt(CURVE_DENOM);
+
+/** T(S) = S(S+1)/2 — exact (S(S+1) is always even). */
+function curveTri(s: bigint): bigint {
+  return (s * (s + 1n)) / 2n;
+}
+
+/** P(S) = S(S+1)(2S+1)/6 — exact (the product is always divisible by 6). */
+function curvePyr(s: bigint): bigint {
+  return (s * (s + 1n) * (2n * s + 1n)) / 6n;
+}
+
+/** curve.go Area(S): S·BasePrice + floor((lin·T(S) + quad·P(S))/den), in HBD base units. */
+function areaBig(s: bigint): bigint {
+  if (s <= 0n) return 0n;
+  return BIG_BASE * s + (BIG_LIN * curveTri(s) + BIG_QUAD * curvePyr(s)) / BIG_DEN;
+}
+
+/**
+ * curve.go Area(S) — the integer HBD reserve backing supply S. THE invariant
+ * of the whole mechanism is R === Area(S) with EQUALITY at every reachable
+ * trading state, so this doubles as "what the reserve must currently hold".
+ */
+export function areaBaseUnits(supplyTokens: number): number {
+  return Number(areaBig(BigInt(Math.trunc(supplyTokens))));
+}
+
+/** curve.go BuyCost(S,n) = Area(S+n) − Area(S) — the EXACT integer area step (L1). */
+export function buyCostBaseUnits(supplyTokens: number, tokens: number): number {
+  const s = BigInt(Math.trunc(supplyTokens));
+  const n = BigInt(Math.trunc(tokens));
+  if (n <= 0n) return 0;
+  return Number(areaBig(s + n) - areaBig(s));
+}
+
+/**
+ * curve.go SellProceeds(S,k) = Area(S) − Area(S−k) (L2). Returns null when
+ * k > S — core returns a TYPED ERROR there rather than a number, and a
+ * silently-wrong payout preview on a fund path is the one failure mode this
+ * feature never accepts.
+ */
+export function sellProceedsBaseUnits(supplyTokens: number, tokens: number): number | null {
+  const s = BigInt(Math.trunc(supplyTokens));
+  const k = BigInt(Math.trunc(tokens));
+  if (k <= 0n) return 0;
+  if (k > s) return null;
+  return Number(areaBig(s) - areaBig(s - k));
+}
+
+/** curve.go SpotRate(S) = base + floor((lin·S + quad·S²)/den); 0 at S == 0, deliberately. */
+export function spotRateBaseUnits(supplyTokens: number): number {
+  const s = BigInt(Math.trunc(supplyTokens));
+  if (s <= 0n) return 0;
+  return Number(BIG_BASE + (BIG_LIN * s + BIG_QUAD * s * s) / BIG_DEN);
+}
+
+/**
+ * exittax.go ExitTaxBpsAt: 0 once held >= 6 weeks, else
+ * ceil(MaxExitTaxBps·(D−h)/D) — CEIL, and seller-adverse by at most 1 bps.
+ */
+export function exitTaxBpsAt(heldBlocks: number): number {
+  const h = Math.max(0, Math.trunc(heldBlocks));
+  if (h >= EXIT_TAX_DECAY_BLOCKS) return 0;
+  return mulDivCeil(MAX_EXIT_TAX_BPS, EXIT_TAX_DECAY_BLOCKS - h, EXIT_TAX_DECAY_BLOCKS);
+}
+
+/**
+ * exittax.go ExitTaxOn: ceil(p·taxBps/10000) — RULING F: CEIL, never floor
+ * (floor made the tax evadable by splitting a sell into <=4-token chunks),
+ * and RULING K: on GROSS proceeds with NO realized-gain cap, which is what
+ * makes it un-splittable (proceeds are path-independent, ceil superadditive).
+ */
+export function exitTaxOnBaseUnits(grossBaseUnits: number, taxBps: number): number {
+  if (taxBps <= 0 || grossBaseUnits <= 0) return 0;
+  return mulDivCeil(grossBaseUnits, taxBps, 10_000);
+}
+
+export interface TradeFeeSplit {
+  feeBaseUnits: number;
+  feeCreatorBaseUnits: number;
+  feePlatformBaseUnits: number;
+}
+
+/** tradefee.go tradeFeeOn: floor(amount·TradeFeeBps/1e4), split floor(fee/2) to the creator, the odd unit to the platform. */
+export function tradeFeeOn(amountBaseUnits: number): TradeFeeSplit {
+  const feeBaseUnits = mulBpsFloor(amountBaseUnits, TRADE_FEE_BPS);
+  const feeCreatorBaseUnits = Math.floor(feeBaseUnits / 2);
+  return { feeBaseUnits, feeCreatorBaseUnits, feePlatformBaseUnits: feeBaseUnits - feeCreatorBaseUnits };
+}
+
+export interface BuyQuoteBaseUnits {
+  tokens: number;
+  costBaseUnits: number;
+  feeBaseUnits: number;
+  /** cost + fee — the single HiveDraw the buyer signs, and the transfer.allow cap they must approve. */
+  totalDueBaseUnits: number;
+  rateAfterBaseUnits: number;
+}
+
+/** buy.go's own arithmetic: cost = BuyCost(S,n); fee = floor(cost·TradeFeeBps/1e4); TotalDue = cost + fee. Mirrors the contract's `quoteBuy` entrypoint. */
+export function quoteBuyBaseUnits(supplyTokens: number, tokens: number): BuyQuoteBaseUnits {
+  const costBaseUnits = buyCostBaseUnits(supplyTokens, tokens);
+  const { feeBaseUnits } = tradeFeeOn(costBaseUnits);
+  return {
+    tokens: Math.trunc(tokens),
+    costBaseUnits,
+    feeBaseUnits,
+    totalDueBaseUnits: costBaseUnits + feeBaseUnits,
+    rateAfterBaseUnits: spotRateBaseUnits(supplyTokens + Math.trunc(tokens))
+  };
+}
+
+export interface SellQuoteBaseUnits {
+  tokens: number;
+  grossBaseUnits: number;
+  taxBaseUnits: number;
+  feeBaseUnits: number;
+  /** gross − tax − fee — what the seller actually receives, and the number they feed back as `sell`'s minNet floor. */
+  netBaseUnits: number;
+  taxBps: number;
+  heldBlocks: number;
+}
+
+/**
+ * sell.go's own arithmetic: p = SellProceeds(S,ΔS); tax = ceil(p·τ/1e4) to the
+ * TREASURY; fee = floor(p·TradeFeeBps/1e4); Net = p − tax − fee. Returns null
+ * when the sell exceeds supply (core refuses rather than guessing).
+ */
+export function quoteSellBaseUnits(supplyTokens: number, tokens: number, heldBlocks: number): SellQuoteBaseUnits | null {
+  const grossBaseUnits = sellProceedsBaseUnits(supplyTokens, tokens);
+  if (grossBaseUnits === null) return null;
+  const taxBps = exitTaxBpsAt(heldBlocks);
+  const taxBaseUnits = exitTaxOnBaseUnits(grossBaseUnits, taxBps);
+  const { feeBaseUnits } = tradeFeeOn(grossBaseUnits);
+  return {
+    tokens: Math.trunc(tokens),
+    grossBaseUnits,
+    taxBaseUnits,
+    feeBaseUnits,
+    netBaseUnits: grossBaseUnits - taxBaseUnits - feeBaseUnits,
+    taxBps,
+    heldBlocks: Math.max(0, Math.trunc(heldBlocks))
+  };
+}
+
+/**
+ * Inverse of quoteBuy for a budget-first UI ("spend 25 HBD"): the largest
+ * WHOLE token count whose TotalDue (cost + trade fee) fits inside `budget`.
+ *
+ * Exact integer bisection over the real quote function — never an algebraic
+ * approximation of the curve. TotalDue is strictly increasing in n (area is
+ * monotone and the fee is a monotone function of it), so bisection is sound
+ * and lands on the true boundary. Returns 0 when even one token is
+ * unaffordable, which the caller must surface rather than rounding up into a
+ * transaction that reverts.
+ */
+export function tokensAffordableForBudget(supplyTokens: number, budgetBaseUnits: number): number {
+  if (budgetBaseUnits <= 0) return 0;
+  if (quoteBuyBaseUnits(supplyTokens, 1).totalDueBaseUnits > budgetBaseUnits) return 0;
+  let lo = 1;
+  let hi = 2;
+  while (quoteBuyBaseUnits(supplyTokens, hi).totalDueBaseUnits <= budgetBaseUnits) {
+    lo = hi;
+    hi *= 2;
+    if (hi > 1e9) return lo; // params.go's own practical ceiling is ~283k tokens
+  }
+  while (lo < hi - 1) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (quoteBuyBaseUnits(supplyTokens, mid).totalDueBaseUnits <= budgetBaseUnits) lo = mid;
+    else hi = mid;
+  }
+  return lo;
+}
+
+// =====================================================================
 // Derivation — faithful ports of the pure logic in core/*.go.
 // =====================================================================
 
-/** market.go Phase(), the 4 real contract values only — UNKNOWN is assigned by the caller on read failure, never by this function. */
-export function derivePhase(closedStored: boolean, paidUntilBlock: number, block: number): Exclude<MarketPhase, 'UNKNOWN'> {
-  if (closedStored) return 'CLOSED';
+const PHASE_RANK: Record<Exclude<MarketPhase, 'UNKNOWN'>, number> = { ACTIVE: 0, OVERDUE: 1, FROZEN: 2, CLOSED: 3 };
+
+/** market.go naturalPhase — the subscription ladder alone, with no retire input. */
+function naturalPhase(paidUntilBlock: number, block: number): Exclude<MarketPhase, 'UNKNOWN'> {
   if (block <= paidUntilBlock) return 'ACTIVE';
   if (block < paidUntilBlock + GRACE_BLOCKS) return 'OVERDUE';
   return 'FROZEN';
+}
+
+/**
+ * market.go Phase(), the 4 real contract values only — UNKNOWN is assigned by
+ * the caller on read failure, never by this function.
+ *
+ * ★ RULING D (2026-07-21), MISSING FROM THIS PORT UNTIL NOW: Phase is
+ * MAX(naturalPhase, retiredPhase) over ACTIVE < OVERDUE < FROZEN < CLOSED,
+ * where a retired market is OVERDUE for its 5-day notice window and FROZEN
+ * after. The MAX is load-bearing on the contract side (retiring may only ever
+ * make a market MORE frozen, never un-freeze it); here it is what stops the
+ * UI showing a retired market as tradeable ACTIVE and inviting a buy that
+ * core.Buy's own RequireInflowOpen gate would revert.
+ *
+ * `retiredAtBlock` is the DECODED height (0/null when never retired) — note
+ * the chain stores block+1 so that 0 can mean "never"; see reads.ts's
+ * decodeRetiredAt.
+ */
+export function derivePhase(closedStored: boolean, paidUntilBlock: number, block: number, retiredAtBlock: number | null = null): Exclude<MarketPhase, 'UNKNOWN'> {
+  if (closedStored) return 'CLOSED';
+  const natural = naturalPhase(paidUntilBlock, block);
+  if (retiredAtBlock === null) return natural;
+  const forced: Exclude<MarketPhase, 'UNKNOWN'> = block < retiredAtBlock + GRACE_BLOCKS ? 'OVERDUE' : 'FROZEN';
+  return PHASE_RANK[forced] > PHASE_RANK[natural] ? forced : natural;
 }
 
 /** market.go RequireInflowOpen: phase ACTIVE or OVERDUE, AND the global pause clear. Gates Prepay and Ask identically. */
@@ -250,9 +506,28 @@ export function deriveFaceBandBaseUnits(currentFaceBaseUnits: number, faceSetAtB
  * RefundHolder can never disagree... about what a given (reserve, credits,
  * supply) triple is worth."
  */
-export function refundPayoutBaseUnits(reserveBaseUnits: number, creditsBaseUnits: number, supplyBaseUnits: number): number {
-  const uncapped = mulDivFloor(reserveBaseUnits, creditsBaseUnits, supplyBaseUnits);
-  return Math.min(uncapped, creditsBaseUnits * PAR_BASE_UNITS_PER_CREDIT);
+export function refundPayoutBaseUnits(reserveBaseUnits: number, tokens: number, supplyTokens: number): number {
+  return mulDivFloor(reserveBaseUnits, tokens, supplyTokens);
+}
+
+/**
+ * refund.go's K2 leg — THE WIND-DOWN IS TAXED. The same hold-time-decaying
+ * exit tax the curve charges is carved from the pro-rata payout to the
+ * treasury, so a fresh whale who triggers Retire to escape the curve tax pays
+ * the identical rate on the way out. Unlike Sell there is NO trade fee here
+ * (charging a fee to exit a dying market is holder-hostile).
+ *
+ *     gross = floor(reserve·tokens/supply)
+ *     net   = gross − ceil(gross·τ(h)/1e4)
+ *
+ * A UI that shows `gross` as "you will receive" overstates a fresh holder's
+ * payout by up to 20%.
+ */
+export function refundNetBaseUnits(reserveBaseUnits: number, tokens: number, supplyTokens: number, heldBlocks: number): { grossBaseUnits: number; taxBaseUnits: number; netBaseUnits: number; taxBps: number } {
+  const grossBaseUnits = refundPayoutBaseUnits(reserveBaseUnits, tokens, supplyTokens);
+  const taxBps = exitTaxBpsAt(heldBlocks);
+  const taxBaseUnits = exitTaxOnBaseUnits(grossBaseUnits, taxBps);
+  return { grossBaseUnits, taxBaseUnits, netBaseUnits: grossBaseUnits - taxBaseUnits, taxBps };
 }
 
 /**
@@ -267,9 +542,9 @@ export function refundPayoutBaseUnits(reserveBaseUnits: number, creditsBaseUnits
  * actually uses, and refundPayoutBaseUnits above for the exact, contract-
  * faithful amount a specific holder's balance would redeem for.
  */
-export function contractRefundPriceBaseUnits(reserveBaseUnits: number, supplyBaseUnits: number): number {
-  if (supplyBaseUnits <= 0) return 0;
-  return refundPayoutBaseUnits(reserveBaseUnits, PAR_BASE_UNITS_PER_CREDIT, supplyBaseUnits);
+export function contractRefundPriceBaseUnits(reserveBaseUnits: number, supplyTokens: number): number {
+  if (supplyTokens <= 0) return 0;
+  return refundPayoutBaseUnits(reserveBaseUnits, 1, supplyTokens);
 }
 
 /**
@@ -294,9 +569,28 @@ export function contractRefundPriceBaseUnits(reserveBaseUnits: number, supplyBas
  * a coverage percentage finer than 0.01% if it ever wants to. Aligned, not
  * duplicated-and-drifted: no change needed.
  */
-export function floorRatioForDisplay(reserveBaseUnits: number, supplyBaseUnits: number): number {
-  if (supplyBaseUnits <= 0) return 0;
-  return Math.min(reserveBaseUnits / supplyBaseUnits, PAR_BASE_UNITS_PER_CREDIT);
+export function reserveCoverageRatio(reserveBaseUnits: number, supplyTokens: number): number {
+  if (supplyTokens <= 0) return 0;
+  const area = areaBaseUnits(supplyTokens);
+  if (area <= 0) return 0;
+  return Math.min(reserveBaseUnits / area, 1);
+}
+
+/**
+ * The market's FLOOR in HBD per token — floor(reserve/supply), the pro-rata
+ * value a wind-down pays before the exit tax. Under PAR this was a useless
+ * display value (it floored to 0 or 1 at any realistic scale, because a
+ * "credit" was a single base unit); under the curve a token is a whole unit
+ * backed by ~1 HBD or more, so this is now a genuinely meaningful number and
+ * IS the floor the UI shows beside the market price.
+ *
+ * NOT what a specific holder receives: that goes through refundNetBaseUnits()
+ * against their real balance AND their own hold clock (the exit tax is
+ * per-holder). Showing this as "you will receive" overstates a fresh
+ * holder's payout.
+ */
+export function floorPricePerTokenBaseUnits(reserveBaseUnits: number, supplyTokens: number): number {
+  return contractRefundPriceBaseUnits(reserveBaseUnits, supplyTokens);
 }
 
 /** ask.go creditsForAsk: ceil(face/rate). rate is HBD base units per credit; caller guarantees rate > 0. */
@@ -484,15 +778,50 @@ export function askRateFromObservations(points: RawObservation[], block: number)
 // =====================================================================
 
 export interface SettlementRateResult {
-  rateBaseUnits: number;
-  /** True when AskRate's guards failed and this is the PAR fallback, not a live TWAP — mirrors ask.go's SettlementRate: `if rate, err := AskRate(...); err == nil { return rate }; return PAR` (ANY non-nil AskRate error, whatever its specific reason, takes the PAR branch). */
-  usedPar: boolean;
+  /** null means REFUSED — there is no safe rate. Never substitute a number here. */
+  rateBaseUnits: number | null;
+  status: QuoteOracleStatus;
 }
 
-/** ask.go SettlementRate, ported term for term: `estimate` is whatever askRateFromObservations (or an 'unavailable' stand-in for a decode failure) already computed. */
-export function settlementRateBaseUnits(estimate: AskRateEstimate): SettlementRateResult {
-  if (estimate.status === 'ok' && estimate.rateBaseUnits !== null && estimate.rateBaseUnits > 0) {
-    return { rateBaseUnits: estimate.rateBaseUnits, usedPar: false };
+/**
+ * settlement.go SettlementRate — ★ REWRITTEN 2026-07-24 for RULING C.
+ *
+ * THE PAR FALLBACK IS DELETED. This function used to return
+ * PAR_BASE_UNITS_PER_CREDIT (1) whenever the TWAP guards failed, mirroring
+ * the old `if err == nil { return rate }; return PAR` shape. RULING C removed
+ * that branch from the contract because PAR was wrong by exactly the factor
+ * `spot`, ALWAYS in the asker-robbing direction: a 0.1 HBD service cost 100
+ * tokens where correct pricing costs 1. The contract now returns a typed
+ * ERROR instead, and a refusal only ever blocks a NEW service inflow — no
+ * outflow consults settlement, so refusing can never trap anyone's funds.
+ *
+ * A client that kept the PAR fallback would quote a price the chain would
+ * never charge and invite an ask that reverts (or, worse, one that succeeds
+ * against a maxCredits cap the user signed on a 100x-wrong preview). So this
+ * refuses too.
+ *
+ * ⚠️ NOT A COMPLETE PORT, DELIBERATELY. The contract's rate is
+ * min(TWAP_short, TWAP_long_7d, SpotRate(supply)) plus the C5 divergence
+ * tripwire, and SettleSpend adds the C4 minimum-price guard and the C2 depth
+ * ceiling. Only the SHORT ring and the SPOT arm are replicated here (the
+ * 7-day long ring is read from a separate "twl|" key family that this client
+ * does not yet fetch). Taking a min over FEWER arms can only ever return a
+ * rate >= the true one, and a too-high rate makes an ask look CHEAPER in
+ * credits than it really is — so this reports the shortfall as a status
+ * rather than pretending to authority it does not have. The drift-proof fix
+ * is to call the contract's own `quote` entrypoint, which returns the real
+ * rate with refusal semantics baked in; see READ_PAYLOAD_SPECS in
+ * vsc/payload-contract.ts.
+ */
+export function settlementRateBaseUnits(estimate: AskRateEstimate, supplyTokens: number): SettlementRateResult {
+  if (estimate.status !== 'ok' || estimate.rateBaseUnits === null || estimate.rateBaseUnits <= 0) {
+    return { rateBaseUnits: null, status: estimate.status === 'ok' ? 'unavailable' : estimate.status };
   }
-  return { rateBaseUnits: PAR_BASE_UNITS_PER_CREDIT, usedPar: true };
+  const spot = spotRateBaseUnits(supplyTokens);
+  if (spot <= 0) {
+    // S == 0: no supply, no traded rate. core's own convention — an empty
+    // market records no observation rather than a synthetic one.
+    return { rateBaseUnits: null, status: 'insufficient_observations' };
+  }
+  return { rateBaseUnits: Math.min(estimate.rateBaseUnits, spot), status: 'ok' };
 }

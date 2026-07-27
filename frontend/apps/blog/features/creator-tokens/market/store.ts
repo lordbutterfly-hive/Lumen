@@ -7,7 +7,7 @@ import type { TokenMarketDetail, HolderPosition, Service } from './token-detail'
 import { MOCK_TOKEN_DETAIL } from './token-detail';
 import { MOCK_CREATORS, MOCK_NEW_CREATORS } from './mock';
 import { MOCK_HOLDINGS, MOCK_ASKS } from './portfolio';
-import { buyQuote, sellQuote, serviceTokens } from './curve';
+import { buyQuote, sellQuote, serviceTokens, spotPriceUsd, reserveUsdAt } from './curve';
 
 /**
  * Client-side, stateful mock of the creator-token markets — the LOCAL backing for
@@ -25,22 +25,37 @@ const DEFAULT_SERVICES: Service[] = [
   { key: 'opinion', name: 'Give your opinion', desc: 'A candid take on your idea, plan or design.', usd: 25, status: 'live', cta: 'Ask' }
 ];
 
+/**
+ * ★ CURVE-CONSISTENT SEED (2026-07-24). The supply is taken from the
+ * fixture's market cap, but the PRICE and the RESERVE are then DERIVED from
+ * the curve at that supply rather than carried over from the fixture:
+ *
+ *   price  = SpotRate(S)   the marginal price the curve actually charges
+ *   reserve = Area(S)      the exact backing the mechanism guarantees
+ *
+ * The old seed set reserve = 50% of market cap, which put every mock market
+ * in a state the real contract cannot reach — R === Area(S) holds with
+ * EQUALITY at every reachable trading state. A demo seeded below its own
+ * curve shows a floor price that could never occur and makes the wind-down
+ * maths look profitable when the governing theorem proves it never is.
+ */
 function synthDetail(c: CreatorTokenSummary): TokenMarketDetail {
-  const supply = Math.max(1, Math.round(c.marketCapUsd / c.priceUsd));
-  const reserveUsd = Math.round(c.marketCapUsd * 0.5);
+  const supply = Math.max(1, Math.round(c.marketCapUsd / Math.max(c.priceUsd, 0.01)));
+  const priceUsd = round2(spotPriceUsd(supply));
+  const reserveUsd = round2(reserveUsdAt(supply));
   return {
     handle: c.handle,
     what: c.what,
     avatarColor: c.avatarColor,
     reputation: Math.max(25, Math.round(c.delivery.completionPct * 0.8)),
-    priceUsd: c.priceUsd,
+    priceUsd,
     changePctWeek: 0,
-    marketCapUsd: c.marketCapUsd,
-    floorUsd: Math.round((reserveUsd / supply) * 100) / 100,
+    marketCapUsd: Math.round(supply * priceUsd),
+    floorUsd: round2(reserveUsd / supply),
     supply,
     cap: Math.max(supply * 2, 10000),
     reserveUsd,
-    chart: Array.from({ length: 12 }, (_, i) => Math.round(c.priceUsd * (0.9 + (0.1 * i) / 11) * 100) / 100),
+    chart: Array.from({ length: 12 }, (_, i) => round2(priceUsd * (0.9 + (0.1 * i) / 11))),
     delivery: c.delivery,
     services: DEFAULT_SERVICES,
     position: null
@@ -130,19 +145,26 @@ function reprice(m: TokenMarketDetail): TokenMarketDetail {
 // handle (never another creator's data), so an unknown /creators/<x> (the Creator
 // Studio link, a hand-typed URL) renders a coherent page instead of @delm.
 function defaultDetail(handle: string): TokenMarketDetail {
+  // Curve-consistent, same reasoning as synthDetail: price and reserve are
+  // DERIVED at S = 1000, never hand-picked. (Area(1000) is ~4.9M base units
+  // = ~$4,940, not the $500 this used to claim — the old seed was under its
+  // own curve by an order of magnitude.)
+  const supply = 1000;
+  const priceUsd = round2(spotPriceUsd(supply));
+  const reserveUsd = round2(reserveUsdAt(supply));
   return {
     handle,
     what: 'Creator token',
     avatarColor: 'linear-gradient(135deg,#6b7280,#9ca3af)',
     reputation: 25,
-    priceUsd: 1,
+    priceUsd,
     changePctWeek: 0,
-    marketCapUsd: 1000,
-    floorUsd: 0.5,
-    supply: 1000,
+    marketCapUsd: Math.round(supply * priceUsd),
+    floorUsd: round2(reserveUsd / supply),
+    supply,
     cap: 10000,
-    reserveUsd: 500,
-    chart: Array.from({ length: 12 }, () => 1),
+    reserveUsd,
+    chart: Array.from({ length: 12 }, () => priceUsd),
     delivery: { answered: 0, total: 0, completionPct: 0, typicalResponse: '', marks: [], available: false },
     services: DEFAULT_SERVICES,
     position: null
@@ -169,38 +191,61 @@ function getMarketReadonly(handle: string): TokenMarketDetail {
   return markets.get(handle) ?? defaultDetail(handle);
 }
 
-/** Buy `usdGross` worth of the token (includes the 10% trade fee). */
+/**
+ * Buy up to `usdGross` worth of the token (the 10% trade fee is included in
+ * that budget).
+ *
+ * ★ INTEGER TOKENS (curve pivot): the curve mints whole tokens only, so the
+ * budget buys the largest whole count that fits and the ACTUAL cost
+ * (`q.totalUsd`) is at most the budget. The reserve is credited the curve leg
+ * alone — crediting the fee too would break the R === Area(S) equality that
+ * the whole mechanism rests on (buy.go: "booking the fee into the reserve
+ * would break R === area(S)").
+ */
 export function buy(handle: string, usdGross: number): void {
   if (handle === STUDIO_HANDLE) return; // #2: you can't buy your own token — no self-dealing
   const m = getMarket(handle);
   if (!Number.isFinite(usdGross) || usdGross <= 0) return;
   usdGross = Math.min(usdGross, 1_000_000); // ceiling — a fat-finger 1e999 must not poison the market to NaN (H1)
   const q = buyQuote(usdGross, m);
-  if (!Number.isFinite(q.tokens) || !Number.isFinite(q.priceAfter) || q.tokens < 0.01) return; // #6: reject a buy crediting ~0 tokens
-  if (m.supply + q.tokens > m.cap) return; // #4: never let supply exceed the cap (was rendering ">100% issued")
-  const supply = m.supply + q.tokens;
-  const priceUsd = Math.max(0.01, round2(q.priceAfter)); // never let price hit 0 (M1 div-by-zero downstream)
-  const reserveUsd = m.reserveUsd + (usdGross - q.tradeFeeUsd);
+  if (!Number.isFinite(q.tokens) || q.tokens < 1) return; // a budget that can't afford one whole token buys nothing
+  const supply = Math.floor(m.supply) + q.tokens;
+  if (supply > m.cap) return; // #4: never let supply exceed the cap
+  const priceUsd = Math.max(0.01, round2(q.priceAfter));
+  // Curve leg only: totalUsd − fee == the exact area step Area(S+n) − Area(S).
+  const reserveUsd = m.reserveUsd + (q.totalUsd - q.tradeFeeUsd);
   const oldTokens = m.position?.tokens ?? 0;
   const heldTokens = oldTokens + q.tokens;
   // #3: acquisition-WEIGHTED hold age — new tokens enter at age 0, existing tokens
   // keep theirs, so a top-up doesn't reset the whole position's early-exit clock.
+  // This mirrors holdclock.go's creditInflow: an inflow always drags the clock
+  // TOWARD now, so a fresh or sybil account can never look aged.
   const heldDays = heldTokens > 0 ? Math.round((oldTokens * (m.position?.heldDays ?? 0)) / heldTokens) : 0;
   const next = reprice({ ...m, supply, priceUsd, reserveUsd, position: withPosition({ ...m, priceUsd }, heldTokens, heldDays) });
   markets.set(handle, next);
   emit();
 }
 
-/** Sell `tokens` back to the curve (early-exit + 10% trade fee apply). */
+/**
+ * Sell `tokens` back to the curve. Whole tokens only; the exit tax and the
+ * 10% trade fee are both charged on the GROSS curve proceeds, and the reserve
+ * is debited that same gross amount (sell.go — the tax goes to the treasury
+ * and the fee to the two pull pots, neither comes out of the reserve's own
+ * area obligation).
+ *
+ * The post-trade price is read from the CURVE at the new supply, not nudged
+ * from the old price by a ratio: the curve is the price source.
+ */
 export function sell(handle: string, tokens: number): void {
   const m = getMarket(handle);
   if (!Number.isFinite(tokens)) return;
   const held = m.position?.tokens ?? 0;
-  const n = Math.min(tokens, held);
+  const n = Math.floor(Math.min(tokens, held, Math.floor(m.supply)));
   if (n <= 0) return;
   const q = sellQuote(n, m, m.position?.heldDays ?? 999);
-  const supply = Math.max(0, m.supply - n);
-  const priceUsd = Math.max(0.01, round2(supply > 0 ? m.priceUsd * (1 - n / m.supply / 2) : m.floorUsd));
+  if (q.curveProceedsUsd <= 0) return;
+  const supply = Math.max(0, Math.floor(m.supply) - n);
+  const priceUsd = Math.max(0.01, round2(supply > 0 ? spotPriceUsd(supply) : m.floorUsd));
   const reserveUsd = Math.max(0, m.reserveUsd - q.curveProceedsUsd);
   const next = reprice({ ...m, supply, priceUsd, reserveUsd, position: withPosition({ ...m, priceUsd }, held - n, m.position?.heldDays ?? 0) });
   markets.set(handle, next);
@@ -488,14 +533,16 @@ export function launchToken(input: { services?: Service[]; cap?: number; firstBu
     input.firstBuyUsd && input.firstBuyUsd > 0 && Number.isFinite(input.firstBuyUsd) ? Math.min(input.firstBuyUsd, 1_000_000) : 0;
   if (spend > 0) {
     const q = buyQuote(spend, next);
-    // #2: never let the first-buy push supply past the cap.
-    if (Number.isFinite(q.tokens) && q.tokens > 0 && next.supply + q.tokens <= next.cap) {
+    // #2: never let the first-buy push supply past the cap. Whole tokens only.
+    if (Number.isFinite(q.tokens) && q.tokens >= 1 && Math.floor(next.supply) + q.tokens <= next.cap) {
       const oldTokens = next.position?.tokens ?? 0;
       const total = oldTokens + q.tokens;
       const heldDays = total > 0 ? Math.round((oldTokens * (next.position?.heldDays ?? 0)) / total) : 0; // #6 weighted
-      next.supply += q.tokens;
+      next.supply = Math.floor(next.supply) + q.tokens;
       next.priceUsd = Math.max(0.01, Math.round(q.priceAfter * 100) / 100);
-      next.reserveUsd += spend - q.tradeFeeUsd; // #1: use the CLAMPED spend, not the raw input
+      // Curve leg only (the ACTUAL cost, not the requested budget — integer
+      // tokens mean the two differ) so R === Area(S) still holds.
+      next.reserveUsd += q.totalUsd - q.tradeFeeUsd;
       next.position = { valueUsd: 0, floorValueUsd: 0, ...(next.position ?? {}), tokens: total, heldDays };
     }
   }

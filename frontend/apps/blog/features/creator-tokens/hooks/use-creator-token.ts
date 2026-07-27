@@ -11,13 +11,21 @@ import { getCreatorTokensDataSource } from '../lib/creator-tokens-data-source';
 // creator shares one cache entry.
 //
 // Scope: this hook wires the READS (market, position, asks, delivery record,
-// quote) plus the three primary HOLDER-facing writes (prepay/ask/refund —
+// quote) plus the three primary HOLDER-facing writes (buy/ask/refund —
 // UI-BRIEF Pages 1, 2 and 4, the surfaces §2.1 orders first). Creator-
 // dashboard-only writes (answer, reclaim, renewSubscription, setFace, setCap,
-// transferCredits, refundHolder) are lower-frequency and deliberately left
+// transferTokens, refundHolder, sell, retire, claimTradeFees,
+// closeIfDrained, withdrawTreasury) are lower-frequency and deliberately left
 // off this hook to keep it within the repo's file-size guidance — a
 // dashboard component can call getCreatorTokensDataSource() directly, or a
 // sibling use-creator-dashboard.ts hook can wire them the same way later.
+//
+// ★ CURVE-PIVOT UPDATE (2026-07-24): prepay() (the PAR mint) is DELETED —
+// replaced by buy() on the curve. `credits`/`creditsHeld`/`supplyCredits`
+// vocabulary is gone; tokens are whole integers now (see types.ts's own
+// "THE 1000x UNIT TRAP" doc) — never pass a token count through
+// baseUnitsToHuman()/humanToBaseUnits() anywhere this hook's callers use
+// these numbers.
 
 const marketKey = (creator: string) => ['creatorTokens', 'market', creator];
 const positionKey = (creator: string, holder?: string) => ['creatorTokens', 'position', creator, holder];
@@ -76,7 +84,7 @@ export function useCreatorToken(creator: string) {
     queryFn: () => dataSource.readQuote(creator),
     // Never worth pricing an ask against a market we can't even confirm
     // exists or that has nothing issued yet.
-    enabled: Boolean(market) && !marketUnknown && (market?.supplyCredits ?? 0) > 0,
+    enabled: Boolean(market) && !marketUnknown && (market?.supplyTokens ?? 0) > 0,
     staleTime: STALE_MS
   });
 
@@ -85,8 +93,13 @@ export function useCreatorToken(creator: string) {
     queryClient.invalidateQueries({ queryKey: positionKey(creator, user.username) });
   }, [queryClient, creator, user.username]);
 
-  const prepayMutation = useMutation({
-    mutationFn: (hbdAmount: number) => dataSource.prepay({ creator, holder: user.username, hbdAmount }),
+  // buy.go Buy — replaces the deleted prepay()/core.Prepay (the PAR mint).
+  // `tokens` is a whole INTEGER token count (curve.go) — never a 3-decimal
+  // HBD-scaled amount; the caller must derive it from a BuyQuote
+  // (dataSource.quoteBuy) before calling, e.g. via
+  // tokensAffordableForBudget() (contract-math.ts) for a "spend N HBD" UI.
+  const buyMutation = useMutation({
+    mutationFn: (tokens: number) => dataSource.buy({ creator, buyer: user.username, tokens }),
     onSuccess: invalidateAfterMoney
   });
 
@@ -106,8 +119,11 @@ export function useCreatorToken(creator: string) {
     }
   });
 
+  // refund.go Refund — the WIND-DOWN exit (open only once the market is
+  // winding down; while it trades, exit via sell() instead — not wired on
+  // this hook, see the scope note above). `tokens` is a whole INTEGER count.
   const refundMutation = useMutation({
-    mutationFn: (credits: number) => dataSource.refund({ creator, holder: user.username, credits }),
+    mutationFn: (tokens: number) => dataSource.refund({ creator, holder: user.username, tokens }),
     onSuccess: invalidateAfterMoney
   });
 
@@ -129,8 +145,8 @@ export function useCreatorToken(creator: string) {
 
     loggedIn,
 
-    prepay: useCallback((hbdAmount: number) => prepayMutation.mutateAsync(hbdAmount), [prepayMutation]),
-    isPrepaying: prepayMutation.isLoading,
+    buy: useCallback((tokens: number) => buyMutation.mutateAsync(tokens), [buyMutation]),
+    isBuying: buyMutation.isLoading,
 
     ask: useCallback(
       (input: { contentHash: string; deadlineBlocks: number; maxCreditsBaseUnits: number }) =>
@@ -139,7 +155,7 @@ export function useCreatorToken(creator: string) {
     ),
     isAsking: askMutation.isLoading,
 
-    refund: useCallback((credits: number) => refundMutation.mutateAsync(credits), [refundMutation]),
+    refund: useCallback((tokens: number) => refundMutation.mutateAsync(tokens), [refundMutation]),
     isRefunding: refundMutation.isLoading
   };
 }

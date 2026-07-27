@@ -2,21 +2,28 @@ import type {
   Ask,
   AskInput,
   AnswerInput,
+  BuyInput,
+  BuyQuote,
+  ClaimTradeFeesInput,
+  CloseIfDrainedInput,
   DeliveryRecord,
   HolderPosition,
   Market,
   MyAsksResult,
-  PrepayInput,
   Quote,
   ReclaimInput,
   RefundHolderInput,
   RefundInput,
   RegisterMarketInput,
   RenewSubscriptionInput,
+  RetireInput,
+  SellInput,
+  SellQuote,
   SetCapInput,
   SetFaceInput,
-  TransferCreditsInput,
-  WalletPositionsResult
+  TransferTokensInput,
+  WalletPositionsResult,
+  WithdrawTreasuryInput
 } from '../types';
 import type { CreatorTokensConfig, CreatorTokensDataSource } from './creator-tokens-data-source';
 import {
@@ -29,7 +36,6 @@ import {
   MIN_FACE_BASE_UNITS,
   OBS_WINDOW,
   RECLAIM_GRACE_BLOCKS,
-  REGISTRATION_FEE_BASE_UNITS,
   SUBSCRIPTION_FEE_BASE_UNITS,
   SUBSCRIPTION_PERIOD_BLOCKS,
   askRateFromObservations,
@@ -42,10 +48,14 @@ import {
   deriveFaceBandBaseUnits,
   deriveGraceExpiresAtBlock,
   derivePhase,
-  floorRatioForDisplay,
+  floorPricePerTokenBaseUnits,
   humanToBaseUnits,
-  refundPayoutBaseUnits,
+  quoteBuyBaseUnits,
+  quoteSellBaseUnits,
+  refundNetBaseUnits,
+  reserveCoverageRatio,
   settlementRateBaseUnits,
+  spotRateBaseUnits,
   type AskRateEstimate
 } from './contract-math';
 import {
@@ -53,15 +63,20 @@ import {
   answerPayload,
   askPayload,
   buildOp,
-  prepayPayload,
+  buyPayload,
+  claimTradeFeesPayload,
+  closeIfDrainedPayload,
   reclaimPayload,
   refundHolderPayload,
   refundPayload,
   registerPayload,
   renewPayload,
+  retirePayload,
+  sellPayload,
   setCapPayload,
   setFacePayload,
-  transferCreditsPayload
+  transferTokensPayload,
+  withdrawTreasuryPayload
 } from './vsc/op-builders';
 // Side-effect-only import: runs the payload-contract self-test in
 // development (see that file's own doc for why it lives here rather than in
@@ -73,6 +88,7 @@ import {
   buildAskFromParsed,
   getJsonProp,
   isWellFormedDid,
+  kAcqBlock,
   kBal,
   kCap,
   kEscrow,
@@ -80,15 +96,18 @@ import {
   kFaceAnchor,
   kFaceAnchorAt,
   kFaceSetAt,
+  kFeeBal,
   kObs,
   kObsIdx,
   kPaidUntil,
   kPaused,
   kRegisteredAt,
   kReserve,
+  kRetiredAt,
   kSeq,
   kState,
   kSupply,
+  decodeRetiredAt,
   parseEscrow,
   toDid,
   toU64,
@@ -108,6 +127,15 @@ import {
 // (./vsc/broadcaster.ts's hiveTransactionBroadcaster) on a provisioned
 // build, so this fallback only fires for a caller that constructs
 // VscCreatorTokensDataSource directly without one (e.g. a future test).
+//
+// ★ CURVE-PIVOT REWRITE (2026-07-24): the contract moved from a PAR
+// "access credit" model (core/prepay.go — DELETED) to a bonding curve
+// (core/curve.go/buy.go/sell.go/refund.go). See types.ts's own file-level
+// doc for THE 1000x UNIT TRAP this rewrite is built around: TOKENS (supply,
+// cap, balances) are whole INTEGERS now, never run through
+// baseUnitsToHuman()/humanToBaseUnits() — only HBD amounts get that
+// conversion. Every method below that touches a token quantity is commented
+// at the exact point the trap would bite.
 //
 // No shared vsc-gql.ts/op-builders.ts exists for this feature to import at
 // the top level (this task owns only the files listed in the brief) — a
@@ -129,6 +157,33 @@ const NO_BROADCASTER_MSG = 'VscCreatorTokensDataSource: no broadcaster wired —
 function toCount(value: unknown): number {
   const n = Number(value);
   return Number.isFinite(n) && Number.isInteger(n) && n >= 0 ? n : 0;
+}
+
+/** Shared "n is a positive whole token count" guard — every buy/sell/refund/transfer amount on the curve is an integer (curve.go indexes price by the token ordinal; there is no fractional token). */
+function assertPositiveTokenCount(n: number, label: string): void {
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) {
+    throw new Error(`VscCreatorTokensDataSource: ${label} must be a positive whole number (tokens are integers on the curve)`);
+  }
+}
+
+/** holdclock.go heldBlocksAt, replicated client-side: unset (0) OR >= block both read as 0 held — MAXIMALLY FRESH, i.e. MAXIMUM exit tax, never as ancient. See holdclock.go's own "zero-value convention" doc — getting this backwards would preview a 0% tax on a position the chain taxes at 20%. */
+function heldBlocksFromAcq(acqBlock: number, block: number): number {
+  return acqBlock === 0 || acqBlock >= block ? 0 : block - acqBlock;
+}
+
+interface BuildMarketState {
+  faceBaseUnits: number;
+  faceSetAtBlock: number;
+  faceAnchorBaseUnits: number;
+  faceAnchorAtBlock: number;
+  capTokens: number;
+  supplyTokens: number;
+  reserveBaseUnits: number;
+  paidUntilBlock: number;
+  closedStored: boolean;
+  globalInflowPaused: boolean;
+  registeredAtBlock: number;
+  retiredAtBlock: number | null;
 }
 
 export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
@@ -156,7 +211,8 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       kPaidUntil(creator),
       kState(creator),
       kRegisteredAt(creator),
-      kPaused()
+      kPaused(),
+      kRetiredAt(creator)
     ];
     let state: Record<string, string | null>;
     let head: number | null;
@@ -167,7 +223,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     }
 
     const registeredAtBlock = toU64(state[kRegisteredAt(creator)]);
-    if (registeredAtBlock === 0) return null; // never registered — prepay.go's own kRegisteredAt==0 convention
+    if (registeredAtBlock === 0) return null; // never registered — market.go's own kRegisteredAt==0 convention
 
     // Phase is meaningless without a head block to compare paidUntil against
     // — never guess. The read technically "worked" but is unusable, so this
@@ -181,43 +237,47 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
         faceSetAtBlock: toU64(state[kFaceSetAt(creator)]),
         faceAnchorBaseUnits: toU64(state[kFaceAnchor(creator)]),
         faceAnchorAtBlock: toU64(state[kFaceAnchorAt(creator)]),
-        capBaseUnits: toU64(state[kCap(creator)]),
-        supplyBaseUnits: toU64(state[kSupply(creator)]),
+        // ★ 1000x TRAP: capTokens/supplyTokens are raw integer TOKEN counts
+        // (core/curve.go — a token is a whole unit). toU64 reads the exact
+        // on-chain integer; NEVER wrap these in baseUnitsToHuman().
+        capTokens: toU64(state[kCap(creator)]),
+        supplyTokens: toU64(state[kSupply(creator)]),
         reserveBaseUnits: toU64(state[kReserve(creator)]),
         paidUntilBlock: toU64(state[kPaidUntil(creator)]),
         closedStored: state[kState(creator)] === STATE_CLOSED,
         globalInflowPaused: state[kPaused()] === '1',
-        registeredAtBlock
+        registeredAtBlock,
+        retiredAtBlock: decodeRetiredAt(state[kRetiredAt(creator)])
       },
       head
     );
   }
 
   // Shared Market construction, used both by readMarket (from live chain
-  // state) and by registerMarket's optimistic PENDING result (from the caller's
-  // inputs) so the two can never derive Market fields differently. Pure — no
-  // I/O; every argument is already a resolved base-unit value + a real head.
-  private buildMarket(
-    creator: string,
-    s: {
-      faceBaseUnits: number;
-      faceSetAtBlock: number;
-      faceAnchorBaseUnits: number;
-      faceAnchorAtBlock: number;
-      capBaseUnits: number;
-      supplyBaseUnits: number;
-      reserveBaseUnits: number;
-      paidUntilBlock: number;
-      closedStored: boolean;
-      globalInflowPaused: boolean;
-      registeredAtBlock: number;
-    },
-    head: number
-  ): Market {
-    const phase = derivePhase(s.closedStored, s.paidUntilBlock, head);
+  // state) and by registerMarket's/retire's optimistic PENDING results (from
+  // the caller's inputs) so the two can never derive Market fields
+  // differently. Pure — no I/O; every argument is already a resolved
+  // base-unit/token value + a real head.
+  private buildMarket(creator: string, s: BuildMarketState, head: number): Market {
+    // market.go Phase(): MAX(naturalPhase, retiredPhase). contract-math.ts's
+    // derivePhase takes retiredAtBlock as its 4th arg and reproduces the fold
+    // exactly — a retired market can never display as ACTIVE even during its
+    // still-technically-OVERDUE 5-day notice window.
+    const phase = derivePhase(s.closedStored, s.paidUntilBlock, head, s.retiredAtBlock);
     const graceExpiresAtBlock = deriveGraceExpiresAtBlock(s.paidUntilBlock);
     const faceBandRaw = deriveFaceBandBaseUnits(s.faceBaseUnits, s.faceSetAtBlock, s.faceAnchorBaseUnits, s.faceAnchorAtBlock, head);
-    const canFlow = canInflowOpen(phase, s.globalInflowPaused);
+
+    // market.go RequireInflowOpen (the shared gate buy.go's Buy and ask.go's
+    // Ask both call): phase in {ACTIVE, OVERDUE} AND !globalInflowPaused AND
+    // NOT marketRetired. contract-math.ts's canInflowOpen() only knows
+    // {phase, globalInflowPaused} — it predates RULING K3, under which a
+    // RETIRED market refuses ALL new inflows for its ENTIRE wind-down,
+    // INCLUDING the OVERDUE notice window (where phase alone would still
+    // read OVERDUE and canInflowOpen() would say "open"). The
+    // `retiredAtBlock === null` AND below restores the full on-chain gate
+    // without editing that already-verified building block — see
+    // Market.canBuy's own doc in types.ts.
+    const canFlow = canInflowOpen(phase, s.globalInflowPaused) && s.retiredAtBlock === null;
 
     return {
       creator,
@@ -229,8 +289,9 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
         bandActive: faceBandRaw.bandActive,
         windowEndsAtBlock: faceBandRaw.windowEndsAtBlock
       },
-      capCredits: baseUnitsToHuman(s.capBaseUnits),
-      supplyCredits: baseUnitsToHuman(s.supplyBaseUnits),
+      // ★ 1000x TRAP: raw integer token counts, NOT baseUnitsToHuman'd.
+      capTokens: s.capTokens,
+      supplyTokens: s.supplyTokens,
       reserveHbd: baseUnitsToHuman(s.reserveBaseUnits),
       paidUntilBlock: s.paidUntilBlock,
       paidUntilAt: blockToEpochMs(s.paidUntilBlock, head),
@@ -239,22 +300,46 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       graceExpiresAtBlock,
       graceExpiresAt: blockToEpochMs(graceExpiresAtBlock, head),
       globalInflowPaused: s.globalInflowPaused,
-      canPrepay: canFlow,
+      canBuy: canFlow,
       canAsk: canFlow,
-      refundPricePerCredit: floorRatioForDisplay(s.reserveBaseUnits, s.supplyBaseUnits)
+      retiredAtBlock: s.retiredAtBlock,
+      floorPriceHbd: baseUnitsToHuman(floorPricePerTokenBaseUnits(s.reserveBaseUnits, s.supplyTokens)),
+      spotPriceHbd: baseUnitsToHuman(spotRateBaseUnits(s.supplyTokens)),
+      reserveCoverage: reserveCoverageRatio(s.reserveBaseUnits, s.supplyTokens)
     };
   }
 
   async readHolderPosition(creator: string, holder: string): Promise<HolderPosition | null> {
-    const keys = [kRegisteredAt(creator), kSupply(creator), kReserve(creator), kBal(creator, holder)];
-    const state = await this.gql.getStateByKeys(this.config.contractId, keys); // rejects on failure — see interface doc
+    const keys = [kRegisteredAt(creator), kSupply(creator), kReserve(creator), kBal(creator, holder), kAcqBlock(creator, holder)];
+    // rejects on failure — see interface doc. heldBlocks (below) needs a real
+    // chain head (the exit tax RATE is time-dependent, holdclock.go), so this
+    // read is genuinely incomplete without one — reject rather than guess.
+    const [state, head] = await Promise.all([this.gql.getStateByKeys(this.config.contractId, keys), this.gql.getHeadBlock()]);
     if (toU64(state[kRegisteredAt(creator)]) === 0) return null;
+    if (head === null) {
+      throw new Error('VscCreatorTokensDataSource: cannot compute the exit tax (chain head unavailable)');
+    }
 
-    const creditsBaseUnits = toU64(state[kBal(creator, holder)]);
-    const supplyBaseUnits = toU64(state[kSupply(creator)]);
+    // ★ 1000x TRAP: tokensHeld/supplyTokens are raw integer token counts.
+    const tokensHeld = toU64(state[kBal(creator, holder)]);
+    const supplyTokens = toU64(state[kSupply(creator)]);
     const reserveBaseUnits = toU64(state[kReserve(creator)]);
-    const floorBaseUnits = supplyBaseUnits > 0 ? refundPayoutBaseUnits(reserveBaseUnits, creditsBaseUnits, supplyBaseUnits) : 0;
-    return { creator, holder, creditsHeld: baseUnitsToHuman(creditsBaseUnits), floorValueHbd: baseUnitsToHuman(floorBaseUnits) };
+    const acqBlock = toU64(state[kAcqBlock(creator, holder)]);
+    const heldBlocks = heldBlocksFromAcq(acqBlock, head);
+
+    // refund.go refundPayout + the K2 exit tax carve (contract-math.ts
+    // refundNetBaseUnits): the TAXED NET, not the untaxed gross — see
+    // HolderPosition.floorValueHbd's own doc in types.ts for why showing the
+    // gross would overstate a fresh holder's payout by up to 20%.
+    const { netBaseUnits, taxBps } = refundNetBaseUnits(reserveBaseUnits, tokensHeld, supplyTokens, heldBlocks);
+    return {
+      creator,
+      holder,
+      tokensHeld,
+      floorValueHbd: baseUnitsToHuman(netBaseUnits),
+      heldBlocks,
+      exitTaxBps: taxBps
+    };
   }
 
   async readWallet(holder: string): Promise<WalletPositionsResult> {
@@ -276,7 +361,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       if (!Array.isArray(positions)) return { positions: [], unavailable: true };
       const creators = positions.map((p) => getJsonProp(p, 'creator')).filter((c): c is string => typeof c === 'string');
       const results = await Promise.all(creators.map((creator) => this.readHolderPosition(creator, holder).catch(() => null)));
-      return { positions: results.filter((p): p is HolderPosition => p !== null && p.creditsHeld > 0), unavailable: false };
+      return { positions: results.filter((p): p is HolderPosition => p !== null && p.tokensHeld > 0), unavailable: false };
     } catch {
       return { positions: [], unavailable: true };
     }
@@ -339,14 +424,6 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
   async readDeliveryRecord(creator: string): Promise<DeliveryRecord> {
     // Never contract state (SPEC §1.7.1) — always indexer, always resolves
     // (never rejects), degrading to source:'unavailable'. WIRING-VERIFY (deploy).
-    //
-    // WIRE CONTRACT (pin-to-DTO fix): this reads the indexer's ACTUAL
-    // DeliveryRecordView shape (/mnt/o/CREATOR-TOKENS/indexer/api.go) — flat
-    // answered/missed/pending COUNTS + responseBlocks + the M1 distinctAskers/
-    // selfDealtExcluded fields. The prior version read a `windows` array that
-    // the DTO has never had, so every call fell through to the empty
-    // 'unavailable' record and the delivery record — the product's central
-    // trust signal — could never render even when the indexer was healthy.
     const empty: DeliveryRecord = {
       creator,
       answeredCount: 0,
@@ -367,9 +444,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       // unavailable, never a fabricated all-zero "answered nothing".
       if (typeof getJsonProp(json, 'creator') !== 'string') return empty;
       const rawBlocks = getJsonProp(json, 'responseBlocks');
-      const responseBlocks = Array.isArray(rawBlocks)
-        ? rawBlocks.map((b) => Number(b)).filter((n): n is number => Number.isFinite(n))
-        : [];
+      const responseBlocks = Array.isArray(rawBlocks) ? rawBlocks.map((b) => Number(b)).filter((n): n is number => Number.isFinite(n)) : [];
       return {
         creator,
         answeredCount: toCount(getJsonProp(json, 'answeredCount')),
@@ -387,7 +462,10 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
 
   async readQuote(creator: string): Promise<Quote> {
     const obsKeys = Array.from({ length: OBS_WINDOW }, (_, i) => kObs(creator, i));
-    const [state, head] = await Promise.all([this.gql.getStateByKeys(this.config.contractId, [kFace(creator), kObsIdx(creator), ...obsKeys]), this.gql.getHeadBlock()]);
+    const [state, head] = await Promise.all([
+      this.gql.getStateByKeys(this.config.contractId, [kFace(creator), kObsIdx(creator), kSupply(creator), ...obsKeys]),
+      this.gql.getHeadBlock()
+    ]);
 
     const faceBaseUnits = toU64(state[kFace(creator)]);
     const commissionHbd = baseUnitsToHuman(commissionOwedForBaseUnits(faceBaseUnits));
@@ -407,46 +485,143 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
 
     if (head === null) return unpriced('unavailable', 0);
 
-    // ask.go: core.Ask (and this preview's real counterpart, core.Ask's
+    // ask.go: core.Ask (and this preview's real counterpart, core.SettleSpend's
     // wrapper `quote`) both check `face > 0` BEFORE ever computing a
-    // settlement rate ("creator has no face price set") — no PAR fallback
-    // rescues a market with no posted price at all. Checked here, ahead of
-    // the TWAP/PAR branch below, for the same reason.
+    // settlement rate ("creator has no face price set").
     if (faceBaseUnits <= 0) return unpriced('unavailable', head);
 
+    const supplyTokens = toU64(state[kSupply(creator)]);
     const obsIdxCount = toU64(state[kObsIdx(creator)]);
     const points = decodeObservationRing(obsKeys.map((k) => state[k]), obsIdxCount);
-    // C-C fix: a corrupt/absent observation ring used to make this preview
-    // refuse to price at all (oracleStatus/rate/creditsRequired all null)
-    // and ask() would hard-throw on it. On the real contract, ask.go's
-    // SettlementRate falls back to PAR on ANY non-nil AskRate error —
-    // including the ErrState a corrupt ring produces (twap.go) — so a
-    // corrupt/empty ring must fall into the SAME PAR path as
-    // 'insufficient_observations' below, not an early, harder refusal that
-    // disagrees with what ask() would actually do.
     const estimate: AskRateEstimate = points === null ? { rateBaseUnits: null, status: 'unavailable' } : askRateFromObservations(points, head);
 
-    // C-C: port core.Ask's own SettlementRate (ask.go) — the TWAP when
-    // AskRate's guards pass, or PAR when they don't. PAR is the DEFAULT
-    // state for a live deployment today (no DEX pool feeds RecordObs yet),
-    // so this preview must price it, and ask() below must actually be able
-    // to broadcast at it — previously a non-'ok' oracleStatus mapped to
-    // rate:null/creditsRequired:null and ask() hard-threw before ever
-    // reaching the chain (vsc-data-source.ts's old ask(), see the report).
-    const settlement = settlementRateBaseUnits(estimate);
+    // ★ RULING C REWRITE (2026-07-24) — THE PAR FALLBACK IS DELETED.
+    // contract-math.ts's settlementRateBaseUnits now REFUSES (rateBaseUnits:
+    // null) instead of inventing PAR whenever the TWAP guards don't pass; see
+    // its own doc and Quote.rate's doc (types.ts). When it refuses, this
+    // preview reports the refusal and creditsForAskBaseUnits is NEVER called
+    // with a null rate — the ask action must read as unavailable, exactly
+    // mirroring what a real ask() call would do right now (RequireInflowOpen
+    // is a separate gate; this is the settlement-refusal gate).
+    const settlement = settlementRateBaseUnits(estimate, supplyTokens);
+    if (settlement.rateBaseUnits === null) {
+      return unpriced(settlement.status, head);
+    }
     const creditsRequiredBaseUnits = creditsForAskBaseUnits(faceBaseUnits, settlement.rateBaseUnits);
     return {
       ...base,
       rate: baseUnitsToHuman(settlement.rateBaseUnits),
-      creditsRequired: baseUnitsToHuman(creditsRequiredBaseUnits),
+      // ask.go's escrowed "credits" spend the SAME whole-token balance
+      // Buy/Sell operate on (kBal) — NOT a 3-decimal PAR quantity any more,
+      // so creditsRequired is the same raw integer as creditsRequiredBaseUnits,
+      // never baseUnitsToHuman'd (the pre-pivot version of this file divided
+      // by 1000 here — see types.ts's Quote.creditsRequired doc).
+      creditsRequired: creditsRequiredBaseUnits,
       creditsRequiredBaseUnits,
-      // oracleStatus keeps reporting AskRate's OWN status (not collapsed to
-      // 'ok' just because a price is now always available) — this is what
-      // lets the UI explain WHY the price shown is PAR rather than a live
-      // TWAP (types.ts's own doc); it never gates whether pricing/ask()
-      // succeeds anymore.
-      oracleStatus: estimate.status,
+      oracleStatus: settlement.status,
       asOfBlock: head
+    };
+  }
+
+  async readFeeBalance(account: string): Promise<number> {
+    const state = await this.gql.getStateByKeys(this.config.contractId, [kFeeBal(account)]);
+    return baseUnitsToHuman(toU64(state[kFeeBal(account)]));
+  }
+
+  async quoteBuy(creator: string, tokens: number): Promise<BuyQuote> {
+    assertPositiveTokenCount(tokens, 'tokens');
+    const [state, head] = await Promise.all([
+      this.gql.getStateByKeys(this.config.contractId, [kRegisteredAt(creator), kSupply(creator), kCap(creator), kPaidUntil(creator), kState(creator), kPaused(), kRetiredAt(creator)]),
+      this.gql.getHeadBlock()
+    ]);
+    if (toU64(state[kRegisteredAt(creator)]) === 0) {
+      throw new Error(`VscCreatorTokensDataSource: no such market ${creator}`);
+    }
+    if (head === null) {
+      throw new Error('VscCreatorTokensDataSource: cannot price this buy (chain head unavailable)');
+    }
+    // buy.go buyCompute: RequireInflowOpen first (market.go — phase +
+    // pause + not-retired), THEN the cap check. Mirrored client-side so a
+    // doomed call fails fast rather than spending RC on a guaranteed revert.
+    const closedStored = state[kState(creator)] === STATE_CLOSED;
+    const paidUntilBlock = toU64(state[kPaidUntil(creator)]);
+    const retiredAtBlock = decodeRetiredAt(state[kRetiredAt(creator)]);
+    const phase = derivePhase(closedStored, paidUntilBlock, head, retiredAtBlock);
+    const globalInflowPaused = state[kPaused()] === '1';
+    if (!(canInflowOpen(phase, globalInflowPaused) && retiredAtBlock === null)) {
+      throw new Error('VscCreatorTokensDataSource: market inflow is not open (frozen, closed, retiring, or globally paused)');
+    }
+    const supplyTokens = toU64(state[kSupply(creator)]);
+    const capTokens = toU64(state[kCap(creator)]);
+    if (supplyTokens + tokens > capTokens) {
+      throw new Error('VscCreatorTokensDataSource: buy would exceed the market cap');
+    }
+    const q = quoteBuyBaseUnits(supplyTokens, tokens);
+    return {
+      tokens: q.tokens,
+      costHbd: baseUnitsToHuman(q.costBaseUnits),
+      feeHbd: baseUnitsToHuman(q.feeBaseUnits),
+      totalDueHbd: baseUnitsToHuman(q.totalDueBaseUnits),
+      rateAfterHbd: baseUnitsToHuman(q.rateAfterBaseUnits)
+    };
+  }
+
+  async quoteSell(creator: string, seller: string, tokens: number): Promise<SellQuote> {
+    assertPositiveTokenCount(tokens, 'tokens');
+    const [state, head] = await Promise.all([
+      this.gql.getStateByKeys(this.config.contractId, [
+        kRegisteredAt(creator),
+        kSupply(creator),
+        kBal(creator, seller),
+        kAcqBlock(creator, seller),
+        kPaidUntil(creator),
+        kState(creator),
+        kRetiredAt(creator)
+      ]),
+      this.gql.getHeadBlock()
+    ]);
+    if (toU64(state[kRegisteredAt(creator)]) === 0) {
+      throw new Error(`VscCreatorTokensDataSource: no such market ${creator}`);
+    }
+    if (head === null) {
+      throw new Error('VscCreatorTokensDataSource: cannot price this sell (chain head unavailable)');
+    }
+    // sell.go sellCompute: balance checked first ("clearer error than the
+    // rail for the common mistake").
+    const bal = toU64(state[kBal(creator, seller)]);
+    if (bal < tokens) {
+      throw new Error('VscCreatorTokensDataSource: insufficient tokens');
+    }
+    // sell.go's rail switch (market.go inWindDown): the curve rail is CLOSED
+    // exactly when the market is retired OR naturally FROZEN/CLOSED. Retired
+    // closes the rail from the retire block on — INCLUDING the still-OVERDUE
+    // notice window (RULING K3) — so this checks retiredAtBlock directly,
+    // never only `phase`.
+    const closedStored = state[kState(creator)] === STATE_CLOSED;
+    const paidUntilBlock = toU64(state[kPaidUntil(creator)]);
+    const retiredAtBlock = decodeRetiredAt(state[kRetiredAt(creator)]);
+    const phase = derivePhase(closedStored, paidUntilBlock, head, retiredAtBlock);
+    if (retiredAtBlock !== null || phase === 'FROZEN' || phase === 'CLOSED') {
+      throw new Error('VscCreatorTokensDataSource: curve sell is closed while the market winds down (retired/frozen/closed); exit via refund() instead');
+    }
+    const supplyTokens = toU64(state[kSupply(creator)]);
+    const acqBlock = toU64(state[kAcqBlock(creator, seller)]);
+    const heldBlocks = heldBlocksFromAcq(acqBlock, head);
+    const q = quoteSellBaseUnits(supplyTokens, tokens, heldBlocks);
+    if (q === null) {
+      // curve.go SellProceeds errors when k > S — unreachable given the
+      // balance check above (bal <= supply, I3), kept as the same
+      // defense-in-depth the Go source documents for its own identical check.
+      throw new Error('VscCreatorTokensDataSource: sell exceeds supply');
+    }
+    return {
+      tokens: q.tokens,
+      grossHbd: baseUnitsToHuman(q.grossBaseUnits),
+      taxHbd: baseUnitsToHuman(q.taxBaseUnits),
+      feeHbd: baseUnitsToHuman(q.feeBaseUnits),
+      netHbd: baseUnitsToHuman(q.netBaseUnits),
+      taxBps: q.taxBps,
+      heldBlocks: q.heldBlocks
     };
   }
 
@@ -455,23 +630,44 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
   async registerMarket(input: RegisterMarketInput): Promise<Market> {
     this.assertBroadcaster();
     const faceBaseUnits = humanToBaseUnits(input.faceHbd);
-    const capBaseUnits = humanToBaseUnits(input.capCredits);
-    // market.go:132-134 (core.Register). Zero-extra-read: fixed protocol
-    // constants, no chain read needed (this is a brand-new market — no band
-    // exists yet, unlike setFace's guard below).
+    // market.go registerCheck (core.Register). Zero-extra-read: fixed
+    // protocol constants, no chain read needed (this is a brand-new market —
+    // no band exists yet, unlike setFace's guard below).
     if (faceBaseUnits < MIN_FACE_BASE_UNITS || faceBaseUnits > MAX_FACE_BASE_UNITS) {
       throw new Error('VscCreatorTokensDataSource: face out of range [MinFace, MaxFace]');
     }
-    // market.go:135-137 (core.Register).
-    if (capBaseUnits < MIN_CAP_CREDITS_BASE_UNITS || capBaseUnits > MAX_CAP_CREDITS_BASE_UNITS) {
+    // ★ 1000x TRAP: capTokens is ALREADY the raw integer token count
+    // (RegisterMarketInput.capTokens) — no humanToBaseUnits() here, unlike
+    // faceBaseUnits above. MinCap/MaxCap (params.go) bound the raw integer.
+    const capTokens = input.capTokens;
+    if (!Number.isInteger(capTokens) || capTokens < MIN_CAP_CREDITS_BASE_UNITS || capTokens > MAX_CAP_CREDITS_BASE_UNITS) {
       throw new Error('VscCreatorTokensDataSource: cap out of range [MinCap, MaxCap]');
     }
+    const firstBuyTokens = input.firstBuyTokens ?? 0;
+    if (!Number.isFinite(firstBuyTokens) || !Number.isInteger(firstBuyTokens) || firstBuyTokens < 0) {
+      throw new Error('VscCreatorTokensDataSource: firstBuyTokens must be a non-negative whole number');
+    }
+    if (firstBuyTokens > capTokens) {
+      throw new Error('VscCreatorTokensDataSource: firstBuyTokens would exceed the market cap');
+    }
+    // launch.go RegisterWithFirstBuy: the optional first buy is an ORDINARY
+    // Buy executed atomically with registration, at supply === 0 (a brand-new
+    // market) — same curve math as any other Buy (buy.go), just previewed
+    // here via quoteBuyBaseUnits(0, firstBuyTokens) since there is no live
+    // market yet to call quoteBuy() against.
+    const firstBuyQuote = firstBuyTokens > 0 ? quoteBuyBaseUnits(0, firstBuyTokens) : null;
+    const totalDueBaseUnits = firstBuyQuote?.totalDueBaseUnits ?? 0;
+
+    // REGISTRATION IS FREE (LOCKED-MECHANISM "Revenue"): no fee is drawn for
+    // the registration itself — hbdLegBaseUnits is set ONLY when a first buy
+    // is present, and it is exactly that buy's TotalDue (cost+fee), the
+    // buyer's own transfer.allow slippage bound (buy.go's own doc).
     const op = buildOp({
       netId: this.config.netId,
       contractId: this.config.contractId,
       action: 'register',
-      payload: registerPayload(faceBaseUnits, capBaseUnits, REGISTRATION_FEE_BASE_UNITS),
-      hbdLegBaseUnits: REGISTRATION_FEE_BASE_UNITS,
+      payload: registerPayload(faceBaseUnits, capTokens, firstBuyTokens),
+      hbdLegBaseUnits: totalDueBaseUnits > 0 ? totalDueBaseUnits : undefined,
       activeAuth: input.creator,
       rcLimit: this.config.rcLimit
     });
@@ -493,15 +689,19 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
           faceSetAtBlock: head,
           faceAnchorBaseUnits: faceBaseUnits,
           faceAnchorAtBlock: head,
-          capBaseUnits,
-          supplyBaseUnits: 0,
-          reserveBaseUnits: 0,
+          capTokens,
+          // supply/reserve reflect the optional atomic first buy: the curve
+          // leg ONLY enters the reserve (buy.go's own "the fee NEVER enters
+          // kReserve" rule) — firstBuyQuote.costBaseUnits, never totalDue.
+          supplyTokens: firstBuyTokens,
+          reserveBaseUnits: firstBuyQuote?.costBaseUnits ?? 0,
           // core.Register grants the first subscription period (mock parity:
           // paidUntil = head + SubscriptionPeriod).
           paidUntilBlock: head + SUBSCRIPTION_PERIOD_BLOCKS,
           closedStored: false,
           globalInflowPaused: false,
-          registeredAtBlock: head
+          registeredAtBlock: head,
+          retiredAtBlock: null
         },
         head
       ),
@@ -511,39 +711,28 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
 
   async renewSubscription(input: RenewSubscriptionInput): Promise<Market> {
     this.assertBroadcaster();
-    // market.go:207-209 (core.Renew). Zero-extra-read: bounds periods before
-    // any arithmetic, exactly mirroring core's own ordering (this check runs
-    // before core computes newPaidUntil).
+    // market.go Renew: periods bounded before any arithmetic, exactly
+    // mirroring core's own ordering (this check runs before core computes
+    // newPaidUntil).
     if (input.periods < 1 || input.periods > MAX_PREPAID_PERIODS) {
       throw new Error('VscCreatorTokensDataSource: periods out of range [1, MaxPrepaidPeriods]');
     }
-    // market.go:194-199 (core.Renew) -> RequireInflowOpen (finding M-d) — the
-    // SAME phase+pause gate prepay()/ask() already read the market for.
-    // Renew is permissionless (any fan may pay), but the MARKET must still
-    // be ACTIVE/OVERDUE and not globally paused — a lapsed-past-grace or
-    // CLOSED market cannot be "renewed" back to life (SPEC §1.7.5 routes
-    // that case through Register instead). Skipped — never blocked — when
-    // the market can't be read or was never registered, same "band check
-    // only, not an existence check" reasoning as every other guard in this
-    // file that reads a fresh Market. market.canPrepay/canAsk are the exact
-    // same RequireInflowOpen boolean (readMarket computes one `canFlow` and
-    // assigns it to both), so reusing canPrepay here rather than importing
-    // canInflowOpen a second time keeps this in lockstep with those two
-    // guards by construction.
-    //
-    // Also fetches head independently (not derived from readMarket, which
-    // does not expose the head it used internally) for the newPaidUntil
-    // bound check below — market.go:218-235 (core.Renew): newPaidUntil =
-    // max(currentPaidUntil, head) + periods*SubscriptionPeriod, rejected
-    // outright (never clamped) if it lands further than MaxPrepaidPeriods
-    // ahead of `head`. The two reads race by at most the width of this
-    // Promise.all, which cannot matter here: this is a client-side
-    // pre-check only, the chain re-validates independently at the real
-    // execution block regardless of what this call observed.
+    // market.go Renew -> RequireInflowOpen — the SAME phase+pause+not-retired
+    // gate Buy/Ask already read the market for. Renew is permissionless (any
+    // fan may pay), but the MARKET must still be able to accept inflows — a
+    // lapsed-past-grace, CLOSED, or RETIRING market cannot be "renewed" back
+    // to life (market.go Renew's own marketRetired guard; SPEC §1.7.5 routes
+    // a genuine lapse through Register instead). Skipped — never blocked —
+    // when the market can't be read or was never registered, same "band
+    // check only, not an existence check" reasoning as every other guard in
+    // this file that reads a fresh Market. market.canBuy/canAsk are the exact
+    // same RequireInflowOpen boolean (buildMarket computes one `canFlow` and
+    // assigns it to both), so reusing canBuy here rather than re-deriving it
+    // keeps this in lockstep with those two guards by construction.
     const [market, head] = await Promise.all([this.readMarket(input.creator), this.gql.getHeadBlock()]);
     if (market && market.phase !== 'UNKNOWN') {
-      if (!market.canPrepay) {
-        throw new Error('VscCreatorTokensDataSource: market inflow is not open (frozen, closed, or globally paused)');
+      if (!market.canBuy) {
+        throw new Error('VscCreatorTokensDataSource: market inflow is not open (frozen, closed, retiring, or globally paused)');
       }
       if (head !== null) {
         const base = Math.max(market.paidUntilBlock, head);
@@ -574,9 +763,9 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       return { ...(market ?? unknownMarket(input.creator)), pending: true };
     }
     const newPaidUntilBlock = Math.max(market.paidUntilBlock, head) + input.periods * SUBSCRIPTION_PERIOD_BLOCKS;
-    const renewedPhase = derivePhase(false, newPaidUntilBlock, head);
+    const renewedPhase = derivePhase(false, newPaidUntilBlock, head, market.retiredAtBlock);
     const graceExpiresAtBlock = deriveGraceExpiresAtBlock(newPaidUntilBlock);
-    const canFlow = canInflowOpen(renewedPhase, market.globalInflowPaused);
+    const canFlow = canInflowOpen(renewedPhase, market.globalInflowPaused) && market.retiredAtBlock === null;
     return {
       ...market,
       paidUntilBlock: newPaidUntilBlock,
@@ -584,7 +773,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       graceExpiresAtBlock,
       graceExpiresAt: blockToEpochMs(graceExpiresAtBlock, head),
       phase: renewedPhase,
-      canPrepay: canFlow,
+      canBuy: canFlow,
       canAsk: canFlow,
       pending: true
     };
@@ -593,16 +782,14 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
   async setFace(input: SetFaceInput): Promise<Market> {
     this.assertBroadcaster();
     const newFaceBaseUnits = humanToBaseUnits(input.newFaceHbd);
-    // market.go:282-284 (core.SetFace). Zero-extra-read: fixed protocol
-    // range, independent of the anti-rug band below — both are separate,
-    // unconditional AND checks on-chain.
+    // market.go SetFace. Zero-extra-read: fixed protocol range, independent
+    // of the anti-rug band below — both are separate, unconditional AND
+    // checks on-chain.
     if (newFaceBaseUnits < MIN_FACE_BASE_UNITS || newFaceBaseUnits > MAX_FACE_BASE_UNITS) {
       throw new Error('VscCreatorTokensDataSource: face out of range [MinFace, MaxFace]');
     }
-    // market.go:303-331 (core.SetFace) — the 2x/7-day anti-rug band, anchored
-    // to a rolling WINDOW (see contract-math.ts's deriveFaceBandBaseUnits doc
-    // for the same-day fix this mirrors; the STALE pre-fix port compared
-    // against the last change instead). Requires a real market read, unlike
+    // market.go SetFace — the 2x/7-day anti-rug band, anchored to a rolling
+    // WINDOW (kFaceAnchor/kFaceAnchorAt). Requires a real market read, unlike
     // the bound check above. Compared in HUMAN units directly against
     // Market.faceBand (already human-converted by readMarket) to avoid a
     // needless base<->human round-trip. Skipped — never blocked — when the
@@ -619,10 +806,6 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       contractId: this.config.contractId,
       action: 'setFace',
       payload: setFacePayload(newFaceBaseUnits),
-      // C1 fix: the contract now requires ACTIVE authority on every write
-      // entrypoint (a posting key is the low-trust key this app is
-      // routinely delegated; a posting-signed setFace would let a merely-
-      // delegated key reprice a creator's market). Was postingAuth.
       activeAuth: input.creator,
       rcLimit: this.config.rcLimit
     });
@@ -639,12 +822,14 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
 
   async setCap(input: SetCapInput): Promise<Market> {
     this.assertBroadcaster();
-    const newCapBaseUnits = humanToBaseUnits(input.newCapCredits);
-    // market.go:350-352 (core.SetCap). Zero-extra-read: fixed protocol range
-    // only — the separate cap-vs-current-supply guard (market.go:354-357)
-    // needs an extra read (kSupply) and is explicitly out of scope for this
-    // pass (see the report: "cap-vs-supply" is on the excluded list).
-    if (newCapBaseUnits < MIN_CAP_CREDITS_BASE_UNITS || newCapBaseUnits > MAX_CAP_CREDITS_BASE_UNITS) {
+    // ★ 1000x TRAP: newCapTokens is ALREADY the raw integer token count — no
+    // humanToBaseUnits() (see registerMarket's identical note).
+    const newCapTokens = input.newCapTokens;
+    // market.go SetCap. Zero-extra-read: fixed protocol range only — the
+    // separate cap-vs-current-supply guard (market.go SetCap) needs an extra
+    // read (kSupply) and is explicitly out of scope for this pass (mirrors
+    // the pre-pivot version of this method).
+    if (!Number.isInteger(newCapTokens) || newCapTokens < MIN_CAP_CREDITS_BASE_UNITS || newCapTokens > MAX_CAP_CREDITS_BASE_UNITS) {
       throw new Error('VscCreatorTokensDataSource: cap out of range [MinCap, MaxCap]');
     }
     // Read the CURRENT market BEFORE broadcasting so the optimistic PENDING
@@ -655,9 +840,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       netId: this.config.netId,
       contractId: this.config.contractId,
       action: 'setCap',
-      payload: setCapPayload(newCapBaseUnits),
-      // C1 fix: active authority required on every write — see setFace's
-      // identical comment above. Was postingAuth.
+      payload: setCapPayload(newCapTokens),
       activeAuth: input.creator,
       rcLimit: this.config.rcLimit
     });
@@ -665,64 +848,137 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     if (!market || market.phase === 'UNKNOWN') {
       return { ...(market ?? unknownMarket(input.creator)), pending: true };
     }
-    return { ...market, capCredits: input.newCapCredits, pending: true };
+    return { ...market, capTokens: newCapTokens, pending: true };
   }
 
-  async prepay(input: PrepayInput): Promise<HolderPosition> {
+  async buy(input: BuyInput): Promise<HolderPosition> {
     this.assertBroadcaster();
-    const hbdBaseUnits = humanToBaseUnits(input.hbdAmount);
-    // prepay.go:54-56 (core.Prepay). Zero-extra-read.
-    if (hbdBaseUnits <= 0) {
-      throw new Error('VscCreatorTokensDataSource: hbdAmount must be positive');
+    assertPositiveTokenCount(input.tokens, 'tokens');
+    // buy.go buyCompute — the exact area-step cost, fee and TotalDue.
+    // quoteBuy() already runs every guard Buy itself would run (existence,
+    // RequireInflowOpen incl. the RULING K3 retired check, and the cap
+    // check), so a rejection here means a real Buy would ALSO reject.
+    const quote = await this.quoteBuy(input.creator, input.tokens);
+    if (input.maxTotalHbd !== undefined && quote.totalDueHbd > input.maxTotalHbd) {
+      throw new Error('VscCreatorTokensDataSource: quoted total due exceeds maxTotalHbd');
     }
-    // prepay.go:50-52 -> market.go:73-83 RequireInflowOpen (core.Prepay) —
-    // the canPrepay gate. Requires a real market read (Market.canPrepay is
-    // exactly RequireInflowOpen's own result, see readMarket() above).
-    // Skipped — never blocked — when the market can't be read or was never
-    // registered, same "band check only, not an existence check" reasoning
-    // as setFace's guard.
-    const market = await this.readMarket(input.creator);
-    if (market && market.phase !== 'UNKNOWN') {
-      if (!market.canPrepay) {
-        throw new Error('VscCreatorTokensDataSource: market inflow is not open (frozen, closed, or globally paused)');
-      }
-      // prepay.go:68-75 (core.Prepay) — ErrCap: supply+hbdPaid must not
-      // exceed the market's cap (finding M-b). Compared in base units (not
-      // the human-converted Market fields directly) to avoid compounding a
-      // second round of 3-decimal rounding on top of the two conversions
-      // readMarket() already performed — mirrors mock-data-source.ts's own
-      // base-unit prepay guard.
-      const supplyBaseUnits = humanToBaseUnits(market.supplyCredits);
-      const capBaseUnits = humanToBaseUnits(market.capCredits);
-      if (supplyBaseUnits + hbdBaseUnits > capBaseUnits) {
-        throw new Error('VscCreatorTokensDataSource: prepay would exceed the market cap');
-      }
-    }
-    // Read the CURRENT position BEFORE broadcasting (readHolderPosition rejects
-    // on read failure — catch it) so the optimistic result is built from real
-    // prior credits, never a racy post-write read.
-    const priorPosition = await this.readHolderPosition(input.creator, input.holder).catch(() => null);
+    // Read the CURRENT position BEFORE broadcasting (see registerMarket's own
+    // doc: a post-broadcast read returns PRE-L2-execution state).
+    const priorPosition = await this.readHolderPosition(input.creator, input.buyer).catch(() => null);
+    const totalDueBaseUnits = humanToBaseUnits(quote.totalDueHbd);
     const op = buildOp({
       netId: this.config.netId,
       contractId: this.config.contractId,
-      action: 'prepay',
-      payload: prepayPayload(toDid(input.creator), hbdBaseUnits),
-      hbdLegBaseUnits: hbdBaseUnits,
-      activeAuth: input.holder,
+      action: 'buy',
+      // ★ 1000x TRAP: input.tokens is the raw integer token count — op-builders'
+      // buyPayload() sends it as an intStr, never through humanToBaseUnits().
+      payload: buyPayload(toDid(input.creator), input.tokens),
+      // buy.go's own doc: "the buyer's own signed transfer.allow on that draw"
+      // IS the slippage protection — this IS that draw, computed from the
+      // SAME quote the caller's optional maxTotalHbd was just checked against.
+      hbdLegBaseUnits: totalDueBaseUnits,
+      activeAuth: input.buyer,
       rcLimit: this.config.rcLimit
     });
     await this.broadcast(op);
-    // Optimistic PENDING result (see registerMarket): credit the prepay locally
-    // (PAR: +hbdAmount credits, human units) rather than re-reading
-    // PRE-execution state — which would show the OLD balance and read as
-    // "you paid HBD, got 0 credits". floorValueHbd is best-effort (prior
-    // value); the poll reconciles the exact floor.
-    const priorCredits = priorPosition?.creditsHeld ?? 0;
+    // Optimistic PENDING result: project the minted tokens onto the prior
+    // balance. heldBlocks is projected as 0 (maximally fresh) rather than
+    // carried over from priorPosition — holdclock.go's creditInflow always
+    // re-averages the clock TOWARD `now` on a Buy (never away from it), so
+    // keeping the OLD heldBlocks would understate the tax the position now
+    // actually carries; 0 is the conservative (treasury-favouring) direction
+    // used everywhere else unset/uncertain hold-time is displayed.
+    // floorValueHbd is best-effort (kept at the pre-buy figure): an exact
+    // post-buy value needs a fresh (reserve, supply) read, since the curve's
+    // floor is not a simple linear function of tokens added.
+    const priorTokens = priorPosition?.tokensHeld ?? 0;
     return {
       creator: input.creator,
-      holder: input.holder,
-      creditsHeld: priorCredits + input.hbdAmount,
+      holder: input.buyer,
+      tokensHeld: priorTokens + input.tokens,
       floorValueHbd: priorPosition?.floorValueHbd ?? 0,
+      heldBlocks: 0,
+      exitTaxBps: priorPosition?.exitTaxBps ?? 0,
+      pending: true
+    };
+  }
+
+  async sell(input: SellInput): Promise<HolderPosition> {
+    this.assertBroadcaster();
+    assertPositiveTokenCount(input.tokens, 'tokens');
+    // sell.go sellCompute — the exact area-step gross, K2 tax, fee and net.
+    // quoteSell() already runs every guard Sell itself would run (balance,
+    // the rail switch).
+    const quote = await this.quoteSell(input.creator, input.seller, input.tokens);
+    if (input.minNetHbd !== undefined && quote.netHbd < input.minNetHbd) {
+      throw new Error('VscCreatorTokensDataSource: quoted net proceeds below minNetHbd');
+    }
+    // Read the CURRENT position BEFORE broadcasting (see registerMarket's own
+    // doc).
+    const priorPosition = await this.readHolderPosition(input.creator, input.seller);
+    if (!priorPosition) throw new Error(`VscCreatorTokensDataSource: no such market ${input.creator}`);
+    const minNetBaseUnits = input.minNetHbd !== undefined ? humanToBaseUnits(input.minNetHbd) : undefined;
+    const op = buildOp({
+      netId: this.config.netId,
+      contractId: this.config.contractId,
+      action: 'sell',
+      // ★ 1000x TRAP: input.tokens is the raw integer token count —
+      // op-builders' sellPayload() sends it as an intStr.
+      payload: sellPayload(toDid(input.creator), input.tokens, minNetBaseUnits),
+      activeAuth: input.seller,
+      rcLimit: this.config.rcLimit
+    });
+    await this.broadcast(op);
+    // Optimistic PENDING result: project the sold tokens off the pre-broadcast
+    // balance. Unlike Buy, selling never re-ages the remainder (holdclock.go
+    // debitBalance: wacq is untouched by a debit), so the prior
+    // heldBlocks/exitTaxBps stay exactly right for what remains.
+    // floorValueHbd is kept at its pre-sell figure (same best-effort
+    // simplification as buy() — an exact post-sell value needs a fresh
+    // (reserve, supply) read).
+    const nextTokens = Math.max(0, priorPosition.tokensHeld - input.tokens);
+    return {
+      creator: input.creator,
+      holder: input.seller,
+      tokensHeld: nextTokens,
+      floorValueHbd: priorPosition.floorValueHbd,
+      heldBlocks: priorPosition.heldBlocks,
+      exitTaxBps: priorPosition.exitTaxBps,
+      pending: true
+    };
+  }
+
+  async retire(input: RetireInput): Promise<Market> {
+    this.assertBroadcaster();
+    const [priorMarket, head] = await Promise.all([this.readMarket(input.creator), this.gql.getHeadBlock()]);
+    const op = buildOp({
+      netId: this.config.netId,
+      contractId: this.config.contractId,
+      action: 'retire',
+      payload: retirePayload(toDid(input.creator)),
+      activeAuth: input.creator,
+      rcLimit: this.config.rcLimit
+    });
+    await this.broadcast(op);
+    if (!priorMarket || priorMarket.phase === 'UNKNOWN' || head === null) {
+      return { ...(priorMarket ?? unknownMarket(input.creator)), pending: true };
+    }
+    // market.go Retire stamps kRetiredAt at the block THIS call executes at
+    // — a height this client cannot know precisely before confirmation.
+    // `head` (read just before broadcasting) is the closest honest estimate;
+    // the poll reconciles the exact mark. RULING D/K3: from this block on the
+    // market is in its 5-day OVERDUE notice (derivePhase's 4th arg reproduces
+    // the MAX(natural, retired) fold), and — the load-bearing K3 change —
+    // BOTH new inflows AND the curve Sell rail close IMMEDIATELY, not just
+    // once the notice expires to FROZEN.
+    const retiredAtBlock = head;
+    const retiredPhase = derivePhase(false, priorMarket.paidUntilBlock, head, retiredAtBlock);
+    return {
+      ...priorMarket,
+      retiredAtBlock,
+      phase: retiredPhase,
+      canBuy: false,
+      canAsk: false,
       pending: true
     };
   }
@@ -733,73 +989,58 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     // ask.go enforces BOTH bounds on-chain; without this the tx broadcasts,
     // reverts, and the asker pays RC for a rejection we could see locally.
     if (input.deadlineBlocks > MAX_ASK_DEADLINE_BLOCKS) throw new Error('VscCreatorTokensDataSource: deadline above MaxAskDeadline');
-    // ask.go:233-238 (core.Ask) — contentHash validation, mirroring
-    // answer()'s identical guard on answerHash below (finding M-c). Zero-
-    // extra-read.
+    // ask.go Ask — contentHash validation, mirroring answer()'s identical
+    // guard on answerHash below. Zero-extra-read.
     if (input.contentHash === '') {
       throw new Error('VscCreatorTokensDataSource: contentHash must not be empty');
     }
     if (input.contentHash.includes('|')) {
       throw new Error("VscCreatorTokensDataSource: contentHash must not contain '|'");
     }
-    // ask.go:239-244 (core.Ask) — reject a missing/zero maxCredits cap
-    // client-side (finding C-D / the report's item #5) rather than letting
-    // an effectively-unlimited-spend call reach the chain: this is the
-    // asker's own signed cap protecting against a creator spiking `face`
-    // between signing and execution (see AskInput.maxCreditsBaseUnits's own
-    // doc) — a call that arrives with no real cap defeats the whole point of
-    // the guard existing, whether or not core would also catch it.
+    // ask.go Ask — reject a missing/zero maxCredits cap client-side rather
+    // than letting an effectively-unlimited-spend call reach the chain: this
+    // is the asker's own signed cap protecting against a creator spiking
+    // `face` between signing and execution (see AskInput.maxCreditsBaseUnits's
+    // own doc) — a call that arrives with no real cap defeats the whole point
+    // of the guard existing, whether or not core would also catch it.
     if (!Number.isFinite(input.maxCreditsBaseUnits) || input.maxCreditsBaseUnits <= 0) {
       throw new Error('VscCreatorTokensDataSource: maxCreditsBaseUnits must be > 0');
     }
-    // ask.go:255-257 -> market.go:73-83 RequireInflowOpen (core.Ask) — the
-    // canAsk gate, identical in shape to prepay()'s canPrepay guard above
-    // (same RequireInflowOpen chokepoint on the Go side, same Market field
-    // pair on this side). Skipped — never blocked — when the market can't be
-    // read or was never registered; see prepay()'s comment for why.
+    // ask.go Ask -> market.go RequireInflowOpen — the canAsk gate, identical
+    // in shape to buy()'s canBuy guard above (same RequireInflowOpen
+    // chokepoint on the Go side, same Market field pair on this side).
+    // Skipped — never blocked — when the market can't be read or was never
+    // registered; see quoteBuy()'s comment for why.
     const market = await this.readMarket(input.creator);
     if (market && market.phase !== 'UNKNOWN' && !market.canAsk) {
-      throw new Error('VscCreatorTokensDataSource: market inflow is not open (frozen, closed, or globally paused)');
+      throw new Error('VscCreatorTokensDataSource: market inflow is not open (frozen, closed, retiring, or globally paused)');
     }
-    // C-C fix: core.Ask's own SettlementRate NEVER fails — it settles at PAR
-    // whenever the TWAP's guards don't pass (the default state today, no DEX
-    // pool wired) — so readQuote() now always returns a priced
-    // creditsRequiredBaseUnits once a face price exists, regardless of
-    // oracleStatus. The only genuine block left is a real read failure or a
-    // market with no face price at all, both of which surface as
-    // creditsRequiredBaseUnits === null. Previously this method hard-threw
-    // on any non-'ok' oracleStatus, which — since no DEX feed exists yet —
-    // meant EVERY ask on a real deployment reverted before ever reaching the
-    // chain.
+    // ★ RULING C: core.Ask's own settlement (settlement.go) now REFUSES
+    // rather than falling back to PAR — readQuote() reflects that refusal via
+    // creditsRequiredBaseUnits === null, and this call must refuse identically
+    // rather than inventing a rate.
     const quote = await this.readQuote(input.creator);
     if (quote.creditsRequiredBaseUnits === null) {
       throw new Error(`VscCreatorTokensDataSource: unable to price this ask (${quote.oracleStatus})`);
     }
-    // ask.go:295-297 (core.Ask) — creditsSpent > maxCredits, checked
-    // client-side against the SAME quote fetched immediately above (so this
-    // can only fire when the ask was already, definitely going to revert on
-    // the chain's own identical check) — the MEDIUM-severity theme this
-    // whole file already applies (fail fast locally rather than spend RC on
-    // a guaranteed revert).
+    // ask.go Ask — creditsSpent > maxCredits, checked client-side against the
+    // SAME quote fetched immediately above (so this can only fire when the
+    // ask was already, definitely going to revert on the chain's own
+    // identical check) — fail fast locally rather than spend RC on a
+    // guaranteed revert.
     if (quote.creditsRequiredBaseUnits > input.maxCreditsBaseUnits) {
       throw new Error('VscCreatorTokensDataSource: settlement price exceeds maxCreditsBaseUnits');
     }
-    // C-D fix: faceHbd is human-scaled and was previously round-tripped
-    // through humanToBaseUnits for the commission calc — unaffected by this
-    // fix, left as-is (not part of the cited defect: the mismatch was
-    // maxCredits' UNIT, not the commission leg).
+    // H2 fix (kept): the wrapper computes the EXACT commission itself via
+    // core.CommissionOwedFor — main.go's `ask` entrypoint no longer reads a
+    // commissionHbdPaid payload field at all (askPayload lost that parameter
+    // with the pivot), so this is the intents-only HBD leg, never a wire field.
     const commissionBaseUnits = commissionOwedForBaseUnits(humanToBaseUnits(quote.faceHbd));
     const op = buildOp({
       netId: this.config.netId,
       contractId: this.config.contractId,
       action: 'ask',
-      payload: askPayload(
-        toDid(input.creator),
-        input.contentHash,
-        input.deadlineBlocks,
-        commissionBaseUnits,
-        input.maxCreditsBaseUnits
-      ),
+      payload: askPayload(toDid(input.creator), input.contentHash, input.deadlineBlocks, input.maxCreditsBaseUnits),
       hbdLegBaseUnits: commissionBaseUnits,
       activeAuth: input.asker,
       rcLimit: this.config.rcLimit
@@ -816,7 +1057,10 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       creator: input.creator,
       seq: -1,
       asker: input.asker,
-      creditsEscrowed: quote.creditsRequired ?? 0,
+      tokensEscrowed: quote.creditsRequired ?? 0,
+      // Unconfirmed: the chain stamps the real hold clock at execution. 0
+      // reads as maximally FRESH, which is the safe direction to guess.
+      acqBlock: 0,
       deadlineBlock: quote.asOfBlock + input.deadlineBlocks,
       deadlineAt: blockToEpochMs(quote.asOfBlock + input.deadlineBlocks, quote.asOfBlock),
       reclaimableAtBlock: quote.asOfBlock + input.deadlineBlocks + RECLAIM_GRACE_BLOCKS,
@@ -830,23 +1074,22 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
 
   async answer(input: AnswerInput): Promise<Ask> {
     this.assertBroadcaster();
-    // ask.go:354-356 (core.Answer). Zero-extra-read.
+    // ask.go Answer. Zero-extra-read.
     if (input.answerHash === '') {
       throw new Error('VscCreatorTokensDataSource: answerHash must not be empty');
     }
-    // ask.go:357-359 (core.Answer). Zero-extra-read.
+    // ask.go Answer. Zero-extra-read.
     if (input.answerHash.includes('|')) {
       throw new Error("VscCreatorTokensDataSource: answerHash must not contain '|'");
     }
-    // ask.go:368-370 (core.Answer) — the answer half of the I6 disjoint
-    // window (block <= deadline). Needs the CURRENT chain head, fetched
-    // fresh rather than trusting any cached value the caller might be
-    // holding — a stale head could let this guard pass locally on a call
-    // that would still revert on-chain a moment later. Deliberately does
-    // NOT re-read the escrow itself (kEscrow) to get the deadline — that
-    // would incidentally implement the excluded escrow-existence check;
-    // AnswerInput.deadlineBlock (extended 2026-07-20) carries it instead,
-    // sourced from the Ask the caller already has.
+    // ask.go Answer — the answer half of the I6 disjoint window (block <=
+    // deadline). Needs the CURRENT chain head, fetched fresh rather than
+    // trusting any cached value the caller might be holding — a stale head
+    // could let this guard pass locally on a call that would still revert
+    // on-chain a moment later. Deliberately does NOT re-read the escrow
+    // itself (kEscrow) to get the deadline — that would incidentally
+    // implement the excluded escrow-existence check; AnswerInput.deadlineBlock
+    // carries it instead, sourced from the Ask the caller already has.
     const head = await this.gql.getHeadBlock();
     if (head === null) {
       throw new Error('VscCreatorTokensDataSource: cannot verify the answer window (chain head unavailable)');
@@ -859,25 +1102,22 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       contractId: this.config.contractId,
       action: 'answer',
       payload: answerPayload(input.seq, input.answerHash),
-      // C1 fix: active authority required on every write — see setFace's
-      // identical comment above. Was postingAuth.
       activeAuth: input.creator,
       rcLimit: this.config.rcLimit
     });
     await this.broadcast(op);
     // Optimistic: the read-back is pre-L2-execution, so project the ask to
     // answered and flag it pending — the poll reconciles against real state.
-    // (Completes fix 5; the stall left answer/reclaim as stale read-backs.)
     const answered = await this.readOneAsk(input.creator, input.seq);
     return { ...answered, status: 'answered', answerHash: input.answerHash, pending: true };
   }
 
   async reclaim(input: ReclaimInput): Promise<Ask> {
     this.assertBroadcaster();
-    // ask.go:414-416 (core.Reclaim) — the reclaim half of the I6 disjoint
-    // window (block > deadline+ReclaimGrace). Same fresh-head, no-escrow-read
-    // reasoning as answer()'s identical guard above; ReclaimInput.deadlineBlock
-    // was extended 2026-07-20 to carry the escrow's deadline for the same reason.
+    // ask.go Reclaim — the reclaim half of the I6 disjoint window (block >
+    // deadline+ReclaimGrace). Same fresh-head, no-escrow-read reasoning as
+    // answer()'s identical guard above; ReclaimInput.deadlineBlock carries
+    // the escrow's deadline for the same reason.
     const head = await this.gql.getHeadBlock();
     if (head === null) {
       throw new Error('VscCreatorTokensDataSource: cannot verify the reclaim window (chain head unavailable)');
@@ -890,8 +1130,6 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       contractId: this.config.contractId,
       action: 'reclaim',
       payload: reclaimPayload(toDid(input.creator), input.seq),
-      // C1 fix: active authority required on every write — see setFace's
-      // identical comment above. Was postingAuth.
       activeAuth: input.asker,
       rcLimit: this.config.rcLimit
     });
@@ -903,26 +1141,52 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
 
   async refund(input: RefundInput): Promise<HolderPosition> {
     this.assertBroadcaster();
-    // refund.go:105-107 (core.Refund). Zero-extra-read.
-    if (humanToBaseUnits(input.credits) <= 0) {
-      throw new Error('VscCreatorTokensDataSource: credits must be positive');
+    assertPositiveTokenCount(input.tokens, 'tokens');
+    // Read the CURRENT position AND market BEFORE broadcasting (see
+    // registerMarket's own doc) — the market read doubles as refund.go's own
+    // rail-switch guard: Refund is the WIND-DOWN rail, open ONLY once the
+    // market is winding down (retired, or naturally FROZEN/CLOSED); while it
+    // trades, the exit is sell() instead (sell.go/refund.go's shared
+    // rail-switch doc — the two rails are state-disjoint by construction).
+    const [priorPosition, market] = await Promise.all([this.readHolderPosition(input.creator, input.holder), this.readMarket(input.creator)]);
+    if (!priorPosition) throw new Error(`VscCreatorTokensDataSource: no such market ${input.creator}`);
+    if (input.tokens > priorPosition.tokensHeld) {
+      throw new Error('VscCreatorTokensDataSource: insufficient tokens');
     }
+    if (market && market.phase !== 'UNKNOWN') {
+      const windingDown = market.retiredAtBlock !== null || market.phase === 'FROZEN' || market.phase === 'CLOSED';
+      if (!windingDown) {
+        throw new Error('VscCreatorTokensDataSource: pro-rata refund opens only at wind-down (retired/frozen/closed); while the market trades, exit via sell() instead');
+      }
+    }
+    const minNetBaseUnits = input.minNetHbd !== undefined ? humanToBaseUnits(input.minNetHbd) : undefined;
     const op = buildOp({
       netId: this.config.netId,
       contractId: this.config.contractId,
       action: 'refund',
-      payload: refundPayload(toDid(input.creator), humanToBaseUnits(input.credits)),
-      // C1 fix: active authority required on every write — see setFace's
-      // identical comment above. Was postingAuth.
+      // ★ 1000x TRAP: input.tokens is the raw integer token count — the wire
+      // field is still named `credits` (main.go's payload shape predates the
+      // pivot), but op-builders' refundPayload() sends it as an intStr, never
+      // through humanToBaseUnits().
+      payload: refundPayload(toDid(input.creator), input.tokens, minNetBaseUnits),
       activeAuth: input.holder,
       rcLimit: this.config.rcLimit
     });
     await this.broadcast(op);
-    // Optimistic: the read-back is pre-L2, so project the credit reduction and
-    // flag pending rather than show the pre-refund balance as the outcome.
-    const position = await this.readHolderPosition(input.creator, input.holder);
-    if (!position) throw new Error(`VscCreatorTokensDataSource: no such market ${input.creator}`);
-    return { ...position, creditsHeld: Math.max(0, position.creditsHeld - input.credits), pending: true };
+    // Optimistic PENDING result: project the redeemed tokens off the
+    // pre-broadcast balance (same best-effort floorValueHbd simplification as
+    // sell() — refund.go's pro-rata floor is not a simple linear function of
+    // tokens removed either).
+    const nextTokens = Math.max(0, priorPosition.tokensHeld - input.tokens);
+    return {
+      creator: input.creator,
+      holder: input.holder,
+      tokensHeld: nextTokens,
+      floorValueHbd: priorPosition.floorValueHbd,
+      heldBlocks: priorPosition.heldBlocks,
+      exitTaxBps: priorPosition.exitTaxBps,
+      pending: true
+    };
   }
 
   async refundHolder(input: RefundHolderInput): Promise<HolderPosition> {
@@ -939,39 +1203,52 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     if (!isWellFormedDid(holderDid)) {
       throw new Error('VscCreatorTokensDataSource: holder account is not well-formed');
     }
+    // H3/EXITTAX-1: RefundHolder is gated to the SAME wind-down rail as
+    // Refund itself (refund.go: "under RULING A/K the pull is rail-routed on
+    // the same inWindDown predicate... the two gates now coincide"). Mirrors
+    // refund()'s identical guard above.
+    const [priorPosition, market] = await Promise.all([this.readHolderPosition(input.creator, input.holder), this.readMarket(input.creator)]);
+    if (!priorPosition) throw new Error(`VscCreatorTokensDataSource: no such market ${input.creator}`);
+    if (market && market.phase !== 'UNKNOWN') {
+      const windingDown = market.retiredAtBlock !== null || market.phase === 'FROZEN' || market.phase === 'CLOSED';
+      if (!windingDown) {
+        throw new Error('VscCreatorTokensDataSource: refundHolder is only available once wind-down opens (retired/frozen/closed); the holder may still exit via sell()');
+      }
+    }
     const op = buildOp({
       netId: this.config.netId,
       contractId: this.config.contractId,
       action: 'refundHolder',
       payload: refundHolderPayload(toDid(input.creator), holderDid),
-      // C1 fix: active authority required on every write — see setFace's
-      // identical comment above. Was postingAuth.
       activeAuth: input.caller,
       rcLimit: this.config.rcLimit
     });
     await this.broadcast(op);
-    // Optimistic: refundHolder pays out the holder's ENTIRE balance, so project
-    // creditsHeld to 0 and flag pending (see refund()).
-    const position = await this.readHolderPosition(input.creator, input.holder);
-    if (!position) throw new Error(`VscCreatorTokensDataSource: no such market ${input.creator}`);
-    return { ...position, creditsHeld: 0, pending: true };
+    // refund.go RefundHolder always pays out the holder's ENTIRE balance —
+    // tokensHeld projects to exactly 0, not an estimate.
+    return {
+      creator: input.creator,
+      holder: input.holder,
+      tokensHeld: 0,
+      floorValueHbd: 0,
+      heldBlocks: priorPosition.heldBlocks,
+      exitTaxBps: 0,
+      pending: true
+    };
   }
 
-  async transferCredits(input: TransferCreditsInput): Promise<void> {
+  async transferTokens(input: TransferTokensInput): Promise<void> {
     this.assertBroadcaster();
     const toDidAccount = toDid(input.to);
-    // prepay.go:115-117 (core.TransferCredits). Zero-extra-read. Compared as
-    // DIDs (not the raw input strings) so an inconsistently-prefixed pair
-    // (e.g. "alice" vs "hive:alice", which core would treat as the SAME
-    // account) is still caught here rather than sailing through as
-    // "different" only to collide once toDid() is applied on the wire.
+    // main.go Transfer. Zero-extra-read. Compared as DIDs (not the raw input
+    // strings) so an inconsistently-prefixed pair (e.g. "alice" vs
+    // "hive:alice", which core would treat as the SAME account) is still
+    // caught here rather than sailing through as "different" only to collide
+    // once toDid() is applied on the wire.
     if (toDid(input.from) === toDidAccount) {
       throw new Error('VscCreatorTokensDataSource: from and to must be different accounts');
     }
-    // prepay.go:118-120 (core.TransferCredits). Zero-extra-read.
-    if (humanToBaseUnits(input.amount) <= 0) {
-      throw new Error('VscCreatorTokensDataSource: amount must be positive');
-    }
+    assertPositiveTokenCount(input.tokens, 'tokens');
     // finding M-e: `to` is a genuine third-party DESTINATION distinct from
     // the signer (`from`) — same "reject a malformed destination before it
     // can strand funds" reasoning as refundHolder's holder guard above.
@@ -981,14 +1258,77 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     const op = buildOp({
       netId: this.config.netId,
       contractId: this.config.contractId,
-      action: 'transfer', // the wasm export is `transfer`, not `transferCredits`
-      payload: transferCreditsPayload(toDid(input.creator), toDidAccount, humanToBaseUnits(input.amount)),
-      // C1 fix: active authority required on every write — see setFace's
-      // identical comment above. Was postingAuth.
+      action: 'transfer', // the wasm export is `transfer`, not `transferTokens`
+      // ★ 1000x TRAP: input.tokens is the raw integer token count —
+      // op-builders' transferTokensPayload() sends it as an intStr.
+      payload: transferTokensPayload(toDid(input.creator), toDidAccount, input.tokens),
       activeAuth: input.from,
       rcLimit: this.config.rcLimit
     });
     await this.broadcast(op);
+  }
+
+  async claimTradeFees(input: ClaimTradeFeesInput): Promise<number> {
+    this.assertBroadcaster();
+    // tradefee.go ClaimTradeFees pulls the CALLER'S ENTIRE accrued balance —
+    // the pre-broadcast read below IS the exact amount this call claims
+    // (there is no partial-claim path), so no post-write reconciliation is
+    // needed the way Market/HolderPosition writes require.
+    const owedHbd = await this.readFeeBalance(input.account);
+    const op = buildOp({
+      netId: this.config.netId,
+      contractId: this.config.contractId,
+      action: 'claimTradeFees',
+      payload: claimTradeFeesPayload(),
+      activeAuth: input.account,
+      rcLimit: this.config.rcLimit
+    });
+    await this.broadcast(op);
+    return owedHbd;
+  }
+
+  async closeIfDrained(input: CloseIfDrainedInput): Promise<boolean> {
+    this.assertBroadcaster();
+    const priorMarket = await this.readMarket(input.creator);
+    const op = buildOp({
+      netId: this.config.netId,
+      contractId: this.config.contractId,
+      action: 'closeIfDrained',
+      payload: closeIfDrainedPayload(toDid(input.creator)),
+      activeAuth: input.caller,
+      rcLimit: this.config.rcLimit
+    });
+    await this.broadcast(op);
+    // refund.go CloseIfDrained: (FROZEN AND supply===0) => CLOSED, or already
+    // CLOSED => true, else false — idempotent on the contract side. A
+    // custom_json broadcast resolves to a Hive tx id, never the L2 call's own
+    // return value, so this client cannot observe the real post-execution
+    // result directly — this is the same PRE-broadcast optimistic projection
+    // every other write in this file makes; re-readMarket() to confirm.
+    if (!priorMarket || priorMarket.phase === 'UNKNOWN') return false;
+    return priorMarket.phase === 'CLOSED' || (priorMarket.phase === 'FROZEN' && priorMarket.supplyTokens === 0);
+  }
+
+  async withdrawTreasury(input: WithdrawTreasuryInput): Promise<number> {
+    this.assertBroadcaster();
+    if (!Number.isFinite(input.amountHbd) || input.amountHbd <= 0) {
+      throw new Error('VscCreatorTokensDataSource: amountHbd must be positive');
+    }
+    const amountBaseUnits = humanToBaseUnits(input.amountHbd);
+    const op = buildOp({
+      netId: this.config.netId,
+      contractId: this.config.contractId,
+      action: 'withdrawTreasury',
+      payload: withdrawTreasuryPayload(amountBaseUnits),
+      activeAuth: input.caller,
+      rcLimit: this.config.rcLimit
+    });
+    await this.broadcast(op);
+    // read.go WithdrawTreasury debits EXACTLY `amount` (bounded to (0,
+    // current treasury balance] — an over-withdrawal is refused outright,
+    // never clamped), so a successful call withdraws exactly what was
+    // requested.
+    return input.amountHbd;
   }
 
   private assertBroadcaster(): void {

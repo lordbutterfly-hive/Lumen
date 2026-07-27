@@ -3,39 +3,55 @@ import type {
   Ask,
   AskInput,
   AnswerInput,
+  BuyInput,
+  BuyQuote,
+  ClaimTradeFeesInput,
+  CloseIfDrainedInput,
   DeliveryRecord,
   HolderPosition,
   MyAsksResult,
   WalletPositionsResult,
   Market,
-  PrepayInput,
   Quote,
   ReclaimInput,
   RefundHolderInput,
   RefundInput,
   RegisterMarketInput,
   RenewSubscriptionInput,
+  RetireInput,
+  SellInput,
+  SellQuote,
   SetCapInput,
   SetFaceInput,
-  TransferCreditsInput
+  TransferTokensInput,
+  WithdrawTreasuryInput
 } from '../../types';
 import type { CreatorTokensDataSource } from '../creator-tokens-data-source';
 import {
   BLOCKS_PER_DAY,
-  canInflowOpen,
   RECLAIM_GRACE_BLOCKS,
+  areaBaseUnits,
   baseUnitsToHuman,
   blockToEpochMs,
+  canInflowOpen,
   commissionOwedForBaseUnits,
   creditsForAskBaseUnits,
   deriveAskStatus,
   deriveFaceBandBaseUnits,
   deriveGraceExpiresAtBlock,
   derivePhase,
-  floorRatioForDisplay,
+  exitTaxBpsAt,
+  exitTaxOnBaseUnits,
+  floorPricePerTokenBaseUnits,
   humanToBaseUnits,
+  quoteBuyBaseUnits,
+  quoteSellBaseUnits,
+  refundNetBaseUnits,
   refundPayoutBaseUnits,
+  reserveCoverageRatio,
   settlementRateBaseUnits,
+  spotRateBaseUnits,
+  tradeFeeOn,
   type AskRateEstimate
 } from '../contract-math';
 import { unknownMarket } from '../vsc/reads';
@@ -56,13 +72,71 @@ import {
 // themselves live in ./fixtures.ts (the pure "creator states" data), this file
 // owns only how reads/writes are simulated against them. See fixtures.ts for
 // the seeded scenarios (MOCK_ACTIVE/OVERDUE/FROZEN/EMPTY/CLOSED/UNKNOWN).
+//
+// ★ CURVE-PIVOT REWRITE (2026-07-24): see types.ts's / contract-math.ts's own
+// "THE 1000x UNIT TRAP" doc. Every *tokens quantity below is a whole INTEGER;
+// only HBD amounts (fees, tax, reserve, floor/spot price) go through
+// baseUnitsToHuman()/humanToBaseUnits().
 
 const walletKey = (holder: string) => `ct-mock-wallet-${holder}`;
 const asksKey = (creator: string) => `ct-mock-asks-${creator}`;
 const marketKey = (creator: string) => `ct-mock-market-${creator}`;
+const feeBalKey = (account: string) => `ct-mock-feebal-${account}`;
+const treasuryKey = () => `ct-mock-treasury`;
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Per-(creator,holder) persisted wallet entry — mirrors kBal + kAcqBlock (expressed as heldBlocks rather than an absolute wacq height, since the mock's "now" is itself a moving target — see fixtures.ts's own MarketSeed.retiredAtBlock doc for the identical reasoning). */
+interface WalletEntry {
+  tokens: number;
+  heldBlocks: number;
+}
+
+/**
+ * holdclock.go creditInflow, replicated at MOCK scale: re-averages the
+ * position's hold clock toward `block` (the trade's own block), weighted by
+ * size, CEIL — exactly mirroring the real chokepoint's `wNew =
+ * ceil((oldBal·wOld + n·block) / (oldBal+n))`, expressed here in `heldBlocks`
+ * (age) rather than an absolute wacq height since the caller only has ages to
+ * hand. oldTokens === 0 hits C-14 exactly: a fresh account always starts at
+ * ZERO hold time (heldBlocks 0), never inheriting the incoming slice's own age.
+ */
+function mockCreditInflow(oldTokens: number, oldHeldBlocks: number, n: number, block: number): WalletEntry {
+  const wOld = oldTokens > 0 ? block - oldHeldBlocks : block;
+  const nextTokens = oldTokens + n;
+  const wNew = nextTokens > 0 ? Math.ceil((oldTokens * wOld + n * block) / nextTokens) : block;
+  return { tokens: nextTokens, heldBlocks: Math.max(0, block - wNew) };
+}
+
+function readWalletEntry(creator: string, holder: string): WalletEntry {
+  const persisted = getStorageItem<Record<string, WalletEntry>>(walletKey(holder));
+  const entry = persisted?.[creator];
+  if (entry) return entry;
+  const seeded = HOLDER_SEEDS[creator]?.find((h) => h.holder === holder);
+  return { tokens: seeded?.tokens ?? 0, heldBlocks: seeded?.heldBlocks ?? 0 };
+}
+
+function writeWalletEntry(creator: string, holder: string, entry: WalletEntry): void {
+  const wallet = getStorageItem<Record<string, WalletEntry>>(walletKey(holder)) ?? {};
+  wallet[creator] = entry;
+  setStorageItem(walletKey(holder), wallet, StorageTTL.SESSION);
+}
+
+/** tradefee.go accrueTradeFee, at mock scale: creator half pull-claimable, platform half to the treasury pot. Zero parts skipped, matching accrueTradeFee's own no-dust-write frugality. */
+function accrueFee(creator: string, feeCreatorBaseUnits: number, feePlatformBaseUnits: number): void {
+  if (feeCreatorBaseUnits > 0) {
+    const cur = getStorageItem<number>(feeBalKey(creator)) ?? 0;
+    setStorageItem(feeBalKey(creator), cur + feeCreatorBaseUnits, StorageTTL.SESSION);
+  }
+  if (feePlatformBaseUnits > 0) addTreasury(feePlatformBaseUnits);
+}
+
+function addTreasury(amountBaseUnits: number): void {
+  if (amountBaseUnits <= 0) return;
+  const cur = getStorageItem<number>(treasuryKey()) ?? 0;
+  setStorageItem(treasuryKey(), cur + amountBaseUnits, StorageTTL.SESSION);
 }
 
 /**
@@ -85,19 +159,24 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
     const paidUntilBlock = head + seed.paidUntilDeltaBlocks;
     const registeredAtBlock = head + seed.registeredAtDeltaBlocks;
     const faceSetAtBlock = head + seed.faceSetAtDeltaBlocks;
-    const phase = derivePhase(seed.closedStored, paidUntilBlock, head);
+    // market.go Phase(): MAX(naturalPhase, retiredPhase). seed.retiredAtBlock
+    // is an ABSOLUTE block (fixtures.ts's own doc explains why, unlike the
+    // *DeltaBlocks fields above), passed straight through as derivePhase's
+    // 4th arg.
+    const phase = derivePhase(seed.closedStored, paidUntilBlock, head, seed.retiredAtBlock);
     const graceExpiresAtBlock = deriveGraceExpiresAtBlock(paidUntilBlock);
-    // deriveFaceBandBaseUnits gained an anchor pair (kFaceAnchor/kFaceAnchorAt)
-    // 2026-07-20 (see contract-math.ts's doc) — MarketSeed has no fixture field
-    // for it (none of the seeded scenarios exercise a second SetFace call
-    // inside the same 7-day window), so 0/0 is passed, which makes the
+    // deriveFaceBandBaseUnits' anchor pair (kFaceAnchor/kFaceAnchorAt) has no
+    // fixture field (none of the seeded scenarios exercise a second SetFace
+    // call inside the same 7-day window), so 0/0 is passed, which makes the
     // function bootstrap the anchor from the current face/faceSetAtBlock every
-    // time, exactly matching this mock's pre-existing (single-change) fixture
-    // behaviour. A multi-call-within-window fixture is out of scope for this
-    // pass — see the report.
+    // time — a deliberate simplification, unrelated to the curve pivot.
     const faceBandRaw = deriveFaceBandBaseUnits(seed.faceBaseUnits, faceSetAtBlock, 0, 0, head);
     const globalInflowPaused = seed.globalInflowPaused;
-    const canFlow = canInflowOpen(phase, globalInflowPaused);
+    // market.go RequireInflowOpen: canInflowOpen() alone predates RULING K3
+    // (a retired market refuses ALL new inflows, even during its still-OVERDUE
+    // notice window) — the retiredAtBlock null-check ANDs the missing half
+    // back in, mirroring vsc-data-source.ts's identical buildMarket() note.
+    const canFlow = canInflowOpen(phase, globalInflowPaused) && seed.retiredAtBlock === null;
     return {
       creator,
       faceHbd: baseUnitsToHuman(seed.faceBaseUnits),
@@ -108,8 +187,9 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
         bandActive: faceBandRaw.bandActive,
         windowEndsAtBlock: faceBandRaw.windowEndsAtBlock
       },
-      capCredits: baseUnitsToHuman(seed.capBaseUnits),
-      supplyCredits: baseUnitsToHuman(seed.supplyBaseUnits),
+      // ★ 1000x TRAP: raw integer token counts, never baseUnitsToHuman'd.
+      capTokens: seed.capTokens,
+      supplyTokens: seed.supplyTokens,
       reserveHbd: baseUnitsToHuman(seed.reserveBaseUnits),
       paidUntilBlock,
       paidUntilAt: blockToEpochMs(paidUntilBlock, head),
@@ -118,13 +198,12 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
       graceExpiresAtBlock,
       graceExpiresAt: blockToEpochMs(graceExpiresAtBlock, head),
       globalInflowPaused,
-      canPrepay: canFlow,
+      canBuy: canFlow,
       canAsk: canFlow,
-      // A dimensionless ratio (reserve/supply, both in the same base-unit
-      // scale) is identical whether computed from base units or from human
-      // units — no baseUnitsToHuman conversion applies here, unlike every
-      // other money field on this object.
-      refundPricePerCredit: floorRatioForDisplay(seed.reserveBaseUnits, seed.supplyBaseUnits)
+      retiredAtBlock: seed.retiredAtBlock,
+      floorPriceHbd: baseUnitsToHuman(floorPricePerTokenBaseUnits(seed.reserveBaseUnits, seed.supplyTokens)),
+      spotPriceHbd: baseUnitsToHuman(spotRateBaseUnits(seed.supplyTokens)),
+      reserveCoverage: reserveCoverageRatio(seed.reserveBaseUnits, seed.supplyTokens)
     };
   }
 
@@ -133,14 +212,9 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
     if (creator === MOCK_UNKNOWN) {
       // Simulates a contract read that failed: resolve with UNKNOWN rather
       // than reject, exactly as VscCreatorTokensDataSource.readMarket must
-      // (see the interface doc — this is the one method with that contract).
-      // Reuses the SAME builder the real data source uses (reads.ts's
-      // unknownMarket) instead of a hand-duplicated shape (cleanup item):
-      // the inline version had drifted — it used
-      // blockToEpochMs(0, mockHeadBlock()) for paidUntilAt/graceExpiresAt,
-      // which (mockHeadBlock() being ~400,000,000) computed a timestamp
-      // hundreds of millions of blocks in the PAST, instead of the "now"
-      // fallback unknownMarket() actually returns for an unusable read.
+      // (see the interface doc). Reuses the SAME builder the real data
+      // source uses (reads.ts's unknownMarket) instead of a hand-duplicated
+      // shape.
       return unknownMarket(creator);
     }
     const seed = this.seed(creator);
@@ -155,22 +229,24 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
     }
     const seed = this.seed(creator);
     if (!seed) return null;
-    const persisted = getStorageItem<Record<string, number>>(walletKey(holder));
-    const persistedCredits = persisted?.[creator];
-    const seededCredits = HOLDER_SEEDS[creator]?.find((h) => h.holder === holder)?.creditsBaseUnits ?? 0;
-    const creditsBaseUnits = persistedCredits ?? seededCredits;
-    const floorBaseUnits = seed.supplyBaseUnits > 0 ? refundPayoutBaseUnits(seed.reserveBaseUnits, creditsBaseUnits, seed.supplyBaseUnits) : 0;
+    const { tokens, heldBlocks } = readWalletEntry(creator, holder);
+    // refund.go refundPayout + the K2 exit tax carve (contract-math.ts
+    // refundNetBaseUnits) — the TAXED NET, matching
+    // VscCreatorTokensDataSource.readHolderPosition exactly.
+    const { netBaseUnits, taxBps } = refundNetBaseUnits(seed.reserveBaseUnits, tokens, seed.supplyTokens, heldBlocks);
     return {
       creator,
       holder,
-      creditsHeld: baseUnitsToHuman(creditsBaseUnits),
-      floorValueHbd: baseUnitsToHuman(floorBaseUnits)
+      tokensHeld: tokens,
+      floorValueHbd: baseUnitsToHuman(netBaseUnits),
+      heldBlocks,
+      exitTaxBps: taxBps
     };
   }
 
   async readWallet(holder: string): Promise<WalletPositionsResult> {
     await delay(150);
-    const persisted = getStorageItem<Record<string, number>>(walletKey(holder)) ?? {};
+    const persisted = getStorageItem<Record<string, WalletEntry>>(walletKey(holder)) ?? {};
     const creators = new Set<string>(Object.keys(persisted));
     for (const [creator, holders] of Object.entries(HOLDER_SEEDS)) {
       if (holders.some((h) => h.holder === holder)) creators.add(creator);
@@ -179,7 +255,7 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
     // The mock always has data available, so unavailable is false; the field
     // exists so a consumer can distinguish "loaded, you hold nothing" (this)
     // from "the indexer read failed" (the VSC source's unavailable:true).
-    return { positions: positions.filter((p): p is HolderPosition => p !== null && p.creditsHeld > 0), unavailable: false };
+    return { positions: positions.filter((p): p is HolderPosition => p !== null && p.tokensHeld > 0), unavailable: false };
   }
 
   private buildAsk(creator: string, s: AskSeed, head: number): Ask {
@@ -190,7 +266,9 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
       creator,
       seq: s.seq,
       asker: s.asker,
-      creditsEscrowed: baseUnitsToHuman(s.creditsBaseUnits),
+      // Whole tokens — no baseUnitsToHuman divide (see ParsedEscrow.tokensEscrowed).
+      tokensEscrowed: s.creditsBaseUnits,
+      acqBlock: s.acqBlock ?? 0,
       deadlineBlock,
       deadlineAt: blockToEpochMs(deadlineBlock, head),
       reclaimableAtBlock,
@@ -275,53 +353,109 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
     const head = mockHeadBlock();
     const faceBaseUnits = seed?.faceBaseUnits ?? 0;
     const commissionHbd = baseUnitsToHuman(commissionOwedForBaseUnits(faceBaseUnits));
+    const unpriced = (oracleStatus: Quote['oracleStatus']): Quote => ({
+      creator,
+      faceHbd: baseUnitsToHuman(faceBaseUnits),
+      rate: null,
+      creditsRequired: null,
+      creditsRequiredBaseUnits: null,
+      commissionHbd,
+      oracleStatus,
+      asOfBlock: head
+    });
     if (!seed || faceBaseUnits <= 0) {
       // No face price set at all — mirrors core.Ask's own "creator has no
-      // face price set" guard (ask.go), checked BEFORE any settlement rate
-      // (TWAP or PAR). Unlike a missing TWAP, there is no PAR fallback for
-      // this: creditsForAsk(0, PAR) is meaningless.
-      return { creator, faceHbd: baseUnitsToHuman(faceBaseUnits), rate: null, creditsRequired: null, creditsRequiredBaseUnits: null, commissionHbd, oracleStatus: 'unavailable', asOfBlock: head };
+      // face price set" guard (ask.go), checked BEFORE any settlement rate.
+      return unpriced('unavailable');
     }
-    if (seed.supplyBaseUnits === 0) {
-      // No trading history yet (mock-empty) — matches AskRate's own
-      // 'insufficient_observations' branch for a market nobody has touched.
-      // C-C fix: still prices at PAR, never null — core.SettlementRate
-      // (ask.go) falls back to PAR whenever AskRate can't produce a TWAP,
-      // which is the DEFAULT state for a live deployment today (no DEX pool
-      // is wired to ever feed the ring). A pre-fix version of this mock (and
-      // of the real vsc-data-source.ts) returned rate:null/
-      // creditsRequired:null here and let ask() hard-throw on it.
-      const estimate: AskRateEstimate = { rateBaseUnits: null, status: 'insufficient_observations' };
-      const settlement = settlementRateBaseUnits(estimate);
-      const creditsRequiredBaseUnits = creditsForAskBaseUnits(faceBaseUnits, settlement.rateBaseUnits);
-      return {
-        creator,
-        faceHbd: baseUnitsToHuman(faceBaseUnits),
-        rate: baseUnitsToHuman(settlement.rateBaseUnits),
-        creditsRequired: baseUnitsToHuman(creditsRequiredBaseUnits),
-        creditsRequiredBaseUnits,
-        commissionHbd,
-        oracleStatus: 'insufficient_observations',
-        asOfBlock: head
-      };
+
+    // ★ RULING C: settlementRateBaseUnits(estimate, supplyTokens) now REFUSES
+    // (rateBaseUnits: null) instead of falling back to PAR — mirrors
+    // VscCreatorTokensDataSource.readQuote()'s identical rewrite.
+    const estimate: AskRateEstimate =
+      seed.supplyTokens === 0
+        ? // No trading history yet (mock-empty) — matches AskRate's own
+          // 'insufficient_observations' branch for a market nobody has touched.
+          { rateBaseUnits: null, status: 'insufficient_observations' }
+        : // Simulates a market with enough live trading history for AskRate to
+          // produce a real TWAP ('ok').
+          { rateBaseUnits: MOCK_RATE_BASE_UNITS, status: 'ok' };
+    const settlement = settlementRateBaseUnits(estimate, seed.supplyTokens);
+    if (settlement.rateBaseUnits === null) {
+      return unpriced(settlement.status);
     }
-    // Simulates a market with enough live trading history for AskRate to
-    // produce a real TWAP ('ok') — see fixtures.ts's own doc on
-    // MOCK_RATE_BASE_UNITS for why it must stay a small, exactly-divide-
-    // friendly integer (core's rate scale has PAR itself as the literal
-    // integer 1, params.go ParBaseUnitsPerCredit — NOT a 3-decimal-scaled
-    // ratio the way HBD/credit AMOUNTS are).
-    const rate = MOCK_RATE_BASE_UNITS;
-    const creditsRequiredBaseUnits = creditsForAskBaseUnits(faceBaseUnits, rate);
+    const creditsRequiredBaseUnits = creditsForAskBaseUnits(faceBaseUnits, settlement.rateBaseUnits);
     return {
       creator,
       faceHbd: baseUnitsToHuman(faceBaseUnits),
-      rate: baseUnitsToHuman(rate),
-      creditsRequired: baseUnitsToHuman(creditsRequiredBaseUnits),
+      rate: baseUnitsToHuman(settlement.rateBaseUnits),
+      // ask.go's escrowed "credits" spend the SAME whole-token balance
+      // Buy/Sell operate on — creditsRequired is the same raw integer as
+      // creditsRequiredBaseUnits, never baseUnitsToHuman'd.
+      creditsRequired: creditsRequiredBaseUnits,
       creditsRequiredBaseUnits,
       commissionHbd,
-      oracleStatus: 'ok',
+      oracleStatus: settlement.status,
       asOfBlock: head
+    };
+  }
+
+  async readFeeBalance(account: string): Promise<number> {
+    await delay(80);
+    return baseUnitsToHuman(getStorageItem<number>(feeBalKey(account)) ?? 0);
+  }
+
+  async quoteBuy(creator: string, tokens: number): Promise<BuyQuote> {
+    await delay(80);
+    const seed = this.seed(creator);
+    if (!seed) throw new Error(`MockCreatorTokensDataSource: no such market ${creator}`);
+    if (!Number.isInteger(tokens) || tokens <= 0) {
+      throw new Error('MockCreatorTokensDataSource: tokens must be a positive whole number');
+    }
+    const market = this.buildMarket(creator, seed);
+    if (!market.canBuy) {
+      throw new Error('MockCreatorTokensDataSource: market inflow is not open (frozen, closed, retiring, or globally paused)');
+    }
+    if (seed.supplyTokens + tokens > seed.capTokens) {
+      throw new Error('MockCreatorTokensDataSource: buy would exceed the market cap');
+    }
+    const q = quoteBuyBaseUnits(seed.supplyTokens, tokens);
+    return {
+      tokens: q.tokens,
+      costHbd: baseUnitsToHuman(q.costBaseUnits),
+      feeHbd: baseUnitsToHuman(q.feeBaseUnits),
+      totalDueHbd: baseUnitsToHuman(q.totalDueBaseUnits),
+      rateAfterHbd: baseUnitsToHuman(q.rateAfterBaseUnits)
+    };
+  }
+
+  async quoteSell(creator: string, seller: string, tokens: number): Promise<SellQuote> {
+    await delay(80);
+    const seed = this.seed(creator);
+    if (!seed) throw new Error(`MockCreatorTokensDataSource: no such market ${creator}`);
+    if (!Number.isInteger(tokens) || tokens <= 0) {
+      throw new Error('MockCreatorTokensDataSource: tokens must be a positive whole number');
+    }
+    const market = this.buildMarket(creator, seed);
+    if (market.retiredAtBlock !== null || market.phase === 'FROZEN' || market.phase === 'CLOSED') {
+      throw new Error('MockCreatorTokensDataSource: curve sell is closed while the market winds down (retired/frozen/closed); exit via refund() instead');
+    }
+    const { tokens: tokensHeld, heldBlocks } = readWalletEntry(creator, seller);
+    if (tokens > tokensHeld) {
+      throw new Error('MockCreatorTokensDataSource: insufficient tokens');
+    }
+    const q = quoteSellBaseUnits(seed.supplyTokens, tokens, heldBlocks);
+    if (q === null) {
+      throw new Error('MockCreatorTokensDataSource: sell exceeds supply');
+    }
+    return {
+      tokens: q.tokens,
+      grossHbd: baseUnitsToHuman(q.grossBaseUnits),
+      taxHbd: baseUnitsToHuman(q.taxBaseUnits),
+      feeHbd: baseUnitsToHuman(q.feeBaseUnits),
+      netHbd: baseUnitsToHuman(q.netBaseUnits),
+      taxBps: q.taxBps,
+      heldBlocks: q.heldBlocks
     };
   }
 
@@ -330,18 +464,32 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
 
   async registerMarket(input: RegisterMarketInput): Promise<Market> {
     await delay(400);
+    const firstBuyTokens = input.firstBuyTokens ?? 0;
+    // launch.go RegisterWithFirstBuy: an ORDINARY Buy at supply === 0 (a
+    // brand-new market) — same curve math as Area(0 + n) − Area(0) = Area(n).
+    const reserveBaseUnits = firstBuyTokens > 0 ? areaBaseUnits(firstBuyTokens) : 0;
     const seed: MarketSeed = {
       faceBaseUnits: humanToBaseUnits(input.faceHbd),
-      capBaseUnits: humanToBaseUnits(input.capCredits),
-      supplyBaseUnits: 0,
-      reserveBaseUnits: 0,
+      capTokens: input.capTokens,
+      supplyTokens: firstBuyTokens,
+      reserveBaseUnits,
       paidUntilDeltaBlocks: 30 * BLOCKS_PER_DAY,
       registeredAtDeltaBlocks: 0,
       faceSetAtDeltaBlocks: 0,
       closedStored: false,
-      globalInflowPaused: false
+      globalInflowPaused: false,
+      retiredAtBlock: null
     };
     setStorageItem(marketKey(input.creator), seed, StorageTTL.SESSION);
+    if (firstBuyTokens > 0) {
+      // buy.go: "Buy mints only to the paying caller" — the creator IS the
+      // buyer for the optional atomic first buy (launch.go's ZERO PREMINE
+      // doc: no discount, ordinary curve cost).
+      const head = mockHeadBlock();
+      writeWalletEntry(input.creator, input.creator, mockCreditInflow(0, 0, firstBuyTokens, head));
+      const { feeCreatorBaseUnits, feePlatformBaseUnits } = tradeFeeOn(reserveBaseUnits);
+      accrueFee(input.creator, feeCreatorBaseUnits, feePlatformBaseUnits);
+    }
     return this.buildMarket(input.creator, seed);
   }
 
@@ -371,45 +519,126 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
     await delay(300);
     const seed = this.seed(input.creator);
     if (!seed) throw new Error(`MockCreatorTokensDataSource: no such market ${input.creator}`);
-    const newCapBaseUnits = humanToBaseUnits(input.newCapCredits);
-    if (newCapBaseUnits < seed.supplyBaseUnits) {
+    const newCapTokens = input.newCapTokens;
+    if (!Number.isInteger(newCapTokens) || newCapTokens < seed.supplyTokens) {
       throw new Error('MockCreatorTokensDataSource: cap cannot be set below current supply');
     }
-    const next: MarketSeed = { ...seed, capBaseUnits: newCapBaseUnits };
+    const next: MarketSeed = { ...seed, capTokens: newCapTokens };
     setStorageItem(marketKey(input.creator), next, StorageTTL.SESSION);
     return this.buildMarket(input.creator, next);
   }
 
-  async prepay(input: PrepayInput): Promise<HolderPosition> {
+  async buy(input: BuyInput): Promise<HolderPosition> {
     await delay(400);
     const seed = this.seed(input.creator);
     if (!seed) throw new Error(`MockCreatorTokensDataSource: no such market ${input.creator}`);
-    const hbdBaseUnits = humanToBaseUnits(input.hbdAmount);
-    const nextSupply = seed.supplyBaseUnits + hbdBaseUnits; // PAR: exact copy, matching prepay.go
-    if (nextSupply > seed.capBaseUnits) throw new Error('MockCreatorTokensDataSource: prepay would exceed the market cap');
-    const next: MarketSeed = { ...seed, supplyBaseUnits: nextSupply, reserveBaseUnits: seed.reserveBaseUnits + hbdBaseUnits };
+    if (!Number.isInteger(input.tokens) || input.tokens <= 0) {
+      throw new Error('MockCreatorTokensDataSource: tokens must be a positive whole number');
+    }
+    const head = mockHeadBlock();
+    const market = this.buildMarket(input.creator, seed);
+    if (!market.canBuy) {
+      throw new Error('MockCreatorTokensDataSource: market inflow is not open (frozen, closed, retiring, or globally paused)');
+    }
+    const nextSupply = seed.supplyTokens + input.tokens;
+    if (nextSupply > seed.capTokens) {
+      throw new Error('MockCreatorTokensDataSource: buy would exceed the market cap');
+    }
+    // curve.go BuyCost: cost = Area(S+n) − Area(S), the exact area step. The
+    // fee NEVER enters the reserve (buy.go) — only `cost` does.
+    const cost = areaBaseUnits(nextSupply) - areaBaseUnits(seed.supplyTokens);
+    const { feeCreatorBaseUnits, feePlatformBaseUnits } = tradeFeeOn(cost);
+
+    const nextSeed: MarketSeed = { ...seed, supplyTokens: nextSupply, reserveBaseUnits: seed.reserveBaseUnits + cost };
+    setStorageItem(marketKey(input.creator), nextSeed, StorageTTL.SESSION);
+
+    const prior = readWalletEntry(input.creator, input.buyer);
+    const next = mockCreditInflow(prior.tokens, prior.heldBlocks, input.tokens, head);
+    writeWalletEntry(input.creator, input.buyer, next);
+
+    accrueFee(input.creator, feeCreatorBaseUnits, feePlatformBaseUnits);
+
+    const { netBaseUnits, taxBps } = refundNetBaseUnits(nextSeed.reserveBaseUnits, next.tokens, nextSeed.supplyTokens, next.heldBlocks);
+    return {
+      creator: input.creator,
+      holder: input.buyer,
+      tokensHeld: next.tokens,
+      floorValueHbd: baseUnitsToHuman(netBaseUnits),
+      heldBlocks: next.heldBlocks,
+      exitTaxBps: taxBps
+    };
+  }
+
+  async sell(input: SellInput): Promise<HolderPosition> {
+    await delay(400);
+    const seed = this.seed(input.creator);
+    if (!seed) throw new Error(`MockCreatorTokensDataSource: no such market ${input.creator}`);
+    if (!Number.isInteger(input.tokens) || input.tokens <= 0) {
+      throw new Error('MockCreatorTokensDataSource: tokens must be a positive whole number');
+    }
+    const market = this.buildMarket(input.creator, seed);
+    // sell.go's rail switch: the curve rail is CLOSED while the market winds
+    // down (retired, or naturally FROZEN/CLOSED).
+    if (market.retiredAtBlock !== null || market.phase === 'FROZEN' || market.phase === 'CLOSED') {
+      throw new Error('MockCreatorTokensDataSource: curve sell is closed while the market winds down (retired/frozen/closed); exit via refund() instead');
+    }
+    const prior = readWalletEntry(input.creator, input.seller);
+    if (input.tokens > prior.tokens) {
+      throw new Error('MockCreatorTokensDataSource: insufficient tokens');
+    }
+    // curve.go SellProceeds: p = Area(S) − Area(S−ΔS), the exact area step —
+    // the FULL slice, before the K2 tax and the trade fee.
+    const nextSupply = seed.supplyTokens - input.tokens;
+    const gross = areaBaseUnits(seed.supplyTokens) - areaBaseUnits(nextSupply);
+    const taxBps = exitTaxBpsAt(prior.heldBlocks);
+    const tax = exitTaxOnBaseUnits(gross, taxBps);
+    const { feeCreatorBaseUnits, feePlatformBaseUnits } = tradeFeeOn(gross);
+
+    const nextSeed: MarketSeed = { ...seed, supplyTokens: nextSupply, reserveBaseUnits: seed.reserveBaseUnits - gross };
+    setStorageItem(marketKey(input.creator), nextSeed, StorageTTL.SESSION);
+
+    // Selling never re-ages the remainder (holdclock.go debitBalance: wacq is
+    // untouched by a debit).
+    const nextEntry: WalletEntry = { tokens: prior.tokens - input.tokens, heldBlocks: prior.heldBlocks };
+    writeWalletEntry(input.creator, input.seller, nextEntry);
+
+    addTreasury(tax); // sell.go RULING J/K: the exit tax goes to the treasury, never the holder pot
+    accrueFee(input.creator, feeCreatorBaseUnits, feePlatformBaseUnits);
+
+    const { netBaseUnits, taxBps: nextTaxBps } =
+      nextSeed.supplyTokens > 0
+        ? refundNetBaseUnits(nextSeed.reserveBaseUnits, nextEntry.tokens, nextSeed.supplyTokens, nextEntry.heldBlocks)
+        : { netBaseUnits: 0, taxBps: exitTaxBpsAt(nextEntry.heldBlocks) };
+    return {
+      creator: input.creator,
+      holder: input.seller,
+      tokensHeld: nextEntry.tokens,
+      floorValueHbd: baseUnitsToHuman(netBaseUnits),
+      heldBlocks: nextEntry.heldBlocks,
+      exitTaxBps: nextTaxBps
+    };
+  }
+
+  async retire(input: RetireInput): Promise<Market> {
+    await delay(300);
+    const seed = this.seed(input.creator);
+    if (!seed) throw new Error(`MockCreatorTokensDataSource: no such market ${input.creator}`);
+    // market.go Retire: ONCE-ONLY — a second call cannot restart the notice
+    // window (RULING D: retiring may only ever make a market MORE frozen).
+    if (seed.retiredAtBlock !== null) {
+      throw new Error('MockCreatorTokensDataSource: market is already retiring; the notice window cannot be restarted');
+    }
+    const next: MarketSeed = { ...seed, retiredAtBlock: mockHeadBlock() };
     setStorageItem(marketKey(input.creator), next, StorageTTL.SESSION);
-
-    const wallet = getStorageItem<Record<string, number>>(walletKey(input.holder)) ?? {};
-    const seededCredits = HOLDER_SEEDS[input.creator]?.find((h) => h.holder === input.holder)?.creditsBaseUnits ?? 0;
-    const priorCredits = wallet[input.creator] ?? seededCredits;
-    const nextCredits = priorCredits + hbdBaseUnits;
-    wallet[input.creator] = nextCredits;
-    setStorageItem(walletKey(input.holder), wallet, StorageTTL.SESSION);
-
-    const floorBaseUnits = refundPayoutBaseUnits(next.reserveBaseUnits, nextCredits, next.supplyBaseUnits);
-    return { creator: input.creator, holder: input.holder, creditsHeld: baseUnitsToHuman(nextCredits), floorValueHbd: baseUnitsToHuman(floorBaseUnits) };
+    return this.buildMarket(input.creator, next);
   }
 
   async ask(input: AskInput): Promise<Ask> {
     await delay(400);
-    // C-C fix, mirrored from vsc-data-source.ts's identical fix: gate on
-    // creditsRequiredBaseUnits being priceable, NOT on oracleStatus === 'ok'
-    // — core.SettlementRate (ask.go) never fails, it settles at PAR whenever
-    // the TWAP's own guards don't pass, so a non-'ok' oracleStatus alone
-    // must not block an ask. The only genuine block is a market with no
-    // face price at all (creditsRequiredBaseUnits === null — see
-    // readQuote() above).
+    // Gate on creditsRequiredBaseUnits being priceable, NOT on
+    // oracleStatus === 'ok' — RULING C's settlement REFUSES rather than
+    // falling back to PAR, and creditsRequiredBaseUnits === null is the exact
+    // signal that a real ask() would ALSO refuse right now.
     const quote = await this.readQuote(input.creator);
     if (quote.creditsRequiredBaseUnits === null) {
       throw new Error(`MockCreatorTokensDataSource: unable to price this ask (${quote.oracleStatus})`);
@@ -458,52 +687,113 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
     await delay(400);
     const seed = this.seed(input.creator);
     if (!seed) throw new Error(`MockCreatorTokensDataSource: no such market ${input.creator}`);
-    const creditsBaseUnits = humanToBaseUnits(input.credits);
-    const wallet = getStorageItem<Record<string, number>>(walletKey(input.holder)) ?? {};
-    const seededCredits = HOLDER_SEEDS[input.creator]?.find((h) => h.holder === input.holder)?.creditsBaseUnits ?? 0;
-    const priorCredits = wallet[input.creator] ?? seededCredits;
-    if (creditsBaseUnits > priorCredits) throw new Error('MockCreatorTokensDataSource: insufficient credits');
+    if (!Number.isInteger(input.tokens) || input.tokens <= 0) {
+      throw new Error('MockCreatorTokensDataSource: tokens must be a positive whole number');
+    }
+    const market = this.buildMarket(input.creator, seed);
+    // refund.go Refund: the WIND-DOWN rail — inWindDown ONLY (retired, or
+    // naturally FROZEN/CLOSED). While the market trades, the exit is sell().
+    if (!(market.retiredAtBlock !== null || market.phase === 'FROZEN' || market.phase === 'CLOSED')) {
+      throw new Error('MockCreatorTokensDataSource: pro-rata refund opens only at wind-down (retired/frozen/closed); while the market trades, exit via sell() instead');
+    }
+    const prior = readWalletEntry(input.creator, input.holder);
+    if (input.tokens > prior.tokens) {
+      throw new Error('MockCreatorTokensDataSource: insufficient tokens');
+    }
+    // refund.go refundPayout: floor(reserve*tokens/supply) — the GROSS
+    // pro-rata slice. Deliberately NOT an area step — see
+    // fixtures.ts's MarketSeed.reserveBaseUnits doc for why the reserve
+    // legitimately drifts from Area(remaining supply) on this rail.
+    const gross = refundPayoutBaseUnits(seed.reserveBaseUnits, input.tokens, seed.supplyTokens);
+    const taxBps = exitTaxBpsAt(prior.heldBlocks);
+    const tax = exitTaxOnBaseUnits(gross, taxBps);
+    // ECON-2 (RULING, intended policy): NO trade fee on the wind-down rail —
+    // only the K2 exit tax is carved from the payout.
 
-    const payoutBaseUnits = refundPayoutBaseUnits(seed.reserveBaseUnits, creditsBaseUnits, seed.supplyBaseUnits);
-    const nextMarket: MarketSeed = {
-      ...seed,
-      supplyBaseUnits: seed.supplyBaseUnits - creditsBaseUnits,
-      reserveBaseUnits: seed.reserveBaseUnits - payoutBaseUnits
+    const nextSeed: MarketSeed = { ...seed, supplyTokens: seed.supplyTokens - input.tokens, reserveBaseUnits: seed.reserveBaseUnits - gross };
+    setStorageItem(marketKey(input.creator), nextSeed, StorageTTL.SESSION);
+
+    const nextEntry: WalletEntry = { tokens: prior.tokens - input.tokens, heldBlocks: prior.heldBlocks };
+    writeWalletEntry(input.creator, input.holder, nextEntry);
+
+    addTreasury(tax);
+
+    const { netBaseUnits, taxBps: nextTaxBps } =
+      nextSeed.supplyTokens > 0
+        ? refundNetBaseUnits(nextSeed.reserveBaseUnits, nextEntry.tokens, nextSeed.supplyTokens, nextEntry.heldBlocks)
+        : { netBaseUnits: 0, taxBps: exitTaxBpsAt(nextEntry.heldBlocks) };
+    return {
+      creator: input.creator,
+      holder: input.holder,
+      tokensHeld: nextEntry.tokens,
+      floorValueHbd: baseUnitsToHuman(netBaseUnits),
+      heldBlocks: nextEntry.heldBlocks,
+      exitTaxBps: nextTaxBps
     };
-    setStorageItem(marketKey(input.creator), nextMarket, StorageTTL.SESSION);
-
-    const nextCredits = priorCredits - creditsBaseUnits;
-    wallet[input.creator] = nextCredits;
-    setStorageItem(walletKey(input.holder), wallet, StorageTTL.SESSION);
-
-    const floorBaseUnits = nextMarket.supplyBaseUnits > 0 ? refundPayoutBaseUnits(nextMarket.reserveBaseUnits, nextCredits, nextMarket.supplyBaseUnits) : 0;
-    return { creator: input.creator, holder: input.holder, creditsHeld: baseUnitsToHuman(nextCredits), floorValueHbd: baseUnitsToHuman(floorBaseUnits) };
   }
 
   async refundHolder(input: RefundHolderInput): Promise<HolderPosition> {
     // Permissionless push: pays `holder` regardless of who called it — same
-    // simulated arithmetic as refund(), just keyed on the payee.
+    // simulated arithmetic as refund(), just keyed on the payee, and always
+    // for the holder's WHOLE balance (refund.go RefundHolder).
     const position = await this.readHolderPosition(input.creator, input.holder);
-    if (!position || position.creditsHeld <= 0) {
-      return { creator: input.creator, holder: input.holder, creditsHeld: 0, floorValueHbd: 0 };
+    if (!position || position.tokensHeld <= 0) {
+      return { creator: input.creator, holder: input.holder, tokensHeld: 0, floorValueHbd: 0, heldBlocks: position?.heldBlocks ?? 0, exitTaxBps: 0 };
     }
-    return this.refund({ creator: input.creator, holder: input.holder, credits: position.creditsHeld });
+    return this.refund({ creator: input.creator, holder: input.holder, tokens: position.tokensHeld });
   }
 
-  async transferCredits(input: TransferCreditsInput): Promise<void> {
+  async transferTokens(input: TransferTokensInput): Promise<void> {
     await delay(400);
-    const amountBaseUnits = humanToBaseUnits(input.amount);
-    const fromWallet = getStorageItem<Record<string, number>>(walletKey(input.from)) ?? {};
-    const seededFrom = HOLDER_SEEDS[input.creator]?.find((h) => h.holder === input.from)?.creditsBaseUnits ?? 0;
-    const fromCredits = fromWallet[input.creator] ?? seededFrom;
-    if (amountBaseUnits > fromCredits) throw new Error('MockCreatorTokensDataSource: insufficient balance');
-    fromWallet[input.creator] = fromCredits - amountBaseUnits;
-    setStorageItem(walletKey(input.from), fromWallet, StorageTTL.SESSION);
+    if (!Number.isInteger(input.tokens) || input.tokens <= 0) {
+      throw new Error('MockCreatorTokensDataSource: tokens must be a positive whole number');
+    }
+    const head = mockHeadBlock();
+    const from = readWalletEntry(input.creator, input.from);
+    if (input.tokens > from.tokens) {
+      throw new Error('MockCreatorTokensDataSource: insufficient balance');
+    }
+    writeWalletEntry(input.creator, input.from, { tokens: from.tokens - input.tokens, heldBlocks: from.heldBlocks });
 
-    const toWallet = getStorageItem<Record<string, number>>(walletKey(input.to)) ?? {};
-    const seededTo = HOLDER_SEEDS[input.creator]?.find((h) => h.holder === input.to)?.creditsBaseUnits ?? 0;
-    const toCredits = toWallet[input.creator] ?? seededTo;
-    toWallet[input.creator] = toCredits + amountBaseUnits;
-    setStorageItem(walletKey(input.to), toWallet, StorageTTL.SESSION);
+    // core.TransferCredits re-averages the RECIPIENT's hold clock toward now
+    // (LOCKED-MECHANISM: "reset on any inflow/transfer" — kills OTC age
+    // laundering), mirroring the same creditInflow chokepoint Buy uses.
+    const to = readWalletEntry(input.creator, input.to);
+    writeWalletEntry(input.creator, input.to, mockCreditInflow(to.tokens, to.heldBlocks, input.tokens, head));
+  }
+
+  async claimTradeFees(input: ClaimTradeFeesInput): Promise<number> {
+    await delay(300);
+    const owedBaseUnits = getStorageItem<number>(feeBalKey(input.account)) ?? 0;
+    if (owedBaseUnits > 0) setStorageItem(feeBalKey(input.account), 0, StorageTTL.SESSION);
+    return baseUnitsToHuman(owedBaseUnits);
+  }
+
+  async closeIfDrained(input: CloseIfDrainedInput): Promise<boolean> {
+    await delay(200);
+    const seed = this.seed(input.creator);
+    if (!seed) return false;
+    const market = this.buildMarket(input.creator, seed);
+    if (market.phase === 'CLOSED') return true;
+    if (market.phase === 'FROZEN' && seed.supplyTokens === 0) {
+      const next: MarketSeed = { ...seed, closedStored: true };
+      setStorageItem(marketKey(input.creator), next, StorageTTL.SESSION);
+      return true;
+    }
+    return false;
+  }
+
+  async withdrawTreasury(input: WithdrawTreasuryInput): Promise<number> {
+    await delay(300);
+    if (!Number.isFinite(input.amountHbd) || input.amountHbd <= 0) {
+      throw new Error('MockCreatorTokensDataSource: amountHbd must be positive');
+    }
+    const amountBaseUnits = humanToBaseUnits(input.amountHbd);
+    const balance = getStorageItem<number>(treasuryKey()) ?? 0;
+    if (amountBaseUnits > balance) {
+      throw new Error('MockCreatorTokensDataSource: amount exceeds treasury balance');
+    }
+    setStorageItem(treasuryKey(), balance - amountBaseUnits, StorageTTL.SESSION);
+    return input.amountHbd;
   }
 }

@@ -31,6 +31,7 @@ import { resolve } from 'node:path';
 
 import type { CreatorTokensConfig } from '../../creator-tokens-data-source';
 import { VscCreatorTokensDataSource } from '../../vsc-data-source';
+import { areaBaseUnits } from '../../contract-math';
 import { CreatorTokensGqlClient, kBal, kEscrow, kRegisteredAt, kSeq, toDid } from '../reads';
 import { ACTION_PAYLOAD_SPECS, type JsonFieldType } from '../payload-contract';
 import { VSC_CALL_ID, type CustomJsonOp } from '../op-builders';
@@ -119,6 +120,17 @@ class CapturingBroadcaster {
 const chM = (creator: string, field: string): string => `m|hive:${creator}|${field}`;
 const chBal = (creator: string, holder: string): string => `bal|hive:${creator}|hive:${holder}`;
 const chEscrow = (creator: string, seq: number): string => `e|hive:${creator}|${seq}`;
+// ★ CURVE-PIVOT ADDITIONS (2026-07-24): acq (holdclock.go kAcqBlock) and the
+// short TWAP observation ring (twap.go kObs/kObsIdx) — neither existed
+// pre-pivot. Both are needed for the journey below: sell()/refund() price the
+// K2/curve exit tax off the seller's OWN hold clock (unseeded reads as 0,
+// i.e. maximally fresh/max tax — holdclock.go's own convention, not a bug),
+// and ask() now settles via a REAL derived rate (RULING C deleted the PAR
+// fallback), which needs a real observation ring with >= MinObsCount (8)
+// samples spanning >= MinObsBlocks (1200) or SettlementRate refuses outright.
+const chAcq = (creator: string, holder: string): string => `acq|hive:${creator}|hive:${holder}`;
+const chObs = (creator: string, i: number): string => `tw|hive:${creator}|${i}`;
+const chObsIdx = (creator: string): string => `tw|hive:${creator}|n`;
 
 const config: CreatorTokensConfig = {
   contractId: 'creator-tokens-e2e',
@@ -129,19 +141,47 @@ const config: CreatorTokensConfig = {
 
 const HEAD = 5_000_000;
 
-/** Seed a healthy ACTIVE market for `creator`, using LITERAL hive: chain keys. */
+/**
+ * Seed a healthy ACTIVE market for `creator`, using LITERAL hive: chain keys.
+ *
+ * ★ CURVE-PIVOT REWRITE: `sup` is seeded NONZERO (50, an integer TOKEN
+ * count — not the deleted PAR "credits" scale) rather than 0, because
+ * settlement.go's SettlementRate refuses OUTRIGHT at supply === 0 ("no
+ * supply: no token exists to settle in") — the journey below needs ask() to
+ * actually settle. `res` is seeded as areaBaseUnits(50) — curve.go's R ===
+ * Area(S) equality invariant — never a hand-picked number (this file's own
+ * import of contract-math.ts's areaBaseUnits computes it, so this seed can
+ * never silently drift from the real curve.go formula it mirrors). `bal` for
+ * bob is seeded so sell()/refund() have real tokens to redeem (this harness
+ * never actually executes a broadcast op — see CapturingBroadcaster — so a
+ * prior "buy" in the same journey never mutates this map; every read in the
+ * journey is against this SAME static seed).
+ */
 function seedActiveMarket(gql: FakeGql, creator: string): void {
+  const supplyTokens = 50;
   gql
     .seed(chM(creator, 'reg'), '4000000') // registeredAt > 0
     .seed(chM(creator, 'face'), '2500') // 2.5 HBD
     .seed(chM(creator, 'fsa'), '4000000')
     .seed(chM(creator, 'fan'), '2500') // band anchor -> [1.25, 5.0] HBD
     .seed(chM(creator, 'faa'), '4000000')
-    .seed(chM(creator, 'cap'), '1000000') // 1000 credits
-    .seed(chM(creator, 'sup'), '0')
-    .seed(chM(creator, 'res'), '0')
-    .seed(chM(creator, 'pu'), '6000000'); // paidUntil > head -> ACTIVE
-  // kState/paused deliberately unseeded: absent -> not CLOSED, not paused.
+    .seed(chM(creator, 'cap'), '1000000') // 1,000,000 TOKENS (raw integer — curve.go MinCap/MaxCap bound this directly, no 3-decimal scaling)
+    .seed(chM(creator, 'sup'), String(supplyTokens))
+    .seed(chM(creator, 'res'), String(areaBaseUnits(supplyTokens)))
+    .seed(chM(creator, 'pu'), '6000000') // paidUntil > head -> ACTIVE
+    .seed(chBal(creator, 'bob'), '50') // bob holds 50 tokens
+    .seed(chAcq(creator, 'bob'), '4712000'); // bob's hold clock: head(5,000,000) − 10 days (288,000 blocks) — partway through the 42-day exit-tax decay, so sell()'s quoted tax is neither 0% nor the 20% max
+  // 8 short-ring observations (MinObsCount), 200 blocks apart, ending 600
+  // blocks before head (well inside MaxStaleBlocks) — a flat 1200-base-units
+  // rate, comfortably below SpotRate(50) so settlement's min() picks the
+  // TWAP arm, not spot (an 'ok' status with a real, non-degenerate rate).
+  for (let i = 0; i < 8; i++) {
+    gql.seed(chObs(creator, i), `${4_998_000 + i * 200}|1200`);
+  }
+  gql.seed(chObsIdx(creator), '8');
+  // kState/paused/rat(retired)/acq deliberately unseeded: absent -> not
+  // CLOSED, not paused, never retired, and every holder's clock reads as
+  // maximally fresh (holdclock.go's own zero-value convention).
 }
 
 // ======================================================================
@@ -188,27 +228,44 @@ async function run(): Promise<void> {
   const capture = new CapturingBroadcaster();
   seedActiveMarket(gql, 'alice');
   // Escrows the answer/reclaim journeys re-read after broadcast (literal keys).
-  gql.seed(chEscrow('alice', 0), 'hive:bob|2500|5500000|ANSWERED|300|QmContentHash123|QmAnswerHash');
-  gql.seed(chEscrow('alice', 1), 'hive:bob|2500|100000|RECLAIMED|300|QmContentHash123|');
+  // ★ EIGHT fields (ask.go packEscrow, verified at source 2026-07-24):
+  //   asker|credits|deadline|status|commissionHbd|acqBlock|contentHash|answerHash
+  // These seeds carried the OLD seven-field layout (no acqBlock), which the
+  // seven-field parser accepted by silently shifting contentHash into
+  // answerHash. The parser now demands eight, so a stale seed fails to parse
+  // outright — which is exactly the loud failure the old layout never gave.
+  gql.seed(chEscrow('alice', 0), 'hive:bob|2500|5500000|ANSWERED|300|4900000|QmContentHash123|QmAnswerHash');
+  gql.seed(chEscrow('alice', 1), 'hive:bob|2500|100000|RECLAIMED|300|4900000|QmContentHash123|');
 
   // THE REAL DATA SOURCE — not the mock. Both deps injected via the real ctor.
   const ds = new VscCreatorTokensDataSource({ config, gql, broadcaster: capture.broadcast });
 
-  section('Journey: register -> renew -> setFace -> setCap -> prepay -> ask -> answer -> reclaim -> refund -> refundHolder -> transfer');
+  section('Journey: register -> renew -> setFace -> setCap -> buy -> sell -> ask -> answer -> reclaim -> retire -> transfer');
 
-  await ds.registerMarket({ creator: 'alice', faceHbd: 2.5, capCredits: 1000 });
+  // ★ CURVE-PIVOT REWRITE (2026-07-24): prepay()/transferCredits() are GONE
+  // (core/prepay.go deleted). buy()/sell() are the curve rails; retire() is
+  // new (RULING D/K3). refund()/refundHolder() are the WIND-DOWN rail and
+  // are deliberately NOT exercised in THIS journey — this harness's FakeGql
+  // is 100% static (CapturingBroadcaster never executes an op, so no prior
+  // call in this sequence ever mutates `gql`'s state), so `retire()` here
+  // cannot actually flip THIS market into wind-down for a later refund() call
+  // to observe. They get their own dedicated, pre-seeded-as-wound-down
+  // section below ("wind-down rail") instead — testing them against a market
+  // that is ACTUALLY frozen, not merely "retire() was called at some earlier
+  // line".
+  await ds.registerMarket({ creator: 'alice', faceHbd: 2.5, capTokens: 1000 });
   await ds.renewSubscription({ creator: 'alice', caller: 'alice', periods: 1 });
   await ds.setFace({ creator: 'alice', newFaceHbd: 3.0 });
-  await ds.setCap({ creator: 'alice', newCapCredits: 2000 });
-  await ds.prepay({ creator: 'alice', holder: 'bob', hbdAmount: 5 });
+  await ds.setCap({ creator: 'alice', newCapTokens: 2000 });
+  await ds.buy({ creator: 'alice', buyer: 'bob', tokens: 5 });
+  await ds.sell({ creator: 'alice', seller: 'bob', tokens: 5 });
   await ds.ask({ creator: 'alice', asker: 'bob', contentHash: 'QmContentHash123', deadlineBlocks: 28_800, maxCreditsBaseUnits: 10_000 });
   await ds.answer({ creator: 'alice', seq: 0, answerHash: 'QmAnswerHash', deadlineBlock: 5_500_000 });
   await ds.reclaim({ creator: 'alice', seq: 1, asker: 'bob', deadlineBlock: 100_000 });
-  await ds.refund({ creator: 'alice', holder: 'bob', credits: 1.5 });
-  await ds.refundHolder({ creator: 'alice', holder: 'bob', caller: 'keeper' });
-  await ds.transferCredits({ creator: 'alice', from: 'bob', to: 'carol', amount: 0.5 });
+  await ds.retire({ creator: 'alice' });
+  await ds.transferTokens({ creator: 'alice', from: 'bob', to: 'carol', tokens: 5 });
 
-  const expectedActions = ['register', 'renew', 'setFace', 'setCap', 'prepay', 'ask', 'answer', 'reclaim', 'refund', 'refundHolder', 'transfer'];
+  const expectedActions = ['register', 'renew', 'setFace', 'setCap', 'buy', 'sell', 'ask', 'answer', 'reclaim', 'retire', 'transfer'];
   eq('journey captured all 11 write actions', capture.ops.length, expectedActions.length);
   for (const a of expectedActions) check(`captured op for action "${a}"`, capture.byAction(a) !== undefined);
 
@@ -233,10 +290,34 @@ async function run(): Promise<void> {
     const spec = ACTION_PAYLOAD_SPECS[action];
     check(`${action}: spec exists`, spec !== undefined);
     if (!spec) continue;
-    const specKeys = Object.keys(spec).sort();
+    // ★ CURVE-PIVOT FIX: the pivot's OPTIONAL fields (register.firstBuy,
+    // sell.minNet, refund.minNet — ActionPayloadSpec's OptionalFieldSpec
+    // shape, payload-contract.ts) may be a bare JsonFieldType string OR
+    // { type, optional: true }. The pre-pivot version of this loop assumed
+    // every spec value was a bare string and required an EXACT payload/spec
+    // key-set match — both assumptions broke the instant any spec gained an
+    // optional field: an absent optional key (the legal, common case — see
+    // op-builders.ts's own "omit the key entirely to mean absent" doc) made
+    // the exact-match `eq` below fail every time, and the per-field loop's
+    // `kind === 'number'/'string'` comparison against an OptionalFieldSpec
+    // OBJECT never matched either branch, mis-classifying it as moneyString
+    // and asserting `typeof undefined === 'string'` — a guaranteed failure on
+    // literally the first optional-field payload this harness ever captured.
+    const specEntries = Object.entries(spec);
+    const requiredKeys = specEntries.filter(([, rawKind]) => typeof rawKind === 'string' || rawKind.optional !== true).map(([k]) => k).sort();
+    const allSpecKeys = new Set(specEntries.map(([k]) => k));
     const payloadKeys = Object.keys(payload).sort();
-    eq(`${action}: field names exactly match spec`, payloadKeys.join(','), specKeys.join(','));
-    for (const [field, kind] of Object.entries(spec)) {
+    for (const k of requiredKeys) check(`${action}: required key "${k}" present in payload`, payloadKeys.includes(k));
+    for (const k of payloadKeys) check(`${action}: payload key "${k}" is declared in spec`, allSpecKeys.has(k));
+    for (const [field, rawKind] of specEntries) {
+      const optional = typeof rawKind !== 'string' && rawKind.optional === true;
+      if (!(field in payload)) {
+        // Legal for an optional field (main.go's own `if raw != ""` branch);
+        // a MISSING required field already failed the requiredKeys check above.
+        if (!optional) continue;
+        continue;
+      }
+      const kind = typeof rawKind === 'string' ? rawKind : rawKind.type;
       const value = payload[field];
       if (kind === 'number') {
         check(`${action}.${field}: bare JSON number`, typeof value === 'number', `got ${typeof value} (${JSON.stringify(value)})`);
@@ -290,41 +371,81 @@ async function run(): Promise<void> {
     const g = new FakeGql(HEAD);
     seedActiveMarket(g, 'alice');
     const noBroadcaster = new VscCreatorTokensDataSource({ config, gql: g });
-    await expectReject('registerMarket without broadcaster rejects', () => noBroadcaster.registerMarket({ creator: 'alice', faceHbd: 2.5, capCredits: 1000 }), 'no broadcaster wired');
-    await expectReject('transferCredits without broadcaster rejects', () => noBroadcaster.transferCredits({ creator: 'alice', from: 'bob', to: 'carol', amount: 0.5 }), 'no broadcaster wired');
+    await expectReject('registerMarket without broadcaster rejects', () => noBroadcaster.registerMarket({ creator: 'alice', faceHbd: 2.5, capTokens: 1000 }), 'no broadcaster wired');
+    await expectReject('transferTokens without broadcaster rejects', () => noBroadcaster.transferTokens({ creator: 'alice', from: 'bob', to: 'carol', tokens: 5 }), 'no broadcaster wired');
   }
 
   // ------------------------------------------------------------------
-  // H5 — PAR fallback: empty observation ring -> ask settles at PAR (does
-  // NOT throw), and the maxCredits cap is STILL enforced.
+  // Wind-down rail (refund.go/sell.go's rail switch) — refund()/refundHolder()
+  // open ONLY once the market is actually winding down; sell()/refund() on
+  // the WRONG rail both reject. Uses its OWN pre-seeded-as-FROZEN market: the
+  // main journey's `ds`/`gql` above called retire() but this harness never
+  // executes a broadcast (CapturingBroadcaster only records the op), so that
+  // call could never have flipped `gql`'s own state — this section instead
+  // seeds a market that IS ALREADY wound down, so refund()/refundHolder()
+  // have a real rail to observe.
   // ------------------------------------------------------------------
-  section('H5 (PAR) — empty obs ring settles at PAR; maxCredits cap still enforced');
+  section('Wind-down rail — refund()/refundHolder() open once FROZEN; sell()/refund() reject on the wrong rail');
   {
-    const g = new FakeGql(HEAD);
-    const cap2 = new CapturingBroadcaster();
-    seedActiveMarket(g, 'alice'); // obs ring deliberately absent (tw|hive:alice|n unseeded -> 0 observations)
-    const dsPar = new VscCreatorTokensDataSource({ config, gql: g, broadcaster: cap2.broadcast });
+    const gqlFrozen = new FakeGql(HEAD);
+    const captureFrozen = new CapturingBroadcaster();
+    const supplyTokens = 20;
+    gqlFrozen
+      .seed(chM('alice', 'reg'), '1000000')
+      .seed(chM('alice', 'face'), '2000')
+      .seed(chM('alice', 'fsa'), '1000000')
+      .seed(chM('alice', 'cap'), '1000000')
+      .seed(chM('alice', 'sup'), String(supplyTokens))
+      .seed(chM('alice', 'res'), String(areaBaseUnits(supplyTokens)))
+      .seed(chM('alice', 'pu'), '2000000') // paidUntil(2,000,000) + GraceBlocks(144,000) << head(5,000,000) -> naturally FROZEN, not via Retire
+      .seed(chBal('alice', 'bob'), '20');
+    const dsFrozen = new VscCreatorTokensDataSource({ config, gql: gqlFrozen, broadcaster: captureFrozen.broadcast });
 
-    const quote = await dsPar.readQuote('alice');
-    // AskRate refuses (0 observations); SettlementRate falls back to PAR, so a
-    // price is STILL produced rather than a null that would brick ask().
-    eq('quote oracleStatus reflects PAR fallback (insufficient_observations)', quote.oracleStatus, 'insufficient_observations');
-    eq('quote still priced at PAR (creditsRequiredBaseUnits = face base units)', quote.creditsRequiredBaseUnits, 2500);
-    check('quote.rate is non-null (PAR, not a bricking null)', quote.rate !== null, `rate=${JSON.stringify(quote.rate)}`);
+    await dsFrozen.refund({ creator: 'alice', holder: 'bob', tokens: 5 });
+    check('refund() captured an op once the market is FROZEN', captureFrozen.byAction('refund') !== undefined);
 
-    // ask() must NOT throw on the empty ring — it settles at PAR and broadcasts.
-    let askThrew = false;
-    try {
-      await dsPar.ask({ creator: 'alice', asker: 'bob', contentHash: 'QmH5', deadlineBlocks: 28_800, maxCreditsBaseUnits: 10_000 });
-    } catch {
-      askThrew = true;
-    }
-    check('ask() with empty obs ring settles at PAR and does NOT throw', !askThrew);
-    check('ask() at PAR actually broadcast an op', cap2.byAction('ask') !== undefined);
+    await dsFrozen.refundHolder({ creator: 'alice', holder: 'bob', caller: 'keeper' });
+    check('refundHolder() captured an op once the market is FROZEN', captureFrozen.byAction('refundHolder') !== undefined);
 
-    // The "obvious fix must not disarm the maxCredits cap": a cap below the PAR
-    // settlement price (2500) must still hard-block the ask.
-    await expectReject('maxCredits cap still enforced at PAR (cap < settlement price)', () => dsPar.ask({ creator: 'alice', asker: 'bob', contentHash: 'QmH5b', deadlineBlocks: 28_800, maxCreditsBaseUnits: 2_000 }), 'exceeds maxCreditsBaseUnits');
+    await expectReject('sell() rejects on the wind-down rail (FROZEN)', () => dsFrozen.sell({ creator: 'alice', seller: 'bob', tokens: 5 }), 'curve sell is closed while the market winds down');
+
+    // The MAIN journey's market (`ds`/`gql`, seeded ACTIVE) never actually
+    // wound down (see this section's own header note) — refund() there must
+    // still reject, proving the two rails are genuinely gated on real chain
+    // state, not merely on whichever write was called most recently client-side.
+    await expectReject('refund() rejects while the market is ACTIVE (not winding down)', () => ds.refund({ creator: 'alice', holder: 'bob', tokens: 5 }), 'pro-rata refund opens only at wind-down');
+  }
+
+  // ------------------------------------------------------------------
+  // RULING K3 — a RETIRED market closes BOTH new inflows AND the curve Sell
+  // rail IMMEDIATELY, even during its still-nominally-OVERDUE 5-day notice
+  // window (where naturalPhase alone would still read ACTIVE/OVERDUE and
+  // canInflowOpen() would say "open"). This is the exact gap
+  // contract-math.ts's canInflowOpen() cannot see on its own (it predates
+  // RULING K3) — vsc-data-source.ts's buildMarket() ANDs retiredAtBlock ===
+  // null on top of it; this section proves that AND is load-bearing.
+  // ------------------------------------------------------------------
+  section('RULING K3 — a retired market is neither buyable nor sellable during its OVERDUE notice');
+  {
+    const gqlRetired = new FakeGql(HEAD);
+    seedActiveMarket(gqlRetired, 'alice'); // paidUntil far in the future -> naturalPhase alone reads ACTIVE
+    // kRetiredAt stores block+1 (0 == never retired) — retired 1000 blocks
+    // ago, well inside the 5-day (144,000-block) notice window.
+    gqlRetired.seed(chM('alice', 'rat'), String(HEAD - 1_000 + 1));
+    const dsRetired = new VscCreatorTokensDataSource({ config, gql: gqlRetired });
+
+    const market = await dsRetired.readMarket('alice');
+    check('retired market does NOT display as ACTIVE (Phase folds in the notice, market.go RULING D)', market !== null && market.phase === 'OVERDUE', `phase=${market?.phase}`);
+    check('retired market reports the decoded retiredAtBlock', market !== null && market.retiredAtBlock === HEAD - 1_000, `retiredAtBlock=${market?.retiredAtBlock}`);
+    check('retired market canBuy is false EVEN THOUGH phase reads only OVERDUE', market !== null && market.canBuy === false);
+    check('retired market canAsk is false EVEN THOUGH phase reads only OVERDUE', market !== null && market.canAsk === false);
+
+    await expectReject('quoteBuy() rejects on a retired (still-OVERDUE) market', () => dsRetired.quoteBuy('alice', 1), 'market inflow is not open');
+    await expectReject(
+      'quoteSell() rejects on a retired (still-OVERDUE) market — the CURVE rail is closed, not merely the inflow gate',
+      () => dsRetired.quoteSell('alice', 'bob', 1),
+      'curve sell is closed while the market winds down'
+    );
   }
 
   // ------------------------------------------------------------------
@@ -370,8 +491,15 @@ function writeGoFixtures(ops: CapturedOp[]): void {
     const spec = ACTION_PAYLOAD_SPECS[action];
     if (!spec) continue;
     const fields: GoFixtureField[] = [];
-    for (const [name, kind] of Object.entries(spec)) {
+    for (const [name, rawKind] of Object.entries(spec)) {
+      // A spec entry is either a bare JsonFieldType or an OptionalFieldSpec
+      // ({ type, optional }) — the optional shape arrived with the curve
+      // pivot (register.firstBuy, sell/refund.minNet).
+      const kind = typeof rawKind === 'string' ? rawKind : rawKind.type;
       const goKind = SPEC_KIND_TO_GO[kind];
+      // An OMITTED optional key must produce no fixture field at all —
+      // String(undefined) would otherwise hand Go the literal "undefined".
+      if (!(name in payload)) continue;
       const value = payload[name];
       if (goKind === 'u64') {
         fields.push({ name, kind: goKind, wantU64: typeof value === 'number' ? value : Number(value) });

@@ -38,15 +38,22 @@ import {
   answerPayload,
   askPayload,
   buildOp,
-  prepayPayload,
+  buyPayload,
+  claimTradeFeesPayload,
+  closeIfDrainedPayload,
+  pausePayload,
   reclaimPayload,
   refundHolderPayload,
   refundPayload,
   registerPayload,
   renewPayload,
+  retirePayload,
+  sellPayload,
   setCapPayload,
   setFacePayload,
-  transferCreditsPayload
+  transferTokensPayload,
+  unpausePayload,
+  withdrawTreasuryPayload
 } from './op-builders';
 
 interface Case {
@@ -56,17 +63,31 @@ interface Case {
 
 function representativeCases(): Case[] {
   return [
-    { action: 'register', payload: registerPayload(2_500, 1_000, 10_000) },
+    // Registration is FREE now — no feePaid. Both the plain and the
+    // optional-firstBuy shapes are covered, because the optional key is
+    // exactly where an "omit vs send" mistake would hide.
+    { action: 'register', payload: registerPayload(2_500, 1_000) },
+    { action: 'register', payload: registerPayload(2_500, 1_000, 25) },
     { action: 'renew', payload: renewPayload('alice', 3, 30_000) },
     { action: 'setFace', payload: setFacePayload(3_000) },
     { action: 'setCap', payload: setCapPayload(2_000) },
-    { action: 'prepay', payload: prepayPayload('alice', 5_000) },
-    { action: 'ask', payload: askPayload('alice', 'Qm-some-content-hash', 28_800, 300, 5_000) },
+    // The curve rails. Both optional-minNet shapes, same reasoning as above.
+    { action: 'buy', payload: buyPayload('alice', 25) },
+    { action: 'sell', payload: sellPayload('alice', 10) },
+    { action: 'sell', payload: sellPayload('alice', 10, 9_500) },
+    { action: 'ask', payload: askPayload('alice', 'Qm-some-content-hash', 28_800, 5_000) },
     { action: 'answer', payload: answerPayload(7, 'Qm-some-answer-hash') },
     { action: 'reclaim', payload: reclaimPayload('alice', 7) },
-    { action: 'refund', payload: refundPayload('alice', 1_500) },
+    { action: 'refund', payload: refundPayload('alice', 15) },
+    { action: 'refund', payload: refundPayload('alice', 15, 1_200) },
     { action: 'refundHolder', payload: refundHolderPayload('alice', 'bob') },
-    { action: 'transfer', payload: transferCreditsPayload('alice', 'bob', 500) }
+    { action: 'transfer', payload: transferTokensPayload('alice', 'bob', 5) },
+    { action: 'retire', payload: retirePayload('alice') },
+    { action: 'claimTradeFees', payload: claimTradeFeesPayload() },
+    { action: 'closeIfDrained', payload: closeIfDrainedPayload('alice') },
+    { action: 'withdrawTreasury', payload: withdrawTreasuryPayload(50_000) },
+    { action: 'pause', payload: pausePayload() },
+    { action: 'unpause', payload: unpausePayload() }
   ];
 }
 

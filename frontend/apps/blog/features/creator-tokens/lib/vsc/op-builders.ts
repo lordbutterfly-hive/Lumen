@@ -5,7 +5,7 @@
 // own admission.
 //
 // AUTH (finding C1, posting-key-theft fix): the contract requires ACTIVE
-// authority on every one of its 11 write entrypoints, full stop — a Hive
+// authority on every one of its 18 write entrypoints, full stop — a Hive
 // POSTING key is the low-value key delegated to every dApp including this
 // frontend, and a posting-signed transfer/refund/reclaim/setFace/setCap/
 // answer/refundHolder would let anyone holding only that key (this app, a
@@ -108,9 +108,70 @@ export function buildOp(opts: {
 // (caller is always used instead — see each entrypoint's own doc comment in
 // main.go and payload-contract.ts's spec doc).
 
-/** main.go Register (main.go:411-449). */
-export function registerPayload(faceBaseUnits: number, capBaseUnits: number, feePaidBaseUnits: number): Record<string, unknown> {
-  return { face: faceBaseUnits, cap: capBaseUnits, feePaid: moneyStr(feePaidBaseUnits) };
+/**
+ * main.go Register (main.go:502-560). REGISTRATION IS FREE — the `feePaid`
+ * field this used to send is DELETED on the contract side, and sending it now
+ * trips the unread-key check. `firstBuyTokens` is the OPTIONAL atomic creator
+ * first buy: omit it (or pass 0) for a plain registration.
+ */
+export function registerPayload(faceBaseUnits: number, capTokens: number, firstBuyTokens = 0): Record<string, unknown> {
+  const payload: Record<string, unknown> = { face: faceBaseUnits, cap: capTokens };
+  // Omit the KEY entirely when there is no first buy — main.go gates on
+  // `raw != ""`, and an explicit "0" would take the buy branch for zero
+  // tokens rather than the plain-registration branch.
+  if (firstBuyTokens > 0) payload.firstBuy = intStr(firstBuyTokens);
+  return payload;
+}
+
+/**
+ * main.go Buy (main.go:999-1042). `tokens` is a count of WHOLE TOKENS, not a
+ * 3-decimal amount. There is deliberately no cost cap in the payload: the
+ * buyer's slippage protection is their own signed `transfer.allow` on the
+ * single HiveDraw of TotalDue, which buildOp() sets from hbdLegBaseUnits.
+ */
+export function buyPayload(creator: string, tokens: number): Record<string, unknown> {
+  return { creator, tokens: intStr(tokens) };
+}
+
+/**
+ * main.go Sell (main.go:1044-1105). `minNet` is the seller's OPTIONAL signed
+ * floor on the HBD they receive — the front-run/slippage guard core.Sell
+ * checks BEFORE any write. Omitting it opts OUT of the guard entirely (which
+ * is what keeps an exit from ever being trapped), so pass one whenever the UI
+ * has shown the seller a quote.
+ */
+export function sellPayload(creator: string, tokens: number, minNetBaseUnits?: number): Record<string, unknown> {
+  const payload: Record<string, unknown> = { creator, tokens: intStr(tokens) };
+  if (minNetBaseUnits !== undefined && minNetBaseUnits > 0) payload.minNet = moneyStr(minNetBaseUnits);
+  return payload;
+}
+
+/** main.go Retire (main.go:1303-1344). Creator-only, ONCE-ONLY; starts the 5-day notice then FROZEN. Moves no funds. */
+export function retirePayload(creator: string): Record<string, unknown> {
+  return { creator };
+}
+
+/** main.go ClaimTradeFees (main.go:1261-1301). No payload at all — the caller IS the beneficiary. */
+export function claimTradeFeesPayload(): Record<string, unknown> {
+  return {};
+}
+
+/** main.go CloseIfDrained (main.go:1157-1208). */
+export function closeIfDrainedPayload(creator: string): Record<string, unknown> {
+  return { creator };
+}
+
+/** main.go WithdrawTreasury (main.go:1210-1259). Owner-gated inside core; the UI must keep this behind an owner-only surface. */
+export function withdrawTreasuryPayload(amountBaseUnits: number): Record<string, unknown> {
+  return { amount: moneyStr(amountBaseUnits) };
+}
+
+/** main.go Pause/Unpause (main.go:438/461). Global INBOUND pause only — outflows (sell, refund, claim, answer) never pause. */
+export function pausePayload(): Record<string, unknown> {
+  return {};
+}
+export function unpausePayload(): Record<string, unknown> {
+  return {};
 }
 
 /** main.go Renew (main.go:451-479). */
@@ -128,31 +189,27 @@ export function setCapPayload(newCapBaseUnits: number): Record<string, unknown> 
   return { newCap: newCapBaseUnits };
 }
 
-/** main.go Prepay (main.go:529-557). */
-export function prepayPayload(creator: string, hbdPaidBaseUnits: number): Record<string, unknown> {
-  return { creator, hbdPaid: moneyStr(hbdPaidBaseUnits) };
-}
+// prepayPayload is GONE. core/prepay.go was DELETED by the bonding-curve
+// pivot — there is no PAR issuance entrypoint to call any more, and the
+// replacement is buyPayload (the curve), NOT a renamed prepay. Anything still
+// importing prepayPayload is pre-pivot code that must be re-pointed at buy.
 
-/** main.go Ask (main.go:589-637). `rate` is deliberately never a field here — see main.go's file-level "departure #1" comment; the wrapper always sources it fresh from core.AskRate, never the payload. */
-export function askPayload(
-  creator: string,
-  contentHash: string,
-  deadlineBlocks: number,
-  commissionHbdPaidBaseUnits: number,
-  maxCreditsBaseUnits: number
-): Record<string, unknown> {
+/**
+ * main.go Ask (main.go:755-808). TWO fields the wrapper does NOT read, and
+ * that must therefore never be sent: `rate` (the wrapper sources it fresh
+ * from core's own settlement derivation) and `commissionHbdPaid` — the
+ * wrapper computes the exact commission itself via core.CommissionOwedFor,
+ * because core.Ask requires it to match EXACTLY (the H2 fix) and any
+ * client-side copy of that formula could only ever drift into bricking every
+ * ask.
+ */
+export function askPayload(creator: string, contentHash: string, deadlineBlocks: number, maxCreditsBaseUnits: number): Record<string, unknown> {
   // maxCredits is REQUIRED by core.Ask — it is the asker's own signed cap on
   // credits spent, and the contract rejects a missing or zero value rather than
   // defaulting to unlimited. It exists because `face` is creator-controlled and
   // intra-block order is producer-chosen, so a creator could otherwise spike the
   // price between the asker signing and the tx executing.
-  return {
-    creator,
-    contentHash,
-    deadlineBlocks,
-    commissionHbdPaid: moneyStr(commissionHbdPaidBaseUnits),
-    maxCredits: moneyStr(maxCreditsBaseUnits)
-  };
+  return { creator, contentHash, deadlineBlocks, maxCredits: moneyStr(maxCreditsBaseUnits) };
 }
 
 /** main.go Answer (main.go:639-661). */
@@ -165,9 +222,20 @@ export function reclaimPayload(creator: string, seq: number): Record<string, unk
   return { creator, seq };
 }
 
-/** main.go Refund (main.go:690-723). */
-export function refundPayload(creator: string, creditsBaseUnits: number): Record<string, unknown> {
-  return { creator, credits: moneyStr(creditsBaseUnits) };
+/**
+ * main.go Refund (main.go:928-997) — the WIND-DOWN exit (FROZEN/CLOSED only;
+ * while the market trades the exit is `sell`). The wire field is still named
+ * `credits`, but under the curve it is a count of WHOLE TOKENS. `minNet` is
+ * the same optional signed floor `sell` takes, checked before any write.
+ *
+ * The payout is pro-rata AND TAXED: net = gross − ceil(gross·τ(h)/1e4) where
+ * τ is the caller's own hold clock (there is no trade fee on this rail). Any
+ * minNet the UI passes must be computed from the NET, not the gross.
+ */
+export function refundPayload(creator: string, tokens: number, minNetBaseUnits?: number): Record<string, unknown> {
+  const payload: Record<string, unknown> = { creator, credits: intStr(tokens) };
+  if (minNetBaseUnits !== undefined && minNetBaseUnits > 0) payload.minNet = moneyStr(minNetBaseUnits);
+  return payload;
 }
 
 /** main.go RefundHolder (main.go:725-757). */
@@ -175,9 +243,17 @@ export function refundHolderPayload(creator: string, holder: string): Record<str
   return { creator, holder };
 }
 
-/** main.go Transfer/transferCredits (main.go:559-587). `from` is deliberately never a field here — see main.go's file-level "departure #2" comment; the wrapper always sources it from the env caller, never the payload. */
-export function transferCreditsPayload(creator: string, to: string, amountBaseUnits: number): Record<string, unknown> {
-  return { creator, to, amount: moneyStr(amountBaseUnits) };
+/**
+ * main.go Transfer (main.go:665-753) — moves TOKENS between holders. `from`
+ * is deliberately never a field here: the wrapper always sources it from the
+ * env caller, never the payload.
+ *
+ * Renamed from transferCreditsPayload with the pivot: there are no "credits"
+ * any more, and the amount is a whole-token count rather than a 3-decimal
+ * base-units value.
+ */
+export function transferTokensPayload(creator: string, to: string, tokens: number): Record<string, unknown> {
+  return { creator, to, amount: intStr(tokens) };
 }
 
 // moneyStr converts an already-computed non-negative integer base-units
@@ -192,4 +268,23 @@ function moneyStr(n: number): string {
     throw new Error(`op-builders: invalid money amount ${JSON.stringify(n)} — must be a non-negative finite base-units number`);
   }
   return String(Math.round(n));
+}
+
+/**
+ * intStr is moneyStr's counterpart for TOKEN COUNTS (buy/sell/refund/transfer
+ * `tokens`, register `firstBuy`). Same wire shape — parseBigDecimal accepts
+ * only a quoted bare base-10 integer either way — but a DIFFERENT unit, and
+ * that distinction is the whole point of having two names: a token count must
+ * never be run through humanToBaseUnits/baseUnitsToHuman (see contract-math.ts's
+ * unit note — that would be a silent 1000x error on a fund path).
+ *
+ * REJECTS a fractional value rather than rounding it: you cannot buy half a
+ * token, and silently rounding 0.5 to 1 would charge the user for a token
+ * they did not ask for. The caller must floor deliberately.
+ */
+function intStr(n: number): string {
+  if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) {
+    throw new Error(`op-builders: invalid token count ${JSON.stringify(n)} — must be a non-negative whole number (tokens are integers on the curve; floor before calling)`);
+  }
+  return String(n);
 }
