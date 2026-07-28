@@ -172,6 +172,7 @@ export function useVoteMutation() {
 
     onSuccess: async (data) => {
       const { voter, author, permlink, weight } = data;
+      const isLiteVote = user.account_tier === 'lite';
       toast({
         title: 'Vote successful',
         description:
@@ -182,6 +183,16 @@ export function useVoteMutation() {
               : 'Your vote has been removed.',
         variant: 'success'
       });
+
+      // A lite account's vote is Lumen-LOCAL: it is never on chain (a Hive vote is
+      // attributed to the signing account, so N lite users would collapse into one).
+      // Every refetch below therefore asks Hivemind about a vote that does not exist
+      // there and reverts the optimistic update ~20s later — the vote visibly
+      // disappears with no error, which reads as a bug. Keep the optimistic state and
+      // refresh only the manabar-free local data instead.
+      if (isLiteVote) {
+        return;
+      }
 
       // Vote data has optimistic update - use validated refetch to avoid
       // overwriting optimistic data with stale API responses from Hivemind

@@ -689,17 +689,31 @@ func (ix *Index) foldKnownEventLocked(ev Event, raw RawEvent) bool {
 		// credits/tokens).
 		m.subBal(p.Actor, sold)
 		ix.noteHolderCreator(p.Actor, p.Creator)
-		// The exit tax is a real, UNSPLIT addMoney straight to the GLOBAL
-		// kTreasury() (sell.go, RULING J/K: "one addMoney, no aggregate, no
-		// distribution") — the SAME global key EvRegistered.feePaid/
-		// EvRenewed.paid/EvAnswered.commissionHbd already fold into via
-		// ix.treasuryHbd (see TreasuryHbd's own doc). Leaving this out would
-		// make TreasuryHbd() silently under-count reality from the moment
-		// Sell starts running — exactly the same class of silent drift this
-		// whole fix exists to close. (Sell's Fee, unlike Tax, is NOT folded
-		// here — see the audit-only check above for why: it is an unsplit
-		// total and no portion of it is known to reach the treasury.)
-		ix.treasuryHbd = new(big.Int).Add(ix.treasuryHbd, tax)
+		// ONLY THE PLATFORM HALF OF THE EXIT TAX REACHES THE TREASURY.
+		//
+		// core/exittax.go's accrueExitTax splits every exit tax 50/50 (USER
+		// RULING 2026-07-27, and since the same day there is no creator
+		// special case — one rule for every seller): floor(tax/2) to the
+		// creator's pull-claimable kFeeBal, and the REMAINDER to kTreasury().
+		// Mirrored here exactly, remainder included, so the two agree at the
+		// integers for an odd tax.
+		//
+		// This fold previously added the WHOLE tax, on the strength of a
+		// comment describing the pre-split behaviour ("a real, UNSPLIT
+		// addMoney straight to the GLOBAL kTreasury"). That made
+		// TreasuryHbd() OVERSTATE the real on-chain treasury by every
+		// creator-half ever split off — growing with every sell, silently,
+		// and in the direction that makes a solvency cross-check look
+		// healthier than reality. A cross-check that errs optimistic is worse
+		// than none.
+		//
+		// The creator half is deliberately NOT accumulated: kFeeBal is a
+		// separate pull pot this package tracks audit-only (see
+		// KindTradeFeesClaimed below), never folded into treasuryHbd. Sell's
+		// Fee leg stays audit-only for its own documented reason above.
+		creatorHalf := new(big.Int).Div(tax, big.NewInt(2))
+		platformHalf := new(big.Int).Sub(tax, creatorHalf)
+		ix.treasuryHbd = new(big.Int).Add(ix.treasuryHbd, platformHalf)
 		m.history = append(m.history, raw)
 
 	case KindRetired:

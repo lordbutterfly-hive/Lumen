@@ -216,7 +216,12 @@ func TestRegister_InvalidCreatorAccountRejected(t *testing.T) {
 	// "hive:blocktrades", so a bare-Hive-name rule rejected every real user.
 	// The rule that remains is the one that is a security control: nothing may
 	// contain the state-key delimiter. See TestValidAccount_AcceptsRealChainCallerShapes.
-	cases := []string{"", "a|b", "hive:al|ice", "way-too-long-" + strings.Repeat("x", 96)}
+	// The over-length case is derived from MaxAccountLen rather than hardcoded:
+	// it was a literal 96-x string, which stopped rejecting the moment the bound
+	// was raised to fit a taproot-length BTC DID (util.go's own derivation). A
+	// fixture pinned to the OLD value of the constant it is testing silently
+	// stops testing anything.
+	cases := []string{"", "a|b", "hive:al|ice", strings.Repeat("x", MaxAccountLen+1)}
 	for _, creator := range cases {
 		err := Register(s, creator, creator, 100, 1000, 1000)
 		if err == nil {

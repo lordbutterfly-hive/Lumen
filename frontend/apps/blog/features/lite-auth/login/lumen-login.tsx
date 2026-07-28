@@ -6,6 +6,8 @@ import DialogLogin from '@/blog/components/dialog-login';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useLiteLogin, type WalletChain } from './use-lite-login';
 import WalletConnectDialog from './wallet-connect-dialog';
+import TurnstileWidget, { turnstileSiteKey } from './turnstile-widget';
+import GoogleSignIn, { googleConfigured } from './google-signin';
 import HiveSigninPanel from './hive-signin-panel';
 
 // TODO i18n — staged copy while the redesign lands (mirrors app-header's LABELS
@@ -31,7 +33,8 @@ const COPY = {
     'Free. No keys to save. Your posts publish through Lumen with a small “via Lumen” mark, and you can upgrade to a full Hive account whenever you want.',
   back: 'Back',
   checking: 'Checking…',
-  googleSeam: 'Google sign-in is being set up — for now, use a Bitcoin wallet or a Hive account below.'
+  googleSeam: 'Google sign-in is being set up — for now, use a Bitcoin wallet or a Hive account below.',
+  captchaNeeded: 'Please complete the “I’m human” check first.'
 };
 
 type View = 'default' | 'name';
@@ -39,13 +42,17 @@ type View = 'default' | 'name';
 const LumenLogin: FC = () => {
   const router = useRouter();
   const { user } = useUserClient();
-  const { nameStatus, checkName, createAccount } = useLiteLogin();
+  const { nameStatus, checkName, createAccount, google } = useLiteLogin();
 
   const [view, setView] = useState<View>('default');
   // Which wallet dialog is open (null = none). One dialog serves both chains.
   const [walletOpen, setWalletOpen] = useState<WalletChain | null>(null);
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
+  // '' until the widget hands one over. Required only when a site key is configured,
+  // which is exactly when the server has a secret to verify it against.
+  const [captchaToken, setCaptchaToken] = useState('');
+  const captchaRequired = turnstileSiteKey().length > 0;
   const [error, setError] = useState<string | null>(null);
 
   // Already signed in → leave the pre-auth page.
@@ -63,11 +70,29 @@ const LumenLogin: FC = () => {
   // built and ready; wiring the token acquisition here is the follow-up.
   const startGoogle = () => setError(COPY.googleSeam);
 
+  /** Google returned an ID token — hand it to the (already built) backend. */
+  const handleGoogleToken = async (idToken: string) => {
+    setError(null);
+    setBusy(true);
+    const outcome = await google(idToken);
+    setBusy(false);
+    if (outcome.status === 'authenticated') goHome();
+    else if (outcome.status === 'needs_name') setView('name');
+    else setError(outcome.message);
+  };
+
   const submitName = async () => {
     if (nameStatus.state !== 'available') return;
+    // The token MUST be sent. The server verifies it and, in production, refuses to
+    // open signup at all unless Turnstile is configured — so a client that never
+    // sends one turns every signup into `captcha_failed`.
+    if (captchaRequired && !captchaToken) {
+      setError(COPY.captchaNeeded);
+      return;
+    }
     setBusy(true);
     setError(null);
-    const outcome = await createAccount(name.trim().toLowerCase());
+    const outcome = await createAccount(name.trim().toLowerCase(), captchaToken || undefined);
     setBusy(false);
     if (outcome.status === 'ok') goHome();
     else setError(outcome.message);
@@ -110,19 +135,25 @@ const LumenLogin: FC = () => {
               </div>
 
               <div className="p-6">
-                {/* Primary: Google identity (Lumen Lite, no keys). */}
-                <button
-                  onClick={startGoogle}
-                  className="flex h-[52px] w-full items-center justify-center gap-[11px] rounded-[14px] border border-[#e4e6e9] bg-white text-[15.5px] font-semibold text-[#161511] hover:border-[#d3d6da] hover:bg-[#f9fafb]"
-                >
-                  <svg width="20" height="20" viewBox="0 0 48 48" aria-hidden>
-                    <path fill="#4285F4" d="M45.1 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h11.8c-.5 2.7-2 5-4.4 6.6v5.5h7.1c4.1-3.8 6.6-9.4 6.6-16.1z" />
-                    <path fill="#34A853" d="M24 46c5.9 0 10.9-2 14.5-5.4l-7.1-5.5c-2 1.3-4.5 2.1-7.4 2.1-5.7 0-10.5-3.8-12.2-9H4.5v5.7C8.1 41.1 15.4 46 24 46z" />
-                    <path fill="#FBBC05" d="M11.8 27.2c-.4-1.3-.7-2.7-.7-4.2s.2-2.9.7-4.2v-5.7H4.5C3 16.1 2.1 19.9 2.1 23s.9 6.9 2.4 9.9l7.3-5.7z" />
-                    <path fill="#EA4335" d="M24 9.9c3.2 0 6.1 1.1 8.4 3.3l6.3-6.3C34.9 3.3 29.9 1 24 1 15.4 1 8.1 5.9 4.5 13.1l7.3 5.7c1.7-5.2 6.5-8.9 12.2-8.9z" />
-                  </svg>
-                  {COPY.google}
-                </button>
+                {/* Primary: Google identity (Lumen Lite, no keys). The real Google
+                    button renders when a client id is configured; otherwise the styled
+                    fallback below explains the state instead of failing on click. */}
+                {googleConfigured() ? (
+                  <GoogleSignIn onIdToken={handleGoogleToken} onError={setError} />
+                ) : (
+                  <button
+                    onClick={startGoogle}
+                    className="flex h-[52px] w-full items-center justify-center gap-[11px] rounded-[14px] border border-[#e4e6e9] bg-white text-[15.5px] font-semibold text-[#161511] hover:border-[#d3d6da] hover:bg-[#f9fafb]"
+                  >
+                    <svg width="20" height="20" viewBox="0 0 48 48" aria-hidden>
+                      <path fill="#4285F4" d="M45.1 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h11.8c-.5 2.7-2 5-4.4 6.6v5.5h7.1c4.1-3.8 6.6-9.4 6.6-16.1z" />
+                      <path fill="#34A853" d="M24 46c5.9 0 10.9-2 14.5-5.4l-7.1-5.5c-2 1.3-4.5 2.1-7.4 2.1-5.7 0-10.5-3.8-12.2-9H4.5v5.7C8.1 41.1 15.4 46 24 46z" />
+                      <path fill="#FBBC05" d="M11.8 27.2c-.4-1.3-.7-2.7-.7-4.2s.2-2.9.7-4.2v-5.7H4.5C3 16.1 2.1 19.9 2.1 23s.9 6.9 2.4 9.9l7.3-5.7z" />
+                      <path fill="#EA4335" d="M24 9.9c3.2 0 6.1 1.1 8.4 3.3l6.3-6.3C34.9 3.3 29.9 1 24 1 15.4 1 8.1 5.9 4.5 13.1l7.3 5.7c1.7-5.2 6.5-8.9 12.2-8.9z" />
+                    </svg>
+                    {COPY.google}
+                  </button>
+                )}
 
                 <div className="mx-0.5 my-4 flex items-center gap-3">
                   <div className="h-px flex-1 bg-[#ececec]" />
@@ -230,19 +261,14 @@ const LumenLogin: FC = () => {
             ) : null}
             <p className="mb-[18px] text-xs text-[#9ca3af]">{COPY.nameRules}</p>
 
-            {/* Turnstile CAPTCHA slot — visual placeholder; the widget + site key
-                are the follow-up seam (backend only enforces when configured). */}
-            <div className="mb-4 flex items-center gap-[11px] rounded-[11px] border border-[#e4e6e9] bg-[#faf9f6] px-3.5 py-3">
-              <span className="flex h-5 w-5 items-center justify-center rounded-[5px] border-[1.5px] border-[#cbd5e1] text-xs text-[#9ca3af]">
-                ✓
-              </span>
-              <span className="text-[13px] text-[#6b7280]">Confirm you’re human</span>
-              <span className="ml-auto text-[11px] text-[#9ca3af]">Turnstile</span>
-            </div>
+            {/* Real Turnstile widget. Renders nothing when no site key is set — which
+                is also when the server passes the check through, so the two ends can
+                never be half-configured. */}
+            <TurnstileWidget onToken={setCaptchaToken} />
 
             <button
               onClick={submitName}
-              disabled={busy || nameStatus.state !== 'available'}
+              disabled={busy || nameStatus.state !== 'available' || (captchaRequired && !captchaToken)}
               className="h-12 w-full cursor-pointer rounded-xl bg-[#c0392b] text-[15px] font-semibold text-white hover:bg-[#a5301f] disabled:cursor-not-allowed disabled:opacity-50"
             >
               {busy ? COPY.checking : COPY.create}

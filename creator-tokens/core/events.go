@@ -405,6 +405,17 @@ func EvBought(creator, actor string, block uint64, minted, cost, fee, totalDue *
 // the trade fee to the pull pots; net == gross−tax−fee, the seller's single
 // payout; taxBps/heldBlocks are the exit-tax rate actually applied and the
 // hold clock it was read from.
+//
+// WHERE `tax` ACTUALLY GOES, because a consumer cannot see it from this event
+// and getting it wrong silently corrupts a solvency total: accrueExitTax
+// (exittax.go) SPLITS it — floor(tax/2) to the seller's creator's
+// pull-claimable kFeeBal, the REMAINDER to the global kTreasury(). It is one
+// rule for every seller; the `seller == creator` special case was deleted
+// (USER RULING 2026-07-28). A consumer folding the whole `tax` into a treasury
+// total therefore OVERSTATES it by every creator-half ever split off — which
+// is exactly what the indexer did until this was written down. The two halves
+// are not emitted separately because they are derivable from `tax` alone, and
+// duplicating them would create a second source of truth to drift.
 func EvSold(creator, actor string, block uint64, sold, gross, tax, fee, net *big.Int, taxBps, heldBlocks uint64) string {
 	return evOpen("sold", creator, actor, block) +
 		`,"sold":"` + evMoney(sold) + `"` +

@@ -47,7 +47,11 @@ function clearStoredEncryptionKeyWif(): void {
 
 declare global {
   interface Window {
-    google: {
+    // Optional, deliberately: this global only exists once Google's script has
+    // loaded, and a dependency in the tree declares the same property as optional —
+    // a required declaration here conflicts with it (TS2687, "All declarations of
+    // 'google' must have identical modifiers"). Callers already null-check it.
+    google?: {
       accounts: {
         oauth2: {
           initCodeClient(config: {
@@ -181,6 +185,7 @@ export class SignerGoogleDrive extends Signer {
     const state = encodeUrlSafeBase64(JSON.stringify({ returnUrl, nonce }));
     const redirectUri = `${window.location.origin}/api/google-drive/callback`;
 
+    if (!window.google) throw new Error('Google script has not loaded yet');
     const tokenClient = window.google.accounts.oauth2.initCodeClient({
       client_id: siteConfig.googleDrive.clientId,
       scope: siteConfig.googleDrive.scopes,
@@ -204,6 +209,7 @@ export class SignerGoogleDrive extends Signer {
    */
   private initiatePopupFlow(): Promise<string> {
     this._accessToken = new Promise<string>((resolve, reject) => {
+      if (!window.google) throw new Error('Google script has not loaded yet');
       const tokenClient = window.google.accounts.oauth2.initCodeClient({
         client_id: siteConfig.googleDrive.clientId,
         scope: siteConfig.googleDrive.scopes,

@@ -1,6 +1,7 @@
 'use client';
 
 import { Link } from '@hive/ui';
+import { useLiteOverlay } from '@/blog/lib/lite/client/use-lite-overlay';
 import { Icons } from '@ui/components/icons';
 import TimeAgo from '@ui/components/time-ago';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@ui/components/tooltip';
@@ -38,7 +39,14 @@ const LABELS = {
 export default function MediumPostCard({ post }: { post: Entry }) {
   const { user } = useUserClient();
   const reblogMutation = useReblogMutation();
-  const href = `/${post.category}/@${post.author}/${post.permlink}`;
+  // A Lumen proxy post arrives from Hivemind authored by the shared publishing
+  // account, so without this overlay a lite user's post shows the wrong name here.
+  // No-op for ordinary Hive posts.
+  const liteOverlay = useLiteOverlay(post);
+  const displayAuthor = liteOverlay?.author ?? post.author;
+  const displayTitle = liteOverlay?.title || post.title;
+
+  const href = `/${post.category}/@${displayAuthor}/${post.permlink}`;
   const dek = getPostSummary(post.json_metadata, post.body);
   const reblogCount = post.reblogs ?? 0;
   const payoutDeclined = parseFloat(post.max_accepted_payout) === 0;
@@ -49,7 +57,7 @@ export default function MediumPostCard({ post }: { post: Entry }) {
   // card only shows a thumbnail when the post genuinely has one, so treat
   // that specific fallback value as "no image".
   const extractedImage = find_first_img(post);
-  const authorAvatarFallback = getUserAvatarUrl(post.author, 'large');
+  const authorAvatarFallback = getUserAvatarUrl(displayAuthor, 'large');
   const thumbnail = extractedImage && extractedImage !== authorAvatarFallback ? extractedImage : '';
 
   const handleReblog = async () => {
@@ -71,15 +79,15 @@ export default function MediumPostCard({ post }: { post: Entry }) {
     <article className="mx-[-18px] rounded-2xl border-b border-[#ebebeb] p-[24px_18px] transition-colors hover:bg-[#faf9f6]">
       {/* Byline row */}
       <div className="flex flex-wrap items-center gap-2 font-sans text-[13.5px] text-[#6b7280]">
-        <Link href={`/@${post.author}`} className="shrink-0" data-testid="medium-card-avatar">
+        <Link href={`/@${displayAuthor}`} className="shrink-0" data-testid="medium-card-avatar">
           <img
-            src={getUserAvatarUrl(post.author, 'small')}
-            alt={post.author}
+            src={getUserAvatarUrl(displayAuthor, 'small')}
+            alt={displayAuthor}
             className="h-[26px] w-[26px] rounded-full object-cover"
           />
         </Link>
         <Link
-          href={`/@${post.author}`}
+          href={`/@${displayAuthor}`}
           className="font-semibold text-[#2a2822] hover:underline"
           data-testid="medium-card-author"
         >

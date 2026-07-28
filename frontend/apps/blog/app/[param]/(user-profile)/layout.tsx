@@ -4,6 +4,7 @@ import { Metadata } from 'next';
 import { dehydrate, Hydrate } from '@tanstack/react-query';
 import { getQueryClient } from '@/blog/lib/react-query';
 import { getAccountFullCached } from '@/blog/lib/cached-api';
+import { liteAccountAsProfile } from '@/blog/lib/lite/render/lite-account';
 import { getAccountReputations, getDynamicGlobalProperties } from '@transaction/lib/hive-api';
 import { getTwitterInfo, isThirdPartyApiEnabled } from '@transaction/lib/custom-api';
 import { isValidAccountNameFormat } from '@transaction/lib/validation';
@@ -78,7 +79,16 @@ const Layout = async ({ children, params }: { children: ReactNode; params: { par
 
   // Layer 2: Existence check (API call) - fixes 500 for nonexistent users
   // Uses getAccountFullCached for request-level dedup with generateMetadata
-  const account = await getAccountFullCached(username);
+  let account = await getAccountFullCached(username).catch(() => null);
+
+  // Lumen lite account fallback. A lite user has no Hive account until they upgrade,
+  // so this lookup fails and the page 404'd — meaning a lite user could not view their
+  // own profile, and everything that hangs off a profile (Follow, post list) was
+  // unreachable. Serve a profile built from what we know, with every chain-shaped
+  // figure zeroed rather than invented.
+  if (!account || !account.name) {
+    account = await liteAccountAsProfile(username);
+  }
   if (!account || !account.name) {
     notFound();
   }

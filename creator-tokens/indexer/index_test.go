@@ -1104,14 +1104,20 @@ func TestIndex_BoughtAndSoldFoldBalancesCorrectly(t *testing.T) {
 		t.Errorf("Stats.Ingested = %d, want 3", stats.Ingested)
 	}
 
-	// The exit tax is a real, unsplit addMoney to the GLOBAL treasury
-	// (sell.go, RULING J/K) — TreasuryHbd() must include it or it silently
-	// under-counts kTreasury() from the moment Sell starts running. Buy's
-	// fee/cost never reach the treasury in a way this event's wire shape can
-	// attribute (no FeeCreator/FeePlatform split on the wire), so the only
-	// contribution here is registered.feePaid(0) + sold.tax(21) = 21.
-	if got := ix.TreasuryHbd(); got.Cmp(big.NewInt(21)) != 0 {
-		t.Errorf("TreasuryHbd() = %s, want 21 (feePaid 0 + sell's exit tax 21)", got)
+	// Only the PLATFORM half of the exit tax reaches the treasury:
+	// accrueExitTax (core/exittax.go) sends floor(tax/2) to the creator's
+	// pull-claimable fee balance and the remainder to kTreasury(). For tax=21
+	// that is creator 10, platform 11, so the treasury total is
+	// registered.feePaid(0) + 11 = 11.
+	//
+	// THIS EXPECTATION WAS 21 — the whole tax — which was pinning the bug it
+	// was written to prevent: TreasuryHbd() overstated the real treasury by
+	// every creator-half ever split off, drifting further with every sell and
+	// in the direction that makes a solvency cross-check look healthier than
+	// reality. The old comment cited "RULING J/K: unsplit"; the 50/50 split
+	// superseded that (USER RULING 2026-07-27) and the doc had not caught up.
+	if got := ix.TreasuryHbd(); got.Cmp(big.NewInt(11)) != 0 {
+		t.Errorf("TreasuryHbd() = %s, want 11 (feePaid 0 + the platform remainder of a 21 exit tax)", got)
 	}
 }
 
@@ -1340,5 +1346,24 @@ func TestIndex_TradeFeesClaimedIsScopedToCreatorAndNeverTouchesTreasury(t *testi
 	// entry, mirroring RefundedEvent.Payout's identical treatment.
 	if got := ix.Position("carol", "carol"); got.Sign() != 0 {
 		t.Errorf("Position(carol,carol) = %s, want 0 (a trade-fee claim must never touch the credits/token balance ledger)", got)
+	}
+}
+
+// TestIndex_SoldTaxOnlyCreditsThePlatformHalf pins the split. core/exittax.go's
+// accrueExitTax sends floor(tax/2) to the creator's pull-claimable fee balance
+// and the REMAINDER to the global treasury. This fold used to add the whole
+// tax, so TreasuryHbd() overstated the real treasury by every creator-half ever
+// split off — a solvency cross-check that drifts in the optimistic direction,
+// which is worse than not having one.
+//
+// The odd amount is deliberate: it catches an implementation that halves with a
+// second floor instead of taking the remainder.
+func TestIndex_SoldTaxOnlyCreditsThePlatformHalf(t *testing.T) {
+	ix := NewIndex()
+	// tax = 401 -> creator floor(401/2) = 200, platform remainder = 201.
+	ix.Ingest([]RawEvent{{OutputID: "o1", Data: `{"ev":"sold","v":1,"creator":"alice","actor":"bob","block":900,"sold":"10","gross":"5000","tax":"401","fee":"100","net":"4499","taxBps":802,"heldBlocks":1000}`}})
+	if got := ix.TreasuryHbd(); got.String() != "201" {
+		t.Fatalf("treasury = %s after a 401 exit tax, want 201 (the platform remainder). "+
+			"401 means the whole tax was folded; 200 means the remainder was floored away.", got)
 	}
 }

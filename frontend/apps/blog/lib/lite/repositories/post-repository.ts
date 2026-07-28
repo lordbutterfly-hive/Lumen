@@ -332,3 +332,12 @@ export async function countPublishedByUser(userId: string): Promise<number> {
   );
   return Number(res.rows[0]?.n ?? 0);
 }
+
+/** Total non-deleted posts by this user — the one profile figure we can state truly. */
+export async function countByUser(userId: string): Promise<number> {
+  const res = await query<{ n: string }>(
+    `SELECT count(*)::text AS n FROM lumen_post WHERE user_id = $1 AND deleted_locally = false`,
+    [userId]
+  );
+  return Number(res.rows[0]?.n ?? 0);
+}
