@@ -20,8 +20,18 @@ import { getCommunity, getSubscriptions } from "@transaction/lib/bridge-api";
 import { useTranslation } from "@/blog/i18n/client";
 import { AdvancedSettingsPostForm } from "@/blog/features/post-editor/advanced-settings-post-form";
 import { useLoggedUserContext } from "@/blog/features/votes/hooks/use-logged-user";
+import { useUserClient } from "@smart-signer/lib/auth/use-user-client";
 import { Entry } from "@hive/common-hiveio-packages/wax";
 import { AccountFormValues } from "@/blog/features/post-editor/types";
+
+/**
+ * Lumen-specific copy. Follows the convention set by the other lite surfaces
+ * (`user-menu.tsx`): Lumen strings live next to their component until the whole
+ * lite vocabulary is translated in one pass, rather than half-populating nine
+ * locale files.
+ */
+const LITE_REWARDS_NOTE =
+  'Lumen posts decline rewards. Upgrade to a Hive account to start earning on what you write.';
 
 interface PostPublishingSectionProps {
   form: UseFormReturn<AccountFormValues>;
@@ -51,6 +61,13 @@ export function PostPublishingSection({
   const { t } = useTranslation("common_blog");
   const router = useRouter();
   const { manabarsData } = useLoggedUserContext();
+  const { user } = useUserClient();
+  // A Lumen lite post declines all rewards on chain (decision 2026-07-23) and the
+  // lite submit path forwards none of these fields, so showing payout type,
+  // maximum payout or beneficiaries would collect settings that are silently
+  // dropped. Resource Credits are equally meaningless: a lite account has no Hive
+  // account to spend them from — the publishing account pays.
+  const isLite = user?.account_tier === "lite";
 
   const { data: communityData } = useQuery({
     queryKey: ["community", categoryParam, observer],
@@ -75,7 +92,14 @@ export function PostPublishingSection({
         {t("submit_page.publishing_section")}
       </span>
 
-      {!editMode ? (
+      {isLite ? (
+        <div className="flex flex-col gap-2">
+          <span className="text-sm font-medium">{t("submit_page.author_rewards")}</span>
+          <span className="text-xs text-muted-foreground" data-testid="lite-rewards-description">
+            {LITE_REWARDS_NOTE}
+          </span>
+        </div>
+      ) : !editMode ? (
         <div className="flex flex-col gap-2">
           <span className="text-sm font-medium">{t("submit_page.post_options")}</span>
 
@@ -179,22 +203,24 @@ export function PostPublishingSection({
         </div>
       )}
 
-      <div className="flex flex-col gap-2">
-        <span className="text-sm font-medium">{t("submit_page.account_stats")}</span>
-        <div className="flex items-center gap-3">
-          <Progress
-            value={manabarsData?.rc.percentageValue ?? 0}
-            className="h-2 flex-1"
-            indicatorClassName="bg-[#0088FE]"
-          />
-          <span
-            className="text-xs tabular-nums text-muted-foreground"
-            data-testid="resource-credits-description"
-          >
-            {manabarsData?.rc.percentageValue ?? 0}% RC
-          </span>
+      {isLite ? null : (
+        <div className="flex flex-col gap-2">
+          <span className="text-sm font-medium">{t("submit_page.account_stats")}</span>
+          <div className="flex items-center gap-3">
+            <Progress
+              value={manabarsData?.rc.percentageValue ?? 0}
+              className="h-2 flex-1"
+              indicatorClassName="bg-[#0088FE]"
+            />
+            <span
+              className="text-xs tabular-nums text-muted-foreground"
+              data-testid="resource-credits-description"
+            >
+              {manabarsData?.rc.percentageValue ?? 0}% RC
+            </span>
+          </div>
         </div>
-      </div>
+      )}
 
       {!editMode ? (
         <FormField

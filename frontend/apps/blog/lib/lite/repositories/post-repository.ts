@@ -110,6 +110,15 @@ export async function getPostById(postId: string): Promise<LumenPost | null> {
   return rows[0] ? mapPost(rows[0]) : null;
 }
 
+/** Batch lookup — ONE query for a whole feed page, never one per entry. */
+export async function getPostsByIds(postIds: string[]): Promise<LumenPost[]> {
+  if (postIds.length === 0) return [];
+  const { rows } = await query<PostRow>(`SELECT * FROM lumen_post WHERE post_id = ANY($1::text[])`, [
+    postIds
+  ]);
+  return rows.map(mapPost);
+}
+
 /** Newest-first keyset pagination by ULID post_id (which is time-sortable). */
 export async function getUserPosts(
   userId: string,

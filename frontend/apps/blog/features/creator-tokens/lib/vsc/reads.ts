@@ -43,8 +43,14 @@ export function toDid(account: string): string {
 // distinct from the signer (transferCredits' `to`, refundHolder's `holder`)
 // — core's own validAccount only runs AFTER the tx has already spent the
 // caller's RC, so this is one guard the client can usefully run first.
+// MaxAccountLen is 160 on the contract side (core/util.go), not 96. The 96
+// here was too TIGHT, and a too-tight client guard is a real bug of its own: it
+// rejects BTC P2WSH/taproot did:pkh forms the contract would happily accept, so
+// a legitimate holder could never be sent tokens or swept. Widened 2026-07-28
+// (gap list) to match core exactly — the point of this mirror is to agree with
+// core, and disagreeing in EITHER direction is a defect.
 export function isWellFormedDid(account: string): boolean {
-  if (account.length === 0 || account.length > 96) return false;
+  if (account.length === 0 || account.length > 160) return false;
   for (let i = 0; i < account.length; i++) {
     const c = account.charCodeAt(i);
     if (c === 0x7c /* '|' */ || c < 0x20 || c > 0x7e) return false;
@@ -59,8 +65,59 @@ function mk(c: string, field: string): string {
 export function kFace(c: string): string {
   return mk(c, 'face');
 }
+
+// ── The offerings shop (core/keys.go's mko/kOffer*). Offering keys are
+// EPOCH-SCOPED: Register bumps kOfferEpoch, which orphans the whole previous
+// incarnation's catalogue in one write instead of deleting N keys. So every
+// shop read is two-stage — resolve the epoch first, then build the id keys
+// against it. Reading with a stale epoch silently returns a DEAD shop. ──
+function mko(c: string, epoch: number, id: number, field: string): string {
+  return `m|${toDid(c)}|o|${epoch}|${id}|${field}`;
+}
+/** Monotone offering-namespace epoch, bumped by Register. Absent/0 is the normal first-incarnation value. */
+export function kOfferEpoch(c: string): string {
+  return mk(c, 'oep');
+}
+/** The LIVE ids, comma-separated. The list IS the live set — its length is the live count, and there is no second counter that could drift from it. Id 0 is not an offering (it doubles as the counter slot), so it never appears here. */
+export function kOfferIds(c: string, epoch: number): string {
+  return mko(c, epoch, 0, 'ids');
+}
+/** HBD base units. 0 means deleted or never set — the contract refuses an ask against it rather than falling back to the face price. */
+export function kOfferPrice(c: string, epoch: number, id: number): string {
+  return mko(c, epoch, id, 'p');
+}
+/** Free-form display label. Also the key of the price BAND (bands are title-anchored, so a rename cannot reset one). */
+export function kOfferTitle(c: string, epoch: number, id: number): string {
+  return mko(c, epoch, id, 't');
+}
+
+/** Parses kOfferIds' comma-separated list. Tolerates absent/empty (a creator with no shop) and skips anything unparseable rather than throwing — a malformed entry must not blank the whole catalogue. */
+export function parseOfferIds(raw: string | null | undefined): number[] {
+  if (!raw) return [];
+  const out: number[] = [];
+  for (const part of raw.split(',')) {
+    const n = Number(part.trim());
+    if (Number.isInteger(n) && n > 0) out.push(n);
+  }
+  return out;
+}
 export function kFaceSetAt(c: string): string {
   return mk(c, 'fsa');
+}
+
+/**
+ * The delivery gate's penalty deadline (core/keys.go's kDelinquentUntil,
+ * "ddu"): the block until which the creator's INFLOWS are refused because they
+ * ignored too many paying customers. 0 = clear.
+ *
+ * RequireInflowOpen consults it on-chain, so a client that does not read it
+ * renders a live Buy/Ask button for a market that will revert every attempt —
+ * the exact "the UI lies" class this feature has already been burned by. Note
+ * it gates INFLOWS ONLY: every outflow (sell, refund, reclaim, claim) stays
+ * open, by design (`non-payment AND non-delivery never gate funds`).
+ */
+export function kDelinquentUntil(c: string): string {
+  return mk(c, 'ddu');
 }
 // kFaceAnchor/kFaceAnchorAt (keys.go: "fan"/"faa") — the band's rolling
 // window anchor, added to core alongside the 2026-07-20 SetFace fix (see
@@ -189,7 +246,7 @@ export interface ParsedEscrow {
    */
   tokensEscrowed: number;
   deadlineBlock: number;
-  status: 'PENDING' | 'ANSWERED' | 'RECLAIMED';
+  status: 'PENDING' | 'ANSWERED' | 'RECLAIMED' | 'DECLINED';
   /** The asker's hold clock, carried through the escrow so reclaiming cannot launder a fresh position into an aged, untaxed one. */
   acqBlock: number;
   contentHash: string;
@@ -237,7 +294,11 @@ export function parseEscrow(v: string): ParsedEscrow | null {
   if (creditsBaseUnits === null) return null;
   const deadlineBlock = parseStrictBaseUnits(deadlineStr);
   if (deadlineBlock === null) return null;
-  if (status !== 'PENDING' && status !== 'ANSWERED' && status !== 'RECLAIMED') return null;
+  // DECLINED must be accepted here (2026-07-28). It is one of ask.go's four
+  // real escrow statuses, and rejecting it made every declined escrow parse as
+  // null — i.e. silently disappear from the creator's inbox and the asker's
+  // list, as if the ask had never existed.
+  if (status !== 'PENDING' && status !== 'ANSWERED' && status !== 'RECLAIMED' && status !== 'DECLINED') return null;
   return { asker, tokensEscrowed: creditsBaseUnits, deadlineBlock, status, acqBlock, contentHash, answerHash };
 }
 
@@ -357,6 +418,10 @@ export function unknownMarket(creator: string): Market {
     globalInflowPaused: false,
     canBuy: false,
     canAsk: false,
+    // null, not 0: on an UNKNOWN market we make no claim about delivery
+    // standing either. The actions are disabled by canBuy/canAsk being false,
+    // and the UI must attribute that to the failed read, never to the creator.
+    delinquentUntilBlock: null,
     retiredAtBlock: null,
     floorPriceHbd: 0,
     spotPriceHbd: 0,
@@ -369,7 +434,16 @@ export function buildAskFromParsed(creator: string, seq: number, parsed: ParsedE
   // A stored status (ANSWERED/RECLAIMED) is a fact regardless of head; only
   // the PENDING -> awaiting/reclaimable split needs "now" — default to the
   // non-actionable `awaiting` when head is unavailable rather than guessing.
-  const status = head !== null ? deriveAskStatus(parsed.status, parsed.deadlineBlock, head) : parsed.status === 'ANSWERED' ? 'answered' : parsed.status === 'RECLAIMED' ? 'reclaimed' : 'awaiting';
+  const status =
+    head !== null
+      ? deriveAskStatus(parsed.status, parsed.deadlineBlock, head)
+      : parsed.status === 'ANSWERED'
+        ? 'answered'
+        : parsed.status === 'RECLAIMED'
+          ? 'reclaimed'
+          : parsed.status === 'DECLINED'
+            ? 'declined'
+            : 'awaiting';
   return {
     id: `${creator}:${seq}`,
     creator,

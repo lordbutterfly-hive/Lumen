@@ -3,7 +3,9 @@
 import { FC, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Service } from '../../market/token-detail';
-import { launchToken, STUDIO_HANDLE } from '../../market/store';
+import { useLiveStudio } from '../../live/use-live-studio';
+import { MarketUnavailable } from '../../live/market-states';
+import { buyQuote } from '../../market/curve';
 import { usdWhole } from '../../market/format';
 import TokenShell from '../token-shell';
 
@@ -21,7 +23,9 @@ const CAP_PRESETS = [
 
 const LaunchWizard: FC = () => {
   const router = useRouter();
+  const studio = useLiveStudio();
   const [step, setStep] = useState(0);
+  const [failed, setFailed] = useState<string | null>(null);
   const [prices, setPrices] = useState<Record<string, string>>({ ask: '10', review: '80' });
   const [cap, setCap] = useState(20000);
   const [firstBuy, setFirstBuy] = useState('');
@@ -34,25 +38,68 @@ const LaunchWizard: FC = () => {
   // here instead of navigating away so the creator sees that before leaving.
   const [firstBuySkipped, setFirstBuySkipped] = useState(false);
 
-  const launch = () => {
+  /**
+   * REGISTER, then post the services as SHOP OFFERINGS.
+   *
+   * Two chain calls, not one, and deliberately in that order: `register` takes
+   * a single `face` price (the creator's legacy default) plus the cap, and the
+   * named catalogue is a separate `createOffering` per service. Registration is
+   * the irreversible part, so it goes first and alone — if an offering fails
+   * afterwards the creator has a live market with one price and can add the
+   * rest from the Studio, which is a far better failure than a half-registered
+   * market that cannot be retried.
+   *
+   * The first service's price becomes the market's `face`, so a creator who
+   * posts nothing still has one working price.
+   */
+  const launch = async () => {
     if (launching) return; // #7: no double-submit
     setLaunching(true);
+    setFailed(null);
     const services: Service[] = SERVICE_TEMPLATE.map((t) => {
       const n = parseFloat((prices[t.key] ?? '0').replace(/,/g, ''));
       return { ...t, status: 'live' as const, usd: Number.isFinite(n) && n > 0 ? n : 0 }; // #5: no Infinity/NaN
     }).filter((s) => s.usd > 0);
+
+    // The optional anti-snipe first buy is a DOLLAR budget in this wizard but a
+    // whole-TOKEN count on-chain. Convert with the same curve math the contract
+    // runs; a budget too small for one whole token buys nothing, and the
+    // creator is told rather than silently launched without it.
     const fb = parseFloat(firstBuy.replace(/,/g, ''));
-    const result = launchToken({ services, cap, firstBuyUsd: Number.isFinite(fb) && fb > 0 ? fb : 0 });
-    if (result.firstBuySkipped) {
-      // Token IS launched — only the first buy vanished. Stay on this step
-      // and say so, rather than silently landing in the Studio as if the
-      // whole thing (first buy included) had gone through.
+    const budget = Number.isFinite(fb) && fb > 0 ? fb : 0;
+    const firstBuyTokens = budget > 0 ? buyQuote(budget, { supply: 0, cap, position: null }).tokens : 0;
+    const skipped = budget > 0 && firstBuyTokens <= 0;
+
+    try {
+      await studio.register({
+        faceHbd: services[0]?.usd ?? 0,
+        capTokens: cap,
+        firstBuyTokens: skipped ? 0 : firstBuyTokens
+      });
+      // Everything past the first price is a named offering. Sequential, not
+      // parallel: they share one nonce and one signer, and a creator being
+      // asked to sign four prompts at once is worse than four in a row.
+      for (const sv of services.slice(1)) {
+        await studio.createOffering({ title: sv.name, priceUsd: sv.usd });
+      }
+    } catch (e) {
+      setLaunching(false);
+      setFailed(e instanceof Error ? e.message : 'Launch failed.');
+      return;
+    }
+
+    if (skipped) {
+      // The token IS launched — only the first buy could not be filled. Stay
+      // here and say so rather than landing in the Studio as if the whole
+      // thing, first buy included, had gone through.
       setLaunching(false);
       setFirstBuySkipped(true);
       return;
     }
     router.push('/creators/studio');
   };
+
+  if (studio.status === 'unavailable') return <MarketUnavailable />;
 
   return (
     <TokenShell>
@@ -75,12 +122,12 @@ const LaunchWizard: FC = () => {
               <div className="mt-4 flex items-center gap-3 rounded-xl border border-[#e4e6e9] px-4 py-3.5">
                 <span className="h-11 w-11 rounded-[13px]" style={{ background: 'linear-gradient(135deg,#c0392b,#e07b3e)' }} />
                 <div>
-                  <div className="text-[15px] font-bold text-[#161511]">@{STUDIO_HANDLE}</div>
+                  <div className="text-[15px] font-bold text-[#161511]">@{studio.creator ?? '—'}</div>
                   <div className="text-[12.5px] text-[#6b7280]">Hive reputation 68 · 1,240 followers</div>
                 </div>
               </div>
               <p className="mt-3 font-serif text-[14px] leading-[1.55] text-[#4b5563]">
-                Your token is bound to <strong>@{STUDIO_HANDLE}</strong> — one per account. It can’t be moved or renamed, and nobody can create one pretending to be you.
+                Your token is bound to <strong>@{studio.creator ?? 'your account'}</strong> — one per account. It can’t be moved or renamed, and nobody can create one pretending to be you.
               </p>
             </>
           ) : null}
@@ -169,9 +216,22 @@ const LaunchWizard: FC = () => {
                   token, or it would have pushed past your cap. Nothing was charged; you can buy from the Studio.
                 </div>
               ) : null}
+              {failed ? (
+                // A failed launch must be LOUD and must not navigate: registering
+                // is the irreversible step, and a creator who lands in the Studio
+                // after a rejected signature would think they had a market.
+                <div className="mt-4 rounded-[12px] border border-[#f0c9c2] bg-[#fef2f0] px-4 py-3.5 text-[13.5px] font-semibold text-[#c0392b]">
+                  Your token wasn’t launched. Nothing was charged. {failed}
+                </div>
+              ) : null}
+              {studio.isLite ? (
+                <div className="mt-4 rounded-[12px] border border-[#e4e6e9] bg-[#f6f7f8] px-4 py-3.5 text-[13.5px] text-[#6b7280]">
+                  This account can’t sign transactions yet, so it can’t launch a token. Upgrade to a full account first.
+                </div>
+              ) : null}
               <button
                 onClick={firstBuySkipped ? () => router.push('/creators/studio') : launch}
-                disabled={launching}
+                disabled={launching || studio.isLite || !studio.loggedIn}
                 className="mt-5 w-full rounded-[13px] bg-[#c0392b] py-[15px] text-[15px] font-bold text-white hover:bg-[#96271b] disabled:opacity-60"
               >
                 {firstBuySkipped

@@ -2,8 +2,9 @@
 
 import { FC, useMemo, useState } from 'react';
 import { Link } from '@hive/ui';
-import type { CreatorTokenSummary } from '../../market/types';
-import { useCreatorList } from '../../market/store';
+import { useLiveDiscovery } from '../../live/use-live-discovery';
+import { usdFromHbd } from '../../live/adapt';
+import type { CreatorSummary } from '../../types';
 import { usdCompact, usdPrice, usdWhole } from '../../market/format';
 import TokenShell from '../token-shell';
 
@@ -32,13 +33,6 @@ const SORTS: { id: Sort; label: string }[] = [
   { id: 'new', label: 'New' }
 ];
 
-// Rough hours from a "~6h" / "~2h" / "~1d" response-time string, for the Fastest sort.
-function responseHours(s: string): number {
-  const m = s.match(/([\d.]+)\s*([hd])/i);
-  if (!m) return 9999;
-  return parseFloat(m[1]) * (m[2].toLowerCase() === 'd' ? 24 : 1);
-}
-
 const DeliveryStrip: FC<{ marks: boolean[] }> = ({ marks }) => (
   <div className="mb-2.5 flex gap-1">
     {marks.map((answered, i) => (
@@ -50,66 +44,97 @@ const DeliveryStrip: FC<{ marks: boolean[] }> = ({ marks }) => (
   </div>
 );
 
-const CreatorCard: FC<{ c: CreatorTokenSummary }> = ({ c }) => (
-  <Link
-    href={`/creators/${c.handle}`}
-    className="block rounded-[18px] border border-[#ebebeb] bg-white p-5 shadow-[0_1px_2px_rgba(20,18,10,0.03)] transition-colors hover:bg-[#faf9f6]"
-  >
-    <div className="mb-3.5 flex items-center gap-3">
-      <span className="h-[46px] w-[46px] flex-shrink-0 rounded-[13px]" style={{ background: c.avatarColor }} />
-      <div className="min-w-0 flex-1">
-        <div className="text-[15.5px] font-bold text-[#161511]">@{c.handle}</div>
-        <div className="font-serif text-[13px] text-[#4b5563]">{c.what}</div>
-      </div>
-    </div>
+/** Blocks -> a human response label. Median, straight from the view. */
+function responseLabel(blocks: number | null): string {
+  if (blocks === null) return '';
+  const hours = (blocks * 3) / 3600;
+  if (hours < 1) return `~${Math.max(1, Math.round(hours * 60))} minutes`;
+  if (hours < 48) return `~${Math.round(hours)} hours`;
+  return `~${Math.round(hours / 24)} days`;
+}
 
-    {c.delivery.available ? (
-      <div>
-        <DeliveryStrip marks={c.delivery.marks} />
-        <div className="text-[13px] tabular-nums text-[#3f4650]">
-          {c.delivery.completionPct}% completion rate · {c.delivery.answered} of {c.delivery.total} · usually within{' '}
-          {c.delivery.typicalResponse}
+/** Decoration derived from the handle — not identity, and not implied to be theirs. */
+function avatarFill(handle: string): string {
+  let h = 0;
+  for (let i = 0; i < handle.length; i++) h = (h * 31 + handle.charCodeAt(i)) % 360;
+  return `linear-gradient(135deg,hsl(${h} 42% 42%),hsl(${(h + 40) % 360} 38% 48%))`;
+}
+
+const CreatorCard: FC<{ c: CreatorSummary }> = ({ c }) => {
+  // The view gives COUNTS, not an ordered pass/fail history, so the strip is
+  // drawn from the totals and is NOT a chronology. Do not label it one.
+  const marks = [...Array(Math.min(c.answeredCount, 14)).fill(true), ...Array(Math.min(c.missedCount, 4)).fill(false)] as boolean[];
+  return (
+    <Link
+      href={`/creators/${c.creator}`}
+      className="block rounded-[18px] border border-[#ebebeb] bg-white p-5 shadow-[0_1px_2px_rgba(20,18,10,0.03)] transition-colors hover:bg-[#faf9f6]"
+    >
+      <div className="mb-3.5 flex items-center gap-3">
+        <span className="h-[46px] w-[46px] flex-shrink-0 rounded-[13px]" style={{ background: avatarFill(c.creator) }} />
+        <div className="min-w-0 flex-1">
+          <div className="text-[15.5px] font-bold text-[#161511]">@{c.creator}</div>
+          {/* No bio: not contract state, not indexed, and inventing one under
+              someone's name reads as their words. */}
         </div>
       </div>
-    ) : (
-      <div className="rounded-[11px] border border-dashed border-[#e4e6e9] px-3.5 py-3 text-[13px] text-[#9ca3af]">
-        {COPY.recordUnavailable}
-      </div>
-    )}
 
-    <div className="mt-3.5 flex items-center justify-between gap-3 border-t border-[#f1f3f5] pt-3.5">
-      <span className="text-[12.5px] tabular-nums text-[#6b7280]">From {usdWhole(c.fromPriceUsd)} per task</span>
-      <span className="text-[11.5px] tabular-nums text-[#9ca3af]">
-        Token {usdPrice(c.priceUsd)} · cap {usdCompact(c.marketCapUsd)}
-      </span>
-    </div>
-  </Link>
-);
+      {c.completionPct !== null ? (
+        <div>
+          <DeliveryStrip marks={marks} />
+          <div className="text-[13px] tabular-nums text-[#3f4650]">
+            {c.completionPct}% completion rate · {c.answeredCount} of {c.answeredCount + c.missedCount}
+            {c.medianResponseBlocks !== null ? ` · usually within ${responseLabel(c.medianResponseBlocks)}` : ''}
+          </div>
+          {c.avgRating !== null ? (
+            <div className="mt-1 text-[12.5px] tabular-nums text-[#6b7280]">
+              Rated {c.avgRating}/5 by {c.ratingCount} buyer{c.ratingCount === 1 ? '' : 's'}
+            </div>
+          ) : null}
+        </div>
+      ) : (
+        // No record YET — this creator simply has not been hired. Deliberately
+        // not dressed up as a positive, and it is why they sort last.
+        <div className="rounded-[11px] border border-dashed border-[#e4e6e9] px-3.5 py-3 text-[13px] text-[#9ca3af]">
+          {COPY.recordUnavailable}
+        </div>
+      )}
+
+      <div className="mt-3.5 flex items-center justify-between gap-3 border-t border-[#f1f3f5] pt-3.5">
+        <span className="text-[12.5px] tabular-nums text-[#6b7280]">From {usdWhole(usdFromHbd(c.faceHbd))} per task</span>
+        <span className="text-[11.5px] tabular-nums text-[#9ca3af]">
+          Token {usdPrice(usdFromHbd(c.priceHbd))} · cap {usdCompact(usdFromHbd(c.marketCapHbd))}
+        </span>
+      </div>
+    </Link>
+  );
+};
 
 const CreatorsView: FC = () => {
   const [sort, setSort] = useState<Sort>('reliable');
   const [showNew, setShowNew] = useState(true);
   const [answersOnly, setAnswersOnly] = useState(false);
-  const { creators: liveCreators, newCreators: liveNew } = useCreatorList();
+  const discovery = useLiveDiscovery();
 
   const creators = useMemo(() => {
-    const list = [...liveCreators];
-    // Reliability is the ONLY ranking metric — never price/cap/volume. Missing
-    // record sorts last (missing ≠ perfect), never rank-boosted.
-    if (sort === 'reliable') {
-      list.sort((a, b) => Number(b.delivery.available) - Number(a.delivery.available) || b.delivery.completionPct - a.delivery.completionPct);
-    } else if (sort === 'fastest') {
-      list.sort(
-        (a, b) =>
-          Number(b.delivery.available) - Number(a.delivery.available) ||
-          responseHours(a.delivery.typicalResponse) - responseHours(b.delivery.typicalResponse)
-      );
+    // The INDEXER already ordered this (lumen_ct_discovery, ranked on delivery
+    // in SQL), and the default view preserves that order verbatim — re-sorting
+    // it here by default would move the product's ranking rule into a
+    // comparator anyone could edit.
+    //
+    // The two alternate sorts are re-orderings of the SAME delivery data, never
+    // of price or market cap. There is deliberately no "top gainers".
+    const list = [...discovery.creators];
+    const proven = (c: CreatorSummary) => Number(c.completionPct !== null);
+    if (sort === 'fastest') {
+      // Missing still sorts last: unproven is not fast.
+      list.sort((a, b) => proven(b) - proven(a) || (a.medianResponseBlocks ?? Infinity) - (b.medianResponseBlocks ?? Infinity));
     } else if (sort === 'new') {
-      // No launch timestamp in the mock — smallest market ≈ newest.
-      list.sort((a, b) => a.marketCapUsd - b.marketCapUsd);
+      list.sort((a, b) => Number(b.isNew) - Number(a.isNew));
     }
-    return answersOnly ? list.filter((c) => c.delivery.available) : list;
-  }, [sort, liveCreators, answersOnly]);
+    return answersOnly ? list.filter((c) => c.completionPct !== null) : list;
+  }, [sort, discovery.creators, answersOnly]);
+
+  const newCreators = useMemo(() => discovery.creators.filter((c) => c.isNew), [discovery.creators]);
 
   const rightRail = (
     <div className="flex flex-col gap-5 pt-[26px]">
@@ -167,7 +192,7 @@ const CreatorsView: FC = () => {
         </button>
       </div>
 
-      {showNew ? (
+      {showNew && newCreators.length > 0 ? (
         <div className="mb-[22px] rounded-2xl border border-[#ebebeb] bg-[#faf9f6] px-5 py-[18px]">
           <div className="mb-3.5 flex items-center justify-between">
             <div>
@@ -179,32 +204,51 @@ const CreatorsView: FC = () => {
             </button>
           </div>
           <div className="flex gap-3.5 overflow-x-auto pb-1">
-            {liveNew.map((c) => (
+            {newCreators.map((c) => (
               <Link
-                key={c.handle}
-                href={`/creators/${c.handle}`}
+                key={c.creator}
+                href={`/creators/${c.creator}`}
                 className="block min-w-[240px] rounded-2xl border border-[#ebebeb] bg-white p-4 transition-colors hover:border-[#e0ddd6]"
               >
                 <div className="mb-3 flex items-center gap-3">
-                  <span className="h-10 w-10 rounded-[11px]" style={{ background: c.avatarColor }} />
+                  <span className="h-10 w-10 rounded-[11px]" style={{ background: avatarFill(c.creator) }} />
                   <div>
-                    <div className="text-[14.5px] font-bold text-[#161511]">@{c.handle}</div>
-                    <div className="text-xs text-[#9ca3af]">{c.what}</div>
+                    <div className="text-[14.5px] font-bold text-[#161511]">@{c.creator}</div>
                   </div>
                 </div>
                 <div className="text-[12.5px] font-semibold text-[#b45309]">{COPY.newNothing}</div>
-                <div className="mt-1.5 text-[12.5px] tabular-nums text-[#6b7280]">From {usdWhole(c.fromPriceUsd)} per task</div>
+                <div className="mt-1.5 text-[12.5px] tabular-nums text-[#6b7280]">From {usdWhole(usdFromHbd(c.faceHbd))} per task</div>
               </Link>
             ))}
           </div>
         </div>
       ) : null}
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {creators.map((c) => (
-          <CreatorCard key={c.handle} c={c} />
-        ))}
-      </div>
+      {discovery.unavailable ? (
+        <div className="rounded-[14px] border border-dashed border-[#e4e6e9] px-5 py-8 text-center text-[13.5px] leading-[1.6] text-[#9ca3af]">
+          Creator tokens aren’t available on this build yet.
+        </div>
+      ) : discovery.isLoading ? (
+        <div className="rounded-[14px] border border-dashed border-[#e4e6e9] px-5 py-8 text-center text-[13.5px] text-[#9ca3af]">Loading creators…</div>
+      ) : discovery.failed ? (
+        // NOT "no creators" — this page must never render a failed lookup as an
+        // empty market. It is the same unavailable-vs-empty rule the wallet and
+        // delivery reads follow.
+        <div className="rounded-[14px] border border-dashed border-[#e4e6e9] px-5 py-8 text-center text-[13.5px] leading-[1.6] text-[#9ca3af]">
+          We can’t load the creator list right now — the index that ranks creators by their delivery record is
+          unreachable. If you already know a creator, their token page still works: /creators/their-name.
+        </div>
+      ) : creators.length === 0 ? (
+        <div className="rounded-[14px] border border-dashed border-[#e4e6e9] px-5 py-8 text-center text-[13.5px] text-[#9ca3af]">
+          No creators have launched a token yet.
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          {creators.map((c) => (
+            <CreatorCard key={c.creator} c={c} />
+          ))}
+        </div>
+      )}
     </TokenShell>
   );
 };

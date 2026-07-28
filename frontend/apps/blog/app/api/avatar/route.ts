@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { configuredImagesEndpoint } from '@hive/ui/config/public-vars';
 import { isHiveAccountNameValid } from '@hive/transaction';
-import { isLiteDisplayName } from '@/blog/lib/lite/render/lite-identity';
+import { liteAvatar } from '@/blog/lib/lite/render/lite-identity';
 
 /**
  * Proxy endpoint for user avatars that prevents caching
@@ -48,7 +48,29 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       // background-image showed a blank square. Serve a generated initial-letter
       // avatar instead — the same idea as the feed strip's AvatarFallback, but here so
       // that every consumer of /api/avatar benefits without touching each one.
-      if (await isLiteDisplayName(username)) {
+      const lite = await liteAvatar(username);
+      if (lite.isLite) {
+        // A picture the user uploaded through /api/lite/upload. It already lives on
+        // the same image host, so hand it back through the host's resizer to keep
+        // avatars a consistent size instead of shipping a full-resolution photo to
+        // every byline.
+        if (lite.imageUrl) {
+          const resized = `${configuredImagesEndpoint}/${avatarBox(size, width, height)}/${lite.imageUrl}`;
+          const picture = await fetch(resized, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+          if (picture.ok && picture.body) {
+            return new NextResponse(picture.body, {
+              status: 200,
+              headers: new Headers({
+                'Content-Type': picture.headers.get('content-type') || 'image/png',
+                'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0',
+                Pragma: 'no-cache',
+                Expires: '0',
+                'X-Content-Type-Options': 'nosniff'
+              })
+            });
+          }
+          // Fall through: a broken stored URL must not leave the byline blank.
+        }
         return initialAvatar(username);
       }
       return NextResponse.json({ error: 'Failed to fetch avatar' }, { status: response.status });
@@ -74,6 +96,21 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 }
 
+
+/**
+ * Pixel box for the image host's resizer, matching the size names the rest of the app
+ * asks for (`small`/`medium`/`large` are the host's own avatar presets).
+ */
+function avatarBox(size: string | null, width: string | null, height: string | null): string {
+  if (width && height) {
+    const w = Math.min(Math.max(Number(width) || 128, 16), 1024);
+    const h = Math.min(Math.max(Number(height) || 128, 16), 1024);
+    return `${w}x${h}`;
+  }
+  if (size === 'large') return '512x512';
+  if (size === 'medium') return '256x256';
+  return '128x128';
+}
 
 /**
  * Deterministic initial-letter avatar. Same name always yields the same colour, so a

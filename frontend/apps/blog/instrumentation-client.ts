@@ -16,6 +16,13 @@ Sentry.init({
     Sentry.replayIntegration({
       // SECURITY: Mask all input fields to prevent capturing passwords/keys in session replays
       maskAllInputs: true,
+      // The upgrade screen renders a master password and four private keys as TEXT,
+      // not inputs, so `maskAllInputs` does not cover them — today they are masked only
+      // by rrweb's `maskAllText` default, and `beforeSend`/`scrubSensitiveData` never
+      // runs for replay envelopes (Sentry applies it to error events only). Blocking
+      // the element outright means the guarantee does not depend on a default that a
+      // future "make replays readable" change could flip.
+      block: ['[data-testid="upgrade-keys"]'],
     }),
   ],
 

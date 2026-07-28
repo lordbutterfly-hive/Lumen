@@ -33,7 +33,11 @@ export const ASK_STATUS_LABEL_KEY: Record<AskStatus, string> = {
   expired: `${NS}.ask_status.expired`,
   answered: `${NS}.ask_status.answered`,
   reclaimable: `${NS}.ask_status.reclaimable`,
-  reclaimed: `${NS}.ask_status.reclaimed`
+  reclaimed: `${NS}.ask_status.reclaimed`,
+  // The creator's free "no" — a terminal state distinct from `reclaimed` on
+  // purpose (see types.ts's AskStatus doc): both return the money, only one is
+  // a black mark against the delivery record.
+  declined: `${NS}.ask_status.declined`
 };
 
 export const DELIVERY_OUTCOME_LABEL_KEY: Record<DeliveryWindow['outcome'], string> = {

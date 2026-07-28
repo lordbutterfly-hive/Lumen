@@ -1,7 +1,8 @@
 'use client';
 
 import { FC, ReactNode, useState } from 'react';
-import type { Service, TokenMarketDetail } from '../../market/token-detail';
+import type { Service } from '../../market/token-detail';
+import type { LiveTokenMarket } from '../../live/adapt';
 import { buyQuote, sellQuote, serviceQuote, EXIT_FEE_MAX } from '../../market/curve';
 import { usdPrice, usdWhole } from '../../market/format';
 
@@ -33,7 +34,8 @@ const ModalHead: FC<{ title: string; onClose: () => void }> = ({ title, onClose 
 
 const tok = (n: number) => n.toFixed(2);
 
-const BuyModal: FC<{ m: TokenMarketDetail; onBuy: (usd: number, maxTotalUsd?: number) => boolean; onClose: () => void }> = ({ m, onBuy, onClose }) => {
+const BuyModal: FC<{ m: LiveTokenMarket; onBuy: (usd: number, maxTotalUsd?: number) => Promise<void>; onClose: () => void }> = ({ m, onBuy, onClose }) => {
+  const [busy, setBusy] = useState(false);
   const [amt, setAmt] = useState('50');
   const [adv, setAdv] = useState(false);
   const [maxPrice, setMaxPrice] = useState((m.priceUsd * 1.05).toFixed(2));
@@ -115,20 +117,28 @@ const BuyModal: FC<{ m: TokenMarketDetail; onBuy: (usd: number, maxTotalUsd?: nu
           buying and an early-exit fee applies.
         </p>
         <button
-          onClick={() => {
-            if (Number.isFinite(usd) && usd > 0 && !overMax) {
-              // onBuy reports whether the buy actually executed (defect fix:
-              // this used to close unconditionally, as if a cap-refused or
-              // wound-down buy had succeeded) — only close on a real success.
-              const ok = onBuy(usd, maxTotalUsd);
-              if (ok) onClose();
-              else setFailed(true);
+          onClick={async () => {
+            if (!Number.isFinite(usd) || usd <= 0 || overMax || busy) return;
+            // The action is a real broadcast now, not a synchronous store
+            // mutation: it opens a signer, waits, and can be REJECTED by the
+            // user or the chain. Close only after it resolves — closing early
+            // would tell someone their money moved while the signer is still
+            // open, which is the exact lie this rewiring exists to remove.
+            setBusy(true);
+            setFailed(false);
+            try {
+              await onBuy(usd, maxTotalUsd);
+              onClose();
+            } catch {
+              setFailed(true);
+            } finally {
+              setBusy(false);
             }
           }}
-          disabled={!Number.isFinite(usd) || usd <= 0 || overMax}
+          disabled={!Number.isFinite(usd) || usd <= 0 || overMax || busy}
           className="w-full rounded-[13px] bg-[#c0392b] py-[15px] text-[15px] font-bold text-white hover:bg-[#a5301f] disabled:opacity-50"
         >
-          Buy — {usdWhole(usd)}
+          {busy ? 'Confirm in your wallet…' : `Buy — ${usdWhole(usd)}`}
         </button>
         {failed ? (
           <div className="mt-2.5 text-center text-[12.5px] font-semibold text-[#c0392b]">
@@ -141,7 +151,8 @@ const BuyModal: FC<{ m: TokenMarketDetail; onBuy: (usd: number, maxTotalUsd?: nu
   );
 };
 
-const SellModal: FC<{ m: TokenMarketDetail; onSell: (tokens: number) => boolean; onClose: () => void }> = ({ m, onSell, onClose }) => {
+const SellModal: FC<{ m: LiveTokenMarket; onSell: (tokens: number) => Promise<void>; onClose: () => void }> = ({ m, onSell, onClose }) => {
+  const [busy, setBusy] = useState(false);
   const held = m.position?.tokens ?? 0;
   const [amt, setAmt] = useState(String(held || 0));
   const [failed, setFailed] = useState(false);
@@ -210,20 +221,23 @@ const SellModal: FC<{ m: TokenMarketDetail; onSell: (tokens: number) => boolean;
           </div>
         </div>
         <button
-          onClick={() => {
-            if (Number.isFinite(tokens) && tokens > 0) {
-              // onSell reports whether the sell actually executed (defect fix:
-              // this used to close unconditionally, as if a nothing-held or
-              // sub-1-token sell had succeeded) — only close on a real success.
-              const ok = onSell(tokens);
-              if (ok) onClose();
-              else setFailed(true);
+          onClick={async () => {
+            if (!Number.isFinite(tokens) || tokens <= 0 || busy) return;
+            setBusy(true);
+            setFailed(false);
+            try {
+              await onSell(tokens);
+              onClose();
+            } catch {
+              setFailed(true);
+            } finally {
+              setBusy(false);
             }
           }}
-          disabled={!Number.isFinite(tokens) || tokens <= 0 || held <= 0 || tokens > held}
+          disabled={!Number.isFinite(tokens) || tokens <= 0 || held <= 0 || tokens > held || busy}
           className="w-full rounded-[13px] bg-[#1a1a17] py-[15px] text-[15px] font-bold text-white hover:bg-black disabled:opacity-50"
         >
-          {tokens > held ? 'More than you hold' : `Sell — get ~${usdPrice(q.receiveUsd)}`}
+          {busy ? 'Confirm in your wallet…' : tokens > held ? 'More than you hold' : `Sell — get ~${usdPrice(q.receiveUsd)}`}
         </button>
         {failed ? (
           <div className="mt-2.5 text-center text-[12.5px] font-semibold text-[#c0392b]">
@@ -237,11 +251,13 @@ const SellModal: FC<{ m: TokenMarketDetail; onSell: (tokens: number) => boolean;
 };
 
 const AskModal: FC<{
-  m: TokenMarketDetail;
+  m: LiveTokenMarket;
   service: Service | null;
-  onSpend: (usd: number, serviceName?: string, deadlineDays?: number, question?: string) => boolean;
+  /** offeringId is Service.key — the creator's named service, or '0' for their legacy face price. Passing it is what makes the shop actually buyable. */
+  onSpend: (input: { offeringId: number; usd: number; deadlineDays: number; question: string }) => Promise<void>;
   onClose: () => void;
 }> = ({ m, service, onSpend, onClose }) => {
+  const [busy, setBusy] = useState(false);
   const [deadline, setDeadline] = useState(7);
   const [question, setQuestion] = useState('');
   const [failed, setFailed] = useState(false);
@@ -286,22 +302,30 @@ const AskModal: FC<{
           <span className="w-[70px] text-right text-[14px] font-bold tabular-nums text-[#161511]">{deadline} days</span>
         </div>
         <button
-          onClick={() => {
-            if (canAffordTokens) {
-              // onSpend reports whether the ask actually opened (defect fix:
-              // this used to close unconditionally, as if a wound-down market
-              // or a stale balance check had succeeded) — only close on a real success.
-              const ok = onSpend(usd, service?.name, deadline, question);
-              if (ok) onClose();
-              else setFailed(true);
+          onClick={async () => {
+            if (!canAffordTokens || busy) return;
+            setBusy(true);
+            setFailed(false);
+            try {
+              // Service.key IS the on-chain offeringId ('0' = the creator's
+              // legacy face price). Dropping it here would silently charge the
+              // generic face price for a named service.
+              await onSpend({ offeringId: Number(service?.key ?? 0), usd, deadlineDays: deadline, question });
+              onClose();
+            } catch {
+              setFailed(true);
+            } finally {
+              setBusy(false);
             }
           }}
-          disabled={!canAffordTokens}
+          disabled={!canAffordTokens || busy}
           className="w-full rounded-[13px] bg-[#1a1a17] py-[15px] text-[15px] font-semibold text-white hover:bg-black disabled:opacity-50"
         >
-          {canAffordTokens
-            ? `Send question — ${tok(q.tokens)} tokens + ${usdPrice(q.commissionUsd)} HBD`
-            : `You need ${tok(q.tokens)} @${m.handle} tokens — buy some first`}
+          {busy
+            ? 'Confirm in your wallet…'
+            : canAffordTokens
+              ? `Send question — ${tok(q.tokens)} tokens + ${usdPrice(q.commissionUsd)} HBD`
+              : `You need ${tok(q.tokens)} @${m.handle} tokens — buy some first`}
         </button>
         {failed ? (
           <div className="mt-2.5 text-center text-[12.5px] font-semibold text-[#c0392b]">
@@ -313,7 +337,8 @@ const AskModal: FC<{
   );
 };
 
-const SendModal: FC<{ m: TokenMarketDetail; onTransfer: (tokens: number) => boolean; onClose: () => void }> = ({ m, onTransfer, onClose }) => {
+const SendModal: FC<{ m: LiveTokenMarket; onTransfer: (to: string, tokens: number) => Promise<void>; onClose: () => void }> = ({ m, onTransfer, onClose }) => {
+  const [busy, setBusy] = useState(false);
   const held = m.position?.tokens ?? 0;
   const [to, setTo] = useState('');
   const [amt, setAmt] = useState('');
@@ -349,22 +374,28 @@ const SendModal: FC<{ m: TokenMarketDetail; onTransfer: (tokens: number) => bool
           className="mb-3.5 w-full rounded-xl border border-[#e4e6e9] px-4 py-3 text-[22px] font-bold tabular-nums text-[#161511] outline-none"
         />
         <button
-          onClick={() => {
-            if (valid) {
-              // onTransfer reports whether the send actually executed (defect
-              // fix: this used to close unconditionally, as if the store had
-              // clamped a too-large amount down to whatever you held and sent
-              // that instead — it now refuses rather than sending less than
-              // you typed) — only close on a real success.
-              const ok = onTransfer(tokens);
-              if (ok) onClose();
-              else setFailed(true);
+          onClick={async () => {
+            if (!valid || busy) return;
+            setBusy(true);
+            setFailed(false);
+            try {
+              // ★ The RECIPIENT is passed now. It was collected by the input
+              // above and then DROPPED — onTransfer only ever received the
+              // amount, so a real send would have gone nowhere or to the wrong
+              // account. Strip a leading '@': the field invites one, the chain
+              // account name never has one.
+              await onTransfer(to.trim().replace(/^@/, ''), tokens);
+              onClose();
+            } catch {
+              setFailed(true);
+            } finally {
+              setBusy(false);
             }
           }}
-          disabled={!valid}
+          disabled={!valid || busy}
           className="w-full rounded-[13px] bg-[#1a1a17] py-[15px] text-[15px] font-bold text-white hover:bg-black disabled:opacity-50"
         >
-          {tokens > held ? 'More than you hold' : `Send ${tok(tokens)} tokens`}
+          {busy ? 'Confirm in your wallet…' : tokens > held ? 'More than you hold' : `Send ${tok(tokens)} tokens`}
         </button>
         {failed ? (
           <div className="mt-2.5 text-center text-[12.5px] font-semibold text-[#c0392b]">
@@ -402,18 +433,22 @@ const InterstitialModal: FC<{ handle: string; onClose: () => void }> = ({ onClos
   </ModalShell>
 );
 
+/**
+ * Every action here RESOLVES on success and REJECTS on failure — a rejected
+ * signer prompt, an insufficient balance, a chain refusal. The modals close on
+ * resolve only. They used to take synchronous booleans from the demo store;
+ * with a real broadcast behind them, "did it work" is not knowable at call
+ * time, and treating it as if it were is how a user gets told their money moved
+ * when it did not.
+ */
 const TokenModals: FC<{
   dialog: TokenDialog;
-  market: TokenMarketDetail;
+  market: LiveTokenMarket;
   service: Service | null;
-  /** Returns whether the buy actually executed — see market/store.ts's buy() doc. */
-  onBuy: (usd: number, maxTotalUsd?: number) => boolean;
-  /** Returns whether the sell actually executed — see market/store.ts's sell() doc. */
-  onSell: (tokens: number) => boolean;
-  /** Returns whether the ask actually opened — see market/store.ts's spend() doc. */
-  onSpend: (usd: number, serviceName?: string, deadlineDays?: number, question?: string) => boolean;
-  /** Returns whether the transfer actually executed — see market/store.ts's transferTokens() doc. */
-  onTransfer: (tokens: number) => boolean;
+  onBuy: (usd: number, maxTotalUsd?: number) => Promise<void>;
+  onSell: (tokens: number) => Promise<void>;
+  onSpend: (input: { offeringId: number; usd: number; deadlineDays: number; question: string }) => Promise<void>;
+  onTransfer: (to: string, tokens: number) => Promise<void>;
   onClose: () => void;
 }> = ({ dialog, market, service, onBuy, onSell, onSpend, onTransfer, onClose }) => {
   if (dialog === 'buy') return <BuyModal m={market} onBuy={onBuy} onClose={onClose} />;

@@ -420,7 +420,7 @@ func Init(a *string) *string {
 	// file doc warns about ("no schema test can pin them"). core.EvInit now
 	// exists (core/events.go) and is pinned by core/schema_contract_test.go's
 	// TestSchemaContract_Init; the emitted JSON is byte-identical to what this
-	// hand-built line used to produce. indexer/events.go's ParseEvent still
+	// hand-built line used to produce. magi-indexer/creator_tokens_mappings.yaml's ParseEvent still
 	// documents "init" as deliberately out of its tracked event kinds (the
 	// owner-bootstrap log carries no fund-relevant state), so this remains
 	// LOW severity by design — unlike treasuryWithdrawn/tradeFeesClaimed
@@ -978,6 +978,44 @@ func Decline(a *string) *string {
 	return strPtr(`{"creator":"` + jsonEscape(creator) + `","seq":` + u64s(seq) + `,"asker":"` + jsonEscape(res.Asker) + `","creditsReturned":"` + bigStr(res.CreditsReturned) + `","commissionRefundedHbd":"` + bigStr(res.CommissionHbd) + `"}`)
 }
 
+//go:wasmexport rate
+func Rate(a *string) *string {
+	payload := payloadStr(a)
+	caller := currentCaller()
+	if err := requireActiveAuth(caller); err != nil {
+		handleErr(err)
+		return nil
+	}
+	block := currentBlock()
+
+	creator := jsonStr(payload, "creator")
+	// STRICT, same 0-is-meaningful reasoning as decline/answer/reclaim above:
+	// escrow #0 is a real escrow, and a malformed seq silently defaulting to it
+	// would attach this buyer's score to somebody else's job.
+	seq, seqOK := jsonU64Field(payload, "seq")
+	if !seqOK {
+		handleErr(inputErr("seq must be an unquoted non-negative integer"))
+		return nil
+	}
+	// score is likewise strict — a missing or malformed score defaulting to 0
+	// would be silently rejected by core's 1-5 bound anyway, but with a
+	// misleading "score must be 1-5" instead of "you sent nothing".
+	score, scoreOK := jsonU64Field(payload, "score")
+	if !scoreOK {
+		handleErr(inputErr("score must be an unquoted non-negative integer"))
+		return nil
+	}
+
+	if err := core.Rate(store, caller, creator, seq, score); err != nil {
+		handleErr(err)
+		return nil
+	}
+	// NO fund movement here, deliberately and permanently: a rating is
+	// reputation, and this entrypoint must never grow a transfer.
+	sdk.Log(core.EvRated(creator, caller, block, seq, score))
+	return strPtr(`{"creator":"` + jsonEscape(creator) + `","seq":` + u64s(seq) + `,"score":` + u64s(score) + `}`)
+}
+
 //go:wasmexport reclaim
 func Reclaim(a *string) *string {
 	payload := payloadStr(a)
@@ -1016,8 +1054,11 @@ func Reclaim(a *string) *string {
 	// model. `caller` is logged as actor (the permissionless pusher/keeper,
 	// matching EvRefundPushed's identical actor-vs-recipient shape), never
 	// as who was paid.
-	sdk.Log(core.EvReclaimed(creator, caller, block, seq, res.CreditsReturned, res.CommissionHbd, res.Asker))
-	return strPtr(`{"creator":"` + jsonEscape(creator) + `","seq":` + u64s(seq) + `,"asker":"` + jsonEscape(res.Asker) + `","creditsReturned":"` + bigStr(res.CreditsReturned) + `","commissionRefundedHbd":"` + bigStr(res.CommissionHbd) + `"}`)
+	// CommissionRetainedHbd (USER RULING 1, 2026-07-28) is NOT transferred here
+	// — core already booked it to the treasury. It is logged so the money model
+	// still balances: held == paid-to-asker + retained.
+	sdk.Log(core.EvReclaimed(creator, caller, block, seq, res.CreditsReturned, res.CommissionHbd, res.CommissionRetainedHbd, res.Asker))
+	return strPtr(`{"creator":"` + jsonEscape(creator) + `","seq":` + u64s(seq) + `,"asker":"` + jsonEscape(res.Asker) + `","creditsReturned":"` + bigStr(res.CreditsReturned) + `","commissionRefundedHbd":"` + bigStr(res.CommissionHbd) + `","commissionRetainedHbd":"` + bigStr(res.CommissionRetainedHbd) + `"}`)
 }
 
 // Payload: {"creator":"<hive-account>","credits":"<decimal big.Int credits
@@ -1305,7 +1346,7 @@ func CloseIfDrained(a *string) *string {
 	// (core.CloseIfDrained takes no caller at all), so an unconditional log
 	// here would let anyone call it against a healthy ACTIVE market — a
 	// no-op on core's own state — and still emit a "closed" event.
-	// indexer/index.go folds "closed" as a one-way, idempotent set with no
+	// magi-indexer/creator_tokens_views.yaml folds "closed" as a one-way, idempotent set with no
 	// way to unset it (KindClosed: "m.closed = true // idempotent set"), so
 	// that single spurious event would permanently poison the indexer's
 	// replayed view of an otherwise-live market. core.CloseIfDrained is
@@ -1366,7 +1407,7 @@ func WithdrawTreasury(a *string) *string {
 	// GAP CLOSED (2026-07-28): hand-built sdk.Log replaced by
 	// core.EvTreasuryWithdrawn (core/events.go), pinned by
 	// TestSchemaContract_TreasuryWithdrawn. Emitted JSON is byte-identical to
-	// the line it replaces. indexer/events.go+index.go already recognize this
+	// the line it replaces. magi-indexer/creator_tokens_mappings.yaml+index.go already recognize this
 	// exact shape (KindTreasuryWithdrawn, TreasuryWithdrawnEvent, folded as a
 	// SUBTRACTION from treasuryHbd — that half of this gap was fixed on the
 	// indexer side already) — the only piece missing was a typed constructor
@@ -1421,7 +1462,7 @@ func ClaimTradeFees(a *string) *string {
 		// GAP CLOSED (2026-07-28): hand-built sdk.Log replaced by
 		// core.EvTradeFeesClaimed (core/events.go), pinned by
 		// TestSchemaContract_TradeFeesClaimed. Emitted JSON is byte-identical to
-		// the line it replaces. indexer/events.go+index.go already recognize
+		// the line it replaces. magi-indexer/creator_tokens_mappings.yaml+index.go already recognize
 		// this exact shape (KindTradeFeesClaimed, TradeFeesClaimedEvent,
 		// audit-only fold that deliberately never touches ix.treasuryHbd — that
 		// half of this gap was fixed on the indexer side already) — the only
@@ -1472,7 +1513,7 @@ func Retire(a *string) *string {
 	}
 	// GAP CLOSED (2026-07-28): hand-built sdk.Log replaced by core.EvRetired
 	// (core/events.go), pinned by TestSchemaContract_Retired. Emitted JSON is
-	// byte-identical to the line it replaces, so indexer/events.go's
+	// byte-identical to the line it replaces, so magi-indexer/creator_tokens_mappings.yaml's
 	// KindRetired decode (RetiredEvent{Creator,Actor,Block}) is unaffected —
 	// though that file's own KindRetired doc comment ("NOT one of
 	// core/events.go's Ev* constructors ... there is no EvRetired to

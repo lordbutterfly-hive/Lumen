@@ -44,9 +44,21 @@ export interface CustomJsonOp {
 
 export const VSC_CALL_ID = 'vsc.call';
 
-// WIRING-VERIFY (deploy): placeholder rc_limit; override via
-// REACT_APP_CREATOR_TOKENS_RC_LIMIT once a devnet call reports real gas_used.
-export const DEFAULT_RC_LIMIT = 30_000;
+/**
+ * rc_limit on Magi is denominated in the caller's own HBD: RC is a 5-day
+ * rolling allowance SIZED by HBD held (read, never debited), so a high
+ * rc_limit is not free headroom — it demands the caller keep that much HBD
+ * idle, and a maximal spend can close their own exit for up to five days.
+ *
+ * 30_000 (= 30 HBD idle) was a placeholder copied in before anyone had
+ * measured a real call, and it is far too high for these ops: every write here
+ * is a small state transition, not a proof verification. 1_000 is the working
+ * default until a devnet call reports real gas_used; override via
+ * REACT_APP_CREATOR_TOKENS_RC_LIMIT rather than editing this.
+ *
+ * WIRING-VERIFY (deploy): still unmeasured against a live node.
+ */
+export const DEFAULT_RC_LIMIT = 1_000;
 
 export function buildOp(opts: {
   netId: string;
@@ -203,18 +215,64 @@ export function setCapPayload(newCapBaseUnits: number): Record<string, unknown> 
  * client-side copy of that formula could only ever drift into bricking every
  * ask.
  */
-export function askPayload(creator: string, contentHash: string, deadlineBlocks: number, maxCreditsBaseUnits: number): Record<string, unknown> {
+export function askPayload(
+  creator: string,
+  contentHash: string,
+  deadlineBlocks: number,
+  maxCreditsBaseUnits: number,
+  offeringId?: number
+): Record<string, unknown> {
   // maxCredits is REQUIRED by core.Ask — it is the asker's own signed cap on
   // credits spent, and the contract rejects a missing or zero value rather than
   // defaulting to unlimited. It exists because `face` is creator-controlled and
   // intra-block order is producer-chosen, so a creator could otherwise spike the
   // price between the asker signing and the tx executing.
-  return { creator, contentHash, deadlineBlocks, maxCredits: moneyStr(maxCreditsBaseUnits) };
+  const payload: Record<string, unknown> = { creator, contentHash, deadlineBlocks, maxCredits: moneyStr(maxCreditsBaseUnits) };
+  // OMITTED, not sent as 0, when there is no named offering: absent and 0 mean
+  // the same thing on-chain (the legacy `face` price), and omitting keeps the
+  // payload byte-identical to every pre-shop ask. When a service IS named, the
+  // id must be a whole number — a fractional or negative value would be
+  // present-but-unparseable, which the contract refuses outright rather than
+  // defaulting to the cheaper face price.
+  if (offeringId !== undefined && offeringId > 0) payload.offeringId = offeringIdNum(offeringId);
+  return payload;
 }
 
 /** main.go Answer (main.go:639-661). */
 export function answerPayload(seq: number, answerHash: string): Record<string, unknown> {
   return { seq, answerHash };
+}
+
+/**
+ * main.go Decline (main.go:948-979) — the creator's free, honest "no", legal in
+ * the SAME window an Answer is. Returns the asker's credits AND the whole
+ * commission, and is explicitly NOT a miss against the delivery record.
+ *
+ * This is the rail that makes griefing pointless and makes a miss mean "you
+ * ignored a paying customer" rather than "you are selective", so a UI that
+ * offers Answer without offering Decline is pushing creators toward taking a
+ * black mark for jobs they simply cannot do.
+ */
+export function declinePayload(creator: string, seq: number): Record<string, unknown> {
+  return { creator, seq };
+}
+
+/**
+ * main.go Rate — the BUYER's 1-5 score for a delivered job.
+ *
+ * This is the only counterweight to `answer` being a unilateral "this is done"
+ * that pays the creator: the contract never sees the work, so it cannot judge
+ * it. The buyer records what actually happened, and a creator who takes money
+ * without delivering watches their own token's reputation fall.
+ *
+ * Both fields are UNQUOTED integers (parse.U64Field): `seq` because escrow #0 is
+ * real, and `score` because it is a count, not money.
+ */
+export function ratePayload(creator: string, seq: number, score: number): Record<string, unknown> {
+  if (!Number.isInteger(score) || score < 1 || score > 5) {
+    throw new Error(`op-builders: invalid score ${JSON.stringify(score)} — must be a whole number 1-5`);
+  }
+  return { creator, seq, score };
 }
 
 /** main.go Reclaim (main.go:663-688). */
@@ -254,6 +312,71 @@ export function refundHolderPayload(creator: string, holder: string): Record<str
  */
 export function transferTokensPayload(creator: string, to: string, tokens: number): Record<string, unknown> {
   return { creator, to, amount: intStr(tokens) };
+}
+
+// ===================================
+// The offerings shop (main.go:1673-1838) — a creator posts N named services,
+// each with its own HBD price under its own 2x/7d anti-rug band. The caller IS
+// the creator on all four writes, so none of them carries a `creator` field.
+//
+// PRICES HERE ARE UNQUOTED NUMBERS, not money strings. The four shop
+// entrypoints read them with jsonU64/i64FromU64, unlike ask/buy/sell/refund
+// which use parseBigDecimal on a quoted string. Sending a quoted "500" would
+// parse as 0 and post a FREE service — which is why offeringPriceNum below
+// refuses anything that is not already a whole, non-negative base-units
+// integer instead of coercing.
+// ===================================
+
+/** main.go CreateOffering (main.go:1673-1701). `priceBaseUnits` is HBD in base units (3 decimals), e.g. 200_000 for 200.000 HBD. */
+export function createOfferingPayload(title: string, priceBaseUnits: number): Record<string, unknown> {
+  return { title, price: offeringPriceNum(priceBaseUnits) };
+}
+
+/**
+ * main.go SetOfferingPrice (main.go:1703-1745). Bounded by the offering's own
+ * TITLE-anchored 2x/7d band — a rename, a delete-and-recreate, or a case change
+ * will not reset it.
+ */
+export function setOfferingPricePayload(offeringId: number, newPriceBaseUnits: number): Record<string, unknown> {
+  return { offeringId: offeringIdNum(offeringId), newPrice: offeringPriceNum(newPriceBaseUnits) };
+}
+
+/** main.go SetOfferingTitle (main.go:1747-1786). Renaming ONTO another live offering's title is refused on-chain (it would launder that title's price band). */
+export function setOfferingTitlePayload(offeringId: number, title: string): Record<string, unknown> {
+  return { offeringId: offeringIdNum(offeringId), title };
+}
+
+/** main.go DeleteOffering (main.go:1788-1821). Delisting only — it does not touch escrows already asked against this offering. */
+export function deleteOfferingPayload(offeringId: number): Record<string, unknown> {
+  return { offeringId: offeringIdNum(offeringId) };
+}
+
+/** main.go ListOfferings (main.go:1823-1838) — a pure read; returns the creator's whole posted catalogue. */
+export function listOfferingsPayload(creator: string): Record<string, unknown> {
+  return { creator };
+}
+
+/**
+ * offeringIdNum guards the one field where 0 is MEANINGFUL rather than empty:
+ * id 0 is the reserved alias for the creator's legacy single `face` price. The
+ * contract reads it with parse.U64Field, which refuses anything that is not an
+ * unquoted non-negative decimal — so a float, a negative, or a stringified id
+ * is a hard on-chain error, never a silent fall back to the cheaper face price.
+ * Catch it here, where the stack trace still names the caller.
+ */
+function offeringIdNum(n: number): number {
+  if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) {
+    throw new Error(`op-builders: invalid offeringId ${JSON.stringify(n)} — must be a non-negative whole number (0 is the reserved legacy-face alias)`);
+  }
+  return n;
+}
+
+/** offeringPriceNum is moneyStr's counterpart for the shop's UNQUOTED price fields. Same base-units input, different wire shape — see the section doc above for why sending a quoted string here posts a free service. */
+function offeringPriceNum(n: number): number {
+  if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) {
+    throw new Error(`op-builders: invalid offering price ${JSON.stringify(n)} — must be a non-negative whole number of HBD base units`);
+  }
+  return n;
 }
 
 // moneyStr converts an already-computed non-negative integer base-units

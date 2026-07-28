@@ -1,8 +1,10 @@
 'use client';
 
 import { useTranslation } from '@/blog/i18n/client';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { getAccountFull } from '@transaction/lib/hive-api';
+import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { fetchLiteProfile, saveLiteProfile } from '@/blog/lib/lite/client/lite-profile';
 import { Input } from '@ui/components/input';
 import { Label } from '@ui/components/label';
 import { MutableRefObject, useEffect, useRef, useState } from 'react';
@@ -28,9 +30,21 @@ import { useSignerContext } from '@smart-signer/components/signer-provider';
 
 const SettingsForm = ({ username }: { username: string }) => {
   const { t } = useTranslation('common_blog');
+  const { user } = useUserClient();
+  // A Lumen lite account has no Hive account behind it, so there is nothing to read
+  // from chain and nothing to broadcast an update to. Its profile lives in our own
+  // database and is read and written over /api/lite/profile; every field below
+  // behaves the same either way.
+  const isLite = user?.account_tier === 'lite';
   const { data } = useQuery({
     queryKey: ['profileData', username],
-    queryFn: () => getAccountFull(username)
+    queryFn: () => getAccountFull(username),
+    enabled: !isLite
+  });
+  const { data: liteProfile } = useQuery({
+    queryKey: ['liteProfile', username],
+    queryFn: () => fetchLiteProfile(),
+    enabled: isLite
   });
   // User preferences are permanent (no TTL) - username is guaranteed here since this is a settings page
   const [preferences, setPreferences] = useStorageWithTTL<Preferences>(
@@ -38,9 +52,12 @@ const SettingsForm = ({ username }: { username: string }) => {
     DEFAULT_PREFERENCES,
     StorageTTL.PERMANENT
   );
-  const profileData = data?.profile;
+  const chainProfile = data?.profile;
+  const profileData: Partial<Settings> = (isLite ? liteProfile : chainProfile) ?? {};
 
   const { signer } = useSignerContext();
+  const queryClient = useQueryClient();
+  const [savingLite, setSavingLite] = useState(false);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [insertImg, setInsertImg] = useState('');
   const inputProfileRef = useRef<HTMLInputElement>(null) as MutableRefObject<HTMLInputElement>;
@@ -72,6 +89,29 @@ const SettingsForm = ({ username }: { username: string }) => {
   const disabledBtn = Object.values(validationCheck).some((value) => typeof value === 'string');
 
   async function onSubmit() {
+    if (isLite) {
+      setSavingLite(true);
+      const result = await saveLiteProfile({
+        name: settings.name,
+        about: settings.about,
+        location: settings.location,
+        website: settings.website,
+        profile_image: settings.profile_image,
+        cover_image: settings.cover_image
+      });
+      setSavingLite(false);
+      if (result.status === 'error') {
+        handleError(new Error(result.message), { method: 'saveLiteProfile', params: {} });
+        return;
+      }
+      // Re-read rather than assume: the server normalises what it stores (a website
+      // that isn't a real URL is dropped), so showing the submitted value would tell
+      // the user something was saved that was not.
+      await queryClient.invalidateQueries({ queryKey: ['liteProfile', username] });
+      toast({ title: t('settings_page.changes_saved'), variant: 'success' });
+      return;
+    }
+
     const updateProfileParams = {
       profile_image: settings.profile_image !== '' ? settings.profile_image : undefined,
       cover_image: settings.cover_image !== '' ? settings.cover_image : undefined,
@@ -79,8 +119,8 @@ const SettingsForm = ({ username }: { username: string }) => {
       about: settings.about !== '' ? settings.about : undefined,
       location: settings.location !== '' ? settings.location : undefined,
       website: settings.website !== '' ? settings.website : undefined,
-      witness_owner: profileData?.witness_owner,
-      witness_description: profileData?.witness_description,
+      witness_owner: chainProfile?.witness_owner,
+      witness_description: chainProfile?.witness_description,
       blacklist_description:
         settings.blacklist_description !== '' ? settings.blacklist_description : undefined,
       muted_list_description:
@@ -239,39 +279,70 @@ const SettingsForm = ({ username }: { username: string }) => {
             <span className="pt-2 text-xs text-destructive">{validationCheck.website}</span>
           </div>
 
-          <div>
-            <Label htmlFor="blacklistDescription">{t('settings_page.blacklist_description')}</Label>
-            <Input
-              type="text"
-              id="blacklistDescription"
-              name="blacklistDescription"
-              value={settings.blacklist_description}
-              onChange={(e) => setSettings((prev) => ({ ...prev, blacklist_description: e.target.value }))}
-            />
-            <span className="pt-2 text-xs text-destructive">{validationCheck.blacklist_description}</span>
-          </div>
+          {/*
+            Blacklists and mute lists are on-chain follow lists published by an
+            account. A lite user has no account to publish them from, so these two
+            describe something they cannot have — hidden rather than shown broken.
+          */}
+          {isLite ? null : (
+            <>
+              <div>
+                <Label htmlFor="blacklistDescription">{t('settings_page.blacklist_description')}</Label>
+                <Input
+                  type="text"
+                  id="blacklistDescription"
+                  name="blacklistDescription"
+                  value={settings.blacklist_description}
+                  onChange={(e) =>
+                    setSettings((prev) => ({ ...prev, blacklist_description: e.target.value }))
+                  }
+                />
+                <span className="pt-2 text-xs text-destructive">
+                  {validationCheck.blacklist_description}
+                </span>
+              </div>
 
-          <div>
-            <Label htmlFor="mutedListDescription">{t('settings_page.mute_list_description')}</Label>
-            <Input
-              type="text"
-              id="mutedListDescription"
-              name="mutedListDescription"
-              value={settings.muted_list_description}
-              onChange={(e) => setSettings((prev) => ({ ...prev, muted_list_description: e.target.value }))}
-            />
-            <span className="pt-2 text-xs text-destructive">{validationCheck.muted_list_description}</span>
-          </div>
+              <div>
+                <Label htmlFor="mutedListDescription">{t('settings_page.mute_list_description')}</Label>
+                <Input
+                  type="text"
+                  id="mutedListDescription"
+                  name="mutedListDescription"
+                  value={settings.muted_list_description}
+                  onChange={(e) =>
+                    setSettings((prev) => ({ ...prev, muted_list_description: e.target.value }))
+                  }
+                />
+                <span className="pt-2 text-xs text-destructive">
+                  {validationCheck.muted_list_description}
+                </span>
+              </div>
+            </>
+          )}
         </div>
         <Button
           onClick={() => onSubmit()}
           className="my-4 w-44"
           data-testid="pps-update-button"
-          disabled={sameData || disabledBtn || updateProfileMutation.isPending || data?._temporary}
+          disabled={
+            sameData ||
+            disabledBtn ||
+            updateProfileMutation.isPending ||
+            savingLite ||
+            // `_temporary` marks a stand-in account object (an unconfirmed chain
+            // write). It never applies to the lite path, which does not read chain
+            // data at all — leaving it in would permanently disable this button for
+            // every lite user.
+            (!isLite && data?._temporary)
+          }
         >
-          {updateProfileMutation.isPending ? (
+          {updateProfileMutation.isPending || savingLite ? (
             <span className="flex items-center justify-center">
-              <CircleSpinner loading={updateProfileMutation.isPending} size={18} color="#dc2626" />
+              <CircleSpinner
+                loading={updateProfileMutation.isPending || savingLite}
+                size={18}
+                color="#dc2626"
+              />
             </span>
           ) : (
             t('settings_page.update')

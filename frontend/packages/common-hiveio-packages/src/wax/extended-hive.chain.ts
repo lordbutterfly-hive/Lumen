@@ -88,6 +88,25 @@ export interface Entry {
   //added only when using optimistic update, not backend property
   _temporary?: boolean;
   _optimistic?: boolean;
+  /**
+   * Lumen identity, attached SERVER-SIDE. Not a chain field.
+   *
+   * Every Lumen "lite" post is published on chain by one shared account, so Hivemind
+   * reports that account as the author of everybody's words. Resolving the real
+   * person in the browser meant each card rendered the wrong name first and corrected
+   * itself a moment later. Attaching it during SSR is what removes that flash.
+   */
+  _lite?: LiteIdentity;
+}
+
+/** The person behind a Lumen proxy post, and the account that actually signed it. */
+export interface LiteIdentity {
+  /** Who to show. NOT a Hive account — never use it for follow/mute/profile lookups. */
+  author: string;
+  /** The real title. Hivemind synthesises "RE: …" for comments, and lite posts are comments. */
+  title: string;
+  /** The shared publishing account that signed this on chain. Use this to ACT. */
+  chainAuthor: string;
 }
 
 export interface JsonMetadata {

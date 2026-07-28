@@ -10,12 +10,28 @@ export type ChallengePurpose = 'login' | 'post_attestation' | 'stepup';
 export type UserStatus = 'active' | 'suspended' | 'upgraded' | 'banned';
 export type NameReservationStatus = 'pending' | 'active';
 
+/**
+ * The editable part of a lite account's public profile. Deliberately the same field
+ * names Hive uses inside `posting_json_metadata.profile`, so the rendered account
+ * object and the settings form work identically for both tiers — and so the values
+ * can be moved on chain unchanged if an upgraded user ever asks for that.
+ */
+export interface LumenProfile {
+  name?: string;
+  about?: string;
+  location?: string;
+  website?: string;
+  profile_image?: string;
+  cover_image?: string;
+}
+
 /** A lite (or upgraded-full) Lumen account. The `userId` is permanent. */
 export interface LumenUser {
   userId: string;
   displayName: string;
   displayNameHistory: string[];
   avatarUrl: string | null;
+  profile: LumenProfile;
   accountTier: AccountTier;
   /** Real on-chain account name, set only after ACT upgrade; differs from displayName. */
   hiveAccountName: string | null;

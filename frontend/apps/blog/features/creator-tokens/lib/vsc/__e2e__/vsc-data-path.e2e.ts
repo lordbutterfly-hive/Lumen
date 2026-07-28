@@ -120,6 +120,9 @@ class CapturingBroadcaster {
 const chM = (creator: string, field: string): string => `m|hive:${creator}|${field}`;
 const chBal = (creator: string, holder: string): string => `bal|hive:${creator}|hive:${holder}`;
 const chEscrow = (creator: string, seq: number): string => `e|hive:${creator}|${seq}`;
+// The offerings shop (core/keys.go's mko). Epoch-scoped: epoch 0 is the normal
+// first incarnation, and an absent kOfferEpoch key reads as 0.
+const chOfferPrice = (creator: string, epoch: number, id: number): string => `m|hive:${creator}|o|${epoch}|${id}|p`;
 // ★ CURVE-PIVOT ADDITIONS (2026-07-24): acq (holdclock.go kAcqBlock) and the
 // short TWAP observation ring (twap.go kObs/kObsIdx) — neither existed
 // pre-pivot. Both are needed for the journey below: sell()/refund() price the
@@ -236,11 +239,14 @@ async function run(): Promise<void> {
   // outright — which is exactly the loud failure the old layout never gave.
   gql.seed(chEscrow('alice', 0), 'hive:bob|2500|5500000|ANSWERED|300|4900000|QmContentHash123|QmAnswerHash');
   gql.seed(chEscrow('alice', 1), 'hive:bob|2500|100000|RECLAIMED|300|4900000|QmContentHash123|');
+  // One posted service, so the offering-targeted ask below prices against the
+  // OFFERING's own price rather than kFace. 200.000 HBD in base units.
+  gql.seed(chOfferPrice('alice', 0, 1), '200000');
 
   // THE REAL DATA SOURCE — not the mock. Both deps injected via the real ctor.
   const ds = new VscCreatorTokensDataSource({ config, gql, broadcaster: capture.broadcast });
 
-  section('Journey: register -> renew -> setFace -> setCap -> buy -> sell -> ask -> answer -> reclaim -> retire -> transfer');
+  section('Journey: register -> renew -> setFace -> setCap -> buy -> sell -> ask -> answer -> reclaim -> retire -> transfer -> decline -> the offerings shop');
 
   // ★ CURVE-PIVOT REWRITE (2026-07-24): prepay()/transferCredits() are GONE
   // (core/prepay.go deleted). buy()/sell() are the curve rails; retire() is
@@ -265,8 +271,52 @@ async function run(): Promise<void> {
   await ds.retire({ creator: 'alice' });
   await ds.transferTokens({ creator: 'alice', from: 'bob', to: 'carol', tokens: 5 });
 
-  const expectedActions = ['register', 'renew', 'setFace', 'setCap', 'buy', 'sell', 'ask', 'answer', 'reclaim', 'retire', 'transfer'];
-  eq('journey captured all 11 write actions', capture.ops.length, expectedActions.length);
+  // The anti-grief rail and the offerings shop (wired client-side 2026-07-28).
+  // Driven HERE, through the real data source, specifically so their payloads
+  // land in the golden fixture file and get parsed by the contract's OWN Go
+  // parser below — the shop's `price`/`offeringId` are UNQUOTED numbers while
+  // every other money field is a quoted string, which is exactly the kind of
+  // asymmetry a hand-written assertion gets wrong and a real cross-check does
+  // not. Decline uses seq 0, whose seeded escrow is ANSWERED — irrelevant
+  // here: this harness's broadcaster never executes, so what is being captured
+  // is the OP, and decline's only client-side gate is the answer window.
+  // A SECOND ask, this one naming a shop offering, so BOTH wire shapes reach
+  // the Go parser: offeringId omitted (the legacy face price) and offeringId
+  // present as an UNQUOTED integer. Proving only the omitted form would leave
+  // the entire shop's purchase path uncross-checked.
+  await ds.ask({ creator: 'alice', asker: 'bob', contentHash: 'QmContentHash123', deadlineBlocks: 28_800, maxCreditsBaseUnits: 10_000, offeringId: 1 });
+  await ds.decline({ creator: 'alice', seq: 0, deadlineBlock: 5_500_000 });
+  // The buyer's rating — the only recourse against a creator who marks a job
+  // delivered without delivering it, so its payload must be cross-checked like
+  // any money op.
+  await ds.rate({ creator: 'alice', rater: 'bob', seq: 0, score: 5 });
+  await ds.createOffering({ creator: 'alice', title: '15-minute call', priceHbd: 200 });
+  await ds.setOfferingPrice({ creator: 'alice', offeringId: 1, newPriceHbd: 250 });
+  await ds.setOfferingTitle({ creator: 'alice', offeringId: 1, title: '20-minute call' });
+  await ds.deleteOffering({ creator: 'alice', offeringId: 1 });
+
+  const expectedActions = [
+    'register',
+    'renew',
+    'setFace',
+    'setCap',
+    'buy',
+    'sell',
+    'ask',
+    'answer',
+    'reclaim',
+    'retire',
+    'transfer',
+    'decline',
+    'rate',
+    'createOffering',
+    'setOfferingPrice',
+    'setOfferingTitle',
+    'deleteOffering'
+  ];
+  // 17 ops for 16 distinct actions: `ask` is driven twice, with and without an
+  // offeringId (see above).
+  eq('journey captured all 16 write actions (ask twice)', capture.ops.length, expectedActions.length + 1);
   for (const a of expectedActions) check(`captured op for action "${a}"`, capture.byAction(a) !== undefined);
 
   // ------------------------------------------------------------------
@@ -510,7 +560,12 @@ function writeGoFixtures(ops: CapturedOp[]): void {
     fixtures.push({ action, payload: payloadJson, fields });
   }
 
-  const outPath = process.env.CREATOR_TOKENS_E2E_FIXTURES ?? resolve('/mnt/o/CREATOR-TOKENS/contract/parse/captured_payloads.json');
+  // The contract repo moved (O:/CREATOR-TOKENS -> O:/Lumen/creator-tokens) and
+  // this path was left pointing at the deleted folder, so the harness ran every
+  // assertion green and then CRASHED on the write — meaning the Go golden
+  // cross-check (contract/parse/golden_crosscheck_test.go) has been reading a
+  // stale fixture file ever since, silently. Fixed 2026-07-28.
+  const outPath = process.env.CREATOR_TOKENS_E2E_FIXTURES ?? resolve('/mnt/o/Lumen/creator-tokens/contract/parse/captured_payloads.json');
   const doc = {
     _comment: 'GENERATED by apps/blog/features/creator-tokens/lib/vsc/__e2e__/vsc-data-path.e2e.ts. The exact payload JSON strings the REAL frontend write path emits, for the Go contract/parse golden cross-check (golden_crosscheck_test.go). Regenerate by re-running the harness.',
     generatedAtUnixMs: Date.now(),

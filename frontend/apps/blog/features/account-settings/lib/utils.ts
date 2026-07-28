@@ -3,6 +3,7 @@ import { TFunction } from 'i18next';
 import { configuredImagesEndpoint } from '@hive/ui/config/public-vars';
 import { getLogger } from '@ui/lib/logging';
 import { processImageForUpload } from '@/blog/features/post-editor/lib/image-processing';
+import { uploadLiteImage } from '@/blog/lib/lite/client/lite-profile';
 
 const logger = getLogger('account-settings/utils');
 
@@ -72,6 +73,11 @@ export const uploadImg = async (file: File, username: string, signer: Signer): P
   try {
     if (!file)
       throw new Error("No file provided");
+
+    // Keyless (Lumen lite) account: no signer exists for this tier, so the upload is
+    // signed server-side by the publishing account via /api/lite/upload. Same branch
+    // as the post editor's uploader.
+    if (!signer) return await uploadLiteImage(file);
 
     const data = await new Promise<Uint8Array>((resolve) => {
       const reader = new FileReader();

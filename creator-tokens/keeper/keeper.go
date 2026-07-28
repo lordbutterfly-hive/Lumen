@@ -59,7 +59,7 @@ package keeper
 import "math/big"
 
 // HolderBalance is one candidate holder and the balance the DISCOVERY source
-// (the indexer's HolderList, in practice — see indexer/index.go) last
+// (the indexer's HolderList, in practice — see magi-indexer/creator_tokens_views.yaml) last
 // reported for them. Advisory only: see Plan's doc for why a stale or wrong
 // Balance here can cost a wasted transaction but can never cause an
 // over-payment — the contract, not this struct, is the source of truth for

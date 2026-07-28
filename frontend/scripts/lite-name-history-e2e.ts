@@ -14,13 +14,11 @@ import { randomBytes } from 'crypto';
 import { query } from '../apps/blog/lib/lite/db/pool';
 import * as users from '../apps/blog/lib/lite/repositories/user-repository';
 import * as posts from '../apps/blog/lib/lite/repositories/post-repository';
-import { AccountCreator, GeneratedKeys, setAccountCreator } from '../apps/blog/lib/lite/upgrade/account-creator';
-import { fetchOutstandingReveal, upgradeToFullAccount } from '../apps/blog/lib/lite/upgrade/upgrade-service';
+import { AccountCreator, AccountPublicKeys, setAccountCreator } from '../apps/blog/lib/lite/upgrade/account-creator';
+import { upgradeToFullAccount } from '../apps/blog/lib/lite/upgrade/upgrade-service';
 import { deriveCandidates, suggestNames } from '../apps/blog/lib/lite/names/suggest';
 import { publicNameOf, resolvePublicName, resolvePublicNames } from '../apps/blog/lib/lite/render/current-name';
 import { vetNameFormat } from '../apps/blog/lib/lite/names/vetting';
-
-process.env.LITE_KEY_REVEAL_ENCRYPTION_KEY = randomBytes(32).toString('base64');
 
 let passed = 0;
 let failed = 0;
@@ -35,16 +33,17 @@ function check(label: string, ok: boolean, detail = ''): void {
   }
 }
 
-function keysFor(name: string): GeneratedKeys {
-  const wif = (role: string) => `5${role}${name}${'K'.repeat(40)}`.slice(0, 51);
-  return {
-    masterPassword: `P5${name}${'M'.repeat(40)}`.slice(0, 52),
-    owner: { publicKey: `STM-owner-${name}`, privateWif: wif('o') },
-    active: { publicKey: `STM-active-${name}`, privateWif: wif('a') },
-    posting: { publicKey: `STM-posting-${name}`, privateWif: wif('p') },
-    memo: { publicKey: `STM-memo-${name}`, privateWif: wif('m') }
-  };
-}
+/**
+ * Stand-in for what a browser derives. Public keys only — the server side of this
+ * flow has no access to private key material at all (2026-07-28 custody change), so
+ * a test fixture should not pretend otherwise.
+ */
+const PUBLIC_KEYS: AccountPublicKeys = {
+  owner: `STMowner${'A'.repeat(45)}`,
+  active: `STMactive${'B'.repeat(44)}`,
+  posting: `STMposting${'C'.repeat(43)}`,
+  memo: `STMmemo${'D'.repeat(46)}`
+};
 
 const stubCreator: AccountCreator = {
   async accountExists() {
@@ -55,9 +54,6 @@ const stubCreator: AccountCreator = {
   },
   async claimAct() {
     return { trxId: 'act' };
-  },
-  async generateKeys(name: string) {
-    return keysFor(name);
   },
   async createClaimedAccount(name: string) {
     return { trxId: `create-${name}` };
@@ -200,7 +196,7 @@ async function main(): Promise<void> {
 
     setAccountCreator(stubCreator);
     const newName = `${u.displayName}1`.slice(0, 16);
-    const result = await upgradeToFullAccount(u.session as never, newName);
+    const result = await upgradeToFullAccount(u.session as never, newName, PUBLIC_KEYS);
     check('upgrade succeeded', result.status === 'ok', JSON.stringify(result));
 
     // The row is untouched — the snapshot is what was BROADCAST and can never change.
@@ -265,7 +261,7 @@ async function main(): Promise<void> {
       }
     });
 
-    const same = await upgradeToFullAccount(u.session as never, u.displayName);
+    const same = await upgradeToFullAccount(u.session as never, u.displayName, PUBLIC_KEYS);
     check(
       'reusing your own Lumen handle is refused',
       same.status === 'error' && same.code === 'name_must_differ',
@@ -274,7 +270,7 @@ async function main(): Promise<void> {
     check('...and NO on-chain account was created', createCalls === 0, `createClaimedAccount ran ${createCalls}x`);
     check(
       '...and the refusal happens for the uppercase form too',
-      (await upgradeToFullAccount(u.session as never, u.displayName.toUpperCase())).status === 'error'
+      (await upgradeToFullAccount(u.session as never, u.displayName.toUpperCase(), PUBLIC_KEYS)).status === 'error'
     );
     check('...still no account created', createCalls === 0);
 
@@ -287,7 +283,7 @@ async function main(): Promise<void> {
     const other = await makeLiteUser('t');
     created.push(owner.userId, other.userId);
     setAccountCreator(stubCreator);
-    const stolen = await upgradeToFullAccount(other.session as never, owner.displayName);
+    const stolen = await upgradeToFullAccount(other.session as never, owner.displayName, PUBLIC_KEYS);
     check(
       'another user’s Lumen name is refused',
       stolen.status === 'error' && stolen.code === 'name_taken',
@@ -317,8 +313,8 @@ async function main(): Promise<void> {
 
     const base = u.displayName.slice(0, 14);
     const results = await Promise.all([
-      upgradeToFullAccount(u.session as never, `${base}1`).catch((e) => ({ status: 'threw', code: String(e) })),
-      upgradeToFullAccount(u.session as never, `${base}2`).catch((e) => ({ status: 'threw', code: String(e) }))
+      upgradeToFullAccount(u.session as never, `${base}1`, PUBLIC_KEYS).catch((e) => ({ status: 'threw', code: String(e) })),
+      upgradeToFullAccount(u.session as never, `${base}2`, PUBLIC_KEYS).catch((e) => ({ status: 'threw', code: String(e) }))
     ]);
     check(
       'two simultaneous upgrades create exactly ONE account',
@@ -331,48 +327,10 @@ async function main(): Promise<void> {
       JSON.stringify(results.map((r) => r.status + ':' + ((r as { code?: string }).code ?? '')))
     );
   }
-  {
-    // An ambiguous create leaves the name free for a window. If somebody ELSE takes it,
-    // the name existing is not proof our creation landed — handing over our keys would
-    // hand over a master password that opens nothing.
-    const u = await makeLiteUser('r');
-    created.push(u.userId);
-    const newName = `${u.displayName.slice(0, 14)}9`;
-
-    setAccountCreator({ ...stubCreator, async createClaimedAccount() { throw new Error('broadcast timed out'); } });
-    await upgradeToFullAccount(u.session as never, newName).catch(() => undefined);
-    const uncertain = await query<{ status: string }>(
-      `SELECT status FROM key_reveal WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1`, [u.userId]);
-    check('an ambiguous create leaves the reveal uncertain', uncertain.rows[0]?.status === 'uncertain',
-      uncertain.rows[0]?.status);
-
-    // Now the name exists — but its owner key is somebody else's.
-    setAccountCreator({
-      ...stubCreator,
-      async accountExists() { return true; },
-      async accountOwnerKey() { return 'STM-somebody-else'; }
-    });
-    const stolen = await fetchOutstandingReveal(u.session as never);
-    check(
-      'keys are NOT handed over for an account we do not own',
-      stolen.status === 'error',
-      JSON.stringify(stolen)
-    );
-
-    // Same setup, but the account really is ours: the keys must come back.
-    const v = await makeLiteUser('s');
-    created.push(v.userId);
-    const vName = `${v.displayName.slice(0, 14)}9`;
-    setAccountCreator({ ...stubCreator, async createClaimedAccount() { throw new Error('broadcast timed out'); } });
-    await upgradeToFullAccount(v.session as never, vName).catch(() => undefined);
-    setAccountCreator({
-      ...stubCreator,
-      async accountExists() { return true; },
-      async accountOwnerKey() { return keysFor(vName).owner.publicKey; }
-    });
-    const mine = await fetchOutstandingReveal(v.session as never);
-    check('keys ARE handed over when the account is ours', mine.status === 'ok', JSON.stringify(mine));
-  }
+  // (The ambiguous-create and "the name is not ours" cases moved to
+  // scripts/lite-upgrade-e2e.ts when server-side key custody was removed: there is no
+  // reveal to hand over any more, so reconciliation is proven there against the public
+  // owner key instead of here.)
 
   for (const userId of created) {
     await query('DELETE FROM key_reveal WHERE user_id = $1', [userId]).catch(() => undefined);

@@ -778,7 +778,7 @@ func TestOfferings_NormalizationDoesNotCollapseGenuinelyDifferentTitles(t *testi
 // newline/tab/NUL/BEL is accepted and embedded UNESCAPED into
 // EvOfferingCreated/EvOfferingUpdated (events.go's evJSONEscape escapes only
 // '"' and '\'), and the resulting log line fails encoding/json.Unmarshal —
-// verified directly below — so indexer/events.go's ParseEvent drops the
+// verified directly below — so magi-indexer/creator_tokens_mappings.yaml's ParseEvent drops the
 // event silently. The fix rejects bytes < 0x20 and 0x7f at the one door
 // every title passes through.
 
@@ -870,7 +870,7 @@ func TestOfferings_TitleUnicodeAndEmojiAccepted(t *testing.T) {
 // corresponding core.* call already succeeded") — so this calls it directly
 // with a title CreateOffering would now refuse, to prove that title would
 // have produced an event line encoding/json.Unmarshal cannot parse, exactly
-// as indexer/events.go's ParseEvent would receive it.
+// as magi-indexer/creator_tokens_mappings.yaml's ParseEvent would receive it.
 func TestOfferings_ControlByteWouldHaveBrokenTheEventLog(t *testing.T) {
 	line := EvOfferingCreated("c", "c", 2000, 1, "evil\ntitle", big.NewInt(1000))
 	var v map[string]any

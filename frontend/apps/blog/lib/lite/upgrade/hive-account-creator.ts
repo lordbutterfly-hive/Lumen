@@ -4,7 +4,7 @@ import { getLogger } from '@ui/lib/logging';
 import { scrubSensitiveData } from '@ui/lib/sentry-scrub';
 import { siteConfig } from '@ui/config/site';
 import { liteConfig } from '../config';
-import { AccountCreator, GeneratedKeys, KeyPair, hasAccountCreator, setAccountCreator } from './account-creator';
+import { AccountCreator, AccountPublicKeys, hasAccountCreator, setAccountCreator } from './account-creator';
 
 const logger = getLogger('app');
 
@@ -24,14 +24,11 @@ const logger = getLogger('app');
  *  1. The imported key's public key MUST appear in the configured account's ACTIVE
  *     authority on-chain, with enough weight to meet its threshold on its own. A
  *     wrong, stale, or under-weighted key fails at bootstrap, loudly.
- *  2. `createClaimedAccount` re-derives all four keys from the master password FOR
- *     THE NAME IT IS ABOUT TO CREATE and refuses if they disagree with the keys it
- *     was handed. Hive key derivation is account-name-bound, so a name mismatch
- *     between `generateKeys(a)` and `createClaimedAccount(b)` would silently mint an
- *     account whose master password does not open it — an irreversible lockout that
- *     no error would otherwise report.
- *  3. Every private WIF must round-trip to the public key it is paired with, so a
- *     corrupted pair can never end up in an on-chain authority.
+ *  2. Only well-formed, distinct PUBLIC keys are ever put into an authority. This
+ *     module cannot check that they open anything — it never sees a private key, by
+ *     design (see `account-creator.ts`). The browser that derived them owns that
+ *     check, and does it twice: once at derivation, once against the chain after the
+ *     account exists.
  *
  * CUSTODY NOTE FOR THE OPERATOR. Hive sets a newly created account's
  * `recovery_account` to its creator, so the configured creator account becomes the
@@ -98,7 +95,6 @@ async function paceClaim(): Promise<void> {
 }
 
 const ROLES = ['owner', 'active', 'posting', 'memo'] as const;
-type Role = (typeof ROLES)[number];
 
 /**
  * Are these the same public key, ignoring the network prefix?
@@ -245,7 +241,7 @@ async function signAndBroadcast(pushOp: (tx: Awaited<ReturnType<IHiveChainInterf
   return { trxId: tx.id };
 }
 
-/* ─────────────────────────────── key derivation ─────────────────────────────── */
+/* ────────────────────────── the keys we are handed ────────────────────────── */
 
 /** A single-key authority at weight 1 — the shape every fresh account gets. */
 function singleKeyAuthority(publicKey: string) {
@@ -253,76 +249,46 @@ function singleKeyAuthority(publicKey: string) {
 }
 
 /**
- * Derive the four role keys a Hive master password expands to. Pure: no chain call,
- * no network, no key material logged. `wax.getPrivateKeyFromPassword` mixes the
- * ACCOUNT NAME into every derivation, which is precisely why `verifyKeysBindTo`
- * below exists.
+ * A Hive public key as printed: a 3-letter network prefix and a base58check body.
+ * Deliberately permissive about WHICH prefix — the browser derives with the chain's
+ * own prefix (`TST…` on a testnet), and rejecting anything but `STM` here would make
+ * every non-mainnet upgrade impossible.
  */
-async function deriveRoles(accountName: string, masterPassword: string): Promise<Record<Role, KeyPair>> {
-  const wax = await loadWax().then(({ createWaxFoundation }) => createWaxFoundation());
-  const derive = (role: Role): KeyPair => {
-    const derived = wax.getPrivateKeyFromPassword(accountName, role, masterPassword);
-    return { publicKey: derived.associatedPublicKey, privateWif: derived.wifPrivateKey };
-  };
-  return {
-    owner: derive('owner'),
-    active: derive('active'),
-    posting: derive('posting'),
-    memo: derive('memo')
-  };
-}
+const PUBLIC_KEY_PATTERN = /^[A-Z]{3}[1-9A-HJ-NP-Za-km-z]{45,55}$/;
 
 /**
- * Refuse to broadcast unless `keys` are exactly what `keys.masterPassword` produces
- * for `accountName`, and every private WIF really matches its stated public key.
+ * Refuse to broadcast anything but four well-formed, distinct public keys.
  *
- * This is the guard against the single unrecoverable failure on this path. The
- * `AccountCreator` interface takes the account name twice — once in
- * `generateKeys(name)`, once in `createClaimedAccount(name, keys)` — and Hive's
- * derivation is name-bound, so any drift between the two (a re-vetting step that
- * normalises case, a retry that picks a new name, a caller that reorders the calls)
- * would put keys on chain that the master password we hand the user cannot open.
- * The account would exist, look correct, and be permanently unusable. Nothing later
- * in the flow could detect it.
+ * This is a smaller guarantee than the one this module used to make, and that is the
+ * point: it no longer receives a master password, so it cannot verify that the keys
+ * open anything. That check moved to where the secret lives — the browser derives all
+ * four for the exact name it submits, and verifies the owner key against the chain
+ * once the account exists.
  *
- * Errors below name only PUBLIC keys and the account name — never the master
- * password or a WIF, which would otherwise be one thrown error away from a log sink.
+ * What is still worth refusing here is a request that would create a permanently
+ * broken account: a malformed key the node might accept into an authority, or the
+ * same key in several roles (which would quietly make the posting key — the one that
+ * lives in browsers and third-party apps — able to move funds).
  */
-async function verifyKeysBindTo(accountName: string, keys: GeneratedKeys): Promise<void> {
-  // Deliberately `sentry-scrub.ts`'s WIF_PATTERN, anchored, with its optional leading
-  // `P` made mandatory. Two properties in one test: the password is the 'P'+WIF form
-  // Hive wallets expect, AND it is a shape the Sentry scrubber provably redacts — so
-  // a non-conforming password can never reach an error report with the owner key
-  // still derivable from it.
-  if (!/^P5[HJK][1-9A-HJ-NP-Za-km-z]{49,50}$/.test(keys.masterPassword)) {
-    throw new Error('Refusing to create an account: master password is not in the required "P"+WIF format');
-  }
-
-  const expected = await deriveRoles(accountName, keys.masterPassword);
-  const wax = await loadWax().then(({ createWaxFoundation }) => createWaxFoundation());
-
+function validatePublicKeys(accountName: string, keys: AccountPublicKeys): void {
   for (const role of ROLES) {
-    const supplied = keys[role];
-    // Typed as present, but this is the last checkpoint before an irreversible
-    // broadcast — a clear refusal beats a TypeError in whatever incident report
-    // someone reads at 3am.
-    if (!supplied?.publicKey || !supplied?.privateWif) {
-      throw new Error(`Refusing to create @${accountName}: the ${role} key pair is missing.`);
-    }
-    if (supplied.publicKey !== expected[role].publicKey) {
-      throw new Error(
-        `Refusing to create @${accountName}: the ${role} key does not derive from this master password for this ` +
-          `account name (expected ${expected[role].publicKey}, got ${supplied.publicKey}). ` +
-          'The keys were almost certainly generated for a different name — creating now would strand the account.'
-      );
-    }
-    if (wax.calculatePublicKey(supplied.privateWif) !== supplied.publicKey) {
-      throw new Error(
-        `Refusing to create @${accountName}: the ${role} private key does not match its public key ` +
-          `(${supplied.publicKey}) — the pair is corrupt.`
-      );
+    const key = keys?.[role];
+    if (typeof key !== 'string' || !PUBLIC_KEY_PATTERN.test(key)) {
+      throw new Error(`Refusing to create @${accountName}: the ${role} public key is missing or malformed.`);
     }
   }
+  const distinct = new Set(ROLES.map((role) => sameKeyBody(keys[role])));
+  if (distinct.size !== ROLES.length) {
+    throw new Error(
+      `Refusing to create @${accountName}: the four keys must be distinct — reusing one across roles would ` +
+        'give a lesser key the authority of a greater one.'
+    );
+  }
+}
+
+/** The prefix-independent body of a public key (see sameKey). */
+function sameKeyBody(key: string): string {
+  return /^[A-Z]{3}[1-9A-HJ-NP-Za-km-z]+$/.test(key) ? key.slice(3) : key;
 }
 
 /**
@@ -422,41 +388,20 @@ export const hiveAccountCreator: AccountCreator = {
   },
 
   /**
-   * Mint a fresh master password and expand it into the four role keys.
-   *
-   * The password is `'P' + WIF` over 32 bytes of CSPRNG entropy — the format Hive
-   * wallets expect and, just as importantly, the format `sentry-scrub.ts` redacts.
-   * Nothing here is persisted or logged; the caller encrypts the result into the
-   * reveal outbox before any account is created.
-   */
-  async generateKeys(accountName: string): Promise<GeneratedKeys> {
-    const { randomBytes } = await import('crypto');
-    const wax = await loadWax().then(({ createWaxFoundation }) => createWaxFoundation());
-
-    const masterPassword = `P${wax.convertRawPrivateKeyToWif(randomBytes(32).toString('hex'))}`;
-    const roles = await deriveRoles(accountName, masterPassword);
-
-    return {
-      masterPassword,
-      owner: roles.owner,
-      active: roles.active,
-      posting: roles.posting,
-      memo: roles.memo
-    };
-  },
-
-  /**
    * Broadcast `create_claimed_account`, signed with the creator's ACTIVE authority.
-   * Irreversible: once this returns, the account exists and `keys` are the only keys
-   * that will ever open it.
+   * Irreversible: once this returns, the account exists and only the private keys held
+   * by the user's browser will ever open it — this process never had them.
    *
    * Everything that can be checked offline is checked BEFORE the ACT pre-flight, so a
    * malformed request costs nothing — no token spent, no transaction attempted.
    */
-  async createClaimedAccount(newName: string, keys: GeneratedKeys): Promise<{ trxId: string }> {
-    // Offline, free, and the only thing standing between a name mismatch and a
-    // permanently unopenable account.
-    await verifyKeysBindTo(newName, keys);
+  async createClaimedAccount(
+    newName: string,
+    keys: AccountPublicKeys,
+    onBroadcast?: () => void
+  ): Promise<{ trxId: string }> {
+    // Offline and free: a malformed or duplicated key must cost no token.
+    validatePublicKeys(newName, keys);
 
     const signer = await getSigner();
 
@@ -478,15 +423,18 @@ export const hiveAccountCreator: AccountCreator = {
       await waitForActPool();
     }
 
+    // Everything above this line fails without touching the chain. From here on a
+    // failure is ambiguous, and the caller must treat the account as possibly created.
+    onBroadcast?.();
     return signAndBroadcast((tx) => {
       tx.pushOperation({
         create_claimed_account_operation: {
           creator: signer.account,
           new_account_name: newName,
-          owner: singleKeyAuthority(keys.owner.publicKey),
-          active: singleKeyAuthority(keys.active.publicKey),
-          posting: singleKeyAuthority(keys.posting.publicKey),
-          memo_key: keys.memo.publicKey,
+          owner: singleKeyAuthority(keys.owner),
+          active: singleKeyAuthority(keys.active),
+          posting: singleKeyAuthority(keys.posting),
+          memo_key: keys.memo,
           json_metadata: '',
           extensions: []
         }
@@ -539,8 +487,8 @@ export function installDevAccountCreator(): boolean {
  *  - `upgradeToFullAccount` checks the creator only AFTER it has checked whether the
  *    user is suspended, so that a suspended user is told the real reason instead of a
  *    misleading "not configured yet". A hard 503 here would undo that ordering.
- *  - The reveal path must keep working even with no creator at all — handing a user
- *    the keys they are owed always beats withholding them because a node is down.
+ *  - The status path must keep working even with no creator at all: reporting where an
+ *    account stands is more useful than a blanket failure because a node is down.
  */
 export function ensureAccountCreator(): void {
   if (hasAccountCreator()) return;

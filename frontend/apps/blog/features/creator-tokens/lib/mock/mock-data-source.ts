@@ -1,6 +1,15 @@
 import { getStorageItem, setStorageItem, StorageTTL } from '@ui/lib/storage-with-ttl';
 import type {
   Ask,
+  CreateOfferingInput,
+  DeclineInput,
+  DeleteOfferingInput,
+  CreatorSummary,
+  Offering,
+  PricePoint,
+  RateInput,
+  SetOfferingPriceInput,
+  SetOfferingTitleInput,
   AskInput,
   AnswerInput,
   BuyInput,
@@ -147,7 +156,79 @@ function addTreasury(amountBaseUnits: number): void {
  * also uses) so the numbers a demo shows stay internally consistent.
  * Mock-only: the real source must never persist state client-side.
  */
+// The mock shop persists to TTL storage, the same way the mock asks do, so a
+// dev reload does not silently empty a catalogue the developer just built.
+// Ids are allocated monotonically and never reused, mirroring offerings.go.
+const offeringsKey = (creator: string) => `ct-mock-offerings-${creator}`;
+const offeringsSeqKey = (creator: string) => `ct-mock-offerings-seq-${creator}`;
+
 export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
+  private readOfferings(creator: string): Offering[] {
+    return getStorageItem<Offering[]>(offeringsKey(creator)) ?? [];
+  }
+
+  private writeOfferings(creator: string, offerings: Offering[]): void {
+    setStorageItem(offeringsKey(creator), offerings, StorageTTL.SESSION);
+  }
+
+  // The mock has no event history to rank or plot, and inventing either would
+  // be exactly the fabrication this feature already shipped once. Both reject,
+  // which the screens render as "not available" — the same thing a real build
+  // shows when the indexer is unreachable.
+  async readDiscovery(): Promise<CreatorSummary[]> {
+    await delay(200);
+    throw new Error('MockCreatorTokensDataSource: discovery needs a real indexer');
+  }
+
+  async readPriceHistory(): Promise<PricePoint[]> {
+    await delay(200);
+    throw new Error('MockCreatorTokensDataSource: price history needs a real indexer');
+  }
+
+  async listOfferings(creator: string): Promise<Offering[]> {
+    await delay(150);
+    return this.readOfferings(creator);
+  }
+
+  async createOffering(input: CreateOfferingInput): Promise<void> {
+    await delay(400);
+    const nextId = (getStorageItem<number>(offeringsSeqKey(input.creator)) ?? 0) + 1;
+    setStorageItem(offeringsSeqKey(input.creator), nextId, StorageTTL.SESSION);
+    const priceBaseUnits = humanToBaseUnits(input.priceHbd);
+    this.writeOfferings(input.creator, [
+      ...this.readOfferings(input.creator),
+      { offeringId: nextId, title: input.title, priceHbd: input.priceHbd, priceBaseUnits }
+    ]);
+  }
+
+  async setOfferingPrice(input: SetOfferingPriceInput): Promise<void> {
+    await delay(400);
+    const offerings = this.readOfferings(input.creator);
+    const idx = offerings.findIndex((o) => o.offeringId === input.offeringId);
+    if (idx < 0) throw new Error(`MockCreatorTokensDataSource: no such offering ${input.offeringId}`);
+    const next = [...offerings];
+    next[idx] = { ...next[idx], priceHbd: input.newPriceHbd, priceBaseUnits: humanToBaseUnits(input.newPriceHbd) };
+    this.writeOfferings(input.creator, next);
+  }
+
+  async setOfferingTitle(input: SetOfferingTitleInput): Promise<void> {
+    await delay(400);
+    const offerings = this.readOfferings(input.creator);
+    const idx = offerings.findIndex((o) => o.offeringId === input.offeringId);
+    if (idx < 0) throw new Error(`MockCreatorTokensDataSource: no such offering ${input.offeringId}`);
+    const next = [...offerings];
+    next[idx] = { ...next[idx], title: input.title };
+    this.writeOfferings(input.creator, next);
+  }
+
+  async deleteOffering(input: DeleteOfferingInput): Promise<void> {
+    await delay(400);
+    this.writeOfferings(
+      input.creator,
+      this.readOfferings(input.creator).filter((o) => o.offeringId !== input.offeringId)
+    );
+  }
+
   private seed(creator: string): MarketSeed | null {
     const persisted = getStorageItem<MarketSeed>(marketKey(creator));
     if (persisted) return persisted;
@@ -176,9 +257,13 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
     // (a retired market refuses ALL new inflows, even during its still-OVERDUE
     // notice window) — the retiredAtBlock null-check ANDs the missing half
     // back in, mirroring vsc-data-source.ts's identical buildMarket() note.
+    // The mock has no delivery-gate seed, so it never simulates delinquency —
+    // stated here rather than left implicit, because "the mock can't reach this
+    // state" is the reason a delinquency bug would never show up in demo mode.
     const canFlow = canInflowOpen(phase, globalInflowPaused) && seed.retiredAtBlock === null;
     return {
       creator,
+      delinquentUntilBlock: null,
       faceHbd: baseUnitsToHuman(seed.faceBaseUnits),
       faceSetAtBlock,
       faceBand: {
@@ -670,6 +755,22 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
     const idx = seeds.findIndex((s) => s.seq === input.seq);
     if (idx < 0) throw new Error(`MockCreatorTokensDataSource: no such escrow ${input.creator}:${input.seq}`);
     const updated: AskSeed = { ...seeds[idx], rawStatus: 'ANSWERED', answerHash: input.answerHash };
+    const next = [...seeds];
+    next[idx] = updated;
+    setStorageItem(asksKey(input.creator), next, StorageTTL.SESSION);
+    return this.buildAsk(input.creator, updated, mockHeadBlock());
+  }
+
+  async rate(_input: RateInput): Promise<void> {
+    await delay(300);
+  }
+
+  async decline(input: DeclineInput): Promise<Ask> {
+    await delay(400);
+    const seeds = getStorageItem<AskSeed[]>(asksKey(input.creator)) ?? ASK_SEEDS[input.creator] ?? [];
+    const idx = seeds.findIndex((s) => s.seq === input.seq);
+    if (idx < 0) throw new Error(`MockCreatorTokensDataSource: no such escrow ${input.creator}:${input.seq}`);
+    const updated: AskSeed = { ...seeds[idx], rawStatus: 'DECLINED' };
     const next = [...seeds];
     next[idx] = updated;
     setStorageItem(asksKey(input.creator), next, StorageTTL.SESSION);

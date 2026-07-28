@@ -3,7 +3,7 @@
 import { useCallback } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
-import { getCreatorTokensDataSource } from '../lib/creator-tokens-data-source';
+import { getCreatorTokensDataSource, type CreatorTokensDataSource } from '../lib/creator-tokens-data-source';
 
 // Single hook the profile/access-panel surfaces use, mirroring
 // features/prediction-market/use-market.ts's shape and its react-query
@@ -39,16 +39,32 @@ const quoteKey = (creator: string) => ['creatorTokens', 'quote', creator];
 const REFETCH_MS = 30_000;
 const STALE_MS = 15_000;
 
+// A write attempted with no provisioned contract is a bug in the CALLER — the
+// UI is supposed to be disabled by `unavailable` long before a button can be
+// pressed. Failing with a named error beats a "cannot read property of null"
+// TypeError, and beats silently resolving as if the money had moved.
+function requireSource(source: CreatorTokensDataSource | null): CreatorTokensDataSource {
+  if (!source) throw new Error('CREATOR_TOKENS_UNAVAILABLE: no contract is provisioned (REACT_APP_CREATOR_TOKENS_*)');
+  return source;
+}
+
 export function useCreatorToken(creator: string) {
   const queryClient = useQueryClient();
   const { user, isHydrated } = useUserClient();
   const loggedIn = isHydrated && user.isLoggedIn;
+  // null = no contract provisioned and no dev demo flag (gap list, 2026-07-28).
+  // Every query below is DISABLED in that state and `unavailable` is returned
+  // so the calling screen can say "not available yet" instead of rendering
+  // fabricated numbers or crashing on a method call against null. This is the
+  // same honest-unavailable shape prediction-market already uses.
   const dataSource = getCreatorTokensDataSource();
+  const unavailable = dataSource === null;
+  const enabledBase = Boolean(creator) && !unavailable;
 
   const marketQuery = useQuery({
     queryKey: marketKey(creator),
-    queryFn: () => dataSource.readMarket(creator),
-    enabled: Boolean(creator),
+    queryFn: () => dataSource!.readMarket(creator),
+    enabled: enabledBase,
     staleTime: STALE_MS,
     refetchInterval: REFETCH_MS
   });
@@ -60,31 +76,31 @@ export function useCreatorToken(creator: string) {
 
   const positionQuery = useQuery({
     queryKey: positionKey(creator, user.username),
-    queryFn: () => dataSource.readHolderPosition(creator, user.username),
-    enabled: Boolean(creator) && loggedIn,
+    queryFn: () => dataSource!.readHolderPosition(creator, user.username),
+    enabled: enabledBase && loggedIn,
     staleTime: STALE_MS
   });
 
   const asksQuery = useQuery({
     queryKey: asksKey(creator),
-    queryFn: () => dataSource.readCreatorAsks(creator),
-    enabled: Boolean(creator) && !marketUnknown,
+    queryFn: () => dataSource!.readCreatorAsks(creator),
+    enabled: enabledBase && !marketUnknown,
     staleTime: STALE_MS
   });
 
   const deliveryQuery = useQuery({
     queryKey: deliveryKey(creator),
-    queryFn: () => dataSource.readDeliveryRecord(creator),
-    enabled: Boolean(creator),
+    queryFn: () => dataSource!.readDeliveryRecord(creator),
+    enabled: enabledBase,
     staleTime: STALE_MS
   });
 
   const quoteQuery = useQuery({
     queryKey: quoteKey(creator),
-    queryFn: () => dataSource.readQuote(creator),
+    queryFn: () => dataSource!.readQuote(creator),
     // Never worth pricing an ask against a market we can't even confirm
     // exists or that has nothing issued yet.
-    enabled: Boolean(market) && !marketUnknown && (market?.supplyTokens ?? 0) > 0,
+    enabled: !unavailable && Boolean(market) && !marketUnknown && (market?.supplyTokens ?? 0) > 0,
     staleTime: STALE_MS
   });
 
@@ -99,7 +115,7 @@ export function useCreatorToken(creator: string) {
   // (dataSource.quoteBuy) before calling, e.g. via
   // tokensAffordableForBudget() (contract-math.ts) for a "spend N HBD" UI.
   const buyMutation = useMutation({
-    mutationFn: (tokens: number) => dataSource.buy({ creator, buyer: user.username, tokens }),
+    mutationFn: (tokens: number) => requireSource(dataSource).buy({ creator, buyer: user.username, tokens }),
     onSuccess: invalidateAfterMoney
   });
 
@@ -112,7 +128,7 @@ export function useCreatorToken(creator: string) {
     // (finding C-D — the base-unit figure, not the human-scaled
     // Quote.creditsRequired) plus the tolerance it shows the user.
     mutationFn: (input: { contentHash: string; deadlineBlocks: number; maxCreditsBaseUnits: number }) =>
-      dataSource.ask({ creator, asker: user.username, ...input }),
+      requireSource(dataSource).ask({ creator, asker: user.username, ...input }),
     onSuccess: () => {
       invalidateAfterMoney();
       queryClient.invalidateQueries({ queryKey: asksKey(creator) });
@@ -123,11 +139,15 @@ export function useCreatorToken(creator: string) {
   // winding down; while it trades, exit via sell() instead — not wired on
   // this hook, see the scope note above). `tokens` is a whole INTEGER count.
   const refundMutation = useMutation({
-    mutationFn: (tokens: number) => dataSource.refund({ creator, holder: user.username, tokens }),
+    mutationFn: (tokens: number) => requireSource(dataSource).refund({ creator, holder: user.username, tokens }),
     onSuccess: invalidateAfterMoney
   });
 
   return {
+    // True when no contract is provisioned: the screen must render an
+    // explicit "not available yet", never an empty market read as real.
+    unavailable,
+
     market,
     isLoadingMarket: marketQuery.isLoading,
     isMarketError: marketQuery.isError,

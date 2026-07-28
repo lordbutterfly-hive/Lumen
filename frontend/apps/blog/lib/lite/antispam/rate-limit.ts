@@ -48,6 +48,36 @@ export async function enforceEditRate(userId: string): Promise<RateResult> {
 }
 
 /**
+ * Per-account daily cap on image uploads.
+ *
+ * Every lite upload is signed by the shared publishing account, so a flood is spent
+ * against OUR standing with the image host and would degrade uploads for every other
+ * lite user — the cost does not land on the account causing it. That asymmetry is
+ * the whole reason this cap exists.
+ */
+export async function enforceUploadRate(userId: string): Promise<RateResult> {
+  const allowed = await rateRepo.checkAndConsume(
+    `user:${userId}`,
+    'upload',
+    liteConfig.uploadsPerDay,
+    dayKey()
+  );
+  return allowed ? { ok: true } : { ok: false, reason: 'daily_upload_cap' };
+}
+
+/**
+ * Per-account daily cap on upgrade attempts (both the status check and the create).
+ *
+ * Every attempt that reaches the account creator can trigger an on-chain `claim_account`
+ * to top up the token pool, which spends the creator account's Resource Credits — a
+ * shared, exhaustible resource that every other user's upgrade depends on. Generous:
+ * a real person upgrades once, with a few retries at worst.
+ */
+export async function enforceUpgradeRate(userId: string): Promise<boolean> {
+  return rateRepo.checkAndConsume(`user:${userId}`, 'upgrade', liteConfig.upgradeAttemptsPerDay, dayKey());
+}
+
+/**
  * Per-IP cap on cheap read lookups — currently the name-availability check.
  *
  * That endpoint was completely uncapped and fans out to TWO Hive API calls per
@@ -103,4 +133,22 @@ export async function enforceFollowRate(userId: string): Promise<boolean> {
   if (!user) return false;
   const caps = getUserCaps(user.trustScore, ageDays(user.createdAt));
   return rateRepo.checkAndConsume(`user:${userId}`, 'follow', caps.likesPerDay, dayKey());
+}
+
+/**
+ * Follow cap for a full Hive account acting on Lumen — following a lite user, which
+ * cannot be a chain operation.
+ *
+ * It gets its own counter because there is no Lumen row to read trust or age from,
+ * and a flat, generous cap is honest about that. The Sybil pressure is also lower
+ * here: a Hive account costs real money or a creation token to make, whereas a lite
+ * account is free, which is exactly what the tiered caps above exist to bound.
+ */
+export async function enforceHiveFollowRate(hiveName: string): Promise<boolean> {
+  return rateRepo.checkAndConsume(
+    `hive:${hiveName}`,
+    'follow',
+    liteConfig.hiveFollowsPerDay,
+    dayKey()
+  );
 }

@@ -1,6 +1,7 @@
 import { FullAccount } from '@hive/common-hiveio-packages/wax';
 import * as users from '../repositories/user-repository';
 import * as posts from '../repositories/post-repository';
+import * as follows from '../repositories/follow-repository';
 
 /**
  * A profile-shaped view of a lite account.
@@ -37,6 +38,25 @@ export async function liteAccountAsProfile(displayName: string): Promise<FullAcc
 
   const postCount = await posts.countByUser(user.userId);
   const created = user.createdAt.toISOString().slice(0, 19);
+  // Real numbers, from our own graph. A lite account's follows cannot be on chain, so
+  // these are the only true counts that exist for it — the zeros this used to render
+  // were not caution, they were wrong.
+  const actor = { userId: user.userId };
+  const [followerCount, followingCount] = await Promise.all([
+    follows.countFollowers(actor),
+    follows.countFollowing(actor)
+  ]);
+  // What the user set on /@name/settings. Stored in Postgres rather than in
+  // `posting_json_metadata` on chain, because there is no chain account to write to —
+  // but shaped identically, so every renderer downstream is unaware of the difference.
+  const profile = {
+    name: user.profile?.name || user.displayName,
+    about: user.profile?.about ?? '',
+    location: user.profile?.location ?? '',
+    website: user.profile?.website ?? '',
+    profile_image: user.avatarUrl || user.profile?.profile_image || '',
+    cover_image: user.profile?.cover_image ?? ''
+  };
 
   return {
     name: user.displayName,
@@ -47,15 +67,7 @@ export async function liteAccountAsProfile(displayName: string): Promise<FullAcc
     post_count: postCount,
     created,
     json_metadata: '',
-    posting_json_metadata: JSON.stringify({
-      profile: {
-        name: user.displayName,
-        // Marks the account as Lumen-hosted for any renderer that looks; the reader
-        // badge decision (2026-07-22) keys off the same idea.
-        about: '',
-        version: 2
-      }
-    }),
+    posting_json_metadata: JSON.stringify({ profile: { ...profile, version: 2 } }),
     last_vote_time: EPOCH,
     last_post: EPOCH,
     reward_hbd_balance: ZERO_HBD,
@@ -85,8 +97,12 @@ export async function liteAccountAsProfile(displayName: string): Promise<FullAcc
     // Reputation is a chain-derived score. A lite account has none; 25 is Hive's
     // own "new account" floor, so it renders as new rather than as suspicious.
     reputation: 25,
-    profile: { name: user.displayName, about: '', profile_image: '', cover_image: '', website: '', location: '' },
-    follow_stats: { account: user.displayName, following_count: 0, follower_count: 0 },
+    profile,
+    follow_stats: {
+      account: user.displayName,
+      following_count: followingCount,
+      follower_count: followerCount
+    },
     __loaded: true,
     _temporary: true
   } as FullAccount;

@@ -127,7 +127,14 @@ export default function ProfileMain() {
           lastVoteTime={profileData.last_vote_time}
           lastPost={profileData.last_post}
         />
-        <ProfileActions username={username} following={following} />
+        {/* `_temporary` is how a Lumen lite account's stand-in profile is marked: no
+            Hive account exists behind it, so a follow of this person can only live on
+            Lumen. It is a hint, not a decision — the server confirms it. */}
+        <ProfileActions
+          username={username}
+          following={following}
+          liteTarget={Boolean(profileData._temporary)}
+        />
       </div>
 
       <ProfileStatsBar

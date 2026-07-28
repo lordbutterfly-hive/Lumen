@@ -12,8 +12,8 @@ Lumen's own Hive account with a `Posted via Lumen by {name}` footer. Lite posts
 Full spec: `/mnt/o/LUMEN-DOCS/frontend-lite/LUMEN-LITE-ACCOUNTS-SPEC-2026-07-22.md`
 (the docs folder was renamed from `O:/HIVE-BLOG-REBUILD` on 2026-07-27).
 
-Current inventory: **65 TS modules · 28 API routes · 14 migrations** (0001–0004,
-0006–0015; `0005_ledger.sql` was deleted with the earnings subsystem).
+Current inventory: **78 TS modules · 31 API routes · 16 migrations** (0001–0004,
+0006–0017; `0005_ledger.sql` was deleted with the earnings subsystem).
 
 ## Decisions that shape everything here
 
@@ -22,6 +22,8 @@ Current inventory: **65 TS modules · 28 API routes · 14 migrations** (0001–0
 | **No earnings, ever, for a lite post** (2026-07-23) | Posts broadcast with `max_accepted_payout 0.000` and no beneficiary. The whole Phase-6 ledger/accrual/settlement subsystem was **deleted** — there is no money to hold, so no custody question and no money-transmission exposure. |
 | **Every lite post is a comment under a rolling container** (2026-07-27) | Hive caps root posts at ~1 per 5 min per account but replies at 1 per 3 s. `publisher/container.ts` opens `lumen-c-<ulid>` roots and rotates at `LITE_CONTAINER_MAX_CHILDREN`. Throughput ≈ 20/min per publishing account. |
 | **Votes / reblogs / follows are Lumen-local** | A Hive vote is attributed to the *signing* account, so N lite users would collapse into one vote. They live in `lumen_vote` / `lumen_reblog` / `lumen_follow` and materialise on chain only after upgrade. |
+| **Following works across both tiers** (2026-07-28) | Three of the four directions cannot be chain operations — a lite user has no key, and a lite user is not an account that can be followed. `lumen_follow` now holds a Lumen user id OR a Hive name on each side (migration 0017). A Lumen account is always stored by `user_id`, so upgrading costs a user nothing: their audience follows them. Hive→Hive is refused here and stays on chain. |
+| **Lite images go to Hive's image host** (2026-07-28) | The host authenticates uploads with a posting-key signature; a lite account has none, so `POST /api/lite/upload` signs with the PUBLISHING account. No storage of our own to run, and the URLs are ordinary public image URLs. Proven end to end against the real host. |
 | **Hive is the source of truth for published content** | `pruneBodyAfterPublish` defaults TRUE: after publish the row keeps the mapping, not the body. Rendering a published post = fetch from chain + overlay the lite identity. |
 
 ## Phase status (spec §L)
@@ -35,7 +37,7 @@ Current inventory: **65 TS modules · 28 API routes · 14 migrations** (0001–0
 | 4 Publisher — outbox queue, container model, pacing, RC pre-flight, live broadcaster | **built; proven on Hive mainnet** |
 | 5 Rate limits / anti-Sybil — intake caps, per-IP caps, /64 IPv6 bucketing, Turnstile | **built** |
 | ~~6 Earnings~~ | **deleted 2026-07-23** — lite posts decline all rewards |
-| 7 Upgrade — ACT claim, keygen, durable reveal-once custody, `/upgrade` page | **built; `setAccountCreator` not yet injected → the endpoint 503s** |
+| 7 Upgrade — ACT claim, **browser-side keygen**, chain reconciliation, `/upgrade` page | **built; needs a creator account + delegated HP before it can run** |
 | 8 recsys reconciliation — author/graph resolution for the ranking layer | **built** |
 | 9 Moderation — account status, post visibility, takedown, audit trail | **built 2026-07-28** |
 | 10 Recovery — linked sign-in methods, second-binder UI, `/security` page | **built 2026-07-28** |
@@ -69,9 +71,21 @@ lib/lite/
 
   upgrade/
     account-creator.ts         ACT claim + keygen seam (setAccountCreator injection)
-    key-reveal-crypto.ts       AES-256-GCM for the reveal outbox; NEVER degrades —
-                               a missing key throws rather than storing nothing
     upgrade-service.ts         creates the account, but writes the encrypted keys FIRST
+
+  social/
+    follow-actor.ts            who is on each end of an edge: a Lumen user id or a Hive
+                               name; canonicalises a name to its user id (injection seam
+                               for the chain existence check)
+    follow-service.ts          follow / unfollow / state for whichever tier each side is
+
+  media/
+    image-host.ts              ImageUploader seam + type/size validation
+    hive-image-uploader.ts     signs sha256("ImageSigningChallenge"||bytes) with the
+                               publishing account's posting key, POSTs to the image host
+
+  profile/profile-service.ts   validation for the editable lite profile; drops anything
+                               that is not an ordinary http(s) URL (stored-XSS surface)
 
   names/vetting.ts             format + reserved (substring) + wallet-shape + live existence
   antispam/                    windows, trust tiers, rate limits, Turnstile
@@ -107,11 +121,14 @@ auth      /api/lite/auth/{google, btc/challenge, btc/verify, evm/challenge, evm/
 names     /api/lite/name/check
 content   /api/lite/posts (POST create/edit, GET feed) · /api/lite/posts/[id] (GET, DELETE)
 social    /api/lite/{vote, reblog, follow, unfollow} · /api/lite/engagement (GET, read side)
+          /api/lite/follow/state (GET — does the viewer follow them ON LUMEN, and is
+                                  Lumen where that follow belongs at all?)
+profile   /api/lite/profile (GET, POST) · /api/lite/upload (POST, multipart image)
 publisher /api/lite/publisher/{drain, health}   (x-lite-publisher-token)
 moderation/api/lite/moderation/{user, post, actions}   (x-lite-moderator-token)
 recsys    /api/lite/recsys/{resolve, follow-edges}     (x-lite-recsys-token)
 wallet    /api/lite/wallet/dids
-upgrade   /api/account/upgrade · /api/account/upgrade/reveal (GET re-fetch, POST ack)
+upgrade   /api/account/upgrade (GET status + reconcile, POST create with PUBLIC keys only)
 ```
 
 ## Moderation (Phase 9)
@@ -161,10 +178,10 @@ BTC login, EVM login, edit/delete, moderation, Lumen-local engagement read-back,
 account-recovery binding paths. **None of them call `/api/lite/publisher/drain` — that
 broadcasts to Hive mainnet.**
 
-`scripts/lite-key-reveal-e2e.ts` is the exception in shape: it imports the upgrade
+`scripts/lite-upgrade-e2e.ts` is the exception in shape: it imports the upgrade
 service directly and runs against the real Postgres with a stubbed `AccountCreator`,
 because the real one burns an account-creation token and writes to chain. Run it with
-`cd apps/blog && npx tsx ../../scripts/lite-key-reveal-e2e.ts`. Most of its cases are
+`cd apps/blog && npx tsx ../../scripts/lite-upgrade-e2e.ts`. Most of its cases are
 failures — a lost response, an ambiguous broadcast, a missing encryption key — since
 that is the entire reason the outbox exists.
 
@@ -196,11 +213,12 @@ to tell two bound wallets apart.
    it returns 503 when the oldest pending job ages past the stall window, and the cron
    script exits non-zero on it. Queue depth alone could never tell a draining queue from
    a dead one — the ages do.
-2. **`setAccountCreator` has no call site**, so `/api/account/upgrade` returns 503 and
-   the `/upgrade` page cannot complete. The durable reveal outbox that used to block
-   wiring it is **built** (migration 0015): keys are encrypted and persisted BEFORE the
-   account is created, re-fetchable at `/api/account/upgrade/reveal` until acknowledged,
-   and the upgrade refuses to start without `LITE_KEY_REVEAL_ENCRYPTION_KEY`.
+2. **Account creation has never broadcast a transaction.** The creator is built and
+   wired (`upgrade/hive-account-creator.ts`, installed lazily by both upgrade routes),
+   but it stays dark until the operator supplies a creator account name and delegates
+   Hive Power (or RC) to it — creation tokens are per-account and cannot be transferred.
+   The claim that still needs a testnet: **the master password we mint actually opens
+   the account we create**.
 3. **`content/pre-screen.ts` is a length check, not a classifier.** The CSAM/abuse
    screen is still a seam; moderation is entirely reactive until it is filled.
 4. No lite notifications.
@@ -214,11 +232,9 @@ to tell two bound wallets apart.
 ## Deploy notes
 
 - Postgres at `LITE_DATABASE_URL` (the migration creates `citext`).
-- `LITE_KEY_REVEAL_ENCRYPTION_KEY` (base64, 32 bytes) is **required before any upgrade
-  can run** — the service refuses to create an account whose keys it could not durably
-  store, checked up front while refusing is still free. Separate key from
-  `LITE_EMAIL_ENCRYPTION_KEY` on purpose: leaking PII must not also unlock account keys.
-  `LITE_KEY_REVEAL_TTL_HOURS` (default 72) bounds how long unacknowledged keys sit.
+- **No key-custody configuration, by design.** A new account's keys are generated in
+  the user's browser and only the four public keys reach the server, so there is no
+  ciphertext to store, no TTL and no encryption key to deploy.
 - The publishing Hive account name per network via
   `LITE_FRONTEND_ACCOUNT_{MAINNET,MIRRORNET,TESTNET}`; its keys belong in KMS and are
   injected through `setBroadcaster` — `LITE_PUBLISHER_POSTING_WIF` is a dev-only path

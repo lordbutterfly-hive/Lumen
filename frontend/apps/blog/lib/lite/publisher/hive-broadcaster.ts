@@ -103,6 +103,20 @@ async function initSigner(): Promise<Signer> {
   return { chain, wallet, publicKey, account };
 }
 
+/**
+ * The publisher's in-memory signer, for other server-side features that must act as
+ * the publishing account. Currently that is image hosting (`media/hive-image-uploader`):
+ * Hive's image host authenticates uploads with a posting-key signature, and a lite
+ * account has no key, so the publishing account signs on its behalf.
+ *
+ * Exported rather than duplicated so there is exactly one place a key is imported,
+ * one place the key is proved to belong to the configured account, and one wallet in
+ * memory.
+ */
+export function getPublisherSigner(): Promise<Signer> {
+  return getSigner();
+}
+
 function getSigner(): Promise<Signer> {
   if (!signerPromise) {
     signerPromise = initSigner().catch((error) => {

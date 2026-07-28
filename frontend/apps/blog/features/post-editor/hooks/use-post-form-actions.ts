@@ -113,6 +113,18 @@ export function usePostFormActions({
       // travels in the entry's json_metadata (lumen_post_id), written by the
       // publisher — the on-chain permlink is not our row id.
       const liteEditId = editMode ? litePostIdOf(post_s) : undefined;
+      // Checked BEFORE submitting. Without an id the server has no way to tell an edit
+      // from a new post and treats it as a create — so running this guard afterwards
+      // published the duplicate it exists to prevent, and then reported failure.
+      if (editMode && !liteEditId) {
+        if (btnRef.current) btnRef.current.disabled = false;
+        setIsSubmitting(false);
+        handleError(new Error("Could not identify which Lumen post to edit."), {
+          method: "lite-post-edit",
+          params: { title: data.title }
+        });
+        return;
+      }
       const result = await createLitePost({
         tier: "advanced",
         title: data.title,
@@ -122,16 +134,6 @@ export function usePostFormActions({
         community: data.category,
         editOfPostId: liteEditId
       });
-      if (editMode && !liteEditId) {
-        // Fail loudly rather than silently duplicating the post.
-        if (btnRef.current) btnRef.current.disabled = false;
-        setIsSubmitting(false);
-        handleError(new Error("Could not identify which Lumen post to edit."), {
-          method: "lite-post-edit",
-          params: { title: data.title }
-        });
-        return;
-      }
       if (btnRef.current) btnRef.current.disabled = false;
       setIsSubmitting(false);
       if (result.status === "ok") {

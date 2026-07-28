@@ -112,6 +112,18 @@ export interface Market {
   /** Same RequireInflowOpen gate as canBuy — ask.go's Ask() calls the identical chokepoint. See canBuy's own doc for the RULING K3 retired-notice caveat, which applies here too. */
   canAsk: boolean;
   /**
+   * delivery.go DeliveryStanding — the block the creator's delivery penalty
+   * ends, or null when their standing is clear. Non-null means canBuy/canAsk
+   * are false FOR THIS REASON specifically, which the UI must say out loud: a
+   * dead Buy button with no explanation reads as a broken page, and the honest
+   * message ("this creator has missed too many asks; sales reopen in N days")
+   * is also the one that makes the gate do its job.
+   *
+   * INFLOWS ONLY. Selling, refunding, reclaiming and claiming stay open the
+   * whole time — never disable an exit on this field.
+   */
+  delinquentUntilBlock: number | null;
+  /**
    * market.go RetiredAt(s, creator) / kRetiredAt — null when the market has
    * never been retired; otherwise the block Retire(...) was called at. A
    * non-null value means the market is in its irreversible 5-day OVERDUE
@@ -253,7 +265,18 @@ export interface SellQuote {
  * whole-token balance rather than a 3-decimal PAR credit (see ask.go's
  * escrowRec doc — kBal is the same balance Buy/Sell operate on).
  */
-export type AskStatus = 'awaiting' | 'expired' | 'answered' | 'reclaimable' | 'reclaimed';
+// 'declined' (added 2026-07-28) is the creator's free, honest "no" — a
+// DISTINCT terminal state from 'reclaimed', deliberately: a reclaim means the
+// creator went silent until the window closed, a decline means they answered
+// promptly with "I can't take this". Only one of those is a black mark, and a
+// UI that could not tell them apart would show a conscientious creator the same
+// record as an absent one.
+//
+// It was missing from this union until 2026-07-28, and the escrow parser
+// REJECTED the on-chain "DECLINED" status outright — so the moment Decline was
+// used, that escrow read as unparseable and VANISHED from the inbox instead of
+// showing as declined.
+export type AskStatus = 'awaiting' | 'expired' | 'answered' | 'reclaimable' | 'reclaimed' | 'declined';
 
 export interface Ask {
   /** `${creator}:${seq}` — mirrors the e|<creator>|<seq> state key (keys.go kEscrow), not a separate id counter. */
@@ -526,6 +549,111 @@ export interface AskInput {
    * consenting to.
    */
   maxCreditsBaseUnits: number;
+  /**
+   * The named service being bought from the creator's shop, or omitted for the
+   * creator's legacy single `face` price (id 0 is the reserved alias for it).
+   *
+   * The whole offerings catalogue was on-chain, tested, and UNREACHABLE until
+   * 2026-07-28 because this field did not exist on any client payload. When it
+   * IS set, the ask settles at THAT offering's own banded price — so a UI that
+   * shows a list of named services must pass the id the user actually picked,
+   * or every purchase silently charges the generic face price instead.
+   */
+  offeringId?: number;
+}
+
+/** One posted service in a creator's shop (core/offerings.go). Prices are per-offering and each sits under its own title-anchored 2x/7d anti-rug band. */
+export interface Offering {
+  offeringId: number;
+  title: string;
+  /** The POSTED price in HBD — the buyer's total. Commission is carved OUT of it, never added on top (USER RULING 2026-07-27), so a $200 service costs the buyer exactly $200. */
+  priceHbd: number;
+  priceBaseUnits: number;
+}
+
+/**
+ * One creator in the discovery list. Ranked on DELIVERY by the indexer view —
+ * never price, never market cap, never volume — and the ordering is applied in
+ * SQL precisely so a client cannot quietly re-rank it on something else.
+ */
+export interface CreatorSummary {
+  creator: string;
+  /** null when nothing has resolved yet. NOT 0 — a creator nobody has asked has no completion rate, and 0% reads as "fails everything". */
+  completionPct: number | null;
+  /** null when UNRATED. Never render or rank this as equivalent to a good score. */
+  avgRating: number | null;
+  ratingCount: number;
+  answeredCount: number;
+  missedCount: number;
+  medianResponseBlocks: number | null;
+  /** Live curve price, from a batched chain read — the indexer stores no price. */
+  priceHbd: number;
+  marketCapHbd: number;
+  /** The creator's default posted ask price ("from $X"). */
+  faceHbd: number;
+  /** Registered within the last ~30 days, by the LATEST registration (a re-registered market is a new incarnation). */
+  isNew: boolean;
+}
+
+/** One point of a token's price history. `priceHbd` is derived from supply via the ported curve math, not stored. */
+export interface PricePoint {
+  block: number;
+  priceHbd: number;
+}
+
+export interface CreateOfferingInput {
+  creator: string;
+  title: string;
+  priceHbd: number;
+}
+
+export interface SetOfferingPriceInput {
+  creator: string;
+  offeringId: number;
+  newPriceHbd: number;
+}
+
+export interface SetOfferingTitleInput {
+  creator: string;
+  offeringId: number;
+  title: string;
+}
+
+export interface DeleteOfferingInput {
+  creator: string;
+  offeringId: number;
+}
+
+/**
+ * The creator's free, honest "no" (ask.go Decline, RULING E). Same window an
+ * Answer is legal in; returns the asker's tokens AND the whole commission, and
+ * is explicitly NOT a miss against the delivery record.
+ *
+ * deadlineBlock is carried for the same reason AnswerInput carries it: the
+ * write path enforces the window client-side from what the caller already has,
+ * without a second chain read.
+ */
+/**
+ * The buyer's 1-5 score for a DELIVERED job (rating.go). Reputation only — the
+ * contract refuses to let a rating gate any payout, refund or sale, and no UI
+ * should imply otherwise.
+ *
+ * Only the account that actually paid can rate, once, and only a job the creator
+ * marked delivered. A reclaim (creator went silent) and a decline (creator said
+ * no) are already recorded objectively and are deliberately not rateable.
+ */
+export interface RateInput {
+  creator: string;
+  /** The buyer — the account that paid for this job, and the ONLY one the contract will accept a rating from. */
+  rater: string;
+  seq: number;
+  score: number;
+}
+
+export interface DeclineInput {
+  creator: string;
+  seq: number;
+  deadlineBlock: number;
 }
 
 export interface AnswerInput {

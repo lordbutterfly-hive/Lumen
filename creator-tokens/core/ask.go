@@ -62,9 +62,13 @@ type AnswerResult struct {
 	CommissionHbd    *big.Int
 }
 
-// ReclaimResult — credits AND the held commission, both returned to the
-// asker in full (I5, SPEC §1.7.2 rule 4: "No commission on refunds...We are
-// paid for delivered service only"). CommissionHbd is HBD, which core itself
+// ReclaimResult — the credits in full, plus the held commission MINUS the miss
+// slice. I5 (SPEC §1.7.2 rule 4: "No commission on refunds...We are paid for
+// delivered service only") held without exception until USER RULING 1
+// (2026-07-28) carved one, because a 100% refund made griefing free; see
+// MissReclaimSliceBps in params.go. Decline still refunds everything, and the
+// credits are still returned whole on both paths.
+// CommissionHbd is HBD, which core itself
 // never moves — the wasm wrapper is responsible for actually paying it back
 // via sdk.HiveTransfer (see contract/main.go's `reclaim` entrypoint), the
 // same division of responsibility Refund's own HBD payout already has.
@@ -77,7 +81,15 @@ type AnswerResult struct {
 type ReclaimResult struct {
 	CreditsReturned *big.Int
 	CommissionHbd   *big.Int
-	Asker           string
+	// CommissionRetainedHbd is the slice kept by the protocol because this
+	// reclaim was a MISS (USER RULING 1, 2026-07-28 — see MissReclaimSliceBps).
+	// It is already booked to kTreasury() by Reclaim itself; the wrapper must
+	// NOT move it. It is reported only so the emitted event carries both halves
+	// of the split and a replaying indexer can still account for every unit of
+	// the commission that was held. Always zero on a self-dealt escrow, which
+	// is not a miss. CommissionHbd above is the NET figure to pay the asker.
+	CommissionRetainedHbd *big.Int
+	Asker                 string
 }
 
 // Escrow status codes. Local to this file: keys.go owns only the key
@@ -588,8 +600,9 @@ func Answer(s Store, caller, creator string, block, seq uint64, answerHash strin
 // read it back from — an unanswered ask permanently cost the asker 12% of
 // face, contradicting SPEC §1.7.2 rule 4 verbatim. Now the commission is
 // only ever HELD in the escrow record (Ask) and only ever BOOKED on Answer,
-// so Reclaim has nothing to reverse in the treasury — it simply hands the
-// held amount back, exactly once (status flips to RECLAIMED before
+// so Reclaim has nothing to reverse in the treasury — it hands the held
+// amount back net of the miss slice it books to the treasury itself
+// (MissReclaimSliceBps), exactly once (status flips to RECLAIMED before
 // returning, so a second call is rejected before reaching here). core
 // itself never moves HBD: the caller (contract/main.go's `reclaim`
 // entrypoint) is responsible for actually paying CommissionHbd back via
@@ -635,9 +648,37 @@ func Reclaim(s Store, caller, creator string, block, seq uint64) (*ReclaimResult
 	// deadline+ReclaimGrace. recordMiss is infallible and returns nothing, so
 	// it can never make this outflow revert (RULING G); the asker's money is
 	// already back above regardless of what it decides about the creator.
-	recordMiss(s, creator, rec.asker, block)
+	//
+	// A SELF-DEALT escrow is not a miss (recordMiss returns immediately on
+	// asker==creator), and the same condition governs the commission slice
+	// below, so the two can never disagree about whether this was an offence.
+	offence := rec.deadline + ReclaimGrace
+	recordMiss(s, creator, rec.asker, offence)
 
-	return &ReclaimResult{CreditsReturned: rec.credits, CommissionHbd: rec.commissionHbd, Asker: rec.asker}, nil
+	// USER RULING 1 (2026-07-28), the ONLY exception to I5's "no commission on
+	// refunds": on a miss the protocol keeps MissReclaimSliceBps of the HELD
+	// commission so that manufacturing a miss is not free (params.go carries
+	// the full reasoning, including why the cost lands on the asker and why the
+	// slice can never go to the creator). The CREDITS are untouched — they went
+	// back whole, above, before this line runs.
+	//
+	// Booked to kTreasury() here rather than by the wrapper because core owns
+	// every HBD balance the contract holds; the wrapper only ever moves the NET
+	// figure this returns, so the two cannot drift.
+	returned := rec.commissionHbd
+	retained := big.NewInt(0)
+	if rec.asker != creator && returned != nil && returned.Sign() > 0 {
+		retained = mMulDivCeil(returned, new(big.Int).SetUint64(MissReclaimSliceBps), big.NewInt(10000))
+		returned = new(big.Int).Sub(returned, retained)
+		addMoney(s, kTreasury(), retained)
+	}
+
+	return &ReclaimResult{
+		CreditsReturned:       rec.credits,
+		CommissionHbd:         returned,
+		CommissionRetainedHbd: retained,
+		Asker:                 rec.asker,
+	}, nil
 }
 
 // Decline is the creator's free, honest "no": it returns the asker's credits

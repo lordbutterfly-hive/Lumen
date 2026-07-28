@@ -2,31 +2,19 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
 import { guardWrite } from '@/blog/lib/lite/http/guard';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
-import { requireLiteUser } from '@/blog/lib/lite/http/actor';
-import { enforceFollowRate } from '@/blog/lib/lite/antispam/rate-limit';
-import { findUserByDisplayName } from '@/blog/lib/lite/repositories/user-repository';
-import { unfollow } from '@/blog/lib/lite/repositories/follow-repository';
+import { unfollowByName } from '@/blog/lib/lite/social/follow-service';
 
 const logger = getLogger('app');
 
-/** POST /api/lite/unfollow — { followeeName } (lite session). */
+/**
+ * POST /api/lite/unfollow — { followeeName }. Mirror of the follow route; a suspended
+ * account may still take back a follow (withdrawal, not participation).
+ */
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const blocked = guardWrite(req);
   if (blocked) return blocked;
 
   const session = await getLiteSession();
-  // Withdrawal, not participation: a suspended account may still unfollow.
-  const actor = await requireLiteUser(session.user);
-  if (!actor.ok) return actor.response;
-  const user = actor.user;
-  // FOLLOW-RECSYS-1 (PRUNED 2026-07-22): cap unfollow too — follow WAS capped but
-  // unfollow wasn't, so an attacker could churn follow/unfollow to spam the recsys
-  // edge feed. (The structural tombstone/resync fix for phantom edges is tracked
-  // separately with the recsys consumer contract.)
-  if (!(await enforceFollowRate(user.userId))) {
-    return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
-  }
-
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
   const followeeName = body?.followeeName;
   if (typeof followeeName !== 'string') {
@@ -34,9 +22,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   try {
-    const followee = await findUserByDisplayName(followeeName);
-    if (!followee) return NextResponse.json({ error: 'not_found' }, { status: 404 });
-    await unfollow(user.userId, followee.userId);
+    const result = await unfollowByName(session.user, followeeName);
+    if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
     return NextResponse.json({ ok: true, following: false });
   } catch (error) {
     logger.error(error, 'Lite unfollow failed');

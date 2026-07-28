@@ -41,7 +41,11 @@ import {
   buyPayload,
   claimTradeFeesPayload,
   closeIfDrainedPayload,
+  createOfferingPayload,
+  declinePayload,
+  deleteOfferingPayload,
   pausePayload,
+  ratePayload,
   reclaimPayload,
   refundHolderPayload,
   refundPayload,
@@ -51,6 +55,8 @@ import {
   sellPayload,
   setCapPayload,
   setFacePayload,
+  setOfferingPricePayload,
+  setOfferingTitlePayload,
   transferTokensPayload,
   unpausePayload,
   withdrawTreasuryPayload
@@ -75,9 +81,22 @@ function representativeCases(): Case[] {
     { action: 'buy', payload: buyPayload('alice', 25) },
     { action: 'sell', payload: sellPayload('alice', 10) },
     { action: 'sell', payload: sellPayload('alice', 10, 9_500) },
+    // BOTH ask shapes: without an offeringId (the legacy face price, where the
+    // key must be OMITTED entirely, not sent as 0) and with one (the shop).
+    // Omit-vs-send on this optional key is exactly where the shop would break.
     { action: 'ask', payload: askPayload('alice', 'Qm-some-content-hash', 28_800, 5_000) },
+    { action: 'ask', payload: askPayload('alice', 'Qm-some-content-hash', 28_800, 5_000, 3) },
     { action: 'answer', payload: answerPayload(7, 'Qm-some-answer-hash') },
+    { action: 'decline', payload: declinePayload('alice', 7) },
+    // The offerings shop. Prices here are UNQUOTED numbers, unlike every money
+    // field above — a quoted string would post a FREE service (see the shop
+    // section of op-builders.ts).
+    { action: 'createOffering', payload: createOfferingPayload('15-minute call', 200_000) },
+    { action: 'setOfferingPrice', payload: setOfferingPricePayload(3, 250_000) },
+    { action: 'setOfferingTitle', payload: setOfferingTitlePayload(3, '20-minute call') },
+    { action: 'deleteOffering', payload: deleteOfferingPayload(3) },
     { action: 'reclaim', payload: reclaimPayload('alice', 7) },
+    { action: 'rate', payload: ratePayload('alice', 7, 5) },
     { action: 'refund', payload: refundPayload('alice', 15) },
     { action: 'refund', payload: refundPayload('alice', 15, 1_200) },
     { action: 'refundHolder', payload: refundHolderPayload('alice', 'bob') },

@@ -359,26 +359,36 @@ func hzAssertReserveDeltas(t *testing.T, s Store, creators []string, before map[
 	}
 }
 
-// ---- I5 (no commission on a reclaim) ---------------------------------------
+// ---- I5 (commission on a reclaim: the miss slice, and nothing else) --------
 
-// hzReclaimNoCommission wraps Reclaim with the I5 proof: treasury (the ONLY
-// place a commission could land, per ask.go) must not move by a single unit
-// across a Reclaim call. Also returns the commission Reclaim handed back
-// (2026-07-20 defect fix) so callers that track a real HBD-out ledger
-// (TestHarness_FullLifecycle_EndToEnd's hzAssertConservation) can record it
-// as the genuine outflow it is — see contract/main.go's `reclaim`
-// entrypoint, which sdk.HiveTransfers this exact amount back to the asker.
-func hzReclaimNoCommission(t *testing.T, s Store, caller, creator string, block, seq uint64, label string) (credits, commission *big.Int) {
+// hzReclaimNetOfMissSlice wraps Reclaim with the I5 proof. I5 used to be "the
+// treasury must not move by a single unit across a Reclaim"; USER RULING 1
+// (2026-07-28) carved the one exception — on a MISS the protocol keeps
+// MissReclaimSliceBps of the held commission, because a 100%% refund made
+// griefing free. So the proof is now TIGHTER, not weaker: the treasury must
+// move by EXACTLY the slice this reclaim reports and by nothing else, which
+// still catches the original defect (a full commission being charged on
+// non-delivery) and additionally catches a slice that disagrees with what the
+// contract told its caller.
+//
+// Returns credits, the NET commission handed back, and the retained slice, so
+// callers tracking a real HBD-out ledger (TestHarness_FullLifecycle_EndToEnd's
+// hzAssertConservation) record only the net as an outflow — the slice never
+// leaves the contract. See contract/main.go's `reclaim` entrypoint, which
+// sdk.HiveTransfers exactly the net back to the asker and moves the slice not
+// at all.
+func hzReclaimNetOfMissSlice(t *testing.T, s Store, caller, creator string, block, seq uint64, label string) (credits, commission, retained *big.Int) {
 	t.Helper()
 	treasuryBefore := getMoney(s, kTreasury())
 	res, err := Reclaim(s, caller, creator, block, seq)
 	hzMustOK(t, err, label+" (Reclaim)")
 	treasuryAfter := getMoney(s, kTreasury())
-	if treasuryAfter.Cmp(treasuryBefore) != 0 {
-		t.Fatalf("%s: I5 VIOLATED — treasury moved %s -> %s on a Reclaim (commission charged on non-delivery)",
-			label, treasuryBefore, treasuryAfter)
+	wantAfter := new(big.Int).Add(treasuryBefore, res.CommissionRetainedHbd)
+	if treasuryAfter.Cmp(wantAfter) != 0 {
+		t.Fatalf("%s: I5 VIOLATED — treasury moved %s -> %s on a Reclaim; want exactly %s (the reported %s miss slice, nothing more)",
+			label, treasuryBefore, treasuryAfter, wantAfter, res.CommissionRetainedHbd)
 	}
-	return res.CreditsReturned, res.CommissionHbd
+	return res.CreditsReturned, res.CommissionHbd, res.CommissionRetainedHbd
 }
 
 // ---- money-conservation identity -------------------------------------------
@@ -687,12 +697,15 @@ func TestHarness_FullLifecycle_EndToEnd(t *testing.T) {
 	// ---- RECLAIM (past deadline+grace; I5: no commission; 100% back) ----
 	reclaimBlock := askBlock + 30 + MinAskDeadline + ReclaimGrace + 1
 	for _, a := range []askRec{ask3, ask4} {
-		got, gotCommission := hzReclaimNoCommission(t, s, a.asker, alice, reclaimBlock, a.res.Seq, fmt.Sprintf("post-Reclaim(seq=%d)", a.res.Seq))
+		got, gotCommission, gotRetained := hzReclaimNetOfMissSlice(t, s, a.asker, alice, reclaimBlock, a.res.Seq, fmt.Sprintf("post-Reclaim(seq=%d)", a.res.Seq))
 		if got.Cmp(a.res.CreditsSpent) != 0 {
 			t.Fatalf("Reclaim(seq=%d): returned %s credits, want exactly %s (100%% back, I5)", a.res.Seq, got, a.res.CreditsSpent)
 		}
-		if gotCommission.Cmp(a.res.CommissionHbd) != 0 {
-			t.Fatalf("Reclaim(seq=%d): returned commission %s, want exactly %s (DEFECT 1 FIX, SPEC §1.7.2 rule 4)", a.res.Seq, gotCommission, a.res.CommissionHbd)
+		// The split is exhaustive: every unit held at Ask is either paid back
+		// or retained. That identity is what keeps the conservation ledger
+		// below honest under USER RULING 1.
+		if sum := new(big.Int).Add(gotCommission, gotRetained); sum.Cmp(a.res.CommissionHbd) != 0 {
+			t.Fatalf("Reclaim(seq=%d): returned %s + retained %s = %s, want exactly the held %s", a.res.Seq, gotCommission, gotRetained, sum, a.res.CommissionHbd)
 		}
 		// The commission is a REAL HBD outflow a real `reclaim` entrypoint
 		// pays back to the asker (contract/main.go) — track it in the same
@@ -1032,12 +1045,12 @@ func TestHarness_Guardrail_FrozenNeverGatesFunds(t *testing.T) {
 
 	t.Run("Reclaim_stillWorks", func(t *testing.T) {
 		hzAssertPhase(t, s, creator, frozenTestBlock, StateFrozen, "precondition")
-		got, gotCommission := hzReclaimNoCommission(t, s, "holderb", creator, frozenTestBlock, askToReclaim.Seq, "Reclaim while FROZEN")
+		got, gotCommission, gotRetained := hzReclaimNetOfMissSlice(t, s, "holderb", creator, frozenTestBlock, askToReclaim.Seq, "Reclaim while FROZEN")
 		if got.Cmp(askToReclaim.CreditsSpent) != 0 {
 			t.Fatalf("Reclaim while FROZEN returned %s, want exactly %s (100%% back)", got, askToReclaim.CreditsSpent)
 		}
-		if gotCommission.Cmp(askToReclaim.CommissionHbd) != 0 {
-			t.Fatalf("Reclaim while FROZEN returned commission %s, want exactly %s (DEFECT 1 FIX)", gotCommission, askToReclaim.CommissionHbd)
+		if sum := new(big.Int).Add(gotCommission, gotRetained); sum.Cmp(askToReclaim.CommissionHbd) != 0 {
+			t.Fatalf("Reclaim while FROZEN returned %s + retained %s = %s, want exactly the held %s (DEFECT 1 FIX + RULING 1 split)", gotCommission, gotRetained, sum, askToReclaim.CommissionHbd)
 		}
 	})
 

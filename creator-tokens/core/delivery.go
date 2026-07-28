@@ -66,7 +66,7 @@ package core
 // creator can still pad using a second account, but that is the sybil floor
 // this whole codebase prices rather than pretends to close, and the indexer's
 // public delivery record already excludes self-deals on the same reasoning
-// (indexer/index.go's SelfDealtExcluded).
+// (magi-indexer/creator_tokens_views.yaml's SelfDealtExcluded).
 func recordDelivery(s Store, creator, asker string) {
 	if asker == creator {
 		return
@@ -83,7 +83,19 @@ func recordDelivery(s Store, creator, asker string) {
 // be the reason an outflow reverts — Reclaim is an outflow, and it must
 // complete for the asker whether or not this is the miss that tips the
 // creator over.
-func recordMiss(s Store, creator, asker string, block uint64) {
+//
+// offenceBlock is WHEN THE MISS BECAME A FACT — deadline+ReclaimGrace, the
+// first block at which the escrow was provably undelivered — and it is NOT the
+// block the reclaim was submitted in, which this function no longer takes at
+// all (USER RULING 2, 2026-07-28). The two used to be conflated, and that made every unreclaimed
+// expired escrow a bomb any stranger could bank and detonate later: a griefer
+// could let three escrows expire, sit on them for sixty days, then reclaim all
+// three in one block with zero balance and open a fresh seven-day shutdown for
+// an offence the creator committed two months ago. Deriving the window from the
+// offence makes a stale miss arrive already expired, which is the whole point:
+// the penalty describes when the creator failed, not when someone chose to
+// press the button.
+func recordMiss(s Store, creator, asker string, offenceBlock uint64) {
 	// Self-dealt escrows count for NEITHER side, symmetric with
 	// recordDelivery: a creator cannot pad their record with their own asks,
 	// and equally cannot be convicted by ignoring their own. Excluding one
@@ -93,6 +105,17 @@ func recordMiss(s Store, creator, asker string, block uint64) {
 	}
 	misses := getU64(s, kMissCount(creator)) + 1
 	setU64(s, kMissCount(creator), misses)
+
+	// Running max over the offences counted in this window, so the sentence is
+	// the same whichever order the reclaims are submitted in. See kMaxOffenceUntil
+	// (keys.go) for why order-independence is load-bearing here: reclaim is
+	// permissionless, so the submitter picks the escrow, and without this the
+	// submitter would also be picking the sentence.
+	offenceUntil := offenceBlock + DelinquencyBlocks
+	if cur := getU64(s, kMaxOffenceUntil(creator)); cur > offenceUntil {
+		offenceUntil = cur
+	}
+	setU64(s, kMaxOffenceUntil(creator), offenceUntil)
 
 	delivered := getU64(s, kDeliveredCount(creator))
 	if !overMissThreshold(misses, delivered) {
@@ -107,13 +130,20 @@ func recordMiss(s Store, creator, asker string, block uint64) {
 	// second crossing needs MinMissesForDelinquency fresh misses — but taking
 	// the max costs one comparison and guarantees a re-offence can never
 	// SHORTEN an unexpired penalty).
-	until := block + DelinquencyBlocks
+	//
+	// offenceUntil, not block+DelinquencyBlocks: an offence old enough that its
+	// window has already elapsed convicts for a window that is already over,
+	// which is exactly the intended outcome (see this function's doc). Nothing
+	// downstream needs the sentence to lie in the future — DeliveryStanding and
+	// RequireInflowOpen both compare against the current block.
+	until := offenceUntil
 	if cur := getU64(s, kDelinquentUntil(creator)); cur > until {
 		until = cur
 	}
 	setU64(s, kDelinquentUntil(creator), until)
 	setU64(s, kMissCount(creator), 0)
 	setU64(s, kDeliveredCount(creator), 0)
+	setU64(s, kMaxOffenceUntil(creator), 0)
 }
 
 // overMissThreshold is the whole judgement, in one place, on integers only:

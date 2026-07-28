@@ -13,6 +13,7 @@
  * post instead of editing.
  */
 
+const ULID = /^[0-9ABCDEFGHJKMNPQRSTVWXYZ]{26}$/i;
 const PUBLISHED = /^lumen-([0-9abcdefghjkmnpqrstvwxyz]{26})$/i;
 const UNPUBLISHED = /^lite-([0-9ABCDEFGHJKMNPQRSTVWXYZ]{26})$/i;
 
@@ -45,7 +46,10 @@ export function litePostIdOf(entry?: EntryLike | null): string | undefined {
       : (meta as Record<string, unknown> | null | undefined);
 
   const id = parsed?.lumen_post_id;
-  return typeof id === 'string' && id.length > 0 ? id : undefined;
+  // Shape-checked like the permlink branch above. This value comes off an on-chain
+  // field ANY Hive account can write, so it is untrusted input: accepting arbitrary
+  // strings turned it into a free-text lookup key against our post table.
+  return typeof id === 'string' && ULID.test(id) ? id : undefined;
 }
 
 /** True when this entry was proxied to Hive by Lumen (drives the lite badge). */

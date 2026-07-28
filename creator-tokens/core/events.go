@@ -20,7 +20,7 @@ import (
 //   - No imports beyond stdlib (math/big for amounts, strconv/strings for
 //     encoding) — this file must never gain a dependency that could pull
 //     wasm-incompatible code into the core package.
-//   - Every event name is a permanent, append-only wire format: "ev" + "v"
+//   - Every event name is a permanent, append-only wire format: "type" + "v"
 //     (schema version) are the discriminator pair. A future incompatible
 //     change to one event's shape bumps that event's "v" and/or adds a new
 //     field; it never repurposes an existing field name or silently removes
@@ -45,20 +45,20 @@ import (
 // Twelve events, one per fund/state-changing core.go entrypoint (API.md's
 // 11 exported mutators, plus Reclaim/Answer both resolving one escrow):
 //
-//	Register        -> {"ev":"registered","v":1,"creator":"...","actor":"...","block":N,"face":"...","cap":"...","feePaid":"..."}
-//	Renew           -> {"ev":"renewed","v":1,"creator":"...","actor":"...","block":N,"periods":N,"paid":"..."}
-//	SetFace         -> {"ev":"faceChanged","v":1,"creator":"...","actor":"...","block":N,"oldFace":"...","newFace":"..."}
-//	SetCap          -> {"ev":"capChanged","v":1,"creator":"...","actor":"...","block":N,"oldCap":"...","newCap":"..."}
-//	Prepay          -> {"ev":"prepaid","v":1,"creator":"...","actor":"...","block":N,"hbdPaid":"...","creditsMinted":"..."}
-//	TransferCredits -> {"ev":"transferred","v":1,"creator":"...","actor":"...","to":"...","block":N,"amount":"..."}
-//	Ask             -> {"ev":"asked","v":1,"creator":"...","actor":"...","block":N,"seq":N,"creditsSpent":"...","commissionHbd":"...","rate":"...","deadlineBlocks":N,"contentHash":"..."}
-//	Answer          -> {"ev":"answered","v":1,"creator":"...","actor":"...","block":N,"seq":N,"creditsToCreator":"...","commissionHbd":"...","answerHash":"..."}
-//	Reclaim         -> {"ev":"reclaimed","v":1,"creator":"...","actor":"...","block":N,"seq":N,"credits":"...","commissionHbd":"..."}
-//	Refund          -> {"ev":"refunded","v":1,"creator":"...","actor":"...","block":N,"credits":"...","payout":"..."}
-//	RefundHolder    -> {"ev":"refundPushed","v":1,"creator":"...","actor":"...","holder":"...","block":N,"creditsBurned":"...","payout":"..."}
-//	CloseIfDrained  -> {"ev":"closed","v":1,"creator":"...","actor":"...","block":N}
+//	Register        -> {"type":"registered","v":1,"creator":"...","actor":"...","block":N,"face":"...","cap":"...","feePaid":"..."}
+//	Renew           -> {"type":"renewed","v":1,"creator":"...","actor":"...","block":N,"periods":N,"paid":"..."}
+//	SetFace         -> {"type":"faceChanged","v":1,"creator":"...","actor":"...","block":N,"oldFace":"...","newFace":"..."}
+//	SetCap          -> {"type":"capChanged","v":1,"creator":"...","actor":"...","block":N,"oldCap":"...","newCap":"..."}
+//	Prepay          -> {"type":"prepaid","v":1,"creator":"...","actor":"...","block":N,"hbdPaid":"...","creditsMinted":"..."}
+//	TransferCredits -> {"type":"transferred","v":1,"creator":"...","actor":"...","to":"...","block":N,"amount":"..."}
+//	Ask             -> {"type":"asked","v":1,"creator":"...","actor":"...","block":N,"seq":N,"creditsSpent":"...","commissionHbd":"...","rate":"...","deadlineBlocks":N,"contentHash":"..."}
+//	Answer          -> {"type":"answered","v":1,"creator":"...","actor":"...","block":N,"seq":N,"creditsToCreator":"...","commissionHbd":"...","answerHash":"..."}
+//	Reclaim         -> {"type":"reclaimed","v":1,"creator":"...","actor":"...","block":N,"seq":N,"credits":"...","commissionHbd":"..."}
+//	Refund          -> {"type":"refunded","v":1,"creator":"...","actor":"...","block":N,"credits":"...","payout":"..."}
+//	RefundHolder    -> {"type":"refundPushed","v":1,"creator":"...","actor":"...","holder":"...","block":N,"creditsBurned":"...","payout":"..."}
+//	CloseIfDrained  -> {"type":"closed","v":1,"creator":"...","actor":"...","block":N}
 //
-// Four fields every single event carries: "ev"/"v" (the discriminator pair),
+// Four fields every single event carries: "type"/"v" (the discriminator pair),
 // "creator" (which market), "actor" (who initiated this state change —
 // always present, even when it structurally always equals creator, e.g.
 // registered/faceChanged/capChanged/answered, for a uniform shape across all
@@ -133,7 +133,7 @@ func evI64(v int64) string  { return strconv.FormatInt(v, 10) }
 // extended to the wire format: a JS consumer's `number` silently loses
 // precision above 2^53, and every amount in this system is meant to be read
 // as an exact integer string end to end, chain to indexer to UI (see
-// ../indexer/events.go, which keeps every amount field as `string` for the
+// ../magi-indexer/creator_tokens_mappings.yaml, which keeps every amount field as `string` for the
 // identical reason).
 func evMoney(v *big.Int) string {
 	if v == nil {
@@ -163,14 +163,14 @@ func evJSONEscape(s string) string {
 }
 
 // evOpen builds the shared envelope prefix common to all twelve events:
-// {"ev":"<name>","v":1,"creator":"<creator>","actor":"<actor>","block":<n>
+// {"type":"<name>","v":1,"creator":"<creator>","actor":"<actor>","block":<n>
 // — deliberately with NO trailing comma and NO closing brace. Every
 // constructor below appends its own event-specific fields (each prefixed
 // with a leading comma) and closes the object itself. Centralizing this is
 // what keeps all twelve constructors agreeing byte-for-byte on field order
 // and quoting for the four fields every single event carries.
 func evOpen(name, creator, actor string, block uint64) string {
-	return `{"ev":"` + name + `","v":` + evU64(evSchemaVersion) +
+	return `{"type":"` + name + `","v":` + evU64(evSchemaVersion) +
 		`,"creator":"` + evJSONEscape(creator) + `"` +
 		`,"actor":"` + evJSONEscape(actor) + `"` +
 		`,"block":` + evU64(block)
@@ -313,7 +313,7 @@ func EvAsked(creator, actor string, block, seq uint64, creditsSpent, commissionH
 // never the HBD side of an answer — Answer moves real money (commission ->
 // treasury) and the indexer had no way to see it, so it could never serve
 // as a solvency cross-check against kTreasury() (SPEC §1.7.3, "where
-// commission + subscription land"). See ../indexer/index.go's
+// commission + subscription land"). See ../magi-indexer/creator_tokens_views.yaml's
 // Index.TreasuryHbd, which folds this field — together with EvRegistered's
 // feePaid and EvRenewed's paid, the other two treasury-crediting entry
 // points core has — into one GLOBAL running total, matching kTreasury()
@@ -349,7 +349,7 @@ func EvAnswered(creator, actor string, block, seq uint64, creditsToCreator, comm
 // already returns this today; it was simply never logged). That is a REAL
 // HBD outflow the old event shape made invisible: the credits leg was
 // logged, the HBD leg was not, so a replay could never reconcile what
-// Reclaim actually paid out. See ../indexer/index.go's
+// Reclaim actually paid out. See ../magi-indexer/creator_tokens_views.yaml's
 // Index.ReclaimOutflowHbd, which folds this field into a GLOBAL running
 // total of every commission HBD unit ever handed back this way.
 // asker (added 2026-07-27) is WHO WAS ACTUALLY PAID, and it is not optional.
@@ -359,12 +359,34 @@ func EvAnswered(creator, actor string, block, seq uint64, creditsToCreator, comm
 // indexer folding `actor` as the recipient credits the wrong account every time
 // a third party reclaims — and it cannot recover the right one from its own
 // escrow map either, since an index that started mid-stream never saw the Ask.
-func EvReclaimed(creator, actor string, block, seq uint64, credits, commissionHbd *big.Int, asker string) string {
+// commissionRetainedHbd (USER RULING 1, 2026-07-28) is the slice of the held
+// commission the protocol KEPT because this reclaim was a miss; commissionHbd
+// is what the asker was actually paid. The two must be carried separately or a
+// replaying indexer cannot balance the books: before this field existed the
+// whole held amount was an outflow, and quietly shrinking commissionHbd while
+// booking the difference to the treasury would have made every miss look like
+// money that vanished. Zero on a self-dealt escrow (not a miss).
+func EvReclaimed(creator, actor string, block, seq uint64, credits, commissionHbd, commissionRetainedHbd *big.Int, asker string) string {
 	return evOpen("reclaimed", creator, actor, block) +
 		`,"seq":` + evU64(seq) +
 		`,"credits":"` + evMoney(credits) + `"` +
 		`,"commissionHbd":"` + evMoney(commissionHbd) + `"` +
+		`,"commissionRetainedHbd":"` + evMoney(commissionRetainedHbd) + `"` +
 		`,"asker":"` + evJSONEscape(asker) + `"}`
+}
+
+// EvRated — Rate (rating.go, USER RULING 2026-07-28). The buyer's score for a
+// DELIVERED job, and the only counterweight to `Answer` being a unilateral
+// "this is done" that pays the creator. Carries no money and touches no fund
+// path: it is reputation, and reputation must never gate a payout.
+//
+// `actor` is the BUYER (rating.go refuses anyone else), which is why there is
+// no separate asker field here as there is on reclaimed/declined — on this
+// event the actor IS the payer, always.
+func EvRated(creator, actor string, block, seq, score uint64) string {
+	return evOpen("rated", creator, actor, block) +
+		`,"seq":` + evU64(seq) +
+		`,"score":` + evU64(score) + `}`
 }
 
 // EvDeclined — Decline (ask.go, RULING E's delivery gate, 2026-07-27). Same
@@ -518,12 +540,12 @@ func EvOfferingDeleted(creator, actor string, block, id uint64) string {
 // their own sdk.Log(...) JSON inline with no constructor behind any of them —
 // a prior gap-hunt's own finding, left for an owner until now. Three of the
 // six (retired, treasuryWithdrawn, tradeFeesClaimed) are real, fund- or
-// state-relevant events ../indexer/events.go ALREADY has typed decode structs
+// state-relevant events ../magi-indexer/creator_tokens_mappings.yaml ALREADY has typed decode structs
 // for (RetiredEvent, TreasuryWithdrawnEvent, TradeFeesClaimedEvent — read
 // directly before writing any of this); a hand-built line could silently
 // drift out of sync with those structs with nothing to catch it. The other
 // three (init, paused, unpaused) have no indexer decode struct at all —
-// ../indexer/events.go's own file doc names them DELIBERATELY unrecognized
+// ../magi-indexer/creator_tokens_mappings.yaml's own file doc names them DELIBERATELY unrecognized
 // (init is not a core-module event; the global pause switch has no query
 // surface in that package) — so they exist here purely so this package's own
 // schema-pin tests can lock their shape down, not to feed a consumer.
@@ -542,7 +564,7 @@ func EvOfferingDeleted(creator, actor string, block, id uint64) string {
 //     through the shared four-field envelope would force a "creator" key onto
 //     a shape that never had one — for treasuryWithdrawn and tradeFeesClaimed
 //     specifically that would be a real deviation from the wire shape
-//     indexer/events.go's own structs already commit to (both declare
+//     magi-indexer/creator_tokens_mappings.yaml's own structs already commit to (both declare
 //     Actor/Block/Amount ONLY; that package's own doc calls the omission on
 //     both deliberate). An extra ignored JSON key would not literally break
 //     decoding — encoding/json silently drops unrecognized fields — but it
@@ -558,11 +580,11 @@ func EvOfferingDeleted(creator, actor string, block, id uint64) string {
 // fields (each prefixed with a leading comma) and close the object
 // themselves.
 func evOpenActor(name, actor string) string {
-	return `{"ev":"` + name + `","v":` + evU64(evSchemaVersion) +
+	return `{"type":"` + name + `","v":` + evU64(evSchemaVersion) +
 		`,"actor":"` + evJSONEscape(actor) + `"`
 }
 
-// EvRetired — Retire (market.go). Wire shape matches indexer/events.go's
+// EvRetired — Retire (market.go). Wire shape matches magi-indexer/creator_tokens_mappings.yaml's
 // RetiredEvent{Creator,Actor,Block} exactly (verified by direct read); no
 // money, no extra fields.
 func EvRetired(creator, actor string, block uint64) string {
@@ -579,18 +601,18 @@ func EvRetired(creator, actor string, block uint64) string {
 // contract.owner before this is ever reached, so the two names would carry an
 // identical value regardless) — kept rather than renamed for uniformity with
 // every other event in this file, because nothing decodes this event today
-// (../indexer/events.go's own file doc names "init" as deliberately
+// (../magi-indexer/creator_tokens_mappings.yaml's own file doc names "init" as deliberately
 // unrecognized) and a cosmetic rename has no consumer to benefit from it,
 // only a wire-format change to justify for nothing.
 func EvInit(owner string) string {
-	return `{"ev":"init","v":` + evU64(evSchemaVersion) +
+	return `{"type":"init","v":` + evU64(evSchemaVersion) +
 		`,"owner":"` + evJSONEscape(owner) + `"}`
 }
 
 // EvPaused / EvUnpaused — the wasm wrapper's owner-only global-pause toggle
 // (contract/main.go's `pause`/`unpause` entrypoints). Actor-only, matching
 // the hand-built logs they replace exactly (field set unchanged: "actor"
-// only, no block, no creator — see ../indexer/events.go's own file doc for
+// only, no block, no creator — see ../magi-indexer/creator_tokens_mappings.yaml's own file doc for
 // why the global pause switch has no per-market scope to carry).
 func EvPaused(actor string) string {
 	return evOpenActor("paused", actor) + `}`
@@ -601,7 +623,7 @@ func EvUnpaused(actor string) string {
 }
 
 // EvTreasuryWithdrawn — WithdrawTreasury (read.go). Wire shape matches
-// indexer/events.go's TreasuryWithdrawnEvent{Actor,Block,Amount} exactly
+// magi-indexer/creator_tokens_mappings.yaml's TreasuryWithdrawnEvent{Actor,Block,Amount} exactly
 // (verified by direct read of that struct and its own doc: "Deliberately no
 // creator field... a GLOBAL kTreasury() debit, not scoped to any single
 // creator's market"). actor is the contract owner (WithdrawTreasury's own
@@ -615,7 +637,7 @@ func EvTreasuryWithdrawn(actor string, block uint64, amount *big.Int) string {
 }
 
 // EvTradeFeesClaimed — ClaimTradeFees (tradefee.go). Wire shape matches
-// indexer/events.go's TradeFeesClaimedEvent{Actor,Block,Amount} exactly
+// magi-indexer/creator_tokens_mappings.yaml's TradeFeesClaimedEvent{Actor,Block,Amount} exactly
 // (verified by direct read: "No creator field on the wire either, but...
 // Actor here doubles as the creator identifier" — kFeeBal is always keyed by
 // the creator whose market accrued the fee, and ClaimTradeFees only ever pays

@@ -213,7 +213,7 @@ func validOfferTitle(t string) error {
 	// encoding/json.Unmarshal (proven empirically: Go's stdlib decoder
 	// accepts an embedded emoji or currency symbol without complaint, but
 	// errors with "invalid character '\n' in string literal" etc. on any of
-	// \n \t \x00 \x07). indexer/events.go's ParseEvent runs on that same
+	// \n \t \x00 \x07). magi-indexer/creator_tokens_mappings.yaml's ParseEvent runs on that same
 	// decoder, so it drops the whole event silently — letting a creator hide
 	// a price change from any off-chain monitoring just by choosing a title
 	// with a stray control byte in it. events.go is NOT owned by this fix

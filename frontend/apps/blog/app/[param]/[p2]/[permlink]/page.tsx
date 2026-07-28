@@ -1,6 +1,7 @@
 import PostContent from './content';
 import { getPostCached } from '@/blog/lib/cached-api';
 import { liteChainCoordinates } from '@/blog/lib/lite/render/lite-entry';
+import { attachLiteIdentities, attachLiteIdentitiesToDiscussion } from '@/blog/lib/lite/render/attach-lite';
 import { liteEntryForPermlinkCached } from '@/blog/lib/lite/render/lite-entry-cached';
 import { getCommunity, getDiscussion, getFollowList } from '@transaction/lib/bridge-api';
 import { getObserverFromCookies } from '@/blog/lib/auth-utils';
@@ -68,6 +69,14 @@ const PostPage = async ({
       logger.error(postResult.reason, 'Error fetching post data:');
     }
 
+    // Reached by the URL every OTHER Hive front end links: `/@<sharedAccount>/<permlink>`,
+    // the real on-chain coordinates. `getPostCached` succeeds there, so the fallback
+    // above never runs and the entry arrives raw — the shared account's name and
+    // Hivemind's synthesised "RE: …" title. Resolve it here so the canonical page is
+    // right on first paint too. `liteEntryForPost` already sets `_lite` on the pretty-URL
+    // path, so this is skipped whenever that ran.
+    if (postData && !postData._lite) await attachLiteIdentities([postData]);
+
     discussionData = discussionResult.status === 'fulfilled' ? (discussionResult.value ?? null) : null;
 
     // Same problem as the post itself, one level down: the discussion was fetched
@@ -83,6 +92,12 @@ const PostPage = async ({
     if (discussionResult.status === 'rejected') {
       logger.error(discussionResult.reason, 'Error fetching discussion data:');
     }
+
+    // Every reply written through Lumen is signed by the shared publishing account,
+    // so an un-resolved thread shows that one name against everybody's words until
+    // the client corrects each comment individually. Resolve the whole thread here,
+    // in two queries, before it is serialised.
+    discussionData = await attachLiteIdentitiesToDiscussion(discussionData);
     if (isLoggedIn) {
       mutedListData = mutedListResult.status === 'fulfilled' ? (mutedListResult.value ?? null) : null;
       if (mutedListResult.status === 'rejected') {

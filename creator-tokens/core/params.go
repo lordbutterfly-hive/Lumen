@@ -215,6 +215,34 @@ const MaxAskDeadline uint64 = 30 * BlocksPerDay // 30 days
 // which of answer/reclaim wins, because only one is ever legal.
 const ReclaimGrace uint64 = 1200 // ~1 hour
 
+// MissReclaimSliceBps is the fraction of the HELD commission the protocol keeps
+// when a reclaim is a MISS (USER RULING, 2026-07-28). It is the only exception
+// to I5 ("no commission on refunds"), and it exists because griefing was
+// otherwise free: Reclaim handed back the credits AND 100% of the commission,
+// and the credits come back with their original acquisition clock (holdclock),
+// so nine junk asks in one block bought 22 days of a creator's shutdown at a
+// cost of exactly zero. delivery.go's claim that "a hostile asker must pay for
+// each ask" was factually false until this constant existed.
+//
+// It is charged ONLY on a miss — never on Decline (the creator's free, honest
+// "no"), never on a self-dealt escrow, and never against the CREDITS, which
+// always come back whole. So the honest asker's exposure is bounded by the
+// creator's own behaviour: a creator who cannot do the job declines and the
+// asker is made whole to the last unit; an asker only ever pays this when the
+// creator went silent for the entire window. That is a real cost borne by a
+// wronged party, and it is the deliberate price of making the grief cost
+// nonzero — there is no way to charge only the malicious asker, because the
+// contract cannot tell them apart from an unlucky one.
+//
+// It goes to kTreasury(), NEVER to the creator. Paying the creator here would
+// pay them for going silent, which is the exact behaviour the gate punishes.
+//
+// 25% of a 12% commission = 3% of the posted face per junk ask, so the grief
+// cost scales with the price of the creator being griefed rather than with a
+// protocol-wide constant an attacker could shop around. Rounded UP (mMulDivCeil)
+// so no dust-priced escrow can round the deterrent away to zero.
+const MissReclaimSliceBps uint64 = 2500
+
 // ---- TWAP (SPEC §1.3b) ----
 
 // ObsWindow is the ring-buffer size for price observations.

@@ -18,7 +18,7 @@ import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import DialogLogin from '@/blog/components/dialog-login';
 import { useFollowMutation, useUnfollowMutation } from '@/blog/features/mute-follow/hooks/use-follow-mutations';
 import { useMuteMutation, useUnmuteMutation } from '@/blog/features/mute-follow/hooks/use-mute-mutations';
-import { liteFollow } from '@/blog/lib/lite/client/lite-write';
+import { useLumenFollow } from '@/blog/lib/lite/client/use-lumen-follow';
 import { useFollowingInfiniteQuery } from '@/blog/features/account-lists/hooks/use-following-infinitequery';
 
 /**
@@ -34,10 +34,13 @@ import { useFollowingInfiniteQuery } from '@/blog/features/account-lists/hooks/u
  */
 export default function ProfileActions({
   username,
-  following
+  following,
+  liteTarget = false
 }: {
   username: string;
   following: UseInfiniteQueryResult<IFollow[]>;
+  /** This profile is a Lumen lite account — no Hive account exists to follow. */
+  liteTarget?: boolean;
 }) {
   const { t } = useTranslation('common_blog');
   const { user } = useUserClient();
@@ -48,6 +51,12 @@ export default function ProfileActions({
   const unfollowMutation = useUnfollowMutation();
   const muteMutation = useMuteMutation();
   const unmuteMutation = useUnmuteMutation();
+  // Lumen's own follow graph: used when either side is keyless. Called before the
+  // early returns below, because hooks cannot be conditional.
+  const lumen = useLumenFollow(
+    username,
+    user.isLoggedIn && username !== user.username && (user.account_tier === 'lite' || liteTarget)
+  );
 
   if (!user.isLoggedIn) {
     return (
@@ -65,23 +74,26 @@ export default function ProfileActions({
 
   if (user.username === username) return null;
 
-  const isFollow = Boolean(following.data?.pages[0]?.some((f) => f.follower === user.username && f.following === username));
+  const isFollow = lumen.applies
+    ? lumen.isFollowing
+    : Boolean(
+        following.data?.pages[0]?.some((f) => f.follower === user.username && f.following === username)
+      );
   const isMute = Boolean(mute.data?.pages[0]?.some((f) => f.follower === user.username && f.following === username));
-  const busy =
-    following.isLoading || followMutation.isPending || unfollowMutation.isPending || mute.isLoading;
-
-  // A lite account has no Hive key, so the wax follow path cannot work for it. This
-  // is the same fork that already exists in mute-follow/buttons-container.tsx — the
-  // profile page was simply never given it, so Follow errored here while working
-  // everywhere else.
-  const isLite = user.account_tier === 'lite';
+  // On the Lumen path the viewer's chain follow list is irrelevant and may never
+  // load at all (a lite viewer has no Hive account), so it must not gate the button.
+  const busy = lumen.applies || lumen.pending
+    ? lumen.busy || lumen.pending
+    : following.isLoading || followMutation.isPending || unfollowMutation.isPending || mute.isLoading;
 
   const handleFollowClick = async () => {
     try {
-      if (isLite) {
-        const result = await liteFollow(username, isFollow);
-        if (result.status !== 'ok') throw new Error(result.message);
-        await following.refetch?.();
+      // Either side keyless: the follow cannot be a chain operation. A lite viewer has
+      // no key to sign one, and a lite profile has no account to be followed.
+      if (lumen.applies) {
+        // Returned, not read from the closure — see buttons-container.tsx.
+        const failure = await lumen.toggle();
+        if (failure) throw new Error(failure);
         return;
       }
       if (isFollow) await unfollowMutation.mutateAsync({ username });
@@ -128,13 +140,16 @@ export default function ProfileActions({
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-52">
-          {/* Mute is deliberately hidden for lite accounts: there is no lite mute
-              backend (no /api/lite/mute route exists), so the control could only ever
-              fail. Better absent than broken — restore it when the route lands. */}
+          {/* Mute is a chain operation, so it is hidden whenever either side is a lite
+              account: a keyless viewer cannot sign one, and a lite profile is not an
+              account that can be muted. Better absent than broken. */}
           <DropdownMenuItem
             onClick={handleMuteClick}
             disabled={busy}
-            className={cn('cursor-pointer', isLite && 'hidden')}
+            className={cn(
+              'cursor-pointer',
+              (user.account_tier === 'lite' || liteTarget) && 'hidden'
+            )}
           >
             {isMute ? t('user_profile.unmute_button') : t('user_profile.mute_button')}
           </DropdownMenuItem>

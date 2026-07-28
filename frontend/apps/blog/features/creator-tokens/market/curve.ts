@@ -1,4 +1,3 @@
-import type { TokenMarketDetail } from './token-detail';
 import {
   ASSET_DECIMALS,
   BLOCKS_PER_DAY,
@@ -72,7 +71,26 @@ function baseUnitsToUsd(baseUnits: number): number {
  * the chain never does. Flooring here keeps the preview on the same integer
  * lattice the contract prices on.
  */
-function supplyTokens(m: TokenMarketDetail): number {
+/**
+ * The ONLY three fields these quote helpers actually read off a market. Typed
+ * structurally (2026-07-28) rather than as the demo's full TokenMarketDetail so
+ * the LIVE, chain-backed view-model (live/adapt.ts's LiveTokenMarket) can be
+ * priced by the exact same functions — the alternative was a second copy of the
+ * curve math for the live path, which is how a preview and a charge start
+ * disagreeing.
+ *
+ * These are a LOCAL preview, computed from the same ported contract math the
+ * chain runs (contract-math.ts). The AUTHORITATIVE numbers still come from the
+ * data source's quoteBuy/quoteSell immediately before signing — this is what
+ * makes a slider feel instant, not what the user's signature is bound to.
+ */
+export interface CurveMarketInput {
+  supply: number;
+  cap: number;
+  position: { tokens: number } | null;
+}
+
+function supplyTokens(m: CurveMarketInput): number {
   return Math.max(0, Math.floor(m.supply));
 }
 
@@ -144,7 +162,7 @@ export interface BuyQuote {
  * ever mint, and the execution side would then have to silently refuse the
  * difference.
  */
-export function buyQuote(usdGross: number, m: TokenMarketDetail): BuyQuote {
+export function buyQuote(usdGross: number, m: CurveMarketInput): BuyQuote {
   const supply = supplyTokens(m);
   const budgetBaseUnits = usdToBaseUnits(usdGross);
   const capHeadroom = Math.max(0, Math.floor(m.cap) - supply);
@@ -184,7 +202,7 @@ export interface SellQuote {
  * Returns an all-zero quote when the sell exceeds supply — core refuses there
  * rather than guessing, and so does this.
  */
-export function sellQuote(tokens: number, m: TokenMarketDetail, holdDays: number): SellQuote {
+export function sellQuote(tokens: number, m: CurveMarketInput, holdDays: number): SellQuote {
   const supply = supplyTokens(m);
   // Clamp to the CALLER'S OWN balance too, never just total supply — sell.go
   // checks bal >= ΔS before anything else ("insufficient credits"), so typing

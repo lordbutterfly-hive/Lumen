@@ -11,16 +11,31 @@ import { Button } from '@hive/ui';
 import DialogLogin from '@/blog/components/dialog-login';
 import { handleError } from '@ui/lib/handle-error';
 import { useTranslation } from '@/blog/i18n/client';
-import { liteFollow } from '@/blog/lib/lite/client/lite-write';
+import { useLumenFollow } from '@/blog/lib/lite/client/use-lumen-follow';
 
 const ButtonsContainer = ({
   username,
   user,
   variant,
   follow,
-  mute
+  mute,
+  hideMute = false,
+  liteTarget = false
 }: {
   username: string;
+  /**
+   * The person being followed is a Lumen lite account. They have no Hive account, so
+   * a chain follow of them is impossible — the relationship is kept on Lumen instead,
+   * for full Hive viewers as well as lite ones.
+   */
+  liteTarget?: boolean;
+  /**
+   * Drop the Mute button. Set for a Lumen lite author: muting is a chain operation
+   * and a lite handle is not a Hive account, so the button could only ever record a
+   * mute against a name that does not exist. Following still works, because Lumen
+   * keeps its own follow graph (`liteFollow`).
+   */
+  hideMute?: boolean;
   user: User;
   variant:
     | 'default'
@@ -55,11 +70,19 @@ const ButtonsContainer = ({
       (f) => f._temporary && f.follower === user.username && f.following === username
     );
 
-  const isFollow = Boolean(
-    follow.data?.pages[0].some(
-      (f: { follower: string; following: string }) => f.follower === user.username && f.following === username
-    )
-  );
+  // Lumen's own follow graph, for any pair the chain cannot hold (see useLumenFollow).
+  // The query only runs when one side is keyless, so an ordinary Hive-to-Hive button
+  // is unchanged and costs nothing.
+  const lumen = useLumenFollow(username, user.isLoggedIn && (user.account_tier === 'lite' || liteTarget));
+
+  const isFollow = lumen.applies
+    ? lumen.isFollowing
+    : Boolean(
+        follow.data?.pages[0].some(
+          (f: { follower: string; following: string }) =>
+            f.follower === user.username && f.following === username
+        )
+      );
   const handlerMute = async () => {
     if (!isMute) {
       try {
@@ -76,11 +99,14 @@ const ButtonsContainer = ({
     }
   };
   const handlerFollow = async () => {
-    // Keyless lite account: follows are Lumen-local (no on-chain custom_json),
-    // recorded via /api/lite/follow. Works for other Lumen accounts.
-    if (user.account_tier === 'lite') {
-      const result = await liteFollow(username, isFollow);
-      if (result.status === 'error') handleError(new Error(result.message), { method: 'lite-follow', params: { username } });
+    // Either side keyless: the follow is Lumen-local (no on-chain custom_json),
+    // recorded via /api/lite/follow.
+    if (lumen.applies) {
+      // The result is RETURNED, not read from `lumen.error`: that field is captured in
+      // this closure at render time, so a failure recorded during the click would be
+      // invisible here — every rate limit and suspension refusal was silent.
+      const failure = await lumen.toggle();
+      if (failure) handleError(new Error(failure), { method: 'lite-follow', params: { username } });
       return;
     }
     if (!isFollow) {
@@ -98,15 +124,22 @@ const ButtonsContainer = ({
     }
   };
 
-  const loading =
-    mute.isLoading ||
-    mute.isFetching ||
-    muteMutation.isPending ||
-    unmuteMutation.isPending ||
-    follow.isLoading ||
-    follow.isFetching ||
-    followMutation.isPending ||
-    unfollowMutation.isPending;
+  // On the Lumen path the chain queries are irrelevant — they read the viewer's Hive
+  // follow lists, which a keyless viewer does not have — so they must not be allowed
+  // to hold the button in a loading state it can never leave.
+  // `lumen.pending` matters: until the state query answers, `applies` is false and the
+  // click would take the CHAIN path — which for a keyless viewer means a signer that
+  // does not exist. Disabled until we know which path this button is.
+  const loading = lumen.applies || lumen.pending
+    ? lumen.busy || lumen.pending
+    : mute.isLoading ||
+      mute.isFetching ||
+      muteMutation.isPending ||
+      unmuteMutation.isPending ||
+      follow.isLoading ||
+      follow.isFetching ||
+      followMutation.isPending ||
+      unfollowMutation.isPending;
   return (
     <>
       {user.isLoggedIn ? (
@@ -118,13 +151,15 @@ const ButtonsContainer = ({
             onClick={handlerFollow}
             disabled={temporaryDisabled}
           />
-          <MuteButton
-            loading={loading}
-            variant={variant}
-            isMute={isMute}
-            onClick={handlerMute}
-            disabled={temporaryDisabled}
-          />
+          {hideMute ? null : (
+            <MuteButton
+              loading={loading}
+              variant={variant}
+              isMute={isMute}
+              onClick={handlerMute}
+              disabled={temporaryDisabled}
+            />
+          )}
         </>
       ) : (
         <DialogLogin>

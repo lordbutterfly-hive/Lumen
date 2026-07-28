@@ -2,16 +2,14 @@
 // module (ops scripts, the migration runner, tests), and wax has no CJS export map.
 import type { User } from '@smart-signer/types/common';
 import { getLogger } from '@ui/lib/logging';
-import { liteConfig } from '../config';
 import { withAdvisoryLock } from '../db/pool';
 import { vetNameFormat } from '../names/vetting';
 import * as users from '../repositories/user-repository';
 import * as names from '../repositories/name-reservation-repository';
 import * as upgradeEvents from '../repositories/upgrade-event-repository';
-import * as keyReveals from '../repositories/key-reveal-repository';
+import * as follows from '../repositories/follow-repository';
 import { LITE_HANDLE_REUSE_MESSAGE, isOwnLiteHandle } from '../names/upgrade-name';
-import { GeneratedKeys, getAccountCreator, hasAccountCreator } from './account-creator';
-import { decryptKeys, encryptKeys, isKeyRevealConfigured } from './key-reveal-crypto';
+import { AccountPublicKeys, getAccountCreator, hasAccountCreator } from './account-creator';
 
 /**
  * Lite -> full Hive account upgrade (spec §F). Idempotent, chain-reconciled, and
@@ -19,12 +17,20 @@ import { decryptKeys, encryptKeys, isKeyRevealConfigured } from './key-reveal-cr
  * `user_id` never changes, so the Lumen history stays continuous across the on-chain
  * author change.
  *
- * CUSTODY. `create_claimed_account` cannot be undone and the master password is random
- * and never derivable again, so the keys have exactly one journey from this function to
- * the user. They are therefore encrypted and persisted to `key_reveal` BEFORE the
- * account is created (migration 0015), and stay there until the user acknowledges
- * receipt. A dropped connection, a closed tab or a crashed render is now a re-fetch
- * rather than a permanently lost account.
+ * ★ CUSTODY. This function never sees a private key. The browser generates the master
+ * password, derives the four role keys, makes the user save them, and sends only the
+ * PUBLIC keys here. A master password is the account's owner key — a server that mints
+ * or receives one can take the account back at any time, however carefully it stores
+ * it, and this screen promises the user the opposite. So the secret never exists on
+ * this side of the wire and there is nothing here to encrypt, log, leak or subpoena.
+ *
+ * What that costs, and how it is paid. The old design could re-hand keys to a user
+ * whose response was lost, because it had kept a copy. It cannot now — so the browser
+ * makes the user confirm they have saved the keys BEFORE the account is created, which
+ * closes the window entirely: at every instant either the account does not exist, or
+ * the user already has its keys. The remaining case — the account was created but our
+ * bookkeeping never ran — is reconciled by {@link resumeInFlightUpgrade} using the
+ * recorded owner PUBLIC key, no secret required.
  */
 
 const logger = getLogger('app');
@@ -33,89 +39,255 @@ export type UpgradeResult =
   | {
       status: 'ok';
       hiveAccountName: string;
-      keys: GeneratedKeys;
-      /** Acknowledge with this to wipe the stored copy — see /api/account/upgrade/reveal. */
-      revealId: string;
-      /** True when these keys came from the outbox rather than a fresh creation. */
+      /** True when the account already existed from an earlier attempt of this user's. */
       resumed?: boolean;
     }
-  | { status: 'error'; code: string; message: string };
+  | { status: 'error'; code: string; message: string; hiveAccountName?: string };
+
+/** How long the chain gets to settle a broadcast before absence is read as failure. */
+const SETTLE_WINDOW_S = 180;
 
 const NAME_LOCK_TTL_S = 300;
 
-/**
- * Hands back keys this user is already owed, reconciling an 'uncertain' row against
- * the chain first. Returns null when there is nothing outstanding.
- */
-async function resumeOutstandingReveal(userId: string): Promise<UpgradeResult | null> {
-  const outstanding = await keyReveals.findOutstandingByUser(userId);
-  if (!outstanding) return null;
+/** The prefix-independent body of a public key (STM on mainnet, TST on a testnet). */
+function keyBody(key: string): string {
+  return /^[A-Z]{3}[1-9A-HJ-NP-Za-km-z]+$/.test(key) ? key.slice(3) : key;
+}
 
-  const keys = decryptKeys(outstanding.ciphertext);
-  if (!keys) {
-    // Rotated key, truncated row, or tampered ciphertext. Say so instead of returning
-    // an empty success the user would copy down as real keys.
-    logger.error(
-      { revealId: outstanding.revealId },
-      'Lite upgrade: stored reveal could not be decrypted — the user cannot be given their keys'
-    );
+/** Compare public keys ignoring the network prefix. */
+function sameKey(a: string, b: string): boolean {
+  return keyBody(a) === keyBody(b);
+}
+
+const PUBLIC_KEY_PATTERN = /^[A-Z]{3}[1-9A-HJ-NP-Za-km-z]{45,55}$/;
+
+/**
+ * Accept only four well-formed, distinct public keys, and nothing that could be a
+ * private key.
+ *
+ * The last clause is the important one. A client bug that posted a WIF into one of
+ * these fields would put a private key in our request logs — exactly the exposure this
+ * whole change removes — so it is refused at the boundary rather than trusted to be
+ * impossible. Hive public keys start with a 3-letter prefix; WIFs and master passwords
+ * start with `5` or `P5`, and cannot match the pattern.
+ */
+function checkPublicKeys(input: unknown): AccountPublicKeys | null {
+  const keys = input as Partial<AccountPublicKeys> | null | undefined;
+  if (!keys) return null;
+  const roles: (keyof AccountPublicKeys)[] = ['owner', 'active', 'posting', 'memo'];
+  for (const role of roles) {
+    const value = keys[role];
+    if (typeof value !== 'string' || !PUBLIC_KEY_PATTERN.test(value)) return null;
+  }
+  const out: AccountPublicKeys = {
+    owner: String(keys.owner),
+    active: String(keys.active),
+    posting: String(keys.posting),
+    memo: String(keys.memo)
+  };
+  // Compared prefix-stripped, exactly as the creator compares them
+  // (hive-account-creator.ts). Two validators disagreeing about what "the same key"
+  // means is how a request passes the boundary and then throws deep inside the
+  // creator, where the failure is indistinguishable from a broadcast that may have
+  // landed.
+  if (new Set(roles.map((role) => keyBody(out[role]))).size !== roles.length) return null;
+  return out;
+}
+
+/**
+ * Finish an upgrade whose account may already exist on chain.
+ *
+ * The window this closes: the create broadcast landed, then the process died, the
+ * connection dropped, or the bookkeeping threw. The user is still marked lite here
+ * while owning a real Hive account there. Left alone, their next attempt would try to
+ * create a second account and their first one would be orphaned with our creator as
+ * its permanent recovery agent.
+ *
+ * Reconciliation uses the owner PUBLIC key recorded before the broadcast, because
+ * "the name exists" is not the same as "we created it" — an ambiguous broadcast leaves
+ * the name free for a while and anyone can take it. Only a matching owner key proves
+ * the account belongs to the keys this user is holding.
+ */
+async function resumeInFlightUpgrade(userId: string): Promise<UpgradeResult | null> {
+  const inFlight = await upgradeEvents.findInFlightByUser(userId);
+  if (!inFlight || !hasAccountCreator()) return null;
+
+  const creator = getAccountCreator();
+  let exists: boolean;
+  try {
+    exists = await creator.accountExists(inFlight.hiveAccountName);
+  } catch (error) {
+    // A node hiccup is not evidence either way. Leave the attempt in flight and say so
+    // — resolving it wrongly either strands an account or burns a second token.
+    logger.warn({ err: error }, 'Lite upgrade: could not reconcile an in-flight attempt against chain');
     return {
       status: 'error',
-      code: 'reveal_unreadable',
-      message: 'Your account was created but its keys can no longer be read. Please contact support.'
+      code: 'reconcile_unavailable',
+      message: 'We cannot reach Hive to check your last attempt. Please try again in a minute.'
     };
   }
 
-  // An 'uncertain' row means the create broadcast failed ambiguously — it may or may
-  // not have landed. Settle that against the chain before handing over keys that might
-  // belong to no account at all.
-  if (outstanding.status === 'uncertain' && hasAccountCreator()) {
-    try {
-      const creator = getAccountCreator();
-      const exists = await creator.accountExists(outstanding.hiveAccountName);
-      if (!exists) {
-        await keyReveals.discard(outstanding.revealId);
-        await names.releasePending(outstanding.hiveAccountName).catch(() => undefined);
-        return null; // nothing was created — let the caller start a clean attempt
-      }
-
-      // The name is taken — but by US? An ambiguous broadcast leaves the name free
-      // for a window, and anyone (another Lumen user, a stranger on Hive) can take
-      // it in the meantime. Existence would then look exactly like success, and we
-      // would hand this user a master password for somebody else's account.
-      if (creator.accountOwnerKey) {
-        const onChainOwner = await creator.accountOwnerKey(outstanding.hiveAccountName);
-        // Compare bodies, not the printed form: the node renders keys with ITS network
-        // prefix (STM/TST) while ours were derived locally, and the prefix is not part
-        // of the key. See sameKey() in hive-account-creator.ts.
-        const strip = (key: string) => (/^[A-Z]{3}[1-9A-HJ-NP-Za-km-z]+$/.test(key) ? key.slice(3) : key);
-        if (onChainOwner && strip(onChainOwner) !== strip(keys.owner.publicKey)) {
-          logger.warn(
-            { hiveAccountName: outstanding.hiveAccountName, revealId: outstanding.revealId },
-            'Lite upgrade: the pending name now belongs to a DIFFERENT account — discarding keys that would open nothing'
-          );
-          await keyReveals.discard(outstanding.revealId);
-          await names.releasePending(outstanding.hiveAccountName).catch(() => undefined);
-          return null; // our creation never landed — start a clean attempt
-        }
-      }
-
-      await keyReveals.markAvailable(outstanding.revealId, '');
-    } catch (error) {
-      // Node hiccup: keep the row and hand the keys over. Holding them back because a
-      // node was briefly unreachable is the worse failure by far.
-      logger.warn({ err: error }, 'Lite upgrade: could not reconcile an uncertain reveal against chain');
+  if (!exists) {
+    // ★ ABSENCE IS ONLY EVIDENCE ONCE THE CHAIN HAS HAD TIME TO SPEAK.
+    //
+    // A broadcast returns as soon as a node takes the transaction into its mempool.
+    // Inclusion needs at least one 3-second block, then propagation to whichever node
+    // answers this read, and a Hive transaction can legitimately sit unconfirmed until
+    // it expires. So a single "no such account" seconds after an ambiguous broadcast
+    // means nothing — and acting on it does real damage: it frees a name we may
+    // already own and marks a live attempt dead, which is exactly how a user ends up
+    // with two accounts and one orphan. Wait out the window first.
+    if (inFlight.ageSeconds < SETTLE_WINDOW_S) {
+      return {
+        status: 'error',
+        code: 'still_settling',
+        message: 'Your last attempt is still settling on Hive. Give it a minute and reload this page.'
+      };
     }
+    await upgradeEvents.fail(inFlight.id, 'not_on_chain').catch(() => undefined);
+    await names.releasePending(inFlight.hiveAccountName, userId).catch(() => undefined);
+    return null;
   }
 
-  await keyReveals.recordFetch(outstanding.revealId);
-  return {
-    status: 'ok',
-    hiveAccountName: outstanding.hiveAccountName,
-    keys,
-    revealId: outstanding.revealId,
-    resumed: true
-  };
+  // ★ The name is taken. Adopting it requires PROOF that it is ours — never merely the
+  // absence of proof that it is not. Everything this function does afterwards is
+  // irreversible for the user: `markUpgraded` is a one-way door, so adopting a
+  // stranger's account marks them upgraded to an account they cannot open and can
+  // never try again. An unavailable check is therefore refused, not waved through.
+  const provenOurs = await ownsAccount(creator, inFlight);
+  if (provenOurs === 'no') {
+    logger.warn(
+      { hiveAccountName: inFlight.hiveAccountName, upgradeEventId: inFlight.id },
+      'Lite upgrade: the pending name belongs to a DIFFERENT account — our creation never landed'
+    );
+    await upgradeEvents.fail(inFlight.id, 'name_taken_by_other').catch(() => undefined);
+    await names.releasePending(inFlight.hiveAccountName, userId).catch(() => undefined);
+    return null;
+  }
+  if (provenOurs === 'unknown') {
+    return {
+      status: 'error',
+      code: 'reconcile_unavailable',
+      message: 'We cannot confirm your last attempt with Hive right now. Please try again in a minute.'
+    };
+  }
+
+  const linked = await completeBookkeeping(userId, inFlight.hiveAccountName, inFlight.id, '');
+  if (!linked) {
+    return {
+      status: 'error',
+      code: 'created_not_linked',
+      message:
+        'Your Hive account exists, but we could not finish linking it to your Lumen profile. Your keys are still valid — please contact support before creating another account.',
+      hiveAccountName: inFlight.hiveAccountName
+    };
+  }
+  return { status: 'ok', hiveAccountName: inFlight.hiveAccountName, resumed: true };
+}
+
+/**
+ * Is the on-chain account the one THIS user's browser generated keys for?
+ *
+ * Three answers, and the difference between the last two is the whole point:
+ *   'yes'     — the chain's owner key matches the one recorded before the broadcast.
+ *   'no'      — it matches something else; somebody took the name.
+ *   'unknown' — we could not tell (no recorded key, no reader, a node error, or an
+ *               owner authority with no key at all). NOT the same as 'yes'.
+ */
+async function ownsAccount(
+  creator: ReturnType<typeof getAccountCreator>,
+  inFlight: { hiveAccountName: string; ownerPublicKey: string | null }
+): Promise<'yes' | 'no' | 'unknown'> {
+  if (!creator.accountOwnerKey || !inFlight.ownerPublicKey) return 'unknown';
+  try {
+    const onChainOwner = await creator.accountOwnerKey(inFlight.hiveAccountName);
+    if (!onChainOwner) return 'unknown';
+    return sameKey(onChainOwner, inFlight.ownerPublicKey) ? 'yes' : 'no';
+  } catch (error) {
+    logger.warn({ err: error }, 'Lite upgrade: owner-key check failed — refusing to decide');
+    return 'unknown';
+  }
+}
+
+/**
+ * Everything Lumen records once the on-chain account exists. Never throws: the account
+ * is already real, and no bookkeeping failure may present itself to the user as "your
+ * upgrade failed" when their account is sitting on chain.
+ */
+async function completeBookkeeping(
+  userId: string,
+  newName: string,
+  eventId: string,
+  trxId: string
+): Promise<boolean> {
+  try {
+    // ★ ORDER MATTERS, AND THE MARKER IS CLEARED LAST.
+    //
+    // `status = 'creating'` is the ONLY record that an account may exist without a
+    // Lumen row behind it — `findInFlightByUser` reads nothing else, and no sweeper
+    // exists. Clearing it first (as this did) meant a failure on the very next
+    // statement left an account on chain that reconciliation could never see again:
+    // the user stays 'lite', is invited to upgrade again, and burns a second creation
+    // token on a second account while the first is orphaned with our creator as its
+    // permanent recovery agent.
+    //
+    // Every step below is idempotent (`markUpgraded` is guarded on tier, `promoteToActive`
+    // on status), so failing part-way and re-running the whole sequence is safe. Marking
+    // the event last makes that re-run happen by itself.
+    await users.markUpgraded(userId, newName);
+    await names.promoteToActive(newName, userId).catch(() => undefined);
+    // Followers travel with the user id, which never changes, so nothing has to be
+    // rewritten for them. This handles the one remaining case: any edge stored against
+    // the NAME they just took is folded into their account, so they cannot end up as
+    // two people in the follow graph.
+    await follows.absorbHiveActor(userId, newName);
+    // No earnings settlement: lite accounts hold NO balance (rewards are rejected at
+    // publish, decision 2026-07-23), so upgrade only creates the on-chain account.
+    await upgradeEvents.markCreated(eventId, trxId);
+    return true;
+  } catch (error) {
+    logger.error(
+      { err: error, userId, hiveAccountName: newName, upgradeEventId: eventId },
+      'Lite upgrade: the Hive account was CREATED but Lumen could not record the upgrade — the account exists on chain and this user is still marked lite. The attempt stays in flight so the next request retries it.'
+    );
+    return false;
+  }
+}
+
+export interface UpgradeStatus {
+  state: 'lite' | 'upgraded';
+  hiveAccountName: string | null;
+}
+
+/**
+ * Where this account stands, with any in-flight attempt settled first.
+ *
+ * Read-only from the user's point of view, but deliberately NOT passive: it runs the
+ * same reconciliation the upgrade does, because the state it is reporting on is
+ * exactly the one that needs resolving — an account created on chain that Lumen never
+ * recorded. Answering "still lite" without checking would invite the caller to create
+ * a second account.
+ *
+ * Takes the per-user lock so it cannot race an upgrade running in another tab.
+ */
+export async function upgradeStatus(sessionUser: User | undefined): Promise<UpgradeStatus> {
+  const userId = sessionUser?.userId;
+  if (!userId) return { state: 'lite', hiveAccountName: null };
+
+  // Wrapped in an object: `withAdvisoryLock` returns null when the lock was not
+  // granted, which would otherwise be indistinguishable from "the user row is null".
+  const settled = await withAdvisoryLock(upgradeLockKey(userId), async () => {
+    await resumeInFlightUpgrade(userId).catch(() => null);
+    return { user: await users.findUserById(userId) };
+  });
+  // Lock not granted (an upgrade is mid-flight in another tab): report the row as it
+  // stands rather than blocking. The POST path re-checks under the lock anyway.
+  const user = settled ? settled.user : await users.findUserById(userId);
+  if (!user) return { state: 'lite', hiveAccountName: null };
+
+  return user.hiveAccountName
+    ? { state: 'upgraded', hiveAccountName: user.hiveAccountName }
+    : { state: 'lite', hiveAccountName: null };
 }
 
 /**
@@ -133,28 +305,25 @@ function upgradeLockKey(userId: string): number {
 /**
  * One upgrade at a time per user, cluster-wide.
  *
- * Without this, two concurrent requests from one session with two DIFFERENT names
- * both read `account_tier = 'lite'` before either commits, both take their own
- * (per-name) reservation, and both run to completion: two account creation tokens
- * burned, two real Hive accounts created, two sets of keys handed out. Only one can
- * win `markUpgraded`'s `WHERE account_tier = 'lite'`; the loser's account then exists
- * on chain with our creator account as its permanent recovery agent and NO record of
- * it anywhere in Lumen. The per-name lock cannot prevent this — the names differ.
- *
- * A double-click on the upgrade button is enough to trigger it.
+ * Without this, two concurrent requests from one session with two DIFFERENT names both
+ * read `account_tier = 'lite'` before either commits, both take their own (per-name)
+ * reservation, and both run to completion: two account creation tokens burned, two real
+ * Hive accounts created. The per-name lock cannot prevent it — the names differ. A
+ * double-click on the upgrade button is enough.
  */
 export async function upgradeToFullAccount(
   sessionUser: User | undefined,
-  newNameRaw: string
+  newNameRaw: string,
+  publicKeys: unknown
 ): Promise<UpgradeResult> {
   if (!sessionUser?.userId || sessionUser.account_tier !== 'lite') {
     return { status: 'error', code: 'unauthorized', message: 'Not signed in as a lite account.' };
   }
   const result = await withAdvisoryLock(upgradeLockKey(sessionUser.userId), () =>
-    runUpgrade(sessionUser, newNameRaw)
+    runUpgrade(sessionUser, newNameRaw, publicKeys)
   );
-  // null means the lock was not granted — never a real result, since runUpgrade
-  // either returns an UpgradeResult or throws.
+  // null means the lock was not granted — never a real result, since runUpgrade either
+  // returns an UpgradeResult or throws.
   return (
     result ?? {
       status: 'error',
@@ -164,23 +333,34 @@ export async function upgradeToFullAccount(
   );
 }
 
-async function runUpgrade(sessionUser: User, newNameRaw: string): Promise<UpgradeResult> {
+async function runUpgrade(
+  sessionUser: User,
+  newNameRaw: string,
+  publicKeysInput: unknown
+): Promise<UpgradeResult> {
   const user = await users.findUserById(sessionUser.userId as string);
   if (!user) return { status: 'error', code: 'not_found', message: 'Account not found.' };
 
-  // Keys already owed to this user outrank everything below — including the
-  // "already upgraded" refusal, which is exactly the state a user lands in when their
-  // first response was lost. Refusing them here is what used to strand the account.
-  const resumed = await resumeOutstandingReveal(user.userId);
+  // An account this user may already own outranks everything below — including the
+  // "already upgraded" refusal, which is exactly the state they land in when a first
+  // attempt succeeded on chain but never got recorded here.
+  const resumed = await resumeInFlightUpgrade(user.userId);
   if (resumed) return resumed;
 
   if (user.accountTier === 'full' || user.hiveAccountName) {
-    return { status: 'error', code: 'already_upgraded', message: 'This account has already been upgraded.' };
+    // Carry the REAL name. Without it the screen tells the user "your account is
+    // @<whatever they just typed>" — a name that is not theirs and may be a stranger's.
+    return {
+      status: 'error',
+      code: 'already_upgraded',
+      message: 'This account has already been upgraded.',
+      hiveAccountName: user.hiveAccountName ?? undefined
+    };
   }
   // A suspended or banned account may not upgrade its way out. Upgrading burns one of
   // OUR account creation tokens and hands over a full Hive account with its own keys —
-  // an account we can no longer moderate at all. Checked here, before the name lock
-  // and long before the ACT, so nothing is spent on a refusal.
+  // an account we can no longer moderate at all. Checked here, before the name lock and
+  // long before the ACT, so nothing is spent on a refusal.
   if (user.status !== 'active') {
     return {
       status: 'error',
@@ -193,11 +373,14 @@ async function runUpgrade(sessionUser: User, newNameRaw: string): Promise<Upgrad
   if (!hasAccountCreator()) {
     return { status: 'error', code: 'unavailable', message: 'Account creation is not configured.' };
   }
-  // Refuse to start what we could not durably record. Checked here — while refusing is
-  // still free — rather than discovering it after the account exists on chain.
-  if (!isKeyRevealConfigured()) {
-    logger.error('Lite upgrade blocked: LITE_KEY_REVEAL_ENCRYPTION_KEY is missing or not 32 bytes');
-    return { status: 'error', code: 'unavailable', message: 'Account creation is not configured.' };
+
+  const publicKeys = checkPublicKeys(publicKeysInput);
+  if (!publicKeys) {
+    return {
+      status: 'error',
+      code: 'invalid_keys',
+      message: 'Your browser did not send a usable set of public keys. Reload the page and try again.'
+    };
   }
 
   const newName = newNameRaw.trim().toLowerCase();
@@ -218,123 +401,65 @@ async function runUpgrade(sessionUser: User, newNameRaw: string): Promise<Upgrad
     return { status: 'error', code: 'name_taken', message: 'That name is already claimed.' };
   }
 
-  // Best-effort hygiene: drop key material whose window has closed. Reads already
-  // filter on expiry, so this only stops keys living at rest indefinitely.
-  await keyReveals.purgeExpired().catch(() => undefined);
-
   const creator = getAccountCreator();
-  const locked = await names.reservePending(newName, NAME_LOCK_TTL_S);
+  const locked = await names.reservePending(newName, NAME_LOCK_TTL_S, user.userId);
   if (!locked) return { status: 'error', code: 'name_taken', message: 'That name is being claimed.' };
 
-  const event = await upgradeEvents.create(user.userId, newName);
-  let revealId: string | null = null;
+  // Recorded BEFORE the broadcast, owner key included: this row is the only thing that
+  // can later tell an account we created from a name someone else took.
+  const event = await upgradeEvents.create(user.userId, newName, publicKeys.owner);
   let creationAttempted = false;
   try {
     // Chain reconciliation: never burn a second ACT if the account already exists.
     if (await creator.accountExists(newName)) {
-      await names.releasePending(newName);
+      await names.releasePending(newName, user.userId);
       await upgradeEvents.fail(event.id, 'name_on_chain');
       return { status: 'error', code: 'name_on_chain', message: 'That name already exists on Hive.' };
     }
 
-    const keys = await creator.generateKeys(newName);
-
-    // ─── The outbox is written FIRST, while failing is still free. ───
-    // If this throws, no account has been created and nothing is stranded.
-    const stored = await keyReveals.create({
-      userId: user.userId,
-      upgradeEventId: event.id,
-      hiveAccountName: newName,
-      ciphertext: encryptKeys(keys),
-      ttlHours: liteConfig.keyRevealTtlHours
+    // Only a failure that may have REACHED THE CHAIN counts as ambiguous. Everything
+    // `createClaimedAccount` does first — validating the keys, loading the signer,
+    // reading and topping up the token pool — throws with nothing broadcast, and
+    // treating those as ambiguous strands the name for 300 seconds and leaves an
+    // attempt in flight that the next request has to clear before it can proceed.
+    const { trxId } = await creator.createClaimedAccount(newName, publicKeys, () => {
+      creationAttempted = true;
     });
-    revealId = stored.revealId;
 
-    creationAttempted = true;
-    const { trxId } = await creator.createClaimedAccount(newName, keys);
-
-    // ─── POINT OF NO RETURN: the on-chain account now EXISTS with `keys`. ───
-    // UPGRADE-KEYLOSS (PRUNED 2026-07-22): from here the keys MUST reach the caller no
-    // matter what fails below. They are already durably stored, so a failure here is a
-    // re-fetch rather than a lockout — but nothing below may throw out of this function
-    // before the keys are returned. Bookkeeping failures are recorded, not raised.
-    try {
-      await keyReveals.markAvailable(revealId, trxId);
-      await upgradeEvents.markCreated(event.id, trxId);
-      // Even if a concurrent request already flipped the flag, THIS request created the
-      // on-chain account, so these keys are the real ones and must be returned either
-      // way (never short-circuit the reveal on the idem race).
-      const updated = await users.markUpgraded(user.userId, newName);
-      if (updated) await names.promoteToActive(newName, user.userId);
-      // No earnings settlement: lite accounts hold NO balance (rewards are rejected at
-      // publish, decision 2026-07-23), so upgrade only creates the on-chain account and
-      // hands over the keys — there is nothing to sweep.
-    } catch (postCreateError) {
-      // Never rethrow — the keys must reach the caller. But never stay quiet either:
-      // an account creation token has just been spent on an account that Lumen has
-      // failed to link to its owner, and nothing downstream will notice. The user
-      // still gets their keys and their account; what is broken is OUR record of it,
-      // and only a human can repair that.
-      logger.error(
-        { err: postCreateError, userId: user.userId, hiveAccountName: newName, upgradeEventId: event.id },
-        'Lite upgrade: the Hive account was CREATED but Lumen could not record the upgrade — the account exists on chain and this user is still marked lite. Needs manual repair.'
-      );
-      await upgradeEvents
-        .fail(
-          event.id,
-          `post_create:${postCreateError instanceof Error ? postCreateError.message : String(postCreateError)}`
-        )
-        .catch(() => undefined); // bookkeeping is best-effort; never mask the reveal
+    // ─── POINT OF NO RETURN: the on-chain account now exists. ───
+    // The user already holds its keys — they confirmed saving them before this request
+    // was sent — so nothing below can lock them out. Bookkeeping is recorded, never
+    // raised.
+    const linked = await completeBookkeeping(user.userId, newName, event.id, trxId);
+    if (!linked) {
+      // The account is real and the user holds its keys; only OUR record is missing.
+      // Saying "ok" here is what let a half-written upgrade look complete and invite a
+      // second one. The attempt stays in flight, so the next request retries the link.
+      return {
+        status: 'error',
+        code: 'created_not_linked',
+        message:
+          'Your Hive account was created, but we could not finish linking it to your Lumen profile. Your keys are valid — reload this page in a moment, and contact support if it persists.',
+        hiveAccountName: newName
+      };
     }
-
-    return { status: 'ok', hiveAccountName: newName, keys, revealId };
+    return { status: 'ok', hiveAccountName: newName };
   } catch (error) {
-    if (revealId && creationAttempted) {
-      // The create broadcast failed, but a timeout is not proof it did not land. Keep
-      // the ciphertext; the next attempt reconciles it against the chain and either
-      // hands these keys over or discards them.
-      await keyReveals.markUncertain(revealId).catch(() => undefined);
-    } else if (revealId) {
-      await keyReveals.discard(revealId).catch(() => undefined);
-    }
     // Release the name ONLY when nothing was broadcast. After an ambiguous create,
-    // freeing it invites someone else to take the very name we may already own —
-    // and reconciliation would then find the name occupied and read that as our own
-    // success. The pending hold expires by itself (NAME_LOCK_TTL_S), so keeping it
-    // costs a few minutes, not the name.
-    if (!creationAttempted) await names.releasePending(newName);
-    await upgradeEvents.fail(event.id, error instanceof Error ? error.message : String(error));
+    // freeing it invites someone else to take the very name we may already own — and
+    // reconciliation would then find the name occupied and have to decide with no
+    // evidence. The pending hold expires by itself (NAME_LOCK_TTL_S).
+    if (!creationAttempted) {
+      await names.releasePending(newName, user.userId);
+      await upgradeEvents.fail(event.id, error instanceof Error ? error.message : String(error));
+    } else {
+      // Leave the event in 'creating' on purpose: that is the marker the resume path
+      // looks for, and this is exactly the case it exists to settle.
+      logger.warn(
+        { err: error, userId: user.userId, hiveAccountName: newName, upgradeEventId: event.id },
+        'Lite upgrade: create broadcast failed ambiguously — left in flight for reconciliation'
+      );
+    }
     throw error;
   }
-}
-
-/**
- * Re-fetch the keys this user is still owed. Backs GET /api/account/upgrade/reveal —
- * the path a user takes when the original response never arrived.
- */
-export async function fetchOutstandingReveal(sessionUser: User | undefined): Promise<UpgradeResult> {
-  if (!sessionUser?.userId) {
-    return { status: 'error', code: 'unauthorized', message: 'Not signed in.' };
-  }
-  const resumed = await resumeOutstandingReveal(sessionUser.userId);
-  if (resumed) return resumed;
-  return { status: 'error', code: 'no_reveal', message: 'There are no keys waiting for you.' };
-}
-
-/**
- * The user confirmed they have written the keys down; wipe the stored copy. Scoped by
- * user so a reveal id alone can never destroy someone else's only copy.
- */
-export async function acknowledgeReveal(
-  sessionUser: User | undefined,
-  revealId: string
-): Promise<{ status: 'ok' } | { status: 'error'; code: string; message: string }> {
-  if (!sessionUser?.userId) {
-    return { status: 'error', code: 'unauthorized', message: 'Not signed in.' };
-  }
-  const done = await keyReveals.acknowledge(revealId, sessionUser.userId);
-  if (!done) {
-    return { status: 'error', code: 'not_found', message: 'There is nothing to acknowledge.' };
-  }
-  return { status: 'ok' };
 }

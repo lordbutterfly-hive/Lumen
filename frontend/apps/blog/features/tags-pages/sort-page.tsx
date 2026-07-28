@@ -4,6 +4,7 @@ import { getPostsRanked } from '@transaction/lib/bridge-api';
 import { ReactNode } from 'react';
 import { getLogger } from '@ui/lib/logging';
 import { ObserverProvider, InitialPostsProvider } from '@/blog/components/observer-provider';
+import { attachLiteIdentities } from '@/blog/lib/lite/render/attach-lite';
 
 const logger = getLogger('app');
 
@@ -27,6 +28,9 @@ const SortPage = async ({
   if (!shouldSkipPrefetch) {
     try {
       initialPosts = (await getPostsRanked(sort, tag, '', '', observer)) ?? null;
+      // Resolve Lumen identities before this reaches the browser, so a lite post
+      // never renders under the shared publishing account and then corrects itself.
+      if (initialPosts) await attachLiteIdentities(initialPosts);
     } catch (error) {
       logger.error(error, 'Error in SortPage:');
     }

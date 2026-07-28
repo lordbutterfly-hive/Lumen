@@ -71,6 +71,28 @@ export const liteConfig = {
   /** Per-IP signup cap per day (anti-Sybil, §H). */
   signupPerIpPerDay: Number(process.env.LITE_SIGNUP_PER_IP_PER_DAY || 20),
   /**
+   * Daily follow cap for a full Hive account acting on Lumen. Flat rather than
+   * trust-tiered: there is no Lumen account to score, and a Hive account is not free
+   * to create, so the Sybil pressure the tiers exist for is not present.
+   */
+  hiveFollowsPerDay: Number(process.env.LITE_HIVE_FOLLOWS_PER_DAY || 300),
+  /**
+   * Per-account daily cap on upgrade attempts. Each one can spend creator-account
+   * Resource Credits (an inline token claim), which every other user's upgrade shares.
+   */
+  upgradeAttemptsPerDay: Number(process.env.LITE_UPGRADE_ATTEMPTS_PER_DAY || 30),
+  /**
+   * Per-account daily cap on image uploads. A lite upload is signed by the shared
+   * publishing account, so abuse here spends OUR reputation with the image host,
+   * not the uploader's. Generous for a person writing posts, bounded for a script.
+   */
+  uploadsPerDay: Number(process.env.LITE_UPLOADS_PER_DAY || 100),
+  /**
+   * Largest image a lite user may upload, in megabytes. The image host enforces its
+   * own limit; this one exists so a huge body never reaches the signer at all.
+   */
+  maxUploadMb: Number(process.env.LITE_MAX_UPLOAD_MB || 8),
+  /**
    * GLOBAL signup velocity cap per day — a platform-wide backstop against
    * distributed IP rotation (ECON-1 hardening, PRUNED 2026-07-22). Mirrors the
    * Reddit/Facebook "new-account velocity" ceiling: even if an attacker rotates
@@ -124,14 +146,9 @@ export const liteConfig = {
   moderatorToken: process.env.LITE_MODERATOR_TOKEN || '',
   /** Shared secret for the publisher drain endpoint (empty = endpoint disabled). */
   publisherToken: process.env.LITE_PUBLISHER_TOKEN || '',
-  /**
-   * How long a freshly created account's keys stay in the encrypted reveal outbox
-   * (migration 0015) before the ciphertext is dropped. This is a straight trade: too
-   * short and a user who closed the tab loses an account nobody can recover; too long
-   * and private keys sit at rest for no reason. Three days covers "I'll do it tomorrow"
-   * without becoming storage.
-   */
-  keyRevealTtlHours: Number(process.env.LITE_KEY_REVEAL_TTL_HOURS || 72),
+  // No key-custody settings here by design: private keys are generated in the user's
+  // BROWSER and never reach this process (see upgrade/upgrade-service.ts). There is
+  // nothing to encrypt, no TTL to tune, and no encryption key to deploy.
   /**
    * Children per container post before rotating to a fresh one (decision
    * 2026-07-27: 1000, matching the ~1000-reply pattern observed on LeoThreads).

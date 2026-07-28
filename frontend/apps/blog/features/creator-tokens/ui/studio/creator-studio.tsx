@@ -1,18 +1,9 @@
 'use client';
 
 import { FC, useState, useEffect } from 'react';
-import {
-  useStudio,
-  answerAsk,
-  renewSubscription,
-  setServicePrice,
-  raiseCap,
-  claimTradeFees,
-  sell,
-  retireOwnToken,
-  STUDIO_HANDLE
-} from '../../market/store';
-import type { PortfolioAsk } from '../../market/portfolio';
+import { useLiveStudio, type LiveStudio } from '../../live/use-live-studio';
+import { MarketLoading, MarketReadFailed, MarketUnavailable } from '../../live/market-states';
+import type { Ask } from '../../types';
 import { usdPrice, usdWhole } from '../../market/format';
 import TokenShell from '../token-shell';
 
@@ -44,7 +35,7 @@ const Stat: FC<{ label: string; value: string; sub?: string; green?: boolean }> 
 // refusal (an invalid amount, or an unknown service key) reverts the field
 // exactly like a locally-invalid entry does, rather than leaving it showing
 // an unconfirmed number the store silently ignored.
-const PriceInput: FC<{ value: number; onCommit: (usd: number) => boolean }> = ({ value, onCommit }) => {
+const PriceInput: FC<{ value: number; onCommit: (usd: number) => Promise<void> }> = ({ value, onCommit }) => {
   const [txt, setTxt] = useState(String(value));
   useEffect(() => setTxt(String(value)), [value]);
   return (
@@ -52,56 +43,104 @@ const PriceInput: FC<{ value: number; onCommit: (usd: number) => boolean }> = ({
       value={txt}
       inputMode="decimal"
       onChange={(e) => setTxt(e.target.value)}
-      onBlur={() => {
+      onBlur={async () => {
         const n = parseFloat(txt.replace(/,/g, ''));
-        const ok = Number.isFinite(n) && n > 0 && onCommit(n);
-        if (!ok) setTxt(String(value));
+        if (!Number.isFinite(n) || n <= 0) {
+          setTxt(String(value));
+          return;
+        }
+        // The commit is a signed broadcast now, and it can be REFUSED — most
+        // often by the offering's own 2x/7d anti-rug band. Revert the field on
+        // rejection so it never displays a price the chain did not accept.
+        try {
+          await onCommit(n);
+        } catch {
+          setTxt(String(value));
+        }
       }}
       className="ml-1 w-[70px] border-0 text-[15px] font-bold tabular-nums text-[#161511] outline-none"
     />
   );
 };
 
-const AnswerModal: FC<{ ask: PortfolioAsk; onClose: () => void }> = ({ ask, onClose }) => {
+const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = ({ ask, studio, onClose }) => {
   const [text, setText] = useState('');
   const [failed, setFailed] = useState(false);
+  const [busy, setBusy] = useState(false);
   return (
     <div onClick={onClose} className="fixed inset-0 z-[60] flex items-center justify-center bg-[rgba(20,18,10,0.4)] p-5 backdrop-blur-[2px]">
       <div onClick={(e) => e.stopPropagation()} className="w-[500px] max-w-full rounded-[20px] bg-white p-6 shadow-[0_20px_60px_rgba(20,18,10,0.25)]">
-        <div className="mb-2 font-serif text-xl font-semibold text-[#161511]">Answer this {ask.service.toLowerCase()}</div>
-        {ask.question ? (
-          <div className="mb-3 rounded-[10px] border border-[#ebebeb] bg-[#f6f7f8] px-3.5 py-3 font-serif text-[14px] leading-[1.55] text-[#2a2822]">
-            {ask.question}
-          </div>
-        ) : null}
-        <p className="mb-3 text-[13px] text-[#6b7280]">Your answer is kept private on Lumen — only this holder sees it. Never posted to Hive.</p>
+        <div className="mb-2 font-serif text-xl font-semibold text-[#161511]">Mark this job delivered</div>
+        {/* The contract carries a REFERENCE, not the brief (USER RULING
+            2026-07-28): it facilitates payment and reputation, and the two
+            parties arrange the work between themselves. Showing the reference is
+            honest; pretending a message arrived here would not be. */}
+        <div className="mb-3 rounded-[10px] border border-[#ebebeb] bg-[#f6f7f8] px-3.5 py-3 text-[13px] text-[#4b5563]">
+          Reference <strong className="font-mono">{ask.contentHash || '—'}</strong> · from @{ask.asker}
+        </div>
+        <p className="mb-3 text-[13px] leading-[1.5] text-[#6b7280]">
+          Arrange and deliver the work with @{ask.asker} however you normally would. Marking it delivered releases the
+          escrow to you — and the buyer then rates it, which is what your token’s reputation is built from.
+        </p>
         <textarea
           value={text}
           onChange={(e) => {
             setText(e.target.value);
             setFailed(false);
           }}
-          placeholder="Write your answer…"
+          placeholder="Where did you deliver it? A link, a ticket number, “sent by email”…"
           className="h-[130px] w-full resize-y rounded-xl border border-[#e4e6e9] px-4 py-3 font-serif text-[15px] leading-[1.5] text-[#161511] outline-none focus:border-[#c0392b]"
         />
         <div className="mt-3 rounded-[10px] bg-[#f0f7f2] px-3.5 py-2.5 text-[13px] text-[#2f7d4f]">
-          Answering pays you <strong>{usdWhole(ask.costUsd)} ({tok(ask.tokens)} tokens)</strong> and closes the ask. This can’t be undone.
+          This pays you <strong>{tok(ask.tokensEscrowed)} tokens</strong> and closes the job. It can’t be undone — and the
+          buyer rates it afterwards.
         </div>
         <div className="mt-4 flex gap-3">
-          <button onClick={onClose} className="flex-1 rounded-xl border border-[#e4e6e9] py-3 text-[14px] font-semibold text-[#6b7280]">Cancel</button>
+          {/* DECLINE, given equal weight to Cancel. It is the creator's free,
+              honest "no": the asker gets everything back INCLUDING the
+              commission, and it is explicitly not a miss against the delivery
+              record. A studio that offered only Answer would push a creator to
+              take a black mark for work they simply cannot do. */}
           <button
-            onClick={() => {
-              // answerAsk reports whether it actually answered (defect fix:
-              // this used to close unconditionally, as if a since-reclaimed or
-              // already-answered ask had paid out) — only close on a real success.
-              const ok = answerAsk(ask.id, text.trim() || 'Answered.');
-              if (ok) onClose();
-              else setFailed(true);
+            onClick={async () => {
+              if (busy) return;
+              setBusy(true);
+              setFailed(false);
+              try {
+                await studio.decline({ seq: ask.seq, deadlineBlock: ask.deadlineBlock });
+                onClose();
+              } catch {
+                setFailed(true);
+              } finally {
+                setBusy(false);
+              }
             }}
-            disabled={text.trim().length === 0}
+            disabled={busy}
+            className="flex-1 rounded-xl border border-[#e4e6e9] py-3 text-[14px] font-semibold text-[#6b7280] disabled:opacity-50"
+          >
+            Decline &amp; refund
+          </button>
+          <button
+            onClick={async () => {
+              if (busy || text.trim().length === 0) return;
+              setBusy(true);
+              setFailed(false);
+              try {
+                // answerHash is the creator's own delivery NOTE/reference — a
+                // link, a ticket number, "sent by email". The chain records that
+                // something was handed over and pays out; it never judges what.
+                await studio.answer({ seq: ask.seq, deadlineBlock: ask.deadlineBlock, answerHash: text.trim() });
+                onClose();
+              } catch {
+                setFailed(true);
+              } finally {
+                setBusy(false);
+              }
+            }}
+            disabled={busy || text.trim().length === 0}
             className="flex-1 rounded-xl bg-[#c0392b] py-3 text-[14px] font-semibold text-white hover:bg-[#96271b] disabled:opacity-50"
           >
-            Send answer
+            {busy ? 'Confirm in your wallet…' : 'Mark as delivered'}
           </button>
         </div>
         {failed ? (
@@ -114,10 +153,11 @@ const AnswerModal: FC<{ ask: PortfolioAsk; onClose: () => void }> = ({ ask, onCl
   );
 };
 
-const RetireModal: FC<{ onConfirm: () => boolean; onClose: () => void }> = ({ onConfirm, onClose }) => {
+const RetireModal: FC<{ handle: string; onConfirm: () => Promise<void>; onClose: () => void }> = ({ handle, onConfirm, onClose }) => {
   const [confirm, setConfirm] = useState('');
   const [failed, setFailed] = useState(false);
-  const ok = confirm.trim().toLowerCase().replace(/^@/, '') === STUDIO_HANDLE;
+  const [busy, setBusy] = useState(false);
+  const ok = confirm.trim().toLowerCase().replace(/^@/, '') === handle.toLowerCase();
   return (
     <div onClick={onClose} className="fixed inset-0 z-[60] flex items-center justify-center bg-[rgba(20,18,10,0.4)] p-5 backdrop-blur-[2px]">
       <div onClick={(e) => e.stopPropagation()} className="w-[500px] max-w-full rounded-[20px] border border-[#f0c9c2] bg-white p-6 shadow-[0_20px_60px_rgba(20,18,10,0.25)]">
@@ -130,22 +170,29 @@ const RetireModal: FC<{ onConfirm: () => boolean; onClose: () => void }> = ({ on
           <li>· Your delivery record is lost — coming back means a new token.</li>
           <li>· This can’t be undone.</li>
         </ul>
-        <label className="mb-1.5 block text-[12.5px] font-semibold text-[#6b7280]">Type your handle (@{STUDIO_HANDLE}) to confirm</label>
-        <input value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder={`@${STUDIO_HANDLE}`} className="mb-4 w-full rounded-xl border border-[#e4e6e9] px-4 py-3 text-[15px] font-semibold outline-none" />
+        <label className="mb-1.5 block text-[12.5px] font-semibold text-[#6b7280]">Type your handle (@{handle}) to confirm</label>
+        <input value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder={`@${handle}`} className="mb-4 w-full rounded-xl border border-[#e4e6e9] px-4 py-3 text-[15px] font-semibold outline-none" />
         <div className="flex gap-3">
           <button onClick={onClose} className="flex-1 rounded-xl border border-[#e4e6e9] py-3 text-[14px] font-semibold text-[#6b7280]">Cancel</button>
           <button
-            onClick={() => {
-              if (ok) {
-                // onConfirm reports whether it actually wound the market down
-                // (defect fix: this used to close unconditionally) — only
-                // close on a real success.
-                const done = onConfirm();
-                if (done) onClose();
-                else setFailed(true);
+            onClick={async () => {
+              if (!ok || busy) return;
+              // Retire is IRREVERSIBLE on-chain. Close only after the broadcast
+              // resolves — closing early would tell a creator they had ended
+              // their market while the signer was still open, and there is no
+              // undo to fall back on.
+              setBusy(true);
+              setFailed(false);
+              try {
+                await onConfirm();
+                onClose();
+              } catch {
+                setFailed(true);
+              } finally {
+                setBusy(false);
               }
             }}
-            disabled={!ok}
+            disabled={!ok || busy}
             className="flex-1 rounded-xl bg-[#c0392b] py-3 text-[14px] font-semibold text-white hover:bg-[#96271b] disabled:opacity-50"
           >
             End my token
@@ -161,19 +208,96 @@ const RetireModal: FC<{ onConfirm: () => boolean; onClose: () => void }> = ({ on
   );
 };
 
+/**
+ * Add a service to the shop. Separate component so its own draft state cannot
+ * re-render the whole studio on every keystroke — and so the create path reads
+ * as its own thing rather than a footnote to the list.
+ */
+const NewOfferingRow: FC<{ studio: LiveStudio }> = ({ studio }) => {
+  const [title, setTitle] = useState('');
+  const [price, setPrice] = useState('');
+  const [failed, setFailed] = useState(false);
+  const usd = parseFloat(price.replace(/,/g, ''));
+  const valid = title.trim().length > 0 && Number.isFinite(usd) && usd > 0;
+  return (
+    <div className="mt-4 border-t border-[#f1f3f5] pt-4">
+      <div className="mb-2 text-[12.5px] font-semibold text-[#6b7280]">Add a service</div>
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          value={title}
+          onChange={(e) => {
+            setTitle(e.target.value);
+            setFailed(false);
+          }}
+          placeholder="e.g. Review my code"
+          className="min-w-[200px] flex-1 rounded-[10px] border border-[#e4e6e9] px-3 py-2 text-[14px] outline-none"
+        />
+        <div className="flex items-center rounded-[10px] border border-[#e4e6e9] px-3 py-2">
+          <span className="font-bold text-[#9ca3af]">$</span>
+          <input
+            value={price}
+            onChange={(e) => {
+              setPrice(e.target.value);
+              setFailed(false);
+            }}
+            inputMode="decimal"
+            placeholder="0"
+            className="ml-1 w-[80px] border-0 text-[14px] font-bold tabular-nums outline-none"
+          />
+        </div>
+        <button
+          onClick={async () => {
+            if (!valid || studio.isBusy) return;
+            setFailed(false);
+            try {
+              await studio.createOffering({ title: title.trim(), priceUsd: usd });
+              setTitle('');
+              setPrice('');
+            } catch {
+              setFailed(true);
+            }
+          }}
+          disabled={!valid || studio.isBusy}
+          className="rounded-[10px] bg-[#161511] px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-50"
+        >
+          Add
+        </button>
+      </div>
+      {failed ? (
+        <div className="mt-2 text-[12px] font-semibold text-[#c0392b]">
+          That didn’t go through — the name may already be in use, the price may be outside the allowed range, or you may
+          have hit the limit on services.
+        </div>
+      ) : null}
+    </div>
+  );
+};
+
 const CreatorStudio: FC = () => {
-  const { market, inbox, subDaysLeft, tradeFeeClaimableUsd, commissionEarnedUsd, launched } = useStudio();
+  const studio = useLiveStudio();
+  const { market, inbox, rawInbox, subDaysLeft, tradeFeeClaimableUsd, commissionEarnedUsd, status } = studio;
   const [section, setSection] = useState<Section>('overview');
-  const [answering, setAnswering] = useState<PortfolioAsk | null>(null);
+  const [answering, setAnswering] = useState<Ask | null>(null);
   const [retireOpen, setRetireOpen] = useState(false);
-  const [capInput, setCapInput] = useState(String(market.cap));
+  const [capInput, setCapInput] = useState('');
   const [sellInput, setSellInput] = useState('');
   const [sellFailed, setSellFailed] = useState(false);
   // Keep the cap field in sync with the committed cap after a successful raise (#3).
-  useEffect(() => setCapInput(String(market.cap)), [market.cap]);
+  const marketCap = market?.cap ?? null;
+  useEffect(() => {
+    if (marketCap !== null) setCapInput(String(marketCap));
+  }, [marketCap]);
 
-  // No token yet → the launch wizard is the whole studio (spec's no-token state).
-  if (!launched) {
+  if (status === 'unavailable') return <MarketUnavailable />;
+  if (status === 'loading') return <MarketLoading />;
+  // A failed read must NOT fall through to the launch wizard: telling a creator
+  // with a live market that they have no token, because the node blinked, is
+  // exactly the "empty read rendered as real" failure this rewiring removes.
+  if (status === 'error') return <MarketReadFailed />;
+
+  // status === 'missing' -> genuinely no market yet (or signed out). The launch
+  // wizard is the whole studio in that state.
+  if (!market) {
     return (
       <TokenShell>
         <div className="mx-auto max-w-[560px] pt-16 text-center">
@@ -189,14 +313,14 @@ const CreatorStudio: FC = () => {
     );
   }
 
-  const supplyPct = Math.min(100, Math.round((market.supply / market.cap) * 100));
+  const supplyPct = market.cap > 0 ? Math.min(100, Math.round((market.supply / market.cap) * 100)) : 0;
   const overdue = subDaysLeft <= 0;
   const held = market.position?.tokens ?? 0;
 
   const banner = overdue ? (
     <div className="mb-5 flex items-center justify-between gap-3 rounded-[14px] border border-[#f6e2c4] bg-[#fdf6ec] px-5 py-3.5">
       <span className="text-[14px] font-semibold text-[#b45309]">Your listing has lapsed — renew to stay in discovery. Answering and cashing out still work.</span>
-      <button onClick={() => renewSubscription(1)} className="rounded-[10px] bg-[#b45309] px-4 py-2 text-[13px] font-semibold text-white">Renew ~$10</button>
+      <button onClick={() => void studio.renew(1)} disabled={studio.isBusy} className="rounded-[10px] bg-[#b45309] px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-50">Renew ~$10</button>
     </div>
   ) : null;
 
@@ -204,10 +328,10 @@ const CreatorStudio: FC = () => {
     <TokenShell>
       <div className="pt-[26px]">
         <div className="mb-1 flex items-center gap-3">
-          <span className="h-11 w-11 rounded-[13px]" style={{ background: market.avatarColor }} />
+          <span className="h-11 w-11 rounded-[13px] bg-[#e9ebee]" />
           <div>
             <h1 className="font-serif text-2xl font-semibold text-[#161511]">Creator Studio</h1>
-            <p className="text-[13.5px] text-[#6b7280]">Your token @{STUDIO_HANDLE} · your control room</p>
+            <p className="text-[13.5px] text-[#6b7280]">Your token @{studio.creator} · your control room</p>
           </div>
         </div>
 
@@ -245,16 +369,22 @@ const CreatorStudio: FC = () => {
             {inbox.length === 0 ? (
               <Card><p className="py-6 text-center font-serif text-sm text-[#9ca3af]">No requests waiting. Nice — you’re all caught up.</p></Card>
             ) : (
-              inbox.map((a) => (
+              // Rendered from the PORTFOLIO row (money + due label, already
+              // adapted) but opened with the RAW escrow, because answer/decline
+              // need seq and deadlineBlock — neither of which a portfolio row
+              // carries. Zipped by index: both lists come from the same filtered
+              // array in the same order, so they cannot drift.
+              inbox.map((a, i) => (
                 <Card key={a.id} className={a.urgent ? 'border-[#f6e2c4] bg-[#fdf6ec]' : ''}>
                   <div className="flex items-center justify-between gap-3">
                     <div className="text-[14.5px] font-semibold text-[#161511]">{a.service}</div>
                     <div className={`text-[12.5px] font-semibold ${a.urgent ? 'text-[#b45309]' : 'text-[#6b7280]'}`}>{a.dueLabel}</div>
                   </div>
                   <div className="mt-1 text-[12.5px] tabular-nums text-[#6b7280]">{usdWhole(a.costUsd)} · {tok(a.tokens)} tokens escrowed</div>
-                  {a.question ? <p className="mt-1.5 line-clamp-2 font-serif text-[13px] text-[#4b5563]">“{a.question}”</p> : null}
                   <div className="mt-3">
-                    <button onClick={() => setAnswering(a)} className="rounded-[10px] bg-[#c0392b] px-4 py-2 text-[13px] font-semibold text-white hover:bg-[#96271b]">Answer</button>
+                    <button onClick={() => setAnswering(rawInbox[i])} className="rounded-[10px] bg-[#c0392b] px-4 py-2 text-[13px] font-semibold text-white hover:bg-[#96271b]">
+                      Answer or decline
+                    </button>
                   </div>
                 </Card>
               ))
@@ -264,22 +394,45 @@ const CreatorStudio: FC = () => {
 
         {section === 'offerings' ? (
           <Card>
-            <div className="mb-3 font-serif text-lg font-semibold text-[#161511]">Your services & prices</div>
-            <p className="mb-4 text-[13px] text-[#6b7280]">Buyers pay these in your token at the live price. Set the dollar price — the token amount follows the market.</p>
+            <div className="mb-3 font-serif text-lg font-semibold text-[#161511]">Your services &amp; prices</div>
+            <p className="mb-4 text-[13px] text-[#6b7280]">
+              Buyers pay these in your token at the live price. Set the dollar price — the token amount follows the market.
+              A price can move at most 2× in any 7 days, and that limit follows the SERVICE NAME, so renaming or
+              re-creating one won’t reset it.
+            </p>
             <div className="flex flex-col gap-3">
-              {market.services.map((sv) => (
-                <div key={sv.key} className="flex items-center justify-between gap-3 rounded-xl border border-[#e4e6e9] px-4 py-3">
-                  <div>
-                    <div className="text-[14px] font-semibold text-[#161511]">{sv.name}</div>
-                    <div className="text-[12px] text-[#9ca3af]">≈ {tok(sv.usd / market.priceUsd)} tokens at today’s price</div>
+              {studio.offerings.length === 0 ? (
+                <p className="rounded-xl border border-dashed border-[#e4e6e9] px-4 py-5 text-center text-[13px] text-[#9ca3af]">
+                  You haven’t posted any services yet. Add one below and it appears on your token page.
+                </p>
+              ) : (
+                studio.offerings.map((o) => (
+                  <div key={o.offeringId} className="flex items-center justify-between gap-3 rounded-xl border border-[#e4e6e9] px-4 py-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-[14px] font-semibold text-[#161511]">{o.title}</div>
+                      <div className="text-[12px] text-[#9ca3af]">
+                        {market.priceUsd > 0 ? `≈ ${tok(o.priceHbd / market.priceUsd)} tokens at today’s price` : 'Token price unavailable'}
+                      </div>
+                    </div>
+                    <div className="flex flex-shrink-0 items-center gap-2">
+                      <div className="flex items-center rounded-[10px] border border-[#e4e6e9] px-3 py-2">
+                        <span className="font-bold text-[#9ca3af]">$</span>
+                        <PriceInput value={o.priceHbd} onCommit={(usd) => studio.setOfferingPrice({ offeringId: o.offeringId, priceUsd: usd })} />
+                      </div>
+                      <button
+                        onClick={() => void studio.deleteOffering(o.offeringId)}
+                        disabled={studio.isBusy}
+                        title="Delist this service. Asks already made against it are unaffected."
+                        className="rounded-[10px] border border-[#e4e6e9] px-3 py-2 text-[13px] font-semibold text-[#6b7280] hover:bg-[#f6f7f8] disabled:opacity-50"
+                      >
+                        Remove
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex items-center rounded-[10px] border border-[#e4e6e9] px-3 py-2">
-                    <span className="font-bold text-[#9ca3af]">$</span>
-                    <PriceInput value={sv.usd} onCommit={(usd) => setServicePrice(sv.key, usd)} />
-                  </div>
-                </div>
-              ))}
+                ))
+              )}
             </div>
+            <NewOfferingRow studio={studio} />
           </Card>
         ) : null}
 
@@ -298,15 +451,21 @@ const CreatorStudio: FC = () => {
               <span className="text-[13px] text-[#6b7280]">Raise cap to</span>
               <input value={capInput} onChange={(e) => setCapInput(e.target.value)} inputMode="numeric" className="w-[110px] rounded-[10px] border border-[#e4e6e9] px-3 py-2 text-[14px] font-semibold tabular-nums outline-none" />
               <button
-                onClick={() => {
+                onClick={async () => {
                   const v = parseInt(capInput.replace(/[^\d]/g, ''), 10);
-                  // raiseCap reports whether it actually raised — the local
-                  // v >= issued check is a fast-path, but the store's own
-                  // refusal (its own read of issued supply may have moved
-                  // since this render) is what actually decides, so both must
-                  // pass before reverting the field is skipped.
-                  const ok = Number.isFinite(v) && v >= Math.ceil(market.supply) && raiseCap(v);
-                  if (!ok) setCapInput(String(market.cap)); // revert a too-low / invalid / refused entry
+                  // The local `v >= issued` check is only a fast path; the
+                  // CHAIN decides, and its view of issued supply may have moved
+                  // since this render. Revert the field on any refusal so it
+                  // never shows a cap the contract did not accept.
+                  if (!Number.isFinite(v) || v < Math.ceil(market.supply)) {
+                    setCapInput(String(market.cap));
+                    return;
+                  }
+                  try {
+                    await studio.setCap(v);
+                  } catch {
+                    setCapInput(String(market.cap));
+                  }
                 }}
                 className="rounded-[10px] bg-[#161511] px-4 py-2 text-[13px] font-semibold text-white"
               >
@@ -324,7 +483,7 @@ const CreatorStudio: FC = () => {
           <Card>
             <div className="mb-1 font-serif text-lg font-semibold text-[#161511]">Subscription</div>
             <div className="mb-4 text-[14px] text-[#4b5563]">{overdue ? 'Lapsed — renew to stay listed.' : `Paid up · ${subDaysLeft} days left.`} Staying listed is ~$10/month. First month’s on the house.</div>
-            <button onClick={() => renewSubscription(1)} className="rounded-[11px] bg-[#c0392b] px-5 py-2.5 text-[14px] font-semibold text-white hover:bg-[#96271b]">Renew ~$10</button>
+            <button onClick={() => void studio.renew(1)} disabled={studio.isBusy} className="rounded-[11px] bg-[#c0392b] px-5 py-2.5 text-[14px] font-semibold text-white hover:bg-[#96271b] disabled:opacity-50">Renew ~$10</button>
             <p className="mt-4 text-[12.5px] leading-[1.5] text-[#9ca3af]">
               If you stop paying, your token’s market winds down, holders are refunded at the floor, and your delivery record resets — coming back means a new token. Answering and cashing out are never blocked by billing.
             </p>
@@ -345,12 +504,22 @@ const CreatorStudio: FC = () => {
             <Card>
               <div className="flex items-center justify-between">
                 <Stat label="Trade-fee share" value={usdWhole(tradeFeeClaimableUsd)} green sub="Your 5% of your token’s trades" />
-                <button onClick={() => claimTradeFees()} disabled={tradeFeeClaimableUsd <= 0} className="rounded-[11px] bg-[#2f7d4f] px-5 py-2.5 text-[14px] font-semibold text-white hover:bg-[#276b43] disabled:opacity-50">
+                <button onClick={() => void studio.claimTradeFees()} disabled={tradeFeeClaimableUsd <= 0 || studio.isBusy} className="rounded-[11px] bg-[#2f7d4f] px-5 py-2.5 text-[14px] font-semibold text-white hover:bg-[#276b43] disabled:opacity-50">
                   {tradeFeeClaimableUsd <= 0 ? 'Claimed' : 'Claim'}
                 </button>
               </div>
             </Card>
-            <Card><Stat label="Service commission" value={usdWhole(commissionEarnedUsd)} green sub="From answered requests" /></Card>
+            {/* Lifetime commission is a REPLAY of past answered events, not
+                current state — only the indexer can produce it, and it has no
+                HTTP server yet. A creator would reconcile real income against
+                this number, so it says "not available" rather than 0. */}
+            <Card>
+              <Stat
+                label="Service commission"
+                value={commissionEarnedUsd === null ? '—' : usdWhole(commissionEarnedUsd)}
+                sub={commissionEarnedUsd === null ? 'Not available yet — needs the earnings index' : 'From answered requests'}
+              />
+            </Card>
             <Card>
               <Stat label="Your own holdings" value={`${tok(held)} tokens`} sub={`worth ${usdPrice(held * market.priceUsd)} · floor ${usdPrice(held * market.floorUsd)}`} />
               <div className="mt-4 flex items-center gap-2">
@@ -366,16 +535,15 @@ const CreatorStudio: FC = () => {
                   className="w-[110px] rounded-[10px] border border-[#e4e6e9] px-3 py-2 text-[14px] font-semibold tabular-nums outline-none"
                 />
                 <button
-                  onClick={() => {
+                  onClick={async () => {
                     const n = parseFloat(sellInput.replace(/,/g, ''));
-                    if (Number.isFinite(n) && n > 0) {
-                      // sell reports whether it actually executed (defect fix:
-                      // this used to clear the input unconditionally, as if a
-                      // nothing-held or sub-1-token sell had succeeded) — only
-                      // clear it on a real success.
-                      const ok = sell(STUDIO_HANDLE, n);
-                      if (ok) setSellInput('');
-                      else setSellFailed(true);
+                    if (!Number.isFinite(n) || n <= 0 || studio.isBusy) return;
+                    setSellFailed(false);
+                    try {
+                      await studio.sell(n);
+                      setSellInput('');
+                    } catch {
+                      setSellFailed(true);
                     }
                   }}
                   className="rounded-[10px] bg-[#161511] px-4 py-2 text-[13px] font-semibold text-white"
@@ -394,8 +562,8 @@ const CreatorStudio: FC = () => {
         ) : null}
       </div>
 
-      {answering ? <AnswerModal ask={answering} onClose={() => setAnswering(null)} /> : null}
-      {retireOpen ? <RetireModal onConfirm={retireOwnToken} onClose={() => setRetireOpen(false)} /> : null}
+      {answering ? <AnswerModal ask={answering} studio={studio} onClose={() => setAnswering(null)} /> : null}
+      {retireOpen ? <RetireModal handle={studio.creator ?? ''} onConfirm={studio.retire} onClose={() => setRetireOpen(false)} /> : null}
     </TokenShell>
   );
 };

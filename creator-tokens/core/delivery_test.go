@@ -368,3 +368,202 @@ func TestDelivery_RefusalCarriesTheDedicatedSymbol(t *testing.T) {
 		t.Fatal("a PAUSE refusal reports Symbol=DELINQUENT — the symbol is not specific to the delivery gate and consumers branching on it will over-count")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// USER RULINGS 1 and 2 (2026-07-28) — griefing is no longer free, and the
+// penalty window is derived from the OFFENCE rather than from whenever
+// somebody chose to press Reclaim.
+// ---------------------------------------------------------------------------
+
+// missSliceFor recomputes the retained slice from first principles —
+// ceil(commission * MissReclaimSliceBps / 10000) on plain integers, without
+// touching mMulDivCeil — so these tests pin the RULE and would still fail if
+// the production helper it happens to share a formula with were changed.
+func missSliceFor(commission *big.Int) *big.Int {
+	num := new(big.Int).Mul(commission, new(big.Int).SetUint64(MissReclaimSliceBps))
+	den := big.NewInt(10000)
+	q, r := new(big.Int).QuoRem(num, den, new(big.Int))
+	if r.Sign() > 0 {
+		q.Add(q, big.NewInt(1))
+	}
+	return q
+}
+
+// TestDelivery_GriefingCostsTheAskerTheMissSlice is RULING 1's whole point.
+// Before it, Reclaim handed back the credits AND 100% of the commission and the
+// credits came back with their original acquisition clock, so a hostile asker
+// could manufacture three misses — a seven-day shutdown of somebody's market —
+// and end the round trip with the exact balance they started with.
+// delivery.go's own comment claimed "a hostile asker must pay for each ask",
+// which was false. This measures the cost and asserts it is strictly positive.
+func TestDelivery_GriefingCostsTheAskerTheMissSlice(t *testing.T) {
+	s, at := dgSetup(t)
+	commission := commissionOwedFor(big.NewInt(9090))
+	slice := missSliceFor(commission)
+	if slice.Sign() <= 0 {
+		t.Fatalf("miss slice on a %s commission is %s — griefing would still be free", commission, slice)
+	}
+
+	treasuryBefore := getMoney(s, kTreasury())
+	balBefore := getMoney(s, kBal(creator1, asker1))
+
+	for i := 0; i < 3; i++ {
+		at = dgMiss(t, s, at) + 1
+	}
+
+	// The CREDITS are still returned whole — RULING 1 charges the HBD leg only.
+	if bal := getMoney(s, kBal(creator1, asker1)); bal.Cmp(balBefore) != 0 {
+		t.Fatalf("asker token balance %s -> %s; credits must always come back whole", balBefore, bal)
+	}
+	// Three misses, three slices, all of it in the treasury and none of it
+	// anywhere near the creator (paying the creator for going silent would pay
+	// for the exact behaviour the gate punishes).
+	wantTreasury := new(big.Int).Add(treasuryBefore, new(big.Int).Mul(slice, big.NewInt(3)))
+	if treas := getMoney(s, kTreasury()); treas.Cmp(wantTreasury) != 0 {
+		t.Fatalf("treasury = %s, want %s (3 misses x %s)", treas, wantTreasury, slice)
+	}
+	if fee := getMoney(s, kFeeBal(creator1)); fee.Sign() != 0 {
+		t.Fatalf("creator fee balance = %s, want 0 — the miss slice must never reach the creator", fee)
+	}
+	if delinquent, _ := DeliveryStanding(s, creator1, at); !delinquent {
+		t.Fatalf("sanity: the three misses should have convicted")
+	}
+}
+
+// TestDelivery_SelfDealtReclaimIsNotAMissAndPaysNoSlice — the slice and the
+// miss counter must agree about what an offence is. A self-dealt escrow is
+// excluded from the counters, so charging it a slice would be a fee on a
+// non-event, and would let anyone quietly tax a creator's own housekeeping.
+func TestDelivery_SelfDealtReclaimIsNotAMissAndPaysNoSlice(t *testing.T) {
+	s, at := dgSetup(t)
+	setMoney(s, kBal(creator1, creator1), big.NewInt(500_000))
+	commission := commissionOwedFor(big.NewInt(9090))
+	treasuryBefore := getMoney(s, kTreasury())
+
+	res, err := askAt0(s, creator1, creator1, at, big.NewInt(1000), commission, "cid", MinAskDeadline)
+	if err != nil {
+		t.Fatalf("self Ask: %v", err)
+	}
+	rres, err := Reclaim(s, creator1, creator1, at+MinAskDeadline+ReclaimGrace+1, res.Seq)
+	if err != nil {
+		t.Fatalf("self Reclaim: %v", err)
+	}
+	if rres.CommissionRetainedHbd.Sign() != 0 {
+		t.Fatalf("retained %s on a self-dealt reclaim, want 0 (not a miss)", rres.CommissionRetainedHbd)
+	}
+	if rres.CommissionHbd.Cmp(commission) != 0 {
+		t.Fatalf("CommissionHbd = %s, want the full %s back", rres.CommissionHbd, commission)
+	}
+	if treas := getMoney(s, kTreasury()); treas.Cmp(treasuryBefore) != 0 {
+		t.Fatalf("treasury moved on a self-dealt reclaim: %s -> %s", treasuryBefore, treas)
+	}
+	if misses, _ := DeliveryRecord(s, creator1); misses != 0 {
+		t.Fatalf("self-dealt reclaim counted as a miss (misses=%d)", misses)
+	}
+}
+
+// TestDelivery_StaleOffencesConvictForAnAlreadyExpiredWindow is RULING 2.
+// A miss is stamped at RECLAIM time, but reclaim is permissionless and has no
+// upper time bound, so three expired escrows could be BANKED and detonated by
+// any stranger months later — opening a fresh seven-day shutdown for an offence
+// the creator committed in the distant past. Deriving the window from
+// deadline+ReclaimGrace makes such a conviction arrive already spent.
+func TestDelivery_StaleOffencesConvictForAnAlreadyExpiredWindow(t *testing.T) {
+	s, at := dgSetup(t)
+	commission := commissionOwedFor(big.NewInt(9090))
+
+	// Three asks that all expire early, and are then left alone.
+	seqs := make([]uint64, 0, 3)
+	for i := 0; i < 3; i++ {
+		res, err := askAt0(s, asker1, creator1, at+uint64(i), big.NewInt(1000), commission, "cid", MinAskDeadline)
+		if err != nil {
+			t.Fatalf("Ask %d: %v", i, err)
+		}
+		seqs = append(seqs, res.Seq)
+	}
+	offenceEnd := at + 2 + MinAskDeadline + ReclaimGrace // the freshest offence
+
+	// Detonated far in the future — well past DelinquencyBlocks after the
+	// offences themselves — by a stranger, which is legal (H1, permissionless).
+	late := offenceEnd + DelinquencyBlocks + 5000
+	for _, seq := range seqs {
+		if _, err := Reclaim(s, rando1, creator1, late, seq); err != nil {
+			t.Fatalf("late Reclaim seq %d: %v", seq, err)
+		}
+	}
+
+	delinquent, until := DeliveryStanding(s, creator1, late)
+	if delinquent {
+		t.Fatalf("creator is delinquent at %d for offences that ended by %d — a banked-and-detonated shutdown", late, offenceEnd)
+	}
+	if until > late {
+		t.Fatalf("delinquentUntil = %d, in the future of %d", until, late)
+	}
+	if err := RequireInflowOpen(s, creator1, late); err != nil {
+		t.Fatalf("inflows closed by a stale offence: %v", err)
+	}
+}
+
+// TestDelivery_PenaltyWindowIsIndependentOfReclaimOrder — reclaim is
+// permissionless, so whoever submits the third one also picks WHICH escrow it
+// is. If the sentence were derived from the tipping reclaim's own escrow, that
+// submitter would be picking the sentence: stalest-last for a sentence that is
+// already over, freshest-last for the full seven days. Our own keeper chooses
+// that order. Every permutation must convict identically.
+func TestDelivery_PenaltyWindowIsIndependentOfReclaimOrder(t *testing.T) {
+	commission := commissionOwedFor(big.NewInt(9090))
+	// Three permutations of the same three offences, oldest-first through
+	// newest-first.
+	orders := [][]int{{0, 1, 2}, {2, 1, 0}, {1, 2, 0}}
+	var got []uint64
+	for _, order := range orders {
+		s, at := dgSetup(t)
+		type esc struct {
+			seq      uint64
+			deadline uint64
+		}
+		escrows := make([]esc, 3)
+		for i := 0; i < 3; i++ {
+			// Spread the asks a day apart so the offences are genuinely
+			// different blocks; otherwise the test proves nothing.
+			askAt := at + uint64(i)*BlocksPerDay
+			res, err := askAt0(s, asker1, creator1, askAt, big.NewInt(1000), commission, "cid", MinAskDeadline)
+			if err != nil {
+				t.Fatalf("Ask %d: %v", i, err)
+			}
+			escrows[i] = esc{seq: res.Seq, deadline: askAt + MinAskDeadline}
+		}
+		last := escrows[2].deadline + ReclaimGrace + 1
+		for _, i := range order {
+			if _, err := Reclaim(s, rando1, creator1, last, escrows[i].seq); err != nil {
+				t.Fatalf("Reclaim %d: %v", i, err)
+			}
+		}
+		_, until := DeliveryStanding(s, creator1, last)
+		got = append(got, until)
+		// The sentence must be the one the FRESHEST offence earned.
+		if want := escrows[2].deadline + ReclaimGrace + DelinquencyBlocks; until != want {
+			t.Fatalf("order %v: delinquentUntil = %d, want %d (freshest offence + %d)", order, until, want, DelinquencyBlocks)
+		}
+	}
+	for i := 1; i < len(got); i++ {
+		if got[i] != got[0] {
+			t.Fatalf("sentence depends on reclaim order: %v", got)
+		}
+	}
+}
+
+// TestDelivery_OffenceTrackerClearedOnConviction — the running max is
+// per-assessment-window state, exactly like the two counters. If conviction
+// left it standing, the NEXT conviction would inherit a sentence earned by
+// offences that were already punished, and a creator could be re-sentenced for
+// the same old miss.
+func TestDelivery_OffenceTrackerClearedOnConviction(t *testing.T) {
+	s, at := dgSetup(t)
+	for i := 0; i < 3; i++ {
+		at = dgMiss(t, s, at) + 1
+	}
+	if got := getU64(s, kMaxOffenceUntil(creator1)); got != 0 {
+		t.Fatalf("kMaxOffenceUntil = %d after conviction, want 0", got)
+	}
+}

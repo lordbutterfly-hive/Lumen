@@ -191,7 +191,7 @@ export interface AskSeed {
   /** WHOLE TOKENS (ask.go escrows against the same kBal balance Buy/Sell move) — not a 3-decimal amount, despite the legacy field name. */
   creditsBaseUnits: number;
   deadlineDeltaBlocks: number; // relative to head
-  rawStatus: 'PENDING' | 'ANSWERED' | 'RECLAIMED';
+  rawStatus: 'PENDING' | 'ANSWERED' | 'RECLAIMED' | 'DECLINED';
   /** The asker's hold clock, carried through the escrow (packEscrow field 6). Optional in fixtures; absent reads as 0 == maximally fresh, the safe direction. */
   acqBlock?: number;
   contentHash: string;

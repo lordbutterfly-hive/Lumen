@@ -59,124 +59,141 @@ async function runKeyTests(): Promise<void> {
   const { createWaxFoundation } = await import('@hiveio/wax');
   const wax = await createWaxFoundation();
 
-  console.log('\nkey generation');
+  console.log('\nkeys are the browser\'s job, not this module\'s');
 
+  // THE structural property of the 2026-07-28 custody change. A master password IS the
+  // owner key; a server that can mint one can take the account later, whatever it
+  // promises. So the capability is gone, not merely unused — asserted here because a
+  // helpful refactor could otherwise add it back and nothing would complain.
+  check(
+    'the server-side creator exposes NO key generation',
+    !('generateKeys' in hiveAccountCreator),
+    `keys: ${Object.keys(hiveAccountCreator).join(', ')}`
+  );
+  check(
+    'and no other member returns private key material',
+    !Object.keys(hiveAccountCreator).some((k) => /password|wif|private|secret/i.test(k))
+  );
+
+  console.log('\nthe derivation the BROWSER performs (same wax, run here offline)');
+
+  // Mirrors features/lite-auth/upgrade/browser-keys.ts. That module cannot be imported
+  // here (it pulls the client chain module), so the properties it must hold are proven
+  // against the same wax primitives it calls.
   const name = 'lumentest1';
-  const keys = await hiveAccountCreator.generateKeys(name);
+  const masterPassword = `P${wax.suggestBrainKey().wifPrivateKey}`;
   const roles = ['owner', 'active', 'posting', 'memo'] as const;
+  const derived = Object.fromEntries(
+    roles.map((role) => {
+      const key = wax.getPrivateKeyFromPassword(name, role, masterPassword);
+      return [role, { publicKey: key.associatedPublicKey, privateWif: key.wifPrivateKey }];
+    })
+  ) as Record<(typeof roles)[number], { publicKey: string; privateWif: string }>;
 
   check(
     'master password is "P" + WIF',
-    /^P5[1-9A-HJ-NP-Za-km-z]{50,51}$/.test(keys.masterPassword),
-    `got length ${keys.masterPassword.length}`
+    /^P5[1-9A-HJ-NP-Za-km-z]{50,51}$/.test(masterPassword),
+    `got length ${masterPassword.length}`
   );
-
-  // The format is load-bearing, not cosmetic: this exact pattern is what stops an
-  // owner key reaching Sentry when something throws while holding the password.
+  // The format is load-bearing, not cosmetic: it is what stops an owner key reaching
+  // Sentry if a browser error report ever carries one.
   check(
-    'the Sentry scrubber redacts a real generated master password',
-    !scrubSensitiveData(`boom: ${keys.masterPassword}`).includes(keys.masterPassword)
+    'the Sentry scrubber redacts a real master password',
+    !scrubSensitiveData(`boom: ${masterPassword}`).includes(masterPassword)
   );
   check(
-    'the Sentry scrubber redacts a real generated private WIF',
-    !scrubSensitiveData(`boom: ${keys.owner.privateWif}`).includes(keys.owner.privateWif)
+    'the Sentry scrubber redacts a real private WIF',
+    !scrubSensitiveData(`boom: ${derived.owner.privateWif}`).includes(derived.owner.privateWif)
   );
-
   check(
     'every private key matches its public key',
-    roles.every((role) => wax.calculatePublicKey(keys[role].privateWif) === keys[role].publicKey)
+    roles.every((role) => wax.calculatePublicKey(derived[role].privateWif) === derived[role].publicKey)
   );
-
-  // The user gets ONE artefact — the master password. If it does not regenerate these
-  // four keys, the account is unrecoverable no matter what else is correct.
-  const rederived = roles.map((role) => wax.getPrivateKeyFromPassword(name, role, keys.masterPassword));
+  // The user keeps ONE artefact. If it does not regenerate these four keys, the
+  // account is unrecoverable no matter what else is correct.
   check(
     'the master password re-derives all four keys for this account name',
-    roles.every((role, i) => rederived[i].associatedPublicKey === keys[role].publicKey)
+    roles.every(
+      (role) =>
+        wax.getPrivateKeyFromPassword(name, role, masterPassword).associatedPublicKey ===
+        derived[role].publicKey
+    )
   );
-
-  check('four roles are four distinct keys', new Set(roles.map((r) => keys[r].publicKey)).size === 4);
-
-  const second = await hiveAccountCreator.generateKeys(name);
+  check('four roles are four distinct keys', new Set(roles.map((r) => derived[r].publicKey)).size === 4);
   check(
-    'two generations for the same name produce different passwords (real entropy)',
-    second.masterPassword !== keys.masterPassword
+    'derivation is account-name bound (so keys must be made AFTER the name is final)',
+    wax.getPrivateKeyFromPassword('lumentest2', 'owner', masterPassword).associatedPublicKey !==
+      derived.owner.publicKey
   );
-
-  const otherName = await hiveAccountCreator.generateKeys('lumentest2');
   check(
-    'derivation is account-name bound',
-    wax.getPrivateKeyFromPassword('lumentest2', 'owner', keys.masterPassword).associatedPublicKey !==
-      keys.owner.publicKey,
-    'the same password derived the same owner key for a different name'
+    'two generations produce different passwords (real entropy)',
+    `P${wax.suggestBrainKey().wifPrivateKey}` !== masterPassword
   );
-  check('a second name yields a different master password', otherName.masterPassword !== keys.masterPassword);
 }
 
 /* ═══════════════════ part 2 — pre-broadcast guards, in-process ════════════════════ */
 
 async function runGuardTests(): Promise<void> {
   const { hiveAccountCreator } = await import('../apps/blog/lib/lite/upgrade/hive-account-creator');
+  const { createWaxFoundation } = await import('@hiveio/wax');
+  const wax = await createWaxFoundation();
 
   console.log('\npre-broadcast refusals (nothing reaches the chain)');
 
-  const keys = await hiveAccountCreator.generateKeys('lumentest1');
+  const password = `P${wax.suggestBrainKey().wifPrivateKey}`;
+  const pub = (role: 'owner' | 'active' | 'posting' | 'memo') =>
+    wax.getPrivateKeyFromPassword('lumentest1', role, password).associatedPublicKey;
+  const keys = { owner: pub('owner'), active: pub('active'), posting: pub('posting'), memo: pub('memo') };
 
-  // THE case this guard exists for. `generateKeys(a)` then `createClaimedAccount(b)`
-  // would mint an account whose master password does not open it — silently, with no
-  // error anywhere, forever.
-  const mismatch = await thrown(() => hiveAccountCreator.createClaimedAccount('lumentest2', keys));
-  check(
-    'refuses keys generated for a DIFFERENT account name',
-    mismatch !== null && /does not derive from this master password/.test(mismatch),
-    mismatch ?? 'it did not throw'
+  const malformed = await thrown(() =>
+    hiveAccountCreator.createClaimedAccount('lumentest1', { ...keys, memo: 'not-a-key' })
   );
   check(
-    'the name-mismatch refusal happens before any signer/config access',
-    // No WIF and no creator account are configured in this process, so reaching the
-    // signer would produce a config error instead. A binding error proves the order.
-    mismatch !== null && !/LITE_ACCOUNT_CREATOR/.test(mismatch),
-    mismatch ?? ''
-  );
-  check(
-    'the refusal names only public keys, never the master password or a WIF',
-    mismatch !== null &&
-      !mismatch.includes(keys.masterPassword) &&
-      !['owner', 'active', 'posting', 'memo'].some((r) =>
-        mismatch.includes(keys[r as 'owner'].privateWif)
-      )
+    'refuses a malformed public key',
+    malformed !== null && /memo public key is missing or malformed/.test(malformed),
+    malformed ?? 'it did not throw'
   );
 
-  const corrupted = { ...keys, posting: { ...keys.posting, privateWif: keys.owner.privateWif } };
-  const corruptErr = await thrown(() => hiveAccountCreator.createClaimedAccount('lumentest1', corrupted));
+  // A client bug that posted a private key into a public-key field must be refused at
+  // the boundary, not written into an authority — and not into our request logs.
+  const wifAsPublic = await thrown(() =>
+    hiveAccountCreator.createClaimedAccount('lumentest1', {
+      ...keys,
+      posting: wax.getPrivateKeyFromPassword('lumentest1', 'posting', password).wifPrivateKey
+    })
+  );
   check(
-    'refuses a private/public key pair that does not match',
-    corruptErr !== null && /does not derive from this master password|does not match its public key/.test(corruptErr),
-    corruptErr ?? 'it did not throw'
+    'refuses a WIF submitted where a public key belongs',
+    wifAsPublic !== null && /posting public key is missing or malformed/.test(wifAsPublic),
+    wifAsPublic ?? 'it did not throw'
   );
 
-  const badFormat = { ...keys, masterPassword: keys.masterPassword.slice(1) }; // drop the 'P'
-  const formatErr = await thrown(() => hiveAccountCreator.createClaimedAccount('lumentest1', badFormat));
+  // Reusing one key across roles would quietly give the posting key — the one that
+  // lives in browsers and third-party apps — the authority to move funds.
+  const duplicated = await thrown(() =>
+    hiveAccountCreator.createClaimedAccount('lumentest1', { ...keys, posting: keys.active })
+  );
   check(
-    'refuses a master password that is not in "P" + WIF format',
-    formatErr !== null && /not in the required "P"\+WIF format/.test(formatErr),
-    formatErr ?? 'it did not throw'
+    'refuses the same key in two roles',
+    duplicated !== null && /must be distinct/.test(duplicated),
+    duplicated ?? 'it did not throw'
   );
 
-  const empty = { ...keys, memo: { publicKey: '', privateWif: '' } };
-  const emptyErr = await thrown(() => hiveAccountCreator.createClaimedAccount('lumentest1', empty));
+  const missing = await thrown(() =>
+    hiveAccountCreator.createClaimedAccount('lumentest1', {
+      ...keys,
+      active: undefined as unknown as string
+    })
+  );
   check(
-    'refuses a key pair that is blank or missing',
-    emptyErr !== null && /the memo key pair is missing/.test(emptyErr),
-    emptyErr ?? 'it did not throw'
+    'refuses a missing key',
+    missing !== null && /active public key is missing or malformed/.test(missing),
+    missing ?? 'it did not throw'
   );
 
-  const swapped = { ...keys, owner: keys.active, active: keys.owner };
-  const swapErr = await thrown(() => hiveAccountCreator.createClaimedAccount('lumentest1', swapped));
   check(
-    'refuses role keys that have been swapped',
-    swapErr !== null && /does not derive from this master password/.test(swapErr),
-    swapErr ?? 'it did not throw'
+    'no refusal message can leak a secret (there is none in scope to leak)',
+    [malformed, wifAsPublic, duplicated, missing].every((m) => !m || !m.includes(password))
   );
 
   // Correct input must NOT be rejected by the guards — otherwise the suite above only
@@ -184,7 +201,7 @@ async function runGuardTests(): Promise<void> {
   // signer, because no creator account is configured in this process.
   const validErr = await thrown(() => hiveAccountCreator.createClaimedAccount('lumentest1', keys));
   check(
-    'correctly bound keys pass every offline guard and fail only at the unconfigured signer',
+    'well-formed keys pass every offline guard and fail only at the unconfigured signer',
     validErr !== null && /LITE_ACCOUNT_CREATOR_ACCOUNT|not configured/.test(validErr),
     validErr ?? 'it did not throw at all — the signer guard is missing'
   );
@@ -384,7 +401,7 @@ async function main(): Promise<void> {
       '  - claim_account actually lands and increments pending_claimed_accounts\n' +
       '  - create_claimed_account actually creates a usable account\n' +
       '  - the boot-time ACTIVE-authority and weight-threshold checks against a real account\n' +
-      '  - the new account can be logged into with the master password this module minted'
+      '  - the browser-minted master password actually opens the account this module creates'
   );
   process.exit(failed === 0 ? 0 : 1);
 }

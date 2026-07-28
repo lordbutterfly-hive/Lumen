@@ -7,6 +7,15 @@ import type {
   BuyQuote,
   ClaimTradeFeesInput,
   CloseIfDrainedInput,
+  CreateOfferingInput,
+  DeclineInput,
+  DeleteOfferingInput,
+  CreatorSummary,
+  Offering,
+  PricePoint,
+  RateInput,
+  SetOfferingPriceInput,
+  SetOfferingTitleInput,
   DeliveryRecord,
   HolderPosition,
   Market,
@@ -82,6 +91,23 @@ export interface CreatorTokensDataSource {
   quoteBuy(creator: string, tokens: number): Promise<BuyQuote>;
   /** sell.go QuoteSell — the read-only preview of Sell for `seller` (the exit-tax RATE is the seller's own hold clock, so the holder to preview is a required parameter, unlike quoteBuy). Rejects on a genuine read failure or the same rail-closed refusal a real Sell would hit (market winding down — use refund()/RefundInput instead in that state). */
   quoteSell(creator: string, seller: string, tokens: number): Promise<SellQuote>;
+  /**
+   * offerings.go ListOfferings — the creator's posted shop. Resolves [] for a
+   * creator with no offerings; REJECTS on a genuine read failure, following the
+   * single-entity convention (an empty shop and an unreadable one must never
+   * render the same, or a UI shows "no services" during an outage and the
+   * creator looks closed for business).
+   */
+  listOfferings(creator: string): Promise<Offering[]>;
+  /**
+   * The ranked creator list (indexer view `lumen_ct_discovery`, ordered on
+   * DELIVERY in SQL). REJECTS when the indexer is unreachable — an empty list
+   * would read as "nobody has launched a token", which is a very different
+   * claim from "we couldn't look".
+   */
+  readDiscovery(limit?: number): Promise<CreatorSummary[]>;
+  /** A token's price history (indexer view `lumen_ct_price_history`). Rejects when unavailable — a flat or empty chart would be a claim about the price. */
+  readPriceHistory(creator: string, limit?: number): Promise<PricePoint[]>;
 
   // ---- writes: build + broadcast a signed custom_json op. Real
   // implementations throw until a broadcaster is injected (see
@@ -99,6 +125,10 @@ export interface CreatorTokensDataSource {
   retire(input: RetireInput): Promise<Market>;
   ask(input: AskInput): Promise<Ask>;
   answer(input: AnswerInput): Promise<Ask>;
+  /** rating.go Rate — the buyer's 1-5 score for a delivered job. Reputation only; it can never move money. Rejects if the caller didn't pay for the job, if it wasn't delivered, or if it was already rated. */
+  rate(input: RateInput): Promise<void>;
+  /** ask.go Decline — the creator's free "no": full refund INCLUDING the commission, inside the same window an Answer is legal in, and not a miss. A studio that offers Answer without this is pushing creators to take a black mark for work they cannot do. */
+  decline(input: DeclineInput): Promise<Ask>;
   reclaim(input: ReclaimInput): Promise<Ask>;
   refund(input: RefundInput): Promise<HolderPosition>;
   refundHolder(input: RefundHolderInput): Promise<HolderPosition>;
@@ -108,6 +138,15 @@ export interface CreatorTokensDataSource {
   claimTradeFees(input: ClaimTradeFeesInput): Promise<number>;
   /** refund.go CloseIfDrained — fully permissionless; flips a FROZEN, fully-drained market to terminal CLOSED. Resolves the contract's own idempotent boolean (true whenever the market ends up CLOSED, whether just now or already was). */
   closeIfDrained(input: CloseIfDrainedInput): Promise<boolean>;
+  // ---- the offerings shop (creator-only; the caller IS the creator) ----
+  /** offerings.go CreateOffering — posts a new named service. Resolves the created offering (id assigned on-chain, so it is optimistic and flagged by the caller re-reading). */
+  createOffering(input: CreateOfferingInput): Promise<void>;
+  /** offerings.go SetOfferingPrice — bounded by the offering's TITLE-anchored 2x/7d band; a rename or a delete-and-recreate does not reset it. */
+  setOfferingPrice(input: SetOfferingPriceInput): Promise<void>;
+  /** offerings.go SetOfferingTitle — renaming ONTO another live offering's title is refused on-chain (it would launder that title's price band). */
+  setOfferingTitle(input: SetOfferingTitleInput): Promise<void>;
+  /** offerings.go DeleteOffering — delists only; escrows already asked against this offering are untouched. */
+  deleteOffering(input: DeleteOfferingInput): Promise<void>;
   /** read.go WithdrawTreasury — owner-gated; the UI must keep this behind an owner-only surface (the contract also refuses a non-owner caller). Resolves the HBD amount actually withdrawn. */
   withdrawTreasury(input: WithdrawTreasuryInput): Promise<number>;
 }
@@ -149,12 +188,34 @@ export function getCreatorTokensConfig(): CreatorTokensConfig | null {
   };
 }
 
+/**
+ * Local-development ONLY escape hatch, mirroring prediction-market's
+ * isMarketDemoEnabled() exactly. When no contract is provisioned
+ * (getCreatorTokensConfig() === null) AND REACT_APP_CREATOR_TOKENS_DEMO=1,
+ * getCreatorTokensDataSource() serves the in-memory Mock so the UI can be
+ * built without a deployed contract.
+ *
+ * IT MUST NEVER BE SET ON A PRODUCTION BUILD. The Mock serves fabricated
+ * markets, balances and prices; a user acting on them would be spending real
+ * intent against numbers nobody owes them. The default un-provisioned state is
+ * honest-unavailable, not a silently fake market.
+ *
+ * WHY THIS EXISTS AT ALL (gap list, 2026-07-28): the previous selector fell
+ * back to the Mock whenever the env was missing — and the env is set NOWHERE
+ * in this repo, no .env, no compose file, no Dockerfile. So every build, in
+ * every environment, served the Mock, and nothing anywhere said so. That is
+ * how a whole feature can look finished and be connected to nothing.
+ */
+export function isCreatorTokensDemoEnabled(): boolean {
+  return readEnv('CREATOR_TOKENS_DEMO') === '1';
+}
+
 let instance: CreatorTokensDataSource | null = null;
 
 /**
- * Real source once REACT_APP_CREATOR_TOKENS_* is provisioned, else the Mock
- * — an un-provisioned build behaves exactly as it does today (no contract
- * exists yet, SPEC §1 status).
+ * Real source once REACT_APP_CREATOR_TOKENS_* is provisioned; the Mock ONLY
+ * behind the dev demo flag; otherwise **null** — the feature is unavailable and
+ * callers must say so rather than render fabricated numbers.
  *
  * Finding C-B: `broadcaster` is now supplied — hiveTransactionBroadcaster
  * (./vsc/broadcaster.ts) — so every write actually signs and broadcasts
@@ -168,10 +229,19 @@ let instance: CreatorTokensDataSource | null = null;
  * regardless of whether this singleton is created before or after the user
  * logs in.
  */
-export function getCreatorTokensDataSource(): CreatorTokensDataSource {
+export function getCreatorTokensDataSource(): CreatorTokensDataSource | null {
   if (!instance) {
     const config = getCreatorTokensConfig();
-    instance = config ? new VscCreatorTokensDataSource({ config, broadcaster: hiveTransactionBroadcaster }) : new MockCreatorTokensDataSource();
+    if (config) {
+      instance = new VscCreatorTokensDataSource({ config, broadcaster: hiveTransactionBroadcaster });
+    } else if (isCreatorTokensDemoEnabled()) {
+      instance = new MockCreatorTokensDataSource();
+    } else {
+      // Deliberately NOT cached: a null here means "not provisioned", and the
+      // next call should re-read the env rather than pin the unavailable
+      // verdict for the lifetime of the process.
+      return null;
+    }
   }
   return instance;
 }

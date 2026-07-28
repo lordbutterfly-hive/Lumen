@@ -167,6 +167,15 @@ const PostContent = () => {
   // does nothing or hits an unrelated real user who happens to share the handle. The
   // overlay hands back the account that actually signed the post.
   const litePost = useLiteOverlay(postData);
+  // "Is this my post?" has to hold on BOTH addresses a Lumen post has. On the Lumen
+  // URL `postData.author` is already the lite identity and the plain comparison
+  // works; on the RAW on-chain URL (`/@<publishing account>/<permlink>` — what every
+  // other Hive front end links) it is the shared publishing account, so the author
+  // saw no Edit or Delete button on their own post. The overlay carries the Lumen
+  // identity on both, so compare against that too.
+  const viewerIsAuthor = Boolean(
+    user.isLoggedIn && (postData?.author === user.username || litePost?.author === user.username)
+  );
   const [mutedPost, setMutedPost] = useState<boolean>(postData?.stats?.gray || false);
   // Single reblog query shared by header and footer ReblogTrigger components
   const { data: isReblogged } = useRebloggedByQuery(
@@ -828,8 +837,7 @@ const PostContent = () => {
                         </DialogLogin>
                       )}
                       {postData.children === 0 &&
-                      user.isLoggedIn &&
-                      postData.author === user.username &&
+                      viewerIsAuthor &&
                       new Date() < new Date(`${postData.payout_at}Z`) ? (
                         <>
                           <span className="mx-1">|</span>
@@ -858,7 +866,7 @@ const PostContent = () => {
                           </PostDeleteDialog>
                         </>
                       ) : null}
-                      {user && user.isLoggedIn && postData.author === user.username && !edit ? (
+                      {viewerIsAuthor && !edit ? (
                         <>
                           <span className="mx-1">|</span>
                           <button

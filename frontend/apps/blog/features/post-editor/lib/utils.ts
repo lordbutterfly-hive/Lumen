@@ -6,6 +6,7 @@ import { getLogger } from '@ui/lib/logging';
 import { isCommunity } from '@ui/lib/utils';
 import { TFunction } from 'i18next';
 import { Dispatch, SetStateAction } from 'react';
+import { uploadLiteImage } from '@/blog/lib/lite/client/lite-profile';
 import { processImageForUpload } from './image-processing';
 import type { BatchFileItem, FileProcessingStatus, ProcessingOptions } from './image-processing-types';
 
@@ -132,6 +133,13 @@ const uploadImg = async (file: File, username: string, signer: Signer): Promise<
   try {
     if (!file)
       throw new Error("No file provided");
+
+    // Keyless (Lumen lite) account: there is no signer to sign the upload challenge
+    // with — `SignerProvider` deliberately leaves it null for this tier — so the file
+    // goes to /api/lite/upload, which signs it server-side with the publishing
+    // account. Checked here rather than at each call site so every entry point
+    // (toolbar, drag-drop, paste, profile pictures) is covered by one branch.
+    if (!signer) return await uploadLiteImage(file);
 
     const fileData = await new Promise<Uint8Array>((resolve) => {
       const reader = new FileReader();

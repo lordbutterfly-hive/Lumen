@@ -27,15 +27,31 @@ export interface LiteOverlay {
 }
 
 export function useLiteOverlay(entry?: {
+  author?: string;
   permlink?: string;
   json_metadata?: unknown;
+  _lite?: LiteOverlay;
 } | null): LiteOverlay | null {
   const isProxied = isLumenProxiedEntry(entry);
   const postId = isProxied ? litePostIdOf(entry) : undefined;
+  // Who actually signed the entry in front of us. Checked against the post's real
+  // author below, because the two things that identify a Lumen post — its permlink and
+  // its json_metadata — are on-chain fields anyone can write.
+  const chainAuthor = (entry?.author ?? '').toLowerCase();
+
+  // Resolved during SSR (render/attach-lite.ts) for every server-rendered feed and
+  // comment thread. Handed to react-query as `initialData`, which does two things:
+  // this render needs no request at all — so there is no wrong name to correct — and
+  // the value lands in the cache under this post id. That second part matters,
+  // because when the client later refetches the feed straight from Hivemind those
+  // fresh entries carry no `_lite`, and without a warm cache every card would flash
+  // right back to the publishing account.
+  const embedded = entry?._lite;
 
   const { data } = useQuery({
-    queryKey: ['liteOverlay', postId],
+    queryKey: ['liteOverlay', postId, chainAuthor],
     enabled: Boolean(postId),
+    initialData: embedded,
     // Identity DOES change once, at exactly one moment: when a lite account upgrades
     // to a real Hive account, its whole back catalogue starts rendering under the new
     // name (see render/current-name.ts). So this is cached hard but not forever — for
@@ -52,8 +68,23 @@ export function useLiteOverlay(entry?: {
           post?: { hiveAuthor?: string | null };
         } | null;
         const author = body?.entry?.author;
-        if (!author) return null;
-        return { author, title: body?.entry?.title ?? '', chainAuthor: body?.post?.hiveAuthor ?? '' };
+        const realAuthor = body?.post?.hiveAuthor ?? '';
+        if (!author || !realAuthor) return null;
+        // ★ Forgery gate. Any Hive account can publish a comment quoting a real Lumen
+        // post id; without this, their text would render under that lite user's name
+        // and avatar. The stored post says who signed it — if this entry was signed by
+        // someone else, it is not that post, so it keeps the identity the chain gave it.
+        //
+        // Two authors are acceptable: the account that really signed it, and the lite
+        // identity itself — the post page and our own lite feed hand over entries whose
+        // author has already been resolved, and re-checking those against the chain
+        // account would strip the identity we just resolved. A forged entry matches
+        // neither, because its author is the attacker's own account.
+        const displayed = author.toLowerCase();
+        if (chainAuthor && realAuthor.toLowerCase() !== chainAuthor && displayed !== chainAuthor) {
+          return null;
+        }
+        return { author, title: body?.entry?.title ?? '', chainAuthor: realAuthor };
       } catch {
         return null;
       }

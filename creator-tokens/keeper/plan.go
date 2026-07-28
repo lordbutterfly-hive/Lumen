@@ -91,8 +91,9 @@ func (op Op) String() string {
 //
 // ---- "verify, don't trust" ------------------------------------------------
 //
-// indexer.Index.HolderList is documented to return only non-zero balances AT
-// INDEX TIME (indexer/index.go's own doc). Plan does not take that on faith:
+// A holder-discovery source — the Magi indexer's lumen_ct_balances view
+// (../magi-indexer/creator_tokens_views.yaml) — reports only non-zero balances
+// AT INDEX TIME. Plan does not take that on faith:
 // every candidate's attached Balance is checked (non-nil, strictly positive)
 // before it is allowed to produce a refundHolder op. Be precise about what
 // this buys, because it would be easy to oversell: it is a COST

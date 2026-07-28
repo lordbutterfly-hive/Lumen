@@ -6,7 +6,16 @@ import type {
   BuyQuote,
   ClaimTradeFeesInput,
   CloseIfDrainedInput,
+  CreateOfferingInput,
+  DeclineInput,
+  DeleteOfferingInput,
   DeliveryRecord,
+  CreatorSummary,
+  Offering,
+  PricePoint,
+  RateInput,
+  SetOfferingPriceInput,
+  SetOfferingTitleInput,
   HolderPosition,
   Market,
   MyAsksResult,
@@ -55,6 +64,7 @@ import {
   refundNetBaseUnits,
   reserveCoverageRatio,
   settlementRateBaseUnits,
+  BLOCKS_PER_DAY,
   spotRateBaseUnits,
   splitFaceBaseUnits,
   type AskRateEstimate
@@ -67,6 +77,10 @@ import {
   buyPayload,
   claimTradeFeesPayload,
   closeIfDrainedPayload,
+  createOfferingPayload,
+  declinePayload,
+  deleteOfferingPayload,
+  ratePayload,
   reclaimPayload,
   refundHolderPayload,
   refundPayload,
@@ -76,6 +90,8 @@ import {
   sellPayload,
   setCapPayload,
   setFacePayload,
+  setOfferingPricePayload,
+  setOfferingTitlePayload,
   transferTokensPayload,
   withdrawTreasuryPayload
 } from './vsc/op-builders';
@@ -84,10 +100,10 @@ import {
 // op-builders.ts — importing it FROM op-builders.ts would be circular, since
 // this file imports the payload builders FROM op-builders.ts).
 import './vsc/payload-contract.selftest';
+import { MagiIndexerClient } from './vsc/hasura';
 import {
   CreatorTokensGqlClient,
   buildAskFromParsed,
-  getJsonProp,
   isWellFormedDid,
   kAcqBlock,
   kBal,
@@ -100,6 +116,12 @@ import {
   kFeeBal,
   kObs,
   kObsIdx,
+  kOfferEpoch,
+  kOfferIds,
+  kOfferPrice,
+  kOfferTitle,
+  parseOfferIds,
+  kDelinquentUntil,
   kPaidUntil,
   kPaused,
   kRegisteredAt,
@@ -154,12 +176,6 @@ export interface VscCreatorTokensDataSourceDeps {
 
 const NO_BROADCASTER_MSG = 'VscCreatorTokensDataSource: no broadcaster wired — inject the transaction service';
 
-/** Coerce a wire value to a non-negative integer count; anything malformed reads as 0 (the DTO's own convention — a count field is always an int, never absent, on a healthy DeliveryRecordView). */
-function toCount(value: unknown): number {
-  const n = Number(value);
-  return Number.isFinite(n) && Number.isInteger(n) && n >= 0 ? n : 0;
-}
-
 /** Shared "n is a positive whole token count" guard — every buy/sell/refund/transfer amount on the curve is an integer (curve.go indexes price by the token ordinal; there is no fractional token). */
 function assertPositiveTokenCount(n: number, label: string): void {
   if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) {
@@ -185,16 +201,24 @@ interface BuildMarketState {
   globalInflowPaused: boolean;
   registeredAtBlock: number;
   retiredAtBlock: number | null;
+  /** kDelinquentUntil — the delivery gate's inflow-refusal deadline. 0 = clear. */
+  delinquentUntilBlock: number;
 }
 
 export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
   private readonly config: CreatorTokensConfig;
   private readonly gql: CreatorTokensGqlClient;
   private readonly broadcaster?: Broadcaster;
+  private readonly indexer: MagiIndexerClient | null;
 
   constructor(deps: VscCreatorTokensDataSourceDeps) {
     this.config = deps.config;
     this.gql = deps.gql ?? new CreatorTokensGqlClient(deps.config.gqlUrl);
+    // The Magi indexer (magi-mongo-indexer via Hasura) serves the three reads
+    // contract state structurally cannot: holder->creators, asker->asks, and
+    // the delivery history. Null when unconfigured — those reads then report
+    // `unavailable`, which is honest, rather than empty, which is a lie.
+    this.indexer = deps.config.indexerUrl ? new MagiIndexerClient(deps.config.indexerUrl, deps.config.contractId) : null;
     this.broadcaster = deps.broadcaster;
   }
 
@@ -213,7 +237,8 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       kState(creator),
       kRegisteredAt(creator),
       kPaused(),
-      kRetiredAt(creator)
+      kRetiredAt(creator),
+      kDelinquentUntil(creator)
     ];
     let state: Record<string, string | null>;
     let head: number | null;
@@ -248,7 +273,8 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
         closedStored: state[kState(creator)] === STATE_CLOSED,
         globalInflowPaused: state[kPaused()] === '1',
         registeredAtBlock,
-        retiredAtBlock: decodeRetiredAt(state[kRetiredAt(creator)])
+        retiredAtBlock: decodeRetiredAt(state[kRetiredAt(creator)]),
+        delinquentUntilBlock: toU64(state[kDelinquentUntil(creator)])
       },
       head
     );
@@ -278,7 +304,16 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     // `retiredAtBlock === null` AND below restores the full on-chain gate
     // without editing that already-verified building block — see
     // Market.canBuy's own doc in types.ts.
-    const canFlow = canInflowOpen(phase, s.globalInflowPaused) && s.retiredAtBlock === null;
+    //
+    // ★ THE DELIVERY GATE (2026-07-27), the second condition canInflowOpen()
+    // does not know about. RequireInflowOpen also refuses while the creator is
+    // DELINQUENT — they ignored too many paying customers — and that refusal
+    // is invisible in phase, in the pause flag and in retiredAtBlock. Without
+    // this term the UI renders a live Buy button on a market that reverts every
+    // single attempt, and the buyer pays RC to find out. INFLOWS ONLY: sell,
+    // refund, reclaim and claim all stay open while delinquent, by design.
+    const delinquent = s.delinquentUntilBlock > head;
+    const canFlow = canInflowOpen(phase, s.globalInflowPaused) && s.retiredAtBlock === null && !delinquent;
 
     return {
       creator,
@@ -303,6 +338,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       globalInflowPaused: s.globalInflowPaused,
       canBuy: canFlow,
       canAsk: canFlow,
+      delinquentUntilBlock: delinquent ? s.delinquentUntilBlock : null,
       retiredAtBlock: s.retiredAtBlock,
       floorPriceHbd: baseUnitsToHuman(floorPricePerTokenBaseUnits(s.reserveBaseUnits, s.supplyTokens)),
       spotPriceHbd: baseUnitsToHuman(spotRateBaseUnits(s.supplyTokens)),
@@ -353,15 +389,15 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     // for a BALANCE view that is a lie. Resolve a discriminated result so the
     // consumer can render "couldn't load your holdings" distinctly from "you
     // hold nothing yet".
-    if (!this.config.indexerUrl) return { positions: [], unavailable: true };
+    if (!this.indexer) return { positions: [], unavailable: true };
     try {
-      const res = await fetch(`${this.config.indexerUrl}/holders/${encodeURIComponent(holder)}/positions`);
-      if (!res.ok) return { positions: [], unavailable: true };
-      const json: unknown = await res.json();
-      const positions = getJsonProp(json, 'positions');
-      if (!Array.isArray(positions)) return { positions: [], unavailable: true };
-      const creators = positions.map((p) => getJsonProp(p, 'creator')).filter((c): c is string => typeof c === 'string');
-      const results = await Promise.all(creators.map((creator) => this.readHolderPosition(creator, holder).catch(() => null)));
+      // lumen_ct_balances is the reverse index: it replays every token move and
+      // reports which markets this account still holds. The per-market POSITION
+      // (taxed floor value, hold clock) is then read from CHAIN STATE, not from
+      // the indexer — an exit-tax figure has to be current to the block, and a
+      // replayed one would be stale the moment anything moved.
+      const rows = await this.indexer.balancesOf(toDid(holder));
+      const results = await Promise.all(rows.map((r) => this.readHolderPosition(r.creator, holder).catch(() => null)));
       return { positions: results.filter((p): p is HolderPosition => p !== null && p.tokensHeld > 0), unavailable: false };
     } catch {
       return { positions: [], unavailable: true };
@@ -397,24 +433,19 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     // Same unavailable-vs-empty discriminator as readWallet (RULE: unavailable
     // ≠ empty) — a bare [] can't tell "the indexer is down" from "you've asked
     // no one".
-    if (!this.config.indexerUrl) return { asks: [], unavailable: true };
+    if (!this.indexer) return { asks: [], unavailable: true };
     try {
-      const res = await fetch(`${this.config.indexerUrl}/askers/${encodeURIComponent(asker)}/asks`);
-      if (!res.ok) return { asks: [], unavailable: true };
-      const json: unknown = await res.json();
-      const refs = getJsonProp(json, 'asks');
-      if (!Array.isArray(refs)) return { asks: [], unavailable: true };
-      const pairs = refs
-        .map((r) => ({ creator: getJsonProp(r, 'creator'), seq: getJsonProp(r, 'seq') }))
-        .filter((p): p is { creator: string; seq: number } => typeof p.creator === 'string' && typeof p.seq === 'number');
-
-      const keys = pairs.map((p) => kEscrow(p.creator, p.seq));
+      // The indexer supplies the (creator, seq) PAIRS — the part no chain key
+      // can answer. Each escrow is then read from chain state, so the status and
+      // deadline shown are current rather than a replay that may lag a block.
+      const rows = await this.indexer.asksOf(toDid(asker));
+      const keys = rows.map((r) => kEscrow(r.creator, r.seq));
       const [state, head] = await Promise.all([this.gql.getStateByKeys(this.config.contractId, keys), this.gql.getHeadBlock()]);
       const asks: Ask[] = [];
-      for (const p of pairs) {
-        const raw = state[kEscrow(p.creator, p.seq)];
+      for (const r of rows) {
+        const raw = state[kEscrow(r.creator, r.seq)];
         const parsed = raw ? parseEscrow(raw) : null;
-        if (parsed) asks.push(buildAskFromParsed(p.creator, p.seq, parsed, head));
+        if (parsed) asks.push(buildAskFromParsed(r.creator, r.seq, parsed, head));
       }
       return { asks: asks.sort((a, b) => b.deadlineBlock - a.deadlineBlock), unavailable: false };
     } catch {
@@ -435,25 +466,26 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       selfDealtExcluded: 0,
       source: 'unavailable'
     };
-    if (!this.config.indexerUrl) return empty;
+    if (!this.indexer) return empty;
     try {
-      const res = await fetch(`${this.config.indexerUrl}/creators/${encodeURIComponent(creator)}/delivery`);
-      if (!res.ok) return empty;
-      const json: unknown = await res.json();
-      // A healthy indexer always echoes `creator` (rec.Creator); its absence
-      // means this is not a DeliveryRecordView (error body / wrong endpoint) —
-      // unavailable, never a fabricated all-zero "answered nothing".
-      if (typeof getJsonProp(json, 'creator') !== 'string') return empty;
-      const rawBlocks = getJsonProp(json, 'responseBlocks');
-      const responseBlocks = Array.isArray(rawBlocks) ? rawBlocks.map((b) => Number(b)).filter((n): n is number => Number.isFinite(n)) : [];
+      const row = await this.indexer.deliveryOf(toDid(creator));
+      // No row = this creator has no indexed history. That is genuinely EMPTY,
+      // not unavailable: the query succeeded and the answer is "nothing yet".
+      if (!row) return { ...empty, source: 'indexer' };
       return {
         creator,
-        answeredCount: toCount(getJsonProp(json, 'answeredCount')),
-        missedCount: toCount(getJsonProp(json, 'missedCount')),
-        pendingCount: toCount(getJsonProp(json, 'pendingCount')),
-        responseBlocks,
-        distinctAskers: toCount(getJsonProp(json, 'distinctAskers')),
-        selfDealtExcluded: toCount(getJsonProp(json, 'selfDealtExcluded')),
+        answeredCount: row.answeredCount,
+        missedCount: row.missedCount,
+        // Pending asks are live escrows, which the view does not track (it folds
+        // resolutions). The creator's own inbox read covers that; leaving it 0
+        // here is a known, bounded gap rather than a wrong number.
+        pendingCount: 0,
+        // The view returns a MEDIAN, already aggregated in SQL. The old REST
+        // shape returned every raw block delta; one median in a list keeps the
+        // consumer's own median-of-list logic correct on a single element.
+        responseBlocks: row.medianResponseBlocks !== null ? [row.medianResponseBlocks] : [],
+        distinctAskers: 0,
+        selfDealtExcluded: 0,
         source: 'indexer'
       };
     } catch {
@@ -461,14 +493,31 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     }
   }
 
-  async readQuote(creator: string): Promise<Quote> {
+  /**
+   * offeringId (2026-07-28) selects WHICH posted price this quote prices. It
+   * must be the same id the ask will carry, because the ask settles at that
+   * offering's own banded price and the commission leg is carved out of THAT
+   * number — a quote that priced the generic `face` while the ask charged a
+   * $200 service would sign a `transfer.allow` for the wrong HBD amount and
+   * revert, or preview a cost the buyer never agreed to.
+   *
+   * Absent/0 = the creator's legacy single face price, exactly as on-chain.
+   */
+  async readQuote(creator: string, offeringId?: number): Promise<Quote> {
     const obsKeys = Array.from({ length: OBS_WINDOW }, (_, i) => kObs(creator, i));
     const [state, head] = await Promise.all([
       this.gql.getStateByKeys(this.config.contractId, [kFace(creator), kObsIdx(creator), kSupply(creator), ...obsKeys]),
       this.gql.getHeadBlock()
     ]);
 
-    const faceBaseUnits = toU64(state[kFace(creator)]);
+    // The posted price this ask will actually settle against. For a named
+    // offering that is the offering's own price key, never kFace — and a
+    // MISSING or deleted offering resolves 0, which flows into the `face <= 0`
+    // refusal below exactly as the contract's own "no such offering" does.
+    let faceBaseUnits = toU64(state[kFace(creator)]);
+    if (offeringId !== undefined && offeringId > 0) {
+      faceBaseUnits = await this.readOfferingPriceBaseUnits(creator, offeringId);
+    }
     // ask.go splitFace (USER RULING 2026-07-27): the posted face is the
     // buyer's TOTAL — commission is carved OUT of it, never drawn on top.
     // tokenLegBaseUnits (never the raw face) is what creditsForAsk must
@@ -697,6 +746,11 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
           faceAnchorBaseUnits: faceBaseUnits,
           faceAnchorAtBlock: head,
           capTokens,
+          // A market a moment old cannot be delinquent — registerApply zeroes
+          // all three delivery keys (core/market.go), which is also the premise
+          // launch.go's launchBuyCheck relies on to keep the first Buy
+          // infallible. Anything but 0 here would be inventing state.
+          delinquentUntilBlock: 0,
           // supply/reserve reflect the optional atomic first buy: the curve
           // leg ONLY enters the reserve (buy.go's own "the fee NEVER enters
           // kReserve" rule) — firstBuyQuote.costBaseUnits, never totalDue.
@@ -990,6 +1044,124 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     };
   }
 
+  /**
+   * offerings.go ListOfferings, read directly from state (the wasmexport of the
+   * same name is a contract-side helper; a frontend reads keys, it does not
+   * call exports).
+   *
+   * THREE SEQUENTIAL READS, and the order is load-bearing: offering keys are
+   * EPOCH-SCOPED (Register bumps kOfferEpoch to orphan a dead incarnation's
+   * whole catalogue in one write), and the id list lives under the epoch, so
+   * neither the ids nor the per-offering keys can be built until the epoch is
+   * known. Reading with a stale or assumed epoch returns a DEAD shop that looks
+   * perfectly live.
+   *
+   * An absent epoch key is 0, which is the correct first-incarnation value —
+   * not an error.
+   */
+  /**
+   * One offering's posted price in base units, or 0 if it does not exist or was
+   * deleted. Two reads, for the same epoch-scoping reason listOfferings has
+   * three — see its doc.
+   */
+  private async readOfferingPriceBaseUnits(creator: string, offeringId: number): Promise<number> {
+    const epochState = await this.gql.getStateByKeys(this.config.contractId, [kOfferEpoch(creator)]);
+    const epoch = toU64(epochState[kOfferEpoch(creator)]);
+    const priceKey = kOfferPrice(creator, epoch, offeringId);
+    const state = await this.gql.getStateByKeys(this.config.contractId, [priceKey]);
+    return toU64(state[priceKey]);
+  }
+
+  /**
+   * The ranked creator list. TWO SOURCES, deliberately:
+   *
+   *   - the ORDER and the delivery stats come from the indexer view, which does
+   *     the ranking in SQL so no client can quietly re-rank on price or volume;
+   *   - the PRICE and CAP come from a single BATCHED chain read, because the
+   *     indexer stores no price (it is a pure function of supply) and a replayed
+   *     one would be stale the moment anyone traded.
+   *
+   * One getStateByKeys covers every creator at once — 3 keys each, and the
+   * client batches internally — so this is two round trips regardless of how
+   * many creators come back, not two per creator.
+   */
+  async readDiscovery(limit = 60): Promise<CreatorSummary[]> {
+    if (!this.indexer) throw new Error('VscCreatorTokensDataSource: discovery needs the Magi indexer (CREATOR_TOKENS_INDEXER_URL)');
+    const rows = await this.indexer.discovery(limit);
+    if (rows.length === 0) return [];
+
+    const keys = rows.flatMap((r) => [kSupply(r.creator), kFace(r.creator), kRegisteredAt(r.creator)]);
+    const [state, head] = await Promise.all([this.gql.getStateByKeys(this.config.contractId, keys), this.gql.getHeadBlock()]);
+
+    return rows
+      .map((r) => {
+        // A market the chain has never registered cannot be shown, whatever the
+        // index says — the index can lag, and chain state is the record.
+        if (toU64(state[kRegisteredAt(r.creator)]) === 0) return null;
+        const supply = toU64(state[kSupply(r.creator)]);
+        const priceBaseUnits = spotRateBaseUnits(supply);
+        const faceBaseUnits = toU64(state[kFace(r.creator)]);
+        return {
+          creator: r.creator,
+          completionPct: r.completionPct,
+          avgRating: r.avgRating,
+          ratingCount: r.ratingCount,
+          answeredCount: r.answeredCount,
+          missedCount: r.missedCount,
+          medianResponseBlocks: r.medianResponseBlocks,
+          priceHbd: baseUnitsToHuman(priceBaseUnits),
+          marketCapHbd: baseUnitsToHuman(priceBaseUnits * supply),
+          faceHbd: baseUnitsToHuman(faceBaseUnits),
+          // "New" is measured from the LATEST registration, and only when we
+          // actually know the head — guessing would put every creator in the
+          // new shelf, or none.
+          isNew: head !== null && r.registeredBlock > 0 && head - r.registeredBlock < 30 * BLOCKS_PER_DAY
+        };
+      })
+      .filter((c): c is CreatorSummary => c !== null);
+  }
+
+  /**
+   * Price history. The indexer stores SUPPLY at each trade, never a price — the
+   * price is a pure function of supply on a bonding curve, and storing it would
+   * be a second copy of the curve that can disagree with the buy button. This
+   * applies the same ported formula the quote path uses.
+   */
+  async readPriceHistory(creator: string, limit = 200): Promise<PricePoint[]> {
+    if (!this.indexer) throw new Error('VscCreatorTokensDataSource: price history needs the Magi indexer (CREATOR_TOKENS_INDEXER_URL)');
+    const points = await this.indexer.priceHistoryOf(creator, limit);
+    return points.map((p) => ({ block: p.block, priceHbd: baseUnitsToHuman(spotRateBaseUnits(p.supplyAfter)) }));
+  }
+
+  async listOfferings(creator: string): Promise<Offering[]> {
+    const epochState = await this.gql.getStateByKeys(this.config.contractId, [kOfferEpoch(creator)]);
+    const epoch = toU64(epochState[kOfferEpoch(creator)]);
+
+    const idsKey = kOfferIds(creator, epoch);
+    const idsState = await this.gql.getStateByKeys(this.config.contractId, [idsKey]);
+    const ids = parseOfferIds(idsState[idsKey]);
+    if (ids.length === 0) return [];
+
+    const keys = ids.flatMap((id) => [kOfferPrice(creator, epoch, id), kOfferTitle(creator, epoch, id)]);
+    const state = await this.gql.getStateByKeys(this.config.contractId, keys);
+
+    const out: Offering[] = [];
+    for (const id of ids) {
+      const priceBaseUnits = toU64(state[kOfferPrice(creator, epoch, id)]);
+      // price 0 means deleted or never set, and the contract REFUSES an ask
+      // against it rather than falling back to the face price. Listing it
+      // would advertise a service that cannot be bought.
+      if (priceBaseUnits <= 0) continue;
+      out.push({
+        offeringId: id,
+        title: state[kOfferTitle(creator, epoch, id)] ?? '',
+        priceHbd: baseUnitsToHuman(priceBaseUnits),
+        priceBaseUnits
+      });
+    }
+    return out;
+  }
+
   async ask(input: AskInput): Promise<Ask> {
     this.assertBroadcaster();
     if (input.deadlineBlocks < MIN_ASK_DEADLINE_BLOCKS) throw new Error('VscCreatorTokensDataSource: deadline below MinAskDeadline');
@@ -1026,7 +1198,10 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     // rather than falling back to PAR — readQuote() reflects that refusal via
     // creditsRequiredBaseUnits === null, and this call must refuse identically
     // rather than inventing a rate.
-    const quote = await this.readQuote(input.creator);
+    // Quote the SAME offering the ask will name, or the commission leg and the
+    // maxCredits check below would both be computed against the wrong posted
+    // price (see readQuote's offeringId doc).
+    const quote = await this.readQuote(input.creator, input.offeringId);
     if (quote.creditsRequiredBaseUnits === null) {
       throw new Error(`VscCreatorTokensDataSource: unable to price this ask (${quote.oracleStatus})`);
     }
@@ -1047,7 +1222,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       netId: this.config.netId,
       contractId: this.config.contractId,
       action: 'ask',
-      payload: askPayload(toDid(input.creator), input.contentHash, input.deadlineBlocks, input.maxCreditsBaseUnits),
+      payload: askPayload(toDid(input.creator), input.contentHash, input.deadlineBlocks, input.maxCreditsBaseUnits, input.offeringId),
       hbdLegBaseUnits: commissionBaseUnits,
       activeAuth: input.asker,
       rcLimit: this.config.rcLimit
@@ -1117,6 +1292,56 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     // answered and flag it pending — the poll reconciles against real state.
     const answered = await this.readOneAsk(input.creator, input.seq);
     return { ...answered, status: 'answered', answerHash: input.answerHash, pending: true };
+  }
+
+  /**
+   * ask.go Decline — the creator's free, honest "no". Legal in the SAME window
+   * an Answer is (block <= deadlineBlock), so it uses the identical fresh-head
+   * guard answer() does, for the identical reason: the escrow's deadline comes
+   * from the Ask the caller already holds, so no second chain read is needed.
+   *
+   * NOT a miss against the delivery record, and it refunds the commission in
+   * full — so this is strictly better for both sides than a creator letting an
+   * ask rot, and it is what makes ask-flooding pointless as a grief.
+   */
+  async decline(input: DeclineInput): Promise<Ask> {
+    this.assertBroadcaster();
+    const head = await this.gql.getHeadBlock();
+    if (head === null) {
+      throw new Error('VscCreatorTokensDataSource: cannot verify the decline window (chain head unavailable)');
+    }
+    if (head > input.deadlineBlock) {
+      throw new Error('VscCreatorTokensDataSource: decline window closed (the answer window is over; the asker reclaims from here)');
+    }
+    const op = buildOp({
+      netId: this.config.netId,
+      contractId: this.config.contractId,
+      action: 'decline',
+      payload: declinePayload(toDid(input.creator), input.seq),
+      activeAuth: input.creator,
+      rcLimit: this.config.rcLimit
+    });
+    await this.broadcast(op);
+    const declined = await this.readOneAsk(input.creator, input.seq);
+    return { ...declined, status: 'declined', pending: true };
+  }
+
+  async rate(input: RateInput): Promise<void> {
+    this.assertBroadcaster();
+    // Bounds are enforced on-chain too; failing here keeps a guaranteed revert
+    // from costing the buyer RC.
+    if (!Number.isInteger(input.score) || input.score < 1 || input.score > 5) {
+      throw new Error('VscCreatorTokensDataSource: score must be a whole number 1-5');
+    }
+    const op = buildOp({
+      netId: this.config.netId,
+      contractId: this.config.contractId,
+      action: 'rate',
+      payload: ratePayload(toDid(input.creator), input.seq, input.score),
+      activeAuth: input.rater,
+      rcLimit: this.config.rcLimit
+    });
+    await this.broadcast(op);
   }
 
   async reclaim(input: ReclaimInput): Promise<Ask> {
@@ -1314,6 +1539,68 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     // every other write in this file makes; re-readMarket() to confirm.
     if (!priorMarket || priorMarket.phase === 'UNKNOWN') return false;
     return priorMarket.phase === 'CLOSED' || (priorMarket.phase === 'FROZEN' && priorMarket.supplyTokens === 0);
+  }
+
+  // ---- the offerings shop. The caller IS the creator on all four writes, so
+  // none of them carries a `creator` payload field; input.creator is only ever
+  // used as the SIGNER (activeAuth). Prices are UNQUOTED base-units integers on
+  // the wire — see op-builders.ts's shop section for why a quoted string there
+  // would post a free service. ----
+
+  async createOffering(input: CreateOfferingInput): Promise<void> {
+    this.assertBroadcaster();
+    if (input.title.trim() === '') throw new Error('VscCreatorTokensDataSource: offering title must not be empty');
+    if (!(input.priceHbd > 0)) throw new Error('VscCreatorTokensDataSource: offering price must be > 0');
+    const op = buildOp({
+      netId: this.config.netId,
+      contractId: this.config.contractId,
+      action: 'createOffering',
+      payload: createOfferingPayload(input.title, humanToBaseUnits(input.priceHbd)),
+      activeAuth: input.creator,
+      rcLimit: this.config.rcLimit
+    });
+    await this.broadcast(op);
+  }
+
+  async setOfferingPrice(input: SetOfferingPriceInput): Promise<void> {
+    this.assertBroadcaster();
+    if (!(input.newPriceHbd > 0)) throw new Error('VscCreatorTokensDataSource: offering price must be > 0');
+    const op = buildOp({
+      netId: this.config.netId,
+      contractId: this.config.contractId,
+      action: 'setOfferingPrice',
+      payload: setOfferingPricePayload(input.offeringId, humanToBaseUnits(input.newPriceHbd)),
+      activeAuth: input.creator,
+      rcLimit: this.config.rcLimit
+    });
+    await this.broadcast(op);
+  }
+
+  async setOfferingTitle(input: SetOfferingTitleInput): Promise<void> {
+    this.assertBroadcaster();
+    if (input.title.trim() === '') throw new Error('VscCreatorTokensDataSource: offering title must not be empty');
+    const op = buildOp({
+      netId: this.config.netId,
+      contractId: this.config.contractId,
+      action: 'setOfferingTitle',
+      payload: setOfferingTitlePayload(input.offeringId, input.title),
+      activeAuth: input.creator,
+      rcLimit: this.config.rcLimit
+    });
+    await this.broadcast(op);
+  }
+
+  async deleteOffering(input: DeleteOfferingInput): Promise<void> {
+    this.assertBroadcaster();
+    const op = buildOp({
+      netId: this.config.netId,
+      contractId: this.config.contractId,
+      action: 'deleteOffering',
+      payload: deleteOfferingPayload(input.offeringId),
+      activeAuth: input.creator,
+      rcLimit: this.config.rcLimit
+    });
+    await this.broadcast(op);
   }
 
   async withdrawTreasury(input: WithdrawTreasuryInput): Promise<number> {

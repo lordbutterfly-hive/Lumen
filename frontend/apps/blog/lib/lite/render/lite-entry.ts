@@ -56,6 +56,16 @@ export async function liteEntryForPost(post: LumenPost, observer = ''): Promise<
 
   return {
     ...chainEntry,
+    // Carried alongside the rewritten fields, not instead of them. Components that
+    // ACT — follow, mute, a profile lookup — need the account that actually signed
+    // this, and once `author` below has been replaced there is nowhere else to read
+    // it from. Without this they fall back to the display name, which is not a Hive
+    // account at all (see features/post-rendering/user-popover-card.tsx).
+    _lite: {
+      author: publicName,
+      title: post.title || chainEntry.title,
+      chainAuthor: post.hiveAuthor
+    },
     // The identity a reader should see. The permlink stays real, so links resolve.
     author: publicName,
     // Hivemind SYNTHESISES a title for any comment — it returns "RE: <parent title>"

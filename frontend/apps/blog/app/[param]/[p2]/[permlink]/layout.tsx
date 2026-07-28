@@ -3,6 +3,7 @@ import React, { PropsWithChildren } from 'react';
 import { notFound } from 'next/navigation';
 import { getPostCached } from '@/blog/lib/cached-api';
 import { liteEntryForPermlinkCached } from '@/blog/lib/lite/render/lite-entry-cached';
+import { attachLiteIdentities } from '@/blog/lib/lite/render/attach-lite';
 import { getObserverFromCookies } from '@/blog/lib/auth-utils';
 import { isValidUserParam } from '@/blog/utils/validate-links';
 import { getLogger } from '@ui/lib/logging';
@@ -37,7 +38,15 @@ export async function generateMetadata({
       (await getPostCached(author, permlink, observer).catch(() => null)) ??
       (await liteEntryForPermlinkCached(permlink, observer));
 
-    const title = post?.title ? `${post.title} ` : 'Hive Blog';
+    // On the raw on-chain URL — the one every other Hive front end links — the post
+    // arrives unresolved: the shared publishing account, and the "RE: <container>"
+    // title Hivemind synthesises for any comment. A crawler never runs JavaScript, so
+    // unlike the page itself this cannot be corrected later: whatever is emitted here
+    // is what every share preview and search result shows, forever.
+    if (post && !post._lite) await attachLiteIdentities([post]);
+
+    const realTitle = post?._lite?.title || post?.title;
+    const title = realTitle ? `${realTitle} ` : 'Hive Blog';
     const description =
       post?.json_metadata?.summary ||
       post?.json_metadata?.description ||

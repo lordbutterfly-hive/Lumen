@@ -269,7 +269,7 @@ func TestEscape_CannotBreakOutOfStringContext(t *testing.T) {
 // core/events.go's EvAsked/EvAnswered pass contentHash/answerHash through
 // the identical minimal evJSONEscape before logging, a contentHash/
 // answerHash containing e.g. a raw newline would make that one "asked"/
-// "answered" event's log line invalid JSON. indexer/index.go's own contract
+// "answered" event's log line invalid JSON. magi-indexer/creator_tokens_views.yaml's own contract
 // degrades this gracefully (ParseEvent failure -> Stats.Malformed, skipped,
 // never wedges ingestion of anything else) — so the impact is bounded to
 // "that one ask silently never appears in the delivery record," not a fund

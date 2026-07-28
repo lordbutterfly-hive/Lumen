@@ -30,15 +30,19 @@ export function normalizeName(displayName: string): string {
  * concurrent signups; an existing PENDING hold that has expired is reclaimable,
  * an ACTIVE reservation is never overwritten.
  */
-export async function reservePending(nameNorm: string, ttlSeconds: number): Promise<boolean> {
+export async function reservePending(
+  nameNorm: string,
+  ttlSeconds: number,
+  userId?: string
+): Promise<boolean> {
   const { rows } = await query<{ display_name_norm: string }>(
-    `INSERT INTO name_reservation (display_name_norm, status, expires_at)
-     VALUES ($1, 'pending', now() + make_interval(secs => $2))
+    `INSERT INTO name_reservation (display_name_norm, status, expires_at, user_id)
+     VALUES ($1, 'pending', now() + make_interval(secs => $2), $3)
      ON CONFLICT (display_name_norm) DO UPDATE
-       SET expires_at = EXCLUDED.expires_at, created_at = now()
+       SET expires_at = EXCLUDED.expires_at, created_at = now(), user_id = EXCLUDED.user_id
        WHERE name_reservation.status = 'pending' AND name_reservation.expires_at < now()
      RETURNING display_name_norm`,
-    [nameNorm, ttlSeconds]
+    [nameNorm, ttlSeconds, userId ?? null]
   );
   return rows.length > 0;
 }
@@ -54,11 +58,25 @@ export async function promoteToActive(nameNorm: string, userId: string): Promise
   return (rowCount ?? 0) > 0;
 }
 
-/** Release a PENDING hold (e.g. the live Hive check failed). ACTIVE is never released here. */
-export async function releasePending(nameNorm: string): Promise<void> {
-  await query(`DELETE FROM name_reservation WHERE display_name_norm = $1 AND status = 'pending'`, [
-    nameNorm
-  ]);
+/**
+ * Release a PENDING hold (e.g. the live Hive check failed). ACTIVE is never released
+ * here.
+ *
+ * Scoped to whoever took the hold. Without that, one user's cleanup path deletes
+ * another's live reservation: an upgrade whose 300-second hold has expired, retrying,
+ * would delete the hold a DIFFERENT user has just taken on the same name, and both
+ * would then race toward creating it. Signup holds carry no user id, so they release
+ * only holds that also carry none.
+ */
+export async function releasePending(nameNorm: string, userId?: string): Promise<void> {
+  await query(
+    userId
+      ? `DELETE FROM name_reservation
+          WHERE display_name_norm = $1 AND status = 'pending' AND user_id = $2`
+      : `DELETE FROM name_reservation
+          WHERE display_name_norm = $1 AND status = 'pending' AND user_id IS NULL`,
+    userId ? [nameNorm, userId] : [nameNorm]
+  );
 }
 
 export async function findReservation(nameNorm: string): Promise<NameReservation | null> {

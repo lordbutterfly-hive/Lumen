@@ -678,7 +678,7 @@ func (e *Engine) doReclaim(caller, asker, creator string, seq uint64) {
 		return err
 	})
 	if ev.OK {
-		e.resolveEscrow(creator, seq, escrowReclaimed)
+		rec := e.resolveEscrow(creator, seq, escrowReclaimed)
 		payee := res.Asker // core pays the escrow's own asker, never the caller
 		if actor, ok := e.pop.Actors[payee]; ok && res.CommissionHbd != nil && res.CommissionHbd.Sign() > 0 {
 			actor.HBD = addBig(actor.HBD, res.CommissionHbd)
@@ -686,11 +686,26 @@ func (e *Engine) doReclaim(caller, asker, creator string, seq uint64) {
 		if res.CommissionHbd != nil && res.CommissionHbd.Sign() > 0 {
 			e.totalHbdOut = addBig(e.totalHbdOut, res.CommissionHbd)
 		}
+		// USER RULING 1 (2026-07-28): a MISS reclaim splits the held commission
+		// — the net leaves (totalHbdOut, above) and the slice STAYS, booked to
+		// the treasury. resolveEscrow released the FULL held amount out of
+		// heldCommissionTotal, so without this the slice would be released from
+		// one bucket and land in none, and the conservation identity would
+		// short by exactly the retained amount on every miss. (It did: this is
+		// what the -race run caught the moment the ruling landed.)
+		if res.CommissionRetainedHbd != nil && res.CommissionRetainedHbd.Sign() > 0 {
+			e.treasuryShadow = addBig(e.treasuryShadow, res.CommissionRetainedHbd)
+			ev.Deltas["treasuryShadow"] = "+" + bigStr(res.CommissionRetainedHbd)
+		}
 		ev.Args["creditsReturned"] = bigStr(res.CreditsReturned)
 		ev.Args["commissionRefundedHbd"] = bigStr(res.CommissionHbd)
+		ev.Args["commissionRetainedHbd"] = bigStr(res.CommissionRetainedHbd)
 		ev.Deltas["balance:"+payee] = deltaStr(beforeBal, core.BalanceOf(e.Store, creator, payee))
 		ev.Deltas["wallet:"+payee] = "+" + bigStr(res.CommissionHbd)
-		ev.Deltas["heldCommissionTotal"] = "-" + bigStr(res.CommissionHbd)
+		if rec != nil {
+			// The FULL held amount left the escrow bucket, not just the net.
+			ev.Deltas["heldCommissionTotal"] = "-" + bigStr(rec.CommissionHbd)
+		}
 	}
 	e.recordEvent(ev)
 }

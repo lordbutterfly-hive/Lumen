@@ -1,0 +1,11 @@
+-- 0016_profile.sql — editable profile for lite accounts.
+--
+-- A Hive user's profile lives in `posting_json_metadata` on chain and is edited by
+-- broadcasting an account update. A lite user has no account to update, so the same
+-- handful of fields live here instead and are rendered into the FullAccount-shaped
+-- view that `render/lite-account.ts` builds. On upgrade the profile stays with the
+-- row (user_id is stable); moving it on chain is a separate, deliberate step.
+--
+-- One JSONB column rather than six TEXT ones: the shape is a copy of Hive's own
+-- profile object, and it is only ever read and written whole.
+ALTER TABLE lumen_user ADD COLUMN IF NOT EXISTS profile JSONB NOT NULL DEFAULT '{}'::jsonb;

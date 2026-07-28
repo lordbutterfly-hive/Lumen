@@ -5,6 +5,7 @@ import { getObserverFromCookies } from '@/blog/lib/auth-utils';
 import { getLogger } from '@ui/lib/logging';
 import { ObserverProvider, InitialPostsProvider } from '@/blog/components/observer-provider';
 import { extractUsernameFromParam } from '@/blog/utils/validate-links';
+import { attachLiteIdentities } from '@/blog/lib/lite/render/attach-lite';
 
 const logger = getLogger('app');
 
@@ -22,6 +23,9 @@ const PostsPage = async ({
   let initialPosts = null;
   try {
     initialPosts = (await getAccountPosts(query, username, observer, '', '')) ?? null;
+      // Resolve Lumen identities before this reaches the browser, so a lite post
+      // never renders under the shared publishing account and then corrects itself.
+      if (initialPosts) await attachLiteIdentities(initialPosts);
   } catch (error) {
     logger.error(error, 'Error in PostsPage:');
   }

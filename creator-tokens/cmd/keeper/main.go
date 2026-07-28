@@ -2,7 +2,7 @@
 // wind-down (SPEC-CREATOR-KEYS.md §1.7.5). Today it only supports --dry-run:
 // it wires the keeper package's REAL decision logic (Plan's phase/balance
 // filtering, ordering, and Sweep's retry/backoff/partial-failure handling)
-// against a REAL core.MemStore + a REAL indexer.Index — both driven by the
+// against a REAL core.MemStore — driven by the
 // actual core and indexer packages, not stand-ins for them — and prints
 // exactly what a live run would submit, for a walkthrough covering every
 // shape of market this task's spec calls out:
@@ -29,7 +29,6 @@ import (
 	"time"
 
 	"creator-tokens/core"
-	"creator-tokens/indexer"
 	"creator-tokens/keeper"
 )
 
@@ -64,32 +63,29 @@ func main() {
 		os.Exit(1)
 	}
 
-	// ---- build the demo scenario: a REAL core.MemStore + REAL indexer.Index ----
-	store, ix, demoBlock := buildDemoScenario()
+	// ---- build the demo scenario: a REAL core.MemStore ----
+	store, holders, demoBlock := buildDemoScenario()
 	if *block != 0 {
 		demoBlock = *block
 	}
 
 	fmt.Printf("=== Magi Creator Keys — keeper dry run ===\ncontract=%s caller=%s netID=%s currentBlock=%d\n\n", *contractID, *caller, *netID, demoBlock)
 
-	views := collectMarketViews(store, ix, demoBlock, []string{"aliceart", "bobmusic", "carlwrites", "danerin"})
+	views := collectMarketViews(store, holders, demoBlock, []string{"aliceart", "bobmusic", "carlwrites", "danerin"})
 	for _, v := range views {
 		fmt.Printf(">>> %-12s phase=%-7s supply=%-8s holders(verified-live-balance)=%d\n", v.Creator, v.Phase, safeStr(v.Supply), len(v.Holders))
 		for _, h := range v.Holders {
-			fmt.Printf("      candidate holder %-10s indexer-discovered, live balance=%s\n", h.Holder, h.Balance)
+			fmt.Printf("      candidate holder %-10s live balance=%s\n", h.Holder, h.Balance)
 		}
-		// Informational only -- the keeper's own Plan/Sweep never reads this;
-		// it's the kind of signal an operator dashboard built on top of this
-		// package would show alongside a sweep report (task spec: "read...
-		// its HolderList and DeliveryRecord in particular").
-		rec := ix.DeliveryRecord(v.Creator, 12)
-		// declined (RULING E's delivery gate, 2026-07-27) is its own bucket —
-		// neither answered nor missed (core/delivery.go: a prompt "no" refunds
-		// the asker in full and is not a black mark). Omitting it here used to
-		// silently understate a creator's real delivery activity: a creator who
-		// only ever declines showed answered=0 missed=0 with nothing to explain
-		// why, as if they had never resolved a single ask.
-		fmt.Printf("      (context only, not a sweep input) delivery record: answered=%d declined=%d missed=%d pending=%d\n", rec.AnsweredCount, rec.DeclinedCount, rec.MissedCount, rec.PendingCount)
+		// The DELIVERY RECORD used to be printed here from this repo's own Go
+		// indexer. That package is DELETED (2026-07-28): the read side is the
+		// Magi indexer (magi-mongo-indexer -> Hasura), and a keeper CLI holding
+		// a second, private replay of the same events was a second source of
+		// truth nobody was reconciling. An operator dashboard reads
+		// lumen_ct_delivery_record from Hasura instead — see
+		// ../../magi-indexer/creator_tokens_views.yaml.
+		//
+		// The keeper's own Plan/Sweep never read it anyway; it was context.
 	}
 	fmt.Println()
 
@@ -131,19 +127,38 @@ func main() {
 	fmt.Println("\nnothing above touched the network or the demo store -- this is exactly what --live would submit, once a signer and a deployed contract exist.")
 }
 
-// buildDemoScenario builds a small, REAL core.MemStore + REAL indexer.Index
-// covering every market shape this task's spec calls out. Every state
-// transition below goes through the actual core.* functions (never a
-// hand-crafted state key) and is logged through the actual core/events.go
-// Ev* constructors into the indexer, exactly mirroring what
+// buildDemoScenario builds a small, REAL core.MemStore covering every market
+// shape this task's spec calls out. Every state transition below goes through
+// the actual core.* functions (never a hand-crafted state key) and is logged
+// through the actual core/events.go Ev* constructors, exactly mirroring what
 // contract/main.go's wasm entrypoints do after each successful call.
-func buildDemoScenario() (*core.MemStore, *indexer.Index, uint64) {
+//
+// The event strings are still BUILT — that is what proves the Ev* constructors
+// stay callable with exactly what the core.* calls beside them returned — but
+// they are no longer replayed into a local index. This repo's own Go indexer is
+// deleted; the Magi indexer is the read side now. The demo tracks the holders it
+// creates directly, which is both simpler and more honest than a private replay
+// pretending to be a discovery mechanism.
+//
+// Returns the store, the holder set per creator, and the demo "now" block.
+func buildDemoScenario() (*core.MemStore, map[string][]string, uint64) {
 	store := core.NewMemStore()
-	ix := indexer.NewIndex()
-	n := 0
+	holders := map[string][]string{}
+	noteHolder := func(creator, holder string) {
+		for _, h := range holders[creator] {
+			if h == holder {
+				return
+			}
+		}
+		holders[creator] = append(holders[creator], holder)
+	}
+	// Kept so every Ev* constructor below is still exercised with real values —
+	// a constructor that stopped compiling against its core.* result would fail
+	// the build here, exactly as before.
+	emitted := 0
 	log := func(data string) {
-		n++
-		ix.Ingest([]indexer.RawEvent{{OutputID: fmt.Sprintf("demo-output-%d", n), Seq: 0, Data: data}})
+		_ = data
+		emitted++
 	}
 
 	const (
@@ -175,13 +190,14 @@ func buildDemoScenario() (*core.MemStore, *indexer.Index, uint64) {
 	// That workaround is now STALE: logging "prepaid" for a real Buy hides
 	// the actual action from anything that reads the event kind (an operator
 	// dashboard would see this creator as having never had a single trade),
-	// and indexer/events.go's ParseEvent would now fold it as a legacy
+	// and magi-indexer/creator_tokens_mappings.yaml's ParseEvent would now fold it as a legacy
 	// PAR-mint credit instead of the curve trade it actually was. Use the
 	// real event and the real fields (Minted/Cost/Fee/TotalDue) core.Buy
 	// itself returns.
 	buy := func(creator, holder string, tokens int64) {
 		res := must2(core.Buy(store, holder, creator, registeredBlock+1, big.NewInt(tokens)))
 		log(core.EvBought(creator, holder, registeredBlock+1, res.Minted, res.Cost, res.Fee, res.TotalDue))
+		noteHolder(creator, holder)
 	}
 
 	// aliceart: FROZEN, three holders still owed a refund -- the ordinary case.
@@ -197,6 +213,7 @@ func buildDemoScenario() (*core.MemStore, *indexer.Index, uint64) {
 	log(core.EvRegistered("bobmusic", "bobmusic", activeRegisteredBlock, face, marketCap, big.NewInt(0)))
 	bobBuy := must2(core.Buy(store, "listener1", "bobmusic", activeRegisteredBlock+1, big.NewInt(40)))
 	log(core.EvBought("bobmusic", "listener1", activeRegisteredBlock+1, bobBuy.Minted, bobBuy.Cost, bobBuy.Fee, bobBuy.TotalDue))
+	noteHolder("bobmusic", "listener1")
 
 	// carlwrites: FROZEN, but its one holder already self-refunded (the pull
 	// path, `refund`) before this sweep ever ran -- HolderList is already
@@ -254,25 +271,36 @@ func buildDemoScenario() (*core.MemStore, *indexer.Index, uint64) {
 	askResult := must2(core.Ask(store, "reader1", "danerin", askBlock, big.NewInt(1), commissionOwed, "demo-content-hash", core.MinAskDeadline, 0))
 	log(core.EvAsked("danerin", "reader1", askBlock, askResult.Seq, askResult.CreditsSpent, askResult.CommissionHbd, askResult.RateUsed, core.MinAskDeadline, "demo-content-hash", 0))
 
-	return store, ix, demoBlock
+	// carlwrites' only holder self-refunded above, so they are no longer owed
+	// anything — but they STAY in the candidate list on purpose. That is the
+	// whole point of "verify, don't trust": discovery offers candidates, and
+	// every balance handed to keeper.Plan is a fresh chain read that will show
+	// this one at zero.
+	_ = emitted
+	return store, holders, demoBlock
 }
 
 // collectMarketViews is cmd/keeper's own I/O composition step -- NOT part of
 // the keeper package, deliberately (see keeper/keeper.go's package doc: the
 // keeper package itself takes a snapshot as given and does no reading of its
 // own). This is where "verify, don't trust" gets its teeth: candidate
-// holders come from the INDEXER (discovery -- who might still be owed
-// something), but every Balance actually handed to keeper.Plan is a FRESH
-// read from the chain-of-record (core.BalanceOf against the live store, here
-// standing in for a real getStateByKeys call -- SPEC §2.5's own rule: "Chain
-// reads:...per-holder balances", never the indexer, is authoritative).
-func collectMarketViews(store *core.MemStore, ix *indexer.Index, block uint64, creators []string) []keeper.MarketView {
+// holders come from DISCOVERY (in production, the Magi indexer's
+// lumen_ct_balances view -- who might still be owed something), but every
+// Balance actually handed to keeper.Plan is a FRESH read from the
+// chain-of-record (core.BalanceOf against the live store, here standing in for
+// a real getStateByKeys call -- SPEC §2.5's own rule: "Chain reads:...per-holder
+// balances", never the indexer, is authoritative).
+// holders comes from the caller now, not from a replayed index. In production
+// that list is a Hasura query (lumen_ct_balances) — the keeper package itself
+// has never enumerated holders and still does not; MarketView.Holders is
+// supplied to it.
+func collectMarketViews(store *core.MemStore, holders map[string][]string, block uint64, creators []string) []keeper.MarketView {
 	views := make([]keeper.MarketView, 0, len(creators))
 	for _, creator := range creators {
 		phase := core.Phase(store, creator, block)
-		var holders []keeper.HolderBalance
-		for _, h := range ix.HolderList(creator) {
-			holders = append(holders, keeper.HolderBalance{Holder: h, Balance: core.BalanceOf(store, creator, h)})
+		var holderViews []keeper.HolderBalance
+		for _, h := range holders[creator] {
+			holderViews = append(holderViews, keeper.HolderBalance{Holder: h, Balance: core.BalanceOf(store, creator, h)})
 		}
 		// Retired is read separately from Phase on purpose: core.Phase is
 		// MAX(natural, retired), so a market retired mid-subscription still
@@ -284,7 +312,7 @@ func collectMarketViews(store *core.MemStore, ix *indexer.Index, block uint64, c
 			Phase:   phase,
 			Retired: retired,
 			Supply:  core.Supply(store, creator),
-			Holders: holders,
+			Holders: holderViews,
 		})
 	}
 	return views

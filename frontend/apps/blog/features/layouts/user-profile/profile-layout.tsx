@@ -388,10 +388,14 @@ const ProfileLayout = ({ children }: { children: ReactNode }) => {
                   {/* Follow/Mute Buttons */}
                   {user.username !== username ? (
                     <div className="mt-6 flex justify-center gap-3">
+                      {/* `liteTarget`: a Lumen lite account has no Hive account to
+                          follow, so the chain path cannot serve this button.
+                          `_temporary` marks the stand-in profile; the server confirms it. */}
                       <ButtonsContainer
                         username={username}
                         user={user}
                         variant="default"
+                        liteTarget={Boolean(profileData?._temporary)}
                         follow={following}
                         mute={mute}
                       />

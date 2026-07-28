@@ -142,7 +142,24 @@ export const ACTION_PAYLOAD_SPECS: Record<string, ActionPayloadSpec> = {
     creator: 'string', // main.go:765
     contentHash: 'string', // main.go:766
     deadlineBlocks: 'number', // main.go:767
-    maxCredits: 'moneyString' // main.go:768 — REQUIRED; core.Ask rejects nil/zero
+    maxCredits: 'moneyString', // main.go:768 — REQUIRED; core.Ask rejects nil/zero
+    // main.go:830 jsonU64Field(payload, "offeringId") — the OFFERINGS SHOP.
+    // ABSENT means 0, which is the reserved alias for the creator's legacy
+    // single `face` price, so leaving it off keeps the pre-shop behaviour
+    // exactly. A NONZERO id names one of the creator's posted services and
+    // prices the ask at THAT offering's own banded price.
+    //
+    // It is an UNQUOTED integer (parse.U64Field), NOT a money string: the
+    // contract reads it with the same loose-number reader `deadlineBlocks`
+    // uses. Present-but-unparseable is REFUSED on-chain rather than defaulted,
+    // because a silent fall back to 0 would settle against the wrong, cheaper
+    // service and underpay the creator.
+    //
+    // Until 2026-07-28 this field did not exist in this client AT ALL, which
+    // meant the entire offerings shop — on-chain, tested, five entrypoints —
+    // was unreachable from any UI. That was the single sharpest gap in the
+    // 2026-07-28 gap list.
+    offeringId: { type: 'number', optional: true }
   },
   answer: {
     seq: 'number', // main.go:820
@@ -156,6 +173,42 @@ export const ACTION_PAYLOAD_SPECS: Record<string, ActionPayloadSpec> = {
     creator: 'string', // main.go:938
     credits: 'moneyString', // main.go:939
     minNet: { type: 'moneyString', optional: true } // main.go:966
+  },
+  // ---- the offerings shop (creator-only; caller IS the creator on all five,
+  // so no `creator` field on the four writes) ----
+  createOffering: {
+    title: 'string', // main.go:1683 jsonStr(payload, "title")
+    // UNQUOTED integer base units (jsonU64 -> i64FromU64), NOT a money string:
+    // the shop entrypoints read prices with the loose number reader, unlike
+    // ask/buy/sell which use parseBigDecimal. Sending "500" here would parse
+    // as 0 and post a free service.
+    price: 'number' // main.go:1684
+  },
+  setOfferingPrice: {
+    offeringId: 'number', // main.go:1721 jsonU64Field — 0 is MEANINGFUL, never omit
+    newPrice: 'number' // main.go:1726
+  },
+  setOfferingTitle: {
+    offeringId: 'number', // main.go:1815 jsonU64Field
+    title: 'string' // main.go:1820
+  },
+  deleteOffering: {
+    offeringId: 'number' // main.go:1806 jsonU64Field
+  },
+  // The anti-grief rail (RULING E): the creator's free, honest "no" inside the
+  // same window an Answer would be legal in. Full refund INCLUDING the
+  // commission, and explicitly not a miss against the delivery record. Had no
+  // client method at all until 2026-07-28.
+  decline: {
+    creator: 'string', // main.go:958
+    seq: 'number' // main.go:963 jsonU64Field — 0 is a real seq
+  },
+  // The buyer's rating of a delivered job. Reputation only — the contract
+  // refuses to let it touch any fund path, and no client should imply it can.
+  rate: {
+    creator: 'string', // main.go (rate)
+    seq: 'number', // jsonU64Field — 0 is a real seq
+    score: 'number' // jsonU64Field — 1-5, bounded in core
   },
   refundHolder: {
     creator: 'string', // main.go:1117
@@ -193,7 +246,14 @@ export const ACTION_PAYLOAD_SPECS: Record<string, ActionPayloadSpec> = {
  * through a node that evaluates them.
  */
 export const READ_PAYLOAD_SPECS: Record<string, ActionPayloadSpec> = {
-  quote: { creator: 'string' }, // main.go:1351
+  quote: {
+    creator: 'string', // main.go:1351
+    // Same convention and the same reason as `ask` above: a quote MUST preview
+    // the price the ask will actually charge, so it takes the same optional
+    // offeringId and refuses a malformed one rather than pricing the legacy
+    // face. A preview that disagrees with the charge is worse than no preview.
+    offeringId: { type: 'number', optional: true }
+  },
   quoteBuy: {
     creator: 'string', // main.go:1398
     tokens: 'moneyString' // main.go:1399
@@ -205,7 +265,10 @@ export const READ_PAYLOAD_SPECS: Record<string, ActionPayloadSpec> = {
     // read. The real `sell` still requires that holder's own active auth.
     holder: 'string', // main.go:1433
     tokens: 'moneyString' // main.go:1434
-  }
+  },
+  // Pure read, no auth, no mutation: returns the creator's whole posted
+  // catalogue as {creator, offerings:[{offeringId,title,price}]}.
+  listOfferings: { creator: 'string' } // main.go:1826
 };
 
 // parseBigDecimal (main.go:272-281) is `new(big.Int).SetString(s, 10)` then

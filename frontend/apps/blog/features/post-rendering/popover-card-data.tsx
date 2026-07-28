@@ -77,6 +77,23 @@ const PopoverCardData = ({ author, blacklist, authorReputation, liteName }: Popo
             <AvatarFallback>{liteName.slice(0, 2).toUpperCase()}</AvatarFallback>
           </Avatar>
           <span className="text-sm font-semibold text-foreground">@{liteName}</span>
+          {/* Lumen keeps its own follow graph, which is the only place a follow of
+              this person can live — there is no account on chain to follow. Offered
+              to any signed-in viewer, lite or full; Mute stays hidden because muting
+              IS a chain operation and has no target here. */}
+          {user.isLoggedIn && user.username !== liteName ? (
+            <div className="ml-auto flex gap-2">
+              <ButtonsContainer
+                username={liteName}
+                user={user}
+                variant="default"
+                follow={following}
+                mute={mute}
+                hideMute
+                liteTarget
+              />
+            </div>
+          ) : null}
         </div>
       ) : account && !isLoading ? (
         <>

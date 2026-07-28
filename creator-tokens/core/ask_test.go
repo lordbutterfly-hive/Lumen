@@ -928,8 +928,12 @@ func TestReclaimByThirdPartyAfterWindowPaysAsker(t *testing.T) {
 	if res.CreditsReturned.Cmp(big.NewInt(42)) != 0 {
 		t.Fatalf("CreditsReturned = %s, want 42", res.CreditsReturned)
 	}
-	if res.CommissionHbd.Cmp(big.NewInt(7)) != 0 {
-		t.Fatalf("CommissionHbd = %s, want 7", res.CommissionHbd)
+	// 7 held, 25%% miss slice rounded UP = 2 retained, 5 paid to the asker.
+	if res.CommissionHbd.Cmp(big.NewInt(5)) != 0 {
+		t.Fatalf("CommissionHbd = %s, want 5 (7 held less the 2 miss slice)", res.CommissionHbd)
+	}
+	if res.CommissionRetainedHbd.Cmp(big.NewInt(2)) != 0 {
+		t.Fatalf("CommissionRetainedHbd = %s, want 2 (ceil(7*2500/10000))", res.CommissionRetainedHbd)
 	}
 
 	// The MONEY lands on the asker, never on rando1 (the caller) — this is
@@ -1040,7 +1044,8 @@ func TestReclaimBeforeWindowRejected(t *testing.T) {
 	}
 }
 
-// TestReclaimNoCommissionCharged proves invariant I5 using a REAL Ask(),
+// TestReclaimCommissionNetOfMissSlice (was TestReclaimNoCommissionCharged
+// until USER RULING 1, 2026-07-28) proves invariant I5 using a REAL Ask(),
 // not a synthetically-built escrow record. The previous version of this
 // test built its escrow directly via mkPendingEscrow and only proved
 // Reclaim doesn't ADD a treasury debit — it never proved a real Ask()'s
@@ -1051,7 +1056,14 @@ func TestReclaimBeforeWindowRejected(t *testing.T) {
 // just "starts and stays at zero", and separately proves this escrow's own
 // held commission is returned via ReclaimResult.CommissionHbd, not
 // forfeited.
-func TestReclaimNoCommissionCharged(t *testing.T) {
+//
+// WHAT CHANGED (USER RULING 1, 2026-07-28): I5 now has exactly one exception —
+// on a MISS the protocol keeps MissReclaimSliceBps of the held commission,
+// because a 100%% refund made griefing free. So the assertions below moved from
+// "the treasury does not move" to "the treasury moves by EXACTLY the slice, and
+// by nothing else": the seeded, legitimately-earned commission from the
+// unrelated Answer is still untouched, and the credits still come back whole.
+func TestReclaimCommissionNetOfMissSlice(t *testing.T) {
 	s := NewMemStore()
 	// RULING C fixture: canonical S=100 / rate 400 market — 3 credits per
 	// 1000-face ask.
@@ -1091,19 +1103,27 @@ func TestReclaimNoCommissionCharged(t *testing.T) {
 	if res.CreditsReturned.Cmp(big.NewInt(3)) != 0 {
 		t.Fatalf("reclaimed %s, want the full 3 (no commission deducted)", res.CreditsReturned)
 	}
-	if res.CommissionHbd.Cmp(commission) != 0 {
-		t.Fatalf("CommissionHbd returned = %s, want the FULL %s back (SPEC §1.7.2 rule 4)", res.CommissionHbd, commission)
+	slice := missSliceFor(commission)
+	wantNet := new(big.Int).Sub(commission, slice)
+	if res.CommissionHbd.Cmp(wantNet) != 0 {
+		t.Fatalf("CommissionHbd returned = %s, want %s (held %s less the %s miss slice — USER RULING 1)", res.CommissionHbd, wantNet, commission, slice)
 	}
-	if treas := getMoney(s, kTreasury()); treas.Cmp(treasuryAfterSeed) != 0 {
-		t.Fatalf("treasury = %s, want unchanged %s (no commission on reclaim, I5)", treas, treasuryAfterSeed)
+	if res.CommissionRetainedHbd.Cmp(slice) != 0 {
+		t.Fatalf("CommissionRetainedHbd = %s, want %s", res.CommissionRetainedHbd, slice)
+	}
+	if treas := getMoney(s, kTreasury()); treas.Cmp(new(big.Int).Add(treasuryAfterSeed, slice)) != 0 {
+		t.Fatalf("treasury = %s, want %s (the seeded commission untouched, plus exactly the miss slice)", treas, new(big.Int).Add(treasuryAfterSeed, slice))
 	}
 }
 
-// TestReclaimReturnsCommissionInFull is the direct round-trip proof for
-// DEFECT 1: a real Ask() followed by a real Reclaim() must return the
-// asker's credits AND the full commission, with the asker's balance
-// restored to exactly what it was before the ask.
-func TestReclaimReturnsCommissionInFull(t *testing.T) {
+// TestReclaimReturnsCreditsInFullAndCommissionNetOfSlice (was
+// ...CommissionInFull until USER RULING 1, 2026-07-28) is the direct
+// round-trip proof for DEFECT 1: a real Ask() followed by a real Reclaim()
+// must return the asker's CREDITS in full, with their token balance restored
+// to exactly what it was before the ask, and the held commission back MINUS
+// the miss slice (params.go, MissReclaimSliceBps). The credit half of DEFECT 1
+// is unchanged and unchangeable; only the HBD leg is now split.
+func TestReclaimReturnsCreditsInFullAndCommissionNetOfSlice(t *testing.T) {
 	s := NewMemStore()
 	// RULING C fixture: canonical S=100 / rate 400 market — 3 credits per
 	// 1000-face ask.
@@ -1134,14 +1154,22 @@ func TestReclaimReturnsCommissionInFull(t *testing.T) {
 	if res.CreditsReturned.Cmp(big.NewInt(3)) != 0 {
 		t.Fatalf("CreditsReturned = %s, want 3 (100%% of credits back, I5)", res.CreditsReturned)
 	}
-	if res.CommissionHbd.Cmp(commission) != 0 {
-		t.Fatalf("CommissionHbd = %s, want %s (the FULL 12%% commission back — DEFECT 1, SPEC §1.7.2 rule 4: 'No commission on refunds')", res.CommissionHbd, commission)
+	slice := missSliceFor(commission) // 12%% of 1000 = 120; 25%% of 120 = 30
+	wantNet := new(big.Int).Sub(commission, slice)
+	if res.CommissionHbd.Cmp(wantNet) != 0 {
+		t.Fatalf("CommissionHbd = %s, want %s (held %s less the %s miss slice — USER RULING 1, 2026-07-28)", res.CommissionHbd, wantNet, commission, slice)
+	}
+	// The split must be EXHAUSTIVE: every unit held is either paid back or
+	// retained. A slice that silently exceeded the held amount, or a net that
+	// did not account for it, would be money appearing or vanishing.
+	if sum := new(big.Int).Add(res.CommissionHbd, res.CommissionRetainedHbd); sum.Cmp(commission) != 0 {
+		t.Fatalf("returned+retained = %s, want exactly the held %s", sum, commission)
 	}
 	if got := getMoney(s, kBal(creator1, asker1)); got.Cmp(big.NewInt(5000)) != 0 {
-		t.Fatalf("asker balance after Reclaim = %s, want 5000 (fully restored)", got)
+		t.Fatalf("asker token balance after Reclaim = %s, want 5000 (credits fully restored — the CREDIT half of I5 is untouched by RULING 1)", got)
 	}
-	if got := getMoney(s, kTreasury()); got.Cmp(treasuryBefore) != 0 {
-		t.Fatalf("treasury moved on Reclaim: %s -> %s (I5 violated)", treasuryBefore, got)
+	if got := getMoney(s, kTreasury()); got.Cmp(new(big.Int).Add(treasuryBefore, slice)) != 0 {
+		t.Fatalf("treasury = %s, want %s (exactly the miss slice, nothing more)", got, new(big.Int).Add(treasuryBefore, slice))
 	}
 }
 

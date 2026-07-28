@@ -61,7 +61,7 @@ func wantNum(t *testing.T, m map[string]any, field string, want float64) {
 func TestEvOpen_EnvelopeShape(t *testing.T) {
 	out := EvClosed("alice", "bob", 42)
 	m := decode(t, out)
-	wantStr(t, m, "ev", "closed")
+	wantStr(t, m, "type", "closed")
 	wantNum(t, m, "v", 1)
 	wantStr(t, m, "creator", "alice")
 	wantStr(t, m, "actor", "bob")
@@ -142,7 +142,7 @@ func TestEvJSONEscape_PreventsFieldInjection(t *testing.T) {
 func TestEvRegistered(t *testing.T) {
 	out := EvRegistered("alice", "alice", 100, 5000, 1000, big.NewInt(10_000))
 	m := decode(t, out)
-	wantStr(t, m, "ev", "registered")
+	wantStr(t, m, "type", "registered")
 	wantNum(t, m, "v", 1)
 	wantStr(t, m, "creator", "alice")
 	wantStr(t, m, "actor", "alice")
@@ -161,7 +161,7 @@ func TestEvRegistered_NilFeePaid(t *testing.T) {
 func TestEvRenewed(t *testing.T) {
 	out := EvRenewed("alice", "fan1", 200, 3, big.NewInt(30_000))
 	m := decode(t, out)
-	wantStr(t, m, "ev", "renewed")
+	wantStr(t, m, "type", "renewed")
 	wantStr(t, m, "creator", "alice")
 	wantStr(t, m, "actor", "fan1") // deliberately NOT alice — Renew is permissionless
 	wantNum(t, m, "block", 200)
@@ -172,7 +172,7 @@ func TestEvRenewed(t *testing.T) {
 func TestEvFaceChanged(t *testing.T) {
 	out := EvFaceChanged("alice", "alice", 300, 5000, 9000)
 	m := decode(t, out)
-	wantStr(t, m, "ev", "faceChanged")
+	wantStr(t, m, "type", "faceChanged")
 	wantStr(t, m, "oldFace", "5000")
 	wantStr(t, m, "newFace", "9000")
 }
@@ -180,7 +180,7 @@ func TestEvFaceChanged(t *testing.T) {
 func TestEvCapChanged(t *testing.T) {
 	out := EvCapChanged("alice", "alice", 300, 1000, 2000)
 	m := decode(t, out)
-	wantStr(t, m, "ev", "capChanged")
+	wantStr(t, m, "type", "capChanged")
 	wantStr(t, m, "oldCap", "1000")
 	wantStr(t, m, "newCap", "2000")
 }
@@ -188,7 +188,7 @@ func TestEvCapChanged(t *testing.T) {
 func TestEvPrepaid(t *testing.T) {
 	out := EvPrepaid("alice", "bob", 400, big.NewInt(2500), big.NewInt(2500))
 	m := decode(t, out)
-	wantStr(t, m, "ev", "prepaid")
+	wantStr(t, m, "type", "prepaid")
 	wantStr(t, m, "creator", "alice")
 	wantStr(t, m, "actor", "bob")
 	wantStr(t, m, "hbdPaid", "2500")
@@ -198,7 +198,7 @@ func TestEvPrepaid(t *testing.T) {
 func TestEvTransferred(t *testing.T) {
 	out := EvTransferred("alice", "bob", "carol", 500, big.NewInt(100))
 	m := decode(t, out)
-	wantStr(t, m, "ev", "transferred")
+	wantStr(t, m, "type", "transferred")
 	wantStr(t, m, "actor", "bob")
 	wantStr(t, m, "to", "carol")
 	wantStr(t, m, "amount", "100")
@@ -207,7 +207,7 @@ func TestEvTransferred(t *testing.T) {
 func TestEvAsked(t *testing.T) {
 	out := EvAsked("alice", "bob", 600, 7, big.NewInt(42), big.NewInt(1200), big.NewInt(1_000_000), 28800, "abc123hash", 3)
 	m := decode(t, out)
-	wantStr(t, m, "ev", "asked")
+	wantStr(t, m, "type", "asked")
 	wantStr(t, m, "actor", "bob")
 	wantNum(t, m, "seq", 7)
 	wantStr(t, m, "creditsSpent", "42")
@@ -220,7 +220,7 @@ func TestEvAsked(t *testing.T) {
 func TestEvAnswered(t *testing.T) {
 	out := EvAnswered("alice", "alice", 700, 7, big.NewInt(42), big.NewInt(504), "answerhash1")
 	m := decode(t, out)
-	wantStr(t, m, "ev", "answered")
+	wantStr(t, m, "type", "answered")
 	wantNum(t, m, "seq", 7)
 	wantStr(t, m, "creditsToCreator", "42")
 	wantStr(t, m, "commissionHbd", "504")
@@ -237,9 +237,9 @@ func TestEvAnswered_NilCommissionRendersZero(t *testing.T) {
 }
 
 func TestEvReclaimed(t *testing.T) {
-	out := EvReclaimed("alice", "bob", 800, 7, big.NewInt(42), big.NewInt(504), "carol")
+	out := EvReclaimed("alice", "bob", 800, 7, big.NewInt(42), big.NewInt(504), big.NewInt(168), "carol")
 	m := decode(t, out)
-	wantStr(t, m, "ev", "reclaimed")
+	wantStr(t, m, "type", "reclaimed")
 	wantStr(t, m, "actor", "bob")
 	wantNum(t, m, "seq", 7)
 	wantStr(t, m, "credits", "42")
@@ -247,7 +247,7 @@ func TestEvReclaimed(t *testing.T) {
 }
 
 func TestEvReclaimed_NilCommissionRendersZero(t *testing.T) {
-	out := EvReclaimed("alice", "bob", 800, 7, big.NewInt(42), nil, "carol")
+	out := EvReclaimed("alice", "bob", 800, 7, big.NewInt(42), nil, nil, "carol")
 	m := decode(t, out)
 	wantStr(t, m, "commissionHbd", "0")
 }
@@ -255,7 +255,7 @@ func TestEvReclaimed_NilCommissionRendersZero(t *testing.T) {
 func TestEvRefunded(t *testing.T) {
 	out := EvRefunded("alice", "bob", 900, big.NewInt(100), big.NewInt(95))
 	m := decode(t, out)
-	wantStr(t, m, "ev", "refunded")
+	wantStr(t, m, "type", "refunded")
 	wantStr(t, m, "actor", "bob")
 	wantStr(t, m, "credits", "100")
 	wantStr(t, m, "payout", "95")
@@ -264,7 +264,7 @@ func TestEvRefunded(t *testing.T) {
 func TestEvRefundPushed(t *testing.T) {
 	out := EvRefundPushed("alice", "keeper1", "bob", 1000, big.NewInt(300), big.NewInt(285))
 	m := decode(t, out)
-	wantStr(t, m, "ev", "refundPushed")
+	wantStr(t, m, "type", "refundPushed")
 	wantStr(t, m, "actor", "keeper1") // pusher
 	wantStr(t, m, "holder", "bob")    // recipient — never actor
 	wantStr(t, m, "creditsBurned", "300")
@@ -287,7 +287,7 @@ func TestEvRefundPushed_ActorNeverEqualsHolderByConstruction(t *testing.T) {
 func TestEvClosed(t *testing.T) {
 	out := EvClosed("alice", "keeper1", 1100)
 	m := decode(t, out)
-	wantStr(t, m, "ev", "closed")
+	wantStr(t, m, "type", "closed")
 	wantStr(t, m, "actor", "keeper1")
 	wantNum(t, m, "block", 1100)
 }
@@ -321,7 +321,7 @@ func TestEvAmountFieldsAreAlwaysStrings(t *testing.T) {
 		{"transferred", EvTransferred("c", "a", "b", 1, big.NewInt(1)), []string{"amount"}},
 		{"asked", EvAsked("c", "a", 1, 1, big.NewInt(1), big.NewInt(1), big.NewInt(1), 1, "h", 0), []string{"creditsSpent", "commissionHbd", "rate"}},
 		{"answered", EvAnswered("c", "a", 1, 1, big.NewInt(1), big.NewInt(1), "h"), []string{"creditsToCreator", "commissionHbd"}},
-		{"reclaimed", EvReclaimed("c", "a", 1, 1, big.NewInt(1), big.NewInt(1), "k"), []string{"credits", "commissionHbd"}},
+		{"reclaimed", EvReclaimed("c", "a", 1, 1, big.NewInt(1), big.NewInt(1), big.NewInt(1), "k"), []string{"credits", "commissionHbd", "commissionRetainedHbd"}},
 		{"refunded", EvRefunded("c", "a", 1, big.NewInt(1), big.NewInt(1)), []string{"credits", "payout"}},
 		{"refundPushed", EvRefundPushed("c", "a", "h", 1, big.NewInt(1), big.NewInt(1)), []string{"creditsBurned", "payout"}},
 		// Added 2026-07-28: this table covered 11 of the 24 constructors, and
@@ -356,7 +356,7 @@ func TestEvAmountFieldsAreAlwaysStrings(t *testing.T) {
 // TestEvBlockSeqDeadlineAreAlwaysBareNumbers is the mirror of the above for
 // the OTHER numeric convention: block/seq/deadlineBlocks/periods are plain
 // counts, never money, and must be bare (unquoted) JSON numbers — matching
-// hive-price-market/indexer/events.go's roundId/outcome/winner convention.
+// hive-price-market/magi-indexer/creator_tokens_mappings.yaml's roundId/outcome/winner convention.
 func TestEvBlockSeqDeadlineAreAlwaysBareNumbers(t *testing.T) {
 	out := EvAsked("c", "a", 42, 7, big.NewInt(1), big.NewInt(1), big.NewInt(1), 28800, "h", 0)
 	m := decode(t, out)
@@ -419,7 +419,7 @@ func TestRegisterWithFirstBuy_FirstBuyResultDrivesBothEvents(t *testing.T) {
 	// (registration is free — market.go).
 	regOut := EvRegistered("aliceperry", "aliceperry", 100, 5000, 1_000_000, big.NewInt(0))
 	regM := decode(t, regOut)
-	wantStr(t, regM, "ev", "registered")
+	wantStr(t, regM, "type", "registered")
 	wantStr(t, regM, "feePaid", "0")
 
 	// The bought event the wrapper's fix now also logs, built the exact way
@@ -427,7 +427,7 @@ func TestRegisterWithFirstBuy_FirstBuyResultDrivesBothEvents(t *testing.T) {
 	// never re-derived.
 	boughtOut := EvBought("aliceperry", "aliceperry", 100, res.FirstBuy.Minted, res.FirstBuy.Cost, res.FirstBuy.Fee, res.FirstBuy.TotalDue)
 	boughtM := decode(t, boughtOut)
-	wantStr(t, boughtM, "ev", "bought")
+	wantStr(t, boughtM, "type", "bought")
 	wantStr(t, boughtM, "creator", "aliceperry")
 	wantStr(t, boughtM, "actor", "aliceperry") // the creator buys their own first slice
 	wantNum(t, boughtM, "block", 100)
@@ -494,7 +494,7 @@ func TestEvSchemaVersionIsStableAcrossAllEvents(t *testing.T) {
 		EvTransferred("c", "a", "b", 1, big.NewInt(1)),
 		EvAsked("c", "a", 1, 1, big.NewInt(1), big.NewInt(1), big.NewInt(1), 1, "h", 0),
 		EvAnswered("c", "a", 1, 1, big.NewInt(1), big.NewInt(1), "h"),
-		EvReclaimed("c", "a", 1, 1, big.NewInt(1), big.NewInt(1), "k"),
+		EvReclaimed("c", "a", 1, 1, big.NewInt(1), big.NewInt(1), big.NewInt(1), "k"),
 		EvRefunded("c", "a", 1, big.NewInt(1), big.NewInt(1)),
 		EvRefundPushed("c", "a", "h", 1, big.NewInt(1), big.NewInt(1)),
 		EvClosed("c", "a", 1),

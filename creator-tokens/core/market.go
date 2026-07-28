@@ -606,6 +606,7 @@ func registerApply(s Store, creator string, block uint64, face, cap int64) {
 	setU64(s, kMissCount(creator), 0)
 	setU64(s, kDeliveredCount(creator), 0)
 	setU64(s, kDelinquentUntil(creator), 0)
+	setU64(s, kMaxOffenceUntil(creator), 0) // same reason: it is per-window state of the DEAD incarnation
 
 	setU64(s, kPaidUntil(creator), block+SubscriptionPeriod)
 	setMoney(s, kFace(creator), big.NewInt(face)) // kFace is money-typed, see SetFace

@@ -643,9 +643,11 @@ export function splitFaceBaseUnits(faceBaseUnits: number): FaceSplit {
  *  - `expired`     deadlineBlock < block <= deadlineBlock+ReclaimGrace  (dead zone — I6's own gap)
  *  - `reclaimable` block > deadlineBlock+ReclaimGrace               (ask.go:414 Reclaim's own bound, inverted)
  */
-export function deriveAskStatus(rawStatus: 'PENDING' | 'ANSWERED' | 'RECLAIMED', deadlineBlock: number, block: number): AskStatus {
+export function deriveAskStatus(rawStatus: 'PENDING' | 'ANSWERED' | 'RECLAIMED' | 'DECLINED', deadlineBlock: number, block: number): AskStatus {
   if (rawStatus === 'ANSWERED') return 'answered';
   if (rawStatus === 'RECLAIMED') return 'reclaimed';
+  // DECLINED is terminal and block-independent, exactly like the two above.
+  if (rawStatus === 'DECLINED') return 'declined';
   if (block <= deadlineBlock) return 'awaiting';
   if (block > deadlineBlock + RECLAIM_GRACE_BLOCKS) return 'reclaimable';
   return 'expired';

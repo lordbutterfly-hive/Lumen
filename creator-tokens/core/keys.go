@@ -69,6 +69,25 @@ func kMissCount(c string) string       { return mk(c, "dmc") } // unanswered-pas
 func kDeliveredCount(c string) string  { return mk(c, "ddc") } // answered + declined escrows this window
 func kDelinquentUntil(c string) string { return mk(c, "ddu") } // block until which inflows are refused (0 = clear)
 
+// kMaxOffenceUntil holds, for the misses counted in the CURRENT window but not
+// yet convicted, the largest `offenceBlock + DelinquencyBlocks` seen so far —
+// i.e. when the penalty would end if the freshest of those offences were the
+// one that tipped the threshold (USER RULING 2, 2026-07-28: the window is
+// derived from the OFFENCE, not from the block the reclaim happened to land
+// in). Cleared on conviction and on Register, exactly like the two counters.
+//
+// WHY A RUNNING MAX AND NOT SIMPLY THE TIPPING RECLAIM'S OWN OFFENCE. Reclaim
+// is permissionless, so whoever submits the third reclaim also chooses WHICH
+// escrow it is — and with a bare `rec.deadline`-derived window that choice sets
+// the sentence: reclaim the stalest escrow last and the penalty is already
+// expired on arrival; reclaim the freshest last and it runs the full seven
+// days. That is the same claim-ORDER dependence that sank an earlier design
+// (RULINGS-v2), and our own keeper picks the order. The running max is
+// order-independent: any permutation of the same three misses convicts for the
+// same window, and that window is the one the creator's most recent offence
+// earned.
+func kMaxOffenceUntil(c string) string { return mk(c, "dou") }
+
 // ---- per-incarnation offering catalogue (N named priced offers, 2026-07-27) ----
 //
 // A creator posts up to MaxOfferings named services ("15-min call", "custom
@@ -199,6 +218,28 @@ func kBal(c, holder string) string { return "bal|" + c + "|" + holder }
 func kEscrow(c string, seq uint64) string {
 	return "e|" + c + "|" + strconv.FormatUint(seq, 10)
 }
+
+// ---- ratings (rating.go, USER RULING 2026-07-28) ----
+//
+// Keyed on (creator, seq) — the escrow's own identity. SAFE ACROSS
+// INCARNATIONS without any epoch scoping, because kSeq is DELIBERATELY MONOTONE
+// across incarnations (market.go's own registerApply note): a re-registered
+// market never reissues a seq, so a new escrow can never inherit a dead one's
+// rating. If kSeq ever became resettable, this would silently start carrying
+// scores across market lifetimes and would need epoch-scoping like the
+// offerings catalogue.
+//
+// 0 == NOT RATED. That is what makes the once-only check a plain non-zero test,
+// and it is why MinRating is 1 rather than 0.
+func kAskRating(c string, seq uint64) string {
+	return "r|" + c + "|" + strconv.FormatUint(seq, 10)
+}
+
+// Running aggregates, so a creator's standing is one read instead of a scan.
+// A CONVENIENCE ONLY — the per-escrow scores are the source of truth, and the
+// indexer rebuilds the average from events independently.
+func kRatingSum(c string) string   { return mk(c, "rsum") }
+func kRatingCount(c string) string { return mk(c, "rcnt") }
 
 // ---- price observations (TWAP) ----
 
