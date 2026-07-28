@@ -3,6 +3,20 @@ import { getLogger } from '@ui/lib/logging';
 import { guardWrite } from '@/blog/lib/lite/http/guard';
 import { hasCsrfHeader } from '@/blog/lib/lite/http/csrf';
 import { enforceUpgradeRate } from '@/blog/lib/lite/antispam/rate-limit';
+import * as upgradeEvents from '@/blog/lib/lite/repositories/upgrade-event-repository';
+
+/**
+ * The cap protects the creator account's Resource Credits, which only a NEW creation
+ * spends. Reconciling an attempt that is already in flight spends nothing but two chain
+ * reads — and refusing it would strand a user whose Hive account exists but is not yet
+ * linked, on the very screen that tells them to reload. So an in-flight attempt is
+ * always allowed through.
+ */
+async function allowUpgradeRequest(userId: string | undefined): Promise<boolean> {
+  if (!userId) return true;
+  if (await upgradeEvents.findInFlightByUser(userId)) return true;
+  return enforceUpgradeRate(userId);
+}
 import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { upgradeStatus, upgradeToFullAccount } from '@/blog/lib/lite/upgrade/upgrade-service';
 import { ensureAccountCreator } from '@/blog/lib/lite/upgrade/hive-account-creator';
@@ -33,8 +47,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // Each attempt that reaches the creator can trigger an on-chain token claim, which
   // spends the creator account's resource credits. The per-user advisory lock
   // serialises attempts but does not bound how many a user may make.
-  if (session.user?.userId && !(await enforceUpgradeRate(session.user.userId))) {
-    return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+  if (!(await allowUpgradeRequest(session.user?.userId))) {
+    return NextResponse.json(
+      { status: 'error', code: 'rate_limited', message: 'Too many attempts today — please try again tomorrow.' },
+      { status: 429 }
+    );
   }
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
   const newName = body?.newName;
@@ -91,7 +108,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 
   const session = await getLiteSession();
-  if (session.user?.userId && !(await enforceUpgradeRate(session.user.userId))) {
+  if (!(await allowUpgradeRequest(session.user?.userId))) {
     return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
   }
   ensureAccountCreator();

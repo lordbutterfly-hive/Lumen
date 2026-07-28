@@ -184,7 +184,8 @@ export interface LumenContainer {
   hiveAuthor: string;
   hivePermlink: string;
   /** opening = root post not on chain yet; open = accepting children; closed = full. */
-  status: 'opening' | 'open' | 'closed';
+  /** 'failed' = retired: it could not be opened and must never be retried (migration 0020). */
+  status: 'opening' | 'open' | 'closed' | 'failed';
   childCount: number;
   maxChildren: number;
   openedAt: Date;

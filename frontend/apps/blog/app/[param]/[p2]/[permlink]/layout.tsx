@@ -3,6 +3,9 @@ import React, { PropsWithChildren } from 'react';
 import { notFound } from 'next/navigation';
 import { getPostCached } from '@/blog/lib/cached-api';
 import { liteEntryForPermlinkCached } from '@/blog/lib/lite/render/lite-entry-cached';
+import { liteRecordExists } from '@/blog/lib/lite/render/lite-entry';
+import { getLiteSession } from '@/blog/lib/lite/http/session';
+import { isLumenPermlink } from '@/blog/lib/lite/render/lite-post-id';
 import { attachLiteIdentities } from '@/blog/lib/lite/render/attach-lite';
 import { getObserverFromCookies } from '@/blog/lib/auth-utils';
 import { isValidUserParam } from '@/blog/utils/validate-links';
@@ -25,6 +28,9 @@ export async function generateMetadata({
   const author = params.p2.replace('%40', '').replace('@', '');
   const permlink = params?.permlink;
   const observer = await getObserverFromCookies();
+  // Same viewer the page uses, so an author's own limited post gets its real title and
+  // the cached resolver actually dedupes (it keys on the whole argument list).
+  const viewerUserId = (await getLiteSession()).user?.userId;
 
   try {
     // Use cached version - deduplicated with page's prefetch within the same request
@@ -35,8 +41,18 @@ export async function generateMetadata({
     // rather than returning null, which would jump straight to the catch below and
     // silently hand back generic "Hive" metadata.
     const post =
-      (await getPostCached(author, permlink, observer).catch(() => null)) ??
-      (await liteEntryForPermlinkCached(permlink, observer));
+      // Same ordering as the page: for a Lumen permlink our own record wins, because
+      // the author segment of that URL is a name anyone could have registered on Hive.
+      // Share previews are the most valuable thing to hijack, so they must not differ.
+      (isLumenPermlink(permlink)
+        ? await liteEntryForPermlinkCached(permlink, observer, viewerUserId)
+        : null) ??
+      // A withheld post of ours gets no preview at all, rather than the chain's answer
+      // for a name anyone could have registered.
+      (isLumenPermlink(permlink) && (await liteRecordExists(permlink))
+        ? null
+        : (await getPostCached(author, permlink, observer).catch(() => null)) ??
+          (await liteEntryForPermlinkCached(permlink, observer, viewerUserId)));
 
     // On the raw on-chain URL — the one every other Hive front end links — the post
     // arrives unresolved: the shared publishing account, and the "RE: <container>"

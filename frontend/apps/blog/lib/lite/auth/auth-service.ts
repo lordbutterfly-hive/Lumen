@@ -5,6 +5,7 @@ import { AuthMethod, LumenUser } from '../types';
 import { buildLiteSessionUser } from '../session/lite-session';
 import { getLiteSession } from '../http/session';
 import { vetNameFormat } from '../names/vetting';
+import { execOn, withTransaction } from '../db/pool';
 import * as users from '../repositories/user-repository';
 import * as creds from '../repositories/credential-repository';
 import { siblingBtcAddresses } from './btc-key-fingerprint';
@@ -147,12 +148,47 @@ export async function completeSignup(displayNameRaw: string): Promise<SignupResu
   const vet = vetNameFormat(displayName);
   if (!vet.ok) return { status: 'error', code: 'invalid_name', message: vet.error };
 
-  // One external_ref -> at most one name ever (spec §B.3): if the binder now
-  // exists (e.g. a concurrent tab finished signup), resolve to it instead.
-  const existingBinder = await creds.findByMethodAndRef(pending.method, pending.externalRef);
+  // One external_ref -> at most one name ever (spec §B.3): if the binder now exists
+  // (a concurrent tab finished signup, or this credential was bound to an account in
+  // the meantime), resolve to it instead of minting a second account.
+  //
+  // Looked up by external_ref AND by key fingerprint, not just the former. One BTC key
+  // yields several addresses, and the fingerprint is what makes them one identity —
+  // checking only the address let a second address reach `createUser`, commit the row,
+  // and then hit the fingerprint UNIQUE constraint, leaving an account nobody can sign
+  // into and a Lumen handle nobody can ever have.
+  const existingBinder =
+    (await creds.findByMethodAndRef(pending.method, pending.externalRef)) ??
+    (pending.keyFingerprint
+      ? await creds.findByFingerprint(pending.method, pending.keyFingerprint)
+      : null);
   if (existingBinder) {
     const u = await users.findUserById(existingBinder.userId);
-    if (u) return { status: 'ok', user: await issueSession(u) };
+    // ★ The same three refusals `resolveLogin` makes. Without them this branch was a
+    // side door into a session for a banned, suspended or UPGRADED account — and for an
+    // upgraded one that means a keyless 'full'-tier session under the Lumen handle,
+    // which is exactly what XC-1 forbids.
+    if (u) {
+      if (u.status === 'banned' || u.status === 'suspended') {
+        session.liteSignup = undefined;
+        await session.save();
+        return {
+          status: 'error',
+          code: `account_${u.status}`,
+          message: 'This account cannot be used right now.'
+        };
+      }
+      if (u.accountTier === 'full' || u.hiveAccountName) {
+        session.liteSignup = undefined;
+        await session.save();
+        return {
+          status: 'error',
+          code: 'account_upgraded',
+          message: 'This wallet already belongs to a full Hive account — sign in with its keys.'
+        };
+      }
+      return { status: 'ok', user: await issueSession(u) };
+    }
   }
 
   const reserved = await names.reservePending(displayName, RESERVE_TTL_S);
@@ -181,17 +217,35 @@ export async function completeSignup(displayNameRaw: string): Promise<SignupResu
       ? Buffer.from(pending.emailCiphertextB64, 'base64')
       : null;
 
-    const user = await users.createUser({ displayName });
-    await names.promoteToActive(displayName, user.userId);
-    await creds.createCredential({
-      userId: user.userId,
-      method: pending.method,
-      externalRef: pending.externalRef,
-      network: pending.network ?? null,
-      keyFingerprint: pending.keyFingerprint ?? null,
-      emailCiphertext,
-      emailHash: pending.emailHash ?? null,
-      isPrimary: true
+    // ★ ONE TRANSACTION. These three writes are one fact: "this person has this name
+    // with this credential." Committed separately, a failure on the third left an
+    // account with NO credential — unreachable forever — while permanently consuming
+    // the display name, which is UNIQUE. Repeatable, so it could burn Lumen handles in
+    // bulk.
+    const user = await withTransaction(async (client) => {
+      const exec = execOn(client);
+      const created = await users.createUser({ displayName }, exec);
+      const promoted = await names.promoteToActive(displayName, created.userId, exec);
+      if (!promoted) {
+        // The hold this transaction relies on is gone or belongs to someone else.
+        // Rolling back is the only honest outcome: committing would leave
+        // `name_reservation` and `lumen_user` disagreeing about who owns the name.
+        throw new Error('name_reservation_lost');
+      }
+      await creds.createCredential(
+        {
+          userId: created.userId,
+          method: pending.method,
+          externalRef: pending.externalRef,
+          network: pending.network ?? null,
+          keyFingerprint: pending.keyFingerprint ?? null,
+          emailCiphertext,
+          emailHash: pending.emailHash ?? null,
+          isPrimary: true
+        },
+        exec
+      );
+      return created;
     });
     return { status: 'ok', user: await issueSession(user) };
   } catch (error) {
@@ -199,7 +253,10 @@ export async function completeSignup(displayNameRaw: string): Promise<SignupResu
     // SEQ-2 (PRUNED 2026-07-22): a concurrent signup can promote the same name
     // between reservePending and createUser (the display_name UNIQUE constraint
     // then fires) — surface it as a clean 'name_taken' rather than an uncaught 500.
-    if (error && typeof error === 'object' && (error as { code?: string }).code === '23505') {
+    if (
+      (error && typeof error === 'object' && (error as { code?: string }).code === '23505') ||
+      (error instanceof Error && error.message === 'name_reservation_lost')
+    ) {
       return { status: 'error', code: 'name_taken', message: 'That name is taken.' };
     }
     throw error;

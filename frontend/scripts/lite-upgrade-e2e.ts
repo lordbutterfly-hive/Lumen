@@ -25,6 +25,7 @@ import {
   setAccountCreator
 } from '../apps/blog/lib/lite/upgrade/account-creator';
 import {
+  checkPublicKeys,
   upgradeStatus,
   upgradeToFullAccount
 } from '../apps/blog/lib/lite/upgrade/upgrade-service';
@@ -79,6 +80,8 @@ function publicKeys(seed: string): AccountPublicKeys {
 interface StubOptions {
   exists?: boolean | (() => boolean);
   ownerKey?: string | null;
+  /** Full owner authority; overrides `ownerKey`. `[]` = exists with no key at all. */
+  ownerKeys?: string[];
   existsThrows?: boolean;
   ownerKeyThrows?: boolean;
   /** Omit `accountOwnerKey` entirely — a partial implementation. */
@@ -96,9 +99,11 @@ function stubCreator(options: StubOptions = {}) {
       const value = typeof options.exists === 'function' ? options.exists() : options.exists;
       return Boolean(value) || calls.some((c) => c.name === name);
     },
-    async accountOwnerKey() {
+    async accountOwnerKeys() {
       if (options.ownerKeyThrows) throw new Error('node unreachable');
-      return options.ownerKey ?? null;
+      if (options.ownerKeys) return options.ownerKeys;
+      if (options.ownerKey === null || options.ownerKey === undefined) return null;
+      return [options.ownerKey];
     },
     async pendingActCount() {
       return 5;
@@ -117,7 +122,7 @@ function stubCreator(options: StubOptions = {}) {
       return { trxId: `trx-${name}` };
     }
   };
-  if (options.noOwnerKeyReader) delete (impl as { accountOwnerKey?: unknown }).accountOwnerKey;
+  if (options.noOwnerKeyReader) delete (impl as { accountOwnerKeys?: unknown }).accountOwnerKeys;
   return { impl, calls };
 }
 
@@ -404,24 +409,35 @@ async function main(): Promise<void> {
     );
     check('the user is still lite', (await users.findUserById(ivan.userId))?.accountTier === 'lite');
 
-    // (b) the creator cannot read owner keys at all
-    setAccountCreator(stubCreator({ exists: true, noOwnerKeyReader: true }).impl);
-    const blind = await upgradeToFullAccount(ivan.session, nameI, publicKeys('ivan'));
+    // (b) a creator that cannot read owner keys is refused AT WIRING TIME. Accepting it
+    // would leave every interrupted upgrade permanently unreconcilable, discovered only
+    // when a user is already stuck.
+    let wiringRefused = '';
+    try {
+      setAccountCreator(stubCreator({ exists: true, noOwnerKeyReader: true }).impl);
+    } catch (error) {
+      wiringRefused = error instanceof Error ? error.message : String(error);
+    }
     check(
-      'a creator that cannot prove ownership refuses too',
-      blind.status === 'error' && blind.code === 'reconcile_unavailable',
-      JSON.stringify(blind)
+      'a creator without accountOwnerKeys cannot be installed at all',
+      /accountOwnerKeys/.test(wiringRefused),
+      wiringRefused || 'it was accepted'
     );
 
-    // (c) the account exists but its owner authority names no key
-    setAccountCreator(stubCreator({ exists: true, ownerKey: null }).impl);
-    const noKey = await upgradeToFullAccount(ivan.session, nameI, publicKeys('ivan'));
+    // (c) an account whose owner authority names no key at all is provably NOT one we
+    // created — every account we mint carries our key there — so this is a definite
+    // "not ours", which frees the name and lets a fresh attempt run.
+    setAccountCreator(stubCreator({ exists: true, ownerKeys: [] }).impl);
+    const noKey = await upgradeToFullAccount(ivan.session, nameI, publicKeys('ivan2'));
+    // Not adopted, and the honest answer for a name that is taken on chain by somebody
+    // else: pick another one. (Contrast with the 'unknown' cases above, which refuse to
+    // decide at all.)
     check(
-      'an owner authority with no key is not proof either',
-      noKey.status === 'error' && noKey.code === 'reconcile_unavailable',
+      'an empty owner authority is read as NOT ours',
+      noKey.status === 'error' && noKey.code === 'name_on_chain',
       JSON.stringify(noKey)
     );
-    check('still lite after all three', (await users.findUserById(ivan.userId))?.accountTier === 'lite');
+    check('the user is still lite', (await users.findUserById(ivan.userId))?.accountTier === 'lite');
   }
 
   // ── 11. a failure BEFORE the broadcast frees the name immediately ──────────
@@ -479,6 +495,63 @@ async function main(): Promise<void> {
       [ken.userId]
     );
     check('the attempt stays in flight so the link can be retried', event.rows[0]?.status === 'creating');
+
+    // ★ THE POINT OF THE ORDERING. Un-break the condition that made the link fail, then
+    // reconcile: the account is adopted and linked with no second creation. Asserting
+    // this is what turns "the marker is cleared last so the next request retries it"
+    // from a comment into a fact.
+    await query(`UPDATE lumen_user SET display_name = $2 WHERE user_id = $1`, [
+      ken.userId,
+      `${nameK}zz`.slice(0, 16)
+    ]);
+    const healer = stubCreator({ exists: true, ownerKey: publicKeys('ken').owner });
+    setAccountCreator(healer.impl);
+    const status = await upgradeStatus(ken.session);
+    check('a later request completes the link by itself', status.state === 'upgraded', JSON.stringify(status));
+    check('under the right name', status.hiveAccountName === nameK);
+    check('and no second account was created', healer.calls.length === 0);
+    const healed = await query<{ status: string }>(
+      `SELECT status FROM upgrade_event WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1`,
+      [ken.userId]
+    );
+    check('the attempt is finally marked created', healed.rows[0]?.status === 'created');
+  }
+
+  // ── 12b. only the LAST step failing (the ordering this fix is about) ───────
+  console.log('\n12b. the marker write itself fails');
+  {
+    const liam = await makeLiteUser('m');
+    const nameL = `${liam.displayName}h`.slice(0, 16);
+    const stub = stubCreator();
+    setAccountCreator(stub.impl);
+
+    // Break ONLY the final write, and do it the way a real database failure would: the
+    // transaction id is written by `markCreated` and by nothing before it, so a value
+    // Postgres refuses (a NUL byte is not valid in `text`) fails exactly that statement
+    // and leaves every earlier write committed.
+    const poison = stubCreator();
+    setAccountCreator({
+      ...poison.impl,
+      async createClaimedAccount(name, keys, onBroadcast) {
+        await poison.impl.createClaimedAccount(name, keys, onBroadcast);
+        return { trxId: 'trx\u0000broken' };
+      }
+    });
+    const result = await upgradeToFullAccount(liam.session, nameL, publicKeys('liam'));
+    check(
+      'a failure on the final write is not reported as success',
+      result?.status === 'error' && result.code === 'created_not_linked',
+      JSON.stringify(result)
+    );
+    // The user row WAS written (it is earlier in the sequence), and the event is still
+    // in flight — so the next request finishes the job rather than creating again.
+    const linked = await users.findUserById(liam.userId);
+    check('the user is already linked', linked?.hiveAccountName === nameL);
+    const healer2 = stubCreator({ exists: true, ownerKey: publicKeys('liam').owner });
+    setAccountCreator(healer2.impl);
+    const status2 = await upgradeStatus(liam.session);
+    check('and a later request settles it', status2.state === 'upgraded', JSON.stringify(status2));
+    check('with no second account', healer2.calls.length === 0);
   }
 
   // ── 13. one attempt in flight per user ────────────────────────────────────
@@ -498,6 +571,69 @@ async function main(): Promise<void> {
       [lena.userId]
     );
     check('at most one attempt is ever in flight', Number(inFlight.rows[0]?.c ?? 0) <= 1);
+  }
+
+  // ── 14. one user's cleanup cannot delete another's name hold ──────────────
+  console.log('\n14. name holds are owned');
+  {
+    const names = await import('../apps/blog/lib/lite/repositories/name-reservation-repository');
+    const mia = await makeLiteUser('o');
+    const contested = `hold${Date.now().toString(36).slice(-6)}`;
+
+    // A signup takes an unowned hold on the name.
+    check('a signup can take the hold', await names.reservePending(contested, 300));
+    // An upgrade's cleanup for the same name must not delete it.
+    await names.releasePending(contested, mia.userId);
+    const stillHeld = await query(`SELECT 1 FROM name_reservation WHERE display_name_norm = $1`, [
+      contested
+    ]);
+    check("an upgrade's release leaves a signup hold alone", stillHeld.rows.length === 1);
+
+    // And the signup's own release does remove it.
+    await names.releasePending(contested);
+    const gone = await query(`SELECT 1 FROM name_reservation WHERE display_name_norm = $1`, [contested]);
+    check('the owner can release it', gone.rows.length === 0);
+
+    // The mirror case: an upgrade's owned hold survives a signup's cleanup.
+    check('an upgrade can take an owned hold', await names.reservePending(contested, 300, mia.userId));
+    await names.releasePending(contested);
+    const survived = await query(`SELECT 1 FROM name_reservation WHERE display_name_norm = $1`, [
+      contested
+    ]);
+    check("a signup's release leaves an owned hold alone", survived.rows.length === 1);
+    await names.releasePending(contested, mia.userId);
+  }
+
+  // ── 15. both key validators agree on every input ──────────────────────────
+  console.log('\n15. the two key validators cannot disagree');
+  {
+    const { hiveAccountCreator } = await import(
+      '../apps/blog/lib/lite/upgrade/hive-account-creator'
+    );
+    const good = publicKeys('agree');
+    // The case that motivated the fix: same key BODY, different network prefix. One
+    // validator compared raw strings and the other compared bodies, so this passed the
+    // boundary and then threw deep inside the creator — where the failure is
+    // indistinguishable from a broadcast that may have landed.
+    const sameBodyDifferentPrefix = { ...good, active: `TST${good.active.slice(3)}` };
+    const cases: Record<string, unknown> = {
+      'same body, different prefix': sameBodyDifferentPrefix,
+      'a duplicated key': { ...good, posting: good.active },
+      'a malformed key': { ...good, memo: 'nope' },
+      'well-formed and distinct': good
+    };
+    for (const [label, keys] of Object.entries(cases)) {
+      let creatorRefused = false;
+      try {
+        await hiveAccountCreator.createClaimedAccount('lumentest1', keys as never);
+      } catch (error) {
+        creatorRefused = /malformed|must be distinct/.test(
+          error instanceof Error ? error.message : ''
+        );
+      }
+      const boundaryRefused = checkPublicKeys(keys) === null;
+      check(`both validators agree on: ${label}`, boundaryRefused === creatorRefused, `boundary=${boundaryRefused} creator=${creatorRefused}`);
+    }
   }
 
   // ── cleanup ───────────────────────────────────────────────────────────────

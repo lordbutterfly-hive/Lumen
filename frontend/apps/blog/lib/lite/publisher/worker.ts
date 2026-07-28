@@ -3,6 +3,7 @@ import { liteConfig } from '../config';
 import { PublishJob, PublishPayload } from '../types';
 import * as jobs from '../repositories/publish-job-repository';
 import * as posts from '../repositories/post-repository';
+import { repointToFreshContainer } from '../content/post-service';
 import { CommentOp, getBroadcaster, hasBroadcaster } from './broadcaster';
 import { buildFooter, buildJsonMetadata } from './footer';
 import { ensureContainerPublished, isContainerPermlink } from './container';
@@ -52,8 +53,14 @@ function buildCommentOp(job: PublishJob): CommentOp {
 function isRetriable(error: unknown): boolean {
   const msg = (error instanceof Error ? error.message : String(error)).toLowerCase();
   // Terminal: content/authority problems won't fix themselves on retry.
+  //
+  // `duplicate` is deliberately NOT here. It is the one error that means the broadcast
+  // ALREADY LANDED — either the same transaction or the same permlink — so treating it
+  // as terminal marked the job rejected while the content was live on Hive, leaving
+  // `hive_permlink` NULL forever with no sweep able to find it (the orphan sweep skips
+  // any post that has a job row). Retried, the `postExists` guard sees the post, skips
+  // the broadcast and records the mapping correctly.
   if (
-    msg.includes('duplicate') ||
     msg.includes('invalid') ||
     msg.includes('validate') ||
     msg.includes('authority') ||
@@ -93,21 +100,46 @@ export async function runPublisherOnce(workerId: string): Promise<ProcessOutcome
   try {
     const broadcaster = getBroadcaster();
 
+    // ★ THE POST IS RE-READ BEFORE EVERY BROADCAST, INCLUDING CREATES.
+    //
+    // Cancelling a queued job only reaches jobs still 'pending' — correctly, since a
+    // claimed job is mid-flight. But nothing else stopped a claimed create: between the
+    // claim and the broadcast there is a network call, possibly a container root, and up
+    // to 3.5 seconds of pacing, and a delete or a takedown landing in that window
+    // matched no rows, reported success, and the worker published the removed content
+    // anyway — permanently, publicly, under the shared account, with no sweep that could
+    // ever find it again.
+    const current = await posts.getPostById(job.postId);
+
     // An edit/delete must never be broadcast before the post itself is on chain.
     // Hive's comment op is an UPSERT — the evaluator branches only on "does this
     // permlink already exist" — so an update that overtook its create would be
     // applied as a NEW post, and the late create would then be applied as an EDIT,
     // silently reverting the user's newer text with no error raised anywhere.
-    if (job.jobType !== 'create') {
-      const original = await posts.getPostById(job.postId);
-      if (!original?.hivePermlink) {
-        await jobs.reschedule(job.jobId, 'waiting for the original post to publish first', 30);
+    if (job.jobType !== 'create' && !current?.hivePermlink) {
+      // A create that was cancelled or rejected will never arrive, so waiting for it is
+      // waiting forever — and this path bypasses the attempt ceiling, so "forever" is
+      // literal. Give up once the post has no live create job left.
+      const pendingCreate = await jobs.hasLiveCreateJob(job.postId);
+      if (!pendingCreate) {
+        await jobs.markTerminal(job.jobId, 'the original post was never published', 'rejected');
         return 'failed';
       }
+      await jobs.reschedule(job.jobId, 'waiting for the original post to publish first', 30);
+      return 'failed';
     }
 
     // Crash-after-broadcast guard: if it's already on-chain, just finish the job.
+    //
+    // For a DELETE this reads the other way round — absence means the delete already
+    // landed, not that it never ran. Treating it as "never ran" made the worker
+    // re-broadcast the blank soft-delete stub onto the permlink it had just freed,
+    // re-creating the object on chain.
     const already = await broadcaster.postExists(author, permlink);
+    if (job.jobType === 'delete' && !already) {
+      await jobs.markPublished(job.jobId);
+      return 'processed';
+    }
     if (!already) {
       // A child can only be broadcast once its container root exists on chain —
       // otherwise the node rejects it ("Comment ... not found"). The container root
@@ -117,10 +149,42 @@ export async function runPublisherOnce(workerId: string): Promise<ProcessOutcome
       if (parentAuthor === author && isContainerPermlink(parentPermlink)) {
         const ready = await ensureContainerPublished(broadcaster, parentAuthor, parentPermlink);
         if (!ready) {
+          // A container that has been RETIRED will never open, so waiting on it is
+          // waiting forever — and this path does not consult the attempt ceiling. Move
+          // the post to a fresh container instead and retry promptly.
+          if (await repointToFreshContainer(job.postId)) {
+            await jobs.reschedule(job.jobId, 'container retired — re-pointed to a fresh one', 5);
+            return 'failed';
+          }
           await jobs.reschedule(job.jobId, 'waiting for container root to publish', 60);
           return 'failed';
         }
       }
+      // ★ THE LAST POSSIBLE MOMENT. Everything above — the existence check, opening a
+      // container root, the pacing wait — is time in which a delete or a takedown can
+      // land, and neither can stop a job that is already claimed (`cancelPending` only
+      // reaches 'pending'). Checked here, the window is closed for good.
+      //
+      // Every job type except `delete` itself: an `update` queued before a takedown and
+      // rescheduled past it would otherwise REPUBLISH the removed content — Hive's
+      // comment op is an upsert, so the deleted object simply comes back, invisible in
+      // Lumen because the row stays hidden, and no operator ever learns of it.
+      if (job.jobType !== 'delete') {
+        const live = await posts.getPostById(job.postId);
+        if (!live) {
+          await jobs.markTerminal(job.jobId, 'the post no longer exists', 'rejected');
+          return 'failed';
+        }
+        if (live.deletedLocally || live.feedVisibility !== 'visible') {
+          await jobs.markTerminal(
+            job.jobId,
+            live.deletedLocally ? 'deleted before publishing' : 'moderated before publishing',
+            'rejected'
+          );
+          return 'failed';
+        }
+      }
+
       await pauseForCommentInterval();
       if (job.jobType === 'delete') {
         // Prefer a real delete_comment. Hive refuses it once the comment has

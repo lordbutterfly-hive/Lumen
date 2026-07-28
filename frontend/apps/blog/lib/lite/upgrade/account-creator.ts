@@ -28,7 +28,8 @@ export interface AccountPublicKeys {
 export interface AccountCreator {
   accountExists(name: string): Promise<boolean>;
   /**
-   * The account's current OWNER public key, or null when there is no such account.
+   * Every public key in the account's OWNER authority, or null when there is no such
+   * account (or it cannot be determined).
    *
    * Existence alone is NOT proof that an ambiguous creation of ours succeeded: after a
    * timed-out broadcast the name can be taken by someone else entirely. This lets
@@ -39,7 +40,7 @@ export interface AccountCreator {
    * implementation without it can never PROVE an account is ours, and reconciliation
    * refuses to adopt on anything less than proof. Production implementations must have it.
    */
-  accountOwnerKey?(name: string): Promise<string | null>;
+  accountOwnerKeys?(name: string): Promise<string[] | null>;
   pendingActCount(): Promise<number>;
   claimAct(): Promise<{ trxId: string }>;
   /**
@@ -58,6 +59,15 @@ export interface AccountCreator {
 let creator: AccountCreator | null = null;
 
 export function setAccountCreator(impl: AccountCreator): void {
+  // Loud at wiring time, not silently degraded at 3am. Without this method,
+  // reconciliation can never PROVE an account is ours, so it refuses every ambiguous
+  // case — which permanently wedges any user whose attempt is in flight and whose name
+  // now exists on chain. Refusing is the right call; discovering the cause then is not.
+  if (!impl.accountOwnerKeys) {
+    throw new Error(
+      'AccountCreator must implement accountOwnerKeys(): without it an interrupted upgrade can never be reconciled'
+    );
+  }
   creator = impl;
 }
 

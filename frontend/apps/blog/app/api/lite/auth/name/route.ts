@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
 import { guardWrite } from '@/blog/lib/lite/http/guard';
 import { getClientIp } from '@/blog/lib/lite/http/ip';
+import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { captchaEnabled, verifyCaptcha } from '@/blog/lib/lite/antispam/captcha';
 import { enforceSignupRate, enforceGlobalSignupRate } from '@/blog/lib/lite/antispam/rate-limit';
 import { completeSignup } from '@/blog/lib/lite/auth/auth-service';
@@ -37,6 +38,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   try {
+    // ★ A caller with no pending sign-up spends NOTHING. The global cap is a
+    // platform-wide daily budget (one counter for everyone), so consuming it before
+    // establishing that this request could possibly succeed let an unauthenticated
+    // caller — no wallet, no OAuth, no challenge — drain it and deny signup to every
+    // real user for the rest of the UTC day. `completeSignup` refuses without this
+    // session state anyway; checking it here is one cookie read.
+    const session = await getLiteSession();
+    if (!session.liteSignup) {
+      return NextResponse.json(
+        { status: 'error', code: 'no_pending_signup', message: 'Sign in again to choose a name.' },
+        { status: 400 }
+      );
+    }
     // Global velocity backstop first (bounds IP-rotation), then the per-IP cap.
     if (!(await enforceGlobalSignupRate()) || !(await enforceSignupRate(ip))) {
       return NextResponse.json({ error: 'signup_rate_limited' }, { status: 429 });

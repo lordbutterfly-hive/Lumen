@@ -24,6 +24,8 @@ import {
 import { setAccountExistenceCheck } from '../apps/blog/lib/lite/social/follow-actor';
 import { sanitizeProfile } from '../apps/blog/lib/lite/profile/profile-service';
 import { liteAccountAsProfile } from '../apps/blog/lib/lite/render/lite-account';
+import * as postsRepo from '../apps/blog/lib/lite/repositories/post-repository';
+import { attachLiteIdentities } from '../apps/blog/lib/lite/render/attach-lite';
 
 /** Stands in for a real Hive account, to prove the lite -> Hive direction. */
 const REAL_HIVE_ACCOUNT = 'gtg';
@@ -245,6 +247,82 @@ async function main(): Promise<void> {
     check('rendered profile carries the bio', account?.profile?.about === 'Writes things');
     // Alice re-followed in step 7 and the Hive user followed in step 4.
     check('follower count is real, not zero', (account?.follow_stats?.follower_count ?? 0) === 2);
+  }
+
+  // ── 14. a Lumen identity cannot be pinned on someone else's post ──────────
+  console.log('\n14. authorship forgery');
+  {
+    // A real published lite post: written by `frank`, signed on chain by the shared
+    // publishing account.
+    const frank = await makeLiteUser('n');
+    const post = await postsRepo.createPost({
+      userId: frank.userId,
+      displayNameSnapshot: frank.displayName,
+      tier: 'normal',
+      title: 'A real Lumen post',
+      body: 'body',
+      tags: ['lumen']
+    });
+    await postsRepo.markPostPublished(post.postId, 'hbd-temp', `lumen-${post.postId.toLowerCase()}`);
+
+    // What an attacker can do: broadcast their OWN comment quoting that post id. Both
+    // signals the overlay keys on — the permlink and json_metadata — are on-chain
+    // fields anyone can write.
+    const forged = {
+      author: 'evilbob',
+      permlink: `lumen-${post.postId.toLowerCase()}`,
+      json_metadata: { app: 'x', lumen_post_id: post.postId },
+      title: 'Something I wrote'
+    } as unknown as Parameters<typeof attachLiteIdentities>[0][number];
+    const genuine = {
+      author: 'hbd-temp',
+      permlink: `lumen-${post.postId.toLowerCase()}`,
+      json_metadata: { app: 'lumen/1.0', lumen_post_id: post.postId },
+      title: 'RE: Lumen posts'
+    } as unknown as Parameters<typeof attachLiteIdentities>[0][number];
+
+    await attachLiteIdentities([forged, genuine]);
+    check(
+      "a stranger's post is NOT relabelled with the lite identity",
+      (forged as { _lite?: unknown })._lite === undefined,
+      JSON.stringify((forged as { _lite?: unknown })._lite)
+    );
+    check(
+      'the genuine post still resolves to its author',
+      (genuine as { _lite?: { author?: string } })._lite?.author === frank.displayName,
+      JSON.stringify((genuine as { _lite?: unknown })._lite)
+    );
+
+    // And a junk id in metadata is not even looked up.
+    const junk = {
+      author: 'evilbob',
+      permlink: 'ordinary-post',
+      json_metadata: { lumen_post_id: "'; DROP TABLE lumen_post; --" }
+    } as unknown as Parameters<typeof attachLiteIdentities>[0][number];
+    await attachLiteIdentities([junk]);
+    check('a malformed post id is ignored', (junk as { _lite?: unknown })._lite === undefined);
+  }
+
+  // ── 15. an upgraded account stops acting through the shared publishing account ──
+  console.log('\n15. upgraded accounts and the proxy');
+  {
+    const { checkLiteActorById } = await import('../apps/blog/lib/lite/auth/account-status');
+    const nate = await makeLiteUser('p');
+    check('a lite account may act', (await checkLiteActorById(nate.userId)).ok);
+
+    await users.markUpgraded(nate.userId, `${nate.displayName}h`.slice(0, 16));
+    const proxy = await checkLiteActorById(nate.userId);
+    check(
+      'once upgraded it may NOT post through the shared account',
+      !proxy.ok && proxy.code === 'account_upgraded',
+      JSON.stringify(proxy)
+    );
+    // ...but the one thing with no on-chain equivalent still works for them.
+    const social = await checkLiteActorById(nate.userId, { allowUpgraded: true });
+    check('it may still follow a lite user on Lumen', social.ok);
+
+    const row = await users.findUserById(nate.userId);
+    check('and the row says so explicitly', row?.status === 'upgraded', row?.status);
   }
 
   // ── cleanup ───────────────────────────────────────────────────────────────

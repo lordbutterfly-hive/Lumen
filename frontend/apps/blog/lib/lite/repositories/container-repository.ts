@@ -128,6 +128,26 @@ export async function markPublished(containerId: string): Promise<void> {
   );
 }
 
+/**
+ * Retire a container that cannot be opened, so the next post starts a fresh one.
+ *
+ * Without this a container root that can never publish — a rotated posting key, a
+ * malformed op, an account restriction — holds every child queued behind it forever:
+ * the worker reschedules each one every 60 seconds without consulting the attempt
+ * ceiling, and `reserveChildSlot` keeps filling the same dead container up to its
+ * thousand-child cap. Marking it failed costs one wasted container row and unblocks
+ * everything.
+ */
+export async function abandon(containerId: string, message: string): Promise<void> {
+  // 'failed' is outside the live partial index (migration 0020), so the account is free
+  // to open a fresh container on the very next post.
+  await query(
+    `UPDATE lumen_container SET status = 'failed', closed_at = now(), last_error = $2
+      WHERE container_id = $1`,
+    [containerId, message.slice(0, 2000)]
+  );
+}
+
 export async function recordError(containerId: string, message: string): Promise<void> {
   await query(`UPDATE lumen_container SET last_error = $2 WHERE container_id = $1`, [
     containerId,

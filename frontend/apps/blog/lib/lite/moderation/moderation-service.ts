@@ -4,7 +4,7 @@ import * as users from '../repositories/user-repository';
 import * as posts from '../repositories/post-repository';
 import * as publishJobs from '../repositories/publish-job-repository';
 import * as log from '../repositories/moderation-repository';
-import { takeDownPost } from '../content/post-service';
+import { requeuePublish, takeDownPost } from '../content/post-service';
 
 const logger = getLogger('app');
 
@@ -100,6 +100,8 @@ export interface ModeratePostResult {
   /** True when a chain removal was requested and queued. */
   takedownQueued: boolean;
   cancelledJobs: number;
+  /** True when restoring visibility queued the post for publishing again. */
+  requeued?: boolean;
   /** True while the post is still on Hive — a local hide never changes this. */
   onChain: boolean;
 }
@@ -124,9 +126,34 @@ export async function moderatePost(input: {
   // A takedown only makes sense alongside hiding it here; restoring visibility does
   // not un-delete anything on chain, and pretending otherwise would be a lie.
   const wantsTakedown = Boolean(input.takedown) && input.visibility === 'hidden';
+  // ★ A post that has NOT reached Hive yet must be stopped from doing so, whatever else
+  // this call does. Hiding it only in our database left the queued job untouched, so
+  // the worker broadcast the removed content minutes later — permanent and public,
+  // under our publishing account. `takedown` could prevent it, but only when the
+  // moderator also chose `hidden`; for `author_only` there was no combination that
+  // worked. Cancelling is safe: the post is already hidden here, and a restore
+  // re-queues it.
+  const stoppedBeforePublish =
+    !post.hivePermlink && input.visibility !== 'visible'
+      ? await publishJobs.cancelPending(input.postId, `moderated:${input.visibility}`)
+      : 0;
+  // ★ AND RESTORING MUST PUT IT BACK. Cancelling marks the job 'rejected', which no
+  // other path revives: `releaseHeldForUser` only touches 'holding', `reapStuck` only
+  // 'publishing', and the orphan sweep skips any post that has a job row at all. So a
+  // hide-then-restore left the post visible in Lumen and permanently unable to reach
+  // Hive — silent, and unrecoverable without hand-written SQL.
+  const requeued =
+    !post.hivePermlink && input.visibility === 'visible'
+      ? await requeuePublish(post)
+      : false;
   const result = wantsTakedown
     ? await takeDownPost(input.postId)
-    : { onChain: Boolean(post.hivePermlink), cancelledJobs: 0, queuedDelete: false };
+    : {
+        onChain: Boolean(post.hivePermlink),
+        cancelledJobs: stoppedBeforePublish,
+        queuedDelete: false,
+        requeued
+      };
 
   await log.recordAction({
     actor: input.actor,

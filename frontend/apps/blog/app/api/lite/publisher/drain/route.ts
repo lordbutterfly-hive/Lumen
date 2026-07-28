@@ -48,15 +48,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const body = (await req.json().catch(() => ({}))) as { max?: number };
   const max = Math.min(Math.max(1, Number(body?.max) || 1), MAX_BATCH);
 
-  // Re-enqueue any post that has no publish job before draining, so an orphan can
-  // never sit invisible forever (see reconcileOrphans).
-  const repaired = await reconcileOrphans(MAX_BATCH);
-
   const counts: Record<ProcessOutcome, number> = { idle: 0, processed: 0, failed: 0 };
   // One drain at a time, cluster-wide. Broadcast pacing is process-local, so a
   // second overlapping drain would ignore the 3-second interval and get its
   // transactions rejected. Skipping is correct: the queue is still there next tick.
+  let repaired = 0;
   const ran = await withAdvisoryLock(DRAIN_LOCK, async () => {
+    // Inside the lock: the sweep reserves container slots, and two overlapping sweeps
+    // each committed a slot reservation (sometimes a whole container) that no post ever
+    // used. The final writes were already race-safe; the side effects were not.
+    repaired = await reconcileOrphans(MAX_BATCH);
+
     for (let i = 0; i < max; i++) {
       const outcome = await runPublisherOnce(`drain-${process.pid}`);
       counts[outcome] += 1;

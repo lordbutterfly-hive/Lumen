@@ -52,6 +52,17 @@ export function litePostIdOf(entry?: EntryLike | null): string | undefined {
   return typeof id === 'string' && ULID.test(id) ? id : undefined;
 }
 
+/**
+ * Does this permlink belong to Lumen's own namespace?
+ *
+ * Used to decide that OUR record — not a chain lookup keyed on the URL's author segment
+ * — is authoritative for such a permlink. A lite handle is a name that was free on Hive
+ * at signup, so the author segment of a Lumen URL is not a trustworthy key.
+ */
+export function isLumenPermlink(permlink: string): boolean {
+  return PUBLISHED.test(permlink) || UNPUBLISHED.test(permlink);
+}
+
 /** True when this entry was proxied to Hive by Lumen (drives the lite badge). */
 export function isLumenProxiedEntry(entry?: EntryLike | null): boolean {
   if (!entry) return false;

@@ -151,23 +151,20 @@ export interface UpdatePostPatch {
   tags: string[];
   summary: string | null;
   thumbnailUrl: string | null;
-  feedVisibility: FeedVisibility;
 }
 
+/**
+ * Replace a post's content. Deliberately does NOT touch `feed_visibility`: that column
+ * carries the MODERATOR's decision, and the edit path used to overwrite it with the
+ * pre-screen's default ('visible'), so any sanction short of a full takedown could be
+ * undone by its own author simply saving an edit.
+ */
 export async function updatePostContent(postId: string, patch: UpdatePostPatch): Promise<LumenPost> {
   const { rows } = await query<PostRow>(
     `UPDATE lumen_post
-       SET title = $2, body = $3, tags = $4, summary = $5, thumbnail_url = $6, feed_visibility = $7
+       SET title = $2, body = $3, tags = $4, summary = $5, thumbnail_url = $6
      WHERE post_id = $1 RETURNING *`,
-    [
-      postId,
-      patch.title,
-      patch.body,
-      JSON.stringify(patch.tags),
-      patch.summary,
-      patch.thumbnailUrl,
-      patch.feedVisibility
-    ]
+    [postId, patch.title, patch.body, JSON.stringify(patch.tags), patch.summary, patch.thumbnailUrl]
   );
   return mapPost(rows[0]);
 }
@@ -265,6 +262,25 @@ export async function getPublishParent(
  * ("The parent of a comment cannot change.", hive_evaluator_social.cpp:294/302),
  * so this must never be overwritten once a post has been published under it.
  */
+/**
+ * Unpin an UNPUBLISHED post's parent so it can be re-pointed.
+ *
+ * The pin is first-write-wins for a reason: a published comment's parent can never
+ * change on chain. But a post that never reached Hive has no such commitment, and one
+ * pinned to a container that turned out to be unopenable would otherwise wait on it
+ * forever. Guarded on `hive_permlink IS NULL` so a published post can never be
+ * re-pointed by this.
+ */
+export async function unpinPublishParent(postId: string): Promise<boolean> {
+  const { rowCount } = await query(
+    `UPDATE lumen_post
+        SET publish_parent_author = NULL, publish_parent_permlink = NULL
+      WHERE post_id = $1 AND hive_permlink IS NULL`,
+    [postId]
+  );
+  return (rowCount ?? 0) > 0;
+}
+
 export async function pinPublishParent(
   postId: string,
   author: string,

@@ -17,7 +17,14 @@ export async function GET(
 
   try {
     const post = await getLitePost(params.id);
-    if (!post || post.deletedLocally || post.feedVisibility === 'hidden') {
+    // `author_only` is a real moderation level, not a label: everyone except the author
+    // must be told the post is gone. Gating on 'hidden' alone left a sanctioned post
+    // fully readable at its own URL.
+    const session = await getLiteSession();
+    const isAuthor = Boolean(session.user?.userId && post && session.user.userId === post.userId);
+    const moderated =
+      post?.feedVisibility === 'hidden' || (post?.feedVisibility !== 'visible' && !isAuthor);
+    if (!post || post.deletedLocally || moderated) {
       return NextResponse.json({ error: 'not_found' }, { status: 404 });
     }
     // Overlaid entry, not the raw row: a published post's body lives on chain
@@ -30,7 +37,8 @@ export async function GET(
     // Hive node, which dominates this request by orders of magnitude, and the client
     // caches the result per post id. Batching it would mean a second endpoint shape
     // for a few hundred microseconds.
-    const entry = await liteEntryForPost(post);
+    // Viewer passed through so the author still sees their own limited post.
+    const entry = await liteEntryForPost(post, '', session.user?.userId);
     if (!entry) return NextResponse.json({ error: 'not_found' }, { status: 404 });
     return NextResponse.json({ entry, post });
   } catch (error) {
@@ -57,7 +65,13 @@ export async function DELETE(
 
   const session = await getLiteSession();
   const user = session.user;
-  if (!user?.userId || user.account_tier !== 'lite') {
+  // Deliberately keyed on the Lumen user id alone, not the tier. Deleting your own post
+  // is a WITHDRAWAL, and it is the one thing an upgraded user still needs this session
+  // for: their pre-upgrade posts were signed by the shared publishing account, so they
+  // hold no key that could remove them. Gating on `account_tier === 'lite'` meant that
+  // once their lite cookie expired — and lite login is refused for an upgraded account —
+  // their own back catalogue became permanently unwithdrawable.
+  if (!user?.userId) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 

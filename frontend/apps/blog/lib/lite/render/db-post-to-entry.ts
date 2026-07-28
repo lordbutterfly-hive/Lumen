@@ -1,3 +1,4 @@
+import { liteConfig } from '../config';
 import { Entry, JsonMetadata } from '@hive/common-hiveio-packages/wax';
 import { LumenPost } from '../types';
 
@@ -27,6 +28,14 @@ export function dbPostToEntry(post: LumenPost, publicName?: string): Entry {
   };
 
   return {
+    // Marked as already-resolved. The client overlay used to infer that from the author
+    // string matching the lite name — which anyone could arrange by registering that
+    // name on Hive, since a lite handle is by construction a name that was FREE on Hive
+    // at signup. An explicit flag cannot be forged from chain data.
+    // The account that signed it — or, before publishing, the one that WILL. Never the
+    // empty string: consumers use this as the target of chain operations, and '' is a
+    // value `??` cannot catch, so it silently became "no author" at every call site.
+    _lite: { author, title: post.title, chainAuthor: post.hiveAuthor || liteConfig.frontendAccount },
     active_votes: [],
     author,
     author_payout_value: '0.000 HBD',

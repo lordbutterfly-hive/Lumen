@@ -211,6 +211,39 @@ export async function replacePendingUpdate(
  * ever reached Hive. Deliberately does NOT touch a job already 'publishing': that
  * one may be mid-broadcast, and the delete job queued afterwards will clean up.
  */
+/**
+ * Is there still a create job that could publish this post? Used to stop an edit or a
+ * delete waiting forever on a create that was cancelled, moderated away, or has already
+ * exhausted its attempts — a wait that otherwise bypasses the attempt ceiling entirely.
+ */
+export async function hasLiveCreateJob(postId: string): Promise<boolean> {
+  const { rows } = await query(
+    `SELECT 1 FROM publish_job
+      WHERE post_id = $1 AND job_type = 'create' AND status IN ('pending', 'publishing', 'holding')
+      LIMIT 1`,
+    [postId]
+  );
+  return rows.length > 0;
+}
+
+/**
+ * Cancel queued EDITS for a post that is being removed.
+ *
+ * `cancelPending` covers a post that never reached Hive. This covers the other case: a
+ * published post with an update still queued. Jobs are claimed in `next_attempt_at`
+ * order, so an update rescheduled after a transient failure can be broadcast AFTER the
+ * delete — and because Hive's comment operation is an upsert, that recreates the object
+ * the user or a moderator just removed.
+ */
+export async function cancelPendingUpdates(postId: string, reason: string): Promise<number> {
+  const { rowCount } = await query(
+    `UPDATE publish_job SET status = 'rejected', last_error = $2
+      WHERE post_id = $1 AND job_type = 'update' AND status IN ('pending', 'holding')`,
+    [postId, reason]
+  );
+  return rowCount ?? 0;
+}
+
 export async function cancelPending(postId: string, reason: string): Promise<number> {
   const { rowCount } = await query(
     `UPDATE publish_job SET status = 'rejected', last_error = $2

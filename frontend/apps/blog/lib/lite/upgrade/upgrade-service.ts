@@ -44,8 +44,18 @@ export type UpgradeResult =
     }
   | { status: 'error'; code: string; message: string; hiveAccountName?: string };
 
-/** How long the chain gets to settle a broadcast before absence is read as failure. */
-const SETTLE_WINDOW_S = 180;
+/**
+ * How long the chain gets to settle a broadcast before absence is read as failure.
+ *
+ * The number is not arbitrary. A wax transaction expires 60 seconds after it is built
+ * (`createTransaction()` defaults to `+1m`), and the attempt's clock starts a little
+ * BEFORE that — the row is written first, then the existence check, the token-pool read
+ * and possibly a claim with its ~12s wait run before anything is broadcast. Five
+ * minutes covers that whole span with room to spare, and the cost of being generous is
+ * only that a genuinely failed attempt waits a few minutes before its name is freed —
+ * against the cost of being hasty, which is freeing a name we may already own.
+ */
+const SETTLE_WINDOW_S = 300;
 
 const NAME_LOCK_TTL_S = 300;
 
@@ -71,7 +81,7 @@ const PUBLIC_KEY_PATTERN = /^[A-Z]{3}[1-9A-HJ-NP-Za-km-z]{45,55}$/;
  * impossible. Hive public keys start with a 3-letter prefix; WIFs and master passwords
  * start with `5` or `P5`, and cannot match the pattern.
  */
-function checkPublicKeys(input: unknown): AccountPublicKeys | null {
+export function checkPublicKeys(input: unknown): AccountPublicKeys | null {
   const keys = input as Partial<AccountPublicKeys> | null | undefined;
   if (!keys) return null;
   const roles: (keyof AccountPublicKeys)[] = ['owner', 'active', 'posting', 'memo'];
@@ -198,11 +208,17 @@ async function ownsAccount(
   creator: ReturnType<typeof getAccountCreator>,
   inFlight: { hiveAccountName: string; ownerPublicKey: string | null }
 ): Promise<'yes' | 'no' | 'unknown'> {
-  if (!creator.accountOwnerKey || !inFlight.ownerPublicKey) return 'unknown';
+  if (!creator.accountOwnerKeys || !inFlight.ownerPublicKey) return 'unknown';
   try {
-    const onChainOwner = await creator.accountOwnerKey(inFlight.hiveAccountName);
-    if (!onChainOwner) return 'unknown';
-    return sameKey(onChainOwner, inFlight.ownerPublicKey) ? 'yes' : 'no';
+    const onChainOwners = await creator.accountOwnerKeys(inFlight.hiveAccountName);
+    if (onChainOwners === null) return 'unknown';
+    // An account whose owner authority names NO key is provably not one we created —
+    // every account we create is minted with exactly our key in that slot.
+    if (onChainOwners.length === 0) return 'no';
+    // Membership, not position: `key_auths` is sorted by key, so ours may not be first
+    // if the owner later added another.
+    const ours = inFlight.ownerPublicKey;
+    return onChainOwners.some((key) => sameKey(key, ours)) ? 'yes' : 'no';
   } catch (error) {
     logger.warn({ err: error }, 'Lite upgrade: owner-key check failed — refusing to decide');
     return 'unknown';
@@ -234,7 +250,21 @@ async function completeBookkeeping(
     // Every step below is idempotent (`markUpgraded` is guarded on tier, `promoteToActive`
     // on status), so failing part-way and re-running the whole sequence is safe. Marking
     // the event last makes that re-run happen by itself.
-    await users.markUpgraded(userId, newName);
+    const flipped = await users.markUpgraded(userId, newName);
+    if (!flipped) {
+      // `markUpgraded` is guarded on `account_tier = 'lite'`, so a no-op means the row
+      // was already flipped. That is fine when it was flipped to THIS name (a retry) —
+      // and a serious inconsistency when it names a different account, which must never
+      // be reported as a successful link.
+      const row = await users.findUserById(userId);
+      if (row?.hiveAccountName?.toLowerCase() !== newName.toLowerCase()) {
+        logger.error(
+          { userId, hiveAccountName: newName, existing: row?.hiveAccountName },
+          'Lite upgrade: refusing to link — this user is already bound to a DIFFERENT Hive account'
+        );
+        return false;
+      }
+    }
     await names.promoteToActive(newName, userId).catch(() => undefined);
     // Followers travel with the user id, which never changes, so nothing has to be
     // rewritten for them. This handles the one remaining case: any edge stored against
@@ -255,7 +285,12 @@ async function completeBookkeeping(
 }
 
 export interface UpgradeStatus {
-  state: 'lite' | 'upgraded';
+  /**
+   * `created_not_linked` is the state that matters: an account exists on chain for this
+   * user but Lumen has not recorded it. Reporting that as 'lite' — which is what the
+   * user row still says — walks them into creating a SECOND account.
+   */
+  state: 'lite' | 'upgraded' | 'created_not_linked' | 'still_settling';
   hiveAccountName: string | null;
 }
 
@@ -277,9 +312,20 @@ export async function upgradeStatus(sessionUser: User | undefined): Promise<Upgr
   // Wrapped in an object: `withAdvisoryLock` returns null when the lock was not
   // granted, which would otherwise be indistinguishable from "the user row is null".
   const settled = await withAdvisoryLock(upgradeLockKey(userId), async () => {
-    await resumeInFlightUpgrade(userId).catch(() => null);
-    return { user: await users.findUserById(userId) };
+    const outcome = await resumeInFlightUpgrade(userId).catch(() => null);
+    return { user: await users.findUserById(userId), outcome };
   });
+  // Reconciliation's own answer outranks the user row: the row still says 'lite' in
+  // exactly the case where an account already exists for this person.
+  const outcome = settled?.outcome;
+  if (outcome && outcome.status === 'error') {
+    if (outcome.code === 'created_not_linked') {
+      return { state: 'created_not_linked', hiveAccountName: outcome.hiveAccountName ?? null };
+    }
+    if (outcome.code === 'still_settling') {
+      return { state: 'still_settling', hiveAccountName: null };
+    }
+  }
   // Lock not granted (an upgrade is mid-flight in another tab): report the row as it
   // stands rather than blocking. The POST path re-checks under the lock anyway.
   const user = settled ? settled.user : await users.findUserById(userId);
@@ -405,10 +451,17 @@ async function runUpgrade(
   const locked = await names.reservePending(newName, NAME_LOCK_TTL_S, user.userId);
   if (!locked) return { status: 'error', code: 'name_taken', message: 'That name is being claimed.' };
 
-  // Recorded BEFORE the broadcast, owner key included: this row is the only thing that
-  // can later tell an account we created from a name someone else took.
-  const event = await upgradeEvents.create(user.userId, newName, publicKeys.owner);
   let creationAttempted = false;
+  let event: { id: string };
+  try {
+    // Recorded BEFORE the broadcast, owner key included: this row is the only thing
+    // that can later tell an account we created from a name someone else took. Inside
+    // the try so that a failure here releases the name rather than leaking the hold.
+    event = await upgradeEvents.create(user.userId, newName, publicKeys.owner);
+  } catch (error) {
+    await names.releasePending(newName, user.userId).catch(() => undefined);
+    throw error;
+  }
   try {
     // Chain reconciliation: never burn a second ACT if the account already exists.
     if (await creator.accountExists(newName)) {

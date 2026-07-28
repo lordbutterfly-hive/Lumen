@@ -10,6 +10,16 @@
  */
 import { runPublisherOnce } from './worker';
 import { installDevBroadcaster } from './hive-broadcaster';
+import { withAdvisoryLock } from '../db/pool';
+
+/**
+ * The SAME lock the drain route takes. Hive rejects a second comment from one account
+ * within 3 seconds, and the pacer that prevents that is a module-local variable — so
+ * two publishing processes (this worker and a drain, or two workers) would each believe
+ * they were clear to broadcast. Without this the lock covered only drain-vs-drain,
+ * which is not what its comment claimed.
+ */
+const PUBLISH_LOCK = 971_020_301;
 
 const WORKER_ID = `worker-${process.pid}`;
 const IDLE_POLL_MS = 5000;
@@ -23,7 +33,9 @@ async function loop(): Promise<void> {
   for (;;) {
     let outcome: string;
     try {
-      outcome = await runPublisherOnce(WORKER_ID);
+      // Not granted means another publisher is mid-broadcast: idle and try again, which
+      // is exactly right — the queue is still there next tick.
+      outcome = (await withAdvisoryLock(PUBLISH_LOCK, () => runPublisherOnce(WORKER_ID))) ?? 'idle';
     } catch {
       outcome = 'failed';
     }

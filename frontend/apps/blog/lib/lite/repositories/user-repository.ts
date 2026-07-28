@@ -1,4 +1,4 @@
-import { query } from '../db/pool';
+import { Exec, query } from '../db/pool';
 import { ulid } from '../ids';
 import { AccountTier, LumenProfile, LumenUser, UserStatus } from '../types';
 
@@ -40,11 +40,14 @@ function mapUser(r: UserRow): LumenUser {
 
 const SELECT = 'SELECT * FROM lumen_user';
 
-export async function createUser(input: {
-  displayName: string;
-  avatarUrl?: string | null;
-}): Promise<LumenUser> {
-  const { rows } = await query<UserRow>(
+export async function createUser(
+  input: {
+    displayName: string;
+    avatarUrl?: string | null;
+  },
+  exec: Exec = query
+): Promise<LumenUser> {
+  const { rows } = await exec<UserRow>(
     `INSERT INTO lumen_user (user_id, display_name, avatar_url)
      VALUES ($1, $2, $3) RETURNING *`,
     [ulid(), input.displayName, input.avatarUrl ?? null]
@@ -78,7 +81,7 @@ export async function markUpgraded(
 ): Promise<LumenUser | null> {
   const { rows } = await query<UserRow>(
     `UPDATE lumen_user
-       SET hive_account_name = $2, account_tier = 'full', upgraded_at = now()
+       SET hive_account_name = $2, account_tier = 'full', status = 'upgraded', upgraded_at = now()
      WHERE user_id = $1 AND account_tier = 'lite'
      RETURNING *`,
     [userId, hiveAccountName]

@@ -1,10 +1,12 @@
 import PostContent from './content';
 import { getPostCached } from '@/blog/lib/cached-api';
-import { liteChainCoordinates } from '@/blog/lib/lite/render/lite-entry';
+import { liteChainCoordinates, liteRecordExists } from '@/blog/lib/lite/render/lite-entry';
 import { attachLiteIdentities, attachLiteIdentitiesToDiscussion } from '@/blog/lib/lite/render/attach-lite';
 import { liteEntryForPermlinkCached } from '@/blog/lib/lite/render/lite-entry-cached';
+import { isLumenPermlink } from '@/blog/lib/lite/render/lite-post-id';
 import { getCommunity, getDiscussion, getFollowList } from '@transaction/lib/bridge-api';
 import { getObserverFromCookies } from '@/blog/lib/auth-utils';
+import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { isUsernameValid, isPermlinkValid, isValidUserParam } from '@/blog/utils/validate-links';
 import { notFound } from 'next/navigation';
 import { getLogger } from '@ui/lib/logging';
@@ -36,6 +38,9 @@ const PostPage = async ({
   if (!isPermlinkValid(permlink)) notFound();
 
   const observer = await getObserverFromCookies();
+  // Who is looking, for the one case it changes the answer: a moderator-limited post is
+  // still served to its own author.
+  const viewerUserId = (await getLiteSession()).user?.userId;
 
   const isLoggedIn = observer !== DEFAULT_OBSERVER;
 
@@ -58,12 +63,29 @@ const PostPage = async ({
 
     postData = postResult.status === 'fulfilled' ? (postResult.value ?? null) : null;
 
-    // Lumen lite post fallback. Hivemind has nothing under a lite display name (it
+    // Lumen lite post resolution. Hivemind has nothing under a lite display name (it
     // is not a Hive account), and a lite post's real on-chain author is the shared
-    // publishing account. The permlink identifies the post on its own, so resolve
-    // from that — never from the author segment — and present the lite identity.
-    if (!postData) {
-      postData = await liteEntryForPermlinkCached(permlink, observer);
+    // publishing account. The permlink identifies the post on its own, so resolve from
+    // that — never from the author segment.
+    //
+    // ★ FOR A LUMEN PERMLINK THIS WINS OVER THE CHAIN RESULT, and that ordering is the
+    // whole point. A lite handle is by construction a name that was FREE on Hive when
+    // the user picked it, so anyone can register it, publish a comment under the same
+    // permlink, and have `getPostCached(<handle>, <permlink>)` succeed — serving their
+    // content, title and share preview at the victim's own Lumen URL, on every link
+    // Lumen itself generates. Our own record decides what a Lumen permlink means.
+    if (isLumenPermlink(permlink)) {
+      const lite = await liteEntryForPermlinkCached(permlink, observer, viewerUserId);
+      if (lite) {
+        postData = lite;
+      } else if (await liteRecordExists(permlink)) {
+        // Ours, and withheld (deleted or moderated). Falling back to the chain here
+        // would serve whatever is published at `/@<handle>/<permlink>` — and that handle
+        // is a name anyone could have registered.
+        notFound();
+      }
+    } else if (!postData) {
+      postData = await liteEntryForPermlinkCached(permlink, observer, viewerUserId);
     }
     if (postResult.status === 'rejected') {
       logger.error(postResult.reason, 'Error fetching post data:');

@@ -1,4 +1,4 @@
-import { query } from '../db/pool';
+import { Exec, query } from '../db/pool';
 import { ulid } from '../ids';
 import { AuthMethod, LumenAuthCredential } from '../types';
 
@@ -56,8 +56,11 @@ export interface CreateCredentialInput {
   keyFingerprint?: string | null;
 }
 
-export async function createCredential(input: CreateCredentialInput): Promise<LumenAuthCredential> {
-  const { rows } = await query<CredentialRow>(
+export async function createCredential(
+  input: CreateCredentialInput,
+  exec: Exec = query
+): Promise<LumenAuthCredential> {
+  const { rows } = await exec<CredentialRow>(
     `INSERT INTO lumen_auth_credential (
        credential_id, user_id, method, external_ref, network,
        webauthn_credential_id, webauthn_public_key_cose, webauthn_sign_count,

@@ -224,7 +224,10 @@ function getSigner(): Promise<Signer> {
 }
 
 /** Sign with the creator's ACTIVE authority and broadcast. Returns the transaction id. */
-async function signAndBroadcast(pushOp: (tx: Awaited<ReturnType<IHiveChainInterface['createTransaction']>>) => void) {
+async function signAndBroadcast(
+  pushOp: (tx: Awaited<ReturnType<IHiveChainInterface['createTransaction']>>) => void,
+  onBroadcast?: () => void
+) {
   const signer = await getSigner();
   const chain = await getChain();
 
@@ -236,6 +239,12 @@ async function signAndBroadcast(pushOp: (tx: Awaited<ReturnType<IHiveChainInterf
   )) as BeekeeperSignersModule;
   const provider = await BeekeeperProvider.for(chain, signer.wallet, signer.account, 'active');
   await provider.signTransaction(tx);
+  // The LAST line before the transaction leaves this process. Everything above —
+  // building it (an API round trip for TaPoS), loading the signer module, signing —
+  // can fail with nothing sent, and the caller uses this signal to decide whether it
+  // may safely release the name and retry. Announcing it any earlier turns a routine
+  // node blip into a 300-second name hold and a forced wait for the user.
+  onBroadcast?.();
   await chain.broadcast(tx);
 
   return { trxId: tx.id };
@@ -348,13 +357,17 @@ export const hiveAccountCreator: AccountCreator = {
    * as "keep the keys", and a swallowed transport error here would decide someone's
    * account custody on a network hiccup.
    */
-  async accountOwnerKey(name: string): Promise<string | null> {
+  async accountOwnerKeys(name: string): Promise<string[] | null> {
     const chain = await getChain();
     const res = await chain.api.database_api.find_accounts({ accounts: [name] });
     const found = (res.accounts ?? []).find((account) => account.name === name);
     if (!found) return null;
-    const first = (found.owner?.key_auths ?? [])[0];
-    return first ? String(first[0]) : null;
+    // ALL of them, not just the first. `key_auths` is stored sorted by key, so an
+    // account that later adds a second owner key can push ours off index 0 — and
+    // reading only index 0 would then answer "this is not our account", which is a
+    // DESTRUCTIVE verdict: it fails the attempt, frees the name, and lets a second
+    // account be created while the first is orphaned.
+    return (found.owner?.key_auths ?? []).map((auth) => String(auth[0]));
   },
 
   /** Account Creation Tokens currently held by the creator account. */
@@ -423,9 +436,6 @@ export const hiveAccountCreator: AccountCreator = {
       await waitForActPool();
     }
 
-    // Everything above this line fails without touching the chain. From here on a
-    // failure is ambiguous, and the caller must treat the account as possibly created.
-    onBroadcast?.();
     return signAndBroadcast((tx) => {
       tx.pushOperation({
         create_claimed_account_operation: {
@@ -439,7 +449,7 @@ export const hiveAccountCreator: AccountCreator = {
           extensions: []
         }
       });
-    });
+    }, onBroadcast);
   }
 };
 

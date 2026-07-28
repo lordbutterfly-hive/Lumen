@@ -9,12 +9,49 @@ import { ParentRef } from '@/blog/lib/lite/types';
 
 const logger = getLogger('app');
 
+/** Hive account charset. */
+const HIVE_NAME = /^[a-z][a-z0-9.-]{2,15}$/;
+
+/**
+ * A permlink we are REFERENCING, not creating.
+ *
+ * Deliberately looser than `isValidPermlinkFormat`, which encodes this app's own
+ * slugifier (`[a-z0-9-]`) rather than Hive's rule. Real permlinks on chain predate that
+ * convention and contain dots, underscores and uppercase — so validating a parent
+ * against it made replying to those posts impossible, permanently, with a 400. This
+ * rejects only what cannot be a permlink at all: empty, over-long, or containing
+ * whitespace or control characters.
+ */
+function isReferenceablePermlink(value: string): boolean {
+  return value.length > 0 && value.length <= 256 && !/[\s\u0000-\u001f\u007f]/.test(value);
+}
+
 function parseParentRef(v: unknown): ParentRef | undefined {
   if (!v || typeof v !== 'object') return undefined;
   const o = v as Record<string, unknown>;
-  if (o.type === 'lite' && typeof o.id === 'string') return { type: 'lite', id: o.id };
-  if (o.type === 'chain' && typeof o.author === 'string' && typeof o.permlink === 'string') {
-    return { type: 'chain', author: o.author, permlink: o.permlink };
+  // A lite parent is one of OUR post ids. Unvalidated, `{type:'lite', id:''}` produced
+  // a parent permlink of `lumen-` under the publishing account and failed on chain until
+  // the job exhausted its retries.
+  if (o.type === 'lite' && typeof o.id === 'string' && /^[0-9A-HJKMNP-TV-Z]{26}$/i.test(o.id)) {
+    return { type: 'lite', id: o.id };
+  }
+  // ★ BOTH halves must be well-formed, and the author especially.
+  //
+  // A chain parent with an EMPTY author is not "a reply to nobody" — it is a ROOT
+  // POST. The publisher branches on `parentAuthor` being truthy
+  // (`hive-broadcaster.ts`), so `{author: '', permlink: 'hive-167922'}` made the shared
+  // publishing account publish the caller's title and body as a root post in the
+  // community named by `permlink`. That bypasses the container model entirely and
+  // burns the account's 5-minute root-post interval, which every other lite user's
+  // posting depends on.
+  if (
+    o.type === 'chain' &&
+    typeof o.author === 'string' &&
+    typeof o.permlink === 'string' &&
+    HIVE_NAME.test(o.author.trim().toLowerCase()) &&
+    isReferenceablePermlink(o.permlink.trim())
+  ) {
+    return { type: 'chain', author: o.author.trim().toLowerCase(), permlink: o.permlink.trim() };
   }
   return undefined;
 }
@@ -45,6 +82,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
   if (!body) return NextResponse.json({ error: 'invalid_body' }, { status: 400 });
 
+  // A parent that cannot be parsed is an ERROR, not "no parent". Treating it as absent
+  // published a reply as a standalone post — under the rolling container, invisible in
+  // the thread the user was replying to — and answered 201, so nothing looked wrong.
+  const parsedParent = parseParentRef(body.parentRef);
+  if (body.parentRef && !parsedParent) {
+    return NextResponse.json(
+      { status: 'error', code: 'invalid_parent', message: 'That post could not be identified.' },
+      { status: 400 }
+    );
+  }
+
   const request: CreatePostRequest = {
     tier: body.tier === 'advanced' ? 'advanced' : 'normal',
     body: typeof body.body === 'string' ? body.body : '',
@@ -53,7 +101,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     tags: Array.isArray(body.tags) ? body.tags.filter((t): t is string => typeof t === 'string') : undefined,
     community: typeof body.community === 'string' ? body.community : undefined,
     thumbnailUrl: typeof body.thumbnail === 'string' ? body.thumbnail : undefined,
-    parentRef: parseParentRef(body.parentRef),
+    parentRef: parsedParent,
     editOfPostId: typeof body.editOfPostId === 'string' ? body.editOfPostId : undefined
   };
 

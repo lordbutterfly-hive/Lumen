@@ -19,7 +19,12 @@ const JSON_POST: HeadersInit = { 'Content-Type': 'application/json', [csrfHeader
 export type LiteWriteResult = { status: 'ok'; postId?: string } | { status: 'error'; message: string };
 export type LiteFollowResult = { status: 'ok'; following: boolean } | { status: 'error'; message: string };
 
-function friendly(status: number, code?: string): string {
+function friendly(status: number, code?: string, message?: string): string {
+  // The server's own message wins when it has one. It is written for the user and is
+  // often the only thing that explains the refusal — "this account is now a full Hive
+  // account, sign in with your own keys" rendered as "something went wrong" for every
+  // post, vote and follow an upgraded (or suspended) user attempted.
+  if (message) return message;
   if (status === 401) return 'Please sign in to continue.';
   if (status === 429 || code === 'rate_limited') return 'You’re going a bit fast — please wait a moment and try again.';
   if (status === 503) return 'Lumen accounts aren’t available right now.';
@@ -63,12 +68,18 @@ export async function createLitePost(input: LitePostInput): Promise<LiteWriteRes
       })
     });
     const b = (await res.json().catch(() => null)) as
-      | { status?: string; post?: { id?: string; postId?: string }; code?: string; error?: string }
+      | {
+          status?: string;
+          post?: { id?: string; postId?: string };
+          code?: string;
+          error?: string;
+          message?: string;
+        }
       | null;
     if (res.status === 201 && b?.status === 'ok') {
       return { status: 'ok', postId: b.post?.id ?? b.post?.postId };
     }
-    return { status: 'error', message: friendly(res.status, b?.code || b?.error) };
+    return { status: 'error', message: friendly(res.status, b?.code || b?.error, b?.message) };
   } catch {
     return { status: 'error', message: 'Network error — please try again.' };
   }
@@ -82,9 +93,9 @@ export async function liteVote(author: string, permlink: string, weight: number)
       headers: JSON_POST,
       body: JSON.stringify({ author, permlink, weight })
     });
-    const b = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+    const b = (await res.json().catch(() => null)) as { ok?: boolean; error?: string; message?: string } | null;
     if (res.ok && b?.ok) return { status: 'ok' };
-    return { status: 'error', message: friendly(res.status, b?.error) };
+    return { status: 'error', message: friendly(res.status, b?.error, b?.message) };
   } catch {
     return { status: 'error', message: 'Network error — please try again.' };
   }
@@ -98,9 +109,9 @@ export async function liteReblog(author: string, permlink: string, undo = false)
       headers: JSON_POST,
       body: JSON.stringify({ author, permlink, undo })
     });
-    const b = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+    const b = (await res.json().catch(() => null)) as { ok?: boolean; error?: string; message?: string } | null;
     if (res.ok && b?.ok) return { status: 'ok' };
-    return { status: 'error', message: friendly(res.status, b?.error) };
+    return { status: 'error', message: friendly(res.status, b?.error, b?.message) };
   } catch {
     return { status: 'error', message: 'Network error — please try again.' };
   }
@@ -115,10 +126,10 @@ export async function liteFollow(followeeName: string, unfollow = false): Promis
       body: JSON.stringify({ followeeName })
     });
     const b = (await res.json().catch(() => null)) as
-      | { ok?: boolean; following?: boolean; error?: string }
+      | { ok?: boolean; following?: boolean; error?: string; message?: string }
       | null;
     if (res.ok && b?.ok) return { status: 'ok', following: !!b.following };
-    return { status: 'error', message: friendly(res.status, b?.error) };
+    return { status: 'error', message: friendly(res.status, b?.error, b?.message) };
   } catch {
     return { status: 'error', message: 'Network error — please try again.' };
   }

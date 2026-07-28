@@ -1,4 +1,4 @@
-import { query } from '../db/pool';
+import { Exec, query } from '../db/pool';
 import { NameReservation, NameReservationStatus } from '../types';
 
 interface ReservationRow {
@@ -48,11 +48,20 @@ export async function reservePending(
 }
 
 /** Phase 2 of the two-phase claim: promote a held PENDING reservation to ACTIVE. */
-export async function promoteToActive(nameNorm: string, userId: string): Promise<boolean> {
-  const { rowCount } = await query(
+export async function promoteToActive(
+  nameNorm: string,
+  userId: string,
+  exec: Exec = query
+): Promise<boolean> {
+  // Scoped to a hold this user owns, or an unowned (signup) one. Unscoped, an upgrade
+  // finishing late could convert somebody ELSE's live pending hold into an active
+  // reservation owned by this user — silently taking a name another signup is mid-way
+  // through claiming.
+  const { rowCount } = await exec(
     `UPDATE name_reservation
        SET status = 'active', user_id = $2, expires_at = NULL
-     WHERE display_name_norm = $1 AND status = 'pending'`,
+     WHERE display_name_norm = $1 AND status = 'pending'
+       AND (user_id = $2 OR user_id IS NULL)`,
     [nameNorm, userId]
   );
   return (rowCount ?? 0) > 0;

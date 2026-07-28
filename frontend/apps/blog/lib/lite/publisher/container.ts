@@ -81,6 +81,26 @@ function buildContainerOp(containerId: string, author: string): CommentOp {
  * a failure here is normal right after the account published something else, and is
  * simply retried.
  */
+/**
+ * Is this failure one that retrying cannot fix? Mirrors the worker's own classifier —
+ * the two must agree, or a job and its container disagree about whether to keep trying.
+ * Deliberately conservative: anything unrecognised is treated as transient and retried.
+ */
+function permanentContainerFailure(message: string): boolean {
+  const msg = message.toLowerCase();
+  // Deliberately NARROWER than the worker's job classifier. Retiring a container is
+  // destructive for everything already slotted into it, so only failures that are
+  // unambiguously about US — our key, our configuration, our operation — qualify.
+  // "invalid" and "validate" are excluded on purpose: a gateway or node error whose text
+  // happens to contain them would otherwise retire a perfectly good container.
+  return (
+    msg.includes('authority') ||
+    msg.includes('not configured') ||
+    msg.includes('refusing') ||
+    msg.includes('missing required')
+  );
+}
+
 export async function ensureContainerPublished(
   broadcaster: PostBroadcaster,
   author: string,
@@ -99,6 +119,11 @@ export async function ensureContainerPublished(
     return true;
   }
 
+  // A retired container is never retried: the children pinned to it are re-pointed by
+  // the caller instead. Without this check the worker re-attempted the doomed root every
+  // 60 seconds — a path that does not consult the attempt ceiling — for every child.
+  if (container.status === 'failed') return false;
+
   try {
     // The container root counts against the same 3 s interval its children use.
     await pauseForCommentInterval();
@@ -109,6 +134,21 @@ export async function ensureContainerPublished(
     return true;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    // A container that cannot open for a NON-transient reason must be retired, not
+    // retried forever. Every child is queued behind this root and the worker's
+    // container wait bypasses the attempt ceiling, so "forever" is literal: a rotated
+    // key or a malformed op would hold up to a thousand posts, indefinitely, with the
+    // real cause visible only in this row's `last_error`.
+    if (permanentContainerFailure(message)) {
+      await containers.abandon(container.containerId, message);
+      logger.error(
+        error,
+        'Retiring container %s/%s — it cannot be opened; the next post will start a fresh one',
+        author,
+        permlink
+      );
+      return false;
+    }
     await containers.recordError(container.containerId, message);
     logger.error(error, 'Could not open container %s/%s', author, permlink);
     return false;

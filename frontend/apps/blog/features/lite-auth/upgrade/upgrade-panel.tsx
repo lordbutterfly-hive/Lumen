@@ -35,20 +35,31 @@ interface UpgradeResponse {
   resumed?: boolean;
 }
 
-/** Chain read used only to confirm the created account really holds the user's key. */
-async function onChainOwnerKey(account: string): Promise<string | null> {
-  try {
-    const { getAccountFull } = await import('@transaction/lib/hive-api');
-    const found = await getAccountFull(account);
-    const auths = (found?.owner?.key_auths ?? []) as [string, number][];
-    return auths[0]?.[0] ? String(auths[0][0]) : null;
-  } catch {
-    return null;
+/**
+ * The account's owner keys, waiting for it to appear on chain.
+ *
+ * `broadcast` returns when a node accepts the transaction into its mempool — the
+ * account is not in a block yet, so an immediate read finds nothing. Without the wait
+ * this check silently did nothing in the normal case, which is worse than not having
+ * it: the screen would report "verified" having verified naught.
+ */
+async function onChainOwnerKeys(account: string): Promise<string[] | null> {
+  const { getAccountFull } = await import('@transaction/lib/hive-api');
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      const found = await getAccountFull(account);
+      const auths = (found?.owner?.key_auths ?? []) as [string, number][];
+      if (auths.length) return auths.map((auth) => String(auth[0]));
+    } catch {
+      // Not visible yet, or a node hiccup — both are "try again".
+    }
+    await new Promise((resolve) => setTimeout(resolve, 3000));
   }
+  return null;
 }
 
 interface StatusResponse {
-  state?: 'lite' | 'upgraded';
+  state?: 'lite' | 'upgraded' | 'created_not_linked' | 'still_settling';
   hiveAccountName?: string | null;
 }
 
@@ -90,6 +101,8 @@ const COPY = {
   doneBody: 'Sign in anywhere on Hive with the master password you just saved.',
   finish: 'Done',
   verifying: 'Checking your keys against Hive…',
+  verifyUnknown:
+    'Your account is being written to Hive. We could not confirm your keys against it yet — reload this page in a minute to check.',
   // Shown only if the account on chain does NOT hold the key this browser derived —
   // which would mean the keys just saved open nothing. Loud on purpose.
   keyMismatch:
@@ -105,6 +118,9 @@ const COPY = {
   unavailable:
     'Account creation isn’t switched on yet. Nothing has changed on your account — try again later.',
   keygenFailed: 'Your browser could not generate the keys. Reload the page and try again.',
+  settling:
+    'Your last attempt is still settling on Hive. Give it a minute, then reload this page.',
+  rateLimited: 'Too many attempts today — please try again tomorrow.',
   networkError: 'Network error — your account was not created. Please try again.'
 };
 
@@ -127,6 +143,7 @@ const UpgradePanel: FC = () => {
   const [acknowledged, setAcknowledged] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
   const [verifying, setVerifying] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
   /**
    * On mount, ask the server where this account actually stands before offering to
@@ -154,6 +171,17 @@ const UpgradePanel: FC = () => {
           if (!cancelled && body?.state === 'upgraded' && body.hiveAccountName) {
             setHiveName(body.hiveAccountName);
             setStage('already');
+            return;
+          }
+          // An account exists for this person but Lumen has not linked it. Offering the
+          // name picker here is what walks somebody into a SECOND account.
+          if (!cancelled && body?.state === 'created_not_linked') {
+            setHiveName(body.hiveAccountName ?? '');
+            setStage('notLinked');
+            return;
+          }
+          if (!cancelled && body?.state === 'still_settling') {
+            setError(COPY.settling);
             return;
           }
         }
@@ -210,6 +238,14 @@ const UpgradePanel: FC = () => {
         setError(body?.message || COPY.unavailable);
         return;
       }
+      if (res.status === 429) {
+        setError(body?.message || COPY.rateLimited);
+        return;
+      }
+      if (body?.code === 'still_settling') {
+        setError(COPY.settling);
+        return;
+      }
       if (body?.code === 'already_upgraded') {
         // Their account was made by an earlier attempt; these keys are not its keys.
         // The server sends the name they ACTUALLY hold — showing the one they just
@@ -255,11 +291,27 @@ const UpgradePanel: FC = () => {
       // else on this path is recoverable; this is not. A fresh account can take a few
       // seconds to appear, so silence is treated as "not yet", never as failure — only
       // a definite mismatch raises the alarm.
+      // Its OWN try/finally. The account exists at this point — a failure while
+      // CHECKING it must never fall into the outer catch, which says "your account was
+      // not created". That would print a flat contradiction on the same screen as
+      // "Your Hive account is live", about something irreversible.
       setVerifying(true);
-      const chainOwner = await onChainOwnerKey(created);
-      setVerifying(false);
-      if (chainOwner && !(await ownerKeyMatches(created, keys.masterPassword, chainOwner))) {
-        setError(COPY.keyMismatch);
+      try {
+        const chainOwners = await onChainOwnerKeys(created);
+        if (!chainOwners) {
+          // Say so. "We could not check" and "we checked and it is fine" must never
+          // look the same on this screen.
+          setNotice(COPY.verifyUnknown);
+        } else {
+          const matches = await Promise.all(
+            chainOwners.map((key) => ownerKeyMatches(created, keys.masterPassword, key))
+          );
+          if (!matches.some(Boolean)) setError(COPY.keyMismatch);
+        }
+      } catch {
+        setNotice(COPY.verifyUnknown);
+      } finally {
+        setVerifying(false);
       }
     } catch {
       setError(COPY.networkError);
@@ -324,9 +376,8 @@ const UpgradePanel: FC = () => {
         <p className="mt-2 text-[15px] leading-[1.55] text-[#4b5563]">
           <strong>@{hiveName}</strong> — {COPY.doneBody}
         </p>
-        {verifying ? (
-          <p className="mt-2 text-[13px] text-[#9ca3af]">{COPY.verifying}</p>
-        ) : null}
+        {verifying ? <p className="mt-2 text-[13px] text-[#9ca3af]">{COPY.verifying}</p> : null}
+        {notice ? <p className="mt-2 text-[13px] leading-[1.55] text-[#b45309]">{notice}</p> : null}
         {error ? (
           <p className="mt-3 rounded-xl border border-[#f6c6c0] bg-[#fdf2f0] p-4 text-[14px] font-semibold leading-[1.55] text-[#8c2b1e]">
             {error}

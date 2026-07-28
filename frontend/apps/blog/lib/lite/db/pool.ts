@@ -37,6 +37,22 @@ export async function query<T extends QueryResultRow = QueryResultRow>(
   return getPool().query<T>(text, params);
 }
 
+/**
+ * A query runner. Repository functions that may need to take part in a transaction
+ * accept one of these instead of calling `query` directly: pass nothing for the pool,
+ * or `execOn(client)` to join an open transaction.
+ */
+export type Exec = <T extends QueryResultRow = QueryResultRow>(
+  text: string,
+  params?: unknown[]
+) => Promise<QueryResult<T>>;
+
+/** Bind a transaction client as an {@link Exec}. */
+export function execOn(client: PoolClient): Exec {
+  return <T extends QueryResultRow = QueryResultRow>(text: string, params?: unknown[]) =>
+    client.query<T>(text, params);
+}
+
 /** Run `fn` inside a single BEGIN/COMMIT transaction; ROLLBACK on throw. */
 export async function withTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
   const client = await getPool().connect();
@@ -44,12 +60,19 @@ export async function withTransaction<T>(fn: (client: PoolClient) => Promise<T>)
     await client.query('BEGIN');
     const result = await fn(client);
     await client.query('COMMIT');
+    client.release();
     return result;
   } catch (error) {
-    await client.query('ROLLBACK');
+    try {
+      await client.query('ROLLBACK');
+      client.release();
+    } catch (rollbackError) {
+      // Release WITH the error when the rollback itself fails: that DISCARDS the
+      // connection instead of returning one that may still be inside a transaction to
+      // the pool. The original error is what propagates — the rollback's is incidental.
+      client.release(rollbackError as Error);
+    }
     throw error;
-  } finally {
-    client.release();
   }
 }
 

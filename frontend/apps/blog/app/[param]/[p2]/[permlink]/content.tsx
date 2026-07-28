@@ -178,8 +178,10 @@ const PostContent = () => {
   );
   const [mutedPost, setMutedPost] = useState<boolean>(postData?.stats?.gray || false);
   // Single reblog query shared by header and footer ReblogTrigger components
+  // Same key as the reblog operation below (the real signer), or the button's state
+  // would be read under one identity and written under another.
   const { data: isReblogged } = useRebloggedByQuery(
-    postData?.author ?? '',
+    litePost?.chainAuthor || postData?.author || '',
     postData?.permlink ?? '',
     user.username
   );
@@ -557,7 +559,7 @@ const PostContent = () => {
                     <UserInfo
                       permlink={permlink}
                       moderateEnabled={!!userCanModerate}
-                      author={crossPostData?.author ?? litePost?.chainAuthor ?? postData.author}
+                      author={crossPostData?.author || litePost?.chainAuthor || postData.author}
                       liteName={crossPostData ? undefined : litePost?.author}
                       author_reputation={
                         crossPostData?.author_reputation ?? postData.author_reputation
@@ -577,7 +579,7 @@ const PostContent = () => {
                     {/* Reblog Button in Header */}
                     {!commentSite && (
                       <ReblogTrigger
-                        author={postData.author}
+                        author={litePost?.chainAuthor || postData.author}
                         permlink={postData.permlink}
                         dataTestidTooltipContent="post-header-reblog-tooltip"
                         dataTestidTooltipIcon="post-header-reblog-icon"
@@ -687,7 +689,7 @@ const PostContent = () => {
                       <div className="flex items-center">
                         <UserPopoverCard
                           author={
-                            postData.json_metadata.original_author ?? litePost?.chainAuthor ?? postData.author
+                            postData.json_metadata.original_author || litePost?.chainAuthor || postData.author
                           }
                           liteName={postData.json_metadata.original_author ? undefined : litePost?.author}
                           author_reputation={crossPostData?.author_reputation ?? postData.author_reputation}
@@ -723,7 +725,14 @@ const PostContent = () => {
                     </div>
                     {/* Stats */}
                     <div className="flex items-center gap-2 rounded-md border border-border bg-background px-2.5 py-1.5 text-sm">
-                      <VotesComponentWrapper post={postData} type="post" />
+                      {/* The REAL signer: a full Hive user's vote is a chain op, and
+                          our own vote table keys on the same value the read path sends.
+                          A display name is neither stable (it changes at upgrade) nor a
+                          Hive account. `author` here is a key, never display text. */}
+                      <VotesComponentWrapper
+                        post={{ ...postData, author: litePost?.chainAuthor || postData.author }}
+                        type="post"
+                      />
                       <span className="h-4 w-px bg-border" />
                       <DetailsCardHover
                         post={postData}
@@ -759,7 +768,7 @@ const PostContent = () => {
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3 text-sm">
                     <div className="flex flex-wrap items-center gap-2" data-testid="comment-respons-header">
                       <ReblogTrigger
-                        author={postData.author}
+                        author={litePost?.chainAuthor || postData.author}
                         permlink={postData.permlink}
                         dataTestidTooltipContent="post-footer-reblog-tooltip"
                         dataTestidTooltipIcon="post-footer-reblog-icon"
@@ -820,11 +829,13 @@ const PostContent = () => {
                             <MutePostDialog
                               comment={false}
                               community={category}
-                              username={postData.author}
+                              /* Muting is a chain op: it must name the account that
+                                 actually signed the post, not the Lumen display name. */
+                              username={litePost?.chainAuthor || postData.author}
                               permlink={postData.permlink}
                               contentMuted={postData.stats?.gray ?? false}
                               discussionPermlink={postData.permlink}
-                              discussionAuthor={postData.author}
+                              discussionAuthor={litePost?.chainAuthor || postData.author}
                               temporaryDisable={postData.stats?._temporary}
                             />
                           ) : null}
@@ -922,7 +933,15 @@ const PostContent = () => {
                     <ReplyTextbox
                       editMode={false}
                       onSetReply={setReply}
-                      username={postData.author}
+                      /*
+                        The REAL on-chain author, never the display name. On a Lumen URL
+                        `postData.author` has already been rewritten to the lite identity,
+                        which is not a Hive account — a reply addressed to it names a
+                        parent that does not exist on chain, so the broadcast fails after
+                        four backoffs while the composer reports success and the reply is
+                        simply lost.
+                      */
+                      username={litePost?.chainAuthor || postData.author}
                       permlink={permlink}
                       storageId={replyStorageId}
                       comment={storedComment}

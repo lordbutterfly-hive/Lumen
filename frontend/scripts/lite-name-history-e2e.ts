@@ -49,6 +49,11 @@ const stubCreator: AccountCreator = {
   async accountExists() {
     return false;
   },
+  // Required: reconciliation refuses to adopt an account it cannot prove is ours, and
+  // `setAccountCreator` now rejects an implementation that cannot answer this.
+  async accountOwnerKeys() {
+    return null;
+  },
   async pendingActCount() {
     return 5;
   },

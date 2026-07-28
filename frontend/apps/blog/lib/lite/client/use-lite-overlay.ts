@@ -50,7 +50,14 @@ export function useLiteOverlay(entry?: {
 
   const { data } = useQuery({
     queryKey: ['liteOverlay', postId, chainAuthor],
-    enabled: Boolean(postId),
+    // NEVER re-query an entry that already carries `_lite`. `initialData` only seeds
+    // the cache; the query still refetches on focus and after `staleTime`, and for
+    // these entries `author` has already been replaced with the Lumen name — so the
+    // author check below can only fail, the overlay drops to null, and the byline falls
+    // back to that Lumen name as if it were a Hive account. Which is exactly the
+    // impersonation this gate exists to prevent, since a lite handle is by construction
+    // a name that was free on Hive.
+    enabled: Boolean(postId) && !embedded,
     initialData: embedded,
     // Identity DOES change once, at exactly one moment: when a lite account upgrades
     // to a real Hive account, its whole back catalogue starts rendering under the new
@@ -75,15 +82,15 @@ export function useLiteOverlay(entry?: {
         // and avatar. The stored post says who signed it — if this entry was signed by
         // someone else, it is not that post, so it keeps the identity the chain gave it.
         //
-        // Two authors are acceptable: the account that really signed it, and the lite
-        // identity itself — the post page and our own lite feed hand over entries whose
-        // author has already been resolved, and re-checking those against the chain
-        // account would strip the identity we just resolved. A forged entry matches
-        // neither, because its author is the attacker's own account.
-        const displayed = author.toLowerCase();
-        if (chainAuthor && realAuthor.toLowerCase() !== chainAuthor && displayed !== chainAuthor) {
-          return null;
-        }
+        // ONE acceptable author: the account that really signed the post on chain.
+        //
+        // This used to also accept "the entry already shows the lite name", to let
+        // already-resolved entries through. That was forgeable: a lite handle is a name
+        // that was free on Hive at signup, so an attacker can register it and post as
+        // that account. Entries we resolved ourselves now carry `_lite` (set by
+        // `render/lite-entry.ts` and `render/db-post-to-entry.ts`) and never reach this
+        // request at all. An entry with no author at all is refused rather than trusted.
+        if (!chainAuthor || realAuthor.toLowerCase() !== chainAuthor) return null;
         return { author, title: body?.entry?.title ?? '', chainAuthor: realAuthor };
       } catch {
         return null;

@@ -35,8 +35,17 @@ import { resolvePublicName } from './current-name';
  * `pruneBodyAfterPublish` drops it from our row) and overlay the lite identity.
  * Not yet published: render straight from the row.
  */
-export async function liteEntryForPost(post: LumenPost, observer = ''): Promise<Entry | null> {
-  if (post.deletedLocally || post.feedVisibility === 'hidden') return null;
+export async function liteEntryForPost(
+  post: LumenPost,
+  observer = '',
+  viewerUserId?: string
+): Promise<Entry | null> {
+  // Both moderation levels hide the post from general rendering. `author_only` is the
+  // exception the caller can opt into by naming the viewer — the API route does that so
+  // an author still sees their own limited post instead of a 404 on it.
+  if (post.deletedLocally) return null;
+  if (post.feedVisibility === 'hidden') return null;
+  if (post.feedVisibility !== 'visible' && viewerUserId !== post.userId) return null;
 
   // The author's name TODAY, not the one frozen on the row. After an upgrade these
   // differ, and the whole point of keeping `user_id` stable is that the history
@@ -83,12 +92,33 @@ export async function liteEntryForPost(post: LumenPost, observer = ''): Promise<
 }
 
 /** Resolve a lite post from a permlink alone (author segment is never trusted). */
-export async function liteEntryForPermlink(permlink: string, observer = ''): Promise<Entry | null> {
+/**
+ * Does Lumen have a record for this permlink at all?
+ *
+ * Distinguishes "this post exists but is withheld" (deleted or moderated → the honest
+ * answer is 404) from "this is not one of ours" (→ let the chain answer). Without the
+ * distinction, a removed lite post's URL falls through to a chain lookup keyed on the
+ * URL's author segment — a name anyone can register — and serves their content instead.
+ */
+export async function liteRecordExists(permlink: string): Promise<boolean> {
+  const postId = litePostIdOf({ permlink });
+  if (!postId) return false;
+  return Boolean(await posts.getPostById(postId));
+}
+
+export async function liteEntryForPermlink(
+  permlink: string,
+  observer = '',
+  viewerUserId?: string
+): Promise<Entry | null> {
   const postId = litePostIdOf({ permlink });
   if (!postId) return null;
   const post = await posts.getPostById(postId);
   if (!post) return null;
-  return liteEntryForPost(post, observer);
+  // Viewer threaded through so an author still reaches their own limited-visibility
+  // post at its URL. Without it the carve-out existed only on the JSON API and the page
+  // still answered 404 to the one person allowed to see it.
+  return liteEntryForPost(post, observer, viewerUserId);
 }
 
 /**
