@@ -1498,7 +1498,22 @@ func (e *Engine) fanTick(name string) {
 // it can never top up for a different price than the ask that follows it
 // will actually quote (see askTarget's doc).
 func (e *Engine) ensureCreditsForAsk(name, creator string, at askTarget) {
-	face := at.Face
+	// LIVE, not at.Face (2026-07-28). F9's fix made askIntent re-derive the
+	// price from core.OfferingPrice instead of trusting the snapshot — which
+	// is right — but left this half reading the snapshot, so the top-up and
+	// the ask could size against two different prices. They are called
+	// back-to-back in the same block with the same askTarget, so the only way
+	// they can ever disagree is the source of this value.
+	//
+	// The regression was silent and total: when the live price sat above the
+	// snapshot, the top-up bought too few credits, askIntent's own
+	// `bal >= creditsEstimate` guard then refused, and the actor produced NO
+	// ask at all. No escrow, therefore no expiry, therefore no reclaim — and
+	// TestKeeperAbsentFailSafesHold (the H1 no-keeper fail-safe proof, which
+	// needs >=1 permissionless reclaim) went red. Reading the same live
+	// source in both halves is what makes askTarget's "top-up and ask can
+	// never disagree" property actually true.
+	face := core.OfferingPrice(e.Store, creator, at.OfferingID)
 	if face == nil || face.Sign() <= 0 {
 		return
 	}

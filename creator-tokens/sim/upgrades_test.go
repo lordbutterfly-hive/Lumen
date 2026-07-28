@@ -376,8 +376,33 @@ func TestDenseRunProvesDelinquencyGuardrailNonVacuous(t *testing.T) {
 		t.Fatalf("standing guardrail proof is VACUOUS at seed=%d: %+v -- either the delivery gate broke (fewer purchases refused / fewer outflows succeeding than attempted) or this run's population/timing no longer reaches delinquency; either way this must not silently pass",
 			cfg.Seed, eng.DQ)
 	}
-	if eng.DQ.PurchaseRefusedForDelinquency != eng.DQ.PurchaseAttempts {
-		t.Errorf("every purchase attempted against an already-delinquent creator must be refused for exactly that reason: refused=%d attempted=%d",
+	// THE SAFETY PROPERTY, as an exact accounting identity: every purchase
+	// attempted against an already-delinquent creator was REFUSED — none got
+	// through. A purchase the delivery gate refuses lands in
+	// PurchaseRefusedForDelinquency; one that some earlier guard (the
+	// settlement spend cap, a retiring market) refused first lands in
+	// PurchaseRefusedOther. Anything that SUCCEEDED never reaches either
+	// counter, because checkDelinquencyGuardrail halts the whole run on it.
+	// So refused+other == attempted is precisely "nothing got through".
+	//
+	// This replaced a bare `refused == attempted` (2026-07-28), which was not
+	// the safety property: it silently also demanded that no OTHER guard ever
+	// fire first, so making markets deeper — which is what actually gets this
+	// scenario reached — broke it, with 8 of 52 attempts refused by the spend
+	// cap. Those 8 were refused; they simply prove nothing about the delivery
+	// gate, since they would fail with or without it. The identity below is
+	// strictly stronger about safety, and the floor beneath it keeps the
+	// coverage claim honest.
+	if got := eng.DQ.PurchaseRefusedForDelinquency + eng.DQ.PurchaseRefusedOther; got != eng.DQ.PurchaseAttempts {
+		t.Errorf("a purchase against an already-delinquent creator was neither refused for delinquency nor refused by another guard: refusedForDelinquency=%d refusedOther=%d sum=%d attempted=%d",
+			eng.DQ.PurchaseRefusedForDelinquency, eng.DQ.PurchaseRefusedOther, got, eng.DQ.PurchaseAttempts)
+	}
+	// ...and the delivery gate specifically must be doing real work, not
+	// riding on other guards: a clear majority of attempts, and at least 10,
+	// must be refused BY IT. Without this the identity above would be
+	// satisfied by a run in which the gate never fired once.
+	if eng.DQ.PurchaseRefusedForDelinquency < 10 || eng.DQ.PurchaseRefusedForDelinquency*2 <= eng.DQ.PurchaseAttempts {
+		t.Errorf("the delivery gate itself refused too few purchases to prove anything: refusedForDelinquency=%d of attempted=%d (want >=10 and a strict majority)",
 			eng.DQ.PurchaseRefusedForDelinquency, eng.DQ.PurchaseAttempts)
 	}
 	if eng.DQ.OutflowSucceeded != eng.DQ.OutflowAttempts {

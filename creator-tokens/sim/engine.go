@@ -277,6 +277,14 @@ type Engine struct {
 type DelinquencyStats struct {
 	PurchaseAttempts              int // ask/buy attempted against an ALREADY-delinquent creator
 	PurchaseRefusedForDelinquency int // ... and correctly refused for exactly that reason
+	// PurchaseRefusedOther: refused, but by a DIFFERENT guard that ran first
+	// (the settlement spend cap, a retiring market, ...). Not a guardrail
+	// failure — the purchase was still refused — but it tells us nothing
+	// about the delivery gate either way, because it would have been
+	// refused with or without it. Tracked separately so a test can assert
+	// the exact identity refused+other == attempted (i.e. NOTHING got
+	// through) without conflating "refused" with "refused for this reason".
+	PurchaseRefusedOther int
 	OutflowAttempts               int // payout/renew/shop-config actions attempted against an ALREADY-delinquent creator
 	OutflowSucceeded              int // ... and did NOT fail for a delinquency reason (succeeded, or failed for something unrelated)
 }
@@ -394,7 +402,34 @@ func NewEngine(cfg Config) *Engine {
 			// deliberate "never attempt a doomed call" design choice this
 			// finding does not touch, reported honestly rather than papered
 			// over by tuning the cap absurdly tight to force a hit).
-			InitialCap:  randRangeInt64(actor.RNG, 120, 450),
+			// HETEROGENEOUS ON PURPOSE (2026-07-28). A single global range
+			// cannot buy both properties this simulator needs:
+			//
+			//   tight caps  -> supply stays small -> setCap/raise-cap actually
+			//                  fire, but the settlement spend cap ("no ask may
+			//                  spend >5% of supply") then binds on nearly every
+			//                  ask, so escrows stop being created at all;
+			//   loose caps  -> markets get deep enough to sustain asks (and
+			//                  therefore expiries, and therefore the
+			//                  permissionless reclaims the H1 no-keeper
+			//                  fail-safe proof depends on), but supply never
+			//                  approaches the cap so setCap never fires.
+			//
+			// Measured, seed 1 / 90d / 4 creators / keeper-absent: at a global
+			// [120,450] the run produced 11 asks and ZERO reclaims (every ask
+			// answered or declined), which silently broke
+			// TestKeeperAbsentFailSafesHold; at a global [2_000,200_000] it
+			// produced a reclaim but setCap never fired in any run.
+			//
+			// So draw a MIX: roughly one creator in three is cap-constrained,
+			// the rest are deep. Both code paths are then exercised by the same
+			// population instead of being traded off against each other.
+			InitialCap: func() int64 {
+				if actor.RNG.Intn(3) == 0 {
+					return randRangeInt64(actor.RNG, 120, 450) // cap-constrained
+				}
+				return randRangeInt64(actor.RNG, 2_000, 200_000) // deep
+			}(),
 			PaidInTotal: zeroBig(),
 		}
 		switch {
@@ -734,6 +769,8 @@ func (e *Engine) checkDelinquencyGuardrail(ev *Event) {
 		}
 		if ev.ErrSym == core.ErrDelinquent {
 			e.DQ.PurchaseRefusedForDelinquency++
+		} else {
+			e.DQ.PurchaseRefusedOther++
 		}
 	case "answer", "decline", "reclaim", "sell", "refund", "refundHolder", "claimTradeFees", "renew", "retire",
 		"createOffering", "setOfferingPrice", "setOfferingTitle", "deleteOffering":
@@ -1058,6 +1095,7 @@ func (e *Engine) Summary() string {
 	}
 	fmt.Fprintf(&b, "  purchases (ask/buy) attempted against an already-delinquent creator: %d\n", e.DQ.PurchaseAttempts)
 	fmt.Fprintf(&b, "  ... correctly refused for exactly that reason:                       %d\n", e.DQ.PurchaseRefusedForDelinquency)
+	fmt.Fprintf(&b, "  ... refused by a different guard that ran first (spend cap, ...):   %d\n", e.DQ.PurchaseRefusedOther)
 	fmt.Fprintf(&b, "  payouts/renew/shop-config attempted against an already-delinquent creator: %d\n", e.DQ.OutflowAttempts)
 	fmt.Fprintf(&b, "  ... none blocked by delinquency (succeeded or failed for an unrelated reason): %d\n", e.DQ.OutflowSucceeded)
 	if e.DQ.PurchaseAttempts == 0 {
