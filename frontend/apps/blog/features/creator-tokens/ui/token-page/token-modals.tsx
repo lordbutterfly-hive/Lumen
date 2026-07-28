@@ -141,9 +141,10 @@ const BuyModal: FC<{ m: TokenMarketDetail; onBuy: (usd: number, maxTotalUsd?: nu
   );
 };
 
-const SellModal: FC<{ m: TokenMarketDetail; onSell: (tokens: number) => void; onClose: () => void }> = ({ m, onSell, onClose }) => {
+const SellModal: FC<{ m: TokenMarketDetail; onSell: (tokens: number) => boolean; onClose: () => void }> = ({ m, onSell, onClose }) => {
   const held = m.position?.tokens ?? 0;
   const [amt, setAmt] = useState(String(held || 0));
+  const [failed, setFailed] = useState(false);
   const tokens = parseFloat(amt.replace(/,/g, '')) || 0;
   const q = sellQuote(tokens, m, m.position?.heldDays ?? 999);
   const feePctLabel = Math.round(q.exitFeePct * 100);
@@ -160,7 +161,10 @@ const SellModal: FC<{ m: TokenMarketDetail; onSell: (tokens: number) => void; on
         <div className="mb-3.5 flex items-center rounded-xl border border-[#e4e6e9] px-4 py-3">
           <input
             value={amt}
-            onChange={(e) => setAmt(e.target.value)}
+            onChange={(e) => {
+              setAmt(e.target.value);
+              setFailed(false); // a fresh amount deserves a fresh attempt, not a stale error
+            }}
             inputMode="decimal"
             className="flex-1 border-0 text-[22px] font-bold tabular-nums text-[#161511] outline-none"
           />
@@ -208,8 +212,12 @@ const SellModal: FC<{ m: TokenMarketDetail; onSell: (tokens: number) => void; on
         <button
           onClick={() => {
             if (Number.isFinite(tokens) && tokens > 0) {
-              onSell(tokens);
-              onClose();
+              // onSell reports whether the sell actually executed (defect fix:
+              // this used to close unconditionally, as if a nothing-held or
+              // sub-1-token sell had succeeded) — only close on a real success.
+              const ok = onSell(tokens);
+              if (ok) onClose();
+              else setFailed(true);
             }
           }}
           disabled={!Number.isFinite(tokens) || tokens <= 0 || held <= 0 || tokens > held}
@@ -217,15 +225,26 @@ const SellModal: FC<{ m: TokenMarketDetail; onSell: (tokens: number) => void; on
         >
           {tokens > held ? 'More than you hold' : `Sell — get ~${usdPrice(q.receiveUsd)}`}
         </button>
+        {failed ? (
+          <div className="mt-2.5 text-center text-[12.5px] font-semibold text-[#c0392b]">
+            That sell didn’t go through — your held balance may have changed. Try a smaller amount.
+          </div>
+        ) : null}
         <div className="mt-2.5 text-center text-xs text-[#9ca3af]">Selling is always available — even if this market winds down.</div>
       </div>
     </ModalShell>
   );
 };
 
-const AskModal: FC<{ m: TokenMarketDetail; service: Service | null; onSpend: (usd: number, serviceName?: string, deadlineDays?: number, question?: string) => void; onClose: () => void }> = ({ m, service, onSpend, onClose }) => {
+const AskModal: FC<{
+  m: TokenMarketDetail;
+  service: Service | null;
+  onSpend: (usd: number, serviceName?: string, deadlineDays?: number, question?: string) => boolean;
+  onClose: () => void;
+}> = ({ m, service, onSpend, onClose }) => {
   const [deadline, setDeadline] = useState(7);
   const [question, setQuestion] = useState('');
+  const [failed, setFailed] = useState(false);
   const usd = service?.usd ?? 10;
   // USER RULING 2026-07-27: the posted USD price is the buyer's TOTAL — 12%
   // is a SEPARATE HBD platform commission, never tokens (ask.go splitFace).
@@ -269,8 +288,12 @@ const AskModal: FC<{ m: TokenMarketDetail; service: Service | null; onSpend: (us
         <button
           onClick={() => {
             if (canAffordTokens) {
-              onSpend(usd, service?.name, deadline, question);
-              onClose();
+              // onSpend reports whether the ask actually opened (defect fix:
+              // this used to close unconditionally, as if a wound-down market
+              // or a stale balance check had succeeded) — only close on a real success.
+              const ok = onSpend(usd, service?.name, deadline, question);
+              if (ok) onClose();
+              else setFailed(true);
             }
           }}
           disabled={!canAffordTokens}
@@ -280,15 +303,21 @@ const AskModal: FC<{ m: TokenMarketDetail; service: Service | null; onSpend: (us
             ? `Send question — ${tok(q.tokens)} tokens + ${usdPrice(q.commissionUsd)} HBD`
             : `You need ${tok(q.tokens)} @${m.handle} tokens — buy some first`}
         </button>
+        {failed ? (
+          <div className="mt-2.5 text-center text-[12.5px] font-semibold text-[#c0392b]">
+            That ask didn’t go through — this market may have just closed to new asks, or your token balance changed. Try again.
+          </div>
+        ) : null}
       </div>
     </ModalShell>
   );
 };
 
-const SendModal: FC<{ m: TokenMarketDetail; onTransfer: (tokens: number) => void; onClose: () => void }> = ({ m, onTransfer, onClose }) => {
+const SendModal: FC<{ m: TokenMarketDetail; onTransfer: (tokens: number) => boolean; onClose: () => void }> = ({ m, onTransfer, onClose }) => {
   const held = m.position?.tokens ?? 0;
   const [to, setTo] = useState('');
   const [amt, setAmt] = useState('');
+  const [failed, setFailed] = useState(false);
   const tokens = parseFloat(amt.replace(/,/g, '')) || 0;
   const valid = to.trim().length > 0 && Number.isFinite(tokens) && tokens > 0 && tokens <= held;
   return (
@@ -296,17 +325,40 @@ const SendModal: FC<{ m: TokenMarketDetail; onTransfer: (tokens: number) => void
       <ModalHead title={`Send @${m.handle} tokens`} onClose={onClose} />
       <div className="px-6 pb-6 pt-[18px]">
         <label className="mb-1.5 block text-[12.5px] font-semibold text-[#6b7280]">To (Lumen or Hive name)</label>
-        <input value={to} onChange={(e) => setTo(e.target.value)} placeholder="@name" className="mb-3.5 w-full rounded-xl border border-[#e4e6e9] px-4 py-3 text-[15px] font-semibold text-[#161511] outline-none" />
+        <input
+          value={to}
+          onChange={(e) => {
+            setTo(e.target.value);
+            setFailed(false);
+          }}
+          placeholder="@name"
+          className="mb-3.5 w-full rounded-xl border border-[#e4e6e9] px-4 py-3 text-[15px] font-semibold text-[#161511] outline-none"
+        />
         <div className="mb-1.5 flex items-center justify-between">
           <label className="text-[12.5px] font-semibold text-[#6b7280]">Amount (tokens)</label>
           <button onClick={() => setAmt(String(held))} className="border-0 bg-transparent text-[12.5px] font-semibold text-[#c0392b]">Max ({tok(held)})</button>
         </div>
-        <input value={amt} onChange={(e) => setAmt(e.target.value)} inputMode="decimal" placeholder="0" className="mb-3.5 w-full rounded-xl border border-[#e4e6e9] px-4 py-3 text-[22px] font-bold tabular-nums text-[#161511] outline-none" />
+        <input
+          value={amt}
+          onChange={(e) => {
+            setAmt(e.target.value);
+            setFailed(false); // a fresh amount deserves a fresh attempt, not a stale error
+          }}
+          inputMode="decimal"
+          placeholder="0"
+          className="mb-3.5 w-full rounded-xl border border-[#e4e6e9] px-4 py-3 text-[22px] font-bold tabular-nums text-[#161511] outline-none"
+        />
         <button
           onClick={() => {
             if (valid) {
-              onTransfer(tokens);
-              onClose();
+              // onTransfer reports whether the send actually executed (defect
+              // fix: this used to close unconditionally, as if the store had
+              // clamped a too-large amount down to whatever you held and sent
+              // that instead — it now refuses rather than sending less than
+              // you typed) — only close on a real success.
+              const ok = onTransfer(tokens);
+              if (ok) onClose();
+              else setFailed(true);
             }
           }}
           disabled={!valid}
@@ -314,6 +366,11 @@ const SendModal: FC<{ m: TokenMarketDetail; onTransfer: (tokens: number) => void
         >
           {tokens > held ? 'More than you hold' : `Send ${tok(tokens)} tokens`}
         </button>
+        {failed ? (
+          <div className="mt-2.5 text-center text-[12.5px] font-semibold text-[#c0392b]">
+            That send didn’t go through — your held balance may have changed. Try a smaller amount.
+          </div>
+        ) : null}
         <div className="mt-2.5 text-center text-xs text-[#9ca3af]">Transfers are free and instant on Lumen. Never blocked by billing.</div>
       </div>
     </ModalShell>
@@ -351,9 +408,12 @@ const TokenModals: FC<{
   service: Service | null;
   /** Returns whether the buy actually executed — see market/store.ts's buy() doc. */
   onBuy: (usd: number, maxTotalUsd?: number) => boolean;
-  onSell: (tokens: number) => void;
-  onSpend: (usd: number, serviceName?: string, deadlineDays?: number, question?: string) => void;
-  onTransfer: (tokens: number) => void;
+  /** Returns whether the sell actually executed — see market/store.ts's sell() doc. */
+  onSell: (tokens: number) => boolean;
+  /** Returns whether the ask actually opened — see market/store.ts's spend() doc. */
+  onSpend: (usd: number, serviceName?: string, deadlineDays?: number, question?: string) => boolean;
+  /** Returns whether the transfer actually executed — see market/store.ts's transferTokens() doc. */
+  onTransfer: (tokens: number) => boolean;
   onClose: () => void;
 }> = ({ dialog, market, service, onBuy, onSell, onSpend, onTransfer, onClose }) => {
   if (dialog === 'buy') return <BuyModal m={market} onBuy={onBuy} onClose={onClose} />;

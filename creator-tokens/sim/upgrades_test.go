@@ -77,7 +77,34 @@ func TestKeeperAbsentFailSafesHold(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping the 90-day absent-keeper run in -short mode")
 	}
-	cfg := Config{Seed: 1, Days: 90, NumCreators: 8, NumActors: 24, KeeperProfile: KeeperAbsent}
+	// NumCreators retuned 8 -> 4 (same 24 actors, same seed) — the retune
+	// itself is correct and necessary, empirically verified against this
+	// exact seed before landing, but the mechanism this comment used to name
+	// (F2, an adversarial review) was WRONG, not merely imprecise, and would
+	// have sent the next maintainer chasing oracleTickCadence, which has no
+	// effect at all on this test.
+	//
+	// MEASURED CAUSE (a dump of every refusal across six seed/creator/day
+	// configs, cross-checked directly against this session's own diagnostic
+	// run): ZERO staleness (ErrOracle/MaxStaleBlocks) refusals in ANY config
+	// tested. Every non-delinquency "ask" failure is
+	// `STATE | settlement spend exceeds 5% of supply (spend cap)` —
+	// settlement.go's MaxSpendSupplyBps, a market-DEPTH constraint, not a
+	// TWAP-staleness one: c*10000 <= S*500, so a fixed-size ask needs a
+	// large enough SUPPLY to clear it, and supply is what organic trading
+	// against a fixed actor pool actually builds up. At 8 creators sharing
+	// 24 actors' organic Buy/Sell traffic, each individual market's supply
+	// grows too slowly for a typical ask's credits requirement to ever clear
+	// 5% of it, so asks (and therefore misses, and therefore delinquency,
+	// and therefore the H1 fail-safe's abandoned-escrow scenario this test
+	// exists to prove) almost never actually happen within 90 days at this
+	// seed. Fewer creators sharing the SAME actor pool concentrate the same
+	// trading volume onto fewer, deeper markets — supply grows faster per
+	// market, the spend cap binds less, and the scenario reliably manifests.
+	// See sim/actions.go's shopTick/claimTradeFees/pickAskTarget wiring
+	// (2026-07-28) for the actions this now also exercises that a sparser
+	// config would starve just as badly, for the identical depth reason.
+	cfg := Config{Seed: 1, Days: 90, NumCreators: 4, NumActors: 24, KeeperProfile: KeeperAbsent}
 	eng := NewEngine(cfg)
 	if err := eng.Run(cfg.Days); err != nil {
 		t.Fatalf("absent-keeper run hit an invariant violation: %v", err)
@@ -224,7 +251,7 @@ func TestH2SetFaceDropSandwichRejected(t *testing.T) {
 	maxCredits := big.NewInt(80000)
 
 	// CONTROL: correct commission at the current (unchanged) face -> succeeds.
-	eng.doAskExecute(asker, creator, maxCredits, oldOwed, "cid-control", core.MinAskDeadline)
+	eng.doAskExecute(asker, creator, maxCredits, oldOwed, "cid-control", core.MinAskDeadline, 0)
 	control := eng.Trace.Events[len(eng.Trace.Events)-1]
 	if control.Action != "ask" || !control.OK {
 		t.Fatalf("control ask should succeed (commission %s matches owed at face 4000), got OK=%v err=%s/%s", oldOwed, control.OK, control.ErrSym, control.ErrMsg)
@@ -239,7 +266,7 @@ func TestH2SetFaceDropSandwichRejected(t *testing.T) {
 
 	// The asker's already-signed ask still pays the OLD 480; owed at 3000 is
 	// now 360. The H2 exact-commission guard must reject it.
-	eng.doAskExecute(asker, creator, maxCredits, oldOwed, "cid-sandwich", core.MinAskDeadline)
+	eng.doAskExecute(asker, creator, maxCredits, oldOwed, "cid-sandwich", core.MinAskDeadline, 0)
 	sandwich := eng.Trace.Events[len(eng.Trace.Events)-1]
 	if sandwich.Action != "ask" {
 		t.Fatalf("expected the last event to be the sandwich ask, got %q", sandwich.Action)
@@ -258,7 +285,7 @@ func TestH2SetFaceDropSandwichRejected(t *testing.T) {
 	// at the current, dropped face (owed = floor(3000*1200/10000) = 360) must
 	// succeed at the same block, against the same asker, same oracle state.
 	newOwed := bpsFloorBig(big.NewInt(3000), core.CommissionBps) // 360
-	eng.doAskExecute(asker, creator, maxCredits, newOwed, "cid-honest-at-new-face", core.MinAskDeadline)
+	eng.doAskExecute(asker, creator, maxCredits, newOwed, "cid-honest-at-new-face", core.MinAskDeadline, 0)
 	honest := eng.Trace.Events[len(eng.Trace.Events)-1]
 	if honest.Action != "ask" || !honest.OK {
 		t.Fatalf("an ask paying the CORRECT commission (360) at the dropped face (3000) should succeed — if it doesn't, the sandwich rejection above proves nothing about the H2 guard specifically; got OK=%v err=%s/%s",
@@ -289,4 +316,81 @@ func TestAdversarialIntraBlockOrder(t *testing.T) {
 	}
 	check(false, "ask-execute") // FIFO: whatever was scheduled first
 	check(true, "creator-tick") // adversarial: the creator front-runs the ask at the same block
+}
+
+// TestDenseRunProvesDelinquencyGuardrailNonVacuous — the delivery-gate
+// standing guardrail (core/delivery.go / engine.go's checkDelinquencyGuardrail)
+// existed and was WIRED correctly from the moment it landed, but was 100%
+// VACUOUS on its own outflow half in every configuration this package's own
+// default tests happened to use (an independent adversarial review measured
+// this directly: 5 real runs, seeds 1/2/3/7/11, 90-180 days, up to 12
+// creators x 40 actors -- OutflowAttempts was 0 in every single one). An
+// invariant that never fires proves nothing, and worse, Summary()'s own
+// header used to print "(live-proven, not assumed)" even on a run where it
+// plainly was not.
+//
+// ROOT CAUSE (CORRECTED 2026-07-28, F2, an adversarial review): this note
+// used to name TWAP staleness (MaxStaleBlocks) as the mechanism -- WRONG,
+// and would have sent the next maintainer chasing oracleTickCadence, which
+// has no effect here at all. A dump of every refusal across six seed/
+// creator/day configs (cross-checked directly against a diagnostic run this
+// session) showed ZERO staleness (ErrOracle) refusals anywhere; every
+// non-delinquency "ask" failure is
+// `STATE | settlement spend exceeds 5% of supply (spend cap)` --
+// settlement.go's MaxSpendSupplyBps, a market-DEPTH constraint:
+// c*10000 <= S*500, so a fixed-size ask needs the market's SUPPLY to have
+// grown large enough to clear it. At a "realistic" broad population (many
+// creators sharing a modest actor pool -- this package's own default CLI
+// flags, cmd/sim/main.go), each individual market's supply grows too slowly
+// for a typical ask to ever clear that 5% floor, so successful asks (and
+// therefore misses, and therefore delinquency) are RARE. Concentrating the
+// same actor pool onto fewer creators (this test's Config) raises per-market
+// supply growth (not merely "trade density" in the abstract -- specifically
+// the spend cap's own denominator) enough that a flaky creator reliably
+// crosses MinMissesForDelinquency within the run -- verified empirically
+// against this exact seed before landing, not tuned to a single lucky draw
+// (see the session's own report for the wider sweep this was picked from).
+//
+// THIS TEST IS THE PERMANENT, CI-ENFORCED VERSION of that proof: it is not
+// enough that a manually-run cmd/sim happens to show good counters once: a
+// caller who wants "vacuous is a hard failure" (an independent adversarial
+// review's explicit ask) needs it enforced by `go test` itself, every time,
+// forever -- which is exactly what DeliveryGuardrailExercised() (engine.go)
+// exists for. If this test ever starts failing, that is either (a) a real
+// regression in the delivery gate / RequireInflowOpen worth halting on, or
+// (b) this population/timing tuning has drifted enough that the scenario no
+// longer manifests at this seed -- in which case the fix is to find a new
+// seed/config that DOES reach it and prove it again, never to weaken or
+// delete this test.
+func TestDenseRunProvesDelinquencyGuardrailNonVacuous(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping the 180-day dense run in -short mode")
+	}
+	cfg := Config{Seed: 2, Days: 180, NumCreators: 2, NumActors: 40, KeeperProfile: KeeperReliable}
+	eng := NewEngine(cfg)
+	if err := eng.Run(cfg.Days); err != nil {
+		t.Fatalf("dense run hit an invariant violation: %v", err)
+	}
+
+	if !eng.DeliveryGuardrailExercised() {
+		t.Fatalf("standing guardrail proof is VACUOUS at seed=%d: %+v -- either the delivery gate broke (fewer purchases refused / fewer outflows succeeding than attempted) or this run's population/timing no longer reaches delinquency; either way this must not silently pass",
+			cfg.Seed, eng.DQ)
+	}
+	if eng.DQ.PurchaseRefusedForDelinquency != eng.DQ.PurchaseAttempts {
+		t.Errorf("every purchase attempted against an already-delinquent creator must be refused for exactly that reason: refused=%d attempted=%d",
+			eng.DQ.PurchaseRefusedForDelinquency, eng.DQ.PurchaseAttempts)
+	}
+	if eng.DQ.OutflowSucceeded != eng.DQ.OutflowAttempts {
+		t.Errorf("every outflow/renew/shop-config action attempted against an already-delinquent creator must NOT be blocked by delinquency: succeeded=%d attempted=%d",
+			eng.DQ.OutflowSucceeded, eng.DQ.OutflowAttempts)
+	}
+	// A floor, not a tight bound: this documents the ORDER OF MAGNITUDE this
+	// config/seed actually reaches (both counts were in the several-dozens
+	// range when this was verified), so a future change that quietly starves
+	// this run back down to "1 purchase, 1 outflow, technically non-vacuous"
+	// fails loudly here instead of squeaking by DeliveryGuardrailExercised's
+	// bare >0 check.
+	if eng.DQ.PurchaseAttempts < 10 || eng.DQ.OutflowAttempts < 10 {
+		t.Errorf("standing guardrail proof is technically non-vacuous but far thinner than expected for this seed: %+v (want >=10 of each)", eng.DQ)
+	}
 }

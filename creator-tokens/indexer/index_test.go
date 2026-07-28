@@ -1123,10 +1123,11 @@ func TestIndex_BoughtAndSoldFoldBalancesCorrectly(t *testing.T) {
 
 // TestIndex_RetiredEventIsRecognizedAndDistinctFromClosed verifies the
 // `retired` finding: main.go's `retire` entrypoint really does emit a
-// hand-built `{"ev":"retired",...}` log (verified directly against
-// contract/main.go), which this Index previously did not recognize at all
-// (Stats.Unknown). It also pins that Retired is NOT the same fact as Closed:
-// a retiring market has NOT necessarily fully drained.
+// `{"ev":"retired",...}` log (verified directly against contract/main.go —
+// built via core.EvRetired as of commit 572ab00, previously hand-built
+// inline; byte-identical either way), which this Index previously did not
+// recognize at all (Stats.Unknown). It also pins that Retired is NOT the
+// same fact as Closed: a retiring market has NOT necessarily fully drained.
 func TestIndex_RetiredEventIsRecognizedAndDistinctFromClosed(t *testing.T) {
 	ix := NewIndex()
 	ix.Ingest([]RawEvent{
@@ -1365,5 +1366,50 @@ func TestIndex_SoldTaxOnlyCreditsThePlatformHalf(t *testing.T) {
 	if got := ix.TreasuryHbd(); got.String() != "201" {
 		t.Fatalf("treasury = %s after a 401 exit tax, want 201 (the platform remainder). "+
 			"401 means the whole tax was folded; 200 means the remainder was floored away.", got)
+	}
+}
+
+// TestIndex_RegisterEmitsTwoLogsFromOneOutput pins that ONE contract call can
+// produce TWO log lines, and that both are folded.
+//
+// ../contract/main.go's `register` gained an atomic first buy, so it now logs
+// `registered` AND `bought` from a single call — the only entrypoint that
+// does. ../indexer/source.go's RawEvent doc used to assert the opposite ("at
+// most one log line for every entrypoint … each of which calls sdk.Log at
+// most once"), and nothing tested the two-line case, because there is no
+// production EventSource yet and MockEventSource.Push hardcodes Seq = 0.
+//
+// Seq is what separates two lines sharing one OutputID, and Ingest
+// de-duplicates on the (OutputID, Seq) PAIR. A production source that
+// hardcodes Seq = 0 would therefore mistake the second line for a redelivery
+// and drop it — dropping every creator's entire launch position, silently, on
+// the default new-market path. Both halves are asserted below.
+func TestIndex_RegisterEmitsTwoLogsFromOneOutput(t *testing.T) {
+	const reg = `{"ev":"registered","v":1,"creator":"nia","actor":"nia","block":10,"face":"1000","cap":"100000","feePaid":"0"}`
+	const bought = `{"ev":"bought","v":1,"creator":"nia","actor":"nia","block":10,"minted":"100","cost":"5050","fee":"505","totalDue":"5555"}`
+
+	// CORRECT source behaviour: distinct Seq per log line, same OutputID.
+	ix := NewIndex()
+	ix.Ingest([]RawEvent{
+		{OutputID: "reg-call", Seq: 0, Data: reg},
+		{OutputID: "reg-call", Seq: 1, Data: bought},
+	})
+	if got := ix.Position("nia", "nia"); got.Cmp(big.NewInt(100)) != 0 {
+		t.Fatalf("Position(nia,nia) = %s, want 100 — the creator's atomic first buy was not folded, so the indexer's balance is wrong from the market's first block", got)
+	}
+	if st := ix.Stats(); st.Unknown != 0 {
+		t.Errorf("Stats.Unknown = %d, want 0", st.Unknown)
+	}
+
+	// BROKEN source behaviour: Seq hardcoded to 0 on both lines. This is the
+	// failure mode the doc now warns about — asserted so the consequence is
+	// visible here rather than discovered in production.
+	bad := NewIndex()
+	bad.Ingest([]RawEvent{
+		{OutputID: "reg-call", Seq: 0, Data: reg},
+		{OutputID: "reg-call", Seq: 0, Data: bought},
+	})
+	if got := bad.Position("nia", "nia"); got.Sign() != 0 {
+		t.Fatalf("a Seq-0-for-every-line source folded the second log (Position = %s); if Ingest's dedup identity changed, update source.go's RawEvent doc and MockEventSource.Push together with this test", got)
 	}
 }

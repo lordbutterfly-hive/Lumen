@@ -3,6 +3,7 @@ import { getLogger } from '@ui/lib/logging';
 import { guardWrite } from '@/blog/lib/lite/http/guard';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { upgradeToFullAccount } from '@/blog/lib/lite/upgrade/upgrade-service';
+import { ensureAccountCreator } from '@/blog/lib/lite/upgrade/hive-account-creator';
 
 const logger = getLogger('app');
 
@@ -15,6 +16,14 @@ const logger = getLogger('app');
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const blocked = guardWrite(req);
   if (blocked) return blocked;
+
+  // Dev convenience: wire the env-var active-key signer if one is configured, the
+  // same lazy-install the publisher drain does. In production this is a no-op unless
+  // a KMS-backed creator was already injected at boot. Failures are logged, not
+  // returned — `upgradeToFullAccount` deliberately reports "not configured" only
+  // after it has reported a suspended account, and short-circuiting here would
+  // replace that honest answer with a generic 503.
+  ensureAccountCreator();
 
   const session = await getLiteSession();
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;

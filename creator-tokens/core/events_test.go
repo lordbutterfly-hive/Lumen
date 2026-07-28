@@ -3,6 +3,8 @@ package core
 import (
 	"encoding/json"
 	"math/big"
+	"os"
+	"strings"
 	"testing"
 )
 
@@ -322,6 +324,19 @@ func TestEvAmountFieldsAreAlwaysStrings(t *testing.T) {
 		{"reclaimed", EvReclaimed("c", "a", 1, 1, big.NewInt(1), big.NewInt(1), "k"), []string{"credits", "commissionHbd"}},
 		{"refunded", EvRefunded("c", "a", 1, big.NewInt(1), big.NewInt(1)), []string{"credits", "payout"}},
 		{"refundPushed", EvRefundPushed("c", "a", "h", 1, big.NewInt(1), big.NewInt(1)), []string{"creditsBurned", "payout"}},
+		// Added 2026-07-28: this table covered 11 of the 24 constructors, and
+		// every event added since (declined, the bought/sold curve pair, the
+		// offering catalogue, the two treasury/fee payouts) carries money it
+		// was not checking. bought/sold matter most — they are the curve's
+		// only issuance and redemption path, and they already shipped
+		// unrecognised by the indexer once.
+		{"declined", EvDeclined("c", "a", 1, 1, big.NewInt(1), big.NewInt(1), "k"), []string{"credits", "commissionHbd"}},
+		{"bought", EvBought("c", "a", 1, big.NewInt(1), big.NewInt(1), big.NewInt(1), big.NewInt(1)), []string{"minted", "cost", "fee", "totalDue"}},
+		{"sold", EvSold("c", "a", 1, big.NewInt(1), big.NewInt(1), big.NewInt(1), big.NewInt(1), big.NewInt(1), 1, 1), []string{"sold", "gross", "tax", "fee", "net"}},
+		{"offeringCreated", EvOfferingCreated("c", "a", 1, 1, "t", big.NewInt(1)), []string{"price"}},
+		{"offeringUpdated", EvOfferingUpdated("c", "a", 1, 1, "t", big.NewInt(1), big.NewInt(2)), []string{"oldPrice", "newPrice"}},
+		{"treasuryWithdrawn", EvTreasuryWithdrawn("a", 1, big.NewInt(1)), []string{"amount"}},
+		{"tradeFeesClaimed", EvTradeFeesClaimed("a", 1, big.NewInt(1)), []string{"amount"}},
 	}
 	for _, c := range cases {
 		m := decode(t, c.out)
@@ -483,9 +498,70 @@ func TestEvSchemaVersionIsStableAcrossAllEvents(t *testing.T) {
 		EvRefunded("c", "a", 1, big.NewInt(1), big.NewInt(1)),
 		EvRefundPushed("c", "a", "h", 1, big.NewInt(1), big.NewInt(1)),
 		EvClosed("c", "a", 1),
+		// Added 2026-07-28 — the sweep named itself "AcrossAllEvents" while
+		// covering 12 of 24. The envelope is shared by three different
+		// builders now (evOpen, evOpenActor, and EvInit's inline literal), so
+		// "all events carry v:1" is a claim about all three, not just evOpen.
+		EvDeclined("c", "a", 1, 1, big.NewInt(1), big.NewInt(1), "k"),
+		EvBought("c", "a", 1, big.NewInt(1), big.NewInt(1), big.NewInt(1), big.NewInt(1)),
+		EvSold("c", "a", 1, big.NewInt(1), big.NewInt(1), big.NewInt(1), big.NewInt(1), big.NewInt(1), 1, 1),
+		EvOfferingCreated("c", "a", 1, 1, "t", big.NewInt(1)),
+		EvOfferingUpdated("c", "a", 1, 1, "t", big.NewInt(1), big.NewInt(2)),
+		EvOfferingDeleted("c", "a", 1, 1),
+		EvRetired("c", "a", 1),
+		EvTreasuryWithdrawn("a", 1, big.NewInt(1)),
+		EvTradeFeesClaimed("a", 1, big.NewInt(1)),
+		EvInit("owner"),
+		EvPaused("a"),
+		EvUnpaused("a"),
+	}
+	if len(outs) != 24 {
+		t.Fatalf("this sweep must cover EVERY constructor in events.go; it has %d and there are 24. Add the missing one rather than leaving the name a lie.", len(outs))
 	}
 	for _, out := range outs {
 		m := decode(t, out)
 		wantNum(t, m, "v", 1)
+	}
+}
+
+// TestRegisterWithFirstBuy_BoughtEventIsActuallyWiredInTheWrapper closes the
+// gap an adversarial review found in the two tests above: they call
+// EvRegistered/EvBought DIRECTLY, so deleting the sdk.Log(core.EvBought(...))
+// line from ../contract/main.go's `register` entrypoint leaves every test in
+// this repo green while re-opening the exact defect they were written for —
+// a creator's own launch holding invisible to the indexer forever.
+//
+// ../contract/ cannot be compiled by the native toolchain (it imports the
+// TinyGo-only sdk), so a source-presence check is the only guard available.
+// Same idiom as fixround1_test.go's TestContract_OUTFLOW1_* .
+func TestRegisterWithFirstBuy_BoughtEventIsActuallyWiredInTheWrapper(t *testing.T) {
+	src, err := os.ReadFile("../contract/main.go")
+	if err != nil {
+		t.Fatalf("read contract/main.go: %v", err)
+	}
+	text := string(src)
+
+	ri := strings.Index(text, "//go:wasmexport register")
+	if ri < 0 {
+		t.Fatal("contract/main.go has no //go:wasmexport register — this test's premise is broken, fix it rather than deleting it")
+	}
+	region := text[ri:]
+	if end := strings.Index(region[1:], "//go:wasmexport"); end >= 0 {
+		region = region[:end+1]
+	}
+
+	if !strings.Contains(region, "res.FirstBuy != nil") {
+		t.Fatal("GAP-2 REGRESSION: register no longer gates on res.FirstBuy != nil — a plain registration would emit a bogus `bought` event, or the first buy is no longer detected at all")
+	}
+	if !strings.Contains(region, "core.EvBought(caller, caller, block, res.FirstBuy.Minted,") {
+		t.Fatal("GAP-2 REGRESSION: register's atomic first buy no longer logs core.EvBought from res.FirstBuy — real money and real tokens move (kReserve, kFeeBal, kBal all mutate in buy.go) but no `bought` event is emitted, so the creator's own launch holding is invisible to the indexer from the first block and its balance for that creator is wrong forever")
+	}
+	// Ordering: the registration event must precede the buy event, so a
+	// consumer folding them in log order sees the market exist before tokens
+	// are minted into it.
+	regAt := strings.Index(region, "core.EvRegistered(")
+	buyAt := strings.Index(region, "core.EvBought(")
+	if regAt < 0 || buyAt < 0 || regAt > buyAt {
+		t.Fatal("GAP-2 REGRESSION: register must log EvRegistered BEFORE EvBought — an indexer folding in order would otherwise mint into a market it has not seen created")
 	}
 }

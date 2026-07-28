@@ -1050,7 +1050,8 @@ func Reclaim(a *string) *string {
 // layer. That is a WRAPPER gap ... and it is a hard blocker for shipping."
 // That is no longer true and directly contradicted the paragraph's own
 // opening sentence above it even at the time it was written. Wave D shipped:
-// both `buy` (go:wasmexport buy) and `sell` (go:wasmexport sell) are fully
+// both `buy` and `sell` (their export directives are on the funcs below,
+// spelled out here would inflate any naive export count) are fully
 // implemented below, CEI-ordered (state mutated first, HBD moved second) and
 // event-logged (EvBought/EvSold) exactly like every other fund-moving
 // entrypoint in this file. The rail reconciliation above is the CURRENT,
@@ -1706,7 +1707,19 @@ func SetOfferingPrice(a *string) *string {
 	}
 	block := currentBlock()
 
-	id := jsonU64(payload, "offeringId")
+	// jsonU64Field, not jsonU64 (2026-07-28): 0 is a MEANINGFUL offeringId —
+	// it is the reserved alias for the legacy `face` price — so a malformed
+	// or missing value silently defaulting to 0 is the same 0-is-meaningful
+	// hazard that was closed on ask/quote/answer/decline/reclaim. It fails
+	// CLOSED here today (0 hits "no such offering"), so this is consistency
+	// and an honest error message rather than a live defect — but leaving
+	// three sites on the loose parser is how the next one stops failing
+	// closed without anyone noticing.
+	id, idOK := jsonU64Field(payload, "offeringId")
+	if !idOK {
+		handleErr(inputErr("offeringId must be an unquoted non-negative integer"))
+		return nil
+	}
 	newPrice, ok := i64FromU64(jsonU64(payload, "newPrice"))
 	if !ok {
 		handleErr(inputErr("newPrice overflows int64"))
@@ -1738,7 +1751,19 @@ func SetOfferingTitle(a *string) *string {
 	}
 	block := currentBlock()
 
-	id := jsonU64(payload, "offeringId")
+	// jsonU64Field, not jsonU64 (2026-07-28): 0 is a MEANINGFUL offeringId —
+	// it is the reserved alias for the legacy `face` price — so a malformed
+	// or missing value silently defaulting to 0 is the same 0-is-meaningful
+	// hazard that was closed on ask/quote/answer/decline/reclaim. It fails
+	// CLOSED here today (0 hits "no such offering"), so this is consistency
+	// and an honest error message rather than a live defect — but leaving
+	// three sites on the loose parser is how the next one stops failing
+	// closed without anyone noticing.
+	id, idOK := jsonU64Field(payload, "offeringId")
+	if !idOK {
+		handleErr(inputErr("offeringId must be an unquoted non-negative integer"))
+		return nil
+	}
 	title := jsonStr(payload, "title")
 
 	if err := core.SetOfferingTitle(store, caller, caller, id, title); err != nil {
@@ -1767,7 +1792,19 @@ func DeleteOffering(a *string) *string {
 	}
 	block := currentBlock()
 
-	id := jsonU64(payload, "offeringId")
+	// jsonU64Field, not jsonU64 (2026-07-28): 0 is a MEANINGFUL offeringId —
+	// it is the reserved alias for the legacy `face` price — so a malformed
+	// or missing value silently defaulting to 0 is the same 0-is-meaningful
+	// hazard that was closed on ask/quote/answer/decline/reclaim. It fails
+	// CLOSED here today (0 hits "no such offering"), so this is consistency
+	// and an honest error message rather than a live defect — but leaving
+	// three sites on the loose parser is how the next one stops failing
+	// closed without anyone noticing.
+	id, idOK := jsonU64Field(payload, "offeringId")
+	if !idOK {
+		handleErr(inputErr("offeringId must be an unquoted non-negative integer"))
+		return nil
+	}
 	if err := core.DeleteOffering(store, caller, caller, id); err != nil {
 		handleErr(err)
 		return nil

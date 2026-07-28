@@ -28,6 +28,7 @@ function UserInfo({
   category,
   created,
   author,
+  liteName,
   author_reputation,
   author_title,
   blacklist
@@ -37,6 +38,7 @@ function UserInfo({
     <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 py-2 text-sm" data-testid="author-data">
       <UserPopoverCard
         author={author}
+        liteName={liteName}
         author_reputation={author_reputation}
         withImage
         blacklist={blacklist}

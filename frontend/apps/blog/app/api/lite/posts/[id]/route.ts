@@ -23,6 +23,13 @@ export async function GET(
     // Overlaid entry, not the raw row: a published post's body lives on chain
     // (pruneBodyAfterPublish drops our copy), and the identity overlay is applied
     // there too.
+    //
+    // Feed cards call this endpoint once per lite post (client/use-lite-overlay.ts),
+    // and resolving the author's CURRENT name costs one extra primary-key lookup on
+    // top of the post read. Accepted deliberately: it sits next to a remote call to a
+    // Hive node, which dominates this request by orders of magnitude, and the client
+    // caches the result per post id. Batching it would mean a second endpoint shape
+    // for a few hundred microseconds.
     const entry = await liteEntryForPost(post);
     if (!entry) return NextResponse.json({ error: 'not_found' }, { status: 404 });
     return NextResponse.json({ entry, post });

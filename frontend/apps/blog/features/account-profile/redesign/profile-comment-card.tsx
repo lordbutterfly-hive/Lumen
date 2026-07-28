@@ -5,6 +5,7 @@ import { Icons } from '@ui/components/icons';
 import TimeAgo from '@ui/components/time-ago';
 import { cn } from '@ui/lib/utils';
 import { Entry } from '@hive/common-hiveio-packages/wax';
+import { useLiteOverlay } from '@/blog/lib/lite/client/use-lite-overlay';
 import { useTranslation } from '@/blog/i18n/client';
 import { getPostSummary } from '@/blog/lib/utils';
 import VotesComponentWrapper from '@/blog/features/votes/votes-component-wrapper';
@@ -21,7 +22,11 @@ import DetailsCardHover from '@/blog/features/list-of-posts/details-card-hover';
  */
 export default function ProfileCommentCard({ post }: { post: Entry }) {
   const { t } = useTranslation('common_blog');
-  const href = `/${post.category}/@${post.author}/${post.permlink}`;
+  // Lumen proxy comments are authored on chain by the shared publishing account.
+  // The permlink identifies the post on its own, so the author segment is free to
+  // carry the lite identity and the link still resolves.
+  const liteOverlay = useLiteOverlay(post);
+  const href = `/${post.category}/@${liteOverlay?.author ?? post.author}/${post.permlink}`;
   const body = getPostSummary(post.json_metadata, post.body);
   const payoutDeclined = parseFloat(post.max_accepted_payout) === 0;
 

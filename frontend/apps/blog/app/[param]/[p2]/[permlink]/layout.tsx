@@ -2,7 +2,7 @@ import { Metadata } from 'next';
 import React, { PropsWithChildren } from 'react';
 import { notFound } from 'next/navigation';
 import { getPostCached } from '@/blog/lib/cached-api';
-import { liteEntryForPermlink } from '@/blog/lib/lite/render/lite-entry';
+import { liteEntryForPermlinkCached } from '@/blog/lib/lite/render/lite-entry-cached';
 import { getObserverFromCookies } from '@/blog/lib/auth-utils';
 import { isValidUserParam } from '@/blog/utils/validate-links';
 import { getLogger } from '@ui/lib/logging';
@@ -35,7 +35,7 @@ export async function generateMetadata({
     // silently hand back generic "Hive" metadata.
     const post =
       (await getPostCached(author, permlink, observer).catch(() => null)) ??
-      (await liteEntryForPermlink(permlink, observer));
+      (await liteEntryForPermlinkCached(permlink, observer));
 
     const title = post?.title ? `${post.title} ` : 'Hive Blog';
     const description =

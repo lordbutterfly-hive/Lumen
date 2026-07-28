@@ -50,14 +50,15 @@ func (d *DryRunSubmitter) Submit(op Op) (string, error) {
 // ErrLiveNotWired is returned by every LiveSubmitter.Submit call, always,
 // regardless of op. Its text is deliberately explicit rather than a generic
 // "not implemented," per this task's own instruction.
-var ErrLiveNotWired = errors.New("keeper: live submission not wired — deliberate: needs a signed Hive tx (posting key material) plus a live deployed contract; use DryRunSubmitter until both exist")
+var ErrLiveNotWired = errors.New("keeper: live submission not wired — deliberate: needs a signed Hive tx (ACTIVE key material — see BuildOp's auth-routing doc) plus a live deployed contract; use DryRunSubmitter until both exist")
 
 // LiveSubmitter is the REAL Submitter — deliberately NOT implemented.
 // Broadcasting real Hive transactions is explicitly out of scope for this
 // build (see RUNBOOK.md's pre-mainnet gate list): a real implementation
-// needs a signed Hive transaction (this bot account's POSTING key material —
-// see BuildOp's auth-routing doc for why posting, not active, key suffices
-// for both ops this package ever builds) plus a live deployed contract, and
+// needs a signed Hive transaction (this bot account's ACTIVE key material —
+// see BuildOp's auth-routing doc for why ACTIVE is required: contract/main.go's
+// requireActiveAuth refuses posting-only auth on both ops this package
+// builds) plus a live deployed contract, and
 // this task deliberately does not write that code.
 //
 // Constructing a Keeper against this interface today, and having it fail
@@ -73,7 +74,7 @@ type LiveSubmitter struct {
 	Cfg        OpConfig
 	Caller     string
 	NodeURL    string
-	PostingKey string // WIF; never logged, never given a default
+	ActiveKey string // WIF, ACTIVE (not posting — see BuildOp's auth-routing doc); never logged, never given a default
 }
 
 func (l *LiveSubmitter) Submit(op Op) (string, error) {

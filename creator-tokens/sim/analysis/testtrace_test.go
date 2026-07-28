@@ -87,6 +87,28 @@ func reclaimEv(block uint64, actor, creator string, seq uint64) Event {
 	return newEv(block, actor, "reclaim", creator).arg("seq", big.NewInt(int64(seq)).String()).build()
 }
 
+// declineEv builds a "decline" event (RULING E, core/ask.go's Decline) —
+// creator-only, so actor and creator are always the same account, matching
+// sim/actions.go's doDecline (newEvent("decline", creator, creator)).
+func declineEv(block uint64, creator string, seq uint64) Event {
+	return newEv(block, creator, "decline", creator).arg("seq", big.NewInt(int64(seq)).String()).build()
+}
+
+// claimTradeFeesEv builds a "claimTradeFees" event (RULING F8's pull half,
+// core/tradefee.go). Actor and creator are always the same account, matching
+// sim/actions.go's doClaimTradeFees (newEvent("claimTradeFees", caller, caller)).
+func claimTradeFeesEv(block uint64, creator string, claimed int64) Event {
+	return newEv(block, creator, "claimTradeFees", creator).argN("claimed", claimed).build()
+}
+
+// buyEv builds a standard "buy" event (RULING A, core/buy.go), matching
+// sim/actions.go's doBuy Args exactly: tokens minted, curve cost, the total
+// 10% trade fee, and totalDue == cost+fee drawn from the buyer's wallet.
+func buyEv(block uint64, actor, creator string, tokens, cost, fee, totalDue int64) Event {
+	return newEv(block, actor, "buy", creator).
+		argN("tokens", tokens).argN("cost", cost).argN("fee", fee).argN("totalDue", totalDue).build()
+}
+
 func refundEv(block uint64, actor, creator string, credits int64) Event {
 	return newEv(block, actor, "refund", creator).argN("credits", credits).build()
 }
@@ -101,6 +123,15 @@ func transferEv(block uint64, from, creator, to string, amount int64) Event {
 
 func renewEv(block uint64, actor, creator string, periods int64, paid int64) Event {
 	return newEv(block, actor, "renew", creator).argN("periods", periods).argN("paid", paid).build()
+}
+
+// retireEv builds a "retire" event (RULING D/K3, core.Retire) — creator-only,
+// matching sim/actions.go's doRetire (newEvent("retire", creator, creator)).
+// Moves no money and carries no Args core.Retire itself needs (block alone
+// is the mark this package's replay tracks — see journey.go/coverage.go's
+// `case "retire":`).
+func retireEv(block uint64, creator string) Event {
+	return newEv(block, creator, "retire", creator).build()
 }
 
 // withdrawTreasuryEv builds a global (creator="") owner treasury withdrawal —

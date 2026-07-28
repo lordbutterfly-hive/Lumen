@@ -49,13 +49,36 @@ type VSCCall struct {
 	NetID      string   `json:"net_id"`
 }
 
-// CustomJSON is the outer Hive L1 custom_json operation. Auth routing
-// mirrors the imitated template exactly: an account only needs
-// RequiredAuths (an ACTIVE key) if one of its intents is "transfer.allow";
-// every op this package builds carries zero intents (see Intent's doc), so
-// the keeper's own bot account always lands in RequiredPostingAuths —
-// cheaper and safer for an unattended, automated process to hold than an
-// active key.
+// CustomJSON is the outer Hive L1 custom_json operation.
+//
+// AUTH ROUTING: the bot account goes in RequiredAuths (an ACTIVE key).
+//
+// DEFECT FIX 2026-07-28 — it used to go in RequiredPostingAuths, and every
+// op this package produced would have been refused on chain, 100% of the
+// time, the moment LiveSubmitter was wired. The old rationale reasoned only
+// about the LEDGER's requirement ("an account only needs an ACTIVE key if
+// one of its intents is transfer.allow; our ops carry zero intents, so
+// posting suffices"). That much is true and is still true — but it is not
+// the only gate. ../contract/main.go's requireActiveAuth is an INDEPENDENT,
+// contract-side check at the top of every state-changing entrypoint,
+// including both ops this package builds (refundHolder at main.go:1245,
+// closeIfDrained at main.go:1295). It refuses an empty RequiredAuths array
+// outright: "active authority required: posting-only (or missing) auth
+// refused". That gate exists because a Hive POSTING key is delegated to
+// every dApp a user has ever touched, and gating value operations on ACTIVE
+// auth is what closed a CRITICAL finding in this contract's own history.
+// The template this package was modelled on has no such contract-side gate,
+// so the assumption did not survive being copied here.
+//
+// Why we fixed the KEEPER rather than carving a posting-tier exception into
+// requireActiveAuth: both these ops are already permissionless and pay only
+// a pre-recorded party (refundHolder pays `holder`, closeIfDrained moves
+// nothing to the caller), so an exception would probably be safe — but
+// "probably safe" is not a reason to put a hole in the one gate that closed
+// a critical, and the operational cost here is nil. The bot needs an active
+// key on a dedicated throwaway account holding no funds; these ops never
+// move the bot's own balance, so that key's blast radius is the bot account
+// itself and nothing else.
 type CustomJSON struct {
 	RequiredAuths        []string `json:"required_auths"`
 	RequiredPostingAuths []string `json:"required_posting_auths"`
@@ -94,8 +117,10 @@ func buildCustomJSON(cfg OpConfig, action string, payload map[string]interface{}
 		return CustomJSON{}, fmt.Errorf("keeper: encode %s vsc.call: %w", action, err)
 	}
 	return CustomJSON{
-		RequiredAuths:        []string{},
-		RequiredPostingAuths: []string{accountName(caller)},
+		// ACTIVE, not posting — ../contract/main.go's requireActiveAuth
+		// refuses an empty RequiredAuths outright. See CustomJSON's doc.
+		RequiredAuths:        []string{accountName(caller)},
+		RequiredPostingAuths: []string{},
 		ID:                   "vsc.call",
 		JSON:                 string(callBytes),
 	}, nil

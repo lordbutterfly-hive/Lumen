@@ -2,11 +2,18 @@ package indexer
 
 import "encoding/json"
 
-// events.go — typed decoders for ../core/events.go's Ev* wire shapes, PLUS a
-// handful of contract-only events ../contract/main.go hand-builds itself
-// (see KindRetired/KindTreasuryWithdrawn/KindTradeFeesClaimed's own docs
-// below). This package is a STANDALONE consumer of the LOG FORMAT (the JSON
-// string), never of core's internal Store machinery — it does not import
+// events.go — typed decoders for ../core/events.go's Ev* wire shapes. As of
+// commit 572ab00, EVERY sdk.Log(...) call site in ../contract/main.go goes
+// through a core.Ev* constructor — including retired/treasuryWithdrawn/
+// tradeFeesClaimed (see KindRetired/KindTreasuryWithdrawn/
+// KindTradeFeesClaimed's own docs below), which used to be hand-built inline
+// JSON with no constructor behind them (verified: zero `sdk.Log("{` call
+// sites remain in contract/main.go). Their wire shapes did NOT change
+// (core/events.go's own doc on each of the six new constructors: "byte-
+// identical to the line it replaces"), so every decode struct below is still
+// correct — what changed is only where the JSON string comes from. This
+// package is a STANDALONE consumer of the LOG FORMAT (the JSON string),
+// never of core's internal Store machinery — it does not import
 // creator-tokens/core at all, matching the boundary discipline
 // hive-price-market/indexer/events.go documents for the identical
 // contract/indexer split ("this package stays a standalone consumer of the
@@ -16,22 +23,31 @@ import "encoding/json"
 //
 // DELIBERATELY NOT RECOGNIZED (fall to Unknown/Stats.Unknown, named and
 // justified here rather than silently dropped — see ParseEvent's own doc for
-// the mechanics): "init" (../contract/main.go's `init` owner-bootstrap log —
-// not a core-module event at all, and this package tracks no owner/init
-// concept) and "paused"/"unpaused" (the `pause`/`unpause` entrypoints' own
-// hand-built logs — the GLOBAL inbound-pause switch, kPaused(), is not
-// scoped to any single creator market and no query surface in this package
-// depends on it: SPEC-CREATOR-KEYS.md §2.5 routes live pause/Phase status
-// through a direct chain read, exactly like Closed/LastFace/LastCap already
-// are for this package's own MarketSummary — see that type's doc). If a
-// future consumer needs replayed pause history, it can be added deliberately
-// (its own scope, its own decision), same convention this package already
-// applies to trading-volume aggregates (index.go's file doc).
+// the mechanics): "init" (../contract/main.go's `init` owner-bootstrap log,
+// built via core.EvInit (core/events.go) as of commit 572ab00 — this package
+// still tracks no owner/init concept, so it stays undecoded here regardless
+// of which side builds the string) and "paused"/"unpaused" (the
+// `pause`/`unpause` entrypoints' logs, likewise now built via
+// core.EvPaused/core.EvUnpaused — the GLOBAL inbound-pause switch, kPaused(),
+// is not scoped to any single creator market and no query surface in this
+// package depends on it: SPEC-CREATOR-KEYS.md §2.5 routes live pause/Phase
+// status through a direct chain read, exactly like Closed/LastFace/LastCap
+// already are for this package's own MarketSummary — see that type's doc).
+// All three DO have pinned constructors on the core side now
+// (core/schema_contract_test.go's TestSchemaContract_Init/Paused/Unpaused) —
+// what makes them unrecognized HERE is that this package simply assigns them
+// no decode struct, a decision about what this package's own queries need,
+// not a gap in core's schema coverage. If a future consumer needs replayed
+// pause history, it can be added deliberately (its own scope, its own
+// decision), same convention this package already applies to trading-volume
+// aggregates (index.go's file doc).
 //
 // EventKind identifies which shape a RawEvent decodes to. The string values
-// are exactly the "ev" field core/events.go's evOpen writes, or (for the
-// contract-only kinds) exactly what ../contract/main.go's own hand-built
-// sdk.Log(...) calls emit.
+// are exactly the "ev" field core/events.go's evOpen/evOpenActor (or, for
+// init, its own inline literal) writes — every kind below, including
+// retired/treasuryWithdrawn/tradeFeesClaimed, now originates from a
+// core.Ev* constructor rather than a hand-built sdk.Log(...) call in
+// ../contract/main.go.
 type EventKind string
 
 const (
@@ -71,50 +87,59 @@ const (
 	KindOfferingUpdated EventKind = "offeringUpdated"
 	KindOfferingDeleted EventKind = "offeringDeleted"
 
-	// KindRetired is DIFFERENT IN KIND from every other constant in this
-	// block: it is NOT one of core/events.go's Ev* constructors. Retire
-	// (core/market.go) is called directly from ../contract/main.go's `retire`
-	// entrypoint, which hand-builds its own sdk.Log JSON inline — verified
-	// against contract/main.go directly (Retire's own wasmexport function) —
-	// exactly the pattern events.go's own file doc already warns about
-	// ("../contract's current main.go... hand-builds its own sdk.Log JSON
-	// inline at each entrypoint"). RetiredEvent (below) declares no "v" field
-	// at all — harmless either way (envelope.V is captured but never branched
-	// on) — and there is no schema_contract_test.go pin on
-	// the core side (that file only exercises core/events.go's Ev*
-	// constructors; there is no EvRetired to exercise). Recognizing it here
-	// is still correct and necessary: Retire is a real, permanent, on-chain
-	// state transition (an irreversible forced-FROZEN wind-down marker,
-	// core/market.go's kRetiredAt) that was previously invisible to this
-	// package — MarketSummary had no way to distinguish a retiring market
-	// from a healthy one, only ever learning about a market's terminal state
-	// much later, if and when it also fully drains to a "closed" event.
+	// KindRetired — Retire (core/market.go) is called from
+	// ../contract/main.go's `retire` entrypoint, which as of commit 572ab00
+	// builds this log via core.EvRetired (core/events.go, evOpen's shared
+	// envelope — verified: same creator/actor/block shape as every event
+	// above this one) rather than the hand-built inline JSON it used to
+	// emit. It is grouped in this file's separate "contract-level events"
+	// block below (not up with Registered..Closed above) only because that
+	// is where it was introduced in core/events.go (the 2026-07-28 six,
+	// alongside init/pause/unpause/withdrawTreasury/claimTradeFees) — its
+	// wire shape carries nothing that structurally distinguishes it from
+	// ClosedEvent's. EvRetired is pinned by core/schema_contract_test.go's
+	// TestSchemaContract_Retired. Recognizing this kind here is still
+	// correct and necessary regardless of which side builds the JSON:
+	// Retire is a real, permanent, on-chain state transition (an
+	// irreversible forced-FROZEN wind-down marker, core/market.go's
+	// kRetiredAt) that was previously invisible to this package —
+	// MarketSummary had no way to distinguish a retiring market from a
+	// healthy one, only ever learning about a market's terminal state much
+	// later, if and when it also fully drains to a "closed" event.
 	KindRetired EventKind = "retired"
 
-	// KindTreasuryWithdrawn — DEFECT FIX, 2026-07-28. Like KindRetired, this is
-	// NOT one of core/events.go's Ev* constructors: ../contract/main.go's
-	// `withdrawTreasury` entrypoint hand-builds its own log —
-	// `{"ev":"treasuryWithdrawn","actor":"...","amount":"...","block":N}` —
-	// verified directly against WithdrawTreasury's wasmexport function. This was
-	// entirely unrecognized before this fix (Stats.Unknown), which mattered more
-	// than a typical missing kind: index.go's own TreasuryHbd() doc had FLAGGED
-	// itself as already-stale the moment this entrypoint shipped ("the pure
-	// MONOTONIC sum, no debit path off kTreasury today claim ... is ALREADY
-	// STALE") — without this fix, TreasuryHbd() could only ever grow, so it
-	// would silently overstate the real kTreasury() balance forever after the
-	// owner's first withdrawal, exactly the kind of drift this package exists to
-	// avoid. NO "creator" field on the wire at all (owner-only, not a per-market
-	// action) — see index.go's KindTreasuryWithdrawn fold for why this is folded
-	// GLOBALLY, never through ix.market(...).
+	// KindTreasuryWithdrawn — DEFECT FIX, 2026-07-28 (indexer side); its
+	// contract-side counterpart landed separately, also 2026-07-28:
+	// ../contract/main.go's `withdrawTreasury` entrypoint used to hand-build
+	// its own log — `{"ev":"treasuryWithdrawn","actor":"...","amount":"...",
+	// "block":N}` — and as of commit 572ab00 builds it via
+	// core.EvTreasuryWithdrawn (core/events.go), byte-identical to the line
+	// it replaces and pinned by core/schema_contract_test.go's
+	// TestSchemaContract_TreasuryWithdrawn. This kind was entirely
+	// unrecognized before the indexer-side fix below (Stats.Unknown), which
+	// mattered more than a typical missing kind: index.go's own
+	// TreasuryHbd() doc had FLAGGED itself as already-stale the moment this
+	// entrypoint shipped ("the pure MONOTONIC sum, no debit path off
+	// kTreasury today claim ... is ALREADY STALE") — without this fix,
+	// TreasuryHbd() could only ever grow, so it would silently overstate the
+	// real kTreasury() balance forever after the owner's first withdrawal,
+	// exactly the kind of drift this package exists to avoid. NO "creator"
+	// field on the wire at all (owner-only, not a per-market action) — see
+	// index.go's KindTreasuryWithdrawn fold for why this is folded GLOBALLY,
+	// never through ix.market(...).
 	KindTreasuryWithdrawn EventKind = "treasuryWithdrawn"
 
-	// KindTradeFeesClaimed — DEFECT FIX, 2026-07-28. Also contract-only:
-	// ../contract/main.go's `claimTradeFees` entrypoint hand-builds
-	// `{"ev":"tradeFeesClaimed","actor":"...","amount":"...","block":N}`,
-	// logged only when the claimed amount is nonzero (mirrors refundHolder's own
-	// M3 zero-payout gating). No "creator" field on the wire either, but unlike
-	// treasuryWithdrawn this IS per-market: core.ClaimTradeFees pays out
-	// kFeeBal(caller), and every accrual into that key (core/tradefee.go's
+	// KindTradeFeesClaimed — DEFECT FIX, 2026-07-28 (indexer side); its
+	// contract-side counterpart landed separately, also 2026-07-28:
+	// ../contract/main.go's `claimTradeFees` entrypoint used to hand-build
+	// `{"ev":"tradeFeesClaimed","actor":"...","amount":"...","block":N}` and
+	// as of commit 572ab00 builds it via core.EvTradeFeesClaimed
+	// (core/events.go), byte-identical to the line it replaces and pinned by
+	// core/schema_contract_test.go's TestSchemaContract_TradeFeesClaimed —
+	// logged only when the claimed amount is nonzero (mirrors refundHolder's
+	// own M3 zero-payout gating). No "creator" field on the wire either, but
+	// unlike treasuryWithdrawn this IS per-market: core.ClaimTradeFees pays
+	// out kFeeBal(caller), and every accrual into that key (core/tradefee.go's
 	// accrueTradeFee, called from buy.go/sell.go) is always keyed by the
 	// CREATOR whose market the trade happened on — never any other account — so
 	// `actor` here doubles as the creator identifier, the same "actor always ==
@@ -369,39 +394,55 @@ type SoldEvent struct {
 	HeldBlocks uint64 `json:"heldBlocks"`
 }
 
-// ---- contract-only events (NOT part of core/events.go's Ev* schema) -------
+// ---- contract-level events (money- or state-relevant half of core/events.go's
+// SIX "contract-level events", 2026-07-28 gap-hunt closure) -----------------
 //
-// RetiredEvent decodes ../contract/main.go's hand-built `retired` log (the
-// `retire` entrypoint) — see KindRetired's own doc for why this one is
-// different from every other event in this file. No money. This struct
-// declares no "v" field at all, so a "v" on the wire (present or absent — the
-// hand-built contract-only logs are not guaranteed to agree with each other
-// or stay stable on this point, unlike core/events.go's Ev* constructors,
-// which all share evOpen's fixed envelope) is simply ignored by
-// json.Unmarshal rather than read into Version.
+// These three are grouped separately from Registered..SoldEvent above only
+// for provenance/history, not because their wire shapes are structurally
+// different: RetiredEvent below matches evOpen's shared four-field envelope
+// exactly, same as ClosedEvent above (verified: core/events.go's EvRetired
+// calls evOpen, not evOpenActor). init/paused/unpaused are the other half of
+// that same six-constructor batch — this file's own top doc explains why
+// those three get no decode struct at all (no per-market or fund-relevant
+// state this package's queries need), which is the real thing distinguishing
+// the two halves, not "hand-built vs constructor": all six now go through a
+// core.Ev* constructor as of commit 572ab00 (see KindRetired's own doc).
+//
+// RetiredEvent decodes ../contract/main.go's `retired` log (the `retire`
+// entrypoint, built via core.EvRetired as of commit 572ab00 — see
+// KindRetired's own doc). No money. This struct declares no "v" field at
+// all, so the "v":1 that log now genuinely carries (evOpen writes it
+// unconditionally) is simply ignored by json.Unmarshal rather than read into
+// Version — envelope.V / Event.Version still capture it separately (see
+// Event's own doc below). Nothing in this package has ever needed to branch
+// on "v" for this event, the same as every other typed struct in this file
+// — not because the value was ever unstable: EvRetired shares evOpen's fixed
+// envelope with every other Ev*-constructed event, so "v" is exactly as
+// stable here as it is for RegisteredEvent or ClosedEvent.
 type RetiredEvent struct {
 	Creator string `json:"creator"`
 	Actor   string `json:"actor"`
 	Block   uint64 `json:"block"`
 }
 
-// TreasuryWithdrawnEvent decodes ../contract/main.go's hand-built
-// `treasuryWithdrawn` log (the `withdrawTreasury` entrypoint) — see
-// KindTreasuryWithdrawn's own doc. Deliberately no "creator" field: this is a
-// GLOBAL kTreasury() debit, not scoped to any single creator's market — see
-// index.go's fold for why that means this event is never routed through
-// ix.market(...) or any per-creator history.
+// TreasuryWithdrawnEvent decodes ../contract/main.go's `treasuryWithdrawn`
+// log (the `withdrawTreasury` entrypoint, built via core.EvTreasuryWithdrawn
+// as of commit 572ab00 — see KindTreasuryWithdrawn's own doc). Deliberately
+// no "creator" field: this is a GLOBAL kTreasury() debit, not scoped to any
+// single creator's market — see index.go's fold for why that means this
+// event is never routed through ix.market(...) or any per-creator history.
 type TreasuryWithdrawnEvent struct {
 	Actor  string `json:"actor"`
 	Block  uint64 `json:"block"`
 	Amount string `json:"amount"`
 }
 
-// TradeFeesClaimedEvent decodes ../contract/main.go's hand-built
-// `tradeFeesClaimed` log (the `claimTradeFees` entrypoint) — see
-// KindTradeFeesClaimed's own doc for why Actor doubles as the creator
-// identifier here (kFeeBal is always keyed by the creator whose market
-// accrued the fee), even though the wire has no separate "creator" field.
+// TradeFeesClaimedEvent decodes ../contract/main.go's `tradeFeesClaimed` log
+// (the `claimTradeFees` entrypoint, built via core.EvTradeFeesClaimed as of
+// commit 572ab00) — see KindTradeFeesClaimed's own doc for why Actor doubles
+// as the creator identifier here (kFeeBal is always keyed by the creator
+// whose market accrued the fee), even though the wire has no separate
+// "creator" field.
 type TradeFeesClaimedEvent struct {
 	Actor  string `json:"actor"`
 	Block  uint64 `json:"block"`
@@ -442,7 +483,9 @@ type Event struct {
 	OfferingDeleted *OfferingDeletedEvent
 
 	// Retired/TreasuryWithdrawn/TradeFeesClaimed — see each Kind's own doc:
-	// contract-only, not from core/events.go.
+	// the money-or-state-relevant half of core/events.go's six contract-level
+	// events (commit 572ab00), now built via core.EvRetired/
+	// EvTreasuryWithdrawn/EvTradeFeesClaimed like everything else in this file.
 	Retired           *RetiredEvent
 	TreasuryWithdrawn *TreasuryWithdrawnEvent
 	TradeFeesClaimed  *TradeFeesClaimedEvent
@@ -460,9 +503,11 @@ type Event struct {
 //  2. Data is valid JSON with a recognized "ev" field, but the value isn't
 //     one of the known kinds (e.g. a future event type added to
 //     core/events.go that this package hasn't been taught yet, or one of
-//     the three DELIBERATELY-ignored contract-only logs named at this
-//     file's own top doc — "init", "paused", "unpaused" — none of which are
-//     core-module events) ⇒ NOT an error. Returns
+//     the three DELIBERATELY-ignored logs named at this file's own top doc
+//     — "init", "paused", "unpaused" — which do have core.Ev* constructors
+//     now, just no decode struct in this package: none of them carry
+//     per-market or fund-relevant state any query here needs) ⇒ NOT an
+//     error. Returns
 //     Event{Kind: <that string>, Unknown: true, Raw: raw}, nil. This is the
 //     graceful-degradation path: an old indexer binary must keep
 //     processing every OTHER event correctly forever, never crash or

@@ -23,4 +23,13 @@ const (
 	ErrNotFound = "NOT_FOUND"
 	ErrOracle   = "ORACLE"
 	ErrCap      = "CAP"
+	// ErrDelinquent is returned ONLY by RequireInflowOpen's delivery-standing
+	// branch (market.go). It exists because ErrState is shared by dozens of
+	// unrelated refusals, so nothing downstream could tell "refused because
+	// the creator is delinquent" apart from "answer window closed" without
+	// matching the message TEXT. The simulator's standing-guardrail check did
+	// exactly that, which meant a reword of one sentence would have silently
+	// turned its halt into a no-op that still printed as a pass. Branch on
+	// this symbol, never on wording.
+	ErrDelinquent = "DELINQUENT"
 )

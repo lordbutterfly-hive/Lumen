@@ -10,22 +10,30 @@
 //
 //	Entered == Left + Sits
 //
-//	Entered = Σ register.feePaid + Σ renew.paid + Σ prepay.hbdPaid + Σ ask.commissionHbdPaid
-//	Left    = Σ refund.payout + Σ refundHolder.payout + Σ reclaim.commissionHbd
-//	Sits    = final treasury + Σ final per-creator reserve + Σ commission currently
-//	          HELD in a still-PENDING escrow
+//	Entered = Σ register.feePaid + Σ renew.paid + Σ prepay.hbdPaid + Σ buy.totalDue
+//	          + Σ ask.commissionHbdPaid
+//	Left    = Σ refund.net + Σ refundHolder.net + Σ sell.net + Σ reclaim.commissionHbd
+//	          + Σ decline.commissionHbd + Σ claimTradeFees.claimed + Σ withdrawTreasury.amount
+//	Sits    = final treasury + Σ final per-creator reserve + Σ final per-creator
+//	          feePots (kFeeBal) + Σ commission currently HELD in a still-PENDING escrow
 //
-// Money enters the system at exactly the four calls that bring HBD in from
-// outside the contract. Ask's commission leg enters at ASK time (it leaves
-// the asker's wallet the moment they sign, per core/ask.go: "the asker's
-// signed transfer.allow intent is what actually moves this HBD"), not at
-// Answer time — Answer only moves that same HBD between two INTERNAL
+// Money enters the system at exactly the calls that bring HBD in from outside
+// the contract (register/renew/prepay/buy — "prepay" is dead, RULING A, kept
+// only for older synthetic fixtures). Ask's commission leg enters at ASK time
+// (it leaves the asker's wallet the moment they sign, per core/ask.go: "the
+// asker's signed transfer.allow intent is what actually moves this HBD"), not
+// at Answer time — Answer only moves that same HBD between two INTERNAL
 // accounts (the escrow hold -> the treasury), so counting it again there
-// would double-count it. Money leaves the system at exactly the two payout
-// calls and at a successful reclaim's commission return. Everything else
-// (Answer's booking, TransferCredits, SetFace/SetCap, RecordObs,
-// CloseIfDrained) either moves credits only or moves HBD between two
-// internal accounts — neither changes Entered or Left.
+// would double-count it. Money leaves the system at the two wind-down payout
+// calls, a curve Sell's net proceeds, a reclaim's or a decline's full
+// commission return (RULING E — Decline is money-shape-identical to Reclaim,
+// tracked in its own MoneyOut bucket so the two are never conflated in the
+// report), a creator's own pull of ClaimTradeFees, and the owner's
+// WithdrawTreasury pull. Everything else (Answer's booking, TransferCredits,
+// SetFace/SetCap, RecordObs, CloseIfDrained, Retire, and the four
+// creator-shop config writers) either moves credits only, moves HBD between
+// two INTERNAL accounts, or moves no money at all — neither changes Entered
+// nor Left.
 //
 // The identity is checked after EVERY event, not just at the end, so a
 // divergence is reported at its first occurrence (FirstBadEvent), not merely
@@ -71,9 +79,21 @@ type MoneyIn struct {
 type MoneyOut struct {
 	Refunds             *big.Int
 	ReclaimedCommission *big.Int
-	Sold                *big.Int // RULING K: net curve proceeds (gross - exit tax - trade fee) paid OUT to a seller via core.Sell
-	TreasuryWithdrawn   *big.Int // Upgrade 1 (C2): protocol revenue paid OUT to the owner via WithdrawTreasury
-	Total               *big.Int
+	// DeclinedCommission (RULING E, wired 2026-07-28): a creator's Decline is
+	// money-shape-identical to Reclaim — the FULL held commission (and
+	// credits) returns to the asker — but is tracked in its own bucket,
+	// mirroring core's own escrowDeclined/askDeclined status being kept
+	// distinct from RECLAIMED (ask.go: "so the shadow ledger can tell 'the
+	// creator declined' from 'the asker was never answered' apart").
+	DeclinedCommission *big.Int
+	Sold               *big.Int // RULING K: net curve proceeds (gross - exit tax - trade fee) paid OUT to a seller via core.Sell
+	// TradeFeesClaimed (RULING F8, wired 2026-07-28): a creator's pull of
+	// their own accrued kFeeBal via core.ClaimTradeFees — money leaving the
+	// Sits.FeePotsTotal bucket, mirroring TreasuryWithdrawn's identical role
+	// for kTreasury (the platform's own pull-claimable pot).
+	TradeFeesClaimed  *big.Int
+	TreasuryWithdrawn *big.Int // Upgrade 1 (C2): protocol revenue paid OUT to the owner via WithdrawTreasury
+	Total             *big.Int
 }
 
 type Holdings struct {
@@ -107,18 +127,45 @@ type ActorLedger struct {
 	CreditsHeldValue       *big.Int // floor value of this actor's SPENDABLE credit balance (excludes anything currently escrowed in a pending ask — see PendingEscrowCreditsValue)
 	CreditsHeldApproximate bool     // true if any component below depended on an unresolved (approximate) credits-per-ask conversion — see report.go's resolveCreditsSpent
 
-	// The two PAR-denominated buckets below deliberately do NOT use the
-	// floor price the way CreditsHeldValue does: they exist to explain away
-	// PaidIn, which was itself booked at PAR (Prepay is an exact 1:1 mint —
-	// core/prepay.go: "PAR performs NO division"), so mixing in a
-	// floor-priced figure here would compare two different units of value.
+	// PendingEscrowCreditsValue / CreditsConsumedOnAnsweredAsks /
+	// TransferredAway are credit AMOUNTS converted to an HBD VALUE via
+	// refundPayout(reserve, credits, supply) — the SAME reserve-backed
+	// pricing CreditsHeldValue below uses — so they can be summed into
+	// PaidIn's HBD units without a unit mismatch.
+	//
+	// FIXED 2026-07-28 (F1, an adversarial review — read this before ever
+	// touching these three fields again). Until this fix they held the raw
+	// CREDIT COUNT itself, on the premise that PaidIn was booked at PAR
+	// (Prepay: "PAR performs NO division," 1 credit == 1 HBD base unit), so
+	// credits and HBD were numerically interchangeable and no conversion was
+	// needed. RULING A deleted Prepay/PAR entirely — core/prepay.go does not
+	// exist — and PaidIn's live issuance leg (buy.totalDue) is real curve
+	// HBD, routinely orders of magnitude away from a 1:1 credit peg. Summing
+	// a raw credit count into an HBD total therefore silently misvalued
+	// every actor who consumed, received, or gave away credits through any
+	// of these three paths: a real run (seed=2, 180 days, 2 creators, 40
+	// actors) showed an actor's 22-TOKEN transfer, worth ~55,000 base units
+	// at that market's end-state backing, counted as "22" — a >99.9%
+	// understatement that alone accounted for the bulk of a 2,482,815-unit,
+	// 29-actor "Unexplained" false alarm.
+	//
+	// PendingEscrowCreditsValue is priced at TRACE END (the last known
+	// reserve/supply for that creator in this replay) — the escrow is still
+	// open, so there is no single resolving block to price it at, and trace
+	// end is this replay's own most-current knowledge, the same point
+	// CreditsHeldValue below is priced at. CreditsConsumedOnAnsweredAsks and
+	// TransferredAway are priced AT THE BLOCK OF THEIR OWN EVENT, using this
+	// replay's own reserve[c]/supply[c] AS OF THAT POINT in the loop — never
+	// an end-state price, which would silently import LATER market movement
+	// into an EARLIER event's value and make the ledger's per-event replay
+	// no longer reflect what was actually known at that block.
 	PendingEscrowCommission       *big.Int // commission HBD still held in this actor's own PENDING asks — not lost, not yet resolved
-	PendingEscrowCreditsValue     *big.Int // PAR value of credits still locked in this actor's own PENDING asks — not lost, not yet resolved (goes to the creator on answer, back to this actor on reclaim)
+	PendingEscrowCreditsValue     *big.Int // reserve-backed HBD value (at trace end) of credits still locked in this actor's own PENDING asks — not lost, not yet resolved (goes to the creator on answer, back to this actor on reclaim)
 	CommissionOnAnsweredAsks      *big.Int // commission consumed because an ask THIS actor opened was actually answered — an intended cost, paid for delivered service
-	CreditsConsumedOnAnsweredAsks *big.Int // PAR value of credits released to the creator because THIS actor's ask was answered — an intended cost, paid for delivered service, same logic as commission
+	CreditsConsumedOnAnsweredAsks *big.Int // reserve-backed HBD value (at the answer event's own block) of credits released to the creator because THIS actor's ask was answered — an intended cost, paid for delivered service, same logic as commission
 	RegistrationFeesPaid          *big.Int // fees this actor personally paid to register a market (as a creator)
 	SubscriptionFeesPaid          *big.Int // fees this actor personally paid to renew ANY creator's subscription (self or as a fan — API.md: "a fan can keep a creator alive")
-	TransferredAway               *big.Int // PAR value of credits this actor voluntarily gave away via TransferCredits — a deliberate gift/sale, not a loss the design failed to anticipate
+	TransferredAway               *big.Int // reserve-backed HBD value (at the transfer event's own block) of credits this actor voluntarily gave away via TransferCredits — a deliberate gift/sale, not a loss the design failed to anticipate
 	TradeFeesPaid                 *big.Int // the 10% trade fee this actor personally paid on curve Buys — an intended cost (RULING A/F8), not a loss; the matching cost basis (the reserve leg) is what CreditsHeldValue prices
 
 	// Unexplained = PaidIn - (ReceivedOut + CreditsHeldValue + PendingEscrowCommission
@@ -147,7 +194,7 @@ type Overpayment struct {
 	Owed       *big.Int
 	Paid       *big.Int
 	Excess     *big.Int
-	Resolution string // "answered" (excess permanently lost to treasury), "reclaimed" (excess returned in full, no loss), "pending" (outcome not yet known — end of trace)
+	Resolution string // "answered" (excess permanently lost to treasury), "reclaimed" or "declined" (excess returned in full, no loss — Decline is RULING E's full round-trip, money-shape-identical to Reclaim), "pending" (outcome not yet known — end of trace)
 }
 
 // LedgerReport is the full result of AnalyzeLedger.
@@ -209,15 +256,90 @@ func newActorLedger(actor string) *ActorLedger {
 // this contract's TransferCredits carries no HBD consideration at all (it is
 // a bare balance move, not a sale) and so this ledger — which only sees HBD
 // — cannot see a secondary-market trade price in the first place:
+//
 //  1. a holder who bought credits above face on a secondary market and is
 //     later refunded at the (lower) reserve floor (SPEC §1.7.5's disclosed
 //     risk) — invisible to this ledger by construction, not merely unflagged;
+//
 //  2. a holder who received credits for free via TransferCredits and later
 //     refunds them for a "profit" — not a bug, a gift. TransferCredits moves
 //     no HBD, so it never appears in PaidIn/ReceivedOut on either side; the
-//     giving side's PAR value is tracked separately (ActorLedger.
+//     giving side's reserve-backed value is tracked separately (ActorLedger.
 //     TransferredAway, an explained bucket) precisely so giving credits away
 //     is never mistaken for an unintended loss on the sender's ledger.
+//
+//  3. A THIRD, real and worth naming (added 2026-07-28): CreditsHeldValue
+//     prices a held balance at the WIND-DOWN pro-rata FLOOR — refundPayout,
+//     reserve*credits/supply (net of the K2 exit tax, F8), the worst case if
+//     the market froze this instant — never at what those tokens are
+//     actually worth on the OPEN curve rail (Sell) while the market is still
+//     trading. Under R===area(S) and an increasing marginal price, the
+//     curve/Sell value of a holding is always >= its pro-rata floor value
+//     (the whole point of the governing theorem this contract is built on —
+//     see core/refund.go), so this is a DELIBERATELY conservative,
+//     one-directional gap: it can make a healthy, fully-solvent holder's
+//     Unexplained read positive, but it can never hide a REAL loss the
+//     other way.
+//
+//     CORRECTED 2026-07-28 (F1, an adversarial review caught this). An
+//     earlier version of this note went further and told the reader to
+//     treat Unexplained as benign for any STILL-HOLDING actor and to
+//     "reserve suspicion" only for one who had ALREADY exited — stated as a
+//     rule, never actually checked against a real run's own output. It was
+//     false: the same real run cited above had 29 flagged actors, 11 of
+//     them ALREADY EXITED (CreditsHeldValue==0, PendingEscrowCommission==0,
+//     PendingEscrowCreditsValue==0 — nothing left that this appreciation gap
+//     could explain) yet still showing a large positive Unexplained. That
+//     was never evidence those 11 were secretly fine; it was a SEPARATE bug
+//     (the PAR-era unit error fixed above, on PendingEscrowCreditsValue/
+//     CreditsConsumedOnAnsweredAsks/TransferredAway) silently summing raw
+//     credit COUNTS into an HBD total for actors on every side of this
+//     ledger, exited or not.
+//
+//  4. A FOURTH, discovered while re-verifying the F1 fix against real runs
+//     (2026-07-28) rather than assumed away: even a FULLY EXITED actor
+//     (CreditsHeldValue==0, PendingEscrowCommission==0,
+//     PendingEscrowCreditsValue==0) can show a genuine, real positive
+//     Unexplained with NO bug anywhere — POOL DILUTION by OTHER holders'
+//     round-trip trading. Flat pro-rata pricing (refundPayout, this file
+//     and core/refund.go both use it) is POSITION-BLIND: it pays out of the
+//     CURRENT shared (reserve, supply) average for the whole creator, not a
+//     per-buyer slice. Area(x)/x is non-decreasing in x (a property of the
+//     convex, increasing curve — core/curve.go), so supply GROWING only
+//     ever raises or holds the shared average — but supply SHRINKING (a
+//     Sell removes the TOP, priciest tokens; a Refund/RefundHolder removes
+//     a pro-rata slice) can only ever lower or hold it. An actor who buys
+//     early and simply holds is never touched directly by someone ELSE's
+//     later Sell — but if that other holder buys in on top and then sells
+//     part of it back out, the shared pool's average can end up BELOW what
+//     the first actor originally paid, purely from the second actor's own
+//     round trip, with the aggregate identity (R===Area(S)) never once
+//     violated. PROVEN, not theorized: a minimal 3-event synthetic trace
+//     (bob buys 100 for cost=50000 alone; charlie buys 900 more, then
+//     sells 500 of it back) drives the shared average from 500/credit down
+//     to 400/credit — bob, who did nothing but hold, shows Unexplained=
+//     18000 with zero held or pending value, and the identity still Closes.
+//     This is not a defect in this file's replay (it correctly mirrors what
+//     core.Refund/RefundHolder would ACTUALLY pay bob if he exited at that
+//     moment) — it is a genuine, previously-invisible consequence of core's
+//     own flat pro-rata design that the PRE-F1 unit bug's raw-credit-count
+//     accounting could never have surfaced, because it was not doing real
+//     economic valuation at all. Whether this fairness property (an
+//     uninvolved early holder's exit value can be diluted by a LATER
+//     holder's unrelated round-trip trade) is acceptable is a product/
+//     ruling question for core's own owners, not something this analysis
+//     layer can or should paper over by discounting it back out.
+//
+//     Do not assume which bucket an Unexplained figure belongs to without
+//     reading the actor's own breakdown: a positive Unexplained is excused
+//     as non-fund-safety ONLY when it is fully accounted for by (3) the
+//     appreciation gap on a CURRENTLY-holding actor (CreditsHeldValue > 0)
+//     or (4) the pool-dilution pattern above on a fully-exited actor with a
+//     verifiable OTHER-holder round trip in the same trace — a residual
+//     that fits NEITHER shape (in particular, any residual larger than what
+//     (3)/(4) can plausibly account for, or one arising with no round-trip
+//     activity from anyone else at all) is worth investigating as a real
+//     bug, exited or not.
 //
 // What IS in scope and caught: an escrow whose held commission is not
 // returned in full on reclaim, or not booked in full on answer (an I5
@@ -228,7 +350,10 @@ func AnalyzeLedger(tr *Trace) LedgerReport {
 	rpt := LedgerReport{
 		FirstBadEvent: -1,
 		Entered:       MoneyIn{Registration: zeroBig(), Subscription: zeroBig(), Prepay: zeroBig(), Buy: zeroBig(), CommissionHeld: zeroBig(), Total: zeroBig()},
-		Left:          MoneyOut{Refunds: zeroBig(), ReclaimedCommission: zeroBig(), Sold: zeroBig(), TreasuryWithdrawn: zeroBig(), Total: zeroBig()},
+		Left: MoneyOut{
+			Refunds: zeroBig(), ReclaimedCommission: zeroBig(), DeclinedCommission: zeroBig(),
+			Sold: zeroBig(), TradeFeesClaimed: zeroBig(), TreasuryWithdrawn: zeroBig(), Total: zeroBig(),
+		},
 		Sits: Holdings{
 			Treasury: zeroBig(), ReservesByCreator: map[string]*big.Int{}, ReserveTotal: zeroBig(),
 			EscrowHeldByCreator: map[string]*big.Int{}, EscrowHeldTotal: zeroBig(),
@@ -252,7 +377,7 @@ func AnalyzeLedger(tr *Trace) LedgerReport {
 	faceKnown := map[string]bool{}
 	paidUntil := map[string]uint64{}
 	bal := map[string]map[string]*big.Int{} // creator -> holder -> balance
-	feePots := map[string]*big.Int{}         // creator -> pull-claimable trade-fee/exit-tax creator half (kFeeBal, RULING F8)
+	feePots := map[string]*big.Int{}        // creator -> pull-claimable trade-fee/exit-tax creator half (kFeeBal, RULING F8)
 	nextSeq := map[string]uint64{}
 	escrows := map[string]map[uint64]*escrowHold{} // creator -> seq -> hold (present only while PENDING)
 	treasury := zeroBig()
@@ -523,12 +648,57 @@ func AnalyzeLedger(tr *Trace) LedgerReport {
 			asker := getActor(hold.asker)
 			asker.CommissionOnAnsweredAsks = new(big.Int).Add(asker.CommissionOnAnsweredAsks, hold.commissionHbd)
 			if hold.credits != nil {
-				asker.CreditsConsumedOnAnsweredAsks = new(big.Int).Add(asker.CreditsConsumedOnAnsweredAsks, hold.credits)
+				// F1: reserve-backed HBD value at THIS event's own block —
+				// reserve[c]/supply[c] are this replay's running shadow state,
+				// already as-of the current point in the loop (answer moves no
+				// reserve/supply itself, so this is exactly the pair core.Answer
+				// would have seen too). See the field's own doc for why this is
+				// a credit COUNT no longer, and why "at this block" not
+				// "at trace end."
+				value := refundPayout(get(reserve, c), hold.credits, get(supply, c))
+				asker.CreditsConsumedOnAnsweredAsks = new(big.Int).Add(asker.CreditsConsumedOnAnsweredAsks, value)
 			} else {
 				asker.CreditsHeldApproximate = true
 			}
 			if idx, ok := overpaymentIdx[key2(c, seq)]; ok {
 				rpt.Overpayments[idx].Resolution = "answered"
+			}
+
+		case "decline":
+			// RULING E (ask.go's Decline, wired into the engine 2026-07-28):
+			// money-shape-identical to "reclaim" below (the FULL held
+			// commission and credits return to the asker), tracked in its own
+			// DeclinedCommission bucket so the report can tell "the creator
+			// declined" from "the asker was never answered" apart. Without
+			// this case, Decline would silently fall through to the
+			// catch-all `default` below, which logs a Note but moves NO
+			// money in the replay — leaving `sits` permanently overstated by
+			// every declined commission and breaking the Entered==Left+Sits
+			// identity from the very first decline onward.
+			seq, okSeq := argU64(ev, "seq")
+			if !okSeq {
+				rpt.Notes = append(rpt.Notes, fmt.Sprintf("event %d (decline by %s on %s): missing Args.seq, skipped in ledger", i, ev.Actor, c))
+				continue
+			}
+			hold := escrowLookup(escrows, c, seq)
+			if hold == nil {
+				rpt.Notes = append(rpt.Notes, fmt.Sprintf("event %d (decline by %s on %s seq %d): no matching PENDING escrow in replay", i, ev.Actor, c, seq))
+				continue
+			}
+			left = new(big.Int).Add(left, hold.commissionHbd)
+			sits = new(big.Int).Sub(sits, hold.commissionHbd)
+			rpt.Left.DeclinedCommission = new(big.Int).Add(rpt.Left.DeclinedCommission, hold.commissionHbd)
+			if hold.credits != nil {
+				addBal(c, hold.asker, hold.credits)
+			}
+			delete(escrows[c], seq)
+			// core.Decline is creator-only to CALL, but the payout target is
+			// fixed by the escrow — the asker, never ev.Actor — same shape as
+			// Reclaim's identical payee rule (ask.go).
+			a := getActor(hold.asker)
+			a.ReceivedOut = new(big.Int).Add(a.ReceivedOut, hold.commissionHbd)
+			if idx, ok := overpaymentIdx[key2(c, seq)]; ok {
+				rpt.Overpayments[idx].Resolution = "declined"
 			}
 
 		case "reclaim":
@@ -599,6 +769,22 @@ func AnalyzeLedger(tr *Trace) LedgerReport {
 			if net.Sign() < 0 {
 				net = zeroBig() // unreachable given tax<=gross always; defensive floor, never a negative payout
 			}
+			// F1 MECHANICAL GUARD (an adversarial review's ask): the trace's
+			// own recorded "payout" Arg (sim/actions.go's doRefund:
+			// `payout, err := core.Refund(...)`) is the REAL net core.Refund
+			// returned. `net` above is this replay's OWN independent
+			// derivation — refundPayout on this replay's own shadow
+			// (reserve, credits, supply), minus a tax sourced from the SAME
+			// trace. If the two disagree, either this replay's shadow state
+			// has drifted from the real contract's, or core itself
+			// mis-computed — either way this is exactly the class of defect
+			// that used to be caught only "by eye" (report.go's refundPayout
+			// doc: the PAR-era clamp bug), not by an assertion that runs on
+			// every single refund automatically.
+			if payoutArg, ok := argBig(ev, "payout"); ok && net.Cmp(payoutArg) != 0 {
+				markBad(i, fmt.Sprintf("event %d (refund by %s on %s): replayed net (%s) != trace's own recorded payout (%s) — this replay's independent refundPayout/tax derivation and core.Refund's real return value disagree",
+					i, ev.Actor, c, net, payoutArg), new(big.Int).Sub(net, payoutArg))
+			}
 			taxCreator, taxPlatform := splitHalf(tax)
 			treasury = new(big.Int).Add(treasury, taxPlatform)
 			feePots[c] = new(big.Int).Add(get(feePots, c), taxCreator)
@@ -642,6 +828,14 @@ func AnalyzeLedger(tr *Trace) LedgerReport {
 			if net.Sign() < 0 {
 				net = zeroBig()
 			}
+			// F1 MECHANICAL GUARD — identical reasoning to the "refund" case
+			// above: cross-check this replay's independently-derived net
+			// against the trace's own recorded "payout" Arg (sim/actions.go's
+			// doRefundHolder).
+			if payoutArg, ok := argBig(ev, "payout"); ok && net.Cmp(payoutArg) != 0 {
+				markBad(i, fmt.Sprintf("event %d (refundHolder by %s targeting %s on %s): replayed net (%s) != trace's own recorded payout (%s) — this replay's independent refundPayout/tax derivation and core.RefundHolder's real return value disagree",
+					i, ev.Actor, holder, c, net, payoutArg), new(big.Int).Sub(net, payoutArg))
+			}
 			taxCreator, taxPlatform := splitHalf(tax)
 			treasury = new(big.Int).Add(treasury, taxPlatform)
 			feePots[c] = new(big.Int).Add(get(feePots, c), taxCreator)
@@ -666,7 +860,13 @@ func AnalyzeLedger(tr *Trace) LedgerReport {
 				// so a gift never manufactures a false "loss" on one side or a
 				// false "unexplained gain" flag on the other).
 				sender := getActor(ev.Actor)
-				sender.TransferredAway = new(big.Int).Add(sender.TransferredAway, amount)
+				// F1: reserve-backed HBD value at THIS event's own block — a
+				// transfer moves no reserve/supply itself, so reserve[c]/
+				// supply[c] here are exactly what they were the instant this
+				// transfer executed. See the field's own doc for why this is a
+				// credit COUNT no longer.
+				value := refundPayout(get(reserve, c), amount, get(supply, c))
+				sender.TransferredAway = new(big.Int).Add(sender.TransferredAway, value)
 			}
 			// no HBD leg — nothing to add to entered/left/sits.
 
@@ -700,8 +900,48 @@ func AnalyzeLedger(tr *Trace) LedgerReport {
 			a := getActor(ev.Actor) // the owner receives this HBD out
 			a.ReceivedOut = new(big.Int).Add(a.ReceivedOut, amount)
 
-		case "closeIfDrained", "setCap", "recordObs":
-			// no HBD movement.
+		case "claimTradeFees":
+			// RULING F8 (tradefee.go's pull half, wired into the engine
+			// 2026-07-28): pays the caller's ENTIRE accrued kFeeBal — money
+			// leaving the Sits.FeePotsTotal bucket, the identical role
+			// "withdrawTreasury" above plays for kTreasury. Without this
+			// case, ClaimTradeFees would fall through to `default` (a Note,
+			// no money moved in the replay) while core REALLY drained the
+			// creator's feePot — sits would stay overstated by every claimed
+			// amount and the identity would diverge from the first claim on.
+			claimed, ok := argBig(ev, "claimed")
+			if !ok {
+				rpt.Notes = append(rpt.Notes, fmt.Sprintf("event %d (claimTradeFees by %s): missing Args.claimed, skipped in ledger", i, ev.Actor))
+				continue
+			}
+			if claimed.Sign() == 0 {
+				continue // legitimate no-op: ClaimTradeFees on an empty pot pays nothing (core/tradefee.go)
+			}
+			pot := get(feePots, c) // c == ev.Creator == ev.Actor here (sim/actions.go's doClaimTradeFees: newEvent("claimTradeFees", caller, caller))
+			if claimed.Cmp(pot) > 0 {
+				// Should be unreachable given core's own exact-balance payout
+				// (ClaimTradeFees pays getMoney(kFeeBal) exactly, then zeros
+				// it); if a trace shows it, note it and clamp so the replay
+				// stays well-defined rather than driving feePots negative.
+				rpt.Notes = append(rpt.Notes, fmt.Sprintf("event %d (claimTradeFees by %s): claimed %s exceeds replayed feePot %s — clamping the replay",
+					i, ev.Actor, claimed, pot))
+				claimed = new(big.Int).Set(pot)
+			}
+			feePots[c] = new(big.Int).Sub(pot, claimed)
+			left = new(big.Int).Add(left, claimed)
+			sits = new(big.Int).Sub(sits, claimed)
+			rpt.Left.TradeFeesClaimed = new(big.Int).Add(rpt.Left.TradeFeesClaimed, claimed)
+			a := getActor(ev.Actor)
+			a.ReceivedOut = new(big.Int).Add(a.ReceivedOut, claimed)
+
+		case "closeIfDrained", "setCap", "recordObs",
+			"retire", "createOffering", "setOfferingPrice", "setOfferingTitle", "deleteOffering":
+			// no HBD movement. The four shop-catalogue writers and Retire all
+			// move no funds (offerings.go/market.go's own file docs — pure
+			// config/state writes), explicitly recognized here rather than
+			// falling through to `default` so a real run's Notes list isn't
+			// cluttered with "unrecognized action" noise for actions this
+			// package's author has actually read and confirmed are moneyless.
 
 		default:
 			rpt.Notes = append(rpt.Notes, fmt.Sprintf("event %d: unrecognized action %q, ignored by ledger replay", i, ev.Action))
@@ -750,7 +990,8 @@ func AnalyzeLedger(tr *Trace) LedgerReport {
 	rpt.Entered.Total = new(big.Int).Add(rpt.Entered.Registration, new(big.Int).Add(rpt.Entered.Subscription,
 		new(big.Int).Add(rpt.Entered.Prepay, new(big.Int).Add(rpt.Entered.Buy, rpt.Entered.CommissionHeld))))
 	rpt.Left.Total = new(big.Int).Add(rpt.Left.Refunds, new(big.Int).Add(rpt.Left.ReclaimedCommission,
-		new(big.Int).Add(rpt.Left.Sold, rpt.Left.TreasuryWithdrawn)))
+		new(big.Int).Add(rpt.Left.DeclinedCommission, new(big.Int).Add(rpt.Left.Sold,
+			new(big.Int).Add(rpt.Left.TradeFeesClaimed, rpt.Left.TreasuryWithdrawn)))))
 
 	// Finalize the treasury-exit verdict (Upgrade 1 / C2).
 	rpt.TreasuryFinal = new(big.Int).Set(treasury)
@@ -766,7 +1007,40 @@ func AnalyzeLedger(tr *Trace) LedgerReport {
 	// the terms) the FIRST violation actually occurred — see markBad's doc.
 	rpt.Closes = rpt.FirstBadEvent == -1
 
-	// Credits-held value per actor, floor-priced from final reserve/supply.
+	// Credits-held value per actor, floor-priced from final reserve/supply,
+	// NET of the maximum possible K2 exit tax (F8, an adversarial review).
+	//
+	// core/refund.go's Refund/RefundHolder return GROSS minus a hold-time-
+	// decaying exit tax (up to MaxExitTaxBps, exittax.go: "tax(t) = 20% *
+	// max(0, 1 - t/6weeks)") — the holder never actually receives the raw
+	// refundPayout figure. This field's own doc calls it "the WIND-DOWN
+	// pro-rata FLOOR... the worst case," but until this fix it priced the
+	// PRE-TAX gross, overstating the realizable floor by up to 20% — in the
+	// MASKING direction (a larger explained CreditsHeldValue shrinks
+	// Unexplained, hiding a real problem rather than manufacturing a false
+	// one; see AnalyzeLedger's SCOPE NOTE, item 3, on why this package
+	// otherwise treats "the floor never overstates" as load-bearing).
+	//
+	// This replay does not track each holder's own hold-clock
+	// (holdclock.go's C-14 weighted-average-toward-block rule, refreshed on
+	// every inflow) — reimplementing it independently here risks the same
+	// silent-drift class journey.go's own doc warns against for the TWAP.
+	// Rather than compute the EXACT tax, this applies the MAXIMUM possible
+	// tax (MaxExitTaxBps, the freshest-hold worst case) as a conservative
+	// haircut. Because ExitTaxOn(gross, τ) = ceil(gross·τ/10000) is
+	// non-decreasing in τ, ceil(gross·MaxExitTaxBps/10000) upper-bounds the
+	// REAL tax at any actual τ <= MaxExitTaxBps, so
+	// gross - thatCeiling <= gross - realTax = the holder's true net for
+	// EVERY possible hold time: a genuine floor, never an overstatement,
+	// regardless of whether the exit would actually route through Sell or
+	// Refund/RefundHolder — RULING K put the identical τ(h) formula behind
+	// both doors. The cost, disclosed: a MATURE (long-held, near-0% tax)
+	// holder's true net is now UNDERSTATED here by up to 20%, which reads as
+	// a correspondingly larger Unexplained for them — never a fund-safety
+	// concern (the same one-directional, appreciation-style bias this
+	// package's SCOPE NOTE already documents and accepts elsewhere), and it
+	// is the price of never again overstating what a fresh holder could
+	// actually realize.
 	for c, holders := range bal {
 		s := get(supply, c)
 		r := get(reserve, c)
@@ -777,21 +1051,31 @@ func AnalyzeLedger(tr *Trace) LedgerReport {
 			if amount.Sign() <= 0 {
 				continue
 			}
-			v := refundPayout(r, amount, s)
+			gross := refundPayout(r, amount, s)
+			maxTax := bpsCeil(gross, maxExitTaxBpsFor(tr))
+			net := new(big.Int).Sub(gross, maxTax)
+			if net.Sign() < 0 {
+				net = zeroBig() // unreachable: maxTax <= gross always (MaxExitTaxBps <= 10000), defensive floor
+			}
 			a := getActor(holder)
-			a.CreditsHeldValue = new(big.Int).Add(a.CreditsHeldValue, v)
+			a.CreditsHeldValue = new(big.Int).Add(a.CreditsHeldValue, net)
 		}
 	}
 	// Commission still held on this actor's own PENDING asks. (Any escrow
 	// still present here is, by construction, still PENDING — answer/reclaim
 	// both delete their entry above — so its Overpayment record, if any, is
 	// already correctly left at its default "pending" Resolution.)
-	for _, m := range escrows {
+	for c, m := range escrows {
 		for _, h := range m {
 			a := getActor(h.asker)
 			a.PendingEscrowCommission = new(big.Int).Add(a.PendingEscrowCommission, h.commissionHbd)
 			if h.credits != nil {
-				a.PendingEscrowCreditsValue = new(big.Int).Add(a.PendingEscrowCreditsValue, h.credits)
+				// F1: reserve-backed HBD value at TRACE END — this escrow is
+				// still open, so there is no single resolving block to price
+				// it at; trace end is this replay's own most-current
+				// knowledge, the same point CreditsHeldValue above prices at.
+				value := refundPayout(get(reserve, c), h.credits, get(supply, c))
+				a.PendingEscrowCreditsValue = new(big.Int).Add(a.PendingEscrowCreditsValue, value)
 			} else {
 				a.CreditsHeldApproximate = true
 			}

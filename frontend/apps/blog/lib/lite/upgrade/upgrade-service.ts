@@ -3,11 +3,13 @@
 import type { User } from '@smart-signer/types/common';
 import { getLogger } from '@ui/lib/logging';
 import { liteConfig } from '../config';
+import { withAdvisoryLock } from '../db/pool';
 import { vetNameFormat } from '../names/vetting';
 import * as users from '../repositories/user-repository';
 import * as names from '../repositories/name-reservation-repository';
 import * as upgradeEvents from '../repositories/upgrade-event-repository';
 import * as keyReveals from '../repositories/key-reveal-repository';
+import { LITE_HANDLE_REUSE_MESSAGE, isOwnLiteHandle } from '../names/upgrade-name';
 import { GeneratedKeys, getAccountCreator, hasAccountCreator } from './account-creator';
 import { decryptKeys, encryptKeys, isKeyRevealConfigured } from './key-reveal-crypto';
 
@@ -69,12 +71,35 @@ async function resumeOutstandingReveal(userId: string): Promise<UpgradeResult | 
   // belong to no account at all.
   if (outstanding.status === 'uncertain' && hasAccountCreator()) {
     try {
-      const exists = await getAccountCreator().accountExists(outstanding.hiveAccountName);
+      const creator = getAccountCreator();
+      const exists = await creator.accountExists(outstanding.hiveAccountName);
       if (!exists) {
         await keyReveals.discard(outstanding.revealId);
         await names.releasePending(outstanding.hiveAccountName).catch(() => undefined);
         return null; // nothing was created — let the caller start a clean attempt
       }
+
+      // The name is taken — but by US? An ambiguous broadcast leaves the name free
+      // for a window, and anyone (another Lumen user, a stranger on Hive) can take
+      // it in the meantime. Existence would then look exactly like success, and we
+      // would hand this user a master password for somebody else's account.
+      if (creator.accountOwnerKey) {
+        const onChainOwner = await creator.accountOwnerKey(outstanding.hiveAccountName);
+        // Compare bodies, not the printed form: the node renders keys with ITS network
+        // prefix (STM/TST) while ours were derived locally, and the prefix is not part
+        // of the key. See sameKey() in hive-account-creator.ts.
+        const strip = (key: string) => (/^[A-Z]{3}[1-9A-HJ-NP-Za-km-z]+$/.test(key) ? key.slice(3) : key);
+        if (onChainOwner && strip(onChainOwner) !== strip(keys.owner.publicKey)) {
+          logger.warn(
+            { hiveAccountName: outstanding.hiveAccountName, revealId: outstanding.revealId },
+            'Lite upgrade: the pending name now belongs to a DIFFERENT account — discarding keys that would open nothing'
+          );
+          await keyReveals.discard(outstanding.revealId);
+          await names.releasePending(outstanding.hiveAccountName).catch(() => undefined);
+          return null; // our creation never landed — start a clean attempt
+        }
+      }
+
       await keyReveals.markAvailable(outstanding.revealId, '');
     } catch (error) {
       // Node hiccup: keep the row and hand the keys over. Holding them back because a
@@ -93,6 +118,31 @@ async function resumeOutstandingReveal(userId: string): Promise<UpgradeResult | 
   };
 }
 
+/**
+ * Advisory-lock key for one user's upgrade. Namespaced above the publisher drain
+ * (971_020_301) and the ACT claim (971_020_302) so the ranges cannot meet. A hash
+ * collision between two users merely serialises two unrelated upgrades, which is
+ * harmless; what matters is that the SAME user can never run two at once.
+ */
+function upgradeLockKey(userId: string): number {
+  let hash = 0;
+  for (let i = 0; i < userId.length; i++) hash = (hash * 31 + userId.charCodeAt(i)) % 100_000_000;
+  return 972_000_000 + hash;
+}
+
+/**
+ * One upgrade at a time per user, cluster-wide.
+ *
+ * Without this, two concurrent requests from one session with two DIFFERENT names
+ * both read `account_tier = 'lite'` before either commits, both take their own
+ * (per-name) reservation, and both run to completion: two account creation tokens
+ * burned, two real Hive accounts created, two sets of keys handed out. Only one can
+ * win `markUpgraded`'s `WHERE account_tier = 'lite'`; the loser's account then exists
+ * on chain with our creator account as its permanent recovery agent and NO record of
+ * it anywhere in Lumen. The per-name lock cannot prevent this — the names differ.
+ *
+ * A double-click on the upgrade button is enough to trigger it.
+ */
 export async function upgradeToFullAccount(
   sessionUser: User | undefined,
   newNameRaw: string
@@ -100,7 +150,22 @@ export async function upgradeToFullAccount(
   if (!sessionUser?.userId || sessionUser.account_tier !== 'lite') {
     return { status: 'error', code: 'unauthorized', message: 'Not signed in as a lite account.' };
   }
-  const user = await users.findUserById(sessionUser.userId);
+  const result = await withAdvisoryLock(upgradeLockKey(sessionUser.userId), () =>
+    runUpgrade(sessionUser, newNameRaw)
+  );
+  // null means the lock was not granted — never a real result, since runUpgrade
+  // either returns an UpgradeResult or throws.
+  return (
+    result ?? {
+      status: 'error',
+      code: 'upgrade_in_progress',
+      message: 'An upgrade is already running for this account. Give it a moment and refresh.'
+    }
+  );
+}
+
+async function runUpgrade(sessionUser: User, newNameRaw: string): Promise<UpgradeResult> {
+  const user = await users.findUserById(sessionUser.userId as string);
   if (!user) return { status: 'error', code: 'not_found', message: 'Account not found.' };
 
   // Keys already owed to this user outrank everything below — including the
@@ -136,9 +201,12 @@ export async function upgradeToFullAccount(
   }
 
   const newName = newNameRaw.trim().toLowerCase();
-  // "Pick another name" is firm — must differ from the permanent Lumen handle (§F.2).
-  if (newName === user.displayName.toLowerCase()) {
-    return { status: 'error', code: 'name_must_differ', message: 'Choose a name different from your Lumen handle.' };
+  // Refused here, before anything is spent. This is NOT a soft preference: the
+  // `hive_name_differs_from_display` CHECK on lumen_user makes the resulting row
+  // impossible, and that row is written only AFTER the on-chain account exists — so
+  // allowing it burns a real token and strands the user. See names/upgrade-name.ts.
+  if (isOwnLiteHandle(newName, user.displayName)) {
+    return { status: 'error', code: 'name_must_differ', message: LITE_HANDLE_REUSE_MESSAGE };
   }
   const vet = vetNameFormat(newName);
   if (!vet.ok) return { status: 'error', code: 'invalid_name', message: vet.error };
@@ -202,6 +270,15 @@ export async function upgradeToFullAccount(
       // publish, decision 2026-07-23), so upgrade only creates the on-chain account and
       // hands over the keys — there is nothing to sweep.
     } catch (postCreateError) {
+      // Never rethrow — the keys must reach the caller. But never stay quiet either:
+      // an account creation token has just been spent on an account that Lumen has
+      // failed to link to its owner, and nothing downstream will notice. The user
+      // still gets their keys and their account; what is broken is OUR record of it,
+      // and only a human can repair that.
+      logger.error(
+        { err: postCreateError, userId: user.userId, hiveAccountName: newName, upgradeEventId: event.id },
+        'Lite upgrade: the Hive account was CREATED but Lumen could not record the upgrade — the account exists on chain and this user is still marked lite. Needs manual repair.'
+      );
       await upgradeEvents
         .fail(
           event.id,
@@ -220,9 +297,12 @@ export async function upgradeToFullAccount(
     } else if (revealId) {
       await keyReveals.discard(revealId).catch(() => undefined);
     }
-    // Only reached for pre-creation failures when `creationAttempted` is false, in
-    // which case no account exists and no key can be stranded.
-    await names.releasePending(newName);
+    // Release the name ONLY when nothing was broadcast. After an ambiguous create,
+    // freeing it invites someone else to take the very name we may already own —
+    // and reconciliation would then find the name occupied and read that as our own
+    // success. The pending hold expires by itself (NAME_LOCK_TTL_S), so keeping it
+    // costs a few minutes, not the name.
+    if (!creationAttempted) await names.releasePending(newName);
     await upgradeEvents.fail(event.id, error instanceof Error ? error.message : String(error));
     throw error;
   }

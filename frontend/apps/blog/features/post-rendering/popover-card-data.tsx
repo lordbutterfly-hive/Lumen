@@ -24,13 +24,19 @@ interface PopoverCardDataProps {
   author: string;
   blacklist: string[];
   authorReputation: number;
+  /** See UserPopoverCardProps.liteName — a lite author has no Hive profile. */
+  liteName?: string;
 }
 
-const PopoverCardData = ({ author, blacklist, authorReputation }: PopoverCardDataProps) => {
+const PopoverCardData = ({ author, blacklist, authorReputation, liteName }: PopoverCardDataProps) => {
   const { t } = useTranslation('common_blog');
   const { user } = useUserClient();
-  const follows = useFollowsQuery(author);
-  const { data: account, isLoading } = useAccountQuery(author);
+  // A lite author is not a Hive account: querying `author` would return the SHARED
+  // publishing account and present its followers, HP and bio as this person's. Both
+  // hooks disable themselves on an empty name, so pass one.
+  const chainAuthor = liteName ? '' : author;
+  const follows = useFollowsQuery(chainAuthor);
+  const { data: account, isLoading } = useAccountQuery(chainAuthor);
   const following = useFollowingInfiniteQuery(user.username || '', 1000, 'blog', ['blog']);
   const mute = useFollowingInfiniteQuery(user.username, 1000, 'ignore', ['ignore']);
   const about = account?.profile?.about ?? null;
@@ -61,7 +67,18 @@ const PopoverCardData = ({ author, blacklist, authorReputation }: PopoverCardDat
 
   return (
     <div>
-      {account && !isLoading && follows.data && !follows.isLoading ? (
+      {liteName ? (
+        // No Hive account behind this name, so there is nothing true to show beyond
+        // it. Deliberately no follow/mute buttons: those are chain operations and
+        // there is no account here to apply them to.
+        <div className="flex items-center gap-3 p-4" data-testid="popover-card-lite-author">
+          <Avatar className="h-10 w-10 ring-2 ring-border">
+            <AvatarImage src={getUserAvatarUrl(liteName, 'medium')} alt={liteName} />
+            <AvatarFallback>{liteName.slice(0, 2).toUpperCase()}</AvatarFallback>
+          </Avatar>
+          <span className="text-sm font-semibold text-foreground">@{liteName}</span>
+        </div>
+      ) : account && !isLoading ? (
         <>
           {/* Header with avatar and name */}
           <div className="flex items-start gap-3 border-b border-border p-4">
@@ -123,11 +140,11 @@ const PopoverCardData = ({ author, blacklist, authorReputation }: PopoverCardDat
               {/* Stats */}
               <div className="grid grid-cols-3 gap-2 border-b border-border p-3" translate="no">
                 <div className="flex flex-col items-center" data-testid="user-followers">
-                  <span className="text-lg font-semibold text-foreground">{follows.data.follower_count}</span>
+                  <span className="text-lg font-semibold text-foreground">{follows.data?.follower_count ?? '—'}</span>
                   <span className="text-xs text-muted-foreground">{t('post_content.header.hover_author.followers')}</span>
                 </div>
                 <div className="flex flex-col items-center" data-testid="user-following">
-                  <span className="text-lg font-semibold text-foreground">{follows.data.following_count}</span>
+                  <span className="text-lg font-semibold text-foreground">{follows.data?.following_count ?? '—'}</span>
                   <span className="text-xs text-muted-foreground">{t('post_content.header.hover_author.following')}</span>
                 </div>
                 <div className="flex flex-col items-center" data-testid="user-hp">
@@ -155,9 +172,24 @@ const PopoverCardData = ({ author, blacklist, authorReputation }: PopoverCardDat
             </>
           )}
         </>
-      ) : (
+      ) : isLoading ? (
         <div className="flex items-center justify-center p-8">
           <div className="h-6 w-6 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
+        </div>
+      ) : (
+        // Not loading, and there is still no account: this name has no Hive profile
+        // to show. That is the normal case for a Lumen lite author — they post
+        // through the shared publishing account and have no account of their own
+        // until they upgrade. The old code had no such branch, so hovering a lite
+        // name spun a loader forever. Show what we actually know instead.
+        <div className="flex items-center gap-3 p-4">
+          <Avatar className="h-10 w-10 ring-2 ring-border">
+            <AvatarImage src={getUserAvatarUrl(author, 'medium')} alt={author} />
+            <AvatarFallback>{author.slice(0, 2).toUpperCase()}</AvatarFallback>
+          </Avatar>
+          <span className="text-sm font-semibold text-foreground" data-testid="popover-card-no-chain-account">
+            @{author}
+          </span>
         </div>
       )}
 

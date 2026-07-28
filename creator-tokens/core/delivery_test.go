@@ -318,3 +318,53 @@ func TestDelivery_SelfDealtEscrowsCountForNeitherSide(t *testing.T) {
 		t.Fatal("a creator padded their record with self-dealt declines and escaped the gate")
 	}
 }
+
+// TestDelivery_RefusalCarriesTheDedicatedSymbol pins the DELINQUENT error
+// symbol. RequireInflowOpen's delivery branch is the ONLY place that returns
+// it, which is what lets a consumer identify "refused because the creator is
+// delinquent" without reading the message text.
+//
+// It used to return the generic ErrState, shared by dozens of unrelated
+// refusals. The simulator's standing-guardrail check therefore had to
+// substring-match the wording, and an adversarial review showed the cost: a
+// reword in this file would have turned the simulator's OUTFLOW halt into a
+// no-op that still reported a pass — so a real regression (an outflow
+// starting to consult delivery standing) would have gone unnoticed.
+//
+// If this test fails because the symbol changed, fix the symbol; do not
+// "fix" it by going back to matching prose.
+func TestDelivery_RefusalCarriesTheDedicatedSymbol(t *testing.T) {
+	s, at := dgSetup(t)
+	for i := 0; i < 3; i++ {
+		at = dgMiss(t, s, at) + 1
+	}
+	if delinquent, _ := DeliveryStanding(s, creator1, at); !delinquent {
+		t.Fatalf("setup failed: creator is not delinquent")
+	}
+
+	err := RequireInflowOpen(s, creator1, at)
+	if err == nil {
+		t.Fatal("setup failed: inflows are still open for a delinquent creator")
+	}
+	ce, ok := err.(*Err)
+	if !ok {
+		t.Fatalf("delinquency refusal must be a typed *core.Err, got %T", err)
+	}
+	if ce.Symbol != ErrDelinquent {
+		t.Fatalf("delinquency refusal carries Symbol %q, want %q — consumers can no longer distinguish it from any other %s refusal without matching message text, which is exactly the fragility this symbol was added to remove",
+			ce.Symbol, ErrDelinquent, ErrState)
+	}
+
+	// And the symbol must stay specific: a DIFFERENT inflow refusal (global
+	// pause) must NOT report itself as delinquency, or a consumer branching
+	// on the symbol would over-count.
+	s2, at2 := dgSetup(t)
+	SetPaused(s2, true)
+	perr := RequireInflowOpen(s2, creator1, at2)
+	if perr == nil {
+		t.Fatal("setup failed: a paused contract still accepts inflows")
+	}
+	if pe, ok := perr.(*Err); ok && pe.Symbol == ErrDelinquent {
+		t.Fatal("a PAUSE refusal reports Symbol=DELINQUENT — the symbol is not specific to the delivery gate and consumers branching on it will over-count")
+	}
+}

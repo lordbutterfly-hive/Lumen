@@ -26,6 +26,13 @@ const LaunchWizard: FC = () => {
   const [cap, setCap] = useState(20000);
   const [firstBuy, setFirstBuy] = useState('');
   const [launching, setLaunching] = useState(false);
+  // True once launchToken() reports the requested anti-snipe first buy was
+  // silently skipped (budget under one whole token, or it would have breached
+  // the cap) — DEFECT FIX: launchToken used to mark the token launched and
+  // report success unconditionally even then, dropping the creator's first
+  // buy with no signal anywhere. The launch itself still completed; we hold
+  // here instead of navigating away so the creator sees that before leaving.
+  const [firstBuySkipped, setFirstBuySkipped] = useState(false);
 
   const launch = () => {
     if (launching) return; // #7: no double-submit
@@ -35,7 +42,15 @@ const LaunchWizard: FC = () => {
       return { ...t, status: 'live' as const, usd: Number.isFinite(n) && n > 0 ? n : 0 }; // #5: no Infinity/NaN
     }).filter((s) => s.usd > 0);
     const fb = parseFloat(firstBuy.replace(/,/g, ''));
-    launchToken({ services, cap, firstBuyUsd: Number.isFinite(fb) && fb > 0 ? fb : 0 });
+    const result = launchToken({ services, cap, firstBuyUsd: Number.isFinite(fb) && fb > 0 ? fb : 0 });
+    if (result.firstBuySkipped) {
+      // Token IS launched — only the first buy vanished. Stay on this step
+      // and say so, rather than silently landing in the Studio as if the
+      // whole thing (first buy included) had gone through.
+      setLaunching(false);
+      setFirstBuySkipped(true);
+      return;
+    }
     router.push('/creators/studio');
   };
 
@@ -148,8 +163,22 @@ const LaunchWizard: FC = () => {
               <p className="mt-4 font-serif text-[12.5px] leading-[1.55] text-[#9ca3af]">
                 If you ever stop paying, your token’s market winds down, holders are refunded at the floor, and your delivery record resets — coming back means a new token.
               </p>
-              <button onClick={launch} disabled={launching} className="mt-5 w-full rounded-[13px] bg-[#c0392b] py-[15px] text-[15px] font-bold text-white hover:bg-[#96271b] disabled:opacity-60">
-                {launching ? 'Launching…' : `Launch my token${firstBuy && parseFloat(firstBuy.replace(/,/g, '')) > 0 ? ` · first buy ${usdWhole(parseFloat(firstBuy.replace(/,/g, '')) || 0)}` : ''}`}
+              {firstBuySkipped ? (
+                <div className="mt-4 rounded-[12px] border border-[#f6e2c4] bg-[#fdf6ec] px-4 py-3.5 text-[13.5px] font-semibold text-[#b45309]">
+                  Your token launched, but the first buy didn’t go through — that amount was too small to afford one whole
+                  token, or it would have pushed past your cap. Nothing was charged; you can buy from the Studio.
+                </div>
+              ) : null}
+              <button
+                onClick={firstBuySkipped ? () => router.push('/creators/studio') : launch}
+                disabled={launching}
+                className="mt-5 w-full rounded-[13px] bg-[#c0392b] py-[15px] text-[15px] font-bold text-white hover:bg-[#96271b] disabled:opacity-60"
+              >
+                {firstBuySkipped
+                  ? 'Continue to Studio'
+                  : launching
+                    ? 'Launching…'
+                    : `Launch my token${firstBuy && parseFloat(firstBuy.replace(/,/g, '')) > 0 ? ` · first buy ${usdWhole(parseFloat(firstBuy.replace(/,/g, '')) || 0)}` : ''}`}
               </button>
             </>
           ) : null}

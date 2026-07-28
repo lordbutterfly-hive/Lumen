@@ -30,6 +30,7 @@ import RedditShare from '@/blog/features/post-rendering/share-post-reddit';
 import TwitterShare from '@/blog/features/post-rendering/share-post-twitter';
 import UserInfo from '@/blog/features/post-rendering/user-info';
 import { UserPopoverCard } from '@/blog/features/post-rendering/user-popover-card';
+import { useLiteOverlay } from '@/blog/lib/lite/client/use-lite-overlay';
 import AnimatedList from '@/blog/features/suggestions-posts/animated-tab';
 import SuggestionsList from '@/blog/features/suggestions-posts/list';
 import { useTranslation } from '@/blog/i18n/client';
@@ -160,6 +161,12 @@ const PostContent = () => {
       handleError(error, { method: 'getPost', params: { author, permlink, observer } });
     }
   });
+  // On this page `postData.author` has ALREADY been replaced with the Lumen identity
+  // (server-side, in render/lite-entry.ts) — which is right for reading and wrong for
+  // acting: a lite name is not a Hive account, so pointing Follow/Mute at it either
+  // does nothing or hits an unrelated real user who happens to share the handle. The
+  // overlay hands back the account that actually signed the post.
+  const litePost = useLiteOverlay(postData);
   const [mutedPost, setMutedPost] = useState<boolean>(postData?.stats?.gray || false);
   // Single reblog query shared by header and footer ReblogTrigger components
   const { data: isReblogged } = useRebloggedByQuery(
@@ -541,7 +548,8 @@ const PostContent = () => {
                     <UserInfo
                       permlink={permlink}
                       moderateEnabled={!!userCanModerate}
-                      author={crossPostData?.author ?? postData.author}
+                      author={crossPostData?.author ?? litePost?.chainAuthor ?? postData.author}
+                      liteName={crossPostData ? undefined : litePost?.author}
                       author_reputation={
                         crossPostData?.author_reputation ?? postData.author_reputation
                       }
@@ -669,7 +677,10 @@ const PostContent = () => {
                       <span>{t('post_content.footer.by')}</span>
                       <div className="flex items-center">
                         <UserPopoverCard
-                          author={postData.json_metadata.original_author ?? postData.author}
+                          author={
+                            postData.json_metadata.original_author ?? litePost?.chainAuthor ?? postData.author
+                          }
+                          liteName={postData.json_metadata.original_author ? undefined : litePost?.author}
                           author_reputation={crossPostData?.author_reputation ?? postData.author_reputation}
                           blacklist={
                             firstPost

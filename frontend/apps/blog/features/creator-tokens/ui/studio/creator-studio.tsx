@@ -40,7 +40,11 @@ const Stat: FC<{ label: string; value: string; sub?: string; green?: boolean }> 
 
 // Controlled service-price editor: reverts an invalid entry to the committed
 // price so the field never lies (#4), and re-syncs when the stored price changes.
-const PriceInput: FC<{ value: number; onCommit: (usd: number) => void }> = ({ value, onCommit }) => {
+// onCommit now reports whether the store actually changed the price — a
+// refusal (an invalid amount, or an unknown service key) reverts the field
+// exactly like a locally-invalid entry does, rather than leaving it showing
+// an unconfirmed number the store silently ignored.
+const PriceInput: FC<{ value: number; onCommit: (usd: number) => boolean }> = ({ value, onCommit }) => {
   const [txt, setTxt] = useState(String(value));
   useEffect(() => setTxt(String(value)), [value]);
   return (
@@ -50,8 +54,8 @@ const PriceInput: FC<{ value: number; onCommit: (usd: number) => void }> = ({ va
       onChange={(e) => setTxt(e.target.value)}
       onBlur={() => {
         const n = parseFloat(txt.replace(/,/g, ''));
-        if (Number.isFinite(n) && n > 0) onCommit(n);
-        else setTxt(String(value));
+        const ok = Number.isFinite(n) && n > 0 && onCommit(n);
+        if (!ok) setTxt(String(value));
       }}
       className="ml-1 w-[70px] border-0 text-[15px] font-bold tabular-nums text-[#161511] outline-none"
     />
@@ -60,6 +64,7 @@ const PriceInput: FC<{ value: number; onCommit: (usd: number) => void }> = ({ va
 
 const AnswerModal: FC<{ ask: PortfolioAsk; onClose: () => void }> = ({ ask, onClose }) => {
   const [text, setText] = useState('');
+  const [failed, setFailed] = useState(false);
   return (
     <div onClick={onClose} className="fixed inset-0 z-[60] flex items-center justify-center bg-[rgba(20,18,10,0.4)] p-5 backdrop-blur-[2px]">
       <div onClick={(e) => e.stopPropagation()} className="w-[500px] max-w-full rounded-[20px] bg-white p-6 shadow-[0_20px_60px_rgba(20,18,10,0.25)]">
@@ -72,7 +77,10 @@ const AnswerModal: FC<{ ask: PortfolioAsk; onClose: () => void }> = ({ ask, onCl
         <p className="mb-3 text-[13px] text-[#6b7280]">Your answer is kept private on Lumen — only this holder sees it. Never posted to Hive.</p>
         <textarea
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            setText(e.target.value);
+            setFailed(false);
+          }}
           placeholder="Write your answer…"
           className="h-[130px] w-full resize-y rounded-xl border border-[#e4e6e9] px-4 py-3 font-serif text-[15px] leading-[1.5] text-[#161511] outline-none focus:border-[#c0392b]"
         />
@@ -83,8 +91,12 @@ const AnswerModal: FC<{ ask: PortfolioAsk; onClose: () => void }> = ({ ask, onCl
           <button onClick={onClose} className="flex-1 rounded-xl border border-[#e4e6e9] py-3 text-[14px] font-semibold text-[#6b7280]">Cancel</button>
           <button
             onClick={() => {
-              answerAsk(ask.id, text.trim() || 'Answered.');
-              onClose();
+              // answerAsk reports whether it actually answered (defect fix:
+              // this used to close unconditionally, as if a since-reclaimed or
+              // already-answered ask had paid out) — only close on a real success.
+              const ok = answerAsk(ask.id, text.trim() || 'Answered.');
+              if (ok) onClose();
+              else setFailed(true);
             }}
             disabled={text.trim().length === 0}
             className="flex-1 rounded-xl bg-[#c0392b] py-3 text-[14px] font-semibold text-white hover:bg-[#96271b] disabled:opacity-50"
@@ -92,13 +104,19 @@ const AnswerModal: FC<{ ask: PortfolioAsk; onClose: () => void }> = ({ ask, onCl
             Send answer
           </button>
         </div>
+        {failed ? (
+          <div className="mt-3 text-center text-[12.5px] font-semibold text-[#c0392b]">
+            That didn’t go through — this ask may have already been answered or reclaimed. Close and check your Inbox.
+          </div>
+        ) : null}
       </div>
     </div>
   );
 };
 
-const RetireModal: FC<{ onConfirm: () => void; onClose: () => void }> = ({ onConfirm, onClose }) => {
+const RetireModal: FC<{ onConfirm: () => boolean; onClose: () => void }> = ({ onConfirm, onClose }) => {
   const [confirm, setConfirm] = useState('');
+  const [failed, setFailed] = useState(false);
   const ok = confirm.trim().toLowerCase().replace(/^@/, '') === STUDIO_HANDLE;
   return (
     <div onClick={onClose} className="fixed inset-0 z-[60] flex items-center justify-center bg-[rgba(20,18,10,0.4)] p-5 backdrop-blur-[2px]">
@@ -119,8 +137,12 @@ const RetireModal: FC<{ onConfirm: () => void; onClose: () => void }> = ({ onCon
           <button
             onClick={() => {
               if (ok) {
-                onConfirm();
-                onClose();
+                // onConfirm reports whether it actually wound the market down
+                // (defect fix: this used to close unconditionally) — only
+                // close on a real success.
+                const done = onConfirm();
+                if (done) onClose();
+                else setFailed(true);
               }
             }}
             disabled={!ok}
@@ -129,6 +151,11 @@ const RetireModal: FC<{ onConfirm: () => void; onClose: () => void }> = ({ onCon
             End my token
           </button>
         </div>
+        {failed ? (
+          <div className="mt-3 text-center text-[12.5px] font-semibold text-[#c0392b]">
+            This token is already winding down — there’s nothing further to end.
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -141,6 +168,7 @@ const CreatorStudio: FC = () => {
   const [retireOpen, setRetireOpen] = useState(false);
   const [capInput, setCapInput] = useState(String(market.cap));
   const [sellInput, setSellInput] = useState('');
+  const [sellFailed, setSellFailed] = useState(false);
   // Keep the cap field in sync with the committed cap after a successful raise (#3).
   useEffect(() => setCapInput(String(market.cap)), [market.cap]);
 
@@ -272,8 +300,13 @@ const CreatorStudio: FC = () => {
               <button
                 onClick={() => {
                   const v = parseInt(capInput.replace(/[^\d]/g, ''), 10);
-                  if (Number.isFinite(v) && v >= Math.ceil(market.supply)) raiseCap(v);
-                  else setCapInput(String(market.cap)); // revert a too-low / invalid entry
+                  // raiseCap reports whether it actually raised — the local
+                  // v >= issued check is a fast-path, but the store's own
+                  // refusal (its own read of issued supply may have moved
+                  // since this render) is what actually decides, so both must
+                  // pass before reverting the field is skipped.
+                  const ok = Number.isFinite(v) && v >= Math.ceil(market.supply) && raiseCap(v);
+                  if (!ok) setCapInput(String(market.cap)); // revert a too-low / invalid / refused entry
                 }}
                 className="rounded-[10px] bg-[#161511] px-4 py-2 text-[13px] font-semibold text-white"
               >
@@ -322,13 +355,27 @@ const CreatorStudio: FC = () => {
               <Stat label="Your own holdings" value={`${tok(held)} tokens`} sub={`worth ${usdPrice(held * market.priceUsd)} · floor ${usdPrice(held * market.floorUsd)}`} />
               <div className="mt-4 flex items-center gap-2">
                 <span className="text-[13px] text-[#6b7280]">Cash out</span>
-                <input value={sellInput} onChange={(e) => setSellInput(e.target.value)} placeholder="tokens" inputMode="decimal" className="w-[110px] rounded-[10px] border border-[#e4e6e9] px-3 py-2 text-[14px] font-semibold tabular-nums outline-none" />
+                <input
+                  value={sellInput}
+                  onChange={(e) => {
+                    setSellInput(e.target.value);
+                    setSellFailed(false);
+                  }}
+                  placeholder="tokens"
+                  inputMode="decimal"
+                  className="w-[110px] rounded-[10px] border border-[#e4e6e9] px-3 py-2 text-[14px] font-semibold tabular-nums outline-none"
+                />
                 <button
                   onClick={() => {
                     const n = parseFloat(sellInput.replace(/,/g, ''));
                     if (Number.isFinite(n) && n > 0) {
-                      sell(STUDIO_HANDLE, n);
-                      setSellInput('');
+                      // sell reports whether it actually executed (defect fix:
+                      // this used to clear the input unconditionally, as if a
+                      // nothing-held or sub-1-token sell had succeeded) — only
+                      // clear it on a real success.
+                      const ok = sell(STUDIO_HANDLE, n);
+                      if (ok) setSellInput('');
+                      else setSellFailed(true);
                     }
                   }}
                   className="rounded-[10px] bg-[#161511] px-4 py-2 text-[13px] font-semibold text-white"
@@ -336,6 +383,11 @@ const CreatorStudio: FC = () => {
                   Sell
                 </button>
               </div>
+              {sellFailed ? (
+                <div className="mt-2 text-[12px] font-semibold text-[#c0392b]">
+                  That sell didn’t go through — you may hold fewer tokens than that. Try a smaller amount.
+                </div>
+              ) : null}
               <p className="mt-3 text-[12px] leading-[1.5] text-[#9ca3af]">Selling your own tokens returns them to dollars at the market price — it doesn’t affect anyone else’s floor. Never blocked by billing.</p>
             </Card>
           </div>

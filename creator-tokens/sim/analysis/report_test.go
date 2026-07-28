@@ -126,16 +126,80 @@ func TestDerivePhase_MirrorsCoreMarketGo(t *testing.T) {
 		{1000 + grace + 1, true, PhaseClosed}, // a stored CLOSED always wins
 	}
 	for _, c := range cases {
-		got := derivePhase(c.closed, paidUntil, c.block, grace)
+		// retiredAt=0, retired=false: the pre-F4 behaviour, unchanged.
+		got := derivePhase(c.closed, paidUntil, c.block, grace, 0, false)
 		if got != c.want {
-			t.Errorf("derivePhase(closed=%v, paidUntil=%d, block=%d, grace=%d) = %s, want %s",
+			t.Errorf("derivePhase(closed=%v, paidUntil=%d, block=%d, grace=%d, retired=false) = %s, want %s",
 				c.closed, paidUntil, c.block, grace, got, c.want)
 		}
 	}
 }
 
+// TestDerivePhase_RetireTermMirrorsCorePhaseMax — F4, an adversarial review.
+// derivePhase used to take no retiredAt input at all (see the fix's own doc
+// on derivePhase and journey.go's file doc for what that blinded). This
+// pins the retire half against core/market.go's own Phase()/maxPhase table
+// (RULING D): phase = MAX(naturalPhase, retiredPhase), retiredPhase =
+// block<retiredAt+GraceBlocks ? OVERDUE : FROZEN — including the
+// load-bearing MAX property that retiring can only ever push a market DOWN
+// the ladder, never up (a market ALREADY naturally FROZEN stays FROZEN
+// through a fresh retire notice, which alone would only read OVERDUE).
+func TestDerivePhase_RetireTermMirrorsCorePhaseMax(t *testing.T) {
+	grace := uint64(144000)
+	paidUntil := uint64(1_000_000) // far in the future: natural phase is ACTIVE throughout every case below
+	retiredAt := uint64(1000)
+
+	cases := []struct {
+		name  string
+		block uint64
+		want  string
+	}{
+		{"retire notice open", retiredAt + 1, PhaseOverdue},
+		{"retire notice, boundary-1", retiredAt + grace - 1, PhaseOverdue},
+		{"retire notice fully expired (boundary)", retiredAt + grace, PhaseFrozen}, // FROZEN begins AT the +GraceBlocks boundary, same convention as the natural ladder
+		{"long after retire", retiredAt + grace + 999, PhaseFrozen},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := derivePhase(false, paidUntil, c.block, grace, retiredAt, true)
+			if got != c.want {
+				t.Errorf("derivePhase(paidUntil=%d(far future), block=%d, retiredAt=%d, retired=true) = %s, want %s",
+					paidUntil, c.block, retiredAt, got, c.want)
+			}
+		})
+	}
+
+	// THE MAX IS LOAD-BEARING (core/market.go's own emphasis on Phase's
+	// doc): a market that is ALREADY naturally FROZEN (paidUntil long past,
+	// well past its own grace) must STAY FROZEN through a brand-new retire
+	// notice, which in isolation would only read OVERDUE. Retiring may only
+	// ever make a market MORE frozen, never less.
+	alreadyFrozenPaidUntil := uint64(100)
+	block := alreadyFrozenPaidUntil + grace // exactly the natural FROZEN boundary (derivePhase's own convention: FROZEN begins AT +GraceBlocks)
+	freshRetireAt := block - 1000           // retired 1000 blocks before this query — notice alone (block < freshRetireAt+grace) reads OVERDUE
+	got := derivePhase(false, alreadyFrozenPaidUntil, block, grace, freshRetireAt, true)
+	if got != PhaseFrozen {
+		t.Errorf("MAX violated: a naturally-FROZEN market (paidUntil=%d, block=%d) retiring at %d (notice alone would be OVERDUE) read %s, want FROZEN",
+			alreadyFrozenPaidUntil, block, freshRetireAt, got)
+	}
+
+	// A stored CLOSED always wins, retire notwithstanding.
+	if got := derivePhase(true, paidUntil, retiredAt+1, grace, retiredAt, true); got != PhaseClosed {
+		t.Errorf("derivePhase(closed=true, ..., retired=true) = %s, want PhaseClosed (closed always wins)", got)
+	}
+}
+
 func TestRefundPayout_MirrorsCoreRefundGo(t *testing.T) {
-	// floor(reserve*credits/supply), capped at credits.
+	// floor(reserve*credits/supply). NO cap — see refundPayout's own doc
+	// (defect fix, 2026-07-28): a stale PAR-era clamp at `credits` used to
+	// sit here, and this third sub-test used to assert THAT clamp fired
+	// ("capped, not 1500") as if it were correct behaviour. It was not:
+	// core/refund.go's own file header names deleting that exact clamp as
+	// RULING A's fix ("THE PAR CAP IS DELETED... a CONFISCATION"), and this
+	// package's copy of the formula had silently drifted back to the
+	// deleted, incorrect behaviour. Once real markets carry a curve-priced
+	// reserve (BasePrice=1000 alone guarantees reserve > supply for any
+	// non-trivial market), the OLD assertion here actively verified a bug.
 	got := refundPayout(mustBig("1000"), mustBig("300"), mustBig("1000"))
 	if got.Cmp(mustBig("300")) != 0 {
 		t.Errorf("exact peg: got %s, want 300", got)
@@ -145,9 +209,12 @@ func TestRefundPayout_MirrorsCoreRefundGo(t *testing.T) {
 	if got.Cmp(mustBig("299")) != 0 { // floor(999*300/1000) = floor(299.7) = 299
 		t.Errorf("floor rounding: got %s, want 299", got)
 	}
-	// PAR cap: if reserve somehow exceeds supply, payout is capped at credits.
+	// A curve-appreciated reserve (reserve > supply, the ORDINARY case once
+	// BasePrice > 1 — every real market): the payout scales with the
+	// reserve, uncapped. floor(5000*300/1000) = 1500 exactly, not clamped
+	// down to the raw credit count.
 	got = refundPayout(mustBig("5000"), mustBig("300"), mustBig("1000"))
-	if got.Cmp(mustBig("300")) != 0 {
-		t.Errorf("PAR cap: got %s, want 300 (capped, not 1500)", got)
+	if got.Cmp(mustBig("1500")) != 0 {
+		t.Errorf("curve-appreciated reserve: got %s, want 1500 (uncapped — the exact amount RULING A's fix restores)", got)
 	}
 }

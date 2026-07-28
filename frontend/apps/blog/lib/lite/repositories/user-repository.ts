@@ -94,6 +94,32 @@ export async function findUsersByHiveAccountNames(names: string[]): Promise<Lume
 }
 
 /**
+ * Which of these names are already spoken for inside Lumen — as a current handle OR
+ * as an upgraded account's Hive name. One query.
+ *
+ * Used to filter name suggestions: Hive availability alone is not enough, because a
+ * name free on chain can still be another Lumen user's handle, and offering it would
+ * mean the picker says "yes" and the upgrade then says "taken".
+ */
+export async function findNamesInUse(names: string[]): Promise<Set<string>> {
+  if (names.length === 0) return new Set();
+  const { rows } = await query<{ name: string }>(
+    `SELECT display_name AS name FROM lumen_user WHERE display_name = ANY($1::citext[])
+     UNION
+     SELECT hive_account_name AS name FROM lumen_user WHERE hive_account_name = ANY($1::citext[])`,
+    [names]
+  );
+  return new Set(rows.map((r) => String(r.name).toLowerCase()));
+}
+
+/** Batch id lookup — one query for a whole feed page, never one per post. */
+export async function findUsersByIds(userIds: string[]): Promise<LumenUser[]> {
+  if (userIds.length === 0) return [];
+  const { rows } = await query<UserRow>(`${SELECT} WHERE user_id = ANY($1::text[])`, [userIds]);
+  return rows.map(mapUser);
+}
+
+/**
  * Set an account's status. `suspended`/`banned` were valid values in the schema that
  * NOTHING ever wrote — the moderation model existed on paper only.
  *

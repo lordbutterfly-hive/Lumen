@@ -74,6 +74,7 @@ const askStyle: Record<PortfolioAsk['state'], { label: string; cls: string }> = 
 const AskCard: FC<{ a: PortfolioAsk }> = ({ a }) => {
   const s = askStyle[a.state];
   const reclaimable = a.state === 'reclaimable';
+  const [failed, setFailed] = useState(false);
   return (
     <div className={`rounded-[16px] border bg-white px-5 py-4 ${reclaimable ? 'border-[#f6e2c4] bg-[#fdf6ec]' : 'border-[#ebebeb]'}`}>
       <div className="flex items-center justify-between gap-3">
@@ -92,8 +93,22 @@ const AskCard: FC<{ a: PortfolioAsk }> = ({ a }) => {
       {reclaimable ? (
         <div className="mt-3 flex items-center justify-between gap-3">
           <div className="text-[13px] text-[#8a5a20]">You get {a.tokens.toFixed(2)} tokens back to your balance — in full.</div>
-          <button onClick={() => reclaimAsk(a.id)} className="rounded-[10px] bg-[#b45309] px-4 py-2 text-[13px] font-semibold text-white hover:bg-[#8a4207]">Get your tokens back</button>
+          <button
+            onClick={() => {
+              // reclaimAsk reports whether it actually returned the tokens —
+              // false means this ask was already reclaimed/answered elsewhere
+              // in the meantime, and nothing moved.
+              const ok = reclaimAsk(a.id);
+              if (!ok) setFailed(true);
+            }}
+            className="rounded-[10px] bg-[#b45309] px-4 py-2 text-[13px] font-semibold text-white hover:bg-[#8a4207]"
+          >
+            Get your tokens back
+          </button>
         </div>
+      ) : null}
+      {failed ? (
+        <div className="mt-2 text-[12px] font-semibold text-[#c0392b]">That didn’t go through — this ask may have already been resolved. Refresh and check its status.</div>
       ) : null}
     </div>
   );

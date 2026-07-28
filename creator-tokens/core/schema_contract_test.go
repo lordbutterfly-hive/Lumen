@@ -25,7 +25,7 @@ import (
 // parseAmount on every money-shaped field of a known event kind and returns
 // false — without applying ANY of that event's effects — if even ONE
 // documented field fails to parse as a non-negative base-10 decimal
-// (index.go:240-251's own comment: "deliberately not just the ones this
+// (index.go:353-367's own comment: "deliberately not just the ones this
 // fold happens to use arithmetically"). If core renamed, say, AskedEvent's
 // "creditsSpent" field, indexer/events.go's AskedEvent.CreditsSpent
 // (json:"creditsSpent") would silently decode to "" (Go's json package
@@ -164,83 +164,83 @@ func scWantFieldCount(t *testing.T, evName string, m map[string]any, want int, i
 
 func TestSchemaContract_Registered(t *testing.T) {
 	const evName = "registered"
-	const ref = "indexer/events.go:51-58 (RegisteredEvent)"
+	const ref = "indexer/events.go:198-205 (RegisteredEvent)"
 	out := EvRegistered("aliceperry", "aliceperry", 12_345_678, 5000, 1_000_000, big.NewInt(10_000))
 	m := scDecode(t, out)
 
-	scWantStr(t, evName, m, "ev", "registered", "indexer/events.go:21 (KindRegistered) + :215-221 (ParseEvent dispatch)")
-	scWantNum(t, evName, m, "v", 1, "indexer/events.go:40-41 (envelope.V)")
-	scWantStr(t, evName, m, "creator", "aliceperry", "indexer/events.go:52 (RegisteredEvent.Creator)")
-	scWantStr(t, evName, m, "actor", "aliceperry", "indexer/events.go:53 (RegisteredEvent.Actor)")
-	scWantNum(t, evName, m, "block", 12_345_678, "indexer/events.go:54 (RegisteredEvent.Block)")
-	scWantStr(t, evName, m, "face", "5000", "indexer/events.go:55 (RegisteredEvent.Face)")
-	scWantStr(t, evName, m, "cap", "1000000", "indexer/events.go:56 (RegisteredEvent.Cap)")
-	scWantStr(t, evName, m, "feePaid", "10000", "indexer/events.go:57 (RegisteredEvent.FeePaid)")
+	scWantStr(t, evName, m, "ev", "registered", "indexer/events.go:54 (KindRegistered) + :528-533 (ParseEvent dispatch)")
+	scWantNum(t, evName, m, "v", 1, "indexer/events.go (envelope.V)")
+	scWantStr(t, evName, m, "creator", "aliceperry", "indexer/events.go:199 (RegisteredEvent.Creator)")
+	scWantStr(t, evName, m, "actor", "aliceperry", "indexer/events.go:200 (RegisteredEvent.Actor)")
+	scWantNum(t, evName, m, "block", 12_345_678, "indexer/events.go:201 (RegisteredEvent.Block)")
+	scWantStr(t, evName, m, "face", "5000", "indexer/events.go:202 (RegisteredEvent.Face)")
+	scWantStr(t, evName, m, "cap", "1000000", "indexer/events.go:203 (RegisteredEvent.Cap)")
+	scWantStr(t, evName, m, "feePaid", "10000", "indexer/events.go:204 (RegisteredEvent.FeePaid)")
 	scWantFieldCount(t, evName, m, 8, ref)
 }
 
 func TestSchemaContract_Renewed(t *testing.T) {
 	const evName = "renewed"
-	const ref = "indexer/events.go:60-66 (RenewedEvent)"
+	const ref = "indexer/events.go:207-213 (RenewedEvent)"
 	// actor deliberately != creator: Renew is permissionless (a fan pays).
 	out := EvRenewed("aliceperry", "fanwriter1", 12_400_000, 3, big.NewInt(30_000))
 	m := scDecode(t, out)
 
-	scWantStr(t, evName, m, "ev", "renewed", "indexer/events.go:22 (KindRenewed)")
-	scWantNum(t, evName, m, "v", 1, "indexer/events.go:40-41 (envelope.V)")
-	scWantStr(t, evName, m, "creator", "aliceperry", "indexer/events.go:61 (RenewedEvent.Creator)")
-	scWantStr(t, evName, m, "actor", "fanwriter1", "indexer/events.go:62 (RenewedEvent.Actor)")
-	scWantNum(t, evName, m, "block", 12_400_000, "indexer/events.go:63 (RenewedEvent.Block)")
-	scWantNum(t, evName, m, "periods", 3, "indexer/events.go:64 (RenewedEvent.Periods)")
-	scWantStr(t, evName, m, "paid", "30000", "indexer/events.go:65 (RenewedEvent.Paid)")
+	scWantStr(t, evName, m, "ev", "renewed", "indexer/events.go:55 (KindRenewed)")
+	scWantNum(t, evName, m, "v", 1, "indexer/events.go (envelope.V)")
+	scWantStr(t, evName, m, "creator", "aliceperry", "indexer/events.go:208 (RenewedEvent.Creator)")
+	scWantStr(t, evName, m, "actor", "fanwriter1", "indexer/events.go:209 (RenewedEvent.Actor)")
+	scWantNum(t, evName, m, "block", 12_400_000, "indexer/events.go:210 (RenewedEvent.Block)")
+	scWantNum(t, evName, m, "periods", 3, "indexer/events.go:211 (RenewedEvent.Periods)")
+	scWantStr(t, evName, m, "paid", "30000", "indexer/events.go:212 (RenewedEvent.Paid)")
 	scWantFieldCount(t, evName, m, 7, ref)
 }
 
 func TestSchemaContract_FaceChanged(t *testing.T) {
 	const evName = "faceChanged"
-	const ref = "indexer/events.go:68-74 (FaceChangedEvent)"
+	const ref = "indexer/events.go:215-221 (FaceChangedEvent)"
 	out := EvFaceChanged("aliceperry", "aliceperry", 12_500_000, 5000, 9000)
 	m := scDecode(t, out)
 
-	scWantStr(t, evName, m, "ev", "faceChanged", "indexer/events.go:23 (KindFaceChanged)")
-	scWantNum(t, evName, m, "v", 1, "indexer/events.go:40-41 (envelope.V)")
-	scWantStr(t, evName, m, "creator", "aliceperry", "indexer/events.go:69 (FaceChangedEvent.Creator)")
-	scWantStr(t, evName, m, "actor", "aliceperry", "indexer/events.go:70 (FaceChangedEvent.Actor)")
-	scWantNum(t, evName, m, "block", 12_500_000, "indexer/events.go:71 (FaceChangedEvent.Block)")
-	scWantStr(t, evName, m, "oldFace", "5000", "indexer/events.go:72 (FaceChangedEvent.OldFace)")
-	scWantStr(t, evName, m, "newFace", "9000", "indexer/events.go:73 (FaceChangedEvent.NewFace)")
+	scWantStr(t, evName, m, "ev", "faceChanged", "indexer/events.go:56 (KindFaceChanged)")
+	scWantNum(t, evName, m, "v", 1, "indexer/events.go (envelope.V)")
+	scWantStr(t, evName, m, "creator", "aliceperry", "indexer/events.go:216 (FaceChangedEvent.Creator)")
+	scWantStr(t, evName, m, "actor", "aliceperry", "indexer/events.go:217 (FaceChangedEvent.Actor)")
+	scWantNum(t, evName, m, "block", 12_500_000, "indexer/events.go:218 (FaceChangedEvent.Block)")
+	scWantStr(t, evName, m, "oldFace", "5000", "indexer/events.go:219 (FaceChangedEvent.OldFace)")
+	scWantStr(t, evName, m, "newFace", "9000", "indexer/events.go:220 (FaceChangedEvent.NewFace)")
 	scWantFieldCount(t, evName, m, 7, ref)
 }
 
 func TestSchemaContract_CapChanged(t *testing.T) {
 	const evName = "capChanged"
-	const ref = "indexer/events.go:76-82 (CapChangedEvent)"
+	const ref = "indexer/events.go:223-229 (CapChangedEvent)"
 	out := EvCapChanged("aliceperry", "aliceperry", 12_500_100, 1_000_000, 2_000_000)
 	m := scDecode(t, out)
 
-	scWantStr(t, evName, m, "ev", "capChanged", "indexer/events.go:24 (KindCapChanged)")
-	scWantNum(t, evName, m, "v", 1, "indexer/events.go:40-41 (envelope.V)")
-	scWantStr(t, evName, m, "creator", "aliceperry", "indexer/events.go:77 (CapChangedEvent.Creator)")
-	scWantStr(t, evName, m, "actor", "aliceperry", "indexer/events.go:78 (CapChangedEvent.Actor)")
-	scWantNum(t, evName, m, "block", 12_500_100, "indexer/events.go:79 (CapChangedEvent.Block)")
-	scWantStr(t, evName, m, "oldCap", "1000000", "indexer/events.go:80 (CapChangedEvent.OldCap)")
-	scWantStr(t, evName, m, "newCap", "2000000", "indexer/events.go:81 (CapChangedEvent.NewCap)")
+	scWantStr(t, evName, m, "ev", "capChanged", "indexer/events.go:57 (KindCapChanged)")
+	scWantNum(t, evName, m, "v", 1, "indexer/events.go (envelope.V)")
+	scWantStr(t, evName, m, "creator", "aliceperry", "indexer/events.go:224 (CapChangedEvent.Creator)")
+	scWantStr(t, evName, m, "actor", "aliceperry", "indexer/events.go:225 (CapChangedEvent.Actor)")
+	scWantNum(t, evName, m, "block", 12_500_100, "indexer/events.go:226 (CapChangedEvent.Block)")
+	scWantStr(t, evName, m, "oldCap", "1000000", "indexer/events.go:227 (CapChangedEvent.OldCap)")
+	scWantStr(t, evName, m, "newCap", "2000000", "indexer/events.go:228 (CapChangedEvent.NewCap)")
 	scWantFieldCount(t, evName, m, 7, ref)
 }
 
 func TestSchemaContract_Prepaid(t *testing.T) {
 	const evName = "prepaid"
-	const ref = "indexer/events.go:84-90 (PrepaidEvent)"
+	const ref = "indexer/events.go:231-237 (PrepaidEvent)"
 	out := EvPrepaid("aliceperry", "holderone", 12_600_000, big.NewInt(250_000), big.NewInt(250_000))
 	m := scDecode(t, out)
 
-	scWantStr(t, evName, m, "ev", "prepaid", "indexer/events.go:25 (KindPrepaid)")
-	scWantNum(t, evName, m, "v", 1, "indexer/events.go:40-41 (envelope.V)")
-	scWantStr(t, evName, m, "creator", "aliceperry", "indexer/events.go:85 (PrepaidEvent.Creator)")
-	scWantStr(t, evName, m, "actor", "holderone", "indexer/events.go:86 (PrepaidEvent.Actor)")
-	scWantNum(t, evName, m, "block", 12_600_000, "indexer/events.go:87 (PrepaidEvent.Block)")
-	scWantStr(t, evName, m, "hbdPaid", "250000", "indexer/events.go:88 (PrepaidEvent.HbdPaid)")
-	scWantStr(t, evName, m, "creditsMinted", "250000", "indexer/events.go:89 (PrepaidEvent.CreditsMinted)")
+	scWantStr(t, evName, m, "ev", "prepaid", "indexer/events.go:58 (KindPrepaid)")
+	scWantNum(t, evName, m, "v", 1, "indexer/events.go (envelope.V)")
+	scWantStr(t, evName, m, "creator", "aliceperry", "indexer/events.go:232 (PrepaidEvent.Creator)")
+	scWantStr(t, evName, m, "actor", "holderone", "indexer/events.go:233 (PrepaidEvent.Actor)")
+	scWantNum(t, evName, m, "block", 12_600_000, "indexer/events.go:234 (PrepaidEvent.Block)")
+	scWantStr(t, evName, m, "hbdPaid", "250000", "indexer/events.go:235 (PrepaidEvent.HbdPaid)")
+	scWantStr(t, evName, m, "creditsMinted", "250000", "indexer/events.go:236 (PrepaidEvent.CreditsMinted)")
 	scWantFieldCount(t, evName, m, 7, ref)
 
 	// index.go's own fold (KindPrepaid case) does m.addBal(p.Actor, credits)
@@ -255,37 +255,37 @@ func TestSchemaContract_Prepaid(t *testing.T) {
 
 func TestSchemaContract_Transferred(t *testing.T) {
 	const evName = "transferred"
-	const ref = "indexer/events.go:94-100 (TransferredEvent)"
+	const ref = "indexer/events.go:241-247 (TransferredEvent)"
 	out := EvTransferred("aliceperry", "holderone", "holdertwo", 12_650_000, big.NewInt(50_000))
 	m := scDecode(t, out)
 
-	scWantStr(t, evName, m, "ev", "transferred", "indexer/events.go:26 (KindTransferred)")
-	scWantNum(t, evName, m, "v", 1, "indexer/events.go:40-41 (envelope.V)")
-	scWantStr(t, evName, m, "creator", "aliceperry", "indexer/events.go:95 (TransferredEvent.Creator)")
-	scWantStr(t, evName, m, "actor", "holderone", "indexer/events.go:96 (TransferredEvent.Actor)")
-	scWantStr(t, evName, m, "to", "holdertwo", "indexer/events.go:97 (TransferredEvent.To)")
-	scWantNum(t, evName, m, "block", 12_650_000, "indexer/events.go:98 (TransferredEvent.Block)")
-	scWantStr(t, evName, m, "amount", "50000", "indexer/events.go:99 (TransferredEvent.Amount)")
+	scWantStr(t, evName, m, "ev", "transferred", "indexer/events.go:59 (KindTransferred)")
+	scWantNum(t, evName, m, "v", 1, "indexer/events.go (envelope.V)")
+	scWantStr(t, evName, m, "creator", "aliceperry", "indexer/events.go:242 (TransferredEvent.Creator)")
+	scWantStr(t, evName, m, "actor", "holderone", "indexer/events.go:243 (TransferredEvent.Actor)")
+	scWantStr(t, evName, m, "to", "holdertwo", "indexer/events.go:244 (TransferredEvent.To)")
+	scWantNum(t, evName, m, "block", 12_650_000, "indexer/events.go:245 (TransferredEvent.Block)")
+	scWantStr(t, evName, m, "amount", "50000", "indexer/events.go:246 (TransferredEvent.Amount)")
 	scWantFieldCount(t, evName, m, 7, ref)
 }
 
 func TestSchemaContract_Asked(t *testing.T) {
 	const evName = "asked"
-	const ref = "indexer/events.go:102-112 (AskedEvent)"
+	const ref = "indexer/events.go:249-263 (AskedEvent)"
 	out := EvAsked("aliceperry", "holderone", 12_700_000, 3, big.NewInt(42), big.NewInt(120), big.NewInt(2000), 28800, "cid-realistic-hash-abc123", 3)
 	m := scDecode(t, out)
 
-	scWantStr(t, evName, m, "ev", "asked", "indexer/events.go:27 (KindAsked)")
-	scWantNum(t, evName, m, "v", 1, "indexer/events.go:40-41 (envelope.V)")
-	scWantStr(t, evName, m, "creator", "aliceperry", "indexer/events.go:103 (AskedEvent.Creator)")
-	scWantStr(t, evName, m, "actor", "holderone", "indexer/events.go:104 (AskedEvent.Actor)")
-	scWantNum(t, evName, m, "block", 12_700_000, "indexer/events.go:105 (AskedEvent.Block)")
-	scWantNum(t, evName, m, "seq", 3, "indexer/events.go:106 (AskedEvent.Seq)")
-	scWantStr(t, evName, m, "creditsSpent", "42", "indexer/events.go:107 (AskedEvent.CreditsSpent)")
-	scWantStr(t, evName, m, "commissionHbd", "120", "indexer/events.go:108 (AskedEvent.CommissionHbd)")
-	scWantStr(t, evName, m, "rate", "2000", "indexer/events.go:109 (AskedEvent.Rate)")
-	scWantNum(t, evName, m, "deadlineBlocks", 28800, "indexer/events.go:110 (AskedEvent.DeadlineBlocks)")
-	scWantStr(t, evName, m, "contentHash", "cid-realistic-hash-abc123", "indexer/events.go:111 (AskedEvent.ContentHash)")
+	scWantStr(t, evName, m, "ev", "asked", "indexer/events.go:60 (KindAsked)")
+	scWantNum(t, evName, m, "v", 1, "indexer/events.go (envelope.V)")
+	scWantStr(t, evName, m, "creator", "aliceperry", "indexer/events.go:250 (AskedEvent.Creator)")
+	scWantStr(t, evName, m, "actor", "holderone", "indexer/events.go:251 (AskedEvent.Actor)")
+	scWantNum(t, evName, m, "block", 12_700_000, "indexer/events.go:252 (AskedEvent.Block)")
+	scWantNum(t, evName, m, "seq", 3, "indexer/events.go:253 (AskedEvent.Seq)")
+	scWantStr(t, evName, m, "creditsSpent", "42", "indexer/events.go:254 (AskedEvent.CreditsSpent)")
+	scWantStr(t, evName, m, "commissionHbd", "120", "indexer/events.go:255 (AskedEvent.CommissionHbd)")
+	scWantStr(t, evName, m, "rate", "2000", "indexer/events.go:256 (AskedEvent.Rate)")
+	scWantNum(t, evName, m, "deadlineBlocks", 28800, "indexer/events.go:257 (AskedEvent.DeadlineBlocks)")
+	scWantStr(t, evName, m, "contentHash", "cid-realistic-hash-abc123", "indexer/events.go:262 (AskedEvent.ContentHash)")
 	// offeringId (2026-07-27): WHICH service this ask bought, 0 == the legacy
 	// face price. The indexer's own doc claimed `asked` already carried it
 	// while the field did not exist — this line is what stops that claim from
@@ -293,51 +293,53 @@ func TestSchemaContract_Asked(t *testing.T) {
 	scWantNum(t, evName, m, "offeringId", 3, "indexer/events.go (AskedEvent.OfferingID)")
 	scWantFieldCount(t, evName, m, 12, ref)
 
-	// This is the event GAP 2's own example (index.go:325-340): a rename of
+	// This is the event GAP 2's own example (index.go:499-502, the KindAsked
+	// case's parseAmount(p.CreditsSpent) check, +:325-329 for the
+	// Stats.Ingested/Stats.Malformed branch in ingestOneLocked): a rename of
 	// "creditsSpent" alone would make indexer's AskedEvent.CreditsSpent
 	// decode to "", parseAmount("") fail closed, and the WHOLE ask silently
 	// drop out of Stats.Ingested into Stats.Malformed — no balance debit
 	// recorded, no escrow entry, and it never appears in DeliveryHistory. The
-	// check above (line 107 reference) is what would catch that rename here,
-	// in core, before it ever reaches indexer.
+	// check above (the CreditsSpent field reference) is what would catch
+	// that rename here, in core, before it ever reaches indexer.
 }
 
 func TestSchemaContract_Answered(t *testing.T) {
 	const evName = "answered"
-	const ref = "indexer/events.go:118-126 (AnsweredEvent)"
+	const ref = "indexer/events.go:269-277 (AnsweredEvent)"
 	// M4 fix (2026-07-21): commissionHbd added — the HBD Answer books to
 	// kTreasury() in the same call, previously invisible to any replay.
 	out := EvAnswered("aliceperry", "aliceperry", 12_710_000, 3, big.NewInt(42), big.NewInt(504), "ans-realistic-hash-1")
 	m := scDecode(t, out)
 
-	scWantStr(t, evName, m, "ev", "answered", "indexer/events.go:28 (KindAnswered)")
-	scWantNum(t, evName, m, "v", 1, "indexer/events.go:40-41 (envelope.V)")
-	scWantStr(t, evName, m, "creator", "aliceperry", "indexer/events.go:119 (AnsweredEvent.Creator)")
-	scWantStr(t, evName, m, "actor", "aliceperry", "indexer/events.go:120 (AnsweredEvent.Actor)")
-	scWantNum(t, evName, m, "block", 12_710_000, "indexer/events.go:121 (AnsweredEvent.Block)")
-	scWantNum(t, evName, m, "seq", 3, "indexer/events.go:122 (AnsweredEvent.Seq)")
-	scWantStr(t, evName, m, "creditsToCreator", "42", "indexer/events.go:123 (AnsweredEvent.CreditsToCreator)")
-	scWantStr(t, evName, m, "commissionHbd", "504", "indexer/events.go:124 (AnsweredEvent.CommissionHbd)")
-	scWantStr(t, evName, m, "answerHash", "ans-realistic-hash-1", "indexer/events.go:125 (AnsweredEvent.AnswerHash)")
+	scWantStr(t, evName, m, "ev", "answered", "indexer/events.go:61 (KindAnswered)")
+	scWantNum(t, evName, m, "v", 1, "indexer/events.go (envelope.V)")
+	scWantStr(t, evName, m, "creator", "aliceperry", "indexer/events.go:270 (AnsweredEvent.Creator)")
+	scWantStr(t, evName, m, "actor", "aliceperry", "indexer/events.go:271 (AnsweredEvent.Actor)")
+	scWantNum(t, evName, m, "block", 12_710_000, "indexer/events.go:272 (AnsweredEvent.Block)")
+	scWantNum(t, evName, m, "seq", 3, "indexer/events.go:273 (AnsweredEvent.Seq)")
+	scWantStr(t, evName, m, "creditsToCreator", "42", "indexer/events.go:274 (AnsweredEvent.CreditsToCreator)")
+	scWantStr(t, evName, m, "commissionHbd", "504", "indexer/events.go:275 (AnsweredEvent.CommissionHbd)")
+	scWantStr(t, evName, m, "answerHash", "ans-realistic-hash-1", "indexer/events.go:276 (AnsweredEvent.AnswerHash)")
 	scWantFieldCount(t, evName, m, 9, ref)
 }
 
 func TestSchemaContract_Reclaimed(t *testing.T) {
 	const evName = "reclaimed"
-	const ref = "indexer/events.go:133-140 (ReclaimedEvent)"
+	const ref = "indexer/events.go:292-300 (ReclaimedEvent)"
 	// M4 fix (2026-07-21): commissionHbd added — the HBD Reclaim hands back
 	// to the asker in full (I5), previously invisible to any replay.
 	out := EvReclaimed("aliceperry", "holderthree", 12_720_000, 4, big.NewInt(60), big.NewInt(72), "holderthree")
 	m := scDecode(t, out)
 
-	scWantStr(t, evName, m, "ev", "reclaimed", "indexer/events.go:29 (KindReclaimed)")
-	scWantNum(t, evName, m, "v", 1, "indexer/events.go:40-41 (envelope.V)")
-	scWantStr(t, evName, m, "creator", "aliceperry", "indexer/events.go:134 (ReclaimedEvent.Creator)")
-	scWantStr(t, evName, m, "actor", "holderthree", "indexer/events.go:135 (ReclaimedEvent.Actor)")
-	scWantNum(t, evName, m, "block", 12_720_000, "indexer/events.go:136 (ReclaimedEvent.Block)")
-	scWantNum(t, evName, m, "seq", 4, "indexer/events.go:137 (ReclaimedEvent.Seq)")
-	scWantStr(t, evName, m, "credits", "60", "indexer/events.go:138 (ReclaimedEvent.Credits)")
-	scWantStr(t, evName, m, "commissionHbd", "72", "indexer/events.go:139 (ReclaimedEvent.CommissionHbd)")
+	scWantStr(t, evName, m, "ev", "reclaimed", "indexer/events.go:62 (KindReclaimed)")
+	scWantNum(t, evName, m, "v", 1, "indexer/events.go (envelope.V)")
+	scWantStr(t, evName, m, "creator", "aliceperry", "indexer/events.go:293 (ReclaimedEvent.Creator)")
+	scWantStr(t, evName, m, "actor", "holderthree", "indexer/events.go:294 (ReclaimedEvent.Actor)")
+	scWantNum(t, evName, m, "block", 12_720_000, "indexer/events.go:295 (ReclaimedEvent.Block)")
+	scWantNum(t, evName, m, "seq", 4, "indexer/events.go:296 (ReclaimedEvent.Seq)")
+	scWantStr(t, evName, m, "credits", "60", "indexer/events.go:297 (ReclaimedEvent.Credits)")
+	scWantStr(t, evName, m, "commissionHbd", "72", "indexer/events.go:298 (ReclaimedEvent.CommissionHbd)")
 	// asker (2026-07-27) — WHO WAS PAID, which is not `actor`: reclaim is
 	// permissionless, so actor may be a keeper pushing an abandoned escrow. The
 	// indexer folds the credits to THIS field; dropping it would silently
@@ -346,25 +348,163 @@ func TestSchemaContract_Reclaimed(t *testing.T) {
 	scWantFieldCount(t, evName, m, 9, ref)
 }
 
+// TestSchemaContract_Declined closes a gap found 2026-07-28: `declined` was
+// listed in BOTH coverage maps below (indexerKinds and pinned) but had no
+// field-by-field pin of its own, so it was counted as covered while its wire
+// shape was checked by nothing. That is the exact defect class this file
+// exists to prevent, and the exact way `declined` shipped unpinned the first
+// time.
+//
+// Shape is identical to `reclaimed` above, and deliberately so: both hand an
+// escrow's credits AND its commission back to the asker in full, and both
+// record `asker` separately from `actor`. For decline the two always coincide
+// (only the creator may decline, and the payee is always the asker) — the
+// field is still asserted, because the indexer folds the credits to THIS
+// field, not to actor, and a consumer must not learn to conflate them.
+func TestSchemaContract_Declined(t *testing.T) {
+	const evName = "declined"
+	const ref = "indexer/events.go:309-317 (DeclinedEvent)"
+	out := EvDeclined("aliceperry", "aliceperry", 12_725_000, 5, big.NewInt(60), big.NewInt(72), "holderthree")
+	m := scDecode(t, out)
+
+	scWantStr(t, evName, m, "ev", "declined", "indexer/events.go:63 (KindDeclined)")
+	scWantNum(t, evName, m, "v", 1, "indexer/events.go (envelope.V)")
+	scWantStr(t, evName, m, "creator", "aliceperry", "indexer/events.go:310 (DeclinedEvent.Creator)")
+	scWantStr(t, evName, m, "actor", "aliceperry", "indexer/events.go:311 (DeclinedEvent.Actor)")
+	scWantNum(t, evName, m, "block", 12_725_000, "indexer/events.go:312 (DeclinedEvent.Block)")
+	scWantNum(t, evName, m, "seq", 5, "indexer/events.go:313 (DeclinedEvent.Seq)")
+	scWantStr(t, evName, m, "credits", "60", "indexer/events.go:314 (DeclinedEvent.Credits)")
+	scWantStr(t, evName, m, "commissionHbd", "72", "indexer/events.go:315 (DeclinedEvent.CommissionHbd)")
+	scWantStr(t, evName, m, "asker", "holderthree", "indexer/events.go:316 (DeclinedEvent.Asker)")
+	scWantFieldCount(t, evName, m, 9, ref)
+}
+
+// The five pins below close the rest of a gap found 2026-07-28: `bought`,
+// `sold` and the three offering-catalogue events were listed in BOTH coverage
+// maps yet had no field-by-field pin of their own, so they counted as covered
+// while their wire shape was checked by nothing.
+//
+// bought/sold matter most. Post-pivot, Buy is the ONLY issuance path and Sell
+// the only redemption, and these two already shipped UNRECOGNISED by the
+// indexer once — every trade parsed to Unknown and was never folded, so its
+// balances would have drifted from chain truth with every trade, silently and
+// forever. Pinning the names was what caught that; pinning the FIELDS is what
+// stops the next one.
+
+func TestSchemaContract_Bought(t *testing.T) {
+	const evName = "bought"
+	const ref = "indexer/events.go:358-366 (BoughtEvent)"
+	out := EvBought("aliceperry", "holderthree", 12_730_000, big.NewInt(100), big.NewInt(5050), big.NewInt(505), big.NewInt(5555))
+	m := scDecode(t, out)
+
+	scWantStr(t, evName, m, "ev", "bought", "indexer/events.go:78 (KindBought)")
+	scWantNum(t, evName, m, "v", 1, "indexer/events.go (envelope.V)")
+	scWantStr(t, evName, m, "creator", "aliceperry", "indexer/events.go:359 (BoughtEvent.Creator)")
+	scWantStr(t, evName, m, "actor", "holderthree", "indexer/events.go:360 (BoughtEvent.Actor)")
+	scWantNum(t, evName, m, "block", 12_730_000, "indexer/events.go:361 (BoughtEvent.Block)")
+	scWantStr(t, evName, m, "minted", "100", "indexer/events.go:362 (BoughtEvent.Minted)")
+	scWantStr(t, evName, m, "cost", "5050", "indexer/events.go:363 (BoughtEvent.Cost)")
+	scWantStr(t, evName, m, "fee", "505", "indexer/events.go:364 (BoughtEvent.Fee)")
+	scWantStr(t, evName, m, "totalDue", "5555", "indexer/events.go:365 (BoughtEvent.TotalDue)")
+	scWantFieldCount(t, evName, m, 9, ref)
+}
+
+func TestSchemaContract_Sold(t *testing.T) {
+	const evName = "sold"
+	const ref = "indexer/events.go:384-395 (SoldEvent)"
+	// taxBps and heldBlocks are BARE NUMBERS (indexer reads both as uint64);
+	// every money leg is a quoted string. Getting either wrong makes the
+	// indexer's json.Unmarshal fail for the whole struct, not decode wrong.
+	out := EvSold("aliceperry", "holderthree", 12_740_000, big.NewInt(50), big.NewInt(2500), big.NewInt(500), big.NewInt(250), big.NewInt(1750), 2000, 604_800)
+	m := scDecode(t, out)
+
+	scWantStr(t, evName, m, "ev", "sold", "indexer/events.go:79 (KindSold)")
+	scWantNum(t, evName, m, "v", 1, "indexer/events.go (envelope.V)")
+	scWantStr(t, evName, m, "creator", "aliceperry", "indexer/events.go:385 (SoldEvent.Creator)")
+	scWantStr(t, evName, m, "actor", "holderthree", "indexer/events.go:386 (SoldEvent.Actor)")
+	scWantNum(t, evName, m, "block", 12_740_000, "indexer/events.go:387 (SoldEvent.Block)")
+	scWantStr(t, evName, m, "sold", "50", "indexer/events.go:388 (SoldEvent.Sold)")
+	scWantStr(t, evName, m, "gross", "2500", "indexer/events.go:389 (SoldEvent.Gross)")
+	scWantStr(t, evName, m, "tax", "500", "indexer/events.go:390 (SoldEvent.Tax)")
+	scWantStr(t, evName, m, "fee", "250", "indexer/events.go:391 (SoldEvent.Fee)")
+	scWantStr(t, evName, m, "net", "1750", "indexer/events.go:392 (SoldEvent.Net)")
+	scWantNum(t, evName, m, "taxBps", 2000, "indexer/events.go:393 (SoldEvent.TaxBps)")
+	scWantNum(t, evName, m, "heldBlocks", 604_800, "indexer/events.go:394 (SoldEvent.HeldBlocks)")
+	scWantFieldCount(t, evName, m, 12, ref)
+}
+
+func TestSchemaContract_OfferingCreated(t *testing.T) {
+	const evName = "offeringCreated"
+	const ref = "indexer/events.go:153-160 (OfferingCreatedEvent)"
+	out := EvOfferingCreated("aliceperry", "aliceperry", 12_750_000, 7, "15-min call", big.NewInt(2500))
+	m := scDecode(t, out)
+
+	scWantStr(t, evName, m, "ev", "offeringCreated", "indexer/events.go:86 (KindOfferingCreated)")
+	scWantNum(t, evName, m, "v", 1, "indexer/events.go (envelope.V)")
+	scWantStr(t, evName, m, "creator", "aliceperry", "indexer/events.go:154 (OfferingCreatedEvent.Creator)")
+	scWantStr(t, evName, m, "actor", "aliceperry", "indexer/events.go:155 (OfferingCreatedEvent.Actor)")
+	scWantNum(t, evName, m, "block", 12_750_000, "indexer/events.go:156 (OfferingCreatedEvent.Block)")
+	// offeringId is a BARE NUMBER, and the JSON key is `offeringId` while the
+	// Go field is OfferingID — a rename on either side is exactly the silent
+	// drift this pin exists for.
+	scWantNum(t, evName, m, "offeringId", 7, "indexer/events.go:157 (OfferingCreatedEvent.OfferingID)")
+	scWantStr(t, evName, m, "title", "15-min call", "indexer/events.go:158 (OfferingCreatedEvent.Title)")
+	scWantStr(t, evName, m, "price", "2500", "indexer/events.go:159 (OfferingCreatedEvent.Price)")
+	scWantFieldCount(t, evName, m, 8, ref)
+}
+
+func TestSchemaContract_OfferingUpdated(t *testing.T) {
+	const evName = "offeringUpdated"
+	const ref = "indexer/events.go:165-173 (OfferingUpdatedEvent)"
+	out := EvOfferingUpdated("aliceperry", "aliceperry", 12_760_000, 7, "15-min call", big.NewInt(2500), big.NewInt(3000))
+	m := scDecode(t, out)
+
+	scWantStr(t, evName, m, "ev", "offeringUpdated", "indexer/events.go:87 (KindOfferingUpdated)")
+	scWantNum(t, evName, m, "v", 1, "indexer/events.go (envelope.V)")
+	scWantStr(t, evName, m, "creator", "aliceperry", "indexer/events.go:166 (OfferingUpdatedEvent.Creator)")
+	scWantStr(t, evName, m, "actor", "aliceperry", "indexer/events.go:167 (OfferingUpdatedEvent.Actor)")
+	scWantNum(t, evName, m, "block", 12_760_000, "indexer/events.go:168 (OfferingUpdatedEvent.Block)")
+	scWantNum(t, evName, m, "offeringId", 7, "indexer/events.go:169 (OfferingUpdatedEvent.OfferingID)")
+	scWantStr(t, evName, m, "title", "15-min call", "indexer/events.go:170 (OfferingUpdatedEvent.Title)")
+	scWantStr(t, evName, m, "oldPrice", "2500", "indexer/events.go:171 (OfferingUpdatedEvent.OldPrice)")
+	scWantStr(t, evName, m, "newPrice", "3000", "indexer/events.go:172 (OfferingUpdatedEvent.NewPrice)")
+	scWantFieldCount(t, evName, m, 9, ref)
+}
+
+func TestSchemaContract_OfferingDeleted(t *testing.T) {
+	const evName = "offeringDeleted"
+	const ref = "indexer/events.go:175-180 (OfferingDeletedEvent)"
+	out := EvOfferingDeleted("aliceperry", "aliceperry", 12_770_000, 7)
+	m := scDecode(t, out)
+
+	scWantStr(t, evName, m, "ev", "offeringDeleted", "indexer/events.go:88 (KindOfferingDeleted)")
+	scWantNum(t, evName, m, "v", 1, "indexer/events.go (envelope.V)")
+	scWantStr(t, evName, m, "creator", "aliceperry", "indexer/events.go:176 (OfferingDeletedEvent.Creator)")
+	scWantStr(t, evName, m, "actor", "aliceperry", "indexer/events.go:177 (OfferingDeletedEvent.Actor)")
+	scWantNum(t, evName, m, "block", 12_770_000, "indexer/events.go:178 (OfferingDeletedEvent.Block)")
+	scWantNum(t, evName, m, "offeringId", 7, "indexer/events.go:179 (OfferingDeletedEvent.OfferingID)")
+	scWantFieldCount(t, evName, m, 6, ref)
+}
+
 func TestSchemaContract_Refunded(t *testing.T) {
 	const evName = "refunded"
-	const ref = "indexer/events.go:131-137 (RefundedEvent)"
+	const ref = "indexer/events.go:319-325 (RefundedEvent)"
 	out := EvRefunded("aliceperry", "holderfour", 12_800_000, big.NewInt(1000), big.NewInt(950))
 	m := scDecode(t, out)
 
-	scWantStr(t, evName, m, "ev", "refunded", "indexer/events.go:30 (KindRefunded)")
-	scWantNum(t, evName, m, "v", 1, "indexer/events.go:40-41 (envelope.V)")
-	scWantStr(t, evName, m, "creator", "aliceperry", "indexer/events.go:132 (RefundedEvent.Creator)")
-	scWantStr(t, evName, m, "actor", "holderfour", "indexer/events.go:133 (RefundedEvent.Actor)")
-	scWantNum(t, evName, m, "block", 12_800_000, "indexer/events.go:134 (RefundedEvent.Block)")
-	scWantStr(t, evName, m, "credits", "1000", "indexer/events.go:135 (RefundedEvent.Credits)")
-	scWantStr(t, evName, m, "payout", "950", "indexer/events.go:136 (RefundedEvent.Payout)")
+	scWantStr(t, evName, m, "ev", "refunded", "indexer/events.go:64 (KindRefunded)")
+	scWantNum(t, evName, m, "v", 1, "indexer/events.go (envelope.V)")
+	scWantStr(t, evName, m, "creator", "aliceperry", "indexer/events.go:320 (RefundedEvent.Creator)")
+	scWantStr(t, evName, m, "actor", "holderfour", "indexer/events.go:321 (RefundedEvent.Actor)")
+	scWantNum(t, evName, m, "block", 12_800_000, "indexer/events.go:322 (RefundedEvent.Block)")
+	scWantStr(t, evName, m, "credits", "1000", "indexer/events.go:323 (RefundedEvent.Credits)")
+	scWantStr(t, evName, m, "payout", "950", "indexer/events.go:324 (RefundedEvent.Payout)")
 	scWantFieldCount(t, evName, m, 7, ref)
 }
 
 func TestSchemaContract_RefundPushed(t *testing.T) {
 	const evName = "refundPushed"
-	const ref = "indexer/events.go:143-150 (RefundPushedEvent)"
+	const ref = "indexer/events.go:331-338 (RefundPushedEvent)"
 	// actor (the permissionless pusher/keeper) deliberately != holder (the
 	// only one who is ever actually paid) — see RefundHolder's own doc and
 	// index.go's KindRefundPushed fold (m.subBal(p.Holder, burned), never
@@ -372,28 +512,28 @@ func TestSchemaContract_RefundPushed(t *testing.T) {
 	out := EvRefundPushed("aliceperry", "keeperbot1", "holderfive", 12_810_000, big.NewInt(300), big.NewInt(285))
 	m := scDecode(t, out)
 
-	scWantStr(t, evName, m, "ev", "refundPushed", "indexer/events.go:31 (KindRefundPushed)")
-	scWantNum(t, evName, m, "v", 1, "indexer/events.go:40-41 (envelope.V)")
-	scWantStr(t, evName, m, "creator", "aliceperry", "indexer/events.go:144 (RefundPushedEvent.Creator)")
-	scWantStr(t, evName, m, "actor", "keeperbot1", "indexer/events.go:145 (RefundPushedEvent.Actor)")
-	scWantStr(t, evName, m, "holder", "holderfive", "indexer/events.go:146 (RefundPushedEvent.Holder)")
-	scWantNum(t, evName, m, "block", 12_810_000, "indexer/events.go:147 (RefundPushedEvent.Block)")
-	scWantStr(t, evName, m, "creditsBurned", "300", "indexer/events.go:148 (RefundPushedEvent.CreditsBurned)")
-	scWantStr(t, evName, m, "payout", "285", "indexer/events.go:149 (RefundPushedEvent.Payout)")
+	scWantStr(t, evName, m, "ev", "refundPushed", "indexer/events.go:65 (KindRefundPushed)")
+	scWantNum(t, evName, m, "v", 1, "indexer/events.go (envelope.V)")
+	scWantStr(t, evName, m, "creator", "aliceperry", "indexer/events.go:332 (RefundPushedEvent.Creator)")
+	scWantStr(t, evName, m, "actor", "keeperbot1", "indexer/events.go:333 (RefundPushedEvent.Actor)")
+	scWantStr(t, evName, m, "holder", "holderfive", "indexer/events.go:334 (RefundPushedEvent.Holder)")
+	scWantNum(t, evName, m, "block", 12_810_000, "indexer/events.go:335 (RefundPushedEvent.Block)")
+	scWantStr(t, evName, m, "creditsBurned", "300", "indexer/events.go:336 (RefundPushedEvent.CreditsBurned)")
+	scWantStr(t, evName, m, "payout", "285", "indexer/events.go:337 (RefundPushedEvent.Payout)")
 	scWantFieldCount(t, evName, m, 8, ref)
 }
 
 func TestSchemaContract_Closed(t *testing.T) {
 	const evName = "closed"
-	const ref = "indexer/events.go:152-156 (ClosedEvent)"
+	const ref = "indexer/events.go:340-344 (ClosedEvent)"
 	out := EvClosed("aliceperry", "keeperbot1", 12_900_000)
 	m := scDecode(t, out)
 
-	scWantStr(t, evName, m, "ev", "closed", "indexer/events.go:32 (KindClosed)")
-	scWantNum(t, evName, m, "v", 1, "indexer/events.go:40-41 (envelope.V)")
-	scWantStr(t, evName, m, "creator", "aliceperry", "indexer/events.go:153 (ClosedEvent.Creator)")
-	scWantStr(t, evName, m, "actor", "keeperbot1", "indexer/events.go:154 (ClosedEvent.Actor)")
-	scWantNum(t, evName, m, "block", 12_900_000, "indexer/events.go:155 (ClosedEvent.Block)")
+	scWantStr(t, evName, m, "ev", "closed", "indexer/events.go:66 (KindClosed)")
+	scWantNum(t, evName, m, "v", 1, "indexer/events.go (envelope.V)")
+	scWantStr(t, evName, m, "creator", "aliceperry", "indexer/events.go:341 (ClosedEvent.Creator)")
+	scWantStr(t, evName, m, "actor", "keeperbot1", "indexer/events.go:342 (ClosedEvent.Actor)")
+	scWantNum(t, evName, m, "block", 12_900_000, "indexer/events.go:343 (ClosedEvent.Block)")
 	scWantFieldCount(t, evName, m, 5, ref)
 }
 
@@ -410,29 +550,29 @@ func TestSchemaContract_Closed(t *testing.T) {
 
 func TestSchemaContract_Retired(t *testing.T) {
 	const evName = "retired"
-	const ref = "indexer/events.go:382-386 (RetiredEvent)"
+	const ref = "indexer/events.go:422-426 (RetiredEvent)"
 	out := EvRetired("aliceperry", "aliceperry", 13_000_000)
 	m := scDecode(t, out)
 
-	scWantStr(t, evName, m, "ev", "retired", "indexer/events.go:92 (KindRetired)")
-	scWantNum(t, evName, m, "v", 1, "indexer/events.go:40-41 (envelope.V)")
-	scWantStr(t, evName, m, "creator", "aliceperry", "indexer/events.go:383 (RetiredEvent.Creator)")
-	scWantStr(t, evName, m, "actor", "aliceperry", "indexer/events.go:384 (RetiredEvent.Actor)")
-	scWantNum(t, evName, m, "block", 13_000_000, "indexer/events.go:385 (RetiredEvent.Block)")
+	scWantStr(t, evName, m, "ev", "retired", "indexer/events.go:109 (KindRetired)")
+	scWantNum(t, evName, m, "v", 1, "indexer/events.go (envelope.V)")
+	scWantStr(t, evName, m, "creator", "aliceperry", "indexer/events.go:423 (RetiredEvent.Creator)")
+	scWantStr(t, evName, m, "actor", "aliceperry", "indexer/events.go:424 (RetiredEvent.Actor)")
+	scWantNum(t, evName, m, "block", 13_000_000, "indexer/events.go:425 (RetiredEvent.Block)")
 	scWantFieldCount(t, evName, m, 5, ref)
 }
 
 func TestSchemaContract_TreasuryWithdrawn(t *testing.T) {
 	const evName = "treasuryWithdrawn"
-	const ref = "indexer/events.go:394-398 (TreasuryWithdrawnEvent)"
+	const ref = "indexer/events.go:434-438 (TreasuryWithdrawnEvent)"
 	out := EvTreasuryWithdrawn("ownerAccount", 13_010_000, big.NewInt(75_000))
 	m := scDecode(t, out)
 
-	scWantStr(t, evName, m, "ev", "treasuryWithdrawn", "indexer/events.go:109 (KindTreasuryWithdrawn)")
-	scWantNum(t, evName, m, "v", 1, "indexer/events.go:40-41 (envelope.V)")
-	scWantStr(t, evName, m, "actor", "ownerAccount", "indexer/events.go:395 (TreasuryWithdrawnEvent.Actor)")
-	scWantStr(t, evName, m, "amount", "75000", "indexer/events.go:397 (TreasuryWithdrawnEvent.Amount)")
-	scWantNum(t, evName, m, "block", 13_010_000, "indexer/events.go:396 (TreasuryWithdrawnEvent.Block)")
+	scWantStr(t, evName, m, "ev", "treasuryWithdrawn", "indexer/events.go:130 (KindTreasuryWithdrawn)")
+	scWantNum(t, evName, m, "v", 1, "indexer/events.go (envelope.V)")
+	scWantStr(t, evName, m, "actor", "ownerAccount", "indexer/events.go:435 (TreasuryWithdrawnEvent.Actor)")
+	scWantStr(t, evName, m, "amount", "75000", "indexer/events.go:437 (TreasuryWithdrawnEvent.Amount)")
+	scWantNum(t, evName, m, "block", 13_010_000, "indexer/events.go:436 (TreasuryWithdrawnEvent.Block)")
 	scWantFieldCount(t, evName, m, 5, ref)
 
 	// Deliberately NO "creator" field — TreasuryWithdrawnEvent declares none,
@@ -447,15 +587,15 @@ func TestSchemaContract_TreasuryWithdrawn(t *testing.T) {
 
 func TestSchemaContract_TradeFeesClaimed(t *testing.T) {
 	const evName = "tradeFeesClaimed"
-	const ref = "indexer/events.go:405-409 (TradeFeesClaimedEvent)"
+	const ref = "indexer/events.go:446-450 (TradeFeesClaimedEvent)"
 	out := EvTradeFeesClaimed("aliceperry", 13_020_000, big.NewInt(1_250))
 	m := scDecode(t, out)
 
-	scWantStr(t, evName, m, "ev", "tradeFeesClaimed", "indexer/events.go:125 (KindTradeFeesClaimed)")
-	scWantNum(t, evName, m, "v", 1, "indexer/events.go:40-41 (envelope.V)")
-	scWantStr(t, evName, m, "actor", "aliceperry", "indexer/events.go:406 (TradeFeesClaimedEvent.Actor)")
-	scWantStr(t, evName, m, "amount", "1250", "indexer/events.go:408 (TradeFeesClaimedEvent.Amount)")
-	scWantNum(t, evName, m, "block", 13_020_000, "indexer/events.go:407 (TradeFeesClaimedEvent.Block)")
+	scWantStr(t, evName, m, "ev", "tradeFeesClaimed", "indexer/events.go:150 (KindTradeFeesClaimed)")
+	scWantNum(t, evName, m, "v", 1, "indexer/events.go (envelope.V)")
+	scWantStr(t, evName, m, "actor", "aliceperry", "indexer/events.go:447 (TradeFeesClaimedEvent.Actor)")
+	scWantStr(t, evName, m, "amount", "1250", "indexer/events.go:449 (TradeFeesClaimedEvent.Amount)")
+	scWantNum(t, evName, m, "block", 13_020_000, "indexer/events.go:448 (TradeFeesClaimedEvent.Block)")
 	scWantFieldCount(t, evName, m, 5, ref)
 
 	// Deliberately NO "creator" field — same reasoning as TreasuryWithdrawn
@@ -514,15 +654,15 @@ func TestSchemaContract_Unpaused(t *testing.T) {
 
 // TestSchemaContract_KindConstantsCoverEveryEvName sweeps every one of the
 // twelve constructors' "ev" values against indexer's own Kind* constants
-// (indexer/events.go:20-33), so a constructor whose emitted name doesn't
+// (indexer/events.go:54-66), so a constructor whose emitted name doesn't
 // match ANY of indexer's twelve recognized kinds is caught here, in core,
 // rather than surfacing as a silent Stats.Unknown increment in production
 // (ParseEvent's own documented "graceful degradation" path — see
-// indexer/events.go:196-202 — is explicitly designed to NOT error on an
+// indexer/events.go:503-514 — is explicitly designed to NOT error on an
 // unrecognized kind, which is correct for a genuinely NEW event a future
 // core version adds, but wrong for an accidental typo in an EXISTING one).
 func TestSchemaContract_KindConstantsCoverEveryEvName(t *testing.T) {
-	// Mirrors indexer/events.go:20-33's twelve EventKind constants exactly —
+	// Mirrors indexer/events.go:54-66's twelve EventKind constants exactly —
 	// this is the one place in this file the indexer-side string literals
 	// are restated directly rather than only referenced, because this test's
 	// whole point is to prove core's twelve emitted "ev" values are drawn
@@ -596,7 +736,7 @@ func TestSchemaContract_KindConstantsCoverEveryEvName(t *testing.T) {
 			t.Fatalf("%s constructor emitted ev=%q, want %q", c.name, ev, c.name)
 		}
 		if !indexerKinds[ev] {
-			t.Fatalf("core emits \"ev\":%q but indexer/events.go:20-33 has NO matching Kind* constant — ParseEvent would silently classify this as Unknown (indexer/events.go:288-289) and it would never fold into any query. Add the Kind constant to indexer/events.go, or fix core's constructor name.", ev)
+			t.Fatalf("core emits \"ev\":%q but indexer/events.go:54-66 has NO matching Kind* constant — ParseEvent would silently classify this as Unknown (indexer/events.go:654-655, the default case's ev.Unknown = true) and it would never fold into any query. Add the Kind constant to indexer/events.go, or fix core's constructor name.", ev)
 		}
 	}
 }
@@ -611,18 +751,47 @@ func TestSchemaContract_KindConstantsCoverEveryEvName(t *testing.T) {
 // happened three times — and `bought`/`sold` are the bonding curve's only
 // issuance path, so the indexer silently dropped every trade.
 //
-// This test derives the expected count from the SOURCE instead: it counts the
-// `evOpen("...")` calls in events.go, which is the one thing that cannot be
-// forgotten, because writing one IS how you add an event. Add a constructor and
-// this test fails until it is pinned above.
+// This test derives the expected set from the SOURCE instead: it scans
+// events.go for the event NAME in every way an event can be constructed, which
+// is the one thing that cannot be forgotten, because naming one IS how you add
+// an event. Add a constructor and this test fails until it is pinned above.
+//
+// REGRESSION 2026-07-28 — the scan must cover ALL construction styles, or it
+// silently stops being a tripwire. It originally matched `evOpen("...")` only,
+// and its premise sentence said so. Two more styles then appeared in the same
+// commit and the scan went blind to five constructors at once:
+//
+//	evOpen("name", ...)       — per-market envelope (creator/actor/block)
+//	evOpenActor("name", ...)  — contract-level envelope (actor only)
+//	`{"ev":"name",...}`       — built inline, no helper at all (EvInit)
+//
+// The blindness was invisible: those five were simply absent from `names`, so
+// the forward check had nothing to complain about, and the exemption was then
+// written into the pinned map as if it were correct. Two of the five
+// (treasuryWithdrawn/tradeFeesClaimed) are real indexer-decoded MONEY events,
+// and a global treasury event is the most likely kind to be added next — which
+// is verbatim the `bought`/`sold` history this test exists to end. Proven by
+// mutation: a probe constructor added via evOpenActor, and another added
+// inline, both passed silently before this fix and both fail after it.
+//
+// If you add a fourth construction style, add it here too.
 func TestSchemaContract_EveryConstructorIsPinned(t *testing.T) {
 	src, err := os.ReadFile("events.go")
 	if err != nil {
 		t.Fatalf("cannot read events.go to count constructors: %v", err)
 	}
 	names := map[string]bool{}
-	for _, m := range regexp.MustCompile(`evOpen\("([a-zA-Z]+)"`).FindAllStringSubmatch(string(src), -1) {
-		names[m[1]] = true
+	// Alternation, one group per style. The inline arm requires a letter
+	// immediately after the quote, so it does NOT match evOpen/evOpenActor's
+	// own bodies (`{"ev":"` + name) or the `<name>` placeholder in their doc
+	// comments; it DOES match the wire-shape examples in this file's header
+	// comment, which is harmless — those name real, already-pinned events.
+	for _, m := range regexp.MustCompile(`evOpen(?:Actor)?\("([a-zA-Z]+)"|\{"ev":"([a-zA-Z]+)"`).FindAllStringSubmatch(string(src), -1) {
+		if m[1] != "" {
+			names[m[1]] = true
+		} else {
+			names[m[2]] = true
+		}
 	}
 	if len(names) == 0 {
 		t.Fatal("found no evOpen calls in events.go — this test's own premise is broken, fix it rather than deleting it")
@@ -634,20 +803,23 @@ func TestSchemaContract_EveryConstructorIsPinned(t *testing.T) {
 		"reclaimed": true, "declined": true, "refunded": true, "refundPushed": true,
 		"closed": true, "bought": true, "sold": true,
 		"offeringCreated": true, "offeringUpdated": true, "offeringDeleted": true,
-		// retired (2026-07-28): EvRetired fits evOpen's own four-field envelope
-		// exactly (an ordinary per-market action), so it goes through evOpen(...)
-		// literally and this regex-driven tripwire finds it — unlike its five
-		// siblings (init/paused/unpaused/treasuryWithdrawn/tradeFeesClaimed),
-		// which are NOT per-market and use the separate evOpenActor(...) helper
-		// instead (see events.go's own "contract-level events" section doc for
-		// why), so they never match this file's `evOpen\("...")` regex scan and
-		// must NOT be added here — doing so would fail the reverse-direction
-		// check below (no matching evOpen(...) call exists in source for them).
-		"retired": true,
+		// The six contract-level events (2026-07-28). ALL of them belong here:
+		// this set means "core can emit it, and something pins its wire shape",
+		// which is true regardless of which helper built it. An earlier version
+		// of this comment claimed the five non-evOpen ones "must NOT be added
+		// here" because the reverse-direction check would fail — that was a
+		// consequence of the scan being too narrow, not a property of the
+		// events, and it is fixed above. Do not re-exempt them.
+		//
+		// Being in THIS set does not claim the indexer decodes them. That is a
+		// separate, narrower question answered by indexerKinds in the sibling
+		// test, where init/paused/unpaused are correctly absent.
+		"retired": true, "treasuryWithdrawn": true, "tradeFeesClaimed": true,
+		"init": true, "paused": true, "unpaused": true,
 	}
 	for ev := range names {
 		if !pinned[ev] {
-			t.Fatalf("core/events.go emits \"ev\":%q but it is NOT pinned by TestSchemaContract_KindConstantsCoverEveryEvName. An unpinned event can drift from indexer/events.go undetected — which is how `bought`/`sold` came to be dropped silently by the indexer. Add it to BOTH the indexerKinds map and the cases list there (and add a Kind constant + fold on the indexer side), or remove the constructor.", ev)
+			t.Fatalf("core/events.go emits \"ev\":%q but it is NOT pinned here. An unpinned event can drift from indexer/events.go undetected — which is how `bought`/`sold` came to be dropped silently by the indexer.\n\nTwo things to do, and they are NOT the same:\n  1. ALWAYS add %q to this test's `pinned` set, and give it a field-by-field TestSchemaContract_* pin with an exact field count.\n  2. ONLY IF the indexer is meant to decode it, ALSO add it to indexerKinds + the cases list in TestSchemaContract_KindConstantsCoverEveryEvName, and add the Kind constant, typed struct and fold on the indexer side.\n\nA contract-level event with no per-market scope (like init/paused/unpaused) is deliberately NOT decoded by the indexer — those get step 1 only. Do not add them to indexerKinds just to make a test pass.", ev, ev)
 		}
 	}
 	for ev := range pinned {

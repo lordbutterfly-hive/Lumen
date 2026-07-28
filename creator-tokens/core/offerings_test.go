@@ -265,7 +265,13 @@ func TestOfferings_CatalogueIsBoundedAndDeleteFreesASlot(t *testing.T) {
 	s, c := offSetup(t)
 	var last uint64
 	for i := uint64(0); i < MaxOfferings; i++ {
-		id, err := CreateOffering(s, c, c, 2000, "svc", 1000)
+		// Distinct titles: as of 2026-07-28 one live offering per normalized
+		// title is enforced (liveTitleOwner), because a duplicate lets the
+		// title-scoped price band be ratcheted by a throwaway listing. This
+		// loop only ever cared about the MaxOfferings cap, so the repeated
+		// "svc" was incidental fixture, not the property under test — every
+		// assertion below is unchanged.
+		id, err := CreateOffering(s, c, c, 2000, "svc-"+evU64(i), 1000)
 		if err != nil {
 			t.Fatalf("create %d of %d: %v", i+1, MaxOfferings, err)
 		}
@@ -906,5 +912,95 @@ func TestOfferings_EscrowRoundTripsTheOfferingID(t *testing.T) {
 	oldLayout := "buyer|1234|999|" + askPending + "|56|4321|question-hash|answer-hash"
 	if _, ok := unpackEscrow(oldLayout); ok {
 		t.Fatal("an 8-field record parsed as a 9-field one — the exact count check is not doing its job")
+	}
+}
+
+// ---- 2026-07-28 hunt findings --------------------------------------------
+
+// TestOfferings_OneLiveOfferingPerTitle blocks the phantom-cur ratchet.
+//
+// THE EXPLOIT (measured before the fix): the 2x/7-day anti-rug band is keyed
+// by TITLE, and its "last known price" slot (kOfferTitlePrice, the `cur` half)
+// was shared by every offering with that title. Nothing rejected two LIVE
+// offerings sharing one. So a creator could park `cur` at a price no live
+// offering posts, and the next window would re-anchor from it:
+//
+//	CreateOffering("custom song", 1200)  -> title{cur 1200, anchor 1200}
+//	SetOfferingPrice(id1, 600)           -> legal, floor of the anchor band
+//	CreateOffering("custom song", 2400)  -> ACCEPTED (duplicate), cur := 2400
+//	DeleteOffering(id2)                  -> cur STAYS 2400 (delete never
+//	                                        clears the title's keys)
+//	...one window later: SetOfferingPrice(id1, 4800) ACCEPTED
+//
+// 4x the headroom the band grants, and the buyer-visible price moves 600 ->
+// 4800 (8x) in one transaction where an honest creator is capped at 2x. It
+// was sustainable: hold cur/visible = 4 across windows indefinitely.
+//
+// Root cause was two different rules for one state transition —
+// SetOfferingTitle gates through withinTitleBand (anchor AND cur), while
+// CreateOffering went through applyTitleBandedPrice (anchor only). This test
+// pins the door that was loose, and the rename door beside it.
+func TestOfferings_OneLiveOfferingPerTitle(t *testing.T) {
+	s, c := offSetup(t)
+
+	if _, err := CreateOffering(s, c, c, 2000, "custom song", 1200); err != nil {
+		t.Fatalf("first offering: %v", err)
+	}
+
+	// The ratchet's load-bearing step: a SECOND live offering under the same
+	// title, whose only purpose is to move the shared `cur`.
+	if _, err := CreateOffering(s, c, c, 2000, "custom song", 2400); err == nil {
+		t.Fatal("PHANTOM-CUR RATCHET: a second LIVE offering under an existing title was accepted. Its price becomes the title band's shared `cur`, and deleting it leaves `cur` parked there — so the next window re-anchors off a price nothing posts, granting ~4x the headroom the 2x band is supposed to allow.")
+	}
+
+	// Cosmetic variants normalize to the same title and must be refused too,
+	// or the rule is trivially bypassed.
+	for _, variant := range []string{"Custom Song", "  custom   song  ", "CUSTOM song"} {
+		if _, err := CreateOffering(s, c, c, 2000, variant, 2400); err == nil {
+			t.Fatalf("variant %q normalizes onto a live title and was accepted — the duplicate rule must key on the NORMALIZED title, which is what the band keys on", variant)
+		}
+	}
+
+	// The rename door must enforce the same rule.
+	other, err := CreateOffering(s, c, c, 2000, "mixing session", 1200)
+	if err != nil {
+		t.Fatalf("second distinct offering: %v", err)
+	}
+	if err := SetOfferingTitle(s, c, c, other, "custom song"); err == nil {
+		t.Fatal("renaming an offering ONTO a live title was accepted — rename is a second door into the duplicate-title state")
+	}
+
+	// ...but renaming an offering to a cosmetic variant of ITS OWN title must
+	// still work: the rule is one live offering per title, not a ban on
+	// touching your own.
+	if err := SetOfferingTitle(s, c, c, other, "Mixing Session"); err != nil {
+		t.Fatalf("renaming an offering to a variant of its own title must be allowed: %v", err)
+	}
+	// And a genuinely free title is still available.
+	if err := SetOfferingTitle(s, c, c, other, "mastering"); err != nil {
+		t.Fatalf("renaming onto an unused title must be allowed: %v", err)
+	}
+}
+
+// TestOfferings_TitleMustHaveAVisibleCharacter — validOfferTitle checked the
+// RAW string for emptiness, so anything made only of characters
+// normalizeOfferTitle folds away got through while normalizing to "".
+//
+// Two effects, both measured: a shop row that renders as nothing is
+// creatable, and every such title collapses into ONE band bucket keyed by "",
+// so a second unrelated invisible-titled service is refused for breaching a
+// band it has nothing to do with — a false positive blocking a legitimate
+// listing.
+func TestOfferings_TitleMustHaveAVisibleCharacter(t *testing.T) {
+	s, c := offSetup(t)
+	for _, blank := range []string{" ", "\u00a0", "\u200b", "\u200d", "\ufeff", "\u3000", "\u200b \u00a0\u3000"} {
+		if _, err := CreateOffering(s, c, c, 2000, blank, 1200); err == nil {
+			t.Errorf("title %q normalizes to \"\" and was accepted — it renders as an empty shop row and shares the \"\" band bucket with every other invisible title", blank)
+		}
+	}
+	// A title with real content plus invisible padding is fine — the rule is
+	// "at least one visible character", not "no invisible characters".
+	if _, err := CreateOffering(s, c, c, 2000, "\u200b custom song \u200b", 1200); err != nil {
+		t.Fatalf("a title with visible content and invisible padding must be accepted: %v", err)
 	}
 }

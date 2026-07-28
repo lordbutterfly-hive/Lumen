@@ -190,9 +190,16 @@ func TestParseEvent_Sold(t *testing.T) {
 	}
 }
 
-// TestParseEvent_Retired pins ../contract/main.go's hand-built `retired` log
-// (verified directly against main.go's `retire` entrypoint — it really does
-// emit this, with no "v" field, unlike every core/events.go Ev* constructor).
+// TestParseEvent_Retired pins ../contract/main.go's `retired` log (verified
+// directly against main.go's `retire` entrypoint — as of commit 572ab00 it
+// builds this via core.EvRetired (core/events.go), previously hand-built
+// inline; byte-identical either way). This test's raw JSON deliberately
+// omits "v", to prove decoding does not depend on it being present:
+// RetiredEvent declares no "v" field of its own (see its own doc), so
+// json.Unmarshal simply drops any "v" key on the wire regardless — real
+// production logs now DO carry "v":1 (evOpen writes it unconditionally),
+// captured separately into envelope.V / Event.Version, just never into this
+// struct.
 func TestParseEvent_Retired(t *testing.T) {
 	ev, err := ParseEvent(RawEvent{Data: `{"ev":"retired","creator":"alice","actor":"alice","block":1300}`})
 	if err != nil {
@@ -207,12 +214,13 @@ func TestParseEvent_Retired(t *testing.T) {
 	}
 }
 
-// TestParseEvent_TreasuryWithdrawn pins ../contract/main.go's hand-built
-// `treasuryWithdrawn` log (the `withdrawTreasury` entrypoint) — DEFECT FIX,
-// this event kind did not exist in this package before: every real
-// "treasuryWithdrawn" log line fell to Unknown=true, and — more importantly —
-// index.go's Index.TreasuryHbd() had no debit path at all, so it could only
-// ever grow.
+// TestParseEvent_TreasuryWithdrawn pins ../contract/main.go's
+// `treasuryWithdrawn` log (the `withdrawTreasury` entrypoint, built via
+// core.EvTreasuryWithdrawn as of commit 572ab00, previously hand-built
+// inline) — DEFECT FIX, this event kind did not exist in this package
+// before: every real "treasuryWithdrawn" log line fell to Unknown=true, and
+// — more importantly — index.go's Index.TreasuryHbd() had no debit path at
+// all, so it could only ever grow.
 func TestParseEvent_TreasuryWithdrawn(t *testing.T) {
 	ev, err := ParseEvent(RawEvent{Data: `{"ev":"treasuryWithdrawn","actor":"ownerbot","amount":"5000","block":1400}`})
 	if err != nil {
@@ -227,9 +235,10 @@ func TestParseEvent_TreasuryWithdrawn(t *testing.T) {
 	}
 }
 
-// TestParseEvent_TradeFeesClaimed pins ../contract/main.go's hand-built
-// `tradeFeesClaimed` log (the `claimTradeFees` entrypoint) — same class of
-// DEFECT FIX as TreasuryWithdrawn above.
+// TestParseEvent_TradeFeesClaimed pins ../contract/main.go's
+// `tradeFeesClaimed` log (the `claimTradeFees` entrypoint, built via
+// core.EvTradeFeesClaimed as of commit 572ab00, previously hand-built
+// inline) — same class of DEFECT FIX as TreasuryWithdrawn above.
 func TestParseEvent_TradeFeesClaimed(t *testing.T) {
 	ev, err := ParseEvent(RawEvent{Data: `{"ev":"tradeFeesClaimed","actor":"carol","amount":"250","block":1500}`})
 	if err != nil {
@@ -278,12 +287,15 @@ func TestParseEvent_UnknownEvIsGraceful(t *testing.T) {
 }
 
 // TestParseEvent_PausedAndUnpausedAreDeliberatelyUnknown pins the OTHER two
-// contract-only hand-built logs named in events.go's own file doc as
-// deliberately unrecognized (alongside "init" above): the `pause`/`unpause`
-// entrypoints' global inbound-switch logs. Before this test existed, nothing
-// proved these two were a DELIBERATE decision rather than an accidental gap —
-// see events.go's top-of-file doc for the justification (a global, not
-// per-market, switch with no query surface in this package depending on it).
+// logs named in events.go's own file doc as deliberately unrecognized
+// (alongside "init" above): the `pause`/`unpause` entrypoints' global
+// inbound-switch logs, built via core.EvPaused/core.EvUnpaused as of commit
+// 572ab00 (previously hand-built inline) — being recognized-or-not here has
+// never depended on which side builds the JSON. Before this test existed,
+// nothing proved these two were a DELIBERATE decision rather than an
+// accidental gap — see events.go's top-of-file doc for the justification (a
+// global, not per-market, switch with no query surface in this package
+// depending on it).
 func TestParseEvent_PausedAndUnpausedAreDeliberatelyUnknown(t *testing.T) {
 	for _, evName := range []string{"paused", "unpaused"} {
 		ev, err := ParseEvent(RawEvent{Data: `{"ev":"` + evName + `","actor":"ownerbot"}`})

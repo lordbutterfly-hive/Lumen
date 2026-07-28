@@ -3,6 +3,7 @@ import { getLogger } from '@ui/lib/logging';
 import { guardRead, guardWrite } from '@/blog/lib/lite/http/guard';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { acknowledgeReveal, fetchOutstandingReveal } from '@/blog/lib/lite/upgrade/upgrade-service';
+import { ensureAccountCreator } from '@/blog/lib/lite/upgrade/hive-account-creator';
 
 const logger = getLogger('app');
 
@@ -25,6 +26,11 @@ const NO_STORE = { 'Cache-Control': 'no-store, no-cache, must-revalidate, privat
 export async function GET(): Promise<NextResponse> {
   const blocked = guardRead();
   if (blocked) return blocked;
+
+  // Without a creator installed, an 'uncertain' reveal can never be reconciled
+  // against the chain: the row is handed back forever and the user can never retry
+  // the upgrade. Wiring it here is what lets that state resolve one way or the other.
+  ensureAccountCreator();
 
   const session = await getLiteSession();
   try {

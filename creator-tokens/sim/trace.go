@@ -5,9 +5,11 @@
 // that happens into a structured, stable trace.
 //
 // It drives the real code directly: core.Register/Renew/SetFace/SetCap/
-// Prepay/TransferCredits/Ask/Answer/Reclaim/Refund/RefundHolder/
-// CloseIfDrained/RecordObs are all called against a real *core.MemStore —
-// nothing in this package mocks or reimplements core's fund logic. Where
+// Buy/Sell/TransferCredits/Ask/Answer/Decline/Reclaim/Refund/RefundHolder/
+// CloseIfDrained/RecordObs/Retire/ClaimTradeFees/CreateOffering/
+// SetOfferingPrice/SetOfferingTitle/DeleteOffering/WithdrawTreasury are all
+// called against a real *core.MemStore — nothing in this package mocks or
+// reimplements core's fund logic. Where
 // this package HAS to duplicate a small piece of arithmetic (the commission
 // calculation, a credits-per-ask preview), it duplicates the same public,
 // caller-side formula contract/main.go's own wasm wrapper already
@@ -47,7 +49,7 @@ type Event struct {
 	Day     int
 	Actor   string
 	Role    string // the behaviour profile, e.g. "creator_reliable", "fan", "keeper"
-	Action  string // "register", "renew", "setFace", "setCap", "prepay", "transfer", "ask", "answer", "reclaim", "refund", "refundHolder", "closeIfDrained", "recordObs", "withdrawTreasury"
+	Action  string // "register", "renew", "setFace", "setCap", "prepay", "buy", "sell", "transfer", "ask", "answer", "decline", "reclaim", "refund", "refundHolder", "closeIfDrained", "recordObs", "withdrawTreasury", "retire", "claimTradeFees", "createOffering", "setOfferingPrice", "setOfferingTitle", "deleteOffering"
 	Creator string
 	Args    map[string]string
 	OK      bool

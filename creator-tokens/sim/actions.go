@@ -14,11 +14,43 @@ import (
 // BASE cadences: engine.nextInterval stretches/compresses the actual gap by
 // the current activityMultiplier and a uniform jitter, so real inter-arrival
 // times vary a lot around these numbers — see engine.go's doc.
+//
+// RATIFIED 2026-07-28 (F5, an adversarial review): fanTickCadence,
+// speculatorTickCadence and traderTickCadence sat here at roughly double
+// their previous values (20_000/30_000/12_000 -> 10_000/15_000/6_000 —
+// roughly DOUBLING all holder activity) with no comment, rationale or date
+// marker at all, in a file that comments everything else at length — an
+// adversarial review correctly flagged that as unreviewable: a silent
+// tuning change that invalidates every prior seed's baseline and gives the
+// next reader no way to tell "deliberate" from "accidental."
+//
+// DECISION: KEEP the denser cadences. This is a deliberate call, not a
+// rubber stamp, made FOR the following reason, checked directly against
+// this session's own measurements: F2 and F3 (the same review round)
+// independently found this simulator's own guardrails — the delivery-gate
+// standing guardrail (DeliveryGuardrailExercised, engine.go) and the H1
+// keeper-absent fail-safe test — are starved by MARKET DEPTH, not by a lack
+// of calendar time: settlement.go's MaxSpendSupplyBps (a fixed-size ask must
+// clear 5% of the CURRENT supply) binds hardest on a market whose supply
+// grows slowly, and supply growth is exactly what a higher holder-tick rate
+// accelerates. A denser default is therefore net POSITIVE for this
+// simulator's actual job (exercising as much of core's guarded surface as a
+// finite simulated horizon allows), not merely "more events for their own
+// sake." The alternative (revert to the slower cadences) would make F2's
+// and F3's density problems WORSE, not better.
+//
+// CONSEQUENCE, stated plainly per the review's own ask: any seed/trace
+// result recorded before 2026-07-28 (this date marker) used the slower
+// cadences and is NOT directly comparable to a run at these values —
+// event counts, phase-reach timing, and anything density-sensitive (F2/F3's
+// own findings chief among them) will differ. A fresh baseline should be
+// taken from this date forward; do not diff an old trace against a new one
+// expecting the same population dynamics.
 const (
 	creatorTickCadence    uint64 = 4_800  // ~4h: a creator checks renewal/price/cap
-	fanTickCadence        uint64 = 20_000 // ~17h: a fan's own cadence
-	speculatorTickCadence uint64 = 30_000 // ~30h
-	traderTickCadence     uint64 = 12_000 // ~10h
+	fanTickCadence        uint64 = 10_000 // ~8.3h: a fan's own cadence
+	speculatorTickCadence uint64 = 15_000 // ~15h
+	traderTickCadence     uint64 = 6_000  // ~5h
 	keeperTickCadence     uint64 = core.BlocksPerDay
 	oracleTickCadence     uint64 = 900                   // ~45min between price observations
 	ownerTickCadence      uint64 = 3 * core.BlocksPerDay // ~3d: owner sweeps the accrued treasury (Upgrade 1 / C2)
@@ -33,6 +65,25 @@ const (
 // or the good-samaritan sweep in speculatorTick) via the now-permissionless
 // Reclaim — which is exactly what the journey analysis then asserts happened.
 const escrowAbandonProb = 0.18
+
+// offeringAskProb is the chance an ask targets one of the creator's live
+// NAMED offerings (offerings.go) rather than the legacy single `face` price,
+// evaluated only when the shop actually has at least one live offering (see
+// pickAskTarget). Without this, the shop catalogue is created/repriced/
+// renamed/deleted by shopTick below but never actually BOUGHT against —
+// offeringID != 0 would stay completely unfuzzed on the one path that
+// actually moves money against it (core/ask.go's offeringID branch).
+const offeringAskProb = 0.45
+
+// declineProb is the chance a creator, on a scheduled answer-attempt,
+// DECLINES the escrow instead of answering it (RULING E, core/ask.go's
+// Decline) — a free, honest "no" inside the same window an Answer would be
+// legal in. Applies uniformly to every answer-attempt this engine ever
+// schedules (reliable/price_mover/abandoner's early/mid-window attempts AND
+// flaky's late-ish ones, including the ones that land past the deadline and
+// so exercise Decline's own "answer window closed" refusal exactly like a
+// late Answer would). This is the ONLY place doDecline is ever driven from.
+const declineProb = 0.12
 
 func boolStr(b bool) string {
 	if b {
@@ -336,18 +387,75 @@ func (e *Engine) doTransfer(creator, from, to string, amount *big.Int) {
 	e.recordEvent(ev)
 }
 
-// askIntent is where an asker DECIDES to open an ask: it reads the current
-// face/rate to build a quote, sets maxCredits as that quote plus the
-// asker's own slippage buffer (holderSlippageBps), pays the commission owed
-// against THAT quote, and schedules the actual Ask call a short, random
-// number of blocks later — sign-then-broadcast latency. Any face/rate
-// movement in that gap (a price_mover's SetFace, an oracle RecordObs) is
-// exactly the drift ask.go's own maxCredits guard exists to bound; see
-// doAskExecute for what happens when the drift is big enough to trip it.
-func (e *Engine) askIntent(asker, creator string) {
+// askTarget bundles the price ONE ask attempt will quote against: either a
+// named offering (OfferingID != 0, Face == that offering's own posted price,
+// core.OfferingPrice) or the legacy single face price (OfferingID == 0, Face
+// == core.Face). Decided ONCE, by pickAskTarget below, and threaded through
+// both the top-up (ensureCreditsForAsk) and the actual ask (askIntent) so the
+// two can never disagree about which price they are aiming for — topping up
+// for the legacy face and then asking against a differently-priced named
+// offering (or vice versa) would make the top-up's own estimate meaningless.
+type askTarget struct {
+	OfferingID uint64
+	Face       *big.Int
+}
+
+// pickAskTarget is the ONE place that decides whether an ask targets the
+// creator's shop or the legacy face price (2026-07-27 offerings.go feature).
+// With offeringAskProb chance, and only when the shop actually has a live
+// offering right now, it picks one uniformly at random and quotes off ITS
+// posted price (core.OfferingPrice via ListOfferings) — otherwise (and
+// always, when the shop is empty) it falls back to the legacy core.Face
+// path, offeringID 0, byte-for-byte the only behaviour that existed before
+// this feature. This is the single door offeringID != 0 ever reaches an
+// actual Ask through — see doAskExecute/core.Ask's own offeringID branch
+// (ask.go, ~line 367).
+func (e *Engine) pickAskTarget(actor *Actor, creator string) askTarget {
+	if offerings := core.ListOfferings(e.Store, creator); len(offerings) > 0 && actor.RNG.Float64() < offeringAskProb {
+		off := offerings[actor.RNG.Intn(len(offerings))]
+		return askTarget{OfferingID: off.ID, Face: off.PriceHbd}
+	}
+	return askTarget{OfferingID: 0, Face: core.Face(e.Store, creator)}
+}
+
+// askIntent is where an asker DECIDES to open an ask, against the price
+// at (its caller-supplied askTarget: either a named offering or the legacy
+// face — see pickAskTarget): it reads the current rate to build a quote,
+// sets maxCredits as that quote plus the asker's own slippage buffer
+// (holderSlippageBps), pays the commission owed against THAT quote, and
+// schedules the actual Ask call a short, random number of blocks later —
+// sign-then-broadcast latency. Any face/rate movement in that gap (a
+// price_mover's SetFace, an oracle RecordObs, or the offering itself being
+// repriced/deleted) is exactly the drift ask.go's own maxCredits/offeringID
+// guards exist to bound; see doAskExecute for what happens when the drift is
+// big enough to trip one of them.
+//
+// FIXED 2026-07-28 (F9, an adversarial review): this used to read `at.Face`
+// directly — a SNAPSHOT taken whenever pickAskTarget built `at`, not a live
+// alias. For every caller that invokes askIntent in the same synchronous
+// step it built `at` in (fanTick), that snapshot is only microseconds
+// stale and harmless. But oneShotSequence schedules its OWN call to
+// askIntent up to 3*BlocksPerDay later (~3 days), passing the SAME `at` it
+// captured at t=0 — so the commission this function computed could be
+// signed against a price up to 3 days old. core.Ask's H2 exact-commission
+// guard requires commissionHbdPaid to EXACTLY equal commissionOwedFor(the
+// LIVE face) at execution — a legitimate 2x/7d-band-legal SetFace, or any
+// offering reprice, in that 3-day gap made the stale-quoted ask reject
+// outright. The fix re-derives the CURRENT price from `at.OfferingID`
+// (the stable identity — WHICH service — pickAskTarget decided) every time
+// this function actually runs, rather than trusting whatever `at.Face` was
+// when the caller built it: core.OfferingPrice(id) already handles both
+// legacy (id==0 -> the live core.Face) and named-offering (id!=0 -> that
+// offering's live posted price, 0 if since deleted) in one call — exactly
+// the same live lookup core.Ask's own offeringID branch performs at
+// execution (ask.go, ~line 367-373), so this can never drift from what Ask
+// will actually check. For a same-block caller this changes nothing (state
+// has not moved since `at` was built, so the live read returns the
+// identical value); for oneShotSequence's delayed call it is the fix.
+func (e *Engine) askIntent(asker, creator string, at askTarget) {
 	actor := e.pop.Actors[asker]
-	face := core.Face(e.Store, creator)
-	if face.Sign() <= 0 {
+	face := core.OfferingPrice(e.Store, creator, at.OfferingID)
+	if face == nil || face.Sign() <= 0 {
 		return
 	}
 	// RULING C: SettlementRate now REFUSES (returns an error) when no safe
@@ -388,8 +496,9 @@ func (e *Engine) askIntent(asker, creator string) {
 	delay := uint64(1 + actor.RNG.Intn(40)) // sign-to-broadcast latency
 	execBlock := e.Block + delay
 
+	offeringID := at.OfferingID
 	e.schedule(execBlock, "ask-execute", func(eng *Engine) {
-		eng.doAskExecute(asker, creator, maxCredits, commission, contentHash, deadline)
+		eng.doAskExecute(asker, creator, maxCredits, commission, contentHash, deadline, offeringID)
 	})
 }
 
@@ -487,10 +596,22 @@ func (e *Engine) scheduleAnswerAndReclaim(creator string, seq uint64, deadline, 
 	e.schedule(reclaimAt, "reclaim-check", func(eng *Engine) { eng.attemptReclaim(asker, creator, seq) })
 }
 
+// attemptAnswer resolves a still-PENDING escrow the creator scheduled a
+// response for: with declineProb chance it Declines instead (RULING E — the
+// free, honest "no"; this is the only place doDecline is ever driven from),
+// otherwise it Answers as before. Both calls are legal (or refused) on
+// exactly the same window (block <= deadline), so a Decline roll on a
+// late-scheduled flaky attempt correctly exercises Decline's own "answer
+// window closed" refusal path, mirroring what a late Answer already does.
 func (e *Engine) attemptAnswer(creator string, seq uint64) {
 	rec := e.escrows[escrowKey(creator, seq)]
 	if rec == nil || rec.Status != escrowPending {
 		return // already resolved -- nothing to attempt
+	}
+	actor := e.pop.Actors[creator]
+	if actor.RNG.Float64() < declineProb {
+		e.doDecline(creator, seq)
+		return
 	}
 	answerHash := fmt.Sprintf("ans-%s-%d", creator, seq)
 	e.doAnswer(creator, seq, answerHash)
@@ -1079,6 +1200,22 @@ func (e *Engine) creatorTick(name string) {
 	actor := e.pop.Actors[name]
 
 	if cs.AbandonBlock != 0 && e.Block >= cs.AbandonBlock {
+		// RetireOnAbandon (Retire coverage, NewEngine's doc): about half of
+		// abandoning creators go dark via a formal, irreversible core.Retire
+		// notice instead of a silent ghost — driven exactly ONCE, right here,
+		// on the very tick that crosses AbandonBlock, since this branch always
+		// returns without rescheduling (no later tick could ever fire it).
+		// The RetiredAt guard is defensive: harmless if this were ever reached
+		// twice, refusing cleanly ("already retiring") rather than wasting a
+		// halt on a no-op re-declaration.
+		if cs.RetireOnAbandon {
+			if _, retired := core.RetiredAt(e.Store, name); !retired {
+				e.doRetire(name)
+				if e.haltErr != nil {
+					return
+				}
+			}
+		}
 		return // dark: no further ticks scheduled; the market's own lazy clock and the keeper take over from here
 	}
 
@@ -1094,6 +1231,22 @@ func (e *Engine) creatorTick(name string) {
 	// calls for the rest of the run.
 	if core.Phase(e.Store, name, e.Block) == core.StateClosed {
 		return
+	}
+
+	// VoluntaryRetireBlock (Retire coverage, NewEngine's doc): a minority of
+	// RELIABLE creators retire on purpose, late in the run, with a clean
+	// delivery record — Retire exercised on a HEALTHY market, not just a
+	// neglected one. Unlike the AbandonBlock path above this does NOT stop
+	// the tick loop (a retiring-but-not-abandoning creator still claims fees
+	// and still answers any outstanding asks; ticking on afterward is
+	// harmless — Renew simply starts refusing on the mark, market.go).
+	if cs.VoluntaryRetireBlock != 0 && e.Block >= cs.VoluntaryRetireBlock {
+		if _, retired := core.RetiredAt(e.Store, name); !retired {
+			e.doRetire(name)
+			if e.haltErr != nil {
+				return
+			}
+		}
 	}
 
 	paidUntil := core.PaidUntil(e.Store, name)
@@ -1137,9 +1290,108 @@ func (e *Engine) creatorTick(name string) {
 		}
 	}
 
+	// ClaimTradeFees (RULING F8's pull half, tradefee.go): every creator role
+	// periodically pulls its accrued kFeeBal — the ONLY place doClaimTradeFees
+	// is ever driven from. Deliberately unconditional on phase/delinquency
+	// (matches core: ClaimTradeFees "consults NOTHING") and on role, since
+	// every role that trades at all (Buy/Sell) can accrue a creator-half fee.
+	if actor.RNG.Float64() < 0.25 {
+		e.doClaimTradeFees(name)
+		if e.haltErr != nil {
+			return
+		}
+	}
+
+	e.shopTick(name)
+	if e.haltErr != nil {
+		return
+	}
+
 	next := e.Block + nextInterval(actor.RNG, creatorTickCadence, e.Block)
 	if next <= e.endBlock {
 		e.scheduleCreatorTick(name, next)
+	}
+}
+
+// offeringTitlePool is a small, FIXED set of candidate service titles shared
+// by every creator's shop (shopTick below). Deliberately small and fixed
+// rather than ever-fresh/generated: reusing the same handful of titles is
+// what makes this simulator organically produce delete+recreate and
+// rename-onto-an-already-anchored-title under the SAME normalized title —
+// exactly the scenarios offerings.go's own file doc says the persistent
+// title-band gate (applyTitleBandedPrice) exists to survive ("THE BAND MUST
+// SURVIVE DELETE+RECREATE"). A pool this small also means MaxOfferings (20)
+// is never the binding constraint on coverage.
+var offeringTitlePool = []string{
+	"intro call", "custom song", "logo design", "shoutout", "mentorship session",
+}
+
+// shopTick drives the creator's own offering catalogue (offerings.go): the
+// four config-write wrappers (doCreateOffering/doSetOfferingPrice/
+// doSetOfferingTitle/doDeleteOffering) a previous session wrote but never
+// called from anywhere — dead code from the simulator's point of view, and
+// the reason offeringID != 0 was completely unfuzzed. Every creator role
+// gets a shop: these are pure config writes, gated only by
+// requireShopEditable/requireOpenCreatorMarket (market.go), never by role,
+// never by delivery standing, and never by the global pause.
+func (e *Engine) shopTick(creator string) {
+	actor := e.pop.Actors[creator]
+	offerings := core.ListOfferings(e.Store, creator)
+
+	roll := actor.RNG.Float64()
+	switch {
+	case roll < 0.20 && uint64(len(offerings)) < core.MaxOfferings:
+		title := offeringTitlePool[actor.RNG.Intn(len(offeringTitlePool))]
+		// [MinFace(577), 60_000] — NOT the full protocol range [MinFace,
+		// MaxFace(10,000,000)], and NOT InitialFace's own [1_000, 50_000]
+		// either (F10, an adversarial review: this comment used to CLAIM
+		// "same range InitialFace itself uses" — it is close, comparable in
+		// order of magnitude, but not the same range: 60_000 vs 50_000 at
+		// the top, 577 vs 1_000 at the bottom). DEFECT FIX (2026-07-28,
+		// found while chasing why offering-targeted asks almost never
+		// succeeded even when pickAskTarget picked one): a price drawn
+		// uniformly across the FULL protocol range (up to MaxFace, 10,000
+		// HBD) is routinely far beyond what any simulated actor's wallet
+		// (walletRangeBase, actors.go — a fan holds 60-300 HBD) can ever
+		// afford, so askIntent's own affordability guards (bal<
+		// creditsEstimate / actor.HBD<commission) silently skipped the ask
+		// almost every time — offeringID != 0 was being PICKED but
+		// essentially never actually EXECUTED. A range comparable to
+		// InitialFace's keeps a fresh offering priced like an ordinary
+		// service (buyable), while the band acceptance/rejection paths stay
+		// exercised exactly as before: a title reused after delete+recreate,
+		// or a later SetOfferingPrice reprice (below, the same wide
+		// multiplicative factor priceMoverAdjustFace uses), still lands
+		// outside the 2x/7d band often enough to trip
+		// applyTitleBandedPrice's rejection — the RANGE moved, the variance
+		// relative to that range did not.
+		price := randRangeInt64(actor.RNG, core.MinFace, 60_000)
+		e.doCreateOffering(creator, title, price)
+
+	case roll < 0.45 && len(offerings) > 0:
+		off := offerings[actor.RNG.Intn(len(offerings))]
+		// Mirrors priceMoverAdjustFace's wide factor exactly, so a reprice
+		// sometimes lands outside the 2x/7d band on purpose — this simulator
+		// must exercise SetOfferingPrice's rejection path, not just its
+		// happy path.
+		factor := 0.60 + actor.RNG.Float64()*1.05 // [0.60, 1.65)
+		newPrice := int64(float64(off.PriceHbd.Int64()) * factor)
+		if newPrice < core.MinFace {
+			newPrice = core.MinFace
+		}
+		if newPrice > core.MaxFace {
+			newPrice = core.MaxFace
+		}
+		e.doSetOfferingPrice(creator, off.ID, newPrice)
+
+	case roll < 0.60 && len(offerings) > 0:
+		off := offerings[actor.RNG.Intn(len(offerings))]
+		newTitle := offeringTitlePool[actor.RNG.Intn(len(offeringTitlePool))]
+		e.doSetOfferingTitle(creator, off.ID, newTitle)
+
+	case roll < 0.70 && len(offerings) > 0:
+		off := offerings[actor.RNG.Intn(len(offerings))]
+		e.doDeleteOffering(creator, off.ID)
 	}
 }
 
@@ -1210,11 +1462,12 @@ func (e *Engine) fanTick(name string) {
 		}
 		e.doBuyBudget(name, target, amount)
 	case roll < 0.75: // ask (top up first if short)
-		e.ensureCreditsForAsk(name, target)
+		at := e.pickAskTarget(actor, target)
+		e.ensureCreditsForAsk(name, target, at)
 		if e.haltErr != nil {
 			return
 		}
-		e.askIntent(name, target)
+		e.askIntent(name, target, at)
 	case roll < 0.80: // occasionally keep a favourite creator alive
 		paidUntil := core.PaidUntil(e.Store, target)
 		if e.Block+2*core.BlocksPerDay >= paidUntil {
@@ -1238,12 +1491,15 @@ func (e *Engine) fanTick(name string) {
 	}
 }
 
-// ensureCreditsForAsk tops up (prepays) just enough for target's current
-// quoted ask cost, plus a small buffer, clamped to what the wallet can
-// afford — never attempting a prepay the actor cannot pay for.
-func (e *Engine) ensureCreditsForAsk(name, creator string) {
-	face := core.Face(e.Store, creator)
-	if face.Sign() <= 0 {
+// ensureCreditsForAsk tops up (prepays) just enough for the PRE-DECIDED
+// target's (see pickAskTarget) current quoted ask cost, plus a small buffer,
+// clamped to what the wallet can afford — never attempting a prepay the
+// actor cannot pay for. Takes `at` rather than re-deciding its own target so
+// it can never top up for a different price than the ask that follows it
+// will actually quote (see askTarget's doc).
+func (e *Engine) ensureCreditsForAsk(name, creator string, at askTarget) {
+	face := at.Face
+	if face == nil || face.Sign() <= 0 {
 		return
 	}
 	// RULING C: refusal (error) instead of a PAR fallback — skip the top-up
@@ -1284,6 +1540,38 @@ func (e *Engine) ensureCreditsForAsk(name, creator string) {
 // fail Ask's own balance/maxCredits guard: a genuine, honest "couldn't
 // quite afford it" outcome this simulator lets play out rather than
 // silently avoiding), then ask once. No recurring tick.
+//
+// MEASURED 2026-07-28 (F9, an adversarial review — this note CORRECTS the
+// review's own hypothesized mechanism, which was checked directly against a
+// diagnostic run and does not hold). The review's finding text hypothesized
+// this role produces zero asks because "askIntent requires bal >=
+// creditsEstimate recomputed at a rate its own buy just moved." That is not
+// what happens: a diagnostic run (4 configs, seeds 1/2/3/7, up to 180 days)
+// showed one_shot actors making ZERO buy attempts at all, not merely zero
+// asks — the SettlementRate call a few lines below refuses (ErrOracle)
+// before doBuy is ever reached, so there is no "own buy" to have moved
+// anything. THE REAL CAUSE: one_shot actors' single lifetime action fires
+// once, uniformly in [genesisBlock+1 day, genesisBlock+2 days)
+// (scheduleInitialEvents), but core.SettlementRate's long TWAP ring
+// (twap.go/params.go: LongMinObsBlocks = 2 days) cannot price ANYTHING
+// until it has accumulated 2 days of SPAN from whenever organic trading
+// actually starts — and the diagnostic's own first successful "buy" event
+// (any actor, any role) landed at day ~1.00-1.02 in every config tested, so
+// the earliest any market's long ring could possibly clear its 2-day
+// minimum is day ~3. A one_shot actor's single shot, fired inside [day 1,
+// day 2), is therefore refused by SettlementRate before ANY market in this
+// simulator can price a service at all — measured 0/4 successful buys
+// across every config tested, not probabilistic, not a rare miss.
+// Fixing this would mean changing WHEN one_shot actors start (a population-
+// timing decision in the same family as F5's tick-cadence question,
+// deserving its own deliberate review — out of scope for "fix the
+// staleness"), so it is left DOCUMENTED, not fixed, per this finding's own
+// explicit option. The askIntent staleness fix above (re-reading the live
+// price by OfferingID rather than trusting a snapshot) is still correct and
+// worth keeping regardless: it is what would make a one_shot actor's ask
+// actually succeed once this startup-timing gap is ever closed, and it
+// already protects any OTHER caller that ever schedules askIntent with a
+// multi-block delay.
 func (e *Engine) oneShotSequence(name string) {
 	actor := e.pop.Actors[name]
 	favorites := e.holderFavorites[name]
@@ -1292,8 +1580,8 @@ func (e *Engine) oneShotSequence(name string) {
 	}
 	target := favorites[0]
 
-	face := core.Face(e.Store, target)
-	if face.Sign() <= 0 {
+	at := e.pickAskTarget(actor, target)
+	if at.Face == nil || at.Face.Sign() <= 0 {
 		return
 	}
 	// RULING C: refusal (error) instead of a PAR fallback — a one-shot asker
@@ -1307,7 +1595,7 @@ func (e *Engine) oneShotSequence(name string) {
 	// can, which will very likely then fail Ask's own balance guard: the
 	// same honest "couldn't quite afford it" outcome as before, on the
 	// curve). tokenLegOf, not the bare face — see tokenLegOf's doc.
-	need := ceilDivBig(tokenLegOf(face), rate)
+	need := ceilDivBig(tokenLegOf(at.Face), rate)
 	if aff := e.maxAffordableTokens(target, actor.HBD); cmpBig(need, aff) > 0 {
 		need = aff
 	}
@@ -1321,7 +1609,7 @@ func (e *Engine) oneShotSequence(name string) {
 
 	delay := uint64(1 + actor.RNG.Intn(3*int(core.BlocksPerDay)))
 	e.schedule(e.Block+delay, "oneshot-ask", func(eng *Engine) {
-		eng.askIntent(name, target)
+		eng.askIntent(name, target, at)
 	})
 }
 

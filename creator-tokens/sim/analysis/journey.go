@@ -26,21 +26,61 @@ import (
 // core/refund.go's Refund is DIFFERENT (RULING A/K3, RULINGS-v2-2026-07-21/
 // 22 — this file used to claim it had no phase gate either; it does now, and
 // that update IS this comment): Refund/RefundHolder are gated to inWindDown
-// ONLY (naturally FROZEN/CLOSED, or an irreversible Retire — Retire is never
-// driven by this simulator's actor set, so in practice this is exactly
-// "FROZEN or CLOSED"). While the market is NOT winding down, the complementary
-// rail is open instead — core/sell.go's Sell, the exact curve proceeds — and
-// refund.go/sell.go's own file headers prove the two rails partition every
-// (creator, block) with NO gap and NO overlap. So the correct static claim is:
-// a positive-balance holder ALWAYS has at least one legal exit — Sell OR
-// Refund, whichever the CURRENT phase opens — in every phase, by construction.
-// A refund refused specifically because the market is not winding down is
-// EXPECTED, not a dead end, exactly because Sell is open in that same state;
-// AnalyzeDeadEnds below only escalates a failed refund into an anomaly when
-// the market WAS in wind-down (i.e. when core's own rule says it should have
-// worked). This file both states the (corrected) claim and checks it
-// dynamically against the actual trace (see AnomalyScan below) — a negative
-// result here is itself a real finding worth reporting, not a non-event.
+// ONLY (naturally FROZEN/CLOSED, or an irreversible Retire). While the market
+// is NOT winding down, the complementary rail is open instead — core/sell.go's
+// Sell, the exact curve proceeds — and refund.go/sell.go's own file headers
+// prove the two rails partition every (creator, block) with NO gap and NO
+// overlap. So the correct static claim is: a positive-balance holder ALWAYS
+// has at least one legal exit — Sell OR Refund, whichever the CURRENT phase
+// opens — in every phase, by construction. A refund refused specifically
+// because the market is not winding down is EXPECTED, not a dead end, exactly
+// because Sell is open in that same state; AnalyzeDeadEnds below only
+// escalates a failed refund into an anomaly when the market WAS in wind-down
+// (i.e. when core's own rule says it should have worked). This file both
+// states the (corrected) claim and checks it dynamically against the actual
+// trace (see AnomalyScan below) — a negative result here is itself a real
+// finding worth reporting, not a non-event.
+//
+// FIXED 2026-07-28 (F4, an adversarial review — this note used to describe
+// the gap this fix closes; kept, corrected, so the history stays legible).
+// "Retire is never driven by this simulator's actor set" stopped being true
+// the session sim/actions.go's creatorTick started calling doRetire
+// (RetireOnAbandon / VoluntaryRetireBlock — engine.go's NewEngine).
+// derivePhase (report.go), the small local phase replay this file and
+// coverage.go both use for their OWN phase bucketing, used to be a pure
+// function of (closed, paidUntil, block, graceBlocks) with no retiredAt
+// input at all, so around a Retire event it UNDER-stated how frozen a
+// market really was (core's real Phase() is MAX(naturalPhase, retiredPhase)
+// — market.go — while derivePhase computed only the natural half) for up to
+// SubscriptionPeriod+GraceBlocks (~35 days), until the natural
+// paidUntil+GraceBlocks lapse independently caught up to the same FROZEN
+// state Retire forces sooner. That blinded MarketDeadEnds below (one of
+// four arms of Report.Critical()), which fires only on
+// derivePhase(...)==PhaseFrozen — a market frozen BY RETIRE and pinned by a
+// stranded PENDING escrow went unflagged by a build-failing gate.
+//
+// derivePhase now takes a `retiredAt uint64, retired bool` pair, and this
+// file (and coverage.go) now track it via a `case "retire":` entry in the
+// same OK-events switch that already tracks `closed`/`paidUntil`, reset on
+// "register" exactly like `closed` is (core's registerApply clears
+// kRetiredAt on re-registration — market.go). Every derivePhase call site
+// below now passes `retiredAt[c], retired[c]`.
+//
+// ONE NARROWER GAP REMAINS, worth naming rather than silently inheriting:
+// core's actual exit-rail switch is `inWindDown` (refund.go), not `Phase`
+// — inWindDown is true from the INSTANT a market retires (even during the
+// 5-day OVERDUE notice, RULING K3), while Phase() itself only reaches
+// FROZEN once the notice expires. The "refund-blocked" anomaly check below
+// still approximates "winding down" as `ph == FROZEN || ph == CLOSED`, so a
+// refund correctly refused during just the retire NOTICE window (OVERDUE,
+// but already inWindDown per core) can still misclassify for the length of
+// that window — the same shape of gap as before, just narrower (35 days ->
+// 5 days) and confined to that one anomaly check, not to MarketDeadEnds
+// (which this fix does close, since it keys off FROZEN, which retire+grace
+// now correctly reaches). Reimplementing inWindDown's OVERDUE-during-notice
+// branch here would need the same retiredAt input this fix just added, so a
+// follow-up closing it fully is a small, well-scoped next step, not a
+// re-plumbing.
 //
 // # The one real dead end this design has: the ReclaimGrace gap
 //
@@ -282,7 +322,7 @@ type journeyEscrow struct {
 	credits       *big.Int
 	creditsApprox bool
 	deadline      uint64
-	status        string // "PENDING" | "ANSWERED" | "RECLAIMED"
+	status        string // "PENDING" | "ANSWERED" | "RECLAIMED" | "DECLINED"
 }
 
 // resolveCreditsSpent lives in report.go — shared with ledger.go, which needs
@@ -305,6 +345,8 @@ func AnalyzeDeadEnds(tr *Trace) DeadEndReport {
 	supply := map[string]*big.Int{}
 	paidUntil := map[string]uint64{}
 	closed := map[string]bool{}
+	retiredAt := map[string]uint64{} // F4: block Retire was called at, per creator
+	retired := map[string]bool{}     // F4: whether Retire has ever fired for this creator (reset on "register")
 	nextSeq := map[string]uint64{}
 	escrows := map[string]map[uint64]*journeyEscrow{}
 	permissionlessByCreator := map[string]bool{} // creator -> saw >=1 third-party (permissionless) reclaim
@@ -357,7 +399,10 @@ func AnalyzeDeadEnds(tr *Trace) DeadEndReport {
 				if ok && getBal(c, ev.Actor).Cmp(credits) >= 0 && getBal(c, ev.Actor).Sign() > 0 {
 					// RULING A/K3's two-rail switch (core/refund.go, core/
 					// sell.go): Refund opens ONLY at wind-down (FROZEN/CLOSED
-					// here — Retire is never driven by this simulator). While
+					// here — see the file doc's "ONE NARROWER GAP REMAINS"
+					// note: this check still approximates wind-down as
+					// FROZEN/CLOSED, not core's own inWindDown, so a retire
+					// NOTICE window is not yet covered here). While
 					// the market is still trading, refusing Refund with
 					// EXACTLY that rail-switch reason is BY DESIGN — Sell is
 					// the open rail in that same state, proven gap-free
@@ -370,7 +415,7 @@ func AnalyzeDeadEnds(tr *Trace) DeadEndReport {
 					// "insufficient credits"-flavoured message a stale
 					// balance-tracking bug could produce, wind-down or not —
 					// is still a genuine anomaly.
-					ph := derivePhase(closed[c], paidUntil[c], ev.Block, grace)
+					ph := derivePhase(closed[c], paidUntil[c], ev.Block, grace, retiredAt[c], retired[c])
 					windingDown := ph == PhaseFrozen || ph == PhaseClosed
 					isExpectedRailSwitch := !windingDown && ev.ErrSym == ErrStateSym && strings.Contains(ev.ErrMsg, "opens only at wind-down")
 					if !isExpectedRailSwitch {
@@ -438,7 +483,16 @@ func AnalyzeDeadEnds(tr *Trace) DeadEndReport {
 		case "register":
 			paidUntil[c] = ev.Block + subPeriod
 			nextSeq[c] = 0
-			closed[c] = false // a re-registration (legal CLOSED->ACTIVE) clears the closed latch
+			closed[c] = false  // a re-registration (legal CLOSED->ACTIVE) clears the closed latch
+			retired[c] = false // F4: registerApply clears kRetiredAt on re-registration (market.go) — same reset shape as closed above
+		case "retire":
+			// F4: core.Retire stamps kRetiredAt with the current block
+			// (market.go — internally block+1, "0 means never retired," but
+			// that encoding is core's own storage detail; this replay only
+			// needs the raw block Retire fired at, exactly what
+			// core.RetiredAt's exported (block, bool) pair returns).
+			retiredAt[c] = ev.Block
+			retired[c] = true
 		case "renew":
 			periods, ok := argU64(ev, "periods")
 			if ok {
@@ -494,6 +548,31 @@ func AnalyzeDeadEnds(tr *Trace) DeadEndReport {
 			if esc.credits != nil {
 				addBal(c, c, esc.credits) // credits release to the creator's own balance
 			}
+		case "decline":
+			// RULING E (ask.go's Decline, wired into the engine 2026-07-28):
+			// a full round-trip refund — credits AND commission both go back
+			// to the asker — inside the SAME window an Answer would be legal
+			// in, so unlike "reclaim" below this never enters the
+			// ReclaimGrace gap and is not a ReclaimGapWindow entry. Without
+			// this case the escrow would stay "PENDING" in this file's OWN
+			// replay forever (core resolved it, this replay wouldn't know),
+			// which would both under-count the asker's balance from here on
+			// AND risk the trace-end PENDING scan below misclassifying an
+			// honestly-declined escrow as an H1 MarketDeadEnd/UnclaimedEscrow
+			// finding that never actually happened.
+			seq, ok := argU64(ev, "seq")
+			if !ok {
+				continue
+			}
+			esc := journeyLookup(escrows, c, seq)
+			if esc == nil {
+				continue
+			}
+			esc.status = "DECLINED"
+			if esc.credits != nil {
+				addBal(c, esc.asker, esc.credits)
+			}
+
 		case "reclaim":
 			seq, ok := argU64(ev, "seq")
 			if !ok {
@@ -537,7 +616,7 @@ func AnalyzeDeadEnds(tr *Trace) DeadEndReport {
 				}
 			}
 		case "closeIfDrained":
-			ph := derivePhase(false, paidUntil[c], ev.Block, grace)
+			ph := derivePhase(false, paidUntil[c], ev.Block, grace, retiredAt[c], retired[c])
 			if getSupply(c).Sign() == 0 && ph == PhaseFrozen {
 				closed[c] = true
 			}
@@ -576,7 +655,7 @@ func AnalyzeDeadEnds(tr *Trace) DeadEndReport {
 				// the permissionless reclaim should have cleared it before the
 				// trace ended, so a non-empty MarketDeadEnds set is a real
 				// failure of the fix (or of whoever should have pushed it).
-				finalPhase := derivePhase(closed[c], paidUntil[c], traceEndBlock, grace)
+				finalPhase := derivePhase(closed[c], paidUntil[c], traceEndBlock, grace, retiredAt[c], retired[c])
 				if finalPhase == PhaseFrozen {
 					rpt.MarketDeadEnds = append(rpt.MarketDeadEnds, MarketDeadEnd{
 						Creator: c, Phase: finalPhase, Seq: seq, Asker: esc.asker,

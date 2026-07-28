@@ -37,6 +37,7 @@ import { UserPopoverCard } from './user-popover-card';
 import { useTranslation } from '@/blog/i18n/client';
 import VotesComponentWrapper from '@/blog/features/votes/votes-component-wrapper';
 import { getCommentMuteReasonKey } from '@/blog/lib/muted-reasons';
+import { useLiteOverlay } from '@/blog/lib/lite/client/use-lite-overlay';
 
 interface CommentListProps {
   permissionToMute: Boolean;
@@ -74,6 +75,21 @@ const CommentListItem = memo(function CommentListItem({
   const { t } = useTranslation('common_blog');
   const { user } = useUserClient();
   const ref = useRef<HTMLTableRowElement>(null);
+
+  // Every Lumen post and reply is published on chain by ONE shared account, so a
+  // comment thread showed that account's name against everybody's words. The overlay
+  // puts the real person back. No-op for ordinary Hive comments.
+  //
+  // DISPLAY ONLY — the name, the avatar and the link to this comment's own page.
+  // Everything below still uses `comment.author`, deliberately: it is the account
+  // that signed this comment, which is what the mute/blacklist/DMCA checks must
+  // match, what the flag and mute dialogs act on, what the `#@author/permlink`
+  // anchors have to agree with, and — most importantly — what `ReplyTextbox` needs
+  // as the parent author, since a reply naming the wrong parent would be rejected by
+  // the chain.
+  const liteOverlay = useLiteOverlay(comment);
+  const displayAuthor = liteOverlay?.author ?? comment.author;
+
   const isMutedByViewer = mutedList?.some((x) => x.name === comment.author);
   const isGrayedByStats = comment.stats?.gray;
   const isBlacklisted = comment.blacklists && comment.blacklists.length > 0;
@@ -177,8 +193,8 @@ const CommentListItem = memo(function CommentListItem({
               })}
               height="40"
               width="40"
-              src={getUserAvatarUrl(comment.author, 'small')}
-              alt={`${comment.author} profile picture`}
+              src={getUserAvatarUrl(displayAuthor, 'small')}
+              alt={`${displayAuthor} profile picture`}
               loading="lazy"
             />
             <Accordion type="single" collapsible value={openState} className="w-full min-w-0">
@@ -200,7 +216,7 @@ const CommentListItem = memo(function CommentListItem({
                           <div className="my-1 flex flex-wrap items-center pl-1">
                             {comment._temporary && !comment._optimistic ? (
                               <div className="flex items-center pl-1 font-bold hover:cursor-pointer hover:text-destructive">
-                                {comment.author}
+                                {displayAuthor}
                               </div>
                             ) : (
                               <>
@@ -214,12 +230,16 @@ const CommentListItem = memo(function CommentListItem({
                                   className=" h-[20px] w-[20px] rounded-3xl sm:hidden"
                                   height="20"
                                   width="20"
-                                  src={getUserAvatarUrl(comment.author, 'small')}
-                                  alt={`${comment.author} profile picture`}
+                                  src={getUserAvatarUrl(displayAuthor, 'small')}
+                                  alt={`${displayAuthor} profile picture`}
                                   loading="lazy"
                                 />
                                 <UserPopoverCard
+                                  // The card ACTS on the real signing account —
+                                  // follow, mute and the profile lookup all live in
+                                  // there — and only DISPLAYS the lite name.
                                   author={comment.author}
+                                  liteName={liteOverlay?.author}
                                   author_reputation={comment.author_reputation}
                                   blacklist={comment.blacklists}
                                 />
@@ -261,7 +281,7 @@ const CommentListItem = memo(function CommentListItem({
                                 {!comment._optimistic && (
                                   <Link
                                     className="p-1 sm:p-2"
-                                    href={`/${comment.category}/@${comment.author}/${comment.permlink}`}
+                                    href={`/${comment.category}/@${displayAuthor}/${comment.permlink}`}
                                     data-testid="comment-page-link"
                                   >
                                     <Icons.link className="h-3 w-3" />
@@ -548,7 +568,7 @@ const CommentListItem = memo(function CommentListItem({
       ) : currentDepth === 8 ? (
         <div className="h-8">
           <Link
-            href={`/${comment.category}/@${comment.author}/${comment.permlink}`}
+            href={`/${comment.category}/@${displayAuthor}/${comment.permlink}`}
             className="text-destructive"
           >
             {t('cards.comment_card.load_more')}...

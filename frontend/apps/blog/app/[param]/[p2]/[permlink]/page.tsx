@@ -1,6 +1,7 @@
 import PostContent from './content';
 import { getPostCached } from '@/blog/lib/cached-api';
-import { liteChainCoordinates, liteEntryForPermlink } from '@/blog/lib/lite/render/lite-entry';
+import { liteChainCoordinates } from '@/blog/lib/lite/render/lite-entry';
+import { liteEntryForPermlinkCached } from '@/blog/lib/lite/render/lite-entry-cached';
 import { getCommunity, getDiscussion, getFollowList } from '@transaction/lib/bridge-api';
 import { getObserverFromCookies } from '@/blog/lib/auth-utils';
 import { isUsernameValid, isPermlinkValid, isValidUserParam } from '@/blog/utils/validate-links';
@@ -61,7 +62,7 @@ const PostPage = async ({
     // publishing account. The permlink identifies the post on its own, so resolve
     // from that — never from the author segment — and present the lite identity.
     if (!postData) {
-      postData = await liteEntryForPermlink(permlink, observer);
+      postData = await liteEntryForPermlinkCached(permlink, observer);
     }
     if (postResult.status === 'rejected') {
       logger.error(postResult.reason, 'Error fetching post data:');

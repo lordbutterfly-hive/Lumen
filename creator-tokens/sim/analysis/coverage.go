@@ -76,6 +76,8 @@ func AnalyzeCoverage(tr *Trace) CoverageReport {
 
 	paidUntil := map[string]uint64{}
 	closed := map[string]bool{}
+	retiredAt := map[string]uint64{} // F4: block Retire was called at, per creator (mirrors journey.go's identical tracker)
+	retired := map[string]bool{}     // F4: whether Retire has ever fired for this creator (reset on "register")
 	registered := map[string]bool{}
 	sawFrozen := map[string]bool{}
 	sawClosed := map[string]bool{}
@@ -85,7 +87,7 @@ func AnalyzeCoverage(tr *Trace) CoverageReport {
 		rpt.ActionsExercised[ev.Action]++
 
 		if registered[c] {
-			ph := derivePhase(closed[c], paidUntil[c], ev.Block, grace)
+			ph := derivePhase(closed[c], paidUntil[c], ev.Block, grace, retiredAt[c], retired[c])
 			rpt.PhasesReached[ph]++
 			rpt.ComboCounts[comboKey(ph, ev.Action)]++
 			if ph == PhaseFrozen {
@@ -106,7 +108,15 @@ func AnalyzeCoverage(tr *Trace) CoverageReport {
 				rpt.CreatorsRegistered++
 			}
 			closed[c] = false
+			retired[c] = false // F4: registerApply clears kRetiredAt on re-registration (market.go)
 			paidUntil[c] = ev.Block + subPeriod
+		case "retire":
+			// F4: see journey.go's identical case for the full reasoning —
+			// core.RetiredAt's exported (block, bool) pair is exactly what
+			// this replay needs; core's internal block+1 storage encoding
+			// never surfaces past that accessor.
+			retiredAt[c] = ev.Block
+			retired[c] = true
 		case "renew":
 			if periods, ok := argU64(ev, "periods"); ok {
 				base := paidUntil[c]
@@ -122,7 +132,7 @@ func AnalyzeCoverage(tr *Trace) CoverageReport {
 			// plausible. Coverage does not need supply precision — it only
 			// needs "was CLOSED ever observed", and journey.go's fuller
 			// replay is the authority on whether the closure was legitimate.
-			if derivePhase(false, paidUntil[c], ev.Block, grace) == PhaseFrozen {
+			if derivePhase(false, paidUntil[c], ev.Block, grace, retiredAt[c], retired[c]) == PhaseFrozen {
 				closed[c] = true
 			}
 		}

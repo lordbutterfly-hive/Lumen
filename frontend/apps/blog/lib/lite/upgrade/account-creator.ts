@@ -27,6 +27,18 @@ export interface GeneratedKeys {
 
 export interface AccountCreator {
   accountExists(name: string): Promise<boolean>;
+  /**
+   * The account's current OWNER public key, or null when there is no such account.
+   *
+   * Existence alone is NOT proof that an ambiguous creation of ours succeeded: after a
+   * timed-out broadcast the name can be taken by someone else entirely, and handing
+   * our user the keys we generated would hand them keys that open nothing. This lets
+   * the reconciliation ask "is that account OURS?" instead of "is that name used?".
+   *
+   * Optional so a stub or a partial implementation still satisfies the interface;
+   * reconciliation falls back to the existence check when it is absent.
+   */
+  accountOwnerKey?(name: string): Promise<string | null>;
   pendingActCount(): Promise<number>;
   claimAct(): Promise<{ trxId: string }>;
   generateKeys(accountName: string): Promise<GeneratedKeys>;

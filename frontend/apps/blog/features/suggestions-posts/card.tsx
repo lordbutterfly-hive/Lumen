@@ -1,4 +1,7 @@
+'use client';
+
 import { Entry } from '@hive/common-hiveio-packages/wax';
+import { useLiteOverlay } from '@/blog/lib/lite/client/use-lite-overlay';
 import { find_first_img } from '../list-of-posts/post-img';
 import { Link } from '@hive/ui';
 import { proxifyImageSrc } from '@ui/lib/proxify-images';
@@ -17,11 +20,17 @@ interface SuggestionsCardProps {
 const SuggestionsCard = ({ entry, horizontal }: SuggestionsCardProps) => {
   const cardImage = find_first_img(entry);
   const [image, setImage] = useState<string>(cardImage);
+  // A Lumen proxy post reaches this card authored by the shared publishing account,
+  // and its title comes back from Hivemind as "RE: <container title>" because every
+  // lite post is a comment on chain. No-op for ordinary Hive posts.
+  const liteOverlay = useLiteOverlay(entry);
+  const displayAuthor = liteOverlay?.author ?? entry.author;
+  const displayTitle = liteOverlay?.title || entry.title;
 
   if (horizontal) {
     return (
       <div className="w-44 flex-shrink-0 snap-start overflow-hidden rounded-lg bg-background shadow-md">
-        <Link href={`/${entry.category}/@${entry.author}/${entry.permlink}`}>
+        <Link href={`/${entry.category}/@${displayAuthor}/${entry.permlink}`}>
           {image ? (
             <div className="h-24 overflow-hidden bg-transparent">
               <img
@@ -38,8 +47,8 @@ const SuggestionsCard = ({ entry, horizontal }: SuggestionsCardProps) => {
             </div>
           )}
           <div className="p-2">
-            <h2 className="line-clamp-2 text-xs font-semibold leading-tight">{entry.title}</h2>
-            <p className="mt-1 truncate text-[11px] text-muted-foreground">@{entry.author}</p>
+            <h2 className="line-clamp-2 text-xs font-semibold leading-tight">{displayTitle}</h2>
+            <p className="mt-1 truncate text-[11px] text-muted-foreground">@{displayAuthor}</p>
           </div>
         </Link>
       </div>
@@ -48,7 +57,7 @@ const SuggestionsCard = ({ entry, horizontal }: SuggestionsCardProps) => {
 
   return (
     <div className="mx-4 mb-3 flex flex-col overflow-hidden rounded-lg bg-background shadow-md">
-      <Link href={`/${entry.category}/@${entry.author}/${entry.permlink}`} data-testid="post-image">
+      <Link href={`/${entry.category}/@${displayAuthor}/${entry.permlink}`} data-testid="post-image">
         {image ? (
           <div className="flex h-24 items-center overflow-hidden bg-transparent">
             <picture className="articles__feature-img h-full w-full">
@@ -67,10 +76,10 @@ const SuggestionsCard = ({ entry, horizontal }: SuggestionsCardProps) => {
             </picture>
           </div>
         ) : null}
-        <h2 className="p-1.5 text-xs font-semibold">{truncateTitle(entry.title)}</h2>
+        <h2 className="p-1.5 text-xs font-semibold">{truncateTitle(displayTitle)}</h2>
       </Link>
       <div className="flex items-center gap-1.5 px-1.5 pb-1.5 text-xs text-muted-foreground">
-        <Link href={`/${entry.category}/@${entry.author}/${entry.permlink}`}>@{entry.author}</Link>
+        <Link href={`/${entry.category}/@${displayAuthor}/${entry.permlink}`}>@{displayAuthor}</Link>
         <span>·</span>
         <time>{new Date(entry.created).toLocaleDateString()}</time>
       </div>

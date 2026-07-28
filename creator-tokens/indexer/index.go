@@ -12,8 +12,9 @@ import (
 // (SPEC-CREATOR-KEYS.md §1.5) holds only the CURRENT escrow set and CURRENT
 // balances; it has no memory of a resolved ask, a past face price, or a
 // former holder. Everything queryable here is a REPLAY of ../core/events.go's
-// Ev* event shapes (plus a handful of contract-only ones — see events.go's
-// own file doc), nothing more.
+// Ev* event shapes — including retired/treasuryWithdrawn/tradeFeesClaimed,
+// which now come from core.Ev* constructors like every other event (see
+// events.go's own file doc) — nothing more.
 //
 // Deliberately NOT provided anywhere in this file, or reachable through it:
 // any aggregate of amounts moved (Σ prepaid, Σ asked, Σ transferred) as a
@@ -66,9 +67,10 @@ type marketData struct {
 	lastCap  *big.Int
 	closed   bool
 
-	// retired mirrors a "retired" event (contract-only, ../contract/main.go's
-	// `retire` entrypoint — see indexer/events.go's KindRetired doc). This is
-	// DELIBERATELY a separate flag from `closed`, never folded into it: Retire
+	// retired mirrors a "retired" event (../contract/main.go's `retire`
+	// entrypoint, built via core.EvRetired as of commit 572ab00 — see
+	// indexer/events.go's KindRetired doc). This is DELIBERATELY a separate
+	// flag from `closed`, never folded into it: Retire
 	// (core/market.go) forces the market straight to FROZEN — an irreversible
 	// wind-down where Sell has already closed and Refund is the open exit —
 	// while `closed` mirrors the market reaching the later, terminal CLOSED
@@ -717,10 +719,10 @@ func (ix *Index) foldKnownEventLocked(ev Event, raw RawEvent) bool {
 		m.history = append(m.history, raw)
 
 	case KindRetired:
-		// Contract-only event, not from core/events.go — see KindRetired's
-		// own doc (indexer/events.go) and marketData.retired's own doc above
-		// for why this is a SEPARATE flag from `closed`, never folded into
-		// it.
+		// Now built via core.EvRetired (core/events.go, commit 572ab00) — see
+		// KindRetired's own doc (indexer/events.go) and marketData.retired's
+		// own doc above for why this is a SEPARATE flag from `closed`, never
+		// folded into it.
 		p := ev.Retired
 		m := ix.market(p.Creator)
 		m.retired = true
@@ -784,8 +786,9 @@ func (ix *Index) foldKnownEventLocked(ev Event, raw RawEvent) bool {
 		m.history = append(m.history, raw)
 
 	case KindTreasuryWithdrawn:
-		// Contract-only event (events.go's KindTreasuryWithdrawn doc) — the
-		// owner's withdrawal from the GLOBAL kTreasury() pot. Deliberately
+		// Now built via core.EvTreasuryWithdrawn (core/events.go, commit
+		// 572ab00) — see events.go's KindTreasuryWithdrawn doc. The owner's
+		// withdrawal from the GLOBAL kTreasury() pot. Deliberately
 		// NOT routed through ix.market(...): the wire carries no "creator" at
 		// all (core.WithdrawTreasury is owner-gated and touches kTreasury()
 		// alone, never any per-market key — core/read.go's own doc: "not a
@@ -804,7 +807,8 @@ func (ix *Index) foldKnownEventLocked(ev Event, raw RawEvent) bool {
 		ix.treasuryHbd = new(big.Int).Sub(ix.treasuryHbd, amount)
 
 	case KindTradeFeesClaimed:
-		// Contract-only event (events.go's KindTradeFeesClaimed doc). Unlike
+		// Now built via core.EvTradeFeesClaimed (core/events.go, commit
+		// 572ab00) — see events.go's KindTradeFeesClaimed doc. Unlike
 		// treasuryWithdrawn, THIS is per-creator — Actor doubles as the
 		// creator identifier (kFeeBal is always keyed by the creator whose
 		// market accrued the fee — core/tradefee.go's accrueTradeFee, called
@@ -1139,17 +1143,19 @@ func (ix *Index) MarketSummary(creator string) MarketSummary {
 //
 // AUDIT/CROSS-CHECK ONLY, same disclaimer as MarketSummary: SPEC-CREATOR-
 // KEYS.md §2.5 routes the LIVE balance through a direct chain read; this is
-// a REPLAY, not a substitute for one. NOTE (found while fixing the above,
-// out of this fix's scope): the "pure MONOTONIC sum, no debit path off
-// kTreasury today" claim this doc used to make is ALREADY STALE —
-// ../contract/main.go's `withdrawTreasury` entrypoint is live and hand-logs
-// its own `{"ev":"treasuryWithdrawn",...}` line (main.go, WithdrawTreasury),
-// which this package does not recognize either (falls into Stats.Unknown,
-// same as `retired` did before this fix, and same as `tradeFeesClaimed`,
-// ClaimTradeFees's own hand-built log). Neither is one of the two defects
-// this change was scoped to fix; flagged here and in the handoff report for
-// whoever picks up the treasury-debit side next, rather than silently left
-// for a future reader to rediscover as "surely this is still monotonic."
+// a REPLAY, not a substitute for one. HISTORY: this doc used to claim "the
+// pure MONOTONIC sum, no debit path off kTreasury today" — that was ALREADY
+// STALE the moment ../contract/main.go's `withdrawTreasury` entrypoint
+// shipped, and stayed unaddressed for a while after (flagged in a handoff
+// note as out-of-scope for the fix that caught it, for "whoever picks up the
+// treasury-debit side next"). That debit side has since been picked up: the
+// KindTreasuryWithdrawn case above subtracts the withdrawn amount from
+// ix.treasuryHbd, so this IS a true replayed balance now, not a
+// monotonic-only sum — a real owner withdrawal is folded, not silently
+// dropped. Contract-side, `withdrawTreasury` (and `claimTradeFees` below it)
+// no longer hand-log their own JSON either — both now build their log via a
+// core.Ev* constructor (core.EvTreasuryWithdrawn / core.EvTradeFeesClaimed,
+// core/events.go, commit 572ab00), byte-identical to the lines they replace.
 func (ix *Index) TreasuryHbd() *big.Int {
 	ix.mu.RLock()
 	defer ix.mu.RUnlock()

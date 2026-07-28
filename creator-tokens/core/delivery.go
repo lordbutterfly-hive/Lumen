@@ -37,10 +37,21 @@ package core
 // delivery standing is deliberately checked ONLY inside RequireInflowOpen so
 // there is exactly one place it can ever bite.
 
-// recordDelivery marks one escrow resolved in the creator's favour — an
-// Answer, or a Decline. Both count: declining fast is a legitimate way to run
-// a shop, and treating it as anything less than delivery would push creators
-// to ignore asks they cannot take rather than say so.
+// recordDelivery marks one escrow resolved in the creator's favour. Its ONLY
+// caller is Answer (ask.go) — verified by grep, not assumed.
+//
+// A DECLINE DOES NOT COUNT (corrected 2026-07-28; this doc previously said
+// "an Answer, or a Decline. Both count", which stopped being true when
+// Decline was made gate-NEUTRAL and is contradicted by Decline's own code and
+// comment in ask.go). The original reasoning — that clearing your inbox
+// promptly is running a shop properly — only holds if the decline IS prompt,
+// and nothing here can tell: an escrow records its deadline and the asker's
+// token age, never the block the ask was opened at. So "declined in a minute"
+// and "declined at the last legal block, after the customer waited the whole
+// window for nothing" are indistinguishable, and counting the second as a
+// delivery let maximal stalling produce a perfect record. A decline is
+// therefore neither a delivery nor a miss; the indexer still counts declines
+// separately for reputation.
 // asker is passed so a SELF-DEALT escrow can be excluded. Both counters
 // deliberately ignore any escrow whose asker is the creator themselves.
 //

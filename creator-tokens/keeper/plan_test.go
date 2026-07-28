@@ -179,3 +179,67 @@ func TestOp_String(t *testing.T) {
 		t.Fatalf("Op.String() = %q", got)
 	}
 }
+
+// TestPlan_RetiredMarketInNoticeWindowIsSwept pins the wind-down predicate to
+// core's own inWindDown, which is (retired OR frozen) — not frozen alone.
+//
+// THE DEFECT (2026-07-28): core.Phase is MAX(naturalPhase, retiredPhase), so a
+// creator who Retires while their subscription is still paid stays OVERDUE for
+// the whole GraceBlocks notice window — yet core.inWindDown is already true
+// from the retire block, and core.RefundHolder will happily pay out. Plan
+// filtered on Phase == StateFrozen alone and returned ZERO ops for that
+// market, on the written but false premise that "frozen IS wind-down open, by
+// construction".
+//
+// Nobody's funds were ever at risk (Refund, the self-serve pull, is open the
+// instant inWindDown is true, and the push is permissionless for anyone), so
+// this was delayed convenience, not loss — the package's own "at most delay,
+// never harm" ceiling. It is fixed because it contradicted the invariant Plan
+// claimed to implement, and because a keeper that silently does nothing for
+// five days looks identical to a keeper that is broken.
+func TestPlan_RetiredMarketInNoticeWindowIsSwept(t *testing.T) {
+	retiredButOverdue := MarketView{
+		Creator: "alice",
+		Phase:   core.StateOverdue, // still OVERDUE — inside the notice window
+		Retired: true,              // ...but core.inWindDown is already true
+		Supply:  big.NewInt(100),
+		Holders: []HolderBalance{{Holder: "bob", Balance: big.NewInt(100)}},
+	}
+	ops := Plan([]MarketView{retiredButOverdue})
+	if len(ops) == 0 {
+		t.Fatal("WIND-DOWN REGRESSION: a RETIRED market inside its notice window produced zero ops. core.inWindDown is true from the retire block, so RefundHolder would succeed — Plan is filtering on Phase==Frozen alone again. See MarketView.Retired.")
+	}
+	var sawRefund, sawClose bool
+	for _, op := range ops {
+		switch op.Kind {
+		case OpRefundHolder:
+			sawRefund = true
+			if op.Holder != "bob" {
+				t.Errorf("refundHolder targeted %q, want bob", op.Holder)
+			}
+		case OpCloseIfDrained:
+			sawClose = true
+		}
+	}
+	if !sawRefund || !sawClose {
+		t.Errorf("want both a refundHolder and a closeIfDrained op, got refund=%v close=%v", sawRefund, sawClose)
+	}
+
+	// An ordinary ACTIVE market must still be left alone — the fix widens the
+	// predicate to match core, it does not make Plan sweep everything.
+	live := MarketView{
+		Creator: "carol",
+		Phase:   core.StateActive,
+		Supply:  big.NewInt(100),
+		Holders: []HolderBalance{{Holder: "dave", Balance: big.NewInt(100)}},
+	}
+	if got := Plan([]MarketView{live}); len(got) != 0 {
+		t.Fatalf("a healthy ACTIVE market must produce no ops, got %d: %+v", len(got), got)
+	}
+
+	// And a CLOSED market has nothing left to sweep, retired or not.
+	closed := MarketView{Creator: "erin", Phase: core.StateClosed, Retired: true, Supply: big.NewInt(0)}
+	if got := Plan([]MarketView{closed}); len(got) != 0 {
+		t.Fatalf("a CLOSED market must produce no ops, got %d: %+v", len(got), got)
+	}
+}

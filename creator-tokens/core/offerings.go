@@ -116,6 +116,42 @@ func bumpOfferEpoch(s Store, creator string) {
 
 // ---- live-id list (bounded, the single source of truth for the live set) ----
 
+// liveTitleOwner reports the live offering id currently carrying normTitle,
+// if any. exceptID is skipped (pass 0 to skip nothing) so a rename can ignore
+// the offering being renamed.
+//
+// DEFECT FIX (2026-07-28). Nothing used to stop two LIVE offerings sharing one
+// normalized title, and the 2x/7-day anti-rug band is keyed by title, not by
+// id — so the title's "last known price" (kOfferTitlePrice, the `cur` half of
+// the band) could be parked at a price no live offering actually posts, and
+// the next window re-anchors from it. Measured exploit: create "custom song"
+// at 1200, drop the visible price to 600 (legal, floor of the anchor band),
+// create a SECOND "custom song" at 2400 (accepted — duplicate title) which
+// sets cur := 2400, delete that throwaway (which deliberately does NOT clear
+// the title's keys), and one window later 600 -> 4800 is accepted where the
+// control creator is capped at 600 -> 1200. Sustained across windows it holds
+// cur/visible = 4 indefinitely, and the visible price can move 8x in a single
+// transaction.
+//
+// The invariant this restores is "the title's cur is some LIVE offering's
+// posted price". Note the rename path was never vulnerable: SetOfferingTitle
+// gates through withinTitleBand, which intersects the anchor band with the
+// cur band, while CreateOffering went through applyTitleBandedPrice, which
+// checks the anchor only — two different rules for the same state transition,
+// which is precisely the "ONE GATE, NOT THREE" defect class this file's own
+// header says it closed.
+func liveTitleOwner(s Store, creator string, epoch uint64, normTitle string, exceptID uint64) (uint64, bool) {
+	for _, id := range loadOfferIds(s, creator, epoch) {
+		if id == exceptID {
+			continue
+		}
+		if normalizeOfferTitle(getStr(s, kOfferTitle(creator, epoch, id))) == normTitle {
+			return id, true
+		}
+	}
+	return 0, false
+}
+
 func loadOfferIds(s Store, creator string, epoch uint64) []uint64 {
 	raw := getStr(s, kOfferIds(creator, epoch))
 	if raw == "" {
@@ -201,6 +237,25 @@ func validOfferTitle(t string) error {
 		if c := t[i]; c < 0x20 || c == 0x7f {
 			return newErr(ErrInput, "offering title must not contain a control character")
 		}
+	}
+	// DEFECT FIX (2026-07-28): the `t == ""` check at the top runs on the RAW
+	// string, so a title made only of characters normalizeOfferTitle folds
+	// away passed it while normalizing to "". Measured: " ", U+00A0 (NBSP),
+	// U+200B (ZWSP), U+200D (ZWJ), U+FEFF (BOM), U+3000 (ideographic space)
+	// and mixtures of them all got through.
+	//
+	// Two consequences, both real. A shop row whose title renders as nothing
+	// is creatable. And worse, every such title collapses into ONE band
+	// bucket keyed by "", so two genuinely unrelated invisible-titled
+	// services share an anchor: the second is refused for "price change
+	// exceeds the 2x/7-day band" against a price it has nothing to do with.
+	// That direction is at least safe, but it is a false positive that blocks
+	// a legitimate listing.
+	//
+	// Check the NORMALIZED form too — the identity the band actually keys on
+	// is the only one that matters here.
+	if normalizeOfferTitle(t) == "" {
+		return newErr(ErrInput, "offering title must contain at least one visible character")
 	}
 	return nil
 }
@@ -414,6 +469,12 @@ func CreateOffering(s Store, caller, creator string, block uint64, title string,
 	// leaves no half-created offering behind: the id counter and the live
 	// list are only advanced after it lands, same as before this rewrite.
 	normTitle := normalizeOfferTitle(title)
+	// One live offering per normalized title — see liveTitleOwner. A second
+	// live offering sharing a title lets the title's band state be parked at
+	// a price nothing posts, which ratchets the next window's anchor.
+	if other, dup := liveTitleOwner(s, creator, epoch, normTitle, 0); dup {
+		return 0, newErr(ErrInput, "an offering with this title already exists (id "+evU64(other)+"); rename or delete it first")
+	}
 	if err := applyTitleBandedPrice(s, creator, epoch, normTitle, block, price); err != nil {
 		return 0, err
 	}
@@ -508,6 +569,13 @@ func SetOfferingTitle(s Store, caller, creator string, id uint64, title string) 
 	}
 
 	newNorm := normalizeOfferTitle(title)
+	// Same one-live-offering-per-title rule as CreateOffering, skipping this
+	// id so renaming an offering to a cosmetic variant of its own title (or
+	// to itself) still works. Without this, rename is a second door to the
+	// duplicate-title state liveTitleOwner exists to prevent.
+	if other, dup := liveTitleOwner(s, creator, epoch, newNorm, id); dup {
+		return newErr(ErrInput, "an offering with this title already exists (id "+evU64(other)+"); rename or delete it first")
+	}
 	newAnchorKey := kOfferTitleAnchor(creator, epoch, newNorm)
 	newAnchorAtKey := kOfferTitleAnchorAt(creator, epoch, newNorm)
 	newPriceKey := kOfferTitlePrice(creator, epoch, newNorm)

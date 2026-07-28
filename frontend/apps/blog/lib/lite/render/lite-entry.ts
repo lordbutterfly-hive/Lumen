@@ -4,6 +4,7 @@ import { LumenPost } from '../types';
 import * as posts from '../repositories/post-repository';
 import { dbPostToEntry } from './db-post-to-entry';
 import { litePostIdOf } from './lite-post-id';
+import { resolvePublicName } from './current-name';
 
 /**
  * Server-side resolution of a lite post for rendering — the piece that makes
@@ -37,7 +38,12 @@ import { litePostIdOf } from './lite-post-id';
 export async function liteEntryForPost(post: LumenPost, observer = ''): Promise<Entry | null> {
   if (post.deletedLocally || post.feedVisibility === 'hidden') return null;
 
-  if (!post.hiveAuthor || !post.hivePermlink) return dbPostToEntry(post);
+  // The author's name TODAY, not the one frozen on the row. After an upgrade these
+  // differ, and the whole point of keeping `user_id` stable is that the history
+  // follows the person to their new Hive name.
+  const publicName = await resolvePublicName(post);
+
+  if (!post.hiveAuthor || !post.hivePermlink) return dbPostToEntry(post, publicName);
 
   let chainEntry: Entry | null = null;
   try {
@@ -46,18 +52,18 @@ export async function liteEntryForPost(post: LumenPost, observer = ''): Promise<
     // Node trouble shouldn't blank the page — fall back to what we still hold.
     chainEntry = null;
   }
-  if (!chainEntry) return dbPostToEntry(post);
+  if (!chainEntry) return dbPostToEntry(post, publicName);
 
   return {
     ...chainEntry,
     // The identity a reader should see. The permlink stays real, so links resolve.
-    author: post.displayNameSnapshot,
+    author: publicName,
     // Hivemind SYNTHESISES a title for any comment — it returns "RE: <parent title>"
     // regardless of the title actually broadcast — so every container child would
     // display as "RE: Lumen posts — <date>" instead of its own headline. The real
     // title is in our row (only the body is pruned after publish), so restore it.
     title: post.title || chainEntry.title,
-    url: `/${chainEntry.category}/@${post.displayNameSnapshot}/${post.hivePermlink}`,
+    url: `/${chainEntry.category}/@${publicName}/${post.hivePermlink}`,
     // Every lite post is a container CHILD on chain (depth 1) because Hive caps root
     // posts at one per 5 minutes per account. It is still a primary post to a
     // reader, so present it as one: the post page gates title, tags, reblog and

@@ -1,10 +1,10 @@
 'use client';
 
-import { FC, useCallback, useEffect, useState } from 'react';
+import { FC, useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { csrfHeaderName } from '@smart-signer/lib/csrf-protection';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
-import { useLiteLogin } from '../login/use-lite-login';
+import { useNameSuggest } from './use-name-suggest';
 
 /**
  * Upgrade a lite account to a real Hive account.
@@ -57,6 +57,13 @@ const COPY = {
     'Your Lumen account posts through Lumen. A full Hive account is yours alone: your own keys, your own name on chain, and you keep your posting history.',
   namePick: 'Choose your Hive account name',
   nameHint: 'Lowercase letters, numbers and dashes. 3–16 characters. This cannot be changed later.',
+  // The one thing this screen must set expectations about. Lumen never reserved the
+  // handle on Hive — reserving one means creating the account, which permanently
+  // spends a token — so a Hive account needs its own, different name.
+  nameWarning:
+    'Your Hive account needs a new name — your Lumen name isn’t reserved on Hive and can’t carry over. Pick something close to it. Your posts, followers and history all move to the new name.',
+  suggestionsLabel: 'Available instead:',
+  historyNote: 'Your posts, your history and your profile all move to your new name.',
   submit: 'Create my Hive account',
   working: 'Creating your account…',
   unavailable:
@@ -81,8 +88,9 @@ const COPY = {
 const UpgradePanel: FC = () => {
   const router = useRouter();
   const { user } = useUserClient();
-  const { nameStatus, checkName } = useLiteLogin();
+  const { status: nameStatus, check: checkName } = useNameSuggest();
   const [name, setName] = useState('');
+  const [started, setStarted] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [keys, setKeys] = useState<GeneratedKeys | null>(null);
@@ -92,31 +100,70 @@ const UpgradePanel: FC = () => {
   const [acknowledged, setAcknowledged] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
 
+  // Set as soon as ANY path has put keys on screen. The recovery fetch below and a
+  // successful submit both land here, and they can finish in either order: a slow
+  // recovery response arriving after the user has already created their account
+  // would otherwise relabel the screen "you left before confirming, so we held these
+  // for you" — a false statement, on the one screen whose whole job is being
+  // trustworthy about key custody. First writer wins; the second is ignored.
+  const adopted = useRef(false);
+
   const adoptReveal = useCallback((body: UpgradeResponse, fallbackName: string) => {
+    if (adopted.current) return;
+    adopted.current = true;
     setKeys(body.keys ?? null);
     setHiveName(body.hiveAccountName ?? fallbackName);
     setRevealId(body.revealId ?? null);
     setResumed(Boolean(body.resumed));
   }, []);
 
-  // Recovery: did a previous attempt create an account whose keys never reached us?
+  /**
+   * Two jobs, in this order, once per mount.
+   *
+   * 1. RECOVERY. Did an earlier attempt create an account whose keys never reached
+   *    the user? If so the keys screen replaces the picker entirely.
+   * 2. SEED. Otherwise, look up their existing Lumen handle so the alternatives on
+   *    screen are recognisably theirs rather than a blank box.
+   *
+   * Sequenced rather than parallel because the seed lookup spends one of a scarce
+   * per-IP budget, and a user landing here to recover keys never sees the picker at
+   * all — spending it on them buys nothing.
+   *
+   * The name field is left EMPTY on purpose. Their Lumen handle is the one name this
+   * flow can never grant (names/upgrade-name.ts), so filling it in would put a
+   * guaranteed rejection in the box and invite them to submit it. The lookup still
+   * runs against the handle — that is what produces `alice1`, `alice-hive` and
+   * friends — and the server answers with the reason plus those alternatives.
+   */
   useEffect(() => {
-    if (!user?.isLoggedIn) return;
+    if (started || !user?.isLoggedIn) return;
+    setStarted(true);
     let cancelled = false;
+
     (async () => {
+      let owedKeys = false;
       try {
         const res = await fetch('/api/account/upgrade/reveal', { cache: 'no-store' });
-        if (!res.ok) return;
-        const body = (await res.json().catch(() => null)) as UpgradeResponse | null;
-        if (!cancelled && body?.status === 'ok' && body.keys) adoptReveal(body, '');
+        if (res.ok) {
+          const body = (await res.json().catch(() => null)) as UpgradeResponse | null;
+          if (body?.status === 'ok' && body.keys) {
+            owedKeys = true;
+            if (!cancelled) adoptReveal(body, '');
+          }
+        }
       } catch {
         // No outstanding reveal, or the network is down. The normal flow still works.
       }
+
+      if (cancelled || owedKeys) return;
+      const current = user?.username;
+      if (current && user?.account_tier === 'lite') checkName(current);
     })();
+
     return () => {
       cancelled = true;
     };
-  }, [user?.isLoggedIn, adoptReveal]);
+  }, [user?.isLoggedIn, user?.username, user?.account_tier, started, adoptReveal, checkName]);
 
   const submit = async () => {
     setBusy(true);
@@ -284,9 +331,33 @@ const UpgradePanel: FC = () => {
         />
       </div>
       {nameStatus.state === 'unavailable' ? (
-        <p className="mt-2 text-[12.5px] font-medium text-[#b45309]">{nameStatus.reason}</p>
+        <>
+          <p className="mt-2 text-[12.5px] font-medium text-[#b45309]">{nameStatus.reason}</p>
+          {nameStatus.suggestions.length > 0 ? (
+            <div className="mt-2.5">
+              <p className="text-[12.5px] text-[#4b5563]">{COPY.suggestionsLabel}</p>
+              <div className="mt-1.5 flex flex-wrap gap-2">
+                {nameStatus.suggestions.map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    onClick={() => {
+                      setName(option);
+                      checkName(option);
+                    }}
+                    className="cursor-pointer rounded-lg border-[1.5px] border-[#e4e6e9] px-2.5 py-1.5 text-[13px] font-semibold text-[#161511] hover:border-[#c0392b] hover:text-[#c0392b]"
+                  >
+                    @{option}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-2 text-xs text-[#4b5563]">{COPY.historyNote}</p>
+            </div>
+          ) : null}
+        </>
       ) : null}
       <p className="mt-2 text-xs text-[#9ca3af]">{COPY.nameHint}</p>
+      <p className="mt-2 text-xs leading-[1.55] text-[#9ca3af]">{COPY.nameWarning}</p>
 
       <button
         onClick={submit}

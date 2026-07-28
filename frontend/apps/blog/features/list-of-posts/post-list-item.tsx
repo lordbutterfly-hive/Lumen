@@ -15,6 +15,7 @@ import TimeAgo from '@ui/components/time-ago';
 import { getUserAvatarUrl } from '@ui/lib/avatar-utils';
 import { accountReputation } from '@hive/ui';
 import { IFollowList, Entry } from '@hive/common-hiveio-packages/wax';
+import { useLiteOverlay } from '@/blog/lib/lite/client/use-lite-overlay';
 import { cn } from '@ui/lib/utils';
 import { handleError } from '@ui/lib/handle-error';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
@@ -58,7 +59,11 @@ function arePostListItemPropsEqual(prev: PostListItemProps, next: PostListItemPr
     prevPost.stats?.gray === nextPost.stats?.gray &&
     prevPost.stats?.is_pinned === nextPost.stats?.is_pinned &&
     prevPost.blacklists === nextPost.blacklists &&
-    prevPost.author_reputation === nextPost.author_reputation
+    prevPost.author_reputation === nextPost.author_reputation &&
+    // The cross-post source drives the whole identity block (author, avatar,
+    // reputation, community) and the lite overlay lookup, so a card whose
+    // `original_entry` arrives or changes later must re-render.
+    prevPost.original_entry === nextPost.original_entry
   );
 }
 
@@ -70,6 +75,16 @@ const PostListItem = memo(
   const tagExists = Array.isArray(post.json_metadata?.tags) && post.json_metadata.tags.includes('nsfw');
   const [nsfw, setNSFW] = useState<Preferences['nsfw']>(tagExists ? 'warn' : 'show');
   const reblogCount = post.reblogs ?? 0;
+
+  // A Lumen proxy post arrives from Hivemind authored by the shared publishing
+  // account, so without this overlay a lite user's post shows the wrong person's
+  // name. Applied to whichever entry we credit, so a cross-post of a lite post still
+  // credits the lite author. No-op for ordinary Hive posts.
+  //
+  // MUST stay above the GDPR early-return below — a hook after a conditional return
+  // corrupts hook order for every later render of this list.
+  const identityEntry = post.original_entry ?? post;
+  const liteOverlay = useLiteOverlay(identityEntry);
 
   const handleReblog = async () => {
     try {
@@ -104,7 +119,11 @@ const PostListItem = memo(
   // entry since they describe this specific on-chain object, not the original.
   // Matches the convention used by hive.blog and aligns with peakd / ecency
   // crediting the original content creator.
-  const displayAuthor = post.original_entry?.author ?? post.author;
+  //
+  // DISPLAY ONLY. Everything that touches the chain or moderation — the reblog
+  // mutation, the blacklist/DMCA/GDPR checks above — keeps using `post.author`,
+  // which is the account that actually signed the post.
+  const displayAuthor = liteOverlay?.author ?? identityEntry.author;
   const displayReputation = post.original_entry?.author_reputation ?? post.author_reputation;
   const displayCommunity = post.original_entry?.community ?? post.community;
   const displayCommunityTitle = post.original_entry?.community_title ?? post.community_title;
@@ -123,11 +142,11 @@ const PostListItem = memo(
                 </Link>{' '}
                 cross-posted{' '}
                 <Link
-                  href={`/${post.original_entry.community}/@${post.original_entry.author}/${post.original_entry.permlink}`}
+                  href={`/${post.original_entry.community}/@${displayAuthor}/${post.original_entry.permlink}`}
                   className="text-destructive hover:cursor-pointer"
                   data-testid="cross-post-original-link"
                 >
-                  @{post.original_entry.author}/{post.original_entry.permlink}
+                  @{displayAuthor}/{post.original_entry.permlink}
                 </Link>
               </p>
             </div>
@@ -208,7 +227,7 @@ const PostListItem = memo(
                     </>
                   ) : null}
                   <Link
-                    href={`/${post.category}/@${post.author}/${post.permlink}`}
+                    href={`/${post.category}/@${displayAuthor}/${post.permlink}`}
                     className="hover:cursor-pointer hover:text-destructive"
                     data-testid="post-card-timestamp"
                   >
@@ -219,7 +238,7 @@ const PostListItem = memo(
                       <TooltipProvider>
                         <Tooltip>
                           <TooltipTrigger data-testid="powered-up-100-trigger">
-                            <Link href={`/${post.category}/@${post.author}/${post.permlink}`}>
+                            <Link href={`/${post.category}/@${displayAuthor}/${post.permlink}`}>
                               <Icons.hive className="h-4 w-4" />
                             </Link>
                           </TooltipTrigger>
@@ -233,7 +252,7 @@ const PostListItem = memo(
                   {post.stats && post.stats.is_pinned && isCommunityPage ? (
                     <Badge className="ml-1 bg-destructive text-white hover:bg-destructive">
                       <Link
-                        href={`/${post.category}/@${post.author}/${post.permlink}`}
+                        href={`/${post.category}/@${displayAuthor}/${post.permlink}`}
                         data-testid="post-pinned-tag"
                       >
                         {t('cards.badges.pinned')}
@@ -260,6 +279,7 @@ const PostListItem = memo(
             <div className="w-full md:overflow-hidden">
               <PostSummary
                 post={post}
+                displayAuthor={displayAuthor}
                 nsfw={nsfw}
                 setNSFW={setNSFW}
                 userFromDMCA={userFromDMCA}
@@ -285,7 +305,7 @@ const PostListItem = memo(
                   <Separator orientation="vertical" />
                   <PostCardCommentTooltip
                     comments={post.children}
-                    url={`/${post.category}/@${post.author}/${post.permlink}/#comments`}
+                    url={`/${post.category}/@${displayAuthor}/${post.permlink}/#comments`}
                   />
                   <Separator orientation="vertical" />
                   {!post.title.includes('RE: ') ? (

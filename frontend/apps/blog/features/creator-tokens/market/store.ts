@@ -280,21 +280,26 @@ export function buy(handle: string, usdGross: number, maxTotalUsd?: number): boo
  *
  * The post-trade price is read from the CURVE at the new supply, not nudged
  * from the old price by a ratio: the curve is the price source.
+ *
+ * Returns whether the sell actually executed. Every refusal below is SILENT —
+ * it mutates nothing — so a caller that closes its modal regardless reports a
+ * sale that never happened (the same defect buy() was fixed for; see its doc).
  */
-export function sell(handle: string, tokens: number): void {
+export function sell(handle: string, tokens: number): boolean {
   const m = getMarket(handle);
-  if (!Number.isFinite(tokens)) return;
+  if (!Number.isFinite(tokens)) return false;
   const held = m.position?.tokens ?? 0;
   const n = Math.floor(Math.min(tokens, held, Math.floor(m.supply)));
-  if (n <= 0) return;
+  if (n <= 0) return false; // nothing held, or a sub-1-token request (whole tokens only)
   const q = sellQuote(n, m, m.position?.heldDays ?? 999);
-  if (q.curveProceedsUsd <= 0) return;
+  if (q.curveProceedsUsd <= 0) return false;
   const supply = Math.max(0, Math.floor(m.supply) - n);
   const priceUsd = Math.max(0.01, round2(supply > 0 ? spotPriceUsd(supply) : m.floorUsd));
   const reserveUsd = Math.max(0, m.reserveUsd - q.curveProceedsUsd);
   const next = reprice({ ...m, supply, priceUsd, reserveUsd, position: withPosition({ ...m, priceUsd }, held - n, m.position?.heldDays ?? 0) });
   markets.set(handle, next);
   emit();
+  return true;
 }
 
 /**
@@ -303,17 +308,21 @@ export function sell(handle: string, tokens: number): void {
  * ask.go splitFace); the remaining 12% is a separate HBD commission this mock
  * has no wallet balance to draw from (see AskModal's own note on the
  * affordability gate it can't fully verify).
+ *
+ * Returns whether the ask actually opened — a refusal (self-ask, wind-down,
+ * a bad amount, or insufficient token balance) mutates NOTHING and must not
+ * be presented as if the ask went out (the same defect buy() was fixed for).
  */
-export function spend(handle: string, usd: number, serviceName = 'Ask a question', deadlineDays = 7, question = ''): void {
-  if (handle === STUDIO_HANDLE) return; // #2: can't ask your own token (would let you answer yourself for commission)
+export function spend(handle: string, usd: number, serviceName = 'Ask a question', deadlineDays = 7, question = ''): boolean {
+  if (handle === STUDIO_HANDLE) return false; // #2: can't ask your own token (would let you answer yourself for commission)
   const m = getMarket(handle);
   // ask.go Ask -> RequireInflowOpen: the SAME inflow gate Buy is behind
   // (RULING K3) — a winding-down market refuses new asks too, not just buys.
-  if (m.windingDown) return;
-  if (!Number.isFinite(usd) || usd <= 0 || m.priceUsd <= 0) return;
+  if (m.windingDown) return false;
+  if (!Number.isFinite(usd) || usd <= 0 || m.priceUsd <= 0) return false;
   const q = serviceQuote(usd, m.priceUsd);
   const held = m.position?.tokens ?? 0;
-  if (!Number.isFinite(q.tokens) || held < q.tokens) return; // AskModal disables the CTA when unaffordable (H2)
+  if (!Number.isFinite(q.tokens) || q.tokens <= 0 || held < q.tokens) return false; // AskModal disables the CTA when unaffordable (H2)
   // Escrow the TOKEN LEG only (remove it from the position) and open an 'awaiting' ask.
   const next = reprice({ ...m, position: withPosition(m, held - q.tokens, m.position?.heldDays ?? 0) });
   markets.set(handle, next);
@@ -329,14 +338,17 @@ export function spend(handle: string, usd: number, serviceName = 'Ask a question
     question: question.trim() || undefined
   });
   emit();
+  return true;
 }
 
 export interface TokenMarketActions {
   market: TokenMarketDetail;
   /** Returns whether the buy actually executed — see buy()'s own doc; a refusal (wind-down, cap, slippage) must NOT be treated as success by the caller. */
   buy: (usdGross: number, maxTotalUsd?: number) => boolean;
-  sell: (tokens: number) => void;
-  spend: (usd: number, serviceName?: string, deadlineDays?: number, question?: string) => void;
+  /** Returns whether the sell actually executed — see sell()'s own doc; a refusal (nothing held, sub-1-token) must NOT be treated as success by the caller. */
+  sell: (tokens: number) => boolean;
+  /** Returns whether the ask actually opened — see spend()'s own doc; a refusal (wind-down, unaffordable) must NOT be treated as success by the caller. */
+  spend: (usd: number, serviceName?: string, deadlineDays?: number, question?: string) => boolean;
 }
 
 export function useTokenMarket(handle: string): TokenMarketActions {
@@ -420,10 +432,12 @@ export function useMyHoldings(): TokenHolding[] {
 
 // Reclaim an ask once its window is open ('reclaimable') — returns the escrowed
 // tokens to the holder's position and marks it 'reclaimed'. Never gated on billing
-// (mirrors the contract's "outflows never pause"). No-op in any other state.
-export function reclaimAsk(id: string): void {
+// (mirrors the contract's "outflows never pause"). Refuses in any other state
+// (not found, or not yet/no-longer reclaimable) rather than silently no-op'ing —
+// the caller must not treat a refusal as tokens having come back.
+export function reclaimAsk(id: string): boolean {
   const a = asksList.find((x) => x.id === id);
-  if (!a || a.state !== 'reclaimable') return;
+  if (!a || a.state !== 'reclaimable') return false;
   a.state = 'reclaimed';
   // Only credit the viewer's OWN position for an OUTGOING ask (to another creator).
   // An incoming ask's escrow belongs to a different buyer, not the viewer — never
@@ -434,6 +448,7 @@ export function reclaimAsk(id: string): void {
     markets.set(a.handle, reprice({ ...m, position: withPosition(m, held, m.position?.heldDays ?? 0) }));
   }
   emit();
+  return true;
 }
 
 export function useMyAsks(): PortfolioAsk[] {
@@ -457,23 +472,31 @@ export function useIsFollowingCreator(handle: string): boolean {
 
 // ---- Transfer your own tokens to another user (Lumen-local; recipient is
 // display-only in the mock — this just debits the sender's position). ----
-export function transferTokens(handle: string, tokens: number): void {
+// Returns whether the transfer actually executed. A request for more than the
+// sender holds is a REFUSAL, not a silent clamp to "send everything you have" —
+// the old `Math.min(tokens, held)` shape sent less than the user typed and
+// reported it as done, the same class of lie buy()/sell() were fixed for.
+export function transferTokens(handle: string, tokens: number): boolean {
   const m = markets.get(handle);
-  if (!m || !Number.isFinite(tokens) || tokens <= 0) return;
+  if (!m) return false; // no market for this handle
+  if (!Number.isFinite(tokens) || tokens <= 0) return false; // invalid amount
   const held = m.position?.tokens ?? 0;
-  const n = Math.min(tokens, held);
-  if (n <= 0) return;
-  markets.set(handle, reprice({ ...m, position: withPosition(m, held - n, m.position?.heldDays ?? 0) }));
+  if (tokens > held) return false; // insufficient balance — never silently send less than requested
+  markets.set(handle, reprice({ ...m, position: withPosition(m, held - tokens, m.position?.heldDays ?? 0) }));
   emit();
+  return true;
 }
 
 // ---- Retire your own token: winds the market down (Buy stops, Sell/reclaim stay
 // open — the windingDown read-side was already built; this is the missing writer). ----
-export function retireOwnToken(): void {
+// Returns whether it actually wound the market down — false if there is no
+// own-token market yet, or it is already winding down (nothing left to do).
+export function retireOwnToken(): boolean {
   const m = markets.get(STUDIO_HANDLE);
-  if (!m) return;
+  if (!m || m.windingDown) return false;
   markets.set(STUDIO_HANDLE, { ...m, windingDown: true });
   emit();
+  return true;
 }
 
 // ------------------------------ Creator Studio -------------------------------
@@ -521,58 +544,104 @@ export interface StudioState {
   launched: boolean;
 }
 
-/** Answer an incoming ask → 'answered'; books its commission to earnings. */
-export function answerAsk(id: string, answer = 'Answered.'): void {
+/**
+ * Answer an incoming ask → 'answered'; books its commission to earnings.
+ * Returns whether it actually answered — false if the ask no longer exists or
+ * is no longer 'awaiting' (already answered/reclaimed/expired), so the modal
+ * must not tell the creator they got paid when they didn't.
+ */
+export function answerAsk(id: string, answer = 'Answered.'): boolean {
   const a = asksList.find((x) => x.id === id);
-  if (!a || a.state !== 'awaiting') return;
+  if (!a || a.state !== 'awaiting') return false;
   a.state = 'answered';
   a.answer = answer;
   commissionEarnedUsd += Math.round(a.costUsd * 0.88 * 100) / 100; // creator keeps 88% (12% commission)
   emit();
+  return true;
 }
 
-/** Renew the listing by `months` (~$10/mo). */
-export function renewSubscription(months = 1): void {
+/**
+ * Renew the listing by `months` (~$10/mo). Returns whether it actually
+ * renewed — false on an invalid length, so a bad value can never silently
+ * corrupt subDaysLeft to NaN (Math.max(1, NaN) is itself NaN).
+ */
+export function renewSubscription(months = 1): boolean {
+  if (!Number.isFinite(months) || months <= 0) return false;
   subDaysLeft += Math.max(1, Math.round(months)) * 30;
   emit();
+  return true;
 }
 
-/** Edit one of your live service prices (USD). */
-export function setServicePrice(key: string, usd: number): void {
-  if (!Number.isFinite(usd) || usd <= 0) return;
+/**
+ * Edit one of your live service prices (USD). Returns whether it actually
+ * changed — false on an invalid price, no own-token market yet, or a `key`
+ * that matches none of your services (the old shape ran `.map` regardless and
+ * reported success even when nothing matched and nothing changed).
+ */
+export function setServicePrice(key: string, usd: number): boolean {
+  if (!Number.isFinite(usd) || usd <= 0) return false;
   const price = Math.min(Math.round(usd * 100) / 100, 1_000_000); // #4: round + bound
   const m = markets.get(STUDIO_HANDLE);
-  if (!m) return;
+  if (!m) return false;
+  if (!m.services.some((s) => s.key === key)) return false; // unknown service key — nothing to update
   const services = m.services.map((s) => (s.key === key ? { ...s, usd: price } : s));
   markets.set(STUDIO_HANDLE, { ...m, services });
   emit();
+  return true;
 }
 
-/** Raise your supply cap (lower only down to what's issued). */
-export function raiseCap(newCap: number): void {
+/**
+ * Raise your supply cap (lower only down to what's issued). Returns whether
+ * it actually raised — false on no own-token market, an invalid value, or a
+ * value below what's already issued.
+ */
+export function raiseCap(newCap: number): boolean {
   const m = markets.get(STUDIO_HANDLE);
-  if (!m || !Number.isFinite(newCap)) return;
+  if (!m || !Number.isFinite(newCap)) return false;
   const issued = Math.ceil(m.supply);
   // #3: reject a value below what's already issued instead of silently clamping to
   // supply (which would set cap == supply and soft-lock every future buy). #7: bound it.
-  if (newCap < issued) return;
+  if (newCap < issued) return false;
   markets.set(STUDIO_HANDLE, { ...m, cap: Math.min(newCap, 1_000_000_000) });
   emit();
+  return true;
 }
 
-/** Claim your accrued 5% trade-fee share. */
-export function claimTradeFees(): void {
+/**
+ * Claim your accrued 5% trade-fee share. Returns whether there was anything
+ * to claim — false when the claimable balance is already 0, so a claim can
+ * never be reported as settled twice.
+ */
+export function claimTradeFees(): boolean {
+  if (tradeFeeClaimableUsd <= 0) return false;
   tradeFeeClaimableUsd = 0;
   emit();
+  return true;
+}
+
+export interface LaunchResult {
+  /** Whether the launch itself completed (services + cap applied, `launched` flag set). False only when there is no own-token market to launch into — unreachable in practice, since the studio token is seeded at module load, but checked rather than assumed. */
+  launched: boolean;
+  /**
+   * True when `firstBuyUsd` was requested but the optional anti-snipe first
+   * buy could NOT be filled — the budget was too small to afford one whole
+   * token, or it would have pushed supply past the cap. THE DEFECT THIS
+   * CLOSES: the launch used to report success unconditionally even when this
+   * happened, silently dropping the creator's first buy while telling them
+   * the wizard finished — the same lie one level deeper than a refused
+   * buy()/sell(). The launch itself still completes either way; only the
+   * first buy silently did nothing, and now the caller can say so.
+   */
+  firstBuySkipped: boolean;
 }
 
 /**
  * Launch/configure your token from the wizard: set services + cap, apply the
  * OPTIONAL anti-snipe first-buy (full curve cost, no premine), mark it launched.
  */
-export function launchToken(input: { services?: Service[]; cap?: number; firstBuyUsd?: number }): void {
+export function launchToken(input: { services?: Service[]; cap?: number; firstBuyUsd?: number }): LaunchResult {
   const m = markets.get(STUDIO_HANDLE);
-  if (!m) return;
+  if (!m) return { launched: false, firstBuySkipped: false };
   const next: TokenMarketDetail = { ...m };
   if (input.services && input.services.length) {
     // #5: round + bound each price; drop invalid; keep existing if all invalid.
@@ -586,6 +655,9 @@ export function launchToken(input: { services?: Service[]; cap?: number; firstBu
   }
   const spend =
     input.firstBuyUsd && input.firstBuyUsd > 0 && Number.isFinite(input.firstBuyUsd) ? Math.min(input.firstBuyUsd, 1_000_000) : 0;
+  // Only true when a first buy was REQUESTED (spend > 0) but could not be filled —
+  // requesting none at all is not a skip, it's simply not asking for one.
+  let firstBuySkipped = false;
   if (spend > 0) {
     const q = buyQuote(spend, next);
     // #2: never let the first-buy push supply past the cap. Whole tokens only.
@@ -599,12 +671,19 @@ export function launchToken(input: { services?: Service[]; cap?: number; firstBu
       // tokens mean the two differ) so R === Area(S) still holds.
       next.reserveUsd += q.totalUsd - q.tradeFeeUsd;
       next.position = { valueUsd: 0, floorValueUsd: 0, ...(next.position ?? {}), tokens: total, heldDays };
+    } else {
+      // The budget bought less than one whole token, or would have breached the
+      // cap — the OLD code silently dropped the buy here and still reported the
+      // whole launch as a plain success. It doesn't any more; the caller decides
+      // how to tell the creator their first buy vanished.
+      firstBuySkipped = true;
     }
   }
   markets.set(STUDIO_HANDLE, reprice(next));
   launched = true;
   subDaysLeft = 30; // first month included
   emit();
+  return { launched: true, firstBuySkipped };
 }
 
 export function useStudio(): StudioState {

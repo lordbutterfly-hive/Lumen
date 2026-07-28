@@ -3,9 +3,24 @@ package indexer
 import "errors"
 
 // RawEvent is one sdk.Log(...) line from the contract, as sourced from a VSC
-// contract-output. One contract call ⇒ one TransactionOutput ⇒ (today) at
-// most one log line for every entrypoint in ../contract/main.go, each of
-// which calls sdk.Log at most once.
+// contract-output.
+//
+// ONE CONTRACT CALL CAN EMIT MORE THAN ONE LOG LINE (corrected 2026-07-28).
+// This doc used to say "one contract call ⇒ one TransactionOutput ⇒ at most
+// one log line for every entrypoint … each of which calls sdk.Log at most
+// once." That stopped being true when ../contract/main.go's `register` gained
+// an atomic first buy: it now logs `registered` AND `bought` from a single
+// call, and it is currently the only entrypoint that does.
+//
+// Consequence for whoever writes the first PRODUCTION EventSource — there is
+// none yet, only MockEventSource — Seq is what separates two log lines that
+// share one OutputID, and Index de-duplicates on the (OutputID, Seq) PAIR. A
+// source that hardcodes Seq = 0 (as MockEventSource.Push does, for the common
+// one-line case) will make the second line look like a redelivery of the
+// first and silently DROP it. For `register` that means dropping every
+// creator's entire launch position, on the default new-market path, with no
+// error anywhere. Assign Seq per log line, in emission order.
+// TestIndex_RegisterEmitsTwoLogsFromOneOutput pins this.
 //
 // JSON TAGS (DEFECT FIX, 2026-07-28): these four fields used to carry NO
 // `json:"..."` tags at all, so encoding/json fell back to their bare Go

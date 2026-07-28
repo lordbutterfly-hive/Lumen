@@ -12,6 +12,7 @@ import {
   extractYouTubeVideoIds
 } from '@/blog/lib/utils';
 import { Entry } from '@hive/common-hiveio-packages/wax';
+import { useLiteOverlay } from '@/blog/lib/lite/client/use-lite-overlay';
 
 // Match condenser's 256x512 to share image cache at images.hive.blog
 const UX_IMAGE_WIDTH = 256;
@@ -102,12 +103,16 @@ export default function PostImage({ post }: { post: Entry }) {
     [post.author, post.permlink]
   );
   const [image, setImage] = useState<string>(cardImage);
+  // Keep this link's author segment consistent with the card's other links.
+  // Cached per post id, so this shares the card's existing lookup.
+  const liteOverlay = useLiteOverlay(post);
+  const displayAuthor = liteOverlay?.author ?? post.author;
 
   return (
     <>
       {image ? (
         <Link
-          href={`/${post.category}/@${post.author}/${post.permlink}`}
+          href={`/${post.category}/@${displayAuthor}/${post.permlink}`}
           data-testid="post-image"
           className={clsx({ hidden: post.stats?.gray })}
         >

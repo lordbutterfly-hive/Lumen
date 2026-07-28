@@ -19,6 +19,22 @@ func TestCoverage_ReportsExercisedAndNeverExercised(t *testing.T) {
 	if len(rpt.ActionsNeverExercised) != len(knownActions)-2 {
 		t.Errorf("ActionsNeverExercised = %v, want %d entries", rpt.ActionsNeverExercised, len(knownActions)-2)
 	}
+	// SENTINEL (F10, an adversarial review): the check above is relative to
+	// len(knownActions), so it is tautologically satisfied no matter how
+	// many entries the catalog holds — it can never, by itself, notice the
+	// denominator growing (or shrinking) without anyone deliberately
+	// checking. This literal count is the deliberate check: it forces
+	// whoever adds or removes a knownActions entry to consciously update
+	// this number, which is exactly the moment to also ask "does
+	// coverage.go/journey.go's own replay correctly track this new action?"
+	// (report.go's own "Six more entries... lists seven" comment, fixed the
+	// same session, is the exact class of drift a silent auto-adjusting
+	// count would never catch). If this fails after a deliberate catalog
+	// change, update the literal here — do not delete the check.
+	const wantKnownActionsCount = 23
+	if len(knownActions) != wantKnownActionsCount {
+		t.Errorf("len(knownActions) = %d, want %d — the action catalog changed size; update this literal deliberately (and check coverage.go/journey.go's own replay tracks the new/removed action)", len(knownActions), wantKnownActionsCount)
+	}
 
 	// Only ACTIVE was ever reached (both events happen while paid_until is
 	// far in the future).

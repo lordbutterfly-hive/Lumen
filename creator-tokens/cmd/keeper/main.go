@@ -274,9 +274,15 @@ func collectMarketViews(store *core.MemStore, ix *indexer.Index, block uint64, c
 		for _, h := range ix.HolderList(creator) {
 			holders = append(holders, keeper.HolderBalance{Holder: h, Balance: core.BalanceOf(store, creator, h)})
 		}
+		// Retired is read separately from Phase on purpose: core.Phase is
+		// MAX(natural, retired), so a market retired mid-subscription still
+		// reads OVERDUE for the whole notice window even though core treats
+		// it as winding down. See keeper.MarketView.Retired.
+		_, retired := core.RetiredAt(store, creator)
 		views = append(views, keeper.MarketView{
 			Creator: creator,
 			Phase:   phase,
+			Retired: retired,
 			Supply:  core.Supply(store, creator),
 			Holders: holders,
 		})

@@ -65,17 +65,29 @@ func (op Op) String() string {
 //
 // ---- which markets are actionable --------------------------------------
 //
-// Only StateFrozen markets produce any ops. Per SPEC §1.7.5's table, FROZEN
-// is the SAME MOMENT wind-down begins ("Unspent credits become refundable
-// pro-rata against the reserve, permissionlessly") — there is no separate
-// on-chain WIND-DOWN state to check for: core/market.go's Phase() only ever
-// returns ACTIVE, OVERDUE, FROZEN or CLOSED (core/params.go), so "frozen" IS
-// "wind-down open," by construction. ACTIVE/OVERDUE markets have nothing due
-// yet (nothing here decides subscription reminders — that is a frontend
-// concern, SPEC §2.1.A.1). CLOSED markets are terminal and already fully
-// wound down — CloseIfDrained only ever sets CLOSED once supply reaches
-// zero (refund.go's own I3 argument) — so there is structurally nothing left
-// to refund or close.
+// A market is actionable when it is in WIND-DOWN, which core defines
+// (core/market.go's inWindDown) as RETIRED **or** FROZEN — and this predicate
+// mirrors that, rather than approximating it.
+//
+// CORRECTION 2026-07-28: this paragraph used to say only FROZEN markets
+// produce ops, justified as "there is no separate on-chain WIND-DOWN state to
+// check for ... so 'frozen' IS 'wind-down open,' by construction." That was
+// false. core.Phase() is MAX(naturalPhase, retiredPhase), so a creator who
+// Retires while still paid up reads OVERDUE for the entire GraceBlocks notice
+// window — while core.inWindDown has been true since the retire block and
+// core.RefundHolder will pay out. Filtering on FROZEN alone made Plan return
+// zero ops for such a market for up to GraceBlocks. Nothing was ever stuck
+// (Refund is a self-serve pull, open the instant inWindDown is true, and the
+// push is permissionless for any third party), so the cost was delayed
+// convenience — but a keeper that silently does nothing is indistinguishable
+// from a broken one, and the claim contradicted the invariant it asserted.
+//
+// ACTIVE/OVERDUE markets that are NOT retired have nothing due yet (nothing
+// here decides subscription reminders — that is a frontend concern, SPEC
+// §2.1.A.1). CLOSED markets are terminal and already fully wound down —
+// CloseIfDrained only ever sets CLOSED once supply reaches zero (refund.go's
+// own I3 argument) — so there is structurally nothing left to refund or
+// close, retired or not.
 //
 // ---- "verify, don't trust" ------------------------------------------------
 //
@@ -144,7 +156,12 @@ func Plan(markets []MarketView) []Op {
 
 	var ops []Op
 	for _, m := range sorted {
-		if m.Phase != core.StateFrozen {
+		// Mirrors core's inWindDown, which is (retired OR frozen) — NOT frozen
+		// alone. A retired market is in wind-down from the retire block, while
+		// Phase still reads OVERDUE for the whole notice window; filtering on
+		// Frozen alone made Plan blind to it. See MarketView.Retired's doc.
+		// CLOSED is deliberately excluded: nothing is left to sweep.
+		if m.Phase == core.StateClosed || (m.Phase != core.StateFrozen && !m.Retired) {
 			continue
 		}
 

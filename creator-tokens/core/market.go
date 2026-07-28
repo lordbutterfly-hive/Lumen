@@ -371,7 +371,9 @@ func RequireInflowOpen(s Store, creator string, block uint64) error {
 	// (non-payment AND non-delivery never gate funds) holds structurally
 	// rather than by remembering to check for it in each rail.
 	if delinquent, until := DeliveryStanding(s, creator, block); delinquent {
-		return newErr(ErrState, "creator is delinquent on delivery: new purchases are closed until block "+evU64(until)+" (every payout, and paying the subscription, stays open)")
+		// ErrDelinquent, not ErrState: this is the one refusal downstream
+		// consumers must be able to identify without reading the wording.
+		return newErr(ErrDelinquent, "creator is delinquent on delivery: new purchases are closed until block "+evU64(until)+" (every payout, and paying the subscription, stays open)")
 	}
 	return nil
 }

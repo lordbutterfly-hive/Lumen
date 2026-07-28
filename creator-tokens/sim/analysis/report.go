@@ -98,24 +98,48 @@ func LoadTrace(path string) (*Trace, error) {
 }
 
 // knownActions is the canonical action set, copied verbatim from
-// sim/trace.go's Event.Action doc comment (2026-07-21 read). Sixteen entries
-// as of RULING A's curve rewrite, which added "buy" (the replacement
-// issuance path for the deleted PAR "prepay" mint — sim/actions.go's doBuy;
-// "prepay" is kept in this list since it is still a legal, if now-dead,
-// synthetic action older fixtures in this package construct directly) and
-// "sell" (RULING K's complementary curve exit — sim/actions.go's doSell) —
-// kept as a live list rather than a rounded number so coverage.go's "which
-// actions were exercised" question has one unambiguous denominator.
+// sim/trace.go's Event.Action doc comment (2026-07-28 read). Started at
+// sixteen entries as of RULING A's curve rewrite, which added "buy" (the
+// replacement issuance path for the deleted PAR "prepay" mint —
+// sim/actions.go's doBuy; "prepay" is kept in this list since it is still a
+// legal, if now-dead, synthetic action older fixtures in this package
+// construct directly) and "sell" (RULING K's complementary curve exit —
+// sim/actions.go's doSell) — kept as a live list rather than a rounded
+// number so coverage.go's "which actions were exercised" question has one
+// unambiguous denominator.
+//
+// Seven more entries added 2026-07-28 (F10, an adversarial review: this
+// comment used to say "six" in two places, each time undercounting its own
+// very next clause, which lists seven both times), the session that wired
+// the seven action wrappers a previous session had built but never called
+// from anywhere
+// (sim/actions.go's doDecline/doRetire/doClaimTradeFees/doCreateOffering/
+// doSetOfferingPrice/doSetOfferingTitle/doDeleteOffering — seven wrappers,
+// and createOffering/setOfferingPrice/setOfferingTitle/deleteOffering are
+// four of the seven NEW distinct action names, alongside decline/retire/
+// claimTradeFees): "decline" (RULING E, ask.go's Decline — the creator's
+// free, honest "no"), "retire" (core.Retire, market.go — the irreversible
+// wind-down notice), "claimTradeFees" (core.ClaimTradeFees, tradefee.go —
+// RULING F8's pull half), and the four creator-shop config writers
+// (offerings.go). Without this list including them, coverage.go's own
+// "which known actions were ever exercised" report would have no way to
+// even ASK about these seven action names, silently hiding them from the
+// denominator regardless of how many times they actually fired.
 //
 // "withdrawTreasury" is a GLOBAL, phaseless action (it targets kTreasury,
 // never a per-market key — see knownGlobalActions in coverage.go): it is
 // counted in the action tally but deliberately excluded from the
 // phase x action combo grid, since a treasury withdrawal is never scoped to
-// any single market's lifecycle phase.
+// any single market's lifecycle phase. "claimTradeFees" is NOT global
+// despite the similar "pull your own accrued balance" shape — it targets
+// kFeeBal(creator), a PER-MARKET key (sim/actions.go's doClaimTradeFees sets
+// both the event's actor AND creator to the caller), so it belongs in the
+// phase x action grid like every other per-market action.
 var knownActions = []string{
 	"register", "renew", "setFace", "setCap", "prepay", "buy", "sell", "transfer",
-	"ask", "answer", "reclaim", "refund", "refundHolder", "closeIfDrained",
-	"recordObs", "withdrawTreasury",
+	"ask", "answer", "decline", "reclaim", "refund", "refundHolder", "closeIfDrained",
+	"recordObs", "withdrawTreasury", "retire", "claimTradeFees",
+	"createOffering", "setOfferingPrice", "setOfferingTitle", "deleteOffering",
 }
 
 // Phase constants — mirror core/params.go's StateActive/StateOverdue/
@@ -145,6 +169,14 @@ const (
 	defaultReclaimGrace        uint64 = 1200                     // params.go ReclaimGrace
 	defaultCommissionBps       uint64 = 1200                     // params.go CommissionBps
 	defaultParBaseUnitsPerCred int64  = 1                        // params.go ParBaseUnitsPerCredit
+	// defaultMaxExitTaxBps mirrors params.go's MaxExitTaxBps (F8, an
+	// adversarial review): the FRESHEST-hold, worst-case K2 exit tax rate
+	// (exittax.go: "tax(t) = 20% * max(0, 1 - t/6weeks)", so t=0 gives
+	// exactly this). ledger.go's CreditsHeldValue uses it as a conservative
+	// upper bound on the tax any holder could ever be charged, since this
+	// package deliberately does not reimplement the per-holder hold clock
+	// (holdclock.go) — see CreditsHeldValue's own field doc for why.
+	defaultMaxExitTaxBps uint64 = 2000
 )
 
 func cfgU64(tr *Trace, key string, fallback uint64) uint64 {
@@ -163,6 +195,7 @@ func subscriptionPeriodFor(tr *Trace) uint64 {
 	return cfgU64(tr, "subscriptionPeriod", defaultSubscriptionPeriod)
 }
 func graceBlocksFor(tr *Trace) uint64   { return cfgU64(tr, "graceBlocks", defaultGraceBlocks) }
+func maxExitTaxBpsFor(tr *Trace) uint64 { return cfgU64(tr, "maxExitTaxBps", defaultMaxExitTaxBps) }
 func reclaimGraceFor(tr *Trace) uint64  { return cfgU64(tr, "reclaimGrace", defaultReclaimGrace) }
 func commissionBpsFor(tr *Trace) uint64 { return cfgU64(tr, "commissionBps", defaultCommissionBps) }
 
@@ -196,14 +229,69 @@ func bpsFloor(total *big.Int, bps uint64) *big.Int {
 	return p.Div(p, big.NewInt(10000))
 }
 
-// refundPayout mirrors core/refund.go's refundPayout exactly: floor(reserve*
-// credits/supply), capped at credits (PAR == 1, so credits*PAR == credits).
-func refundPayout(reserve, credits, supply *big.Int) *big.Int {
-	payout := mulDivFloor(reserve, credits, supply)
-	if payout.Cmp(credits) > 0 {
-		return new(big.Int).Set(credits)
+// bpsCeil = ceil(total*bps/10000), mirroring core/exittax.go's ExitTaxOn —
+// deliberately CEIL, not floor, the opposite rounding direction from
+// bpsFloor: a tax rounds in the TREASURY's favour (money.go's package rule),
+// never the payer's. Used by ledger.go's CreditsHeldValue (F8) to compute a
+// conservative upper bound on the K2 exit tax a held balance could ever be
+// charged.
+func bpsCeil(total *big.Int, bps uint64) *big.Int {
+	if total == nil || total.Sign() <= 0 || bps == 0 {
+		return zeroBig()
 	}
-	return payout
+	p := new(big.Int).Mul(total, new(big.Int).SetUint64(bps))
+	q, r := new(big.Int).QuoRem(p, big.NewInt(10000), new(big.Int))
+	if r.Sign() != 0 {
+		q.Add(q, big.NewInt(1))
+	}
+	return q
+}
+
+// refundPayout mirrors core/refund.go's own gross(c) = floor(reserve*
+// credits/supply) EXACTLY: no cap.
+//
+// DEFECT FIX (2026-07-28, found while verifying a "30 actors with massive
+// unexplained HBD loss" ledger result against the raw trace — it wasn't
+// real). This function used to clamp its result at `credits` — a leftover
+// from the PRE-RULING-A PAR mint, where 1 credit was pegged 1:1 to 1 HBD
+// base unit, so `payout > credits` was structurally impossible and the
+// clamp was inert. core/refund.go's OWN file header names this exact
+// clamp, verbatim, as the thing RULING A deleted: "THE PAR CAP IS
+// DELETED... the old refundPayout capped every payout at credits·PAR ==
+// credits... Under the curve it was a CONFISCATION: curve backing runs
+// ~10.5 units per token-index... a curve-priced position refunded at 1
+// unit/token loses 99.98% of its backing to a cap built for a mechanism
+// that no longer exists." This package's own copy of the formula was never
+// updated when core's was fixed, so it silently reintroduced the exact
+// confiscation core explicitly deleted — comparing an HBD amount against a
+// raw token COUNT is a unit error the instant PAR stops holding (RULING A,
+// the bonding curve), which is always, since BasePrice=1000 alone means
+// even the cheapest token is worth far more than 1 base unit.
+//
+// BLAST RADIUS, verified against a real run (creator-tokens/sim, seed=2,
+// 180 days, 2 creators, 40 actors): a holder pushed 110 credits via
+// RefundHolder at a point where each credit was worth ~2897 HBD base units
+// (reserve/supply) received the REAL payout of 318670 (confirmed against
+// the trace's own recorded `payout` Arg, sourced from core's real return
+// value — sim/actions.go's doRefundHolder), but this function computed
+// 110 — clamped down to the raw credit count, a >99.9% understatement. This
+// fed straight into ledger.go's "refund"/"refundHolder" cases (Left.Refunds,
+// each actor's ReceivedOut) AND the separate "Credits-held value per actor"
+// pass (CreditsHeldValue), so BOTH legs of AnalyzeLedger's Unexplained
+// computation for every affected actor were wrong — one real trace showed
+// 30 actors with a combined multi-hundred-thousand-unit "unexplained loss"
+// that evaporated entirely once this clamp was removed. The AGGREGATE
+// Entered==Left+Sits identity still closed throughout (it is an internally
+// self-consistent shadow replay, never compared against live core state —
+// see this package's doc — so a systematic per-event understatement that
+// also proportionally shrinks the matching shadow reserve debit stays
+// balanced against itself), which is exactly why this went unnoticed: the
+// headline "Identity CLOSES" pass hid a real, substantial reporting defect
+// underneath it. Fund safety in the actual contract was never in question —
+// core/refund.go was already fixed; only this independent reimplementation
+// had drifted.
+func refundPayout(reserve, credits, supply *big.Int) *big.Int {
+	return mulDivFloor(reserve, credits, supply)
 }
 
 // splitHalf mirrors the ONE split formula this codebase uses everywhere two
@@ -222,19 +310,74 @@ func splitHalf(total *big.Int) (creatorHalf, platformHalf *big.Int) {
 }
 
 // derivePhase mirrors core/market.go's Phase() exactly: a stored CLOSED is
-// the only stored state that wins; everything else derives lazily from
-// paidUntil and the grace window.
-func derivePhase(closed bool, paidUntil, block, graceBlocks uint64) string {
+// the only stored state that wins; otherwise the phase is
+// MAX(naturalPhase, retiredPhase) (RULING D, core/market.go's Phase) —
+// naturalPhase derives lazily from paidUntil and the grace window,
+// retiredPhase is OVERDUE inside the retire notice and FROZEN once it
+// expires, and MAX means retiring can only ever push a market DOWN the
+// ladder, never up.
+//
+// FIXED 2026-07-28 (F4, an adversarial review): until this fix, this
+// function took no retire input at all and computed only the natural half —
+// a market frozen BY RETIRE (not by a natural subscription lapse) read as
+// whatever the natural ladder alone said, understating how frozen it really
+// was for up to SubscriptionPeriod+GraceBlocks (~35 days). That blinded
+// MarketDeadEnds (journey.go), one of the four arms of Report.Critical() —
+// it fires only when derivePhase(...)==PhaseFrozen, so a market retired-and-
+// stuck on an unresolved PENDING escrow (H1) was silently invisible to a
+// build-failing gate on exactly the path core.Retire's own wiring (this
+// session) made reachable for the first time. `retired`/`retiredAt` are now
+// threaded through journey.go/coverage.go's own small replays (a
+// `case "retire":` tracker, reset on "register" exactly like `closed` is —
+// core's registerApply clears kRetiredAt on re-registration) so both files'
+// derivePhase calls carry the same input core.Phase itself reads
+// (core.RetiredAt). The claim in this doc's first paragraph is therefore
+// actually true now, not merely asserted — see report_test.go's retire cases
+// for the parity proof against core/market.go's own Phase/maxPhase.
+func derivePhase(closed bool, paidUntil, block, graceBlocks uint64, retiredAt uint64, retired bool) string {
 	if closed {
 		return PhaseClosed
 	}
-	if block <= paidUntil {
-		return PhaseActive
+	natural := PhaseActive
+	if block > paidUntil {
+		if block < paidUntil+graceBlocks {
+			natural = PhaseOverdue
+		} else {
+			natural = PhaseFrozen
+		}
 	}
-	if block < paidUntil+graceBlocks {
-		return PhaseOverdue
+	if !retired {
+		return natural
 	}
-	return PhaseFrozen
+	forced := PhaseFrozen
+	if block < retiredAt+graceBlocks {
+		forced = PhaseOverdue
+	}
+	return maxDerivedPhase(natural, forced)
+}
+
+// maxDerivedPhase mirrors core/market.go's maxPhase/phaseRank exactly:
+// ACTIVE < OVERDUE < FROZEN < CLOSED, "higher" meaning more restricted.
+// derivePhase's own two inputs (natural, forced) never produce CLOSED —
+// derivePhase handles the stored-CLOSED case itself, above — so CLOSED is
+// ranked here only for a complete, order-preserving mirror of core's table.
+func maxDerivedPhase(a, b string) string {
+	rank := func(p string) int {
+		switch p {
+		case PhaseOverdue:
+			return 1
+		case PhaseFrozen:
+			return 2
+		case PhaseClosed:
+			return 3
+		default: // PhaseActive
+			return 0
+		}
+	}
+	if rank(b) > rank(a) {
+		return b
+	}
+	return a
 }
 
 // ---------------------------------------------------------------------------

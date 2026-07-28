@@ -38,6 +38,20 @@ import (
 // exists to rediscover, so every run starts comfortably clear of it.
 const genesisBlock uint64 = 10_000
 
+// checkDelinquencyGuardrail (below) identifies a delivery-gate refusal by its
+// ERROR SYMBOL, core.ErrDelinquent, which core/market.go's RequireInflowOpen
+// returns for that branch and nothing else returns at all.
+//
+// It used to substring-match ErrMsg for "delinquent on delivery", because
+// core/errors.go had no symbol finer than the shared ErrState. An independent
+// adversarial review (2026-07-28) showed why that mattered: rewording one
+// sentence in core would leave PurchaseRefusedForDelinquency merely
+// undercounting, but would make the OUTFLOW halt STRUCTURALLY UNREACHABLE —
+// a genuine standing-guardrail regression in core (an outflow starting to
+// consult delivery standing) would silently score as OutflowSucceeded++ and
+// still print as a pass. core.ErrDelinquent was added to close that; do not
+// reintroduce a text match here.
+
 const (
 	escrowPending   = "PENDING"
 	escrowAnswered  = "ANSWERED"
@@ -232,20 +246,27 @@ type Engine struct {
 	keeperProfile    string // Upgrade 3: KeeperReliable | KeeperAbsent
 	adversarialOrder bool   // Upgrade 3b: producer-adversarial intra-block tie-break
 
-	// dq is the live, in-run proof for the delivery-gate STANDING GUARDRAIL
+	// DQ is the live, in-run proof for the delivery-gate STANDING GUARDRAIL
 	// (core/delivery.go): delinquency must refuse PURCHASES (Ask/Buy, via
 	// RequireInflowOpen) and must NEVER refuse a payout, a subscription
 	// payment, or a shop-config change. Populated by checkDelinquencyGuardrail
 	// (called from recordEvent for every single event) rather than by a
 	// scripted probe, so the proof comes from ordinary population behaviour
 	// hitting real delinquent creators, not a scenario built to pass.
-	dq delinquencyStats
+	//
+	// EXPORTED (2026-07-28, previously unexported `dq`) so a caller outside
+	// this package — cmd/sim, a CI gate, a test — can check
+	// DeliveryGuardrailExercised() below and treat a vacuous proof as a hard
+	// failure instead of a string buried in Summary()'s text. See
+	// TestDenseRunProvesDelinquencyGuardrailNonVacuous (upgrades_test.go) for
+	// this package's own enforcement of exactly that.
+	DQ DelinquencyStats
 
 	haltErr error
 	verbose bool
 }
 
-// delinquencyStats — see Engine.dq's doc. Every counted event captured its
+// DelinquencyStats — see Engine.DQ's doc. Every counted event captured its
 // creator's delinquency standing via core.DeliveryStanding BEFORE the call
 // executed (the same read RequireInflowOpen itself performs, at the same
 // block, off the same store — see actions.go's captureDelinquent), so
@@ -253,11 +274,23 @@ type Engine struct {
 // attempted," never a status that only became true afterward (e.g. a Reclaim
 // that itself pushes the creator over the miss threshold does NOT count as
 // "attempted while delinquent" — it is the call that CAUSES delinquency).
-type delinquencyStats struct {
+type DelinquencyStats struct {
 	PurchaseAttempts              int // ask/buy attempted against an ALREADY-delinquent creator
 	PurchaseRefusedForDelinquency int // ... and correctly refused for exactly that reason
 	OutflowAttempts               int // payout/renew/shop-config actions attempted against an ALREADY-delinquent creator
 	OutflowSucceeded              int // ... and did NOT fail for a delinquency reason (succeeded, or failed for something unrelated)
+}
+
+// DeliveryGuardrailExercised reports whether THIS run actually tested the
+// standing guardrail — both halves it exists to prove — rather than merely
+// finding zero violations because no delinquent creator was ever attempted
+// against. A caller that wants "vacuous is a failure, not a silent pass"
+// (exactly the posture a CI gate should take — added at an independent
+// adversarial review's request, 2026-07-28) should treat a run where this
+// returns false as non-passing even though Run() itself returned no error.
+func (e *Engine) DeliveryGuardrailExercised() bool {
+	return e.DQ.PurchaseAttempts > 0 && e.DQ.PurchaseRefusedForDelinquency > 0 &&
+		e.DQ.OutflowAttempts > 0 && e.DQ.OutflowSucceeded > 0
 }
 
 // NewEngine builds the store, the population, and every shadow-ledger
@@ -325,8 +358,43 @@ func NewEngine(cfg Config) *Engine {
 		cs := &creatorState{
 			Name:        name,
 			Role:        actor.Role,
-			InitialFace: randRangeInt64(actor.RNG, 1_000, 50_000),  // 1.000 - 50.000 HBD per answer
-			InitialCap:  randRangeInt64(actor.RNG, 2_000, 200_000), // outstanding-credit ceiling
+			InitialFace: randRangeInt64(actor.RNG, 1_000, 50_000), // 1.000 - 50.000 HBD per answer
+			// InitialCap: RE-SCALED 2026-07-28 (F6, an adversarial review).
+			// The cap denominates TOKENS (core/buy.go: "the cap is
+			// deliberate scarcity... under the curve it denominates
+			// TOKENS"), but this range (2,000-200,000) was sized as if it
+			// still denominated PAR-era HBD-equivalent credits. Measured
+			// against this session's own diagnostic sweep (12 configs,
+			// 7-270 simulated days, 2-8 creators, matching the review's own
+			// independently measured 263-617 across 52 runs): organic final
+			// supply tops out in the low hundreds even in the densest
+			// config tested (2 creators sharing 40 actors, up to ~650
+			// tokens) — nowhere near even the OLD range's floor. The 70%
+			// maybeRaiseCap trigger (engine.go) and core.Buy's ErrCap guard
+			// were therefore both structurally unreachable regardless of
+			// RNG: setCap fired 0 times and ErrCap 0 times across every run
+			// measured, old range or new seed.
+			//
+			// The new range (120-450) is sized to sit in the SAME ORDER OF
+			// MAGNITUDE as observed reachable supply, not merely "smaller":
+			// re-verified directly (not guessed) against a 12-config,
+			// 16-seed sweep of this exact range — setCap fired at least
+			// once in 8 of the 10 non-trivial configs (only the shortest,
+			// 7-day config never generated enough organic growth to reach
+			// even 70% of ANY drawn cap in time), 30 firings total across
+			// the sweep, and one run drove a creator's supply to EXACTLY
+			// its cap (ratio 1.0000) with no further buy attempted against
+			// it in that trace — the hard ErrCap ceiling is genuinely
+			// reachable at this range, though it did not fire live in this
+			// specific sweep (see this session's own report for why: EVERY
+			// buy call site in this simulator pre-clamps its requested
+			// token count to the market's remaining cap headroom via
+			// maxAffordableTokens, so a buy that WOULD exceed the cap is
+			// silently sized down rather than ever attempted — a separate,
+			// deliberate "never attempt a doomed call" design choice this
+			// finding does not touch, reported honestly rather than papered
+			// over by tuning the cap absurdly tight to force a hit).
+			InitialCap:  randRangeInt64(actor.RNG, 120, 450),
 			PaidInTotal: zeroBig(),
 		}
 		switch {
@@ -648,28 +716,30 @@ func (e *Engine) creatorWindingDown(creator string) bool {
 // Both counters are exported via Summary() so a run reports HOW MUCH of this
 // was actually exercised, not just "zero violations" (which would be equally
 // true of a creator population that never got near delinquency at all).
+//
+// The OUTFLOW branch's HALT keys on core.ErrDelinquent — see that symbol's
+// doc in core/errors.go for why a text match was not good enough.
 func (e *Engine) checkDelinquencyGuardrail(ev *Event) {
 	if ev.Args["creatorDelinquent"] != "true" {
 		return
 	}
-	msg := strings.ToLower(ev.ErrMsg)
 	switch ev.Action {
 	case "ask", "buy":
-		e.dq.PurchaseAttempts++
+		e.DQ.PurchaseAttempts++
 		if ev.OK {
 			e.halt(fmt.Sprintf(
 				"DELIVERY-GATE VIOLATION: %s by %s against creator=%s SUCCEEDED while the creator was already delinquent on delivery at call time -- RequireInflowOpen's delivery gate should have refused this purchase",
 				ev.Action, ev.Actor, ev.Creator), ev)
 			return
 		}
-		if strings.Contains(msg, "delinquent") {
-			e.dq.PurchaseRefusedForDelinquency++
+		if ev.ErrSym == core.ErrDelinquent {
+			e.DQ.PurchaseRefusedForDelinquency++
 		}
 	case "answer", "decline", "reclaim", "sell", "refund", "refundHolder", "claimTradeFees", "renew", "retire",
 		"createOffering", "setOfferingPrice", "setOfferingTitle", "deleteOffering":
-		e.dq.OutflowAttempts++
-		if ev.OK || !strings.Contains(msg, "delinquent") {
-			e.dq.OutflowSucceeded++
+		e.DQ.OutflowAttempts++
+		if ev.OK || ev.ErrSym != core.ErrDelinquent {
+			e.DQ.OutflowSucceeded++
 			return
 		}
 		e.halt(fmt.Sprintf(
@@ -913,6 +983,33 @@ func (e *Engine) Summary() string {
 	}
 	fmt.Fprintln(&b)
 
+	// ---- offering-ask coverage (F7, an adversarial review) ----
+	//
+	// EscrowShadow.OfferingID (declared alongside the struct's other fields
+	// above) was write-only until this fix: set on every successful ask
+	// (doAskExecute, actions.go) and never read anywhere — the review's own
+	// finding. e.escrows retains EVERY escrow this run ever opened, keyed by
+	// "creator|seq" (addEscrow appends, resolveEscrow only flips Status —
+	// nothing ever deletes an entry), so iterating it here is a complete,
+	// order-independent tally: exactly what this section needs (a count),
+	// never a per-item ordering the map's own non-determinism could disturb.
+	// This is also what the field was FOR, per pickAskTarget's own doc: it
+	// exists so a real run can show whether offeringID != 0 (the named-
+	// offering shop path, offerings.go) is actually being exercised, not
+	// just picked and then silently dropped before reaching an ask.
+	offeringAsks, legacyFaceAsks := 0, 0
+	for _, rec := range e.escrows {
+		if rec.OfferingID != 0 {
+			offeringAsks++
+		} else {
+			legacyFaceAsks++
+		}
+	}
+	fmt.Fprintf(&b, "-- offering-ask coverage (F7: EscrowShadow.OfferingID) --\n")
+	fmt.Fprintf(&b, "  asks opened: %d total (%d against a named offering, %d against the legacy face price)\n",
+		offeringAsks+legacyFaceAsks, offeringAsks, legacyFaceAsks)
+	fmt.Fprintln(&b)
+
 	// ---- per-creator final state ----
 	fmt.Fprintf(&b, "-- final per-creator state (block %d) --\n", e.Block)
 	for _, name := range e.creatorNames {
@@ -946,12 +1043,28 @@ func (e *Engine) Summary() string {
 	fmt.Fprintln(&b)
 
 	// ---- delivery-gate standing guardrail (core/delivery.go) ----
-	fmt.Fprintf(&b, "-- delivery-gate standing guardrail (live-proven, not assumed) --\n")
-	fmt.Fprintf(&b, "  purchases (ask/buy) attempted against an already-delinquent creator: %d\n", e.dq.PurchaseAttempts)
-	fmt.Fprintf(&b, "  ... correctly refused for exactly that reason:                       %d\n", e.dq.PurchaseRefusedForDelinquency)
-	fmt.Fprintf(&b, "  payouts/renew/shop-config attempted against an already-delinquent creator: %d\n", e.dq.OutflowAttempts)
-	fmt.Fprintf(&b, "  ... none blocked by delinquency (succeeded or failed for an unrelated reason): %d\n", e.dq.OutflowSucceeded)
-	if e.dq.OutflowAttempts == 0 {
+	//
+	// HEADER WORDING FIX (2026-07-28, flagged by an independent adversarial
+	// review): this used to unconditionally print "(live-proven, not
+	// assumed)" and only ADMIT vacuity in a note several lines further down —
+	// a real, embarrassing contradiction for exactly the run that most needs
+	// the honest answer (a vacuous one). The header itself now reflects
+	// e.DeliveryGuardrailExercised(), so the headline claim can never
+	// contradict the counters printed directly under it.
+	if e.DeliveryGuardrailExercised() {
+		fmt.Fprintf(&b, "-- delivery-gate standing guardrail (live-proven, not assumed) --\n")
+	} else {
+		fmt.Fprintf(&b, "-- delivery-gate standing guardrail (NOT PROVEN THIS RUN — see counters and NOTE below) --\n")
+	}
+	fmt.Fprintf(&b, "  purchases (ask/buy) attempted against an already-delinquent creator: %d\n", e.DQ.PurchaseAttempts)
+	fmt.Fprintf(&b, "  ... correctly refused for exactly that reason:                       %d\n", e.DQ.PurchaseRefusedForDelinquency)
+	fmt.Fprintf(&b, "  payouts/renew/shop-config attempted against an already-delinquent creator: %d\n", e.DQ.OutflowAttempts)
+	fmt.Fprintf(&b, "  ... none blocked by delinquency (succeeded or failed for an unrelated reason): %d\n", e.DQ.OutflowSucceeded)
+	if e.DQ.PurchaseAttempts == 0 {
+		fmt.Fprintf(&b, "  NOTE: zero purchases were ever attempted against a delinquent creator in this run --\n")
+		fmt.Fprintf(&b, "        the \"delinquency refuses purchases\" half is UNPROVEN here, not because it failed but because it was never tested.\n")
+	}
+	if e.DQ.OutflowAttempts == 0 {
 		fmt.Fprintf(&b, "  NOTE: zero non-purchase actions were ever attempted against a delinquent creator in this run --\n")
 		fmt.Fprintf(&b, "        the standing guardrail held VACUOUSLY here, not because it was exercised. See coverage.\n")
 	}

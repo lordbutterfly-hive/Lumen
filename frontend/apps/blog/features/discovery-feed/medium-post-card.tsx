@@ -91,7 +91,7 @@ export default function MediumPostCard({ post }: { post: Entry }) {
           className="font-semibold text-[#2a2822] hover:underline"
           data-testid="medium-card-author"
         >
-          {post.author}
+          {displayAuthor}
         </Link>
         <LeagueByline tier={bylineTierFromReputation(post.author_reputation)} className="ml-0.5" />
         {post.community && post.community_title ? (
@@ -116,7 +116,7 @@ export default function MediumPostCard({ post }: { post: Entry }) {
         <div className="min-w-0">
           <Link href={href} className="block" data-testid="medium-card-title">
             <h2 className="line-clamp-2 font-sans text-[26px] font-semibold leading-[1.22] tracking-[-0.015em] text-[#161511]">
-              {post.title}
+              {displayTitle}
             </h2>
           </Link>
 

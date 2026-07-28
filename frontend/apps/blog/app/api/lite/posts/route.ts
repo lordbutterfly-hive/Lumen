@@ -4,6 +4,7 @@ import { guardWrite, guardRead } from '@/blog/lib/lite/http/guard';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { createLitePost, getLiteFeed, CreatePostRequest } from '@/blog/lib/lite/content/post-service';
 import { dbPostToEntry } from '@/blog/lib/lite/render/db-post-to-entry';
+import { resolvePublicNames } from '@/blog/lib/lite/render/current-name';
 import { ParentRef } from '@/blog/lib/lite/types';
 
 const logger = getLogger('app');
@@ -82,7 +83,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   try {
     const list = await getLiteFeed({ limit, before });
-    return NextResponse.json({ entries: list.map(dbPostToEntry) });
+    // ONE user query for the page, not one per post. Names are resolved live rather
+    // than read off the row so an upgraded author's back catalogue shows their new
+    // Hive name (see render/current-name.ts).
+    const names = await resolvePublicNames(list);
+    return NextResponse.json({ entries: list.map((post) => dbPostToEntry(post, names.get(post.postId))) });
   } catch (error) {
     logger.error(error, 'Lite feed failed');
     return NextResponse.json({ error: 'server_error' }, { status: 500 });

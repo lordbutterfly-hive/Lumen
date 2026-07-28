@@ -9,9 +9,8 @@ import { getAccountCreator, hasAccountCreator } from './account-creator';
  */
 
 const logger = getLogger('app');
-const DEFAULT_MIN_POOL = 5;
 
-export async function runActClaimOnce(minPool = DEFAULT_MIN_POOL): Promise<{ claimed: boolean }> {
+export async function runActClaimOnce(minPool = liteConfig.actMinPool): Promise<{ claimed: boolean }> {
   if (!liteConfig.enabled || !hasAccountCreator()) return { claimed: false };
   const creator = getAccountCreator();
   const pending = await creator.pendingActCount();

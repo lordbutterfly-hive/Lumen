@@ -18,6 +18,19 @@ const FRONTEND_ACCOUNTS: Record<string, string> = {
   testnet: process.env.LITE_FRONTEND_ACCOUNT_TESTNET || ''
 };
 
+// A SEPARATE account from the publisher above, and deliberately so (operator
+// decision 2026-07-28). The publisher holds a POSTING key, which can only publish.
+// This one holds an ACTIVE key, which can also move funds — so it is a dedicated,
+// balance-free account whose only job is claiming ACTs and creating accounts. There
+// is intentionally NO fallback to the publisher account: a missing value must leave
+// account creation dark, never quietly promote the publisher account to active-key
+// duty on the same server.
+const ACCOUNT_CREATOR_ACCOUNTS: Record<string, string> = {
+  mainnet: process.env.LITE_ACCOUNT_CREATOR_ACCOUNT_MAINNET || '',
+  mirrornet: process.env.LITE_ACCOUNT_CREATOR_ACCOUNT_MIRRORNET || '',
+  testnet: process.env.LITE_ACCOUNT_CREATOR_ACCOUNT_TESTNET || ''
+};
+
 export const liteConfig = {
   /** Postgres connection string. Empty until infra is provisioned. */
   databaseUrl: process.env.LITE_DATABASE_URL || '',
@@ -85,6 +98,22 @@ export const liteConfig = {
    * bootstrap refuses to use this in production (see publisher/hive-broadcaster).
    */
   publisherPostingWif: process.env.LITE_PUBLISHER_POSTING_WIF || '',
+  /** The account that claims ACTs and creates upgraded accounts (public name only). */
+  accountCreatorAccount: ACCOUNT_CREATOR_ACCOUNTS[siteConfig.chainEnv] || '',
+  /**
+   * DEV-ONLY ACTIVE WIF for the account-creator account. Strictly more dangerous
+   * than the publisher's posting WIF above — an active key can move funds, not just
+   * publish — so production MUST leave this empty and inject a KMS-backed
+   * `AccountCreator` via `setAccountCreator` instead. The bootstrap refuses to use
+   * this in production (see upgrade/hive-account-creator).
+   */
+  accountCreatorActiveWif: process.env.LITE_ACCOUNT_CREATOR_ACTIVE_WIF || '',
+  /**
+   * How many Account Creation Tokens the claim worker keeps warm. Claiming is not
+   * free — it burns a large slice of the creator account's RC — but claiming ahead
+   * of demand is what stops an upgrade from failing at the point a user asks for it.
+   */
+  actMinPool: Number(process.env.LITE_ACT_MIN_POOL || 5),
   /**
    * Publishing stops below this percentage of the account's resource credits, so a
    * funding problem becomes a delay instead of a queue of permanently failed posts.

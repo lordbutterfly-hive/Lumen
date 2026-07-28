@@ -8,8 +8,12 @@ import { LumenPost } from '../types';
  * DB-first. Post-publish, the chain entry is fetched under its REAL author and the
  * lite identity is laid over it (see render/lite-entry.ts).
  */
-export function dbPostToEntry(post: LumenPost): Entry {
-  const author = post.displayNameSnapshot;
+export function dbPostToEntry(post: LumenPost, publicName?: string): Entry {
+  // `publicName` is the author's name TODAY (see render/current-name.ts). It differs
+  // from the snapshot after an upgrade, when the account has a new Hive name and its
+  // whole Lumen history has to move with it. Callers that cannot resolve it fall back
+  // to the snapshot rather than rendering nothing.
+  const author = publicName || post.displayNameSnapshot;
   const permlink = post.hivePermlink ?? `lite-${post.postId.toLowerCase()}`;
   const created = post.createdAt.toISOString();
 

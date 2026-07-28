@@ -89,9 +89,31 @@ type HolderBalance struct {
 // correctly; it exists so cmd/keeper's dry-run output (and any real
 // operator's logs) can explain WHY a FROZEN market's CloseIfDrained op keeps
 // coming back as a no-op instead of that looking like a bug.
+// Retired mirrors core.RetiredAt: has this market been Retired, regardless of
+// what Phase currently reads?
+//
+// DEFECT FIX 2026-07-28. Plan used to treat `Phase == StateFrozen` as
+// synonymous with "wind-down is open", on the stated reasoning that "there is
+// no separate on-chain WIND-DOWN state to check for". That is false.
+// core.Phase() is MAX(naturalPhase, retiredPhase), and core's own inWindDown
+// returns true from the RETIRE BLOCK onward — including the whole GraceBlocks
+// notice window, during which Phase still reads OVERDUE. So a retired market
+// is in wind-down and refundable while Plan, filtering on Frozen alone, saw
+// nothing to do and returned zero ops for up to GraceBlocks.
+//
+// Harmless but real: no holder was ever stuck (Refund, the self-serve pull,
+// is open the instant inWindDown is true, and any third party can push), so
+// the cost was at most delayed convenience — exactly the package's own
+// "at most delay, never harm" ceiling. It still contradicted the invariant
+// Plan claimed to implement, which is why it is fixed rather than documented.
+//
+// A caller that cannot cheaply read this may leave it false: Plan then
+// behaves exactly as it did before, i.e. it degrades to the old late-but-safe
+// behaviour rather than to anything incorrect.
 type MarketView struct {
 	Creator string
 	Phase   string // core.StateActive / StateOverdue / StateFrozen / StateClosed
+	Retired bool   // core.RetiredAt(...) — see doc above
 	Supply  *big.Int
 	Holders []HolderBalance
 }
