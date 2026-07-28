@@ -85,8 +85,24 @@ export const liteConfig = {
    * bootstrap refuses to use this in production (see publisher/hive-broadcaster).
    */
   publisherPostingWif: process.env.LITE_PUBLISHER_POSTING_WIF || '',
+  /**
+   * Publishing stops below this percentage of the account's resource credits, so a
+   * funding problem becomes a delay instead of a queue of permanently failed posts.
+   * The queue is durable — waiting costs nothing.
+   */
+  rcFloorPercent: Number(process.env.LITE_RC_FLOOR_PERCENT || 10),
+  /** Shared secret for the moderation endpoints (empty = endpoints disabled). */
+  moderatorToken: process.env.LITE_MODERATOR_TOKEN || '',
   /** Shared secret for the publisher drain endpoint (empty = endpoint disabled). */
   publisherToken: process.env.LITE_PUBLISHER_TOKEN || '',
+  /**
+   * How long a freshly created account's keys stay in the encrypted reveal outbox
+   * (migration 0015) before the ciphertext is dropped. This is a straight trade: too
+   * short and a user who closed the tab loses an account nobody can recover; too long
+   * and private keys sit at rest for no reason. Three days covers "I'll do it tomorrow"
+   * without becoming storage.
+   */
+  keyRevealTtlHours: Number(process.env.LITE_KEY_REVEAL_TTL_HOURS || 72),
   /**
    * Children per container post before rotating to a fresh one (decision
    * 2026-07-27: 1000, matching the ~1000-reply pattern observed on LeoThreads).

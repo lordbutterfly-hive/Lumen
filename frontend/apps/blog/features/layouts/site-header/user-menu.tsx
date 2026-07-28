@@ -19,6 +19,13 @@ import { User, LoginType } from '@smart-signer/types/common';
 import { useTranslation } from '@/blog/i18n/client';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@ui/components/tooltip';
 
+// TODO i18n — staged copy, same precedent as app-header's LABELS; move to
+// locales/*/common_blog.json with the rest of the Lumen copy.
+const LITE_LABELS = {
+  security: 'Sign-in & recovery',
+  upgrade: 'Upgrade to a Hive account'
+};
+
 // Helper function to get login method icon
 const getLoginMethodIcon = (loginType: LoginType) => {
   switch (loginType) {
@@ -113,6 +120,28 @@ const UserMenu = ({
               <span className="w-full">{t('navigation.user_menu.replies')}</span>
             </DropdownMenuItem>
           </Link>
+          {/*
+            The two doors a lite account needs and could not previously find. Both
+            pages existed with nothing anywhere linking to them — the same way /login
+            was unreachable for weeks. Lite-only: a full Hive account already has its
+            own keys and has nothing to upgrade to.
+          */}
+          {user.account_tier === 'lite' ? (
+            <>
+              <Link href="/security" data-testid="user-profile-menu-security-link">
+                <DropdownMenuItem className="cursor-pointer">
+                  <Icons.keyRound className="mr-2" />
+                  <span className="w-full">{LITE_LABELS.security}</span>
+                </DropdownMenuItem>
+              </Link>
+              <Link href="/upgrade" data-testid="user-profile-menu-upgrade-link">
+                <DropdownMenuItem className="cursor-pointer">
+                  <Icons.arrowUpCircle className="mr-2" />
+                  <span className="w-full">{LITE_LABELS.upgrade}</span>
+                </DropdownMenuItem>
+              </Link>
+            </>
+          ) : null}
           <DropdownMenuItem className="cursor-pointer">
             <ModeToggle>
               <Button

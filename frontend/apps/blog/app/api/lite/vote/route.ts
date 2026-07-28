@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
 import { guardWrite } from '@/blog/lib/lite/http/guard';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
+import { requireActiveLiteUser, requireLiteUser } from '@/blog/lib/lite/http/actor';
 import { enforceFollowRate } from '@/blog/lib/lite/antispam/rate-limit';
 import { castVote } from '@/blog/lib/lite/repositories/engagement-repository';
 
@@ -16,10 +17,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (blocked) return blocked;
 
   const session = await getLiteSession();
-  const user = session.user;
-  if (!user?.userId || user.account_tier !== 'lite') {
-    return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
-  }
 
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
   const author = body?.author;
@@ -29,6 +26,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'invalid_request' }, { status: 400 });
   }
   const weight = Math.max(-10000, Math.min(10000, Math.round(weightRaw)));
+
+  // Weight 0 clears an existing vote — a withdrawal, so a suspended account may
+  // still do it (see http/actor.ts). Casting a vote is an addition and may not.
+  const actor = weight === 0 ? await requireLiteUser(session.user) : await requireActiveLiteUser(session.user);
+  if (!actor.ok) return actor.response;
+  const user = actor.user;
 
   try {
     if (!(await enforceFollowRate(user.userId))) {

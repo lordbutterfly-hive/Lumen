@@ -33,7 +33,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             ? 503
             : result.code === 'already_upgraded'
               ? 409
-              : 400;
+              : // Suspended/banned: the session is valid, the account is not permitted.
+                result.code.startsWith('account_')
+                ? 403
+                : 400;
       return NextResponse.json(result, { status });
     }
     return NextResponse.json(result);

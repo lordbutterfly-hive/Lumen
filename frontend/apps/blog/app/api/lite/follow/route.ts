@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
 import { guardWrite } from '@/blog/lib/lite/http/guard';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
+import { requireActiveLiteUser } from '@/blog/lib/lite/http/actor';
 import { findUserByDisplayName } from '@/blog/lib/lite/repositories/user-repository';
 import { follow } from '@/blog/lib/lite/repositories/follow-repository';
 import { enforceFollowRate } from '@/blog/lib/lite/antispam/rate-limit';
@@ -14,10 +15,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (blocked) return blocked;
 
   const session = await getLiteSession();
-  const user = session.user;
-  if (!user?.userId || user.account_tier !== 'lite') {
-    return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
-  }
+  const actor = await requireActiveLiteUser(session.user);
+  if (!actor.ok) return actor.response;
+  const user = actor.user;
 
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
   const followeeName = body?.followeeName;

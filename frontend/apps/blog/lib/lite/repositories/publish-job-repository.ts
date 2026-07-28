@@ -219,3 +219,107 @@ export async function cancelPending(postId: string, reason: string): Promise<num
   );
   return rowCount ?? 0;
 }
+
+/**
+ * Park every not-yet-broadcast job belonging to one user (suspension/ban).
+ *
+ * 'holding' rather than 'rejected' because suspension has to be undoable: cancelled
+ * jobs would need re-deriving payloads to restore, and a reinstated user would
+ * silently lose whatever was queued. 'holding' was a legal status from migration
+ * 0003 that nothing ever wrote — this is its writer.
+ *
+ * A job already 'publishing' is left alone: it may be mid-broadcast, and stealing it
+ * would only produce a job the worker no longer owns.
+ */
+export async function holdPendingForUser(userId: string, reason: string): Promise<number> {
+  const { rowCount } = await query(
+    `UPDATE publish_job j SET status = 'holding', last_error = $2
+       FROM lumen_post p
+      WHERE p.post_id = j.post_id AND p.user_id = $1 AND j.status = 'pending'`,
+    [userId, reason]
+  );
+  return rowCount ?? 0;
+}
+
+/** Undo {@link holdPendingForUser}: parked jobs become due again immediately. */
+export async function releaseHeldForUser(userId: string): Promise<number> {
+  const { rowCount } = await query(
+    `UPDATE publish_job j SET status = 'pending', last_error = NULL, next_attempt_at = now()
+       FROM lumen_post p
+      WHERE p.post_id = j.post_id AND p.user_id = $1 AND j.status = 'holding'`,
+    [userId]
+  );
+  return rowCount ?? 0;
+}
+
+/**
+ * A single scan answering "is the outbox actually moving?".
+ *
+ * Nothing schedules the drain by default, so the failure mode this exists for is
+ * silence: posts accumulate in Postgres, no exception is raised anywhere, and the
+ * author sees a post that simply never appears on Hive. Counts alone do not show
+ * that — a queue with 5 pending jobs looks identical whether it is draining every
+ * minute or has been dead for a week. The ages are the signal.
+ *
+ * `lastPublishedAt` is derived from `claimed_at`, which is stamped moments before the
+ * broadcast rather than after it. It is a liveness heartbeat, not a precise publish
+ * time; nothing here should be used to answer "when exactly did this post go out".
+ */
+export interface QueueHealth {
+  pending: number;
+  holding: number;
+  publishing: number;
+  published: number;
+  failed: number;
+  rejected: number;
+  /** Age of the longest-waiting pending job. null when nothing is pending. */
+  oldestPendingAgeSeconds: number | null;
+  /** Heartbeat: how long since a job was last picked up and published. */
+  secondsSinceLastPublish: number | null;
+  /** Jobs a dead worker left mid-flight; reapStuck() recovers these. */
+  stuckPublishing: number;
+}
+
+export async function queueHealth(stuckAfterSeconds = 300): Promise<QueueHealth> {
+  const { rows } = await query<{
+    pending: string;
+    holding: string;
+    publishing: string;
+    published: string;
+    failed: string;
+    rejected: string;
+    oldest_pending_age: string | null;
+    seconds_since_last_publish: string | null;
+    stuck_publishing: string;
+  }>(
+    `SELECT
+       count(*) FILTER (WHERE status = 'pending')                              AS pending,
+       count(*) FILTER (WHERE status = 'holding')                              AS holding,
+       count(*) FILTER (WHERE status = 'publishing')                           AS publishing,
+       count(*) FILTER (WHERE status = 'published')                            AS published,
+       count(*) FILTER (WHERE status = 'failed')                               AS failed,
+       count(*) FILTER (WHERE status = 'rejected')                             AS rejected,
+       extract(epoch FROM now() - min(created_at) FILTER (WHERE status = 'pending'))
+                                                                               AS oldest_pending_age,
+       extract(epoch FROM now() - max(claimed_at) FILTER (WHERE status = 'published'))
+                                                                               AS seconds_since_last_publish,
+       count(*) FILTER (WHERE status = 'publishing'
+                          AND claimed_at < now() - make_interval(secs => $1))  AS stuck_publishing
+     FROM publish_job`,
+    [stuckAfterSeconds]
+  );
+  const r = rows[0];
+  const num = (v: string | null | undefined) => Number(v ?? 0);
+  const age = (v: string | null | undefined) => (v === null || v === undefined ? null : Math.round(Number(v)));
+  return {
+    pending: num(r?.pending),
+    holding: num(r?.holding),
+    publishing: num(r?.publishing),
+    published: num(r?.published),
+    failed: num(r?.failed),
+    rejected: num(r?.rejected),
+    oldestPendingAgeSeconds: age(r?.oldest_pending_age),
+    secondsSinceLastPublish: age(r?.seconds_since_last_publish),
+    stuckPublishing: num(r?.stuck_publishing)
+  };
+}

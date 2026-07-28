@@ -12,11 +12,15 @@ import HiveSigninPanel from './hive-signin-panel';
 
 // TODO i18n — staged copy while the redesign lands (mirrors app-header's LABELS
 // precedent); move to locales/*/common_blog.json once final.
+// A Lumen account posts to Hive but DECLINES all rewards (decision 2026-07-23) —
+// earning starts on your own Hive account, after upgrading. Promising payment on the
+// signup screen would be a straight lie to the person reading it, so the copy sells
+// the thing that is actually true: publishing to Hive with nothing to set up.
 const COPY = {
-  tagline: 'A calmer place to read, write, and get paid on Hive.',
+  tagline: 'A calmer place to read and write on Hive.',
   welcome: 'Welcome to Lumen',
   welcomeSub:
-    'Read, write, and get paid on Hive — the calm way. Start in seconds; upgrade to a full Hive account whenever you’re ready.',
+    'Publish to Hive without keys, wallets or setup. Start in seconds; upgrade to a full Hive account — and start earning on it — whenever you’re ready.',
   google: 'Continue with Google',
   orWallet: 'or connect a wallet',
   keychainTitle: 'Sign in with Hive Keychain',
@@ -30,10 +34,11 @@ const COPY = {
   nameRules: 'Lowercase letters, numbers and dashes. 3–16 characters.',
   create: 'Create my Lumen account',
   createReassure:
-    'Free. No keys to save. Your posts publish through Lumen with a small “via Lumen” mark, and you can upgrade to a full Hive account whenever you want.',
+    'Free. No keys to save. Your posts publish through Lumen with a small “via Lumen” mark and don’t collect rewards — upgrade to a full Hive account whenever you want, and your posting history comes with you.',
   back: 'Back',
   checking: 'Checking…',
-  googleSeam: 'Google sign-in is being set up — for now, use a Bitcoin wallet or a Hive account below.',
+  googleSeam:
+    'Google sign-in is being set up — for now, use a Bitcoin or Ethereum wallet, or a Hive account below.',
   captchaNeeded: 'Please complete the “I’m human” check first.'
 };
 

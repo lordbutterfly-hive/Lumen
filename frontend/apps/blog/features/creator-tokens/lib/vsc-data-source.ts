@@ -56,6 +56,7 @@ import {
   reserveCoverageRatio,
   settlementRateBaseUnits,
   spotRateBaseUnits,
+  splitFaceBaseUnits,
   type AskRateEstimate
 } from './contract-math';
 import {
@@ -468,7 +469,13 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     ]);
 
     const faceBaseUnits = toU64(state[kFace(creator)]);
-    const commissionHbd = baseUnitsToHuman(commissionOwedForBaseUnits(faceBaseUnits));
+    // ask.go splitFace (USER RULING 2026-07-27): the posted face is the
+    // buyer's TOTAL — commission is carved OUT of it, never drawn on top.
+    // tokenLegBaseUnits (never the raw face) is what creditsForAsk must
+    // price; see splitFaceBaseUnits's own doc (contract-math.ts) for the
+    // "posted 200 cost 224" autopsy this closes.
+    const { tokenLegBaseUnits, commissionBaseUnits } = splitFaceBaseUnits(faceBaseUnits);
+    const commissionHbd = baseUnitsToHuman(commissionBaseUnits);
     const base: Omit<Quote, 'rate' | 'creditsRequired' | 'creditsRequiredBaseUnits' | 'oracleStatus' | 'asOfBlock'> = {
       creator,
       faceHbd: baseUnitsToHuman(faceBaseUnits),
@@ -507,7 +514,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     if (settlement.rateBaseUnits === null) {
       return unpriced(settlement.status, head);
     }
-    const creditsRequiredBaseUnits = creditsForAskBaseUnits(faceBaseUnits, settlement.rateBaseUnits);
+    const creditsRequiredBaseUnits = creditsForAskBaseUnits(tokenLegBaseUnits, settlement.rateBaseUnits);
     return {
       ...base,
       rate: baseUnitsToHuman(settlement.rateBaseUnits),

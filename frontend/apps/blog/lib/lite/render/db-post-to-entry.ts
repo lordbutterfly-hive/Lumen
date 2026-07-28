@@ -5,8 +5,8 @@ import { LumenPost } from '../types';
  * Adapt a DB post to the bridge `Entry` shape the feed renders (spec §E.1).
  * Pre-publish, the author is the lite user's `display_name` so the card renders
  * and links (`/@{display_name}`) as their own — Lumen resolves that namespace
- * DB-first. Post-publish, chain entries are rewritten by the attribution overlay
- * instead (see render/attribution.ts).
+ * DB-first. Post-publish, the chain entry is fetched under its REAL author and the
+ * lite identity is laid over it (see render/lite-entry.ts).
  */
 export function dbPostToEntry(post: LumenPost): Entry {
   const author = post.displayNameSnapshot;

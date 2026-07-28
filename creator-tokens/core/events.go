@@ -113,6 +113,14 @@ import (
 // file today. The oldFace/oldCap/creditsBurned pre-reads two gaps above
 // describe are exactly what main.go's setFace/setCap/refundHolder
 // entrypoints actually do, correctly, right before their core call.
+//
+// SIX MORE, CLOSED 2026-07-28 (a prior gap-hunt's own finding, left for an
+// owner until now): main.go's init/pause/unpause/retire/withdrawTreasury/
+// claimTradeFees entrypoints used to be the last holdouts hand-building their
+// own sdk.Log JSON inline instead of calling a constructor here — see the
+// "contract-level events" section below for the six new EvInit/EvPaused/
+// EvUnpaused/EvRetired/EvTreasuryWithdrawn/EvTradeFeesClaimed constructors,
+// now wired into every one of those six entrypoints.
 const evSchemaVersion = 1
 
 // ---- shared encoding helpers -------------------------------------------
@@ -501,4 +509,120 @@ func EvOfferingUpdated(creator, actor string, block, id uint64, title string, ol
 func EvOfferingDeleted(creator, actor string, block, id uint64) string {
 	return evOpen("offeringDeleted", creator, actor, block) +
 		`,"offeringId":` + evU64(id) + `}`
+}
+
+// ---- contract-level events (2026-07-28, gap-hunt closure) ----------------
+//
+// Six more constructors for six contract/main.go entrypoints (init, pause,
+// unpause, retire, withdrawTreasury, claimTradeFees) that used to hand-build
+// their own sdk.Log(...) JSON inline with no constructor behind any of them —
+// a prior gap-hunt's own finding, left for an owner until now. Three of the
+// six (retired, treasuryWithdrawn, tradeFeesClaimed) are real, fund- or
+// state-relevant events ../indexer/events.go ALREADY has typed decode structs
+// for (RetiredEvent, TreasuryWithdrawnEvent, TradeFeesClaimedEvent — read
+// directly before writing any of this); a hand-built line could silently
+// drift out of sync with those structs with nothing to catch it. The other
+// three (init, paused, unpaused) have no indexer decode struct at all —
+// ../indexer/events.go's own file doc names them DELIBERATELY unrecognized
+// (init is not a core-module event; the global pause switch has no query
+// surface in that package) — so they exist here purely so this package's own
+// schema-pin tests can lock their shape down, not to feed a consumer.
+//
+// TWO envelope shapes below, not one, because these six do not all share the
+// per-market shape every event above this section uses:
+//
+//   - EvRetired fits the shared envelope above exactly (creator/actor/block)
+//     — Retire is an ordinary per-market action — and matches
+//     RetiredEvent{Creator,Actor,Block} field for field.
+//   - The other five are NOT per-market. init/pause/unpause are global
+//     contract-level actions with no creator at all; withdrawTreasury debits
+//     the one GLOBAL kTreasury() pot; claimTradeFees pays out kFeeBal(caller)
+//     — keyed by the CALLER, never by a separate creator argument (indexer's
+//     own doc: "Actor here doubles as the creator identifier"). Routing these
+//     through the shared four-field envelope would force a "creator" key onto
+//     a shape that never had one — for treasuryWithdrawn and tradeFeesClaimed
+//     specifically that would be a real deviation from the wire shape
+//     indexer/events.go's own structs already commit to (both declare
+//     Actor/Block/Amount ONLY; that package's own doc calls the omission on
+//     both deliberate). An extra ignored JSON key would not literally break
+//     decoding — encoding/json silently drops unrecognized fields — but it
+//     would contradict a design decision recorded in a file this package
+//     cannot edit, for no benefit, so these five use the actor-only envelope
+//     below instead. Every one of the six below renders BYTE-IDENTICAL JSON
+//     (same fields, same order) to the hand-built line it replaces — this is
+//     a pure refactor of the STRING BUILDER, not a wire-format change.
+
+// evOpenActor is the sibling of evOpen for events with NO creator concept: an
+// object opened with just "ev"/"v"/"actor" — same no-trailing-comma,
+// no-closing-brace convention, so callers append their own event-specific
+// fields (each prefixed with a leading comma) and close the object
+// themselves.
+func evOpenActor(name, actor string) string {
+	return `{"ev":"` + name + `","v":` + evU64(evSchemaVersion) +
+		`,"actor":"` + evJSONEscape(actor) + `"`
+}
+
+// EvRetired — Retire (market.go). Wire shape matches indexer/events.go's
+// RetiredEvent{Creator,Actor,Block} exactly (verified by direct read); no
+// money, no extra fields.
+func EvRetired(creator, actor string, block uint64) string {
+	return evOpen("retired", creator, actor, block) + `}`
+}
+
+// EvInit — the wasm wrapper's one-time owner-bootstrap log (contract/main.go's
+// `init` entrypoint). core has no Init/Owner concept of its own — kOwner() is
+// a documented key builder nothing in this package ever reads or writes — so
+// this event exists purely to give that log a typed, pinned constructor,
+// never to introduce a concept core doesn't otherwise have. The field is
+// named "owner", not "actor": this is the exact key the hand-built log it
+// replaces already used (contract/main.go's Init requires caller ==
+// contract.owner before this is ever reached, so the two names would carry an
+// identical value regardless) — kept rather than renamed for uniformity with
+// every other event in this file, because nothing decodes this event today
+// (../indexer/events.go's own file doc names "init" as deliberately
+// unrecognized) and a cosmetic rename has no consumer to benefit from it,
+// only a wire-format change to justify for nothing.
+func EvInit(owner string) string {
+	return `{"ev":"init","v":` + evU64(evSchemaVersion) +
+		`,"owner":"` + evJSONEscape(owner) + `"}`
+}
+
+// EvPaused / EvUnpaused — the wasm wrapper's owner-only global-pause toggle
+// (contract/main.go's `pause`/`unpause` entrypoints). Actor-only, matching
+// the hand-built logs they replace exactly (field set unchanged: "actor"
+// only, no block, no creator — see ../indexer/events.go's own file doc for
+// why the global pause switch has no per-market scope to carry).
+func EvPaused(actor string) string {
+	return evOpenActor("paused", actor) + `}`
+}
+
+func EvUnpaused(actor string) string {
+	return evOpenActor("unpaused", actor) + `}`
+}
+
+// EvTreasuryWithdrawn — WithdrawTreasury (read.go). Wire shape matches
+// indexer/events.go's TreasuryWithdrawnEvent{Actor,Block,Amount} exactly
+// (verified by direct read of that struct and its own doc: "Deliberately no
+// creator field... a GLOBAL kTreasury() debit, not scoped to any single
+// creator's market"). actor is the contract owner (WithdrawTreasury's own
+// caller==Owner guard); amount is exactly what core debited — WithdrawTreasury
+// returns the same value it validated and subtracted, never a caller-supplied
+// figure the wasm wrapper might otherwise have trusted instead.
+func EvTreasuryWithdrawn(actor string, block uint64, amount *big.Int) string {
+	return evOpenActor("treasuryWithdrawn", actor) +
+		`,"amount":"` + evMoney(amount) + `"` +
+		`,"block":` + evU64(block) + `}`
+}
+
+// EvTradeFeesClaimed — ClaimTradeFees (tradefee.go). Wire shape matches
+// indexer/events.go's TradeFeesClaimedEvent{Actor,Block,Amount} exactly
+// (verified by direct read: "No creator field on the wire either, but...
+// Actor here doubles as the creator identifier" — kFeeBal is always keyed by
+// the creator whose market accrued the fee, and ClaimTradeFees only ever pays
+// out the CALLER's own balance, so actor and that creator are always the same
+// account). amount is exactly what core debited from kFeeBal(actor).
+func EvTradeFeesClaimed(actor string, block uint64, amount *big.Int) string {
+	return evOpenActor("tradeFeesClaimed", actor) +
+		`,"amount":"` + evMoney(amount) + `"` +
+		`,"block":` + evU64(block) + `}`
 }

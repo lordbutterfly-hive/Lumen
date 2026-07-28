@@ -4,10 +4,13 @@ import {
   BLOCKS_PER_DAY,
   MAX_EXIT_TAX_BPS,
   TRADE_FEE_BPS,
+  creditsForAskBaseUnits,
   exitTaxBpsAt,
+  exitTaxOnBaseUnits,
   quoteBuyBaseUnits,
   quoteSellBaseUnits,
   spotRateBaseUnits,
+  splitFaceBaseUnits,
   tokensAffordableForBudget
 } from '../lib/contract-math';
 
@@ -95,6 +98,25 @@ export function exitFeeFraction(holdDays: number): number {
   return exitTaxBpsAt(heldBlocks) / 10_000;
 }
 
+/**
+ * The NET floor value a position of `tokens` would redeem for at a flat
+ * pro-rata wind-down, aged `holdDays` — refund.go's K2 tax carved off the
+ * GROSS pro-rata slice (tokens × the market's per-token floor), exactly
+ * matching lib/vsc-data-source.ts's readHolderPosition (refundNetBaseUnits).
+ *
+ * Showing the untaxed GROSS here overstates a fresh holder's payout by up to
+ * MaxExitTaxBps (20%) — the same defect refundNetBaseUnits's own doc warns
+ * against — because a wind-down redemption always carries the holder's own
+ * hold-time exit tax, never the bare reserve share.
+ */
+export function floorValueUsdNet(tokens: number, floorUsd: number, holdDays: number): number {
+  const heldBlocks = Math.max(0, Math.round(holdDays * BLOCKS_PER_DAY));
+  const taxBps = exitTaxBpsAt(heldBlocks);
+  const grossBaseUnits = usdToBaseUnits(tokens * floorUsd);
+  const taxBaseUnits = exitTaxOnBaseUnits(grossBaseUnits, taxBps);
+  return baseUnitsToUsd(grossBaseUnits - taxBaseUnits);
+}
+
 export interface BuyQuote {
   /** WHOLE tokens received — the curve mints integers only. */
   tokens: number;
@@ -115,11 +137,19 @@ export interface BuyQuote {
  * rather than inverting an approximation of it. `totalUsd` is therefore <=
  * `usdGross`, and it is that number, not the requested budget, that the buyer
  * must approve as their transfer.allow.
+ *
+ * Also never quotes past the market's own cap (buy.go's ErrCap: a buy that
+ * would push supply over the cap is refused outright, never partial-filled) —
+ * a quote that ignored the cap would show more tokens than a real buy could
+ * ever mint, and the execution side would then have to silently refuse the
+ * difference.
  */
 export function buyQuote(usdGross: number, m: TokenMarketDetail): BuyQuote {
   const supply = supplyTokens(m);
   const budgetBaseUnits = usdToBaseUnits(usdGross);
-  const tokens = tokensAffordableForBudget(supply, budgetBaseUnits);
+  const capHeadroom = Math.max(0, Math.floor(m.cap) - supply);
+  const affordable = tokensAffordableForBudget(supply, budgetBaseUnits);
+  const tokens = Math.min(affordable, capHeadroom);
   if (tokens <= 0) {
     return { tokens: 0, avgPrice: 0, priceAfter: baseUnitsToUsd(spotRateBaseUnits(supply)), tradeFeeUsd: 0, totalUsd: 0 };
   }
@@ -156,7 +186,12 @@ export interface SellQuote {
  */
 export function sellQuote(tokens: number, m: TokenMarketDetail, holdDays: number): SellQuote {
   const supply = supplyTokens(m);
-  const n = Math.max(0, Math.floor(Math.min(tokens, supply)));
+  // Clamp to the CALLER'S OWN balance too, never just total supply — sell.go
+  // checks bal >= ΔS before anything else ("insufficient credits"), so typing
+  // more than you hold must quote what you'd actually receive (proceeds for
+  // your real balance), never proceeds for an amount execution will refuse.
+  const held = Math.max(0, Math.floor(m.position?.tokens ?? 0));
+  const n = Math.max(0, Math.floor(Math.min(tokens, supply, held)));
   const heldBlocks = Math.max(0, Math.round(holdDays * BLOCKS_PER_DAY));
   const q = n > 0 ? quoteSellBaseUnits(supply, n, heldBlocks) : null;
   if (!q) return { curveProceedsUsd: 0, exitFeePct: exitFeeFraction(holdDays), exitFeeUsd: 0, tradeFeeUsd: 0, receiveUsd: 0 };
@@ -169,20 +204,45 @@ export function sellQuote(tokens: number, m: TokenMarketDetail, holdDays: number
   };
 }
 
+export interface ServiceQuote {
+  /** Whole tokens escrowed from the buyer's balance — priced off the TOKEN LEG only (88% of the posted face), never the full posted price. */
+  tokens: number;
+  /** The 12% platform commission — a SEPARATE HBD payment, never tokens. */
+  commissionUsd: number;
+  /** The token leg's USD value + commissionUsd — reconstructs the posted `usd` face, up to the floor/ceil residue. */
+  totalUsd: number;
+}
+
 /**
- * Tokens needed for a USD-priced service. ask.go's creditsForAsk is
- * ceil(face/rate) — CEIL, and the rounding favours the reserve, so a client
- * that floors (or that divides floats) quotes the buyer fewer tokens than the
- * chain will actually escrow and the ask trips their own maxCredits cap.
+ * The true cost of a USD-priced service (ask.go splitFace + creditsForAsk,
+ * USER RULING 2026-07-27): the posted `usd` is the buyer's TOTAL, not a
+ * token-only price. 12% is carved off as a SEPARATE HBD commission leg
+ * (splitFaceBaseUnits); only the remaining 88% (the token leg) is what's
+ * actually escrowed in tokens, ceil-divided by the live price — CEIL, and the
+ * rounding favours the reserve, so a client that floors (or that divides
+ * floats) quotes the buyer fewer tokens than the chain will actually escrow
+ * and the ask trips their own maxCredits cap.
+ *
+ * Replaces the old serviceTokens(usd, priceUsd), which priced the FULL posted
+ * amount in tokens while the commission was ALSO drawn as a separate HBD
+ * leg — a posted "200" cost the buyer 224 with no line item ever showing the
+ * extra 24 (splitFaceBaseUnits's own doc has the full autopsy).
  *
  * `priceUsd` here stands in for the settlement rate. The REAL rate is
  * min(TWAP_short, TWAP_long, spot) and the contract REFUSES when it cannot
  * price safely — a live surface must take the rate from the contract's own
  * `quote` entrypoint rather than from a displayed spot price.
  */
-export function serviceTokens(usd: number, priceUsd: number): number {
-  if (!Number.isFinite(usd) || !Number.isFinite(priceUsd) || usd <= 0 || priceUsd <= 0) return 0;
+export function serviceQuote(usd: number, priceUsd: number): ServiceQuote {
+  if (!Number.isFinite(usd) || !Number.isFinite(priceUsd) || usd <= 0 || priceUsd <= 0) {
+    return { tokens: 0, commissionUsd: 0, totalUsd: 0 };
+  }
   const faceBaseUnits = usdToBaseUnits(usd);
+  const { tokenLegBaseUnits, commissionBaseUnits } = splitFaceBaseUnits(faceBaseUnits);
   const rateBaseUnits = Math.max(1, Math.round(priceUsd * HBD_PER_USD * SCALE));
-  return Math.ceil(faceBaseUnits / rateBaseUnits);
+  return {
+    tokens: creditsForAskBaseUnits(tokenLegBaseUnits, rateBaseUnits),
+    commissionUsd: baseUnitsToUsd(commissionBaseUnits),
+    totalUsd: baseUnitsToUsd(tokenLegBaseUnits + commissionBaseUnits)
+  };
 }

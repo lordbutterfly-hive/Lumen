@@ -55,3 +55,52 @@ export async function unreblog(rebloggerUserId: string, author: string, permlink
     [rebloggerUserId, author, permlink]
   );
 }
+
+/**
+ * What this user did to this post, plus the Lumen-side totals.
+ *
+ * These tables were write-only until now, which is why a lite vote survived exactly
+ * as long as the react-query cache: the button read `active_votes` and
+ * `getRebloggedBy` from Hivemind, where a Lumen-local vote does not and cannot exist,
+ * so a reload showed the post as never voted. One statement rather than four, because
+ * the vote button asks per post and a feed asks per card.
+ */
+export interface LiteEngagement {
+  /** The user's own active vote weight (-10000..10000), or null if they have none. */
+  weight: number | null;
+  reblogged: boolean;
+  /** Lumen-local totals — deliberately separate from the post's on-chain counts. */
+  voteCount: number;
+  reblogCount: number;
+}
+
+export async function getEngagement(
+  userId: string | null,
+  author: string,
+  permlink: string
+): Promise<LiteEngagement> {
+  const { rows } = await query<{
+    weight: number | null;
+    reblogged: boolean;
+    vote_count: string;
+    reblog_count: string;
+  }>(
+    `SELECT
+       (SELECT weight FROM lumen_vote
+         WHERE voter_user_id = $1 AND target_author = $2 AND target_permlink = $3 AND active)      AS weight,
+       EXISTS (SELECT 1 FROM lumen_reblog
+         WHERE reblogger_user_id = $1 AND target_author = $2 AND target_permlink = $3 AND active)  AS reblogged,
+       (SELECT count(*) FROM lumen_vote
+         WHERE target_author = $2 AND target_permlink = $3 AND active)                             AS vote_count,
+       (SELECT count(*) FROM lumen_reblog
+         WHERE target_author = $2 AND target_permlink = $3 AND active)                             AS reblog_count`,
+    [userId, author, permlink]
+  );
+  const row = rows[0];
+  return {
+    weight: row?.weight ?? null,
+    reblogged: Boolean(row?.reblogged),
+    voteCount: Number(row?.vote_count ?? 0),
+    reblogCount: Number(row?.reblog_count ?? 0)
+  };
+}

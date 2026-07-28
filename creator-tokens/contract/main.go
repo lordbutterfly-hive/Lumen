@@ -415,19 +415,17 @@ func Init(a *string) *string {
 		return nil
 	}
 	store.Set("owner", caller)
-	// GAP (hunted, not closed here — see the handoff report): this is a
-	// hand-built sdk.Log, not a core.Ev* constructor call, exactly the class
-	// of defect events.go's own file doc warns about ("no schema test can
-	// pin them"). No EvInit exists in core/events.go to call instead — adding
-	// one is a core/ change, outside this fix's ownership (contract/**,
-	// cmd/**, keeper/** only). indexer/events.go's ParseEvent already
-	// documents "init" as deliberately out of its twelve tracked event kinds
-	// (the owner-bootstrap log carries no fund-relevant state), so this one
-	// is LOW severity by design — unlike treasuryWithdrawn/tradeFeesClaimed
-	// below, which move real money and are NOT tracked by the indexer today.
-	// "v":1 added for schema-version consistency with every other event this
-	// file emits, even without a typed constructor behind it.
-	sdk.Log(`{"ev":"init","v":1,"owner":"` + jsonEscape(caller) + `"}`)
+	// GAP CLOSED (2026-07-28): this used to be a hand-built sdk.Log, not a
+	// core.Ev* constructor call — exactly the class of defect events.go's own
+	// file doc warns about ("no schema test can pin them"). core.EvInit now
+	// exists (core/events.go) and is pinned by core/schema_contract_test.go's
+	// TestSchemaContract_Init; the emitted JSON is byte-identical to what this
+	// hand-built line used to produce. indexer/events.go's ParseEvent still
+	// documents "init" as deliberately out of its tracked event kinds (the
+	// owner-bootstrap log carries no fund-relevant state), so this remains
+	// LOW severity by design — unlike treasuryWithdrawn/tradeFeesClaimed
+	// below, which move real money and ARE tracked by the indexer.
+	sdk.Log(core.EvInit(caller))
 	return strPtr(`{"owner":"` + jsonEscape(caller) + `"}`)
 }
 
@@ -468,11 +466,11 @@ func Pause(a *string) *string {
 		return nil
 	}
 	core.SetPaused(store, true)
-	// GAP (hunted, not closed here — see Init's identical note and the
-	// handoff report): hand-built sdk.Log, no EvPaused constructor exists in
-	// core/events.go to call instead (a core/ change, outside this fix's
-	// ownership). "v":1 added for schema-version consistency.
-	sdk.Log(`{"ev":"paused","v":1,"actor":"` + jsonEscape(caller) + `"}`)
+	// GAP CLOSED (2026-07-28): hand-built sdk.Log replaced by core.EvPaused
+	// (core/events.go), pinned by TestSchemaContract_Paused — see Init's
+	// identical note above. Emitted JSON is byte-identical to the line it
+	// replaces.
+	sdk.Log(core.EvPaused(caller))
 	return strPtr(`{"paused":true}`)
 }
 
@@ -495,11 +493,11 @@ func Unpause(a *string) *string {
 		return nil
 	}
 	core.SetPaused(store, false)
-	// GAP (hunted, not closed here — see Init's identical note and the
-	// handoff report): hand-built sdk.Log, no EvUnpaused constructor exists
-	// in core/events.go to call instead (a core/ change, outside this fix's
-	// ownership). "v":1 added for schema-version consistency.
-	sdk.Log(`{"ev":"unpaused","v":1,"actor":"` + jsonEscape(caller) + `"}`)
+	// GAP CLOSED (2026-07-28): hand-built sdk.Log replaced by core.EvUnpaused
+	// (core/events.go), pinned by TestSchemaContract_Unpaused — see Init's
+	// identical note above. Emitted JSON is byte-identical to the line it
+	// replaces.
+	sdk.Log(core.EvUnpaused(caller))
 	return strPtr(`{"paused":false}`)
 }
 
@@ -569,13 +567,26 @@ func Register(a *string) *string {
 		sdk.HiveDraw(nativeInt64(res.TotalDue), sdk.AssetHbd) // state-first, then draw
 	}
 	// feePaid is logged as ZERO, structurally and forever — registration is
-	// free. The event field is kept for schema stability (events.go still
-	// carries it; the launch buy itself needs the buy/sell event schema that
-	// is a Wave-D item, flagged in the handoff).
+	// free. The event field is kept for schema stability (every other
+	// EvRegistered call site in this file still carries it).
 	sdk.Log(core.EvRegistered(caller, caller, block, face, capVal, big.NewInt(0)))
 	minted := "0"
 	if res.FirstBuy != nil {
 		minted = res.FirstBuy.Minted.String()
+		// GAP CLOSED (2026-07-28): the atomic first buy moves real money and
+		// real tokens — core.RegisterWithFirstBuy calls core.Buy internally,
+		// which mutates kReserve, kFeeBal(creator) and kBal(creator,creator)
+		// (buy.go) — but until now only EvRegistered was ever logged here, so
+		// a creator's own initial holding was invisible to any indexer
+		// forever, and that indexer's balance for the creator was wrong from
+		// the very first block. res.FirstBuy is the SAME *core.BuyResult an
+		// ordinary Buy would have returned (launch.go's own doc: "so the
+		// wrapper's event log and the indexer can treat a launch buy as what
+		// it is — a buy"), so this logs the ordinary `bought` event, with the
+		// ordinary fields, through the SAME EvBought constructor the `buy`
+		// entrypoint below uses — no special-cased shape for an indexer to
+		// learn.
+		sdk.Log(core.EvBought(caller, caller, block, res.FirstBuy.Minted, res.FirstBuy.Cost, res.FirstBuy.Fee, res.FirstBuy.TotalDue))
 	}
 	return strPtr(`{"creator":"` + jsonEscape(caller) + `","face":` + i64s(face) + `,"cap":` + i64s(capVal) +
 		`,"firstBuyMinted":"` + minted + `","totalDue":"` + res.TotalDue.String() + `"}`)
@@ -1032,10 +1043,20 @@ func Reclaim(a *string) *string {
 // trapped (refund.go's rail reconciliation carries the case proof). An
 // ungated pro-rata while buys are live would be a tax-and-fee bypass AND
 // would strand excess in the reserve for a fresh buyer to dilute into.
-// NOTE the `sell` entrypoint is still UNBUILT (see the deleted-`prepay`
-// note above): until Wave D wires `buy`/`sell`, an ACTIVE-phase holder has
-// NO on-chain exit at the wrapper layer. That is a WRAPPER gap, not a core
-// one, and it is a hard blocker for shipping.
+//
+// STALE-CLAIM CORRECTION (2026-07-28): this paragraph used to end here with
+// "NOTE the `sell` entrypoint is still UNBUILT ... until Wave D wires
+// `buy`/`sell`, an ACTIVE-phase holder has NO on-chain exit at the wrapper
+// layer. That is a WRAPPER gap ... and it is a hard blocker for shipping."
+// That is no longer true and directly contradicted the paragraph's own
+// opening sentence above it even at the time it was written. Wave D shipped:
+// both `buy` (go:wasmexport buy) and `sell` (go:wasmexport sell) are fully
+// implemented below, CEI-ordered (state mutated first, HBD moved second) and
+// event-logged (EvBought/EvSold) exactly like every other fund-moving
+// entrypoint in this file. The rail reconciliation above is the CURRENT,
+// accurate picture: `sell` is the live ACTIVE/OVERDUE exit, `refund` here is
+// the FROZEN/CLOSED exit, and no wrapper-layer gap remains — every phase has
+// exactly one open, reachable rail today, not merely in this comment.
 //
 //go:wasmexport refund
 func Refund(a *string) *string {
@@ -1341,28 +1362,17 @@ func WithdrawTreasury(a *string) *string {
 		return nil
 	}
 	sdk.HiveTransfer(sdk.Address(caller), nativeInt64(paid), sdk.AssetHbd) // THEN pay the owner
-	// GAP (hunted, not closed here — see the handoff report). This is a
-	// hand-built sdk.Log, not a core.Ev* constructor call — and unlike
-	// init/pause/unpause above, this one is NOT low severity: it moves real
-	// HBD off the ONE pot (kTreasury) every other treasury-crediting event
-	// (registered.feePaid, renewed.paid, answered.commissionHbd, sold.tax)
-	// feeds into indexer/index.go's Index.TreasuryHbd(), and indexer/events.go
-	// has no KindTreasuryWithdrawn to recognize it — this event falls into
-	// Stats.Unknown today, exactly like `retired` did before the indexer added
-	// KindRetired (indexer/events.go's own KindRetired doc), except nobody has
-	// done the equivalent fix for this one yet. Consequently
-	// Index.TreasuryHbd() is monotonically-increasing-only: a real withdrawal
-	// silently vanishes from its running total, so it can OVERSTATE the true
-	// on-chain treasury balance by every unit ever withdrawn — the exact
-	// "indexer can never serve as a solvency cross-check" gap M4 was written
-	// to close, reopened here. index.go's own TreasuryHbd doc already flags
-	// this by name ("NOTE... whoever picks up the treasury-debit side next").
-	// The real fix needs core/events.go (a new EvTreasuryWithdrawn
-	// constructor) and indexer/events.go+index.go (KindTreasuryWithdrawn,
-	// folded as a SUBTRACTION from treasuryHbd) — both outside this fix's
-	// ownership (contract/**, cmd/**, keeper/** only). "v":1 added here for
-	// schema-version consistency in the meantime.
-	sdk.Log(`{"ev":"treasuryWithdrawn","v":1,"actor":"` + jsonEscape(caller) + `","amount":"` + bigStr(paid) + `","block":` + u64s(block) + `}`)
+	// GAP CLOSED (2026-07-28): hand-built sdk.Log replaced by
+	// core.EvTreasuryWithdrawn (core/events.go), pinned by
+	// TestSchemaContract_TreasuryWithdrawn. Emitted JSON is byte-identical to
+	// the line it replaces. indexer/events.go+index.go already recognize this
+	// exact shape (KindTreasuryWithdrawn, TreasuryWithdrawnEvent, folded as a
+	// SUBTRACTION from treasuryHbd — that half of this gap was fixed on the
+	// indexer side already) — the only piece missing was a typed constructor
+	// on this side to pin against, which this closes. That file's own
+	// KindTreasuryWithdrawn doc comment ("NOT one of core/events.go's Ev*
+	// constructors") is now STALE and outside this fix's ownership to correct.
+	sdk.Log(core.EvTreasuryWithdrawn(caller, block, paid))
 	return strPtr(`{"owner":"` + jsonEscape(caller) + `","amount":"` + bigStr(paid) + `"}`)
 }
 
@@ -1407,19 +1417,17 @@ func ClaimTradeFees(a *string) *string {
 	}
 	if paid != nil && paid.Sign() > 0 {
 		sdk.HiveTransfer(sdk.Address(caller), nativeInt64(paid), sdk.AssetHbd) // THEN pay the creator their claimed fees
-		// GAP (hunted, not closed here — see withdrawTreasury's identical note
-		// and the handoff report): hand-built sdk.Log, no EvTradeFeesClaimed
-		// constructor exists in core/events.go, and indexer/events.go has no
-		// KindTradeFeesClaimed either — this event falls into Stats.Unknown
-		// today (indexer/index.go's TreasuryHbd doc names this exact gap: "same
-		// as `tradeFeesClaimed`, ClaimTradeFees's own hand-built log"). This one
-		// moves the CREATOR's own pull-claimable trade-fee half
-		// (kFeeBal(account), RULING F8/K2's 50/50 split), not the global
-		// treasury, so it does not corrupt Index.TreasuryHbd() the way an
-		// unrecognized treasuryWithdrawn does — but it is still a real HBD
-		// outflow with zero audit trail in the event stream. "v":1 added for
-		// schema-version consistency.
-		sdk.Log(`{"ev":"tradeFeesClaimed","v":1,"actor":"` + jsonEscape(caller) + `","amount":"` + bigStr(paid) + `","block":` + u64s(block) + `}`)
+		// GAP CLOSED (2026-07-28): hand-built sdk.Log replaced by
+		// core.EvTradeFeesClaimed (core/events.go), pinned by
+		// TestSchemaContract_TradeFeesClaimed. Emitted JSON is byte-identical to
+		// the line it replaces. indexer/events.go+index.go already recognize
+		// this exact shape (KindTradeFeesClaimed, TradeFeesClaimedEvent,
+		// audit-only fold that deliberately never touches ix.treasuryHbd — that
+		// half of this gap was fixed on the indexer side already) — the only
+		// piece missing was a typed constructor on this side to pin against,
+		// which this closes. That file's own KindTradeFeesClaimed doc is
+		// unaffected (it never claimed core had a constructor).
+		sdk.Log(core.EvTradeFeesClaimed(caller, block, paid))
 	}
 	return strPtr(`{"account":"` + jsonEscape(caller) + `","amount":"` + bigStr(paid) + `"}`)
 }
@@ -1461,19 +1469,16 @@ func Retire(a *string) *string {
 		handleErr(err)
 		return nil
 	}
-	// GAP (hunted, partially closed elsewhere — see the handoff report): still
-	// a hand-built sdk.Log, no EvRetired constructor exists in core/events.go
-	// to call instead (a core/ change, outside this fix's ownership). UNLIKE
-	// init/pause/unpause/treasuryWithdrawn/tradeFeesClaimed above, this one IS
-	// already recognized on the read side — indexer/events.go's KindRetired
-	// explicitly decodes this exact shape as a documented, deliberate
-	// exception (its own doc: "NOT one of core/events.go's Ev* constructors
-	// ... Recognizing it here is still correct and necessary"). "v":1 added
-	// for schema-version consistency; harmless to the indexer's decode (its
-	// RetiredEvent struct has no "v" field of its own, so this is simply
-	// captured in the generic envelope and ignored, exactly like every other
-	// field this event doesn't declare).
-	sdk.Log(`{"ev":"retired","v":1,"creator":"` + jsonEscape(creator) + `","actor":"` + jsonEscape(caller) + `","block":` + u64s(block) + `}`)
+	// GAP CLOSED (2026-07-28): hand-built sdk.Log replaced by core.EvRetired
+	// (core/events.go), pinned by TestSchemaContract_Retired. Emitted JSON is
+	// byte-identical to the line it replaces, so indexer/events.go's
+	// KindRetired decode (RetiredEvent{Creator,Actor,Block}) is unaffected —
+	// though that file's own KindRetired doc comment ("NOT one of
+	// core/events.go's Ev* constructors ... there is no EvRetired to
+	// exercise") is now STALE and outside this fix's ownership to correct
+	// (indexer/** is not touched here); flagged for whoever owns that file
+	// next.
+	sdk.Log(core.EvRetired(creator, caller, block))
 	return strPtr(`{"creator":"` + jsonEscape(creator) + `"}`)
 }
 

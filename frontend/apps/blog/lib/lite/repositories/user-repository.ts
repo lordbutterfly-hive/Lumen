@@ -92,3 +92,28 @@ export async function findUsersByHiveAccountNames(names: string[]): Promise<Lume
   ]);
   return rows.map(mapUser);
 }
+
+/**
+ * Set an account's status. `suspended`/`banned` were valid values in the schema that
+ * NOTHING ever wrote — the moderation model existed on paper only.
+ *
+ * Suspension is intentionally reversible (back to 'active') and always records a
+ * reason: a moderation action nobody can explain later is not a moderation action.
+ */
+export async function setUserStatus(
+  userId: string,
+  status: 'active' | 'suspended' | 'banned',
+  reason: string | null
+): Promise<LumenUser | null> {
+  const res = await query<UserRow>(
+    `UPDATE lumen_user
+        SET status = $2,
+            suspended_reason = CASE WHEN $2 = 'active' THEN NULL ELSE $3 END,
+            suspended_at = CASE WHEN $2 = 'active' THEN NULL ELSE COALESCE(suspended_at, now()) END,
+            updated_at = now()
+      WHERE user_id = $1
+      RETURNING *`,
+    [userId, status, reason]
+  );
+  return res.rows[0] ? mapUser(res.rows[0]) : null;
+}

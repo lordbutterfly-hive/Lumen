@@ -3,7 +3,8 @@ import { getLogger } from '@ui/lib/logging';
 import { guardWrite } from '@/blog/lib/lite/http/guard';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { createChallenge } from '@/blog/lib/lite/repositories/challenge-repository';
-import { bindMessage } from '@/blog/lib/lite/auth/btc-verify';
+import { bindMessage as btcBindMessage } from '@/blog/lib/lite/auth/btc-verify';
+import { bindMessage as evmBindMessage } from '@/blog/lib/lite/auth/evm-verify';
 
 const logger = getLogger('app');
 
@@ -32,7 +33,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       userId: user.userId,
       ttlSeconds: 300
     });
-    return NextResponse.json({ nonce: challenge.nonce, message: bindMessage(challenge.nonce) });
+    // BTC and EVM sign DIFFERENT bind messages, and /bind verifies against the one
+    // for the method it was given. Returning only the BTC text made an EVM bind
+    // impossible to complete — the signature verified against the wrong string and
+    // came back `bad_signature` with nothing to indicate why. Hand back both and let
+    // the caller pick by chain. `message` stays as the BTC text for existing callers.
+    return NextResponse.json({
+      nonce: challenge.nonce,
+      message: btcBindMessage(challenge.nonce),
+      messages: {
+        btc: btcBindMessage(challenge.nonce),
+        evm: evmBindMessage(challenge.nonce)
+      }
+    });
   } catch (error) {
     logger.error(error, 'Lite step-up challenge issuance failed');
     return NextResponse.json({ error: 'server_error' }, { status: 500 });

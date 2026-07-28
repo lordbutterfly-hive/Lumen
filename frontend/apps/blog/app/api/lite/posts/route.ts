@@ -19,6 +19,20 @@ function parseParentRef(v: unknown): ParentRef | undefined {
 }
 
 /**
+ * Map an intake error code onto HTTP.
+ *
+ * 403 for the account states (suspended, banned, upgraded, moderated) rather than
+ * 401: the session is genuinely valid, so a 401 would send the client into a
+ * re-login loop that can never resolve the problem.
+ */
+function httpStatusFor(code: string): number {
+  if (code === 'unauthorized') return 401;
+  if (code.startsWith('account_') || code === 'moderated') return 403;
+  if (code.endsWith('rate_limited')) return 429;
+  return 400;
+}
+
+/**
  * POST /api/lite/posts — intake for NORMAL and ADVANCED lite posts (spec §C).
  * Identity comes from the session, never the client body.
  */
@@ -45,9 +59,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const result = await createLitePost(session.user, request);
     if (result.status === 'error') {
-      const status =
-        result.code === 'unauthorized' ? 401 : result.code === 'rate_limited' ? 429 : 400;
-      return NextResponse.json(result, { status });
+      return NextResponse.json(result, { status: httpStatusFor(result.code) });
     }
     return NextResponse.json(
       { status: 'ok', post: result.post, entry: dbPostToEntry(result.post) },

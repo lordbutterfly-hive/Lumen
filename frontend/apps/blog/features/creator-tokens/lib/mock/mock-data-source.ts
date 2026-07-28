@@ -34,7 +34,6 @@ import {
   baseUnitsToHuman,
   blockToEpochMs,
   canInflowOpen,
-  commissionOwedForBaseUnits,
   creditsForAskBaseUnits,
   deriveAskStatus,
   deriveFaceBandBaseUnits,
@@ -51,6 +50,7 @@ import {
   reserveCoverageRatio,
   settlementRateBaseUnits,
   spotRateBaseUnits,
+  splitFaceBaseUnits,
   tradeFeeOn,
   type AskRateEstimate
 } from '../contract-math';
@@ -352,7 +352,12 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
     const seed = this.seed(creator);
     const head = mockHeadBlock();
     const faceBaseUnits = seed?.faceBaseUnits ?? 0;
-    const commissionHbd = baseUnitsToHuman(commissionOwedForBaseUnits(faceBaseUnits));
+    // ask.go splitFace (USER RULING 2026-07-27), mirrors
+    // VscCreatorTokensDataSource.readQuote()'s identical fix: the posted face
+    // is the buyer's TOTAL, so the token leg (tokenLegBaseUnits) — never the
+    // raw face — is what creditsForAsk must price below.
+    const { tokenLegBaseUnits, commissionBaseUnits } = splitFaceBaseUnits(faceBaseUnits);
+    const commissionHbd = baseUnitsToHuman(commissionBaseUnits);
     const unpriced = (oracleStatus: Quote['oracleStatus']): Quote => ({
       creator,
       faceHbd: baseUnitsToHuman(faceBaseUnits),
@@ -384,7 +389,7 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
     if (settlement.rateBaseUnits === null) {
       return unpriced(settlement.status);
     }
-    const creditsRequiredBaseUnits = creditsForAskBaseUnits(faceBaseUnits, settlement.rateBaseUnits);
+    const creditsRequiredBaseUnits = creditsForAskBaseUnits(tokenLegBaseUnits, settlement.rateBaseUnits);
     return {
       creator,
       faceHbd: baseUnitsToHuman(faceBaseUnits),

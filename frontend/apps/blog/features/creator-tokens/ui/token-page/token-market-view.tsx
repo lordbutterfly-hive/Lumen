@@ -3,7 +3,7 @@
 import { FC, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import type { Service } from '../../market/token-detail';
-import { serviceTokens } from '../../market/curve';
+import { serviceQuote } from '../../market/curve';
 import { useTokenMarket, useIsFollowingCreator, toggleCreatorFollow, transferTokens } from '../../market/store';
 import { usdPrice, usdWhole } from '../../market/format';
 import TokenShell from '../token-shell';
@@ -29,10 +29,17 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
   const searchParams = useSearchParams();
 
   // Deep-link an action from the Your-Tokens row buttons (?a=buy|sell|spend|send).
+  // buy.go/ask.go RequireInflowOpen (RULING K3): a winding-down market refuses
+  // every new inflow, so a deep link must not silently open Buy/Ask around the
+  // gate the main Buy button and the Services CTAs already close. Sell/Send
+  // are outflows and stay open in every state (the rail-switch doc).
   useEffect(() => {
     const a = searchParams?.get('a');
-    if (a === 'buy' || a === 'sell' || a === 'send') setDialog(a);
-    else if (a === 'spend' && market.services[0]) {
+    if (a === 'buy') {
+      if (!market.windingDown) setDialog('buy');
+    } else if (a === 'sell' || a === 'send') {
+      setDialog(a);
+    } else if (a === 'spend' && market.services[0] && !market.windingDown) {
       setService(market.services[0]);
       setDialog('ask');
     }
@@ -103,6 +110,16 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
           {following ? 'Following' : 'Follow'}
         </button>
       </div>
+
+      {/* Wind-down banner (design brief ui-prompts/tokens/1-TOKEN-PAGE.md,
+          WIND-DOWN/FROZEN state): tells a visitor WHY buying/asking is closed
+          and that selling stays open, rather than leaving the disabled Buy
+          button to speak for itself. */}
+      {market.windingDown ? (
+        <div className="mb-4 rounded-[14px] border border-[#f6e2c4] bg-[#fdf6ec] px-5 py-3.5 text-[13.5px] font-semibold text-[#b45309]">
+          This creator’s market is winding down — buying and new asks are closed; sell/refund at the floor stays open.
+        </div>
+      ) : null}
 
       {/* 2. Token market — centerpiece */}
       <div className="mb-4 rounded-[20px] border border-[#ebebeb] bg-white p-[26px] shadow-[0_1px_2px_rgba(20,18,10,0.03)]">
@@ -224,23 +241,30 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
               </div>
               <div className="flex-shrink-0 text-right">
                 <div className="text-[15px] font-bold tabular-nums text-[#161511]">{usdWhole(sv.usd)}</div>
-                <div className="text-xs tabular-nums text-[#9ca3af]">≈ {tok(serviceTokens(sv.usd, market.priceUsd))} tokens</div>
+                {/* The TOKEN LEG only (88% of the posted price) — the other 12% is a
+                    separate HBD commission (serviceQuote/ask.go splitFace, USER RULING
+                    2026-07-27), never itself paid in tokens. */}
+                <div className="text-xs tabular-nums text-[#9ca3af]">≈ {tok(serviceQuote(sv.usd, market.priceUsd).tokens)} tokens</div>
               </div>
-              {sv.status === 'live' ? (
+              {sv.status !== 'live' ? (
+                <span className="flex-shrink-0 rounded-full bg-[#f1f3f5] px-3 py-1.5 text-[12px] font-semibold text-[#9ca3af]">Rolling out</span>
+              ) : market.windingDown ? (
+                // ask.go Ask -> RequireInflowOpen: closed for the whole wind-down, the same gate Buy is behind.
+                <span className="flex-shrink-0 rounded-full bg-[#fdf6ec] px-3 py-1.5 text-[12px] font-semibold text-[#b45309]">Winding down</span>
+              ) : (
                 <button
                   onClick={() => openAsk(sv)}
                   className="flex-shrink-0 rounded-[11px] bg-[#1a1a17] px-[18px] py-2.5 text-[13.5px] font-semibold text-white hover:bg-black"
                 >
                   {sv.cta}
                 </button>
-              ) : (
-                <span className="flex-shrink-0 rounded-full bg-[#f1f3f5] px-3 py-1.5 text-[12px] font-semibold text-[#9ca3af]">Rolling out</span>
               )}
             </div>
           ))}
         </div>
         <p className="font-serif text-[13px] leading-[1.55] text-[#6b7280]">
-          Prices are set in dollars. As the token’s price rises, a service costs fewer tokens.
+          Prices are set in dollars — the total you’ll pay. 12% goes to Lumen as a separate platform commission, paid in
+          HBD; the rest is spent in tokens, and as the token’s price rises a service costs fewer of them.
         </p>
       </div>
 
@@ -258,9 +282,12 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
                 Sell
               </button>
               <button onClick={() => setDialog('send')} className="rounded-[10px] border border-[#e4e6e9] bg-white px-4 py-2.5 text-[13px] font-semibold text-[#3f4650] hover:bg-[#f1f3f5]">Send</button>
-              <button onClick={() => openAsk(market.services[0])} className="rounded-[10px] bg-[#1a1a17] px-4 py-2.5 text-[13px] font-semibold text-white hover:bg-black">
-                Spend
-              </button>
+              {/* ask.go Ask -> RequireInflowOpen: closed for the whole wind-down, same gate as Buy. */}
+              {!market.windingDown ? (
+                <button onClick={() => openAsk(market.services[0])} className="rounded-[10px] bg-[#1a1a17] px-4 py-2.5 text-[13px] font-semibold text-white hover:bg-black">
+                  Spend
+                </button>
+              ) : null}
             </div>
           </div>
         </div>

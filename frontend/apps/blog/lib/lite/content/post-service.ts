@@ -4,6 +4,7 @@ import { BeneficiaryRoute, LumenPost, ParentRef, PostTier, PublishPayload } from
 import * as posts from '../repositories/post-repository';
 import * as publishJobs from '../repositories/publish-job-repository';
 import * as rateLimit from '../antispam/rate-limit';
+import { checkLiteActor } from '../auth/account-status';
 import { buildPermlink } from '../publisher/permlink';
 import { reserveContainerParent } from '../publisher/container';
 import { ulid } from '../ids';
@@ -108,9 +109,15 @@ export async function createLitePost(
   sessionUser: User | undefined,
   req: CreatePostRequest
 ): Promise<CreatePostResult> {
-  if (!sessionUser?.userId || sessionUser.account_tier !== 'lite') {
-    return { status: 'error', code: 'unauthorized', message: 'Not signed in as a lite account.' };
+  // Status comes from the DB, not the cookie: a session issued before a suspension
+  // would otherwise keep posting until it expired (see auth/account-status.ts).
+  const actor = await checkLiteActor(sessionUser);
+  if (!actor.ok) {
+    return { status: 'error', code: actor.code, message: actor.message };
   }
+  // Identity from the row, not the cookie: the cookie's copy of the name can be
+  // stale, and it is the value stamped into the on-chain footer.
+  const { userId, displayName } = actor.user;
   if (req.tier !== 'normal' && req.tier !== 'advanced') {
     return { status: 'error', code: 'invalid_tier', message: 'Invalid post tier.' };
   }
@@ -132,7 +139,7 @@ export async function createLitePost(
   // Edit fork — update the original row instead of creating a duplicate (§C.3).
   if (req.editOfPostId) {
     const existing = await posts.getPostById(req.editOfPostId);
-    if (!existing || existing.userId !== sessionUser.userId) {
+    if (!existing || existing.userId !== userId) {
       return { status: 'error', code: 'not_found', message: 'Post not found.' };
     }
     // A deleted post takes no further edits. Nothing else enforced this, so an
@@ -140,11 +147,21 @@ export async function createLitePost(
     if (existing.deletedAt || existing.deletedLocally) {
       return { status: 'error', code: 'deleted', message: 'That post has been deleted.' };
     }
+    // A moderator-hidden post takes no further edits either. Without this, a takedown
+    // is reversible by its own author: the post is blanked on chain, the author saves
+    // an edit, and the `update` job broadcasts the content straight back.
+    if (existing.feedVisibility === 'hidden') {
+      return {
+        status: 'error',
+        code: 'moderated',
+        message: 'This post has been removed and can no longer be edited.'
+      };
+    }
     // Edits were exempt from every cap, which made them a queue-starvation vector:
     // the publishing account can broadcast ~20 things a minute in total, so an edit
     // loop could hold up everyone else's posts. Hive imposes no edit limit at all
     // (the old 24-hour window is dead code past HF17), so this cap is the only bound.
-    const editRate = await rateLimit.enforceEditRate(sessionUser.userId);
+    const editRate = await rateLimit.enforceEditRate(userId);
     if (!editRate.ok) {
       return {
         status: 'error',
@@ -187,7 +204,7 @@ export async function createLitePost(
 
   // Per-account rate cap on NEW posts/comments (edits above are exempt). Spec §H.
   const rate = await rateLimit.enforcePostRate(
-    sessionUser.userId,
+    userId,
     req.parentRef ? 'comment' : 'post'
   );
   if (!rate.ok) {
@@ -207,8 +224,8 @@ export async function createLitePost(
   const reserved = explicit ?? (await reserveContainerParent());
 
   const post = await posts.createPost({
-    userId: sessionUser.userId,
-    displayNameSnapshot: sessionUser.username, // immutable name at post time -> footer (§D.4)
+    userId,
+    displayNameSnapshot: displayName, // immutable name at post time -> footer (§D.4)
     tier: req.tier,
     title,
     body,
@@ -297,6 +314,9 @@ export type DeletePostResult =
  * Idempotent: deleting twice is not an error.
  */
 export async function deleteLitePost(userId: string, postId: string): Promise<DeletePostResult> {
+  // Deliberately NOT gated on account status. Suspension stops an account creating and
+  // engaging; taking your own content down is harm-reducing, and blocking it would
+  // strand a suspended user's material in public with no way to withdraw it.
   const existing = await posts.getPostById(postId);
   if (!existing || existing.userId !== userId) {
     return { status: 'error', code: 'not_found', message: 'Post not found.' };
@@ -318,4 +338,40 @@ export async function deleteLitePost(userId: string, postId: string): Promise<De
     payload: buildPayload(post, parent)
   });
   return { status: 'ok', onChain: true };
+}
+
+/**
+ * Moderator takedown: stop this post reaching Hive, or remove it if it already did.
+ *
+ * Lives here rather than in the moderation service because the on-chain payload has
+ * exactly one correct shape and one place that knows it — the pinned parent above
+ * all, since Hive refuses any operation that would change a comment's parent.
+ *
+ * Hiding a post in Lumen does NOT remove it from Hive; that is what this adds. The
+ * worker attempts a real `delete_comment` and falls back to blanking when Hive
+ * refuses (replies, net-positive votes, or already paid out).
+ */
+export async function takeDownPost(postId: string): Promise<{
+  onChain: boolean;
+  cancelledJobs: number;
+  queuedDelete: boolean;
+}> {
+  const post = await posts.getPostById(postId);
+  if (!post) return { onChain: false, cancelledJobs: 0, queuedDelete: false };
+
+  if (!post.hivePermlink) {
+    const cancelledJobs = await publishJobs.cancelPending(postId, 'removed by moderation');
+    return { onChain: false, cancelledJobs, queuedDelete: false };
+  }
+
+  const parent = explicitParent(post.parentRef) ?? (await containerParentFor(post.postId));
+  const job = await publishJobs.enqueue({
+    postId: post.postId,
+    jobType: 'delete',
+    idempotencyKey: `${post.postId}:delete`,
+    payload: buildPayload(post, parent)
+  });
+  // `null` means a delete job already existed (the author beat us to it) — the
+  // outcome the moderator wanted is already queued, so this is a success either way.
+  return { onChain: true, cancelledJobs: 0, queuedDelete: job !== null };
 }

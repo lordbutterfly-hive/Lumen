@@ -15,6 +15,14 @@ export interface Service {
 export interface HolderPosition {
   tokens: number;
   valueUsd: number;
+  /**
+   * The NET wind-down value — tokens × the market's floor, LESS this position's
+   * own hold-time exit tax (store.ts's withPosition -> curve.ts's
+   * floorValueUsdNet, matching lib/vsc-data-source.ts's readHolderPosition).
+   * Deliberately the NET, not the gross: the UI calls this "the least you're
+   * guaranteed back", and the untaxed gross overstates a fresh holder's payout
+   * by up to 20% (MaxExitTaxBps) — see floorValueUsdNet's own doc.
+   */
   floorValueUsd: number;
   /** Days since the viewer's last buy — drives the early-exit fee. */
   heldDays: number;

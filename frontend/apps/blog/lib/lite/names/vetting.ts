@@ -1,5 +1,4 @@
 import { validateHiveAccountName } from '@smart-signer/lib/validators/validate-hive-account-name';
-import { checkAccountExists } from '@transaction/lib/validation/existence/account';
 import { liteConfig } from '../config';
 
 /**
@@ -96,6 +95,12 @@ export async function checkNameAvailability(displayName: string): Promise<Availa
   const vet = vetNameFormat(displayName);
   if (!vet.ok) return { available: false, reason: vet.error };
 
+  // Runtime import, same reason as publisher/hive-broadcaster.ts: the chain client
+  // pulls in @hiveio/wax, which has no CJS export map, so a static import here makes
+  // this module unloadable from anything that is not the Next bundle — the migration
+  // runner, ops scripts and tests all import vetNameFormat transitively. Only THIS
+  // function needs the chain, so only this function pays for it.
+  const { checkAccountExists } = await import('@transaction/lib/validation/existence/account');
   const existence = await checkAccountExists(displayName.trim().toLowerCase());
   if (existence.status === 'exists') {
     return { available: false, reason: 'That name already exists on Hive.' };

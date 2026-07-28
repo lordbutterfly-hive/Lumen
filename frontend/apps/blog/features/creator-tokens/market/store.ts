@@ -7,7 +7,7 @@ import type { TokenMarketDetail, HolderPosition, Service } from './token-detail'
 import { MOCK_TOKEN_DETAIL } from './token-detail';
 import { MOCK_CREATORS, MOCK_NEW_CREATORS } from './mock';
 import { MOCK_HOLDINGS, MOCK_ASKS } from './portfolio';
-import { buyQuote, sellQuote, serviceTokens, spotPriceUsd, reserveUsdAt } from './curve';
+import { buyQuote, sellQuote, serviceQuote, spotPriceUsd, reserveUsdAt, floorValueUsdNet } from './curve';
 
 /**
  * Client-side, stateful mock of the creator-token markets — the LOCAL backing for
@@ -66,18 +66,42 @@ function synthDetail(c: CreatorTokenSummary): TokenMarketDetail {
 // the public Discovery grid + the "holdings of others" portfolio).
 export const STUDIO_HANDLE = 'you';
 
-// Seed: @ada from the richest fixture, the rest synthesized from the summaries.
+// Seed: @ada now goes through the SAME curve-consistent synthDetail() path as
+// every other creator (2026-07-27 fix) — it used to seed straight from
+// MOCK_TOKEN_DETAIL's own hand-picked money numbers (price $4.20, reserve
+// $42,000 at supply 20,000), figures the curve cannot produce at that supply
+// (Area(20,000) ≈ $8.6M, SpotRate(20,000) ≈ $1,208.50/token — curve.go
+// Area/SpotRate). The summary below carries MOCK_TOKEN_DETAIL's own non-money
+// fields; its OLD priceUsd/marketCapUsd pair is fed in ONLY to imply the
+// target supply (exactly how synthDetail derives every other creator's
+// supply), and synthDetail then re-derives price/floor/reserve from the
+// curve. The one hand-authored field synthDetail's generic DEFAULT_SERVICES
+// can't replicate — @ada's richer 5-item services catalogue — is kept on top.
 const markets = new Map<string, TokenMarketDetail>();
-markets.set(MOCK_TOKEN_DETAIL.handle, { ...MOCK_TOKEN_DETAIL });
+const adaSummary: CreatorTokenSummary = {
+  handle: MOCK_TOKEN_DETAIL.handle,
+  what: MOCK_TOKEN_DETAIL.what,
+  avatarColor: MOCK_TOKEN_DETAIL.avatarColor,
+  fromPriceUsd: Math.min(...MOCK_TOKEN_DETAIL.services.filter((s) => s.status === 'live').map((s) => s.usd)),
+  priceUsd: MOCK_TOKEN_DETAIL.priceUsd,
+  marketCapUsd: MOCK_TOKEN_DETAIL.marketCapUsd,
+  delivery: MOCK_TOKEN_DETAIL.delivery
+};
+markets.set(MOCK_TOKEN_DETAIL.handle, { ...synthDetail(adaSummary), services: MOCK_TOKEN_DETAIL.services });
 for (const c of [...MOCK_CREATORS, ...MOCK_NEW_CREATORS]) {
   if (!markets.has(c.handle)) markets.set(c.handle, synthDetail(c));
 }
 // Seed the viewer's starting portfolio so Your-Tokens is populated up front and
 // then tracks live trades (a buy adds/increases a position, a sell reduces it).
+// value/floor are DERIVED from each market's own live price/floor via
+// withPosition (which nets the K2 exit tax — see its own doc), never trusted
+// as raw numbers off the fixture: MOCK_HOLDINGS' own valueUsd/floorValueUsd
+// were hand-computed against each creator's OLD seed price and would silently
+// drift from a curve-consistent reseed (exactly the @ada defect fixed above).
 for (const h of MOCK_HOLDINGS) {
   const m = markets.get(h.handle);
   if (m) {
-    m.position = { tokens: h.tokens, valueUsd: h.valueUsd, floorValueUsd: h.floorValueUsd, heldDays: 30 };
+    m.position = withPosition(m, h.tokens, 30);
     if (h.windingDown) m.windingDown = true;
   }
 }
@@ -124,7 +148,12 @@ function withPosition(m: TokenMarketDetail, tokens: number, heldDays: number): H
   return {
     tokens: round2(tokens),
     valueUsd: round2(tokens * m.priceUsd),
-    floorValueUsd: round2(tokens * m.floorUsd),
+    // NET of the K2 exit tax for THIS position's own hold age — matches
+    // lib/vsc-data-source.ts's readHolderPosition (refundNetBaseUnits). The
+    // untaxed GROSS (tokens * m.floorUsd) overstates a fresh holder's payout
+    // by up to 20% while the UI calls this "the least you're guaranteed
+    // back" (floorValueUsdNet's own doc has the full reasoning).
+    floorValueUsd: round2(floorValueUsdNet(tokens, m.floorUsd, heldDays)),
     heldDays
   };
 }
@@ -193,7 +222,11 @@ function getMarketReadonly(handle: string): TokenMarketDetail {
 
 /**
  * Buy up to `usdGross` worth of the token (the 10% trade fee is included in
- * that budget).
+ * that budget). Returns whether the buy actually executed — the caller
+ * (BuyModal) must check this before treating a click as a success; a refusal
+ * (wind-down closed, cap exhausted, a budget too small to afford one token,
+ * or the buyer's own slippage ceiling tripped) mutates NOTHING and must not
+ * be presented as if it did.
  *
  * ★ INTEGER TOKENS (curve pivot): the curve mints whole tokens only, so the
  * budget buys the largest whole count that fits and the ACTUAL cost
@@ -201,16 +234,27 @@ function getMarketReadonly(handle: string): TokenMarketDetail {
  * alone — crediting the fee too would break the R === Area(S) equality that
  * the whole mechanism rests on (buy.go: "booking the fee into the reserve
  * would break R === area(S)").
+ *
+ * maxTotalUsd (OPTIONAL): the buyer's own signed ceiling on TotalDue — the
+ * modal's "max price per token" control converted to a total-cost bound (the
+ * mock's stand-in for buy.go's own doc: "slippage protection is the buyer's
+ * own signed transfer.allow on that draw"). Refuses rather than silently
+ * buying at a worse price than the buyer signed up for.
  */
-export function buy(handle: string, usdGross: number): void {
-  if (handle === STUDIO_HANDLE) return; // #2: you can't buy your own token — no self-dealing
+export function buy(handle: string, usdGross: number, maxTotalUsd?: number): boolean {
+  if (handle === STUDIO_HANDLE) return false; // #2: you can't buy your own token — no self-dealing
   const m = getMarket(handle);
-  if (!Number.isFinite(usdGross) || usdGross <= 0) return;
+  // buy.go RequireInflowOpen (RULING K3): a retired/winding-down market
+  // refuses EVERY new inflow for its whole wind-down — enforced here, not
+  // just via the main Buy button's own disabled state (that's UI, not a gate).
+  if (m.windingDown) return false;
+  if (!Number.isFinite(usdGross) || usdGross <= 0) return false;
   usdGross = Math.min(usdGross, 1_000_000); // ceiling — a fat-finger 1e999 must not poison the market to NaN (H1)
-  const q = buyQuote(usdGross, m);
-  if (!Number.isFinite(q.tokens) || q.tokens < 1) return; // a budget that can't afford one whole token buys nothing
+  const q = buyQuote(usdGross, m); // cap-aware: never quotes past m.cap (curve.ts's own doc)
+  if (!Number.isFinite(q.tokens) || q.tokens < 1) return false; // a too-small budget (or an exhausted cap) buys nothing
+  if (maxTotalUsd !== undefined && q.totalUsd > maxTotalUsd) return false; // the buyer's own signed slippage ceiling
   const supply = Math.floor(m.supply) + q.tokens;
-  if (supply > m.cap) return; // #4: never let supply exceed the cap
+  if (supply > m.cap) return false; // defense-in-depth: buyQuote's own cap clamp should make this unreachable
   const priceUsd = Math.max(0.01, round2(q.priceAfter));
   // Curve leg only: totalUsd − fee == the exact area step Area(S+n) − Area(S).
   const reserveUsd = m.reserveUsd + (q.totalUsd - q.tradeFeeUsd);
@@ -224,6 +268,7 @@ export function buy(handle: string, usdGross: number): void {
   const next = reprice({ ...m, supply, priceUsd, reserveUsd, position: withPosition({ ...m, priceUsd }, heldTokens, heldDays) });
   markets.set(handle, next);
   emit();
+  return true;
 }
 
 /**
@@ -252,16 +297,25 @@ export function sell(handle: string, tokens: number): void {
   emit();
 }
 
-/** Spend tokens on a USD-priced service (tokens = USD ÷ live price). */
+/**
+ * Spend on a USD-priced service. USER RULING 2026-07-27: `usd` is the
+ * buyer's TOTAL — only the 88% TOKEN LEG is escrowed here (serviceQuote,
+ * ask.go splitFace); the remaining 12% is a separate HBD commission this mock
+ * has no wallet balance to draw from (see AskModal's own note on the
+ * affordability gate it can't fully verify).
+ */
 export function spend(handle: string, usd: number, serviceName = 'Ask a question', deadlineDays = 7, question = ''): void {
   if (handle === STUDIO_HANDLE) return; // #2: can't ask your own token (would let you answer yourself for commission)
   const m = getMarket(handle);
+  // ask.go Ask -> RequireInflowOpen: the SAME inflow gate Buy is behind
+  // (RULING K3) — a winding-down market refuses new asks too, not just buys.
+  if (m.windingDown) return;
   if (!Number.isFinite(usd) || usd <= 0 || m.priceUsd <= 0) return;
-  const tokensSpent = serviceTokens(usd, m.priceUsd);
+  const q = serviceQuote(usd, m.priceUsd);
   const held = m.position?.tokens ?? 0;
-  if (!Number.isFinite(tokensSpent) || held < tokensSpent) return; // AskModal disables the CTA when unaffordable (H2)
-  // Escrow the tokens (remove them from the position) and open an 'awaiting' ask.
-  const next = reprice({ ...m, position: withPosition(m, held - tokensSpent, m.position?.heldDays ?? 0) });
+  if (!Number.isFinite(q.tokens) || held < q.tokens) return; // AskModal disables the CTA when unaffordable (H2)
+  // Escrow the TOKEN LEG only (remove it from the position) and open an 'awaiting' ask.
+  const next = reprice({ ...m, position: withPosition(m, held - q.tokens, m.position?.heldDays ?? 0) });
   markets.set(handle, next);
   askSeq += 1;
   asksList.unshift({
@@ -270,7 +324,7 @@ export function spend(handle: string, usd: number, serviceName = 'Ask a question
     service: serviceName,
     state: 'awaiting',
     costUsd: usd,
-    tokens: Math.round(tokensSpent * 100) / 100,
+    tokens: Math.round(q.tokens * 100) / 100,
     dueLabel: `Answer due in ${deadlineDays}d`,
     question: question.trim() || undefined
   });
@@ -279,7 +333,8 @@ export function spend(handle: string, usd: number, serviceName = 'Ask a question
 
 export interface TokenMarketActions {
   market: TokenMarketDetail;
-  buy: (usdGross: number) => void;
+  /** Returns whether the buy actually executed — see buy()'s own doc; a refusal (wind-down, cap, slippage) must NOT be treated as success by the caller. */
+  buy: (usdGross: number, maxTotalUsd?: number) => boolean;
   sell: (tokens: number) => void;
   spend: (usd: number, serviceName?: string, deadlineDays?: number, question?: string) => void;
 }
@@ -292,7 +347,7 @@ export function useTokenMarket(handle: string): TokenMarketActions {
   );
   return {
     market,
-    buy: (usd) => buy(handle, usd),
+    buy: (usd, maxTotalUsd) => buy(handle, usd, maxTotalUsd),
     sell: (tokens) => sell(handle, tokens),
     spend: (usd, serviceName, deadlineDays, question) => spend(handle, usd, serviceName, deadlineDays, question)
   };

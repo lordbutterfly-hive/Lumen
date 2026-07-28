@@ -397,6 +397,121 @@ func TestSchemaContract_Closed(t *testing.T) {
 	scWantFieldCount(t, evName, m, 5, ref)
 }
 
+// ---------------------------------------------------------------------------
+// Six more (2026-07-28, gap-hunt closure): main.go's init/pause/unpause/
+// retire/withdrawTreasury/claimTradeFees entrypoints used to hand-build their
+// own sdk.Log JSON with no constructor here to pin. Retired/TreasuryWithdrawn/
+// TradeFeesClaimed ARE real indexer/events.go decode structs (verified by
+// direct read); Init/Paused/Unpaused are not — pinned anyway per the task's
+// own instruction, so THIS package's schema tests still catch any accidental
+// future drift in their shape, even though nothing outside core consumes them
+// today.
+// ---------------------------------------------------------------------------
+
+func TestSchemaContract_Retired(t *testing.T) {
+	const evName = "retired"
+	const ref = "indexer/events.go:382-386 (RetiredEvent)"
+	out := EvRetired("aliceperry", "aliceperry", 13_000_000)
+	m := scDecode(t, out)
+
+	scWantStr(t, evName, m, "ev", "retired", "indexer/events.go:92 (KindRetired)")
+	scWantNum(t, evName, m, "v", 1, "indexer/events.go:40-41 (envelope.V)")
+	scWantStr(t, evName, m, "creator", "aliceperry", "indexer/events.go:383 (RetiredEvent.Creator)")
+	scWantStr(t, evName, m, "actor", "aliceperry", "indexer/events.go:384 (RetiredEvent.Actor)")
+	scWantNum(t, evName, m, "block", 13_000_000, "indexer/events.go:385 (RetiredEvent.Block)")
+	scWantFieldCount(t, evName, m, 5, ref)
+}
+
+func TestSchemaContract_TreasuryWithdrawn(t *testing.T) {
+	const evName = "treasuryWithdrawn"
+	const ref = "indexer/events.go:394-398 (TreasuryWithdrawnEvent)"
+	out := EvTreasuryWithdrawn("ownerAccount", 13_010_000, big.NewInt(75_000))
+	m := scDecode(t, out)
+
+	scWantStr(t, evName, m, "ev", "treasuryWithdrawn", "indexer/events.go:109 (KindTreasuryWithdrawn)")
+	scWantNum(t, evName, m, "v", 1, "indexer/events.go:40-41 (envelope.V)")
+	scWantStr(t, evName, m, "actor", "ownerAccount", "indexer/events.go:395 (TreasuryWithdrawnEvent.Actor)")
+	scWantStr(t, evName, m, "amount", "75000", "indexer/events.go:397 (TreasuryWithdrawnEvent.Amount)")
+	scWantNum(t, evName, m, "block", 13_010_000, "indexer/events.go:396 (TreasuryWithdrawnEvent.Block)")
+	scWantFieldCount(t, evName, m, 5, ref)
+
+	// Deliberately NO "creator" field — TreasuryWithdrawnEvent declares none,
+	// and indexer/events.go's own doc calls the omission deliberate (a GLOBAL
+	// kTreasury() debit, not scoped to any single creator's market). Pin that
+	// shape assumption explicitly, same discipline TestSchemaContract_Prepaid
+	// uses for its own "no to field" assertion above.
+	if _, present := m["creator"]; present {
+		t.Fatalf("%s: unexpected \"creator\" field — TreasuryWithdrawnEvent has none; indexer/events.go's own doc calls this omission deliberate (a global, not per-market, debit)", evName)
+	}
+}
+
+func TestSchemaContract_TradeFeesClaimed(t *testing.T) {
+	const evName = "tradeFeesClaimed"
+	const ref = "indexer/events.go:405-409 (TradeFeesClaimedEvent)"
+	out := EvTradeFeesClaimed("aliceperry", 13_020_000, big.NewInt(1_250))
+	m := scDecode(t, out)
+
+	scWantStr(t, evName, m, "ev", "tradeFeesClaimed", "indexer/events.go:125 (KindTradeFeesClaimed)")
+	scWantNum(t, evName, m, "v", 1, "indexer/events.go:40-41 (envelope.V)")
+	scWantStr(t, evName, m, "actor", "aliceperry", "indexer/events.go:406 (TradeFeesClaimedEvent.Actor)")
+	scWantStr(t, evName, m, "amount", "1250", "indexer/events.go:408 (TradeFeesClaimedEvent.Amount)")
+	scWantNum(t, evName, m, "block", 13_020_000, "indexer/events.go:407 (TradeFeesClaimedEvent.Block)")
+	scWantFieldCount(t, evName, m, 5, ref)
+
+	// Deliberately NO "creator" field — same reasoning as TreasuryWithdrawn
+	// above, except here "actor" itself doubles as the creator identifier
+	// (kFeeBal is always keyed by the creator whose market accrued the fee),
+	// per indexer/events.go's own KindTradeFeesClaimed doc.
+	if _, present := m["creator"]; present {
+		t.Fatalf("%s: unexpected \"creator\" field — TradeFeesClaimedEvent has none; actor already doubles as the creator identifier per indexer/events.go's own doc", evName)
+	}
+}
+
+// TestSchemaContract_Init/Paused/Unpaused: NOT indexer-recognized events —
+// ../indexer/events.go's own file doc names all three DELIBERATELY
+// unrecognized (init is not a core-module event; the global pause switch has
+// no per-market query surface in that package), so there is no indexer
+// struct/line to cite here the way every test above does. Pinned anyway
+// (task instruction: "pin all six... field-by-field, with an exact
+// field-count assertion") so a future accidental change to these three still
+// gets caught by this package's own tests, even with no external consumer.
+
+func TestSchemaContract_Init(t *testing.T) {
+	const evName = "init"
+	const ref = "NOT an indexer-decoded event (indexer/events.go's file doc: \"init\" deliberately unrecognized, falls to Unknown)"
+	out := EvInit("ownerAccount")
+	m := scDecode(t, out)
+
+	scWantStr(t, evName, m, "ev", "init", ref)
+	scWantNum(t, evName, m, "v", 1, ref)
+	scWantStr(t, evName, m, "owner", "ownerAccount", ref)
+	scWantFieldCount(t, evName, m, 3, ref)
+}
+
+func TestSchemaContract_Paused(t *testing.T) {
+	const evName = "paused"
+	const ref = "NOT an indexer-decoded event (indexer/events.go's file doc: \"paused\" deliberately unrecognized, falls to Unknown)"
+	out := EvPaused("ownerAccount")
+	m := scDecode(t, out)
+
+	scWantStr(t, evName, m, "ev", "paused", ref)
+	scWantNum(t, evName, m, "v", 1, ref)
+	scWantStr(t, evName, m, "actor", "ownerAccount", ref)
+	scWantFieldCount(t, evName, m, 3, ref)
+}
+
+func TestSchemaContract_Unpaused(t *testing.T) {
+	const evName = "unpaused"
+	const ref = "NOT an indexer-decoded event (indexer/events.go's file doc: \"unpaused\" deliberately unrecognized, falls to Unknown)"
+	out := EvUnpaused("ownerAccount")
+	m := scDecode(t, out)
+
+	scWantStr(t, evName, m, "ev", "unpaused", ref)
+	scWantNum(t, evName, m, "v", 1, ref)
+	scWantStr(t, evName, m, "actor", "ownerAccount", ref)
+	scWantFieldCount(t, evName, m, 3, ref)
+}
+
 // TestSchemaContract_KindConstantsCoverEveryEvName sweeps every one of the
 // twelve constructors' "ev" values against indexer's own Kind* constants
 // (indexer/events.go:20-33), so a constructor whose emitted name doesn't
@@ -430,6 +545,16 @@ func TestSchemaContract_KindConstantsCoverEveryEvName(t *testing.T) {
 		// truth with every single trade, silently, forever. Pinned here so that
 		// can never recur.
 		"bought": true, "sold": true,
+		// retired/treasuryWithdrawn/tradeFeesClaimed (2026-07-28 gap-hunt
+		// closure) — all three ALREADY have real Kind* constants and typed
+		// decode structs in indexer/events.go (KindRetired/RetiredEvent,
+		// KindTreasuryWithdrawn/TreasuryWithdrawnEvent,
+		// KindTradeFeesClaimed/TradeFeesClaimedEvent — verified by direct
+		// read), so this sweep genuinely applies to them; init/paused/unpaused
+		// are deliberately NOT added here — indexer/events.go's own file doc
+		// names all three as intentionally unrecognized (no Kind* constant
+		// exists for any of them), so claiming otherwise here would be false.
+		"retired": true, "treasuryWithdrawn": true, "tradeFeesClaimed": true,
 	}
 
 	cases := []struct {
@@ -454,9 +579,15 @@ func TestSchemaContract_KindConstantsCoverEveryEvName(t *testing.T) {
 		{"declined", EvDeclined("c", "a", 1, 1, big.NewInt(1), big.NewInt(1), "k")},
 		{"bought", EvBought("c", "a", 1, big.NewInt(1), big.NewInt(1), big.NewInt(1), big.NewInt(1))},
 		{"sold", EvSold("c", "a", 1, big.NewInt(1), big.NewInt(1), big.NewInt(1), big.NewInt(1), big.NewInt(1), 1, 1)},
+		// retired/treasuryWithdrawn/tradeFeesClaimed (2026-07-28) — see the
+		// indexerKinds map's own comment above for why these three, and not
+		// init/paused/unpaused, belong in this sweep.
+		{"retired", EvRetired("c", "a", 1)},
+		{"treasuryWithdrawn", EvTreasuryWithdrawn("a", 1, big.NewInt(1))},
+		{"tradeFeesClaimed", EvTradeFeesClaimed("a", 1, big.NewInt(1))},
 	}
-	if len(cases) != 18 {
-		t.Fatalf("test setup bug: expected exactly 18 constructors (twelve money/state events, the three offering-catalogue events, declined, and the bought/sold curve pair), got %d", len(cases))
+	if len(cases) != 21 {
+		t.Fatalf("test setup bug: expected exactly 21 constructors (twelve money/state events, the three offering-catalogue events, declined, the bought/sold curve pair, and retired/treasuryWithdrawn/tradeFeesClaimed), got %d", len(cases))
 	}
 	for _, c := range cases {
 		m := scDecode(t, c.out)
@@ -503,6 +634,16 @@ func TestSchemaContract_EveryConstructorIsPinned(t *testing.T) {
 		"reclaimed": true, "declined": true, "refunded": true, "refundPushed": true,
 		"closed": true, "bought": true, "sold": true,
 		"offeringCreated": true, "offeringUpdated": true, "offeringDeleted": true,
+		// retired (2026-07-28): EvRetired fits evOpen's own four-field envelope
+		// exactly (an ordinary per-market action), so it goes through evOpen(...)
+		// literally and this regex-driven tripwire finds it — unlike its five
+		// siblings (init/paused/unpaused/treasuryWithdrawn/tradeFeesClaimed),
+		// which are NOT per-market and use the separate evOpenActor(...) helper
+		// instead (see events.go's own "contract-level events" section doc for
+		// why), so they never match this file's `evOpen\("...")` regex scan and
+		// must NOT be added here — doing so would fail the reverse-direction
+		// check below (no matching evOpen(...) call exists in source for them).
+		"retired": true,
 	}
 	for ev := range names {
 		if !pinned[ev] {

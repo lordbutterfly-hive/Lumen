@@ -1,198 +1,232 @@
 # Lumen Lite Accounts — build tracker
 
-Proxy-posting lite accounts: a chosen name + `user_id` authenticated by Google
-passkey **or** BTC wallet, with **no Hive account/keys**. Posts go to this DB and
-a server-side publisher broadcasts them under Lumen's own Hive account with a
-`Posted via Lumen by {name}` footer. Full spec:
-`/mnt/o/HIVE-BLOG-REBUILD/LUMEN-LITE-ACCOUNTS-SPEC-2026-07-22.md`.
+**Last verified against the code on 2026-07-28.** If a claim here disagrees with the
+code, the code wins — say so and fix this file.
 
-## Phase status
+A lite account is a chosen name + `user_id`, authenticated by a **Google identity**,
+a **Bitcoin wallet**, or an **EVM wallet**, with **no Hive account and no keys**.
+Posts land in this Postgres schema; a server-side publisher broadcasts them under
+Lumen's own Hive account with a `Posted via Lumen by {name}` footer. Lite posts
+**decline all rewards** — a user earns only on their own Hive account, after upgrading.
 
-| Phase | §L | Status |
-|------|----|--------|
-| 1 Foundation — datastore, identity schema, session tier, signer/observer guards | 1 | **BUILT + tsc-verified** |
-| 2 Auth — Google + BTC login (passkey deferred), name-pick + vetting | 2 | **BUILT + tsc-verified** |
-| 3 Intake + render — `/api/lite/posts`, `lumen_post`, `dbPostToEntry`, attribution overlay | 3 | **backend BUILT + tsc-verified; client wiring (3b) next** |
-| 4 Publisher — `publish_job` queue, permlink, footer, worker (KMS signer seam) | 4 | **backend BUILT + tsc-verified; RC allocator + moderation-hold gate later** |
-| 5 Rate limits — per-account intake caps, trust tiers, anti-Sybil | 5 | **BUILT + tsc-verified** |
-| 6 Earnings — accrual worker, ledger, insolvency guard, claim worker, settlement, reconciliation | 6 | **BUILT + tsc-verified** |
-| 7 Upgrade — ACT claim, keygen/custody, Sentry scrub fix, settlement | 7 | **BUILT + tsc-verified (scrub fix proven)** |
-| 8 recsys reconciliation — `resolve_author` | 8 | **BUILT + tsc-verified** |
+Full spec: `/mnt/o/LUMEN-DOCS/frontend-lite/LUMEN-LITE-ACCOUNTS-SPEC-2026-07-22.md`
+(the docs folder was renamed from `O:/HIVE-BLOG-REBUILD` on 2026-07-27).
 
-> **All 8 §L backend phases built + tsc-verified (2026-07-22).** 53 TS modules · 14 API routes · 7 migrations · ~3,400 LOC. Remaining: **Phase 3b client wiring** (deferred for review — edits in-flight UI) and the **infra seams** (Postgres/Redis/KMS, the real `lumen.posts` account + wax signers, Google client id, Turnstile) which the deploy provides.
+Current inventory: **65 TS modules · 28 API routes · 14 migrations** (0001–0004,
+0006–0015; `0005_ledger.sql` was deleted with the earnings subsystem).
 
-## What Phase 1 provides
+## Decisions that shape everything here
 
-```
-lib/lite/
-  config.ts                     feature config from env (no secrets)
-  ids.ts                        crypto ULID + challenge nonce
-  types.ts                      domain types (camelCase)
-  db/
-    pool.ts                     lazy pg Pool + query() + withTransaction()
-    migrate.ts                  forward-only SQL migration runner
-    run-migrations.ts           ops entrypoint (tsx)
-    migrations/0001_identity.sql lumen_user, lumen_auth_credential, lumen_challenge, name_reservation
-  repositories/                 user / credential / challenge / name-reservation
-  session/lite-session.ts       buildLiteSessionUser(), isLiteUser()
-```
+| Decision | Consequence in the code |
+|---|---|
+| **No earnings, ever, for a lite post** (2026-07-23) | Posts broadcast with `max_accepted_payout 0.000` and no beneficiary. The whole Phase-6 ledger/accrual/settlement subsystem was **deleted** — there is no money to hold, so no custody question and no money-transmission exposure. |
+| **Every lite post is a comment under a rolling container** (2026-07-27) | Hive caps root posts at ~1 per 5 min per account but replies at 1 per 3 s. `publisher/container.ts` opens `lumen-c-<ulid>` roots and rotates at `LITE_CONTAINER_MAX_CHILDREN`. Throughput ≈ 20/min per publishing account. |
+| **Votes / reblogs / follows are Lumen-local** | A Hive vote is attributed to the *signing* account, so N lite users would collapse into one vote. They live in `lumen_vote` / `lumen_reblog` / `lumen_follow` and materialise on chain only after upgrade. |
+| **Hive is the source of truth for published content** | `pruneBodyAfterPublish` defaults TRUE: after publish the row keeps the mapping, not the body. Rendering a published post = fetch from chain + overlay the lite identity. |
 
-Guards applied outside this module (existing files):
-- `packages/smart-signer/types/common.ts` — `User` gains optional `userId` + `account_tier` (non-breaking).
-- `packages/smart-signer/lib/use-signer.ts` — surfaces `accountTier`.
-- `packages/smart-signer/components/signer-provider.tsx` — lite early-return before `getSigner()` (must-fix).
-- `apps/blog/lib/auth-utils.ts` — `getObserver()` never returns a lite `display_name` as the bridge observer (must-fix).
+## Phase status (spec §L)
 
-## What Phase 2 provides
+| Phase | Status |
+|------|--------|
+| 1 Foundation — datastore, identity schema, session tier, signer/observer guards | **built** |
+| 2 Auth — Google + BTC + **EVM** login, name-pick + vetting (passkey parked) | **built** |
+| 3 Intake + render — `/api/lite/posts`, `lumen_post`, entry adaptation | **built** |
+| 3b Client wiring — composer fork, feed strip, attribution overlay, tier-aware avatar | **built** |
+| 4 Publisher — outbox queue, container model, pacing, RC pre-flight, live broadcaster | **built; proven on Hive mainnet** |
+| 5 Rate limits / anti-Sybil — intake caps, per-IP caps, /64 IPv6 bucketing, Turnstile | **built** |
+| ~~6 Earnings~~ | **deleted 2026-07-23** — lite posts decline all rewards |
+| 7 Upgrade — ACT claim, keygen, durable reveal-once custody, `/upgrade` page | **built; `setAccountCreator` not yet injected → the endpoint 503s** |
+| 8 recsys reconciliation — author/graph resolution for the ranking layer | **built** |
+| 9 Moderation — account status, post visibility, takedown, audit trail | **built 2026-07-28** |
+| 10 Recovery — linked sign-in methods, second-binder UI, `/security` page | **built 2026-07-28** |
+
+## Module map
 
 ```
 lib/lite/
-  http/{session,csrf,guard}.ts    App Router iron-session, x-csrf-token, enabled+CSRF guards
+  config.ts                    env-derived config (never secrets) + fail-closed assert
+  ids.ts  types.ts             crypto ULID/nonce; domain types
+
+  db/                          lazy pg pool, query(), withTransaction(), withAdvisoryLock(),
+                               forward-only migration runner + migrations/
+  repositories/                one module per table; all SQL lives here
+
+  http/
+    session.ts                 App Router iron-session access
+    csrf.ts  guard.ts          x-csrf-token; guardWrite/guardRead/guardPublisher/
+                               guardModerator/guardRecsys (constant-time tokens)
+    actor.ts                   requireActiveLiteUser (adds) vs requireLiteUser (withdraws)
+    ip.ts                      client IP from the TRUSTED end of x-forwarded-for; /64 for IPv6
+
   auth/
-    google-verify.ts              OAuth2Client.verifyIdToken (root of trust)
-    btc-verify.ts                 BIP-137 + BIP-322 (bip322-js); taproot rejected; loginMessage(nonce)
-    email-crypto.ts               AES-256-GCM envelope (KMS seam) + sha256 email hash
-    auth-service.ts               resolveLogin / completeSignup / bindMethod
-  names/vetting.ts                format+reserved+wallet-shape + live-existence (fail-closed)
-app/api/lite/
-  auth/google/route.ts            POST { idToken }
-  auth/btc/challenge/route.ts     POST { address } -> { nonce, message }
-  auth/btc/verify/route.ts        POST { address, signature, nonce }
-  auth/name/route.ts              POST { displayName }  (completes signup)
-  auth/bind/route.ts              POST link 2nd method (google|btc) = recovery
-  auth/logout/route.ts            POST destroy session
-  name/check/route.ts             GET  ?name= availability (read-only)
+    google-verify.ts           OAuth2Client.verifyIdToken — the root of trust
+    btc-verify.ts              BIP-137 + BIP-322 via bip322-js; taproot rejected
+    btc-key-fingerprint.ts     hash160(pubkey) — one key is one account, not three addresses
+    evm-verify.ts              EIP-191 personal_sign, EOA only (EIP-1271 deliberately refused)
+    email-crypto.ts            AES-256-GCM envelope (KMS seam) + sha256 hash
+    auth-service.ts            resolveLogin / completeSignup / bindMethod
+    account-status.ts          is this session still allowed to act? (DB, not cookie)
+
+  upgrade/
+    account-creator.ts         ACT claim + keygen seam (setAccountCreator injection)
+    key-reveal-crypto.ts       AES-256-GCM for the reveal outbox; NEVER degrades —
+                               a missing key throws rather than storing nothing
+    upgrade-service.ts         creates the account, but writes the encrypted keys FIRST
+
+  names/vetting.ts             format + reserved (substring) + wallet-shape + live existence
+  antispam/                    windows, trust tiers, rate limits, Turnstile
+
+  content/
+    pre-screen.ts              structural checks only — the abuse classifier is still a SEAM
+    post-service.ts            create/edit/delete intake, container reservation, orphan repair
+  moderation/
+    moderation-service.ts      suspend/ban/reinstate, post visibility, takedown, audit log
+
+  publisher/
+    broadcaster.ts             PostBroadcaster interface + setBroadcaster (injection point)
+    hive-broadcaster.ts        the real signer; runtime-imports wax/beekeeper (see next.config.js)
+    container.ts  pace.ts      rolling container posts; ONE shared 3-second pacer
+    permlink.ts  footer.ts     postId-derived permlink (stable across edits); footer + metadata
+    rc-guard.ts                resource-credit pre-flight, fails OPEN on a node hiccup
+    worker.ts  run-worker.ts   claim → build → broadcast → write back the mapping
+
+  render/                      db-post-to-entry, lite-entry (chain + identity overlay),
+                               lite-account, lite-identity, lite-post-id
+  client/                      lite-write (posts/follow), lite-engagement (READ side of
+                               Lumen-local votes/reblogs), lite-security (linked
+                               methods + binding), lite-post-fetch
+  recsys/resolver.ts           author/graph resolution for the ranking layer
+  wallet/did-pkh.ts            wallet DID derivation
 ```
 
-Session-type change: `IronSessionData` gains a short-lived `liteSignup` pending state (`packages/smart-signer/types/common.ts`). **Deferred:** the WebAuthn passkey layer — until it lands, posting rests on session + CSRF only (the XSS-forgery gap, spec §I).
-
-## What Phase 3 provides (backend)
+## API surface
 
 ```
-lib/lite/
-  db/migrations/0002_content.sql  lumen_post (system of record)
-  repositories/post-repository.ts create/get/list (keyset), edit-fork update, softDelete, resolveByHive
-  content/pre-screen.ts           fast intake screen (CSAM/abuse classifier seam)
-  content/post-service.ts         createLitePost (normal auto-title / advanced), edit fork; feed/timeline reads
-  render/db-post-to-entry.ts      LumenPost -> bridge Entry (renders as the user, pre-publish)
-  render/attribution.ts           resolveLiteAuthor + rewriteProxyEntry (post-publish overlay)
-app/api/lite/
-  posts/route.ts                  POST create (normal/advanced, identity from session), GET feed
-  posts/[id]/route.ts             GET single post
+auth      /api/lite/auth/{google, btc/challenge, btc/verify, evm/challenge, evm/verify,
+                          name, bind, stepup, methods, logout}
+names     /api/lite/name/check
+content   /api/lite/posts (POST create/edit, GET feed) · /api/lite/posts/[id] (GET, DELETE)
+social    /api/lite/{vote, reblog, follow, unfollow} · /api/lite/engagement (GET, read side)
+publisher /api/lite/publisher/{drain, health}   (x-lite-publisher-token)
+moderation/api/lite/moderation/{user, post, actions}   (x-lite-moderator-token)
+recsys    /api/lite/recsys/{resolve, follow-edges}     (x-lite-recsys-token)
+wallet    /api/lite/wallet/dids
+upgrade   /api/account/upgrade · /api/account/upgrade/reveal (GET re-fetch, POST ack)
 ```
 
-**Phase 3b (client wiring) — DEFERRED for review** (edits in-flight UI: `short-form-composer` / `use-post-form-actions` fork on `account_tier`; attribution overlay in `MediumPostCard`; account-tier-aware `/api/avatar`; DB-feed hook).
+## Moderation (Phase 9)
 
-## What Phase 4 provides (backend)
+`lumen_user.status` and `lumen_post.feed_visibility` accepted moderation values from
+migration 0001/0002 onward and **nothing ever wrote them** — the model existed on
+paper. What exists now:
 
-```
-lib/lite/
-  db/migrations/0003_publisher.sql   publish_job outbox queue
-  repositories/publish-job-repository.ts  enqueue (idempotent), claimNext (SKIP LOCKED), reschedule/backoff, updatePendingPayload
-  publisher/permlink.ts              deterministic postId-derived permlink (stable across edits)
-  publisher/footer.ts                "Posted via Lumen by {name}" footer + json_metadata
-  publisher/broadcaster.ts           PostBroadcaster interface + setBroadcaster (KMS/wax seam); dark until injected
-  publisher/worker.ts                claim -> build op -> broadcast -> writeback mapping; crash-guard; retriable/terminal backoff
-  publisher/run-worker.ts            long-lived ops entrypoint
-  content/post-service.ts            enqueue-on-post wired (create + edit-before/after-publish)
-```
+- `POST /api/lite/moderation/user` — suspend / ban / reinstate, optionally hiding all
+  their content. Suspension **parks** queued publish jobs (`publish_job.status =
+  'holding'`) rather than cancelling them, so reinstating is a true undo.
+- `POST /api/lite/moderation/post` — set visibility; `takedown: true` additionally
+  queues the on-chain removal.
+- `GET /api/lite/moderation/actions` — the append-only trail (who, what, why, and what
+  it actually did).
+- Enforcement: `auth/account-status.ts` is consulted on every path that ADDS
+  something — posting, editing, voting, reblogging, following, **and upgrading**
+  (an upgrade would otherwise burn one of our ACTs and hand a banned user a full
+  account we can never moderate). Withdrawals — unfollow, un-reblog, clearing a vote,
+  deleting your own post — stay open on purpose.
+- A moderator-hidden post refuses further edits, or the author could push an `update`
+  job and restore the content on chain.
 
-**Storage model (refined with user, 2026-07-22):** the DB is the **outbox + a rebuildable read-cache**; **Hive is the source of truth for published content**. The publish queue is unavoidable because Hive hard-limits ~1 root post / 5 min per account (must queue + shard). After publish, the worker writes only the mapping and can prune the body (`LITE_PRUNE_BODY_AFTER_PUBLISH=yes`). Post-publish rendering = chain entry + `render/attribution.ts` overlay.
+Two honest limits, said out loud in the API responses: **Lumen can hide, Hive cannot
+forget** (a hide does nothing to a post already broadcast), and Hive refuses a real
+`delete_comment` once a post has replies or net-positive votes — the worker blanks
+the content instead.
 
-**Infra seam:** the real `SignerServerWif` (KMS-held posting key + `@hiveio/beekeeper`/`wax` Node signing) is injected via `setBroadcaster`; the worker stays idle until then.
+Operator tool: `scripts/lite-moderate.mjs` (there is no admin UI and no admin account
+model; the endpoints hold a shared secret and every action records the `--actor`
+label you pass).
 
-## What Phase 5 provides (anti-Sybil)
-
-```
-lib/lite/
-  db/migrations/0004_rate_limits.sql   rate_counter (shared fixed-window store)
-  repositories/rate-limit-repository.ts  atomic checkAndConsume, currentCount, cleanup
-  antispam/windows.ts                  day/hour window keys + account age
-  antispam/trust.ts                    T0(5/15/30) -> T1(10/40/100) -> T2(20/80/300) by trust_score + age
-  antispam/rate-limit.ts               enforcePostRate(user, post|comment), enforceSignupRate(ip)
-  antispam/captcha.ts                  Cloudflare Turnstile verify (pass-through until configured)
-  http/ip.ts                           client IP from x-forwarded-for
-```
-Wired: post/comment intake -> 429 on cap (edits exempt); signup -> CAPTCHA (403) + per-IP cap (429). Two independent limiters (per-account intake + per-IP signup). The ranking-discount teeth for low-trust posts live in the discovery layer (recsys), not here.
-
-## What Phase 6 provides (earnings)
-
-```
-lib/lite/
-  db/migrations/0005_ledger.sql   ledger_entry (append-only double-entry) + user_balance + settlement_batch + payout_target + platform_fee_config + accrual_state
-  earnings/money.ts               Big.js integer math (never floats); asset precision; bps
-  earnings/fee.ts                 platform-fee split (rounding favours user)
-  earnings/insolvency.ts          Σ owed <= balance - reserve; fail-closed; FrontendBalanceSource seam
-  earnings/accrual.ts             reward-history -> resolve permlink -> book entries; unattributed alerted; watermark; RewardHistorySource seam
-  earnings/claim.ts               drains reward pool (account-level); RewardClaimer seam
-  earnings/settlement.ts          sweep to Hive account on upgrade; insolvency-gated; debit after transfer; Settler seam
-  earnings/reconciliation.ts      rebuild gross from chain, diff vs ledger (anti-insider-theft); LedgerAuditSource seam
-  repositories/{ledger,balance,accrual-state,settlement}-repository.ts
-```
-Money is integer + Big.js end to end; ledger append is idempotent (unique per permlink/type/asset). Seams: reward-history read, reward claim (posting), settlement transfer (active), frontend-balance read, full-history audit. HP/VESTS settlement (power-up) deferred to the upgrade wiring.
-
-## What Phase 7 provides (lite -> full upgrade)
-
-```
-lib/lite/
-  db/migrations/0006_upgrade.sql   upgrade_event audit
-  upgrade/account-creator.ts       ACT claim + keygen + create_claimed_account seam (active-key tier)
-  upgrade/upgrade-service.ts       idempotent, chain-reconciled, re-vet new name (≠ handle), settle sweep, reveal-once keys
-  upgrade/act-claim.ts             keep an ACT pool ready
-  repositories/upgrade-event-repository.ts
-app/api/account/upgrade/route.ts   POST { newName }
-packages/ui/lib/sentry-scrub.ts    ★must-fix: P?5[HJK]... now redacts MASTER PASSWORDS (was leaking owner keys)
-packages/ui/lib/sentry-scrub.selftest.ts   runnable regression (proven: master pw redacted)
-apps/blog/lib/lite/repositories/user-repository.ts::markUpgraded  idempotent tier flip; user_id stable (history continuity)
-```
-`user_id` never changes -> Lumen history stays continuous across the on-chain author change. Keys returned ONCE (reveal-once), never stored/logged. Settlement sweep reuses §G. Custody A (passkey) / B (Google-Drive) are deferred; C (reveal-once) is the built default.
-
-## What Phase 8 provides (recsys reconciliation)
-
-```
-lib/lite/
-  db/migrations/0007_social.sql   lumen_follow (off-chain follow graph, seq cursor)
-  repositories/follow-repository.ts  follow/unfollow/counts/listEdges
-  recsys/resolver.ts              resolveAuthors((frontend,permlink)->user), resolveHiveAccounts(name->user), listFollowEdges
-app/api/lite/
-  recsys/resolve/route.ts         POST batch resolver (token-guarded, constant-time)
-  recsys/follow-edges/route.ts    GET follow graph (cursor-paginated)
-  follow/route.ts + unfollow/route.ts   POST (session; rate-limited)
-```
-Recsys substitutes `user_id` for `author` at post_index/graph_cred/second_degree using these — so lite engagement no longer collapses onto `lumen.posts`. Token via `x-lite-recsys-token` (`LITE_RECSYS_TOKEN`), compared constant-time.
-
-## Infra the deploy must provide (NOT in code)
-
-- **Postgres** reachable at `LITE_DATABASE_URL` (needs the `citext` extension; the migration creates it).
-- The public frontend Hive account name per network (`LITE_FRONTEND_ACCOUNT_{MAINNET,MIRRORNET,TESTNET}`). Its keys go in KMS (Phase 4), never in env/repo.
-- Feature stays dark until `LITE_ACCOUNTS_ENABLED=yes`.
-
-### Env vars (Phase 1)
-
-| Var | Purpose |
-|-----|---------|
-| `LITE_ACCOUNTS_ENABLED` | `yes` to enable; anything else keeps the feature off |
-| `LITE_DATABASE_URL` | Postgres connection string |
-| `LITE_DB_POOL_MAX` | pool size (default 10) |
-| `LITE_GOOGLE_CLIENT_ID` | Google OAuth client id — audience for ID-token verification (Phase 2) |
-| `LITE_EMAIL_ENCRYPTION_KEY` | base64 32-byte AES key for email-at-rest (KMS seam; hash still works without it) |
-| `LITE_FRONTEND_ACCOUNT_MAINNET` / `_MIRRORNET` / `_TESTNET` | public on-chain author account name |
-| `LITE_TURNSTILE_SECRET` | Cloudflare Turnstile secret for signup CAPTCHA (empty = disabled) |
-| `LITE_SIGNUP_PER_IP_PER_DAY` | per-IP signup cap (default 20) |
-| `LITE_PRUNE_BODY_AFTER_PUBLISH` | `yes` to drop the stored body after publish (Hive = source of truth) |
-| `LITE_PLATFORM_FEE_BPS` | platform fee in basis points from author rewards (0-500, §K decision; default 0) |
-| `LITE_OPERATING_RESERVE` | reserve (smallest units) kept above Σ owed for the insolvency guard |
-
-### Apply the schema
+## Running it locally
 
 ```bash
-cd apps/blog
-LITE_DATABASE_URL=postgres://… pnpm --filter @hive/blog exec tsx lib/lite/db/run-migrations.ts
+docker start lumen-pg                     # postgres:16 on :5433, data is ephemeral
+cd apps/blog && npx tsx lib/lite/db/run-migrations.ts
+cd ~/hive-blog-rebuild && set -a && . ./.env.blog && set +a && pnpm dev:blog
 ```
 
-## Open Phase-1 decision (flagged for review)
+`LITE_*` vars **must** live in `apps/blog/.env.local` — turbo's strict env mode strips
+undeclared vars from the sourced `.env.blog`, so they never reach the server. Template:
+`apps/blog/.env.lite.example`.
 
-- `buildLiteSessionUser` sets a **placeholder `loginType`** (`wif`) because the flat
-  `User` type requires the field but lite accounts have no `LoginType`. It is never
-  read (all signer paths gate on `account_tier` first) and is chosen to fail closed.
-  If a dedicated non-signing sentinel is preferred, revisit here + the guards.
+End-to-end scripts (`scripts/lite-*-e2e.mjs`) run against a local server and prove the
+BTC login, EVM login, edit/delete, moderation, Lumen-local engagement read-back, and
+account-recovery binding paths. **None of them call `/api/lite/publisher/drain` — that
+broadcasts to Hive mainnet.**
+
+`scripts/lite-key-reveal-e2e.ts` is the exception in shape: it imports the upgrade
+service directly and runs against the real Postgres with a stubbed `AccountCreator`,
+because the real one burns an account-creation token and writes to chain. Run it with
+`cd apps/blog && npx tsx ../../scripts/lite-key-reveal-e2e.ts`. Most of its cases are
+failures — a lost response, an ambiguous broadcast, a missing encryption key — since
+that is the entire reason the outbox exists.
+
+## Recovery (Phase 10)
+
+A lite account has no password and no recovery email — the linked credentials ARE the
+account. `/api/lite/auth/{stepup,bind}` could link a second one since Phase 2 and
+nothing in the product ever called them, so every user was one lost wallet away from
+losing everything, silently. `/security` is that screen: it lists what is linked, says
+plainly when only one thing is, and links another wallet or a Google account.
+
+Linking is a step-up — a single-use, user-bound nonce, then a fresh proof of the NEW
+credential (SEQ-1/XC-2). **BTC and EVM sign different bind messages**, and `/stepup`
+used to return only the Bitcoin one, so an EVM bind could not be completed at all: the
+signature verified against the wrong string and came back `bad_signature` with nothing
+to say why. It now returns `messages.{btc,evm}` and the caller picks.
+
+`GET /api/lite/auth/methods` deliberately never returns a full `externalRef` — a Google
+`sub` and a wallet address are both linkable identifiers, and a truncated hint is enough
+to tell two bound wallets apart.
+
+## Still open
+
+1. **The publisher scheduler must actually be deployed.** Two artifacts exist —
+   `docker/lumen-publisher.yml` (a service beside the blog) and
+   `scripts/lite-publisher-cron.sh` (cron/systemd) — but *choosing and running one is a
+   deploy step nobody has taken yet*. `LITE_PUBLISHER_TOKEN` must be set for either.
+   `GET /api/lite/publisher/health` now makes the failure observable rather than silent:
+   it returns 503 when the oldest pending job ages past the stall window, and the cron
+   script exits non-zero on it. Queue depth alone could never tell a draining queue from
+   a dead one — the ages do.
+2. **`setAccountCreator` has no call site**, so `/api/account/upgrade` returns 503 and
+   the `/upgrade` page cannot complete. The durable reveal outbox that used to block
+   wiring it is **built** (migration 0015): keys are encrypted and persisted BEFORE the
+   account is created, re-fetchable at `/api/account/upgrade/reveal` until acknowledged,
+   and the upgrade refuses to start without `LITE_KEY_REVEAL_ENCRYPTION_KEY`.
+3. **`content/pre-screen.ts` is a length check, not a classifier.** The CSAM/abuse
+   screen is still a seam; moderation is entirely reactive until it is filled.
+4. No lite notifications.
+5. WebAuthn passkey is parked; the only implementation is in
+   `/mnt/o/LUMEN-DOCS/_salvage/lite-auth-passkey/` (Drizzle-based, does not match the
+   raw-`pg` repository pattern here).
+6. Lumen-local vote/reblog **totals** are returned by `/api/lite/engagement`
+   (`voteCount`/`reblogCount`) but are not yet folded into a post's displayed count —
+   the user's own state persists correctly, the aggregate still shows chain-only.
+
+## Deploy notes
+
+- Postgres at `LITE_DATABASE_URL` (the migration creates `citext`).
+- `LITE_KEY_REVEAL_ENCRYPTION_KEY` (base64, 32 bytes) is **required before any upgrade
+  can run** — the service refuses to create an account whose keys it could not durably
+  store, checked up front while refusing is still free. Separate key from
+  `LITE_EMAIL_ENCRYPTION_KEY` on purpose: leaking PII must not also unlock account keys.
+  `LITE_KEY_REVEAL_TTL_HOURS` (default 72) bounds how long unacknowledged keys sit.
+- The publishing Hive account name per network via
+  `LITE_FRONTEND_ACCOUNT_{MAINNET,MIRRORNET,TESTNET}`; its keys belong in KMS and are
+  injected through `setBroadcaster` — `LITE_PUBLISHER_POSTING_WIF` is a dev-only path
+  and the bootstrap refuses it in production.
+- The feature stays dark until `LITE_ACCOUNTS_ENABLED=yes`, and `assertLiteEnabled()`
+  refuses to open public signup in production without `LITE_TURNSTILE_SECRET`.
+- `next.config.js` must **not** list `@hiveio/beekeeper` or `@hiveio/wax` in
+  `serverComponentsExternalPackages` — it returns 500 on every page of the app. The
+  publisher runtime-imports them instead; the config carries the warning.
+- `output: 'standalone'` traces static imports only, so those runtime-imported packages
+  may need `experimental.outputFileTracingIncludes` for the drain route.

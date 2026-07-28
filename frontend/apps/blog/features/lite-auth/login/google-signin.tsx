@@ -39,6 +39,8 @@ interface GsiIdApi {
     callback: (res: GoogleCredentialResponse) => void;
     auto_select?: boolean;
     cancel_on_tap_outside?: boolean;
+    /** Echoed into the ID token's `nonce` claim — required by the bind step-up. */
+    nonce?: string;
   }) => void;
   renderButton: (
     el: HTMLElement,
@@ -81,9 +83,19 @@ interface Props {
   /** Receives the Google ID token; hand it to /api/lite/auth/google. */
   onIdToken: (idToken: string) => void;
   onError: (message: string) => void;
+  /**
+   * Step-up nonce for LINKING Google to an existing account. `/api/lite/auth/bind`
+   * refuses any ID token whose `nonce` claim does not match the challenge it issued
+   * (XC-2), so a bind caller must pass it here. Sign-in leaves it undefined.
+   *
+   * The nonce is fixed for the life of this component — GIS captures it at
+   * `initialize` and the button is rendered once. Callers that need a fresh nonce
+   * should remount via `key={nonce}` rather than change the prop underneath it.
+   */
+  nonce?: string;
 }
 
-const GoogleSignIn: FC<Props> = ({ onIdToken, onError }) => {
+const GoogleSignIn: FC<Props> = ({ onIdToken, onError, nonce }) => {
   const holder = useRef<HTMLDivElement | null>(null);
   const rendered = useRef(false);
   const [loading, setLoading] = useState(true);
@@ -103,7 +115,8 @@ const GoogleSignIn: FC<Props> = ({ onIdToken, onError }) => {
             else onError('Google didn’t return a sign-in token — please try again.');
           },
           auto_select: false,
-          cancel_on_tap_outside: true
+          cancel_on_tap_outside: true,
+          ...(nonce ? { nonce } : {})
         });
         api.renderButton(holder.current, {
           type: 'standard',

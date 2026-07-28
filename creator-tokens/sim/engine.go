@@ -42,6 +42,13 @@ const (
 	escrowPending   = "PENDING"
 	escrowAnswered  = "ANSWERED"
 	escrowReclaimed = "RECLAIMED"
+	// escrowDeclined (RULING E, core/delivery.go/core/ask.go's Decline) — the
+	// creator's free, honest "no": full round-trip of credits AND commission
+	// back to the asker, inside the answer window, explicitly NEUTRAL in the
+	// delivery gate (neither a miss nor a delivery). Distinct from RECLAIMED
+	// so the shadow ledger can tell "the creator declined" from "the asker
+	// never got an answer" apart, exactly as core's own askDeclined status does.
+	escrowDeclined = "DECLINED"
 )
 
 // EscrowShadow is this simulator's own record of one escrowed ask — NOT a
@@ -58,7 +65,8 @@ type EscrowShadow struct {
 	Credits       *big.Int
 	CommissionHbd *big.Int
 	Deadline      uint64
-	Status        string // PENDING / ANSWERED / RECLAIMED
+	Status        string // PENDING / ANSWERED / RECLAIMED / DECLINED
+	OfferingID    uint64 // which named service this ask targeted (0 == the legacy `face` price, offerings.go)
 }
 
 func escrowKey(creator string, seq uint64) string {
@@ -75,6 +83,18 @@ type creatorState struct {
 	InitialCap   int64
 	AbandonBlock uint64 // 0 = this creator never abandons
 	PaidInTotal  *big.Int
+
+	// RetireOnAbandon (Retire coverage): when AbandonBlock != 0, whether this
+	// creator's shutdown is a formal Retire (core.Retire — irreversible,
+	// closes inflows including the curve rail IMMEDIATELY, even during the
+	// 5-day notice) rather than a silent ghost (the natural OVERDUE->FROZEN
+	// lapse ladder, unchanged pre-existing behaviour). See NewEngine.
+	RetireOnAbandon bool
+	// VoluntaryRetireBlock (Retire coverage): a minority of RELIABLE creators
+	// retire on purpose, late in the run, with a clean delivery record --
+	// distinct from abandonment, exercising Retire on a HEALTHY market. 0 =
+	// never. See NewEngine and creatorTick.
+	VoluntaryRetireBlock uint64
 }
 
 // Keeper-behaviour profiles (Upgrade 3). The creator sim historically ran a
@@ -212,8 +232,32 @@ type Engine struct {
 	keeperProfile    string // Upgrade 3: KeeperReliable | KeeperAbsent
 	adversarialOrder bool   // Upgrade 3b: producer-adversarial intra-block tie-break
 
+	// dq is the live, in-run proof for the delivery-gate STANDING GUARDRAIL
+	// (core/delivery.go): delinquency must refuse PURCHASES (Ask/Buy, via
+	// RequireInflowOpen) and must NEVER refuse a payout, a subscription
+	// payment, or a shop-config change. Populated by checkDelinquencyGuardrail
+	// (called from recordEvent for every single event) rather than by a
+	// scripted probe, so the proof comes from ordinary population behaviour
+	// hitting real delinquent creators, not a scenario built to pass.
+	dq delinquencyStats
+
 	haltErr error
 	verbose bool
+}
+
+// delinquencyStats — see Engine.dq's doc. Every counted event captured its
+// creator's delinquency standing via core.DeliveryStanding BEFORE the call
+// executed (the same read RequireInflowOpen itself performs, at the same
+// block, off the same store — see actions.go's captureDelinquent), so
+// "AtCall" here means "already delinquent at the moment this call was
+// attempted," never a status that only became true afterward (e.g. a Reclaim
+// that itself pushes the creator over the miss threshold does NOT count as
+// "attempted while delinquent" — it is the call that CAUSES delinquency).
+type delinquencyStats struct {
+	PurchaseAttempts              int // ask/buy attempted against an ALREADY-delinquent creator
+	PurchaseRefusedForDelinquency int // ... and correctly refused for exactly that reason
+	OutflowAttempts               int // payout/renew/shop-config actions attempted against an ALREADY-delinquent creator
+	OutflowSucceeded              int // ... and did NOT fail for a delinquency reason (succeeded, or failed for something unrelated)
 }
 
 // NewEngine builds the store, the population, and every shadow-ledger
@@ -304,6 +348,28 @@ func NewEngine(cfg Config) *Engine {
 			// which role produced it).
 			frac := 0.30 + actor.RNG.Float64()*0.40
 			cs.AbandonBlock = genesisBlock + uint64(frac*float64(totalBlocks))
+		}
+		if cs.AbandonBlock != 0 {
+			// Roughly half of abandoning creators (Abandoner, and the ~30% of
+			// Flaky creators who eventually stop entirely) choose to formally
+			// Retire at that point instead of silently ghosting -- a distinct,
+			// equally realistic shutdown shape (RULING D/K3's irreversible
+			// notice) this simulator must drive too: it closes inflows,
+			// INCLUDING the curve rail, IMMEDIATELY -- even during the 5-day
+			// notice window -- rather than riding out the natural OVERDUE
+			// grace the silent-ghost path still gets. The other half keep the
+			// pre-existing silent-ghost behaviour, so both shutdown shapes
+			// stay covered by the same population.
+			cs.RetireOnAbandon = actor.RNG.Float64() < 0.5
+		} else if actor.Role == RoleCreatorReliable && actor.RNG.Float64() < 0.20 {
+			// A minority of reliable creators retire VOLUNTARILY, late in the
+			// run, with a clean delivery record -- a graceful shutdown
+			// distinct from abandonment: still renews and answers everything
+			// up to the point they retire, never delinquent, but chooses to
+			// stop taking new business. Exercises Retire on a HEALTHY market,
+			// not just a neglected one.
+			frac := 0.70 + actor.RNG.Float64()*0.25
+			cs.VoluntaryRetireBlock = genesisBlock + uint64(frac*float64(totalBlocks))
 		}
 		e.creators[name] = cs
 	}
@@ -529,7 +595,87 @@ func (e *Engine) newEvent(action, actor, creator string) *Event {
 // recordEvent appends ev to the trace and runs the full invariant sweep.
 func (e *Engine) recordEvent(ev *Event) {
 	e.Trace.AddEvent(*ev)
+	e.checkDelinquencyGuardrail(ev)
+	if e.haltErr != nil {
+		return
+	}
 	e.checkInvariants(ev)
+}
+
+// creatorWindingDown mirrors core/market.go's private inWindDown() from the
+// PUBLIC surface this package can reach (core.RetiredAt + core.Phase): true
+// once Retire has fired (even during its 5-day OVERDUE notice -- K3) or the
+// market is naturally FROZEN/CLOSED. This is exactly the predicate that
+// switches Sell (sell.go) off and Refund/RefundHolder (refund.go) on, and the
+// one R===Area(S) stops being an equality at (see checkInvariants below) --
+// used by both so the sim's own notion of "which exit rail is open" can never
+// drift from the invariant sweep's notion of "should the curve equality still
+// hold here."
+func (e *Engine) creatorWindingDown(creator string) bool {
+	if _, retired := core.RetiredAt(e.Store, creator); retired {
+		return true
+	}
+	switch core.Phase(e.Store, creator, e.Block) {
+	case core.StateFrozen, core.StateClosed:
+		return true
+	default:
+		return false
+	}
+}
+
+// checkDelinquencyGuardrail is the LIVE proof of delivery.go's standing
+// guardrail: "delinquency and billing state may refuse purchases but must
+// NEVER block a payout or a subscription payment." Every wrapper that can
+// target a creator whose delivery standing might matter captures
+// ev.Args["creatorDelinquent"] = "true"/"false" BEFORE invoking core (see
+// actions.go's captureDelinquent) -- the same (store, block) RequireInflowOpen
+// itself reads, so this is never a stale or racy snapshot.
+//
+//   - "ask"/"buy" (the two flows RequireInflowOpen actually gates,
+//     core/delivery.go/buy.go/ask.go): succeeding while ALREADY delinquent is
+//     impossible if the gate works -- an immediate HALT, not a soft flag,
+//     because it directly disproves "delinquency refuses purchases."
+//   - every other captured action (answer/decline/reclaim/sell/refund/
+//     refundHolder/claimTradeFees/renew/retire/the four offering-catalogue
+//     writers) never calls RequireInflowOpen at all (verified reading
+//     core/ask.go, core/sell.go, core/refund.go, core/tradefee.go,
+//     core/market.go's requireMarketAcceptsMoney, core/offerings.go's
+//     requireShopEditable/requireOpenCreatorMarket) -- so a failure whose
+//     ErrMsg blames delinquency here would mean one of those files started
+//     consulting delivery standing, which is exactly the guardrail breaking.
+//     Also an immediate HALT.
+//
+// Both counters are exported via Summary() so a run reports HOW MUCH of this
+// was actually exercised, not just "zero violations" (which would be equally
+// true of a creator population that never got near delinquency at all).
+func (e *Engine) checkDelinquencyGuardrail(ev *Event) {
+	if ev.Args["creatorDelinquent"] != "true" {
+		return
+	}
+	msg := strings.ToLower(ev.ErrMsg)
+	switch ev.Action {
+	case "ask", "buy":
+		e.dq.PurchaseAttempts++
+		if ev.OK {
+			e.halt(fmt.Sprintf(
+				"DELIVERY-GATE VIOLATION: %s by %s against creator=%s SUCCEEDED while the creator was already delinquent on delivery at call time -- RequireInflowOpen's delivery gate should have refused this purchase",
+				ev.Action, ev.Actor, ev.Creator), ev)
+			return
+		}
+		if strings.Contains(msg, "delinquent") {
+			e.dq.PurchaseRefusedForDelinquency++
+		}
+	case "answer", "decline", "reclaim", "sell", "refund", "refundHolder", "claimTradeFees", "renew", "retire",
+		"createOffering", "setOfferingPrice", "setOfferingTitle", "deleteOffering":
+		e.dq.OutflowAttempts++
+		if ev.OK || !strings.Contains(msg, "delinquent") {
+			e.dq.OutflowSucceeded++
+			return
+		}
+		e.halt(fmt.Sprintf(
+			"STANDING-GUARDRAIL VIOLATION: %s by %s against creator=%s was REFUSED because the creator is delinquent on delivery (%s: %s) -- delinquency must never block a payout, a subscription payment, or a shop-config change",
+			ev.Action, ev.Actor, ev.Creator, ev.ErrSym, ev.ErrMsg), ev)
+	}
 }
 
 // snapshotStore captures every key/value currently in the store. Used only
@@ -614,6 +760,32 @@ func (e *Engine) checkInvariants(triggerEv *Event) {
 				cname, bigStr(reserve), bigStr(paidIn),
 			), triggerEv)
 			return
+		}
+
+		// R === Area(S) EXACTLY (C-9, THE governing invariant -- core/curve.go's
+		// Area doc, core/buy.go's and core/sell.go's own induction proofs) --
+		// asserted directly here rather than assumed from reading core, and
+		// ONLY while the curve rail is actually the open rail for this creator
+		// (creatorWindingDown false): Buy/Sell maintain the equality
+		// inductively from the S=0,R=0 genesis, but the wind-down rail
+		// (Refund/RefundHolder, refund.go) deliberately pays flat PRO-RATA
+		// (floor(R*credits/S)), which is NOT the curve's own area step and is
+		// not supposed to preserve equality -- that is the entire mechanism
+		// the governing theorem relies on (a fresh buyer's payout is provably
+		// LESS than a curve-shaped payout would be, which is exactly R
+		// drifting away from Area(S) in the conservative direction). Checking
+		// this unconditionally would flag CORRECT wind-down behaviour as a
+		// violation; checking it only pre-wind-down is what actually proves
+		// C-9, not a weaker substitute for it.
+		if !e.creatorWindingDown(cname) {
+			area := core.Area(supply)
+			if cmpBig(reserve, area) != 0 {
+				e.halt(fmt.Sprintf(
+					"R!=AREA(S) VIOLATION creator=%s: reserve=%s != Area(supply=%s)=%s (curve rail still open -- Buy/Sell must maintain this exactly)",
+					cname, bigStr(reserve), bigStr(supply), bigStr(area),
+				), triggerEv)
+				return
+			}
 		}
 	}
 
@@ -771,6 +943,18 @@ func (e *Engine) Summary() string {
 	rhs := addBig(addBig(e.totalHbdOut, reserveTotal), addBig(e.treasuryShadow, e.heldCommissionTotal))
 	rhs = addBig(rhs, feePotsTotal)
 	fmt.Fprintf(&b, "  in == out+reserve+treasury+held+feePots? %v  (%s == %s)\n", cmpBig(e.totalHbdIn, rhs) == 0, bigStr(e.totalHbdIn), bigStr(rhs))
+	fmt.Fprintln(&b)
+
+	// ---- delivery-gate standing guardrail (core/delivery.go) ----
+	fmt.Fprintf(&b, "-- delivery-gate standing guardrail (live-proven, not assumed) --\n")
+	fmt.Fprintf(&b, "  purchases (ask/buy) attempted against an already-delinquent creator: %d\n", e.dq.PurchaseAttempts)
+	fmt.Fprintf(&b, "  ... correctly refused for exactly that reason:                       %d\n", e.dq.PurchaseRefusedForDelinquency)
+	fmt.Fprintf(&b, "  payouts/renew/shop-config attempted against an already-delinquent creator: %d\n", e.dq.OutflowAttempts)
+	fmt.Fprintf(&b, "  ... none blocked by delinquency (succeeded or failed for an unrelated reason): %d\n", e.dq.OutflowSucceeded)
+	if e.dq.OutflowAttempts == 0 {
+		fmt.Fprintf(&b, "  NOTE: zero non-purchase actions were ever attempted against a delinquent creator in this run --\n")
+		fmt.Fprintf(&b, "        the standing guardrail held VACUOUSLY here, not because it was exercised. See coverage.\n")
+	}
 
 	if e.haltErr != nil {
 		fmt.Fprintf(&b, "\n*** RUN HALTED: %v ***\n", e.haltErr)

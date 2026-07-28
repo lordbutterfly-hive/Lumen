@@ -1,0 +1,51 @@
+# The Lumen lite publisher scheduler.
+#
+# WITHOUT THIS RUNNING, LITE POSTS NEVER REACH HIVE. They accumulate in Postgres,
+# the user sees their post in Lumen, and nothing anywhere reports a problem. It is
+# the single most silent failure mode in the lite-accounts feature, which is why the
+# scheduler is a deployed service rather than a line in a runbook.
+#
+# Compose it alongside the blog:
+#   docker compose -f docker/docker-compose.yml -f docker/lumen-publisher.yml up -d
+#
+# Bare metal instead? Either of these is equivalent — the endpoint is idempotent and
+# takes a cluster-wide advisory lock, so overlapping calls are safe:
+#   crontab:  * * * * * LITE_PUBLISHER_TOKEN=… /app/scripts/lite-publisher-cron.sh >> /var/log/lumen-publisher.log 2>&1
+#   systemd:  a .service running the same script + a .timer with OnUnitActiveSec=60
+#
+# Required environment (same values the blog has):
+#   LITE_PUBLISHER_TOKEN   shared secret for the drain endpoint
+#   LUMEN_BASE_URL         where the blog answers (default http://denser-blog:3000)
+services:
+  lumen-publisher:
+    image: curlimages/curl:8.11.1
+    restart: unless-stopped
+    environment:
+      LUMEN_BASE_URL: ${LUMEN_BASE_URL:-http://denser-blog:3000}
+      LITE_PUBLISHER_TOKEN: ${LITE_PUBLISHER_TOKEN:?LITE_PUBLISHER_TOKEN is required — without it the publisher never runs}
+      LITE_DRAIN_MAX: ${LITE_DRAIN_MAX:-25}
+      DRAIN_INTERVAL_SECONDS: ${DRAIN_INTERVAL_SECONDS:-60}
+    # A loop rather than cron: one less daemon, and the interval is visible here.
+    # A full batch of 25 takes ~85s (Hive's 3-second comment interval), so ticks
+    # overlap by design — the endpoint answers {"status":"skipped"} instead of
+    # double-publishing, and the queue is still there on the next tick.
+    #
+    # A 503 is a configuration state, not an incident: it means the publisher is
+    # deliberately dark (no signer injected, or refusing to arm against mainnet
+    # without an explicit opt-in). Logged, not retried harder.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "lumen-publisher: draining $$LUMEN_BASE_URL every $${DRAIN_INTERVAL_SECONDS}s"
+        while true; do
+          RESPONSE=$$(curl -sS -X POST "$$LUMEN_BASE_URL/api/lite/publisher/drain" \
+            -H 'content-type: application/json' \
+            -H "x-lite-publisher-token: $$LITE_PUBLISHER_TOKEN" \
+            -d "{\"max\":$$LITE_DRAIN_MAX}" \
+            --max-time 300 -w '\n%{http_code}' 2>&1)
+          echo "$$(date -Iseconds) $$(echo "$$RESPONSE" | tr '\n' ' ')"
+          sleep "$$DRAIN_INTERVAL_SECONDS"
+        done
+    depends_on:
+      denser-blog:
+        condition: service_healthy

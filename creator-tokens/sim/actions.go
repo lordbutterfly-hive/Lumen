@@ -105,6 +105,21 @@ func mulDivFloorBig(a, b, c *big.Int) *big.Int {
 	return p.Div(p, c)
 }
 
+// captureDelinquent snapshots creator's delivery standing (core.
+// DeliveryStanding) at THIS block, BEFORE core is actually called, into
+// ev.Args["creatorDelinquent"] — exactly what engine.go's
+// checkDelinquencyGuardrail reads to prove delivery.go's standing guardrail
+// live: "delinquency refuses purchases... but never a payout, a subscription
+// payment, or a shop-config change." It reads the same (e.Store, e.Block)
+// RequireInflowOpen itself consults a moment later in the same wrapper, so
+// the snapshot can never be stale or racy relative to what core actually
+// decides. Every wrapper the guardrail cares about (the two purchase paths,
+// every exempt payout/config path) calls this immediately after building ev.
+func (e *Engine) captureDelinquent(ev *Event, creator string) {
+	delinquent, _ := core.DeliveryStanding(e.Store, creator, e.Block)
+	ev.Args["creatorDelinquent"] = boolStr(delinquent)
+}
+
 // ===========================================================================
 // core.* call wrappers. Every one of these calls exactly one real core.*
 // mutator against e.Store, updates this simulator's own shadow ledgers ONLY
@@ -151,6 +166,7 @@ func (e *Engine) doRenew(caller, creator string, periods uint64) {
 	ev := e.newEvent("renew", caller, creator)
 	ev.Args["periods"] = fmt.Sprintf("%d", periods)
 	ev.Args["paid"] = bigStr(cost)
+	e.captureDelinquent(ev, creator) // standing guardrail: Renew must never be blocked by delinquency (requireMarketAcceptsMoney deliberately skips the delivery gate)
 
 	beforePaidUntil := core.PaidUntil(e.Store, creator)
 	e.coreCall("renew", ev, func() error {
@@ -221,6 +237,7 @@ func (e *Engine) doBuy(caller, creator string, n *big.Int) {
 
 	ev := e.newEvent("buy", caller, creator)
 	ev.Args["tokens"] = bigStr(n)
+	e.captureDelinquent(ev, creator) // Buy IS gated by RequireInflowOpen (buy.go) — a purchase, must be refused while delinquent
 
 	beforeReserve := core.Reserve(e.Store, creator)
 	beforeSupply := core.Supply(e.Store, creator)
@@ -376,7 +393,7 @@ func (e *Engine) askIntent(asker, creator string) {
 	})
 }
 
-func (e *Engine) doAskExecute(asker, creator string, maxCredits, commission *big.Int, contentHash string, deadlineBlocks uint64) {
+func (e *Engine) doAskExecute(asker, creator string, maxCredits, commission *big.Int, contentHash string, deadlineBlocks uint64, offeringID uint64) {
 	actor := e.pop.Actors[asker]
 	if cmpBig(actor.HBD, commission) < 0 {
 		return // wallet drained by something else in the gap; a real wallet would refuse to even sign
@@ -387,13 +404,15 @@ func (e *Engine) doAskExecute(asker, creator string, maxCredits, commission *big
 	ev.Args["commissionHbdPaid"] = bigStr(commission)
 	ev.Args["deadlineBlocks"] = fmt.Sprintf("%d", deadlineBlocks)
 	ev.Args["contentHash"] = contentHash
+	ev.Args["offeringID"] = fmt.Sprintf("%d", offeringID)
+	e.captureDelinquent(ev, creator) // Ask IS gated by RequireInflowOpen (ask.go) — a purchase, must be refused while delinquent
 
 	beforeBal := core.BalanceOf(e.Store, creator, asker)
 
 	var res *core.AskResult
 	e.coreCall("ask", ev, func() error {
 		var err error
-		res, err = core.Ask(e.Store, asker, creator, e.Block, maxCredits, commission, contentHash, deadlineBlocks, 0)
+		res, err = core.Ask(e.Store, asker, creator, e.Block, maxCredits, commission, contentHash, deadlineBlocks, offeringID)
 		return err
 	})
 	if ev.OK {
@@ -404,7 +423,7 @@ func (e *Engine) doAskExecute(asker, creator string, maxCredits, commission *big
 		e.addEscrow(&EscrowShadow{
 			Creator: creator, Seq: res.Seq, Asker: asker,
 			Credits: res.CreditsSpent, CommissionHbd: res.CommissionHbd,
-			Deadline: deadline, Status: escrowPending,
+			Deadline: deadline, Status: escrowPending, OfferingID: offeringID,
 		})
 
 		ev.Args["seq"] = fmt.Sprintf("%d", res.Seq)
@@ -489,6 +508,7 @@ func (e *Engine) doAnswer(creator string, seq uint64, answerHash string) {
 	ev := e.newEvent("answer", creator, creator)
 	ev.Args["seq"] = fmt.Sprintf("%d", seq)
 	ev.Args["answerHash"] = answerHash
+	e.captureDelinquent(ev, creator) // standing guardrail: Answer must never be blocked by delinquency (ask.go: "deliberately consults NO phase/subscription state")
 
 	beforeBal := core.BalanceOf(e.Store, creator, creator)
 
@@ -526,6 +546,7 @@ func (e *Engine) doReclaim(caller, asker, creator string, seq uint64) {
 	if caller != asker {
 		ev.Args["permissionless"] = "true" // a third party pushed this on the asker's behalf (H1)
 	}
+	e.captureDelinquent(ev, creator) // standing guardrail: Reclaim must never be blocked by delinquency (ask.go: "deliberately consults NO phase/subscription state")
 
 	beforeBal := core.BalanceOf(e.Store, creator, asker)
 
@@ -538,6 +559,54 @@ func (e *Engine) doReclaim(caller, asker, creator string, seq uint64) {
 	if ev.OK {
 		e.resolveEscrow(creator, seq, escrowReclaimed)
 		payee := res.Asker // core pays the escrow's own asker, never the caller
+		if actor, ok := e.pop.Actors[payee]; ok && res.CommissionHbd != nil && res.CommissionHbd.Sign() > 0 {
+			actor.HBD = addBig(actor.HBD, res.CommissionHbd)
+		}
+		if res.CommissionHbd != nil && res.CommissionHbd.Sign() > 0 {
+			e.totalHbdOut = addBig(e.totalHbdOut, res.CommissionHbd)
+		}
+		ev.Args["creditsReturned"] = bigStr(res.CreditsReturned)
+		ev.Args["commissionRefundedHbd"] = bigStr(res.CommissionHbd)
+		ev.Deltas["balance:"+payee] = deltaStr(beforeBal, core.BalanceOf(e.Store, creator, payee))
+		ev.Deltas["wallet:"+payee] = "+" + bigStr(res.CommissionHbd)
+		ev.Deltas["heldCommissionTotal"] = "-" + bigStr(res.CommissionHbd)
+	}
+	e.recordEvent(ev)
+}
+
+// doDecline resolves an escrow via core.Decline (RULING E, ask.go) — the
+// creator's free, honest "no": a full round-trip of credits AND the whole
+// commission back to the asker, inside the SAME window an Answer would be
+// legal in. Money-shape-identical to doReclaim above (same payee, same two
+// legs returned in full), which is why the shadow-ledger bookkeeping below
+// mirrors it line for line — the two calls differ only in WHO can trigger
+// them (creator-only here, permissionless there) and in WHAT they mean for
+// the delivery gate (Decline is explicitly neutral — neither a miss nor a
+// delivery; Reclaim always records a miss). Both of those distinctions are
+// core's business, not this wrapper's: core.Decline itself refuses a caller
+// that is not the creator and never touches the miss/delivered counters.
+func (e *Engine) doDecline(creator string, seq uint64) {
+	rec := e.escrows[escrowKey(creator, seq)]
+	asker := ""
+	if rec != nil {
+		asker = rec.Asker
+	}
+
+	ev := e.newEvent("decline", creator, creator)
+	ev.Args["seq"] = fmt.Sprintf("%d", seq)
+	e.captureDelinquent(ev, creator) // standing guardrail: Decline must never be blocked by delinquency (ask.go: "deliberately consults NO phase/subscription state")
+
+	beforeBal := core.BalanceOf(e.Store, creator, asker)
+
+	var res *core.ReclaimResult
+	e.coreCall("decline", ev, func() error {
+		var err error
+		res, err = core.Decline(e.Store, creator, creator, e.Block, seq)
+		return err
+	})
+	if ev.OK {
+		e.resolveEscrow(creator, seq, escrowDeclined)
+		payee := res.Asker // core pays the escrow's own asker — decline is creator-only to CALL, but the payout target is fixed by the escrow, same shape as Reclaim
 		if actor, ok := e.pop.Actors[payee]; ok && res.CommissionHbd != nil && res.CommissionHbd.Sign() > 0 {
 			actor.HBD = addBig(actor.HBD, res.CommissionHbd)
 		}
@@ -573,6 +642,7 @@ func (e *Engine) doSell(caller, creator string, deltaS *big.Int) {
 
 	ev := e.newEvent("sell", caller, creator)
 	ev.Args["tokens"] = bigStr(deltaS)
+	e.captureDelinquent(ev, creator) // standing guardrail: Sell must never be blocked by delinquency (sell.go reads inWindDown only, never RequireInflowOpen)
 
 	beforeReserve := core.Reserve(e.Store, creator)
 	beforeSupply := core.Supply(e.Store, creator)
@@ -624,6 +694,7 @@ func (e *Engine) doRefund(caller, creator string, credits *big.Int) {
 
 	ev := e.newEvent("refund", caller, creator)
 	ev.Args["credits"] = bigStr(credits)
+	e.captureDelinquent(ev, creator) // standing guardrail: Refund must never be blocked by delinquency (refund.go gates on inWindDown only)
 
 	beforeReserve := core.Reserve(e.Store, creator)
 	beforeSupply := core.Supply(e.Store, creator)
@@ -679,6 +750,7 @@ func (e *Engine) doRefund(caller, creator string, credits *big.Int) {
 func (e *Engine) doRefundHolder(pusher, creator, holder string) {
 	ev := e.newEvent("refundHolder", pusher, creator)
 	ev.Args["holder"] = holder
+	e.captureDelinquent(ev, creator) // standing guardrail: RefundHolder must never be blocked by delinquency (refund.go gates on inWindDown only)
 
 	beforeReserve := core.Reserve(e.Store, creator)
 	beforeSupply := core.Supply(e.Store, creator)
@@ -787,6 +859,141 @@ func (e *Engine) doWithdrawTreasury(owner string) {
 		ev.Deltas["treasuryShadow"] = deltaStr(beforeShadow, e.treasuryShadow)
 		ev.Deltas["wallet:"+owner] = "+" + bigStr(paid)
 	}
+	e.recordEvent(ev)
+}
+
+// doRetire drives core.Retire — the creator's own, IRREVERSIBLE, once-only
+// wind-down notice (RULING D/K3, market.go). Moves no HBD (Retire touches
+// only kRetiredAt; paidUntil is left untouched, the reserve is left
+// untouched) — the event carries the derived "windingDown" transition purely
+// for trace readability, not because anything here is money-critical.
+func (e *Engine) doRetire(creator string) {
+	ev := e.newEvent("retire", creator, creator)
+	e.captureDelinquent(ev, creator) // standing guardrail: Retire is gated by requireOpenCreatorMarket only, never delivery standing
+
+	beforeWindingDown := e.creatorWindingDown(creator)
+	e.coreCall("retire", ev, func() error {
+		return core.Retire(e.Store, creator, creator, e.Block)
+	})
+	if ev.OK {
+		ev.Deltas["windingDown"] = boolStr(beforeWindingDown) + " -> " + boolStr(e.creatorWindingDown(creator))
+	}
+	e.recordEvent(ev)
+}
+
+// doClaimTradeFees drives core.ClaimTradeFees (tradefee.go, RULING F8's pull
+// half): pays out the caller's ENTIRE accrued trade-fee balance (kFeeBal) —
+// the creator half of every 10% trade fee (Buy/Sell) AND every K2/K-split
+// exit tax (Sell/Refund/RefundHolder), all of which accrue to the SAME pot.
+// Only ever called with caller == a creator claiming their OWN pot (kFeeBal
+// is never credited to anyone else in this codebase — see tradefee.go/
+// exittax.go, both keyed on `creator`), which is also why checkInvariants'
+// live feePotsTotal sum (engine.go) only ever iterates creatorNames: this
+// wrapper's payout is exactly the amount that sum will drop by, so no
+// shadow-ledger mirror is needed here — only totalHbdOut, mirroring
+// doWithdrawTreasury's identical "live pot, no shadow" shape.
+func (e *Engine) doClaimTradeFees(caller string) {
+	ev := e.newEvent("claimTradeFees", caller, caller)
+	e.captureDelinquent(ev, caller) // standing guardrail: ClaimTradeFees "consults NOTHING" (tradefee.go) — must never be blocked by delinquency
+
+	beforeFee := core.FeeBalanceOf(e.Store, caller)
+
+	var paid *big.Int
+	e.coreCall("claimTradeFees", ev, func() error {
+		var err error
+		paid, err = core.ClaimTradeFees(e.Store, caller)
+		return err
+	})
+	if ev.OK {
+		if paid.Sign() > 0 {
+			if actor, ok := e.pop.Actors[caller]; ok {
+				actor.HBD = addBig(actor.HBD, paid)
+			}
+			e.totalHbdOut = addBig(e.totalHbdOut, paid)
+		}
+		ev.Args["claimed"] = bigStr(paid)
+		ev.Deltas["feeBal:"+caller] = deltaStr(beforeFee, core.FeeBalanceOf(e.Store, caller))
+		ev.Deltas["wallet:"+caller] = "+" + bigStr(paid)
+	}
+	e.recordEvent(ev)
+}
+
+// ---- the creator shop (offerings.go): CreateOffering / SetOfferingPrice /
+// SetOfferingTitle / DeleteOffering. None of the four move HBD — posting,
+// repricing, renaming or withdrawing a listing is pure config, gated by
+// requireShopEditable/requireOpenCreatorMarket (market-exists, not CLOSED,
+// and — for the first three — not RETIRED), never by delivery standing or
+// the global pause. Money only ever moves later, when a buyer Asks against a
+// live offering id (doAskExecute, above, already handles that uniformly via
+// core.OfferingPrice(id) — id 0 mirrors the legacy face price exactly).
+
+func (e *Engine) doCreateOffering(creator, title string, price int64) {
+	ev := e.newEvent("createOffering", creator, creator)
+	ev.Args["title"] = title
+	ev.Args["price"] = fmt.Sprintf("%d", price)
+	e.captureDelinquent(ev, creator) // standing guardrail: shop-config writes are gated by requireShopEditable only, never delivery standing
+
+	var id uint64
+	e.coreCall("createOffering", ev, func() error {
+		var err error
+		id, err = core.CreateOffering(e.Store, creator, creator, e.Block, title, price)
+		return err
+	})
+	if ev.OK {
+		ev.Args["id"] = fmt.Sprintf("%d", id)
+	}
+	e.recordEvent(ev)
+}
+
+func (e *Engine) doSetOfferingPrice(creator string, id uint64, newPrice int64) {
+	ev := e.newEvent("setOfferingPrice", creator, creator)
+	ev.Args["id"] = fmt.Sprintf("%d", id)
+	ev.Args["newPrice"] = fmt.Sprintf("%d", newPrice)
+	e.captureDelinquent(ev, creator)
+	before := core.OfferingPrice(e.Store, creator, id)
+
+	e.coreCall("setOfferingPrice", ev, func() error {
+		return core.SetOfferingPrice(e.Store, creator, creator, e.Block, id, newPrice)
+	})
+	if ev.OK {
+		ev.Deltas["offerPrice:"+fmt.Sprintf("%d", id)] = deltaStr(before, core.OfferingPrice(e.Store, creator, id))
+	}
+	e.recordEvent(ev)
+}
+
+func (e *Engine) doSetOfferingTitle(creator string, id uint64, newTitle string) {
+	ev := e.newEvent("setOfferingTitle", creator, creator)
+	ev.Args["id"] = fmt.Sprintf("%d", id)
+	ev.Args["newTitle"] = newTitle
+	e.captureDelinquent(ev, creator)
+	beforeTitle := core.OfferingTitle(e.Store, creator, id)
+	beforePrice := core.OfferingPrice(e.Store, creator, id)
+
+	e.coreCall("setOfferingTitle", ev, func() error {
+		return core.SetOfferingTitle(e.Store, creator, creator, id, newTitle)
+	})
+	if ev.OK {
+		ev.Deltas["offerTitle:"+fmt.Sprintf("%d", id)] = beforeTitle + " -> " + core.OfferingTitle(e.Store, creator, id)
+		// SetOfferingTitle never changes THIS id's own price (offerings.go:
+		// "renaming a service is not a repricing") — recorded as a delta only
+		// when it moved, so a clean no-op rename doesn't spuriously suggest a
+		// price change happened.
+		afterPrice := core.OfferingPrice(e.Store, creator, id)
+		if cmpBig(beforePrice, afterPrice) != 0 {
+			ev.Deltas["offerPrice:"+fmt.Sprintf("%d", id)] = deltaStr(beforePrice, afterPrice)
+		}
+	}
+	e.recordEvent(ev)
+}
+
+func (e *Engine) doDeleteOffering(creator string, id uint64) {
+	ev := e.newEvent("deleteOffering", creator, creator)
+	ev.Args["id"] = fmt.Sprintf("%d", id)
+	e.captureDelinquent(ev, creator)
+
+	e.coreCall("deleteOffering", ev, func() error {
+		return core.DeleteOffering(e.Store, creator, creator, id)
+	})
 	e.recordEvent(ev)
 }
 

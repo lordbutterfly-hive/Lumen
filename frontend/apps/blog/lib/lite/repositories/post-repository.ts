@@ -341,3 +341,38 @@ export async function countByUser(userId: string): Promise<number> {
   );
   return Number(res.rows[0]?.n ?? 0);
 }
+
+/**
+ * Moderator visibility override for a single post. `feed_visibility` existed in the
+ * schema with no writer outside the automatic pre-screen, so a human had no way to
+ * hide something the screen missed.
+ */
+export async function setFeedVisibility(
+  postId: string,
+  visibility: 'visible' | 'author_only' | 'hidden'
+): Promise<LumenPost | null> {
+  const res = await query<PostRow>(
+    `UPDATE lumen_post SET feed_visibility = $2 WHERE post_id = $1 RETURNING *`,
+    [postId, visibility]
+  );
+  return res.rows[0] ? mapPost(res.rows[0]) : null;
+}
+
+/**
+ * Hide (or restore) every post by one author in a single statement — the spam case,
+ * where suspending the account is useless if forty posts stay in the feed.
+ *
+ * Deliberately does NOT touch the chain: posts already broadcast stay on Hive, and
+ * the caller is told so rather than being left to assume this removed them.
+ */
+export async function setFeedVisibilityForUser(
+  userId: string,
+  visibility: 'visible' | 'author_only' | 'hidden'
+): Promise<number> {
+  const res = await query(
+    `UPDATE lumen_post SET feed_visibility = $2
+      WHERE user_id = $1 AND feed_visibility <> $2 AND deleted_locally = false`,
+    [userId, visibility]
+  );
+  return res.rowCount ?? 0;
+}

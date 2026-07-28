@@ -2,7 +2,7 @@
 
 import { FC, ReactNode, useState } from 'react';
 import type { Service, TokenMarketDetail } from '../../market/token-detail';
-import { buyQuote, sellQuote, serviceTokens } from '../../market/curve';
+import { buyQuote, sellQuote, serviceQuote, EXIT_FEE_MAX } from '../../market/curve';
 import { usdPrice, usdWhole } from '../../market/format';
 
 export type TokenDialog = 'buy' | 'sell' | 'ask' | 'send' | 'inter' | null;
@@ -33,14 +33,22 @@ const ModalHead: FC<{ title: string; onClose: () => void }> = ({ title, onClose 
 
 const tok = (n: number) => n.toFixed(2);
 
-const BuyModal: FC<{ m: TokenMarketDetail; onBuy: (usd: number) => void; onClose: () => void }> = ({ m, onBuy, onClose }) => {
+const BuyModal: FC<{ m: TokenMarketDetail; onBuy: (usd: number, maxTotalUsd?: number) => boolean; onClose: () => void }> = ({ m, onBuy, onClose }) => {
   const [amt, setAmt] = useState('50');
   const [adv, setAdv] = useState(false);
   const [maxPrice, setMaxPrice] = useState((m.priceUsd * 1.05).toFixed(2));
+  const [failed, setFailed] = useState(false);
   const usd = parseFloat(amt.replace(/,/g, '')) || 0; // strip thousands separators ("1,000" → 1000, not 1)
   const q = buyQuote(usd, m);
   const maxP = parseFloat(maxPrice.replace(/,/g, ''));
   const overMax = adv && Number.isFinite(maxP) && maxP > 0 && q.priceAfter > maxP; // slippage guard
+  // The "max price per token" cap, converted to a TOTAL-cost bound for the
+  // quoted count — buy.go's own doc: "slippage protection is the buyer's own
+  // signed transfer.allow" on TotalDue, not on a per-token price the chain
+  // never receives as such. Threading this through is what makes the control
+  // mean something once buy() is wired to a real chain call (previously it
+  // only disabled this button locally and was never passed to onBuy at all).
+  const maxTotalUsd = adv && Number.isFinite(maxP) && maxP > 0 && q.tokens > 0 ? maxP * q.tokens : undefined;
   return (
     <ModalShell width={460} onClose={onClose}>
       <ModalHead title={`Buy @${m.handle} token`} onClose={onClose} />
@@ -50,7 +58,10 @@ const BuyModal: FC<{ m: TokenMarketDetail; onBuy: (usd: number) => void; onClose
           <span className="text-[22px] font-bold text-[#161511]">$</span>
           <input
             value={amt}
-            onChange={(e) => setAmt(e.target.value)}
+            onChange={(e) => {
+              setAmt(e.target.value);
+              setFailed(false); // a fresh amount deserves a fresh attempt, not a stale error
+            }}
             inputMode="decimal"
             className="ml-0.5 flex-1 border-0 text-[22px] font-bold tabular-nums text-[#161511] outline-none"
           />
@@ -59,7 +70,10 @@ const BuyModal: FC<{ m: TokenMarketDetail; onBuy: (usd: number) => void; onClose
           {['10', '25', '100'].map((v) => (
             <button
               key={v}
-              onClick={() => setAmt(v)}
+              onClick={() => {
+                setAmt(v);
+                setFailed(false);
+              }}
               className="flex-1 rounded-[9px] border border-[#e4e6e9] py-2 text-[13px] font-semibold text-[#3f4650] hover:border-[#c0392b] hover:text-[#c0392b]"
             >
               ${v}
@@ -103,8 +117,12 @@ const BuyModal: FC<{ m: TokenMarketDetail; onBuy: (usd: number) => void; onClose
         <button
           onClick={() => {
             if (Number.isFinite(usd) && usd > 0 && !overMax) {
-              onBuy(usd);
-              onClose();
+              // onBuy reports whether the buy actually executed (defect fix:
+              // this used to close unconditionally, as if a cap-refused or
+              // wound-down buy had succeeded) — only close on a real success.
+              const ok = onBuy(usd, maxTotalUsd);
+              if (ok) onClose();
+              else setFailed(true);
             }
           }}
           disabled={!Number.isFinite(usd) || usd <= 0 || overMax}
@@ -112,6 +130,11 @@ const BuyModal: FC<{ m: TokenMarketDetail; onBuy: (usd: number) => void; onClose
         >
           Buy — {usdWhole(usd)}
         </button>
+        {failed ? (
+          <div className="mt-2.5 text-center text-[12.5px] font-semibold text-[#c0392b]">
+            That buy didn’t go through — the market may be at its cap or winding down. Try a smaller amount.
+          </div>
+        ) : null}
         <div className="mt-2.5 text-center text-xs text-[#9ca3af]">One signature confirms your buy.</div>
       </div>
     </ModalShell>
@@ -150,7 +173,11 @@ const SellModal: FC<{ m: TokenMarketDetail; onSell: (tokens: number) => void; on
               You’ve held these ~{m.position?.heldDays ?? 0} days. The fee drops to 0% if you hold ~6 weeks.
             </p>
             <div className="h-1.5 overflow-hidden rounded bg-[#f4e3c8]">
-              <div className="h-full bg-[#b45309]" style={{ width: `${feePctLabel / 0.15}%` }} />
+              {/* Was a leftover 0.15 (the OLD, pre-curve 15% max) — reads as
+                  maxed-out for the first quarter of the real 20% decay.
+                  EXIT_FEE_MAX is the real, exported maximum (params.go
+                  MaxExitTaxBps). */}
+              <div className="h-full bg-[#b45309]" style={{ width: `${(q.exitFeePct / EXIT_FEE_MAX) * 100}%` }} />
             </div>
             <div className="mt-1.5 flex justify-between text-[11px] tabular-nums text-[#b45309]">
               <span>{feePctLabel}% now</span>
@@ -185,10 +212,10 @@ const SellModal: FC<{ m: TokenMarketDetail; onSell: (tokens: number) => void; on
               onClose();
             }
           }}
-          disabled={!Number.isFinite(tokens) || tokens <= 0 || held <= 0}
+          disabled={!Number.isFinite(tokens) || tokens <= 0 || held <= 0 || tokens > held}
           className="w-full rounded-[13px] bg-[#1a1a17] py-[15px] text-[15px] font-bold text-white hover:bg-black disabled:opacity-50"
         >
-          Sell — get ~{usdPrice(q.receiveUsd)}
+          {tokens > held ? 'More than you hold' : `Sell — get ~${usdPrice(q.receiveUsd)}`}
         </button>
         <div className="mt-2.5 text-center text-xs text-[#9ca3af]">Selling is always available — even if this market winds down.</div>
       </div>
@@ -200,9 +227,17 @@ const AskModal: FC<{ m: TokenMarketDetail; service: Service | null; onSpend: (us
   const [deadline, setDeadline] = useState(7);
   const [question, setQuestion] = useState('');
   const usd = service?.usd ?? 10;
-  const tokens = serviceTokens(usd, m.priceUsd);
+  // USER RULING 2026-07-27: the posted USD price is the buyer's TOTAL — 12%
+  // is a SEPARATE HBD platform commission, never tokens (ask.go splitFace).
+  const q = serviceQuote(usd, m.priceUsd);
   const held = m.position?.tokens ?? 0;
-  const canAfford = held >= tokens && Number.isFinite(tokens);
+  // This mock has no HBD wallet balance to check — a real, wallet-connected
+  // build MUST also verify the buyer can cover q.commissionUsd in HBD
+  // (ask.go's commissionHbdPaid leg) before enabling this button; this only
+  // proves the TOKEN leg is affordable. Never let "canAfford" quietly mean
+  // "affords the tokens" once a real HBD balance exists to check — see
+  // ask.go's Ask() guard order (maxCredits, then the exact commission match).
+  const canAffordTokens = held >= q.tokens && Number.isFinite(q.tokens);
   return (
     <ModalShell width={500} onClose={onClose}>
       <ModalHead title={`Ask @${m.handle}`} onClose={onClose} />
@@ -215,11 +250,9 @@ const AskModal: FC<{ m: TokenMarketDetail; service: Service | null; onSpend: (us
         />
         <div className="my-2 mb-3.5 text-xs text-[#9ca3af]">Private — stored on Lumen, only its fingerprint goes on-chain.</div>
         <div className="mb-4 rounded-xl border border-[#ebebeb] px-4 py-3.5 text-[14px] leading-[1.55] text-[#3f4650]">
-          This costs{' '}
-          <strong className="tabular-nums text-[#161511]">
-            {usdWhole(usd)} ≈ {tok(tokens)} tokens
-          </strong>{' '}
-          at today’s price. If unanswered within your deadline, you get it all back.
+          This costs <strong className="tabular-nums text-[#161511]">{tok(q.tokens)} tokens</strong> from your balance, plus
+          a separate <strong className="tabular-nums text-[#161511]">{usdPrice(q.commissionUsd)}</strong> platform
+          commission paid in HBD — {usdWhole(usd)} total. If unanswered within your deadline, you get it all back.
         </div>
         <label className="mb-2 block text-[12.5px] font-semibold text-[#6b7280]">Answer due within</label>
         <div className="mb-4 flex items-center gap-3.5">
@@ -235,15 +268,17 @@ const AskModal: FC<{ m: TokenMarketDetail; service: Service | null; onSpend: (us
         </div>
         <button
           onClick={() => {
-            if (canAfford) {
+            if (canAffordTokens) {
               onSpend(usd, service?.name, deadline, question);
               onClose();
             }
           }}
-          disabled={!canAfford}
+          disabled={!canAffordTokens}
           className="w-full rounded-[13px] bg-[#1a1a17] py-[15px] text-[15px] font-semibold text-white hover:bg-black disabled:opacity-50"
         >
-          {canAfford ? `Send question — ${tok(tokens)} tokens` : `You need ${tok(tokens)} @${m.handle} tokens — buy some first`}
+          {canAffordTokens
+            ? `Send question — ${tok(q.tokens)} tokens + ${usdPrice(q.commissionUsd)} HBD`
+            : `You need ${tok(q.tokens)} @${m.handle} tokens — buy some first`}
         </button>
       </div>
     </ModalShell>
@@ -314,7 +349,8 @@ const TokenModals: FC<{
   dialog: TokenDialog;
   market: TokenMarketDetail;
   service: Service | null;
-  onBuy: (usd: number) => void;
+  /** Returns whether the buy actually executed — see market/store.ts's buy() doc. */
+  onBuy: (usd: number, maxTotalUsd?: number) => boolean;
   onSell: (tokens: number) => void;
   onSpend: (usd: number, serviceName?: string, deadlineDays?: number, question?: string) => void;
   onTransfer: (tokens: number) => void;

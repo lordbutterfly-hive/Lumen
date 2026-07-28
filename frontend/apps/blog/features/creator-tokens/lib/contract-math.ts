@@ -603,6 +603,33 @@ export function commissionOwedForBaseUnits(faceBaseUnits: number): number {
   return mulBpsFloor(faceBaseUnits, COMMISSION_BPS);
 }
 
+export interface FaceSplit {
+  /** What creditsForAsk actually prices — NEVER the raw face. */
+  tokenLegBaseUnits: number;
+  /** The 12% platform commission — a SEPARATE HBD leg, paid alongside the token leg, never added on top of it. */
+  commissionBaseUnits: number;
+}
+
+/**
+ * ask.go splitFace (USER RULING 2026-07-27): the posted face is the buyer's
+ * TOTAL, not a token-only price. commission = floor(face·CommissionBps/10000);
+ * the token leg is the REMAINDER, so the two always re-sum to the posted face
+ * exactly — the rounding can only ever favour the CREATOR (at most 1 base
+ * unit), never overcharge the buyer.
+ *
+ * THE BUG THIS CLOSES: callers used to feed the raw `faceBaseUnits` straight
+ * into creditsForAskBaseUnits (pricing the FULL posted amount in tokens)
+ * while the commission was ALSO drawn as a separate HBD leg — so a posted
+ * "200" cost the buyer 224 (200 in tokens + 24 in HBD), a surcharge that
+ * appeared on no screen and in no spec (ask.go's own splitFace doc). Every
+ * caller that needs "how many tokens does this ask cost" must split first and
+ * price tokenLegBaseUnits — never the raw face.
+ */
+export function splitFaceBaseUnits(faceBaseUnits: number): FaceSplit {
+  const commissionBaseUnits = commissionOwedForBaseUnits(faceBaseUnits);
+  return { tokenLegBaseUnits: faceBaseUnits - commissionBaseUnits, commissionBaseUnits };
+}
+
 /**
  * ask.go's I6 disjoint-window guard, restated as a status instead of a
  * legality check. REVISED 2026-07-20 (guard-wiring pass): PENDING now splits

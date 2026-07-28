@@ -356,6 +356,115 @@ func TestEvBlockSeqDeadlineAreAlwaysBareNumbers(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// GAP 2 closure (2026-07-28): Register's atomic first buy must also log a
+// `bought` event, not just `registered`.
+//
+// contract/main.go's `register` entrypoint supports an atomic first buy
+// (RegisterWithFirstBuy, result field res.FirstBuy). Real money and real
+// tokens move on that path — RegisterWithFirstBuy calls Buy internally,
+// which mutates kReserve, kFeeBal(creator) and kBal(creator,creator)
+// (buy.go) — but before this fix only EvRegistered was ever logged for it,
+// so a creator's own initial holding was invisible to any indexer forever,
+// and the indexer's balance for that creator was wrong from the first block.
+//
+// NON-VACUOUSNESS / WHAT THIS TEST CAN AND CANNOT PROVE: contract/main.go
+// cannot be compiled or executed by plain `go test` under any configuration
+// (verified directly — see that file's own TESTING NOTE: it unconditionally
+// imports creator-tokens/sdk, which requires TinyGo-only compiler
+// intrinsics), so no test anywhere in this repo can invoke Register's actual
+// wasm entrypoint body and observe its real sdk.Log calls. What CAN be tested
+// from here — and what these two tests do — is every piece of DATA that
+// entrypoint's fix depends on: that RegisterWithFirstBuy's own res.FirstBuy
+// is non-nil exactly when a first buy actually happened (nil for a plain
+// registration, nil for firstBuy==0, non-nil and holding the CORRECT amounts
+// for a real one), and that mapping those fields into EvBought — the exact
+// mapping contract/main.go's Register now performs — produces the
+// mathematically correct wire values. A bug in either of those (the
+// firstBuy-happened signal, or the field mapping) would fail one of the two
+// tests below; the wasm wrapper's actual `if res.FirstBuy != nil { ... }`
+// gate around the second sdk.Log call was verified separately by direct
+// source read (contract/main.go's Register, immediately after the
+// EvRegistered log) to mirror this exactly, field for field, in this order:
+// creator, actor, block, res.FirstBuy.Minted, res.FirstBuy.Cost,
+// res.FirstBuy.Fee, res.FirstBuy.TotalDue.
+// ---------------------------------------------------------------------------
+
+func TestRegisterWithFirstBuy_FirstBuyResultDrivesBothEvents(t *testing.T) {
+	s := NewMemStore()
+	res, err := RegisterWithFirstBuy(s, "aliceperry", "aliceperry", 100, 5000, 1_000_000, big.NewInt(100))
+	if err != nil {
+		t.Fatalf("RegisterWithFirstBuy: %v", err)
+	}
+	if res.FirstBuy == nil {
+		t.Fatal("res.FirstBuy is nil for a registration with firstBuy=100 — the wrapper's `if res.FirstBuy != nil` gate would then wrongly skip EvBought entirely")
+	}
+
+	// The registered event: feePaid is always zero, first buy or not
+	// (registration is free — market.go).
+	regOut := EvRegistered("aliceperry", "aliceperry", 100, 5000, 1_000_000, big.NewInt(0))
+	regM := decode(t, regOut)
+	wantStr(t, regM, "ev", "registered")
+	wantStr(t, regM, "feePaid", "0")
+
+	// The bought event the wrapper's fix now also logs, built the exact way
+	// contract/main.go's Register does: straight off res.FirstBuy's fields,
+	// never re-derived.
+	boughtOut := EvBought("aliceperry", "aliceperry", 100, res.FirstBuy.Minted, res.FirstBuy.Cost, res.FirstBuy.Fee, res.FirstBuy.TotalDue)
+	boughtM := decode(t, boughtOut)
+	wantStr(t, boughtM, "ev", "bought")
+	wantStr(t, boughtM, "creator", "aliceperry")
+	wantStr(t, boughtM, "actor", "aliceperry") // the creator buys their own first slice
+	wantNum(t, boughtM, "block", 100)
+	wantStr(t, boughtM, "minted", "100") // == the firstBuy argument, exactly
+
+	// Cross-check res.FirstBuy's amounts against the SAME curve math buy.go's
+	// buyCompute uses for an ordinary Buy of 100 tokens from a fresh (S=0)
+	// market — proving cost/fee/totalDue are not just "present" but the
+	// numerically correct values a real Buy of this size would have produced
+	// (do not guess which field is cost vs fee vs totalDue — read buy.go).
+	wantCost := BuyCost(mZero(), big.NewInt(100))
+	wantFee, _, _ := tradeFeeOn(wantCost)
+	wantTotalDue := mAdd(wantCost, wantFee)
+	wantStr(t, boughtM, "cost", wantCost.String())
+	wantStr(t, boughtM, "fee", wantFee.String())
+	wantStr(t, boughtM, "totalDue", wantTotalDue.String())
+	if res.TotalDue.Cmp(wantTotalDue) != 0 {
+		t.Fatalf("RegisterResult.TotalDue = %s, want %s (the single HiveDraw amount the wrapper draws)", res.TotalDue, wantTotalDue)
+	}
+}
+
+func TestRegisterWithFirstBuy_PlainRegistration_FirstBuyResultIsNil(t *testing.T) {
+	// firstBuy nil: the OPTIONAL, default case — a plain registration. The
+	// wrapper's `if res.FirstBuy != nil` gate must stay CLOSED here, so only
+	// EvRegistered would ever be logged.
+	s := NewMemStore()
+	res, err := RegisterWithFirstBuy(s, "bobcreator", "bobcreator", 100, 5000, 1_000_000, nil)
+	if err != nil {
+		t.Fatalf("RegisterWithFirstBuy: %v", err)
+	}
+	if res.FirstBuy != nil {
+		t.Fatalf("res.FirstBuy = %+v, want nil for firstBuy=nil (a plain registration must never emit a bought event)", res.FirstBuy)
+	}
+	if res.TotalDue == nil || res.TotalDue.Sign() != 0 {
+		t.Fatalf("res.TotalDue = %v, want exactly 0 for a plain registration (nothing to draw)", res.TotalDue)
+	}
+
+	// Same assertion with firstBuy explicitly zero rather than nil —
+	// RegisterWithFirstBuy's own doc (launchBuyCheck: "firstBuy == nil ||
+	// firstBuy.Sign() == 0") treats the two as the identical plain-
+	// registration case, so the gate must stay closed for zero too, not just
+	// for nil.
+	s2 := NewMemStore()
+	res2, err := RegisterWithFirstBuy(s2, "carolcreator", "carolcreator", 100, 5000, 1_000_000, big.NewInt(0))
+	if err != nil {
+		t.Fatalf("RegisterWithFirstBuy(firstBuy=0): %v", err)
+	}
+	if res2.FirstBuy != nil {
+		t.Fatalf("res.FirstBuy = %+v, want nil for firstBuy=0 (must be treated identically to nil, not as a 0-token buy)", res2.FirstBuy)
+	}
+}
+
 // TestEvSchemaVersionIsStableAcrossAllEvents proves every constructor
 // stamps the same "v" today — the append-only contract this file's doc
 // describes (a future incompatible change bumps ONE event's version, not

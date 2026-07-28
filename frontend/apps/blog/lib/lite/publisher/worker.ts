@@ -7,6 +7,7 @@ import { CommentOp, getBroadcaster, hasBroadcaster } from './broadcaster';
 import { buildFooter, buildJsonMetadata } from './footer';
 import { ensureContainerPublished, isContainerPermlink } from './container';
 import { noteBroadcast, pauseForCommentInterval } from './pace';
+import { checkRc } from './rc-guard';
 
 /**
  * Publisher worker (spec §D.3). Claims a ready job, builds the comment op authored
@@ -79,6 +80,11 @@ export async function runPublisherOnce(workerId: string): Promise<ProcessOutcome
   // 'publishing' forever — and that stall is the window in which an edit can
   // overtake its own create and silently revert a user's text.
   await jobs.reapStuck(STUCK_JOB_SECONDS);
+
+  // Look before spending: every broadcast costs resource credits, and grinding jobs
+  // into terminal failure because the account is out of RC is worse than pausing.
+  const rc = await checkRc();
+  if (!rc.ok) return 'idle';
 
   const job = await jobs.claimNext(workerId);
   if (!job) return 'idle';

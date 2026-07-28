@@ -15,6 +15,7 @@ import { Popover, PopoverTrigger, PopoverContent } from '@ui/components/popover'
 import { useLoggedUserContext } from '@/blog/features/votes/hooks/use-logged-user';
 import { useTranslation } from '@/blog/i18n/client';
 import { handleError } from '@ui/lib/handle-error';
+import { fetchLiteEngagement } from '@/blog/lib/lite/client/lite-engagement';
 import { useVoteMutation } from './hooks/use-vote-mutation';
 import { VoteRemovalDialog } from './vote-removal-dialog';
 
@@ -70,11 +71,20 @@ const VotesComponent = ({ post, type }: { post: Entry; type: 'comment' | 'post' 
     setSliderDownvote(getVoteValue(storedVotesValues, type, 'downvote'));
   }, [type, storedVotesValues]);
   const checkVote = post.active_votes.find((e) => e.voter === voter);
+  const isLite = user?.account_tier === 'lite';
 
+  // A lite vote is Lumen-LOCAL and never reaches the chain, so `active_votes` can
+  // never contain this voter and Hivemind can never confirm the vote. Reading the
+  // chain here is what made a lite vote light up and then vanish on the next load.
+  // Source the vote from Lumen instead, and enable the query on sign-in rather than
+  // on a chain vote that will never be there.
   const { data: userVotes } = useQuery({
     queryKey: ['votes', post.author, post.permlink, user?.username],
-    queryFn: () => getListVotesByCommentVoter([post.author, post.permlink, user?.username], 1),
-    enabled: !!checkVote || !!clickedVoteButton,
+    queryFn: () =>
+      isLite
+        ? fetchLiteEngagement(post.author, post.permlink)
+        : getListVotesByCommentVoter([post.author, post.permlink, user?.username], 1),
+    enabled: isLite ? !!user?.username : !!checkVote || !!clickedVoteButton,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     refetchOnMount: false
