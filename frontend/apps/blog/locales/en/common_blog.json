@@ -489,7 +489,8 @@
         "maximum_characters": "Maximum {{value}} characters",
         "minimum_characters": "Minimum {{value}} characters"
       }
-    }
+    },
+    "lite_cannot_subscribe": "Joining a community needs a full Hive account. Upgrade to join."
   },
   "post_content": {
     "close_post_editor": "Are you sure you want to close the post editor?",
@@ -583,7 +584,8 @@
       "flag_description": "Please provide a note regarding your decision to flag this post, it will be reviewed by community moderators.",
       "community_rules": "Community rules",
       "cancel": "Cancel",
-      "ok": "OK"
+      "ok": "OK",
+      "lite_cannot_flag": "Reporting a post to its community moderators needs a full Hive account. Upgrade to report."
     }
   },
   "submit_page": {
@@ -1255,7 +1257,11 @@
       "days_hours": "{{days}}d {{hours}}h",
       "hours_minutes": "{{hours}}h {{minutes}}m",
       "minutes": "{{minutes}}m"
-    }
+    },
+    "reclaim": "Get my stake back",
+    "reclaim_explain": "This round is past its deadline and was never settled. You can void it yourself and take your full stake back — no one else needs to act.",
+    "upgrade_to_claim": "Upgrade to a full account to claim",
+    "upgrade_to_reclaim": "Upgrade to a full account to reclaim"
   },
   "login_dialog": {
     "new_here": "New to Lumen?",

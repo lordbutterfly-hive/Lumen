@@ -65,6 +65,51 @@ const PriceInput: FC<{ value: number; onCommit: (usd: number) => Promise<void> }
   );
 };
 
+/**
+ * Rename a posted service in place.
+ *
+ * `setOfferingTitle` was wired all the way to the hook and had ZERO callers, so a
+ * creator with a typo in a service name had to delist it and create a new one —
+ * which is not cosmetic: the anti-rug price band is anchored to the TITLE, so
+ * delete-and-recreate resets that anchor. Renaming keeps it.
+ *
+ * Reverts on refusal for the same reason PriceInput does: the chain can say no
+ * (the title band, a control byte, a duplicate of another live offering) and the
+ * field must never show a name the contract did not accept.
+ */
+const TitleInput: FC<{ value: string; onCommit: (title: string) => Promise<void>; disabled?: boolean }> = ({
+  value,
+  onCommit,
+  disabled
+}) => {
+  const [txt, setTxt] = useState(value);
+  useEffect(() => setTxt(value), [value]);
+  return (
+    <input
+      value={txt}
+      disabled={disabled}
+      aria-label="Service name"
+      onChange={(e) => setTxt(e.target.value)}
+      onBlur={async () => {
+        const next = txt.trim();
+        // Unchanged, or emptied: put the old name back rather than broadcasting a
+        // no-op (which still costs resource credits) or an empty title the
+        // contract refuses anyway.
+        if (next === value || next === '') {
+          setTxt(value);
+          return;
+        }
+        try {
+          await onCommit(next);
+        } catch {
+          setTxt(value);
+        }
+      }}
+      className="w-full truncate border-0 bg-transparent text-[14px] font-semibold text-[#161511] outline-none focus:underline disabled:opacity-60"
+    />
+  );
+};
+
 const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = ({ ask, studio, onClose }) => {
   const [text, setText] = useState('');
   const [failure, setFailure] = useState<string | null>(null);
@@ -329,7 +374,7 @@ const CreatorStudio: FC = () => {
   // A failed read must NOT fall through to the launch wizard: telling a creator
   // with a live market that they have no token, because the node blinked, is
   // exactly the "empty read rendered as real" failure this rewiring removes.
-  if (status === 'error') return <MarketReadFailed />;
+  if (status === 'error') return <MarketReadFailed onRetry={studio.retry} />;
 
   // status === 'missing' -> genuinely no market yet (or signed out). The launch
   // wizard is the whole studio in that state.
@@ -445,7 +490,11 @@ const CreatorStudio: FC = () => {
                 studio.offerings.map((o) => (
                   <div key={o.offeringId} className="flex items-center justify-between gap-3 rounded-xl border border-[#e4e6e9] px-4 py-3">
                     <div className="min-w-0">
-                      <div className="truncate text-[14px] font-semibold text-[#161511]">{o.title}</div>
+                      <TitleInput
+                        value={o.title}
+                        disabled={studio.isBusy}
+                        onCommit={(title) => studio.setOfferingTitle({ offeringId: o.offeringId, title })}
+                      />
                       <div className="text-[12px] text-[#9ca3af]">
                         {market.priceUsd > 0 ? `≈ ${tok(o.priceHbd / market.priceUsd)} tokens at today’s price` : 'Token price unavailable'}
                       </div>

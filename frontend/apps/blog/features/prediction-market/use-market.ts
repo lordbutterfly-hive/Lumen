@@ -28,6 +28,8 @@ export function useMarket() {
   const queryClient = useQueryClient();
   const { user, isHydrated } = useUserClient();
   const loggedIn = isHydrated && user.isLoggedIn;
+  // A keyless Lumen account: it can read the market but cannot sign anything.
+  const isLite = user.account_tier === 'lite';
   const dataSource = getMarketDataSource();
   // null data source ⇒ the market is not provisioned. Surface this as a distinct
   // state so the UI renders "not available yet", never a bettable fake round.
@@ -92,10 +94,33 @@ export function useMarket() {
   const claimMutation = useMutation({
     mutationFn: () => {
       if (!dataSource || !round) return Promise.reject(new Error('No active round'));
+      // A keyless Lumen account cannot sign. Bet was already gated; Claim was
+      // not, so a lite user with a resolved position saw a fully enabled Claim
+      // button that threw a raw error. There is no Lumen-local equivalent — the
+      // payout is on chain — so this refuses with a sentence instead.
+      if (isLite) return Promise.reject(new Error('Claiming a payout needs a full Hive account. Upgrade to claim.'));
       return dataSource.claim({ roundId: round.roundId, username: user.username });
     },
     onSuccess: (position) => {
       queryClient.setQueryData(positionKey(position.roundId, user.username), position);
+      scheduleReconcile(position.roundId);
+    }
+  });
+
+  // The fail-safe. Offered only when the position says the round is genuinely
+  // stuck past its deadline — see MyPosition.reclaimable, derived from the same
+  // rule market/reclaim.go enforces.
+  const reclaimMutation = useMutation({
+    mutationFn: () => {
+      if (!dataSource || !round) return Promise.reject(new Error('No active round'));
+      if (isLite) return Promise.reject(new Error('Reclaiming a stake needs a full Hive account. Upgrade to reclaim.'));
+      return dataSource.reclaim({ roundId: round.roundId, username: user.username });
+    },
+    onSuccess: (position) => {
+      queryClient.setQueryData(positionKey(position.roundId, user.username), position);
+      // A reclaim VOIDS the round, so the round itself changed too — not just
+      // this account's position.
+      queryClient.invalidateQueries({ queryKey: ROUND_KEY });
       scheduleReconcile(position.roundId);
     }
   });
@@ -116,6 +141,9 @@ export function useMarket() {
     ),
     isPlacingBet: placeBetMutation.isLoading,
     claim: useCallback(() => claimMutation.mutateAsync(), [claimMutation]),
-    isClaiming: claimMutation.isLoading
+    isClaiming: claimMutation.isLoading,
+    reclaim: useCallback(() => reclaimMutation.mutateAsync(), [reclaimMutation]),
+    isReclaiming: reclaimMutation.isLoading,
+    isLite
   };
 }

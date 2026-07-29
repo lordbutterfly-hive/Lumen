@@ -72,6 +72,13 @@ export interface LiveStudio {
   setOfferingTitle: (input: { offeringId: number; title: string }) => Promise<void>;
   deleteOffering: (offeringId: number) => Promise<void>;
 
+  /**
+   * Re-read everything this hook owns. Exists so the "Try again" on a failed
+   * chain read is a real button: MarketReadFailed accepted an `onRetry` and NO
+   * call site ever passed one, so the retry never rendered at all — a dead
+   * affordance on the one screen where the user is stuck.
+   */
+  retry: () => void;
   isBusy: boolean;
 }
 
@@ -281,6 +288,11 @@ export function useLiveStudio(): LiveStudio {
       [call]
     ),
 
+    retry: () => {
+      for (const key of [marketKey(creator ?? ''), asksKey(creator ?? ''), offeringsKey(creator ?? ''), deliveryKey(creator ?? '')]) {
+        queryClient.invalidateQueries({ queryKey: key });
+      }
+    },
     isBusy: run.isLoading
   };
 }

@@ -25,62 +25,74 @@ const SubscribeCommunity = ({
   const subscribeMutation = useSubscribeMutation();
   const unsubscribeMutation = useUnsubscribeMutation();
   const { username } = user;
+  // Subscribing is a community custom_json — chain-only, with no Lumen-local
+  // equivalent, since a subscription that exists only in our database would not
+  // put the community's posts in anyone's Hive feed. A keyless lite account had no
+  // tier check here at all: the button looked normal, error-toasted on click, and
+  // could never succeed. Say it instead of offering it.
+  const isLite = user.account_tier === 'lite';
 
   return (
     <>
       {user && user.isLoggedIn ? (
-        <>
-          {!isSubscribed ? (
-            <Button
-              size="sm"
-              className="w-full bg-blue-600 text-center text-slate-50 hover:bg-blue-700"
-              data-testid="community-subscribe-button"
-              disabled={subscribeMutation.isPending || temprary}
-              onClick={async () => {
-                try {
-                  await subscribeMutation.mutateAsync({ community, username, communityTitle });
-                  onIsSubscribed(true);
-                } catch (error) {
-                  handleError(error, {
-                    method: 'subscribe',
-                    params: { community, username, communityTitle }
-                  });
-                }
-              }}
-            >
-              {subscribeMutation.isPending ? (
-                <CircleSpinner loading={subscribeMutation.isPending} size={18} color="#dc2626" />
-              ) : (
-                t('communities.buttons.subscribe')
-              )}
-            </Button>
-          ) : (
-            <Button
-              size="sm"
-              variant="outline"
-              className="group relative w-full border-blue-600 text-center text-blue-600 hover:border-destructive hover:bg-transparent hover:text-destructive"
-              data-testid="community-join-leave-button"
-              disabled={unsubscribeMutation.isPending || temprary}
-              onClick={async () => {
-                try {
-                  await unsubscribeMutation.mutateAsync({ community, username });
-                  onIsSubscribed(false);
-                } catch (error) {
-                  handleError(error, { method: 'unsubscribe', params: { community, username } });
-                }
-              }}
-            >
-              {unsubscribeMutation.isPending ? (
-                <CircleSpinner loading={unsubscribeMutation.isPending} size={18} color="#dc2626" />
-              ) : (
-                <span>
-                  <span className="group-hover:hidden">{t('communities.buttons.joined')}</span>
-                  <span className="hidden group-hover:inline">{t('communities.buttons.leave')}</span>
-                </span>
-              )}
-            </Button>
-          )}
-        </>
+        isLite ? (
+          <p className="text-center text-sm text-muted-foreground" data-testid="community-subscribe-lite">
+            {t('communities.lite_cannot_subscribe')}
+          </p>
+        ) : (
+          <>
+            {!isSubscribed ? (
+              <Button
+                size="sm"
+                className="w-full bg-blue-600 text-center text-slate-50 hover:bg-blue-700"
+                data-testid="community-subscribe-button"
+                disabled={subscribeMutation.isPending || temprary}
+                onClick={async () => {
+                  try {
+                    await subscribeMutation.mutateAsync({ community, username, communityTitle });
+                    onIsSubscribed(true);
+                  } catch (error) {
+                    handleError(error, {
+                      method: 'subscribe',
+                      params: { community, username, communityTitle }
+                    });
+                  }
+                }}
+              >
+                {subscribeMutation.isPending ? (
+                  <CircleSpinner loading={subscribeMutation.isPending} size={18} color="#dc2626" />
+                ) : (
+                  t('communities.buttons.subscribe')
+                )}
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                variant="outline"
+                className="group relative w-full border-blue-600 text-center text-blue-600 hover:border-destructive hover:bg-transparent hover:text-destructive"
+                data-testid="community-join-leave-button"
+                disabled={unsubscribeMutation.isPending || temprary}
+                onClick={async () => {
+                  try {
+                    await unsubscribeMutation.mutateAsync({ community, username });
+                    onIsSubscribed(false);
+                  } catch (error) {
+                    handleError(error, { method: 'unsubscribe', params: { community, username } });
+                  }
+                }}
+              >
+                {unsubscribeMutation.isPending ? (
+                  <CircleSpinner loading={unsubscribeMutation.isPending} size={18} color="#dc2626" />
+                ) : (
+                  <span>
+                    <span className="group-hover:hidden">{t('communities.buttons.joined')}</span>
+                    <span className="hidden group-hover:inline">{t('communities.buttons.leave')}</span>
+                  </span>
+                )}
+              </Button>
+            )}
+          </>
+        )
       ) : (
         <DialogLogin>
           <Button

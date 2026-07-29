@@ -23,6 +23,12 @@ export interface MarketDataSource {
   placeBet(input: PlaceBetInput): Promise<MyPosition>;
   claim(input: ClaimInput): Promise<MyPosition>;
   /**
+   * The fail-safe: a round stuck past its deadline is forced to VOID and the
+   * caller's own stake returned, in one permissionless call. Offered to a user
+   * only when `MyPosition.reclaimable` is true.
+   */
+  reclaim(input: ClaimInput): Promise<MyPosition>;
+  /**
    * Per-outcome pool share over the life of the round, for the chart. NULL means
    * "no usable history" — no indexer configured, the index is unreachable, or
    * fewer than two distinct blocks have bets. The caller must fall back to the
@@ -86,6 +92,7 @@ class MockMarketDataSource implements MarketDataSource {
       stakeByBucket,
       totalStaked: Object.values(stakeByBucket).reduce((sum, v) => sum + v, 0),
       claimed: false,
+      reclaimable: false,
       claimable: false
     };
     setStorageItem(key, position, StorageTTL.SESSION);
@@ -101,10 +108,18 @@ class MockMarketDataSource implements MarketDataSource {
       stakeByBucket: prev?.stakeByBucket ?? {},
       totalStaked: prev?.totalStaked ?? 0,
       claimed: true,
+      reclaimable: false,
       claimable: false
     };
     setStorageItem(key, position, StorageTTL.SESSION);
     return position;
+  }
+
+  // The mock round is always OPEN and never past a deadline, so reclaim is not
+  // reachable here. It settles the position the same way a real reclaim would
+  // rather than throwing, so a dev poking at it sees the real post-state.
+  async reclaim(input: ClaimInput): Promise<MyPosition> {
+    return this.claim(input);
   }
 
   // The Mock has static pools and therefore no history. It returns null rather

@@ -7,7 +7,7 @@ import { buyQuote, sellQuote, serviceQuote, EXIT_FEE_MAX } from '../../market/cu
 import { usdPrice, usdWhole } from '../../market/format';
 import { writeFailureMessage } from '../write-failure';
 
-export type TokenDialog = 'buy' | 'sell' | 'ask' | 'send' | 'inter' | null;
+export type TokenDialog = 'buy' | 'sell' | 'redeem' | 'ask' | 'send' | 'inter' | null;
 
 const ModalShell: FC<{ width: number; onClose: () => void; children: ReactNode }> = ({ width, onClose, children }) => (
   <div
@@ -153,7 +153,23 @@ const BuyModal: FC<{ m: LiveTokenMarket; onBuy: (usd: number, maxTotalUsd?: numb
   );
 };
 
-const SellModal: FC<{ m: LiveTokenMarket; onSell: (tokens: number) => Promise<void>; onClose: () => void }> = ({ m, onSell, onClose }) => {
+/**
+ * Doubles as the REDEEM dialog when `mode === 'redeem'`.
+ *
+ * The two rails are genuinely different contract calls — sell.go Sell walks the
+ * curve, refund.go Refund pays a pro-rata slice of the reserve — but from a
+ * holder's point of view they are the same act ("give me my money for N tokens"),
+ * and once a market is winding down only ONE of them works. Sharing the dialog
+ * means the wind-down path cannot drift out of sync with the normal one, which is
+ * how it came to be missing entirely.
+ */
+const SellModal: FC<{
+  m: LiveTokenMarket;
+  onSell: (tokens: number) => Promise<void>;
+  onClose: () => void;
+  mode?: 'sell' | 'redeem';
+}> = ({ m, onSell, onClose, mode = 'sell' }) => {
+  const redeem = mode === 'redeem';
   const [busy, setBusy] = useState(false);
   const held = m.position?.tokens ?? 0;
   const [amt, setAmt] = useState(String(held || 0));
@@ -161,14 +177,20 @@ const SellModal: FC<{ m: LiveTokenMarket; onSell: (tokens: number) => Promise<vo
   const tokens = parseFloat(amt.replace(/,/g, '')) || 0;
   const q = sellQuote(tokens, m, m.position?.heldDays ?? 999);
   const feePctLabel = Math.round(q.exitFeePct * 100);
+  // REDEEM amount, derived from the position's own already-taxed floor value and
+  // scaled pro rata (the slice is linear in tokens; the tax rate does not vary
+  // with size). This is the ONLY figure we have for this rail — we do NOT have a
+  // gross, so redeem mode shows one honest number instead of a breakdown whose
+  // rows would have to be invented.
+  const redeemUsd = redeem && held > 0 ? ((m.position?.floorValueUsd ?? 0) * tokens) / held : 0;
   return (
     <ModalShell width={460} onClose={onClose}>
-      <ModalHead title={`Sell @${m.handle} token`} onClose={onClose} />
+      <ModalHead title={redeem ? `Redeem @${m.handle} token` : `Sell @${m.handle} token`} onClose={onClose} />
       <div className="px-6 pb-6 pt-[18px]">
         <div className="mb-[7px] flex items-center justify-between">
           <label className="text-[12.5px] font-semibold text-[#6b7280]">Amount (tokens)</label>
           <button onClick={() => setAmt(String(held))} className="border-0 bg-transparent text-[12.5px] font-semibold text-[#c0392b]">
-            Sell all ({tok(held)})
+            {redeem ? 'Redeem all' : 'Sell all'} ({tok(held)})
           </button>
         </div>
         <div className="mb-3.5 flex items-center rounded-xl border border-[#e4e6e9] px-4 py-3">
@@ -203,23 +225,46 @@ const SellModal: FC<{ m: LiveTokenMarket; onSell: (tokens: number) => Promise<vo
           </div>
         ) : null}
         <div className="mb-3.5 rounded-xl border border-[#ebebeb] px-4 py-3.5 tabular-nums">
-          <div className="mb-1.5 flex justify-between text-[13px] text-[#3f4650]">
-            <span>Curve proceeds</span>
-            <span>{usdPrice(q.curveProceedsUsd)}</span>
-          </div>
-          {q.exitFeeUsd > 0 ? (
-            <div className="mb-1.5 flex justify-between text-[13px] text-[#b45309]">
-              <span>Early-exit fee ({feePctLabel}%)</span>
-              <span>−{usdPrice(q.exitFeeUsd)}</span>
+          {/* CURVE-RAIL ROWS ONLY. In redeem mode the curve is closed, so a
+              "Curve proceeds" figure describes a rail that cannot execute, and the
+              exit fee shown as a DOLLAR amount is computed off that same wrong
+              basis. Both were left ungated in the first pass of this change and
+              produced three numbers on screen that did not reconcile with each
+              other or with the button. The exit-tax RATE strip above stays: that
+              rate genuinely applies to both doors (see Market position exitTaxBps). */}
+          {redeem ? null : (
+            <>
+              <div className="mb-1.5 flex justify-between text-[13px] text-[#3f4650]">
+                <span>Curve proceeds</span>
+                <span>{usdPrice(q.curveProceedsUsd)}</span>
+              </div>
+              {q.exitFeeUsd > 0 ? (
+                <div className="mb-1.5 flex justify-between text-[13px] text-[#b45309]">
+                  <span>Early-exit fee ({feePctLabel}%)</span>
+                  <span>−{usdPrice(q.exitFeeUsd)}</span>
+                </div>
+              ) : null}
+            </>
+          )}
+          {/* The 10% trade fee is a CURVE-rail charge (sell.go). The wind-down
+              rail (refund.go) is a pro-rata slice of the reserve and does not pay
+              it, so showing it here would be inventing a deduction. */}
+          {redeem ? null : (
+            <div className="mb-2 flex justify-between text-[13px] text-[#b45309]">
+              <span>Trade fee (10%)</span>
+              <span>−{usdPrice(q.tradeFeeUsd)}</span>
             </div>
-          ) : null}
-          <div className="mb-2 flex justify-between text-[13px] text-[#b45309]">
-            <span>Trade fee (10%)</span>
-            <span>−{usdPrice(q.tradeFeeUsd)}</span>
-          </div>
+          )}
           <div className="flex justify-between border-t border-[#f1f3f5] pt-2 text-[15px]">
             <span className="font-bold">You receive</span>
-            <span className="font-bold text-[#2f7d4f]">{usdPrice(q.receiveUsd)}</span>
+            {/* Redeem: derived from the position's own already-taxed floor value,
+                scaled pro rata — the slice is linear in tokens and the tax rate is
+                the same at any size. Marked approximate because the contract
+                recomputes it at execution from the live clock, and we will not
+                print an exact figure we cannot guarantee. */}
+            <span className="font-bold text-[#2f7d4f]">
+              {redeem ? `≈ ${usdPrice(redeemUsd)}` : usdPrice(q.receiveUsd)}
+            </span>
           </div>
         </div>
         <button
@@ -240,14 +285,29 @@ const SellModal: FC<{ m: LiveTokenMarket; onSell: (tokens: number) => Promise<vo
           disabled={!Number.isFinite(tokens) || tokens <= 0 || held <= 0 || tokens > held || busy}
           className="w-full rounded-[13px] bg-[#1a1a17] py-[15px] text-[15px] font-bold text-white hover:bg-black disabled:opacity-50"
         >
-          {busy ? 'Confirm in your wallet…' : tokens > held ? 'More than you hold' : `Sell — get ~${usdPrice(q.receiveUsd)}`}
+          {busy
+            ? 'Confirm in your wallet…'
+            : tokens > held
+              ? 'More than you hold'
+              : redeem
+                ? `Redeem — get ~${usdPrice(redeemUsd)}`
+                : `Sell — get ~${usdPrice(q.receiveUsd)}`}
         </button>
         {failure ? (
           <div className="mt-2.5 text-center text-[12.5px] font-semibold text-[#c0392b]">
             {failure}
           </div>
         ) : null}
-        <div className="mt-2.5 text-center text-xs text-[#9ca3af]">Selling is always available — even if this market winds down.</div>
+        {/* This used to read "Selling is always available — even if this market
+            winds down", which is false: sell() throws once the market is
+            retired/frozen/closed. The honest statement is that an EXIT is always
+            available — via this dialog's redeem mode, which is what the page
+            routes to in that state. */}
+        <div className="mt-2.5 text-center text-xs text-[#9ca3af]">
+          {redeem
+            ? 'Redeeming pays your share of the reserve at the floor. Available even while this market winds down.'
+            : 'You can always exit — while this market is open by selling, and once it winds down by redeeming at the floor.'}
+        </div>
       </div>
     </ModalShell>
   );
@@ -452,12 +512,16 @@ const TokenModals: FC<{
   service: Service | null;
   onBuy: (usd: number, maxTotalUsd?: number) => Promise<void>;
   onSell: (tokens: number) => Promise<void>;
+  /** refund.go Refund — the pro-rata exit, and the only rail that works once the market winds down. */
+  onRedeem: (tokens: number) => Promise<void>;
   onSpend: (input: { offeringId: number; usd: number; deadlineDays: number; question: string }) => Promise<void>;
   onTransfer: (to: string, tokens: number) => Promise<void>;
   onClose: () => void;
-}> = ({ dialog, market, service, onBuy, onSell, onSpend, onTransfer, onClose }) => {
+}> = ({ dialog, market, service, onBuy, onSell, onRedeem, onSpend, onTransfer, onClose }) => {
   if (dialog === 'buy') return <BuyModal m={market} onBuy={onBuy} onClose={onClose} />;
   if (dialog === 'sell') return <SellModal m={market} onSell={onSell} onClose={onClose} />;
+  // The wind-down exit. Same dialog, refund.go behind it instead of sell.go.
+  if (dialog === 'redeem') return <SellModal m={market} onSell={onRedeem} onClose={onClose} mode="redeem" />;
   if (dialog === 'ask') return <AskModal m={market} service={service} onSpend={onSpend} onClose={onClose} />;
   if (dialog === 'send') return <SendModal m={market} onTransfer={onTransfer} onClose={onClose} />;
   if (dialog === 'inter') return <InterstitialModal handle={market.handle} onClose={onClose} />;

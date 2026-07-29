@@ -99,7 +99,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
 
   if (status === 'unavailable') return <MarketUnavailable />;
   if (status === 'loading') return <MarketLoading />;
-  if (status === 'error' || !market) return <MarketReadFailed />;
+  if (status === 'error' || !market) return <MarketReadFailed onRetry={live.retry} />;
   if (status === 'missing') return <MarketMissing handle={handle} />;
 
   const d = market.delivery;
@@ -161,6 +161,17 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
     await live.sell(tokens);
   };
 
+  /**
+   * The wind-down exit. Deliberately does NOT pre-flight with quoteSell: that
+   * quote walks the CURVE, and the curve rail is exactly what is closed here —
+   * asking for it would fail with "sell is closed" and block the one exit that
+   * still works. The refund amount is derived from the position's own already-
+   * taxed floor value in the dialog, and the contract recomputes it at execution.
+   */
+  const handleRedeem = async (tokens: number): Promise<void> => {
+    await live.refund(tokens);
+  };
+
   const rightRail = (
     <div className="flex flex-col gap-5 pt-[26px]">
       <div className="rounded-[18px] border border-[#ebebeb] bg-white p-5">
@@ -214,7 +225,8 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
           button to speak for itself. */}
       {market.windingDown ? (
         <div className="mb-4 rounded-[14px] border border-[#f6e2c4] bg-[#fdf6ec] px-5 py-3.5 text-[13.5px] font-semibold text-[#b45309]">
-          This creator’s market is winding down — buying and new asks are closed; sell/refund at the floor stays open.
+          This creator’s market is winding down — buying and new asks are closed. Selling on the curve is closed too;
+          use Redeem to take your pro-rata share of the reserve at the floor.
         </div>
       ) : market.delinquentUntilBlock !== null ? (
         // delivery.go: RequireInflowOpen also refuses while a creator is
@@ -294,13 +306,18 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
               >
                 Buy
               </button>
+              {/* ★ Sell is CLOSED during wind-down — sell.go's curve rail refuses
+                  once the market is retired/frozen/closed, and this button used
+                  to open the sell dialog anyway, fail every time, and leave the
+                  holder with no reachable exit. The pro-rata rail (refund.go) is
+                  the exit in that state, so the button becomes it. */}
               <button
-                onClick={() => setDialog('sell')}
+                onClick={() => setDialog(market.windingDown ? 'redeem' : 'sell')}
                 disabled={writesBlocked}
                 title={writeBlockedReason ?? undefined}
                 className="flex-1 rounded-xl border border-[#e4e6e9] bg-white py-3.5 text-[15px] font-semibold text-[#3f4650] hover:bg-[#f6f7f8] disabled:opacity-50"
               >
-                Sell
+                {market.windingDown ? 'Redeem' : 'Sell'}
               </button>
             </div>
             {writeBlockedReason ? (
@@ -446,6 +463,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
         service={service}
         onBuy={handleBuy}
         onSell={handleSell}
+        onRedeem={handleRedeem}
         onSpend={({ offeringId, deadlineDays, usd, question }) =>
           // THE CONTRACT DOES NOT CARRY THE BRIEF, by design (USER RULING
           // 2026-07-28): it facilitates the payment and the relationship, and

@@ -3,7 +3,7 @@ import type { MarketDataSource } from './market-data-source';
 import type { MarketConfig } from './market-config';
 import { BUCKET_DEFS, bucketUsdLabel } from './bucket-defs';
 import { baseUnitsToHuman } from './vsc-money';
-import { buildBetOp, buildClaimOp, type ContractAsset, type CustomJsonOp } from './op-builders';
+import { buildBetOp, buildClaimOp, buildReclaimOp, type ContractAsset, type CustomJsonOp } from './op-builders';
 import { DefaultVscGqlClient, type VscGqlClient } from './vsc-gql';
 import { MagiIndexerClient } from './magi-indexer';
 import { buildOddsSeries } from './pool-series';
@@ -26,6 +26,12 @@ const MS_PER_BLOCK = 3_000;
 
 // refprice / settle price are stored in bps of the HBD/HIVE feed (10000 = 1.0).
 const BPS_SCALE = 10_000;
+
+// market/params.go SettleWindowBlocks — the window a settle must land inside.
+// Mirrored here ONLY to derive `reclaimable` from the same rule the contract
+// enforces; if it ever changes on chain this must change with it, which is why
+// it is named after the constant rather than inlined as 1200.
+const SETTLE_WINDOW_BLOCKS = 1200;
 
 const NO_BROADCASTER_MSG = 'VscMarketDataSource: no broadcaster wired — inject the transaction service';
 
@@ -188,6 +194,18 @@ export class VscMarketDataSource implements MarketDataSource {
 
     const rawState = map[rk(id, 'state')] ?? '';
     const resolved = rawState === 'settled' || rawState === 'void';
+
+    // market/reclaim.go's gate, verbatim: STILL OPEN and STRICTLY past
+    // settleBlock + SettleWindowBlocks + grace. A staker with nothing at stake
+    // has nothing to reclaim, so a zero balance is excluded — the contract would
+    // accept the call and pay them zero, which is a wasted fee and a confusing
+    // button.
+    const head = await this.gql.getHeadBlock();
+    const settleBlock = toU64(map[rk(id, 'settle')]);
+    const graceBlocks = toU64(map[rk(id, 'grace')]);
+    const pastDeadline =
+      head !== null && settleBlock > 0 && head > settleBlock + SETTLE_WINDOW_BLOCKS + graceBlocks;
+    const reclaimable = rawState === 'open' && pastDeadline && totalStaked > 0 && !claimed;
     let claimable = false;
     if (resolved && !claimed) {
       if (rawState === 'void') {
@@ -201,7 +219,7 @@ export class VscMarketDataSource implements MarketDataSource {
     // NOTE: realized `payout` is not derivable from getStateByKeys (the contract
     // does not store per-account payout); it comes from the indexer's positions
     // endpoint if/when that is wired. Left undefined here.
-    return { roundId: String(id), stakeByBucket, totalStaked, claimed, claimable };
+    return { roundId: String(id), stakeByBucket, totalStaked, claimed, reclaimable, claimable };
   }
 
   async placeBet(input: PlaceBetInput): Promise<MyPosition> {
@@ -238,6 +256,8 @@ export class VscMarketDataSource implements MarketDataSource {
       roundId: String(id),
       stakeByBucket,
       totalStaked: (prev?.totalStaked ?? 0) + input.amount,
+      // A bet just placed is on an OPEN, pre-lock round by definition.
+      reclaimable: false,
       claimed: false,
       claimable: false
     };
@@ -263,6 +283,42 @@ export class VscMarketDataSource implements MarketDataSource {
       stakeByBucket: prev?.stakeByBucket ?? {},
       totalStaked: prev?.totalStaked ?? 0,
       claimed: true,
+      reclaimable: false,
+      claimable: false
+    };
+  }
+
+  /**
+   * market/reclaim.go Reclaim — force a round that is stuck past its deadline to
+   * VOID and pull back this caller's own full stake, in one call. Permissionless
+   * and dependent on nothing: no oracle, no keeper, no owner.
+   *
+   * Posting authority only (no asset draw), same as claim. The contract pays the
+   * CALLER and can never pay anyone else, so there is no payee to get wrong.
+   */
+  async reclaim(input: ClaimInput): Promise<MyPosition> {
+    const id = parseRoundId(input.roundId);
+    if (id === null) throw new Error(`VscMarketDataSource: invalid roundId ${input.roundId}`);
+    if (!this.broadcaster) throw new Error(NO_BROADCASTER_MSG);
+
+    const prev = await this.readMyPosition(input.roundId, input.username);
+    const op = buildReclaimOp({
+      contractId: this.config.contractId,
+      netId: this.config.netId,
+      username: input.username,
+      roundId: id,
+      rcLimit: this.config.rcLimit
+    });
+    await this.broadcaster(op);
+
+    // Optimistic, and flagged as such by the caller's poll: a reclaim both voids
+    // the round and settles this account, so both doors close.
+    return {
+      roundId: String(id),
+      stakeByBucket: prev?.stakeByBucket ?? {},
+      totalStaked: prev?.totalStaked ?? 0,
+      claimed: true,
+      reclaimable: false,
       claimable: false
     };
   }
@@ -348,7 +404,16 @@ function buildRoundKeys(id: number): string[] {
 }
 
 function buildPositionKeys(id: number, acct: string): string[] {
-  const keys = [rkStakeTotal(id, acct), rkClaimed(id, acct), rk(id, 'state'), rk(id, 'win')];
+  // `settle` + `grace` are read so `reclaimable` can be derived from the SAME
+  // rule market/reclaim.go enforces, rather than the UI guessing at a deadline.
+  const keys = [
+    rkStakeTotal(id, acct),
+    rkClaimed(id, acct),
+    rk(id, 'state'),
+    rk(id, 'win'),
+    rk(id, 'settle'),
+    rk(id, 'grace')
+  ];
   BUCKET_DEFS.forEach((_, i) => keys.push(rkStake(id, acct, i)));
   return keys;
 }

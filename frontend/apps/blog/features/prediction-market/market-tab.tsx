@@ -40,7 +40,29 @@ const CHART_POINTS = 8; // width of the flat placeholder series
 // odds, no open-interest / 24h-vol.
 export default function MarketTab() {
   const { t } = useTranslation('common_blog');
-  const { round, isUnavailable, isLoading, isError, refetch, myPosition, poolSeries, claim, isClaiming } = useMarket();
+  const {
+    round,
+    isUnavailable,
+    isLoading,
+    isError,
+    refetch,
+    myPosition,
+    poolSeries,
+    claim,
+    isClaiming,
+    reclaim,
+    isReclaiming,
+    isLite
+  } = useMarket();
+
+  const onReclaim = async () => {
+    if (!round) return;
+    try {
+      await reclaim();
+    } catch (error) {
+      handleError(error, { method: 'predictionMarketReclaim', params: { roundId: round.roundId } });
+    }
+  };
 
   const onClaim = async () => {
     if (!round) return;
@@ -228,12 +250,35 @@ export default function MarketTab() {
               <button
                 type="button"
                 onClick={() => void onClaim()}
-                disabled={isClaiming}
+                disabled={isClaiming || isLite}
+                title={isLite ? t('prediction_market.upgrade_to_claim') : undefined}
                 className="mt-3 w-full rounded-[14px] bg-[#1a1a17] py-3 font-sans text-sm font-semibold text-white transition-colors hover:bg-black disabled:opacity-50"
               >
-                {t('prediction_market.claim')}
+                {isLite ? t('prediction_market.upgrade_to_claim') : t('prediction_market.claim')}
               </button>
             ))}
+          {/* ★ THE FAIL-SAFE, previously unreachable from the app. A round stuck
+              past its deadline never resolves on its own: `reclaim` lets any
+              staker void it and take their own stake back, needing no oracle,
+              keeper or owner. It existed on chain and had no button, so a bettor
+              in a dead round had no in-app way to get their money. Shown only
+              when the position itself says the deadline has passed. */}
+          {!isResolved && myPosition.reclaimable && (
+            <div className="mt-3 rounded-[14px] border border-[#f6e2c4] bg-[#fdf6ec] p-3">
+              <p className="font-sans text-[13px] leading-[1.5] text-[#b45309]">
+                {t('prediction_market.reclaim_explain')}
+              </p>
+              <button
+                type="button"
+                onClick={() => void onReclaim()}
+                disabled={isReclaiming || isLite}
+                title={isLite ? t('prediction_market.upgrade_to_reclaim') : undefined}
+                className="mt-2.5 w-full rounded-[12px] bg-[#b45309] py-2.5 font-sans text-sm font-semibold text-white transition-colors hover:bg-[#92400e] disabled:opacity-50"
+              >
+                {isLite ? t('prediction_market.upgrade_to_reclaim') : t('prediction_market.reclaim')}
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

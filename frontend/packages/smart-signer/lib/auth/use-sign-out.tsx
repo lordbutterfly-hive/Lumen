@@ -19,8 +19,32 @@ async function signOutBackend(): Promise<User> {
   });
 }
 
+/**
+ * A Lumen LITE session lives in a server-side cookie of its own, destroyed by
+ * its own route. It does NOT set `authenticateOnBackend`, so the branch below
+ * used to skip every server call and return a logged-out user object while the
+ * real session cookie stayed valid — the user looked signed out, and anything
+ * reading the cookie server-side still saw them signed in. The endpoint that
+ * fixes it already existed and had no callers.
+ */
+async function signOutLite(): Promise<User> {
+  await fetchJson('/api/lite/auth/logout', {
+    method: 'POST',
+    headers: [
+      ['content-type', 'application/json'],
+      [csrfHeaderName, '1']
+    ]
+  });
+  return defaultUser;
+}
+
 async function signOut(user: User): Promise<User> {
   const { authenticateOnBackend } = user;
+  // Checked BEFORE authenticateOnBackend: a lite session must always reach its
+  // own destroy route, whatever else is configured.
+  if (user.account_tier === 'lite') {
+    return signOutLite();
+  }
   if (authenticateOnBackend) {
     return signOutBackend();
   } else {

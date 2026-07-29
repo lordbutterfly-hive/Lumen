@@ -20,7 +20,17 @@ const ZERO = new Big(0);
 export default function WalletRightRail() {
   const { t } = useTranslation('common_blog');
   const { user } = useUserClient();
-  const { figures, pendingClaimedAccounts } = useWalletAccount(user.username);
+  // Same guard as wallet-content.tsx, and it is NOT redundant: this rail fetches
+  // its own copy, so guarding only the centre column left the page still
+  // crashing. `getAccountFull` on a name that does not exist on chain resolves to
+  // a TRUTHY object with no balance fields (Hive returns an empty array,
+  // `getAccounts([n])[0]` is undefined, and the spread `{...undefined}` yields
+  // `{}`), so the hook's `if (!accountQuery.data) return null` guard passes and
+  // `Big(undefined)` throws inside its useMemo. There is no error.tsx under
+  // app/wallet, so that throw blanks the whole page — including the honest
+  // "no wallet yet" panel that was added to explain the situation.
+  const isLite = user.account_tier === 'lite';
+  const { figures, pendingClaimedAccounts } = useWalletAccount(isLite ? '' : user.username);
 
   return (
     <aside className="flex w-full flex-col gap-5 font-sans" data-testid="wallet-right-rail">
@@ -35,12 +45,18 @@ export default function WalletRightRail() {
       >
         {t('wallet.market.view_more')}
       </a>
-      <AdvancedToolsCard
-        username={user.username}
-        netHp={figures?.netHp ?? ZERO}
-        hbdBalance={figures?.liquidHbd ?? ZERO}
-        pendingClaimedAccounts={pendingClaimedAccounts}
-      />
+      {/* Hidden for a lite account. Every tool in here (power up/down, delegate,
+          claim account tokens) is a Hive key operation, and with the queries
+          disabled above its figures would all be ZERO — a card reading
+          "0.000 HP" is a claim about a balance, not an absence of one. */}
+      {!isLite && (
+        <AdvancedToolsCard
+          username={user.username}
+          netHp={figures?.netHp ?? ZERO}
+          hbdBalance={figures?.liquidHbd ?? ZERO}
+          pendingClaimedAccounts={pendingClaimedAccounts}
+        />
+      )}
     </aside>
   );
 }

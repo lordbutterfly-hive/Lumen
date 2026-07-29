@@ -141,3 +141,36 @@ export function buildClaimOp(params: BuildClaimOpParams): CustomJsonOp {
     required_posting_auths: [params.username] // posting auth is enough for claim
   };
 }
+
+/**
+ * reclaim — the FAIL-SAFE. Once a round is past its hard deadline
+ * (settleBlock + SettleWindowBlocks + grace) and still OPEN, any staker forces it
+ * to VOID and pulls their own full stake back in ONE call. No oracle, no keeper,
+ * no owner.
+ *
+ * Same auth shape as claim: no asset draw, so posting authority is enough and no
+ * intents are attached. The contract pays the CALLER their own stake and nobody
+ * else's, so there is no payee parameter to get wrong.
+ */
+export function buildReclaimOp(params: BuildClaimOpParams): CustomJsonOp {
+  assertUsername(params.username);
+  assertUint('roundId', params.roundId);
+
+  const body = {
+    net_id: params.netId,
+    contract_id: params.contractId,
+    action: 'reclaim',
+    payload: {
+      roundId: params.roundId
+    },
+    rc_limit: params.rcLimit ?? DEFAULT_RC_LIMIT,
+    intents: []
+  };
+
+  return {
+    id: VSC_CALL_ID,
+    json: JSON.stringify(body),
+    required_auths: [],
+    required_posting_auths: [params.username]
+  };
+}

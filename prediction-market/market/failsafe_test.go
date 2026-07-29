@@ -139,3 +139,72 @@ func TestFailsafe_ExistingVoidStalePathRecovers(t *testing.T) {
 		t.Fatalf("refunds a=%s b=%s, want 10000 each", ra, rb)
 	}
 }
+
+// ★ RECLAIM CANNOT BE USED TO WALK AWAY FROM A LIVE BET.
+//
+// The worry this pins: reclaim returns a staker's money, so if it were reachable
+// while betting is open — or after the outcome starts to look bad but before the
+// round resolves — it would be a free option. Stake, watch, and pull out if the
+// price moves against you. That would be exploited immediately and it would make
+// the pool meaningless.
+//
+// It is not reachable. Reclaim's gate is `block > settleBlock + SettleWindowBlocks
+// + grace` (reclaim.go), and EVERY other path that can void a round is itself at
+// or past settleBlock: settle refuses "too early to settle" below it
+// (settle.go:36-38) and voidStale demands the same full deadline
+// (settle.go:129-131). So there is no block at which a round is both bettable and
+// reclaimable, and no back door via an early void.
+//
+// This test walks the whole timeline rather than just the boundary, because the
+// boundary case alone would still pass if someone widened the gate to, say,
+// `block > lockBlock`.
+func TestFailsafe_Reclaim_RefusedWhileTheBetIsStillLive(t *testing.T) {
+	s := newMem()
+	Init(s, owner)
+	const lock, settle, grace = uint64(2000), uint64(4000), uint64(300)
+	id, err := CreateRound(s, owner, 0, CreateParams{
+		Asset: AssetHive, Strikes: []uint64{2646, 3234}, LockBlock: lock, SettleBlock: settle, GraceBlocks: grace,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RecordBet(s, "alice", 10, id, 1, mp(t, "9000")); err != nil {
+		t.Fatal(err)
+	}
+
+	deadline := settle + SettleWindowBlocks + grace
+	for _, tc := range []struct {
+		block uint64
+		when  string
+	}{
+		{10, "the block the bet was placed"},
+		{lock / 2, "mid betting window"},
+		{lock - 1, "one block before lock"},
+		{lock, "the lock block itself"},
+		{lock + 1, "locked, bets closed, outcome unknown"},
+		{settle - 1, "one block before settlement is even allowed"},
+		{settle, "the settle block — settle() is the only resolver here"},
+		{settle + 1, "inside the settle window"},
+		{settle + SettleWindowBlocks, "last block of the settle window"},
+		{deadline, "the deadline itself (gate is STRICTLY after)"},
+	} {
+		if _, _, err := Reclaim(s, "alice", tc.block, id); err == nil {
+			t.Fatalf("EXPLOITABLE: reclaim succeeded at block %d (%s) — a staker could exit a live bet", tc.block, tc.when)
+		}
+	}
+
+	// And the round is still OPEN throughout: none of those attempts voided it,
+	// which is the other half of the exploit (force a void, then everyone claims).
+	if got := roundState(s, id); got != StateOpen {
+		t.Fatalf("a refused reclaim changed round state to %q — it must leave the round untouched", got)
+	}
+
+	// Only past the full deadline does it work.
+	refund, _, err := Reclaim(s, "alice", deadline+1, id)
+	if err != nil {
+		t.Fatalf("past the deadline reclaim must work: %v", err)
+	}
+	if refund.Cmp(mp(t, "9000")) != 0 {
+		t.Fatalf("refund %s, want the full stake 9000", refund)
+	}
+}

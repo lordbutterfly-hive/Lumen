@@ -67,12 +67,26 @@ export interface LiveTokenMarketResult {
   /** Buys `tokens` whole tokens. `maxTotalUsd` becomes the signed transfer.allow cap — the buyer's ONLY slippage protection. */
   buy: (tokens: number, maxTotalUsd?: number) => Promise<void>;
   sell: (tokens: number, minNetUsd?: number) => Promise<void>;
+  /**
+   * refund.go Refund — the pro-rata exit at the floor. This is the rail to use
+   * once `windingDown` is true: `sell` THROWS in that state, so a UI that offers
+   * only sell leaves a holder with no way out of a market that is closing.
+   */
+  refund: (tokens: number, minNetUsd?: number) => Promise<void>;
   /** Opens an escrowed ask against `offeringId` (0 = the creator's legacy face price). */
   ask: (input: { offeringId: number; contentHash: string; deadlineDays: number; maxCostUsd: number }) => Promise<void>;
   transfer: (to: string, tokens: number) => Promise<void>;
 
   isBuying: boolean;
+  /**
+   * Re-read everything this hook owns. Exists so the "Try again" on a failed
+   * chain read is a real button: MarketReadFailed accepted an `onRetry` and NO
+   * call site ever passed one, so the retry never rendered at all — a dead
+   * affordance on the one screen where the user is stuck.
+   */
+  retry: () => void;
   isSelling: boolean;
+  isRefunding: boolean;
   isAsking: boolean;
   isTransferring: boolean;
 }
@@ -197,6 +211,20 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
     onSuccess: invalidate
   });
 
+  // refund.go Refund — the PRO-RATA rail, and the ONLY way out once the market
+  // is winding down. sell() throws in that state (vsc-data-source.ts: "curve
+  // sell is closed while the market winds down ... exit via refund() instead"),
+  // and until now nothing in the UI called this: the Sell button stayed enabled,
+  // reliably failed, and the page's own copy claimed selling always worked. A
+  // holder had no reachable exit at exactly the moment they most needed one.
+  const refundMutation = useMutation({
+    mutationFn: async ({ tokens, minNetUsd }: { tokens: number; minNetUsd?: number }) => {
+      const { source, signer } = requireSigner();
+      await source.refund({ creator, holder: signer, tokens, minNetHbd: minNetUsd });
+    },
+    onSuccess: invalidate
+  });
+
   const askMutation = useMutation({
     mutationFn: async (input: { offeringId: number; contentHash: string; deadlineDays: number; maxCostUsd: number }) => {
       const { source, signer } = requireSigner();
@@ -256,11 +284,21 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
 
     buy: useCallback((tokens: number, maxTotalUsd?: number) => buyMutation.mutateAsync({ tokens, maxTotalUsd }), [buyMutation]),
     sell: useCallback((tokens: number, minNetUsd?: number) => sellMutation.mutateAsync({ tokens, minNetUsd }), [sellMutation]),
+    refund: useCallback(
+      (tokens: number, minNetUsd?: number) => refundMutation.mutateAsync({ tokens, minNetUsd }),
+      [refundMutation]
+    ),
     ask: useCallback((input: { offeringId: number; contentHash: string; deadlineDays: number; maxCostUsd: number }) => askMutation.mutateAsync(input), [askMutation]),
     transfer: useCallback((to: string, tokens: number) => transferMutation.mutateAsync({ to, tokens }), [transferMutation]),
 
     isBuying: buyMutation.isLoading,
+    retry: () => {
+      for (const key of [marketKey(creator), positionKey(creator, viewer ?? undefined), offeringsKey(creator), deliveryKey(creator), historyKey(creator)]) {
+        queryClient.invalidateQueries({ queryKey: key });
+      }
+    },
     isSelling: sellMutation.isLoading,
+    isRefunding: refundMutation.isLoading,
     isAsking: askMutation.isLoading,
     isTransferring: transferMutation.isLoading
   };

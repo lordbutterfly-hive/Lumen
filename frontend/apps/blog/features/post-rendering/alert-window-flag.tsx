@@ -35,7 +35,22 @@ export function AlertDialogFlag({
   const { t } = useTranslation('common_blog');
   const flagMutation = useFlagMutation();
 
+  // Flagging is a chain operation (a community custom_json) and there is no
+  // Lumen-local equivalent — a report that only exists in our database is not a
+  // report to the community's moderators. A keyless lite account therefore cannot
+  // do it, and this dialog is the ONE place to say so: it is shared by the post
+  // page and every comment, both of which called it with no tier check at all and
+  // surfaced a raw signer error.
+  const isLite = user.account_tier === 'lite';
+
   const flag = async () => {
+    if (isLite) {
+      handleError(new Error(t('post_content.flag.lite_cannot_flag')), {
+        method: 'flag',
+        params: { community, username, permlink }
+      });
+      return;
+    }
     try {
       await flagMutation.mutateAsync({ community, username, permlink, notes });
     } catch (error) {
@@ -74,13 +89,19 @@ export function AlertDialogFlag({
             {t('post_content.flag.cancel')}
           </AlertDialogCancel>
           {user && user.isLoggedIn ? (
-            <AlertDialogAction
-              className="rounded-none bg-foreground text-secondary shadow-lg shadow-destructive hover:bg-destructive hover:shadow-foreground disabled:bg-gray-400 disabled:shadow-none"
-              data-testid="flag-dialog-ok"
-              onClick={flag}
-            >
-              {t('post_content.flag.ok')}
-            </AlertDialogAction>
+            isLite ? (
+              <p className="max-w-prose self-center text-sm text-destructive" data-testid="flag-dialog-lite">
+                {t('post_content.flag.lite_cannot_flag')}
+              </p>
+            ) : (
+              <AlertDialogAction
+                className="rounded-none bg-foreground text-secondary shadow-lg shadow-destructive hover:bg-destructive hover:shadow-foreground disabled:bg-gray-400 disabled:shadow-none"
+                data-testid="flag-dialog-ok"
+                onClick={flag}
+              >
+                {t('post_content.flag.ok')}
+              </AlertDialogAction>
+            )
           ) : null}
         </AlertDialogFooter>
       </AlertDialogContent>

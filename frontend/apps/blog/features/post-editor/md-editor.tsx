@@ -23,12 +23,7 @@ import { CircleSpinner } from 'react-spinners-kit';
 import { useTranslation } from '@/blog/i18n/client';
 import { useStorageWithTTL } from '@ui/hooks/useStorageWithTTL';
 import { StorageTTL } from '@ui/lib/storage-with-ttl';
-import {
-  onBatchImageUpload,
-  onImageDrop,
-  onImagePaste,
-  onImageUpload
-} from './lib/utils';
+import { onBatchImageUpload, onImageDrop, onImagePaste, onImageUpload } from './lib/utils';
 import type { BatchFileItem, ProcessingOptions } from './lib/image-processing-types';
 import { convertHiveUrlsInText, parseHiveBlogUrl } from './lib/hive-url-converter';
 import { getToolbarButtons } from './lib/toolbar-config';
@@ -135,8 +130,17 @@ const MdEditor: FC<MdEditorProps> = ({ onChange, persistedValue = '', placeholde
         event.preventDefault();
         const cursorPos = view.state.selection.main.head;
         onImagePaste(
-          event.clipboardData, insertTextAtPosition, signer.username, signer,
-          setIsUploading, cursorPos, processingOptionsRef.current
+          // user.username, NOT signer.username: `signer` is null for a keyless
+          // lite account, so the old dereference threw before the upload helper
+          // (which handles a null signer) could route to the lite path. The
+          // file-picker branch below already did this correctly.
+          event.clipboardData,
+          insertTextAtPosition,
+          user.username,
+          signer,
+          setIsUploading,
+          cursorPos,
+          processingOptionsRef.current
         );
         return true;
       }
@@ -197,7 +201,7 @@ const MdEditor: FC<MdEditorProps> = ({ onChange, persistedValue = '', placeholde
 
       return true;
     },
-    [setMarkdownAdapter, signer, isBlockedUser, t]
+    [setMarkdownAdapter, signer, user.username, isBlockedUser, t]
   );
 
   // Stable ref for paste handler so extension doesn't need to be re-created
@@ -226,8 +230,13 @@ const MdEditor: FC<MdEditorProps> = ({ onChange, persistedValue = '', placeholde
 
       if (fileList.length === 1) {
         await onImageUpload(
-          fileList[0], insertTextAtPosition, user.username, signer,
-          setIsUploading, cursorPos, processingOptions
+          fileList[0],
+          insertTextAtPosition,
+          user.username,
+          signer,
+          setIsUploading,
+          cursorPos,
+          processingOptions
         );
       } else {
         const files = Array.from(fileList);
@@ -240,49 +249,52 @@ const MdEditor: FC<MdEditorProps> = ({ onChange, persistedValue = '', placeholde
         }));
         setUploadQueue(items);
 
-        await onBatchImageUpload(files, insertTextAtPosition, user.username, signer, {
-          onFileStart: (i) => {
-            setUploadQueue((prev) =>
-              prev.map((item, idx) => (idx === i ? { ...item, status: 'processing' } : item))
-            );
+        await onBatchImageUpload(
+          files,
+          insertTextAtPosition,
+          user.username,
+          signer,
+          {
+            onFileStart: (i) => {
+              setUploadQueue((prev) =>
+                prev.map((item, idx) => (idx === i ? { ...item, status: 'processing' } : item))
+              );
+            },
+            onFileProgress: (i, status) => {
+              setUploadQueue((prev) => prev.map((item, idx) => (idx === i ? { ...item, status } : item)));
+            },
+            onFileComplete: (i, url) => {
+              setUploadQueue((prev) =>
+                prev.map((item, idx) => (idx === i ? { ...item, status: 'done', resultUrl: url } : item))
+              );
+            },
+            onFileError: (i, error) => {
+              setUploadQueue((prev) =>
+                prev.map((item, idx) => (idx === i ? { ...item, status: 'error', error } : item))
+              );
+            },
+            onAllComplete: () => {
+              setTimeout(() => setUploadQueue([]), 3000);
+            }
           },
-          onFileProgress: (i, status) => {
-            setUploadQueue((prev) =>
-              prev.map((item, idx) => (idx === i ? { ...item, status } : item))
-            );
-          },
-          onFileComplete: (i, url) => {
-            setUploadQueue((prev) =>
-              prev.map((item, idx) => (idx === i ? { ...item, status: 'done', resultUrl: url } : item))
-            );
-          },
-          onFileError: (i, error) => {
-            setUploadQueue((prev) =>
-              prev.map((item, idx) => (idx === i ? { ...item, status: 'error', error } : item))
-            );
-          },
-          onAllComplete: () => {
-            setTimeout(() => setUploadQueue([]), 3000);
-          }
-        }, cursorPos, processingOptions);
+          cursorPos,
+          processingOptions
+        );
       }
     },
     [insertTextAtPosition, signer, user.username, processingOptions, viewRef]
   );
 
   // Drag handlers
-  const dragHandler = useCallback(
-    (event: React.DragEvent<HTMLDivElement>) => {
-      event.preventDefault();
-      event.stopPropagation();
-      if (event.type === 'dragenter' || event.type === 'dragover') {
-        setIsDrag(true);
-      } else if (event.type === 'dragleave') {
-        setIsDrag(false);
-      }
-    },
-    []
-  );
+  const dragHandler = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.type === 'dragenter' || event.type === 'dragover') {
+      setIsDrag(true);
+    } else if (event.type === 'dragleave') {
+      setIsDrag(false);
+    }
+  }, []);
 
   const dropHandler = useCallback(
     async (event: React.DragEvent<HTMLDivElement>) => {
@@ -291,11 +303,17 @@ const MdEditor: FC<MdEditorProps> = ({ onChange, persistedValue = '', placeholde
       setIsDrag(false);
       const cursorPos = viewRef.current?.state.selection.main.head;
       await onImageDrop(
-        event.dataTransfer, insertTextAtPosition, signer.username, signer,
-        setIsUploading, cursorPos, processingOptions
+        // Same null-signer dereference as the paste handler above.
+        event.dataTransfer,
+        insertTextAtPosition,
+        user.username,
+        signer,
+        setIsUploading,
+        cursorPos,
+        processingOptions
       );
     },
-    [insertTextAtPosition, signer, processingOptions, viewRef]
+    [insertTextAtPosition, signer, user.username, processingOptions, viewRef]
   );
 
   // Toolbar buttons
@@ -333,10 +351,9 @@ const MdEditor: FC<MdEditorProps> = ({ onChange, persistedValue = '', placeholde
 
   const editorBody = (
     <div
-      className={cn(
-        'relative cursor-text overflow-hidden rounded-md border border-border',
-        { '!bg-red-400/20': isDrag }
-      )}
+      className={cn('relative cursor-text overflow-hidden rounded-md border border-border', {
+        '!bg-red-400/20': isDrag
+      })}
       onClick={focusEditor}
       onDragEnter={isBlockedUser ? undefined : dragHandler}
       onDragOver={isBlockedUser ? undefined : dragHandler}
@@ -372,15 +389,11 @@ const MdEditor: FC<MdEditorProps> = ({ onChange, persistedValue = '', placeholde
             </p>
             {uploadQueue.map((item) => (
               <div key={item.id} className="mb-1.5 flex items-center gap-2 text-xs">
-                {item.status === 'done' && (
-                  <Icons.check className="h-3 w-3 shrink-0 text-green-600" />
-                )}
-                {item.status === 'error' && (
-                  <Icons.close className="h-3 w-3 shrink-0 text-destructive" />
-                )}
-                {(item.status === 'pending' || item.status === 'processing' || item.status === 'uploading') && (
-                  <CircleSpinner loading size={12} color="#dc2626" />
-                )}
+                {item.status === 'done' && <Icons.check className="h-3 w-3 shrink-0 text-green-600" />}
+                {item.status === 'error' && <Icons.close className="h-3 w-3 shrink-0 text-destructive" />}
+                {(item.status === 'pending' ||
+                  item.status === 'processing' ||
+                  item.status === 'uploading') && <CircleSpinner loading size={12} color="#dc2626" />}
                 <span className="flex-1 truncate">{item.originalFile.name}</span>
                 {item.status === 'error' && (
                   <span className="shrink-0 text-destructive" title={item.error ?? undefined}>

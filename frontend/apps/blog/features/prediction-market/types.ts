@@ -38,6 +38,15 @@ export interface MyPosition {
   stakeByBucket: Record<string, number>;
   totalStaked: number;
   claimed: boolean;
+  /**
+   * TRUE when this round is past its hard deadline (settleBlock +
+   * SettleWindowBlocks + grace) and STILL OPEN — the exact gate market/reclaim.go
+   * enforces. In that state the normal claim path does nothing, and `reclaim`
+   * is how a staker forces the round to VOID and takes their own stake back
+   * without waiting for anyone. Nothing in the UI offered it before, so a
+   * bettor in a round that never resolved had no in-app way to get their money.
+   */
+  reclaimable: boolean;
   claimable: boolean;
   payout?: number;
 }

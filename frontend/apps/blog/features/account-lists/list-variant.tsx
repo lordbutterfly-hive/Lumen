@@ -39,7 +39,18 @@ const ListVariant = ({
 }: ListVariantProps) => {
   const { t } = useTranslation('common_blog');
   const { user } = useUserClient();
-  const userOwner = user.username === username && user.isLoggedIn;
+  // ★ NOT just "is this my page". These four lists (blacklist, muted, and the
+  // followed-list variants) are chain-only features: every write goes through
+  // `transactionService`, and there is no Lumen-local equivalent — a mute or a
+  // blacklist is a Hive custom_json or it is nothing.
+  //
+  // A keyless lite account viewing its OWN lists satisfied the old check, so every
+  // Add / Reset / Un-X control rendered and then threw a raw TypeError out of
+  // `getSigner(undefined)` on click. Treating a lite viewer as a non-owner hides
+  // the write controls while leaving the lists themselves readable, which is the
+  // same shape as the Mute fix in mute-follow/buttons-container.tsx.
+  const isLite = user.account_tier === 'lite';
+  const userOwner = user.username === username && user.isLoggedIn && !isLite;
 
   const blacklistBlogMutation = useBlacklistBlogMutation();
   const resetBlacklistBlogMutation = useResetBlacklistBlogMutation();

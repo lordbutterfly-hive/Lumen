@@ -205,19 +205,41 @@ const YourTokensView: FC = () => {
         <div className="mt-5">
           <Unavailable>Sign in to see the creator tokens you hold.</Unavailable>
         </div>
-      ) : p.isLite ? (
-        // A lite account IS logged in, so it fell straight through to the full
-        // list — holdings it cannot have, next to Reclaim and Rate buttons it
-        // cannot sign. The hook refuses both (use-live-portfolio.ts:91,104),
-        // but only after the click. Say it up front instead.
+      ) : p.accountsFailed ? (
+        // The wallet lookup itself failed. NOT "you hold nothing" — that would
+        // tell someone their tokens are gone.
         <div className="mt-5">
           <Unavailable>
-            This account has no Hive keys yet, so it can’t hold or sign for creator tokens. Upgrade to a full account
-            first.
+            We couldn’t check which wallets are linked to this account, so we can’t show what you hold. Nothing is
+            wrong with your tokens — reload in a moment.
+          </Unavailable>
+        </div>
+      ) : p.isLite && !p.canHold ? (
+        // ONLY a Google-only lite account genuinely cannot hold: there is no
+        // keypair behind it, so Magi has no account to key a balance to.
+        //
+        // This branch used to fire for EVERY lite account, which became wrong the
+        // moment balances started resolving per bound wallet: a Bitcoin- or
+        // Ethereum-wallet holder was told they could not hold tokens while the
+        // data layer was correctly reading the ones they did hold.
+        <div className="mt-5">
+          <Unavailable>
+            This account signs in with Google only, so there is no wallet to hold creator tokens in. Link a Bitcoin or
+            Ethereum wallet, or upgrade to a full Hive account.
           </Unavailable>
         </div>
       ) : (
         <>
+          {/* Viewing works, signing does not — yet. A wallet identity holds tokens
+              at its own `did:pkh` and can be paid, but initiating a transaction
+              needs a signature over the transaction itself, which is a rail that
+              is not ported. Stated up front rather than discovered on a click. */}
+          {p.isLite && !p.canSign ? (
+            <div className="mt-5 rounded-[14px] border border-[#f6e2c4] bg-[#fdf6ec] px-4 py-3 text-[13px] leading-[1.5] text-[#b45309]">
+              These are the tokens held by the wallet you signed in with. Selling and spending them from Lumen isn’t
+              available yet — the wallet signing for it is still being built.
+            </div>
+          ) : null}
           {/* The headline is the FLOOR total, not a market value: a market value
               needs each creator's live curve price and this list makes no
               per-market read. The floor is a number we actually have — and it is
@@ -276,8 +298,8 @@ const YourTokensView: FC = () => {
                 )}
               </div>
               <p className="mt-4 font-serif text-[12.5px] leading-[1.55] text-[#9ca3af]">
-                Token prices float — the floor value is the least you’re guaranteed back. Selling and reclaiming work in
-                every market state.
+                Token prices float — the floor value is the least you’re guaranteed back. You can always exit: by
+                selling while a market is open, and by redeeming at the floor once it winds down.
               </p>
             </>
           ) : (
