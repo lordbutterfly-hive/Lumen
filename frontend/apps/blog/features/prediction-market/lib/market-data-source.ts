@@ -22,6 +22,13 @@ export interface MarketDataSource {
   readMyPosition(roundId: string, username: string): Promise<MyPosition | null>;
   placeBet(input: PlaceBetInput): Promise<MyPosition>;
   claim(input: ClaimInput): Promise<MyPosition>;
+  /**
+   * Per-outcome pool share over the life of the round, for the chart. NULL means
+   * "no usable history" — no indexer configured, the index is unreachable, or
+   * fewer than two distinct blocks have bets. The caller must fall back to the
+   * flat placeholder and SAY it is one, never draw a line from a null.
+   */
+  readPoolSeries(roundId: string, outcomeCount: number): Promise<number[][] | null>;
 }
 
 const MOCK_REF = 0.294; // reference price ($) the strikes were set against
@@ -98,6 +105,13 @@ class MockMarketDataSource implements MarketDataSource {
     };
     setStorageItem(key, position, StorageTTL.SESSION);
     return position;
+  }
+
+  // The Mock has static pools and therefore no history. It returns null rather
+  // than synthesising a plausible-looking curve: a fabricated series is exactly
+  // the kind of thing that survives into a demo and gets believed.
+  async readPoolSeries(): Promise<number[][] | null> {
+    return null;
   }
 }
 

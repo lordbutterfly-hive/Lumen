@@ -26,14 +26,14 @@
 // (records the outgoing op, never transmits). Nothing in production code is
 // modified — this file only READS the real data path.
 
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import type { CreatorTokensConfig } from '../../creator-tokens-data-source';
 import { VscCreatorTokensDataSource } from '../../vsc-data-source';
 import { areaBaseUnits } from '../../contract-math';
 import { CreatorTokensGqlClient, kBal, kEscrow, kRegisteredAt, kSeq, toDid } from '../reads';
-import { ACTION_PAYLOAD_SPECS, type JsonFieldType } from '../payload-contract';
+import { ACTION_PAYLOAD_SPECS, MAX_HASH_LEN, WRITE_ACTIONS_REQUIRING_ACTIVE_AUTH, assertHashField, type JsonFieldType } from '../payload-contract';
 import { VSC_CALL_ID, type CustomJsonOp } from '../op-builders';
 
 // ======================================================================
@@ -294,6 +294,11 @@ async function run(): Promise<void> {
   await ds.setOfferingPrice({ creator: 'alice', offeringId: 1, newPriceHbd: 250 });
   await ds.setOfferingTitle({ creator: 'alice', offeringId: 1, title: '20-minute call' });
   await ds.deleteOffering({ creator: 'alice', offeringId: 1 });
+  // The creator's own trade-fee withdrawal. Driven here purely so its op
+  // reaches the golden + auth-tier fixture file: it is a gated write
+  // (main.go:1446-1449) whose auth tier was otherwise cross-checked by
+  // nothing. Reads the accrued balance first (unseeded -> 0), then emits.
+  await ds.claimTradeFees({ account: 'alice' });
 
   const expectedActions = [
     'register',
@@ -312,11 +317,12 @@ async function run(): Promise<void> {
     'createOffering',
     'setOfferingPrice',
     'setOfferingTitle',
-    'deleteOffering'
+    'deleteOffering',
+    'claimTradeFees'
   ];
-  // 17 ops for 16 distinct actions: `ask` is driven twice, with and without an
+  // One op per action plus one: `ask` is driven twice, with and without an
   // offeringId (see above).
-  eq('journey captured all 16 write actions (ask twice)', capture.ops.length, expectedActions.length + 1);
+  eq(`journey captured all ${expectedActions.length} write actions (ask twice)`, capture.ops.length, expectedActions.length + 1);
   for (const a of expectedActions) check(`captured op for action "${a}"`, capture.byAction(a) !== undefined);
 
   // ------------------------------------------------------------------
@@ -327,6 +333,125 @@ async function run(): Promise<void> {
     check(`${action}: required_auths non-empty (active auth)`, op.required_auths.length > 0, `required_auths=${JSON.stringify(op.required_auths)}`);
     check(`${action}: required_posting_auths empty (no posting-signed write)`, op.required_posting_auths.length === 0, `required_posting_auths=${JSON.stringify(op.required_posting_auths)}`);
     eq(`${action}: op id is vsc.call`, op.id, VSC_CALL_ID);
+  }
+
+  // ------------------------------------------------------------------
+  // C1 (derived) — the auth tier is read OUT OF contract/main.go, never
+  // restated here.
+  //
+  // The block above proves every captured op carries active auth. It does not
+  // prove that active auth is what the CONTRACT actually demands — both sides
+  // could drift together, and a hand-maintained list of "actions needing
+  // active auth" is exactly what did drift: WRITE_ACTIONS_REQUIRING_ACTIVE_AUTH
+  // sat at 18 entries while the client had grown to 24 write actions, so
+  // assertAuthContract returned CLEAN for decline, rate and all four offerings
+  // -shop writes (fixed 2026-07-29, see payload-contract.ts's own note).
+  //
+  // So this section derives the requirement from the contract's SOURCE, the
+  // same idiom as creator-tokens/keeper/wire_test.go's
+  // TestBuildOp_AuthTierMatchesWhatTheContractDemands: find each
+  // `//go:wasmexport <name>` region in main.go and ask whether that region
+  // calls requireActiveAuth(. Deliberately conditional, never hardcoded — if
+  // a future change genuinely removes the gate from an entrypoint, this stops
+  // demanding active auth for it rather than failing for the wrong reason.
+  //
+  // The wasm wrapper cannot be compiled or executed by any native toolchain
+  // (it imports the TinyGo-only sdk), so a source-presence check is the only
+  // guard available on this seam. Its Go-side counterpart, which re-derives
+  // the same set and checks it against the fixtures this file writes, is
+  // creator-tokens/contract/parse/auth_tier_crosscheck_test.go.
+  // ------------------------------------------------------------------
+  section('C1 (derived) — auth tier read out of contract/main.go, not restated');
+  {
+    const gated = gatedEntrypointsFromContractSource();
+    check(
+      'contract/main.go is readable and declares wasm entrypoints',
+      gated !== null,
+      `set CREATOR_TOKENS_CONTRACT_MAIN if the contract is not at ${DEFAULT_CONTRACT_MAIN}`
+    );
+    if (gated) {
+      check('main.go declares a plausible number of entrypoints (>= 20)', gated.all.size >= 20, `found ${gated.all.size}`);
+
+      // 1. Every action this client actually emitted must BE an entrypoint,
+      //    and must be one the contract gates on active auth.
+      for (const { action } of capture.ops) {
+        check(`${action}: is a real //go:wasmexport in main.go`, gated.all.has(action));
+        check(
+          `${action}: contract gates it on requireActiveAuth — so the op must carry active auth`,
+          gated.active.has(action),
+          'if the contract genuinely dropped the gate, drop it from ACTION_PAYLOAD_SPECS too'
+        );
+      }
+
+      // 2. The tripwire list must COVER every gated entrypoint a client can
+      //    reach. `init` is excluded: it is the deployer's one-time call and
+      //    has no client method. This is the check that would have caught the
+      //    six-action blind spot the moment the shop was added on chain.
+      const clientReachableGated = [...gated.active].filter((a) => a !== 'init').sort();
+      const covered = new Set(WRITE_ACTIONS_REQUIRING_ACTIVE_AUTH);
+      const uncovered = clientReachableGated.filter((a) => !covered.has(a));
+      check(
+        'WRITE_ACTIONS_REQUIRING_ACTIVE_AUTH covers every active-gated entrypoint in main.go',
+        uncovered.length === 0,
+        uncovered.length > 0
+          ? `NOT covered: ${uncovered.join(', ')} — assertAuthContract silently returns clean for these, so the posting-auth tripwire is blind on them`
+          : ''
+      );
+
+      // 3. And the reverse: nothing in the tripwire list may name an action
+      //    the contract does not gate (a stale entry pointing at a deleted or
+      //    downgraded entrypoint would be a false sense of coverage).
+      const phantom = [...covered].filter((a) => !gated.active.has(a));
+      check(
+        'WRITE_ACTIONS_REQUIRING_ACTIVE_AUTH names no action main.go does not gate',
+        phantom.length === 0,
+        phantom.length > 0 ? `phantom entries: ${phantom.join(', ')}` : ''
+      );
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Free-form commitment strings — bound DERIVED from core/params.go.
+  //
+  // contentHash and answerHash are the only fields on this contract a user
+  // types directly, and core/ask.go refuses three shapes: empty, longer than
+  // MaxHashLen, or containing '|'. None of the three was checked client-side
+  // until 2026-07-29, so a creator pasting a long delivery link — exactly what
+  // the answer box's own placeholder asks for — signed with their ACTIVE key,
+  // paid resource credits, broadcast, and the escrow silently did not release.
+  //
+  // MAX_HASH_LEN is a TS mirror of a Go constant, which is the shape that
+  // always drifts, so it is READ from core/params.go rather than trusted.
+  // ------------------------------------------------------------------
+  section('hash fields — MAX_HASH_LEN derived from core/params.go, and all three bounds enforced');
+  {
+    const declared = maxHashLenFromContractSource();
+    check(
+      'core/params.go is readable and declares MaxHashLen',
+      declared !== null,
+      `set CREATOR_TOKENS_CORE_PARAMS if the contract is not at ${DEFAULT_CORE_PARAMS}`
+    );
+    if (declared !== null) {
+      eq('MAX_HASH_LEN matches core/params.go MaxHashLen', MAX_HASH_LEN, declared);
+    }
+    const tooLong = 'a'.repeat(MAX_HASH_LEN + 1);
+    await expectReject('ask() rejects a contentHash over MaxHashLen before signing', () => ds.ask({ creator: 'alice', asker: 'bob', contentHash: tooLong, deadlineBlocks: 28_800, maxCreditsBaseUnits: 10_000 }), 'at most');
+    // The pipe guard already lived at the data source (vsc-data-source.ts:1176,
+    // :1264) before this section existed; op-builders now repeats it one layer
+    // deeper, for any caller that reaches the builders directly. The LENGTH
+    // bound is the one that was genuinely missing at every layer.
+    await expectReject('ask() rejects a contentHash containing a pipe', () => ds.ask({ creator: 'alice', asker: 'bob', contentHash: 'ref|1', deadlineBlocks: 28_800, maxCreditsBaseUnits: 10_000 }), "must not contain '|'");
+    await expectReject('answer() rejects an answerHash over MaxHashLen before signing', () => ds.answer({ creator: 'alice', seq: 0, answerHash: tooLong, deadlineBlock: 5_500_000 }), 'at most');
+    await expectReject('answer() rejects an answerHash containing a pipe', () => ds.answer({ creator: 'alice', seq: 0, answerHash: 'sent|by email', deadlineBlock: 5_500_000 }), "must not contain '|'");
+    // Exactly at the cap is LEGAL — core/ask_test.go:1297-1306 pins this on the
+    // Go side, so an off-by-one here would reject what the chain accepts.
+    let atCapOk = true;
+    try {
+      assertHashField('answerHash', 'a'.repeat(MAX_HASH_LEN));
+    } catch {
+      atCapOk = false;
+    }
+    check('a hash field of EXACTLY MaxHashLen is accepted (no off-by-one)', atCapOk);
   }
 
   // ------------------------------------------------------------------
@@ -436,9 +561,9 @@ async function run(): Promise<void> {
   // have a real rail to observe.
   // ------------------------------------------------------------------
   section('Wind-down rail — refund()/refundHolder() open once FROZEN; sell()/refund() reject on the wrong rail');
+  const captureFrozen = new CapturingBroadcaster();
   {
     const gqlFrozen = new FakeGql(HEAD);
-    const captureFrozen = new CapturingBroadcaster();
     const supplyTokens = 20;
     gqlFrozen
       .seed(chM('alice', 'reg'), '1000000')
@@ -503,13 +628,95 @@ async function run(): Promise<void> {
   // strings + their spec-declared field kinds/expected values.
   // ------------------------------------------------------------------
   section('golden fixtures — write captured payloads for the Go contract/parse cross-check');
-  writeGoFixtures(capture.ops);
+  // BOTH capture sets. refund/refundHolder are only reachable on a market
+  // that is ALREADY wound down, so they are driven against their own
+  // pre-seeded-FROZEN fixture above and their ops live in captureFrozen —
+  // which used to be dropped on the floor here. golden_crosscheck_test.go's
+  // own doc records the consequence: it deliberately excused refund and
+  // refundHolder from its required-action list because 'neither currently
+  // has a fixture'. They do now, and both are money paths.
+  writeGoFixtures([...capture.ops, ...captureFrozen.ops]);
 }
 
 /** Construct a fresh data source over `g` (broadcaster not needed for reads) and readMarket. */
 async function ds2Read(g: FakeGql, creator: string) {
   const ds = new VscCreatorTokensDataSource({ config, gql: g });
   return ds.readMarket(creator);
+}
+
+// ======================================================================
+// 4b. Contract-source derivation — the auth tier is READ from main.go.
+// ======================================================================
+
+/**
+ * Same absolute-path convention this file already uses for the fixture
+ * output: the contract lives in a sibling repo directory, not inside the
+ * frontend tree, so there is no relative path that is correct from both the
+ * canon checkout and a developer's working copy. Override with
+ * CREATOR_TOKENS_CONTRACT_MAIN.
+ */
+const DEFAULT_CONTRACT_MAIN = '/mnt/o/Lumen/creator-tokens/contract/main.go';
+
+interface GatedEntrypoints {
+  /** Every `//go:wasmexport <name>` in main.go. */
+  all: Set<string>;
+  /** The subset whose region calls requireActiveAuth(. */
+  active: Set<string>;
+}
+
+/**
+ * Parse main.go's `//go:wasmexport` directives and report which ones are
+ * gated on requireActiveAuth. Returns null (rather than throwing) when the
+ * contract source is not reachable, so the caller can report a NAMED
+ * unverified check instead of the harness dying — a check that could not run
+ * must never look like a check that passed.
+ *
+ * Region = from one `//go:wasmexport` directive to the next. That is exactly
+ * how keeper/wire_test.go:122-132 slices it, and it is sound here for the
+ * same reason: main.go declares each entrypoint's directive immediately above
+ * its own func, and the auth gate is the third statement of every one of them.
+ */
+const DEFAULT_CORE_PARAMS = '/mnt/o/Lumen/creator-tokens/core/params.go';
+
+/**
+ * Read `const MaxHashLen int = N` out of core/params.go. Returns null (never
+ * throws, never guesses) when the file is unreachable, so the caller reports a
+ * named unverified check rather than a silent pass.
+ */
+function maxHashLenFromContractSource(): number | null {
+  const path = process.env.CREATOR_TOKENS_CORE_PARAMS ?? resolve(DEFAULT_CORE_PARAMS);
+  let text: string;
+  try {
+    text = readFileSync(path, 'utf8');
+  } catch {
+    return null;
+  }
+  const m = /^const\s+MaxHashLen\s+int\s*=\s*(\d+)\s*$/m.exec(text);
+  return m ? Number(m[1]) : null;
+}
+
+function gatedEntrypointsFromContractSource(): GatedEntrypoints | null {
+  const path = process.env.CREATOR_TOKENS_CONTRACT_MAIN ?? resolve(DEFAULT_CONTRACT_MAIN);
+  let text: string;
+  try {
+    text = readFileSync(path, 'utf8');
+  } catch {
+    return null;
+  }
+  const all = new Set<string>();
+  const active = new Set<string>();
+  const directive = /^\/\/go:wasmexport[ \t]+(\w+)[ \t]*$/gm;
+  const marks: { name: string; at: number }[] = [];
+  for (let m = directive.exec(text); m !== null; m = directive.exec(text)) {
+    marks.push({ name: m[1], at: m.index });
+    all.add(m[1]);
+  }
+  for (let i = 0; i < marks.length; i++) {
+    const start = marks[i].at;
+    const end = i + 1 < marks.length ? marks[i + 1].at : text.length;
+    if (text.slice(start, end).includes('requireActiveAuth(')) active.add(marks[i].name);
+  }
+  return { all, active };
 }
 
 // ======================================================================
@@ -533,11 +740,19 @@ interface GoFixture {
   action: string;
   payload: string; // the exact JSON string the Go parser must accept
   fields: GoFixtureField[];
+  /**
+   * The op's ACTUAL Hive auth arrays, recorded so the Go side can re-derive
+   * the requirement from contract/main.go and check it against what this
+   * client really emitted — rather than either side restating it.
+   * Consumed by contract/parse/auth_tier_crosscheck_test.go.
+   */
+  requiredAuths: string[];
+  requiredPostingAuths: string[];
 }
 
 function writeGoFixtures(ops: CapturedOp[]): void {
   const fixtures: GoFixture[] = [];
-  for (const { action, payload, payloadJson } of ops) {
+  for (const { action, payload, payloadJson, op } of ops) {
     const spec = ACTION_PAYLOAD_SPECS[action];
     if (!spec) continue;
     const fields: GoFixtureField[] = [];
@@ -557,7 +772,13 @@ function writeGoFixtures(ops: CapturedOp[]): void {
         fields.push({ name, kind: goKind, wantStr: String(value) });
       }
     }
-    fixtures.push({ action, payload: payloadJson, fields });
+    fixtures.push({
+      action,
+      payload: payloadJson,
+      fields,
+      requiredAuths: [...op.required_auths],
+      requiredPostingAuths: [...op.required_posting_auths]
+    });
   }
 
   // The contract repo moved (O:/CREATOR-TOKENS -> O:/Lumen/creator-tokens) and
@@ -567,7 +788,7 @@ function writeGoFixtures(ops: CapturedOp[]): void {
   // stale fixture file ever since, silently. Fixed 2026-07-28.
   const outPath = process.env.CREATOR_TOKENS_E2E_FIXTURES ?? resolve('/mnt/o/Lumen/creator-tokens/contract/parse/captured_payloads.json');
   const doc = {
-    _comment: 'GENERATED by apps/blog/features/creator-tokens/lib/vsc/__e2e__/vsc-data-path.e2e.ts. The exact payload JSON strings the REAL frontend write path emits, for the Go contract/parse golden cross-check (golden_crosscheck_test.go). Regenerate by re-running the harness.',
+    _comment: 'GENERATED by apps/blog/features/creator-tokens/lib/vsc/__e2e__/vsc-data-path.e2e.ts. The exact payload JSON strings the REAL frontend write path emits, plus each op\u2019s Hive auth arrays, for the Go cross-checks in contract/parse (golden_crosscheck_test.go and auth_tier_crosscheck_test.go). Regenerate by re-running the harness.',
     generatedAtUnixMs: Date.now(),
     fixtures
   };

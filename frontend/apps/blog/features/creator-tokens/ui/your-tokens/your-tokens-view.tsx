@@ -26,6 +26,7 @@ import { usdFromHbd } from '../../live/adapt';
 import type { Ask, HolderPosition } from '../../types';
 import { usdPrice } from '../../market/format';
 import TokenShell from '../token-shell';
+import { writeFailureMessage } from '../write-failure';
 
 const tok = (n: number) => n.toFixed(1);
 
@@ -83,7 +84,7 @@ const askStyle: Record<string, { label: string; cls: string }> = {
  * immediately, so nothing but this records whether the work was real.
  */
 const RateStrip: FC<{ onRate: (score: number) => Promise<void>; busy: boolean }> = ({ onRate, busy }) => {
-  const [failed, setFailed] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
   const [done, setDone] = useState(false);
   if (done) return <div className="mt-3 text-[12.5px] font-semibold text-[#2f7d4f]">Thanks — your rating is recorded on-chain.</div>;
   return (
@@ -95,12 +96,13 @@ const RateStrip: FC<{ onRate: (score: number) => Promise<void>; busy: boolean }>
             key={score}
             disabled={busy}
             onClick={async () => {
-              setFailed(false);
+              setFailure(null);
               try {
                 await onRate(score);
                 setDone(true);
-              } catch {
-                setFailed(true);
+              } catch (err) {
+                // The REAL reason, not a guess. See ../write-failure.ts.
+                setFailure(writeFailureMessage(err, 'Your rating didn’t go through.'));
               }
             }}
             className="h-8 w-8 rounded-[9px] border border-[#e4e6e9] bg-white text-[13px] font-bold text-[#3f4650] hover:bg-[#f1f3f5] disabled:opacity-50"
@@ -110,10 +112,8 @@ const RateStrip: FC<{ onRate: (score: number) => Promise<void>; busy: boolean }>
         ))}
         <span className="ml-1 text-[11.5px] text-[#9ca3af]">1 = poor · 5 = excellent</span>
       </div>
-      {failed ? (
-        <div className="mt-2 text-[12px] font-semibold text-[#c0392b]">
-          That didn’t go through — you may have already rated this job.
-        </div>
+      {failure ? (
+        <div className="mt-2 text-[12px] font-semibold text-[#c0392b]">{failure}</div>
       ) : null}
     </div>
   );
@@ -128,7 +128,7 @@ const AskCard: FC<{ a: Ask; onReclaim: () => Promise<void>; onRate: (score: numb
 }) => {
   const s = askStyle[a.status] ?? askStyle.awaiting;
   const reclaimable = a.status === 'reclaimable';
-  const [failed, setFailed] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
   return (
     <div className={`rounded-[16px] border bg-white px-5 py-4 ${reclaimable ? 'border-[#f6e2c4] bg-[#fdf6ec]' : 'border-[#ebebeb]'}`}>
       <div className="flex items-center justify-between gap-3">
@@ -152,11 +152,12 @@ const AskCard: FC<{ a: Ask; onReclaim: () => Promise<void>; onRate: (score: numb
           <button
             onClick={async () => {
               if (busy) return;
-              setFailed(false);
+              setFailure(null);
               try {
                 await onReclaim();
-              } catch {
-                setFailed(true);
+              } catch (err) {
+                // The REAL reason, not a guess. See ../write-failure.ts.
+                setFailure(writeFailureMessage(err, 'That reclaim didn’t go through.'));
               }
             }}
             disabled={busy}
@@ -166,10 +167,8 @@ const AskCard: FC<{ a: Ask; onReclaim: () => Promise<void>; onRate: (score: numb
           </button>
         </div>
       ) : null}
-      {failed ? (
-        <div className="mt-2 text-[12px] font-semibold text-[#c0392b]">
-          That didn’t go through — this ask may have already been resolved. Refresh and check its status.
-        </div>
+      {failure ? (
+        <div className="mt-2 text-[12px] font-semibold text-[#c0392b]">{failure}</div>
       ) : null}
     </div>
   );
@@ -205,6 +204,17 @@ const YourTokensView: FC = () => {
       ) : !p.loggedIn ? (
         <div className="mt-5">
           <Unavailable>Sign in to see the creator tokens you hold.</Unavailable>
+        </div>
+      ) : p.isLite ? (
+        // A lite account IS logged in, so it fell straight through to the full
+        // list — holdings it cannot have, next to Reclaim and Rate buttons it
+        // cannot sign. The hook refuses both (use-live-portfolio.ts:91,104),
+        // but only after the click. Say it up front instead.
+        <div className="mt-5">
+          <Unavailable>
+            This account has no Hive keys yet, so it can’t hold or sign for creator tokens. Upgrade to a full account
+            first.
+          </Unavailable>
         </div>
       ) : (
         <>

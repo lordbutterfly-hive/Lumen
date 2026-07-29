@@ -868,11 +868,26 @@
     "advanced": {
       "title": "Advanced",
       "description": "Power-user tools for your Hive account.",
-      "delegate": { "label": "Delegate HP", "sub": "Lend Hive Power to others" },
-      "claim_account": { "label": "Claim account tokens", "sub": "Create claimed accounts" },
-      "convert": { "label": "Convert HBD → HIVE", "sub": "3.5 day conversion" },
-      "recurring": { "label": "Recurring transfers", "sub": "Schedule payments" },
-      "savings": { "label": "Savings", "sub": "Deposit or withdraw" }
+      "delegate": {
+        "label": "Delegate HP",
+        "sub": "Lend Hive Power to others"
+      },
+      "claim_account": {
+        "label": "Claim account tokens",
+        "sub": "Create claimed accounts"
+      },
+      "convert": {
+        "label": "Convert HBD → HIVE",
+        "sub": "3.5 day conversion"
+      },
+      "recurring": {
+        "label": "Recurring transfers",
+        "sub": "Schedule payments"
+      },
+      "savings": {
+        "label": "Savings",
+        "sub": "Deposit or withdraw"
+      }
     },
     "dialogs": {
       "common": {
@@ -941,7 +956,10 @@
         "new_account": "New account name",
         "todo_notice": "Key generation for the new account isn't wired up yet, so this can't be submitted from here. The form is ready — only the broadcast step is pending."
       }
-    }
+    },
+    "lite_title": "No wallet yet",
+    "lite_body": "A Lumen account has no Hive wallet of its own. Upgrade to a full Hive account to get one — your posts, followers and history all come with you on Lumen.",
+    "lite_upgrade": "Upgrade my account"
   },
   "profile": {
     "following": "Following",
@@ -1059,7 +1077,8 @@
       "unvoted": "You removed your vote for witness {{witness}}.",
       "proxy_set": "Your witness votes are now delegated to @{{proxy}}.",
       "proxy_cleared": "Your witness proxy was cleared."
-    }
+    },
+    "lite_cannot_vote": "Voting for witnesses needs a full Hive account. Upgrade to vote."
   },
   "proposals": {
     "header": {
@@ -1178,7 +1197,8 @@
       "errors": {
         "post_not_found": "No post found at @{{creator}}/{{permlink}} — create the post first, then link it here."
       }
-    }
+    },
+    "lite_cannot_vote": "Voting on proposals needs a full Hive account. Upgrade to vote."
   },
   "prediction_market": {
     "heading": "Prediction Market",
@@ -1236,5 +1256,9 @@
       "hours_minutes": "{{hours}}h {{minutes}}m",
       "minutes": "{{minutes}}m"
     }
+  },
+  "login_dialog": {
+    "new_here": "New to Lumen?",
+    "signup_link": "Create an account with Google or a crypto wallet — no keys to manage."
   }
 }

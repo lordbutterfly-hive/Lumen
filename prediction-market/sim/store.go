@@ -6,7 +6,7 @@
 //
 // This package owns nothing about the wasm layer or SDK — it only needs
 // market.Store (an interface: Get/Set/Delete). Nothing in market/, contract/,
-// indexer/, or scheduler/ is modified.
+// or scheduler/ is modified.
 package sim
 
 // MemStore is a plain in-memory market.Store — the same shape as the

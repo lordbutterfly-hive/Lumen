@@ -36,6 +36,19 @@ func (d *DryRunBroadcaster) Broadcast(op CustomJSON) (string, error) {
 	return fmt.Sprintf("dryrun-tx-%d", d.n), nil
 }
 
+// HiveBroadcaster — SUPERSEDED 2026-07-29. The real implementation now lives in
+// ../settler (settler.NewHiveBroadcaster), which satisfies this same Broadcaster
+// interface. It could not live here: it needs hivego, which requires Go >= 1.24,
+// and raising this module's floor would raise it for the TinyGo wasm build of the
+// contract too — so a dependency of the bot could break the contract. The settler
+// is therefore its own module with its own go directive.
+//
+// This type is kept only so the doc below stays discoverable from the interface
+// it implements. Prefer settler.NewHiveBroadcaster; this one still returns an
+// error explaining where to go.
+//
+// Original note follows.
+//
 // HiveBroadcaster is the REAL Broadcaster — deliberately NOT implemented.
 // Live submission is explicitly out of scope for this package (same
 // discipline as the creator-tokens keeper): wiring a real signer/broadcaster
@@ -61,5 +74,5 @@ type HiveBroadcaster struct {
 }
 
 func (h *HiveBroadcaster) Broadcast(op CustomJSON) (string, error) {
-	return "", fmt.Errorf("scheduler: HiveBroadcaster.Broadcast not implemented — needs a signed Hive tx (posting key material) plus a live deployed contract; use DryRunBroadcaster until both exist")
+	return "", fmt.Errorf("scheduler: HiveBroadcaster is superseded — use settler.NewHiveBroadcaster (../settler), which implements this interface with real signing; DryRunBroadcaster remains the safe default")
 }

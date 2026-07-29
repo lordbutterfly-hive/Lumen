@@ -83,7 +83,26 @@ const ButtonsContainer = ({
             f.follower === user.username && f.following === username
         )
       );
+  // `hideMute` above covers a lite TARGET (you cannot mute a handle that is not a
+  // Hive account). This covers a lite VIEWER, which was missed: a keyless account
+  // has no Hive signer, and mute is chain-only — there is no /api/lite/mute and
+  // deliberately so. Unguarded, the button rendered on every real Hive profile and
+  // every author popover, and clicking it dropped into `transactionService` with no
+  // signer configured, surfacing a raw error. Follow is safe because Lumen keeps
+  // its own follow graph; mute has no such fallback, so the control is removed
+  // rather than shown and refused.
+  const viewerIsLite = user.account_tier === 'lite';
+
   const handlerMute = async () => {
+    // Belt-and-braces: the button is not rendered for a lite viewer, but a stale
+    // render or a future call site must not reach a signer that cannot exist.
+    if (viewerIsLite) {
+      handleError(new Error('Muting needs a Hive account. Upgrade your account to mute people.'), {
+        method: 'mute',
+        params: { username }
+      });
+      return;
+    }
     if (!isMute) {
       try {
         await muteMutation.mutateAsync({ username });
@@ -151,7 +170,7 @@ const ButtonsContainer = ({
             onClick={handlerFollow}
             disabled={temporaryDisabled}
           />
-          {hideMute ? null : (
+          {hideMute || viewerIsLite ? null : (
             <MuteButton
               loading={loading}
               variant={variant}

@@ -14,6 +14,10 @@ const STALE_MS = 10_000;
 // After a bet/claim, reconcile the optimistic position against real on-chain
 // state promptly rather than waiting up to a full poll interval.
 const RECONCILE_MS = 4_000;
+// The chart's history only grows at the tail, and it comes from an indexer that
+// lags the chain anyway — polling it on the ticker cadence would be pure waste.
+const SERIES_STALE_MS = 60_000;
+const SERIES_REFETCH_MS = 120_000;
 
 /**
  * Single hook every market component uses. Both MarketWidget (always mounted in
@@ -60,6 +64,19 @@ export function useMarket() {
     refetchInterval: REFETCH_MS
   });
 
+  // The chart's history. Kept as its own query rather than folded into
+  // readRound() so a slow or dead indexer can never delay the round itself —
+  // the numbers people bet on come from chain state and must render regardless.
+  // Polled far more slowly than the round: a bet only shifts the tail of it.
+  const seriesQuery = useQuery({
+    queryKey: ['predictionMarket', 'poolSeries', round?.roundId, round?.buckets.length],
+    queryFn: () =>
+      dataSource && round ? dataSource.readPoolSeries(round.roundId, round.buckets.length) : Promise.resolve(null),
+    enabled: isAvailable && Boolean(round?.roundId),
+    staleTime: SERIES_STALE_MS,
+    refetchInterval: SERIES_REFETCH_MS
+  });
+
   const placeBetMutation = useMutation({
     mutationFn: (input: { bucketId: string; amount: number }) => {
       if (!dataSource || !round) return Promise.reject(new Error('No active round'));
@@ -90,6 +107,8 @@ export function useMarket() {
     isError: roundQuery.isError,
     refetch: roundQuery.refetch,
     myPosition: positionQuery.data ?? null,
+    // null ⇒ no usable history; the caller draws the labelled placeholder.
+    poolSeries: seriesQuery.data ?? null,
     loggedIn,
     placeBet: useCallback(
       (bucketId: string, amount: number) => placeBetMutation.mutateAsync({ bucketId, amount }),

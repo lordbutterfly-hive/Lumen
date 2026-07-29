@@ -5,7 +5,8 @@
 // own admission.
 //
 // AUTH (finding C1, posting-key-theft fix): the contract requires ACTIVE
-// authority on every one of its 18 write entrypoints, full stop — a Hive
+// authority on every one of its 24 client-reachable write entrypoints, full
+// stop (25 counting `init`, which only the deployer calls) — a Hive
 // POSTING key is the low-value key delegated to every dApp including this
 // frontend, and a posting-signed transfer/refund/reclaim/setFace/setCap/
 // answer/refundHolder would let anyone holding only that key (this app, a
@@ -27,13 +28,16 @@
 // ./payload-contract.ts's ACTION_PAYLOAD_SPECS says main.go's jsonU64/jsonStr
 // reader expects (money amounts as QUOTED base-10 integer strings, never a
 // bare JS number — see payload-contract.ts's file doc for the bug class this
-// fixes). buildOp() itself re-checks every payload against that same spec,
-// AND re-checks the auth shape above, in development (assertPayloadShape /
-// assertAuthContract below), so vsc-data-source.ts's 11 write methods don't
-// each need their own guard — this is the one choke point every one of them
-// already funnels through.
+// fixes). buildOp() itself re-checks every payload against that same spec in
+// development (assertPayloadShape), and re-checks the auth shape above on
+// EVERY build including production (assertAuthContract) — so vsc-data-source.ts's
+// 22 write methods don't each need their own guard; this is the one choke
+// point every one of them already funnels through. The signing side of the
+// same guarantee (that the signature is actually made with the ACTIVE key,
+// which the envelope alone cannot state) lives one layer out, in
+// ./broadcaster.ts.
 
-import { assertAuthContract, assertPayloadShape } from './payload-contract';
+import { assertAuthContract, assertHashField, assertPayloadShape } from './payload-contract';
 
 export interface CustomJsonOp {
   id: string;
@@ -66,7 +70,7 @@ export function buildOp(opts: {
   action: string;
   payload: Record<string, unknown>;
   hbdLegBaseUnits?: number;
-  /** The Hive ACTIVE-authority account signing this write (required_auths). Required — see the file-level AUTH comment: every one of the 11 write actions needs active authority, never posting. */
+  /** The Hive ACTIVE-authority account signing this write (required_auths). Required — see the file-level AUTH comment: every one of the 24 write actions needs active authority, never posting. A blank value is refused rather than silently producing an unsigned op. */
   activeAuth: string;
   rcLimit?: number;
 }): CustomJsonOp {
@@ -90,11 +94,33 @@ export function buildOp(opts: {
     rc_limit: opts.rcLimit ?? DEFAULT_RC_LIMIT,
     intents
   };
-  const requiredAuths = opts.activeAuth ? [opts.activeAuth] : [];
-  const requiredPostingAuths: string[] = [];
-  if (process.env.NODE_ENV !== 'production') {
-    assertAuthContract(opts.action, requiredAuths, requiredPostingAuths);
+  // ★ 2026-07-29: `opts.activeAuth ? [...] : []` used to fail OPEN. `activeAuth`
+  // is typed as a required string, but TypeScript cannot stop `''` or a
+  // whitespace-only name arriving from a caller that read it out of a session
+  // object — and an empty/blank value silently produced `required_auths: []`,
+  // i.e. an op with NO authority at all. The chain refuses that
+  // (contract/main.go:206-212 requireActiveAuth), so it was never a theft
+  // vector, but "money write, silently unsigned by anyone" must not be a shape
+  // this function is able to return. It now throws where the stack trace still
+  // names the write method that lost the signer.
+  const activeAuth = typeof opts.activeAuth === 'string' ? opts.activeAuth.trim() : '';
+  if (activeAuth === '') {
+    throw new Error(
+      `op-builders: action "${opts.action}" was built with no active-auth signer — every creator-tokens write must name the Hive account whose ACTIVE authority signs it (required_auths). Refusing to build an op that carries no authority.`
+    );
   }
+  const requiredAuths = [activeAuth];
+  const requiredPostingAuths: string[] = [];
+  // ALWAYS, including production. This is two array-length checks plus a set
+  // lookup on a path that is already about to do a network round trip and a
+  // wallet prompt — the cost is nil, and it is the last programmatic statement
+  // of "a posting key may never authorize this" before the op leaves the
+  // module. It was previously dev-only, which meant the only build that
+  // handles real HBD was the one build running without it. (assertPayloadShape
+  // stays dev-only: it walks every field of every payload and its failure mode
+  // — a malformed field — is caught again by the contract's own parser, which
+  // an auth-tier mistake is not.)
+  assertAuthContract(opts.action, requiredAuths, requiredPostingAuths);
   return {
     id: VSC_CALL_ID,
     json: JSON.stringify(body),
@@ -227,6 +253,10 @@ export function askPayload(
   // defaulting to unlimited. It exists because `face` is creator-controlled and
   // intra-block order is producer-chosen, so a creator could otherwise spike the
   // price between the asker signing and the tx executing.
+  // core/ask.go:336-343 — non-empty, <= MaxHashLen, no '|'. Checked HERE, at
+  // the last chokepoint before the wire, so a doomed ask never reaches a
+  // signature. See payload-contract.ts's assertHashField doc.
+  assertHashField('contentHash', contentHash);
   const payload: Record<string, unknown> = { creator, contentHash, deadlineBlocks, maxCredits: moneyStr(maxCreditsBaseUnits) };
   // OMITTED, not sent as 0, when there is no named offering: absent and 0 mean
   // the same thing on-chain (the legacy `face` price), and omitting keeps the
@@ -240,6 +270,10 @@ export function askPayload(
 
 /** main.go Answer (main.go:639-661). */
 export function answerPayload(seq: number, answerHash: string): Record<string, unknown> {
+  // core/ask.go:515-523 — same three bounds as contentHash. The answer box is
+  // free text with a "paste a link" placeholder, so this is the likelier of the
+  // two to be tripped by an ordinary user doing an ordinary thing.
+  assertHashField('answerHash', answerHash);
   return { seq, answerHash };
 }
 

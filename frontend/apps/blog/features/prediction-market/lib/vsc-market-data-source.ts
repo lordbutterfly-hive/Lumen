@@ -4,7 +4,9 @@ import type { MarketConfig } from './market-config';
 import { BUCKET_DEFS, bucketUsdLabel } from './bucket-defs';
 import { baseUnitsToHuman } from './vsc-money';
 import { buildBetOp, buildClaimOp, type ContractAsset, type CustomJsonOp } from './op-builders';
-import { DefaultVscGqlClient, getJsonProp, type VscGqlClient } from './vsc-gql';
+import { DefaultVscGqlClient, type VscGqlClient } from './vsc-gql';
+import { MagiIndexerClient } from './magi-indexer';
+import { buildOddsSeries } from './pool-series';
 
 // Real, on-chain implementation of MarketDataSource. Reads live contract state
 // via GraphQL getStateByKeys; builds (but does not itself sign) the bet/claim
@@ -135,7 +137,8 @@ export class VscMarketDataSource implements MarketDataSource {
     const asset: MarketAsset = assetRaw === 'hbd' ? 'HBD' : 'HIVE';
     const lock = toU64(state[rk(id, 'lock')]);
 
-    const bettors = this.config.indexerUrl ? await this.readBettors(this.config.indexerUrl, id) : 0;
+    // No indexer configured ⇒ genuinely unknown, not zero.
+    const bettors = this.config.indexerUrl ? await this.readBettors(this.config.indexerUrl, id) : null;
 
     const round: RoundState = {
       roundId: String(id),
@@ -274,23 +277,54 @@ export class VscMarketDataSource implements MarketDataSource {
     return pointer - 1;
   }
 
+  /**
+   * The chart's series, folded from the indexer's per-bet running pool totals.
+   * Chain state cannot answer this at all — it holds only the CURRENT pool per
+   * bucket, with no time dimension — which is why the chart was a flat
+   * placeholder until the indexer landed.
+   *
+   * Degrades to null on every failure path (no indexer, unreachable, too little
+   * history), and the caller falls back to the labelled placeholder.
+   */
+  async readPoolSeries(roundId: string, outcomeCount: number): Promise<number[][] | null> {
+    const id = parseRoundId(roundId);
+    if (id === null || !this.config.indexerUrl) return null;
+    try {
+      const client = new MagiIndexerClient(this.config.indexerUrl, this.config.contractId);
+      const points = await client.readPoolHistory(id);
+      return buildOddsSeries(points, outcomeCount);
+    } catch {
+      return null;
+    }
+  }
+
   private async readRoundAsset(id: number): Promise<ContractAsset> {
     const key = rk(id, 'asset');
     const map = await this.gql.getStateByKeys(this.config.contractId, [key]);
     return map[key] === 'hbd' ? 'hbd' : 'hive';
   }
 
-  // Bettors count needs the off-chain indexer (getStateByKeys cannot derive it).
-  // Never blocks the read path: any failure degrades to 0.
-  private async readBettors(indexerUrl: string, id: number): Promise<number> {
+  // Bettors count needs the indexer (getStateByKeys cannot derive it: stakes are
+  // keyed by account, and contract state holds no roster to enumerate).
+  //
+  // Reads the Magi indexer's `lumen_pm_round_summary` view over Hasura. This
+  // used to hit `${indexerUrl}/rounds/:id/bettors` on this repo's own Go
+  // indexer, which was deleted — its production event source could never be fed,
+  // because go-vsc-node's public GraphQL exposes no path to a contract's
+  // persisted logs.
+  //
+  // Still never blocks the read path — a round must render even when the index
+  // is down — but a failure now degrades to NULL, not 0. Returning 0 asserted
+  // "nobody has bet on this", which is a different and often false claim.
+  private async readBettors(indexerUrl: string, id: number): Promise<number | null> {
     try {
-      const res = await fetch(`${indexerUrl}/rounds/${id}/bettors`);
-      if (!res.ok) return 0;
-      const json: unknown = await res.json();
-      const bettors = getJsonProp(json, 'bettors');
-      return typeof bettors === 'number' ? bettors : 0;
+      const client = new MagiIndexerClient(indexerUrl, this.config.contractId);
+      const summary = await client.readRoundSummary(id);
+      // A round the indexer has not seen yet is unknown, not empty: the roll
+      // event may simply not have been folded at the time of this read.
+      return summary?.bettors ?? null;
     } catch {
-      return 0;
+      return null;
     }
   }
 }

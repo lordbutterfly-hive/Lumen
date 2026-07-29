@@ -20,6 +20,7 @@ package parse
 import (
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -81,13 +82,21 @@ func TestGoldenCrossCheck_FrontendPayloadsParse(t *testing.T) {
 	// emits today, so this list had silently stopped protecting the exact
 	// three actions most likely to regress next.
 	//
-	// "refund"/"refundHolder" are deliberately NOT required here: neither
-	// currently has a fixture in captured_payloads.json (the frontend's own
-	// vsc-data-path.e2e.ts harness does not yet exercise either write path),
-	// so requiring them would fail this test for a frontend gap this package
-	// cannot fix or verify — see the handoff report for that gap, flagged
-	// precisely rather than silently worked around.
-	wantActions := []string{"register", "renew", "setFace", "setCap", "buy", "sell", "ask", "answer", "reclaim", "retire", "transfer"}
+	// ★ 2026-07-29: "refund", "refundHolder" and "claimTradeFees" are now
+	// REQUIRED here too. They used to be excused because captured_payloads.json
+	// genuinely had no fixture for them — but the reason was not that the
+	// frontend never exercised those paths. The harness DID drive refund and
+	// refundHolder (against a pre-seeded-FROZEN market, since the wind-down
+	// rail is the only place they open), it just recorded them into a SECOND
+	// CapturingBroadcaster whose ops were then dropped on the floor by
+	// writeGoFixtures. So the two rails that hand real HBD back to a holder
+	// were the only money paths this cross-check never saw. The harness now
+	// writes both capture sets, and drives claimTradeFees as well.
+	//
+	// The shop/decline/rate writes are covered too, via the auth-tier
+	// cross-check in auth_tier_crosscheck_test.go, which derives the required
+	// set from main.go rather than restating it here.
+	wantActions := []string{"register", "renew", "setFace", "setCap", "buy", "sell", "ask", "answer", "reclaim", "retire", "transfer", "refund", "refundHolder", "claimTradeFees"}
 	seen := map[string]bool{}
 	for _, fx := range doc.Fixtures {
 		seen[fx.Action] = true
@@ -102,7 +111,26 @@ func TestGoldenCrossCheck_FrontendPayloadsParse(t *testing.T) {
 		fx := fx
 		t.Run(fx.Action, func(t *testing.T) {
 			if len(fx.Fields) == 0 {
-				t.Fatalf("action %q has no fields to check", fx.Action)
+				// A field-less fixture is ALMOST always a regression: an action
+				// that stopped emitting its payload. But three entrypoints
+				// genuinely take no payload at all — the caller IS the subject,
+				// so main.go reads nothing (claimTradeFees main.go:1446, pause
+				// :456, unpause :483, all specced as `{}` in
+				// payload-contract.ts). Naming them, rather than accepting any
+				// empty fixture, keeps the regression check intact: adding a
+				// fourth requires a deliberate edit here.
+				//
+				// For those three the payload must still be EXACTLY `{}`. Their
+				// entrypoints run the same unread-key check as every other, so
+				// a stray field is a hard on-chain error, not a harmless extra.
+				payloadless := map[string]bool{"claimTradeFees": true, "pause": true, "unpause": true}
+				if !payloadless[fx.Action] {
+					t.Fatalf("action %q has no fields to check — it declares payload fields in ACTION_PAYLOAD_SPECS, so a fixture with none means the frontend stopped emitting them", fx.Action)
+				}
+				if strings.TrimSpace(fx.Payload) != "{}" {
+					t.Fatalf("action %q takes no payload, but the frontend emitted %s — main.go's unread-key check refuses any field here", fx.Action, fx.Payload)
+				}
+				return
 			}
 			for _, f := range fx.Fields {
 				switch f.Kind {

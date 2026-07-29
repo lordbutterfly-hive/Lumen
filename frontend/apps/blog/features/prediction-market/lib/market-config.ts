@@ -9,7 +9,13 @@ import env from '@beam-australia/react-env';
 //   REACT_APP_VSC_MARKET_CONTRACT_ID  — deployed contract id (vsc1...). REQUIRED.
 //   REACT_APP_VSC_MARKET_NET_ID       — VSC network id the call is scoped to. REQUIRED.
 //   REACT_APP_VSC_MARKET_GQL_URL      — VSC GraphQL endpoint. REQUIRED.
-//   REACT_APP_VSC_MARKET_INDEXER_URL  — optional off-chain indexer base URL (bettors/claims).
+//   REACT_APP_VSC_MARKET_INDEXER_URL  — optional Magi indexer base URL, e.g.
+//       https://indexer.magi.milohpr.com. This is a magi-mongo-indexer instance
+//       serving Hasura; the client appends /v1/graphql. It answers only what
+//       contract state structurally cannot: distinct bettor counts, per-round
+//       history, and the pool series behind the chart. Unset ⇒ those read as
+//       UNKNOWN and render as such — never as zero.
+//       Register prediction-market/magi-indexer/*.yaml with the instance first.
 //   REACT_APP_VSC_MARKET_RC_LIMIT     — optional rc_limit override for bet/claim calls.
 //
 // When the contract id (or net id / gql url) is not set, getMarketConfig()

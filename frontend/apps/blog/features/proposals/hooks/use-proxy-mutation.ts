@@ -6,6 +6,8 @@ import { toast } from '@ui/components/hooks/use-toast';
 import { handleError } from '@ui/lib/handle-error';
 import { scheduleInvalidations } from '@/blog/lib/react-query';
 import { useTranslation } from '@/blog/i18n/client';
+import { refuseIfLite } from '@/blog/lib/lite/client/require-full-account';
+import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 
 /**
  * Sets (or clears, with proxy = '') the account_witness_proxy_operation.
@@ -17,10 +19,15 @@ import { useTranslation } from '@/blog/i18n/client';
 export function useProxyMutation(username: string) {
   const queryClient = useQueryClient();
   const { t } = useTranslation('common_blog');
+  const { user } = useUserClient();
 
   return useMutation({
     mutationKey: ['proposalsProxy'],
     mutationFn: async (proxy: string) => {
+      // A keyless Lumen account has no Hive account and no keys, and a
+      // governance vote is counted by Hive consensus — there is no Lumen-local
+      // equivalent to fall back to. See lib/lite/client/require-full-account.ts.
+      refuseIfLite(user.account_tier, t('proposals.lite_cannot_vote'));
       await transactionService.witnessProxy(proxy, { observe: true });
       return proxy;
     },

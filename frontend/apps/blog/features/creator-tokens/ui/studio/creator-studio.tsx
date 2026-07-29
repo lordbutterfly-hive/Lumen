@@ -6,6 +6,8 @@ import { MarketLoading, MarketReadFailed, MarketUnavailable } from '../../live/m
 import type { Ask } from '../../types';
 import { usdPrice, usdWhole } from '../../market/format';
 import TokenShell from '../token-shell';
+import { writeFailureMessage } from '../write-failure';
+import { MAX_HASH_LEN } from '../../lib/vsc/payload-contract';
 
 type Section = 'overview' | 'inbox' | 'offerings' | 'market' | 'billing' | 'earnings';
 const SECTIONS: { id: Section; label: string }[] = [
@@ -65,8 +67,14 @@ const PriceInput: FC<{ value: number; onCommit: (usd: number) => Promise<void> }
 
 const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = ({ ask, studio, onClose }) => {
   const [text, setText] = useState('');
-  const [failed, setFailed] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // core/ask.go:521 refuses a '|' in answerHash outright: the escrow record
+  // is packed as a pipe-delimited string (core/ask.go:157), so one stray
+  // pipe would re-partition it. maxLength handles the length bound; this
+  // handles the character the browser cannot.
+  const answerHasPipe = text.includes('|');
+  const answerValid = text.trim().length > 0 && text.trim().length <= MAX_HASH_LEN && !answerHasPipe;
   return (
     <div onClick={onClose} className="fixed inset-0 z-[60] flex items-center justify-center bg-[rgba(20,18,10,0.4)] p-5 backdrop-blur-[2px]">
       <div onClick={(e) => e.stopPropagation()} className="w-[500px] max-w-full rounded-[20px] bg-white p-6 shadow-[0_20px_60px_rgba(20,18,10,0.25)]">
@@ -82,15 +90,30 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
           Arrange and deliver the work with @{ask.asker} however you normally would. Marking it delivered releases the
           escrow to you — and the buyer then rates it, which is what your token’s reputation is built from.
         </p>
+        {/* BOUNDED to exactly what core/ask.go:515-523 accepts. This box invites
+            a link, and a tracking URL over MAX_HASH_LEN characters — or one
+            carrying a "|" in a query parameter — is completely ordinary. The
+            contract refuses both, but only AFTER the creator has signed with
+            their active key and paid resource credits, and the escrow then does
+            not release. Enforce it here, where it costs nothing. */}
         <textarea
           value={text}
+          maxLength={MAX_HASH_LEN}
           onChange={(e) => {
             setText(e.target.value);
-            setFailed(false);
+            setFailure(null);
           }}
           placeholder="Where did you deliver it? A link, a ticket number, “sent by email”…"
           className="h-[130px] w-full resize-y rounded-xl border border-[#e4e6e9] px-4 py-3 font-serif text-[15px] leading-[1.5] text-[#161511] outline-none focus:border-[#c0392b]"
         />
+        <div className="mt-1 flex justify-between text-[11.5px] text-[#9ca3af]">
+          <span className={answerHasPipe ? 'font-semibold text-[#c0392b]' : ''}>
+            {answerHasPipe ? 'Remove the “|” — the chain refuses it in this field.' : 'Stored on chain as a public reference.'}
+          </span>
+          <span className="tabular-nums">
+            {text.length}/{MAX_HASH_LEN}
+          </span>
+        </div>
         <div className="mt-3 rounded-[10px] bg-[#f0f7f2] px-3.5 py-2.5 text-[13px] text-[#2f7d4f]">
           This pays you <strong>{tok(ask.tokensEscrowed)} tokens</strong> and closes the job. It can’t be undone — and the
           buyer rates it afterwards.
@@ -105,12 +128,13 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
             onClick={async () => {
               if (busy) return;
               setBusy(true);
-              setFailed(false);
+              setFailure(null);
               try {
                 await studio.decline({ seq: ask.seq, deadlineBlock: ask.deadlineBlock });
                 onClose();
-              } catch {
-                setFailed(true);
+              } catch (err) {
+                // The REAL reason, not a guess. See ../write-failure.ts.
+                setFailure(writeFailureMessage(err, 'That didn’t go through.'));
               } finally {
                 setBusy(false);
               }
@@ -122,31 +146,30 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
           </button>
           <button
             onClick={async () => {
-              if (busy || text.trim().length === 0) return;
+              if (busy || !answerValid) return;
               setBusy(true);
-              setFailed(false);
+              setFailure(null);
               try {
                 // answerHash is the creator's own delivery NOTE/reference — a
                 // link, a ticket number, "sent by email". The chain records that
                 // something was handed over and pays out; it never judges what.
                 await studio.answer({ seq: ask.seq, deadlineBlock: ask.deadlineBlock, answerHash: text.trim() });
                 onClose();
-              } catch {
-                setFailed(true);
+              } catch (err) {
+                // The REAL reason, not a guess. See ../write-failure.ts.
+                setFailure(writeFailureMessage(err, 'That didn’t go through.'));
               } finally {
                 setBusy(false);
               }
             }}
-            disabled={busy || text.trim().length === 0}
+            disabled={busy || !answerValid}
             className="flex-1 rounded-xl bg-[#c0392b] py-3 text-[14px] font-semibold text-white hover:bg-[#96271b] disabled:opacity-50"
           >
             {busy ? 'Confirm in your wallet…' : 'Mark as delivered'}
           </button>
         </div>
-        {failed ? (
-          <div className="mt-3 text-center text-[12.5px] font-semibold text-[#c0392b]">
-            That didn’t go through — this ask may have already been answered or reclaimed. Close and check your Inbox.
-          </div>
+        {failure ? (
+          <div className="mt-3 text-center text-[12.5px] font-semibold text-[#c0392b]">{failure}</div>
         ) : null}
       </div>
     </div>
@@ -155,7 +178,7 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
 
 const RetireModal: FC<{ handle: string; onConfirm: () => Promise<void>; onClose: () => void }> = ({ handle, onConfirm, onClose }) => {
   const [confirm, setConfirm] = useState('');
-  const [failed, setFailed] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const ok = confirm.trim().toLowerCase().replace(/^@/, '') === handle.toLowerCase();
   return (
@@ -182,12 +205,13 @@ const RetireModal: FC<{ handle: string; onConfirm: () => Promise<void>; onClose:
               // their market while the signer was still open, and there is no
               // undo to fall back on.
               setBusy(true);
-              setFailed(false);
+              setFailure(null);
               try {
                 await onConfirm();
                 onClose();
-              } catch {
-                setFailed(true);
+              } catch (err) {
+                // The REAL reason, not a guess. See ../write-failure.ts.
+                setFailure(writeFailureMessage(err, 'Ending this token didn’t go through.'));
               } finally {
                 setBusy(false);
               }
@@ -198,10 +222,8 @@ const RetireModal: FC<{ handle: string; onConfirm: () => Promise<void>; onClose:
             End my token
           </button>
         </div>
-        {failed ? (
-          <div className="mt-3 text-center text-[12.5px] font-semibold text-[#c0392b]">
-            This token is already winding down — there’s nothing further to end.
-          </div>
+        {failure ? (
+          <div className="mt-3 text-center text-[12.5px] font-semibold text-[#c0392b]">{failure}</div>
         ) : null}
       </div>
     </div>
@@ -216,7 +238,7 @@ const RetireModal: FC<{ handle: string; onConfirm: () => Promise<void>; onClose:
 const NewOfferingRow: FC<{ studio: LiveStudio }> = ({ studio }) => {
   const [title, setTitle] = useState('');
   const [price, setPrice] = useState('');
-  const [failed, setFailed] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
   const usd = parseFloat(price.replace(/,/g, ''));
   const valid = title.trim().length > 0 && Number.isFinite(usd) && usd > 0;
   return (
@@ -227,7 +249,7 @@ const NewOfferingRow: FC<{ studio: LiveStudio }> = ({ studio }) => {
           value={title}
           onChange={(e) => {
             setTitle(e.target.value);
-            setFailed(false);
+            setFailure(null);
           }}
           placeholder="e.g. Review my code"
           className="min-w-[200px] flex-1 rounded-[10px] border border-[#e4e6e9] px-3 py-2 text-[14px] outline-none"
@@ -238,7 +260,7 @@ const NewOfferingRow: FC<{ studio: LiveStudio }> = ({ studio }) => {
             value={price}
             onChange={(e) => {
               setPrice(e.target.value);
-              setFailed(false);
+              setFailure(null);
             }}
             inputMode="decimal"
             placeholder="0"
@@ -248,13 +270,14 @@ const NewOfferingRow: FC<{ studio: LiveStudio }> = ({ studio }) => {
         <button
           onClick={async () => {
             if (!valid || studio.isBusy) return;
-            setFailed(false);
+            setFailure(null);
             try {
               await studio.createOffering({ title: title.trim(), priceUsd: usd });
               setTitle('');
               setPrice('');
-            } catch {
-              setFailed(true);
+            } catch (err) {
+              // The REAL reason, not a guess. See ../write-failure.ts.
+              setFailure(writeFailureMessage(err, 'That didn’t go through.'));
             }
           }}
           disabled={!valid || studio.isBusy}
@@ -263,11 +286,8 @@ const NewOfferingRow: FC<{ studio: LiveStudio }> = ({ studio }) => {
           Add
         </button>
       </div>
-      {failed ? (
-        <div className="mt-2 text-[12px] font-semibold text-[#c0392b]">
-          That didn’t go through — the name may already be in use, the price may be outside the allowed range, or you may
-          have hit the limit on services.
-        </div>
+      {failure ? (
+        <div className="mt-2 text-[12px] font-semibold text-[#c0392b]">{failure}</div>
       ) : null}
     </div>
   );
@@ -281,13 +301,29 @@ const CreatorStudio: FC = () => {
   const [retireOpen, setRetireOpen] = useState(false);
   const [capInput, setCapInput] = useState('');
   const [sellInput, setSellInput] = useState('');
-  const [sellFailed, setSellFailed] = useState(false);
+  const [sellFailure, setSellFailure] = useState<string | null>(null);
   // Keep the cap field in sync with the committed cap after a successful raise (#3).
   const marketCap = market?.cap ?? null;
   useEffect(() => {
     if (marketCap !== null) setCapInput(String(marketCap));
   }, [marketCap]);
 
+  // A lite account has no Hive keys, so every button on this page would open a
+  // signer that does not exist; use-live-studio.ts's requireSigner refuses each
+  // one, but only on click. launch-wizard.tsx:234 already gates its own Launch
+  // button on exactly this, so the studio saying nothing was the inconsistency.
+  if (studio.isLite) {
+    return (
+      <TokenShell>
+        <div className="mx-auto max-w-[560px] pt-16 text-center">
+          <h1 className="font-serif text-3xl font-semibold text-[#161511]">Creator studio</h1>
+          <p className="mt-3 font-serif text-[15px] leading-[1.6] text-[#6b7280]">
+            This account can’t sign transactions yet, so it can’t run a creator token. Upgrade to a full account first.
+          </p>
+        </div>
+      </TokenShell>
+    );
+  }
   if (status === 'unavailable') return <MarketUnavailable />;
   if (status === 'loading') return <MarketLoading />;
   // A failed read must NOT fall through to the launch wizard: telling a creator
@@ -528,7 +564,7 @@ const CreatorStudio: FC = () => {
                   value={sellInput}
                   onChange={(e) => {
                     setSellInput(e.target.value);
-                    setSellFailed(false);
+                    setSellFailure(null);
                   }}
                   placeholder="tokens"
                   inputMode="decimal"
@@ -538,12 +574,13 @@ const CreatorStudio: FC = () => {
                   onClick={async () => {
                     const n = parseFloat(sellInput.replace(/,/g, ''));
                     if (!Number.isFinite(n) || n <= 0 || studio.isBusy) return;
-                    setSellFailed(false);
+                    setSellFailure(null);
                     try {
                       await studio.sell(n);
                       setSellInput('');
-                    } catch {
-                      setSellFailed(true);
+                    } catch (err) {
+                      // The REAL reason, not a guess. See ../write-failure.ts.
+                      setSellFailure(writeFailureMessage(err, 'That sell didn’t go through.'));
                     }
                   }}
                   className="rounded-[10px] bg-[#161511] px-4 py-2 text-[13px] font-semibold text-white"
@@ -551,10 +588,8 @@ const CreatorStudio: FC = () => {
                   Sell
                 </button>
               </div>
-              {sellFailed ? (
-                <div className="mt-2 text-[12px] font-semibold text-[#c0392b]">
-                  That sell didn’t go through — you may hold fewer tokens than that. Try a smaller amount.
-                </div>
+              {sellFailure ? (
+                <div className="mt-2 text-[12px] font-semibold text-[#c0392b]">{sellFailure}</div>
               ) : null}
               <p className="mt-3 text-[12px] leading-[1.5] text-[#9ca3af]">Selling your own tokens returns them to dollars at the market price — it doesn’t affect anyone else’s floor. Never blocked by billing.</p>
             </Card>

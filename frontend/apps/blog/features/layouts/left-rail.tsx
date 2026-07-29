@@ -89,10 +89,15 @@ export default function LeftRail() {
           />
         ) : (
           <li data-testid="left-rail-profile">
+            {/* A real <button>, not a <span>. Radix's asChild forwards its props to
+                whatever it wraps but does not make a non-interactive element
+                focusable, so a span here was skipped by Tab entirely — a total
+                lockout of this row for anyone navigating by keyboard or switch.
+                Every other DialogLogin trigger in the app wraps a real button. */}
             <DialogLogin>
-              <span className="cursor-pointer">
+              <button type="button" className="w-full cursor-pointer text-left">
                 <NavRowContent icon={Icons.user} label={LABELS.profile} isActive={false} />
-              </span>
+              </button>
             </DialogLogin>
           </li>
         )}

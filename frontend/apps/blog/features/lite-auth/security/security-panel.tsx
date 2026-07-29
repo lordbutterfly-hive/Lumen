@@ -53,6 +53,11 @@ const COPY = {
   stepUpFailed: 'Could not start linking — please try again.',
   taproot: 'Taproot addresses aren’t supported yet — use a SegWit (bc1q…) or legacy (1…) address.',
   loading: 'Loading…',
+  // This page's whole job is to tell someone they have only one way back into
+  // their account. Failing silently to "Loading…" forever meant that warning
+  // never arrived — the one outcome this screen exists to prevent.
+  loadError: "Couldn't load your sign-in methods just now.",
+  loadRetry: 'Try again',
   signedOut: 'Sign in with your Lumen account to manage sign-in methods.',
   primary: 'Primary'
 };
@@ -115,12 +120,20 @@ const SecurityPanel: FC = () => {
   // Google captures its nonce when the button initialises, so it is fetched up front
   // and the button is remounted (key) whenever a fresh one arrives.
   const [googleNonce, setGoogleNonce] = useState<string | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
 
   const isLite = user?.isLoggedIn && user.account_tier === 'lite';
 
   const reload = useCallback(async () => {
+    setLoadFailed(false);
     const data = await fetchAuthMethods();
-    if (!data) return;
+    // fetchAuthMethods swallows every failure into null, so null is the ONLY
+    // signal available here. Returning early left `methods` null forever and the
+    // render sat on "Loading…" with no retry.
+    if (!data) {
+      setLoadFailed(true);
+      return;
+    }
     setMethods(data.methods);
     setAtRisk(data.atRisk);
   }, []);
@@ -212,7 +225,18 @@ const SecurityPanel: FC = () => {
       <h1 className="font-serif text-2xl font-semibold text-[#161511]">{COPY.title}</h1>
       <p className="mt-2 text-[15px] leading-[1.55] text-[#4b5563]">{COPY.intro}</p>
 
-      {methods === null ? (
+      {methods === null && loadFailed ? (
+        <div className="mt-6">
+          <p className="text-[14px] text-destructive">{COPY.loadError}</p>
+          <button
+            type="button"
+            onClick={() => void reload()}
+            className="mt-3 rounded-[10px] border border-[#e2e4e7] bg-white px-4 py-2 text-[14px] font-semibold text-[#161511] hover:border-[#161511]"
+          >
+            {COPY.loadRetry}
+          </button>
+        </div>
+      ) : methods === null ? (
         <p className="mt-6 text-[14px] text-[#9ca3af]">{COPY.loading}</p>
       ) : (
         <>

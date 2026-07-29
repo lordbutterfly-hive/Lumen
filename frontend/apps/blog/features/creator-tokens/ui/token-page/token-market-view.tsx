@@ -119,6 +119,20 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
    * the local estimate, is what the user's transfer.allow is signed for
    * (RULING F: the quote is mandatory before signing).
    */
+  // ONE reason, shared by every write entry point on this page. Buy and Ask
+  // already checked `live.isLite`; Sell and Send checked nothing at all, so a
+  // signed-out visitor got an enabled Sell button, a modal, a filled-in
+  // amount, and only then the refusal from the hook's requireSigner. The gate
+  // now sits with the control that offers the action, and states WHY — the
+  // hook's throw remains the backstop for a stale render or a deep link, per
+  // its own doc.
+  const writeBlockedReason: string | null = !live.loggedIn
+    ? 'Sign in to trade this token.'
+    : live.isLite
+      ? 'This account has no Hive keys yet, so it can’t sign a transaction. Upgrade to a full account to trade.'
+      : null;
+  const writesBlocked = writeBlockedReason !== null;
+
   const handleBuy = async (usd: number, maxTotalUsd?: number): Promise<void> => {
     const local = buyQuote(usd, market);
     if (local.tokens <= 0) throw new Error('That budget does not cover a whole token at the current price.');
@@ -274,18 +288,24 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
             <div className="mt-5 flex gap-3">
               <button
                 onClick={() => setDialog('buy')}
-                disabled={!market.canBuy || market.supply >= market.cap || live.isLite}
+                disabled={!market.canBuy || market.supply >= market.cap || writesBlocked}
+                title={writeBlockedReason ?? undefined}
                 className="flex-1 rounded-xl bg-[#c0392b] py-3.5 text-[15px] font-bold text-white hover:bg-[#a5301f] disabled:opacity-50"
               >
                 Buy
               </button>
               <button
                 onClick={() => setDialog('sell')}
-                className="flex-1 rounded-xl border border-[#e4e6e9] bg-white py-3.5 text-[15px] font-semibold text-[#3f4650] hover:bg-[#f6f7f8]"
+                disabled={writesBlocked}
+                title={writeBlockedReason ?? undefined}
+                className="flex-1 rounded-xl border border-[#e4e6e9] bg-white py-3.5 text-[15px] font-semibold text-[#3f4650] hover:bg-[#f6f7f8] disabled:opacity-50"
               >
                 Sell
               </button>
             </div>
+            {writeBlockedReason ? (
+              <div className="mt-2.5 text-center text-[12.5px] text-[#6b7280]">{writeBlockedReason}</div>
+            ) : null}
           </div>
           <div>
             {/* REAL history, from the Magi indexer's lumen_ct_price_history view
@@ -363,7 +383,8 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
               ) : (
                 <button
                   onClick={() => openAsk(sv)}
-                  disabled={live.isLite}
+                  disabled={writesBlocked}
+                  title={writeBlockedReason ?? undefined}
                   className="flex-shrink-0 rounded-[11px] bg-[#1a1a17] px-[18px] py-2.5 text-[13.5px] font-semibold text-white hover:bg-black disabled:opacity-40"
                 >
                   {sv.cta}
@@ -388,10 +409,22 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
               <strong className="text-[#161511]">{usdPrice(market.position.floorValueUsd)}</strong>
             </div>
             <div className="flex gap-2.5">
-              <button onClick={() => setDialog('sell')} className="rounded-[10px] border border-[#e4e6e9] bg-white px-4 py-2.5 text-[13px] font-semibold text-[#3f4650] hover:bg-[#f1f3f5]">
+              <button
+                onClick={() => setDialog('sell')}
+                disabled={writesBlocked}
+                title={writeBlockedReason ?? undefined}
+                className="rounded-[10px] border border-[#e4e6e9] bg-white px-4 py-2.5 text-[13px] font-semibold text-[#3f4650] hover:bg-[#f1f3f5] disabled:opacity-50"
+              >
                 Sell
               </button>
-              <button onClick={() => setDialog('send')} className="rounded-[10px] border border-[#e4e6e9] bg-white px-4 py-2.5 text-[13px] font-semibold text-[#3f4650] hover:bg-[#f1f3f5]">Send</button>
+              <button
+                onClick={() => setDialog('send')}
+                disabled={writesBlocked}
+                title={writeBlockedReason ?? undefined}
+                className="rounded-[10px] border border-[#e4e6e9] bg-white px-4 py-2.5 text-[13px] font-semibold text-[#3f4650] hover:bg-[#f1f3f5] disabled:opacity-50"
+              >
+                Send
+              </button>
               {/* ask.go Ask -> RequireInflowOpen: closed for the whole wind-down, same gate as Buy. */}
               {/* Spend is hidden entirely rather than shown disabled: the
                   Services list above already explains why asking is off, and a

@@ -396,7 +396,7 @@ func Roll(a *string) *string {
 		handleErr(err)
 		return nil
 	}
-	sdk.Log(`{"ev":"roll","roundId":` + u64s(id) + `,"refPrice":` + u64s(priceBps) + `}`)
+	sdk.Log(`{"type":"roll","roundId":` + u64s(id) + `,"refPrice":` + u64s(priceBps) + `}`)
 	return strPtr(`{"roundId":` + u64s(id) + `}`)
 }
 
@@ -447,7 +447,7 @@ func Bet(a *string) *string {
 		handleErr(err)
 		return nil
 	}
-	sdk.Log(`{"ev":"bet","roundId":` + u64s(roundId) + `,"outcome":` + strconv.Itoa(outcome) + `,"acct":"` + jsonEscape(caller) + `","amount":"` + amount.String() + `"}`)
+	sdk.Log(`{"type":"bet","roundId":` + u64s(roundId) + `,"outcome":` + strconv.Itoa(outcome) + `,"acct":"` + jsonEscape(caller) + `","amount":"` + amount.String() + `"}`)
 	return strPtr(`{"roundId":` + u64s(roundId) + `,"outcome":` + strconv.Itoa(outcome) + `,"received":"` + amount.String() + `"}`)
 }
 
@@ -484,7 +484,7 @@ func Settle(a *string) *string {
 	}
 	// Surface the void reason (empty when SETTLED) so a user always sees WHY a
 	// round resolved the way it did rather than an unexplained VOID.
-	sdk.Log(`{"ev":"resolved","roundId":` + u64s(roundId) + `,"state":"` + result.State + `","winner":` + strconv.Itoa(result.Winner) + `,"reason":"` + jsonEscape(result.Reason) + `"}`)
+	sdk.Log(`{"type":"resolved","roundId":` + u64s(roundId) + `,"state":"` + result.State + `","winner":` + strconv.Itoa(result.Winner) + `,"reason":"` + jsonEscape(result.Reason) + `"}`)
 	return strPtr(`{"roundId":` + u64s(roundId) + `,"state":"` + result.State + `","winner":` + strconv.Itoa(result.Winner) + `,"bounty":"` + bigStr(result.Bounty) + `","reason":"` + jsonEscape(result.Reason) + `"}`)
 }
 
@@ -525,7 +525,7 @@ func VoidStale(a *string) *string {
 		handleErr(err)
 		return nil
 	}
-	sdk.Log(`{"ev":"voided","roundId":` + u64s(roundId) + `,"reason":"` + jsonEscape(result.Reason) + `"}`)
+	sdk.Log(`{"type":"voided","roundId":` + u64s(roundId) + `,"reason":"` + jsonEscape(result.Reason) + `"}`)
 	return strPtr(`{"roundId":` + u64s(roundId) + `,"state":"` + result.State + `","reason":"` + jsonEscape(result.Reason) + `"}`)
 }
 
@@ -550,7 +550,7 @@ func Claim(a *string) *string {
 	if payout != nil && payout.Sign() > 0 {
 		sdk.HiveTransfer(sdk.Address(caller), nativeInt64(payout), sdk.Asset(asset))
 	}
-	sdk.Log(`{"ev":"claim","roundId":` + u64s(roundId) + `,"acct":"` + jsonEscape(caller) + `","payout":"` + bigStr(payout) + `","asset":"` + jsonEscape(asset) + `"}`)
+	sdk.Log(`{"type":"claim","roundId":` + u64s(roundId) + `,"acct":"` + jsonEscape(caller) + `","payout":"` + bigStr(payout) + `","asset":"` + jsonEscape(asset) + `"}`)
 	return strPtr(`{"roundId":` + u64s(roundId) + `,"payout":"` + bigStr(payout) + `","asset":"` + jsonEscape(asset) + `"}`)
 }
 
@@ -575,7 +575,7 @@ func Reclaim(a *string) *string {
 	if refund != nil && refund.Sign() > 0 {
 		sdk.HiveTransfer(sdk.Address(caller), nativeInt64(refund), sdk.Asset(asset))
 	}
-	sdk.Log(`{"ev":"reclaim","roundId":` + u64s(roundId) + `,"acct":"` + jsonEscape(caller) + `","refund":"` + bigStr(refund) + `","asset":"` + jsonEscape(asset) + `"}`)
+	sdk.Log(`{"type":"reclaim","roundId":` + u64s(roundId) + `,"acct":"` + jsonEscape(caller) + `","refund":"` + bigStr(refund) + `","asset":"` + jsonEscape(asset) + `"}`)
 	return strPtr(`{"roundId":` + u64s(roundId) + `,"refund":"` + bigStr(refund) + `","asset":"` + jsonEscape(asset) + `"}`)
 }
 
@@ -602,7 +602,7 @@ func SweepUnclaimed(a *string) *string {
 	if amt != nil && amt.Sign() > 0 {
 		sdk.HiveWithdraw(sdk.Address(dhf), nativeInt64(amt), sdk.Asset(asset))
 	}
-	sdk.Log(`{"ev":"sweep","roundId":` + u64s(roundId) + `,"amount":"` + bigStr(amt) + `","asset":"` + jsonEscape(asset) + `","to":"` + jsonEscape(dhf) + `"}`)
+	sdk.Log(`{"type":"sweep","roundId":` + u64s(roundId) + `,"amount":"` + bigStr(amt) + `","asset":"` + jsonEscape(asset) + `","to":"` + jsonEscape(dhf) + `"}`)
 	return strPtr(`{"roundId":` + u64s(roundId) + `,"amount":"` + bigStr(amt) + `","asset":"` + jsonEscape(asset) + `","to":"` + jsonEscape(dhf) + `"}`)
 }
 

@@ -1,5 +1,7 @@
 'use client';
 
+import { Link } from '@hive/ui';
+
 import { ReactNode, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { Dialog, DialogContent, DialogTrigger, DialogTitle, DialogDescription } from '@ui/components/dialog';
@@ -7,6 +9,7 @@ import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
 import SignInForm, { SignInFormRef } from '@smart-signer/components/auth/form';
 import { KeyType } from '@smart-signer/types/common';
 import { siteConfig } from '@ui/config/site';
+import { useTranslation } from '@/blog/i18n/client';
 
 const GOOGLE_GSI_SCRIPT_ID = 'google-gsi-script';
 const GOOGLE_GSI_SCRIPT_SRC = 'https://accounts.google.com/gsi/client';
@@ -17,6 +20,7 @@ interface DialogLoginProps {
 }
 
 function DialogLogin({ children, redirectTo }: DialogLoginProps) {
+  const { t } = useTranslation('common_blog');
   const signInFormRef = useRef<SignInFormRef>(null);
   const router = useRouter();
 
@@ -72,6 +76,23 @@ function DialogLogin({ children, redirectTo }: DialogLoginProps) {
           authenticateOnBackend={siteConfig.loginAuthenticateOnBackend}
           strict={!siteConfig.allowNonStrictLogin}
         />
+        {/* THE SIGNUP DOOR. This dialog is opened from ~24 places — the home
+            composer, every upvote and reply button, the left rail — and it asks
+            for a Hive username and a private key. A first-time visitor has
+            neither, and until now there was no route from here to the keyless
+            Google / Bitcoin / Ethereum signup that is the entire point of Lumen
+            lite accounts: `/login` was linked from exactly ONE place in the app.
+            Fixing it here rather than at each call site means every entry point
+            gets it at once, and the visitor keeps their place instead of being
+            navigated away from whatever they were trying to do. */}
+        <div className="border-t border-border px-6 py-4 text-center">
+          <p className="text-sm text-muted-foreground">
+            <span className="font-semibold text-foreground">{t('login_dialog.new_here')}</span>{' '}
+            <Link href="/login" className="text-destructive underline hover:no-underline">
+              {t('login_dialog.signup_link')}
+            </Link>
+          </p>
+        </div>
       </DialogContent>
     </Dialog>
   );

@@ -21,7 +21,12 @@ export interface RoundState {
   closesAt: number; // epoch ms — betting closes (lock)
   buckets: Bucket[]; // always the 5 %-move buckets
   totalPool: number;
-  bettors: number;
+  // Distinct accounts in the round. NULL means "we could not find out" — the
+  // indexer is unconfigured or unreachable — and must never render as a number.
+  // Contract state cannot answer this: stakes are keyed by account with no
+  // roster to enumerate, so it only exists by folding the bet events. It used to
+  // degrade silently to 0, which reads as the fact "nobody has bet".
+  bettors: number | null;
   feeBps: number; // per-round fee snapshot (rd|id|fb)
   settledBucketId?: string;
   settlementPrice?: number; // labeled HBD/HIVE (peg proxy, not HIVE/USD)

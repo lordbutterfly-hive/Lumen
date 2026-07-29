@@ -8,6 +8,7 @@ import { MarketUnavailable } from '../../live/market-states';
 import { buyQuote } from '../../market/curve';
 import { usdWhole } from '../../market/format';
 import TokenShell from '../token-shell';
+import { writeFailureMessage } from '../write-failure';
 
 const STEPS = ['Account', 'What you offer', 'Supply', 'Launch'];
 
@@ -84,7 +85,11 @@ const LaunchWizard: FC = () => {
       }
     } catch (e) {
       setLaunching(false);
-      setFailed(e instanceof Error ? e.message : 'Launch failed.');
+      // Was the RAW message, including the CREATOR_TOKENS_* machine code and
+      // whatever text a signer chose to throw. Routed through the shared
+      // formatter so the code is stripped and any key-shaped text is redacted
+      // before it is painted into the DOM (see ../write-failure.ts).
+      setFailed(writeFailureMessage(e, 'Launch didn’t go through.'));
       return;
     }
 

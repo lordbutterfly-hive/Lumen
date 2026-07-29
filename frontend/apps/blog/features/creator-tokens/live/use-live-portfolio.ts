@@ -18,9 +18,10 @@
  */
 
 import { useCallback } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueries, useQueryClient } from '@tanstack/react-query';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { getCreatorTokensDataSource } from '../lib/creator-tokens-data-source';
+import { useTokenAccounts, type TokenAccount } from './use-token-accounts';
 import type { Ask, HolderPosition } from '../types';
 
 const walletKey = (holder: string) => ['creatorTokens', 'live', 'wallet', holder];
@@ -41,6 +42,27 @@ export interface LivePortfolio {
   asksUnavailable: boolean;
   holdings: HolderPosition[];
   asks: Ask[];
+  /**
+   * The Magi accounts these holdings are read under — one Hive account, or one
+   * row per bound wallet. Carried so a screen can label WHICH wallet holds what:
+   * two bound wallets are two separate Magi accounts and nothing moves between
+   * them.
+   */
+  accounts: TokenAccount[];
+  /**
+   * FALSE for a Google-only lite account: there is no keypair behind it, so it is
+   * not a Magi account and cannot hold anything. Screens must say that rather
+   * than render an empty portfolio, which reads as "your tokens are gone".
+   */
+  canHold: boolean;
+  /**
+   * FALSE for every wallet identity today: holding and being paid work, but
+   * initiating a transaction needs a signature over the transaction itself,
+   * which is a rail we have not ported yet. Separate from `canHold` on purpose.
+   */
+  canSign: boolean;
+  /** The wallet lookup itself failed — NOT "no wallets". Never render an empty portfolio here. */
+  accountsFailed: boolean;
   /** ask.go Reclaim — permissionless once the window is open, but this always pays the escrow's own asker, never the caller. */
   reclaim: (input: { creator: string; seq: number; deadlineBlock: number }) => Promise<void>;
   isReclaiming: boolean;
@@ -61,28 +83,62 @@ export function useLivePortfolio(): LivePortfolio {
   const queryClient = useQueryClient();
   const { user, isHydrated } = useUserClient();
   const loggedIn = isHydrated && user.isLoggedIn;
-  const holder = loggedIn ? user.username : null;
   const isLite = user.account_tier === 'lite';
+
+  // WHICH ACCOUNTS TO READ. Previously this was always `user.username`, which is
+  // wrong for a lite account: a Lumen handle is a display name Magi has never
+  // heard of, so a Bitcoin- or Ethereum-wallet user saw an empty portfolio no
+  // matter what they held. Their real holder identity is the wallet's `did:pkh`,
+  // which the contract already accepts. A user may have bound more than one
+  // wallet, so this is a LIST and each holding keeps the account it is under.
+  const tokenAccounts = useTokenAccounts();
+  const accountIds = tokenAccounts.accounts.map((a) => a.id);
+  // Primary account, kept for the write paths below (all of which still require
+  // Hive keys) and for query-key continuity on a full Hive session.
+  const holder = loggedIn && accountIds.length > 0 ? accountIds[0] : null;
 
   const dataSource = getCreatorTokensDataSource();
   const unavailable = dataSource === null;
-  const enabled = Boolean(holder) && !unavailable;
+  const enabled = accountIds.length > 0 && !unavailable;
 
-  const walletQuery = useQuery({
-    queryKey: walletKey(holder ?? ''),
-    queryFn: () => dataSource!.readWallet(holder as string),
-    enabled,
-    staleTime: STALE_MS,
-    refetchInterval: REFETCH_MS
+  const walletQueries = useQueries({
+    queries: accountIds.map((id) => ({
+      queryKey: walletKey(id),
+      queryFn: () => dataSource!.readWallet(id),
+      enabled,
+      staleTime: STALE_MS,
+      refetchInterval: REFETCH_MS
+    }))
   });
 
-  const asksQuery = useQuery({
-    queryKey: myAsksKey(holder ?? ''),
-    queryFn: () => dataSource!.readMyAsks(holder as string),
-    enabled,
-    staleTime: STALE_MS,
-    refetchInterval: REFETCH_MS
+  const asksQueries = useQueries({
+    queries: accountIds.map((id) => ({
+      queryKey: myAsksKey(id),
+      queryFn: () => dataSource!.readMyAsks(id),
+      enabled,
+      staleTime: STALE_MS,
+      refetchInterval: REFETCH_MS
+    }))
   });
+
+  // A PARTIAL portfolio is treated as unavailable, not as complete. Someone with
+  // two wallets who is shown only one wallet's tokens would reasonably conclude
+  // the rest are gone — so if any single account's read fails, the whole view
+  // says "couldn't load" rather than silently under-reporting holdings.
+  const walletQuery = {
+    isLoading: walletQueries.some((q) => q.isLoading),
+    data: {
+      positions: walletQueries.flatMap((q) => q.data?.positions ?? []),
+      unavailable: walletQueries.some((q) => q.isError || q.data?.unavailable)
+    }
+  };
+  const asksQuery = {
+    isLoading: asksQueries.some((q) => q.isLoading),
+    data: {
+      asks: asksQueries.flatMap((q) => q.data?.asks ?? []),
+      unavailable: asksQueries.some((q) => q.isError || q.data?.unavailable)
+    }
+  };
 
   const reclaimMutation = useMutation({
     mutationFn: async (input: { creator: string; seq: number; deadlineBlock: number }) => {
@@ -114,13 +170,19 @@ export function useLivePortfolio(): LivePortfolio {
     loggedIn,
     isLite,
     holder,
-    isLoading: walletQuery.isLoading || asksQuery.isLoading,
+    isLoading: tokenAccounts.isLoading || walletQuery.isLoading || asksQuery.isLoading,
     // A thrown query and a resolved `unavailable:true` mean the same thing to a
     // user; fold both rather than making every screen handle two shapes.
-    holdingsUnavailable: walletQuery.isError || (walletQuery.data?.unavailable ?? false),
-    asksUnavailable: asksQuery.isError || (asksQuery.data?.unavailable ?? false),
-    holdings: walletQuery.data?.positions ?? [],
-    asks: asksQuery.data?.asks ?? [],
+    // The aggregate already folds thrown queries and resolved `unavailable:true`
+    // into one flag (see walletQuery above), so there is no separate isError here.
+    holdingsUnavailable: walletQuery.data.unavailable,
+    asksUnavailable: asksQuery.data.unavailable,
+    holdings: walletQuery.data.positions,
+    asks: asksQuery.data.asks,
+    accounts: tokenAccounts.accounts,
+    canHold: tokenAccounts.canHold,
+    canSign: tokenAccounts.canSign,
+    accountsFailed: tokenAccounts.failed,
     reclaim: useCallback((input: { creator: string; seq: number; deadlineBlock: number }) => reclaimMutation.mutateAsync(input), [reclaimMutation]),
     isReclaiming: reclaimMutation.isLoading,
     rate: useCallback((input: { creator: string; seq: number; score: number }) => rateMutation.mutateAsync(input), [rateMutation]),

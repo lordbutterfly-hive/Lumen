@@ -12,13 +12,17 @@ for the full design + council adjudication.
 
 - **`market/`** — pure Go, no SDK, no `go-vsc-node` import. ALL fund logic + the
   state machine + payout math live here, so they run under plain `go test` on any
-  machine. **21 fund-safety invariant tests pass** (`go test ./market/`).
-- **`contract/main.go`** — thin TinyGo wasm layer: 13 `//go:wasmexport` actions
+  machine. **117 fund-safety tests pass** (`go test ./market/`).
+- **`contract/main.go`** — thin TinyGo wasm layer: 9 `//go:wasmexport` actions
   that parse the payload, read env (caller / block / oracle keys), call the
   `market` core, and execute SDK effects (`HiveDraw`/`HiveTransfer`/state).
-  Compiles to `bin/main.wasm` (75 KB) with TinyGo 0.39.
+  Compiles to 79,888 B with TinyGo 0.41.1 (verified 2026-07-29).
 - **`sdk/`, `runtime/`** — vendored verbatim from `go-contract-template` (one
   import line rebased to this module, per the `magi-market` precedent).
+- **`magi-indexer/`** — YAML config (event→table mappings + Hasura views) for
+  `magi-mongo-indexer`, the official vsc-eco indexer. This is the ONLY read path
+  for anything historical. This repo's own Go indexer was deleted 2026-07-29;
+  see `STATUS.md`.
 
 ## Oracle
 
@@ -48,7 +52,7 @@ be labeled as such (peg-break is a documented residual risk).
 
 ```bash
 # Pure fund-critical core — runs anywhere with Go 1.22+:
-GOTOOLCHAIN=local go test ./market/ -count=1        # 21 tests
+GOTOOLCHAIN=local go test ./market/ -count=1        # 117 tests
 
 # wasm contract (TinyGo 0.39 via Docker — native tinygo optional):
 docker run --rm -v "$(pwd)":/work -w /work tinygo/tinygo:0.39.0 \

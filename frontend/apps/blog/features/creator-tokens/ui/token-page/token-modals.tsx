@@ -5,6 +5,7 @@ import type { Service } from '../../market/token-detail';
 import type { LiveTokenMarket } from '../../live/adapt';
 import { buyQuote, sellQuote, serviceQuote, EXIT_FEE_MAX } from '../../market/curve';
 import { usdPrice, usdWhole } from '../../market/format';
+import { writeFailureMessage } from '../write-failure';
 
 export type TokenDialog = 'buy' | 'sell' | 'ask' | 'send' | 'inter' | null;
 
@@ -39,7 +40,7 @@ const BuyModal: FC<{ m: LiveTokenMarket; onBuy: (usd: number, maxTotalUsd?: numb
   const [amt, setAmt] = useState('50');
   const [adv, setAdv] = useState(false);
   const [maxPrice, setMaxPrice] = useState((m.priceUsd * 1.05).toFixed(2));
-  const [failed, setFailed] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
   const usd = parseFloat(amt.replace(/,/g, '')) || 0; // strip thousands separators ("1,000" → 1000, not 1)
   const q = buyQuote(usd, m);
   const maxP = parseFloat(maxPrice.replace(/,/g, ''));
@@ -62,7 +63,7 @@ const BuyModal: FC<{ m: LiveTokenMarket; onBuy: (usd: number, maxTotalUsd?: numb
             value={amt}
             onChange={(e) => {
               setAmt(e.target.value);
-              setFailed(false); // a fresh amount deserves a fresh attempt, not a stale error
+              setFailure(null); // a fresh amount deserves a fresh attempt, not a stale error
             }}
             inputMode="decimal"
             className="ml-0.5 flex-1 border-0 text-[22px] font-bold tabular-nums text-[#161511] outline-none"
@@ -74,7 +75,7 @@ const BuyModal: FC<{ m: LiveTokenMarket; onBuy: (usd: number, maxTotalUsd?: numb
               key={v}
               onClick={() => {
                 setAmt(v);
-                setFailed(false);
+                setFailure(null);
               }}
               className="flex-1 rounded-[9px] border border-[#e4e6e9] py-2 text-[13px] font-semibold text-[#3f4650] hover:border-[#c0392b] hover:text-[#c0392b]"
             >
@@ -125,12 +126,13 @@ const BuyModal: FC<{ m: LiveTokenMarket; onBuy: (usd: number, maxTotalUsd?: numb
             // would tell someone their money moved while the signer is still
             // open, which is the exact lie this rewiring exists to remove.
             setBusy(true);
-            setFailed(false);
+            setFailure(null);
             try {
               await onBuy(usd, maxTotalUsd);
               onClose();
-            } catch {
-              setFailed(true);
+            } catch (err) {
+              // The REAL reason, not a guess. See ../write-failure.ts.
+              setFailure(writeFailureMessage(err, 'That buy didn’t go through.'));
             } finally {
               setBusy(false);
             }
@@ -140,9 +142,9 @@ const BuyModal: FC<{ m: LiveTokenMarket; onBuy: (usd: number, maxTotalUsd?: numb
         >
           {busy ? 'Confirm in your wallet…' : `Buy — ${usdWhole(usd)}`}
         </button>
-        {failed ? (
+        {failure ? (
           <div className="mt-2.5 text-center text-[12.5px] font-semibold text-[#c0392b]">
-            That buy didn’t go through — the market may be at its cap or winding down. Try a smaller amount.
+            {failure}
           </div>
         ) : null}
         <div className="mt-2.5 text-center text-xs text-[#9ca3af]">One signature confirms your buy.</div>
@@ -155,7 +157,7 @@ const SellModal: FC<{ m: LiveTokenMarket; onSell: (tokens: number) => Promise<vo
   const [busy, setBusy] = useState(false);
   const held = m.position?.tokens ?? 0;
   const [amt, setAmt] = useState(String(held || 0));
-  const [failed, setFailed] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
   const tokens = parseFloat(amt.replace(/,/g, '')) || 0;
   const q = sellQuote(tokens, m, m.position?.heldDays ?? 999);
   const feePctLabel = Math.round(q.exitFeePct * 100);
@@ -174,7 +176,7 @@ const SellModal: FC<{ m: LiveTokenMarket; onSell: (tokens: number) => Promise<vo
             value={amt}
             onChange={(e) => {
               setAmt(e.target.value);
-              setFailed(false); // a fresh amount deserves a fresh attempt, not a stale error
+              setFailure(null); // a fresh amount deserves a fresh attempt, not a stale error
             }}
             inputMode="decimal"
             className="flex-1 border-0 text-[22px] font-bold tabular-nums text-[#161511] outline-none"
@@ -224,12 +226,13 @@ const SellModal: FC<{ m: LiveTokenMarket; onSell: (tokens: number) => Promise<vo
           onClick={async () => {
             if (!Number.isFinite(tokens) || tokens <= 0 || busy) return;
             setBusy(true);
-            setFailed(false);
+            setFailure(null);
             try {
               await onSell(tokens);
               onClose();
-            } catch {
-              setFailed(true);
+            } catch (err) {
+              // The REAL reason, not a guess. See ../write-failure.ts.
+              setFailure(writeFailureMessage(err, 'That sell didn’t go through.'));
             } finally {
               setBusy(false);
             }
@@ -239,9 +242,9 @@ const SellModal: FC<{ m: LiveTokenMarket; onSell: (tokens: number) => Promise<vo
         >
           {busy ? 'Confirm in your wallet…' : tokens > held ? 'More than you hold' : `Sell — get ~${usdPrice(q.receiveUsd)}`}
         </button>
-        {failed ? (
+        {failure ? (
           <div className="mt-2.5 text-center text-[12.5px] font-semibold text-[#c0392b]">
-            That sell didn’t go through — your held balance may have changed. Try a smaller amount.
+            {failure}
           </div>
         ) : null}
         <div className="mt-2.5 text-center text-xs text-[#9ca3af]">Selling is always available — even if this market winds down.</div>
@@ -260,7 +263,7 @@ const AskModal: FC<{
   const [busy, setBusy] = useState(false);
   const [deadline, setDeadline] = useState(7);
   const [question, setQuestion] = useState('');
-  const [failed, setFailed] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
   const usd = service?.usd ?? 10;
   // USER RULING 2026-07-27: the posted USD price is the buyer's TOTAL — 12%
   // is a SEPARATE HBD platform commission, never tokens (ask.go splitFace).
@@ -305,15 +308,16 @@ const AskModal: FC<{
           onClick={async () => {
             if (!canAffordTokens || busy) return;
             setBusy(true);
-            setFailed(false);
+            setFailure(null);
             try {
               // Service.key IS the on-chain offeringId ('0' = the creator's
               // legacy face price). Dropping it here would silently charge the
               // generic face price for a named service.
               await onSpend({ offeringId: Number(service?.key ?? 0), usd, deadlineDays: deadline, question });
               onClose();
-            } catch {
-              setFailed(true);
+            } catch (err) {
+              // The REAL reason, not a guess. See ../write-failure.ts.
+              setFailure(writeFailureMessage(err, 'That request didn’t go through.'));
             } finally {
               setBusy(false);
             }
@@ -327,9 +331,9 @@ const AskModal: FC<{
               ? `Send question — ${tok(q.tokens)} tokens + ${usdPrice(q.commissionUsd)} HBD`
               : `You need ${tok(q.tokens)} @${m.handle} tokens — buy some first`}
         </button>
-        {failed ? (
+        {failure ? (
           <div className="mt-2.5 text-center text-[12.5px] font-semibold text-[#c0392b]">
-            That ask didn’t go through — this market may have just closed to new asks, or your token balance changed. Try again.
+            {failure}
           </div>
         ) : null}
       </div>
@@ -342,7 +346,7 @@ const SendModal: FC<{ m: LiveTokenMarket; onTransfer: (to: string, tokens: numbe
   const held = m.position?.tokens ?? 0;
   const [to, setTo] = useState('');
   const [amt, setAmt] = useState('');
-  const [failed, setFailed] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
   const tokens = parseFloat(amt.replace(/,/g, '')) || 0;
   const valid = to.trim().length > 0 && Number.isFinite(tokens) && tokens > 0 && tokens <= held;
   return (
@@ -354,7 +358,7 @@ const SendModal: FC<{ m: LiveTokenMarket; onTransfer: (to: string, tokens: numbe
           value={to}
           onChange={(e) => {
             setTo(e.target.value);
-            setFailed(false);
+            setFailure(null);
           }}
           placeholder="@name"
           className="mb-3.5 w-full rounded-xl border border-[#e4e6e9] px-4 py-3 text-[15px] font-semibold text-[#161511] outline-none"
@@ -367,7 +371,7 @@ const SendModal: FC<{ m: LiveTokenMarket; onTransfer: (to: string, tokens: numbe
           value={amt}
           onChange={(e) => {
             setAmt(e.target.value);
-            setFailed(false); // a fresh amount deserves a fresh attempt, not a stale error
+            setFailure(null); // a fresh amount deserves a fresh attempt, not a stale error
           }}
           inputMode="decimal"
           placeholder="0"
@@ -377,7 +381,7 @@ const SendModal: FC<{ m: LiveTokenMarket; onTransfer: (to: string, tokens: numbe
           onClick={async () => {
             if (!valid || busy) return;
             setBusy(true);
-            setFailed(false);
+            setFailure(null);
             try {
               // ★ The RECIPIENT is passed now. It was collected by the input
               // above and then DROPPED — onTransfer only ever received the
@@ -386,8 +390,9 @@ const SendModal: FC<{ m: LiveTokenMarket; onTransfer: (to: string, tokens: numbe
               // account name never has one.
               await onTransfer(to.trim().replace(/^@/, ''), tokens);
               onClose();
-            } catch {
-              setFailed(true);
+            } catch (err) {
+              // The REAL reason, not a guess. See ../write-failure.ts.
+              setFailure(writeFailureMessage(err, 'That send didn’t go through.'));
             } finally {
               setBusy(false);
             }
@@ -397,9 +402,9 @@ const SendModal: FC<{ m: LiveTokenMarket; onTransfer: (to: string, tokens: numbe
         >
           {busy ? 'Confirm in your wallet…' : tokens > held ? 'More than you hold' : `Send ${tok(tokens)} tokens`}
         </button>
-        {failed ? (
+        {failure ? (
           <div className="mt-2.5 text-center text-[12.5px] font-semibold text-[#c0392b]">
-            That send didn’t go through — your held balance may have changed. Try a smaller amount.
+            {failure}
           </div>
         ) : null}
         <div className="mt-2.5 text-center text-xs text-[#9ca3af]">Transfers are free and instant on Lumen. Never blocked by billing.</div>

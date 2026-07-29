@@ -1,0 +1,312 @@
+# ===============================
+# LUMEN PREDICTION MARKET — Hasura views
+# ===============================
+# These are what replace the REST endpoints the frontend used to call into
+# thin air (`${indexerUrl}/rounds/{id}/bettors` and friends, served by an
+# indexer that could never be fed — see prediction_market_mappings.yaml).
+#
+#   lumen_pm_round_state    -> "is this round open, settled, or void?"
+#   lumen_pm_round_pools    -> "how much is on each bucket?"
+#   lumen_pm_round_summary  -> the round card / history list
+#   lumen_pm_my_positions   -> "what am I in?"
+#   lumen_pm_my_unclaimed   -> "where do I still have money on the table?"
+#   lumen_pm_price_history  -> the HIVE reference price at each round open
+#   lumen_pm_pool_history   -> how the pools moved during a round (the chart)
+#
+# FOUR RULES THESE VIEWS OBEY:
+#
+#   1. NEVER INVENT A NUMBER. Where the event stream cannot answer exactly, the
+#      column is NULL and the frontend says so. In particular no view computes a
+#      payout: settlement uses a zero-dust running-remainder split where the last
+#      claimant absorbs the rounding, so any figure derived here would disagree
+#      with the contract by a few base units. Exact payouts come from chain state.
+#
+#   2. WINNER IS ONLY REAL WHEN state='settled'. The void path never sets the
+#      winner field, so it arrives as 0 — indistinguishable from a genuine
+#      winning outcome index of 0. Every read of it below is gated on state.
+#
+#   3. MONEY IS TEXT ON THE WIRE, cast explicitly with ::numeric. Nothing here
+#      goes through a float.
+#
+#   4. EVERY VIEW IS SCOPED BY indexer_contract_id. One indexer instance can
+#      carry more than one deployment of this contract (a testnet address beside
+#      a mainnet one) into the same tables; without the scope their rounds would
+#      silently merge, because round ids restart at 1 per deployment.
+
+views:
+
+  # -------------------------------------------------------------------------
+  # ROUND STATE — the foundation every other view builds on.
+  #
+  # Three sources, in precedence order:
+  #   1. `resolved`  — settle() writes the terminal state directly ('settled' or
+  #                    'void'). Authoritative.
+  #   2. `voided`    — voidStale() forced it.
+  #   3. `reclaim`   — ★ the subtle one. A staker reclaiming past the deadline
+  #                    FORCE-VOIDS the round but emits only a `reclaim` log; no
+  #                    voided/resolved row is ever written for that path. Without
+  #                    this branch such a round reads as OPEN forever while its
+  #                    stakers are pulling refunds out of it.
+  #
+  #                    Treating a reclaim as proof of void is EXACT, not a guess:
+  #                    market.Reclaim refuses a settled round outright
+  #                    (market/reclaim.go:52-56) and only reaches its refund once
+  #                    the round is VOID. A reclaim row therefore cannot exist on
+  #                    any other kind of round.
+  #
+  # A round with no terminal row is 'open' — which includes "not yet settled" and
+  # "past its deadline and nobody has triggered anything yet". Those are the same
+  # thing on chain; the deadline lives in contract state, not in the event stream,
+  # so this view does not pretend to know it.
+  # -------------------------------------------------------------------------
+  - name: lumen_pm_round_state
+    sql: |
+      CREATE OR REPLACE VIEW lumen_pm_round_state AS
+      WITH terminal AS (
+        SELECT indexer_contract_id, round_id, state, winner, reason,
+               indexer_block_height AS resolved_block, indexer_ts AS resolved_ts, 1 AS pri
+        FROM lumen_pm_resolved_events
+        UNION ALL
+        SELECT indexer_contract_id, round_id, 'void', NULL, reason,
+               indexer_block_height, indexer_ts, 2
+        FROM lumen_pm_voided_events
+        UNION ALL
+        -- proven void: see the note above
+        SELECT indexer_contract_id, round_id, 'void', NULL, 'deadline_reclaim',
+               indexer_block_height, indexer_ts, 3
+        FROM lumen_pm_reclaim_events
+      ),
+      ranked AS (
+        SELECT *, ROW_NUMBER() OVER (
+                    PARTITION BY indexer_contract_id, round_id
+                    ORDER BY pri, resolved_block
+                  ) AS rn
+        FROM terminal
+      ),
+      swept AS (
+        SELECT DISTINCT indexer_contract_id, round_id FROM lumen_pm_sweep_events
+      )
+      SELECT
+        r.indexer_contract_id                       AS contract_id,
+        r.round_id,
+        COALESCE(t.state, 'open')                   AS state,
+        -- NULL unless genuinely settled; rule 2
+        CASE WHEN t.state = 'settled' THEN t.winner END AS winner,
+        t.reason,
+        t.resolved_block,
+        t.resolved_ts,
+        (s.round_id IS NOT NULL)                    AS swept
+      FROM lumen_pm_roll_events r
+      LEFT JOIN ranked t
+        ON t.indexer_contract_id = r.indexer_contract_id
+       AND t.round_id = r.round_id AND t.rn = 1
+      LEFT JOIN swept s
+        ON s.indexer_contract_id = r.indexer_contract_id
+       AND s.round_id = r.round_id;
+
+  # -------------------------------------------------------------------------
+  # ROUND POOLS — staked per outcome. This is the parimutuel product itself:
+  # the pools ARE the odds, so unlike a token market there is nothing
+  # wash-tradeable about exposing them.
+  # -------------------------------------------------------------------------
+  - name: lumen_pm_round_pools
+    sql: |
+      CREATE OR REPLACE VIEW lumen_pm_round_pools AS
+      SELECT
+        indexer_contract_id            AS contract_id,
+        round_id,
+        outcome,
+        SUM(amount::numeric)           AS staked,
+        COUNT(DISTINCT acct)           AS bettors,
+        COUNT(*)                       AS bet_count
+      FROM lumen_pm_bet_events
+      GROUP BY indexer_contract_id, round_id, outcome;
+
+  # -------------------------------------------------------------------------
+  # ROUND SUMMARY — one row per round: the card at the top of the market tab and
+  # the rows of the history list.
+  #
+  # `bettors` counts DISTINCT accounts across the whole round, which is why it
+  # cannot be a SUM over lumen_pm_round_pools (one account betting two buckets is
+  # one bettor, not two). This figure is the reason this view exists at all —
+  # contract state cannot answer it, since state stores per-account stakes keyed
+  # by account, with no roster to enumerate.
+  # -------------------------------------------------------------------------
+  - name: lumen_pm_round_summary
+    sql: |
+      CREATE OR REPLACE VIEW lumen_pm_round_summary AS
+      WITH totals AS (
+        SELECT indexer_contract_id, round_id,
+               COUNT(DISTINCT acct) AS bettors,
+               COUNT(*)             AS bet_count,
+               SUM(amount::numeric) AS total_staked
+        FROM lumen_pm_bet_events
+        GROUP BY indexer_contract_id, round_id
+      )
+      SELECT
+        r.indexer_contract_id          AS contract_id,
+        r.round_id,
+        r.ref_price,
+        r.indexer_block_height         AS opened_block,
+        r.indexer_ts                   AS opened_ts,
+        st.state,
+        st.winner,
+        st.reason,
+        st.resolved_block,
+        st.resolved_ts,
+        st.swept,
+        -- a round nobody has bet on has 0 bettors and 0 staked. That is a real
+        -- zero, not a missing value: the roll event proves the round exists.
+        COALESCE(t.bettors, 0)         AS bettors,
+        COALESCE(t.bet_count, 0)       AS bet_count,
+        COALESCE(t.total_staked, 0)    AS total_staked
+      FROM lumen_pm_roll_events r
+      LEFT JOIN totals t
+        ON t.indexer_contract_id = r.indexer_contract_id AND t.round_id = r.round_id
+      LEFT JOIN lumen_pm_round_state st
+        ON st.contract_id = r.indexer_contract_id AND st.round_id = r.round_id;
+
+  # -------------------------------------------------------------------------
+  # MY POSITIONS — every round an account has money in, and whether they have
+  # taken it off the table yet.
+  #
+  # `settled_up` is TRUE if the account has a claim OR a reclaim row. Both mark
+  # the account claimed in contract state and both are terminal for that account,
+  # so either one means "done here". Note a zero-payout claim by a loser is still
+  # a claim — presence of a row means settled up, never "won something".
+  # -------------------------------------------------------------------------
+  - name: lumen_pm_my_positions
+    sql: |
+      CREATE OR REPLACE VIEW lumen_pm_my_positions AS
+      WITH stakes AS (
+        SELECT indexer_contract_id, round_id, acct,
+               SUM(amount::numeric) AS stake_total,
+               MIN(indexer_ts)      AS first_bet_ts
+        FROM lumen_pm_bet_events
+        GROUP BY indexer_contract_id, round_id, acct
+      ),
+      done AS (
+        SELECT indexer_contract_id, round_id, acct, payout::numeric AS amount, 'claim' AS via
+        FROM lumen_pm_claim_events
+        UNION ALL
+        SELECT indexer_contract_id, round_id, acct, refund::numeric, 'reclaim'
+        FROM lumen_pm_reclaim_events
+      ),
+      done1 AS (
+        SELECT DISTINCT ON (indexer_contract_id, round_id, acct)
+               indexer_contract_id, round_id, acct, amount, via
+        FROM done
+        ORDER BY indexer_contract_id, round_id, acct, amount DESC
+      )
+      SELECT
+        s.indexer_contract_id             AS contract_id,
+        s.round_id,
+        s.acct,
+        s.stake_total,
+        s.first_bet_ts,
+        st.state,
+        st.winner,
+        st.swept,
+        (d.acct IS NOT NULL)              AS settled_up,
+        d.via                             AS settled_via,
+        -- the ACTUAL amount received, straight off the chain's own log. Absent
+        -- until they settle up: we do not predict it (rule 1).
+        d.amount                          AS received,
+        -- how much of their stake was on the winning bucket. NULL on a void or
+        -- still-open round, where the question is meaningless.
+        CASE WHEN st.state = 'settled' THEN (
+          SELECT COALESCE(SUM(b.amount::numeric), 0)
+          FROM lumen_pm_bet_events b
+          WHERE b.indexer_contract_id = s.indexer_contract_id
+            AND b.round_id = s.round_id AND b.acct = s.acct
+            AND b.outcome = st.winner
+        ) END                             AS stake_on_winner
+      FROM stakes s
+      LEFT JOIN lumen_pm_round_state st
+        ON st.contract_id = s.indexer_contract_id AND st.round_id = s.round_id
+      LEFT JOIN done1 d
+        ON d.indexer_contract_id = s.indexer_contract_id
+       AND d.round_id = s.round_id AND d.acct = s.acct;
+
+  # -------------------------------------------------------------------------
+  # MY UNCLAIMED — where an account still has money it can actually collect.
+  #
+  # Three conditions, all necessary:
+  #   - the round reached a terminal state (nothing to collect on an open round)
+  #   - the account has not claimed or reclaimed
+  #   - the round has NOT been swept. After the ~90-day sweep to the DHF, claim
+  #     and reclaim are both refused, so listing it would be advertising money
+  #     that can no longer be taken.
+  #
+  # A settled-round LOSER is excluded: they are owed nothing, and showing them a
+  # "you have unclaimed funds" row would be a lie they would act on. On a VOID
+  # round everyone is owed their full stake, winner or not.
+  # -------------------------------------------------------------------------
+  - name: lumen_pm_my_unclaimed
+    sql: |
+      CREATE OR REPLACE VIEW lumen_pm_my_unclaimed AS
+      SELECT
+        contract_id,
+        round_id,
+        acct,
+        state,
+        stake_total,
+        stake_on_winner
+      FROM lumen_pm_my_positions
+      WHERE settled_up = FALSE
+        AND swept = FALSE
+        AND (
+              state = 'void'
+              OR (state = 'settled' AND stake_on_winner > 0)
+            );
+
+  # -------------------------------------------------------------------------
+  # PRICE HISTORY — the witness-oracle reference price captured at each round
+  # open, in HBD/HIVE basis points.
+  #
+  # ★ THIS IS ONE POINT PER ROUND — a weekly cadence, not a price feed. The
+  # contract records the oracle price exactly twice in a round's life: at `roll`
+  # (here) and at settlement (which is not logged as a price at all, only as a
+  # winning bucket). Anything drawn from this must be rendered as discrete marks,
+  # and a single point must render as NOTHING — one dot joined to nothing is a
+  # claim that the price held steady, which we do not know.
+  #
+  # It is also a PEG PROXY, not a USD price: the feed is HBD/HIVE. Label it that
+  # way wherever it is shown.
+  # -------------------------------------------------------------------------
+  - name: lumen_pm_price_history
+    sql: |
+      CREATE OR REPLACE VIEW lumen_pm_price_history AS
+      SELECT
+        indexer_contract_id     AS contract_id,
+        round_id,
+        ref_price,
+        indexer_block_height    AS block,
+        indexer_ts              AS ts
+      FROM lumen_pm_roll_events;
+
+  # -------------------------------------------------------------------------
+  # POOL HISTORY — how each bucket's pool grew across a round. This is the real
+  # series behind the market chart: implied odds over time, derived from actual
+  # bets rather than a fabricated curve.
+  #
+  # `pool_after` is the running total on that bucket immediately after the bet on
+  # that row. Ordered by block then indexer_id, which is the finest ordering the
+  # indexer gives us — several bets can share a block.
+  # -------------------------------------------------------------------------
+  - name: lumen_pm_pool_history
+    sql: |
+      CREATE OR REPLACE VIEW lumen_pm_pool_history AS
+      SELECT
+        indexer_contract_id     AS contract_id,
+        round_id,
+        outcome,
+        indexer_block_height    AS block,
+        indexer_ts              AS ts,
+        amount::numeric         AS amount,
+        SUM(amount::numeric) OVER (
+          PARTITION BY indexer_contract_id, round_id, outcome
+          ORDER BY indexer_block_height, indexer_id
+          ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        )                       AS pool_after
+      FROM lumen_pm_bet_events;

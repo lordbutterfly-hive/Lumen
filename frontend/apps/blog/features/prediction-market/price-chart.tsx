@@ -5,9 +5,14 @@ import { useTranslation } from '@/blog/i18n/client';
 
 // Coinbase-style pool-odds line chart. Pure SVG, no deps. One line per outcome,
 // y-axis 0-100¢ (the pool share), x-axis dates. Presentation-only: it renders
-// whatever `series` it is handed. `readRound()` currently has no historical
-// series, so the caller passes a flat placeholder and sets `placeholder` — see
-// TODO(series) below for wiring real history once an indexer exposes it.
+// whatever `series` it is handed.
+//
+// Real history now comes from the Magi indexer's lumen_pm_pool_history view,
+// folded into per-outcome shares by lib/pool-series.ts. When that is
+// unavailable — no indexer configured, unreachable, or a round with fewer than
+// two blocks of bets — the caller passes a flat series at each bucket's live
+// share AND sets `placeholder`, which is what labels it on screen. A flat line
+// with no label would read as evidence that the odds held steady.
 
 export interface ChartSeries {
   label: string;
@@ -41,9 +46,9 @@ export default function PriceChart({
 }: {
   series: ChartSeries[];
   xLabels?: string[];
-  // TODO(series): flip to false and pass real per-outcome history once the
-  // indexer exposes a time series; the caller currently builds a flat line at
-  // each outcome's live share.
+  // TRUE ⇒ the series is a flat stand-in, not history. Must be set by the caller
+  // whenever it could not get real data; it drives the on-screen caption that
+  // stops the chart being read as a record of how the odds moved.
   placeholder?: boolean;
   className?: string;
 }) {

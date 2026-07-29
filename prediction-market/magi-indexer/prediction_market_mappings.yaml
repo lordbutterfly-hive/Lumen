@@ -1,0 +1,144 @@
+# ===============================
+# LUMEN PREDICTION MARKET — event → table mappings for magi-mongo-indexer
+# ===============================
+# Drop this file (and prediction_market_views.yaml beside it) into
+# magi-mongo-indexer's internal/config/events/ directory, set the contract
+# address + fromBlockHeight below, and restart. The indexer backfills from
+# fromBlockHeight automatically the first time it sees a new contract.
+#
+# WHY THIS EXISTS RATHER THAN OUR OWN SERVER. This repo used to carry its own Go
+# indexer (indexer/, now deleted) with a working HTTP server — but its
+# production event source could never be fed. go-vsc-node persists every
+# sdk.Log line (modules/db/vsc/contracts/interface.go:43 defines `Logs []string`
+# on ContractOutputResult, and state_engine.go populates it), yet the PUBLIC
+# GraphQL type ContractOutputResult (modules/gql/schema.graphql:165-170) exposes
+# only `ret` and `ok` — there is no path from findContractOutput to the
+# persisted logs at all. The only place logs surface is
+# SimulateContractCallResult, the dry-run path, which by definition never
+# executes a mined transaction. So the bespoke indexer was structurally
+# unfeedable, waiting on an upstream schema change nobody had scheduled.
+#
+# magi-mongo-indexer sidesteps that entirely: it reads contract logs straight
+# from the node's MongoDB contract_state, normalises them into Postgres from
+# this file, and serves them through Hasura GraphQL with subscriptions. It is the
+# official vsc-eco service and Altera runs against it in production
+# (https://indexer.magi.milohpr.com). Creator tokens already migrated to it; this
+# is the same move, for the same reason, and it makes the two Lumen contracts
+# read through one path instead of two.
+#
+# THE ONE THING THAT HAD TO CHANGE ON OUR SIDE: the indexer identifies a JSON log
+# by a field called "type" — verified at source, internal/indexer/mapper/mapper.go:87-92,
+# where MatchesLogType decodes the log and compares raw["type"] against LogType.
+# Our contract emitted "ev". All seven sdk.Log sites in ../contract/main.go were
+# renamed to "type". Nothing is deployed, so this was free today and a migration
+# later.
+#
+# Our logs are FLAT — no `attributes` wrapper — so every jsonPath here is a
+# top-level `$.field`, unlike the magi_token/magi_nft mappings which nest.
+#
+# The indexer adds indexer_contract_id / indexer_block_height / indexer_tx_hash /
+# indexer_ts / indexer_id to every row automatically; none are declared here.
+#
+# MONEY IS A STRING, ALWAYS. Every HIVE/HBD amount on our wire is a quoted
+# base-10 integer in base units (3 dp). Declaring one as `numeric` would push it
+# through a float somewhere in the pipeline, and this contract holds staked user
+# funds. The views do their arithmetic with explicit ::numeric casts instead.
+# Round ids, outcome indices and the oracle price ARE bare numbers on the wire
+# (see u64s/strconv.Itoa in ../contract/main.go) and are declared numeric.
+#
+# The tripwire that keeps this file honest is ../market/magi_mapping_contract_test.go:
+# it reads ../contract/main.go's actual log literals and fails if any event here
+# is unmapped, any field misnamed, or any declared column type disagrees with the
+# JSON type on the wire. A wrong mapping produces NO error anywhere at runtime —
+# the column just fills with NULL forever and every screen built on it is quietly
+# wrong — which is exactly why the test exists. Do not delete it.
+
+contracts:
+  - address: "REPLACE_WITH_DEPLOYED_CONTRACT_ID"
+    # Set to the block the contract was deployed at. 0 backfills the whole
+    # chain, which works but is slow and pointless.
+    fromBlockHeight: 0
+    events:
+
+      # ---- round lifecycle ----
+
+      # `roll` opens a round. It is PERMISSIONLESS and attributed to "protocol":
+      # the reference price and all six strikes are derived in-contract from the
+      # witness oracle, so there is no operator choice here to record. refPrice
+      # is the Hive witness feed's moving average in HBD/HIVE bps at the moment
+      # the round opened — this is the only on-chain price series the contract
+      # ever writes, and lumen_pm_price_history is built from it.
+      - log_type: "roll"
+        table: "lumen_pm_roll_events"
+        schema: { round_id: numeric, ref_price: numeric }
+        parse: "json"
+        fields: { round_id: "$.roundId", ref_price: "$.refPrice" }
+
+      # `resolved` is emitted by settle() for BOTH terminal outcomes — state is
+      # "settled" or "void". WINNER IS ONLY MEANINGFUL WHEN state='settled':
+      # the void path never sets it, so it reads back as 0, which collides with
+      # a genuine winning outcome index of 0. Every view below gates on state
+      # before touching winner. Do not "simplify" that away.
+      - log_type: "resolved"
+        table: "lumen_pm_resolved_events"
+        schema: { round_id: numeric, state: string, winner: numeric, reason: string }
+        parse: "json"
+        fields: { round_id: "$.roundId", state: "$.state", winner: "$.winner", reason: "$.reason" }
+
+      # `voided` is emitted by voidStale() only. It carries no state field at all
+      # (this entrypoint has exactly one outcome) — only the reason.
+      - log_type: "voided"
+        table: "lumen_pm_voided_events"
+        schema: { round_id: numeric, reason: string }
+        parse: "json"
+        fields: { round_id: "$.roundId", reason: "$.reason" }
+
+      # ---- money ----
+
+      # A bet. Carries no asset field: the round's asset is immutable and
+      # enforced against the payload inside Bet(), but never re-logged. Join
+      # through the round to learn it, or read it from chain state — never
+      # fabricate it.
+      - log_type: "bet"
+        table: "lumen_pm_bet_events"
+        schema: { round_id: numeric, outcome: numeric, acct: string, amount: string }
+        parse: "json"
+        fields: { round_id: "$.roundId", outcome: "$.outcome", acct: "$.acct", amount: "$.amount" }
+
+      # A claim. Logged even when the payout is zero (a loser claiming is still a
+      # successful claim, and it is what marks them settled up) — so presence of
+      # a row here means "this account has taken its position off the table",
+      # NOT "this account won something". Asset IS present, read from state at
+      # claim time.
+      - log_type: "claim"
+        table: "lumen_pm_claim_events"
+        schema: { round_id: numeric, acct: string, payout: string, asset: string }
+        parse: "json"
+        fields: { round_id: "$.roundId", acct: "$.acct", payout: "$.payout", asset: "$.asset" }
+
+      # The fail-safe: past the settle deadline any staker force-voids a stuck
+      # round and pulls their own full stake in one call.
+      #
+      # ★ A RECLAIM ROW PROVES THE ROUND IS VOID. market.Reclaim REFUSES a
+      # settled round outright (market/reclaim.go:52-56, "round settled; use
+      # claim") and only reaches the refund once the round is VOID — already, or
+      # flipped by this very call. It emits no separate `voided` log, so this is
+      # the ONLY record that a reclaim-voided round ended. lumen_pm_round_state
+      # depends on that fact; it is an exact consequence of the contract, not an
+      # inference.
+      - log_type: "reclaim"
+        table: "lumen_pm_reclaim_events"
+        schema: { round_id: numeric, acct: string, refund: string, asset: string }
+        parse: "json"
+        fields: { round_id: "$.roundId", acct: "$.acct", refund: "$.refund", asset: "$.asset" }
+
+      # Long after resolution (~90 days) anyone may sweep still-unclaimed funds
+      # to the Hive DHF rather than burn them or strand them. After this fires
+      # claim and reclaim are both refused, so an unclaimed position stops being
+      # collectable — lumen_pm_my_unclaimed must exclude swept rounds or it
+      # advertises money that can no longer be taken.
+      - log_type: "sweep"
+        table: "lumen_pm_sweep_events"
+        schema: { round_id: numeric, amount: string, asset: string, to_account: string }
+        parse: "json"
+        fields: { round_id: "$.roundId", amount: "$.amount", asset: "$.asset", to_account: "$.to" }

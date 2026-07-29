@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import type { TFunction } from 'i18next';
 import { cn } from '@ui/lib/utils';
 import { handleError } from '@ui/lib/handle-error';
@@ -40,7 +40,7 @@ const CHART_POINTS = 8; // width of the flat placeholder series
 // odds, no open-interest / 24h-vol.
 export default function MarketTab() {
   const { t } = useTranslation('common_blog');
-  const { round, isUnavailable, isLoading, isError, refetch, myPosition, claim, isClaiming } = useMarket();
+  const { round, isUnavailable, isLoading, isError, refetch, myPosition, poolSeries, claim, isClaiming } = useMarket();
 
   const onClaim = async () => {
     if (!round) return;
@@ -53,20 +53,28 @@ export default function MarketTab() {
 
   const colors = useMemo(() => (round ? buildOutcomeColorMap(round.buckets) : {}), [round]);
 
-  // No historical series exists yet (readRound has no time dimension) — draw a
-  // flat line at each outcome's live share and mark it a placeholder.
-  const series: ChartSeries[] = useMemo(
-    () =>
-      round
-        ? round.buckets.map((bucket) => ({
-            label: bucket.label,
-            color: colors[bucket.id],
-            points: Array<number>(CHART_POINTS).fill(bucket.oddsPct),
-            end: bucket.oddsPct
-          }))
-        : [],
-    [round, colors]
-  );
+  // Real history when the indexer has it, the flat placeholder when it does not.
+  // `poolSeries` is null for an unconfigured or unreachable indexer AND for a
+  // round with fewer than two blocks of bets — in every one of those cases we
+  // have no evidence about how the odds moved, so the chart says so rather than
+  // drawing a line. `isPlaceholder` is what makes it say so.
+  const isPlaceholder = poolSeries === null;
+  const series: ChartSeries[] = useMemo(() => {
+    if (!round) return [];
+    return round.buckets.map((bucket, i) => {
+      const points = poolSeries?.[i];
+      const hasHistory = Array.isArray(points) && points.length > 1;
+      return {
+        label: bucket.label,
+        color: colors[bucket.id],
+        points: hasHistory ? points : Array<number>(CHART_POINTS).fill(bucket.oddsPct),
+        // The endpoint dot always shows the LIVE share from chain state, not the
+        // indexed tail: the index lags the chain, and the dot sits next to the
+        // live percentages in the bucket list. They must not disagree.
+        end: bucket.oddsPct
+      };
+    });
+  }, [round, colors, poolSeries]);
 
   // Honest, non-conflated failure states. Order matters: an unprovisioned market
   // is neither "loading" nor "no round"; a read error is not "no round open".
@@ -121,9 +129,14 @@ export default function MarketTab() {
               <strong className="font-semibold text-[#2a2822]">{t('prediction_market.pool')}</strong>{' '}
               <span className="tabular-nums">{round.totalPool.toFixed(0)}</span> {round.asset}
             </span>
-            <span>
-              <strong className="font-semibold tabular-nums text-[#2a2822]">{round.bettors}</strong> {t('prediction_market.bettors')}
-            </span>
+            {/* Omitted entirely when unknown (no indexer, or it is unreachable).
+                Rendering 0 there would assert that nobody has bet. */}
+            {round.bettors !== null && (
+              <span>
+                <strong className="font-semibold tabular-nums text-[#2a2822]">{round.bettors}</strong>{' '}
+                {t('prediction_market.bettors')}
+              </span>
+            )}
             {round.status === 'open' && (
               <span>
                 <strong className="font-semibold text-[#2a2822]">{t('prediction_market.locks')}</strong>{' '}
@@ -161,7 +174,7 @@ export default function MarketTab() {
               ))}
             </div>
 
-            <PriceChart series={series} placeholder />
+            <PriceChart series={series} placeholder={isPlaceholder} />
 
             {/* Pool odds ladder */}
             <div className="mt-[26px] border-t border-[#f0f0f0] pt-[22px]">
@@ -176,7 +189,12 @@ export default function MarketTab() {
         {/* Pool-safe key stats (no open-interest / 24h-vol) */}
         <div className="grid grid-cols-2 border-t border-[#f0f0f0] sm:grid-cols-4">
           <KeyStat label={t('prediction_market.pool')} value={`${round.totalPool.toFixed(0)} ${round.asset}`} />
-          <KeyStat label={t('prediction_market.bettors')} value={String(round.bettors)} />
+          {/* An em dash, not 0 — this stat holds a slot in the grid, so it says
+              "unknown" rather than disappearing. String(null) would print "null". */}
+          <KeyStat
+            label={t('prediction_market.bettors')}
+            value={round.bettors === null ? '—' : String(round.bettors)}
+          />
           <KeyStat label={t('prediction_market.ref')} value={`$${round.referencePrice.toFixed(3)}`} />
           <KeyStat label={t('prediction_market.closes')} value={closesDate} last />
         </div>

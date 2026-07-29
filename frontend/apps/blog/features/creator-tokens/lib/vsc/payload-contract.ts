@@ -239,6 +239,53 @@ export const ACTION_PAYLOAD_SPECS: Record<string, ActionPayloadSpec> = {
 };
 
 /**
+ * The escrow's two free-form commitment strings — `ask.contentHash` and
+ * `answer.answerHash` — are the ONLY fields on this contract a user types
+ * directly, and core/ask.go bounds them on three axes (Ask :336-343, Answer
+ * :515-523):
+ *
+ *   - non-empty            -> "empty content hash" / "empty answer hash"
+ *   - at most MaxHashLen   -> "contentHash too long" / "answerHash too long"
+ *   - no "|" character     -> "... must not contain '|'"
+ *
+ * The pipe is not cosmetic: core/ask.go:157 packs the whole escrow record into
+ * a single pipe-delimited string, so one stray "|" would re-partition the
+ * record — which is exactly why the contract refuses it outright rather than
+ * escaping it.
+ *
+ * ★ ADDED 2026-07-29. None of these three was enforced client-side. The answer
+ * composer (ui/studio/creator-studio.tsx) is a free-text box whose own
+ * placeholder invites "a link, a ticket number" — and a tracking URL longer
+ * than 128 characters, or one carrying a "|" in a query parameter, is entirely
+ * ordinary. A creator would type it, sign with their ACTIVE key, pay resource
+ * credits, broadcast, and the escrow would simply not release: the on-chain
+ * refusal arrives after the signature, not before it. Bounding it here means
+ * the failure happens in the composer, where it costs nothing and says what to
+ * change.
+ *
+ * MaxHashLen is mirrored from creator-tokens/core/params.go:171. The e2e
+ * harness re-derives it from that file and fails if the two drift.
+ */
+export const MAX_HASH_LEN = 128;
+
+/** Throws with the exact reason core/ask.go would have given, before anything is signed. */
+export function assertHashField(fieldName: 'contentHash' | 'answerHash', value: string): void {
+  if (value === '') {
+    throw new Error(`payload-contract: ${fieldName} is empty — the contract refuses an empty commitment string (core/ask.go).`);
+  }
+  if (value.length > MAX_HASH_LEN) {
+    throw new Error(
+      `payload-contract: ${fieldName} is ${value.length} characters — the contract accepts at most ${MAX_HASH_LEN} (core/ask.go MaxHashLen). Shorten it; a longer one is refused on chain AFTER you sign.`
+    );
+  }
+  if (value.includes('|')) {
+    throw new Error(
+      `payload-contract: ${fieldName} contains a "|" — the contract refuses it, because the escrow record is packed as a pipe-delimited string (core/ask.go:157). Remove the "|".`
+    );
+  }
+}
+
+/**
  * READ-ONLY preview entrypoints. Specced for the same drift protection, but
  * kept OUT of ACTION_PAYLOAD_SPECS because they are never broadcast as a
  * write — they carry no auth and mutate nothing. Listed here so a future
@@ -356,31 +403,43 @@ export function assertPayloadShape(action: string, payload: Record<string, unkno
 // runtime tripwire for the ONE way that guarantee could still regress: a
 // future edit to buildOp() itself (e.g. someone re-adding an optional
 // posting-auth parameter "just for one case") without updating this list.
-// VERIFIED 2026-07-24 by walking every //go:wasmexport in main.go: ALL 18
-// write entrypoints call requireActiveAuth(currentCaller()) — including the
-// curve rails, and including the ones that look permissionless in core
-// (closeIfDrained, refundHolder). There is no write on this contract that a
-// posting key may sign. `prepay` is gone (core/prepay.go deleted).
-export const WRITE_ACTIONS_REQUIRING_ACTIVE_AUTH: readonly string[] = [
-  'register',
-  'renew',
-  'setFace',
-  'setCap',
-  'buy',
-  'sell',
-  'ask',
-  'answer',
-  'reclaim',
-  'refund',
-  'refundHolder',
-  'transfer',
-  'retire',
-  'claimTradeFees',
-  'closeIfDrained',
-  'withdrawTreasury',
-  'pause',
-  'unpause'
-];
+// RE-VERIFIED 2026-07-29 by walking every //go:wasmexport in main.go at the
+// current commit: main.go declares 29 entrypoints, and 25 of them call
+// requireActiveAuth(currentCaller()) — including the curve rails, and
+// including the ones that look permissionless in core (closeIfDrained,
+// refundHolder). The four that do NOT are all genuine pure reads: `quote`
+// (main.go:1550), `quoteBuy` (:1628), `quoteSell` (:1662), `listOfferings`
+// (:1861) — they are specced in READ_PAYLOAD_SPECS below and are never
+// broadcast. Of the 25 gated entrypoints, 24 are client-reachable; the 25th
+// is `init` (main.go:401), which only the deployer calls. There is no write
+// on this contract that a posting key may sign. `prepay` is gone
+// (core/prepay.go deleted).
+//
+// ★ FIXED 2026-07-29 — THIS LIST WAS A HAND-MAINTAINED COPY AND IT HAD GONE
+// STALE. It enumerated 18 actions while ACTION_PAYLOAD_SPECS above (and the
+// data source's 22 write methods) covered 24. The six it had silently stopped
+// covering were `decline`, `rate`, `createOffering`, `setOfferingPrice`,
+// `setOfferingTitle` and `deleteOffering` — every one of them added after the
+// list was written, and every one of them gated on requireActiveAuth on
+// chain. Because assertAuthContract's first line is
+// `if (!WRITE_ACTIONS_REQUIRING_ACTIVE_AUTH.includes(action)) return;`, the
+// tripwire was returning CLEAN for all six: had a future edit to buildOp()
+// re-introduced a posting-auth path, this check — the one guard whose entire
+// job is to notice that — would have said nothing for the offerings shop, the
+// anti-grief decline rail, and the ratings rail. That is the exact failure
+// mode a hand-copied list has, so the list is no longer hand-copied: it is
+// DERIVED from ACTION_PAYLOAD_SPECS, which is itself the ground truth every
+// payload is already validated against. A new write action cannot be added to
+// this feature without landing in that table, so it cannot be added without
+// being covered here.
+//
+// The one thing derivation cannot prove is that ACTION_PAYLOAD_SPECS still
+// matches main.go. That is checked separately and against the contract's own
+// source, by the auth-tier section of
+// ./__e2e__/vsc-data-path.e2e.ts (which reads contract/main.go and derives
+// the gated set from the //go:wasmexport directives) and by
+// contract/parse/auth_tier_crosscheck_test.go on the Go side.
+export const WRITE_ACTIONS_REQUIRING_ACTIVE_AUTH: readonly string[] = Object.keys(ACTION_PAYLOAD_SPECS);
 
 /**
  * Throws if a write action's built CustomJsonOp does not carry active
@@ -391,7 +450,19 @@ export const WRITE_ACTIONS_REQUIRING_ACTIVE_AUTH: readonly string[] = [
  * a synthetic sample.
  */
 export function assertAuthContract(action: string, requiredAuths: string[], requiredPostingAuths: string[]): void {
-  if (!WRITE_ACTIONS_REQUIRING_ACTIVE_AUTH.includes(action)) return;
+  // An UNKNOWN action is a hard error, not a quiet pass. This used to `return`
+  // — which is how the six actions missing from the old hand-written list
+  // (decline, rate and the four shop writes) were skipped in silence. Every
+  // caller of this function is building a WRITE that is about to be signed, so
+  // "I have never heard of this action" is precisely when it must refuse.
+  // buildOp() now calls this in production too, where assertPayloadShape's own
+  // unknown-action check is switched off, so this is also the only guard that
+  // catches a typo'd action name on a real money path.
+  if (!WRITE_ACTIONS_REQUIRING_ACTIVE_AUTH.includes(action)) {
+    throw new Error(
+      `payload-contract auth violation: unknown creator-tokens write action "${action}" — it is not in ACTION_PAYLOAD_SPECS, so the auth tier it needs cannot be established. Add it there (citing its //go:wasmexport line in contract/main.go) before wiring a new write.`
+    );
+  }
   const problems: string[] = [];
   if (requiredAuths.length === 0) {
     problems.push(

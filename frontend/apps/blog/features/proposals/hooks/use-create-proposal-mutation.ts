@@ -8,6 +8,8 @@ import { toast } from '@ui/components/hooks/use-toast';
 import { handleError } from '@ui/lib/handle-error';
 import { scheduleInvalidations } from '@/blog/lib/react-query';
 import { useTranslation } from '@/blog/i18n/client';
+import { refuseIfLite } from '@/blog/lib/lite/client/require-full-account';
+import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 
 export interface CreateProposalParams {
   creator: string;
@@ -31,10 +33,15 @@ export interface CreateProposalParams {
 export function useCreateProposalMutation() {
   const queryClient = useQueryClient();
   const { t } = useTranslation('common_blog');
+  const { user } = useUserClient();
 
   return useMutation({
     mutationKey: ['createProposal'],
     mutationFn: async (params: CreateProposalParams) => {
+      // A keyless Lumen account has no Hive account and no keys, and a
+      // governance vote is counted by Hive consensus — there is no Lumen-local
+      // equivalent to fall back to. See lib/lite/client/require-full-account.ts.
+      refuseIfLite(user.account_tier, t('proposals.lite_cannot_vote'));
       const { creator, receiver, permlink, subject, dailyPayHbd, startDate, endDate } = params;
 
       const post = await getPost(creator, permlink);
