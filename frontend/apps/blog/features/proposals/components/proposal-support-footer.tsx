@@ -1,7 +1,9 @@
 'use client';
 
 import { cn } from '@ui/lib/utils';
+import TooltipContainer from '@ui/components/tooltip-container';
 import { useTranslation } from '@/blog/i18n/client';
+import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import DialogLogin from '@/blog/components/dialog-login';
 import { formatHp } from '../lib/proposals-format';
 import HeartIcon from './heart-icon';
@@ -30,6 +32,12 @@ export default function ProposalSupportFooter({
   onToggle
 }: Props) {
   const { t } = useTranslation('common_blog');
+  const { user } = useUserClient();
+  // A lite account has no Hive keys — the mutation backstop already refuses this
+  // (use-proposal-vote-mutation.ts -> refuseIfLite), but the toggle used to render
+  // fully enabled until clicked, with a brief optimistic "supported" flash before
+  // the rollback (see that hook's onMutate for the corresponding fix).
+  const isLiteBlocked = isLoggedIn && user.account_tier === 'lite';
 
   // Vote state unknown for a logged-in viewer: don't render a confident (possibly wrong)
   // "Support"/"Un-support" toggle — surface an honest "couldn't load your votes" note instead.
@@ -38,8 +46,8 @@ export default function ProposalSupportFooter({
   const button = (
     <button
       type="button"
-      disabled={isPending}
-      onClick={isLoggedIn ? onToggle : undefined}
+      disabled={isPending || isLiteBlocked}
+      onClick={isLoggedIn && !isLiteBlocked ? onToggle : undefined}
       data-testid="proposal-support-toggle"
       aria-pressed={isSupported}
       className={cn(
@@ -71,6 +79,8 @@ export default function ProposalSupportFooter({
         >
           {t('proposals.card.votes_unavailable')}
         </span>
+      ) : isLiteBlocked ? (
+        <TooltipContainer title={t('proposals.lite_cannot_vote')}>{button}</TooltipContainer>
       ) : isLoggedIn ? (
         button
       ) : (

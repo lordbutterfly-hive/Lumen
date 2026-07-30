@@ -1,41 +1,44 @@
 'use client';
 
-import { useEffect } from 'react';
 import { Popover, PopoverContent, PopoverTrigger } from '@ui/components/popover';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useTranslation } from '@/blog/i18n/client';
-import { useAppStore } from '@/blog/store/app';
 import { ManabarRing } from '@/blog/features/layouts/site-header/manabar-ring';
 import { LeagueEmblem, divisionToRoman } from '../emblems/league-emblem';
 import { TIERS } from '../lib/tiers';
 import { useRetention } from '../hooks/use-retention';
-import { ExpBar } from './exp-bar';
 import { StreakFlame } from './streak-flame';
-import { DailyTasksPopoverContent } from './daily-tasks-popover-content';
 
-// The navbar/left-rail status block: a calm emblem + thin XP ring + tier name +
-// neutral "Lv" pill. The XP ring color is the TIER core (never green/red). Click
-// opens a Radix popover card with the big emblem, tier/division, the EXP bar,
-// the streak flame, and the Daily 5 checklist. Rendered only when logged in.
+// The navbar/left-rail status block: a calm emblem + thin ring + tier name.
+// The ring color is the TIER core (never green/red) and its fill is the real,
+// chain-derived `rank.standing` Standing Score. Click opens a Radix popover
+// card with the big emblem, tier/division, and the streak flame. Rendered
+// only when logged in.
+//
+// PRODUCT DECISION (2026-07-30, FRONTEND-REMAINING-2026-07-30.md row 1.3): the
+// HABIT layer (Level/XP/daily-tasks) has no real backend — `use-retention.ts`
+// only overwrites `streakDays`/`activeWeeks` from the server, the rest is
+// `mockSummary()`'s hardcoded constants for every user, forever. Rather than
+// invent an XP economy, that entire layer is hidden here (Lv pill, EXP bar,
+// Daily 5 checklist all removed from this component) until a real task ledger
+// exists. `exp-bar.tsx` / `daily-tasks-popover-content.tsx` are kept, unused,
+// for that future wiring — do not re-add them without a real data source.
 
 export function LeagueShowcase() {
   const { user } = useUserClient();
-  const hydrateRetention = useAppStore((s) => s.hydrateRetention);
   const { t } = useTranslation('common_blog');
   const { data: summary } = useRetention(user.username);
 
-  useEffect(() => {
-    hydrateRetention();
-  }, [hydrateRetention]);
-
   if (!user.isLoggedIn || !summary) return null;
 
-  const { rank, habit, tasks } = summary;
+  const { rank, habit } = summary;
   const info = TIERS[rank.tier];
   const tierName = t(info.labelKey);
-  const total = habit.xp + habit.xpToNext;
-  const ringPct = total > 0 ? (habit.xp / total) * 100 : 0;
-  const streakActive = tasks.some((task) => task.ticksStreak && task.done);
+  const ringPct = Math.max(0, Math.min(100, rank.standing));
+  // `habit.streakDays` is real (server-overwritten in use-retention.ts); the
+  // per-task "ticked today" flag is not, so the flame's lit/unlit state is
+  // driven by the honest streak count instead.
+  const streakActive = habit.streakDays > 0;
   const divisionLabel = info.hasDivisions && rank.division ? divisionToRoman(rank.division) : null;
 
   return (
@@ -54,12 +57,12 @@ export function LeagueShowcase() {
               </span>
             </span>
             <span className="flex min-w-0 flex-1 flex-col">
-              <span className="truncate font-sans text-[14px] font-semibold text-[#161511]">
-                {tierName}
-              </span>
-              <span className="w-fit rounded-full bg-[#f1f3f5] px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-[#4b5563]">
-                {t('retention.level_pill', { n: habit.level })}
-              </span>
+              <span className="truncate font-sans text-[14px] font-semibold text-[#161511]">{tierName}</span>
+              {divisionLabel && (
+                <span className="w-fit rounded-full bg-[#f1f3f5] px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-[#4b5563]">
+                  {divisionLabel}
+                </span>
+              )}
             </span>
           </button>
         </PopoverTrigger>
@@ -78,12 +81,6 @@ export function LeagueShowcase() {
               </p>
               <StreakFlame days={habit.streakDays} active={streakActive} className="mt-1" />
             </div>
-          </div>
-
-          <ExpBar habit={habit} tier={rank.tier} className="mt-4" />
-
-          <div className="mt-4 border-t border-[#f1f3f5] pt-4">
-            <DailyTasksPopoverContent tasks={tasks} />
           </div>
         </PopoverContent>
       </Popover>

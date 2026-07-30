@@ -12,6 +12,7 @@ import {
   DialogTrigger,
   Input
 } from '@hive/ui';
+import TooltipContainer from '@ui/components/tooltip-container';
 import { useTranslation } from '@/blog/i18n/client';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import DialogLogin from '@/blog/components/dialog-login';
@@ -40,6 +41,14 @@ export default function SetProxyDialog({ children, currentProxy }: Props) {
 
   if (!user.isLoggedIn) {
     return <DialogLogin>{children}</DialogLogin>;
+  }
+
+  // Structural backstop for the same gate `proxy-card.tsx` already applies at the
+  // trigger (real `disabled` + reason there). `children` has no click handler of
+  // its own outside `DialogTrigger`, so not wrapping it in one already makes it
+  // inert if this dialog is ever mounted for a lite account some other way.
+  if (user.account_tier === 'lite') {
+    return <TooltipContainer title={t('proposals.lite_cannot_vote')}>{children}</TooltipContainer>;
   }
 
   const submit = async (proxyValue: string) => {

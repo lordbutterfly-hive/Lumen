@@ -1,28 +1,17 @@
 'use client';
 
-import { FC, ReactNode, useState } from 'react';
+import { FC, useState } from 'react';
 import type { Service } from '../../market/token-detail';
 import type { LiveTokenMarket } from '../../live/adapt';
 import { buyQuote, sellQuote, serviceQuote, EXIT_FEE_MAX } from '../../market/curve';
 import { usdPrice, usdWhole } from '../../market/format';
 import { writeFailureMessage } from '../write-failure';
+import { useTokenAccounts } from '../../live/use-token-accounts';
+import { useMagiSpendingPower } from '../../live/use-magi-spending-power';
+import { MagiFuelGauge, MagiFundingHelp } from '../../live/magi-fuel-gauge';
+import ModalShell from '../modal-shell';
 
 export type TokenDialog = 'buy' | 'sell' | 'redeem' | 'ask' | 'send' | 'inter' | null;
-
-const ModalShell: FC<{ width: number; onClose: () => void; children: ReactNode }> = ({ width, onClose, children }) => (
-  <div
-    onClick={onClose}
-    className="fixed inset-0 z-[60] flex items-start justify-center overflow-y-auto bg-[rgba(20,18,10,0.4)] p-5 py-12 backdrop-blur-[2px]"
-  >
-    <div
-      onClick={(e) => e.stopPropagation()}
-      style={{ width }}
-      className="max-w-full rounded-[20px] bg-white shadow-[0_20px_60px_rgba(20,18,10,0.25)]"
-    >
-      {children}
-    </div>
-  </div>
-);
 
 const ModalHead: FC<{ title: string; onClose: () => void }> = ({ title, onClose }) => (
   <div className="flex items-center justify-between px-6 pt-[22px]">
@@ -35,7 +24,11 @@ const ModalHead: FC<{ title: string; onClose: () => void }> = ({ title, onClose 
 
 const tok = (n: number) => n.toFixed(2);
 
-const BuyModal: FC<{ m: LiveTokenMarket; onBuy: (usd: number, maxTotalUsd?: number) => Promise<void>; onClose: () => void }> = ({ m, onBuy, onClose }) => {
+const BuyModal: FC<{
+  m: LiveTokenMarket;
+  onBuy: (usd: number, maxTotalUsd?: number) => Promise<void>;
+  onClose: () => void;
+}> = ({ m, onBuy, onClose }) => {
   const [busy, setBusy] = useState(false);
   const [amt, setAmt] = useState('50');
   const [adv, setAdv] = useState(false);
@@ -52,12 +45,33 @@ const BuyModal: FC<{ m: LiveTokenMarket; onBuy: (usd: number, maxTotalUsd?: numb
   // mean something once buy() is wired to a real chain call (previously it
   // only disabled this button locally and was never passed to onBuy at all).
   const maxTotalUsd = adv && Number.isFinite(maxP) && maxP > 0 && q.tokens > 0 ? maxP * q.tokens : undefined;
+
+  // ★ THE SPENDING CHECK, before the action rather than after the signature.
+  //
+  // The account that pays is the MAGI account, which for a lite user is the wallet
+  // they signed in with — NOT `user.username`, which is a Lumen display name Magi
+  // has never heard of. `useTokenAccounts` resolves the real identity, and a wallet
+  // user may have more than one bound, so the first is treated as the payer.
+  //
+  // On Magi, HBD is also what pays to SEND, so a wallet holding nothing cannot
+  // submit at all — see use-magi-spending-power. Checking here means a user is told
+  // before they sign, not after they have spent resource credits on a transaction
+  // that could never land.
+  const tokenAccounts = useTokenAccounts();
+  const payer = tokenAccounts.accounts[0] ?? null;
+  const spending = useMagiSpendingPower(payer?.id ?? null);
+  // HBD is a 3-decimal base-unit integer; the modal works in whole USD, and HBD is
+  // dollar-pegged (see live/adapt.ts usdFromHbd — the one documented 1:1).
+  const costBaseUnits = Math.round(usd * 1000);
+  const affordability = spending.affordability(costBaseUnits);
+  const blockedBySpending = affordability === 'no_resource_credits' || affordability === 'insufficient_hbd';
+
   return (
-    <ModalShell width={460} onClose={onClose}>
+    <ModalShell width={460} onClose={onClose} title={`Buy @${m.handle} token`}>
       <ModalHead title={`Buy @${m.handle} token`} onClose={onClose} />
       <div className="px-6 pb-6 pt-[18px]">
         <label className="mb-[7px] block text-[12.5px] font-semibold text-[#6b7280]">Amount (USD)</label>
-        <div className="mb-2.5 flex items-center rounded-xl border border-[#e4e6e9] px-4 py-3">
+        <div className="mb-2.5 flex items-center rounded-xl border border-[#e4e6e9] px-4 py-3 focus-within:border-[#c0392b] focus-within:ring-1 focus-within:ring-[#c0392b]">
           <span className="text-[22px] font-bold text-[#161511]">$</span>
           <input
             value={amt}
@@ -94,28 +108,44 @@ const BuyModal: FC<{ m: LiveTokenMarket; onBuy: (usd: number, maxTotalUsd?: numb
             <span>~{usdPrice(q.priceAfter)}</span>
           </div>
         </div>
-        <button onClick={() => setAdv((v) => !v)} className="mb-3 flex items-center gap-1.5 border-0 bg-transparent text-[12.5px] font-semibold text-[#6b7280]">
+        <button
+          onClick={() => setAdv((v) => !v)}
+          className="mb-3 flex items-center gap-1.5 border-0 bg-transparent text-[12.5px] font-semibold text-[#6b7280]"
+        >
           Advanced {adv ? '▴' : '▾'}
         </button>
         {adv ? (
           <div className="mb-3.5">
             <label className="mb-1.5 block text-xs text-[#6b7280]">Max price per token</label>
-            <div className="flex items-center rounded-[10px] border border-[#e4e6e9] px-3.5 py-2.5">
+            <div className="flex items-center rounded-[10px] border border-[#e4e6e9] px-3.5 py-2.5 focus-within:border-[#c0392b] focus-within:ring-1 focus-within:ring-[#c0392b]">
               <span className="font-bold text-[#9ca3af]">$</span>
-              <input value={maxPrice} onChange={(e) => setMaxPrice(e.target.value)} inputMode="decimal" className="ml-0.5 flex-1 border-0 text-[15px] font-semibold tabular-nums outline-none" />
+              <input
+                value={maxPrice}
+                onChange={(e) => setMaxPrice(e.target.value)}
+                inputMode="decimal"
+                className="ml-0.5 flex-1 border-0 text-[15px] font-semibold tabular-nums outline-none"
+              />
             </div>
-            <div className="mt-1.5 text-[11.5px] text-[#9ca3af]">Don’t buy above this — the curve moves as others trade.</div>
+            <div className="mt-1.5 text-[11.5px] text-[#9ca3af]">
+              Don’t buy above this — the curve moves as others trade.
+            </div>
             {overMax ? (
-              <div className="mt-1.5 text-[11.5px] font-semibold text-[#b45309]">Your buy would push the price to {usdPrice(q.priceAfter)}, above your max — lower the amount or raise the cap.</div>
+              <div className="mt-1.5 text-[11.5px] font-semibold text-[#b45309]">
+                Your buy would push the price to {usdPrice(q.priceAfter)}, above your max — lower the amount
+                or raise the cap.
+              </div>
             ) : null}
           </div>
         ) : null}
+        {/* What you can actually spend, and whether you can send anything at all. */}
+        <MagiFuelGauge state={spending} costBaseUnits={costBaseUnits} className="mb-3" />
+        {blockedBySpending && payer ? <MagiFundingHelp kind={payer.kind} className="mb-3" /> : null}
         <div className="mb-3 rounded-[10px] bg-[#f6f7f8] px-3.5 py-3 text-[12.5px] leading-[1.5] text-[#6b7280]">
           Includes a 10% trade fee (5% to @{m.handle}, 5% to Lumen).
         </div>
         <p className="mb-3.5 font-serif text-[12.5px] leading-[1.55] text-[#9ca3af]">
-          This token’s price floats. The floor ({usdPrice(m.floorUsd)}) is the least you’re guaranteed back; sell soon after
-          buying and an early-exit fee applies.
+          This token’s price floats. The floor ({usdPrice(m.floorUsd)}) is the least you’re guaranteed back;
+          sell soon after buying and an early-exit fee applies.
         </p>
         <button
           onClick={async () => {
@@ -137,15 +167,24 @@ const BuyModal: FC<{ m: LiveTokenMarket; onBuy: (usd: number, maxTotalUsd?: numb
               setBusy(false);
             }
           }}
-          disabled={!Number.isFinite(usd) || usd <= 0 || overMax || busy}
+          // blockedBySpending refuses BEFORE the signature. The gauge above already
+          // explains which of the two problems it is (nothing to send with, versus
+          // not enough for this particular purchase), so the label stays short.
+          // Note it does NOT block on `affordability === 'unknown'`: a failed
+          // balance read must not stop a user who may well be able to afford this.
+          disabled={!Number.isFinite(usd) || usd <= 0 || overMax || busy || blockedBySpending}
           className="w-full rounded-[13px] bg-[#c0392b] py-[15px] text-[15px] font-bold text-white hover:bg-[#a5301f] disabled:opacity-50"
         >
-          {busy ? 'Confirm in your wallet…' : `Buy — ${usdWhole(usd)}`}
+          {busy
+            ? 'Confirm in your wallet…'
+            : affordability === 'no_resource_credits'
+              ? 'Add HBD on Magi first'
+              : affordability === 'insufficient_hbd'
+                ? 'Not enough HBD'
+                : `Buy — ${usdWhole(usd)}`}
         </button>
         {failure ? (
-          <div className="mt-2.5 text-center text-[12.5px] font-semibold text-[#c0392b]">
-            {failure}
-          </div>
+          <div className="mt-2.5 text-center text-[12.5px] font-semibold text-[#c0392b]">{failure}</div>
         ) : null}
         <div className="mt-2.5 text-center text-xs text-[#9ca3af]">One signature confirms your buy.</div>
       </div>
@@ -184,16 +223,23 @@ const SellModal: FC<{
   // rows would have to be invented.
   const redeemUsd = redeem && held > 0 ? ((m.position?.floorValueUsd ?? 0) * tokens) / held : 0;
   return (
-    <ModalShell width={460} onClose={onClose}>
+    <ModalShell
+      width={460}
+      onClose={onClose}
+      title={redeem ? `Redeem @${m.handle} token` : `Sell @${m.handle} token`}
+    >
       <ModalHead title={redeem ? `Redeem @${m.handle} token` : `Sell @${m.handle} token`} onClose={onClose} />
       <div className="px-6 pb-6 pt-[18px]">
         <div className="mb-[7px] flex items-center justify-between">
           <label className="text-[12.5px] font-semibold text-[#6b7280]">Amount (tokens)</label>
-          <button onClick={() => setAmt(String(held))} className="border-0 bg-transparent text-[12.5px] font-semibold text-[#c0392b]">
+          <button
+            onClick={() => setAmt(String(held))}
+            className="border-0 bg-transparent text-[12.5px] font-semibold text-[#c0392b]"
+          >
             {redeem ? 'Redeem all' : 'Sell all'} ({tok(held)})
           </button>
         </div>
-        <div className="mb-3.5 flex items-center rounded-xl border border-[#e4e6e9] px-4 py-3">
+        <div className="mb-3.5 flex items-center rounded-xl border border-[#e4e6e9] px-4 py-3 focus-within:border-[#c0392b] focus-within:ring-1 focus-within:ring-[#c0392b]">
           <input
             value={amt}
             onChange={(e) => {
@@ -207,7 +253,9 @@ const SellModal: FC<{
         </div>
         {q.exitFeePct > 0 ? (
           <div className="mb-3.5 rounded-xl border border-[#f6e2c4] bg-[#fdf6ec] px-4 py-3.5">
-            <div className="mb-1.5 text-[13.5px] font-bold text-[#b45309]">Early-exit fee: {feePctLabel}% now</div>
+            <div className="mb-1.5 text-[13.5px] font-bold text-[#b45309]">
+              Early-exit fee: {feePctLabel}% now
+            </div>
             <p className="mb-2.5 text-[12.5px] leading-[1.5] text-[#8a5a20]">
               You’ve held these ~{m.position?.heldDays ?? 0} days. The fee drops to 0% if you hold ~6 weeks.
             </p>
@@ -216,7 +264,10 @@ const SellModal: FC<{
                   maxed-out for the first quarter of the real 20% decay.
                   EXIT_FEE_MAX is the real, exported maximum (params.go
                   MaxExitTaxBps). */}
-              <div className="h-full bg-[#b45309]" style={{ width: `${(q.exitFeePct / EXIT_FEE_MAX) * 100}%` }} />
+              <div
+                className="h-full bg-[#b45309]"
+                style={{ width: `${(q.exitFeePct / EXIT_FEE_MAX) * 100}%` }}
+              />
             </div>
             <div className="mt-1.5 flex justify-between text-[11px] tabular-nums text-[#b45309]">
               <span>{feePctLabel}% now</span>
@@ -294,9 +345,7 @@ const SellModal: FC<{
                 : `Sell — get ~${usdPrice(q.receiveUsd)}`}
         </button>
         {failure ? (
-          <div className="mt-2.5 text-center text-[12.5px] font-semibold text-[#c0392b]">
-            {failure}
-          </div>
+          <div className="mt-2.5 text-center text-[12.5px] font-semibold text-[#c0392b]">{failure}</div>
         ) : null}
         {/* This used to read "Selling is always available — even if this market
             winds down", which is false: sell() throws once the market is
@@ -317,7 +366,12 @@ const AskModal: FC<{
   m: LiveTokenMarket;
   service: Service | null;
   /** offeringId is Service.key — the creator's named service, or '0' for their legacy face price. Passing it is what makes the shop actually buyable. */
-  onSpend: (input: { offeringId: number; usd: number; deadlineDays: number; question: string }) => Promise<void>;
+  onSpend: (input: {
+    offeringId: number;
+    usd: number;
+    deadlineDays: number;
+    question: string;
+  }) => Promise<void>;
   onClose: () => void;
 }> = ({ m, service, onSpend, onClose }) => {
   const [busy, setBusy] = useState(false);
@@ -337,7 +391,7 @@ const AskModal: FC<{
   // ask.go's Ask() guard order (maxCredits, then the exact commission match).
   const canAffordTokens = held >= q.tokens && Number.isFinite(q.tokens);
   return (
-    <ModalShell width={500} onClose={onClose}>
+    <ModalShell width={500} onClose={onClose} title={`Ask @${m.handle}`}>
       <ModalHead title={`Ask @${m.handle}`} onClose={onClose} />
       <div className="px-6 pb-6 pt-[18px]">
         <textarea
@@ -346,11 +400,15 @@ const AskModal: FC<{
           placeholder={`What do you want to ask @${m.handle}?`}
           className="h-[120px] w-full resize-y rounded-xl border border-[#e4e6e9] px-4 py-3.5 font-serif text-[15px] leading-[1.5] text-[#161511] outline-none focus:border-[#c0392b]"
         />
-        <div className="my-2 mb-3.5 text-xs text-[#9ca3af]">Private — stored on Lumen, only its fingerprint goes on-chain.</div>
+        <div className="my-2 mb-3.5 text-xs text-[#9ca3af]">
+          Private — stored on Lumen, only its fingerprint goes on-chain.
+        </div>
         <div className="mb-4 rounded-xl border border-[#ebebeb] px-4 py-3.5 text-[14px] leading-[1.55] text-[#3f4650]">
-          This costs <strong className="tabular-nums text-[#161511]">{tok(q.tokens)} tokens</strong> from your balance, plus
-          a separate <strong className="tabular-nums text-[#161511]">{usdPrice(q.commissionUsd)}</strong> platform
-          commission paid in HBD — {usdWhole(usd)} total. If unanswered within your deadline, you get it all back.
+          This costs <strong className="tabular-nums text-[#161511]">{tok(q.tokens)} tokens</strong> from your
+          balance, plus a separate{' '}
+          <strong className="tabular-nums text-[#161511]">{usdPrice(q.commissionUsd)}</strong> platform
+          commission paid in HBD — {usdWhole(usd)} total. If unanswered within your deadline, you get it all
+          back.
         </div>
         <label className="mb-2 block text-[12.5px] font-semibold text-[#6b7280]">Answer due within</label>
         <div className="mb-4 flex items-center gap-3.5">
@@ -362,7 +420,9 @@ const AskModal: FC<{
             onChange={(e) => setDeadline(Number(e.target.value))}
             className="flex-1 accent-[#c0392b]"
           />
-          <span className="w-[70px] text-right text-[14px] font-bold tabular-nums text-[#161511]">{deadline} days</span>
+          <span className="w-[70px] text-right text-[14px] font-bold tabular-nums text-[#161511]">
+            {deadline} days
+          </span>
         </div>
         <button
           onClick={async () => {
@@ -392,16 +452,18 @@ const AskModal: FC<{
               : `You need ${tok(q.tokens)} @${m.handle} tokens — buy some first`}
         </button>
         {failure ? (
-          <div className="mt-2.5 text-center text-[12.5px] font-semibold text-[#c0392b]">
-            {failure}
-          </div>
+          <div className="mt-2.5 text-center text-[12.5px] font-semibold text-[#c0392b]">{failure}</div>
         ) : null}
       </div>
     </ModalShell>
   );
 };
 
-const SendModal: FC<{ m: LiveTokenMarket; onTransfer: (to: string, tokens: number) => Promise<void>; onClose: () => void }> = ({ m, onTransfer, onClose }) => {
+const SendModal: FC<{
+  m: LiveTokenMarket;
+  onTransfer: (to: string, tokens: number) => Promise<void>;
+  onClose: () => void;
+}> = ({ m, onTransfer, onClose }) => {
   const [busy, setBusy] = useState(false);
   const held = m.position?.tokens ?? 0;
   const [to, setTo] = useState('');
@@ -410,10 +472,12 @@ const SendModal: FC<{ m: LiveTokenMarket; onTransfer: (to: string, tokens: numbe
   const tokens = parseFloat(amt.replace(/,/g, '')) || 0;
   const valid = to.trim().length > 0 && Number.isFinite(tokens) && tokens > 0 && tokens <= held;
   return (
-    <ModalShell width={420} onClose={onClose}>
+    <ModalShell width={420} onClose={onClose} title={`Send @${m.handle} tokens`}>
       <ModalHead title={`Send @${m.handle} tokens`} onClose={onClose} />
       <div className="px-6 pb-6 pt-[18px]">
-        <label className="mb-1.5 block text-[12.5px] font-semibold text-[#6b7280]">To (Lumen or Hive name)</label>
+        <label className="mb-1.5 block text-[12.5px] font-semibold text-[#6b7280]">
+          To (Lumen or Hive name)
+        </label>
         <input
           value={to}
           onChange={(e) => {
@@ -421,11 +485,16 @@ const SendModal: FC<{ m: LiveTokenMarket; onTransfer: (to: string, tokens: numbe
             setFailure(null);
           }}
           placeholder="@name"
-          className="mb-3.5 w-full rounded-xl border border-[#e4e6e9] px-4 py-3 text-[15px] font-semibold text-[#161511] outline-none"
+          className="mb-3.5 w-full rounded-xl border border-[#e4e6e9] px-4 py-3 text-[15px] font-semibold text-[#161511] outline-none focus:border-[#c0392b] focus:ring-1 focus:ring-[#c0392b]"
         />
         <div className="mb-1.5 flex items-center justify-between">
           <label className="text-[12.5px] font-semibold text-[#6b7280]">Amount (tokens)</label>
-          <button onClick={() => setAmt(String(held))} className="border-0 bg-transparent text-[12.5px] font-semibold text-[#c0392b]">Max ({tok(held)})</button>
+          <button
+            onClick={() => setAmt(String(held))}
+            className="border-0 bg-transparent text-[12.5px] font-semibold text-[#c0392b]"
+          >
+            Max ({tok(held)})
+          </button>
         </div>
         <input
           value={amt}
@@ -435,7 +504,7 @@ const SendModal: FC<{ m: LiveTokenMarket; onTransfer: (to: string, tokens: numbe
           }}
           inputMode="decimal"
           placeholder="0"
-          className="mb-3.5 w-full rounded-xl border border-[#e4e6e9] px-4 py-3 text-[22px] font-bold tabular-nums text-[#161511] outline-none"
+          className="mb-3.5 w-full rounded-xl border border-[#e4e6e9] px-4 py-3 text-[22px] font-bold tabular-nums text-[#161511] outline-none focus:border-[#c0392b] focus:ring-1 focus:ring-[#c0392b]"
         />
         <button
           onClick={async () => {
@@ -460,23 +529,29 @@ const SendModal: FC<{ m: LiveTokenMarket; onTransfer: (to: string, tokens: numbe
           disabled={!valid || busy}
           className="w-full rounded-[13px] bg-[#1a1a17] py-[15px] text-[15px] font-bold text-white hover:bg-black disabled:opacity-50"
         >
-          {busy ? 'Confirm in your wallet…' : tokens > held ? 'More than you hold' : `Send ${tok(tokens)} tokens`}
+          {busy
+            ? 'Confirm in your wallet…'
+            : tokens > held
+              ? 'More than you hold'
+              : `Send ${tok(tokens)} tokens`}
         </button>
         {failure ? (
-          <div className="mt-2.5 text-center text-[12.5px] font-semibold text-[#c0392b]">
-            {failure}
-          </div>
+          <div className="mt-2.5 text-center text-[12.5px] font-semibold text-[#c0392b]">{failure}</div>
         ) : null}
-        <div className="mt-2.5 text-center text-xs text-[#9ca3af]">Transfers are free and instant on Lumen. Never blocked by billing.</div>
+        <div className="mt-2.5 text-center text-xs text-[#9ca3af]">
+          Transfers are free and instant on Lumen. Never blocked by billing.
+        </div>
       </div>
     </ModalShell>
   );
 };
 
 const InterstitialModal: FC<{ handle: string; onClose: () => void }> = ({ onClose }) => (
-  <ModalShell width={480} onClose={onClose}>
+  <ModalShell width={480} onClose={onClose} title="Before you trade this token">
     <div className="px-6 py-[26px]">
-      <div className="mb-[18px] font-serif text-[22px] font-semibold text-[#161511]">Before you trade this token</div>
+      <div className="mb-[18px] font-serif text-[22px] font-semibold text-[#161511]">
+        Before you trade this token
+      </div>
       <div className="mb-[22px] flex flex-col gap-3.5">
         {[
           'This is a real token whose price goes up and down.',
@@ -490,7 +565,10 @@ const InterstitialModal: FC<{ handle: string; onClose: () => void }> = ({ onClos
         ))}
       </div>
       <div className="flex gap-3">
-        <button onClick={onClose} className="flex-1 rounded-xl bg-[#1a1a17] py-3.5 text-[14.5px] font-semibold text-white hover:bg-black">
+        <button
+          onClick={onClose}
+          className="flex-1 rounded-xl bg-[#1a1a17] py-3.5 text-[14.5px] font-semibold text-white hover:bg-black"
+        >
           I understand — show the market
         </button>
       </div>
@@ -514,7 +592,12 @@ const TokenModals: FC<{
   onSell: (tokens: number) => Promise<void>;
   /** refund.go Refund — the pro-rata exit, and the only rail that works once the market winds down. */
   onRedeem: (tokens: number) => Promise<void>;
-  onSpend: (input: { offeringId: number; usd: number; deadlineDays: number; question: string }) => Promise<void>;
+  onSpend: (input: {
+    offeringId: number;
+    usd: number;
+    deadlineDays: number;
+    question: string;
+  }) => Promise<void>;
   onTransfer: (to: string, tokens: number) => Promise<void>;
   onClose: () => void;
 }> = ({ dialog, market, service, onBuy, onSell, onRedeem, onSpend, onTransfer, onClose }) => {

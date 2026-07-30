@@ -1,6 +1,7 @@
 import { Metadata } from 'next';
 import React, { PropsWithChildren } from 'react';
 import { notFound } from 'next/navigation';
+import { siteConfig } from '@ui/config/site';
 import { getPostCached } from '@/blog/lib/cached-api';
 import { liteEntryForPermlinkCached } from '@/blog/lib/lite/render/lite-entry-cached';
 import { liteRecordExists } from '@/blog/lib/lite/render/lite-entry';
@@ -12,6 +13,12 @@ import { isValidUserParam } from '@/blog/utils/validate-links';
 import { getLogger } from '@ui/lib/logging';
 
 const logger = getLogger('app');
+
+// Matches app/layout.tsx's SITE_DESC — not imported (that constant isn't
+// exported) but kept word-for-word so the error-path fallback here reads as
+// the same site, not a second one.
+const SITE_DESC =
+  'Communities without borders. A social network owned and operated by its users, powered by Hive.';
 
 export async function generateMetadata({
   params
@@ -51,8 +58,8 @@ export async function generateMetadata({
       // for a name anyone could have registered.
       (isLumenPermlink(permlink) && (await liteRecordExists(permlink))
         ? null
-        : (await getPostCached(author, permlink, observer).catch(() => null)) ??
-          (await liteEntryForPermlinkCached(permlink, observer, viewerUserId)));
+        : ((await getPostCached(author, permlink, observer).catch(() => null)) ??
+          (await liteEntryForPermlinkCached(permlink, observer, viewerUserId))));
 
     // On the raw on-chain URL — the one every other Hive front end links — the post
     // arrives unresolved: the shared publishing account, and the "RE: <container>"
@@ -62,7 +69,7 @@ export async function generateMetadata({
     if (post && !post._lite) await attachLiteIdentities([post]);
 
     const realTitle = post?._lite?.title || post?.title;
-    const title = realTitle ? `${realTitle} ` : 'Hive Blog';
+    const title = realTitle ? `${realTitle} ` : siteConfig.name;
     const description =
       post?.json_metadata?.summary ||
       post?.json_metadata?.description ||
@@ -90,11 +97,11 @@ export async function generateMetadata({
   } catch (error) {
     logger.error(error, 'Error in generateMetadata');
     return {
-      title: 'Hive',
-      description: 'Hive: Communities Without Borders.',
+      title: siteConfig.name,
+      description: SITE_DESC,
       openGraph: {
-        title: 'Hive',
-        description: 'Hive: Communities Without Borders.'
+        title: siteConfig.name,
+        description: SITE_DESC
       }
     };
   }

@@ -30,6 +30,11 @@ export function useProposalVoteMutation() {
   return useMutation({
     mutationKey: ['proposalVote'],
     onMutate: async ({ voter, proposalId, approve }: VoteParams) => {
+      // Refuse BEFORE the optimistic update, not just in mutationFn below — the
+      // previous ordering let the heart/pill flip to "supported" for one render
+      // even for a lite account that can never actually vote, only rolling back
+      // after the mutationFn's refuseIfLite threw. See require-full-account.ts.
+      refuseIfLite(user.account_tier, t('proposals.lite_cannot_vote'));
       const queryKey = ['proposalVotes', voter];
       await queryClient.cancelQueries({ queryKey });
       const previous = queryClient.getQueryData<Set<number>>(queryKey);
@@ -49,7 +54,9 @@ export function useProposalVoteMutation() {
     },
     onSuccess: ({ voter, approve }) => {
       toast({
-        title: approve ? t('proposals.vote_toast.supported_title') : t('proposals.vote_toast.unsupported_title'),
+        title: approve
+          ? t('proposals.vote_toast.supported_title')
+          : t('proposals.vote_toast.unsupported_title'),
         description: approve
           ? t('proposals.vote_toast.supported_description')
           : t('proposals.vote_toast.unsupported_description'),

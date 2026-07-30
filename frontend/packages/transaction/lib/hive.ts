@@ -1,5 +1,5 @@
 import { AccountAuthorityUpdateOperation } from '@hiveio/wax';
-import { Entry, IListWitnessVotes, IWitness } from '@hive/common-hiveio-packages/wax';
+import { Entry, IListWitnessVotes, ITrendingTag, IWitness } from '@hive/common-hiveio-packages/wax';
 import { getChain } from './chain';
 
 export interface IDynamicProps {
@@ -55,6 +55,16 @@ export const getWitnessesByVote = async (limit: number): Promise<IWitness[]> => 
     order: 'by_vote_name'
   });
   return response.witnesses;
+};
+
+/**
+ * Fetches the current trending tags, ordered by top_posts descending.
+ *
+ * @param limit max number of tags to return
+ */
+export const getTrendingTags = async (limit: number): Promise<ITrendingTag[]> => {
+  const chain = await getChain();
+  return chain.api.database_api.get_trending_tags(['', limit]);
 };
 
 export const getAuthority = async (username: string): Promise<AccountAuthorityUpdateOperation> => {

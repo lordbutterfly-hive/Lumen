@@ -29,7 +29,8 @@ export interface UseWitnessesDataResult {
   hpAprPercent: number | null;
   /** Current network HBD savings rate (%) — the median of all witnesses' proposed rates. */
   hbdInterestRatePercent: number | null;
-  votesLeft: number;
+  /** null while the viewer's own votes are loading or failed to load — never a confident-but-wrong 30. */
+  votesLeft: number | null;
   ownVotesCount: number;
   proxyAccount: string;
   hasProxy: boolean;
@@ -134,7 +135,11 @@ export function useWitnessesData(): UseWitnessesDataResult {
     headBlock: dgpQuery.data?.head_block_number ?? 0,
     hpAprPercent,
     hbdInterestRatePercent: dgpQuery.data ? dgpQuery.data.hbd_interest_rate / 100 : null,
-    votesLeft: MAX_WITNESS_VOTES - ownVotes.size,
+    // Loading or errored own-votes reads as "unknown," never a confident MAX_WITNESS_VOTES.
+    votesLeft:
+      isLoggedIn && (ownVotesQuery.isLoading || ownVotesQuery.isError)
+        ? null
+        : MAX_WITNESS_VOTES - ownVotes.size,
     ownVotesCount: ownVotes.size,
     proxyAccount: ownAccountQuery.data?.proxy ?? '',
     hasProxy: !!ownAccountQuery.data?.proxy,

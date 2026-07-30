@@ -10,6 +10,8 @@ const Dialog = DialogPrimitive.Root;
 
 const DialogTrigger = DialogPrimitive.Trigger;
 
+const DialogClose = DialogPrimitive.Close;
+
 const DialogPortal = ({ children, ...props }: DialogPrimitive.DialogPortalProps) => (
   <DialogPrimitive.Portal {...props}>
     <div className="fixed inset-0 z-50 flex items-start justify-center sm:items-center">{children}</div>
@@ -47,7 +49,10 @@ const DialogContent = React.forwardRef<
       {...props}
     >
       {children}
-      <DialogPrimitive.Close data-testid="close-dialog" className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
+      <DialogPrimitive.Close
+        data-testid="close-dialog"
+        className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground"
+      >
         <X className="h-4 w-4" />
         <span className="sr-only">Close</span>
       </DialogPrimitive.Close>
@@ -55,6 +60,42 @@ const DialogContent = React.forwardRef<
   </DialogPortal>
 ));
 DialogContent.displayName = DialogPrimitive.Content.displayName;
+
+/**
+ * Same real Radix dialog semantics as `DialogContent` (portal, overlay,
+ * `role="dialog"`, `aria-modal`, focus trap, Escape-to-close, outside-click
+ * close, focus return to the trigger on close) but with none of
+ * `DialogContent`'s opinionated chrome — no default padding/border/shadow/
+ * animation, and no auto-injected close button. For callers that already have
+ * their own fully custom visual design (backdrop, box, close control) and
+ * only want the real dialog *behavior* underneath it, unchanged.
+ */
+const DialogContentBare = React.forwardRef<
+  React.ElementRef<typeof DialogPrimitive.Content>,
+  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
+    /** Overrides the dimming/blur backdrop's classes (merged via `cn`). */
+    overlayClassName?: string;
+    /** Overrides the fixed full-screen positioning wrapper's classes (merged via `cn`). */
+    wrapperClassName?: string;
+  }
+>(({ className, overlayClassName, wrapperClassName, children, ...props }, ref) => (
+  <DialogPrimitive.Portal>
+    <DialogPrimitive.Overlay
+      className={cn(
+        'fixed inset-0 z-50 bg-background/80 backdrop-blur-sm transition-all duration-100 data-[state=closed]:animate-out data-[state=closed]:fade-out data-[state=open]:fade-in',
+        overlayClassName
+      )}
+    />
+    <div
+      className={cn('fixed inset-0 z-50 flex items-start justify-center overflow-y-auto', wrapperClassName)}
+    >
+      <DialogPrimitive.Content ref={ref} className={className} {...props}>
+        {children}
+      </DialogPrimitive.Content>
+    </div>
+  </DialogPrimitive.Portal>
+));
+DialogContentBare.displayName = 'DialogContentBare';
 
 const DialogHeader = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
   <div className={cn('flex flex-col space-y-1.5 text-center sm:text-left', className)} {...props} />
@@ -93,4 +134,14 @@ const DialogDescription = React.forwardRef<
 ));
 DialogDescription.displayName = DialogPrimitive.Description.displayName;
 
-export { Dialog, DialogTrigger, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription };
+export {
+  Dialog,
+  DialogTrigger,
+  DialogClose,
+  DialogContent,
+  DialogContentBare,
+  DialogHeader,
+  DialogFooter,
+  DialogTitle,
+  DialogDescription
+};

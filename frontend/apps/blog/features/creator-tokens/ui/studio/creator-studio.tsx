@@ -8,6 +8,7 @@ import { usdPrice, usdWhole } from '../../market/format';
 import TokenShell from '../token-shell';
 import { writeFailureMessage } from '../write-failure';
 import { MAX_HASH_LEN } from '../../lib/vsc/payload-contract';
+import ModalShell from '../modal-shell';
 
 type Section = 'overview' | 'inbox' | 'offerings' | 'market' | 'billing' | 'earnings';
 const SECTIONS: { id: Section; label: string }[] = [
@@ -21,12 +22,23 @@ const SECTIONS: { id: Section; label: string }[] = [
 
 const tok = (n: number) => n.toFixed(2);
 const Card: FC<{ children: React.ReactNode; className?: string }> = ({ children, className = '' }) => (
-  <div className={`rounded-[18px] border border-[#ebebeb] bg-white p-5 shadow-[0_1px_2px_rgba(20,18,10,0.03)] ${className}`}>{children}</div>
+  <div
+    className={`rounded-[18px] border border-[#ebebeb] bg-white p-5 shadow-[0_1px_2px_rgba(20,18,10,0.03)] ${className}`}
+  >
+    {children}
+  </div>
 );
-const Stat: FC<{ label: string; value: string; sub?: string; green?: boolean }> = ({ label, value, sub, green }) => (
+const Stat: FC<{ label: string; value: string; sub?: string; green?: boolean }> = ({
+  label,
+  value,
+  sub,
+  green
+}) => (
   <div>
     <div className="text-[12px] font-semibold uppercase tracking-wide text-[#9ca3af]">{label}</div>
-    <div className={`mt-1 text-[22px] font-bold tabular-nums ${green ? 'text-[#2f7d4f]' : 'text-[#161511]'}`}>{value}</div>
+    <div className={`mt-1 text-[22px] font-bold tabular-nums ${green ? 'text-[#2f7d4f]' : 'text-[#161511]'}`}>
+      {value}
+    </div>
     {sub ? <div className="mt-0.5 text-[12.5px] text-[#6b7280]">{sub}</div> : null}
   </div>
 );
@@ -121,157 +133,181 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
   const answerHasPipe = text.includes('|');
   const answerValid = text.trim().length > 0 && text.trim().length <= MAX_HASH_LEN && !answerHasPipe;
   return (
-    <div onClick={onClose} className="fixed inset-0 z-[60] flex items-center justify-center bg-[rgba(20,18,10,0.4)] p-5 backdrop-blur-[2px]">
-      <div onClick={(e) => e.stopPropagation()} className="w-[500px] max-w-full rounded-[20px] bg-white p-6 shadow-[0_20px_60px_rgba(20,18,10,0.25)]">
-        <div className="mb-2 font-serif text-xl font-semibold text-[#161511]">Mark this job delivered</div>
-        {/* The contract carries a REFERENCE, not the brief (USER RULING
+    <ModalShell width={500} onClose={onClose} title="Mark this job delivered" className="p-6">
+      <div className="mb-2 font-serif text-xl font-semibold text-[#161511]">Mark this job delivered</div>
+      {/* The contract carries a REFERENCE, not the brief (USER RULING
             2026-07-28): it facilitates payment and reputation, and the two
             parties arrange the work between themselves. Showing the reference is
             honest; pretending a message arrived here would not be. */}
-        <div className="mb-3 rounded-[10px] border border-[#ebebeb] bg-[#f6f7f8] px-3.5 py-3 text-[13px] text-[#4b5563]">
-          Reference <strong className="font-mono">{ask.contentHash || '—'}</strong> · from @{ask.asker}
-        </div>
-        <p className="mb-3 text-[13px] leading-[1.5] text-[#6b7280]">
-          Arrange and deliver the work with @{ask.asker} however you normally would. Marking it delivered releases the
-          escrow to you — and the buyer then rates it, which is what your token’s reputation is built from.
-        </p>
-        {/* BOUNDED to exactly what core/ask.go:515-523 accepts. This box invites
+      <div className="mb-3 rounded-[10px] border border-[#ebebeb] bg-[#f6f7f8] px-3.5 py-3 text-[13px] text-[#4b5563]">
+        Reference <strong className="font-mono">{ask.contentHash || '—'}</strong> · from @{ask.asker}
+      </div>
+      <p className="mb-3 text-[13px] leading-[1.5] text-[#6b7280]">
+        Arrange and deliver the work with @{ask.asker} however you normally would. Marking it delivered
+        releases the escrow to you — and the buyer then rates it, which is what your token’s reputation is
+        built from.
+      </p>
+      {/* BOUNDED to exactly what core/ask.go:515-523 accepts. This box invites
             a link, and a tracking URL over MAX_HASH_LEN characters — or one
             carrying a "|" in a query parameter — is completely ordinary. The
             contract refuses both, but only AFTER the creator has signed with
             their active key and paid resource credits, and the escrow then does
             not release. Enforce it here, where it costs nothing. */}
-        <textarea
-          value={text}
-          maxLength={MAX_HASH_LEN}
-          onChange={(e) => {
-            setText(e.target.value);
-            setFailure(null);
-          }}
-          placeholder="Where did you deliver it? A link, a ticket number, “sent by email”…"
-          className="h-[130px] w-full resize-y rounded-xl border border-[#e4e6e9] px-4 py-3 font-serif text-[15px] leading-[1.5] text-[#161511] outline-none focus:border-[#c0392b]"
-        />
-        <div className="mt-1 flex justify-between text-[11.5px] text-[#9ca3af]">
-          <span className={answerHasPipe ? 'font-semibold text-[#c0392b]' : ''}>
-            {answerHasPipe ? 'Remove the “|” — the chain refuses it in this field.' : 'Stored on chain as a public reference.'}
-          </span>
-          <span className="tabular-nums">
-            {text.length}/{MAX_HASH_LEN}
-          </span>
-        </div>
-        <div className="mt-3 rounded-[10px] bg-[#f0f7f2] px-3.5 py-2.5 text-[13px] text-[#2f7d4f]">
-          This pays you <strong>{tok(ask.tokensEscrowed)} tokens</strong> and closes the job. It can’t be undone — and the
-          buyer rates it afterwards.
-        </div>
-        <div className="mt-4 flex gap-3">
-          {/* DECLINE, given equal weight to Cancel. It is the creator's free,
+      <textarea
+        value={text}
+        maxLength={MAX_HASH_LEN}
+        onChange={(e) => {
+          setText(e.target.value);
+          setFailure(null);
+        }}
+        placeholder="Where did you deliver it? A link, a ticket number, “sent by email”…"
+        className="h-[130px] w-full resize-y rounded-xl border border-[#e4e6e9] px-4 py-3 font-serif text-[15px] leading-[1.5] text-[#161511] outline-none focus:border-[#c0392b]"
+      />
+      <div className="mt-1 flex justify-between text-[11.5px] text-[#9ca3af]">
+        <span className={answerHasPipe ? 'font-semibold text-[#c0392b]' : ''}>
+          {answerHasPipe
+            ? 'Remove the “|” — the chain refuses it in this field.'
+            : 'Stored on chain as a public reference.'}
+        </span>
+        <span className="tabular-nums">
+          {text.length}/{MAX_HASH_LEN}
+        </span>
+      </div>
+      <div className="mt-3 rounded-[10px] bg-[#f0f7f2] px-3.5 py-2.5 text-[13px] text-[#2f7d4f]">
+        This pays you <strong>{tok(ask.tokensEscrowed)} tokens</strong> and closes the job. It can’t be undone
+        — and the buyer rates it afterwards.
+      </div>
+      <div className="mt-4 flex gap-3">
+        {/* DECLINE, given equal weight to Cancel. It is the creator's free,
               honest "no": the asker gets everything back INCLUDING the
               commission, and it is explicitly not a miss against the delivery
               record. A studio that offered only Answer would push a creator to
               take a black mark for work they simply cannot do. */}
-          <button
-            onClick={async () => {
-              if (busy) return;
-              setBusy(true);
-              setFailure(null);
-              try {
-                await studio.decline({ seq: ask.seq, deadlineBlock: ask.deadlineBlock });
-                onClose();
-              } catch (err) {
-                // The REAL reason, not a guess. See ../write-failure.ts.
-                setFailure(writeFailureMessage(err, 'That didn’t go through.'));
-              } finally {
-                setBusy(false);
-              }
-            }}
-            disabled={busy}
-            className="flex-1 rounded-xl border border-[#e4e6e9] py-3 text-[14px] font-semibold text-[#6b7280] disabled:opacity-50"
-          >
-            Decline &amp; refund
-          </button>
-          <button
-            onClick={async () => {
-              if (busy || !answerValid) return;
-              setBusy(true);
-              setFailure(null);
-              try {
-                // answerHash is the creator's own delivery NOTE/reference — a
-                // link, a ticket number, "sent by email". The chain records that
-                // something was handed over and pays out; it never judges what.
-                await studio.answer({ seq: ask.seq, deadlineBlock: ask.deadlineBlock, answerHash: text.trim() });
-                onClose();
-              } catch (err) {
-                // The REAL reason, not a guess. See ../write-failure.ts.
-                setFailure(writeFailureMessage(err, 'That didn’t go through.'));
-              } finally {
-                setBusy(false);
-              }
-            }}
-            disabled={busy || !answerValid}
-            className="flex-1 rounded-xl bg-[#c0392b] py-3 text-[14px] font-semibold text-white hover:bg-[#96271b] disabled:opacity-50"
-          >
-            {busy ? 'Confirm in your wallet…' : 'Mark as delivered'}
-          </button>
-        </div>
-        {failure ? (
-          <div className="mt-3 text-center text-[12.5px] font-semibold text-[#c0392b]">{failure}</div>
-        ) : null}
+        <button
+          onClick={async () => {
+            if (busy) return;
+            setBusy(true);
+            setFailure(null);
+            try {
+              await studio.decline({ seq: ask.seq, deadlineBlock: ask.deadlineBlock });
+              onClose();
+            } catch (err) {
+              // The REAL reason, not a guess. See ../write-failure.ts.
+              setFailure(writeFailureMessage(err, 'That didn’t go through.'));
+            } finally {
+              setBusy(false);
+            }
+          }}
+          disabled={busy}
+          className="flex-1 rounded-xl border border-[#e4e6e9] py-3 text-[14px] font-semibold text-[#6b7280] disabled:opacity-50"
+        >
+          Decline &amp; refund
+        </button>
+        <button
+          onClick={async () => {
+            if (busy || !answerValid) return;
+            setBusy(true);
+            setFailure(null);
+            try {
+              // answerHash is the creator's own delivery NOTE/reference — a
+              // link, a ticket number, "sent by email". The chain records that
+              // something was handed over and pays out; it never judges what.
+              await studio.answer({
+                seq: ask.seq,
+                deadlineBlock: ask.deadlineBlock,
+                answerHash: text.trim()
+              });
+              onClose();
+            } catch (err) {
+              // The REAL reason, not a guess. See ../write-failure.ts.
+              setFailure(writeFailureMessage(err, 'That didn’t go through.'));
+            } finally {
+              setBusy(false);
+            }
+          }}
+          disabled={busy || !answerValid}
+          className="flex-1 rounded-xl bg-[#c0392b] py-3 text-[14px] font-semibold text-white hover:bg-[#96271b] disabled:opacity-50"
+        >
+          {busy ? 'Confirm in your wallet…' : 'Mark as delivered'}
+        </button>
       </div>
-    </div>
+      {failure ? (
+        <div className="mt-3 text-center text-[12.5px] font-semibold text-[#c0392b]">{failure}</div>
+      ) : null}
+    </ModalShell>
   );
 };
 
-const RetireModal: FC<{ handle: string; onConfirm: () => Promise<void>; onClose: () => void }> = ({ handle, onConfirm, onClose }) => {
+const RetireModal: FC<{ handle: string; onConfirm: () => Promise<void>; onClose: () => void }> = ({
+  handle,
+  onConfirm,
+  onClose
+}) => {
   const [confirm, setConfirm] = useState('');
   const [failure, setFailure] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const ok = confirm.trim().toLowerCase().replace(/^@/, '') === handle.toLowerCase();
   return (
-    <div onClick={onClose} className="fixed inset-0 z-[60] flex items-center justify-center bg-[rgba(20,18,10,0.4)] p-5 backdrop-blur-[2px]">
-      <div onClick={(e) => e.stopPropagation()} className="w-[500px] max-w-full rounded-[20px] border border-[#f0c9c2] bg-white p-6 shadow-[0_20px_60px_rgba(20,18,10,0.25)]">
-        <div className="mb-2 font-serif text-xl font-semibold text-[#c0392b]">End your creator token?</div>
-        <ul className="mb-4 space-y-1.5 font-serif text-[13.5px] leading-[1.5] text-[#4b5563]">
-          <li>· The market freezes now — no new buys or asks.</li>
-          <li>· You’re removed from discovery.</li>
-          <li>· Every holder is refunded at the floor.</li>
-          <li>· Asks you’ve received still resolve — answer them to get paid.</li>
-          <li>· Your delivery record is lost — coming back means a new token.</li>
-          <li>· This can’t be undone.</li>
-        </ul>
-        <label className="mb-1.5 block text-[12.5px] font-semibold text-[#6b7280]">Type your handle (@{handle}) to confirm</label>
-        <input value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder={`@${handle}`} className="mb-4 w-full rounded-xl border border-[#e4e6e9] px-4 py-3 text-[15px] font-semibold outline-none" />
-        <div className="flex gap-3">
-          <button onClick={onClose} className="flex-1 rounded-xl border border-[#e4e6e9] py-3 text-[14px] font-semibold text-[#6b7280]">Cancel</button>
-          <button
-            onClick={async () => {
-              if (!ok || busy) return;
-              // Retire is IRREVERSIBLE on-chain. Close only after the broadcast
-              // resolves — closing early would tell a creator they had ended
-              // their market while the signer was still open, and there is no
-              // undo to fall back on.
-              setBusy(true);
-              setFailure(null);
-              try {
-                await onConfirm();
-                onClose();
-              } catch (err) {
-                // The REAL reason, not a guess. See ../write-failure.ts.
-                setFailure(writeFailureMessage(err, 'Ending this token didn’t go through.'));
-              } finally {
-                setBusy(false);
-              }
-            }}
-            disabled={!ok || busy}
-            className="flex-1 rounded-xl bg-[#c0392b] py-3 text-[14px] font-semibold text-white hover:bg-[#96271b] disabled:opacity-50"
-          >
-            End my token
-          </button>
-        </div>
-        {failure ? (
-          <div className="mt-3 text-center text-[12.5px] font-semibold text-[#c0392b]">{failure}</div>
-        ) : null}
+    <ModalShell
+      width={500}
+      onClose={onClose}
+      title="End your creator token?"
+      className="border border-[#f0c9c2] p-6"
+    >
+      <div className="mb-2 font-serif text-xl font-semibold text-[#c0392b]">End your creator token?</div>
+      <ul className="mb-4 space-y-1.5 font-serif text-[13.5px] leading-[1.5] text-[#4b5563]">
+        <li>· The market freezes now — no new buys or asks.</li>
+        <li>· You’re removed from discovery.</li>
+        <li>· Every holder is refunded at the floor.</li>
+        <li>· Asks you’ve received still resolve — answer them to get paid.</li>
+        <li>· Your delivery record is lost — coming back means a new token.</li>
+        <li>· This can’t be undone.</li>
+      </ul>
+      <label className="mb-1.5 block text-[12.5px] font-semibold text-[#6b7280]">
+        Type your handle (@{handle}) to confirm
+      </label>
+      <input
+        value={confirm}
+        onChange={(e) => setConfirm(e.target.value)}
+        placeholder={`@${handle}`}
+        className="mb-4 w-full rounded-xl border border-[#e4e6e9] px-4 py-3 text-[15px] font-semibold outline-none focus:border-[#c0392b] focus:ring-1 focus:ring-[#c0392b]"
+      />
+      <div className="flex gap-3">
+        <button
+          onClick={onClose}
+          className="flex-1 rounded-xl border border-[#e4e6e9] py-3 text-[14px] font-semibold text-[#6b7280]"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={async () => {
+            if (!ok || busy) return;
+            // Retire is IRREVERSIBLE on-chain. Close only after the broadcast
+            // resolves — closing early would tell a creator they had ended
+            // their market while the signer was still open, and there is no
+            // undo to fall back on.
+            setBusy(true);
+            setFailure(null);
+            try {
+              await onConfirm();
+              onClose();
+            } catch (err) {
+              // The REAL reason, not a guess. See ../write-failure.ts.
+              setFailure(writeFailureMessage(err, 'Ending this token didn’t go through.'));
+            } finally {
+              setBusy(false);
+            }
+          }}
+          disabled={!ok || busy}
+          className="flex-1 rounded-xl bg-[#c0392b] py-3 text-[14px] font-semibold text-white hover:bg-[#96271b] disabled:opacity-50"
+        >
+          End my token
+        </button>
       </div>
-    </div>
+      {failure ? (
+        <div className="mt-3 text-center text-[12.5px] font-semibold text-[#c0392b]">{failure}</div>
+      ) : null}
+    </ModalShell>
   );
 };
 
@@ -297,9 +333,9 @@ const NewOfferingRow: FC<{ studio: LiveStudio }> = ({ studio }) => {
             setFailure(null);
           }}
           placeholder="e.g. Review my code"
-          className="min-w-[200px] flex-1 rounded-[10px] border border-[#e4e6e9] px-3 py-2 text-[14px] outline-none"
+          className="min-w-[200px] flex-1 rounded-[10px] border border-[#e4e6e9] px-3 py-2 text-[14px] outline-none focus:border-[#c0392b] focus:ring-1 focus:ring-[#c0392b]"
         />
-        <div className="flex items-center rounded-[10px] border border-[#e4e6e9] px-3 py-2">
+        <div className="flex items-center rounded-[10px] border border-[#e4e6e9] px-3 py-2 focus-within:border-[#c0392b] focus-within:ring-1 focus-within:ring-[#c0392b]">
           <span className="font-bold text-[#9ca3af]">$</span>
           <input
             value={price}
@@ -331,9 +367,7 @@ const NewOfferingRow: FC<{ studio: LiveStudio }> = ({ studio }) => {
           Add
         </button>
       </div>
-      {failure ? (
-        <div className="mt-2 text-[12px] font-semibold text-[#c0392b]">{failure}</div>
-      ) : null}
+      {failure ? <div className="mt-2 text-[12px] font-semibold text-[#c0392b]">{failure}</div> : null}
     </div>
   );
 };
@@ -363,7 +397,8 @@ const CreatorStudio: FC = () => {
         <div className="mx-auto max-w-[560px] pt-16 text-center">
           <h1 className="font-serif text-3xl font-semibold text-[#161511]">Creator studio</h1>
           <p className="mt-3 font-serif text-[15px] leading-[1.6] text-[#6b7280]">
-            This account can’t sign transactions yet, so it can’t run a creator token. Upgrade to a full account first.
+            This account can’t sign transactions yet, so it can’t run a creator token. Upgrade to a full
+            account first.
           </p>
         </div>
       </TokenShell>
@@ -384,9 +419,13 @@ const CreatorStudio: FC = () => {
         <div className="mx-auto max-w-[560px] pt-16 text-center">
           <h1 className="font-serif text-3xl font-semibold text-[#161511]">Launch your creator token</h1>
           <p className="mt-3 font-serif text-[15px] leading-[1.6] text-[#6b7280]">
-            One token, bound to your account, that trades on a live market and is spent on your services. Free to launch.
+            One token, bound to your account, that trades on a live market and is spent on your services. Free
+            to launch.
           </p>
-          <a href="/creators/launch" className="mt-6 inline-block rounded-[13px] bg-[#c0392b] px-6 py-3 text-[15px] font-bold text-white hover:bg-[#96271b]">
+          <a
+            href="/creators/launch"
+            className="mt-6 inline-block rounded-[13px] bg-[#c0392b] px-6 py-3 text-[15px] font-bold text-white hover:bg-[#96271b]"
+          >
             Open the launch wizard
           </a>
         </div>
@@ -400,8 +439,16 @@ const CreatorStudio: FC = () => {
 
   const banner = overdue ? (
     <div className="mb-5 flex items-center justify-between gap-3 rounded-[14px] border border-[#f6e2c4] bg-[#fdf6ec] px-5 py-3.5">
-      <span className="text-[14px] font-semibold text-[#b45309]">Your listing has lapsed — renew to stay in discovery. Answering and cashing out still work.</span>
-      <button onClick={() => void studio.renew(1)} disabled={studio.isBusy} className="rounded-[10px] bg-[#b45309] px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-50">Renew ~$10</button>
+      <span className="text-[14px] font-semibold text-[#b45309]">
+        Your listing has lapsed — renew to stay in discovery. Answering and cashing out still work.
+      </span>
+      <button
+        onClick={() => void studio.renew(1)}
+        disabled={studio.isBusy}
+        className="rounded-[10px] bg-[#b45309] px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-50"
+      >
+        Renew ~$10
+      </button>
     </div>
   ) : null;
 
@@ -427,7 +474,11 @@ const CreatorStudio: FC = () => {
               }`}
             >
               {s.label}
-              {s.id === 'inbox' && inbox.length > 0 ? <span className="ml-1.5 rounded-full bg-[#c0392b] px-1.5 text-[11px] text-white">{inbox.length}</span> : null}
+              {s.id === 'inbox' && inbox.length > 0 ? (
+                <span className="ml-1.5 rounded-full bg-[#c0392b] px-1.5 text-[11px] text-white">
+                  {inbox.length}
+                </span>
+              ) : null}
             </button>
           ))}
         </div>
@@ -436,19 +487,56 @@ const CreatorStudio: FC = () => {
 
         {section === 'overview' ? (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Card><Stat label="Token price" value={usdPrice(market.priceUsd)} sub={`Floor ${usdPrice(market.floorUsd)} · cap ${supplyPct}% used`} /></Card>
-            <Card><Stat label="Market cap" value={usdWhole(market.marketCapUsd)} sub={`${market.supply.toLocaleString('en-US')} of ${market.cap.toLocaleString('en-US')} tokens`} /></Card>
-            <Card><Stat label="Delivery" value={`${market.delivery.completionPct}%`} sub={`${market.delivery.answered}/${market.delivery.total} answered · ${market.delivery.typicalResponse}`} /></Card>
-            <Card><Stat label="Subscription" value={overdue ? 'Lapsed' : `${subDaysLeft} days left`} sub={overdue ? 'Renew to stay listed' : `Renew ~$10`} /></Card>
-            <Card><Stat label="Trade-fee share (claimable)" value={usdWhole(tradeFeeClaimableUsd)} green sub="Your 5% of the token’s trades" /></Card>
-            <Card><Stat label="Requests waiting" value={String(inbox.length)} sub="In your Inbox" /></Card>
+            <Card>
+              <Stat
+                label="Token price"
+                value={usdPrice(market.priceUsd)}
+                sub={`Floor ${usdPrice(market.floorUsd)} · cap ${supplyPct}% used`}
+              />
+            </Card>
+            <Card>
+              <Stat
+                label="Market cap"
+                value={usdWhole(market.marketCapUsd)}
+                sub={`${market.supply.toLocaleString('en-US')} of ${market.cap.toLocaleString('en-US')} tokens`}
+              />
+            </Card>
+            <Card>
+              <Stat
+                label="Delivery"
+                value={`${market.delivery.completionPct}%`}
+                sub={`${market.delivery.answered}/${market.delivery.total} answered · ${market.delivery.typicalResponse}`}
+              />
+            </Card>
+            <Card>
+              <Stat
+                label="Subscription"
+                value={overdue ? 'Lapsed' : `${subDaysLeft} days left`}
+                sub={overdue ? 'Renew to stay listed' : `Renew ~$10`}
+              />
+            </Card>
+            <Card>
+              <Stat
+                label="Trade-fee share (claimable)"
+                value={usdWhole(tradeFeeClaimableUsd)}
+                green
+                sub="Your 5% of the token’s trades"
+              />
+            </Card>
+            <Card>
+              <Stat label="Requests waiting" value={String(inbox.length)} sub="In your Inbox" />
+            </Card>
           </div>
         ) : null}
 
         {section === 'inbox' ? (
           <div className="flex flex-col gap-2.5">
             {inbox.length === 0 ? (
-              <Card><p className="py-6 text-center font-serif text-sm text-[#9ca3af]">No requests waiting. Nice — you’re all caught up.</p></Card>
+              <Card>
+                <p className="py-6 text-center font-serif text-sm text-[#9ca3af]">
+                  No requests waiting. Nice — you’re all caught up.
+                </p>
+              </Card>
             ) : (
               // Rendered from the PORTFOLIO row (money + due label, already
               // adapted) but opened with the RAW escrow, because answer/decline
@@ -459,11 +547,20 @@ const CreatorStudio: FC = () => {
                 <Card key={a.id} className={a.urgent ? 'border-[#f6e2c4] bg-[#fdf6ec]' : ''}>
                   <div className="flex items-center justify-between gap-3">
                     <div className="text-[14.5px] font-semibold text-[#161511]">{a.service}</div>
-                    <div className={`text-[12.5px] font-semibold ${a.urgent ? 'text-[#b45309]' : 'text-[#6b7280]'}`}>{a.dueLabel}</div>
+                    <div
+                      className={`text-[12.5px] font-semibold ${a.urgent ? 'text-[#b45309]' : 'text-[#6b7280]'}`}
+                    >
+                      {a.dueLabel}
+                    </div>
                   </div>
-                  <div className="mt-1 text-[12.5px] tabular-nums text-[#6b7280]">{usdWhole(a.costUsd)} · {tok(a.tokens)} tokens escrowed</div>
+                  <div className="mt-1 text-[12.5px] tabular-nums text-[#6b7280]">
+                    {usdWhole(a.costUsd)} · {tok(a.tokens)} tokens escrowed
+                  </div>
                   <div className="mt-3">
-                    <button onClick={() => setAnswering(rawInbox[i])} className="rounded-[10px] bg-[#c0392b] px-4 py-2 text-[13px] font-semibold text-white hover:bg-[#96271b]">
+                    <button
+                      onClick={() => setAnswering(rawInbox[i])}
+                      className="rounded-[10px] bg-[#c0392b] px-4 py-2 text-[13px] font-semibold text-white hover:bg-[#96271b]"
+                    >
                       Answer or decline
                     </button>
                   </div>
@@ -475,11 +572,13 @@ const CreatorStudio: FC = () => {
 
         {section === 'offerings' ? (
           <Card>
-            <div className="mb-3 font-serif text-lg font-semibold text-[#161511]">Your services &amp; prices</div>
+            <div className="mb-3 font-serif text-lg font-semibold text-[#161511]">
+              Your services &amp; prices
+            </div>
             <p className="mb-4 text-[13px] text-[#6b7280]">
-              Buyers pay these in your token at the live price. Set the dollar price — the token amount follows the market.
-              A price can move at most 2× in any 7 days, and that limit follows the SERVICE NAME, so renaming or
-              re-creating one won’t reset it.
+              Buyers pay these in your token at the live price. Set the dollar price — the token amount
+              follows the market. A price can move at most 2× in any 7 days, and that limit follows the
+              SERVICE NAME, so renaming or re-creating one won’t reset it.
             </p>
             <div className="flex flex-col gap-3">
               {studio.offerings.length === 0 ? (
@@ -488,7 +587,10 @@ const CreatorStudio: FC = () => {
                 </p>
               ) : (
                 studio.offerings.map((o) => (
-                  <div key={o.offeringId} className="flex items-center justify-between gap-3 rounded-xl border border-[#e4e6e9] px-4 py-3">
+                  <div
+                    key={o.offeringId}
+                    className="flex items-center justify-between gap-3 rounded-xl border border-[#e4e6e9] px-4 py-3"
+                  >
                     <div className="min-w-0">
                       <TitleInput
                         value={o.title}
@@ -496,13 +598,20 @@ const CreatorStudio: FC = () => {
                         onCommit={(title) => studio.setOfferingTitle({ offeringId: o.offeringId, title })}
                       />
                       <div className="text-[12px] text-[#9ca3af]">
-                        {market.priceUsd > 0 ? `≈ ${tok(o.priceHbd / market.priceUsd)} tokens at today’s price` : 'Token price unavailable'}
+                        {market.priceUsd > 0
+                          ? `≈ ${tok(o.priceHbd / market.priceUsd)} tokens at today’s price`
+                          : 'Token price unavailable'}
                       </div>
                     </div>
                     <div className="flex flex-shrink-0 items-center gap-2">
-                      <div className="flex items-center rounded-[10px] border border-[#e4e6e9] px-3 py-2">
+                      <div className="flex items-center rounded-[10px] border border-[#e4e6e9] px-3 py-2 focus-within:border-[#c0392b] focus-within:ring-1 focus-within:ring-[#c0392b]">
                         <span className="font-bold text-[#9ca3af]">$</span>
-                        <PriceInput value={o.priceHbd} onCommit={(usd) => studio.setOfferingPrice({ offeringId: o.offeringId, priceUsd: usd })} />
+                        <PriceInput
+                          value={o.priceHbd}
+                          onCommit={(usd) =>
+                            studio.setOfferingPrice({ offeringId: o.offeringId, priceUsd: usd })
+                          }
+                        />
                       </div>
                       <button
                         onClick={() => void studio.deleteOffering(o.offeringId)}
@@ -524,17 +633,33 @@ const CreatorStudio: FC = () => {
         {section === 'market' ? (
           <Card>
             <div className="flex items-end justify-between">
-              <Stat label="Price" value={usdPrice(market.priceUsd)} sub={`Floor ${usdPrice(market.floorUsd)}`} />
+              <Stat
+                label="Price"
+                value={usdPrice(market.priceUsd)}
+                sub={`Floor ${usdPrice(market.floorUsd)}`}
+              />
               <Stat label="Market cap" value={usdWhole(market.marketCapUsd)} />
               <Stat label="Reserve" value={usdWhole(market.reserveUsd)} sub="Backs the floor" />
             </div>
             <div className="mt-5">
-              <div className="mb-1 flex justify-between text-[12.5px] text-[#6b7280]"><span>Supply</span><span className="tabular-nums">{market.supply.toLocaleString('en-US')} / {market.cap.toLocaleString('en-US')}</span></div>
-              <div className="h-2 overflow-hidden rounded-full bg-[#f1f3f5]"><div className="h-full bg-[#c0392b]" style={{ width: `${supplyPct}%` }} /></div>
+              <div className="mb-1 flex justify-between text-[12.5px] text-[#6b7280]">
+                <span>Supply</span>
+                <span className="tabular-nums">
+                  {market.supply.toLocaleString('en-US')} / {market.cap.toLocaleString('en-US')}
+                </span>
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-[#f1f3f5]">
+                <div className="h-full bg-[#c0392b]" style={{ width: `${supplyPct}%` }} />
+              </div>
             </div>
             <div className="mt-5 flex items-center gap-2">
               <span className="text-[13px] text-[#6b7280]">Raise cap to</span>
-              <input value={capInput} onChange={(e) => setCapInput(e.target.value)} inputMode="numeric" className="w-[110px] rounded-[10px] border border-[#e4e6e9] px-3 py-2 text-[14px] font-semibold tabular-nums outline-none" />
+              <input
+                value={capInput}
+                onChange={(e) => setCapInput(e.target.value)}
+                inputMode="numeric"
+                className="w-[110px] rounded-[10px] border border-[#e4e6e9] px-3 py-2 text-[14px] font-semibold tabular-nums outline-none focus:border-[#c0392b] focus:ring-1 focus:ring-[#c0392b]"
+              />
               <button
                 onClick={async () => {
                   const v = parseInt(capInput.replace(/[^\d]/g, ''), 10);
@@ -556,10 +681,13 @@ const CreatorStudio: FC = () => {
               >
                 Raise cap
               </button>
-              <span className="text-[12px] text-[#9ca3af]">lower only down to {market.supply.toLocaleString('en-US')} issued</span>
+              <span className="text-[12px] text-[#9ca3af]">
+                lower only down to {market.supply.toLocaleString('en-US')} issued
+              </span>
             </div>
             <p className="mt-4 rounded-[10px] bg-[#f6f7f8] px-3.5 py-3 text-[12.5px] leading-[1.5] text-[#6b7280]">
-              Your token’s price is set by the market — buys raise it, sells lower it. You don’t set the price; you set your <strong>service prices</strong> in dollars.
+              Your token’s price is set by the market — buys raise it, sells lower it. You don’t set the
+              price; you set your <strong>service prices</strong> in dollars.
             </p>
           </Card>
         ) : null}
@@ -567,16 +695,33 @@ const CreatorStudio: FC = () => {
         {section === 'billing' ? (
           <Card>
             <div className="mb-1 font-serif text-lg font-semibold text-[#161511]">Subscription</div>
-            <div className="mb-4 text-[14px] text-[#4b5563]">{overdue ? 'Lapsed — renew to stay listed.' : `Paid up · ${subDaysLeft} days left.`} Staying listed is ~$10/month. First month’s on the house.</div>
-            <button onClick={() => void studio.renew(1)} disabled={studio.isBusy} className="rounded-[11px] bg-[#c0392b] px-5 py-2.5 text-[14px] font-semibold text-white hover:bg-[#96271b] disabled:opacity-50">Renew ~$10</button>
+            <div className="mb-4 text-[14px] text-[#4b5563]">
+              {overdue ? 'Lapsed — renew to stay listed.' : `Paid up · ${subDaysLeft} days left.`} Staying
+              listed is ~$10/month. First month’s on the house.
+            </div>
+            <button
+              onClick={() => void studio.renew(1)}
+              disabled={studio.isBusy}
+              className="rounded-[11px] bg-[#c0392b] px-5 py-2.5 text-[14px] font-semibold text-white hover:bg-[#96271b] disabled:opacity-50"
+            >
+              Renew ~$10
+            </button>
             <p className="mt-4 text-[12.5px] leading-[1.5] text-[#9ca3af]">
-              If you stop paying, your token’s market winds down, holders are refunded at the floor, and your delivery record resets — coming back means a new token. Answering and cashing out are never blocked by billing.
+              If you stop paying, your token’s market winds down, holders are refunded at the floor, and your
+              delivery record resets — coming back means a new token. Answering and cashing out are never
+              blocked by billing.
             </p>
             <div className="mt-5 border-t border-[#f1f3f5] pt-4">
               {market.windingDown ? (
-                <div className="text-[13px] font-semibold text-[#b45309]">This token is winding down — holders are being refunded at the floor. Answering and cashing out still work.</div>
+                <div className="text-[13px] font-semibold text-[#b45309]">
+                  This token is winding down — holders are being refunded at the floor. Answering and cashing
+                  out still work.
+                </div>
               ) : (
-                <button onClick={() => setRetireOpen(true)} className="rounded-[10px] border border-[#f0c9c2] px-4 py-2 text-[13px] font-semibold text-[#c0392b] hover:bg-[#fef2f0]">
+                <button
+                  onClick={() => setRetireOpen(true)}
+                  className="rounded-[10px] border border-[#f0c9c2] px-4 py-2 text-[13px] font-semibold text-[#c0392b] hover:bg-[#fef2f0]"
+                >
                   End this token
                 </button>
               )}
@@ -588,8 +733,17 @@ const CreatorStudio: FC = () => {
           <div className="flex flex-col gap-4">
             <Card>
               <div className="flex items-center justify-between">
-                <Stat label="Trade-fee share" value={usdWhole(tradeFeeClaimableUsd)} green sub="Your 5% of your token’s trades" />
-                <button onClick={() => void studio.claimTradeFees()} disabled={tradeFeeClaimableUsd <= 0 || studio.isBusy} className="rounded-[11px] bg-[#2f7d4f] px-5 py-2.5 text-[14px] font-semibold text-white hover:bg-[#276b43] disabled:opacity-50">
+                <Stat
+                  label="Trade-fee share"
+                  value={usdWhole(tradeFeeClaimableUsd)}
+                  green
+                  sub="Your 5% of your token’s trades"
+                />
+                <button
+                  onClick={() => void studio.claimTradeFees()}
+                  disabled={tradeFeeClaimableUsd <= 0 || studio.isBusy}
+                  className="rounded-[11px] bg-[#2f7d4f] px-5 py-2.5 text-[14px] font-semibold text-white hover:bg-[#276b43] disabled:opacity-50"
+                >
                   {tradeFeeClaimableUsd <= 0 ? 'Claimed' : 'Claim'}
                 </button>
               </div>
@@ -602,11 +756,19 @@ const CreatorStudio: FC = () => {
               <Stat
                 label="Service commission"
                 value={commissionEarnedUsd === null ? '—' : usdWhole(commissionEarnedUsd)}
-                sub={commissionEarnedUsd === null ? 'Not available yet — needs the earnings index' : 'From answered requests'}
+                sub={
+                  commissionEarnedUsd === null
+                    ? 'Not available yet — needs the earnings index'
+                    : 'From answered requests'
+                }
               />
             </Card>
             <Card>
-              <Stat label="Your own holdings" value={`${tok(held)} tokens`} sub={`worth ${usdPrice(held * market.priceUsd)} · floor ${usdPrice(held * market.floorUsd)}`} />
+              <Stat
+                label="Your own holdings"
+                value={`${tok(held)} tokens`}
+                sub={`worth ${usdPrice(held * market.priceUsd)} · floor ${usdPrice(held * market.floorUsd)}`}
+              />
               <div className="mt-4 flex items-center gap-2">
                 <span className="text-[13px] text-[#6b7280]">Cash out</span>
                 <input
@@ -617,7 +779,7 @@ const CreatorStudio: FC = () => {
                   }}
                   placeholder="tokens"
                   inputMode="decimal"
-                  className="w-[110px] rounded-[10px] border border-[#e4e6e9] px-3 py-2 text-[14px] font-semibold tabular-nums outline-none"
+                  className="w-[110px] rounded-[10px] border border-[#e4e6e9] px-3 py-2 text-[14px] font-semibold tabular-nums outline-none focus:border-[#c0392b] focus:ring-1 focus:ring-[#c0392b]"
                 />
                 <button
                   onClick={async () => {
@@ -640,14 +802,23 @@ const CreatorStudio: FC = () => {
               {sellFailure ? (
                 <div className="mt-2 text-[12px] font-semibold text-[#c0392b]">{sellFailure}</div>
               ) : null}
-              <p className="mt-3 text-[12px] leading-[1.5] text-[#9ca3af]">Selling your own tokens returns them to dollars at the market price — it doesn’t affect anyone else’s floor. Never blocked by billing.</p>
+              <p className="mt-3 text-[12px] leading-[1.5] text-[#9ca3af]">
+                Selling your own tokens returns them to dollars at the market price — it doesn’t affect anyone
+                else’s floor. Never blocked by billing.
+              </p>
             </Card>
           </div>
         ) : null}
       </div>
 
       {answering ? <AnswerModal ask={answering} studio={studio} onClose={() => setAnswering(null)} /> : null}
-      {retireOpen ? <RetireModal handle={studio.creator ?? ''} onConfirm={studio.retire} onClose={() => setRetireOpen(false)} /> : null}
+      {retireOpen ? (
+        <RetireModal
+          handle={studio.creator ?? ''}
+          onConfirm={studio.retire}
+          onClose={() => setRetireOpen(false)}
+        />
+      ) : null}
     </TokenShell>
   );
 };

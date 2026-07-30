@@ -45,11 +45,18 @@ export default function WalletRightRail() {
       >
         {t('wallet.market.view_more')}
       </a>
-      {/* Hidden for a lite account. Every tool in here (power up/down, delegate,
-          claim account tokens) is a Hive key operation, and with the queries
-          disabled above its figures would all be ZERO — a card reading
-          "0.000 HP" is a claim about a balance, not an absence of one. */}
-      {!isLite && (
+      {/* Hidden for logged-out and lite accounts. Every tool in here (power
+          up/down, delegate, claim account tokens) is a real, unconditional
+          transactionService call with no tier/login check inside the tool
+          dialogs themselves — this rail was the only gate. It was previously
+          gated on `!isLite` alone, which left it fully visible and clickable
+          for a signed-out visitor too (found during the closeout's own
+          dev-server pass: curled /wallet logged out and the whole Advanced
+          card, including "Claim account tokens", rendered enabled). Lite is
+          additionally hidden because with the account queries disabled above
+          its figures would all be ZERO — a card reading "0.000 HP" is a claim
+          about a balance, not an absence of one. */}
+      {user.isLoggedIn && !isLite && (
         <AdvancedToolsCard
           username={user.username}
           netHp={figures?.netHp ?? ZERO}

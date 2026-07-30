@@ -4,12 +4,10 @@ import { FC } from 'react';
 import { Link } from '@hive/ui';
 import { Icons } from '@ui/components/icons';
 
-import env from '@beam-australia/react-env';
 import { useTranslation } from '../../i18n/client';
 
 const ExploreHive: FC = () => {
   const { t } = useTranslation('common_blog');
-  const walletHost = env('WALLET_ENDPOINT');
   return (
     <Card
       className={cn('my-4 hidden h-fit w-auto flex-col bg-background px-8 text-primary md:flex')}
@@ -54,25 +52,19 @@ const ExploreHive: FC = () => {
             </Link>
           </li>
           <li>
-            <Link
-              href={`${walletHost}/~witnesses`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center hover:text-destructive"
-            >
+            {/* Was an external link to the OLD apps/wallet `/~witnesses` page — a
+                real, in-app /witnesses page exists now (browsable logged-out,
+                voting requires login), so this points there instead of keeping
+                two separate governance UIs alive. */}
+            <Link href="/witnesses" className="flex items-center hover:text-destructive">
               {t('navigation.explore_nav.vote_for_witnesses')}
-              <Icons.externalLink className="ml-1 h-4 w-4" />
             </Link>
           </li>
           <li>
-            <Link
-              href={`${walletHost}/proposals`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center hover:text-destructive"
-            >
+            {/* Same as above: the old apps/wallet `/proposals` page is replaced by
+                the real in-app /proposals page. */}
+            <Link href="/proposals" className="flex items-center hover:text-destructive">
               {t('navigation.explore_nav.hive_proposals')}
-              <Icons.externalLink className="ml-1 h-4 w-4" />
             </Link>
           </li>
         </ul>

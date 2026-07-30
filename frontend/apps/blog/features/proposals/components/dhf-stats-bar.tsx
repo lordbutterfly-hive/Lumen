@@ -1,12 +1,26 @@
 'use client';
 
+import { Skeleton } from '@hive/ui';
 import { useTranslation } from '@/blog/i18n/client';
 import { formatHbd } from '../lib/proposals-format';
 import { DhfStats } from '../lib/proposals-types';
 
 /** Daily funded / HBD stabilizer / max daily budget / total budget — all real chain data. */
-export default function DhfStatsBar({ stats }: { stats: DhfStats }) {
+export default function DhfStatsBar({ stats }: { stats: DhfStats | undefined }) {
   const { t } = useTranslation('common_blog');
+
+  if (!stats) {
+    return (
+      <div
+        className="my-5 flex flex-wrap gap-6 rounded-2xl border border-[#ebebeb] bg-[#fbfbfa] p-[16px_22px] font-sans text-[13.5px] text-[#6b7280]"
+        data-testid="dhf-stats-bar-loading"
+      >
+        {Array.from({ length: 4 }).map((_, index) => (
+          <Skeleton key={index} className="h-4 w-32" />
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div

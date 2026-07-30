@@ -2,6 +2,7 @@ import ProfileChromeSwitch from '@/blog/features/account-profile/redesign/profil
 import { ReactNode } from 'react';
 import { Metadata } from 'next';
 import { dehydrate, Hydrate } from '@tanstack/react-query';
+import { siteConfig } from '@ui/config/site';
 import { getQueryClient } from '@/blog/lib/react-query';
 import { getAccountFullCached } from '@/blog/lib/cached-api';
 import { liteAccountAsProfile } from '@/blog/lib/lite/render/lite-account';
@@ -13,13 +14,19 @@ import { getLogger } from '@ui/lib/logging';
 
 const logger = getLogger('app');
 
+// Matches app/layout.tsx's SITE_DESC — not imported (that constant isn't
+// exported) but kept word-for-word so the fallback title/description here
+// reads as the same site, not a second one.
+const SITE_DESC =
+  'Communities without borders. A social network owned and operated by its users, powered by Hive.';
+
 export async function generateMetadata({ params }: { params: { param: string } }): Promise<Metadata> {
   const raw = params.param;
   // Only process if it looks like a username (starts with @ or %40)
   if (!raw.startsWith('@') && !raw.startsWith('%40')) {
     return {
-      title: 'Hive',
-      description: 'Hive: Communities Without Borders.'
+      title: siteConfig.name,
+      description: SITE_DESC
     };
   }
   const username = raw.startsWith('%40') ? raw.replace('%40', '') : raw.replace('@', '');
@@ -27,12 +34,14 @@ export async function generateMetadata({ params }: { params: { param: string } }
     // Use cached version - deduplicated with Layout's prefetch within the same request
     const account = await getAccountFullCached(username);
     const image = account?.profile?.profile_image || 'https://hive.blog/images/hive-blog-share.png';
+    // "on Hive" here is a factual statement about the chain the account lives
+    // on (Lumen is a Hive frontend), not a branding mismatch — left as-is.
     const about = account?.profile?.about || `Profile of @${username} on Hive.`;
     const title = `Blog ${username}`;
     return {
       title: {
         default: title,
-        template: '%s - Hive'
+        template: `%s - ${siteConfig.name}`
       },
       description: about,
       openGraph: {
@@ -50,11 +59,11 @@ export async function generateMetadata({ params }: { params: { param: string } }
   } catch (error) {
     logger.error(error, 'Error in generateMetadata:');
     return {
-      title: 'Hive',
-      description: 'Hive: Communities Without Borders.',
+      title: siteConfig.name,
+      description: SITE_DESC,
       openGraph: {
-        title: 'Hive',
-        description: 'Hive: Communities Without Borders.'
+        title: siteConfig.name,
+        description: SITE_DESC
       }
     };
   }

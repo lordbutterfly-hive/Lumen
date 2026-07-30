@@ -17,7 +17,8 @@ import { DhfStats, ProposalViewModel } from '../lib/proposals-types';
 
 export interface UseProposalsDataResult {
   proposals: ProposalViewModel[];
-  stats: DhfStats;
+  /** undefined until all three underlying reads resolve — render a skeleton, never a false "0.000 HBD". */
+  stats: DhfStats | undefined;
   returnProposalVoteValueHp: number | undefined;
   isLoading: boolean;
   isError: boolean;
@@ -93,8 +94,7 @@ export function useProposalsData({
 
   return {
     proposals: result.proposals,
-    stats:
-      result.stats ?? { dailyFundedHbd: 0, hbdStabilizerHbd: null, maxDailyBudgetHbd: 0, totalBudgetHbd: 0 },
+    stats: result.stats,
     returnProposalVoteValueHp: result.returnProposalVoteValueHp,
     isLoading: proposalsQuery.isLoading || treasuryQuery.isLoading || hivePerMVestsQuery.isLoading,
     isError: proposalsQuery.isError || treasuryQuery.isError || hivePerMVestsQuery.isError,

@@ -10,6 +10,7 @@ import { StorageCleanup } from '@hive/ui';
 import CondenserMigration from '../components/condenser-migration';
 import { getEnvVersion } from '../lib/env-version';
 import { Open_Sans, Lora } from 'next/font/google';
+import { siteConfig } from '@ui/config/site';
 
 // Redesign typography (design-handoff-v2, 2026-07-21): Open Sans for ALL UI —
 // headers, nav, labels, chips, buttons, tabs, table headers and numbers
@@ -42,8 +43,8 @@ const SITE_DESC =
 const metadata = {
   metadataBase: new URL(process.env.REACT_APP_SITE_DOMAIN || 'https://hive.blog'),
   title: {
-    default: 'Hive',
-    template: '%s - Hive'
+    default: siteConfig.name,
+    template: `%s - ${siteConfig.name}`
   },
   description: SITE_DESC,
   icons: {
@@ -51,20 +52,28 @@ const metadata = {
   },
   openGraph: {
     type: 'website',
-    siteName: 'Hive',
-    title: 'Hive',
+    siteName: siteConfig.name,
+    title: siteConfig.name,
     description: SITE_DESC,
+    // TODO(branding): these still point at hive.blog's own share images — no
+    // Lumen-branded og/twitter share image exists anywhere in public/images/
+    // yet. Left as a real, working image rather than a 404 on a guessed path;
+    // swap once a real asset exists.
     images: ['https://hive.blog/images/hive-blog-share.png']
   },
   twitter: {
     card: 'summary',
-    site: '@hiveblocks',
-    title: '#Hive.io',
+    // No real Lumen social handle exists anywhere in this codebase
+    // (siteConfig.links.twitter is itself a dead '/' placeholder) — omitting
+    // `site` rather than keeping the unrelated official @hiveblocks handle.
+    title: siteConfig.name,
     description: SITE_DESC,
     images: ['https://hive.blog/images/hive-blog-twshare.png']
   },
   other: {
-    'fb:app_id': 'YOUR_FB_APP_ID'
+    // Real placeholder removed: no Facebook App ID is configured anywhere in
+    // this codebase, so the key is simply omitted rather than shipping a
+    // literal 'YOUR_FB_APP_ID' string in production metadata.
   }
 } as const satisfies Metadata;
 
@@ -80,7 +89,7 @@ export function generateMetadata(): Metadata {
       ...Sentry.getTraceData()
     }
   };
-};
+}
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
   // Server-side locale and language handling
@@ -93,11 +102,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   const envVersion = getEnvVersion();
 
   return (
-    <html
-      lang={locale}
-      dir={isRTL ? 'rtl' : 'ltr'}
-      className={`${openSans.variable} ${lora.variable}`}
-    >
+    <html lang={locale} dir={isRTL ? 'rtl' : 'ltr'} className={`${openSans.variable} ${lora.variable}`}>
       <head>
         {/* Use plain script tag for guaranteed synchronous loading of env globals */}
         <script src={`${basePath}/__ENV.js?v=${envVersion}`} />

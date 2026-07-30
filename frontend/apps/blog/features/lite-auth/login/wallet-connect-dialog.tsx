@@ -1,6 +1,7 @@
 'use client';
 
 import { FC, useState } from 'react';
+import { Dialog, DialogContentBare, DialogDescription, DialogTitle } from '@ui/components/dialog';
 import { useLiteLogin, type WalletChallenge, type WalletChain } from './use-lite-login';
 import {
   connectWallet,
@@ -51,7 +52,8 @@ const COPY = {
     connectToggle: 'Use a connected wallet instead',
     getMessage: 'Get sign-in message',
     signHeading: 'Sign to prove ownership',
-    signHelp: 'Sign this message in your wallet — it’s free and moves no funds. Then paste the signature below.',
+    signHelp:
+      'Sign this message in your wallet — it’s free and moves no funds. Then paste the signature below.',
     sigPlaceholder: 'Paste the signature from your wallet',
     verify: 'Verify & sign in',
     working: 'Working…',
@@ -131,15 +133,27 @@ const WalletConnectDialog: FC<Props> = ({ chain, onClose, onAuthenticated, onNee
     settle(outcome);
   };
 
+  // Same real Radix `Dialog` treatment as the creator-token money modals
+  // (features/creator-tokens/ui/modal-shell.tsx) — role="dialog", aria-modal,
+  // a focus trap, Escape-to-close and outside-click-to-close, instead of a
+  // hand-rolled backdrop `onClick`/`stopPropagation` pair with none of that.
+  // Found during the section-6 accessibility sweep, not on the original
+  // list — same pattern, same fix, on a login-flow dialog instead of a
+  // money one.
   return (
-    <div
-      onClick={onClose}
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-[rgba(20,18,10,0.4)] p-5 backdrop-blur-[2px]"
+    <Dialog
+      open
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
     >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="w-[420px] max-w-full rounded-[20px] bg-white p-6 shadow-[0_20px_60px_rgba(20,18,10,0.25)]"
+      <DialogContentBare
+        overlayClassName="bg-[rgba(20,18,10,0.4)] backdrop-blur-[2px]"
+        wrapperClassName="p-5 py-12"
+        className="w-[420px] max-w-full rounded-[20px] bg-white p-6 shadow-[0_20px_60px_rgba(20,18,10,0.25)] focus:outline-none"
       >
+        <DialogTitle className="sr-only">{copy.title}</DialogTitle>
+        <DialogDescription className="sr-only">{copy.title}</DialogDescription>
         <div className="mb-[18px] flex items-center justify-between">
           <div className="font-serif text-xl font-semibold text-[#161511]">{copy.title}</div>
           <button
@@ -269,8 +283,8 @@ const WalletConnectDialog: FC<Props> = ({ chain, onClose, onAuthenticated, onNee
         >
           {S.cancel}
         </button>
-      </div>
-    </div>
+      </DialogContentBare>
+    </Dialog>
   );
 };
 

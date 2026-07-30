@@ -80,13 +80,25 @@ const AppHeader: FC = () => {
           <TooltipContainer title={LABELS.write}>
             {user?.isLoggedIn ? (
               <Link href="/submit.html">
-                <Button variant="ghost" size="sm" className="h-10 w-10 px-0" data-testid="nav-pencil">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-10 w-10 px-0"
+                  aria-label={LABELS.write}
+                  data-testid="nav-pencil"
+                >
                   <Icons.pencil className="h-5 w-5" />
                 </Button>
               </Link>
             ) : (
               <DialogLogin redirectTo="/submit.html">
-                <Button variant="ghost" size="sm" className="h-10 w-10 px-0" data-testid="nav-pencil">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-10 w-10 px-0"
+                  aria-label={LABELS.write}
+                  data-testid="nav-pencil"
+                >
                   <Icons.pencil className="h-5 w-5" />
                 </Button>
               </DialogLogin>
@@ -96,7 +108,16 @@ const AppHeader: FC = () => {
           {user?.isLoggedIn ? (
             <TooltipContainer title={LABELS.notifications}>
               <Link href={`/@${user.username}/notifications`} data-testid="nav-notifications">
-                <Button variant="ghost" size="sm" className="relative h-10 w-10 px-0">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="relative h-10 w-10 px-0"
+                  aria-label={
+                    data && data.unread > 0
+                      ? `${LABELS.notifications} (${data.unread} unread)`
+                      : LABELS.notifications
+                  }
+                >
                   <Icons.bell className="h-5 w-5" />
                   {data && data.unread !== 0 ? (
                     <span className="absolute right-0 top-0.5 z-10 inline-block -translate-y-1/2 translate-x-2/4 rounded-full bg-destructive-icon px-1.5 py-1 text-center align-baseline text-xs font-bold leading-none text-white">
@@ -201,10 +222,7 @@ const AppHeader: FC = () => {
                for existing Hive users. */
             <>
               <Link href="/login" data-testid="login-link">
-                <Button
-                  variant="ghost"
-                  className="whitespace-nowrap text-base hover:text-destructive"
-                >
+                <Button variant="ghost" className="whitespace-nowrap text-base hover:text-destructive">
                   {LABELS.login}
                 </Button>
               </Link>

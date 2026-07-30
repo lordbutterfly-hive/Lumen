@@ -809,6 +809,7 @@
   },
   "wallet": {
     "page_title": "Wallet",
+    "your_tokens_link": "Your creator tokens",
     "loading": "Loading wallet…",
     "login_required": "Log in to see your Hive wallet.",
     "login_button": "Log in",
@@ -956,7 +957,7 @@
         "pending": "{{count}} claimed account token(s) available",
         "pending_none": "No claimed account tokens available yet.",
         "new_account": "New account name",
-        "todo_notice": "Key generation for the new account isn't wired up yet, so this can't be submitted from here. The form is ready — only the broadcast step is pending."
+        "todo_notice": "Claiming a new account here isn't available yet — it needs generating and safely backing up a fresh keypair for the new account, which Lumen doesn't support yet. Your claimed-account tokens aren't going anywhere in the meantime."
       }
     },
     "lite_title": "No wallet yet",
@@ -1266,5 +1267,19 @@
   "login_dialog": {
     "new_here": "New to Lumen?",
     "signup_link": "Create an account with Google or a crypto wallet — no keys to manage."
+  },
+  "right_rail": {
+    "communities": {
+      "heading": "Communities",
+      "suggested_heading": "Popular communities",
+      "loading": "Loading your communities…",
+      "empty": "You haven't joined any communities yet.",
+      "browse": "Browse communities"
+    },
+    "topics": {
+      "heading": "Topics",
+      "error": "Couldn't load trending topics.",
+      "empty": "No trending topics right now."
+    }
   }
 }

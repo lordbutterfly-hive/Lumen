@@ -13,6 +13,7 @@ import {
   DialogTrigger,
   Input
 } from '@hive/ui';
+import TooltipContainer from '@ui/components/tooltip-container';
 import { useTranslation } from '@/blog/i18n/client';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import DialogLogin from '@/blog/components/dialog-login';
@@ -36,6 +37,16 @@ export default function NewProposalDialog({ children }: { children: ReactNode })
 
   if (!user.isLoggedIn) {
     return <DialogLogin>{children}</DialogLogin>;
+  }
+
+  // Structural backstop for the same gate `proposals-main-header.tsx` already
+  // applies at the trigger (real `disabled` + tooltip there). If this dialog is
+  // ever mounted for a lite account some other way, it must not let the whole
+  // form render fillable and client-side "valid" before refusing on Submit —
+  // `children` has no click handler of its own outside `DialogTrigger`, so
+  // simply not wrapping it in one already makes it inert.
+  if (user.account_tier === 'lite') {
+    return <TooltipContainer title={t('proposals.lite_cannot_vote')}>{children}</TooltipContainer>;
   }
 
   const receiverValue = receiver.trim() || user.username;
@@ -136,7 +147,9 @@ export default function NewProposalDialog({ children }: { children: ReactNode })
               />
             </label>
           </div>
-          <p className="font-serif text-[12.5px] leading-normal text-[#6b7280]">{t('proposals.new_dialog.fee_note')}</p>
+          <p className="font-serif text-[12.5px] leading-normal text-[#6b7280]">
+            {t('proposals.new_dialog.fee_note')}
+          </p>
         </div>
 
         <DialogFooter>

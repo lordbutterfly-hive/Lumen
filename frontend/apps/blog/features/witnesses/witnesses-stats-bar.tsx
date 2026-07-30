@@ -7,7 +7,8 @@ interface WitnessesStatsBarProps {
   hpAprPercent: number | null;
   hbdInterestRatePercent: number | null;
   witnessCount: number;
-  votesLeft: number;
+  /** null while the viewer's own votes are loading or unavailable — rendered as '—', never a false 30. */
+  votesLeft: number | null;
   isLoggedIn: boolean;
   hasProxy: boolean;
   proxyAccount: string;
@@ -70,9 +71,16 @@ export default function WitnessesStatsBar({
         <span className="ml-auto font-semibold text-[#c0392b]" data-testid="witnesses-stats-proxy-active">
           {t('witnesses.stats.proxy_active', { proxy: proxyAccount })}
         </span>
-      ) : (
+      ) : votesLeft !== null ? (
         <span className="ml-auto font-semibold text-[#c0392b]" data-testid="witnesses-stats-votes-left">
           {t('witnesses.stats.votes_left', { count: votesLeft })}
+        </span>
+      ) : (
+        <span
+          className={`ml-auto font-semibold text-[#9ca3af] ${STAT_VALUE_CLASS}`}
+          data-testid="witnesses-stats-votes-left-unavailable"
+        >
+          —
         </span>
       )}
     </div>

@@ -4,6 +4,7 @@ import { Icons } from '@ui/components/icons';
 import TooltipContainer from '@ui/components/tooltip-container';
 import DialogLogin from '@/blog/components/dialog-login';
 import { useTranslation } from '@/blog/i18n/client';
+import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useWitnessVoteMutation } from './hooks/use-witness-vote-mutation';
 
 interface WitnessVoteToggleProps {
@@ -38,6 +39,7 @@ export default function WitnessVoteToggle({
   votesUnavailable
 }: WitnessVoteToggleProps) {
   const { t } = useTranslation('common_blog');
+  const { user } = useUserClient();
   const voteMutation = useWitnessVoteMutation();
   const isPending = voteMutation.isLoading && voteMutation.variables?.witness === witness;
 
@@ -53,6 +55,25 @@ export default function WitnessVoteToggle({
           <Icons.check className="h-4 w-4" />
         </button>
       </DialogLogin>
+    );
+  }
+
+  // A lite account has no Hive keys — the mutation backstop already refuses this
+  // (use-witness-vote-mutation.ts -> refuseIfLite), but the button used to render
+  // fully enabled until clicked. Gate it here too, same pattern as `hasProxy` below.
+  if (user.account_tier === 'lite') {
+    return (
+      <TooltipContainer title={t('witnesses.lite_cannot_vote')}>
+        <button
+          type="button"
+          data-testid={`witness-vote-${witness}`}
+          aria-label={t('witnesses.lite_cannot_vote')}
+          disabled
+          className={`${BASE_CLASS} ${UNVOTED_CLASS}`}
+        >
+          <Icons.check className="h-4 w-4" />
+        </button>
+      </TooltipContainer>
     );
   }
 
@@ -88,11 +109,7 @@ export default function WitnessVoteToggle({
       className={`${BASE_CLASS} ${isVoted ? VOTED_CLASS : UNVOTED_CLASS}`}
       onClick={() => voteMutation.mutate({ witness, approve: !isVoted })}
     >
-      {isPending ? (
-        <Icons.spinner className="h-4 w-4 animate-spin" />
-      ) : (
-        <Icons.check className="h-4 w-4" />
-      )}
+      {isPending ? <Icons.spinner className="h-4 w-4 animate-spin" /> : <Icons.check className="h-4 w-4" />}
     </button>
   );
 

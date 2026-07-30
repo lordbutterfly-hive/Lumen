@@ -52,6 +52,19 @@ export interface TokenAccount {
   kind: 'hive' | 'btc' | 'evm';
   /** The wallet address for a did:pkh account, for display. Null for a Hive account. */
   address: string | null;
+  /**
+   * Whether THIS account can initiate a transaction — deliberately per account,
+   * not per session.
+   *
+   * A scrutiny pass caught that a single session-wide flag could not express the
+   * rule this rail is supposed to follow ("prove one chain at a time, never flip
+   * globally"): the EVM rail and the Bitcoin rail are separate ports with separate
+   * proofs, and Bitcoin additionally cannot be rehearsed on testnet at all
+   * (dids.Parse never calls ParseBtcTestnetDID, so a BTC testnet DID can be funded
+   * and can never sign). Turning both on together because one was proven is exactly
+   * the mistake the rule exists to prevent.
+   */
+  canSign: boolean;
 }
 
 interface WalletDidsResponse {
@@ -73,12 +86,15 @@ export interface TokenAccounts {
    */
   canHold: boolean;
   /**
-   * FALSE for every wallet identity today. Reading is solved; signing is not —
-   * a Magi transaction needs a signature over the transaction itself (EIP-712
-   * over the transaction container for EVM, the transaction CID for Bitcoin),
-   * which is a different payload from the login nonce we currently sign. Until
-   * that rail is ported, a wallet holder can SEE and be PAID, but cannot
-   * initiate. Kept as its own flag so no screen infers one from the other.
+   * DERIVED: true when ANY resolved account can sign. A convenience for screens
+   * that only need "is anything signable here"; anything that acts on a specific
+   * account must read `TokenAccount.canSign` instead, because signability is a
+   * property of the chain, not the session.
+   *
+   * False for every wallet identity today. Reading is solved; signing is not — a
+   * Magi transaction needs a signature over the transaction itself (EIP-712 over
+   * the container for EVM, the transaction CID for Bitcoin), which is a different
+   * payload from the login nonce we sign now.
    */
   canSign: boolean;
 }
@@ -116,7 +132,7 @@ export function useTokenAccounts(): TokenAccounts {
   if (!isLite) {
     // A full Hive account signs with its own keys, so it can both hold and spend.
     return {
-      accounts: [{ id: user.username, kind: 'hive', address: null }],
+      accounts: [{ id: user.username, kind: 'hive', address: null, canSign: true }],
       isLoading: false,
       failed: false,
       canHold: true,
@@ -131,15 +147,22 @@ export function useTokenAccounts(): TokenAccounts {
     return { accounts: [], isLoading: false, failed: true, canHold: false, canSign: false };
   }
 
+  const accounts: TokenAccount[] = query.data.wallets.map((w) => ({
+    id: w.did,
+    kind: kindOf(w.method, w.network),
+    address: w.address,
+    // FALSE for every wallet identity today: the signing rail is not ported.
+    // Flip per KIND as each chain is proven end to end — never both at once.
+    canSign: false
+  }));
+
   return {
-    accounts: query.data.wallets.map((w) => ({
-      id: w.did,
-      kind: kindOf(w.method, w.network),
-      address: w.address
-    })),
+    accounts,
     isLoading: false,
     failed: false,
     canHold: query.data.canHoldTokens,
-    canSign: false
+    // DERIVED, not asserted — so it cannot drift from the per-account truth when
+    // the first chain is switched on.
+    canSign: accounts.some((a) => a.canSign)
   };
 }

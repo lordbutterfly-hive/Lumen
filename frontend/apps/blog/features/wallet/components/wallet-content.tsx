@@ -94,10 +94,20 @@ export default function WalletContent() {
 
   return (
     <div className="pt-[26px]" data-testid="wallet-content">
-      <div className="mb-[22px]">
+      <div className="mb-[22px] flex flex-wrap items-center justify-between gap-3">
         <h1 className="font-sans text-[32px] font-bold tracking-[-0.02em] text-[#161511]">
           {t('wallet.page_title')}
         </h1>
+        {/* /wallet/tokens (Your Tokens — creator-token portfolio) had zero inbound
+            links anywhere in the app despite rendering real, wallet-identity-aware
+            content. This is its entry point. */}
+        <Link
+          href="/wallet/tokens"
+          className="rounded-[10px] border border-[#e4e6e9] px-4 py-2 text-[13px] font-semibold text-[#3f4650] transition-colors hover:bg-[#f6f7f8]"
+          data-testid="wallet-your-tokens-link"
+        >
+          {t('wallet.your_tokens_link')} →
+        </Link>
       </div>
 
       <HiveTokenCard username={user.username} figures={figures} dynamicGlobal={dynamicGlobal} chain={chain} />

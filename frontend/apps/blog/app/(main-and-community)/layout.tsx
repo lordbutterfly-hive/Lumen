@@ -2,11 +2,12 @@ import ClientSideLayout from '@/blog/features/layouts/sorts/client-side-layout';
 import ServerSideLayout from '@/blog/features/layouts/sorts/server-side-layout';
 import { ReactNode } from 'react';
 import { Metadata } from 'next';
+import { siteConfig } from '@ui/config/site';
 
 export const metadata: Metadata = {
   title: {
     default: 'Blog',
-    template: '%s - Hive'
+    template: `%s - ${siteConfig.name}`
   }
 };
 

@@ -19,7 +19,11 @@ import BasePathLink from '@/blog/components/base-path-link';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { DEFAULT_OBSERVER } from '@/blog/lib/utils';
 import { StaleTime } from '@/blog/lib/react-query';
-import { useSSRObserver, useInitialCommunity, useInitialSubscriptions } from '@/blog/components/observer-provider';
+import {
+  useSSRObserver,
+  useInitialCommunity,
+  useInitialSubscriptions
+} from '@/blog/components/observer-provider';
 import { t } from 'i18next';
 import { Skeleton } from '@hive/ui';
 
@@ -93,10 +97,7 @@ const CommunityLayout = ({ children, community }: { children: ReactNode; communi
               <div className="mr-2 flex w-[320px] flex-col">
                 {isRolesPage ? (
                   <BasePathLink href={`/trending/${community}`}>
-                    <span
-                      className="text-md ml-10 font-medium text-destructive"
-                      data-testid="community-name"
-                    >
+                    <span className="text-md ml-10 font-medium text-destructive" data-testid="community-name">
                       {isCommunity && isCommunityLoading ? (
                         <Skeleton className="inline-block h-6 w-48" />
                       ) : (
@@ -114,29 +115,34 @@ const CommunityLayout = ({ children, community }: { children: ReactNode; communi
                       )}
                     </span>
                     <span className="md:hidden">
-                      <CommunitiesSelect title={isCommunity && isCommunityLoading ? '' : (communityData?.title || community)} />
+                      <CommunitiesSelect
+                        title={isCommunity && isCommunityLoading ? '' : communityData?.title || community}
+                      />
                     </span>
 
-                      <span
-                        className="hidden text-xs font-light md:block"
-                        data-testid="community-name-unmoderated"
-                      >
-                        {isCommunity && isCommunityLoading ? (
-                          <Skeleton className="inline-block h-4 w-32" />
-                        ) : communityData ? (
-                          t('communities.community')
-                        ) : (
-                          t('communities.unmoderated_tag')
-                        )}
-                      </span>
-
+                    <span
+                      className="hidden text-xs font-light md:block"
+                      data-testid="community-name-unmoderated"
+                    >
+                      {isCommunity && isCommunityLoading ? (
+                        <Skeleton className="inline-block h-4 w-32" />
+                      ) : communityData ? (
+                        t('communities.community')
+                      ) : (
+                        t('communities.unmoderated_tag')
+                      )}
+                    </span>
                   </>
                 )}
               </div>
 
               {isRolesPage ? null : (
                 <div className="w-[180px]">
-                  <PostSelectFilter param={`/${community}`} />
+                  {/* `param` gets a single slash prepended by PostSelectFilter itself
+                      (`${next}/${param}`) — passing it here too produced a malformed
+                      double-slash URL (`/hot//hive-xyz`). main-page-layout.tsx's `tag`
+                      call site never had the extra slash; this one just matches it now. */}
+                  <PostSelectFilter param={community} />
                 </div>
               )}
             </div>
