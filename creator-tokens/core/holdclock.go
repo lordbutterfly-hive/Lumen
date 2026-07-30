@@ -200,6 +200,23 @@ func holderAcqBlock(s Store, c, h string) uint64 {
 func heldBlocksAt(s Store, c, h string, block uint64) uint64 {
 	w := holderAcqBlock(s, c, h)
 	if w == 0 || w >= block {
+		// ★ A GRADUATED POSITION HAS NO CLOCK, AND ZERO WOULD BE A LIE
+		// (2026-07-30). graduate() deletes kAcqBlock when it empties the
+		// maturing bucket, and the zero-value convention below reads an unset
+		// clock as MAXIMALLY FRESH — so without this branch a holder who held
+		// for the full window and graduated reads back as owing the FULL rate.
+		// That inverted the truth for every consumer at once: the tax gate, the
+		// permissionless-push consent gate, the emitted event, and the quote UI
+		// that RULING F makes mandatory before signing.
+		//
+		// If nothing is maturing but a matured balance exists, the honest answer
+		// is the full window — that is precisely what "matured" means. Fixing it
+		// here rather than at each reader is deliberate: the alternative is a
+		// shortcut at every call site, and the one that gets forgotten reports
+		// the maximum tax on a holder who owes nothing.
+		if getMoney(s, kBal(c, h)).Sign() == 0 && getMatured(s, c, h).Sign() > 0 {
+			return ExitTaxDecayBlocks
+		}
 		return 0
 	}
 	held := block - w

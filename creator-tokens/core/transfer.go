@@ -106,7 +106,12 @@ func TransferCredits(s Store, creator, from, to string, block uint64, amount *bi
 	// sender's balance, before any write lands anywhere. debitBalance
 	// re-checks internally, but the explicit pre-check keeps the error
 	// message and the nothing-mutates guarantee readable at this level.
-	bal := getMoney(s, kBal(creator, from))
+	// BOTH BUCKETS (2026-07-30, scrutiny F6). BalanceOf reports maturing +
+	// matured, so a maturing-only guard here refuses a wholly-matured holder
+	// their own tokens and tells them they have an "insufficient balance" that
+	// the same contract reports as ample — the send button shows 1000 and the
+	// call reverts.
+	bal := totalBalance(s, creator, from)
 	if mLt(bal, amount) {
 		return newErr(ErrBalance, "insufficient balance")
 	}

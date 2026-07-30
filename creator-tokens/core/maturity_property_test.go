@@ -152,12 +152,14 @@ func mpRandAge(r *rand.Rand) uint64 {
 // mpAgeWeight is the market-wide age-weight ledger W = Σ bal·min(age, Dt),
 // computed from STORED clocks (see the file header for why that matters).
 func mpAgeWeight(s *MemStore, c string, block uint64) *big.Int {
-	prefix := "bal|" + c + "|"
+	prefix := kBal(c, "")
 	total := big.NewInt(0)
+	matched := 0
 	for _, k := range s.Keys() {
 		if !strings.HasPrefix(k, prefix) {
 			continue
 		}
+		matched++
 		h := k[len(prefix):]
 		bal := getMoney(s, k)
 		if bal.Sign() == 0 {
@@ -165,7 +167,67 @@ func mpAgeWeight(s *MemStore, c string, block uint64) *big.Int {
 		}
 		total.Add(total, new(big.Int).Mul(bal, mpBig(mpStoredAge(s, c, h, block))))
 	}
+	// ★ BOTH BUCKETS (2026-07-30). A matured token has served the full window,
+	// so its contribution to the age-weight ledger is bal·Dt — the maximum, and
+	// frozen there forever. Counting only the maturing family would make this
+	// ledger measure a shrinking subset of the tokens as holders graduate, and
+	// "no operation increases W" would become trivially satisfiable by moving
+	// tokens out of the thing being measured.
+	matchedMatured, maturedTotal := mpMaturedWeight(s, c)
+	total.Add(total, maturedTotal)
+	mpAssertScanned(matched+matchedMatured, s, c, "mpAgeWeight")
 	return total
+}
+
+// mpMaturedWeight totals the matured family for one creator and reports how
+// many keys it matched. The matured key is TRANSPOSED (bal|<holder>|<creator>),
+// so the creator is a suffix and this cannot be a prefix scan.
+func mpMaturedWeight(s *MemStore, c string) (matched int, weight *big.Int) {
+	suffix := "|" + c
+	weight = big.NewInt(0)
+	for _, k := range s.Keys() {
+		if !strings.HasPrefix(k, "bal|") || !strings.HasSuffix(k, suffix) {
+			continue
+		}
+		matched++
+		h := k[len("bal|") : len(k)-len(suffix)]
+		bal := getMatured(s, c, h)
+		if bal.Sign() == 0 {
+			continue
+		}
+		weight.Add(weight, new(big.Int).Mul(bal, mpBig(mpDt)))
+	}
+	return matched, weight
+}
+
+// mpAssertScanned is the non-vacuity guard for every prefix scan in this file.
+//
+// ★ WHY IT PANICS RATHER THAN RETURNING ZERO (M0 scrutiny, 2026-07-30, proven by
+// mutation): with the pre-M0 hardcoded "bal|" prefix restored, EVERY ONE of the
+// thirteen P1–P7 property tests in this file still PASSED — because the scan
+// matched nothing, the ledger was 0, and P2's assertions reduce to `0 > 0` and
+// `0 < 0`, both false, both green. The executable specification for the entire
+// anti-laundering guarantee was satisfied by an empty ledger.
+//
+// Deriving the prefix from kBal() closes the rename hazard, but not the class:
+// M1 adds a SECOND balance family (kMatured) beside this one, so a scan that
+// silently covers only half the tokens is the same trap one milestone away. A
+// property that measures nothing must fail loudly, not pass quietly.
+//
+// A panic is the right instrument here: these are helpers with no *testing.T,
+// and a zero scan on a populated market is a broken harness rather than a
+// falsified property — it must never be swallowed by an assertion that happens
+// to hold at zero.
+func mpAssertScanned(matched int, s *MemStore, c, who string) {
+	if matched > 0 {
+		return
+	}
+	if getMoney(s, kSupply(c)).Sign() == 0 {
+		return // genuinely empty market: nothing to scan, nothing to prove
+	}
+	panic(who + ": scanned ZERO balance keys for creator " + c +
+		" while supply is non-zero — the prefix no longer matches the balance " +
+		"family, so every property built on this ledger is passing vacuously")
 }
 
 // ---------------------------------------------------------------------------
@@ -318,12 +380,14 @@ func mpNewWorld(c string, start uint64) *mpWorld {
 // mpTotals returns the market's total balance and its total tax CAPACITY
 // (Σ bal·τ), both read through the real rate path.
 func mpTotals(s *MemStore, c string, block uint64) (bal, capacity *big.Int) {
-	prefix := "bal|" + c + "|"
+	prefix := kBal(c, "")
 	bal, capacity = big.NewInt(0), big.NewInt(0)
+	matched := 0
 	for _, k := range s.Keys() {
 		if !strings.HasPrefix(k, prefix) {
 			continue
 		}
+		matched++
 		h := k[len(prefix):]
 		b := getMoney(s, k)
 		if b.Sign() == 0 {
@@ -332,6 +396,17 @@ func mpTotals(s *MemStore, c string, block uint64) (bal, capacity *big.Int) {
 		bal.Add(bal, b)
 		capacity.Add(capacity, mpCapacity(s, c, h, block))
 	}
+	// Matured tokens count toward the balance and contribute ZERO capacity —
+	// their rate is 0 by definition, which is exactly what "matured" means.
+	suffix := "|" + c
+	for _, k := range s.Keys() {
+		if !strings.HasPrefix(k, "bal|") || !strings.HasSuffix(k, suffix) {
+			continue
+		}
+		matched++
+		bal.Add(bal, getMatured(s, c, k[len("bal|"):len(k)-len(suffix)]))
+	}
+	mpAssertScanned(matched, s, c, "mpTotals")
 	return bal, capacity
 }
 

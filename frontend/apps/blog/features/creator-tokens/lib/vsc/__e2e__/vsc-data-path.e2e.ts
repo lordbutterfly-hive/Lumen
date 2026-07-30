@@ -118,7 +118,7 @@ class CapturingBroadcaster {
 // ======================================================================
 
 const chM = (creator: string, field: string): string => `m|hive:${creator}|${field}`;
-const chBal = (creator: string, holder: string): string => `bal|hive:${creator}|hive:${holder}`;
+const chBal = (creator: string, holder: string): string => `mb|hive:${creator}|hive:${holder}`;
 const chEscrow = (creator: string, seq: number): string => `e|hive:${creator}|${seq}`;
 // The offerings shop (core/keys.go's mko). Epoch-scoped: epoch 0 is the normal
 // first incarnation, and an absent kOfferEpoch key reads as 0.
@@ -511,7 +511,7 @@ async function run(): Promise<void> {
   // ------------------------------------------------------------------
   section('C3 (namespace) — client key-builder produces hive:-prefixed keys; bare keys read null');
   eq('kRegisteredAt("alice") is hive:-prefixed', kRegisteredAt('alice'), 'm|hive:alice|reg');
-  eq('kBal("alice","bob") is hive:-prefixed', kBal('alice', 'bob'), 'bal|hive:alice|hive:bob');
+  eq('kBal("alice","bob") is hive:-prefixed', kBal('alice', 'bob'), 'mb|hive:alice|hive:bob');
   eq('kEscrow("alice",7) is hive:-prefixed', kEscrow('alice', 7), 'e|hive:alice|7');
   eq('kSeq("alice") is hive:-prefixed', kSeq('alice'), 'm|hive:alice|seq');
   eq('toDid("alice") prefixes', toDid('alice'), 'hive:alice');

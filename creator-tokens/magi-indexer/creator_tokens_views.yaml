@@ -58,6 +58,23 @@ views:
         UNION ALL
         SELECT creator, recipient AS holder, amount::numeric FROM lumen_ct_transferred_events
         UNION ALL
+        -- Matured-bucket movement (2026-07-30). A sale on magi-market settles
+        -- through safeTransferFrom, which emits ONLY these — no bought/sold row
+        -- exists for it. Without these two branches a holder who acquired
+        -- tokens on the marketplace is invisible here, and this view is what the
+        -- wind-down keeper reads to find holders: it would never sweep them,
+        -- supply would never reach zero, and the market could never close.
+        --
+        -- Bucket moves are netted, not counted: a graduation (sender = '') and a
+        -- matured burn on a curve sale (recipient = '') are already reflected by
+        -- the bought/sold rows, so both are excluded here and only genuine
+        -- holder-to-holder movement is folded in.
+        SELECT creator, sender AS holder, -(amount::numeric) FROM lumen_ct_matured_moved_events
+          WHERE sender <> '' AND recipient <> ''
+        UNION ALL
+        SELECT creator, recipient AS holder, amount::numeric FROM lumen_ct_matured_moved_events
+          WHERE sender <> '' AND recipient <> ''
+        UNION ALL
         -- an ask escrows the asker's tokens out of their balance
         SELECT creator, actor AS holder, -(credits_spent::numeric) FROM lumen_ct_asked_events
         UNION ALL

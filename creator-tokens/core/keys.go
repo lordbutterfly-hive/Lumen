@@ -208,8 +208,37 @@ func kOfferTitleSetAt(c string, e uint64, normTitle string) string {
 
 // ---- balances ----
 
-// bal|<creator>|<holder> — credits held.
-func kBal(c, holder string) string { return "bal|" + c + "|" + holder }
+// mb|<creator>|<holder> — MATURING credits held (still inside the exit-tax
+// window, not yet transferable).
+//
+// ★ RENAMED FROM "bal|" ON 2026-07-30 (BUILD-MAP-MATURED-EDITIONS §M0). The
+// "bal|" prefix is now RESERVED for the market-facing MATURED family, which
+// magi-market reads as RAW STATE in magi_nft's layout: "bal|<holder>|<creator>"
+// — the exact TRANSPOSE of this key, holding a little-endian trimmed uint64
+// rather than our decimal string. Two independent reasons this rename is
+// mandatory rather than cosmetic, both verified at source:
+//
+//  1. COLLISION. With creator ≡ tokenId and holder ≡ account, the two families
+//     are both "bal|<A>|<B>" over the same account-name domain. Alice holding
+//     Bob's token and Bob holding Alice's token write the SAME key.
+//
+//  2. MISREAD, THEN ABORT. Even with a single creator, magi-market decodes
+//     whatever sits at that key as little-endian uint64
+//     (magi-market/contract/internal.go:848-859). Our decimal ASCII "7" reads
+//     as 55; "100" as 3,158,065. Worse, any balance of 9+ digits (≥ 100,000,000
+//     — well inside MaxCap = 1e9) is a 9-byte value, and its decoder ABORTS
+//     past 8 bytes, trapping every market read against this contract for that
+//     holder.
+//
+// Nothing is deployed, so this is a rename today. After deploy it would be a
+// state migration on the most-written key in the money core — and because
+// holdclock.go's zero-value convention reads an unclocked balance as maximally
+// FRESH, a naive migration would charge every existing holder the full 20%.
+//
+// The identifier stays kBal until M1 introduces kMatured beside it; the prefix
+// is what carries the correctness, and renaming 170 call sites in the same
+// change would bury the one line that matters.
+func kBal(c, holder string) string { return "mb|" + c + "|" + holder }
 
 // ---- escrow ----
 

@@ -6,7 +6,6 @@ import (
 	"os"
 	"regexp"
 	"sort"
-	"strings"
 	"testing"
 )
 
@@ -116,8 +115,9 @@ func magiSamples() map[string]string {
 		"retired":           EvRetired("c", "a", 1),
 		"closed":            EvClosed("c", "a", 1),
 		"bought":            EvBought("c", "a", 1, one, one, one, one),
-		"sold":              EvSold("c", "a", 1, one, one, one, one, one, 2000, 100),
+		"sold":              EvSold("c", "a", 1, one, one, one, one, one, one, 2000, 100),
 		"transferred":       EvTransferred("c", "a", "b", 1, one),
+		"maturedMoved":      EvMaturedMoved("c", "a", "a", "b", 1, one),
 		"refunded":          EvRefunded("c", "a", 1, one, one),
 		"refundPushed":      EvRefundPushed("c", "a", "h", 1, one, one),
 		"asked":             EvAsked("c", "a", 1, 1, one, one, one, 1, "h", 0),
@@ -192,18 +192,32 @@ func TestMagiMapping_EveryDeclaredFieldExistsOnTheWire(t *testing.T) {
 // any view needs them.
 func TestMagiMapping_EveryEmittedEventIsMapped(t *testing.T) {
 	mapping := magiMapping(t)
-	deliberatelyUnmapped := map[string]bool{"init": true, "paused": true, "unpaused": true, "prepaid": true}
+	deliberatelyUnmapped := map[string]bool{
+		"init": true, "paused": true, "unpaused": true, "prepaid": true,
+		// ★ The magi_nft-family events (2026-07-30). These are deliberately NOT
+		// in OUR mapping, because they are not ours to map: the Magi indexer
+		// ships a stock mapping for them, discovers this contract by watching
+		// for init_magi_nft, and folds them into the SHARED magi_token/nft
+		// tables every wallet and explorer already reads. Adding them here would
+		// duplicate rows into a private table and defeat the entire point of
+		// speaking the standard.
+		"init_magi_nft": true, "tokenCreated": true, "TransferSingle": true,
+	}
 
 	src, err := os.ReadFile("events.go")
 	if err != nil {
 		t.Fatalf("read events.go: %v", err)
 	}
 	// Same alternation the schema tripwire uses: every construction style.
-	emitted := regexp.MustCompile(`evOpen\("([a-zA-Z]+)"|evOpenActor\("([a-zA-Z]+)"|\{"type":"([a-zA-Z]+)"`).FindAllStringSubmatch(string(src), -1)
+	emitted := regexp.MustCompile(`evOpen\("([A-Za-z0-9_]+)"|evOpenActor\("([A-Za-z0-9_]+)"|\{"type":"([A-Za-z0-9_]+)"`).FindAllStringSubmatch(string(src), -1)
 	seen := map[string]bool{}
 	for _, m := range emitted {
 		name := m[1] + m[2] + m[3]
-		if name == "" || strings.Contains(name, "name") {
+		// NOTE: the old `strings.Contains(name, "name")` skip was removed
+		// (scrutiny F7b) — it was dead against the real constructors and it
+		// silently exempted any event whose name contained "name" from the
+		// mapping check, which is a hole rather than a filter.
+		if name == "" {
 			continue
 		}
 		seen[name] = true

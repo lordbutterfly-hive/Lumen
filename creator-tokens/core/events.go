@@ -85,6 +85,7 @@ import (
 //     is a foot-gun the first time that replay ever drifts from truth (a
 //     missed event, a reorg, a bug). Recording it here for the caller to
 //     fill in makes the audit log self-verifying instead.
+//
 // THIRD GAP, CLOSED — kept here as a corrected historical note rather than
 // silently deleted, because the surrounding two gaps above are still open and
 // a reader scanning this list needs to know this one no longer belongs with
@@ -446,7 +447,7 @@ func EvBought(creator, actor string, block uint64, minted, cost, fee, totalDue *
 // is exactly what the indexer did until this was written down. The two halves
 // are not emitted separately because they are derivable from `tax` alone, and
 // duplicating them would create a second source of truth to drift.
-func EvSold(creator, actor string, block uint64, sold, gross, tax, fee, net *big.Int, taxBps, heldBlocks uint64) string {
+func EvSold(creator, actor string, block uint64, sold, gross, tax, fee, net, taxableGross *big.Int, taxBps, heldBlocks uint64) string {
 	return evOpen("sold", creator, actor, block) +
 		`,"sold":"` + evMoney(sold) + `"` +
 		`,"gross":"` + evMoney(gross) + `"` +
@@ -454,7 +455,13 @@ func EvSold(creator, actor string, block uint64, sold, gross, tax, fee, net *big
 		`,"fee":"` + evMoney(fee) + `"` +
 		`,"net":"` + evMoney(net) + `"` +
 		`,"taxBps":` + evU64(taxBps) +
-		`,"heldBlocks":` + evU64(heldBlocks) + `}`
+		`,"heldBlocks":` + evU64(heldBlocks) +
+		// taxableGross is the MATURING share of the gross — the base the rate
+		// was actually charged on (2026-07-30). APPEND-ONLY, at the end, per
+		// this file's wire rule. Without it no consumer can reproduce the tax
+		// from the event: `gross × taxBps` overstates it for any position that
+		// is part-matured, by up to the whole 20%.
+		`,"taxableGross":"` + evMoney(taxableGross) + `"}`
 }
 
 // EvRefundPushed — RefundHolder (refund.go). actor is the PERMISSIONLESS
@@ -647,4 +654,76 @@ func EvTradeFeesClaimed(actor string, block uint64, amount *big.Int) string {
 	return evOpenActor("tradeFeesClaimed", actor) +
 		`,"amount":"` + evMoney(amount) + `"` +
 		`,"block":` + evU64(block) + `}`
+}
+
+// ---------------------------------------------------------------------------
+// THE STANDARD (magi_nft-family) EVENTS — 2026-07-30, milestone M3.
+//
+// These are NOT our wire format. They are magi_nft's, byte for byte, because
+// the Magi indexer discovers a token contract by watching for one specific
+// event name and then folds its standard events into SHARED tables that every
+// wallet and explorer already reads.
+//
+// ★ WITHOUT init_magi_nft THERE IS NO REGISTRY ROW, AND WITHOUT A REGISTRY ROW
+// EVERY DOWNSTREAM VIEW IS EMPTY — not wrong, EMPTY. Balances, transfers, token
+// info and the collection overview all filter on that registry. So this event is
+// the load-bearing one, and it is why the core dev's remark about the init
+// schema was not a nicety.
+//
+// TWO SHAPES COEXIST ON THIS CONTRACT. Our own eighteen curve events stay flat
+// (`{"type":"bought","v":1,...}`); these nest under `attributes` as the standard
+// does. The indexer matches on the top-level `type` alone and our names are
+// disjoint from theirs, so both families index side by side with no collision.
+//
+// The DERIVED balance views compute holdings as inflow minus outflow over these
+// events, so EVERY change to the matured bucket must emit one or the balance is
+// permanently wrong for that holder. Mint shape is from:"", burn shape is to:"".
+
+// EvInitMagiNft — emitted ONCE at contract init. The discovery trigger.
+func EvInitMagiNft(owner, name, symbol string) string {
+	return `{"type":"init_magi_nft","attributes":{"owner":"` + evJSONEscape(owner) +
+		`","name":"` + evJSONEscape(name) +
+		`","symbol":"` + evJSONEscape(symbol) +
+		`","baseUri":""}}`
+}
+
+// EvTokenCreated — emitted when a creator registers, declaring their token id.
+// maxSupply carries the market's cap; soulbound is always false (these tokens
+// are transferable once matured — that is the whole point).
+func EvTokenCreated(tokenID string, maxSupply uint64) string {
+	return `{"type":"tokenCreated","attributes":{"tokenId":"` + evJSONEscape(tokenID) +
+		`","maxSupply":` + evU64(maxSupply) +
+		`,"soulbound":false}}`
+}
+
+// EvTransferSingle — every matured-bucket movement.
+//
+// `value` is a BARE NUMBER, matching the standard, and it is a token COUNT —
+// never HBD. from=="" is a mint (a graduation into the tradable bucket),
+// to=="" is a burn (a curve sale of matured tokens).
+func EvTransferSingle(operator, from, to, tokenID string, value *big.Int) string {
+	return `{"type":"TransferSingle","attributes":{"operator":"` + evJSONEscape(operator) +
+		`","from":"` + evJSONEscape(from) +
+		`","to":"` + evJSONEscape(to) +
+		`","id":"` + evJSONEscape(tokenID) +
+		`","value":` + value.String() + `}}`
+}
+
+// EvMaturedMoved — the FLAT sibling of TransferSingle, for our own tables.
+//
+// Every matured-bucket movement emits BOTH: the standard TransferSingle (which
+// the indexer folds into the shared magi_nft tables that wallets and explorers
+// read) and this one (which lumen_ct_balances is built on, and which the
+// wind-down keeper reads to find holders). A holder who acquired tokens on
+// magi-market and appears in neither is a holder the keeper cannot sweep — so
+// supply never reaches zero and the market can never close.
+//
+// from == "" is a graduation into the tradable bucket; to == "" is a burn out of
+// it. Both are movements WITHIN one holder's position or out of supply, so a
+// consumer must net them exactly as the standard views do.
+func EvMaturedMoved(creator, actor, from, to string, block uint64, amount *big.Int) string {
+	return evOpen("maturedMoved", creator, actor, block) +
+		`,"from":"` + evJSONEscape(from) + `"` +
+		`,"to":"` + evJSONEscape(to) + `"` +
+		`,"amount":"` + evMoney(amount) + `"}`
 }

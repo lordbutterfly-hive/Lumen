@@ -70,12 +70,17 @@ import "math/big"
 // BuyResult carries every amount the wasm wrapper and the event log need.
 // All fields are freshly-allocated big.Ints owned by the caller.
 type BuyResult struct {
-	Minted       *big.Int // tokens minted == n
-	Cost         *big.Int // curve leg — what entered kReserve
-	Fee          *big.Int // total trade fee (Cost·TradeFeeBps/1e4, floored)
-	FeeCreator   *big.Int // accrued to kFeeBal(creator) (pull, F8)
-	FeePlatform  *big.Int // accrued to kTreasury() (pull via WithdrawTreasury)
-	TotalDue     *big.Int // Cost + Fee — the wrapper's single HiveDraw amount
+	Minted      *big.Int // tokens minted == n
+	Cost        *big.Int // curve leg — what entered kReserve
+	Fee         *big.Int // total trade fee (Cost·TradeFeeBps/1e4, floored)
+	FeeCreator  *big.Int // accrued to kFeeBal(creator) (pull, F8)
+	FeePlatform *big.Int // accrued to kTreasury() (pull via WithdrawTreasury)
+	TotalDue    *big.Int // Cost + Fee — the wrapper's single HiveDraw amount
+	// Graduated is how many tokens moved into the tradable bucket as a side
+	// effect of this call (see the graduate() call in Buy for why it runs
+	// BEFORE the credit). The wrapper emits the standard mint-shaped transfer
+	// event for it.
+	Graduated    *big.Int
 	RateRecorded *big.Int // spotRate(S+n) fed to RecordObs (twap.go may ignore
 	//                       a duplicate-block or non-positive rate by its own
 	//                       contract; this is what was OFFERED)
@@ -166,6 +171,23 @@ func Buy(s Store, caller, creator string, block uint64, n *big.Int) (*BuyResult,
 	// upward and pay it back out to holders at wind-down (C-19 forbids
 	// exactly that).
 	addMoney(s, kReserve(creator), r.Cost)
+	// ★ GRADUATE BEFORE CREDITING (2026-07-30). This one line is most of what
+	// the two-bucket split buys. The hold clock is a size-weighted average over
+	// the maturing balance, so a fresh purchase landing on top of an aged pile
+	// drags the whole pile's clock forward — which both delays the old tokens'
+	// maturity and hands the new ones a head start they did not earn. That is
+	// the "accelerated maturation" residual, and it is why an aged position used
+	// to be a permanent, reusable tax shield.
+	//
+	// Graduating first moves everything already past the window OUT of the
+	// average, so the incoming purchase can only ever dilute tokens that are
+	// themselves still maturing. The shield stops being reusable: to run it
+	// again you must hold a large position for a full window, and it leaves the
+	// moment it matures.
+	//
+	// Placed in the write phase, after every guard: it mutates, so it must not
+	// run anywhere a call could still be rejected (RULING G).
+	r.Graduated = graduate(s, creator, caller, block)
 	// Balance + hold clock in one chokepoint helper — bought tokens are
 	// CLOCKED fresh, which is what keeps the exit tax RATE sybil-proof.
 	// Infallible (holdclock.go — RULING A4 deleted the WA aggregate, RULING J

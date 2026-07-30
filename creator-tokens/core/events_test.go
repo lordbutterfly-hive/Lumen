@@ -332,7 +332,7 @@ func TestEvAmountFieldsAreAlwaysStrings(t *testing.T) {
 		// unrecognised by the indexer once.
 		{"declined", EvDeclined("c", "a", 1, 1, big.NewInt(1), big.NewInt(1), "k"), []string{"credits", "commissionHbd"}},
 		{"bought", EvBought("c", "a", 1, big.NewInt(1), big.NewInt(1), big.NewInt(1), big.NewInt(1)), []string{"minted", "cost", "fee", "totalDue"}},
-		{"sold", EvSold("c", "a", 1, big.NewInt(1), big.NewInt(1), big.NewInt(1), big.NewInt(1), big.NewInt(1), 1, 1), []string{"sold", "gross", "tax", "fee", "net"}},
+		{"sold", EvSold("c", "a", 1, big.NewInt(1), big.NewInt(1), big.NewInt(1), big.NewInt(1), big.NewInt(1), big.NewInt(1), 1, 1), []string{"sold", "gross", "tax", "fee", "net"}},
 		{"offeringCreated", EvOfferingCreated("c", "a", 1, 1, "t", big.NewInt(1)), []string{"price"}},
 		{"offeringUpdated", EvOfferingUpdated("c", "a", 1, 1, "t", big.NewInt(1), big.NewInt(2)), []string{"oldPrice", "newPrice"}},
 		{"treasuryWithdrawn", EvTreasuryWithdrawn("a", 1, big.NewInt(1)), []string{"amount"}},
@@ -504,7 +504,7 @@ func TestEvSchemaVersionIsStableAcrossAllEvents(t *testing.T) {
 		// "all events carry v:1" is a claim about all three, not just evOpen.
 		EvDeclined("c", "a", 1, 1, big.NewInt(1), big.NewInt(1), "k"),
 		EvBought("c", "a", 1, big.NewInt(1), big.NewInt(1), big.NewInt(1), big.NewInt(1)),
-		EvSold("c", "a", 1, big.NewInt(1), big.NewInt(1), big.NewInt(1), big.NewInt(1), big.NewInt(1), 1, 1),
+		EvSold("c", "a", 1, big.NewInt(1), big.NewInt(1), big.NewInt(1), big.NewInt(1), big.NewInt(1), big.NewInt(1), 1, 1),
 		EvOfferingCreated("c", "a", 1, 1, "t", big.NewInt(1)),
 		EvOfferingUpdated("c", "a", 1, 1, "t", big.NewInt(1), big.NewInt(2)),
 		EvOfferingDeleted("c", "a", 1, 1),

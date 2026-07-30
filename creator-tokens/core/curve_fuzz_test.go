@@ -494,8 +494,8 @@ func cfNewWorld(t *testing.T, seed int64, seqIdx int, s *MemStore, creator strin
 		sumTax:   mZero(),
 		sumTaxC:  mZero(),
 		sumTaxP:  mZero(),
-		spent:      map[string]*big.Int{},
-		received:   map[string]*big.Int{},
+		spent:    map[string]*big.Int{},
+		received: map[string]*big.Int{},
 	}
 	for _, a := range actors {
 		w.spent[a] = mZero()
@@ -635,9 +635,14 @@ func cfDoSell(t *testing.T, w *cfWorld, actor string, deltaS *big.Int) {
 	// (curve.go L4) and ceil is superadditive, so any split pays >= a single
 	// sale (proven in TestSell_ChunkingCannotEvade). Assert the exact identity
 	// here, every sale.
-	rate := ExitTaxOn(r.Gross, r.TaxBps)
+	// TWO BUCKETS (2026-07-30): the base is the MATURING share of the gross, not
+	// the whole gross — a matured token's rate is exactly 0, so taxing it would
+	// charge for time already served. The identity stays EXACT, on every sale;
+	// only the base narrowed. TaxableGross == Gross whenever nothing has
+	// graduated, which is every pre-existing scenario.
+	rate := ExitTaxOn(r.TaxableGross, r.TaxBps)
 	if r.Tax.Cmp(rate) != 0 {
-		w.fail(t, "K1 TAX MISMATCH: tax %s != ExitTaxOn(gross %s, %d bps) %s — the gross tax has no cap", r.Tax, r.Gross, r.TaxBps, rate)
+		w.fail(t, "K1 TAX MISMATCH: tax %s != ExitTaxOn(taxableGross %s of gross %s, %d bps) %s — the tax has no cap", r.Tax, r.TaxableGross, r.Gross, r.TaxBps, rate)
 	}
 	// C-19 sell side: ΔR == −Gross EXACTLY.
 	gotDelta := new(big.Int).Sub(beforeR, getMoney(w.s, kReserve(w.creator)))

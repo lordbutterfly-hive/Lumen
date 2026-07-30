@@ -96,7 +96,7 @@ func subMoney(s Store, key string, delta *big.Int) error {
 // wrong by construction.
 //
 // What this function is actually FOR is narrower and worth stating plainly: state
-// keys are built by concatenation ("bal|"+creator+"|"+holder), so a value
+// keys are built by concatenation ("mb|"+creator+"|"+holder), so a value
 // containing the '|' delimiter could forge another account's key. THAT is the
 // safety property. Everything else here is a sanity bound, not a security control
 // — authenticating the caller is the chain's job, not ours, and the proven

@@ -395,8 +395,13 @@ func jsonEscape(s string) string { return parse.Escape(s) }
 // action) using the SAME literal key ("owner") kOwner() would produce. Since
 // kOwner() is unexported it cannot be called from this package, but the
 // literal is safe to duplicate: no core market key ever collides with a bare
-// "owner" string (every per-market key is prefixed "m|", "bal|", "e|", or
+// "owner" string (every per-market key is prefixed "m|", "mb|", "e|", or
 // "tw|" — see core/keys.go).
+//
+// ⚠ 2026-07-30: the bare "owner" key is ALSO what magi-market reads to identify
+// this contract's collection admin (magi-market/contract/internal.go:976-982).
+// Whoever it names can set the royalty on secondary sales for every creator at
+// once. It must stay a plain account string under our control.
 //
 //go:wasmexport init
 func Init(a *string) *string {
@@ -426,6 +431,13 @@ func Init(a *string) *string {
 	// LOW severity by design — unlike treasuryWithdrawn/tradeFeesClaimed
 	// below, which move real money and ARE tracked by the indexer.
 	sdk.Log(core.EvInit(caller))
+	// ★ THE DISCOVERY TRIGGER (2026-07-30). The Magi indexer finds a token
+	// contract by scanning every contract's logs for this one event name, then
+	// folds its standard events into the shared tables every wallet and explorer
+	// already read. WITHOUT THIS LINE THERE IS NO REGISTRY ROW, and every
+	// downstream view — balances, transfers, token info, the collection
+	// overview — is EMPTY for us rather than wrong. Emitted once, at init.
+	sdk.Log(core.EvInitMagiNft(caller, "Lumen Creator Tokens", "LUMEN"))
 	return strPtr(`{"owner":"` + jsonEscape(caller) + `"}`)
 }
 
@@ -569,6 +581,8 @@ func Register(a *string) *string {
 	// feePaid is logged as ZERO, structurally and forever — registration is
 	// free. The event field is kept for schema stability (every other
 	// EvRegistered call site in this file still carries it).
+	// Declares this creator's token id to the standard tables.
+	sdk.Log(core.EvTokenCreated(caller, uint64(capVal)))
 	sdk.Log(core.EvRegistered(caller, caller, block, face, capVal, big.NewInt(0)))
 	minted := "0"
 	if res.FirstBuy != nil {
@@ -720,7 +734,7 @@ func Transfer(a *string) *string {
 	// path able to reach them (credits are an internal ledger balance, not
 	// HBD — there is no separate outbound transfer call here to gate; this
 	// IS the fund-moving call for this entrypoint).
-	if !sdk.Address(to).IsValid() {
+	if !isPayableAddress(to) {
 		handleErr(inputErr("invalid destination address"))
 		return nil
 	}
@@ -741,6 +755,238 @@ func Transfer(a *string) *string {
 	}
 	sdk.Log(core.EvTransferred(creator, caller, to, block, amount))
 	return strPtr(`{"creator":"` + jsonEscape(creator) + `","from":"` + jsonEscape(caller) + `","to":"` + jsonEscape(to) + `","amount":"` + amount.String() + `"}`)
+}
+
+// isPayableAddress is the payee gate: a recognised address form that can also
+// actually RECEIVE a payout.
+//
+// ★ IsValid() alone is not enough (scrutiny F1, 2026-07-30). It classifies
+// `system:` as a valid form — and go-vsc's ledger refuses every transfer to one,
+// so a balance parked there can be burned by the wind-down push and then revert
+// the payout, pinning supply above zero forever: the market can never close and
+// the creator can never re-register. Domain() already distinguishes them; the
+// gate just has to consult it.
+func isPayableAddress(a string) bool {
+	addr := sdk.Address(a)
+	return addr.IsValid() && addr.Domain() != sdk.AddressDomainSystem && addr.Domain() != sdk.AddressDomainContract
+}
+
+// emitMaturedDelta emits the standard and flat transfer events for whatever the
+// matured bucket did across a call, given its balance beforehand.
+//
+// It exists because Refund and RefundHolder can BOTH graduate a position (a
+// mint into the tradable bucket) and draw from it (a burn out), and neither
+// returns those figures. Measuring the delta at the wrapper is the honest way
+// to emit without threading two more values through core's money signatures.
+// A zero delta emits nothing.
+func emitMaturedDelta(creator, holder, operator string, block uint64, before *big.Int) {
+	after := core.MaturedOf(store, creator, holder)
+	switch after.Cmp(before) {
+	case 1: // grew — a graduation into the tradable bucket
+		d := new(big.Int).Sub(after, before)
+		sdk.Log(core.EvTransferSingle(operator, "", holder, creator, d))
+		sdk.Log(core.EvMaturedMoved(creator, operator, "", holder, block, d))
+	case -1: // shrank — tokens left the tradable supply
+		d := new(big.Int).Sub(before, after)
+		sdk.Log(core.EvTransferSingle(operator, holder, "", creator, d))
+		sdk.Log(core.EvMaturedMoved(creator, operator, holder, "", block, d))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// THE MARKET-FACING DOORS (2026-07-30). See core/doors.go for the model.
+//
+// These exist so a MATURED creator token can be traded on magi-market using
+// Magi's own token interface rather than a dialect of our own. Only matured
+// tokens pass through them: a token still inside the exit-tax window owes an
+// amount that depends on its own age, so it is not interchangeable with
+// anything and it does not leave.
+// ---------------------------------------------------------------------------
+
+// Payload: {"from":"<acct>","to":"<acct>","id":"<creator>","amount":<NUMBER>,"data":"<ignored>"}
+//
+// ★★ `amount` IS A BARE JSON NUMBER, NOT A QUOTED STRING. This is the ONE place
+// in this contract where that is true, and it is not our choice: magi-market
+// builds this payload itself and emits an unquoted number
+// (magi-market/contract/internal.go:943-949). Our house rule is "money is a
+// string, always" — and a faithful application of it here would parse the amount
+// as zero, compile, pass every local test, deploy, and then fail EVERY market
+// purchase. Hence jsonU64Field (a bare-number parse with an explicit validity
+// flag) rather than jsonStr + parseBigDecimal.
+//
+// A token count is safe in uint64 by scope: it is bounded by supply, which is
+// bounded by MaxCap = 1e9. HBD never passes through here.
+//
+// AUTH — deliberately NOT requireActiveAuth. The caller may be a contract (the
+// marketplace settling a sale), and the active-auth gate structurally refuses
+// every contract caller. The authority is the ALLOWANCE, granted earlier by the
+// owner under their own active key at the `approve` door. See core/doors.go for
+// why authorising on the transaction's signers instead would be a gate that
+// always passes.
+//
+//go:wasmexport safeTransferFrom
+func SafeTransferFrom(a *string) *string {
+	payload := payloadStr(a)
+	spender := currentCaller() // msg.caller — the immediate caller, contract or human
+
+	from := jsonStr(payload, "from")
+	to := jsonStr(payload, "to")
+	creator := jsonStr(payload, "id") // the token id IS the creator
+	amountU64, ok := jsonU64Field(payload, "amount")
+	if !ok {
+		handleErr(inputErr("invalid amount (expected a bare JSON number)"))
+		return nil
+	}
+	if amountU64 == 0 {
+		handleErr(inputErr("amount must be positive"))
+		return nil
+	}
+	// The owner moving their own tokens must still prove active authority —
+	// otherwise a delegated posting key could move a holder's balance, which is
+	// the exact defect requireActiveAuth exists to close. A third-party spender
+	// is authorised by the allowance instead, inside core.
+	if spender == from {
+		if err := requireActiveAuth(spender); err != nil {
+			handleErr(err)
+			return nil
+		}
+	}
+	if !isPayableAddress(to) {
+		handleErr(inputErr("invalid destination address"))
+		return nil
+	}
+
+	amount := new(big.Int).SetUint64(amountU64)
+	if err := core.TransferMatured(store, creator, from, to, spender, amount); err != nil {
+		handleErr(err)
+		return nil
+	}
+	// The derived balance views are inflow minus outflow over these events, so
+	// every matured-bucket movement must emit one.
+	sdk.Log(core.EvTransferSingle(spender, from, to, creator, amount))
+	sdk.Log(core.EvMaturedMoved(creator, spender, from, to, currentBlock(), amount))
+	return strPtr(`{"success":true}`)
+}
+
+// Payload: {"spender":"<acct>","id":"<creator>","amount":<NUMBER>,"expected":<NUMBER>}
+//
+// The GRANT door. Caller is always the owner and always a human, so the active
+// auth requirement is discharged here, once. An ungated approve would let a
+// delegated posting key hand a spender authority over the owner's tokens — the
+// same critical one indirection later.
+//
+// `expected` is our addition to the standard shape: the allowance is set only if
+// it currently equals that value. Intra-block ordering on this chain is chosen
+// by the block producer rather than won in a fee auction, which makes the
+// classic re-approve race a decision rather than a gamble. Setting to zero
+// always succeeds, so revoking authority is never blocked.
+//
+//go:wasmexport approve
+func ApproveAllowance(a *string) *string {
+	payload := payloadStr(a)
+	owner := currentCaller()
+	if err := requireActiveAuth(owner); err != nil {
+		handleErr(err)
+		return nil
+	}
+
+	spender := jsonStr(payload, "spender")
+	creator := jsonStr(payload, "id")
+	amountU64, ok := jsonU64Field(payload, "amount")
+	if !ok {
+		handleErr(inputErr("invalid amount (expected a bare JSON number)"))
+		return nil
+	}
+	// A malformed `expected` must NOT silently read as zero: a client following
+	// the house money-is-a-string convention would send "500", parse to 0, and
+	// get "allowance changed since it was read" for a perfectly well-formed
+	// intent (scrutiny F13). Absent is legitimate only when revoking.
+	expectedU64, expectedOK := jsonU64Field(payload, "expected")
+	if !expectedOK && amountU64 > 0 {
+		handleErr(inputErr("expected current allowance required as a bare JSON number (compare-and-set)"))
+		return nil
+	}
+
+	if err := core.Approve(store, owner, spender, creator,
+		new(big.Int).SetUint64(expectedU64), new(big.Int).SetUint64(amountU64)); err != nil {
+		handleErr(err)
+		return nil
+	}
+	return strPtr(`{"success":true}`)
+}
+
+// Payload: {"id":"<creator>"}
+//
+// Moves the caller's own cleared position into the tradable bucket. The holder's
+// own act, under their own active key — deliberately not permissionless: an
+// arbitrary caller able to top up someone's tradable balance at a moment of
+// their choosing can re-arm a listing or an allowance the holder had left
+// unbacked, at a stale price.
+//
+// A no-op when nothing has cleared, so a client can call it unconditionally
+// before listing without first reading the chain.
+//
+//go:wasmexport graduate
+func GraduateMatured(a *string) *string {
+	payload := payloadStr(a)
+	caller := currentCaller()
+	if err := requireActiveAuth(caller); err != nil {
+		handleErr(err)
+		return nil
+	}
+	creator := jsonStr(payload, "id")
+	moved := core.Graduate(store, creator, caller, currentBlock())
+	if moved.Sign() > 0 {
+		// Mint shape (from == ""): tokens entering the tradable supply.
+		sdk.Log(core.EvTransferSingle(caller, "", caller, creator, moved))
+		sdk.Log(core.EvMaturedMoved(creator, caller, "", caller, currentBlock(), moved))
+	}
+	return strPtr(`{"graduated":"` + moved.String() + `"}`)
+}
+
+// Payload: {"owner":"<acct>","spender":"<acct>","id":"<creator>"} — read-only.
+//
+//go:wasmexport allowance
+func AllowanceRead(a *string) *string {
+	payload := payloadStr(a)
+	v := core.AllowanceOf(store,
+		jsonStr(payload, "owner"), jsonStr(payload, "spender"), jsonStr(payload, "id"))
+	// `amount`, not `allowance` — the standard's own response key
+	// (magi_nft's AllowanceResponse). Speaking the standard is the whole point
+	// of these doors; a dialect here defeats it (scrutiny F5).
+	return strPtr(`{"amount":` + v.String() + `}`)
+}
+
+// Payload: {"account":"<acct>","id":"<creator>"} — read-only.
+//
+// Returns the MATURED balance only, because that is what this interface means to
+// every consumer of it: the tokens that can move. The maturing half is real and
+// spendable on the curve, but it is not transferable, and reporting it here
+// would promise liquidity that does not exist. `creatorTokenBalance` reports
+// both for our own UI.
+//
+//go:wasmexport balanceOf
+func BalanceOfMatured(a *string) *string {
+	payload := payloadStr(a)
+	v := core.MaturedOf(store, jsonStr(payload, "id"), jsonStr(payload, "account"))
+	return strPtr(`{"balance":` + v.String() + `}`)
+}
+
+// Payload: {"account":"<acct>","id":"<creator>"} — read-only, OUR shape.
+//
+// The honest full picture for our own screens: what can move today, what is
+// still maturing, and when it graduates. One call rather than three, because at
+// a thousand creators a per-creator round trip is the cost model the whole
+// design exists to avoid.
+//
+//go:wasmexport creatorTokenBalance
+func CreatorTokenBalance(a *string) *string {
+	payload := payloadStr(a)
+	creator := jsonStr(payload, "id")
+	account := jsonStr(payload, "account")
+	return strPtr(`{"matured":"` + core.MaturedOf(store, creator, account).String() +
+		`","maturing":"` + core.MaturingOf(store, creator, account).String() +
+		`","maturesAtBlock":` + u64s(core.MaturesAtBlock(store, creator, account)) + `}`)
 }
 
 // Payload: {"creator":"<hive-account>","contentHash":"<string>",
@@ -851,11 +1097,16 @@ func Ask(a *string) *string {
 	owed := core.CommissionOwedFor(face)
 
 	sdk.HiveDraw(nativeInt64(owed), sdk.AssetHbd) // commission leg, pull FIRST, EXACTLY owed
+	maturedBefore := core.MaturedOf(store, creator, caller)
 	res, err := core.Ask(store, caller, creator, block, maxCredits, owed, contentHash, deadlineBlocks, offeringID)
 	if err != nil {
 		handleErr(err)
 		return nil
 	}
+	// An ask draws from the MATURED bucket once maturing tokens are exhausted,
+	// and every change to that bucket must emit or the shared explorer tables
+	// overstate the holder's tradable balance permanently (scrutiny F2).
+	emitMaturedDelta(creator, caller, caller, block, maturedBefore)
 	sdk.Log(core.EvAsked(creator, caller, block, res.Seq, res.CreditsSpent, res.CommissionHbd, res.RateUsed, deadlineBlocks, contentHash, offeringID))
 	return strPtr(`{"creator":"` + jsonEscape(creator) + `","seq":` + u64s(res.Seq) + `,"creditsSpent":"` + bigStr(res.CreditsSpent) + `","commissionHbd":"` + bigStr(res.CommissionHbd) + `","rate":"` + res.RateUsed.String() + `"}`)
 }
@@ -1147,6 +1398,14 @@ func Refund(a *string) *string {
 		minNet = []*big.Int{mn}
 	}
 
+	// Matured-bucket delta, measured across the call. A Refund graduates the
+	// caller's cleared position and may then draw from the matured bucket, and
+	// EVERY change to that bucket must emit — the indexer's derived balances are
+	// inflow minus outflow over those events, so a silent change is a balance
+	// that stays wrong for that holder forever. Measured here rather than
+	// threaded through core's signature because the wrapper is the only layer
+	// that can emit at all.
+	maturedBefore := core.MaturedOf(store, creator, caller)
 	payout, err := core.Refund(store, caller, creator, block, credits, minNet...) // state mutated FIRST
 	if err != nil {
 		handleErr(err)
@@ -1155,6 +1414,7 @@ func Refund(a *string) *string {
 	if payout != nil && payout.Sign() > 0 {
 		sdk.HiveTransfer(sdk.Address(caller), nativeInt64(payout), sdk.AssetHbd) // THEN pay
 	}
+	emitMaturedDelta(creator, caller, caller, block, maturedBefore)
 	sdk.Log(core.EvRefunded(creator, caller, block, credits, payout))
 	return strPtr(`{"creator":"` + jsonEscape(creator) + `","creditsBurned":"` + credits.String() + `","payoutHbd":"` + bigStr(payout) + `"}`)
 }
@@ -1195,6 +1455,12 @@ func Buy(a *string) *string {
 	}
 	if res.TotalDue.Sign() > 0 {
 		sdk.HiveDraw(nativeInt64(res.TotalDue), sdk.AssetHbd) // THEN draw cost+fee from the buyer
+	}
+	if res.Graduated != nil && res.Graduated.Sign() > 0 {
+		// A buy graduates the caller's cleared position before crediting the new
+		// tokens; mint shape, because those tokens enter the tradable supply.
+		sdk.Log(core.EvTransferSingle(caller, "", caller, creator, res.Graduated))
+		sdk.Log(core.EvMaturedMoved(creator, caller, "", caller, block, res.Graduated))
 	}
 	sdk.Log(core.EvBought(creator, caller, block, res.Minted, res.Cost, res.Fee, res.TotalDue))
 	return strPtr(`{"creator":"` + jsonEscape(creator) + `","minted":"` + bigStr(res.Minted) +
@@ -1251,7 +1517,18 @@ func Sell(a *string) *string {
 	if res.Net != nil && res.Net.Sign() > 0 {
 		sdk.HiveTransfer(sdk.Address(caller), nativeInt64(res.Net), sdk.AssetHbd) // THEN pay the seller
 	}
-	sdk.Log(core.EvSold(creator, caller, block, res.Sold, res.Gross, res.Tax, res.Fee, res.Net, res.TaxBps, res.HeldBlocks))
+	if res.Graduated != nil && res.Graduated.Sign() > 0 {
+		sdk.Log(core.EvTransferSingle(caller, "", caller, creator, res.Graduated))
+		sdk.Log(core.EvMaturedMoved(creator, caller, "", caller, block, res.Graduated))
+	}
+	// Burn shape (to == ""): whatever left the MATURED bucket has left the
+	// tradable supply. A sale draws maturing tokens first, so this fires only
+	// once those are exhausted.
+	if res.MaturedBurned != nil && res.MaturedBurned.Sign() > 0 {
+		sdk.Log(core.EvTransferSingle(caller, caller, "", creator, res.MaturedBurned))
+		sdk.Log(core.EvMaturedMoved(creator, caller, caller, "", block, res.MaturedBurned))
+	}
+	sdk.Log(core.EvSold(creator, caller, block, res.Sold, res.Gross, res.Tax, res.Fee, res.Net, res.TaxableGross, res.TaxBps, res.HeldBlocks))
 	return strPtr(`{"creator":"` + jsonEscape(creator) + `","sold":"` + bigStr(res.Sold) +
 		`","gross":"` + bigStr(res.Gross) + `","tax":"` + bigStr(res.Tax) +
 		`","net":"` + bigStr(res.Net) + `","taxBps":` + u64s(res.TaxBps) + `}`)
@@ -1292,7 +1569,8 @@ func RefundHolder(a *string) *string {
 	creator := jsonStr(payload, "creator")
 	holder := jsonStr(payload, "holder")
 
-	creditsBurned := core.BalanceOf(store, creator, holder)                 // pre-read: RefundHolder burns the WHOLE balance and returns only the payout
+	creditsBurned := core.BalanceOf(store, creator, holder) // pre-read: RefundHolder burns the WHOLE balance and returns only the payout
+	maturedBefore := core.MaturedOf(store, creator, holder)
 	payout, err := core.RefundHolder(store, caller, creator, holder, block) // state mutated FIRST
 	if err != nil {
 		handleErr(err)
@@ -1303,7 +1581,7 @@ func RefundHolder(a *string) *string {
 		// the burn above already happened in core's state, but a rejection
 		// here reverts the WHOLE transaction (handleErr -> sdk.Revert),
 		// rolling that burn back too, so nothing is stranded.
-		if !sdk.Address(holder).IsValid() {
+		if !isPayableAddress(holder) {
 			handleErr(inputErr("invalid holder address"))
 			return nil
 		}
@@ -1313,6 +1591,7 @@ func RefundHolder(a *string) *string {
 	// own gating below — an unconditional log let anyone force a documented
 	// (0,nil) no-op and still pollute the indexer's audit history for free.
 	if payout != nil && payout.Sign() > 0 {
+		emitMaturedDelta(creator, holder, caller, block, maturedBefore)
 		sdk.Log(core.EvRefundPushed(creator, caller, holder, block, creditsBurned, payout))
 	}
 	return strPtr(`{"creator":"` + jsonEscape(creator) + `","holder":"` + jsonEscape(holder) + `","payoutHbd":"` + bigStr(payout) + `"}`)

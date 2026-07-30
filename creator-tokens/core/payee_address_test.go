@@ -72,7 +72,28 @@ func TestPayee_BitcoinDIDIsAValidRecipient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read contract/main.go: %v", err)
 	}
-	if n := strings.Count(string(main), ".IsValid()"); n != 2 {
-		t.Fatalf("PAYEE REGRESSION: expected exactly 2 sdk.Address(...).IsValid() payee gates in contract/main.go (transfer's `to` and refundHolder's `holder`), found %d — if a gate was added or removed, re-read this test's doc and update it deliberately", n)
+	// Updated deliberately 2026-07-30 (milestone M2): safeTransferFrom is the
+	// THIRD payee gate. It moves matured tokens to a counterparty, so it needs
+	// the same protection as transfer — a destination this classifier does not
+	// recognise would strand the tokens at a dead key with no rail able to
+	// reach them.
+	//
+	// Note that safeTransferFrom ALSO refuses contract-domain destinations
+	// (core/doors.go), which IsValid does not cover: a contract address is a
+	// perfectly real account that simply cannot be refunded, because it holds no
+	// keys and cannot call. The two checks guard different failures and neither
+	// replaces the other.
+	// ★ UPDATED 2026-07-30 (scrutiny F1). The three payee gates now route through
+	// ONE helper, isPayableAddress, instead of calling IsValid directly — because
+	// IsValid alone accepts `system:` addresses, which our own classifier calls
+	// valid but go-vsc's ledger refuses to pay. A balance parked at one survives
+	// the wind-down burn and then reverts the payout, pinning supply above zero
+	// forever. So the count to pin is now the number of CALL SITES of the helper,
+	// plus the single IsValid inside it.
+	if n := strings.Count(string(main), "isPayableAddress("); n != 4 {
+		t.Fatalf("PAYEE REGRESSION: expected 4 isPayableAddress mentions in contract/main.go (its definition plus the three payee gates: transfer's `to`, refundHolder's `holder`, safeTransferFrom's `to`), found %d — if a gate was added or removed, re-read this test's doc and update it deliberately", n)
+	}
+	if !strings.Contains(string(main), "AddressDomainSystem") {
+		t.Fatal("PAYEE REGRESSION: the payee gate no longer refuses `system:` destinations — a single token sent to one can never be swept, so supply never reaches zero and the market can never close")
 	}
 }

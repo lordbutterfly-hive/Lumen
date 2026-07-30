@@ -458,7 +458,11 @@ func TestSell_OUTFLOWK1_RefutedVictimEnriched(t *testing.T) {
 		}
 		total.Add(total, net1)
 		// bob refunds whatever he still holds (his kept gift, in the attack).
-		if rem := getMoney(s, kBal(c, bob)); rem.Sign() > 0 {
+		// BOTH buckets: bob has held a full window here, so his first Refund
+		// graduates him and his remaining tokens sit in the matured bucket — a
+		// maturing-only read would report zero and silently skip the second
+		// refund, making the attack look no better than the baseline.
+		if rem := totalBalance(s, c, bob); rem.Sign() > 0 {
 			net2, err := Refund(s, bob, c, t1, rem)
 			if err != nil {
 				t.Fatal(err)

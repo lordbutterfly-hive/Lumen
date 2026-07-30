@@ -101,15 +101,34 @@ contracts:
       # seller paid the tax they did.
       - log_type: "sold"
         table: "lumen_ct_sold_events"
-        schema: { creator: string, actor: string, block: numeric, sold: string, gross: string, tax: string, fee: string, net: string, tax_bps: numeric, held_blocks: numeric }
+        schema: { creator: string, actor: string, block: numeric, sold: string, gross: string, tax: string, fee: string, net: string, tax_bps: numeric, held_blocks: numeric, taxable_gross: string }
         parse: "json"
-        fields: { creator: "$.creator", actor: "$.actor", block: "$.block", sold: "$.sold", gross: "$.gross", tax: "$.tax", fee: "$.fee", net: "$.net", tax_bps: "$.taxBps", held_blocks: "$.heldBlocks" }
+        fields: { creator: "$.creator", actor: "$.actor", block: "$.block", sold: "$.sold", gross: "$.gross", tax: "$.tax", fee: "$.fee", net: "$.net", tax_bps: "$.taxBps", held_blocks: "$.heldBlocks", taxable_gross: "$.taxableGross" }
 
       - log_type: "transferred"
         table: "lumen_ct_transferred_events"
         schema: { creator: string, actor: string, recipient: string, block: numeric, amount: string }
         parse: "json"
         fields: { creator: "$.creator", actor: "$.actor", recipient: "$.to", block: "$.block", amount: "$.amount" }
+
+      # ---- matured-bucket movement, OUR flat shape ----
+      #
+      # The same movements also go out as the standard TransferSingle, which the
+      # indexer folds into the stock magi_nft tables for wallets and explorers.
+      # This flat sibling exists because lumen_ct_balances — the view the
+      # WIND-DOWN KEEPER reads to find holders — is built on our own tables.
+      # Without it, a holder who acquired tokens on magi-market is invisible to
+      # the keeper, supply never reaches zero, and the market can never close.
+      #
+      # Flat rather than nested deliberately: the standard family nests under
+      # `attributes`, and this file's own field-path checker reads flat `$.field`
+      # paths only. Emitting a flat sibling keeps the tripwire honest instead of
+      # widening it for one event.
+      - log_type: "maturedMoved"
+        table: "lumen_ct_matured_moved_events"
+        schema: { creator: string, actor: string, sender: string, recipient: string, block: numeric, amount: string }
+        parse: "json"
+        fields: { creator: "$.creator", actor: "$.actor", sender: "$.from", recipient: "$.to", block: "$.block", amount: "$.amount" }
 
       # ---- wind-down exits ----
 

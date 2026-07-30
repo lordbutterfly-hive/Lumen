@@ -257,7 +257,12 @@ func TestOffPegRefundRounding(t *testing.T) {
 			for len(live) > 0 {
 				idx := rng.Intn(len(live))
 				h := live[idx]
-				bal := getMoney(s, kBal(creator, h))
+				// BOTH buckets. At this block every holder has cleared the
+				// window, so Refund graduates them on first touch and their
+				// maturing key empties while the tokens are still outstanding.
+				// A maturing-only read drops them from the drain and the supply
+				// never reaches zero.
+				bal := totalBalance(s, creator, h)
 				if mIsZero(bal) {
 					live = append(live[:idx], live[idx+1:]...)
 					continue
@@ -323,7 +328,10 @@ func TestOffPegRefundRounding(t *testing.T) {
 				totalPaid.Add(totalPaid, wantGross)
 				block++
 
-				if mIsZero(getMoney(s, kBal(creator, h))) {
+				// BOTH buckets: a holder whose position graduated has no
+				// maturing key, and dropping them here would leave their
+				// tokens outstanding forever — the supply would never drain.
+				if mIsZero(totalBalance(s, creator, h)) {
 					live = append(live[:idx], live[idx+1:]...)
 				}
 			}

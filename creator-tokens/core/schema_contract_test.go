@@ -444,7 +444,7 @@ func TestSchemaContract_Sold(t *testing.T) {
 	// taxBps and heldBlocks are BARE NUMBERS (indexer reads both as uint64);
 	// every money leg is a quoted string. Getting either wrong makes the
 	// indexer's json.Unmarshal fail for the whole struct, not decode wrong.
-	out := EvSold("aliceperry", "holderthree", 12_740_000, big.NewInt(50), big.NewInt(2500), big.NewInt(500), big.NewInt(250), big.NewInt(1750), 2000, 604_800)
+	out := EvSold("aliceperry", "holderthree", 12_740_000, big.NewInt(50), big.NewInt(2500), big.NewInt(500), big.NewInt(250), big.NewInt(1750), big.NewInt(2500), 2000, 604_800)
 	m := scDecode(t, out)
 
 	scWantStr(t, evName, m, "type", "sold", "magi-indexer/creator_tokens_mappings.yaml (KindSold)")
@@ -459,7 +459,11 @@ func TestSchemaContract_Sold(t *testing.T) {
 	scWantStr(t, evName, m, "net", "1750", "magi-indexer/creator_tokens_mappings.yaml (SoldEvent.Net)")
 	scWantNum(t, evName, m, "taxBps", 2000, "magi-indexer/creator_tokens_mappings.yaml (SoldEvent.TaxBps)")
 	scWantNum(t, evName, m, "heldBlocks", 604_800, "magi-indexer/creator_tokens_mappings.yaml (SoldEvent.HeldBlocks)")
-	scWantFieldCount(t, evName, m, 12, ref)
+	// 13 since 2026-07-30: taxableGross was appended so a consumer can
+	// reproduce the tax. gross × taxBps alone overstates it for any position
+	// that is part-matured.
+	scWantStr(t, evName, m, "taxableGross", "2500", ref)
+	scWantFieldCount(t, evName, m, 13, ref)
 }
 
 func TestSchemaContract_OfferingCreated(t *testing.T) {
@@ -744,7 +748,7 @@ func TestSchemaContract_EveryConstructorIsPinned(t *testing.T) {
 	// own bodies (`{"type":"` + name) or the `<name>` placeholder in their doc
 	// comments; it DOES match the wire-shape examples in this file's header
 	// comment, which is harmless — those name real, already-pinned events.
-	for _, m := range regexp.MustCompile(`evOpen(?:Actor)?\("([a-zA-Z]+)"|\{"type":"([a-zA-Z]+)"`).FindAllStringSubmatch(string(src), -1) {
+	for _, m := range regexp.MustCompile(`evOpen(?:Actor)?\("([A-Za-z0-9_]+)"|\{"type":"([A-Za-z0-9_]+)"`).FindAllStringSubmatch(string(src), -1) {
 		if m[1] != "" {
 			names[m[1]] = true
 		} else {
@@ -756,6 +760,11 @@ func TestSchemaContract_EveryConstructorIsPinned(t *testing.T) {
 	}
 	// Every event core can emit must appear in the pinned kind set.
 	pinned := map[string]bool{
+		// The magi_nft-family events (2026-07-30) — pinned below by
+		// TestSchemaContract_StandardNftFamily. Their shape is dictated by
+		// magi_nft, not by us, so the pin asserts conformance to THEIR wire
+		// format rather than freedom to choose ours.
+		"init_magi_nft": true, "tokenCreated": true, "TransferSingle": true, "maturedMoved": true,
 		"registered": true, "renewed": true, "faceChanged": true, "capChanged": true,
 		"prepaid": true, "transferred": true, "asked": true, "answered": true,
 		"reclaimed": true, "declined": true, "refunded": true, "refundPushed": true,
@@ -785,4 +794,56 @@ func TestSchemaContract_EveryConstructorIsPinned(t *testing.T) {
 			t.Fatalf("the pinned set names %q but core/events.go has no evOpen(%q) — a constructor was renamed or deleted; update this test and the indexer together.", ev, ev)
 		}
 	}
+}
+
+// TestSchemaContract_StandardNftFamily pins the three magi_nft-family events.
+//
+// These differ from every other event this contract emits: their shape is NOT
+// ours to choose. The Magi indexer ships a stock mapping for them and folds
+// them into shared tables, so a field renamed or a number quoted here does not
+// produce a wrong row — it produces NO row, silently, for every consumer at
+// once. That is why they are pinned field-by-field like the rest.
+func TestSchemaContract_StandardNftFamily(t *testing.T) {
+	// init_magi_nft — the discovery trigger. Absent it, there is no registry
+	// row and every downstream view is empty.
+	got := EvInitMagiNft("hive:lumen", "Lumen Creator Tokens", "LUMEN")
+	want := `{"type":"init_magi_nft","attributes":{"owner":"hive:lumen","name":"Lumen Creator Tokens","symbol":"LUMEN","baseUri":""}}`
+	if got != want {
+		t.Fatalf("init_magi_nft wire shape drifted.\n got: %s\nwant: %s", got, want)
+	}
+
+	got = EvTokenCreated("hive:alice", 1000)
+	want = `{"type":"tokenCreated","attributes":{"tokenId":"hive:alice","maxSupply":1000,"soulbound":false}}`
+	if got != want {
+		t.Fatalf("tokenCreated wire shape drifted.\n got: %s\nwant: %s", got, want)
+	}
+
+	// TransferSingle — `value` is a BARE NUMBER, matching the standard. It is a
+	// token COUNT, never HBD; this is the one family where our money-is-a-string
+	// rule does not apply, and quoting it here would make the indexer's numeric
+	// column reject every row.
+	got = EvTransferSingle("hive:market", "hive:bob", "hive:carol", "hive:alice", big.NewInt(250))
+	want = `{"type":"TransferSingle","attributes":{"operator":"hive:market","from":"hive:bob","to":"hive:carol","id":"hive:alice","value":250}}`
+	if got != want {
+		t.Fatalf("TransferSingle wire shape drifted.\n got: %s\nwant: %s", got, want)
+	}
+
+	// Mint shape (from == "") and burn shape (to == "") are how the derived
+	// balance views distinguish supply entering and leaving the tradable set.
+	if mint := EvTransferSingle("hive:bob", "", "hive:bob", "hive:alice", big.NewInt(5)); !scContains(mint, `"from":""`) {
+		t.Fatalf("mint shape must carry an EMPTY from: %s", mint)
+	}
+	if burn := EvTransferSingle("hive:bob", "hive:bob", "", "hive:alice", big.NewInt(5)); !scContains(burn, `"to":""`) {
+		t.Fatalf("burn shape must carry an EMPTY to: %s", burn)
+	}
+}
+
+// scContains avoids importing strings into this file just for two assertions.
+func scContains(hay, needle string) bool {
+	for i := 0; i+len(needle) <= len(hay); i++ {
+		if hay[i:i+len(needle)] == needle {
+			return true
+		}
+	}
+	return false
 }

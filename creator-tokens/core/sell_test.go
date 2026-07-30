@@ -61,8 +61,17 @@ func slAssertSplits(t *testing.T, r *SellResult) {
 	// identity (not a bracket) is what makes the tax un-splittable by ceil
 	// superadditivity, and it is the property net >= 0 rests on (ceil(p·τ) +
 	// fee < p for τ <= 2000).
-	if want := ExitTaxOn(r.Gross, r.TaxBps); r.Tax.Cmp(want) != 0 {
-		t.Fatalf("tax %s != ExitTaxOn(gross %s, %d bps) %s — the gross tax has no cap", r.Tax, r.Gross, r.TaxBps, want)
+	// TWO BUCKETS (2026-07-30): the base narrowed to the MATURING share of the
+	// gross — a matured token's rate is exactly 0, so taxing it would charge for
+	// time already served. The identity is still exact on every sale, and
+	// TaxableGross == Gross whenever nothing has graduated.
+	if want := ExitTaxOn(r.TaxableGross, r.TaxBps); r.Tax.Cmp(want) != 0 {
+		t.Fatalf("tax %s != ExitTaxOn(taxableGross %s of gross %s, %d bps) %s — the tax has no cap",
+			r.Tax, r.TaxableGross, r.Gross, r.TaxBps, want)
+	}
+	if r.TaxableGross.Cmp(r.Gross) > 0 {
+		t.Fatalf("taxable base %s exceeds gross %s — the maturing share can never be more than the whole",
+			r.TaxableGross, r.Gross)
 	}
 }
 

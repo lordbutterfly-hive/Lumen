@@ -223,7 +223,7 @@ func RefundPrice(s Store, creator string) *big.Int {
 func Refund(s Store, caller, creator string, block uint64, credits *big.Int, minNet ...*big.Int) (*big.Int, error) {
 	if !validAccount(caller) {
 		// Rejects empty caller too. Closes the same key-collision class every
-		// sibling closes: kBal concatenates "bal|"+creator+"|"+holder with no
+		// sibling closes: kBal concatenates "mb|"+creator+"|"+holder with no
 		// escaping, so a caller containing '|' could alias another
 		// (creator,holder) pair's balance key. validAccount structurally
 		// excludes '|'.
@@ -236,8 +236,14 @@ func Refund(s Store, caller, creator string, block uint64, credits *big.Int, min
 		return nil, newErr(ErrInput, "credits must be positive")
 	}
 
-	balKey := kBal(creator, caller)
-	bal := getMoney(s, balKey)
+	// ★ BOTH BUCKETS (2026-07-30). Reading kBal alone here was the concrete
+	// defect the scrutiny found in the two-bucket spec: after the rename kBal is
+	// the MATURING family, so a holder whose whole position had matured would
+	// see ErrBalance — while Sell is closed by inWindDown — leaving them with
+	// ZERO open rails. That is precisely the state this file's header proves
+	// cannot exist ("no state exists in which a holder with a balance has zero
+	// open rails"), so the guard has to see the whole position.
+	bal := totalBalance(s, creator, caller)
 	if mLt(bal, credits) {
 		return nil, newErr(ErrBalance, "insufficient credits")
 	}
@@ -268,8 +274,13 @@ func Refund(s Store, caller, creator string, block uint64, credits *big.Int, min
 	// — and every fairness property C-22/C-23/C-24 proves on it — is UNCHANGED
 	// by the tax; the tax is a pure carve from the holder's payout, no
 	// aggregate, RULING G-clean.
+	// TWO BUCKETS: only the maturing share of the draw owes tax, apportioned pro
+	// rata by token count (matured tokens are 0% by definition). Same helper,
+	// same fixed matured-first order, and therefore the same number as Sell
+	// charges for an identical position.
 	taxBps := ExitTaxBpsAt(heldBlocksAt(s, creator, caller, block))
-	tax := ExitTaxOn(gross, taxBps)
+	_, refundFromMaturing := splitDraw(s, creator, caller, credits)
+	tax := ExitTaxOn(maturingGrossShare(gross, refundFromMaturing, credits), taxBps)
 	net := new(big.Int).Sub(gross, tax) // >= 0: tax = ceil(gross·τ/1e4) <= gross for τ <= 2000
 
 	// ECON-2 RATIFIED (PRUNED 2026-07-22, owner ruling): the wind-down rail
@@ -292,8 +303,9 @@ func Refund(s Store, caller, creator string, block uint64, credits *big.Int, min
 	// existence; the wrapper's narrowing + host-revert covers that tail. The
 	// int64 guard lives only on Buy (an inflow).
 
-	if err := debitBalance(s, creator, caller, credits); err != nil {
-		return nil, err // unreachable: bal >= credits was just proven
+	graduate(s, creator, caller, block) // see sell.go: keep the buckets honest on every touch
+	if err := debitPosition(s, creator, caller, credits); err != nil {
+		return nil, err // unreachable: totalBalance >= credits was just proven
 	}
 	if err := subMoney(s, kSupply(creator), credits); err != nil {
 		return nil, err // unreachable: supply >= bal >= credits by I3
@@ -361,8 +373,11 @@ func RefundHolder(s Store, caller, creator, holder string, block uint64) (*big.I
 		return nil, newErr(ErrState, "refundHolder is only available once wind-down opens (retired/frozen/closed); the holder may still exit via Sell on the live curve")
 	}
 
-	balKey := kBal(creator, holder)
-	bal := getMoney(s, balKey)
+	// BOTH BUCKETS — the push sweeps the holder's WHOLE position, or an
+	// abandoned matured balance pins supply above zero forever, CloseIfDrained
+	// never fires, and the creator can never re-register. That is the exact
+	// shape of the BTC-payee defect this file already records.
+	bal := totalBalance(s, creator, holder)
 	if mIsZero(bal) {
 		return mZero(), nil
 	}
@@ -447,6 +462,20 @@ func RefundHolder(s Store, caller, creator, holder string, block uint64) (*big.I
 	//     the transfer enriches the recipient far more than the tax it triggers),
 	//     so no rational actor does it, and the market still closes either way.
 	// ─────────────────────────────────────────────────────────────────────────
+	// ★ TWO BUCKETS — THE GATE MUST READ THE MATURING SIDE (2026-07-30). This
+	// gate is what stops a griefer, or the retiring creator who chooses when
+	// wind-down opens, from force-liquidating a still-fresh holder and
+	// crystallising up to 20% of their backing against their will (the EXITTAX-1
+	// / NOTICE-1 vector). Evaluate it against a holder's MATURED bucket and it
+	// reads 0% and waves everything through — the protection would be silently
+	// dead while looking intact.
+	//
+	// heldBlocksAt reads the maturing clock, which is exactly the right input: a
+	// holder still owes tax iff their maturing bucket is non-empty and its clock
+	// has not decayed. A purely-matured holder owes nothing and is safe to push
+	// (that is what "matured" means), so the gate correctly opens for them.
+	// heldBlocksAt now reports a graduated position as fully aged (holdclock.go),
+	// so this reads 0 for a wholly-matured holder without a special case here.
 	taxBps := ExitTaxBpsAt(heldBlocksAt(s, creator, holder, block))
 	if taxBps != 0 {
 		open, ok := windDownOpenBlock(s, creator, block)
@@ -472,14 +501,21 @@ func RefundHolder(s Store, caller, creator, holder string, block uint64) (*big.I
 	// above. Either way the carve is exact: tax = ceil(gross·τ/1e4) to the
 	// treasury (RULING K2), net = gross − tax to the holder, and the reserve is
 	// debited the FULL gross so R === area(S) is untouched by the tax.
-	tax := ExitTaxOn(gross, taxBps)
+	// Pro rata across the two buckets, same rule as Sell and Refund.
+	_, pushFromMaturing := splitDraw(s, creator, holder, bal)
+	tax := ExitTaxOn(maturingGrossShare(gross, pushFromMaturing, bal), taxBps)
 	net := new(big.Int).Sub(gross, tax)
 
-	// Chokepoint debit, same as Refund: the pushed-out holder's whole balance
-	// leaves (amount == bal). RULING K deleted the cost basis, so nothing but
-	// the balance and supply move here.
-	if err := debitBalance(s, creator, holder, bal); err != nil {
-		return nil, err // unreachable: amount == bal by construction
+	// Chokepoint debit, same as Refund: the pushed-out holder's whole position
+	// leaves (amount == bal, both buckets). RULING K deleted the cost basis, so
+	// nothing but the balance and supply move here.
+	// NOT graduated here, deliberately: the push removes the holder's ENTIRE
+	// position, so moving it between buckets first is pure churn — and it would
+	// delete the hold clock, which this operation's own consent gate and its
+	// event both read. Sell and Refund graduate because they leave a remainder
+	// that has to stay honest; this one leaves nothing.
+	if err := debitPosition(s, creator, holder, bal); err != nil {
+		return nil, err // unreachable: amount == totalBalance by construction
 	}
 	if err := subMoney(s, kSupply(creator), bal); err != nil {
 		return nil, err // unreachable: supply >= bal by I3

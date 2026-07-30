@@ -132,17 +132,35 @@ import "math/big"
 // SellResult carries every amount the wasm wrapper, the quote UI (RULING F:
 // the split MUST be shown before signing) and the event log need.
 type SellResult struct {
-	Sold  *big.Int // ΔS — removed from the seller's balance and from supply
-	Gross *big.Int // p = SellProceeds(S, ΔS) — the exact reserve debit
-	Tax   *big.Int // ExitTaxOn(p, τ) — gross × rate, no cap — to the TREASURY (RULING J/K)
-	Fee          *big.Int // total trade fee, out of the payout
-	FeeCreator   *big.Int // accrued to kFeeBal(creator) (pull, F8)
-	FeePlatform  *big.Int // accrued to kTreasury()
-	Net          *big.Int // p − tax − fee — the wrapper's single transfer
+	Sold        *big.Int // ΔS — removed from the seller's balance and from supply
+	Gross       *big.Int // p = SellProceeds(S, ΔS) — the exact reserve debit
+	Tax         *big.Int // ExitTaxOn(p, τ) — gross × rate, no cap — to the TREASURY (RULING J/K)
+	Fee         *big.Int // total trade fee, out of the payout
+	FeeCreator  *big.Int // accrued to kFeeBal(creator) (pull, F8)
+	FeePlatform *big.Int // accrued to kTreasury()
+	Net         *big.Int // p − tax − fee — the wrapper's single transfer
 	//                       to the seller (skipped when 0)
-	TaxBps       uint64   // τ actually applied (quote/UI/event)
-	HeldBlocks   uint64   // h the clock read (quote/UI/event)
-	RateRecorded *big.Int // spotRate(S_before) fed to RecordObs
+	TaxBps uint64 // τ actually applied (quote/UI/event)
+	// TaxableGross is the MATURING share of Gross — the base the exit tax was
+	// actually charged on. With two buckets the K1 identity is no longer
+	// tax == ExitTaxOn(Gross, τ), because a matured token's rate is 0 by
+	// definition; it is tax == ExitTaxOn(TaxableGross, τ), exactly, on every
+	// sale. Carried on the result rather than recomputed by callers so the
+	// quote, the charge, the event and the property tests all read one number.
+	TaxableGross *big.Int
+	// Graduated is how many tokens moved into the tradable bucket as a side
+	// effect of this call. The wrapper emits the standard mint-shaped transfer
+	// event for it — the indexer's derived balances are inflow minus outflow
+	// over those events, so a graduation that emits nothing is a balance that
+	// stays wrong for that holder forever.
+	Graduated *big.Int
+	// MaturedBurned is how much of this sale came out of the TRADABLE bucket.
+	// The wrapper emits a burn-shaped standard transfer event for it so the
+	// indexer's derived balances stay correct. Zero in the common case, since a
+	// sale draws maturing tokens first.
+	MaturedBurned *big.Int
+	HeldBlocks    uint64   // h the clock read (quote/UI/event)
+	RateRecorded  *big.Int // spotRate(S_before) fed to RecordObs
 }
 
 // sellCompute runs every guard and all the math for a sell WITHOUT mutating
@@ -164,7 +182,11 @@ func sellCompute(s Store, caller, creator string, block uint64, deltaS *big.Int)
 	// Balance first (clearer error than the rail for the common mistake).
 	// Escrowed tokens are already OUTSIDE bal (I3), so escrow structurally
 	// cannot be sold — no extra check needed or possible here.
-	bal := getMoney(s, kBal(creator, caller))
+	// BOTH BUCKETS (2026-07-30). A holder's position is maturing + matured, and
+	// reading only one of them refuses a seller access to tokens they provably
+	// own — which is exactly how refund.go's "no state leaves a holder trapped"
+	// proof breaks.
+	bal := totalBalance(s, creator, caller)
 	if mLt(bal, deltaS) {
 		return nil, newErr(ErrBalance, "insufficient credits")
 	}
@@ -203,7 +225,15 @@ func sellCompute(s Store, caller, creator string, block uint64, deltaS *big.Int)
 	// per-position state. Un-splittable by ceil superadditivity + curve-leg
 	// path-independence (exittax.go) — read-only, so QuoteSell computes the
 	// identical number.
-	tax := ExitTaxOn(p, taxBps)
+	//
+	// TWO BUCKETS (2026-07-30): only the MATURING part of the draw owes anything
+	// — a matured token's rate is exactly 0 by definition. The taxable base is
+	// therefore the maturing share of the gross, apportioned PRO RATA by token
+	// count, never by letting the matured tokens take the dearest price slice
+	// off the top (see maturingGrossShare for the measured reason).
+	fromMatured, fromMaturing := splitDraw(s, creator, caller, deltaS)
+	taxableGross := maturingGrossShare(p, fromMaturing, deltaS)
+	tax := ExitTaxOn(taxableGross, taxBps)
 	fee, feeC, feeP := tradeFeeOn(p)
 
 	// net = p − tax − fee, >= 0 (proof in the file header). Computed once,
@@ -225,16 +255,18 @@ func sellCompute(s Store, caller, creator string, block uint64, deltaS *big.Int)
 	// int64 narrowing + host-revert covers the (economically-impossible) tail;
 	// the guard lives only on Buy (an inflow, buyCompute/launchBuyCheck).
 	return &SellResult{
-		Sold:         new(big.Int).Set(deltaS),
-		Gross:        p,
-		Tax:          tax,
-		Fee:          fee,
-		FeeCreator:   feeC,
-		FeePlatform:  feeP,
-		Net:          net,
-		TaxBps:       taxBps,
-		HeldBlocks:   h,
-		RateRecorded: SpotRate(supply), // S_before — the pre-trade marginal
+		Sold:          new(big.Int).Set(deltaS),
+		Gross:         p,
+		Tax:           tax,
+		Fee:           fee,
+		FeeCreator:    feeC,
+		FeePlatform:   feeP,
+		Net:           net,
+		TaxBps:        taxBps,
+		TaxableGross:  taxableGross,
+		MaturedBurned: fromMatured,
+		HeldBlocks:    h,
+		RateRecorded:  SpotRate(supply), // S_before — the pre-trade marginal
 	}, nil
 }
 
@@ -329,8 +361,17 @@ func Sell(s Store, caller, creator string, block uint64, deltaS *big.Int, minNet
 	// deliberately NOT touched — selling does not re-age the remainder
 	// (holdclock.go). RULING K deleted the cost basis, so a Sell no longer
 	// removes or persists any per-position accounting.
-	if err := debitBalance(s, creator, caller, r.Sold); err != nil {
-		return nil, err // unreachable: bal >= ΔS was just proven
+	// Graduate first: a position that has cleared the window belongs in the
+	// matured bucket whether or not its owner has bought since. This is one of
+	// the touch points that keeps the market-visible balance honest — without
+	// them the ONLY way into the matured bucket is spending money on another
+	// purchase (scrutiny MEDIUM-1). Infallible, and every guard has passed.
+	r.Graduated = graduate(s, creator, caller, block)
+	// Maturing first, then matured — the same fixed order sellCompute priced
+	// against, so the charge can never disagree with the quote. See splitDraw
+	// for why the order is what makes the tax un-splittable.
+	if err := debitPosition(s, creator, caller, r.Sold); err != nil {
+		return nil, err // unreachable: totalBalance >= ΔS was just proven
 	}
 	// The full slice leaves supply — no burn, no withheld tokens.
 	if err := subMoney(s, kSupply(creator), r.Sold); err != nil {

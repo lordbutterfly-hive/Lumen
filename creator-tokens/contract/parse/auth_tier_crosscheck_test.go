@@ -145,7 +145,16 @@ func TestAuthTier_ContractGateIsIntact(t *testing.T) {
 	// The ungated entrypoints must be reads only. This is a NAMED allow-list
 	// on purpose: a new UNGATED entrypoint is exactly the change that must not
 	// pass silently, so adding one forces a deliberate edit here.
-	knownReadOnly := map[string]bool{"quote": true, "quoteBuy": true, "quoteSell": true, "listOfferings": true}
+	knownReadOnly := map[string]bool{
+		"quote": true, "quoteBuy": true, "quoteSell": true, "listOfferings": true,
+		// Market-facing reads (2026-07-30). Each returns state and writes
+		// nothing, so an ungated caller can learn only what the chain already
+		// makes public — and magi-market reads these values straight out of raw
+		// state anyway, so gating them would protect nothing.
+		"allowance":           true, // reads allow|<owner>|<spender>|<creator>
+		"balanceOf":           true, // reads the matured balance
+		"creatorTokenBalance": true, // our own shape: matured + maturing + graduation block
+	}
 	var unexpectedUngated []string
 	for name := range all {
 		if !active[name] && !knownReadOnly[name] {
@@ -217,6 +226,21 @@ func TestAuthTier_EveryGatedWriteIsExercised(t *testing.T) {
 		"unpause":          "platform-owner control; the payload builder exists but no data-source method wires it",
 		"withdrawTreasury": "platform-owner control; the data source has the method but no UI reaches it, so the harness journey cannot drive it as a user would",
 		"closeIfDrained":   "permissionless keeper op; creator-tokens/keeper builds this envelope, and keeper/wire_test.go cross-checks ITS auth tier against the same gate",
+		// The market-facing doors (2026-07-30, milestone M2). No client method
+		// exists yet — the frontend wiring is milestone M4 — so the TS harness
+		// cannot drive them. REMOVE THESE TWO ENTRIES the moment the client
+		// gains approve/safeTransferFrom builders, or their auth tier ships
+		// cross-checked by nothing.
+		//
+		// Note for whoever does that: safeTransferFrom is gated CONDITIONALLY —
+		// requireActiveAuth applies only when the caller is moving their own
+		// tokens. A third-party spender (the marketplace) is authorised by the
+		// allowance instead, because the active-auth gate structurally refuses
+		// every contract caller. This test's scanner sees the gate and treats
+		// the entrypoint as gated, which is correct for the owner path.
+		"graduate":         "holder moves their own cleared position into the tradable bucket; client builder lands with the frontend wiring in M4",
+		"approve":          "grant door; client builder lands with the frontend wiring in M4",
+		"safeTransferFrom": "spend door; conditionally gated (owner path only) — client builder lands in M4",
 	}
 
 	var missing []string

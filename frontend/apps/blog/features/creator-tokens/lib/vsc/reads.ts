@@ -18,7 +18,7 @@ import { RECLAIM_GRACE_BLOCKS, baseUnitsToHuman, blockToEpochMs, deriveAskStatus
 // core.Register always uses that DID-form caller AS the market's own
 // `creator` identity (main.go's Register entrypoint: caller==creator,
 // enforced by core.Register itself), so every state key core/keys.go builds
-// — m|<creator>|<field>, bal|<creator>|<holder>, e|<creator>|<seq>,
+// — m|<creator>|<field>, mb|<creator>|<holder>, e|<creator>|<seq>,
 // tw|<creator>|<i> — is namespaced under "hive:<name>", never a bare
 // username. A client that builds `m|alice|face` instead of
 // `m|hive:alice|face` reads null forever ("never registered") even against
@@ -203,8 +203,13 @@ export function decodeRetiredAt(raw: string | null | undefined): number | null {
   if (v === null || v === 0) return null;
   return v - 1;
 }
+// MATURING balance. Renamed from `bal|` to `mb|` on 2026-07-30 to match
+// core/keys.go — `bal|` is now reserved for the market-facing MATURED family,
+// which magi-market reads directly as `bal|<holder>|<creator>` (transposed) in
+// little-endian u64. Reading the old prefix here would return the wrong
+// family's bytes, or nothing at all.
 export function kBal(c: string, holder: string): string {
-  return `bal|${toDid(c)}|${toDid(holder)}`;
+  return `mb|${toDid(c)}|${toDid(holder)}`;
 }
 export function kEscrow(c: string, seq: number): string {
   return `e|${toDid(c)}|${seq}`;

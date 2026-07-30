@@ -450,7 +450,12 @@ func Ask(s Store, caller, creator string, block uint64, maxCredits *big.Int, com
 		return nil, newErr(ErrBalance, "commission must exactly equal commissionOwedFor(face) at execution (not more, not less)")
 	}
 
-	bal := getMoney(s, kBal(creator, caller))
+	// BOTH BUCKETS (2026-07-30). An asker whose position has wholly matured
+	// holds no maturing key at all; reading kBal alone would refuse them their
+	// own tokens and lock them out of the product's core loop — buy a creator's
+	// token, spend it on that creator's services — precisely once they had held
+	// long enough to be a committed customer.
+	bal := totalBalance(s, creator, caller)
 	if mLt(bal, creditsSpent) {
 		return nil, newErr(ErrBalance, "insufficient credits")
 	}
@@ -465,8 +470,14 @@ func Ask(s Store, caller, creator string, block uint64, maxCredits *big.Int, com
 	// the cost-basis half — the tax no longer caps at realized gain, so there
 	// is no basis to record. The asker's own remaining position keeps its clock
 	// either way — escrow-out never re-ages a remainder.
-	acqAtEscrow := holderAcqBlock(s, creator, caller)
-	if err := debitBalance(s, creator, caller, creditsSpent); err != nil {
+	// The recorded clock now spans both buckets — see escrowAcqBlock. A draw
+	// taken wholly from matured tokens records one full window, so reclaiming or
+	// declining returns them still matured rather than silently re-starting
+	// their clock (which would be the same confiscation the ET-2 fix closed,
+	// arriving through a new door).
+	escFromMatured, escFromMaturing := splitDraw(s, creator, caller, creditsSpent)
+	acqAtEscrow := escrowAcqBlock(s, creator, caller, block, escFromMatured, escFromMaturing)
+	if err := debitPosition(s, creator, caller, creditsSpent); err != nil {
 		return nil, err // unreachable given the check above; defense-in-depth
 	}
 

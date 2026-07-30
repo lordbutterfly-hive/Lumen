@@ -38,7 +38,37 @@ func Reserve(s Store, creator string) *big.Int { return getMoney(s, kReserve(cre
 // BalanceOf returns a holder's credit balance (escrowed credits excluded —
 // those have left the balance and live in the escrow record until resolved).
 func BalanceOf(s Store, creator, holder string) *big.Int {
+	// BOTH BUCKETS. This is what the wrapper, the keeper and the frontend all
+	// read; returning the maturing half alone would under-report every holder
+	// who has ever crossed the window, and the keeper would then believe a
+	// market had drained when it had not.
+	return totalBalance(s, creator, holder)
+}
+
+// MaturedOf and MaturingOf split what BalanceOf totals. The UI needs the two
+// apart — one number is spendable and tradable today, the other is not, and
+// showing a single figure would promise liquidity that does not exist.
+func MaturedOf(s Store, creator, holder string) *big.Int {
+	return getMatured(s, creator, holder)
+}
+
+func MaturingOf(s Store, creator, holder string) *big.Int {
 	return getMoney(s, kBal(creator, holder))
+}
+
+// MaturesAtBlock reports the block at which a holder's maturing balance
+// graduates, or 0 when there is nothing maturing. Read-only; the UI renders a
+// date from it, and it is derived from the same clock the tax rate uses so the
+// two can never disagree.
+func MaturesAtBlock(s Store, creator, holder string) uint64 {
+	if getMoney(s, kBal(creator, holder)).Sign() == 0 {
+		return 0
+	}
+	w := holderAcqBlock(s, creator, holder)
+	if w == 0 {
+		return 0
+	}
+	return w + ExitTaxDecayBlocks
 }
 
 // (RULING K deleted BasisOf: the exit tax no longer caps at realized gain, so

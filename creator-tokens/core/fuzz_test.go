@@ -803,7 +803,11 @@ func fzActRefundHolder(t *testing.T, rng *rand.Rand, w *fzWorld, tr *fzTrace) {
 	h := fzHolders[rng.Intn(len(fzHolders))]
 	pusher := fzHolders[rng.Intn(len(fzHolders))] // deliberately independent of h — anyone may push
 
-	balBefore := getMoney(w.s, kBal(c, h))
+	// BOTH buckets: a wholly-matured holder has no maturing key, so reading
+	// kBal alone reports 0 and the "a real burn happened" flag never gets set —
+	// after which the R == area(S) equality check fires on a market that has
+	// legitimately begun its wind-down.
+	balBefore := totalBalance(w.s, c, h)
 	payout, err := RefundHolder(w.s, pusher, c, h, w.block)
 	tr.add("RefundHolder(pusher=%s creator=%s holder=%s block=%d) -> payout=%v err=%v", pusher, c, h, w.block, payout, err)
 	if err == nil {
@@ -965,7 +969,8 @@ func fzCheckInvariantsOnStore(t *testing.T, s *MemStore, tr *fzTrace, label stri
 		}
 		sumBal := big.NewInt(0)
 		for _, h := range fzAllActors {
-			sumBal = mAdd(sumBal, getMoney(s, kBal(c, h)))
+			// BOTH buckets — a graduated holder holds no maturing key.
+			sumBal = mAdd(sumBal, totalBalance(s, c, h))
 		}
 		esc := escrowed[c]
 		if esc == nil {
@@ -1039,7 +1044,10 @@ func fzCheckSolvencyCore(t *testing.T, w *fzWorld, tr *fzTrace, step int) {
 			total := big.NewInt(0)
 			sumBal := big.NewInt(0)
 			for _, h := range fzAllActors {
-				bal := getMoney(w.s, kBal(c, h))
+				// BOTH buckets — a wind-down pays a holder's whole position, so
+				// simulating it from the maturing half alone strands the matured
+				// half's backing and reports a residual that does not exist.
+				bal := totalBalance(w.s, c, h)
 				if bal.Sign() <= 0 {
 					continue
 				}

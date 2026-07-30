@@ -28,8 +28,10 @@ func setupMarket(s Store, creator string, block uint64, cap int64) {
 // sumBalances scans every bal|<creator>|<holder> key and sums it — the
 // invariant-sweep helper store.go documents MemStore.Keys() as existing for.
 func sumBalances(s *MemStore, creator string) *big.Int {
-	prefix := "bal|" + creator + "|"
-	total := big.NewInt(0)
+	// Both buckets — see hzSumMatured (harness_test.go) for why the matured
+	// family cannot be reached by a prefix scan on the creator.
+	prefix := kBal(creator, "")
+	total := hzSumMatured(s, creator)
 	for _, k := range s.Keys() {
 		if strings.HasPrefix(k, prefix) {
 			v, _ := s.Get(k)
@@ -180,7 +182,7 @@ func TestTransferCredits_RecipientInheritsSenderClock_MaturityTravels(t *testing
 	}
 	// The two now read the SAME rate at every block: 300 tokens' worth of
 	// maturity was neither created nor destroyed by moving 100 of them.
-	for _, q := range []uint64{250, 250 + ExitTaxDecayBlocks / 2, 250 + ExitTaxDecayBlocks} {
+	for _, q := range []uint64{250, 250 + ExitTaxDecayBlocks/2, 250 + ExitTaxDecayBlocks} {
 		if a, b := ExitTaxBpsAt(heldBlocksAt(s, creator, "alice", q)), ExitTaxBpsAt(heldBlocksAt(s, creator, "bob", q)); a != b {
 			t.Fatalf("at block %d alice pays %d bps and bob %d bps on tokens of identical provenance", q, a, b)
 		}

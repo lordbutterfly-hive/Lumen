@@ -138,29 +138,69 @@ func hzAssertPhase(t *testing.T, s Store, creator string, block uint64, want, la
 
 // ---- I3 (supply == balances + escrow) --------------------------------------
 
-// hzHoldersOf scans every bal|<creator>|<holder> key and returns the
-// distinct holder names, sorted for deterministic iteration.
+// hzHoldersOf returns every distinct holder of a creator's token, sorted for
+// deterministic iteration.
+//
+// ★ IT MUST SCAN BOTH FAMILIES. A holder whose position has graduated has NO
+// maturing key at all, so a maturing-only scan omits them — and its consumer is
+// the I1 full-unwind solvency proof, which would then skip that holder's entire
+// claim on the reserve and PASS MORE EASILY for it. Scrutiny caught exactly
+// that: the proof was measuring a subset and calling it the whole.
 func hzHoldersOf(s *MemStore, creator string) []string {
-	prefix := "bal|" + creator + "|"
 	seen := map[string]bool{}
 	var out []string
-	for _, k := range s.Keys() {
-		if !strings.HasPrefix(k, prefix) {
-			continue
-		}
-		h := k[len(prefix):]
-		if !seen[h] {
+	add := func(h string) {
+		if h != "" && !seen[h] {
 			seen[h] = true
 			out = append(out, h)
+		}
+	}
+	maturingPrefix := kBal(creator, "")
+	maturedSuffix := "|" + creator
+	for _, k := range s.Keys() {
+		switch {
+		case strings.HasPrefix(k, maturingPrefix):
+			add(k[len(maturingPrefix):])
+		case strings.HasPrefix(k, "bal|") && strings.HasSuffix(k, maturedSuffix):
+			add(k[len("bal|") : len(k)-len(maturedSuffix)])
 		}
 	}
 	sort.Strings(out)
 	return out
 }
 
-// hzSumBalances totals every bal|<creator>|<holder> value.
+// hzSumMatured totals the MATURED family for one creator.
+//
+// ★ It cannot be a simple prefix scan. The matured key is magi_nft's layout,
+// bal|<holder>|<creator> — TRANSPOSED — so the creator sits in the SUFFIX and a
+// prefix scan cannot select by it. Holder names structurally exclude '|'
+// (validAccount), so the three segments are unambiguous.
+//
+// Every solvency sweep in this package must include this. A holder whose whole
+// position has graduated has NO maturing key at all, so a maturing-only sweep
+// omits them entirely and reports a supply/balance mismatch that is an artefact
+// of the measurement, not a defect in the money.
+func hzSumMatured(s *MemStore, creator string) *big.Int {
+	suffix := "|" + creator
+	total := big.NewInt(0)
+	for _, k := range s.Keys() {
+		if !strings.HasPrefix(k, "bal|") || !strings.HasSuffix(k, suffix) {
+			continue
+		}
+		v, _ := s.Get(k)
+		n, ok := leToU64([]byte(v))
+		if ok {
+			total.Add(total, new(big.Int).SetUint64(n))
+		}
+	}
+	return total
+}
+
+// hzSumBalances totals a creator's WHOLE outstanding position — maturing plus
+// matured. This is the Σbal side of I3 (S == Σbal + escrowed); measuring only
+// one bucket silently halves the invariant.
 func hzSumBalances(s *MemStore, creator string) *big.Int {
-	prefix := "bal|" + creator + "|"
+	prefix := kBal(creator, "")
 	total := big.NewInt(0)
 	for _, k := range s.Keys() {
 		if !strings.HasPrefix(k, prefix) {
@@ -172,7 +212,7 @@ func hzSumBalances(s *MemStore, creator string) *big.Int {
 			total.Add(total, n)
 		}
 	}
-	return total
+	return total.Add(total, hzSumMatured(s, creator))
 }
 
 // hzSumEscrowedCredits totals the credits of every e|<creator>|<seq> record
@@ -279,7 +319,9 @@ func hzAssertI1Solvency(t *testing.T, s *MemStore, creator string, block uint64,
 	total := big.NewInt(0)
 	rc, sc := new(big.Int).Set(reserve), new(big.Int).Set(supply)
 	for _, h := range hzHoldersOf(s, creator) {
-		bal := getMoney(s, kBal(creator, h))
+		// BOTH buckets: a wind-down pays a holder's whole position, so a
+		// maturing-only read understates what the reserve must cover.
+		bal := totalBalance(s, creator, h)
 		if bal.Sign() <= 0 || sc.Sign() <= 0 {
 			continue
 		}
