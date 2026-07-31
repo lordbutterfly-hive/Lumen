@@ -11,7 +11,12 @@ export function captchaEnabled(): boolean {
 }
 
 export async function verifyCaptcha(token: string, ip?: string): Promise<boolean> {
-  if (!captchaEnabled()) return true; // disabled -> pass-through
+  // F-L8: fail CLOSED in production. An unset Turnstile secret is a dev convenience
+  // (pass-through so the feature runs before Turnstile is provisioned), but in prod it
+  // meant signup ran with zero bot protection — the exact "fails open" hole. In
+  // production an absent secret now rejects; assertLiteEnabled() additionally refuses to
+  // even start the signup path without it (config.ts), so this is defence-in-depth.
+  if (!captchaEnabled()) return process.env.NODE_ENV !== 'production';
   if (!token) return false;
   try {
     const body = new URLSearchParams({ secret: liteConfig.turnstileSecret, response: token });

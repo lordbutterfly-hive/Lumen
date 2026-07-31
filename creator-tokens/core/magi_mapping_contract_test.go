@@ -202,6 +202,9 @@ func TestMagiMapping_EveryEmittedEventIsMapped(t *testing.T) {
 		// duplicate rows into a private table and defeat the entire point of
 		// speaking the standard.
 		"init_magi_nft": true, "tokenCreated": true, "TransferSingle": true,
+		// Approval (F-C2) is the ERC-6909 approval event — same story: the indexer's
+		// stock magi_nft mapping folds it, so it is deliberately NOT in our table.
+		"Approval": true,
 	}
 
 	src, err := os.ReadFile("events.go")

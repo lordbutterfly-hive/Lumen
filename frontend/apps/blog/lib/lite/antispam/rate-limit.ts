@@ -3,7 +3,7 @@ import * as users from '../repositories/user-repository';
 import * as rateRepo from '../repositories/rate-limit-repository';
 import * as posts from '../repositories/post-repository';
 import { getUserCaps } from './trust';
-import { ageDays, dayKey } from './windows';
+import { ageDays, dayKey, hourKey } from './windows';
 
 /**
  * High-level rate enforcement (spec §H). Per-account intake caps are the bot-farm
@@ -90,7 +90,11 @@ export async function enforceLookupRate(ip: string): Promise<boolean> {
 
 /** Per-IP signup cap — an independent limiter from the per-account caps (§H). */
 export async function enforceSignupRate(ip: string): Promise<boolean> {
-  return rateRepo.checkAndConsume(`ip:${ip}`, 'signup', liteConfig.signupPerIpPerDay, dayKey());
+  if (!(await rateRepo.checkAndConsume(`ip:${ip}`, 'signup', liteConfig.signupPerIpPerDay, dayKey()))) {
+    return false;
+  }
+  // F-L33: hourly sub-cap blunts the 00:00-UTC boundary burst the daily fixed window allows.
+  return rateRepo.checkAndConsume(`ip:${ip}`, 'signup', hourlySubCap(liteConfig.signupPerIpPerDay), hourKey());
 }
 
 /**
@@ -127,12 +131,69 @@ export async function enforceGlobalSignupRate(): Promise<boolean> {
   return rateRepo.checkAndConsume('global', 'signup', liteConfig.signupGlobalPerDay, dayKey());
 }
 
+// F-L33: an hourly sub-cap alongside the daily one blunts the boundary burst a
+// fixed-window daily counter allows (up to 2× the daily limit spent across 00:00 UTC).
+// ~1/6 of the daily budget, so steady honest use is never touched.
+function hourlySubCap(dailyLimit: number): number {
+  return Math.max(1, Math.ceil(dailyLimit / 6));
+}
+
+async function enforceGlobalDaily(action: string, dailyLimit: number): Promise<boolean> {
+  if (!(await rateRepo.checkAndConsume('global', action, dailyLimit, dayKey()))) return false;
+  return rateRepo.checkAndConsume('global', action, hourlySubCap(dailyLimit), hourKey());
+}
+
+/**
+ * F-L30: the SCARCE new-account velocity cap — consumed ONLY when an account is
+ * actually created (inside completeSignup), so failed name attempts (name_taken,
+ * name_on_chain, vetting retries) can no longer drain it and deny real users.
+ */
+export async function enforceSignupSuccessRate(): Promise<boolean> {
+  return enforceGlobalDaily('signup_success', liteConfig.signupGlobalPerDay);
+}
+
+/**
+ * F-L30: the every-attempt global ceiling (success OR failure). Restores an aggregate
+ * bound on the upstream Hive-API amplification that doomed-name retries cause, without
+ * the "failed attempts deny real users" bug of the old single shared counter.
+ */
+export async function enforceSignupAttemptRate(): Promise<boolean> {
+  return enforceGlobalDaily('signup_attempt', liteConfig.signupAttemptGlobalPerDay);
+}
+
+/**
+ * F-L31: aggregate daily cap on the RC-expensive account-creation consumption point
+ * (`create_claimed_account`). The per-user enforceUpgradeRate cannot bound a Sybil
+ * fleet; this is the platform-wide backstop, consumed in upgrade-service right before
+ * the create. Gates DEMAND only — pool top-up (supply) is deliberately NOT gated here.
+ */
+export async function enforceActSpend(): Promise<boolean> {
+  return enforceGlobalDaily('act_spend', liteConfig.actSpendPerDay);
+}
+
 /** Off-chain follows feed ranking, so they are capped too (§H). Uses the likes tier. */
 export async function enforceFollowRate(userId: string): Promise<boolean> {
   const user = await users.findUserById(userId);
   if (!user) return false;
   const caps = getUserCaps(user.trustScore, ageDays(user.createdAt));
   return rateRepo.checkAndConsume(`user:${userId}`, 'follow', caps.likesPerDay, dayKey());
+}
+
+// F-L14: vote and reblog each get their OWN daily bucket. They shared the 'follow'
+// key, so casting votes drained the follow budget (and vice versa) — one engagement
+// type could exhaust an unrelated one. Same per-user cap shape, distinct action keys.
+export async function enforceVoteRate(userId: string): Promise<boolean> {
+  const user = await users.findUserById(userId);
+  if (!user) return false;
+  const caps = getUserCaps(user.trustScore, ageDays(user.createdAt));
+  return rateRepo.checkAndConsume(`user:${userId}`, 'vote', caps.likesPerDay, dayKey());
+}
+
+export async function enforceReblogRate(userId: string): Promise<boolean> {
+  const user = await users.findUserById(userId);
+  if (!user) return false;
+  const caps = getUserCaps(user.trustScore, ageDays(user.createdAt));
+  return rateRepo.checkAndConsume(`user:${userId}`, 'reblog', caps.likesPerDay, dayKey());
 }
 
 /**

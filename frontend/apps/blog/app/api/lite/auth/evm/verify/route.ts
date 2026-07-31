@@ -58,6 +58,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const result = await resolveLogin('evm_wallet', normalizeEvmAddress(address), {
       network: evmNetwork()
     });
+    if (result.status === 'error') {
+      return NextResponse.json({ error: result.code }, { status: result.httpStatus }); // F-L27: 403 refusal, not 500
+    }
     return NextResponse.json(result);
   } catch (error) {
     logger.error(error, 'Lite EVM login verification failed');

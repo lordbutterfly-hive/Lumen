@@ -206,8 +206,8 @@ export function decodeRetiredAt(raw: string | null | undefined): number | null {
 // MATURING balance. Renamed from `bal|` to `mb|` on 2026-07-30 to match
 // core/keys.go — `bal|` is now reserved for the market-facing MATURED family,
 // which magi-market reads directly as `bal|<holder>|<creator>` (transposed) in
-// little-endian u64. Reading the old prefix here would return the wrong
-// family's bytes, or nothing at all.
+// little-endian u64. Reading the old prefix here returns the wrong family's
+// bytes, or nothing at all.
 export function kBal(c: string, holder: string): string {
   return `mb|${toDid(c)}|${toDid(holder)}`;
 }

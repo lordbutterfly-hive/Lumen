@@ -6,6 +6,7 @@ import { enforceChallengeRate } from '@/blog/lib/lite/antispam/rate-limit';
 import { verifyGoogleIdToken } from '@/blog/lib/lite/auth/google-verify';
 import { encryptEmail, emailHash } from '@/blog/lib/lite/auth/email-crypto';
 import { resolveLogin } from '@/blog/lib/lite/auth/auth-service';
+import { consumeChallenge } from '@/blog/lib/lite/repositories/challenge-repository';
 
 const logger = getLogger('app');
 
@@ -25,8 +26,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
   const idToken = body?.idToken;
-  if (typeof idToken !== 'string') {
-    return NextResponse.json({ error: 'idToken_required' }, { status: 400 });
+  const nonce = body?.nonce;
+  if (typeof idToken !== 'string' || typeof nonce !== 'string') {
+    return NextResponse.json({ error: 'idToken_and_nonce_required' }, { status: 400 });
+  }
+
+  // F-L11: consume the server-issued single-use `login` nonce FIRST. A captured Google
+  // ID token was replayable for its ~1h validity because nothing tied it to a
+  // server-side single-use value (unlike BTC/EVM, which consume a challenge). Consuming
+  // here means a replay presents a spent nonce and is refused before the token is even
+  // read; the identity.nonce echo check below binds THIS token to THIS challenge.
+  const consumed = await consumeChallenge(nonce, 'login');
+  if (!consumed) {
+    return NextResponse.json({ error: 'invalid_or_expired_challenge' }, { status: 401 });
   }
 
   let identity;
@@ -39,6 +51,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (!identity.emailVerified) {
     return NextResponse.json({ error: 'email_not_verified' }, { status: 401 });
   }
+  // The token MUST echo the nonce we just issued (OIDC `nonce` claim), or a token
+  // obtained for a different nonce could be presented against a freshly-consumed one.
+  if (identity.nonce !== nonce) {
+    return NextResponse.json({ error: 'nonce_mismatch' }, { status: 401 });
+  }
 
   try {
     const ciphertext = encryptEmail(identity.email);
@@ -46,6 +63,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       emailCiphertextB64: ciphertext?.toString('base64'),
       emailHash: emailHash(identity.email)
     });
+    if (result.status === 'error') {
+      return NextResponse.json({ error: result.code }, { status: result.httpStatus }); // F-L27: 403 refusal, not 500
+    }
     return NextResponse.json(result);
   } catch (error) {
     logger.error(error, 'Lite Google login resolution failed');

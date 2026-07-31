@@ -5,6 +5,8 @@ import { computeStreak } from '@/blog/features/retention/lib/compute-streak';
 import { computeLeague } from '@/blog/features/retention/lib/compute-league';
 import { deriveGate, deriveLeagueInputs, utcDay } from '@/blog/features/retention/lib/derive-league-inputs';
 import { getLogger } from '@ui/lib/logging';
+import { getClientIp } from '@/blog/lib/lite/http/ip';
+import { enforceLookupRate } from '@/blog/lib/lite/antispam/rate-limit';
 
 const logger = getLogger('app');
 
@@ -35,12 +37,32 @@ const MAX_PAGES = 25; // ⇒ up to 500 items per feed before we stop walking bac
 const WINDOW_WEEKS = 26; // the rolling window the league's active-weeks arm scores
 const VOTE_SAMPLE_POSTS = 3; // posts we actually walk voters for (bounded cost)
 const CACHE_TTL_MS = 5 * 60 * 1000;
+// F-L15: a DEFINITIVE not-found is negative-cached, but for a SHORTER window than a
+// positive result and NEVER for a transient upstream failure (that returns 502 and is
+// left uncached, so a node hiccup can't pin a real account as missing for 5 minutes).
+const NEG_CACHE_TTL_MS = 60 * 1000;
+// F-L15: hard cap on the in-process cache. It was an unbounded Map on a public, unauth
+// route — every distinct (validated) username added an entry that was never evicted, so
+// walking the username space was a slow memory-exhaustion vector. FIFO-evict once over.
+const MAX_CACHE_ENTRIES = 10_000;
 
 interface CacheEntry {
   at: number;
   body: unknown;
+  /** A negative (account-not-found) entry — see NEG_CACHE_TTL_MS. */
+  notFound?: boolean;
 }
 const cache = new Map<string, CacheEntry>();
+
+function putCache(user: string, entry: CacheEntry): void {
+  cache.set(user, entry);
+  // Map preserves insertion order, so the first key is the oldest — evict until bounded.
+  while (cache.size > MAX_CACHE_ENTRIES) {
+    const oldest = cache.keys().next().value;
+    if (oldest === undefined) break;
+    cache.delete(oldest);
+  }
+}
 
 interface PostLike {
   author?: string;
@@ -104,8 +126,22 @@ export async function GET(req: NextRequest, { params }: { params: { user: string
     return NextResponse.json({ error: 'invalid username' }, { status: 400 });
   }
 
+  // F-L15: per-IP rate limit on this public, unauth route (a cache miss fans ~50 Hive
+  // calls). Best-effort: if the limiter's store is unavailable, fall open on the LIMITER
+  // only — the cache + LRU bound still cap cost — rather than take the route down.
+  try {
+    if (!(await enforceLookupRate(getClientIp(req)))) {
+      return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+    }
+  } catch {
+    /* limiter unavailable — proceed; the cache still bounds amplification */
+  }
+
   const hit = cache.get(user);
-  if (hit && Date.now() - hit.at < CACHE_TTL_MS) {
+  if (hit && Date.now() - hit.at < (hit.notFound ? NEG_CACHE_TTL_MS : CACHE_TTL_MS)) {
+    if (hit.notFound) {
+      return NextResponse.json({ error: 'account not found' }, { status: 404, headers: { 'x-cache': 'neg' } });
+    }
     return NextResponse.json(hit.body, { headers: { 'x-cache': 'hit' } });
   }
 
@@ -118,7 +154,17 @@ export async function GET(req: NextRequest, { params }: { params: { user: string
       walkFeed('comments', user, cutoffMs)
     ]);
 
-    if (accountRes.status !== 'fulfilled' || !accountRes.value) {
+    // F-L15: distinguish a TRANSIENT upstream failure (the getAccount call rejected)
+    // from a DEFINITIVE not-found (it resolved, empty). The former is a 502 and is NEVER
+    // cached; the latter is a 404 and IS negative-cached. Previously both returned 404 —
+    // so a node outage rendered a real account as "not found", and repeated hits on a
+    // genuinely-missing account re-walked every time.
+    if (accountRes.status !== 'fulfilled') {
+      logger.error(accountRes.reason, 'streak: account read failed for %s', user);
+      return NextResponse.json({ error: 'upstream unavailable', detail: 'account' }, { status: 502 });
+    }
+    if (!accountRes.value) {
+      putCache(user, { at: Date.now(), body: null, notFound: true });
       return NextResponse.json({ error: 'account not found' }, { status: 404 });
     }
 
@@ -223,7 +269,7 @@ export async function GET(req: NextRequest, { params }: { params: { user: string
       }
     };
 
-    cache.set(user, { at: Date.now(), body });
+    putCache(user, { at: Date.now(), body });
     return NextResponse.json(body, { headers: { 'x-cache': 'miss' } });
   } catch (error) {
     logger.error(error, 'streak route failed for %s', user);

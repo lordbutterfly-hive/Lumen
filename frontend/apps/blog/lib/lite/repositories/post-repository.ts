@@ -151,20 +151,38 @@ export interface UpdatePostPatch {
   tags: string[];
   summary: string | null;
   thumbnailUrl: string | null;
+  /** The edit's OWN pre-screen result (F-L32). See updatePostContent for why writing
+   *  this cannot undo a moderator sanction. */
+  feedVisibility: FeedVisibility;
 }
 
 /**
- * Replace a post's content. Deliberately does NOT touch `feed_visibility`: that column
- * carries the MODERATOR's decision, and the edit path used to overwrite it with the
- * pre-screen's default ('visible'), so any sanction short of a full takedown could be
- * undone by its own author simply saving an edit.
+ * Replace a post's content AND persist the edit's own pre-screen visibility (F-L32).
+ *
+ * Earlier this deliberately left `feed_visibility` alone, because an unconditional edit
+ * once overwrote a MODERATOR decision with the pre-screen default ('visible') — a
+ * sanction short of a full takedown was undoable by its own author. That hole is now
+ * closed at the CALLER instead: the edit path refuses any post whose current
+ * feed_visibility !== 'visible' (post-service.ts), so an edit only ever reaches here on
+ * an already-visible post, and the value written is the AUTOMATED screen of the NEW
+ * text. It can therefore only DOWNGRADE ('limited'/'author_only') content that just
+ * screened worse — never restore a moderator-hidden post. Without persisting it, an edit
+ * could turn visible content into limited-worthy content while staying fully visible.
  */
 export async function updatePostContent(postId: string, patch: UpdatePostPatch): Promise<LumenPost> {
   const { rows } = await query<PostRow>(
     `UPDATE lumen_post
-       SET title = $2, body = $3, tags = $4, summary = $5, thumbnail_url = $6
+       SET title = $2, body = $3, tags = $4, summary = $5, thumbnail_url = $6, feed_visibility = $7
      WHERE post_id = $1 RETURNING *`,
-    [postId, patch.title, patch.body, JSON.stringify(patch.tags), patch.summary, patch.thumbnailUrl]
+    [
+      postId,
+      patch.title,
+      patch.body,
+      JSON.stringify(patch.tags),
+      patch.summary,
+      patch.thumbnailUrl,
+      patch.feedVisibility
+    ]
   );
   return mapPost(rows[0]);
 }

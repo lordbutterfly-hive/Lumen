@@ -1232,6 +1232,7 @@
     "total_staked": "Total staked",
     "claim": "Claim",
     "claimed": "Claimed",
+    "no_payout": "This round is settled — your position didn't win a payout.",
     "no_round": "No market is open right now — check back next week.",
     "unavailable": "The prediction market isn't available yet — check back soon.",
     "unavailable_widget": "Prediction market isn't available yet.",

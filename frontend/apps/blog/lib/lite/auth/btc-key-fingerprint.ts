@@ -1,6 +1,7 @@
 import { secp256k1 } from '@noble/curves/secp256k1';
 import { sha256 } from '@noble/hashes/sha256';
 import { ripemd160 } from '@noble/hashes/ripemd160';
+import { normalizeBtcAddress, btcNetworkKind } from './btc-verify';
 
 /**
  * One Bitcoin key = one Lumen account.
@@ -126,19 +127,51 @@ export function btcKeyFingerprint(message: string, signatureBase64: string): str
  * P2PKH = base58check(0x00 ‖ hash160), P2SH-P2WPKH = base58check(0x05 ‖
  * hash160(0x0014 ‖ hash160)), P2WPKH = bech32(v0, hash160).
  */
-export function siblingBtcAddresses(fingerprintHex: string): string[] {
+export function siblingBtcAddresses(
+  fingerprintHex: string,
+  network: 'bitcoin' | 'testnet' | 'regtest' = 'bitcoin'
+): string[] {
   try {
     const hash160 = Buffer.from(fingerprintHex, 'hex');
     if (hash160.length !== 20) return [];
     const { payments, networks } = require('bitcoinjs-lib') as typeof import('bitcoinjs-lib');
-    const p2wpkh = payments.p2wpkh({ hash: hash160, network: networks.bitcoin });
+    // F-L29: derive siblings on the CALLER's network, not a hardcoded mainnet. A
+    // hardcoded `networks.bitcoin` produced bc1/1/3 encodings that can never
+    // string-match a legitimate testnet (tb1…) address, so the primary Sybil-dedup
+    // gate returned null for every non-mainnet BTC login and silently disabled itself.
+    const net = networks[network];
+    const p2wpkh = payments.p2wpkh({ hash: hash160, network: net });
     const out = [
-      payments.p2pkh({ hash: hash160, network: networks.bitcoin }).address,
-      payments.p2sh({ redeem: p2wpkh, network: networks.bitcoin }).address,
+      payments.p2pkh({ hash: hash160, network: net }).address,
+      payments.p2sh({ redeem: p2wpkh, network: net }).address,
       p2wpkh.address
     ];
     return out.filter((a): a is string => typeof a === 'string' && a.length > 0);
   } catch {
     return [];
   }
+}
+
+/**
+ * Verify a claimed fingerprint actually BELONGS to the address that just proved
+ * ownership (F-L29). `btcKeyFingerprint` recovers a key from the signature's witness,
+ * but nothing bound it to the address `verifyBtcSignature` validated — a spliced
+ * witness could carry a victim's pubkey and hijack their credential-lookup key. Here
+ * the recovered fingerprint is accepted ONLY if one of its network-correct sibling
+ * addresses equals the proven address; otherwise it is discarded (returns null, i.e.
+ * "no fingerprint" — the caller falls back to the address, never an auth failure).
+ */
+export function verifiedBtcKeyFingerprint(
+  message: string,
+  signatureBase64: string,
+  address: string
+): string | null {
+  const fp = btcKeyFingerprint(message, signatureBase64);
+  if (!fp) return null;
+  const norm = normalizeBtcAddress(address);
+  return siblingBtcAddresses(fp, btcNetworkKind(address)).some(
+    (a) => normalizeBtcAddress(a) === norm
+  )
+    ? fp
+    : null;
 }

@@ -62,7 +62,11 @@ const BuyModal: FC<{
   const spending = useMagiSpendingPower(payer?.id ?? null);
   // HBD is a 3-decimal base-unit integer; the modal works in whole USD, and HBD is
   // dollar-pegged (see live/adapt.ts usdFromHbd — the one documented 1:1).
-  const costBaseUnits = Math.round(usd * 1000);
+  // F-C14 (H-FE-11): the affordability gauge must reflect the MAXIMUM the buy could
+  // charge, not just the base budget. In Advanced mode the signed ceiling is
+  // maxTotalUsd (maxP × tokens), which can exceed `usd`; checking only `usd` would pass
+  // a user whose balance covers the budget but not the higher ceiling they authorised.
+  const costBaseUnits = Math.round(Math.max(usd, maxTotalUsd ?? 0) * 1000);
   const affordability = spending.affordability(costBaseUnits);
   const blockedBySpending = affordability === 'no_resource_credits' || affordability === 'insufficient_hbd';
 
@@ -204,7 +208,7 @@ const BuyModal: FC<{
  */
 const SellModal: FC<{
   m: LiveTokenMarket;
-  onSell: (tokens: number) => Promise<void>;
+  onSell: (tokens: number, minNetUsd?: number) => Promise<void>;
   onClose: () => void;
   mode?: 'sell' | 'redeem';
 }> = ({ m, onSell, onClose, mode = 'sell' }) => {
@@ -213,6 +217,14 @@ const SellModal: FC<{
   const held = m.position?.tokens ?? 0;
   const [amt, setAmt] = useState(String(held || 0));
   const [failure, setFailure] = useState<string | null>(null);
+  // H-FE-7: an OPTIONAL minimum-net floor (slippage protection), collapsed and OFF by
+  // default so the exit is never trapped — sell.go treats an absent minNet as NO floor,
+  // the escape hatch this deliberately preserves (design unchanged). The backend already
+  // threads minNetHbd (use-live-token-market), so this only surfaces the existing knob.
+  const [advOpen, setAdvOpen] = useState(false);
+  const [minNetText, setMinNetText] = useState('');
+  const minNetParsed = parseFloat(minNetText.replace(/,/g, ''));
+  const minNetUsd = advOpen && Number.isFinite(minNetParsed) && minNetParsed > 0 ? minNetParsed : undefined;
   const tokens = parseFloat(amt.replace(/,/g, '')) || 0;
   const q = sellQuote(tokens, m, m.position?.heldDays ?? 999);
   const feePctLabel = Math.round(q.exitFeePct * 100);
@@ -319,12 +331,43 @@ const SellModal: FC<{
           </div>
         </div>
         <button
+          type="button"
+          onClick={() => setAdvOpen((v) => !v)}
+          className="mb-2 border-0 bg-transparent text-[12.5px] font-semibold text-[#6b7280]"
+        >
+          Advanced {advOpen ? '▴' : '▾'}
+        </button>
+        {advOpen ? (
+          <div className="mb-3.5">
+            <label className="mb-1.5 block text-xs text-[#6b7280]">
+              Minimum {redeem ? 'refund' : 'net'} (HBD) — optional slippage floor
+            </label>
+            <div className="flex items-center rounded-xl border border-[#e4e6e9] px-4 py-2.5 focus-within:border-[#c0392b]">
+              <input
+                value={minNetText}
+                onChange={(e) => {
+                  setMinNetText(e.target.value);
+                  setFailure(null);
+                }}
+                inputMode="decimal"
+                placeholder="optional"
+                className="flex-1 border-0 text-[15px] font-semibold tabular-nums text-[#161511] outline-none"
+              />
+              <span className="text-[13px] font-semibold text-[#9ca3af]">HBD</span>
+            </div>
+            <p className="mt-1.5 text-[11.5px] leading-[1.4] text-[#9ca3af]">
+              Leave blank to always exit at the going rate. If set, the {redeem ? 'redeem' : 'sell'} reverts
+              (nothing spent) when the net would fall below it.
+            </p>
+          </div>
+        ) : null}
+        <button
           onClick={async () => {
             if (!Number.isFinite(tokens) || tokens <= 0 || busy) return;
             setBusy(true);
             setFailure(null);
             try {
-              await onSell(tokens);
+              await onSell(tokens, minNetUsd);
               onClose();
             } catch (err) {
               // The REAL reason, not a guess. See ../write-failure.ts.
@@ -390,6 +433,19 @@ const AskModal: FC<{
   // "affords the tokens" once a real HBD balance exists to check — see
   // ask.go's Ask() guard order (maxCredits, then the exact commission match).
   const canAffordTokens = held >= q.tokens && Number.isFinite(q.tokens);
+  // H-FE-2: the commission is a SEPARATE HBD leg (ask.go's commissionHbdPaid), so the
+  // buyer must be able to cover it in HBD — the token-leg check alone let an ask be
+  // signed that the contract's exact-commission guard rejects for want of HBD, burning
+  // the caller's RC. Same payer resolution + spending gauge BuyModal uses; HBD is
+  // dollar-pegged, so the USD commission is its base-unit amount ×1000.
+  const askTokenAccounts = useTokenAccounts();
+  const askPayer = askTokenAccounts.accounts[0] ?? null;
+  const askSpending = useMagiSpendingPower(askPayer?.id ?? null);
+  const commissionBaseUnits = Math.round(q.commissionUsd * 1000);
+  const commissionAffordability = askSpending.affordability(commissionBaseUnits);
+  const blockedByCommission =
+    commissionAffordability === 'no_resource_credits' || commissionAffordability === 'insufficient_hbd';
+  const canAsk = canAffordTokens && !blockedByCommission;
   return (
     <ModalShell width={500} onClose={onClose} title={`Ask @${m.handle}`}>
       <ModalHead title={`Ask @${m.handle}`} onClose={onClose} />
@@ -424,9 +480,10 @@ const AskModal: FC<{
             {deadline} days
           </span>
         </div>
+        {blockedByCommission && askPayer ? <MagiFundingHelp kind={askPayer.kind} className="mb-3" /> : null}
         <button
           onClick={async () => {
-            if (!canAffordTokens || busy) return;
+            if (!canAsk || busy) return;
             setBusy(true);
             setFailure(null);
             try {
@@ -442,14 +499,16 @@ const AskModal: FC<{
               setBusy(false);
             }
           }}
-          disabled={!canAffordTokens || busy}
+          disabled={!canAsk || busy}
           className="w-full rounded-[13px] bg-[#1a1a17] py-[15px] text-[15px] font-semibold text-white hover:bg-black disabled:opacity-50"
         >
           {busy
             ? 'Confirm in your wallet…'
-            : canAffordTokens
-              ? `Send question — ${tok(q.tokens)} tokens + ${usdPrice(q.commissionUsd)} HBD`
-              : `You need ${tok(q.tokens)} @${m.handle} tokens — buy some first`}
+            : !canAffordTokens
+              ? `You need ${tok(q.tokens)} @${m.handle} tokens — buy some first`
+              : blockedByCommission
+                ? `You need ${usdPrice(q.commissionUsd)} in HBD for the commission`
+                : `Send question — ${tok(q.tokens)} tokens + ${usdPrice(q.commissionUsd)} HBD`}
         </button>
         {failure ? (
           <div className="mt-2.5 text-center text-[12.5px] font-semibold text-[#c0392b]">{failure}</div>
@@ -589,9 +648,9 @@ const TokenModals: FC<{
   market: LiveTokenMarket;
   service: Service | null;
   onBuy: (usd: number, maxTotalUsd?: number) => Promise<void>;
-  onSell: (tokens: number) => Promise<void>;
+  onSell: (tokens: number, minNetUsd?: number) => Promise<void>;
   /** refund.go Refund — the pro-rata exit, and the only rail that works once the market winds down. */
-  onRedeem: (tokens: number) => Promise<void>;
+  onRedeem: (tokens: number, minNetUsd?: number) => Promise<void>;
   onSpend: (input: {
     offeringId: number;
     usd: number;

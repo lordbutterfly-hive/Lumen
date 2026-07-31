@@ -83,10 +83,13 @@ def filter_eligible(
     """Apply suppression, NSFW, mute, the second-degree gate (§8.1, §8.2), and
     the author graph-cred floor (§8.3) to a candidate pool.
 
-    Suppression (§8.7) and the NSFW preference apply to every candidate,
-    regardless of source. The mute list, second-degree gate, and graph-cred
-    floor apply only to gated sources — in-network and viewer-opted-in
-    (community/interest) candidates are exempt (``source.requires_second_degree``).
+    Suppression (§8.7), the NSFW preference, and the viewer's mute list apply to
+    every candidate, regardless of source — a mute is a hard user preference and
+    must drop a muted author even from an in-network candidate (see the loop
+    below: the mute check sits OUTSIDE the ``requires_second_degree`` block). Only
+    the second-degree gate and the author graph-cred floor apply solely to gated
+    sources — in-network and viewer-opted-in (community/interest) candidates are
+    exempt from those two (``source.requires_second_degree``).
     Missing graph-cred data never drops a candidate (Phase 0): both the vouch
     floor and the author floor fall back to permissive behavior when
     ``graph_creds`` is empty.

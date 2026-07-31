@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
-import { guardPublisher } from '@/blog/lib/lite/http/guard';
+import { guardAccountCreator } from '@/blog/lib/lite/http/guard';
 import { liteConfig } from '@/blog/lib/lite/config';
 import { withAdvisoryLock } from '@/blog/lib/lite/db/pool';
 import { runActClaimOnce } from '@/blog/lib/lite/upgrade/act-claim';
@@ -29,15 +29,16 @@ const MAX_CLAIMS = 10;
  * (`createClaimedAccount` still claims in-line as a last resort — this endpoint is
  * what stops that path from ever being the normal one.)
  *
- * AUTH: reuses `x-lite-publisher-token`. It is the same ops trust tier — a scheduler
- * secret that triggers broadcasts — and a second secret to rotate buys nothing here.
- * Worth stating plainly though: this token now reaches an ACTIVE-authority operation,
- * where before it only reached POSTING ones. The blast radius is still bounded, because
- * `claim_account` with a zero fee only converts the creator account's Resource Credits
- * into a token; it cannot move funds, and the creator account holds none by design.
+ * AUTH: `x-lite-account-creator-token` (F-L4) — a DEDICATED secret, distinct from the
+ * posting-only publisher-drain token. This endpoint reaches `claim_account`, an
+ * ACTIVE-authority operation, so it must not share a secret with POSTING-tier ops: a
+ * leaked drain token must not transitively drive active-authority work. The blast radius
+ * is still bounded (a zero-fee `claim_account` only converts the balance-free creator
+ * account's Resource Credits into a token; it moves no funds), but the authority tiers
+ * are now separated so the higher one can be rotated on its own.
  */
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  const blocked = guardPublisher(req);
+  const blocked = guardAccountCreator(req);
   if (blocked) return blocked;
 
   ensureAccountCreator();

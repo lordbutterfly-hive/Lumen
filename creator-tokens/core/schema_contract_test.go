@@ -764,7 +764,7 @@ func TestSchemaContract_EveryConstructorIsPinned(t *testing.T) {
 		// TestSchemaContract_StandardNftFamily. Their shape is dictated by
 		// magi_nft, not by us, so the pin asserts conformance to THEIR wire
 		// format rather than freedom to choose ours.
-		"init_magi_nft": true, "tokenCreated": true, "TransferSingle": true, "maturedMoved": true,
+		"init_magi_nft": true, "tokenCreated": true, "TransferSingle": true, "Approval": true, "maturedMoved": true,
 		"registered": true, "renewed": true, "faceChanged": true, "capChanged": true,
 		"prepaid": true, "transferred": true, "asked": true, "answered": true,
 		"reclaimed": true, "declined": true, "refunded": true, "refundPushed": true,
@@ -835,6 +835,15 @@ func TestSchemaContract_StandardNftFamily(t *testing.T) {
 	}
 	if burn := EvTransferSingle("hive:bob", "hive:bob", "", "hive:alice", big.NewInt(5)); !scContains(burn, `"to":""`) {
 		t.Fatalf("burn shape must carry an EMPTY to: %s", burn)
+	}
+
+	// Approval (F-C2) — the ERC-6909 approval event; `amount` is a BARE NUMBER token
+	// COUNT, same money-is-not-a-string exception TransferSingle's `value` carries, and
+	// it is folded by the indexer's stock magi_nft mapping (deliberatelyUnmapped).
+	got = EvApproved("hive:alice", "contract:magi-market", "hive:creator", big.NewInt(500))
+	want = `{"type":"Approval","attributes":{"owner":"hive:alice","spender":"contract:magi-market","id":"hive:creator","amount":500}}`
+	if got != want {
+		t.Fatalf("Approval wire shape drifted.\n got: %s\nwant: %s", got, want)
 	}
 }
 

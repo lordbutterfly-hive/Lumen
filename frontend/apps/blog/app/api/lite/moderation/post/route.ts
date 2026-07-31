@@ -78,7 +78,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 }
 
 /** Who did it, as claimed by the caller. An attribution hint, not an identity. */
-function actorOf(req: NextRequest, body: Record<string, unknown> | null): string {
-  const fromBody = typeof body?.actor === 'string' ? body.actor.trim() : '';
-  return fromBody || req.headers.get('x-lite-moderator-actor')?.trim() || 'operator';
+// F-L14: attribution from the operator-tooling HEADER only, never the request body
+// (a body actor let any token-holder frame another operator). `_body` kept for symmetry.
+function actorOf(req: NextRequest, _body: Record<string, unknown> | null): string {
+  return req.headers.get('x-lite-moderator-actor')?.trim() || 'operator';
 }

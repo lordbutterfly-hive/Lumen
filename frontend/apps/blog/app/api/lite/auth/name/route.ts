@@ -3,8 +3,9 @@ import { getLogger } from '@ui/lib/logging';
 import { guardWrite } from '@/blog/lib/lite/http/guard';
 import { getClientIp } from '@/blog/lib/lite/http/ip';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
+import { assertLiteEnabled } from '@/blog/lib/lite/config';
 import { captchaEnabled, verifyCaptcha } from '@/blog/lib/lite/antispam/captcha';
-import { enforceSignupRate, enforceGlobalSignupRate } from '@/blog/lib/lite/antispam/rate-limit';
+import { enforceSignupRate, enforceSignupAttemptRate } from '@/blog/lib/lite/antispam/rate-limit';
 import { completeSignup } from '@/blog/lib/lite/auth/auth-service';
 
 const logger = getLogger('app');
@@ -16,6 +17,14 @@ const logger = getLogger('app');
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const blocked = guardWrite(req);
   if (blocked) return blocked;
+  // F-L8: assertLiteEnabled had ZERO callers — the real bug. It refuses to run signup in
+  // production without the Turnstile secret (captcha must not fail open). Wrapped so a
+  // misconfig is a clean 503, not an uncaught 500.
+  try {
+    assertLiteEnabled();
+  } catch {
+    return NextResponse.json({ error: 'lite_accounts_disabled' }, { status: 503 });
+  }
 
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
   const displayName = body?.displayName;
@@ -51,8 +60,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         { status: 400 }
       );
     }
-    // Global velocity backstop first (bounds IP-rotation), then the per-IP cap.
-    if (!(await enforceGlobalSignupRate()) || !(await enforceSignupRate(ip))) {
+    // F-L30: the every-ATTEMPT global ceiling (bounds Hive-API amplification from
+    // doomed-name retries, incl. IP-rotation) + the per-IP cap. The SCARCE
+    // success-velocity budget is no longer consumed here — it moved into completeSignup
+    // and is charged only when an account is actually created, so a flood of failing
+    // names can no longer deny real users their signup.
+    if (!(await enforceSignupAttemptRate()) || !(await enforceSignupRate(ip))) {
       return NextResponse.json({ error: 'signup_rate_limited' }, { status: 429 });
     }
     const result = await completeSignup(displayName);

@@ -38,6 +38,9 @@ export interface LumenUser {
   trustScore: number;
   status: UserStatus;
   suspendedReason: string | null;
+  /** Monotonic cookie-invalidation counter (F-L3): bumped on upgrade, suspend/ban and
+   *  logout-all. A session whose stamped epoch differs from this is stale and refused. */
+  sessionEpoch: number;
   createdAt: Date;
   updatedAt: Date;
   upgradedAt: Date | null;

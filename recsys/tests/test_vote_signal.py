@@ -9,6 +9,7 @@ from dataclasses import replace
 
 import pytest
 
+from recsys.config import DEFAULT_SETTINGS
 from recsys.contracts import VoteExclusions
 from recsys.core.normalize import log_compress
 from recsys.core.vote_signal import (
@@ -306,6 +307,17 @@ SLOPE = 2.0  # matches VoteSignalConfig.unknown_per_vouched default
 
 def _trust(*vouched: str, free: float = FREE, slope: float = SLOPE) -> VoterTrust:
     return VoterTrust(vouched=frozenset(vouched), unknown_free=free, unknown_per_vouched=slope)
+
+
+def test_voter_trust_defaults_match_config() -> None:
+    """F-R5 #2: a bare ``VoterTrust`` (dataclass defaults) must use the SAME
+    breadth budget the configured pipeline threads — no divergence between the
+    module default and ``VoteSignalConfig``. Previously the module hard-coded 2.0
+    while config used 1.0 (its documented tightest-correct newcomer floor), so any
+    caller building ``VoterTrust(vouched=...)`` silently ran a looser budget."""
+    default = VoterTrust(vouched=frozenset())
+    assert default.unknown_free == DEFAULT_SETTINGS.vote_signal.unknown_free
+    assert default.unknown_per_vouched == DEFAULT_SETTINGS.vote_signal.unknown_per_vouched
 
 
 def test_credited_breadth_all_vouched_is_full_count() -> None:

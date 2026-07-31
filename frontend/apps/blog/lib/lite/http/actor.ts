@@ -21,8 +21,11 @@ import { findUserById } from '../repositories/user-repository';
 
 export type ActorResult = { ok: true; user: LumenUser } | { ok: false; response: NextResponse };
 
-export async function requireActiveLiteUser(sessionUser: User | undefined): Promise<ActorResult> {
-  const check = await checkLiteActor(sessionUser);
+export async function requireActiveLiteUser(
+  sessionUser: User | undefined,
+  sessionEpoch?: number
+): Promise<ActorResult> {
+  const check = await checkLiteActor(sessionUser, sessionEpoch);
   if (check.ok) return { ok: true, user: check.user };
   return {
     ok: false,

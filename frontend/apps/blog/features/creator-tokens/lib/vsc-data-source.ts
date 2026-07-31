@@ -48,6 +48,7 @@ import {
   SUBSCRIPTION_FEE_BASE_UNITS,
   SUBSCRIPTION_PERIOD_BLOCKS,
   askRateFromObservations,
+  LONG_RING_CFG,
   baseUnitsToHuman,
   blockToEpochMs,
   canInflowOpen,
@@ -116,6 +117,8 @@ import {
   kFeeBal,
   kObs,
   kObsIdx,
+  kObsLong,
+  kObsLongIdx,
   kOfferEpoch,
   kOfferIds,
   kOfferPrice,
@@ -505,8 +508,17 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
    */
   async readQuote(creator: string, offeringId?: number): Promise<Quote> {
     const obsKeys = Array.from({ length: OBS_WINDOW }, (_, i) => kObs(creator, i));
+    const obsLongKeys = Array.from({ length: OBS_WINDOW }, (_, i) => kObsLong(creator, i));
     const [state, head] = await Promise.all([
-      this.gql.getStateByKeys(this.config.contractId, [kFace(creator), kObsIdx(creator), kSupply(creator), ...obsKeys]),
+      this.gql.getStateByKeys(this.config.contractId, [
+        kFace(creator),
+        kObsIdx(creator),
+        kObsLongIdx(creator),
+        kRegisteredAt(creator),
+        kSupply(creator),
+        ...obsKeys,
+        ...obsLongKeys
+      ]),
       this.gql.getHeadBlock()
     ]);
 
@@ -551,6 +563,20 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     const points = decodeObservationRing(obsKeys.map((k) => state[k]), obsIdxCount);
     const estimate: AskRateEstimate = points === null ? { rateBaseUnits: null, status: 'unavailable' } : askRateFromObservations(points, head);
 
+    // F-C3: the LONG (7-day) arm of settlement's min(short, long, spot). Same packed ring
+    // format, decoded identically, but read with the long constants and DROPPED before the
+    // market's current registration epoch — the long counter survives re-registration, so
+    // without the epoch filter a re-registered market would price off the dead incarnation
+    // (core/twap.go askRateLong). Omitting this arm let the preview exceed execution
+    // whenever the long window was the binding constraint.
+    const longIdxCount = toU64(state[kObsLongIdx(creator)]);
+    const registeredAtBlock = toU64(state[kRegisteredAt(creator)]);
+    const longPoints = decodeObservationRing(obsLongKeys.map((k) => state[k]), longIdxCount);
+    const longEstimate: AskRateEstimate =
+      longPoints === null
+        ? { rateBaseUnits: null, status: 'unavailable' }
+        : askRateFromObservations(longPoints, head, { ...LONG_RING_CFG, sinceBlock: registeredAtBlock });
+
     // ★ RULING C REWRITE (2026-07-24) — THE PAR FALLBACK IS DELETED.
     // contract-math.ts's settlementRateBaseUnits now REFUSES (rateBaseUnits:
     // null) instead of inventing PAR whenever the TWAP guards don't pass; see
@@ -559,7 +585,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     // with a null rate — the ask action must read as unavailable, exactly
     // mirroring what a real ask() call would do right now (RequireInflowOpen
     // is a separate gate; this is the settlement-refusal gate).
-    const settlement = settlementRateBaseUnits(estimate, supplyTokens);
+    const settlement = settlementRateBaseUnits(estimate, longEstimate, supplyTokens);
     if (settlement.rateBaseUnits === null) {
       return unpriced(settlement.status, head);
     }

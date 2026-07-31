@@ -27,11 +27,19 @@ CREATE TABLE IF NOT EXISTS cf_factors (
 );
 
 -- Graph-cred (§8.3): engagement-weighted follow-graph PageRank, weekly.
+-- ``outside_engaged`` (H02) MUST be persisted and reloaded with the snapshot:
+-- ``_voter_trust_from_creds`` (recsys/pipeline.py) gates the vouched tier on it
+-- (``GraphCred.outside_engaged``, contracts.py). Without this column a persisted
+-- snapshot round-trips every reloaded GraphCred to the dataclass default
+-- (outside_engaged=False), emptying the vouched set network-wide and dropping
+-- every genuinely-vouched account to unknown-tier breadth budgeting. Wire the
+-- persist/load of this column together with the F-R2 persistence layer.
 CREATE TABLE IF NOT EXISTS graph_cred (
-    account               text PRIMARY KEY,
+    account               text             PRIMARY KEY,
     score                 double precision NOT NULL,
     follow_follower_ratio double precision NOT NULL,
-    computed_at           timestamptz NOT NULL DEFAULT now()
+    outside_engaged       boolean          NOT NULL DEFAULT false,
+    computed_at           timestamptz      NOT NULL DEFAULT now()
 );
 
 -- recsys's own "Thunder" post index (§7): recent posts by author/community.

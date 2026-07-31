@@ -181,6 +181,16 @@ def test_popular_posts_ordering_is_attributed_and_self_excluded() -> None:
     assert "v.rshares > 10000000" in sql  # chain-dust votes neither
 
 
+def test_vote_vouch_queries_ignore_downvotes() -> None:
+    """F-R5 #1: a DOWNVOTE by a followed account must not vouch an out-of-network
+    post into the feed. Both vote-sourced vouch paths — the engaged-OON pool and
+    the second-degree engager index — must keep only positive-rshares votes,
+    matching ``independent_vote_signal``'s ``vote.rshares > 0`` filter. Without
+    this, a followed account's downvote surfaces the downvoted post."""
+    assert "v.rshares > 0" in hafsql._SQL_ENGAGED_OON_POSTS
+    assert "v.rshares > 0" in hafsql._SQL_SECOND_DEGREE_ENGAGERS
+
+
 # ---------------------------------------------------------------------------
 # Author-pooled prior aggregate (§6): §8.4-exclusion-filtered so an author
 # cannot inflate total_base with self-engagement, delegation-tied alts, or a

@@ -35,7 +35,12 @@ func Claim(s Store, caller string, id uint64) (*big.Int, string, error) {
 		return nil, "", newErr(ErrState, "already claimed")
 	}
 	asset := getStr(s, rk(id, "asset"))
-	setStr(s, rkClaimed(id, caller), "1") // CEI: mark claimed first
+	// CEI: mark claimed first, BEFORE the wasm-side HiveTransfer. Exit-safe: a
+	// failed transfer traps the whole contract call and the CallSession is rolled
+	// back (state + ledger are one atomic rollback unit) — so the claimed flag and
+	// the remainder writes below can never persist without the payout leaving. See
+	// the verified go-vsc host-atomicity note in sweep.go (F-P4).
+	setStr(s, rkClaimed(id, caller), "1")
 
 	if st == StateVoid {
 		refund := getMoney(s, rkStakeTotal(id, caller))

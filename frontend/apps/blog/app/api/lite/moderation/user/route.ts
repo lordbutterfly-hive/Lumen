@@ -80,8 +80,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 }
 
-/** Who did it, as claimed by the caller. An attribution hint, not an identity. */
-function actorOf(req: NextRequest, body: Record<string, unknown> | null): string {
-  const fromBody = typeof body?.actor === 'string' ? body.actor.trim() : '';
-  return fromBody || req.headers.get('x-lite-moderator-actor')?.trim() || 'operator';
+/**
+ * Who did it, from the HEADER the operator's tooling sets — never the request body
+ * (F-L14). A body-supplied actor let any moderator-token holder attribute an action to
+ * someone else. `_body` is kept for call-site symmetry but deliberately ignored. True
+ * per-operator identity stays a product decision (one shared token, no admin model yet).
+ */
+function actorOf(req: NextRequest, _body: Record<string, unknown> | null): string {
+  return req.headers.get('x-lite-moderator-actor')?.trim() || 'operator';
 }

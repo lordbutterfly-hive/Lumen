@@ -57,6 +57,22 @@ const (
 	// (This is a contract-side MITIGATION: it pins to the first-tick-after-settle,
 	// not the exact-settleBlock price — a deterministic <100-block offset, not
 	// attacker-controllable. A perfect fix still wants an oracle tick_history key.)
+	//
+	// F-P6 (host cadence — VERIFIED against the go-vsc pendulum module the
+	// contract settles against; see TestSettle_DeterministicAcrossTickWindow):
+	//   1. The pendulum ticks every DefaultTickIntervalBlocks = 100 blocks —
+	//      oracle/tracker.go:17, and TickIfDue only recomputes the snapshot when
+	//      blockHeight%DefaultTickIntervalBlocks == 0 (tracker.go:293-296).
+	//   2. pendulum.hive_moving_avg_bps is CONSTANT between ticks — the env value
+	//      is FeedTickSnapshot.HiveMovingAvgBps read from LastTick()
+	//      (state_engine.go:2669,2678), and t.last is written ONLY inside TickIfDue
+	//      (tracker.go:336); it does not change until the next 100-block tick.
+	// A half-open window [settleBlock, settleBlock+100) contains EXACTLY ONE
+	// multiple of 100, so exactly one tick can satisfy the gate above and every
+	// settle in the window reads that single tick's MA — the winner is fixed by
+	// settleBlock, not by the caller's block. Widening this past one tick interval
+	// would re-admit a second (different-MA) tick and re-open the cherry-pick, which
+	// the pin test would catch.
 	MaxSettleTickLag = 100
 
 	// Minimum lock→settle gap so the price can move between lock and settle —

@@ -101,6 +101,14 @@ export const liteConfig = {
    */
   signupGlobalPerDay: Number(process.env.LITE_SIGNUP_GLOBAL_PER_DAY || 5000),
   /**
+   * F-L30: aggregate daily ceiling on signup ATTEMPTS (success OR failure), sized well
+   * above honest mistype volume. It exists so failed attempts (name_taken, name_on_chain,
+   * vetting retries) still have a platform-wide bound on the upstream Hive-API
+   * amplification they cause, WITHOUT letting failures deny real users the scarce
+   * signupGlobalPerDay success budget (which is now consumed on success only).
+   */
+  signupAttemptGlobalPerDay: Number(process.env.LITE_SIGNUP_ATTEMPT_GLOBAL_PER_DAY || 50000),
+  /**
    * Number of trusted reverse proxies in front (e.g. a single Caddy). The client
    * IP is read as the X-Forwarded-For entry this many hops from the right — the
    * value OUR infrastructure appended — never the attacker-controllable leftmost
@@ -137,6 +145,13 @@ export const liteConfig = {
    */
   actMinPool: Number(process.env.LITE_ACT_MIN_POOL || 5),
   /**
+   * F-L31: aggregate daily cap on ACTUAL account creations (the RC-expensive
+   * `create_claimed_account` consumption point), consumed in upgrade-service right
+   * before the create. Bounds a Sybil ACT drain across ALL users — per-user
+   * enforceUpgradeRate cannot. Distinct from actMinPool (pool SUPPLY): this caps DEMAND.
+   */
+  actSpendPerDay: Number(process.env.LITE_ACT_SPEND_PER_DAY || 200),
+  /**
    * Publishing stops below this percentage of the account's resource credits, so a
    * funding problem becomes a delay instead of a queue of permanently failed posts.
    * The queue is durable — waiting costs nothing.
@@ -146,6 +161,14 @@ export const liteConfig = {
   moderatorToken: process.env.LITE_MODERATOR_TOKEN || '',
   /** Shared secret for the publisher drain endpoint (empty = endpoint disabled). */
   publisherToken: process.env.LITE_PUBLISHER_TOKEN || '',
+  /**
+   * Shared secret for the ACT-claim endpoint (empty = endpoint disabled). SEPARATE
+   * from publisherToken (F-L4): the claim reaches an ACTIVE-authority op
+   * (`claim_account`), while the publisher drain is POSTING-only. One secret spanning
+   * both authority tiers means a leaked posting-drain token also drives active-authority
+   * ops; splitting them lets the higher-authority secret be rotated independently.
+   */
+  accountCreatorToken: process.env.LITE_ACCOUNT_CREATOR_TOKEN || '',
   // No key-custody settings here by design: private keys are generated in the user's
   // BROWSER and never reach this process (see upgrade/upgrade-service.ts). There is
   // nothing to encrypt, no TTL to tune, and no encryption key to deploy.

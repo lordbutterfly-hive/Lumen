@@ -709,6 +709,21 @@ func EvTransferSingle(operator, from, to, tokenID string, value *big.Int) string
 		`","value":` + value.String() + `}}`
 }
 
+// EvApproved — the ERC-6909 Approval event (F-C2): `owner` set `spender`'s allowance
+// for token `id` to `amount`. The allowance model is DELIBERATELY the standard
+// ERC-6909 one — persistent, not revoked-on-transfer — and that design is unchanged;
+// this event is the standard's own answer to the survives-a-transfer footgun, making a
+// live allowance OBSERVABLE so it can be revoked (Approve amount=0) with visibility. It
+// carries the same `{type,attributes}` shape the indexer already folds for
+// TransferSingle, so the door auto-recognises without a bespoke mapping. `amount` is a
+// bare number — a token COUNT, never HBD.
+func EvApproved(owner, spender, tokenID string, amount *big.Int) string {
+	return `{"type":"Approval","attributes":{"owner":"` + evJSONEscape(owner) +
+		`","spender":"` + evJSONEscape(spender) +
+		`","id":"` + evJSONEscape(tokenID) +
+		`","amount":` + amount.String() + `}}`
+}
+
 // EvMaturedMoved — the FLAT sibling of TransferSingle, for our own tables.
 //
 // Every matured-bucket movement emits BOTH: the standard TransferSingle (which

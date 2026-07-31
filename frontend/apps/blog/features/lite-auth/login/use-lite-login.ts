@@ -110,16 +110,29 @@ export function useLiteLogin() {
   );
 
   const google = useCallback(
-    async (idToken: string): Promise<ResolveOutcome> => {
+    async (idToken: string, nonce: string): Promise<ResolveOutcome> => {
       const res = await fetch('/api/lite/auth/google', {
         method: 'POST',
         headers: JSON_POST,
-        body: JSON.stringify({ idToken })
+        // F-L11: the server now requires the single-use `login` nonce this token was
+        // minted with (echoed as the OIDC `nonce` claim) — a captured token is no
+        // longer replayable.
+        body: JSON.stringify({ idToken, nonce })
       });
       return resolveFrom(res);
     },
     [resolveFrom]
   );
+
+  // F-L11: fetch the single-use `login` nonce the Google button must be initialised
+  // with, so Google embeds it in the ID token. Mirrors the wallet challenge step;
+  // returns null on failure so the caller can show an honest error, not a doomed flow.
+  const googleChallenge = useCallback(async (): Promise<string | null> => {
+    const res = await fetch('/api/lite/auth/google/challenge', { method: 'POST', headers: JSON_POST });
+    if (!res.ok) return null;
+    const data = (await res.json().catch(() => null)) as { nonce?: string } | null;
+    return data?.nonce ?? null;
+  }, []);
 
   // BTC and EVM share one flow (challenge -> sign the exact message -> verify);
   // only the route pair and the signature encoding differ, and the server owns
@@ -215,6 +228,7 @@ export function useLiteLogin() {
     nameStatus,
     checkName,
     google,
+    googleChallenge,
     walletChallenge,
     walletVerify,
     btcChallenge,

@@ -470,7 +470,10 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
         : // Simulates a market with enough live trading history for AskRate to
           // produce a real TWAP ('ok').
           { rateBaseUnits: MOCK_RATE_BASE_UNITS, status: 'ok' };
-    const settlement = settlementRateBaseUnits(estimate, seed.supplyTokens);
+    // F-C3: settlementRateBaseUnits now takes both TWAP arms. The demo has no separate
+    // long ring, so the same estimate stands in for both — min(short, short, spot) is the
+    // demo's prior behaviour, unchanged.
+    const settlement = settlementRateBaseUnits(estimate, estimate, seed.supplyTokens);
     if (settlement.rateBaseUnits === null) {
       return unpriced(settlement.status);
     }

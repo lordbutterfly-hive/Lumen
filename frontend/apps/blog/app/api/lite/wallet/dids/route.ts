@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
 import { guardRead } from '@/blog/lib/lite/http/guard';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
+import { requireActiveLiteUser } from '@/blog/lib/lite/http/actor';
 import { listByUser } from '@/blog/lib/lite/repositories/credential-repository';
 import { walletDids } from '@/blog/lib/lite/wallet/did-pkh';
 
@@ -24,10 +25,12 @@ export async function GET(_req: NextRequest): Promise<NextResponse> {
   if (blocked) return blocked;
 
   const session = await getLiteSession();
-  const user = session.user;
-  if (!user?.userId) {
-    return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
-  }
+  // F-L2/F-L17: this exposes the account's full cross-wallet linkage (every bound
+  // DID) — a banned/suspended/revoked session must be refused, so gate on the DB
+  // status + F-L3 epoch, not a bare cookie presence check.
+  const actor = await requireActiveLiteUser(session.user, session.sessionEpoch);
+  if (!actor.ok) return actor.response;
+  const user = actor.user;
 
   try {
     const credentials = await listByUser(user.userId);

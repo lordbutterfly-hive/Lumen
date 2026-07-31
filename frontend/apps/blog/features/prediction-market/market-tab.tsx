@@ -246,7 +246,7 @@ export default function MarketTab() {
           {isResolved &&
             (myPosition.claimed ? (
               <p className="mt-3 text-center font-sans text-sm text-[#6b7280]">{t('prediction_market.claimed')}</p>
-            ) : (
+            ) : myPosition.claimable ? (
               <button
                 type="button"
                 onClick={() => void onClaim()}
@@ -256,6 +256,11 @@ export default function MarketTab() {
               >
                 {isLite ? t('prediction_market.upgrade_to_claim') : t('prediction_market.claim')}
               </button>
+            ) : (
+              // F-P9: a SETTLED round where this position won nothing has no payout —
+              // the contract would reject a Claim. Show that instead of a live button
+              // whose only outcome is a confusing on-chain failure.
+              <p className="mt-3 text-center font-sans text-sm text-[#6b7280]">{t('prediction_market.no_payout')}</p>
             ))}
           {/* ★ THE FAIL-SAFE, previously unreachable from the app. A round stuck
               past its deadline never resolves on its own: `reclaim` lets any

@@ -69,6 +69,24 @@ export function guardModerator(req: NextRequest): NextResponse | null {
   return null;
 }
 
+/**
+ * For the ACT-claim endpoint: enabled + a valid shared token (constant-time).
+ *
+ * SEPARATE from guardPublisher (F-L4). The claim route reaches `claim_account`, an
+ * ACTIVE-authority operation, whereas the publisher drain is POSTING-only. Sharing one
+ * secret across both authority tiers means a leaked posting-drain token also authorises
+ * active-authority ops; a distinct `LITE_ACCOUNT_CREATOR_TOKEN` keeps the higher tier
+ * rotatable on its own. Disabled outright when the token is unset.
+ */
+export function guardAccountCreator(req: NextRequest): NextResponse | null {
+  if (!liteConfig.enabled || !liteConfig.databaseUrl) return disabledResponse();
+  const token = req.headers.get('x-lite-account-creator-token') ?? '';
+  if (!liteConfig.accountCreatorToken || !safeEqual(token, liteConfig.accountCreatorToken)) {
+    return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  }
+  return null;
+}
+
 /** For recsys ingestion routes: enabled + a valid shared token (constant-time). */
 export function guardRecsys(req: NextRequest): NextResponse | null {
   if (!liteConfig.enabled || !liteConfig.databaseUrl) return disabledResponse();

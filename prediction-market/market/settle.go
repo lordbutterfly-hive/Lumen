@@ -116,6 +116,13 @@ func VoidStale(s Store, caller string, block uint64, id uint64) (*SettleResult, 
 	}
 	settleBlock := getU64(s, rk(id, "settle"))
 	grace := getU64(s, rk(id, "grace"))
+	// F-P4: mirror reclaim's zero-settle guard. A well-formed round always has
+	// settle>0 (create.go:89-94); getU64→0 on corrupt/missing state would collapse
+	// the deadline gate below and let VoidStale fire far too early. Refuse
+	// explicitly on a zero/corrupt settle height.
+	if settleBlock == 0 {
+		return nil, newErr(ErrState, "round has no settle height; refusing (corrupt round state)")
+	}
 	// VoidStale may fire only STRICTLY AFTER the settle window has fully elapsed
 	// (plus any extra grace), so it can never preempt a healthy, still-settleable
 	// round during the window — a losing bettor can't race a refund to dodge a

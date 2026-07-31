@@ -86,6 +86,7 @@ WHERE c.parent_author = ''
         SELECT 1 FROM hafsql.operation_effective_comment_vote_view v
         WHERE v.author = c.author AND v.permlink = c.permlink
           AND v.voter = ANY(%(follows)s)
+          AND v.rshares > 0  -- a DOWNVOTE must not vouch an OON post into the feed
     )
     OR EXISTS (
         SELECT 1 FROM hafsql.reblogs r
@@ -208,6 +209,7 @@ SELECT author, permlink, engager FROM (
         SELECT * FROM unnest(%(authors)s::text[], %(permlinks)s::text[])
     )
       AND v.voter = ANY(%(follows)s)
+      AND v.rshares > 0  -- a followed account's DOWNVOTE is not a second-degree vouch
     UNION
     SELECT rc.parent_author AS author, rc.parent_permlink AS permlink, rc.author AS engager
     FROM hafsql.operation_comment_view rc

@@ -141,10 +141,16 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
     // preview and this click, REFUSE here rather than signing an allowance
     // above what they agreed to — a transfer.allow is the buyer's only
     // slippage protection on this rail.
-    if (maxTotalUsd !== undefined && authoritative.totalDueHbd > maxTotalUsd) {
+    // F-C14: when Advanced is collapsed (maxTotalUsd undefined) the ENTERED BUDGET
+    // `usd` is the ceiling. Previously the guard was skipped in that default case and
+    // the buy was signed for the fresh, possibly-higher live total — so the budget the
+    // user saw was never actually a spend cap. buyQuote guarantees totalDueHbd <= usd
+    // under no drift, so this never self-rejects the common (unmoved-price) case.
+    const cap = maxTotalUsd ?? usd;
+    if (authoritative.totalDueHbd > cap) {
       throw new Error('The price moved above your limit.');
     }
-    await live.buy(local.tokens, maxTotalUsd ?? authoritative.totalDueHbd);
+    await live.buy(local.tokens, cap);
   };
 
   /**
@@ -156,9 +162,11 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
    * called first so a closed rail (a market in wind-down, where refund() is the
    * door instead) fails HERE with its real reason rather than on-chain.
    */
-  const handleSell = async (tokens: number): Promise<void> => {
+  const handleSell = async (tokens: number, minNetUsd?: number): Promise<void> => {
     await live.quoteSell(tokens);
-    await live.sell(tokens);
+    // H-FE-7: pass the OPTIONAL net floor the SellModal now offers (undefined = the
+    // deliberate no-floor default; the backend already threads minNetHbd).
+    await live.sell(tokens, minNetUsd);
   };
 
   /**
@@ -168,8 +176,8 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
    * still works. The refund amount is derived from the position's own already-
    * taxed floor value in the dialog, and the contract recomputes it at execution.
    */
-  const handleRedeem = async (tokens: number): Promise<void> => {
-    await live.refund(tokens);
+  const handleRedeem = async (tokens: number, minNetUsd?: number): Promise<void> => {
+    await live.refund(tokens, minNetUsd); // H-FE-7: optional net-refund floor (undefined = no floor)
   };
 
   const rightRail = (

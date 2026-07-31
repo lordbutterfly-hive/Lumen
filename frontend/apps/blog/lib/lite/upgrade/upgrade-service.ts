@@ -9,6 +9,7 @@ import * as names from '../repositories/name-reservation-repository';
 import * as upgradeEvents from '../repositories/upgrade-event-repository';
 import * as follows from '../repositories/follow-repository';
 import { LITE_HANDLE_REUSE_MESSAGE, isOwnLiteHandle } from '../names/upgrade-name';
+import { enforceActSpend } from '../antispam/rate-limit';
 import { AccountPublicKeys, getAccountCreator, hasAccountCreator } from './account-creator';
 
 /**
@@ -475,6 +476,18 @@ async function runUpgrade(
     // reading and topping up the token pool — throws with nothing broadcast, and
     // treating those as ambiguous strands the name for 300 seconds and leaves an
     // attempt in flight that the next request has to clear before it can proceed.
+    // F-L31: gate the RC-expensive create at the CONSUMPTION point with a platform-wide
+    // daily cap. per-user enforceUpgradeRate cannot bound a Sybil fleet each staying
+    // within its own quota; this is the aggregate backstop. Consumed only for a request
+    // that has passed every doomed-name check and is about to actually create. Gating
+    // here transitively bounds the inline `claimAct` fallback (fires ≤once per create);
+    // the scheduled pool top-up (supply) is deliberately NOT gated.
+    if (!(await enforceActSpend())) {
+      await names.releasePending(newName, user.userId).catch(() => undefined);
+      await upgradeEvents.fail(event.id, 'act_capacity').catch(() => undefined);
+      return { status: 'error', code: 'capacity', message: 'At capacity — please try again later.' };
+    }
+
     const { trxId } = await creator.createClaimedAccount(newName, publicKeys, () => {
       creationAttempted = true;
     });

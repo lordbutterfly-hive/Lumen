@@ -61,7 +61,8 @@ function allowFollowAction(actor: FollowActor): Promise<boolean> {
 
 async function actorFor(
   sessionUser: User | undefined,
-  requireActive: boolean
+  requireActive: boolean,
+  sessionEpoch?: number
 ): Promise<{ ok: true; actor: FollowActor } | { ok: false; status: number; error: string }> {
   const actor = await sessionActor(sessionUser);
   if (!actor) return { ok: false, status: 401, error: 'unauthorized' };
@@ -76,16 +77,18 @@ async function actorFor(
   // rejected every one of them with a bare 401 while their unfollow still worked.
   // `allowUpgraded`: an upgraded user still needs this path, because a lite account has
   // no on-chain identity to follow — there is no keyed alternative for them to use.
-  const check = await checkLiteActorById(actor.userId, { allowUpgraded: true });
+  // F-L3: carry the cookie epoch so a revoked session cannot follow either.
+  const check = await checkLiteActorById(actor.userId, { allowUpgraded: true, sessionEpoch });
   if (!check.ok) return { ok: false, status: check.status, error: check.code };
   return { ok: true, actor };
 }
 
 export async function followByName(
   sessionUser: User | undefined,
-  targetName: string
+  targetName: string,
+  sessionEpoch?: number
 ): Promise<FollowOutcome> {
-  const from = await actorFor(sessionUser, true);
+  const from = await actorFor(sessionUser, true, sessionEpoch);
   if (!from.ok) return from;
 
   // Charged BEFORE the target is resolved, because resolving hits a Hive API node for

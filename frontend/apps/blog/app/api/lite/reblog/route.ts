@@ -3,7 +3,7 @@ import { getLogger } from '@ui/lib/logging';
 import { guardWrite } from '@/blog/lib/lite/http/guard';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { requireActiveLiteUser, requireLiteUser } from '@/blog/lib/lite/http/actor';
-import { enforceFollowRate } from '@/blog/lib/lite/antispam/rate-limit';
+import { enforceReblogRate } from '@/blog/lib/lite/antispam/rate-limit';
 import { reblog, unreblog } from '@/blog/lib/lite/repositories/engagement-repository';
 
 const logger = getLogger('app');
@@ -28,12 +28,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   // Undoing a reblog is a withdrawal, so a suspended account may still do it; adding
   // one is participation and may not (see http/actor.ts).
-  const actor = undo ? await requireLiteUser(session.user) : await requireActiveLiteUser(session.user);
+  const actor = undo ? await requireLiteUser(session.user) : await requireActiveLiteUser(session.user, session.sessionEpoch);
   if (!actor.ok) return actor.response;
   const user = actor.user;
 
   try {
-    if (!(await enforceFollowRate(user.userId))) {
+    if (!(await enforceReblogRate(user.userId))) {
       return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
     }
     if (undo) {

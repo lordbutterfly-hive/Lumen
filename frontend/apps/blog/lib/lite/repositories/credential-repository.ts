@@ -162,3 +162,43 @@ export async function setKeyFingerprint(credentialId: string, keyFingerprint: st
     [credentialId, keyFingerprint]
   );
 }
+
+/** Append-only audit of a bind/unbind (F-L2, migration 0022). Never throws the caller
+ *  off the happy path for an audit-write failure is a policy decision left to callers. */
+export async function writeCredentialAudit(
+  userId: string,
+  credentialId: string | null,
+  action: 'bind' | 'unbind',
+  method: string | null
+): Promise<void> {
+  await query(
+    `INSERT INTO lumen_credential_audit (audit_id, user_id, credential_id, action, method)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [ulid(), userId, credentialId, action, method]
+  );
+}
+
+export type UnbindResult = 'ok' | 'last_credential' | 'not_found';
+
+/**
+ * Remove a linked sign-in method (F-L2). REFUSES to remove the account's last
+ * credential — a lite account with zero credentials is unrecoverable (no password, no
+ * email), so this is the one deletion that must never succeed. Ownership is enforced by
+ * scoping every read/write to `user_id`, so one user can never unbind another's method.
+ * Writes an `unbind` audit row on success.
+ */
+export async function unbindMethod(userId: string, credentialId: string): Promise<UnbindResult> {
+  const { rows } = await query<CredentialRow>(
+    `SELECT * FROM lumen_auth_credential WHERE user_id = $1`,
+    [userId]
+  );
+  if (rows.length < 2) return 'last_credential'; // cannot remove the only way in
+  const target = rows.find((r) => r.credential_id === credentialId);
+  if (!target) return 'not_found';
+  await query(`DELETE FROM lumen_auth_credential WHERE credential_id = $1 AND user_id = $2`, [
+    credentialId,
+    userId
+  ]);
+  await writeCredentialAudit(userId, credentialId, 'unbind', target.method);
+  return 'ok';
+}

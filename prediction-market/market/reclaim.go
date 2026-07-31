@@ -53,6 +53,16 @@ func Reclaim(s Store, caller string, block uint64, id uint64) (*big.Int, string,
 		// bounded, so this sum cannot overflow uint64 (C2).
 		settleBlock := getU64(s, rk(id, "settle"))
 		grace := getU64(s, rk(id, "grace"))
+		// F-P4: a well-formed round always has settle>0 (set atomically with state
+		// at create.go:89-94). getU64 returns 0 on a missing/unparseable value,
+		// which would collapse the deadline gate below to
+		// `block <= SettleWindowBlocks+grace` and let reclaim fire ~settleBlock
+		// blocks early — potentially while the round is still legitimately live.
+		// Refuse explicitly on a zero/corrupt settle height rather than silently
+		// reclaiming "during betting".
+		if settleBlock == 0 {
+			return nil, "", newErr(ErrState, "round has no settle height; refusing (corrupt round state)")
+		}
 		if block <= settleBlock+SettleWindowBlocks+grace {
 			return nil, "", newErr(ErrState, "round may still resolve normally; reclaim only past the settle deadline")
 		}

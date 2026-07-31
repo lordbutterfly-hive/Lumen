@@ -2,11 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
 import { guardWrite } from '@/blog/lib/lite/http/guard';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
+import { requireActiveLiteUser } from '@/blog/lib/lite/http/actor';
 import { verifyGoogleIdToken } from '@/blog/lib/lite/auth/google-verify';
 import { encryptEmail, emailHash } from '@/blog/lib/lite/auth/email-crypto';
 import { consumeChallenge } from '@/blog/lib/lite/repositories/challenge-repository';
 import { verifyBtcSignature, bindMessage, btcNetwork, isTaproot, normalizeBtcAddress } from '@/blog/lib/lite/auth/btc-verify';
-import { btcKeyFingerprint } from '@/blog/lib/lite/auth/btc-key-fingerprint';
+import { verifiedBtcKeyFingerprint } from '@/blog/lib/lite/auth/btc-key-fingerprint';
 import {
   verifyEvmSignature,
   bindMessage as evmBindMessage,
@@ -15,6 +16,13 @@ import {
   normalizeEvmAddress
 } from '@/blog/lib/lite/auth/evm-verify';
 import { bindMethod } from '@/blog/lib/lite/auth/auth-service';
+import { writeCredentialAudit } from '@/blog/lib/lite/repositories/credential-repository';
+import { checkAndConsume } from '@/blog/lib/lite/repositories/rate-limit-repository';
+import { dayKey } from '@/blog/lib/lite/antispam/windows';
+
+/** Binds are a rare recovery-setup action; a per-user/day ceiling blunts a
+ *  stolen-session bind-flood without ever getting in a legitimate user's way. */
+const BIND_LIMIT_PER_DAY = 20;
 
 const logger = getLogger('app');
 
@@ -30,9 +38,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (blocked) return blocked;
 
   const session = await getLiteSession();
-  const user = session.user;
-  if (!user?.userId || user.account_tier !== 'lite') {
-    return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  // F-L2: gate on the DB row's status (checkLiteActorById), not the cookie tier — a
+  // suspended/banned/revoked session must not be able to bind a new recovery method.
+  // Carries the F-L3 epoch check too.
+  const actor = await requireActiveLiteUser(session.user, session.sessionEpoch);
+  if (!actor.ok) return actor.response;
+  const user = actor.user;
+
+  // F-L2: rate-limit binds per user/day. Counts every attempt (a valid step-up is
+  // still required below), so a stolen session cannot flood recovery methods.
+  if (!(await checkAndConsume('user:' + user.userId, 'bind', BIND_LIMIT_PER_DAY, dayKey()))) {
+    return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
   }
 
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
@@ -97,7 +113,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       }
       const result = await bindMethod(user.userId, 'btc_wallet', normalizeBtcAddress(address), {
         network: btcNetwork(address),
-        keyFingerprint: btcKeyFingerprint(bindMessage(nonce), signature) ?? undefined
+        // F-L29: bind the fingerprint to the proven address (network-aware), so a
+        // spliced witness cannot register a victim's key under the attacker's account.
+        keyFingerprint: verifiedBtcKeyFingerprint(bindMessage(nonce), signature, address) ?? undefined
       });
       return result.status === 'ok'
         ? NextResponse.json({ status: 'ok' })

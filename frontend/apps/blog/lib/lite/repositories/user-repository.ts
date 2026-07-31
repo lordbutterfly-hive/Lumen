@@ -13,6 +13,7 @@ interface UserRow {
   trust_score: number;
   status: string;
   suspended_reason: string | null;
+  session_epoch: number;
   created_at: Date;
   updated_at: Date;
   upgraded_at: Date | null;
@@ -31,6 +32,7 @@ function mapUser(r: UserRow): LumenUser {
     trustScore: r.trust_score,
     status: r.status as UserStatus,
     suspendedReason: r.suspended_reason,
+    sessionEpoch: r.session_epoch ?? 0,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
     upgradedAt: r.upgraded_at,
@@ -80,8 +82,14 @@ export async function markUpgraded(
   hiveAccountName: string
 ): Promise<LumenUser | null> {
   const { rows } = await query<UserRow>(
+    // session_epoch + 1 is UNCONDITIONAL (F-L3): every upgrade must kill the
+    // pre-upgrade lite cookie so a freshly upgraded user can no longer proxy-post
+    // through the shared account with their old session (checkLiteActorById refuses
+    // the stale epoch). This is a single WHERE account_tier='lite' UPDATE, so it
+    // only ever fires on the one row being upgraded.
     `UPDATE lumen_user
-       SET hive_account_name = $2, account_tier = 'full', status = 'upgraded', upgraded_at = now()
+       SET hive_account_name = $2, account_tier = 'full', status = 'upgraded',
+           upgraded_at = now(), session_epoch = session_epoch + 1
      WHERE user_id = $1 AND account_tier = 'lite'
      RETURNING *`,
     [userId, hiveAccountName]
@@ -166,10 +174,28 @@ export async function setUserStatus(
         SET status = $2,
             suspended_reason = CASE WHEN $2 = 'active' THEN NULL ELSE $3 END,
             suspended_at = CASE WHEN $2 = 'active' THEN NULL ELSE COALESCE(suspended_at, now()) END,
+            -- F-L3: force-logout on suspend/ban, but NOT on reinstate (→ 'active'),
+            -- so restoring an account does not also boot its owner's live sessions.
+            session_epoch = CASE WHEN $2 IN ('suspended','banned') THEN session_epoch + 1 ELSE session_epoch END,
             updated_at = now()
       WHERE user_id = $1
       RETURNING *`,
     [userId, status, reason]
   );
   return res.rows[0] ? mapUser(res.rows[0]) : null;
+}
+
+/**
+ * Revoke every outstanding cookie for a user by advancing their session epoch (F-L3).
+ * Backs POST /api/lite/auth/logout-all and any future "sign out everywhere" control.
+ * Unconditional single-row bump; the caller's own next request re-issues a fresh epoch.
+ */
+export async function bumpSessionEpoch(userId: string): Promise<LumenUser | null> {
+  const { rows } = await query<UserRow>(
+    `UPDATE lumen_user SET session_epoch = session_epoch + 1, updated_at = now()
+       WHERE user_id = $1
+       RETURNING *`,
+    [userId]
+  );
+  return rows[0] ? mapUser(rows[0]) : null;
 }

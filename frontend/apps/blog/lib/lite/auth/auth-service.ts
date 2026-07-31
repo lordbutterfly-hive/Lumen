@@ -5,6 +5,7 @@ import { AuthMethod, LumenUser } from '../types';
 import { buildLiteSessionUser } from '../session/lite-session';
 import { getLiteSession } from '../http/session';
 import { vetNameFormat } from '../names/vetting';
+import { enforceSignupSuccessRate } from '../antispam/rate-limit';
 import { execOn, withTransaction } from '../db/pool';
 import * as users from '../repositories/user-repository';
 import * as creds from '../repositories/credential-repository';
@@ -30,7 +31,11 @@ export interface AuthExtras {
 
 export type ResolveResult =
   | { status: 'authenticated'; user: User }
-  | { status: 'needs_name' };
+  | { status: 'needs_name' }
+  // F-L27: a REFUSAL (banned/suspended/upgraded) is a typed result, not a thrown
+  // Error — the login routes were catching these throws and returning HTTP 500,
+  // so a suspended user saw "server error" instead of the honest 403.
+  | { status: 'error'; code: string; httpStatus: number };
 
 export type SignupResult =
   | { status: 'ok'; user: User }
@@ -44,6 +49,10 @@ async function issueSession(u: LumenUser): Promise<User> {
   const sessionUser = buildLiteSessionUser(u);
   const session = await getLiteSession();
   session.user = sessionUser;
+  // F-L3: stamp the current epoch into the cookie. Every acting request re-reads
+  // the row's epoch and refuses a mismatch, so bumping it (upgrade/suspend/ban/
+  // logout-all) instantly invalidates every cookie issued before the bump.
+  session.sessionEpoch = u.sessionEpoch ?? 0;
   session.liteSignup = undefined;
   await session.save();
   // Analytics parity with the Hive login path (spec §A.5): a lightweight,
@@ -66,9 +75,13 @@ async function issueSession(u: LumenUser): Promise<User> {
  * other addresses that key can produce. An address cannot be reversed into a public
  * key, so old NULL-fingerprint rows are unreachable any other way.
  */
-async function findBySiblingAddress(method: AuthMethod, keyFingerprint?: string) {
+async function findBySiblingAddress(method: AuthMethod, keyFingerprint?: string, network?: string) {
   if (method !== 'btc_wallet' || !keyFingerprint) return null;
-  for (const sibling of siblingBtcAddresses(keyFingerprint)) {
+  // F-L29: derive siblings on the login's OWN network. Without this the heal-path
+  // was mainnet-only too, so a legacy NULL-fingerprint testnet row could never be
+  // matched and the one-key-one-account guarantee lapsed for that tier.
+  const net = network === 'testnet' ? 'testnet' : network === 'regtest' ? 'regtest' : 'bitcoin';
+  for (const sibling of siblingBtcAddresses(keyFingerprint, net)) {
     const found = await creds.findByMethodAndRef(method, sibling);
     if (found) return found;
   }
@@ -87,7 +100,7 @@ export async function resolveLogin(
   const binder =
     (await creds.findByMethodAndRef(method, externalRef)) ??
     (extras.keyFingerprint ? await creds.findByFingerprint(method, extras.keyFingerprint) : null) ??
-    (await findBySiblingAddress(method, extras.keyFingerprint));
+    (await findBySiblingAddress(method, extras.keyFingerprint, extras.network));
   if (binder) {
     // Heal credentials created before fingerprints existed: they hold NULL, which no
     // fingerprint lookup can ever match, so without this a legacy key keeps its
@@ -97,15 +110,18 @@ export async function resolveLogin(
     }
     const user = await users.findUserById(binder.userId);
     if (!user) throw new Error('Auth binder references a missing user');
+    // F-L27: refusals RETURN a typed 403 rather than throwing into the route's
+    // catch-all (which rendered them as 500). This is a genuine "not a server
+    // fault" answer — the account exists and is simply not permitted to sign in.
     if (user.status === 'banned' || user.status === 'suspended') {
-      throw new Error(`account_${user.status}`);
+      return { status: 'error', code: `account_${user.status}`, httpStatus: 403 };
     }
     // XC-1 (PRUNED 2026-07-22): once upgraded to a full Hive account, the lite
     // credential must NOT mint a keyless 'full'-tier lite session under the Lumen
     // handle — the user has real keys now and must sign in via the Hive-account
     // path. Refuse the lite login for an upgraded account.
     if (user.accountTier === 'full' || user.hiveAccountName) {
-      throw new Error('account_upgraded');
+      return { status: 'error', code: 'account_upgraded', httpStatus: 403 };
     }
     await creds.touchLastUsed(binder.credentialId);
     const sessionUser = await issueSession(user);
@@ -205,12 +221,30 @@ export async function completeSignup(displayNameRaw: string): Promise<SignupResu
     const existence = await checkAccountExists(displayName);
     if (existence.status === 'exists') {
       await names.releasePending(displayName);
+      // F-L30: this name exists on Hive PERMANENTLY — it will never free. Clear the
+      // pending session so a held session cannot sit and retry the same doomed name,
+      // draining the signup rate budget on a request that can never succeed. (A user
+      // who wants a different name re-authenticates — one signature.)
+      session.liteSignup = undefined;
       return { status: 'error', code: 'name_on_chain', message: 'That name already exists on Hive.' };
     }
     if (existence.status === 'api_error') {
       // Fail closed — never let a node outage let someone grab a real name.
       await names.releasePending(displayName);
       return { status: 'error', code: 'vetting_unavailable', message: 'Could not verify the name right now, please retry.' };
+    }
+
+    // F-L30: charge the SCARCE success-velocity budget HERE — the request has passed
+    // every doomed-name check and is about to create a real account, so failing names
+    // never touch it. Exhausted → a transient capacity refusal; the name is released and
+    // the pending session kept so the user can retry once the daily budget frees.
+    if (!(await enforceSignupSuccessRate())) {
+      await names.releasePending(displayName);
+      return {
+        status: 'error',
+        code: 'capacity',
+        message: "Sign-ups have hit today's limit — please try again later."
+      };
     }
 
     const emailCiphertext = pending.emailCiphertextB64
@@ -300,5 +334,7 @@ export async function bindMethod(
     emailHash: extras.emailHash ?? null,
     isPrimary: false
   });
+  // F-L2: record the link at the single chokepoint every bind branch flows through.
+  await creds.writeCredentialAudit(userId, null, 'bind', method);
   return { status: 'ok' };
 }

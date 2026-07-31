@@ -3,7 +3,7 @@ import { getLogger } from '@ui/lib/logging';
 import { guardWrite } from '@/blog/lib/lite/http/guard';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { requireActiveLiteUser, requireLiteUser } from '@/blog/lib/lite/http/actor';
-import { enforceFollowRate } from '@/blog/lib/lite/antispam/rate-limit';
+import { enforceVoteRate } from '@/blog/lib/lite/antispam/rate-limit';
 import { castVote } from '@/blog/lib/lite/repositories/engagement-repository';
 
 const logger = getLogger('app');
@@ -29,12 +29,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   // Weight 0 clears an existing vote — a withdrawal, so a suspended account may
   // still do it (see http/actor.ts). Casting a vote is an addition and may not.
-  const actor = weight === 0 ? await requireLiteUser(session.user) : await requireActiveLiteUser(session.user);
+  const actor = weight === 0 ? await requireLiteUser(session.user) : await requireActiveLiteUser(session.user, session.sessionEpoch);
   if (!actor.ok) return actor.response;
   const user = actor.user;
 
   try {
-    if (!(await enforceFollowRate(user.userId))) {
+    if (!(await enforceVoteRate(user.userId))) {
       return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
     }
     await castVote(user.userId, author, permlink, weight);

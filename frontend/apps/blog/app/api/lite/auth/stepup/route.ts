@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
 import { guardWrite } from '@/blog/lib/lite/http/guard';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
+import { requireActiveLiteUser } from '@/blog/lib/lite/http/actor';
 import { createChallenge } from '@/blog/lib/lite/repositories/challenge-repository';
 import { bindMessage as btcBindMessage } from '@/blog/lib/lite/auth/btc-verify';
 import { bindMessage as evmBindMessage } from '@/blog/lib/lite/auth/evm-verify';
@@ -22,10 +23,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (blocked) return blocked;
 
   const session = await getLiteSession();
-  const user = session.user;
-  if (!user?.userId || user.account_tier !== 'lite') {
-    return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
-  }
+  // F-L2: DB status gate (+ F-L3 epoch) — a suspended/banned/revoked session cannot
+  // mint a step-up challenge (the precondition for binding a new credential).
+  const actor = await requireActiveLiteUser(session.user, session.sessionEpoch);
+  if (!actor.ok) return actor.response;
+  const user = actor.user;
 
   try {
     const challenge = await createChallenge({

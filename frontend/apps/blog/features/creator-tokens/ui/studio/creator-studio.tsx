@@ -381,6 +381,19 @@ const CreatorStudio: FC = () => {
   const [capInput, setCapInput] = useState('');
   const [sellInput, setSellInput] = useState('');
   const [sellFailure, setSellFailure] = useState<string | null>(null);
+  const [actionFailure, setActionFailure] = useState<string | null>(null);
+  // H-FE-8: the studio's fire-and-forget buttons (renew, deleteOffering, claimTradeFees)
+  // used `void studio.X()`, silently swallowing a rejected write — the user clicked and
+  // nothing happened, with no reason shown. Route them through here so a failure surfaces
+  // via the same write-failure.ts messaging the modals already use.
+  const runStudioAction = async (fn: () => Promise<unknown>, fallback: string): Promise<void> => {
+    setActionFailure(null);
+    try {
+      await fn();
+    } catch (err) {
+      setActionFailure(writeFailureMessage(err, fallback));
+    }
+  };
   // Keep the cap field in sync with the committed cap after a successful raise (#3).
   const marketCap = market?.cap ?? null;
   useEffect(() => {
@@ -443,7 +456,7 @@ const CreatorStudio: FC = () => {
         Your listing has lapsed — renew to stay in discovery. Answering and cashing out still work.
       </span>
       <button
-        onClick={() => void studio.renew(1)}
+        onClick={() => void runStudioAction(() => studio.renew(1), 'Renewing your listing didn’t go through.')}
         disabled={studio.isBusy}
         className="rounded-[10px] bg-[#b45309] px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-50"
       >
@@ -484,6 +497,11 @@ const CreatorStudio: FC = () => {
         </div>
 
         {banner}
+        {actionFailure ? (
+          <div className="mb-5 rounded-[14px] border border-[#f3c7c0] bg-[#fdecea] px-5 py-3.5 text-[13.5px] font-semibold text-[#c0392b]">
+            {actionFailure}
+          </div>
+        ) : null}
 
         {section === 'overview' ? (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -614,7 +632,12 @@ const CreatorStudio: FC = () => {
                         />
                       </div>
                       <button
-                        onClick={() => void studio.deleteOffering(o.offeringId)}
+                        onClick={() =>
+                          void runStudioAction(
+                            () => studio.deleteOffering(o.offeringId),
+                            'Removing that service didn’t go through.'
+                          )
+                        }
                         disabled={studio.isBusy}
                         title="Delist this service. Asks already made against it are unaffected."
                         className="rounded-[10px] border border-[#e4e6e9] px-3 py-2 text-[13px] font-semibold text-[#6b7280] hover:bg-[#f6f7f8] disabled:opacity-50"
@@ -700,7 +723,7 @@ const CreatorStudio: FC = () => {
               listed is ~$10/month. First month’s on the house.
             </div>
             <button
-              onClick={() => void studio.renew(1)}
+              onClick={() => void runStudioAction(() => studio.renew(1), 'Renewing your listing didn’t go through.')}
               disabled={studio.isBusy}
               className="rounded-[11px] bg-[#c0392b] px-5 py-2.5 text-[14px] font-semibold text-white hover:bg-[#96271b] disabled:opacity-50"
             >
@@ -740,7 +763,12 @@ const CreatorStudio: FC = () => {
                   sub="Your 5% of your token’s trades"
                 />
                 <button
-                  onClick={() => void studio.claimTradeFees()}
+                  onClick={() =>
+                    void runStudioAction(
+                      () => studio.claimTradeFees(),
+                      'Claiming your trade fees didn’t go through.'
+                    )
+                  }
                   disabled={tradeFeeClaimableUsd <= 0 || studio.isBusy}
                   className="rounded-[11px] bg-[#2f7d4f] px-5 py-2.5 text-[14px] font-semibold text-white hover:bg-[#276b43] disabled:opacity-50"
                 >

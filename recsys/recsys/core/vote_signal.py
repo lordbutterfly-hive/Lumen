@@ -27,14 +27,20 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+from recsys.config import VoteSignalConfig
 from recsys.contracts import Post, VoteExclusions
 from recsys.core.normalize import log_compress
 
 # Default unknown-voter breadth budget (§4/§8.4, funded-alt hardening 2026-07-22).
-# See :class:`VoterTrust`. Kept here as the single source of truth so
-# ``recsys.config.VoteSignalConfig`` and the runtime bundle agree.
-_DEFAULT_UNKNOWN_FREE = 2.0
-_DEFAULT_UNKNOWN_PER_VOUCHED = 2.0
+# See :class:`VoterTrust`. DERIVED from ``recsys.config.VoteSignalConfig`` so the
+# dataclass default and the configured runtime value can never diverge: previously
+# these were hard-coded 2.0 while ``VoteSignalConfig.unknown_free`` was 1.0 (its
+# documented tightest-correct newcomer floor), so any bare ``VoterTrust(vouched=...)``
+# silently ran a looser 2.0 budget than the pipeline threads. config.py is the single
+# source of truth; these mirror it structurally.
+_VOTE_SIGNAL_DEFAULTS = VoteSignalConfig()
+_DEFAULT_UNKNOWN_FREE = _VOTE_SIGNAL_DEFAULTS.unknown_free
+_DEFAULT_UNKNOWN_PER_VOUCHED = _VOTE_SIGNAL_DEFAULTS.unknown_per_vouched
 
 # Organic-engagement weights (§6). Votes are weighted low here because their
 # magnitude is already the 10% vote bucket's job (avoid double-counting).

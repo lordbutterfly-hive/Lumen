@@ -38,7 +38,6 @@ from recsys.core.candidates import merge_candidates, top_up
 from recsys.core.coldstart import (
     INTEREST_LANE_SOURCES,
     interest_candidates,
-    is_cold,
     is_established_followless,
     popular_fallback,
 )
@@ -157,6 +156,7 @@ def build_trust_snapshot(
     now: datetime | None = None,
     trusted_seeds: frozenset[str] = frozenset(),
     previous: TrustSnapshot | None = None,
+    production: bool = False,
 ) -> TrustSnapshot:
     """Weekly batch: detect rings, then compute Sybil-hardened graph-cred over
     the follow graph (§8.3/§8.5). Ring membership feeds graph-cred's self-dealing
@@ -197,7 +197,25 @@ def build_trust_snapshot(
     it is built from THIS batch's graph-cred (outside-engaged-gated vouched set),
     the same laundered reciprocal pair that H02 keeps unknown in the vote signal
     is also unknown here — one consistent trust chokepoint feeds every signal.
+
+    F-R2 — EMPTY-SEEDS PRODUCTION GUARD. With ``seed_teleport_share`` sending the
+    bulk of TrustRank's teleport mass to ``trusted_seeds``, an EMPTY seed set makes
+    graph-cred silently revert toward uniform teleport — a Sybil clique then mints
+    free rank with nothing raising. ``rank_feed`` already fails CLOSED on a
+    missing/degraded snapshot; this mirrors that posture for the one remaining
+    silent-degradation path. When ``production`` is set, refuse to build a snapshot
+    from an empty ``trusted_seeds`` rather than fall back to uniform teleport. The
+    empty-seeds path stays allowed for the offline harness/unit tests (the default,
+    ``production=False`` — the same deliberate opt-in as ``TrustPolicy.WARN``).
     """
+    if production and not trusted_seeds:
+        raise ValueError(
+            "build_trust_snapshot: refusing to build a production trust snapshot "
+            "with empty trusted_seeds — TrustRank's seed teleport mass would revert "
+            "to uniform, letting a Sybil clique mint free rank. Supply a curated "
+            "trusted_seeds set at deploy (F-R2), or pass production=False for the "
+            "offline harness."
+        )
     # TIERED HISTORY (settings.history, 2026-07-23): `since` here is the LONG
     # TRUST window (now - history.trust_days). Engagement edges feed graph-cred /
     # ALS / ring detection, which must be slow-moving and expensive to fake — a
@@ -359,7 +377,14 @@ def gather_candidates(
     post-flooding per author (§8.8). Cold viewers get the interest lane."""
     groups: list[list[Candidate]] = []
 
-    if is_cold(viewer):
+    # Route the gate-exempt interest lane on the UNSPOOFABLE structural condition
+    # (no follow graph to rank from), NOT the client-supplied ``is_new`` flag that
+    # ``is_cold()`` also honours. A viewer WITH follows could otherwise keep
+    # ``is_new=true`` to force the gate-exempt lane to be appended on top of their
+    # in-network feed — the exact spoofable-flag shape ``is_established_followless``
+    # was hardened against (coldstart.py: "the ALS-row test is the one that cannot
+    # be spoofed"). A true cold/followless viewer still gets the lane here.
+    if not viewer.follows:
         groups.append(interest_candidates(viewer, gateway, since, limit, settings.cold_start))
 
     if viewer.follows:

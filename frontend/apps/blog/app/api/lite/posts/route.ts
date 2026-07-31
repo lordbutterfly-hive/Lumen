@@ -106,7 +106,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   };
 
   try {
-    const result = await createLitePost(session.user, request);
+    const result = await createLitePost(session.user, request, session.sessionEpoch);
     if (result.status === 'error') {
       return NextResponse.json(result, { status: httpStatusFor(result.code) });
     }

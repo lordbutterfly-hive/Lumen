@@ -99,6 +99,12 @@ export function useMarket() {
       // button that threw a raw error. There is no Lumen-local equivalent — the
       // payout is on chain — so this refuses with a sentence instead.
       if (isLite) return Promise.reject(new Error('Claiming a payout needs a full Hive account. Upgrade to claim.'));
+      // F-P9: defense-in-depth behind the now-gated button — a settled position that
+      // won nothing has no on-chain payout, so refuse rather than broadcast a Claim the
+      // contract will reject.
+      if (positionQuery.data && !positionQuery.data.claimable) {
+        return Promise.reject(new Error('This round settled with no payout for your position.'));
+      }
       return dataSource.claim({ roundId: round.roundId, username: user.username });
     },
     onSuccess: (position) => {

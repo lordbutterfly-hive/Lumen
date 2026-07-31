@@ -78,8 +78,13 @@ function parseRoundId(roundId: string): number | null {
 function deriveStatus(rawState: string, lock: number, head: number | null): MarketStatus {
   if (rawState === 'settled') return 'settled';
   if (rawState === 'void') return 'void';
-  // "open": locked is DERIVED (open && now>=lock), never a stored state.
-  if (head !== null && lock > 0 && head >= lock) return 'locked';
+  // F-L20: fail CLOSED when the head height is unavailable. "locked" is DERIVED
+  // (open && now>=lock), so without a head we CANNOT confirm the betting window is still
+  // open — returning 'open' let the UI enable a bet that, if the window had already
+  // closed, is a wasted on-chain transaction. Treat an unknown head as 'locked' (the
+  // safe, non-bettable state); it re-derives to 'open' as soon as a head is read.
+  if (head === null) return 'locked';
+  if (lock > 0 && head >= lock) return 'locked';
   return 'open';
 }
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { FC, useEffect, useState } from 'react';
+import { FC, useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import DialogLogin from '@/blog/components/dialog-login';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
@@ -47,7 +47,7 @@ type View = 'default' | 'name';
 const LumenLogin: FC = () => {
   const router = useRouter();
   const { user } = useUserClient();
-  const { nameStatus, checkName, createAccount, google } = useLiteLogin();
+  const { nameStatus, checkName, createAccount, google, googleChallenge } = useLiteLogin();
 
   const [view, setView] = useState<View>('default');
   // Which wallet dialog is open (null = none). One dialog serves both chains.
@@ -59,6 +59,18 @@ const LumenLogin: FC = () => {
   const [captchaToken, setCaptchaToken] = useState('');
   const captchaRequired = turnstileSiteKey().length > 0;
   const [error, setError] = useState<string | null>(null);
+
+  // F-L11: Google's ID token must echo a single-use server nonce (GIS captures it at
+  // button init), so fetch one up front and re-arm after each attempt. null = not yet
+  // ready / fetch failed → the real button is withheld rather than minting a token the
+  // server will reject as a replay.
+  const [googleNonce, setGoogleNonce] = useState<string | null>(null);
+  const refreshGoogleNonce = useCallback(() => {
+    void googleChallenge().then((n) => setGoogleNonce(n));
+  }, [googleChallenge]);
+  useEffect(() => {
+    if (googleConfigured()) refreshGoogleNonce();
+  }, [refreshGoogleNonce]);
 
   // Already signed in → leave the pre-auth page.
   useEffect(() => {
@@ -77,10 +89,16 @@ const LumenLogin: FC = () => {
 
   /** Google returned an ID token — hand it to the (already built) backend. */
   const handleGoogleToken = async (idToken: string) => {
+    if (!googleNonce) {
+      setError('Google sign-in isn’t ready yet — please try again in a moment.');
+      return;
+    }
     setError(null);
     setBusy(true);
-    const outcome = await google(idToken);
+    const outcome = await google(idToken, googleNonce);
     setBusy(false);
+    // The nonce is single-use; arm a fresh one for the next attempt.
+    refreshGoogleNonce();
     if (outcome.status === 'authenticated') goHome();
     else if (outcome.status === 'needs_name') setView('name');
     else setError(outcome.message);
@@ -144,7 +162,24 @@ const LumenLogin: FC = () => {
                     button renders when a client id is configured; otherwise the styled
                     fallback below explains the state instead of failing on click. */}
                 {googleConfigured() ? (
-                  <GoogleSignIn onIdToken={handleGoogleToken} onError={setError} />
+                  googleNonce ? (
+                    // key + nonce: GIS captures the nonce at init, so a fresh nonce
+                    // remounts the button (F-L11).
+                    <GoogleSignIn
+                      key={googleNonce}
+                      nonce={googleNonce}
+                      onIdToken={handleGoogleToken}
+                      onError={setError}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      disabled
+                      className="flex h-[52px] w-full items-center justify-center gap-[11px] rounded-[14px] border border-[#e4e6e9] bg-white text-[15.5px] font-semibold text-[#161511] opacity-60"
+                    >
+                      {COPY.google}
+                    </button>
+                  )
                 ) : (
                   <button
                     onClick={startGoogle}

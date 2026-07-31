@@ -138,6 +138,40 @@ def test_gather_dedups_in_network_over_community() -> None:
     assert candidates[0].source is CandidateSource.IN_NETWORK
 
 
+def test_interest_lane_not_appended_for_followed_viewer_claiming_new() -> None:
+    # F-R5 #3: the gate-exempt interest lane is routed on the UNSPOOFABLE
+    # `not viewer.follows`, never the client-set `is_new` flag. A viewer WITH
+    # follows must NOT be able to force the exempt lane onto their feed by
+    # claiming is_new=True (the spoofable-flag shape hardened elsewhere).
+    interest_sources = {CandidateSource.INTEREST_COMMUNITY, CandidateSource.INTEREST_TAG}
+    community_post = make_post("author1", "c1", community="hive-1")
+    tag_post = make_post("author2", "t1", tags=("art",))
+    in_net = make_post("alice", "a1")
+    gateway = FakeGateway(in_network=[in_net], community=[community_post], tag=[tag_post])
+
+    followed_new = make_viewer(
+        "me",
+        follows=frozenset({"alice"}),
+        is_new=True,  # spoofable client flag — must NOT open the interest lane
+        interest_communities=frozenset({"hive-1"}),
+        interest_tags=frozenset({"art"}),
+    )
+    followed_cands = gather_candidates(followed_new, gateway, EPOCH, 400, DEFAULT_SETTINGS)
+    assert interest_sources.isdisjoint({c.source for c in followed_cands})
+
+    # Control: a genuinely followless viewer still gets the lane (is_new=False).
+    followless = make_viewer(
+        "newbie",
+        is_new=False,
+        interest_communities=frozenset({"hive-1"}),
+        interest_tags=frozenset({"art"}),
+    )
+    cold_sources = {
+        c.source for c in gather_candidates(followless, gateway, EPOCH, 400, DEFAULT_SETTINGS)
+    }
+    assert interest_sources & cold_sources
+
+
 def test_empty_norm_is_refused_not_silently_flat() -> None:
     gateway = FakeGateway(in_network=[make_post()])
     viewer = make_viewer("me", follows=frozenset({"alice"}))
@@ -522,6 +556,33 @@ def test_build_trust_snapshot_produces_graph_cred() -> None:
     snap = build_trust_snapshot(gateway, DEFAULT_SETTINGS, since=EPOCH, now=EPOCH)
     assert {"a", "b"} <= set(snap.graph_creds)
     assert isinstance(snap.ring_members, frozenset)
+
+
+def test_build_trust_snapshot_refuses_empty_seeds_in_production() -> None:
+    # F-R2: in production an empty trusted_seeds set makes TrustRank's seed
+    # teleport mass revert to uniform, letting a Sybil clique mint free rank
+    # with nothing raising. The production guard refuses it, mirroring the
+    # fail-closed posture rank_feed already takes for a missing snapshot.
+    edges = [
+        EngagementEdge(src="a", dst="b", upvotes=5),
+        EngagementEdge(src="b", dst="a", upvotes=5),
+    ]
+    gateway = FakeGateway(
+        edges=edges, follow_graph={"a": frozenset({"b"}), "b": frozenset({"a"})}
+    )
+    with pytest.raises(ValueError, match="trusted_seeds"):
+        build_trust_snapshot(
+            gateway, DEFAULT_SETTINGS, since=EPOCH, now=EPOCH, production=True
+        )
+    # With seeds supplied, the production build succeeds.
+    snap = build_trust_snapshot(
+        gateway, DEFAULT_SETTINGS, since=EPOCH, now=EPOCH,
+        trusted_seeds=frozenset({"a"}), production=True,
+    )
+    assert {"a", "b"} <= set(snap.graph_creds)
+    # The offline/harness default (production=False) still allows empty seeds.
+    offline = build_trust_snapshot(gateway, DEFAULT_SETTINGS, since=EPOCH, now=EPOCH)
+    assert {"a", "b"} <= set(offline.graph_creds)
 
 
 def _popular(n: int = 30) -> list:

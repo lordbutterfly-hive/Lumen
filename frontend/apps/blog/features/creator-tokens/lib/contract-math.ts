@@ -58,12 +58,15 @@ export const GRACE_BLOCKS = 5 * BLOCKS_PER_DAY; // OVERDUE -> FROZEN
 
 export const FACE_BAND_NUMERATOR = 2; // 2x/7d anti-rug band
 export const FACE_BAND_WINDOW_BLOCKS = 7 * BLOCKS_PER_DAY;
-// MinFace was raised 100 -> 500 (SET-2) -> 508 (LIVE-1, PRUNED 2026-07-22):
-// it is pinned to the GLOBAL-MINIMUM reachable settlement floor (the C4
-// face*2 >= rate guard at S == 2), not to ceil(BasePrice/2). A client that
-// still validated against 100 would let a creator sign a `register`/`setFace`
+// MinFace was raised 100 -> 500 (SET-2) -> 508 (LIVE-1) -> 577 (2026-07-27,
+// grossed up for the commission carve-out): it is pinned to the GLOBAL-MINIMUM
+// reachable settlement floor (the C4 face*2 >= rate guard at S == 2), grossed up so
+// that only 100%-CommissionBps of the posted price still clears it. A client that
+// validates against a STALE lower value lets a creator sign a `register`/`setFace`
 // the contract rejects, burning their RC for a guaranteed revert.
-export const MIN_FACE_BASE_UNITS = 508;
+// F-C5: kept in lockstep with Go core/params.go `MinFace int64 = 577`; a face in
+// 508–576 passed this client and reverted on chain.
+export const MIN_FACE_BASE_UNITS = 577;
 export const MAX_FACE_BASE_UNITS = 10_000_000;
 
 export const MIN_CAP_CREDITS_BASE_UNITS = 1;
@@ -76,9 +79,45 @@ export const RECLAIM_GRACE_BLOCKS = 1_200; // ~1h — I6 disjoint answer/reclaim
 export const OBS_WINDOW = 32;
 export const MIN_OBS_BLOCKS = 1_200;
 export const MIN_OBS_COUNT = 8;
-export const MAX_RATE_DEVIATION_BPS = 2_000; // 20%, measured against the window MEDIAN
+export const MAX_RATE_DEVIATION_BPS = 2_000; // 20%, measured against the window MEDIAN (shared by both rings)
 export const MAX_OBS_WEIGHT_BLOCKS = 2_400; // ~2h dwell clamp per observation
 export const MAX_STALE_BLOCKS = 3 * BLOCKS_PER_DAY;
+
+// F-C3: LONG (7-day) ring constants — mirror core/params.go EXACTLY. The long arm is
+// coarser-sampled with a longer required span; it is the second arm of settlement's
+// min(short, long, spot). Verified against params.go: LongObsSpacing 6300,
+// LongMinObsCount 8, LongMinObsBlocks 2·BlocksPerDay, LongMaxObsWeightBlocks 2·spacing,
+// LongMaxStaleBlocks MaxStaleBlocks+spacing.
+export const LONG_OBS_SPACING = 6_300;
+export const LONG_MIN_OBS_COUNT = 8;
+export const LONG_MIN_OBS_BLOCKS = 2 * BLOCKS_PER_DAY; // 57_600
+export const LONG_MAX_OBS_WEIGHT_BLOCKS = 2 * LONG_OBS_SPACING; // 12_600
+export const LONG_MAX_STALE_BLOCKS = MAX_STALE_BLOCKS + LONG_OBS_SPACING; // 92_700
+
+/** The per-ring parameters twapWindowRead (Go) reads with — mirrors core/twap.go's
+ *  twapRingCfg so the client's short/long arms are byte-parameterised the same way. */
+export interface TwapRingCfg {
+  minCount: number;
+  minSpan: number;
+  maxStale: number;
+  maxWeight: number;
+  /** Samples recorded before this block are DROPPED (the long ring's re-registration
+   *  epoch, `kRegisteredAt`). 0/undefined = keep all — the short ring is epoch-clean by
+   *  its own kObsIdx reset, so it passes nothing here. */
+  sinceBlock?: number;
+}
+export const SHORT_RING_CFG: TwapRingCfg = {
+  minCount: MIN_OBS_COUNT,
+  minSpan: MIN_OBS_BLOCKS,
+  maxStale: MAX_STALE_BLOCKS,
+  maxWeight: MAX_OBS_WEIGHT_BLOCKS
+};
+export const LONG_RING_CFG: TwapRingCfg = {
+  minCount: LONG_MIN_OBS_COUNT,
+  minSpan: LONG_MIN_OBS_BLOCKS,
+  maxStale: LONG_MAX_STALE_BLOCKS,
+  maxWeight: LONG_MAX_OBS_WEIGHT_BLOCKS
+};
 
 // =====================================================================
 // THE BONDING CURVE (core/curve.go + params.go) — the 2026-07-21 pivot.
@@ -749,41 +788,53 @@ export interface AskRateEstimate {
  * self-referential case twap.go's own comment warns about), and the final
  * non-positive-twap refusal. No divergence found.
  */
-export function askRateFromObservations(points: RawObservation[], block: number): AskRateEstimate {
-  if (points.length < MIN_OBS_COUNT) return { rateBaseUnits: null, status: 'insufficient_observations' };
+export function askRateFromObservations(
+  points: RawObservation[],
+  block: number,
+  cfg: TwapRingCfg = SHORT_RING_CFG
+): AskRateEstimate {
+  // F-C3: drop samples from before the ring's registration epoch. The long ring's write
+  // counter survives re-registration, so a re-registered market would otherwise price off
+  // the DEAD incarnation's rates (mirrors core/twap.go twapWindowRead's `o.block <
+  // cfg.sinceBlock` drop). The short ring passes sinceBlock 0 (its kObsIdx is reset per
+  // incarnation) and keeps every sample.
+  const since = cfg.sinceBlock ?? 0;
+  const pts = since > 0 ? points.filter((p) => p.block >= since) : points;
 
-  const oldest = points[0].block;
+  if (pts.length < cfg.minCount) return { rateBaseUnits: null, status: 'insufficient_observations' };
+
+  const oldest = pts[0].block;
   if (block < oldest) return { rateBaseUnits: null, status: 'unavailable' };
 
-  const newest = points[points.length - 1].block;
-  if (block > newest && block - newest > MAX_STALE_BLOCKS) return { rateBaseUnits: null, status: 'stale' };
+  const newest = pts[pts.length - 1].block;
+  if (block > newest && block - newest > cfg.maxStale) return { rateBaseUnits: null, status: 'stale' };
 
   const windowBlocks = block - oldest;
-  if (windowBlocks < MIN_OBS_BLOCKS) return { rateBaseUnits: null, status: 'insufficient_span' };
+  if (windowBlocks < cfg.minSpan) return { rateBaseUnits: null, status: 'insufficient_span' };
 
   let weighted = 0n;
   let totalW = 0;
-  for (let i = 0; i < points.length; i++) {
-    const p = points[i];
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i];
     let w: number;
-    if (i === points.length - 1) {
+    if (i === pts.length - 1) {
       if (block < p.block) return { rateBaseUnits: null, status: 'unavailable' };
       w = block - p.block;
     } else {
-      const next = points[i + 1].block;
+      const next = pts[i + 1].block;
       if (next < p.block) return { rateBaseUnits: null, status: 'unavailable' };
       w = next - p.block;
     }
-    if (w > MAX_OBS_WEIGHT_BLOCKS) w = MAX_OBS_WEIGHT_BLOCKS;
+    if (w > cfg.maxWeight) w = cfg.maxWeight;
     if (w === 0) continue;
     totalW += w;
     weighted += BigInt(Math.trunc(p.rateBaseUnits)) * BigInt(w);
   }
-  if (totalW < MIN_OBS_BLOCKS) return { rateBaseUnits: null, status: 'insufficient_span' };
+  if (totalW < cfg.minSpan) return { rateBaseUnits: null, status: 'insufficient_span' };
 
   const twap = weighted / BigInt(totalW); // floor, favours the reserve (fewer credits per HBD of face means MORE credits spent — see ask.go creditsForAsk comment)
 
-  const ref = medianRateBaseUnits(points);
+  const ref = medianRateBaseUnits(pts);
   if (ref <= 0n) return { rateBaseUnits: null, status: 'unavailable' };
   const diff = twap > ref ? twap - ref : ref - twap;
   const lhs = diff * 10_000n;
@@ -842,9 +893,22 @@ export interface SettlementRateResult {
  * rate with refusal semantics baked in; see READ_PAYLOAD_SPECS in
  * vsc/payload-contract.ts.
  */
-export function settlementRateBaseUnits(estimate: AskRateEstimate, supplyTokens: number): SettlementRateResult {
-  if (estimate.status !== 'ok' || estimate.rateBaseUnits === null || estimate.rateBaseUnits <= 0) {
-    return { rateBaseUnits: null, status: estimate.status === 'ok' ? 'unavailable' : estimate.status };
+export function settlementRateBaseUnits(
+  short: AskRateEstimate,
+  long: AskRateEstimate,
+  supplyTokens: number
+): SettlementRateResult {
+  // F-C3: the contract's SettlementRate refuses if EITHER TWAP arm refuses, then takes
+  // min(short, long, spot) (core/settlement.go). Previously only the short arm + spot
+  // were replicated here, so a preview could OVERSTATE the rate — and thus understate
+  // the credits an ask would spend — whenever the LONG arm was the binding (lowest)
+  // constraint, diverging from what a real ask() settles at. Surface the first refusing
+  // arm's status so the preview reads 'unavailable' exactly when execution would refuse.
+  if (short.status !== 'ok' || short.rateBaseUnits === null || short.rateBaseUnits <= 0) {
+    return { rateBaseUnits: null, status: short.status === 'ok' ? 'unavailable' : short.status };
+  }
+  if (long.status !== 'ok' || long.rateBaseUnits === null || long.rateBaseUnits <= 0) {
+    return { rateBaseUnits: null, status: long.status === 'ok' ? 'unavailable' : long.status };
   }
   const spot = spotRateBaseUnits(supplyTokens);
   if (spot <= 0) {
@@ -852,5 +916,5 @@ export function settlementRateBaseUnits(estimate: AskRateEstimate, supplyTokens:
     // market records no observation rather than a synthetic one.
     return { rateBaseUnits: null, status: 'insufficient_observations' };
   }
-  return { rateBaseUnits: Math.min(estimate.rateBaseUnits, spot), status: 'ok' };
+  return { rateBaseUnits: Math.min(short.rateBaseUnits, long.rateBaseUnits, spot), status: 'ok' };
 }

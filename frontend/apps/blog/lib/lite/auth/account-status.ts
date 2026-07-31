@@ -26,11 +26,21 @@ const MESSAGES: Record<string, string> = {
   upgraded: 'This account is now a full Hive account — sign in with your own keys.'
 };
 
-export async function checkLiteActor(sessionUser: User | undefined): Promise<ActorCheck> {
+/**
+ * @param sessionEpoch  The epoch stamped into the caller's cookie at issue (F-L3).
+ *   When provided, it is compared against the row's live `session_epoch`; a mismatch
+ *   means the cookie was invalidated (by an upgrade, suspend/ban, or logout-all) and
+ *   the request is refused. Left undefined for legacy cookies with no stamp — the
+ *   check is skipped rather than locking everyone out, matching the DEFAULT 0 column.
+ */
+export async function checkLiteActor(
+  sessionUser: User | undefined,
+  sessionEpoch?: number
+): Promise<ActorCheck> {
   if (!sessionUser?.userId || sessionUser.account_tier !== 'lite') {
     return { ok: false, status: 401, code: 'unauthorized', message: 'Not signed in as a lite account.' };
   }
-  return checkLiteActorById(sessionUser.userId);
+  return checkLiteActorById(sessionUser.userId, { sessionEpoch });
 }
 
 /**
@@ -43,12 +53,20 @@ export async function checkLiteActor(sessionUser: User | undefined): Promise<Act
  */
 export async function checkLiteActorById(
   userId: string,
-  options: { allowUpgraded?: boolean } = {}
+  options: { allowUpgraded?: boolean; sessionEpoch?: number } = {}
 ): Promise<ActorCheck> {
   const user = await users.findUserById(userId);
   // The row is gone but the cookie is not: treat as signed out rather than 500.
   if (!user) {
     return { ok: false, status: 401, code: 'unauthorized', message: 'Account not found.' };
+  }
+  // F-L3: the cookie's stamped epoch must match the row's live epoch. A mismatch means
+  // it was invalidated (upgrade/suspend/ban/logout-all) — refuse with 401 so the client
+  // re-authenticates. Checked BEFORE the upgrade/status branches so a revoked cookie
+  // gets the honest "sign in again" rather than a stale upgraded/suspended message.
+  // Undefined = a legacy cookie with no stamp; skip (backward-compatible, DEFAULT 0).
+  if (options.sessionEpoch !== undefined && user.sessionEpoch !== options.sessionEpoch) {
+    return { ok: false, status: 401, code: 'session_revoked', message: 'Please sign in again.' };
   }
   // ★ Judged from the DATABASE, not the cookie. Upgrading does not rewrite the session,
   // so a freshly upgraded user's cookie still says `account_tier: 'lite'` for its full

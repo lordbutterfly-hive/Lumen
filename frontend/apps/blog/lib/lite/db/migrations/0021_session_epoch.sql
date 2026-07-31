@@ -1,0 +1,20 @@
+-- 0021_session_epoch.sql — a monotonic per-user counter that invalidates old cookies.
+--
+-- Lite sessions are STATELESS: getLiteSession() is a bare iron-session accessor over a
+-- shared encrypted cookie, with no server-side record to revoke (http/session.ts). So a
+-- moderation action (suspend/ban) or an ACT upgrade only took effect at NEXT login —
+-- the cookie issued before it stayed valid for its full life (config.sessionTtlDays=14,
+-- which was itself dead: zero consumers). A stolen or pre-upgrade cookie could keep
+-- proxy-posting through the shared publishing account until it expired (F-L3).
+--
+-- session_epoch closes that: it is stamped into the cookie at issue and re-read from
+-- this row on every acting request (checkLiteActorById). A mismatch = the cookie is
+-- stale and the request is refused (401 session_revoked). Bumping the counter — on
+-- upgrade (markUpgraded, unconditional), on suspend/ban (setUserStatus, CONDITIONAL so
+-- a reinstate does not force-logout), or on an explicit POST /api/lite/auth/logout-all —
+-- instantly kills every outstanding cookie for that user.
+--
+-- DEFAULT 0 matches the value a legacy cookie (issued before this column existed, with
+-- no sessionEpoch stamped) is compared against, so the check is backward-compatible:
+-- an absent cookie epoch skips the comparison rather than locking everyone out on deploy.
+ALTER TABLE lumen_user ADD COLUMN IF NOT EXISTS session_epoch INT NOT NULL DEFAULT 0;

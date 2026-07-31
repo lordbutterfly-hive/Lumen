@@ -5,7 +5,7 @@ import { getClientIp } from '@/blog/lib/lite/http/ip';
 import { enforceChallengeRate } from '@/blog/lib/lite/antispam/rate-limit';
 import { consumeChallenge } from '@/blog/lib/lite/repositories/challenge-repository';
 import { verifyBtcSignature, loginMessage, btcNetwork, isTaproot, addressChallengeHash, normalizeBtcAddress } from '@/blog/lib/lite/auth/btc-verify';
-import { btcKeyFingerprint } from '@/blog/lib/lite/auth/btc-key-fingerprint';
+import { verifiedBtcKeyFingerprint } from '@/blog/lib/lite/auth/btc-key-fingerprint';
 import { resolveLogin } from '@/blog/lib/lite/auth/auth-service';
 
 const logger = getLogger('app');
@@ -53,8 +53,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // would otherwise be able to register three accounts.
     const result = await resolveLogin('btc_wallet', normalizeBtcAddress(address), {
       network: btcNetwork(address),
-      keyFingerprint: btcKeyFingerprint(loginMessage(nonce), signature) ?? undefined
+      // F-L29: bind the fingerprint to the address that just proved ownership — a
+      // spliced witness carrying a victim's pubkey no longer yields a usable lookup key.
+      keyFingerprint: verifiedBtcKeyFingerprint(loginMessage(nonce), signature, address) ?? undefined
     });
+    if (result.status === 'error') {
+      return NextResponse.json({ error: result.code }, { status: result.httpStatus }); // F-L27: 403 refusal, not 500
+    }
     return NextResponse.json(result);
   } catch (error) {
     logger.error(error, 'Lite BTC login verification failed');

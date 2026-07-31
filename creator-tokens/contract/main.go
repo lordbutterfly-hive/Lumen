@@ -923,6 +923,9 @@ func ApproveAllowance(a *string) *string {
 		handleErr(err)
 		return nil
 	}
+	// F-C2: emit the standard ERC-6909 Approval event so a persistent allowance is
+	// observable (and a zero-amount revoke is visible). The allowance model is unchanged.
+	sdk.Log(core.EvApproved(owner, spender, creator, new(big.Int).SetUint64(amountU64)))
 	return strPtr(`{"success":true}`)
 }
 

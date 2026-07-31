@@ -180,11 +180,13 @@ function buildPayload(post: LumenPost, parent: OnChainParent | null): PublishPay
 
 export async function createLitePost(
   sessionUser: User | undefined,
-  req: CreatePostRequest
+  req: CreatePostRequest,
+  sessionEpoch?: number
 ): Promise<CreatePostResult> {
   // Status comes from the DB, not the cookie: a session issued before a suspension
   // would otherwise keep posting until it expired (see auth/account-status.ts).
-  const actor = await checkLiteActor(sessionUser);
+  // F-L3: sessionEpoch carries the cookie stamp so a revoked session cannot post.
+  const actor = await checkLiteActor(sessionUser, sessionEpoch);
   if (!actor.ok) {
     return { status: 'error', code: actor.code, message: actor.message };
   }
@@ -248,7 +250,11 @@ export async function createLitePost(
       body,
       tags,
       summary: req.summary ?? null,
-      thumbnailUrl: req.thumbnailUrl ?? null
+      thumbnailUrl: req.thumbnailUrl ?? null,
+      // F-L32: persist the edit's OWN screen result. Only reachable on an
+      // already-visible post (guarded above), so this can only downgrade freshly
+      // limited-worthy content — never undo a moderator decision.
+      feedVisibility
     });
     const editParent = await publishParentFor(updated);
     const payload = buildPayload(updated, editParent);
@@ -336,14 +342,14 @@ export async function createLitePost(
 const MAX_PAGE = 50;
 
 export async function getLiteFeed(opts: { limit?: number; before?: string }): Promise<LumenPost[]> {
-  return posts.listRecent({ limit: Math.min(opts.limit ?? 20, MAX_PAGE), before: opts.before });
+  return posts.listRecent({ limit: Math.max(1, Math.min(opts.limit ?? 20, MAX_PAGE)), before: opts.before });
 }
 
 export async function getLiteUserPosts(
   userId: string,
   opts: { limit?: number; before?: string }
 ): Promise<LumenPost[]> {
-  return posts.getUserPosts(userId, { limit: Math.min(opts.limit ?? 20, MAX_PAGE), before: opts.before });
+  return posts.getUserPosts(userId, { limit: Math.max(1, Math.min(opts.limit ?? 20, MAX_PAGE)), before: opts.before });
 }
 
 export async function getLitePost(postId: string): Promise<LumenPost | null> {

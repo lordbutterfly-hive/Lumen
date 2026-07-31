@@ -63,6 +63,20 @@ export function btcNetwork(address: string): string {
   return 'bitcoin';
 }
 
+/**
+ * The bitcoinjs-lib network KEY for an address (F-L29 / F-L36 H-K). Distinct from
+ * btcNetwork() above, which returns our CAIP-ish string and folds regtest into
+ * 'bitcoin' — wrong for sibling derivation. Only bech32 `bcrt1` vs `tb1`
+ * distinguishes regtest from testnet (base58 regtest shares testnet's m/n/2 version
+ * bytes, so those map to 'testnet' and yield identical siblings — harmless).
+ */
+export function btcNetworkKind(address: string): 'bitcoin' | 'testnet' | 'regtest' {
+  const a = address.trim().toLowerCase();
+  if (a.startsWith('bcrt1')) return 'regtest';
+  if (a.startsWith('tb1') || a.startsWith('m') || a.startsWith('n') || a.startsWith('2')) return 'testnet';
+  return 'bitcoin';
+}
+
 export interface BtcVerifyInput {
   address: string;
   message: string;
