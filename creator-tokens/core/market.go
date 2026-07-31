@@ -632,6 +632,35 @@ func registerApply(s Store, creator string, block uint64, face, cap int64) {
 //     incarnation's age. (RULING K deleted kBasis, so there is no longer a
 //     per-holder cost basis to reason about here at all.)
 //
+//   - kAllowance(owner, spender, c) and kMatured(holder, c) — ADDED 2026-07-30,
+//     named here because this list is the whole point of this block and a
+//     family added without a row in it is exactly the oversight the block
+//     exists to prevent.
+//
+//     kMatured needs no clearing for the same reason kAcqBlock does not: the
+//     supply == 0 admission guard means every balance on this market, in BOTH
+//     families, is already zero (I3 sums both), so there is nothing to inherit.
+//
+//     kAllowance is DIFFERENT and does NOT self-heal, and that is a real
+//     residual, stated plainly: an allowance is a standing grant from an owner
+//     to a spender on a creator's token id. The creator id is the same string
+//     across incarnations, so a grant made before a market CLOSED remains a
+//     live spend authority over the NEW incarnation's tokens. It cannot be
+//     enumerated (per-owner-per-spender, unbounded), and it cannot be
+//     epoch-scoped either: magi-market reads this key from our raw state at a
+//     fixed 4-segment shape (allow|<owner>|<spender>|<tokenId>), so adding a
+//     segment would make every marketplace read miss — which is the whole
+//     reason we adopted their layout.
+//
+//     What bounds the damage: the grant is the OWNER's own signed instruction
+//     under active auth, it is spendable only against tokens that owner
+//     actually holds, and re-registration requires the previous incarnation to
+//     have drained to zero — so the spender inherits authority over a balance
+//     that does not exist until the owner buys again. A holder who wants it
+//     gone revokes it (approve to zero is always permitted, never blocked by
+//     the compare-and-set). It is recorded here so nobody later mistakes it
+//     for an oversight.
+//
 //   - kSeq — DELIBERATELY MONOTONE ACROSS INCARNATIONS. Resetting it to 0
 //     would be actively unsafe: escrow records at kEscrow(c, seq) are never
 //     deleted (ask.go flips status to ANSWERED/RECLAIMED and leaves the

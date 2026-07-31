@@ -254,7 +254,8 @@ func escrowAcqBlock(s Store, c, h string, block uint64, fromMatured, fromMaturin
 	return mean.Uint64()
 }
 
-// debitPosition removes `amount` from the holder's position, matured first.
+// debitPosition removes `amount` from the holder's position, MATURING first
+// (see splitDraw — the order is what makes the exit tax un-splittable).
 // Infallible once totalBalance >= amount has been proven; it returns an error
 // only on that broken precondition, and it writes NOTHING on that path.
 func debitPosition(s Store, c, h string, amount *big.Int) error {

@@ -90,6 +90,13 @@ type ReclaimResult struct {
 	// is not a miss. CommissionHbd above is the NET figure to pay the asker.
 	CommissionRetainedHbd *big.Int
 	Asker                 string
+	// Graduated is how much of the asker's OWN previously-maturing position
+	// crossed into the MATURED bucket when this reclaim/decline banked it before
+	// re-crediting (F-C1/F-C8). The wrapper needs it to emit the matured-mint
+	// event, because the recipient here is the asker — which the wrapper does not
+	// know until this result carries it back (Decline's caller is the CREATOR, not
+	// the asker, so it cannot measure the delta itself). Zero when nothing aged out.
+	Graduated *big.Int
 }
 
 // Escrow status codes. Local to this file: keys.go owns only the key
@@ -475,6 +482,14 @@ func Ask(s Store, caller, creator string, block uint64, maxCredits *big.Int, com
 	// declining returns them still matured rather than silently re-starting
 	// their clock (which would be the same confiscation the ET-2 fix closed,
 	// arriving through a new door).
+	// Graduate first, as Sell and Refund do (Phase-0 model: Ask was the one
+	// value path that did not). Without it an asker whose position has cleared
+	// the window has their tokens drawn from a maturing bucket that should
+	// already be empty — so the escrow records a stale clock and, on reclaim or
+	// decline, the tokens come back into the maturing family and are invisible
+	// to the marketplace until an explicit Graduate. Every guard above has
+	// passed, so this is in the write phase where a mutation is safe.
+	graduate(s, creator, caller, block)
 	escFromMatured, escFromMaturing := splitDraw(s, creator, caller, creditsSpent)
 	acqAtEscrow := escrowAcqBlock(s, creator, caller, block, escFromMatured, escFromMaturing)
 	if err := debitPosition(s, creator, caller, creditsSpent); err != nil {
@@ -566,6 +581,13 @@ func Answer(s Store, caller, creator string, block, seq uint64, answerHash strin
 	// that already carry rec.acqBlock — Reclaim and Decline both return the
 	// escrow age-neutral, so an escrow that is ANSWERED must not be the one path
 	// that destroys age.
+	//
+	// F-C1/F-C8: bank the creator's OWN cleared position into the MATURED bucket
+	// BEFORE these credits re-average into it. Without this, an aged pile that has
+	// earned its way out of the exit tax gets its clock pulled back toward `block`
+	// by the fresh inflow and becomes taxable again — the recipient "rides an aged
+	// pile". graduate() is infallible and a no-op when nothing has aged out.
+	graduate(s, creator, creator, block)
 	creditInflowAt(s, creator, creator, rec.credits, rec.acqBlock, block)
 	addMoney(s, kTreasury(), rec.commissionHbd)
 	rec.status = askAnswered
@@ -651,6 +673,12 @@ func Reclaim(s Store, caller, creator string, block, seq uint64) (*ReclaimResult
 	// acqBlock 0 degrades to `block` inside creditInflowAt — i.e. the
 	// seller-adverse direction. RULING K deleted the cost basis, so nothing but
 	// the clock is restored.
+	//
+	// F-C1/F-C8: bank the asker's OWN cleared position into MATURED before the
+	// returned credits re-average into it, so an aged pile that has earned its way
+	// out of the exit tax cannot be re-aged (and re-taxed) by this inflow. The
+	// graduated figure rides back in the result so the wrapper can emit the mint.
+	graduated := graduate(s, creator, rec.asker, block)
 	creditInflowAt(s, creator, rec.asker, rec.credits, rec.acqBlock, block)
 	rec.status = askReclaimed
 	saveEscrow(s, creator, seq, rec)
@@ -689,6 +717,7 @@ func Reclaim(s Store, caller, creator string, block, seq uint64) (*ReclaimResult
 		CommissionHbd:         returned,
 		CommissionRetainedHbd: retained,
 		Asker:                 rec.asker,
+		Graduated:             graduated,
 	}, nil
 }
 
@@ -749,6 +778,12 @@ func Decline(s Store, caller, creator string, block, seq uint64) (*ReclaimResult
 	// tokens back carrying exactly the acquisition clock they left with, so a
 	// nothing-happened escrow is restored to nothing-happened and the creator's
 	// refusal cannot re-age (and therefore cannot exit-tax) the asker.
+	//
+	// F-C1/F-C8: same as Reclaim — bank the asker's aged position into MATURED
+	// before the returned credits re-average into it, so a decline cannot re-age
+	// (and re-tax) a pile that had already earned its way out. graduate() is
+	// infallible and a no-op when nothing has aged out.
+	graduated := graduate(s, creator, rec.asker, block)
 	creditInflowAt(s, creator, rec.asker, rec.credits, rec.acqBlock, block)
 	rec.status = askDeclined
 	saveEscrow(s, creator, seq, rec)
@@ -776,5 +811,5 @@ func Decline(s Store, caller, creator string, block, seq uint64) (*ReclaimResult
 	// reputation signal for a buyer to weigh, not a solvency question for the
 	// contract to enforce.
 
-	return &ReclaimResult{CreditsReturned: rec.credits, CommissionHbd: rec.commissionHbd, Asker: rec.asker}, nil
+	return &ReclaimResult{CreditsReturned: rec.credits, CommissionHbd: rec.commissionHbd, Asker: rec.asker, Graduated: graduated}, nil
 }

@@ -129,15 +129,57 @@ func TransferCredits(s Store, creator, from, to string, block uint64, amount *bi
 	// every other path.
 	acqFrom := holderAcqBlock(s, creator, from)
 
-	if err := debitBalance(s, creator, from, amount); err != nil {
-		return err // unreachable given the check above; defense-in-depth
+	// ★ THE DEBIT MUST COVER BOTH BUCKETS TOO (2026-07-30, Phase-0 model INV-9).
+	// The guard above was widened to totalBalance while this line still drew
+	// from the maturing family alone — so the comment "unreachable given the
+	// check above" became FALSE the moment a holder had any matured tokens: the
+	// guard admitted the call and the debit then failed underneath it. A guard
+	// and a debit that disagree about what a balance IS is the shape that ends
+	// in a partial write, and it is what every sibling path (Sell, Refund,
+	// RefundHolder, Ask) already avoids by using debitPosition.
+	//
+	// Maturing first, then matured — the same fixed order every other exit uses
+	// (splitDraw). The split is read BEFORE the debit so the credit legs below
+	// can place each part in the right bucket.
+	_, fromMaturing := splitDraw(s, creator, from, amount)
+	fromMatured, err := mSub(amount, fromMaturing)
+	if err != nil {
+		return err // unreachable: fromMaturing <= amount by construction
 	}
+	if err := debitPosition(s, creator, from, amount); err != nil {
+		return err // unreachable given the total-balance check above
+	}
+	// A matured token stays matured for whoever receives it — that is what makes
+	// matured tokens interchangeable, and crediting them into the recipient's
+	// MATURING bucket would silently restart a 42-day clock on tokens that had
+	// already served it.
+	if fromMatured.Sign() > 0 {
+		setMatured(s, creator, to, mAdd(getMatured(s, creator, to), fromMatured))
+	}
+	if fromMaturing.Sign() == 0 {
+		return nil // nothing maturing moved; the clock legs below have no work
+	}
+	amount = fromMaturing
 	// The recipient's balance grows and the moved tokens' own maturity —
 	// capped at ExitTaxDecayBlocks inside creditInflowAt — re-averages into
 	// whatever they already hold. Maturity travels with the tokens and is
 	// neither created nor destroyed by the move (see the file header; properties
 	// P2/P3). RULING K deleted the cost basis, so nothing else moves with them.
 	// Infallible (holdclock.go).
+	//
+	// F-C1 DELIBERATELY DOES NOT graduate the recipient here (2026-07-31, USER
+	// RULING). Unlike the escrow-return legs (Answer/Reclaim/Decline), a transfer's
+	// inflow is chosen by a THIRD PARTY, and graduating the recipient's aged pile
+	// would segregate it into MATURED while leaving the sender's fresh gift alone in
+	// the maturing bucket. A maturing-first Sell would then force the recipient to
+	// sell that gift FIRST at max tax on the EXPENSIVE upper curve slice, relegating
+	// their own tokens to the cheap lower slice — a "poisoned gift" that makes the
+	// recipient worse off on immediate liquidation (verified against
+	// TestSell_OUTFLOWK1 / the OUTFLOWCLIFF1 / P4 grief suite). The pre-existing
+	// bounded-blend model (a gift can raise the recipient's rate by at most the
+	// donated fraction, and never profitably) is the safer contract on this leg, so
+	// the recipient's clock re-averages here exactly as before. F-C8's matured-split
+	// (moved MATURED tokens stay matured) is separate and unaffected.
 	creditInflowAt(s, creator, to, amount, acqFrom, block)
 	return nil
 }

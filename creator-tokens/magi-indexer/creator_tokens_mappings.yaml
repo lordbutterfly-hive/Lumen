@@ -111,6 +111,26 @@ contracts:
         parse: "json"
         fields: { creator: "$.creator", actor: "$.actor", recipient: "$.to", block: "$.block", amount: "$.amount" }
 
+      # ★ NAME COLLISION WITH THE STOCK magi_nft MAPPING (Phase-0 model,
+      # 2026-07-30). We emit `paused` and `unpaused`, and so does
+      # magi_nft_mappings.yaml. The indexer's FindMapping is FIRST-MATCH-WINS
+      # across every *_mappings.yaml, and once our init_magi_nft event has
+      # discovered this contract the magi_nft template matches our address too
+      # — so our pause events land in magi_nft_paused_events with a NULL `by`
+      # and surface as magi_nft_overview.paused to every wallet and explorer
+      # reading the shared tables.
+      #
+      # Three places in this repo assert these two events are unmapped. They
+      # are unmapped BY US; that is not the same thing, and our own mapping
+      # test cannot see the difference because it only reads this file.
+      #
+      # Mapping them here does NOT resolve the collision (first-match-wins
+      # still decides), so this is recorded rather than papered over. The real
+      # fixes are upstream and are the operator's call: rename our two events,
+      # or have the indexer scope a template to the contracts it discovered.
+      # Until then, treat magi_nft_overview.paused as UNTRUSTWORTHY for this
+      # contract — read our own kPaused state instead.
+
       # ---- matured-bucket movement, OUR flat shape ----
       #
       # The same movements also go out as the standard TransferSingle, which the

@@ -367,6 +367,18 @@ func Sell(s Store, caller, creator string, block uint64, deltaS *big.Int, minNet
 	// them the ONLY way into the matured bucket is spending money on another
 	// purchase (scrutiny MEDIUM-1). Infallible, and every guard has passed.
 	r.Graduated = graduate(s, creator, caller, block)
+	// ★ RE-SPLIT AFTER GRADUATION (Phase-0 model P-09). sellCompute priced the
+	// bucket split against the PRE-graduation state; graduate() then empties the
+	// maturing family into the matured one, so the tokens this sale actually
+	// draws from the matured bucket are not the ones the quote computed. The
+	// money is unaffected — graduation only fires when the rate is already zero,
+	// so tax, gross, supply and reserve are identical either way — but
+	// MaturedBurned drives the burn EVENT, and reporting the pre-graduation
+	// figure leaves the derived balances over-stating that holder's tradable
+	// position by exactly the maturing part of the draw, permanently.
+	if actualFromMatured, _ := splitDraw(s, creator, caller, r.Sold); actualFromMatured != nil {
+		r.MaturedBurned = actualFromMatured
+	}
 	// Maturing first, then matured — the same fixed order sellCompute priced
 	// against, so the charge can never disagree with the quote. See splitDraw
 	// for why the order is what makes the tax un-splittable.

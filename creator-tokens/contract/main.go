@@ -630,6 +630,17 @@ func Renew(a *string) *string {
 		handleErr(inputErr("invalid paid"))
 		return nil
 	}
+	// F-C9(9b): bound the raw payload amount with a CLEAN TYPED rejection BEFORE
+	// the pull, mirroring Buy's BUY-INT64 guard. `paid` is a caller-supplied
+	// amount that flows straight into nativeInt64 at the SDK boundary; without
+	// this, an int64-overflowing `paid` hits nativeInt64's hard Abort (a
+	// host-level crash, not a recoverable business rejection) and a non-positive
+	// `paid` would attempt a ≤0 HiveDraw. core.Renew still re-validates the exact
+	// fee below; this only keeps a malformed amount from ever reaching the draw.
+	if paid.Sign() <= 0 || !paid.IsInt64() {
+		handleErr(inputErr("paid must be a positive amount within int64 range"))
+		return nil
+	}
 
 	sdk.HiveDraw(nativeInt64(paid), sdk.AssetHbd) // pull FIRST
 	if err := core.Renew(store, caller, creator, block, periods, paid); err != nil {
@@ -1138,11 +1149,17 @@ func Answer(a *string) *string {
 	}
 	answerHash := jsonStr(payload, "answerHash")
 
+	// F-C1/F-C8: measure the caller's matured bucket across the call so the
+	// graduation core.Answer now performs (banking the creator's aged position
+	// before the answer credit lands) is emitted. Recipient == caller here, so the
+	// wrapper measures the delta directly (like Refund/Buy).
+	maturedBefore := core.MaturedOf(store, caller, caller)
 	res, err := core.Answer(store, caller, caller, block, seq, answerHash)
 	if err != nil {
 		handleErr(err)
 		return nil
 	}
+	emitMaturedDelta(caller, caller, caller, block, maturedBefore)
 	// M4: EvAnswered now also carries the commission booked to treasury
 	// (AnswerResult.CommissionHbd), so the indexer's event stream can
 	// reconstruct the HBD money model.
@@ -1224,6 +1241,14 @@ func Decline(a *string) *string {
 	}
 	if res.CommissionHbd != nil && res.CommissionHbd.Sign() > 0 {
 		sdk.HiveTransfer(sdk.Address(res.Asker), nativeInt64(res.CommissionHbd), sdk.AssetHbd) // THEN pay the commission back to the ASKER
+	}
+	// F-C1/F-C8: if core.Decline banked the asker's aged position into MATURED
+	// before returning the credits, emit the mint. The recipient is the asker —
+	// which this wrapper's caller is NOT (the caller is the creator) — so we emit
+	// from the returned figure rather than measuring a delta. operator == caller.
+	if res.Graduated != nil && res.Graduated.Sign() > 0 {
+		sdk.Log(core.EvTransferSingle(caller, "", res.Asker, creator, res.Graduated))
+		sdk.Log(core.EvMaturedMoved(creator, caller, "", res.Asker, block, res.Graduated))
 	}
 	sdk.Log(core.EvDeclined(creator, caller, block, seq, res.CreditsReturned, res.CommissionHbd, res.Asker))
 	return strPtr(`{"creator":"` + jsonEscape(creator) + `","seq":` + u64s(seq) + `,"asker":"` + jsonEscape(res.Asker) + `","creditsReturned":"` + bigStr(res.CreditsReturned) + `","commissionRefundedHbd":"` + bigStr(res.CommissionHbd) + `"}`)
@@ -1308,6 +1333,14 @@ func Reclaim(a *string) *string {
 	// CommissionRetainedHbd (USER RULING 1, 2026-07-28) is NOT transferred here
 	// — core already booked it to the treasury. It is logged so the money model
 	// still balances: held == paid-to-asker + retained.
+	// F-C1/F-C8: if core.Reclaim banked the asker's aged position into MATURED
+	// before returning the credits, emit the mint from the returned figure.
+	// Reclaim is permissionless, so caller may be a third-party keeper — the
+	// recipient is res.Asker, never caller. operator == caller (the actor).
+	if res.Graduated != nil && res.Graduated.Sign() > 0 {
+		sdk.Log(core.EvTransferSingle(caller, "", res.Asker, creator, res.Graduated))
+		sdk.Log(core.EvMaturedMoved(creator, caller, "", res.Asker, block, res.Graduated))
+	}
 	sdk.Log(core.EvReclaimed(creator, caller, block, seq, res.CreditsReturned, res.CommissionHbd, res.CommissionRetainedHbd, res.Asker))
 	return strPtr(`{"creator":"` + jsonEscape(creator) + `","seq":` + u64s(seq) + `,"asker":"` + jsonEscape(res.Asker) + `","creditsReturned":"` + bigStr(res.CreditsReturned) + `","commissionRefundedHbd":"` + bigStr(res.CommissionHbd) + `","commissionRetainedHbd":"` + bigStr(res.CommissionRetainedHbd) + `"}`)
 }
@@ -1587,10 +1620,20 @@ func RefundHolder(a *string) *string {
 		}
 		sdk.HiveTransfer(sdk.Address(holder), nativeInt64(payout), sdk.AssetHbd) // THEN pay the HOLDER, never caller
 	}
-	// M3: gate the log on an actual nonzero payout, matching closeIfDrained's
-	// own gating below — an unconditional log let anyone force a documented
-	// (0,nil) no-op and still pollute the indexer's audit history for free.
-	if payout != nil && payout.Sign() > 0 {
+	// ★ GATE ON THE BURN, NOT THE PAYOUT (Phase-0 model, 2026-07-30). The gate
+	// used to read `payout > 0`, to stop anyone spamming the audit log with a
+	// documented (0, nil) no-op. But the payout is a FLOORED pro-rata slice, so
+	// a dust holder yields net = 0 while `debitPosition` has ALREADY burned
+	// their whole position and decremented supply. On that path the old gate
+	// emitted nothing at all: the tokens were gone and no event said so, so
+	// lumen_ct_balances — which is the wind-down keeper's own holder-discovery
+	// source — kept that holder forever and the keeper retried them on every
+	// sweep.
+	//
+	// creditsBurned is the honest trigger: these events describe TOKEN
+	// movement, which happened whether or not any HBD did. The original
+	// anti-spam intent is preserved, because a true no-op burns nothing.
+	if creditsBurned != nil && creditsBurned.Sign() > 0 {
 		emitMaturedDelta(creator, holder, caller, block, maturedBefore)
 		sdk.Log(core.EvRefundPushed(creator, caller, holder, block, creditsBurned, payout))
 	}

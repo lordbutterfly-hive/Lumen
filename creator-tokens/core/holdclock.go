@@ -45,9 +45,14 @@ import "math/big"
 //
 // THE CHOKEPOINT RULE (load-bearing — the tax RATE depends on it): EVERY
 // write to a kBal key in this package goes through creditInflow or
-// debitBalance. A balance that changed outside them would carry a stale
-// clock (tax-rate laundering). Call sites, the complete list (grep kBal to
-// verify — nothing else writes it):
+// debitBalance — WITH ONE NAMED EXCEPTION, added 2026-07-30: graduate()
+// (matured.go) DELETES kBal and kAcqBlock together when a position clears the
+// window. That is not a balance mutation the clock has to survive — it empties
+// the maturing family entirely and removes the clock with it, so there is no
+// stale clock left for a later write to re-average against. Any OTHER direct
+// write to kBal is still the defect this rule exists to prevent: a balance
+// changed outside these helpers would carry a STALE clock, which is tax-rate
+// laundering. Call sites, the complete list (grep kBal to verify):
 //
 //	creditInflow:   Buy (buy.go) — the ONLY issuance path, and the only
 //	                credit that legitimately mints a fresh clock

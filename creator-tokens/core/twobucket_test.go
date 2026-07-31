@@ -480,3 +480,152 @@ func TestTwoBucket_PushStillRefusesAFreshHolder(t *testing.T) {
 			"someone else's backing")
 	}
 }
+
+// ★ Phase-0 model INV-9. The guard was widened to the whole position while the
+// debit still drew from the maturing family alone — so the guard admitted a
+// transfer the debit underneath it could not honour. A guard and a debit that
+// disagree about what a balance IS is the shape that ends in a partial write.
+func TestTwoBucket_TransferDebitsBothBucketsAndKeepsMaturityIntact(t *testing.T) {
+	const c, from, to = "hive:alice", "hive:bob", "hive:carol"
+	s := tbMarket(t, c)
+	at := tbMature(t, s, c, from, 400, 1_000_000)
+	if _, err := Buy(s, from, c, at, big.NewInt(400)); err != nil {
+		t.Fatalf("buy: %v", err)
+	}
+	// 400 matured + 400 maturing. Move 600 — more than either bucket alone.
+	if err := TransferCredits(s, c, from, to, at, big.NewInt(600)); err != nil {
+		t.Fatalf("a transfer the guard admitted was refused by the debit: %v", err)
+	}
+
+	if got := BalanceOf(s, c, from); got.Cmp(big.NewInt(200)) != 0 {
+		t.Fatalf("sender total = %s, want 200", got)
+	}
+	if got := BalanceOf(s, c, to); got.Cmp(big.NewInt(600)) != 0 {
+		t.Fatalf("recipient total = %s, want 600", got)
+	}
+	// Maturing is drawn first, so the whole 400 maturing plus 200 matured moved.
+	if got := MaturedOf(s, c, to); got.Cmp(big.NewInt(200)) != 0 {
+		t.Fatalf("recipient matured = %s, want 200 — matured tokens credited into the "+
+			"MATURING bucket would silently restart a 42-day clock on tokens that had "+
+			"already served it", got)
+	}
+	if got := MaturedOf(s, c, from); got.Cmp(big.NewInt(200)) != 0 {
+		t.Fatalf("sender matured = %s, want 200", got)
+	}
+	// Conservation across the move.
+	if tot := mAdd(BalanceOf(s, c, from), BalanceOf(s, c, to)); tot.Cmp(big.NewInt(800)) != 0 {
+		t.Fatalf("total across both parties = %s, want 800", tot)
+	}
+	if Supply(s, c).Cmp(big.NewInt(800)) != 0 {
+		t.Fatal("a transfer changed supply")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// F-C1 — NO SELF-OWNED-RETURN LEG MAY RIDE AN AGED PILE
+//
+// Buy already graduates the caller's cleared position before crediting a fresh
+// purchase (TestTwoBucket_BuyItselfGraduatesTheOldPile). The SAME hazard exists
+// on the SELF-OWNED-RETURN paths: Answer (credits the creator its own
+// settlement) and Reclaim/Decline (return the asker their OWN escrowed tokens).
+// If any of them credits the returned tokens into an aged-but-not-yet-graduated
+// maturing pile, creditInflowAt's size-weighted average pulls the whole pile's
+// clock back toward `block`, re-aging — and therefore re-taxing — tokens that
+// had already served the full 42-day window. The fix graduates the recipient
+// FIRST, banking the aged tokens as tradable MATURED before the credit lands.
+//
+// TransferCredits is DELIBERATELY EXCLUDED (2026-07-31 USER RULING — see
+// transfer.go): its inflow is chosen by a THIRD PARTY, so graduating there would
+// let a griefer's fresh gift, under the maturing-first Sell order, force the
+// recipient to sell that gift first at max tax on the expensive upper curve
+// slice (a "poisoned gift" — see TestSell_OUTFLOWK1 / the OUTFLOWCLIFF1 / P4
+// suite). Transfer keeps the pre-existing bounded-blend model instead.
+//
+// Each test below mirrors BuyItselfGraduates (buy, wait one full window, DO NOT
+// graduate), then drives ONE self-owned-return leg with a small fresh inflow and
+// asserts the aged pile crossed into MATURED. On unfixed code the graduate() call
+// is absent, the buckets blend, and MaturedOf(recipient) is 0 — so each fails
+// loudly on the exact regression it guards. NB: these deliberately do NOT use
+// tbMature(), which graduates the pile in setup and would make the check
+// vacuous.
+
+// tbAgeWithoutGraduating gives `h` an aged pile of `n` credits on `c`'s market
+// that is STILL in the maturing bucket at the returned block — the ride-able
+// state. It is BuyItselfGraduates' setup, minus the graduate() call.
+func tbAgeWithoutGraduating(t *testing.T, s *MemStore, c, h string, n int64) uint64 {
+	t.Helper()
+	const t0 = 1_000_000
+	if _, err := Buy(s, h, c, t0, big.NewInt(n)); err != nil {
+		t.Fatalf("setup buy: %v", err)
+	}
+	at := uint64(t0) + tbWindow
+	tbKeepPaid(t, s, c, t0, at)
+	if MaturedOf(s, c, h).Sign() != 0 {
+		t.Fatalf("setup: pile graduated before the leg ran — the test would be vacuous")
+	}
+	if MaturingOf(s, c, h).Cmp(big.NewInt(n)) != 0 {
+		t.Fatalf("setup: expected %d maturing, got %s", n, MaturingOf(s, c, h))
+	}
+	return at
+}
+
+func TestTwoBucket_AnswerCannotRideAnAgedPile(t *testing.T) {
+	const c = "hive:alice"
+	s := tbMarket(t, c)
+	// Answer credits the CREATOR, so the aged pile must be the creator's own.
+	at := tbAgeWithoutGraduating(t, s, c, c, 100_000)
+
+	// A PENDING escrow the creator will answer; deadline in the future so the
+	// answer window is open. commission 0 keeps the HBD legs inert.
+	mkPendingEscrow(s, c, 0, "hive:bob", 100, at+tbWindow, "cid", 0)
+	if _, err := Answer(s, c, c, at, 0, "answerhash"); err != nil {
+		t.Fatalf("answer: %v", err)
+	}
+
+	if got := MaturedOf(s, c, c); got.Cmp(big.NewInt(100_000)) != 0 {
+		t.Fatalf("creator matured = %s, want 100000 — Answer credited its payout into the "+
+			"creator's aged pile without graduating it first (F-C1); the aged tokens are "+
+			"re-aged and become taxable again", got)
+	}
+	if got := MaturingOf(s, c, c); got.Cmp(big.NewInt(100)) != 0 {
+		t.Fatalf("creator maturing = %s, want 100 (only the fresh answer credit)", got)
+	}
+}
+
+func TestTwoBucket_ReclaimCannotRideAnAgedPile(t *testing.T) {
+	const c, h = "hive:alice", "hive:bob"
+	s := tbMarket(t, c)
+	at := tbAgeWithoutGraduating(t, s, c, h, 100_000)
+
+	// deadline in the PAST so the reclaim window is open at `at`
+	// (at > deadline + ReclaimGrace). Reclaim credits the asker `h`.
+	mkPendingEscrow(s, c, 0, h, 100, 1_000_000, "cid", 0)
+	if _, err := Reclaim(s, h, c, at, 0); err != nil {
+		t.Fatalf("reclaim: %v", err)
+	}
+
+	if got := MaturedOf(s, c, h); got.Cmp(big.NewInt(100_000)) != 0 {
+		t.Fatalf("asker matured = %s, want 100000 — Reclaim returned credits into the "+
+			"asker's aged pile without graduating it first (F-C1); the aged tokens are "+
+			"re-aged and become taxable again", got)
+	}
+}
+
+func TestTwoBucket_DeclineCannotRideAnAgedPile(t *testing.T) {
+	const c, h = "hive:alice", "hive:bob"
+	s := tbMarket(t, c)
+	at := tbAgeWithoutGraduating(t, s, c, h, 100_000)
+
+	// deadline in the future — Decline is legal on a PENDING escrow. Decline is
+	// called by the creator and credits the asker `h`.
+	mkPendingEscrow(s, c, 0, h, 100, at+tbWindow, "cid", 0)
+	if _, err := Decline(s, c, c, at, 0); err != nil {
+		t.Fatalf("decline: %v", err)
+	}
+
+	if got := MaturedOf(s, c, h); got.Cmp(big.NewInt(100_000)) != 0 {
+		t.Fatalf("asker matured = %s, want 100000 — Decline returned credits into the "+
+			"asker's aged pile without graduating it first (F-C1); the aged tokens are "+
+			"re-aged and become taxable again", got)
+	}
+}
