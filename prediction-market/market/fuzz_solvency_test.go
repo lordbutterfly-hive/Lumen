@@ -229,8 +229,14 @@ func genRandomScenario(rng *rand.Rand) scenario {
 	}
 	price := uint64(rng.Int63n(int64(prev) + 2000))
 	if rng.Intn(4) == 0 {
-		price = rng.Uint64() // occasionally stress the full uint64 price range
+		price = rng.Uint64() // occasionally stress the price range, far above every strike
 	}
+	// F-P3 gave the oracle price an explicit legal domain [1, MaxReferenceBps];
+	// Settle now REFUSES outside it. This harness fuzzes settlement MATH, not
+	// oracle validation (fp3_settle_price_test.go owns that), so model a legal
+	// oracle — otherwise every full-range draw is a refusal and the solvency
+	// properties below never execute.
+	price = price%MaxReferenceBps + 1
 	return scenario{n: n, strikes: strikes, bets: bets, feeBps: feeBps, price: price}
 }
 
@@ -480,8 +486,12 @@ func scenarioFromBytes(data []byte) (scenario, bool) {
 	}
 	price := c.u64() % (prev + 100)
 	if c.byte()%2 == 0 {
-		price = c.u64() // occasionally full-range, unbounded by the strikes
+		price = c.u64() // occasionally unbounded by the strikes
 	}
+	// Same reason as the randomized generator above: keep the fuzzed price
+	// inside the oracle domain F-P3 made explicit, so these bytes keep
+	// exercising settlement math instead of bouncing off the new guard.
+	price = price%MaxReferenceBps + 1
 	return scenario{n: n, strikes: strikes, bets: bets, feeBps: feeBps, price: price}, true
 }
 

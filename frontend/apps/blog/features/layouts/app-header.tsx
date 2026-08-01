@@ -24,8 +24,7 @@ const LABELS = {
   homeAriaLabel: 'Lumen home',
   write: 'Write',
   notifications: 'Notifications',
-  login: 'Log in',
-  hiveKeys: 'Use Hive keys'
+  login: 'Log in'
 };
 
 /**
@@ -216,26 +215,21 @@ const AppHeader: FC = () => {
               </Tooltip>
             </TooltipProvider>
           ) : (
-            /* /login is the Lumen entry point (Google / Bitcoin / EVM / Keychain).
-               Nothing in the site linked to it, which made the whole lite-account
-               journey unreachable for a real visitor. The keys-only DialogLogin stays
-               for existing Hive users. */
-            <>
-              <Link href="/login" data-testid="login-link">
-                <Button variant="ghost" className="whitespace-nowrap text-base hover:text-destructive">
-                  {LABELS.login}
-                </Button>
-              </Link>
-              <DialogLogin>
-                <Button
-                  variant="ghost"
-                  className="hidden whitespace-nowrap text-base hover:text-destructive md:inline-flex"
-                  data-testid="login-btn"
-                >
-                  {LABELS.hiveKeys}
-                </Button>
-              </DialogLogin>
-            </>
+            /* /login is the ONE entry point, and it carries all four ways in:
+               Google, Hive Keychain, a Bitcoin wallet and an EVM wallet.
+
+               ★ OPERATOR RULING 2026-08-01 — the second "Use Hive keys" button
+               that used to sit here is gone. Two adjacent, undifferentiated login
+               buttons is a coin toss for anyone who has not used Hive before, and
+               the one it opened asked a first-time visitor for a private key.
+               DialogLogin still exists and still opens from the ~24 in-context
+               places (upvote, reply, composer) — it is now Keychain-only and
+               links onward to /login for people without an account. */
+            <Link href="/login" data-testid="login-link">
+              <Button variant="ghost" className="whitespace-nowrap text-base hover:text-destructive">
+                {LABELS.login}
+              </Button>
+            </Link>
           )}
         </div>
       </div>

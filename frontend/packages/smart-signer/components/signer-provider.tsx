@@ -30,12 +30,21 @@ export const SignerProvider = ({ children }: { children: ReactNode }) => {
       // getSigner() would throw "Invalid loginType" for them; short-circuit
       // before it is ever called. Spec §A.5 (must-fix).
       if (accountTier === 'lite') {
+        // F-L12: a lite session has no signer, so drop any identity a previous
+        // FULL session left in the module-level singleton. Returning without
+        // this kept the old user's signerOptions live for the whole SPA session.
+        setSigner(null);
+        transactionService.clearSignerOptions();
         return;
       }
       const _getSigner = (await import('@smart-signer/lib/signer/get-signer')).getSigner;
       if (signerOptions.username !== '') {
         setSigner(_getSigner(signerOptions));
         transactionService.setSignerOptions(signerOptions);
+      } else {
+        // F-L12: logout. Same reason — clear, never leave the previous user.
+        setSigner(null);
+        transactionService.clearSignerOptions();
       }
     })().catch(logger.error);
   }, [signerOptions.username, signerOptions.loginType, signerOptions.keyType, accountTier]);

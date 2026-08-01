@@ -211,6 +211,46 @@ export function decodeRetiredAt(raw: string | null | undefined): number | null {
 export function kBal(c: string, holder: string): string {
   return `mb|${toDid(c)}|${toDid(holder)}`;
 }
+// MATURED balance — core/matured.go's kMatured. NOTE THE TRANSPOSITION: this
+// family is keyed holder-FIRST (`bal|<holder>|<creator>`), the opposite of the
+// maturing `mb|` family above, because magi-market reads it as a per-holder
+// index. Building it in the mb| order returns null forever.
+export function kMatured(c: string, holder: string): string {
+  return `bal|${toDid(holder)}|${toDid(c)}`;
+}
+
+// Decode core/matured.go's wire form: little-endian uint64 with trailing
+// (high-order) zero bytes TRIMMED, supplied here as the node's hex encoding.
+//
+// ★ THIS MUST BE READ WITH encoding:"hex" — F-C5. The node's default encoding
+// is `string(rawVal)` (go-vsc modules/gql/gqlgen/schema.resolvers.go), i.e. a
+// raw byte->string cast, and gqlgen then JSON-marshals that. Raw LE bytes are
+// not valid UTF-8, so invalid sequences become U+FFFD and the value is
+// IRRECOVERABLY corrupted before it reaches us. Verified live against mainnet:
+// the DEX pool's `r0` reserve reads "#�c" by default and "239c63" with
+// encoding:"hex". Decimal-string values (everything setMoney writes) are
+// unaffected either way; only this byte-encoded family needs hex.
+//
+// Returns null — never 0 — when the value cannot be decoded. A balance we
+// failed to read is UNAVAILABLE, not empty (F-L19 family); rendering it as zero
+// is how a holder gets told they own nothing. Absent/empty IS a real zero,
+// because setMatured deletes the key rather than storing one.
+export function decodeMaturedLeHex(hex: string | null | undefined): number | null {
+  if (hex === null || hex === undefined || hex === '') return 0; // deleted key == zero
+  if (!/^[0-9a-fA-F]*$/.test(hex) || hex.length % 2 !== 0) return null;
+  const bytes = hex.length / 2;
+  if (bytes === 0) return 0;
+  if (bytes > 8) return null; // mirrors leToU64's length refusal
+  let n = 0;
+  for (let i = 0; i < bytes; i++) {
+    // Little-endian: byte i carries the 8*i shift. Token counts are bounded by
+    // the contract's MaxCap (1e9), far inside Number.MAX_SAFE_INTEGER, so plain
+    // arithmetic is exact here — 2**(8*i) rather than <<, which is 32-bit.
+    n += parseInt(hex.slice(i * 2, i * 2 + 2), 16) * Math.pow(2, 8 * i);
+  }
+  if (!Number.isSafeInteger(n)) return null;
+  return n;
+}
 export function kEscrow(c: string, seq: number): string {
   return `e|${toDid(c)}|${seq}`;
 }
@@ -339,6 +379,13 @@ async function postGql(gqlUrl: string, query: string, variables: Record<string, 
 const STATE_QUERY = `query CreatorTokensState($contractId: String!, $keys: [String!]!) {
   getStateByKeys(contractId: $contractId, keys: $keys)
 }`;
+// F-C5 — the hex variant, for byte-encoded families only (the matured `bal|`
+// bucket). `encoding` is a per-CALL argument on the node's resolver, so hex and
+// default keys cannot share a request; that is why this is a second query and a
+// second method rather than a flag on the existing one.
+const STATE_QUERY_HEX = `query CreatorTokensStateHex($contractId: String!, $keys: [String!]!) {
+  getStateByKeys(contractId: $contractId, keys: $keys, encoding: "hex")
+}`;
 const HEAD_QUERY = `query CreatorTokensHead {
   localNodeInfo { last_processed_block }
 }`;
@@ -347,13 +394,27 @@ export class CreatorTokensGqlClient {
   constructor(private readonly gqlUrl: string) {}
 
   async getStateByKeys(contractId: string, keys: string[]): Promise<Record<string, string | null>> {
+    return this.readState(contractId, keys, STATE_QUERY);
+  }
+
+  /**
+   * F-C5 — the same read, but asking the node to hex-encode each value. Use
+   * this ONLY for byte-encoded state (the matured `bal|` family); decode with
+   * decodeMaturedLeHex. See that function's comment for why the default
+   * encoding cannot carry these values at all.
+   */
+  async getStateByKeysHex(contractId: string, keys: string[]): Promise<Record<string, string | null>> {
+    return this.readState(contractId, keys, STATE_QUERY_HEX);
+  }
+
+  private async readState(contractId: string, keys: string[], query: string): Promise<Record<string, string | null>> {
     const out: Record<string, string | null> = {};
     if (keys.length === 0) return out;
     // getStateByKeys accepts 1..100 keys per call (schema.graphql:813); batch.
     const CHUNK = 100;
     for (let i = 0; i < keys.length; i += CHUNK) {
       const chunk = keys.slice(i, i + CHUNK);
-      const data = await postGql(this.gqlUrl, STATE_QUERY, { contractId, keys: chunk });
+      const data = await postGql(this.gqlUrl, query, { contractId, keys: chunk });
       const rawMap = getJsonProp(data, 'getStateByKeys');
       for (const key of chunk) {
         const value = getJsonProp(rawMap, key);

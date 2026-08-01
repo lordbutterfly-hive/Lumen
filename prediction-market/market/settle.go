@@ -44,6 +44,24 @@ func Settle(
 	if !feedOK {
 		return nil, newErr(ErrOracle, "price feed not ok; retry in window or voidStale after grace")
 	}
+	// F-P3 — bound the SETTLEMENT price with the same range RollRound already
+	// applies to the REFERENCE price (create.go:151-156). The feed's own "ok"
+	// flags are liveness signals, not sanity ones: a healthy-looking feed that
+	// emits 0 lands in bucketFor(0, strikes) -> bucket 0, so the entire pool
+	// pays out to the "-30% or worse" outcome with no error at any layer. The
+	// asymmetry was the bug — the same value was validated on the way IN and
+	// trusted on the way OUT.
+	//
+	// Refusal (not VOID) is deliberate and preserves the existing contract:
+	// this is the identical treatment !feedOK already gets, so the round stays
+	// OPEN and resolves on a later tick, or voids after grace via voidStale.
+	// Refusing is always recoverable; a wrong winner never is.
+	//
+	// MaxReferenceBps is ~HIVE at $10,000 (params.go:106-110), so this cannot
+	// reject a real settlement — a round's own top strike is only ref*13/10.
+	if priceBps == 0 || priceBps > MaxReferenceBps {
+		return nil, newErr(ErrOracle, "settlement price out of range; retry in window or voidStale after grace")
+	}
 	// C1 mitigation — pin settlement to the FIRST pendulum tick at/after
 	// settleBlock. hive_moving_avg_bps is constant between ticks, so once
 	// tick_block_height is bound to [settleBlock, settleBlock+MaxSettleTickLag)

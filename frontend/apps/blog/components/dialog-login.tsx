@@ -2,12 +2,10 @@
 
 import { Link } from '@hive/ui';
 
-import { ReactNode, useRef, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import { ReactNode, useCallback } from 'react';
 import { Dialog, DialogContent, DialogTrigger, DialogTitle, DialogDescription } from '@ui/components/dialog';
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
-import SignInForm, { SignInFormRef } from '@smart-signer/components/auth/form';
-import { KeyType } from '@smart-signer/types/common';
+import KeychainSignin from '@/blog/features/lite-auth/login/keychain-signin';
 import { siteConfig } from '@ui/config/site';
 import { useTranslation } from '@/blog/i18n/client';
 
@@ -21,14 +19,7 @@ interface DialogLoginProps {
 
 function DialogLogin({ children, redirectTo }: DialogLoginProps) {
   const { t } = useTranslation('common_blog');
-  const signInFormRef = useRef<SignInFormRef>(null);
-  const router = useRouter();
 
-  async function onComplete(_username: string) {
-    if (redirectTo) {
-      router.push(redirectTo);
-    }
-  }
 
   // Load Google Sign-In script on demand when dialog opens
   const loadGoogleScript = useCallback(() => {
@@ -49,12 +40,8 @@ function DialogLogin({ children, redirectTo }: DialogLoginProps) {
   return (
     <Dialog
       modal={true}
-      onOpenChange={async (open) => {
-        if (open) {
-          loadGoogleScript();
-        } else {
-          await signInFormRef?.current?.cancel();
-        }
+      onOpenChange={(open) => {
+        if (open) loadGoogleScript();
       }}
     >
       <DialogTrigger asChild>{children}</DialogTrigger>
@@ -69,13 +56,25 @@ function DialogLogin({ children, redirectTo }: DialogLoginProps) {
         <VisuallyHidden>
           <DialogDescription>Sign in to your account using your posting key.</DialogDescription>
         </VisuallyHidden>
-        <SignInForm
-          ref={signInFormRef}
-          preferredKeyTypes={[KeyType.posting]}
-          onComplete={onComplete}
-          authenticateOnBackend={siteConfig.loginAuthenticateOnBackend}
-          strict={!siteConfig.allowNonStrictLogin}
-        />
+        {/* ★ OPERATOR RULING 2026-08-01 — Lumen has FOUR ways in: Google, a
+            Bitcoin wallet and an EVM wallet (all Lumen Lite, via Reown for the
+            two wallets), plus Hive Keychain for people who already have a Hive
+            account. Everything denser shipped here is gone.
+
+            This dialog used to render smart-signer's SignInForm, whose first
+            step is the hbauth "encrypt your keys in this browser" screen, with
+            PeakVault / MetaMask-Snap / Google-Drive-restore / WIF key entry /
+            HiveAuth / HiveSigner behind an "Other sign in options" click. It
+            opens from ~24 in-context places (upvote, reply, composer), so that
+            was the app's widest exposure of the very flow we removed from
+            /login.
+
+            Keychain is inline because it is one field and one click. The three
+            LITE methods need the name-pick, CAPTCHA and wallet-connect steps,
+            which belong on the full page — the link below goes there. */}
+        <div className="px-6 pb-2 pt-6">
+          <KeychainSignin redirectTo={redirectTo} />
+        </div>
         {/* THE SIGNUP DOOR. This dialog is opened from ~24 places — the home
             composer, every upvote and reply button, the left rail — and it asks
             for a Hive username and a private key. A first-time visitor has

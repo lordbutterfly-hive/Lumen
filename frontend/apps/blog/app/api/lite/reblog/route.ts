@@ -5,6 +5,7 @@ import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { requireActiveLiteUser, requireLiteUser } from '@/blog/lib/lite/http/actor';
 import { enforceReblogRate } from '@/blog/lib/lite/antispam/rate-limit';
 import { reblog, unreblog } from '@/blog/lib/lite/repositories/engagement-repository';
+import { checkEngagementTarget } from '@/blog/lib/lite/content/engagement-target';
 
 const logger = getLogger('app');
 
@@ -31,6 +32,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const actor = undo ? await requireLiteUser(session.user) : await requireActiveLiteUser(session.user, session.sessionEpoch);
   if (!actor.ok) return actor.response;
   const user = actor.user;
+
+  // F-L34 — undo is a withdrawal and stays ungated; adding a reblog is not.
+  if (!undo) {
+    const target = checkEngagementTarget(user, author, permlink);
+    if (!target.ok) {
+      return NextResponse.json({ error: target.code }, { status: target.status });
+    }
+  }
 
   try {
     if (!(await enforceReblogRate(user.userId))) {

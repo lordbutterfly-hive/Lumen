@@ -56,7 +56,11 @@ export class SignerPeakvault extends Signer {
       await provider.signTransaction(authTx);
 
       await verifyAuthorityOrThrow(authTx.toApiJson(), TTransactionPackType.LEGACY, this.keyType, 'Peakvault');
-      logger.info('authTx.transaction.signatures: %o', authTx.transaction.signatures);
+      // F-L13 (sibling site) — logged the raw login signature at info.
+      // This transaction is NEVER broadcast: it is the off-chain auth proof
+      // the backend verifies, so the signature IS the credential and pino has
+      // no redaction on this path. Log that one was produced, not its value.
+      logger.info('Peakvault signTransaction produced %d signature(s)', authTx.transaction.signatures.length);
       return authTx.transaction.signatures[0];
     } catch (error) {
       logger.error('SignerPeakvault.signTransaction error: %s', error instanceof Error ? error.message : String(error));

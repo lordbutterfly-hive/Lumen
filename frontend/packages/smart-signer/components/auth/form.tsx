@@ -13,6 +13,12 @@ export interface SignInFormProps {
   authenticateOnBackend?: boolean;
   strict?: boolean; // if true use strict authentication
   i18nNamespace?: string;
+  /**
+   * Which sign-in methods to offer. Omitted ⇒ all of them, so every existing
+   * caller is unchanged. Forwarded to <Methods>. Lumen's blog passes
+   * [keychain]; see apps/blog/components/dialog-login.tsx.
+   */
+  enabledLoginTypes?: LoginType[];
 }
 
 export type SignInFormRef = { cancel: () => Promise<void> };
@@ -30,7 +36,8 @@ const SignInForm = forwardRef<SignInFormRef, SignInFormProps>(
       onComplete,
       authenticateOnBackend = false,
       strict = false,
-      i18nNamespace = 'smart-signer'
+      i18nNamespace = 'smart-signer',
+      enabledLoginTypes
     }: SignInFormProps,
     ref
   ) => {
@@ -96,6 +103,7 @@ const SignInForm = forwardRef<SignInFormRef, SignInFormProps>(
             onUsernameChange={(username) => setUsername(username)}
             sign={sign}
             submit={submit}
+            enabledLoginTypes={enabledLoginTypes}
           />
         )}
 

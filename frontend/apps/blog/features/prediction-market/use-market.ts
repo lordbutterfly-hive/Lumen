@@ -82,6 +82,14 @@ export function useMarket() {
   const placeBetMutation = useMutation({
     mutationFn: (input: { bucketId: string; amount: number }) => {
       if (!dataSource || !round) return Promise.reject(new Error('No active round'));
+      // F-P11 — the ONLY lite gate on betting was `disabled` on the submit
+      // button (bet-form.tsx). Its two siblings below refuse inside the
+      // mutation; this one did not, so any path that reaches placeBet without
+      // that button — a keyboard submit on a re-enabled form, a stale render,
+      // any future caller of the returned placeBet() — handed a keyless account
+      // to a signer it has no key for and surfaced a raw error. A render-only
+      // tier gate is not a gate (F-L22 family).
+      if (isLite) return Promise.reject(new Error('Placing a bet needs a full Hive account. Upgrade to bet.'));
       return dataSource.placeBet({ ...input, roundId: round.roundId, username: user.username });
     },
     onSuccess: (position) => {

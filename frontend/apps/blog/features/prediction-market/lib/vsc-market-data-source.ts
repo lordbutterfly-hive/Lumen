@@ -14,10 +14,23 @@ import { buildOddsSeries } from './pool-series';
 // getMarketDataSource() only when getMarketConfig() is non-null.
 
 // The active-round pointer this weekly market reads. The contract keys it per
-// asset (active|hive, active|hbd); this deployment's primary market is the
-// hive-staked one (DEPLOY-RUNBOOK §5 / market/keys.go kActiveRound). A hbd
-// market would read active|hbd instead.
-const POINTER_ASSET: ContractAsset = 'hive';
+// asset (active|hive, active|hbd — market/keys.go kActiveRound).
+//
+// F-P8 — this was 'hive' and the shipped contract rolls 'hbd'. RollRound
+// hardcodes `Asset: AssetHbd` (market/create.go:158, "stake token = HBD (stable
+// payout unit); settlement variable stays the HBD/HIVE feed") and the scheduler
+// defaults to the same; scheduler/plan_test.go's TestDefaultConfig_AssetMatchesRollRound
+// exists BECAUSE the pre-re-skin scheduler had this exact stale 'hive' default.
+// The contract side was fixed and test-guarded; this constant was its un-fixed
+// twin, so on deploy the frontend would have watched a key the contract never
+// writes and rendered "no round" forever — nobody bets, and existing bettors
+// cannot reach claim/reclaim in-app.
+//
+// Now a config value with the contract's own asset as the default, so a
+// deployment can move the pointer without a code change and the default can
+// never silently disagree with RollRound again. prediction-market's
+// fp8_pointer_asset_test.go reads THIS file and fails if the default drifts.
+const DEFAULT_POINTER_ASSET: ContractAsset = 'hbd';
 
 // Hive L1 blocks are ~3s. lock/settle are Hive L1 heights (contract block.height
 // == the node's last_processed_block basis), so this converts a height delta to
@@ -53,8 +66,8 @@ function rkStakeTotal(id: number, acct: string): string {
 function rkClaimed(id: number, acct: string): string {
   return `rd|${id}|cl|${acct}`;
 }
-function activePointerKey(): string {
-  return `active|${POINTER_ASSET}`;
+function activePointerKey(asset: ContractAsset): string {
+  return `active|${asset}`;
 }
 
 function toU64(value: string | null | undefined): number {
@@ -130,6 +143,23 @@ export class VscMarketDataSource implements MarketDataSource {
 
     const rawState = state[rk(id, 'state')];
     if (!rawState) return null; // round does not exist
+
+    // F-P10 — refuse to render a round whose outcome count this UI cannot
+    // represent. Every bucket read below indexes BUCKET_DEFS positionally
+    // (pools, stakes, the settled winner), so against an n != 7 round the page
+    // would drop real outcomes, show shares that do not sum to 100, and label
+    // the wrong bucket as the winner — all while looking normal. A round we
+    // cannot draw correctly is not drawn: the widget already renders "no round"
+    // safely, and being blank beats being wrong about a payout.
+    // n is absent on nothing the contract writes today, so a 0/missing value is
+    // treated as "not asserted" rather than a mismatch.
+    const outcomeCount = toU64(state[rk(id, 'n')]);
+    if (outcomeCount > 0 && outcomeCount !== BUCKET_DEFS.length) {
+      console.error(
+        `[prediction-market] round ${id} has ${outcomeCount} on-chain outcomes but this build renders ${BUCKET_DEFS.length}; refusing to display it rather than mis-render positions.`
+      );
+      return null;
+    }
 
     const totalPool = baseUnitsToHuman(state[rk(id, 'pool')]);
     const refUsd = toU64(state[rk(id, 'refprice')]) / BPS_SCALE;
@@ -329,7 +359,7 @@ export class VscMarketDataSource implements MarketDataSource {
   }
 
   private async resolveActiveRoundId(): Promise<number | null> {
-    const key = activePointerKey();
+    const key = activePointerKey(this.config.pointerAsset ?? DEFAULT_POINTER_ASSET);
     const map = await this.gql.getStateByKeys(this.config.contractId, [key]);
     const raw = map[key];
     if (!raw) return null;
@@ -402,7 +432,13 @@ function buildRoundKeys(id: number): string[] {
     rk(id, 'win'),
     rk(id, 'price'),
     rk(id, 'vr'),
-    rk(id, 'label')
+    rk(id, 'label'),
+    // F-P10 — the on-chain outcome count. The UI's bucket table is a fixed 7
+    // (BUCKET_DEFS), which is correct for every round the contract can
+    // currently open (RollRound -> computeStrikes, always 6 strikes), but
+    // nothing verified the two agreed. Read it so a disagreement is caught
+    // instead of silently mis-rendering someone's money.
+    rk(id, 'n')
   ];
   BUCKET_DEFS.forEach((_, i) => keys.push(rkOutcomePool(id, i)));
   return keys;

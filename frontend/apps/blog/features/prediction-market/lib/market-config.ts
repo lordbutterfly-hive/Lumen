@@ -17,6 +17,9 @@ import env from '@beam-australia/react-env';
 //       UNKNOWN and render as such — never as zero.
 //       Register prediction-market/magi-indexer/*.yaml with the instance first.
 //   REACT_APP_VSC_MARKET_RC_LIMIT     — optional rc_limit override for bet/claim calls.
+//   REACT_APP_VSC_MARKET_POINTER_ASSET — optional 'hive'|'hbd'. Which per-asset
+//       active-round pointer to watch. Unset (the normal case) ⇒ the asset the
+//       shipped contract actually rolls. See MarketConfig.pointerAsset (F-P8).
 //
 // When the contract id (or net id / gql url) is not set, getMarketConfig()
 // returns null and getMarketDataSource() falls back to the Mock — so an
@@ -28,6 +31,16 @@ export interface MarketConfig {
   gqlUrl: string;
   indexerUrl?: string;
   rcLimit?: number;
+  /**
+   * F-P8 — which per-asset active-round pointer to watch (`active|hbd` /
+   * `active|hive`, market/keys.go kActiveRound). Leave unset: the data source
+   * defaults to the asset RollRound actually opens rounds with. Only set this
+   * if a deployment deliberately runs a second market on the other asset.
+   * An unrecognised value is IGNORED rather than honoured — pointing at a key
+   * the contract never writes renders "no round" forever, which is precisely
+   * the failure this finding was.
+   */
+  pointerAsset?: 'hive' | 'hbd';
 }
 
 function readEnv(key: string): string | undefined {
@@ -48,12 +61,18 @@ export function getMarketConfig(): MarketConfig | null {
   const parsedRcLimit = rcLimitRaw !== undefined ? Number(rcLimitRaw) : undefined;
   const rcLimit = parsedRcLimit !== undefined && Number.isFinite(parsedRcLimit) ? parsedRcLimit : undefined;
 
+  // Only 'hive' / 'hbd' are real pointer keys; anything else (typo, stale
+  // value) falls through to the data source's contract-matching default.
+  const pointerAssetRaw = readEnv('VSC_MARKET_POINTER_ASSET')?.toLowerCase();
+  const pointerAsset = pointerAssetRaw === 'hive' || pointerAssetRaw === 'hbd' ? pointerAssetRaw : undefined;
+
   return {
     contractId,
     netId,
     gqlUrl: gqlUrl.replace(/\/+$/, ''),
     indexerUrl: readEnv('VSC_MARKET_INDEXER_URL')?.replace(/\/+$/, ''),
-    rcLimit
+    rcLimit,
+    pointerAsset
   };
 }
 

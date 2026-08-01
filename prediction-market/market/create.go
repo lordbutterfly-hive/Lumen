@@ -27,6 +27,21 @@ type CreateParams struct {
 // below is the only guard. It snapshots the current fee (0 on the zero-rake
 // deploy) into the round (F-1). Returns the new round id.
 func CreateRound(s Store, caller string, block uint64, p CreateParams) (uint64, error) {
+	// F-P1 — CreateRound validates its inputs but never its CALLER, which reads
+	// like a missing access-control gate. It is not one TODAY: `createRound` has
+	// no //go:wasmexport in contract/main.go, so the only reachable path is
+	// `roll` -> RollRound -> CreateRound(s, "protocol", ...), where every strike
+	// and every deadline is derived from protocol constants and nobody chooses
+	// them. That reachability — not a gate in here — is the security property,
+	// and fp1_round_creation_test.go pins it structurally so exporting this
+	// without a gate breaks the build's tests rather than the market.
+	//
+	// What IS worth refusing here is an unattributable round: `caller` becomes
+	// the round's creator when CreateParams.Creator is empty (see below), and an
+	// empty creator would make a round's provenance unreadable on-chain.
+	if caller == "" {
+		return 0, newErr(ErrAuth, "caller required (round attribution)")
+	}
 	if !isNativeAsset(p.Asset) {
 		return 0, newErr(ErrInput, "asset must be native hive or hbd")
 	}

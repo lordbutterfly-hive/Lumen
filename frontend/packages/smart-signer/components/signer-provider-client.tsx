@@ -35,6 +35,12 @@ export const SignerProviderClient = ({ children }: { children: ReactNode }) => {
       if (signerOptions.username !== '') {
         setSigner(_getSigner(signerOptions));
         transactionService.setSignerOptions(signerOptions);
+      } else {
+        // F-L12 (App Router twin of signer-provider.tsx): on logout the
+        // module-level singleton kept the previous user's signerOptions, and
+        // every op this service builds takes its actor from them.
+        setSigner(null);
+        transactionService.clearSignerOptions();
       }
     })().catch(logger.error);
   }, [signerOptions.username, signerOptions.loginType, signerOptions.keyType]);

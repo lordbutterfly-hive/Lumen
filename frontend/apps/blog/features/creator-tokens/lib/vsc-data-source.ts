@@ -108,6 +108,8 @@ import {
   isWellFormedDid,
   kAcqBlock,
   kBal,
+  kMatured,
+  decodeMaturedLeHex,
   kCap,
   kEscrow,
   kFace,
@@ -354,14 +356,32 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     // rejects on failure — see interface doc. heldBlocks (below) needs a real
     // chain head (the exit tax RATE is time-dependent, holdclock.go), so this
     // read is genuinely incomplete without one — reject rather than guess.
-    const [state, head] = await Promise.all([this.gql.getStateByKeys(this.config.contractId, keys), this.gql.getHeadBlock()]);
+    // F-C5 — the MATURED bucket is a separate key family AND a separate wire
+    // encoding, so it needs its own hex-encoded read (see decodeMaturedLeHex).
+    // core/matured.go totalBalance: "EVERY guard that used to read kBal alone
+    // must read this instead, or a holder is refused access to tokens they
+    // demonstrably own." Reading kBal alone here understated a holder's whole
+    // position by exactly their matured tokens.
+    const [state, maturedState, head] = await Promise.all([
+      this.gql.getStateByKeys(this.config.contractId, keys),
+      this.gql.getStateByKeysHex(this.config.contractId, [kMatured(creator, holder)]),
+      this.gql.getHeadBlock()
+    ]);
     if (toU64(state[kRegisteredAt(creator)]) === 0) return null;
     if (head === null) {
       throw new Error('VscCreatorTokensDataSource: cannot compute the exit tax (chain head unavailable)');
     }
+    const tokensMatured = decodeMaturedLeHex(maturedState[kMatured(creator, holder)]);
+    if (tokensMatured === null) {
+      // Undecodable ≠ zero. Reporting 0 here would tell a holder they own
+      // nothing in the matured bucket and understate their exit value — the
+      // same class of lie F-L19 is about. Refuse the read instead.
+      throw new Error('VscCreatorTokensDataSource: matured balance unreadable (unexpected wire encoding)');
+    }
 
     // ★ 1000x TRAP: tokensHeld/supplyTokens are raw integer token counts.
-    const tokensHeld = toU64(state[kBal(creator, holder)]);
+    const tokensMaturing = toU64(state[kBal(creator, holder)]);
+    const tokensHeld = tokensMaturing + tokensMatured;
     const supplyTokens = toU64(state[kSupply(creator)]);
     const reserveBaseUnits = toU64(state[kReserve(creator)]);
     const acqBlock = toU64(state[kAcqBlock(creator, holder)]);
@@ -371,7 +391,13 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
     // refundNetBaseUnits): the TAXED NET, not the untaxed gross — see
     // HolderPosition.floorValueHbd's own doc in types.ts for why showing the
     // gross would overstate a fresh holder's payout by up to 20%.
-    const { netBaseUnits, taxBps } = refundNetBaseUnits(reserveBaseUnits, tokensHeld, supplyTokens, heldBlocks);
+    const { netBaseUnits, taxBps } = refundNetBaseUnits(
+      reserveBaseUnits,
+      tokensHeld,
+      supplyTokens,
+      heldBlocks,
+      tokensMaturing
+    );
     return {
       creator,
       holder,

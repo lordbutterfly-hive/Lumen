@@ -6,6 +6,9 @@ import { csrfHeaderName } from '@smart-signer/lib/csrf-protection';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useNameSuggest } from './use-name-suggest';
 import { AccountKeys, generateAccountKeys, ownerKeyMatches, publicKeysOf } from './browser-keys';
+import { fetchAuthMethods, requestStepUp, type LiteAuthMethodName } from '@/blog/lib/lite/client/lite-security';
+import { connectWallet, signMessageWith, walletErrorMessage, type WalletChain } from '../wallet/appkit';
+import GoogleSignIn, { googleConfigured } from '../login/google-signin';
 
 /**
  * Upgrade a lite account to a real Hive account.
@@ -93,6 +96,12 @@ const COPY = {
   masterLabel: 'Master password (recovers everything)',
   acknowledge: 'I have saved these keys somewhere safe',
   create: 'Create my Hive account',
+  createWithBtc: 'Confirm with your Bitcoin wallet & create',
+  createWithEvm: 'Confirm with your Ethereum wallet & create',
+  stepUpExplain:
+    'One last check: confirm with the wallet or Google account you signed up with. Creating your Hive account cannot be undone, so we ask for it here rather than trusting the browser session alone.',
+  stepUpFailed: 'Could not confirm it was you — please try again.',
+  stepUpUnavailable: 'Sign-in confirmation is unavailable right now. Please try again later.',
   creating: 'Creating your account…',
   copy: 'Copy',
   copied: 'Copied',
@@ -144,6 +153,10 @@ const UpgradePanel: FC = () => {
   const [copied, setCopied] = useState<string | null>(null);
   const [verifying, setVerifying] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  // F-L1 step-up: which credentials this account can prove with, and (for
+  // Google, whose button captures the nonce at render time) a nonce held ready.
+  const [methods, setMethods] = useState<LiteAuthMethodName[] | null>(null);
+  const [googleNonce, setGoogleNonce] = useState<string | null>(null);
 
   /**
    * On mount, ask the server where this account actually stands before offering to
@@ -221,8 +234,57 @@ const UpgradePanel: FC = () => {
     }
   }, [name]);
 
-  /** Keys saved → create the account, sending public keys only. */
-  const createAccount = async () => {
+  /**
+   * F-L1 — which credentials this account owns, so the confirm step asks for one
+   * it can actually produce. Loaded once the panel is live; a failure leaves
+   * `methods` null and the wallet path is offered, which is what every account
+   * created so far has.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const list = await fetchAuthMethods();
+      if (cancelled) return;
+      setMethods(list ? list.methods.map((m) => m.method) : null);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // The Google button captures its nonce when it initialises, so unlike the
+  // wallet path it cannot be fetched at click time. Held ready while the keys
+  // are on screen.
+  const googleOnly = methods !== null && methods.length > 0 && methods.every((m) => m === 'google_passkey');
+  useEffect(() => {
+    if (stage !== 'keys' || !googleOnly || !googleConfigured()) return;
+    let cancelled = false;
+    (async () => {
+      const stepUp = await requestStepUp();
+      if (!cancelled) setGoogleNonce(stepUp?.nonce ?? null);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [stage, googleOnly]);
+
+  /**
+   * Prove control of a wallet this account already owns. A fresh nonce per
+   * attempt (single-use, user-bound) and a fresh signature — the session cookie
+   * alone is deliberately not enough to reach the irreversible step.
+   */
+  const walletStepUp = async (chain: WalletChain): Promise<Record<string, unknown> | null> => {
+    const address = await connectWallet(chain);
+    const stepUp = await requestStepUp();
+    if (!stepUp) return null;
+    const message = chain === 'btc' ? stepUp.messages.btc : stepUp.messages.evm;
+    if (!message) return null;
+    const signature = await signMessageWith(chain, address, message);
+    return { method: chain, address, signature, nonce: stepUp.nonce };
+  };
+
+  /** Keys saved → confirm with an existing credential, then create the account. */
+  const createAccount = async (stepUpProof?: Record<string, unknown>) => {
     if (!keys) return;
     setBusy(true);
     setError(null);
@@ -230,7 +292,7 @@ const UpgradePanel: FC = () => {
       const res = await fetch('/api/account/upgrade', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', [csrfHeaderName]: '1' },
-        body: JSON.stringify({ newName: hiveName, publicKeys: publicKeysOf(keys) })
+        body: JSON.stringify({ newName: hiveName, publicKeys: publicKeysOf(keys), stepUp: stepUpProof })
       });
       const body = (await res.json().catch(() => null)) as UpgradeResponse | null;
 
@@ -439,14 +501,59 @@ const UpgradePanel: FC = () => {
           />
           {COPY.acknowledge}
         </label>
-        <button
-          onClick={createAccount}
-          disabled={!acknowledged || busy}
-          data-testid="upgrade-create"
-          className="mt-4 h-12 w-full cursor-pointer rounded-xl bg-[#c0392b] text-[15px] font-semibold text-white hover:bg-[#a5301f] disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {busy ? COPY.creating : COPY.create}
-        </button>
+        {/*
+          F-L1 — creating the account is irreversible, so it takes a fresh proof
+          from the credential this account was created with, not just the session
+          cookie. The spec has always required this for account-security actions;
+          the button below is where it is asked for.
+        */}
+        <p className="mt-4 text-[13px] leading-[1.55] text-[#4b5563]">{COPY.stepUpExplain}</p>
+        {googleOnly ? (
+          googleConfigured() && googleNonce ? (
+            <div className="mt-3" data-testid="upgrade-stepup-google">
+              <GoogleSignIn
+                key={googleNonce}
+                nonce={googleNonce}
+                onIdToken={(idToken) => {
+                  if (!acknowledged || busy) return;
+                  void createAccount({ method: 'google', idToken, nonce: googleNonce });
+                }}
+                onError={() => setError(COPY.stepUpFailed)}
+              />
+            </div>
+          ) : (
+            <p className="mt-3 text-[13px] leading-[1.55] text-[#b45309]">{COPY.stepUpUnavailable}</p>
+          )
+        ) : (
+          (['btc', 'evm'] as WalletChain[])
+            .filter((chain) => methods === null || methods.includes(chain === 'btc' ? 'btc_wallet' : 'evm_wallet'))
+            .map((chain) => (
+              <button
+                key={chain}
+                onClick={async () => {
+                  setBusy(true);
+                  setError(null);
+                  try {
+                    const proof = await walletStepUp(chain);
+                    if (!proof) {
+                      setError(COPY.stepUpFailed);
+                      return;
+                    }
+                    await createAccount(proof);
+                  } catch (err) {
+                    setError(walletErrorMessage(err));
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+                disabled={!acknowledged || busy}
+                data-testid={chain === 'btc' ? 'upgrade-create' : `upgrade-create-${chain}`}
+                className="mt-3 h-12 w-full cursor-pointer rounded-xl bg-[#c0392b] text-[15px] font-semibold text-white hover:bg-[#a5301f] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {busy ? COPY.creating : chain === 'btc' ? COPY.createWithBtc : COPY.createWithEvm}
+              </button>
+            ))
+        )}
         {error ? <p className="mt-3 text-[13px] leading-[1.55] text-[#b45309]">{error}</p> : null}
       </div>
     );

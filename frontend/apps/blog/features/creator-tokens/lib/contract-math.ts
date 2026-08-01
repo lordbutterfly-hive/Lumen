@@ -562,11 +562,46 @@ export function refundPayoutBaseUnits(reserveBaseUnits: number, tokens: number, 
  * A UI that shows `gross` as "you will receive" overstates a fresh holder's
  * payout by up to 20%.
  */
-export function refundNetBaseUnits(reserveBaseUnits: number, tokens: number, supplyTokens: number, heldBlocks: number): { grossBaseUnits: number; taxBaseUnits: number; netBaseUnits: number; taxBps: number } {
+export function refundNetBaseUnits(
+  reserveBaseUnits: number,
+  tokens: number,
+  supplyTokens: number,
+  heldBlocks: number,
+  maturingTokens?: number
+): { grossBaseUnits: number; taxBaseUnits: number; netBaseUnits: number; taxBps: number } {
   const grossBaseUnits = refundPayoutBaseUnits(reserveBaseUnits, tokens, supplyTokens);
   const taxBps = exitTaxBpsAt(heldBlocks);
-  const taxBaseUnits = exitTaxOnBaseUnits(grossBaseUnits, taxBps);
+  // TWO BUCKETS (F-C5 / H-FE-4). refund.go taxes only the MATURING share of the
+  // draw — matured tokens are 0% by definition — apportioned pro rata by token
+  // count:
+  //     _, fromMaturing := splitDraw(...)                    // maturing FIRST
+  //     tax = ExitTaxOn(maturingGrossShare(gross, fromMaturing, credits), τ)
+  // Taxing the whole gross would overstate the tax (understate the payout) for
+  // any holder with matured tokens.
+  //
+  // maturingTokens omitted ⇒ treat the entire position as maturing, which is
+  // exactly what this function computed before and what every existing caller
+  // means; the whole-gross path is preserved bit-for-bit via the
+  // fromMaturing === total shortcut below.
+  const maturing = maturingTokens === undefined ? tokens : maturingTokens;
+  const fromMaturing = Math.min(tokens, Math.max(0, maturing)); // splitDraw, maturing-first
+  const taxableBaseUnits = maturingGrossShareBaseUnits(grossBaseUnits, fromMaturing, tokens);
+  const taxBaseUnits = exitTaxOnBaseUnits(taxableBaseUnits, taxBps);
   return { grossBaseUnits, taxBaseUnits, netBaseUnits: grossBaseUnits - taxBaseUnits, taxBps };
+}
+
+/**
+ * matured.go maturingGrossShare, ported exactly — pro rata by token count,
+ * rounded UP (ceil keeps the residue in the more-tax direction, RULING F).
+ *
+ * The shortcuts are not optimisations, they are the contract's own: an
+ * all-maturing draw returns the FULL gross rather than a mulDivCeil that could
+ * round differently, and any zero returns zero.
+ */
+export function maturingGrossShareBaseUnits(grossBaseUnits: number, fromMaturing: number, totalTokens: number): number {
+  if (fromMaturing <= 0 || grossBaseUnits <= 0 || totalTokens <= 0) return 0;
+  if (fromMaturing === totalTokens) return grossBaseUnits;
+  return mulDivCeil(grossBaseUnits, fromMaturing, totalTokens);
 }
 
 /**

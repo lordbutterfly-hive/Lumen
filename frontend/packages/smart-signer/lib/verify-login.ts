@@ -14,7 +14,14 @@ const logger = getLogger('app');
  */
 export async function verifyLogin(data: PostLoginSchema): Promise<User> {
   const { username, keyType, strict, loginType } = data;
-  logger.info('verifyLogin argument data: %o', data);
+  // F-L13 — this logged the ENTIRE payload at info. postLoginSchema carries
+  // `hivesignerToken` (a live bearer credential), `signatures.posting`,
+  // `signatures.active` and `txJSON`, so every login wrote replayable
+  // authentication material into the app log. The Sentry scrubber does not
+  // cover this path — it is wired to Sentry only, and pino has no redaction
+  // configured — so nothing downstream was removing them either.
+  // Log the identifying fields, which is all the diagnostics ever needed.
+  logger.info('verifyLogin argument data: %o', { username, keyType, strict, loginType });
 
   try {
     // Create User object from login data

@@ -4,6 +4,7 @@ import { guardWrite } from '@/blog/lib/lite/http/guard';
 import { hasCsrfHeader } from '@/blog/lib/lite/http/csrf';
 import { enforceUpgradeRate } from '@/blog/lib/lite/antispam/rate-limit';
 import * as upgradeEvents from '@/blog/lib/lite/repositories/upgrade-event-repository';
+import { parseStepUpProof, verifyStepUpProof } from '@/blog/lib/lite/auth/step-up';
 
 /**
  * The cap protects the creator account's Resource Credits, which only a NEW creation
@@ -12,9 +13,9 @@ import * as upgradeEvents from '@/blog/lib/lite/repositories/upgrade-event-repos
  * linked, on the very screen that tells them to reload. So an in-flight attempt is
  * always allowed through.
  */
-async function allowUpgradeRequest(userId: string | undefined): Promise<boolean> {
+async function allowUpgradeRequest(userId: string | undefined, inFlight: boolean): Promise<boolean> {
   if (!userId) return true;
-  if (await upgradeEvents.findInFlightByUser(userId)) return true;
+  if (inFlight) return true;
   return enforceUpgradeRate(userId);
 }
 import { getLiteSession } from '@/blog/lib/lite/http/session';
@@ -44,10 +45,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   ensureAccountCreator();
 
   const session = await getLiteSession();
+  const userId = session.user?.userId;
+  // An attempt already in flight is a RECONCILIATION, not a new creation: it spends
+  // no token and creates nothing. Both gates below let it through for the same
+  // reason — refusing it would strand a user whose Hive account exists but is not
+  // yet linked, on the very screen telling them to reload.
+  const inFlight = userId ? Boolean(await upgradeEvents.findInFlightByUser(userId)) : false;
+
   // Each attempt that reaches the creator can trigger an on-chain token claim, which
   // spends the creator account's resource credits. The per-user advisory lock
   // serialises attempts but does not bound how many a user may make.
-  if (!(await allowUpgradeRequest(session.user?.userId))) {
+  if (!(await allowUpgradeRequest(userId, inFlight))) {
     return NextResponse.json(
       { status: 'error', code: 'rate_limited', message: 'Too many attempts today — please try again tomorrow.' },
       { status: 429 }
@@ -57,6 +65,35 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const newName = body?.newName;
   if (typeof newName !== 'string') {
     return NextResponse.json({ error: 'newName_required' }, { status: 400 });
+  }
+
+  // ── F-L1 STEP-UP ─────────────────────────────────────────────────────────
+  // Creating the Hive account is irreversible: it burns a creation token, takes a
+  // name forever, and flips this row one-way. The spec has always required a fresh
+  // credential proof for it (LUMEN-LITE-ACCOUNTS-SPEC-2026-07-22: "Step-up re-auth
+  // required only for account-security actions (upgrade, ...)"), and /bind
+  // implements exactly that — this route never did, so a stolen 14-day session was
+  // sufficient on its own to seize an identity permanently.
+  //
+  // The proof is a fresh signature from a wallet key (or Google assertion) the
+  // ACCOUNT already owns — see auth/step-up.ts for why a bare nonce here would be
+  // theatre against this particular threat.
+  if (userId && !inFlight) {
+    const proof = parseStepUpProof(body?.stepUp);
+    if (!proof) {
+      return NextResponse.json(
+        {
+          status: 'error',
+          code: 'step_up_required',
+          message: 'Confirm with the wallet or Google account you signed up with before creating your Hive account.'
+        },
+        { status: 401 }
+      );
+    }
+    const verdict = await verifyStepUpProof(userId, proof);
+    if (!verdict.ok) {
+      return NextResponse.json({ status: 'error', code: verdict.code }, { status: verdict.status });
+    }
   }
 
   try {
@@ -108,7 +145,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 
   const session = await getLiteSession();
-  if (!(await allowUpgradeRequest(session.user?.userId))) {
+  const statusUserId = session.user?.userId;
+  const statusInFlight = statusUserId ? Boolean(await upgradeEvents.findInFlightByUser(statusUserId)) : false;
+  if (!(await allowUpgradeRequest(statusUserId, statusInFlight))) {
     return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
   }
   ensureAccountCreator();

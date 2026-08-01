@@ -80,6 +80,35 @@ export class TransactionService {
   }
 
   /**
+   * F-L12 — drop the signing identity when the session no longer has one.
+   *
+   * This service is a module singleton (`transactionService` below), so it
+   * outlives any component. <SignerProvider> only ever SET these options: it
+   * skips the call when `username === ''` (logout) and returns early for a
+   * lite account, so both transitions left the PREVIOUS user's options in
+   * place for the rest of the SPA session. Every operation this class builds
+   * takes its actor from `this.signerOptions.username` (`voter`, `authorize`,
+   * `reblog`, `followBlog`, community ops), so a stale value means ops built
+   * in a logged-out session still name the account that logged out — at best
+   * an unexplainable rejection, at worst a wallet prompt naming a stranger.
+   *
+   * Cleared to a BLANK identity rather than undefined so the many
+   * `this.signerOptions.username` readers keep their type and fail loudly at
+   * signing instead of throwing three frames deep. The creator-tokens and
+   * prediction-market broadcasters already refuse on `!signerOptions.username`
+   * with a named error — this makes that branch reachable, which is what they
+   * were written to expect.
+   */
+  clearSignerOptions() {
+    this.signerOptions = {
+      username: '',
+      loginType: this.signerOptions?.loginType,
+      keyType: this.signerOptions?.keyType,
+      storageType: this.signerOptions?.storageType
+    } as SignerOptions;
+  }
+
+  /**
    * Create transaction and add operation to it (by running callback
    * `cb`), sign transaction, broadcast transaction and observe if
    * transaction has been applied in blockchain (if caller wants this).

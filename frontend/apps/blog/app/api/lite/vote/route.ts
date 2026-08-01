@@ -5,6 +5,7 @@ import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { requireActiveLiteUser, requireLiteUser } from '@/blog/lib/lite/http/actor';
 import { enforceVoteRate } from '@/blog/lib/lite/antispam/rate-limit';
 import { castVote } from '@/blog/lib/lite/repositories/engagement-repository';
+import { checkEngagementTarget } from '@/blog/lib/lite/content/engagement-target';
 
 const logger = getLogger('app');
 
@@ -32,6 +33,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const actor = weight === 0 ? await requireLiteUser(session.user) : await requireActiveLiteUser(session.user, session.sessionEpoch);
   if (!actor.ok) return actor.response;
   const user = actor.user;
+
+  // F-L34 — a weight of 0 WITHDRAWS a vote, so it is allowed against anything
+  // (including a target that has since become invalid); only ADDING engagement
+  // is gated.
+  if (weight !== 0) {
+    const target = checkEngagementTarget(user, author, permlink);
+    if (!target.ok) {
+      return NextResponse.json({ error: target.code }, { status: target.status });
+    }
+  }
 
   try {
     if (!(await enforceVoteRate(user.userId))) {

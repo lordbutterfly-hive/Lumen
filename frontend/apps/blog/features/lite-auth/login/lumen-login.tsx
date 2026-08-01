@@ -2,13 +2,12 @@
 
 import { FC, useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import DialogLogin from '@/blog/components/dialog-login';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useLiteLogin, type WalletChain } from './use-lite-login';
 import WalletConnectDialog from './wallet-connect-dialog';
 import TurnstileWidget, { turnstileSiteKey } from './turnstile-widget';
 import GoogleSignIn, { googleConfigured } from './google-signin';
-import HiveSigninPanel from './hive-signin-panel';
+import KeychainSignin from './keychain-signin';
 
 // TODO i18n — staged copy while the redesign lands (mirrors app-header's LABELS
 // precedent); move to locales/*/common_blog.json once final.
@@ -202,18 +201,6 @@ const LumenLogin: FC = () => {
                 </div>
 
                 <div className="flex flex-col gap-2.5">
-                  {/* Hive Keychain — reuse the built login dialog for real key auth. */}
-                  <DialogLogin redirectTo="/">
-                    <div className="flex h-14 w-full cursor-pointer items-center gap-3 rounded-[14px] border border-[#e4e6e9] bg-white px-4 text-left hover:border-[#c0392b] hover:bg-[#fefaf9]">
-                      <span className="flex h-[34px] w-[34px] flex-shrink-0 items-center justify-center rounded-[9px] bg-[#c0392b] text-[15px] font-extrabold text-white">
-                        K
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block text-[15px] font-semibold text-[#161511]">{COPY.keychainTitle}</span>
-                        <span className="block text-xs text-[#6b7280]">{COPY.keychainSub}</span>
-                      </span>
-                    </div>
-                  </DialogLogin>
 
                   {/* Bitcoin wallet — Lumen Lite, no keys. */}
                   <button
@@ -254,7 +241,7 @@ const LumenLogin: FC = () => {
             </div>
 
             {/* Tier-2: full Hive account, secondary. */}
-            <HiveSigninPanel />
+            <KeychainSignin />
           </>
         ) : (
           <div className="rounded-[18px] border border-[#ebebeb] bg-white p-6 shadow-[0_1px_2px_rgba(20,18,10,0.03)]">

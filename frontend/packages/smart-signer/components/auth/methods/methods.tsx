@@ -37,6 +37,16 @@ export interface MethodsProps {
   onUsernameChange: (username: string) => void;
   sign: (loginType: LoginType, username: string, keyType: KeyType) => Promise<void>;
   submit: (username: string) => Promise<void>;
+  /**
+   * Which sign-in methods this consumer offers. Defaults to ALL of them, so any
+   * caller that does not pass it keeps the exact behaviour it had before —
+   * this is purely additive for the wallet app and upstream denser.
+   *
+   * Lumen's blog passes [keychain]: the product offers four ways in (Google
+   * lite identity, Hive Keychain, BTC wallet, EVM wallet) and the last two are
+   * Reown flows that never reach this component.
+   */
+  enabledLoginTypes?: LoginType[];
 }
 
 const formSchema = z.object({
@@ -59,7 +69,8 @@ const Methods: FC<MethodsProps> = ({
   username,
   onUsernameChange,
   sign,
-  submit
+  submit,
+  enabledLoginTypes = Object.values(LoginType)
 }) => {
   const [loading, setLoading] = useState(false);
   const form = useForm<MethodsFormValues>({
@@ -195,102 +206,130 @@ const Methods: FC<MethodsProps> = ({
           )}
 
           <div className="flex flex-col items-start">
-            <Button
-              disabled={!form.formState.isValid || !isMetaMaskSupported}
-              className="flex w-full justify-start py-6"
-              type="button"
-              variant="ghost"
-              onClick={form.handleSubmit(() => onSubmit(LoginType.metamask))}
-              data-testid="metamask-extension-button"
-            >
-              <Icons.metamask className="mr-4 h-8 w-8" />
-              MetaMask extension
-            </Button>
+            {enabledLoginTypes.includes(LoginType.metamask) && (
+              <>
+  <Button
+                disabled={!form.formState.isValid || !isMetaMaskSupported}
+                className="flex w-full justify-start py-6"
+                type="button"
+                variant="ghost"
+                onClick={form.handleSubmit(() => onSubmit(LoginType.metamask))}
+                data-testid="metamask-extension-button"
+              >
+                <Icons.metamask className="mr-4 h-8 w-8" />
+                MetaMask extension
+              </Button>
 
-            <Separator className="my-1 w-full" />
-            <Button
-              disabled={!form.formState.isValid || !isGoogleSupported}
-              className="flex w-full justify-start py-6"
-              type="button"
-              variant="ghost"
-              onClick={form.handleSubmit(() => onSubmit(LoginType.google))}
-              data-testid="google-button"
-            >
-              <Icons.google className="mr-4 h-8 w-8" />
-              Google Account
-            </Button>
+              <Separator className="my-1 w-full" />
+              </>
+            )}
+            {enabledLoginTypes.includes(LoginType.google) && (
+              <>
+  <Button
+                disabled={!form.formState.isValid || !isGoogleSupported}
+                className="flex w-full justify-start py-6"
+                type="button"
+                variant="ghost"
+                onClick={form.handleSubmit(() => onSubmit(LoginType.google))}
+                data-testid="google-button"
+              >
+                <Icons.google className="mr-4 h-8 w-8" />
+                Google Account
+              </Button>
 
-            <Separator className="my-1 w-full" />
+              <Separator className="my-1 w-full" />
+              </>
+            )}
 
-            <Button
-              disabled={!form.formState.isValid || !isKeychainSupported}
-              className="flex w-full justify-start py-6"
-              type="button"
-              variant="ghost"
-              onClick={form.handleSubmit(() => onSubmit(LoginType.keychain))}
-              data-testid="hive-keychain-extension-button"
-            >
-              <Icons.hivekeychain className="mr-4 h-8 w-8" />
-              Hive Keychain extension
-            </Button>
+            {enabledLoginTypes.includes(LoginType.keychain) && (
+              <>
+  <Button
+                disabled={!form.formState.isValid || !isKeychainSupported}
+                className="flex w-full justify-start py-6"
+                type="button"
+                variant="ghost"
+                onClick={form.handleSubmit(() => onSubmit(LoginType.keychain))}
+                data-testid="hive-keychain-extension-button"
+              >
+                <Icons.hivekeychain className="mr-4 h-8 w-8" />
+                Hive Keychain extension
+              </Button>
 
-            <Separator className="my-1 w-full" />
+              <Separator className="my-1 w-full" />
+              </>
+            )}
 
-            <Button
-              disabled={!form.formState.isValid || !isPeakvaultSupported}
-              className="flex w-full justify-start py-6"
-              type="button"
-              variant="ghost"
-              onClick={form.handleSubmit(() => onSubmit(LoginType.peakvault))}
-              data-testid="peakvault-extension-button"
-            >
-              <Icons.peakvault className="mr-4 h-8 w-8" />
-              PeakVault extension
-            </Button>
+            {enabledLoginTypes.includes(LoginType.peakvault) && (
+              <>
+  <Button
+                disabled={!form.formState.isValid || !isPeakvaultSupported}
+                className="flex w-full justify-start py-6"
+                type="button"
+                variant="ghost"
+                onClick={form.handleSubmit(() => onSubmit(LoginType.peakvault))}
+                data-testid="peakvault-extension-button"
+              >
+                <Icons.peakvault className="mr-4 h-8 w-8" />
+                PeakVault extension
+              </Button>
 
-            <Separator className="my-1 w-full" />
+              <Separator className="my-1 w-full" />
+              </>
+            )}
 
-            <Button
-              disabled={!form.formState.isValid}
-              className="flex w-full py-6"
-              type="button"
-              variant="ghost"
-              onClick={form.handleSubmit(() => onSubmit(LoginType.wif))}
-              data-testid="sign-in-with-wif-button"
-            >
-              <div className="flex flex-1 items-center">
-                <Icons.keyRound className="mr-4 h-8 w-8" />
-                Sign in with WIF (Legacy)
-              </div>
-            </Button>
+            {enabledLoginTypes.includes(LoginType.wif) && (
+              <>
+  <Button
+                disabled={!form.formState.isValid}
+                className="flex w-full py-6"
+                type="button"
+                variant="ghost"
+                onClick={form.handleSubmit(() => onSubmit(LoginType.wif))}
+                data-testid="sign-in-with-wif-button"
+              >
+                <div className="flex flex-1 items-center">
+                  <Icons.keyRound className="mr-4 h-8 w-8" />
+                  Sign in with WIF (Legacy)
+                </div>
+              </Button>
 
-            <Separator className="my-1 w-full" />
+              <Separator className="my-1 w-full" />
+              </>
+            )}
 
-            <Button
-              disabled
-              className="flex w-full py-6"
-              type="button"
-              variant="ghost"
-              data-testid="hive-auth-button"
-            >
-              <div className="flex flex-1 items-center">
-                <Icons.hiveauth className="mr-4 h-8 w-8" />
-                HiveAuth
-              </div>
-            </Button>
+            {enabledLoginTypes.includes(LoginType.hiveauth) && (
+              <>
+  <Button
+                disabled
+                className="flex w-full py-6"
+                type="button"
+                variant="ghost"
+                data-testid="hive-auth-button"
+              >
+                <div className="flex flex-1 items-center">
+                  <Icons.hiveauth className="mr-4 h-8 w-8" />
+                  HiveAuth
+                </div>
+              </Button>
 
-            <Separator className="my-1 w-full" />
+              <Separator className="my-1 w-full" />
+              </>
+            )}
 
-            <Button
-              disabled
-              className="flex w-full justify-start py-6"
-              type="button"
-              variant="ghost"
-              data-testid="hive-signer-button"
-            >
-              <Icons.hivesigner className="mr-4 h-8 w-8" />
-              HiveSigner
-            </Button>
+            {enabledLoginTypes.includes(LoginType.hivesigner) && (
+              <>
+  <Button
+                disabled
+                className="flex w-full justify-start py-6"
+                type="button"
+                variant="ghost"
+                data-testid="hive-signer-button"
+              >
+                <Icons.hivesigner className="mr-4 h-8 w-8" />
+                HiveSigner
+              </Button>
+              </>
+            )}
 
             <Button
               className="mt-8 w-full"
