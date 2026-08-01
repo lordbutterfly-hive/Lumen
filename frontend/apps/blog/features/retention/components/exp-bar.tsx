@@ -12,10 +12,20 @@ export interface ExpBarProps {
   habit: HabitProgress;
   tier: LeagueTier;
   className?: string;
+  /**
+   * Where the level/XP numbers came from. This component is currently unmounted
+   * (the habit layer is hidden until a real task ledger exists) and is kept for
+   * that future wiring — so it REFUSES to draw 'mock' data rather than quietly
+   * showing every user the same invented level the day someone re-adds it.
+   */
+  habitSource?: 'mock' | 'server';
 }
 
-export function ExpBar({ habit, tier, className }: ExpBarProps) {
+export function ExpBar({ habit, tier, className, habitSource }: ExpBarProps) {
   const { t } = useTranslation('common_blog');
+  // Invented progress is not shown. Render nothing at all: a level bar is a
+  // claim about the user's history, and a wrong one is worse than none.
+  if (habitSource !== 'server') return null;
   const { level, xp, xpToNext } = habit;
   const total = xp + xpToNext;
   const pct = total > 0 ? Math.max(0, Math.min(100, (xp / total) * 100)) : 0;

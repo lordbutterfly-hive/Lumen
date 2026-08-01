@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import ProposalsContent from '@/blog/features/proposals/components/proposals-content';
 import {
   getHivePerMVestsLive,
@@ -8,6 +9,11 @@ import {
 import { getObserver } from '@/blog/lib/auth-utils';
 import { DEFAULT_OBSERVER } from '@/blog/lib/utils';
 import { getLogger } from '@ui/lib/logging';
+
+export const metadata: Metadata = {
+  title: 'Proposals',
+  description: 'Hive Decentralized Hub proposals — what is funded and who is voting.'
+};
 
 const logger = getLogger('app');
 

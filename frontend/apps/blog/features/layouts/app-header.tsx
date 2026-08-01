@@ -3,7 +3,7 @@
 import { FC, useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, getUserAvatarUrl } from '@hive/ui';
-import { Avatar, AvatarFallback, AvatarImage, Skeleton } from '@ui/components';
+import { Avatar, AvatarFallback, AvatarImage } from '@ui/components';
 import { Button } from '@ui/components/button';
 import { Icons } from '@ui/components/icons';
 import TooltipContainer from '@ui/components/tooltip-container';
@@ -128,8 +128,24 @@ const AppHeader: FC = () => {
             </TooltipContainer>
           ) : null}
 
+          {/* ★ The sign-in link MUST exist in the server-rendered HTML.
+              This branch used to render a <Skeleton/> until hydration, so a
+              crawler, a link-preview bot, or anyone on a slow connection saw a
+              header with NO way into the product — /login appeared only after
+              JS ran. The signup path being invisible to search engines is an
+              acquisition bug, not a cosmetic one.
+
+              Rendering the login link pre-hydration makes the logged-OUT case
+              byte-identical on both sides (no flash, no hydration mismatch),
+              which is the overwhelming majority of first visits. A logged-IN
+              user sees it for the single frame before hydration swaps in their
+              avatar — a far cheaper trade than an unreachable front door. */}
           {!isClient ? (
-            <Skeleton className="h-9 w-9 rounded-full" />
+            <Link href="/login" data-testid="login-link">
+              <Button variant="ghost" className="whitespace-nowrap text-base hover:text-destructive">
+                {LABELS.login}
+              </Button>
+            </Link>
           ) : user?.isLoggedIn ? (
             <TooltipProvider>
               <Tooltip>

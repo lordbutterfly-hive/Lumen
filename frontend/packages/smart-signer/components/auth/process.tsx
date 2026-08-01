@@ -30,8 +30,11 @@ export const useProcessAuth = (authenticateOnBackend: boolean, strict: boolean) 
   }, []);
 
   const signAuth = async (data: LoginFormSchema): Promise<void> => {
-    logger.info('onSubmit form data', data);
+    // F-L13 — this logged the WHOLE form payload. LoginFormSchema can carry a
+    // raw WIF in `password`, so a single login wrote a private key to the app
+    // log. Log only the identifying fields.
     const { loginType, username, keyType } = data;
+    logger.info('signAuth: %o', { loginType, username, keyType });
     const signatures: Signatures = { posting: '', active: '' };
     let hivesignerToken = '';
     let signInData: PostLoginSchema;
@@ -66,15 +69,19 @@ export const useProcessAuth = (authenticateOnBackend: boolean, strict: boolean) 
         transaction: tx
       });
 
-      logger.info('signature: %s', signature);
+      // F-L13 — this logged the RAW login signature. That transaction is never
+      // broadcast: it is the off-chain auth proof the backend verifies, so the
+      // signature IS the credential. It is also now a LIVE path (the Keychain
+      // sign-in added 2026-08-01 calls signAuth), which is how it slipped past
+      // the sweep that fixed the four signer files.
+      logger.info('signAuth produced a signature (%d chars)', signature.length);
       txBuilder.addSignature(signature);
       signatures[keyType] = signature;
 
-      logger.info('transaction: %o', {
-        pack,
-        toApi: txBuilder.toApi(),
-        toApiParsed: JSON.parse(txBuilder.toApi())
-      });
+      // F-L13 — `addSignature` ran on the line above, so `toApi()` now embeds
+      // the login signature; this logged it twice more, in two formats. The
+      // pack is the only part with diagnostic value.
+      logger.info('signAuth transaction built (pack: %s)', pack);
 
       signInData = {
         username,

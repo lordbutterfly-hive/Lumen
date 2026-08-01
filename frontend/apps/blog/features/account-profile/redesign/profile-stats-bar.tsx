@@ -33,7 +33,16 @@ export default function ProfileStatsBar({
   ];
 
   return (
-    <div className="mt-5 flex flex-wrap items-center gap-8 rounded-2xl border border-[#ebebeb] bg-white p-[18px_22px]">
+    // Same data-testid the legacy chrome's stats block used
+    // (layouts/user-profile/profile-layout.tsx). The redesign renders bare on
+    // the profile ROOT path, so that legacy node no longer exists there and the
+    // smoke suite's SMOKE-08/09 were timing out on a selector for markup we
+    // deliberately replaced. Reusing the id points those tests at the live
+    // component instead of muting them.
+    <div
+      data-testid="profile-stats"
+      className="mt-5 flex flex-wrap items-center gap-8 rounded-2xl border border-[#ebebeb] bg-white p-[18px_22px]"
+    >
       {stats.map((stat) =>
         stat.href ? (
           <Link key={stat.label} href={stat.href} className="flex flex-col gap-0.5 hover:opacity-80">

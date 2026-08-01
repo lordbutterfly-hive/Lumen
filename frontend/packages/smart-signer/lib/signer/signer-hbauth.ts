@@ -218,7 +218,11 @@ export class SignerHbauth extends Signer {
       return signature;
     } else {
       const signature = await authClient.sign(username, digest, keyType);
-      logger.info('hbauth: %o', { digest, signature });
+      // F-L13 — logged the raw signature. signDigest serves BOTH the login
+      // challenge and real wallet transaction signing, so this emitted signing
+      // output on money paths too. The digest is a hash and safe; the signature
+      // is not. Still reachable from apps/wallet, which uses this signer.
+      logger.info('hbauth signed digest %s (%d-char signature)', digest, signature.length);
       return signature;
     }
   }

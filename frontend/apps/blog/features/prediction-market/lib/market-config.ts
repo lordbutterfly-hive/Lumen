@@ -86,5 +86,11 @@ export function getMarketConfig(): MarketConfig | null {
  * lie. See getMarketDataSource().
  */
 export function isMarketDemoEnabled(): boolean {
+  // ★ FAIL-SAFE (2026-08-01): the flag is INERT in production, whatever the env
+  // says. Both comments above warn "must never be set on a production build" —
+  // a warning is not a control. The flag is set by a human on a deploy target,
+  // which is exactly the kind of thing that gets copied into the wrong
+  // environment, so production refuses it here instead of trusting the warning.
+  if (process.env.NODE_ENV === 'production') return false;
   return readEnv('MARKET_DEMO') === '1';
 }

@@ -32,7 +32,7 @@ async function fetchRetention(username: string): Promise<RetentionSummary> {
   // Default to the REAL chain-derived route; only fall back to the demo mock when
   // explicitly asked (NEXT_PUBLIC_RETENTION_SOURCE=mock) — never show fabricated
   // rank/XP as if it were the user's own (N3).
-  if (RETENTION_SOURCE === 'mock') return local;
+  if (RETENTION_SOURCE === 'mock') return { ...local, habitSource: 'mock' };
 
   const res = await fetch(`/api/streak/${encodeURIComponent(username)}`);
   if (!res.ok) throw new Error(`retention fetch failed: ${res.status}`);
@@ -46,7 +46,10 @@ async function fetchRetention(username: string): Promise<RetentionSummary> {
     // Habit stays local; the two chain-derived members of it are overwritten
     // with the server's factual values rather than the mock's.
     habit: { ...local.habit, streakDays: server.streakDays, activeWeeks: server.activeWeeks },
-    tasks: local.tasks
+    tasks: local.tasks,
+    // streakDays/activeWeeks above ARE real; level/XP/tasks are still the mock's
+    // constants, so the layer is flagged 'mock' until a task ledger exists.
+    habitSource: 'mock' as const
   };
 }
 

@@ -58,6 +58,16 @@ export interface RetentionSummary {
   rank: LeagueRank;
   habit: HabitProgress;
   tasks: DailyTask[];
+  /**
+   * Where `habit`'s level/XP numbers and `tasks` came from.
+   *
+   * 'mock' means they are `mockSummary()`'s hardcoded constants — IDENTICAL for
+   * every user, forever — because no task ledger exists yet. Only `streakDays`
+   * and `activeWeeks` are ever real (chain-derived, overwritten from the
+   * server). Anything rendering level, XP or tasks MUST refuse when this is
+   * 'mock' rather than present invented progress as the user's own.
+   */
+  habitSource: 'mock' | 'server';
   tenureYear: number; // "Member since <year>"
   // Honest "what's gating your next promotion" breakdown, each 0..1.
   gate: { engagement: number; tenure: number; activeWeeks: number };

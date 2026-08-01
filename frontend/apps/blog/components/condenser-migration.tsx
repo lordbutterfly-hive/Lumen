@@ -65,23 +65,31 @@ export default function CondenserMigration() {
         return;
       }
 
-      const { username, postingWif, loginWithKeychain } = data;
+      const { username, loginWithKeychain } = data;
 
       // Migrate user data (templates, drafts, vote weights) before login attempt.
       // These are synchronous and idempotent, so safe to run even if login retries later.
       migrateCondenserData(username);
 
-      // Determine login type: Keychain takes priority (more secure)
+      // ★ 2026-08-01 — THE WIF BRANCH IS GONE. It used to take a plaintext
+      // posting key out of legacy Condenser storage and write it straight into
+      // `wif.<user>@posting` for SignerWif to read: a private key persisted to
+      // localStorage, unencrypted, with no TTL, WITHOUT the user ever seeing
+      // the "store my key" consent checkbox that the normal WIF login path
+      // requires — and it ran automatically on page load for every visitor,
+      // because this component is mounted app-wide in app/layout.tsx.
+      //
+      // It is also a login method Lumen no longer offers. The product supports
+      // exactly four: Google, Bitcoin wallet, EVM wallet (all Lumen Lite) and
+      // Hive Keychain. Silently signing someone in with a stored private key is
+      // the opposite of that.
+      //
+      // Their DATA (templates, drafts, vote weights) is still migrated above —
+      // that is the part worth keeping. Without Keychain they simply sign in
+      // again through the normal login page.
       let loginType: LoginType;
       if (loginWithKeychain && hasCompatibleKeychain()) {
         loginType = LoginType.keychain;
-      } else if (postingWif && postingWif !== 'none') {
-        loginType = LoginType.wif;
-        // Store WIF in Denser format so SignerWif can read it
-        window.localStorage.setItem(
-          `wif.${username}@posting`,
-          JSON.stringify(postingWif)
-        );
       } else {
         // No usable login method, but data was already migrated above
         cleanupCondenserStorage(username);
@@ -177,8 +185,11 @@ function isNetworkError(error: unknown): boolean {
   return false;
 }
 
-function removeStoredWif(username: string, loginType: LoginType): void {
-  if (loginType === LoginType.wif) {
-    window.localStorage.removeItem(`wif.${username}@posting`);
-  }
+function removeStoredWif(username: string, _loginType: LoginType): void {
+  // Unconditional REMEDIATION, not just cleanup. Until 2026-08-01 this
+  // component wrote a plaintext posting key to `wif.<user>@posting` on page
+  // load; anyone who ran that build still has one sitting in localStorage. The
+  // WIF branch is gone, so nothing writes it any more — this now deletes the
+  // legacy key on the next load regardless of how the user signs in.
+  window.localStorage.removeItem(`wif.${username}@posting`);
 }

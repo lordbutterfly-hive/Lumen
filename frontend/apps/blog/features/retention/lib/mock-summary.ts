@@ -13,6 +13,9 @@ const MOCK_LIFETIME_XP = 3820;
 export function mockSummary(username = 'demo'): RetentionSummary {
   const { level, xp, xpToNext } = levelFromXp(MOCK_LIFETIME_XP);
   return {
+    // Every number below except streakDays/activeWeeks is invented and
+    // identical for every user — see RetentionSummary.habitSource.
+    habitSource: 'mock',
     username,
     rank: { tier: LeagueTier.Torch, division: 2, standing: 63, showBylineEmblem: true },
     habit: { level, xp, xpToNext, lifetimeXp: MOCK_LIFETIME_XP, streakDays: 12, activeWeeks: 14 },

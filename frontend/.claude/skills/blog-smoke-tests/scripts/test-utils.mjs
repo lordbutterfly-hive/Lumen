@@ -45,7 +45,10 @@ export const SELECTORS = {
   POST_CARD_CATEGORY: '[data-testid="post-card-category"]',
   PROFILE_STATS: '[data-testid="profile-stats"]',
   ARTICLE_TITLE: '[data-testid="article-title"]',
-  LOGIN_BTN: '[data-testid="login-btn"]',
+  // 'login-btn' was the "Use Hive keys" button, removed 2026-08-01 when Lumen
+  // cut login down to four methods (Google / BTC / EVM / Keychain). The entry
+  // point is now the header link to /login.
+  LOGIN_BTN: '[data-testid="login-link"], [data-testid="login-btn"]',
   TOOLTIP: '[role="tooltip"]',
   COMMENT_VOTES: '[data-testid="comment-votes"]',
   UPVOTE_BUTTON: '[data-testid="upvote-button"]'

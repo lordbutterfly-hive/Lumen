@@ -6,6 +6,7 @@ import { getLogger } from '@ui/lib/logging';
 import { FullAccount } from '@hive/common-hiveio-packages/wax';
 import { toast } from '@ui/components/hooks/use-toast';
 import { handleError } from '@ui/lib/handle-error';
+import { refuseIfLite } from '@/blog/lib/lite/client/require-full-account';
 const logger = getLogger('app');
 
 /**
@@ -20,6 +21,12 @@ export function useClaimRewardsMutation() {
   const queryKey = ['profileData', user.username];
   const claimRewardMutation = useMutation({
     mutationFn: async (params: { account: ApiAccount }) => {
+      // The ONLY wallet-adjacent action that had no tier check of any kind.
+      // It is hard to reach today only because a lite handle is not a real Hive
+      // account, so the bridge API returns no reward data to claim — an
+      // accident of routing, not a gate. Claiming rewards is a chain operation
+      // with no Lumen-local equivalent, so it refuses rather than forks.
+      refuseIfLite(user.account_tier, 'Claiming rewards needs a full Hive account.');
       const { account } = params;
 
       const broadcstResult = await transactionService.claimRewards(account, { observe: true });
