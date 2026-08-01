@@ -21,7 +21,7 @@ const COPY = {
   welcomeSub:
     'Publish to Hive without keys, wallets or setup. Start in seconds; upgrade to a full Hive account — and start earning on it — whenever you’re ready.',
   google: 'Continue with Google',
-  orWallet: 'or connect a wallet',
+  orHive: 'or connect with Hive Keychain',
   keychainTitle: 'Sign in with Hive Keychain',
   keychainSub: 'Your existing Hive account — keys stay on your device.',
   btcTitle: 'Continue with a Bitcoin wallet',
@@ -194,12 +194,7 @@ const LumenLogin: FC = () => {
                   </button>
                 )}
 
-                <div className="mx-0.5 my-4 flex items-center gap-3">
-                  <div className="h-px flex-1 bg-[#ececec]" />
-                  <span className="text-xs font-semibold text-[#9ca3af]">{COPY.orWallet}</span>
-                  <div className="h-px flex-1 bg-[#ececec]" />
-                </div>
-
+                <div className="mt-2.5" />
                 <div className="flex flex-col gap-2.5">
 
                   {/* Bitcoin wallet — Lumen Lite, no keys. */}
@@ -231,6 +226,21 @@ const LumenLogin: FC = () => {
                   </button>
                 </div>
 
+                {/* ── The Hive path, deliberately SEPARATE ──────────────────
+                    Google / Bitcoin / Ethereum above are all LUMEN LITE: no
+                    keys, no wallet required to hold an account, created by us.
+                    Keychain below signs into a FULL HIVE ACCOUNT the person
+                    already owns. They are different kinds of thing, so they do
+                    not belong in one undifferentiated list — the three lite
+                    options carry equal weight, and this is its own step. */}
+                <div className="mx-0.5 my-4 flex items-center gap-3">
+                  <div className="h-px flex-1 bg-[#ececec]" />
+                  <span className="text-xs font-semibold text-[#9ca3af]">{COPY.orHive}</span>
+                  <div className="h-px flex-1 bg-[#ececec]" />
+                </div>
+
+                <KeychainSignin />
+
                 {error ? <p className="mt-4 text-center text-[13px] leading-[1.5] text-[#b45309]">{error}</p> : null}
 
                 <p className="mt-[18px] text-center text-xs leading-[1.5] text-[#9ca3af]">
@@ -241,7 +251,6 @@ const LumenLogin: FC = () => {
             </div>
 
             {/* Tier-2: full Hive account, secondary. */}
-            <KeychainSignin />
           </>
         ) : (
           <div className="rounded-[18px] border border-[#ebebeb] bg-white p-6 shadow-[0_1px_2px_rgba(20,18,10,0.03)]">

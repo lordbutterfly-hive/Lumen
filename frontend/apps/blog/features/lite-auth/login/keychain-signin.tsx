@@ -6,59 +6,66 @@ import { useProcessAuth } from '@smart-signer/components/auth/process';
 import { KeyType, LoginType } from '@smart-signer/types/common';
 
 /**
- * Hive Keychain sign-in — the ONLY Hive-key path Lumen offers, and it does not
- * touch a single denser login component.
+ * Hive Keychain sign-in — the ONLY Hive-key path Lumen offers, and it touches no
+ * denser login component.
  *
- * ★ OPERATOR RULING 2026-08-01: Lumen has four ways in — Google, EVM wallet and
- * Bitcoin wallet (all Lumen Lite, via Reown for the two wallets) and Hive
+ * ★ OPERATOR RULING 2026-08-01: Lumen has four ways in — Google, a Bitcoin
+ * wallet and an EVM wallet (Lumen Lite; the wallets via Reown), plus Hive
  * Keychain for people who already have a Hive account. Everything else is
  * stripped from login.
  *
- * WHY THIS FILE EXISTS RATHER THAN A FILTERED LIST. Restricting the denser
- * method list was not enough: the panel handed off to `DialogLogin` ->
- * smart-signer's `SignInForm`, whose FIRST step is `SAFE_STORAGE_LOGIN` — the
- * hbauth "encrypt your keys in this browser" screen — with Keychain reachable
- * only after clicking through to "Other sign in options". So the denser flow,
- * its safe-storage step and its key-type toggle were all still in the path.
- * This component talks to `useProcessAuth` directly: one field, one button,
- * posting authority, done.
+ * SHAPE COMES FROM THE DESIGN (design_handoff_lumen_redesign/Login.dc.html,
+ * "Hiveblog UI Redesign Request (2)"): Keychain is a 56px ROW sitting inside
+ * the main card under the "or connect a wallet" divider — the handoff's own
+ * markup comments it "Equal-weight: Keychain (above) + Bitcoin" — with a
+ * "Detected" chip when the extension is present. It is NOT a separate card and
+ * NOT a collapsed secondary section.
  *
- * Keychain needs a username because the signature is bound to a Hive account —
- * that is the one input, and it is not negotiable. Nothing here ever handles a
- * private key: the extension signs and returns a signature.
+ * WHY THIS EXISTS RATHER THAN A FILTERED METHOD LIST. Restricting the denser
+ * list was not enough: the row handed off to `DialogLogin` -> smart-signer's
+ * `SignInForm`, whose FIRST step is `SAFE_STORAGE_LOGIN` — the hbauth "encrypt
+ * your keys in this browser" screen — with PeakVault / MetaMask-Snap /
+ * Google-Drive-restore / WIF / HiveAuth / HiveSigner one click away under
+ * "Other sign in options". This talks to `useProcessAuth` directly.
+ *
+ * Keychain needs a username because the signature binds to a Hive account; that
+ * is the single input, revealed only after the row is chosen so the row itself
+ * stays visually equal to the wallet rows. No private key is ever handled here —
+ * the extension signs and returns a signature.
  */
 
 const COPY = {
-  title: 'Already on Hive?',
-  sub: 'Sign in with the Hive Keychain browser extension. Your keys stay in the extension — Lumen never sees them.',
+  title: 'Sign in with Hive Keychain',
+  sub: 'Your existing Hive account — keys stay on your device.',
+  detected: 'Detected',
   usernameLabel: 'Hive username',
   placeholder: 'yourname',
   submit: 'Sign in with Keychain',
   working: 'Waiting for Keychain…',
-  notDetected: 'Keychain not detected',
-  install: 'Install the Hive Keychain extension, then reload this page.',
+  notDetected: 'Not detected — install the Hive Keychain extension, then reload.',
   needUsername: 'Enter your Hive username.',
   failed: 'That sign-in did not complete. Please try again.',
   cancelled: 'You cancelled — nothing was signed.'
 };
 
 interface KeychainSigninProps {
-  /** Where to land after a successful sign-in. Defaults to the feed. The
-   *  in-context dialog passes the page the user was trying to act on, so a
-   *  "Write" click still ends at the composer. */
+  /** Where to land after a successful sign-in. Defaults to the feed; the
+   *  in-context dialog passes the page the user was acting on, so a "Write"
+   *  click still ends at the composer. */
   redirectTo?: string;
 }
 
 const KeychainSignin: FC<KeychainSigninProps> = ({ redirectTo = '/' }) => {
   const router = useRouter();
   const { signAuth, submitAuth } = useProcessAuth(false, false);
+  const [open, setOpen] = useState(false);
   const [username, setUsername] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [detected, setDetected] = useState<boolean | null>(null);
 
   useEffect(() => {
-    // Extensions inject after load; a single check on mount can race them.
+    // Extensions inject after load; one check on mount can race them.
     const check = () => setDetected(typeof window !== 'undefined' && 'hive_keychain' in window);
     check();
     const timer = setTimeout(check, 1200);
@@ -87,45 +94,62 @@ const KeychainSignin: FC<KeychainSigninProps> = ({ redirectTo = '/' }) => {
   };
 
   return (
-    <div className="rounded-[18px] border border-[#ebebeb] bg-white p-6 shadow-[0_1px_2px_rgba(20,18,10,0.03)]">
-      <h2 className="text-[17px] font-semibold text-[#161511]">{COPY.title}</h2>
-      <p className="mt-1.5 text-[13px] leading-[1.55] text-[#6b7280]">{COPY.sub}</p>
-
-      <label htmlFor="keychain-username" className="mt-4 block text-[13px] font-medium text-[#4b5563]">
-        {COPY.usernameLabel}
-      </label>
-      <div className="mt-1.5 flex items-center rounded-[10px] border border-[#e4e6e9] bg-white px-3 focus-within:border-[#c0392b]">
-        <span className="text-[15px] text-[#9ca3af]">@</span>
-        <input
-          id="keychain-username"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') void signIn();
-          }}
-          placeholder={COPY.placeholder}
-          autoComplete="username"
-          spellCheck={false}
-          data-testid="keychain-username"
-          className="h-11 w-full bg-transparent px-1.5 text-[15px] text-[#161511] outline-none placeholder:text-[#9ca3af]"
-        />
-      </div>
-
+    <div>
       <button
-        onClick={() => void signIn()}
-        disabled={busy || detected === false}
-        data-testid="keychain-signin"
-        className="mt-3.5 h-12 w-full cursor-pointer rounded-[12px] bg-[#161511] text-[15px] font-semibold text-white hover:bg-[#2b2822] disabled:cursor-not-allowed disabled:opacity-50"
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        data-testid="keychain-row"
+        className="flex h-14 w-full cursor-pointer items-center gap-3 rounded-[14px] border border-[#e4e6e9] bg-white px-4 text-left hover:border-[#c0392b] hover:bg-[#fefaf9]"
       >
-        {busy ? COPY.working : COPY.submit}
+        <span className="flex h-[34px] w-[34px] flex-shrink-0 items-center justify-center rounded-[9px] bg-[#c0392b] text-[15px] font-extrabold text-white">
+          K
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-[15px] font-semibold text-[#161511]">{COPY.title}</span>
+          <span className="block text-xs text-[#6b7280]">{COPY.sub}</span>
+        </span>
+        {detected ? (
+          <span className="flex-shrink-0 rounded-full bg-[#eef7f1] px-2.5 py-1 text-[11px] font-semibold text-[#2f7d4f]">
+            {COPY.detected}
+          </span>
+        ) : null}
       </button>
 
-      {detected === false ? (
-        <p className="mt-3 text-[13px] leading-[1.55] text-[#b45309]">
-          <span className="font-medium">{COPY.notDetected}</span> — {COPY.install}
-        </p>
+      {open ? (
+        <div className="mt-2.5 rounded-[14px] border border-[#f1f3f5] bg-[#fbfbfc] p-4">
+          <label htmlFor="keychain-username" className="block text-[13px] font-medium text-[#4b5563]">
+            {COPY.usernameLabel}
+          </label>
+          <div className="mt-1.5 flex items-center rounded-[10px] border border-[#e4e6e9] bg-white px-3 focus-within:border-[#c0392b]">
+            <span className="text-[15px] text-[#9ca3af]">@</span>
+            <input
+              id="keychain-username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void signIn();
+              }}
+              placeholder={COPY.placeholder}
+              autoComplete="username"
+              spellCheck={false}
+              data-testid="keychain-username"
+              className="h-11 w-full bg-transparent px-1.5 text-[15px] text-[#161511] outline-none placeholder:text-[#9ca3af]"
+            />
+          </div>
+          <button
+            onClick={() => void signIn()}
+            disabled={busy || detected === false}
+            data-testid="keychain-signin"
+            className="mt-3 h-12 w-full cursor-pointer rounded-[12px] bg-[#161511] text-[15px] font-semibold text-white hover:bg-[#2b2822] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {busy ? COPY.working : COPY.submit}
+          </button>
+          {detected === false ? (
+            <p className="mt-2.5 text-[13px] leading-[1.55] text-[#b45309]">{COPY.notDetected}</p>
+          ) : null}
+          {error ? <p className="mt-2.5 text-[13px] leading-[1.55] text-[#b45309]">{error}</p> : null}
+        </div>
       ) : null}
-      {error ? <p className="mt-3 text-[13px] leading-[1.55] text-[#b45309]">{error}</p> : null}
     </div>
   );
 };
