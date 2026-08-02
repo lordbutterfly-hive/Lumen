@@ -9,7 +9,8 @@ Re-baselines the shipped config (Settings() defaults, topic_affinity_strength
 Protocol mirrors q1/q6 exactly (seed=7 world, curated trusted seeds = top-2
 reputation authors per topic, 24-viewer panel, k=20). Self-check: the legacy
 ndcg / fcq_capture / cap_own / auc_own columns must reproduce the known
-0.365 / 0.770 / 0.807 / 0.666 shipped figures — if they don't, the instrument
+0.378 / 0.803 / 0.821 / 0.742 shipped figures (re-pinned 2026-08-01 after the
+instrument was fixed to emit AttributedPost and to carry the author prior) — if they don't, the instrument
 moved and no number below is comparable to prior rounds.
 
 RE-PINNED 2026-07-22 (post-PRUNED fix-loop): the anti-sybil fix-loop shifted
@@ -24,9 +25,23 @@ are reliable; exact figures are directional.
 """
 from __future__ import annotations
 
+import pathlib
 import sys
 
-sys.path.insert(0, "/mnt/o/HIVE-BLOG-REBUILD/recsys/measurement-harness")
+# ★ Derived from __file__ (2026-08-01). These were two hardcoded absolute paths:
+# a scratchpad from an unrelated session, and "/mnt/o/HIVE-BLOG-REBUILD/recsys",
+# which does not exist — so no panel ran from its own directory without
+# PYTHONPATH set by hand.
+#
+# Index 0 is DELIBERATE and stays: a measurement harness must bind to the tree
+# it sits in, never to an installed `recsys` that happens to be on the path, or
+# its numbers describe code nobody is looking at. The hazard the old code had
+# was not the precedence, it was pointing that precedence at a path outside the
+# repo; derived paths cannot drift. `metrics_v2.py` uses the same ordering.
+_HARNESS = pathlib.Path(__file__).resolve().parent
+sys.path.insert(0, str(_HARNESS))
+sys.path.insert(0, str(_HARNESS.parent))
+
 
 from metrics_v2 import (
     DECOMP_CONFIGS,
@@ -100,10 +115,53 @@ print("SELF-CHECK vs prior-round shipped figures (must reproduce):")
 # is mean_q@20 + own-stratum AUC, both up/flat — the Opus council verified the
 # organic-term win survives the forced-composition control). Re-measured 3x
 # (PYTHONHASHSEED 0/1/42) — bit-identical every run.
-for label, key, known in [("legacy ndcg (global ideal)", "ndcg", 0.365),
-                          ("DEPRECATED fcq_capture", "fcq_capture", 0.770),
-                          ("own capture (pool ceiling)", "cap_own", 0.807),
-                          ("AUC own (served slots)", "auc_own", 0.666)]:
+# ★ RE-PINNED 2026-08-01. TWO SEPARATE CAUSES — decomposed, because attributing
+# the whole move to one of them is exactly the error this self-check exists to
+# catch. Measured by running this panel over a 2x2 of (HEAD package, working-tree
+# package) x (old harness, fixed harness):
+#
+#                                        ndcg    fcq   cap_own  auc_own
+#   HEAD pkg + old harness              0.365  0.770    0.807    0.666   <- old pins
+#   HEAD pkg + FIXED harness            0.376  0.809    0.826    0.690   <- instrument
+#   working-tree pkg + FIXED harness    0.378  0.803    0.825    0.748
+#   ... + the trust-budget fix below    0.378  0.803    0.821    0.742   <- pinned here
+#
+# (1) INSTRUMENT (0.365 -> 0.376 / 0.770 -> 0.809 / 0.807 -> 0.826 / 0.666 -> 0.690).
+#     `simworld` emitted a plain `Post`, and comment/reblog engagement is read ONLY
+#     off an `AttributedPost`, so every panel scored conversation at ZERO while
+#     production hydrates attribution. And every panel but q8 built a plain
+#     `SimGateway`, which had no `author_engagement`, so the author-pooled prior was
+#     inactive. Measured: mean organic engagement raw 1.2590 -> 1.7667 (a +40.3%
+#     increase, i.e. 28.7% of the corrected signal had been invisible; +27.8% on the
+#     log-compressed post_base scale), 543 of 751 posts changed value.
+#
+# (2) ALGORITHM — the larger share of auc_own, and NOT an instrument move. The
+#     2026-08-01 package changes (graph_cred, flooding, second_degree, coldstart,
+#     rerank, pipeline, config) account for auc_own 0.690 -> 0.748, i.e. ~70% of its
+#     total movement. Note this component is NOT uniformly positive: measured alone
+#     it moves fcq_capture 0.770 -> 0.761 and cap_own 0.807 -> 0.804 DOWN. An earlier
+#     draft of this comment claimed "everything moved UP" and credited the whole
+#     delta to the instrument; both halves of that were wrong.
+#
+# (3) TRUST BUDGET in the pooled prior (cap_own 0.825 -> 0.821, auc_own 0.748 ->
+#     0.742). The `author_engagement` twin promoted onto `SimGateway` did not
+#     forward `trust` to `post_base_engagement`, while `pipeline._score` budgets
+#     `own_base` with it — so `total_base` was overstated by mean 0.6% / max 9.7%
+#     per author on this world (176 of 746 posts inflated). These two columns
+#     therefore move DOWN, which is the CORRECT direction for removing an upward
+#     bias: a pin moving down here is evidence the fix worked, not evidence of a
+#     regression. Re-pinned deliberately rather than left mismatching.
+#
+# ★ CONSEQUENCE: every weight fitted through this panel was fitted on the degraded
+# instrument. `organic_recency`, `organic_cf`, `topic_affinity_strength` and
+# `organic_post_share` are due a re-sweep; until then their values are inherited,
+# not measured. q6's swept optimum for `topic_affinity_strength` has already moved
+# to the LEFT EDGE of its range (argmax auc_own s=0.25 -> s=0.00 against a shipped
+# 0.90), so that sweep's range itself needs extending, not just re-running.
+for label, key, known in [("legacy ndcg (global ideal)", "ndcg", 0.378),
+                          ("DEPRECATED fcq_capture", "fcq_capture", 0.803),
+                          ("own capture (pool ceiling)", "cap_own", 0.821),
+                          ("AUC own (served slots)", "auc_own", 0.742)]:
     m, _ = base[key]
     flag = "OK" if abs(m - known) < 0.0015 else "** MISMATCH — instrument moved **"
     print(f"    {label:32s} {m:6.3f}   (known {known:5.3f})  {flag}")

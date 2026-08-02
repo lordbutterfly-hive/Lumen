@@ -120,12 +120,19 @@ import sys
 from typing import TYPE_CHECKING
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-for _p in (_HERE, "/mnt/o/HIVE-BLOG-REBUILD/recsys"):
-    if _p not in sys.path:
-        sys.path.append(_p)
+# ★ The second entry was "/mnt/o/HIVE-BLOG-REBUILD/recsys", which does not exist
+# (2026-08-01). Derive the package root from __file__ so the harness runs from
+# any working directory and can never bind to a stale tree.
+# Same ordering as the panels: prepend, so the harness binds to the tree it sits
+# in rather than to an installed `recsys`. This used to `append`, i.e. the exact
+# opposite precedence to its own callers, in the same codebase.
+for _p in (os.path.dirname(_HERE), _HERE):
+    if _p in sys.path:
+        sys.path.remove(_p)
+    sys.path.insert(0, _p)
 
-import numpy as np  # noqa: E402
-from simworld import dcg, overlap_at_k, topic_entropy  # noqa: E402
+import numpy as np
+from simworld import dcg, overlap_at_k, topic_entropy
 
 if TYPE_CHECKING:  # duck-typed at runtime; annotations only
     from simworld import World
@@ -404,7 +411,8 @@ def decomposition_settings(base: Settings | None = None) -> dict[str, Settings]:
     convention q6 established)."""
     import dataclasses
 
-    from recsys.config import DiversityConfig, Settings as _Settings
+    from recsys.config import DiversityConfig
+    from recsys.config import Settings as _Settings
 
     if base is None:
         base = _Settings()

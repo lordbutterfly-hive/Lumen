@@ -25,9 +25,23 @@ are reliable; exact figures are directional.
 """
 from __future__ import annotations
 
+import pathlib
 import sys
 
-sys.path.insert(0, "/mnt/o/HIVE-BLOG-REBUILD/recsys/measurement-harness")
+# ★ Derived from __file__ (2026-08-01). These were two hardcoded absolute paths:
+# a scratchpad from an unrelated session, and "/mnt/o/HIVE-BLOG-REBUILD/recsys",
+# which does not exist — so no panel ran from its own directory without
+# PYTHONPATH set by hand.
+#
+# Index 0 is DELIBERATE and stays: a measurement harness must bind to the tree
+# it sits in, never to an installed `recsys` that happens to be on the path, or
+# its numbers describe code nobody is looking at. The hazard the old code had
+# was not the precedence, it was pointing that precedence at a path outside the
+# repo; derived paths cannot drift. `metrics_v2.py` uses the same ordering.
+_HARNESS = pathlib.Path(__file__).resolve().parent
+sys.path.insert(0, str(_HARNESS))
+sys.path.insert(0, str(_HARNESS.parent))
+
 
 import numpy as np
 from metrics_v2 import aggregate, session_overlap_loop, viewer_metrics

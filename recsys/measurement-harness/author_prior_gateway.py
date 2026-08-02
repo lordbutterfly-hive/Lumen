@@ -1,41 +1,26 @@
-"""SimGateway + the author-pooled engagement prior (NEW harness file, 2026-07-21).
+"""DEPRECATED SHIM — ``author_engagement`` now lives on ``simworld.SimGateway``.
 
-``simworld.SimGateway`` is frozen, so the one extra read the rebuilt organic
-term needs — ``AuthorPriorGateway.author_engagement`` — is added here by
-subclassing. The implementation is the exact in-memory twin of the grouped SQL
-documented on :class:`recsys.core.scoring.AuthorPriorGateway`: for each
-requested author, count their top-level posts in the window and sum
-``log10(1 + independent engagement)`` over them, with SELF-exclusion only
-(a grouped window aggregate cannot afford the per-request lineage/ring
-exclusion; that stays scoring-side, exactly as ``_SQL_POPULAR_POSTS`` does).
+★ 2026-08-01. This file used to ADD the author-pooled prior by subclassing, and
+every panel except q8 instantiated the plain ``SimGateway`` instead — so the
+prior, the headline of the 2026-07-21 organic rebuild, was inactive in every
+panel that produced a tuning table. The method therefore moved onto
+``SimGateway`` itself: the default instrument must be the shipped algorithm, and
+measuring WITHOUT the prior must be the deliberate act (``PriorlessSimGateway``).
 
-Anything measured with a plain ``SimGateway`` measures the prior-less
-fallback, which is the honest control for the pooling half of the rebuild.
+The previous header claimed "anything measured with a plain SimGateway measures
+the prior-less fallback, which is the honest control" — that is now exactly
+backwards, which is why it is quoted here rather than left in place.
+
+``AuthorPriorSimGateway`` survives only so existing imports keep working.
 """
 from __future__ import annotations
 
-from datetime import datetime
-
 from simworld import SimGateway
-
-from recsys.core.scoring import AuthorEngagement, post_base_engagement
 
 
 class AuthorPriorSimGateway(SimGateway):
-    """``SimGateway`` that also serves the author-pooled window aggregate."""
-
-    def author_engagement(
-        self, authors: frozenset[str], since: datetime
-    ) -> dict[str, AuthorEngagement]:
-        counts: dict[str, int] = {}
-        totals: dict[str, float] = {}
-        for p in self.w.posts:
-            if p.created < since or p.author not in authors:
-                continue
-            counts[p.author] = counts.get(p.author, 0) + 1
-            totals[p.author] = totals.get(p.author, 0.0) + post_base_engagement(
-                p, frozenset({p.author})
-            )
-        return {
-            a: AuthorEngagement(posts=counts[a], total_base=totals[a]) for a in counts
-        }
+    """Retained as an ALIAS. ``author_engagement`` moved onto ``SimGateway``
+    itself (2026-08-01) because every panel that instantiated the plain gateway
+    silently measured the prior-less fallback — see the note on ``SimGateway``.
+    Existing panels importing this name keep working and now get the same
+    behaviour as everything else."""

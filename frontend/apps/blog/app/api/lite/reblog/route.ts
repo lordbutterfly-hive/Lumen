@@ -35,7 +35,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   // F-L34 — undo is a withdrawal and stays ungated; adding a reblog is not.
   if (!undo) {
-    const target = checkEngagementTarget(user, author, permlink);
+    const target = await checkEngagementTarget(user, author, permlink);
     if (!target.ok) {
       return NextResponse.json({ error: target.code }, { status: target.status });
     }

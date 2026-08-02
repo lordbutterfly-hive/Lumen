@@ -27,7 +27,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from recsys.config import VoteSignalConfig
+from recsys.config import DEFAULT_SETTINGS, ScoreWeights, VoteSignalConfig
 from recsys.contracts import Post, VoteExclusions
 from recsys.core.normalize import log_compress
 
@@ -47,6 +47,11 @@ _DEFAULT_UNKNOWN_PER_VOUCHED = _VOTE_SIGNAL_DEFAULTS.unknown_per_vouched
 # All three weights now multiply DISTINCT INDEPENDENT PEOPLE, never raw event
 # counts: one person commenting ten times is one commenter, exactly as one
 # voter voting twice is one voter in the vote signal's breadth term.
+# ★ Moved to `ScoreWeights.organic_{voter,reply,reblog}_breadth` (2026-08-01) so
+# they can be swept and rolled back without a code edit — see that config block
+# for the measured contradiction between this layer's view of a comment and the
+# trust layer's. The names are kept here only as the documented defaults; nothing
+# reads them.
 _ORGANIC_VOTER_WEIGHT = 0.5
 _ORGANIC_REBLOG_WEIGHT = 0.5
 _ORGANIC_REPLY_WEIGHT = 0.3
@@ -183,6 +188,7 @@ def independent_organic_engagement(
     *,
     trust: VoterTrust | None = None,
     require_attribution: bool = False,
+    weights: ScoreWeights | None = None,
 ) -> float:
     """Attributed independent-engagement term of the organic signal (§6).
 
@@ -250,8 +256,11 @@ def independent_organic_engagement(
         voter_breadth = trust.credited_breadth(voters)
         commenter_breadth = trust.credited_breadth(commenters)
         reblogger_breadth = trust.credited_breadth(rebloggers)
+    # `None` means "the shipped weights", so every existing caller — including
+    # the frozen harness — keeps the exact value the §4 norm sample is built on.
+    w = weights if weights is not None else DEFAULT_SETTINGS.weights
     return (
-        _ORGANIC_VOTER_WEIGHT * voter_breadth
-        + _ORGANIC_REPLY_WEIGHT * commenter_breadth
-        + _ORGANIC_REBLOG_WEIGHT * reblogger_breadth
+        w.organic_voter_breadth * voter_breadth
+        + w.organic_reply_breadth * commenter_breadth
+        + w.organic_reblog_breadth * reblogger_breadth
     )

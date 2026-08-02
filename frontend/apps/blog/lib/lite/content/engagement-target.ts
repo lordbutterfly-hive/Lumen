@@ -1,4 +1,6 @@
 import type { LumenUser } from '@/blog/lib/lite/types';
+import { liteConfig } from '@/blog/lib/lite/config';
+import { resolveByHive } from '@/blog/lib/lite/repositories/post-repository';
 
 /**
  * F-L34 — validation for a Lumen-local engagement target (`castVote`, `reblog`).
@@ -32,7 +34,17 @@ const PERMLINK_RE = /^[a-z0-9-]{1,256}$/;
 
 export type TargetCheck = { ok: true } | { ok: false; code: string; status: number };
 
-export function checkEngagementTarget(user: LumenUser, author: string, permlink: string): TargetCheck {
+/**
+ * A published lite post's permlink, as buildPermlink() mints it: `lumen-<lc ULID>`.
+ * Crockford base32 excludes i, l, o and u.
+ */
+const LITE_PERMLINK_RE = /^lumen-[0-9a-hjkmnp-tv-z]{26}$/;
+
+export async function checkEngagementTarget(
+  user: LumenUser,
+  author: string,
+  permlink: string
+): Promise<TargetCheck> {
   const a = author.trim().toLowerCase();
   const p = permlink.trim().toLowerCase();
 
@@ -48,6 +60,29 @@ export function checkEngagementTarget(user: LumenUser, author: string, permlink:
       .map((n) => n.toLowerCase())
   );
   if (own.has(a)) return { ok: false, code: 'self_engagement', status: 400 };
+
+  // ★ THE SELF-CHECK ABOVE IS NOT ENOUGH FOR OUR OWN POSTS (found 2026-08-01).
+  //
+  // Every PUBLISHED lite post is authored on chain by the shared publishing
+  // account, not by its lite author — so `own.has(a)` compares the caller's
+  // handle against `frontendAccount` and never matches. The permlink is
+  // `lumen-<own postId>` (publisher/permlink.ts), which the author can derive
+  // from their own post. So a caller could self-vote simply by addressing their
+  // post through its CHAIN coordinates instead of its Lumen ones, which is
+  // precisely what this guard exists to refuse.
+  //
+  // The comment below still stands for TARGETS THAT ARE NOT OURS: we must not
+  // require a lumen_post row in general, because a lite user legitimately votes
+  // on native Hive posts. The fix is to resolve ONLY when the target looks like
+  // one of ours — same author, and the exact permlink shape we mint — so this
+  // costs one indexed lookup on that narrow shape and nothing at all otherwise.
+  const frontend = liteConfig.frontendAccount.toLowerCase();
+  if (frontend && a === frontend && LITE_PERMLINK_RE.test(p)) {
+    const target = await resolveByHive(liteConfig.frontendAccount, p);
+    if (target && target.userId === user.userId) {
+      return { ok: false, code: 'self_engagement', status: 400 };
+    }
+  }
 
   return { ok: true };
 }

@@ -1,14 +1,32 @@
 """Q4 — is graph_cred a real trust signal? Does ALS separate anything at this sparsity?"""
 from __future__ import annotations
+
+import pathlib
 import sys
-sys.path.insert(0, "/tmp/claude-1004/-home-clauderfly/fa2f34ba-7811-45c8-a634-26cb2cbffb1b/scratchpad/algo")
-from simworld import build_world, SimGateway, build_norm, EPOCH, NOW, TOPICS, spearman, Account
-import numpy as np
+
+# ★ Derived from __file__ (2026-08-01). These were two hardcoded absolute paths:
+# a scratchpad from an unrelated session, and "/mnt/o/HIVE-BLOG-REBUILD/recsys",
+# which does not exist — so no panel ran from its own directory without
+# PYTHONPATH set by hand.
+#
+# Index 0 is DELIBERATE and stays: a measurement harness must bind to the tree
+# it sits in, never to an installed `recsys` that happens to be on the path, or
+# its numbers describe code nobody is looking at. The hazard the old code had
+# was not the precedence, it was pointing that precedence at a path outside the
+# repo; derived paths cannot drift. `metrics_v2.py` uses the same ordering.
+_HARNESS = pathlib.Path(__file__).resolve().parent
+sys.path.insert(0, str(_HARNESS))
+sys.path.insert(0, str(_HARNESS.parent))
+
 from collections import Counter
+
+import numpy as np
+from simworld import EPOCH, NOW, TOPICS, Account, SimGateway, build_world, spearman
+
+from recsys.config import Settings
 from recsys.contracts import EngagementEdge
-from recsys.config import Settings, GraphCredConfig
-from recsys.pipeline import build_trust_snapshot
 from recsys.core.ring import detect_rings, ring_member_set
+from recsys.pipeline import build_trust_snapshot
 
 world = build_world(seed=7)
 gw = SimGateway(world)
@@ -100,8 +118,8 @@ cross_uneng = aff_sample(lambda v, a: (v, a) not in engaged_pairs and not same_t
 def auc(pos, neg, n=4000):
     p = rng.choice(pos, n); q = rng.choice(neg, n)
     return float(np.mean(p > q) + 0.5 * np.mean(p == q))
-print(f"\n[D] ALS affinity (cf_weight x this lands on organic_raw whose global sample "
-      f"spread is ~[0, 2.2]):")
+print("\n[D] ALS affinity (cf_weight x this lands on organic_raw whose global sample "
+      "spread is ~[0, 2.2]):")
 print(f"    engaged pairs        : mean {eng.mean():.3f} std {eng.std():.3f} (n={len(eng)})")
 print(f"    same-topic unengaged : mean {same_uneng.mean():.4f} std {same_uneng.std():.4f} (n={len(same_uneng)})")
 print(f"    cross-topic unengaged: mean {cross_uneng.mean():.4f} std {cross_uneng.std():.4f} (n={len(cross_uneng)})")

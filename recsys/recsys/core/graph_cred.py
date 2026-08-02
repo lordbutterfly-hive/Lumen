@@ -184,7 +184,7 @@ def compute_graph_cred(
         return {}
     nodes = sorted(accounts)
     ratios = _follow_follower_ratios(nodes, follows)
-    pair_weight, discounted, outside_received = _engagement_by_pair(
+    pair_weight, discounted, outside_received, outside_engagers = _engagement_by_pair(
         edges,
         weights,
         resolved_now,
@@ -207,6 +207,7 @@ def compute_graph_cred(
             score=scores[account],
             follow_follower_ratio=ratios[account],
             outside_engaged=outside_received.get(account, 0.0) > 0.0,
+            outside_engagers=frozenset(outside_engagers.get(account, ())),
         )
         for account in nodes
     }
@@ -251,7 +252,27 @@ def _raw_event_count(edge: EngagementEdge) -> int:
     """
     return (
         edge.replies
-        + edge.reply_backs
+        # ★ `reply_backs` is DELIBERATELY ABSENT (2026-08-01). `io/hafsql.py`
+        # populates it from `replies[(dst, src)]` — the REVERSE edge's own reply
+        # count — so summing it here counted the partner's reply as one of this
+        # edge's events, and one mutual reply exchange scored 2 in BOTH
+        # directions. That cleared `min_ring_self_dealing_events = 2` outright,
+        # which is the exact threshold `GraphCredConfig.__post_init__` refuses to
+        # set to 1 because "1 would make the newcomer protection a no-op". With
+        # the production gateway, 2 WAS 1.
+        #
+        # Measured on the real hafsql edge shape, two brand-new accounts:
+        #     one mutual upvote each way -> 1 event  -> cred 1.0000 (protected)
+        #     one mutual reply  each way -> 2 events -> cred 0.0000 (condemned)
+        # The suite could not see it: its fixtures leave `reply_backs` at 0, a
+        # shape production never emits, so the tests exercised a mutual reply as
+        # if it were a single event.
+        #
+        # Both directions are still counted — as the reverse edge's own
+        # `replies`, which is where they belong — and `_ring_scale_signals`
+        # already inspects both. The reciprocity SIGNAL is untouched:
+        # `RealGraphWeights.reply_back` still weights this field everywhere that
+        # weighting (rather than event counting) is the question.
         + edge.upvotes
         + edge.reblogs
         + edge.mentions
@@ -293,6 +314,7 @@ def _ring_scale_signals(
     return {account: frozenset(others) for account, others in partners.items()}, dict(raw_count)
 
 
+
 def _engagement_by_pair(
     edges: Sequence[EngagementEdge],
     weights: RealGraphWeights,
@@ -300,7 +322,12 @@ def _engagement_by_pair(
     lineage: Mapping[str, frozenset[str]],
     ring_members: frozenset[str],
     min_ring_self_dealing_events: int,
-) -> tuple[dict[tuple[str, str], float], dict[str, float], dict[str, float]]:
+) -> tuple[
+    dict[tuple[str, str], float],
+    dict[str, float],
+    dict[str, float],
+    dict[str, set[str]],
+]:
     """Split each directed ``(src, dst)`` edge's time-decayed weight into the
     clean pair weights and the weight thrown away as self-dealing.
 
@@ -343,18 +370,40 @@ def _engagement_by_pair(
     pair_weight: dict[tuple[str, str], float] = {}
     discounted_received: dict[str, float] = {}
     outside_received: dict[str, float] = {}
+    outside_engagers: dict[str, set[str]] = {}
     for edge in edges:
         weight = edge_weight(edge, weights, now)
         lineage_dealt = edge.dst in lineage.get(edge.src, frozenset())
         ring_flagged = edge.src in ring_members and edge.dst in ring_members
-        ring_at_scale = ring_flagged and (
+        breadth = (
             len(partners.get(edge.src, frozenset())) > 1
             or len(partners.get(edge.dst, frozenset())) > 1
-            or (
-                raw_count.get((edge.src, edge.dst), 0) >= min_ring_self_dealing_events
-                and raw_count.get((edge.dst, edge.src), 0) >= min_ring_self_dealing_events
-            )
         )
+        repeated = (
+            raw_count.get((edge.src, edge.dst), 0) >= min_ring_self_dealing_events
+            and raw_count.get((edge.dst, edge.src), 0) >= min_ring_self_dealing_events
+        )
+        # ⚠ RIVAL SUPPRESSION IS A KNOWN, OPEN ISSUE HERE — see
+        # tests/test_rival_suppression.py. Breadth alone condemns, and a
+        # STRANGER can manufacture breadth: two socks comment on a newcomer's
+        # post, the newcomer replies to both as anyone would, and those two
+        # reciprocal edges floor their graph-cred (measured: 0.0000 vs 0.5286
+        # with one sock). Only authors with no audience yet are exposed — one
+        # genuine outside engager protects them — i.e. exactly cold start.
+        #
+        # A shape-based fix was tried on 2026-08-01 and REVERTED: requiring the
+        # condemned account to sit in a closed triangle protected the victim but
+        # released every triangle-free ring — measured, an even cycle of 6 and a
+        # complete bipartite K5,5 both went from fully condemned to 0 condemned,
+        # while the q4 panel could not see it because its ring is clique-shaped.
+        # It was also bypassable by giving each sock a disjoint triangle,
+        # amortizing to 0.3 accounts per victim — cheaper than the attack it
+        # closed. A victim and a small genuine ring are locally isomorphic in the
+        # 1-hop neighbourhood, so no predicate over `partners` separates them.
+        # Fixing this needs a different mechanism (initiation order, or the
+        # victim's own history), not another shape test. Do not re-attempt with
+        # a neighbourhood predicate.
+        ring_at_scale = ring_flagged and (breadth or repeated)
         self_dealt = lineage_dealt or ring_at_scale
         if self_dealt:
             discounted_received[edge.dst] = discounted_received.get(edge.dst, 0.0) + weight
@@ -363,7 +412,12 @@ def _engagement_by_pair(
         pair_weight[key] = pair_weight.get(key, 0.0) + weight
         if weight > 0.0 and not ring_flagged:
             outside_received[edge.dst] = outside_received.get(edge.dst, 0.0) + weight
-    return pair_weight, discounted_received, outside_received
+            # ★ WHO engaged, not just how much (2026-08-01). The scalar total
+            # cannot answer "was any of this from an account that is itself
+            # vouched", which is what seed-anchored vouch propagation needs to
+            # stop a directed sock cycle from vouching itself.
+            outside_engagers.setdefault(edge.dst, set()).add(edge.src)
+    return pair_weight, discounted_received, outside_received, outside_engagers
 
 
 def _teleport_vector(

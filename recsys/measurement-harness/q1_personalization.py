@@ -1,13 +1,41 @@
 """Q1 — does the feed personalize? Baselines, CF ablation, rep-term decomposition."""
 from __future__ import annotations
+
+import pathlib
 import sys
-sys.path.insert(0, "/tmp/claude-1004/-home-clauderfly/fa2f34ba-7811-45c8-a634-26cb2cbffb1b/scratchpad/algo")
-from simworld import (build_world, SimGateway, build_norm, EPOCH, NOW, TOPICS, COMMUNITY,
-                      ndcg_at_k, mean_rel_at_k, overlap_at_k, spearman)
+
+# ★ Derived from __file__ (2026-08-01). These were two hardcoded absolute paths:
+# a scratchpad from an unrelated session, and "/mnt/o/HIVE-BLOG-REBUILD/recsys",
+# which does not exist — so no panel ran from its own directory without
+# PYTHONPATH set by hand.
+#
+# Index 0 is DELIBERATE and stays: a measurement harness must bind to the tree
+# it sits in, never to an installed `recsys` that happens to be on the path, or
+# its numbers describe code nobody is looking at. The hazard the old code had
+# was not the precedence, it was pointing that precedence at a path outside the
+# repo; derived paths cannot drift. `metrics_v2.py` uses the same ordering.
+_HARNESS = pathlib.Path(__file__).resolve().parent
+sys.path.insert(0, str(_HARNESS))
+sys.path.insert(0, str(_HARNESS.parent))
+
 import numpy as np
+from simworld import (
+    COMMUNITY,
+    EPOCH,
+    NOW,
+    TOPICS,
+    SimGateway,
+    build_norm,
+    build_world,
+    mean_rel_at_k,
+    ndcg_at_k,
+    overlap_at_k,
+    spearman,
+)
+
+from recsys.config import ALSConfig, ScoreWeights, Settings
 from recsys.contracts import ViewerProfile
-from recsys.config import Settings, ALSConfig, ScoreWeights
-from recsys.pipeline import rank_feed, build_trust_snapshot, TrustPolicy
+from recsys.pipeline import TrustPolicy, build_trust_snapshot, rank_feed
 
 world = build_world(seed=7)
 gw = SimGateway(world)

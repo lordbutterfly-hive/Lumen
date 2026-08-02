@@ -38,7 +38,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // (including a target that has since become invalid); only ADDING engagement
   // is gated.
   if (weight !== 0) {
-    const target = checkEngagementTarget(user, author, permlink);
+    const target = await checkEngagementTarget(user, author, permlink);
     if (!target.ok) {
       return NextResponse.json({ error: target.code }, { status: target.status });
     }

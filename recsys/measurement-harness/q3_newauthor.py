@@ -1,13 +1,30 @@
 """Q3 — new-author discovery: can a fresh author with no graph/rep/votes surface?"""
 from __future__ import annotations
+
+import pathlib
 import sys
-sys.path.insert(0, "/tmp/claude-1004/-home-clauderfly/fa2f34ba-7811-45c8-a634-26cb2cbffb1b/scratchpad/algo")
-from simworld import (build_world, SimGateway, build_norm, EPOCH, NOW, TOPICS, COMMUNITY, TAGS,
-                      Account, DAYS)
-import numpy as np
+
+# ★ Derived from __file__ (2026-08-01). These were two hardcoded absolute paths:
+# a scratchpad from an unrelated session, and "/mnt/o/HIVE-BLOG-REBUILD/recsys",
+# which does not exist — so no panel ran from its own directory without
+# PYTHONPATH set by hand.
+#
+# Index 0 is DELIBERATE and stays: a measurement harness must bind to the tree
+# it sits in, never to an installed `recsys` that happens to be on the path, or
+# its numbers describe code nobody is looking at. The hazard the old code had
+# was not the precedence, it was pointing that precedence at a path outside the
+# repo; derived paths cannot drift. `metrics_v2.py` uses the same ordering.
+_HARNESS = pathlib.Path(__file__).resolve().parent
+sys.path.insert(0, str(_HARNESS))
+sys.path.insert(0, str(_HARNESS.parent))
+
 from datetime import timedelta
-from recsys.contracts import ViewerProfile, Post, Vote, EngagementEdge
+
+from simworld import COMMUNITY, EPOCH, NOW, TAGS, Account, SimGateway, build_norm, build_world
+
 from recsys.config import Settings
+from recsys.contracts import EngagementEdge, Post, ViewerProfile, Vote
+from recsys.core.vote_signal import AttributedPost
 from recsys.pipeline import TrustPolicy, build_trust_snapshot, rank_feed
 
 world = build_world(seed=7)
@@ -61,6 +78,7 @@ print(f"[B] established photo viewers seeing newbie ANYWHERE in feed: {est_hits}
 
 # (c) one vouch vote: pick the photo author FOLLOWED BY THE MOST photo viewers
 from collections import Counter
+
 fcount = Counter()
 for j in range(10):
     for a in world.follows[f"v-photo-{j:02d}"]:
@@ -70,9 +88,15 @@ print(f"\nvoucher {voucher} is followed by {fcount[voucher]}/10 established phot
 p0 = newbie_posts[0]
 vote = Vote(voter=voucher, rshares=int(world.accounts[voucher].stake * 1e9), timestamp=p0.created + timedelta(minutes=30))
 idx0 = world.posts.index(p0)
-p0v = Post(author=p0.author, permlink=p0.permlink, category=p0.category, community=p0.community,
+# ★ AttributedPost (2026-08-01). Rebuilt as a plain `Post`, the newbie's post was
+# the ONE post in the world carrying no attribution — so while every other post
+# gained comment/reblog signal, the new author was measured with that channel
+# forced to zero. The panel's whole question is whether a new author can break
+# through, and it was answering it with the new author handicapped.
+p0v = AttributedPost(author=p0.author, permlink=p0.permlink, category=p0.category,
+           community=p0.community,
            created=p0.created, children=0, reblog_count=0, author_reputation=25.0,
-           tags=p0.tags, votes=(vote,))
+           tags=p0.tags, votes=(vote,), commenters=(), rebloggers=())
 world.posts[idx0] = p0v
 world.post_engagers[p0.key] = {voucher}
 world.edges.append(EngagementEdge(src=voucher, dst=NEWBIE, upvotes=1, last_interaction=vote.timestamp))
@@ -119,9 +143,15 @@ for extra in [3, 8]:
     votes = tuple([vote] + [Vote(voter=w, rshares=int(world.accounts[w].stake * 1e9),
                                  timestamp=p0.created + timedelta(hours=1 + i))
                             for i, w in enumerate(voters)])
-    p0x = Post(author=p0.author, permlink=p0.permlink, category=p0.category, community=p0.community,
+    # The 2 comments and 1 reblog need IDENTITIES or they score nothing at all —
+    # `children`/`reblog_count` are display counters the scorer ignores. Named
+    # commenters/rebloggers distinct from the author and from each other, which
+    # is what "2 comments + 1 reblog" was always meant to represent.
+    p0x = AttributedPost(author=p0.author, permlink=p0.permlink, category=p0.category,
+               community=p0.community,
                created=p0.created, children=2, reblog_count=1, author_reputation=25.0,
-               tags=p0.tags, votes=votes)
+               tags=p0.tags, votes=votes,
+               commenters=("a-photo-20", "a-photo-21"), rebloggers=("a-photo-22",))
     world.posts[idx0] = p0x
     world.post_engagers[p0.key] = {voucher, *voters}
     gw = SimGateway(world)

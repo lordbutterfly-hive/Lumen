@@ -29,7 +29,19 @@ def cap_oon_flooding(candidates: Iterable[Candidate], max_per_author: int) -> li
     kept: list[Candidate] = []
     seen_per_author: dict[str, int] = {}
     for candidate in candidates:
-        if not candidate.source.requires_second_degree:
+        # ★ Keyed on `requires_author_floor`, NOT `requires_second_degree`
+        # (2026-08-01). This asks "is this an out-of-network lane" — the whole
+        # point of an OON post-frequency cap — and that is exactly the set
+        # `requires_author_floor` names. `requires_second_degree` used to name
+        # the same set, so keying on it was correct until it stopped being a
+        # lane classifier and became a per-lane DISCOVERY POLICY switch: the
+        # moment `OON_INTEREST` was exempted from the vouch count (to make the
+        # follow-cliff fix work at all), it silently left this cap too, and one
+        # account could place unlimited posts in an established viewer's feed
+        # (measured: 60 of 103 slots). Same defect shape as the POPULAR_FALLBACK
+        # label split — one property serving two unrelated purposes, so changing
+        # it for one silently changed the other.
+        if not candidate.source.requires_author_floor:
             kept.append(candidate)
             continue
         author = candidate.post.author

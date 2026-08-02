@@ -120,6 +120,12 @@ def filter_eligible(
             engagers = qualifying_engagers(engagers, graph_creds, thresholds.vouch_graph_cred_floor)
             if not passes_second_degree(candidate, engagers, thresholds.second_degree_min_engagers):
                 continue
+        # The author floor is a SEPARATE question from the vouch count (2026-08-01):
+        # "has my network seen this" vs "is this author credible at all". A
+        # discovery lane can reasonably skip the first while never skipping the
+        # second — otherwise it either demands prior in-network engagement, which
+        # new content cannot have, or it admits self-dealers.
+        if candidate.source.requires_author_floor:
             cred = graph_creds.get(post.author)
             if cred is not None and cred.score < thresholds.graph_cred_floor:
                 continue

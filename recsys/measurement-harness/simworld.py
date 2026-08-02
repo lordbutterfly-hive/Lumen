@@ -10,22 +10,43 @@ Ground truth: rel(viewer, post) = interest_match(viewer, author.topic) * author.
 """
 from __future__ import annotations
 
+import pathlib
 import sys
+
+# ★ Derived from __file__ (2026-08-01). These were two hardcoded absolute paths:
+# a scratchpad from an unrelated session, and "/mnt/o/HIVE-BLOG-REBUILD/recsys",
+# which does not exist — so no panel ran from its own directory without
+# PYTHONPATH set by hand.
+#
+# Index 0 is DELIBERATE and stays: a measurement harness must bind to the tree
+# it sits in, never to an installed `recsys` that happens to be on the path, or
+# its numbers describe code nobody is looking at. The hazard the old code had
+# was not the precedence, it was pointing that precedence at a path outside the
+# repo; derived paths cannot drift. `metrics_v2.py` uses the same ordering.
+_HARNESS = pathlib.Path(__file__).resolve().parent
+sys.path.insert(0, str(_HARNESS))
+sys.path.insert(0, str(_HARNESS.parent))
 import math
 import random
-from dataclasses import dataclass, field
+from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-
-sys.path.insert(0, "/mnt/o/HIVE-BLOG-REBUILD/recsys")
 
 import numpy as np
 
 from recsys.contracts import (
-    Candidate, CandidateSource, EngagementEdge, NormContext, Post,
-    ViewerProfile, Vote, VoteExclusions,
+    Candidate,
+    CandidateSource,
+    EngagementEdge,
+    NormContext,
+    Post,
+    ViewerProfile,
+    Vote,
+    VoteExclusions,
 )
 from recsys.core.normalize import build_norm_context
-from recsys.core.vote_signal import independent_vote_signal
+from recsys.core.scoring import AuthorEngagement, post_base_engagement
+from recsys.core.vote_signal import AttributedPost, VoterTrust, independent_vote_signal
 from recsys.pipeline import _organic_signal
 
 EPOCH = datetime(2026, 1, 1, tzinfo=UTC)
@@ -173,16 +194,37 @@ def build_world(seed: int = 7, authors_per_topic: int = 20, viewers_per_topic: i
                                        timestamp=post.created + timedelta(minutes=1)))
 
     # rebuild posts with votes/children/reblog_count attached
+    #
+    # ★ AttributedPost, NOT Post (2026-08-01). This emitted a plain `Post`, and
+    # `independent_organic_engagement` reads `commenters`/`rebloggers` ONLY off an
+    # AttributedPost — by design, since a count without identity cannot be
+    # exclusion-filtered and must degrade toward silence. Production hydrates
+    # AttributedPost (`io/hafsql.py:461`). So **every harness panel scored comments
+    # and reblogs at exactly zero**, and the whole organic term was measured on
+    # votes alone.
+    #
+    # Measured on the same world and seed: mean organic engagement raw
+    # 1.2590 -> 1.7667. State that carefully — it is a +40.3% INCREASE, i.e.
+    # 28.7% of the corrected signal had been invisible (+27.8% on the
+    # log-compressed post_base scale). 543 of 751 posts changed value. Every
+    # tuning table in config.py was fitted through the degraded instrument.
+    #
+    # The identity was already here — `per_post_replies[key]` is keyed by commenter
+    # and `per_post_reblogs[key]` is a set of accounts. It was being reduced to a
+    # count and discarded. Sorted for determinism, mirroring hafsql's
+    # `tuple(sorted(comment_counts))`.
     final_posts: list[Post] = []
     for post in posts:
         key = post.key
-        final_posts.append(Post(
+        final_posts.append(AttributedPost(
             author=post.author, permlink=post.permlink, category=post.category,
             community=post.community, created=post.created,
             children=sum(per_post_replies[key].values()),
             reblog_count=len(per_post_reblogs[key]),
             author_reputation=post.author_reputation, tags=post.tags,
             votes=tuple(raw_votes[key]),
+            commenters=tuple(sorted(per_post_replies[key])),
+            rebloggers=tuple(sorted(per_post_reblogs[key])),
         ))
     posts = final_posts
 
@@ -257,7 +299,17 @@ def build_world(seed: int = 7, authors_per_topic: int = 20, viewers_per_topic: i
 
 
 class SimGateway:
-    """HafsqlGateway implementation that honestly honors query arguments."""
+    """HafsqlGateway implementation that honestly honors query arguments.
+
+    ★ `author_engagement` lives HERE, not in a subclass (2026-08-01). It used
+    to be added by `AuthorPriorSimGateway`, and every panel except q8
+    instantiated the plain `SimGateway` — so `_author_priors` saw a gateway
+    without the method, returned {}, and the AUTHOR-POOLED PRIOR (the headline
+    of the 2026-07-21 organic rebuild) was inactive in every panel that
+    produced a tuning table. Opting INTO the production code path is exactly
+    backwards: the default instrument must be the shipped algorithm, and
+    measuring the prior-less fallback must be the thing you opt into.
+    """
 
     def __init__(self, world: World, lineage: dict[str, frozenset[str]] | None = None):
         self.w = world
@@ -314,9 +366,90 @@ class SimGateway:
     def suppressed_keys(self, post_keys: frozenset[str]) -> frozenset[str]:
         return frozenset()
 
+    def author_engagement(
+        self,
+        authors: frozenset[str],
+        since: datetime,
+        excluded: Mapping[str, frozenset[str]] | None = None,
+        *,
+        trust: VoterTrust | None = None,
+        weights: object | None = None,
+    ) -> dict[str, AuthorEngagement]:
+        """Author-pooled window aggregate, matching the PRODUCTION signature.
+
+        ★ 2026-08-01: moved here from ``author_prior_gateway.AuthorPriorSimGateway``.
+        ``SimGateway`` never had a stale signature — it had NO SUCH METHOD, and
+        because ``AuthorPriorGateway`` is a @runtime_checkable Protocol (whose
+        isinstance() checks method NAMES) a gateway lacking it simply fails the
+        guard and the pipeline takes its documented prior-less fallback. Every
+        panel but q8 used that gateway, so the prior was inactive in every panel
+        that produced a tuning table. (q8 was unaffected: it defines its own
+        gateway inline. A separate 2026-08-01 fix repaired a genuinely stale
+        two-argument signature in the subclass, which is a different defect from
+        this one — do not conflate them, as an earlier draft of this docstring
+        did.)
+
+        ``excluded`` mirrors the production anti-join: engagement from an
+        author's own stake lineage / ring / self must not count toward that
+        author's pooled prior, or an author inflates ``total_base`` with exactly
+        the identities the vote signal already discounts on ``own_base``.
+
+        ``trust`` is accepted for signature parity. The production query uses it
+        to breadth-budget unknown-tier engagers (H05); reproducing that budget
+        in-sim would require per-post voter identity accounting that
+        ``post_base_engagement`` does not expose, so it is deliberately NOT
+        approximated here — a wrong budget would be worse than a documented
+        absent one. Simulated priors are therefore an UPPER BOUND on the
+        production prior for authors whose engagement is unknown-tier.
+        """
+        counts: dict[str, int] = {}
+        totals: dict[str, float] = {}
+        for p in self.w.posts:
+            if p.created < since or p.author not in authors:
+                continue
+            # Self-exclusion always; the caller's per-author exclusion set on top.
+            excl = frozenset({p.author}) | (
+                (excluded or {}).get(p.author, frozenset())
+            )
+            counts[p.author] = counts.get(p.author, 0) + 1
+            # ★ `trust` and `weights` are FORWARDED (2026-08-01). The copy that
+            # was moved here omitted both, while `pipeline._score` computes
+            # `own_base` with `trust=_voter_trust(snap, settings)` and
+            # `weights=settings.weights`. Measured on the q7 world, where trust
+            # is not None (145 vouched of 180 accounts), the unbudgeted version
+            # overstates `total_base` by mean 0.6% / max 9.7% per author and
+            # inflates pooled organic on 176 of 746 posts. That was a documented
+            # "upper bound" while it lived in a q8-only subclass; once this
+            # became the instrument for EVERY panel it was simply a bias. q8's
+            # own inline gateway already did this correctly — that implementation
+            # is the one preserved here.
+            totals[p.author] = totals.get(p.author, 0.0) + post_base_engagement(
+                p, excl, trust=trust, weights=weights
+            )
+        return {
+            a: AuthorEngagement(posts=counts[a], total_base=totals[a]) for a in counts
+        }
+
+
+class PriorlessSimGateway(SimGateway):
+    """``SimGateway`` with the author-pooled prior REMOVED — the explicit control.
+
+    ★ Added 2026-08-01 when `author_engagement` moved onto `SimGateway` itself.
+    Before that move the plain gateway was accidentally prior-less and every
+    panel but q8 used it, so the shipped algorithm's headline organic feature was
+    inactive in every tuning table. Now the default instrument is the shipped
+    algorithm and measuring WITHOUT the prior is the deliberate act.
+
+    `AuthorPriorGateway` is a @runtime_checkable Protocol, and those check method
+    NAMES — so removing the attribute (rather than raising inside it) is what
+    actually makes `isinstance` false and exercises the pipeline's documented
+    prior-less fallback.
+    """
+
+    author_engagement = None  # type: ignore[assignment]
+
 
 DUMMY_VIEWER = ViewerProfile(account="__norm__")
-
 
 def build_norm(world: World, now: datetime = NOW) -> NormContext:
     """A realistic NormContext producer: raw signals of every window post,

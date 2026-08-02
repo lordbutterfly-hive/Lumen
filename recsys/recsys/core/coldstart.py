@@ -26,7 +26,20 @@ def is_cold(viewer: ViewerProfile) -> bool:
 # The interest lane's two gate-exempt sources (§13.1) — the sources
 # :func:`is_established_followless` exists to partially re-gate (H07).
 INTEREST_LANE_SOURCES: frozenset[CandidateSource] = frozenset(
-    {CandidateSource.INTEREST_COMMUNITY, CandidateSource.INTEREST_TAG}
+    {
+        CandidateSource.INTEREST_COMMUNITY,
+        CandidateSource.INTEREST_TAG,
+        # ★ POPULAR_FALLBACK belongs here (added 2026-08-01 with the label, and
+        # NOT an extension of H07's scope — a restoration of it). Padding used to
+        # be emitted AS `INTEREST_TAG`, so it was inside this set and had CF
+        # suppressed for established-followless viewers. Giving padding its own
+        # honest label silently moved it OUT, which would have narrowed an
+        # anti-poisoning control as a side effect of a labelling change. Padding
+        # is served to exactly the viewers H07 is about and is the most
+        # promotable lane there is, so it is the last thing that should carry an
+        # unsuppressed cross-viewer signal.
+        CandidateSource.POPULAR_FALLBACK,
+    }
 )
 
 
@@ -106,6 +119,57 @@ def interest_candidates(
     return list(merged.values())
 
 
+def established_interest_candidates(
+    viewer: ViewerProfile,
+    gateway: HafsqlGateway,
+    since: datetime,
+    limit: int,
+) -> list[Candidate]:
+    """The viewer's declared interests, for a viewer who HAS a follow graph.
+
+    ★ THE FOLLOW-CLIFF (2026-08-01). ``gather_candidates`` used to append the
+    interest lane only ``if not viewer.follows`` and the in-network lanes only
+    ``if viewer.follows`` — mutually exclusive. So the instant a brand-new user
+    followed ONE account their declared interests stopped being consulted
+    entirely and their pool collapsed to that account's recent posts, padded out
+    with global-popularity filler. Measured: pool 60 -> 3, on-interest share of
+    the top 20 falling 20/20 -> 0/20. The dead zone runs from the first follow
+    until in-network supply alone can fill a feed, which is exactly the window in
+    which a new user decides whether to stay.
+
+    The picks do not stop mattering once someone follows a person, so the lane is
+    now unconditional — but it changes TRUST CLASS rather than simply staying on.
+    A followless viewer keeps the gate-exempt ``INTEREST_*`` sources (they have
+    no follow graph for the second-degree gate to use, §13.1). A viewer WITH a
+    graph gets ``OON_INTEREST``, which ``requires_author_floor`` — so their
+    interest content must still come from an author who clears the graph-cred
+    floor, and this does not widen the gate-exempt surface H07 exists to narrow.
+
+    ★ WHAT THIS LANE DELIBERATELY DOES NOT REQUIRE, and why. The first version of
+    this fix also made ``OON_INTEREST`` ``requires_second_degree``, which read as
+    strictly safer and was in fact a total no-op: that gate admits a post only if
+    someone the viewer ALREADY FOLLOWS engaged it, which is the exact predicate
+    ``OON_ENGAGED`` selects on, and which brand-new content from outside the
+    viewer's network can never satisfy. Measured end to end: 60 candidates
+    generated, 0 of 20 feed slots on-interest, 17 of 20 popularity padding — the
+    same numbers as the bug. "Is this author credible" and "has my network
+    already seen this" are different questions, and a discovery lane can only
+    ever ask the first.
+
+    ``OON_INTEREST`` was declared, priority-mapped and gated but never produced
+    by anything; this is its first producer.
+    """
+    community_posts = gateway.community_posts(viewer.interest_communities, since, limit)
+    tag_posts = gateway.tag_posts(viewer.interest_tags, since, limit)
+    merged: dict[str, Candidate] = {
+        post.key: Candidate(post=post, source=CandidateSource.OON_INTEREST)
+        for post in community_posts
+    }
+    for post in tag_posts:
+        merged.setdefault(post.key, Candidate(post=post, source=CandidateSource.OON_INTEREST))
+    return list(merged.values())
+
+
 def popular_fallback(gateway: HafsqlGateway, since: datetime, limit: int) -> list[Candidate]:
     """Community-popular fallback for a fully-cold viewer (§13.5b).
 
@@ -115,7 +179,12 @@ def popular_fallback(gateway: HafsqlGateway, since: datetime, limit: int) -> lis
     cold-start exploration lane is gate-exempt (§8.1), which is what a blank
     viewer with no follow graph needs.
     """
+    # ★ Labelled POPULAR_FALLBACK, not INTEREST_TAG (2026-08-01). This padding is
+    # global popularity with no relation to anything the viewer picked; emitting
+    # it as INTEREST_TAG made "interest-lane coverage" unfalsifiable — in the
+    # measured follow-cliff case 17 of 20 slots were globally-popular posts
+    # indistinguishable, in the output, from genuine interest matches.
     return [
-        Candidate(post=post, source=CandidateSource.INTEREST_TAG)
+        Candidate(post=post, source=CandidateSource.POPULAR_FALLBACK)
         for post in gateway.popular_posts(since, limit)
     ]

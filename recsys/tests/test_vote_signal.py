@@ -449,3 +449,43 @@ def test_require_attribution_default_off_keeps_lenient_plain_post_behaviour() ->
     # scores zero comment/reblog signal, no raise.
     plain = make_post(author="a", children=60, reblog_count=20, votes=[])
     assert independent_organic_engagement(plain, frozenset({"a"})) == 0.0
+
+
+# ── ★ the organic breadth weights are now configurable ───────────────────────
+
+def test_organic_breadth_weights_are_configurable_and_default_unchanged() -> None:
+    """★ These were module constants, so they had never been swept.
+
+    That matters because the two layers of this system disagree about what a
+    comment is worth, by roughly 9x and in opposite directions: here one upvoter
+    outweighs two distinct commenters (0.5 vs 0.3), while the trust layer scores
+    a reply at 5.0 against an upvote's 1.0. The product goal is to rank by where
+    people comment and engage, so which layer is right is a live question — and
+    it could not even be measured without editing source.
+
+    The default must reproduce the previous value exactly, because the §4 norm
+    sample is built on it.
+    """
+    from dataclasses import replace as dc_replace
+
+    from recsys.config import DEFAULT_SETTINGS
+    from recsys.core.vote_signal import (
+        _ORGANIC_REPLY_WEIGHT,
+        _ORGANIC_VOTER_WEIGHT,
+        independent_organic_engagement,
+    )
+
+    assert DEFAULT_SETTINGS.weights.organic_voter_breadth == _ORGANIC_VOTER_WEIGHT
+    assert DEFAULT_SETTINGS.weights.organic_reply_breadth == _ORGANIC_REPLY_WEIGHT
+
+    post = make_attributed_post(commenters=("c1", "c2", "c3"))
+    baseline = independent_organic_engagement(post, frozenset())
+    explicit = independent_organic_engagement(
+        post, frozenset(), weights=DEFAULT_SETTINGS.weights
+    )
+    assert explicit == baseline, "passing the shipped weights must change nothing"
+
+    louder = dc_replace(DEFAULT_SETTINGS.weights, organic_reply_breadth=0.8)
+    assert independent_organic_engagement(post, frozenset(), weights=louder) > baseline, (
+        "raising the reply weight did not raise a discussed post's organic signal"
+    )

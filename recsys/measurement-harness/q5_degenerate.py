@@ -1,15 +1,45 @@
 """Q5 — degeneracy probes: feedback loop, flooding, tiny community, dead follows,
 whale-votes-everything, empty-feed states."""
 from __future__ import annotations
+
+import pathlib
 import sys
-sys.path.insert(0, "/tmp/claude-1004/-home-clauderfly/fa2f34ba-7811-45c8-a634-26cb2cbffb1b/scratchpad/algo")
-from simworld import (build_world, SimGateway, build_norm, EPOCH, NOW, TOPICS, COMMUNITY, TAGS,
-                      Account, ndcg_at_k, overlap_at_k, topic_entropy)
-import numpy as np
+from dataclasses import replace
+
+# ★ Derived from __file__ (2026-08-01). These were two hardcoded absolute paths:
+# a scratchpad from an unrelated session, and "/mnt/o/HIVE-BLOG-REBUILD/recsys",
+# which does not exist — so no panel ran from its own directory without
+# PYTHONPATH set by hand.
+#
+# Index 0 is DELIBERATE and stays: a measurement harness must bind to the tree
+# it sits in, never to an installed `recsys` that happens to be on the path, or
+# its numbers describe code nobody is looking at. The hazard the old code had
+# was not the precedence, it was pointing that precedence at a path outside the
+# repo; derived paths cannot drift. `metrics_v2.py` uses the same ordering.
+_HARNESS = pathlib.Path(__file__).resolve().parent
+sys.path.insert(0, str(_HARNESS))
+sys.path.insert(0, str(_HARNESS.parent))
+
 from datetime import timedelta
-from collections import Counter
-from recsys.contracts import ViewerProfile, Post, Vote, EngagementEdge
+
+import numpy as np
+from simworld import (
+    COMMUNITY,
+    EPOCH,
+    NOW,
+    TAGS,
+    TOPICS,
+    Account,
+    SimGateway,
+    build_norm,
+    build_world,
+    ndcg_at_k,
+    overlap_at_k,
+    topic_entropy,
+)
+
 from recsys.config import Settings
+from recsys.contracts import EngagementEdge, Post, ViewerProfile, Vote
 from recsys.pipeline import TrustPolicy, build_trust_snapshot, rank_feed
 
 # This degenerate-input harness measures PRE-hardening Phase-0 behaviour on
@@ -82,6 +112,7 @@ gw = SimGateway(world)
 vb = ViewerProfile(account="v-photo-01", follows=world.follows["v-photo-01"],
                    subscribed_communities=frozenset({COMMUNITY["photo"]}))
 from recsys.pipeline import gather_candidates
+
 cand = gather_candidates(vb, gw, EPOCH, 400, settings)
 n_flood_cand = sum(1 for c in cand if c.post.author == FLOOD)
 fb = [sc.post for sc in rank_feed(vb, gw, norm, now=NOW, since=EPOCH, settings=settings, snapshot=snap)]
@@ -135,10 +166,12 @@ world.accounts["whale"] = Account("whale", "crypto", 0.5, 50000.0, 70.0, False)
 new_posts = []
 for p in world.posts:
     wv = Vote(voter="whale", rshares=int(5e13), timestamp=p.created + timedelta(minutes=10))
-    new_posts.append(Post(author=p.author, permlink=p.permlink, category=p.category,
-                          community=p.community, created=p.created, children=p.children,
-                          reblog_count=p.reblog_count, author_reputation=p.author_reputation,
-                          tags=p.tags, votes=(*p.votes, wv)))
+    # ★ `replace`, not a fresh `Post` (2026-08-01). Rebuilding as a plain `Post`
+    # silently DROPPED comment/reblog attribution from every post in the world,
+    # so `base_feed` above had it and `whale_feed` below did not — the panel was
+    # varying two things at once and calling the result "the whale's effect".
+    # `dataclasses.replace` preserves the concrete class and every other field.
+    new_posts.append(replace(p, votes=(*p.votes, wv)))
     world.post_engagers[p.key].add("whale")
 world.posts = new_posts
 gw = SimGateway(world)

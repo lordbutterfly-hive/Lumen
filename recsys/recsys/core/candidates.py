@@ -19,6 +19,8 @@ SOURCE_PRIORITY: dict[CandidateSource, int] = {
     CandidateSource.INTEREST_COMMUNITY: 4,
     CandidateSource.INTEREST_TAG: 5,
     CandidateSource.OON_ALS: 6,
+    # Last resort: only fills slots nothing else could.
+    CandidateSource.POPULAR_FALLBACK: 7,
 }
 
 

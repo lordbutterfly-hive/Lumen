@@ -1,13 +1,32 @@
 """Q5b — the spam vector the gate can't see: sybil author + comment-count farming
 into the gate-EXEMPT cold-start interest lane."""
 from __future__ import annotations
+
+import pathlib
 import sys
-sys.path.insert(0, "/tmp/claude-1004/-home-clauderfly/fa2f34ba-7811-45c8-a634-26cb2cbffb1b/scratchpad/algo")
-from simworld import build_world, SimGateway, build_norm, EPOCH, NOW, COMMUNITY, TAGS, Account
+
+# ★ Derived from __file__ (2026-08-01). These were two hardcoded absolute paths:
+# a scratchpad from an unrelated session, and "/mnt/o/HIVE-BLOG-REBUILD/recsys",
+# which does not exist — so no panel ran from its own directory without
+# PYTHONPATH set by hand.
+#
+# Index 0 is DELIBERATE and stays: a measurement harness must bind to the tree
+# it sits in, never to an installed `recsys` that happens to be on the path, or
+# its numbers describe code nobody is looking at. The hazard the old code had
+# was not the precedence, it was pointing that precedence at a path outside the
+# repo; derived paths cannot drift. `metrics_v2.py` uses the same ordering.
+_HARNESS = pathlib.Path(__file__).resolve().parent
+sys.path.insert(0, str(_HARNESS))
+sys.path.insert(0, str(_HARNESS.parent))
+
 from datetime import timedelta
-from recsys.contracts import ViewerProfile, Post
+
+from simworld import COMMUNITY, EPOCH, NOW, TAGS, Account, SimGateway, build_norm, build_world
+
 from recsys.config import Settings
-from recsys.pipeline import rank_feed, build_trust_snapshot
+from recsys.contracts import ViewerProfile
+from recsys.core.vote_signal import AttributedPost
+from recsys.pipeline import build_trust_snapshot, rank_feed
 
 world = build_world(seed=7)
 settings = Settings()
@@ -15,14 +34,23 @@ settings = Settings()
 SPAM = "spammer"
 world.accounts[SPAM] = Account(SPAM, "photo", 0.1, 1.0, 25.0, True)
 world.follows = dict(world.follows); world.follows[SPAM] = frozenset()
-# 3 spam posts, each with 60 self-comments + 20 self-reblogs (children/reblog_count
-# carry no attribution -> cannot be excluded), zero votes.
+# 3 spam posts, each with 60 self-comments + 20 self-reblogs, zero votes.
+#
+# ★ ATTRIBUTED (2026-08-01). These were plain `Post`s carrying bare counters,
+# and once the world started emitting `AttributedPost` the scorer read the
+# spammer's engagement as EXACTLY ZERO — so this panel passed trivially, for the
+# wrong reason: it was measuring "a post with no attribution scores nothing",
+# not "self-engagement is excluded". Its spam `organic_pct` fell 0.122 -> 0.042
+# purely because the rest of the world gained signal while the spam post stayed
+# at zero. Naming the spammer as its own commenter/reblogger is what actually
+# exercises the §8.4 self-exclusion this panel exists to test.
 spam_posts = []
 for i in range(3):
-    p = Post(author=SPAM, permlink=f"spam-{i}", category="photo",
+    p = AttributedPost(author=SPAM, permlink=f"spam-{i}", category="photo",
              community=COMMUNITY["photo"], created=NOW - timedelta(hours=2 + i),
              children=60, reblog_count=20, author_reputation=25.0,
-             tags=TAGS["photo"], votes=())
+             tags=TAGS["photo"], votes=(),
+             commenters=(SPAM,), rebloggers=(SPAM,))
     spam_posts.append(p); world.posts.append(p)
     world.post_topic[p.key] = "photo"; world.post_engagers[p.key] = set()
 gw = SimGateway(world)

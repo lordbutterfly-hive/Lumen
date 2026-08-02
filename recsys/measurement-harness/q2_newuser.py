@@ -1,15 +1,42 @@
 """Q2 — new-user cold start: what do they get, does the gate strangle them,
 does the feed improve with engagement?"""
 from __future__ import annotations
+
+import pathlib
 import sys
-sys.path.insert(0, "/tmp/claude-1004/-home-clauderfly/fa2f34ba-7811-45c8-a634-26cb2cbffb1b/scratchpad/algo")
-from simworld import (build_world, SimGateway, build_norm, EPOCH, NOW, TOPICS, COMMUNITY, TAGS,
-                      ndcg_at_k, mean_rel_at_k, Account)
-import numpy as np
+
+# ★ Derived from __file__ (2026-08-01). These were two hardcoded absolute paths:
+# a scratchpad from an unrelated session, and "/mnt/o/HIVE-BLOG-REBUILD/recsys",
+# which does not exist — so no panel ran from its own directory without
+# PYTHONPATH set by hand.
+#
+# Index 0 is DELIBERATE and stays: a measurement harness must bind to the tree
+# it sits in, never to an installed `recsys` that happens to be on the path, or
+# its numbers describe code nobody is looking at. The hazard the old code had
+# was not the precedence, it was pointing that precedence at a path outside the
+# repo; derived paths cannot drift. `metrics_v2.py` uses the same ordering.
+_HARNESS = pathlib.Path(__file__).resolve().parent
+sys.path.insert(0, str(_HARNESS))
+sys.path.insert(0, str(_HARNESS.parent))
+
 from collections import Counter
-from recsys.contracts import ViewerProfile, EngagementEdge
+
+from simworld import (
+    COMMUNITY,
+    EPOCH,
+    NOW,
+    TAGS,
+    Account,
+    SimGateway,
+    build_norm,
+    build_world,
+    mean_rel_at_k,
+    ndcg_at_k,
+)
+
 from recsys.config import Settings
-from recsys.pipeline import rank_feed, build_trust_snapshot
+from recsys.contracts import EngagementEdge, ViewerProfile
+from recsys.pipeline import build_trust_snapshot, rank_feed
 
 world = build_world(seed=7)
 gw = SimGateway(world)
@@ -59,8 +86,9 @@ print(f"    new user reaches {len(new_keys & photo_keys)} photo posts "
       f"({len(new_keys & photo_keys)/len(photo_keys):.0%}); established reaches "
       f"{len(est_keys & photo_keys)} ({len(est_keys & photo_keys)/len(photo_keys):.0%})")
 # gated-candidate survival for the established viewer
-from recsys.pipeline import gather_candidates, _suppressed
 from recsys.core.second_degree import filter_eligible
+from recsys.pipeline import gather_candidates
+
 cand = gather_candidates(vest, gw, EPOCH, 400, settings)
 gated = [c for c in cand if c.source.requires_second_degree]
 gated_keys = frozenset(c.post.key for c in gated)

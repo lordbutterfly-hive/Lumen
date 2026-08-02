@@ -125,6 +125,62 @@ class ScoreWeights:
     # raising it toward 1.0 once OON/interest-lane CF quality is measured
     # rather than assumed.
     organic_cf_oon_scale: float = 0.0
+
+    #: Weight of the VIEWER-OWN affinity percentile inside the organic slice
+    #: (2026-08-01). Applied as `organic = blend(quality_pct, viewer_pct, w)`,
+    #: i.e. it trades against the quality percentile only — the 10/10/80 outer
+    #: split and `organic_cf` are untouched.
+    #:
+    #: WHY THIS IS NOT "just raise organic_cf". CF is a CROSS-VIEWER signal
+    #: (other people's co-engagement decides what you see), which is exactly why
+    #: H06/H07 capped it at 8% in-network and 0% elsewhere. Those caps are still
+    #: right. This term is VIEWER-OWN: only the viewer's own outgoing engagement
+    #: moves it, so the worst an attacker achieves by moving it is changing their
+    #: own feed. Self-harm, not an attack — which is why it can carry real weight
+    #: where CF cannot. See recsys/core/viewer_affinity.py for the invariant.
+    #:
+    #: DEFAULT 0.0 = OFF, deliberately. At 0.0 `blend` returns the quality
+    #: percentile unchanged, so every existing measurement, tuning table and
+    #: panel reproduces bit-for-bit. Turning this on is a measured decision:
+    #: raise it, re-run the composition-immune reads (mean_q@20, stack_capture_g,
+    #: auc_own_m5) and require them flat-or-up. Own-topic share rising while
+    #: mean_q falls is the documented REGRESSION signature and vetoes the change.
+    #: Council C's stated target for a cold viewer is ~0.3.
+    organic_viewer: float = 0.0
+
+    #: Weights on DISTINCT-PERSON breadth inside the organic term (§6): how much
+    #: one more independent voter / commenter / reblogger is worth. Previously
+    #: module constants in `core/vote_signal.py`, so they could not be swept,
+    #: A/B'd or rolled back without a code change — which is why they had never
+    #: been swept.
+    #:
+    #: ★ AN OPEN CONTRADICTION, NOT A SETTLED TUNING (2026-08-01). At these
+    #: values one upvoter is worth ~2 distinct commenters (measured marginal
+    #: dfinal on real pool posts: +0.0639 per upvoter vs +0.0359 per commenter,
+    #: ratio 0.562). The TRUST layer values the same two actions in the opposite
+    #: direction and far more sharply — `RealGraphWeights.reply = 5.0` against
+    #: `upvote = 1.0`. The two layers disagree about what a comment means by
+    #: roughly 9x, and the product goal is explicitly to rank by where people
+    #: comment and engage.
+    #:
+    #: Swept on the project's own instrument (production-shaped, 24 viewers), a
+    #: reply weight of 0.5-0.8 is flat-or-BETTER on every column q7 treats as a
+    #: decision column, while discussed posts rank far better:
+    #:
+    #:     reply_w   mean_q@20   ownAUC@5   own capture   corr(rank, comments)
+    #:       0.30      0.7100     0.7430        0.8255                  0.2317
+    #:       0.50      0.7109     0.7471        0.8293                  0.2930
+    #:       0.80      0.7112     0.7509        0.8298                  0.3680
+    #:
+    #: NOT changed here, deliberately. The simulator generates comments with
+    #: probability proportional to quality, so comments are a quality proxy BY
+    #: CONSTRUCTION and the sweep cannot prove 0.8 is right on Hive — only that
+    #: 0.3 is not the optimum of the project's own instrument. This is the same
+    #: LIVE-DATA gate already applied to `organic_cf`. The knob now exists so the
+    #: decision can be made on real data instead of a code edit.
+    organic_voter_breadth: float = 0.5
+    organic_reply_breadth: float = 0.3
+    organic_reblog_breadth: float = 0.5
     organic_post_share: float = 1.0 / 3.0
     # Additive freshness bonus inside the quality raw, ON THE SAME SCALE as the
     # log-engagement term (never a multiplicative decay, so an old well-engaged
@@ -236,6 +292,38 @@ class DiversityConfig:
     topic_affinity_strength: float = 0.5
     top_k: int = 200
 
+    #: How many of the FIRST PAGE's slots are reserved for exploration
+    #: (2026-08-01). 0 = off, and off is the default.
+    #:
+    #: WHY THIS EXISTS. `rank_feed` is a pure function of its inputs, and the
+    #: package contains no randomness, no session state and no impression memory
+    #: — grep for "random", "seen", "impression": nothing outside comments. So
+    #: two calls with the same inputs return byte-identical feeds BY
+    #: CONSTRUCTION. Measured: a returning viewer's top-20 was identical across
+    #: 77-79 of every 79 consecutive sessions, with the diversity re-ranker both
+    #: ON and OFF, because the re-ranker shapes WHICH posts are frozen in, never
+    #: whether the feed can change at all. Nothing in the pipeline generates new
+    #: information, so nothing can dislodge an established ordering.
+    #:
+    #: Exploration is the only lever that gives an unexposed post any impression
+    #: at all, which also makes it the only counterweight to the filter bubble
+    #: the viewer-own affinity channel creates (see
+    #: tests/test_engagement_drift.py's documented full-capture case).
+    #:
+    #: The slots are filled DETERMINISTICALLY per (viewer, session bucket): a
+    #: refresh inside the bucket returns the same feed, so a user cannot re-roll
+    #: for a better one, while a later session differs.
+    explore_slots: int = 0
+
+    #: Size of the exploration session bucket, in hours. Feeds vary between
+    #: buckets and are stable within one.
+    explore_bucket_hours: int = 6
+
+    #: The visible window exploration is drawn INTO — the first page. Slots are
+    #: taken from the tail of this window and filled from below it, so
+    #: exploration costs the weakest visible items rather than the strongest.
+    explore_window: int = 20
+
     def __post_init__(self) -> None:
         if not 0.0 <= self.topic_affinity_strength <= 1.0:
             raise ValueError(
@@ -342,6 +430,80 @@ class GraphCredConfig:
     # self-dealers and nobody else, and only floors above this value start
     # cutting into new and weakly-engaged accounts.
     min_vouched_score: float = 0.10
+
+    #: How many hops of vouch propagation to walk out from ``trusted_seeds``
+    #: (2026-08-01, directed-cycle fix).
+    #:
+    #: The vouched tier used to be "did this account receive engagement from
+    #: outside its own detected ring". A DIRECTED cycle S0->S1->S2->S0 contains
+    #: no reciprocal pair, so ``detect_rings`` finds no component, so each sock
+    #: is "outside" the others and 3 accounts + 3 one-way upvotes vouched the
+    #: whole cycle — buying unbounded breadth instead of the ~1.0 unknown cap.
+    #:
+    #: Vouch is now ANCHORED: it starts at ``trusted_seeds`` and propagates only
+    #: to accounts engaged by someone already vouched. A closed sock cycle
+    #: touches no seed and therefore never enters the set.
+    #:
+    #: BOUNDED ROUNDS ARE LOAD-BEARING, NOT A TUNING KNOB. Measured on the
+    #: seed-7 world, if an attacker buys ONE genuine endorsement from a vouched
+    #: account into the cycle: 3 rounds vouches 1 of 10 socks, 5 rounds vouches
+    #: 3, and UNBOUNDED propagation vouches all 10 — i.e. transitive closure
+    #: reopens the hole completely. One purchased endorsement must buy at most a
+    #: few hops, so this is a cost multiplier on the attack, not a performance
+    #: setting. Do not implement as a closure; do not raise casually.
+    #:
+    #: 3 measured as the sweet spot: identical honest coverage to the old rule
+    #: (145/145 on the seed-7 world) with the attack fully closed (0/10 socks).
+    vouch_max_rounds: int = 3
+
+    #: Maximum accounts ONE voucher can transmit vouch to per propagation round.
+    #:
+    #: ★ THE BOUND THAT ACTUALLY BINDS (2026-08-01). ``vouch_max_rounds`` caps
+    #: propagation DEPTH, and the attacker chooses the depth — so it bounded
+    #: nothing. Breadth per round was unlimited: every account engaged by anyone
+    #: already vouched was added, so one purchased (or merely reciprocated)
+    #: endorsement plus a single hub vouched the hub's entire engagement list at
+    #: depth 1. Measured against a real snapshot with real seeds:
+    #:
+    #:     attacker structure          socks   vouched
+    #:     directed 10-cycle              10         0   <- the documented target
+    #:     chain b=2 d=8                 511         7   <- the OLD fixture's shape
+    #:     star  b=500 d=1               500       500   <- wide and shallow
+    #:     star-of-stars b=50 d=2       2500      2500
+    #:
+    #: The old fixture was a chain, which is why depth looked like the binding
+    #: constraint. It never was.
+    #:
+    #: Chosen on a measured sweep (3000-account honest worlds vs a 500-sock star
+    #: one hop from one endorsement). A cap costs an honest graph NOTHING until
+    #: it falls below that graph's own out-degree, while attacker reach falls
+    #: linearly in the cap:
+    #:
+    #:     cap    honest fan-out 3 / 10 / 50      attacker star-500
+    #:     none      1.3%  /  37.0%  /  100%                    500
+    #:     100       1.3%  /  37.0%  /  100%                    200
+    #:      50       1.3%  /  37.0%  /  100%                    100   <- shipped
+    #:      25       1.3%  /  37.0%  /  71.7%                    50
+    #:      10       1.3%  /  37.0%  /  14.0%                    20
+    #:
+    #: 50 is the tightest value that degraded NO honest topology measured, for a
+    #: 5x cut in what one endorsement buys. Tighter is available and strictly
+    #: safer if the honest cost turns out to be acceptable.
+    #:
+    #: ★ CALIBRATION STILL REQUIRED BEFORE LIVE USE. The honest worlds above are
+    #: synthetic trees; Hive's real out-degree distribution has not been
+    #: measured. A genuine high-volume curator may engage far more than 50
+    #: distinct accounts per window, and every engagee past the cap simply goes
+    #: un-vouched BY THEM (anyone else may still vouch them). Measure the real
+    #: distribution, then set this above the honest bulk and below farm scale.
+    #: Set to 0 to disable the cap entirely and restore the unbounded — and
+    #: measurably vulnerable — behaviour.
+    #:
+    #: Ties are broken by graph-cred score, so a voucher spends its budget on
+    #: its most credible engagees first — a sock swarm, whose members all sit at
+    #: the same low score, cannot arrange to be preferred.
+    vouch_max_fanout: int = 50
+
     # Relocated-newcomer-blackout fix (§8.3): a reciprocal pair flagged by
     # ring.py's insularity test is only treated as PROVEN self-dealing --
     # zeroed weight, eligible for the 0.0 band -- if it shows SCALE (the
@@ -372,6 +534,35 @@ class GraphCredConfig:
 
 
 @dataclass(frozen=True)
+class RingConfig:
+    """Knobs for the reciprocity/insularity ring detector (:mod:`recsys.core.ring`).
+
+    ★ These were FUNCTION DEFAULTS with no Settings field at all (found
+    2026-08-01): ``detect_rings(..., reciprocity_min=0.5, min_group=2)``, and the
+    single production call passed neither. They could not be tuned, ablated or
+    measured without editing code — which is precisely the shape the H01/F-R2
+    hardening closed elsewhere.
+    """
+
+    #: How balanced a mutual pair must be to count as a ring edge: ``min/max``
+    #: of the two directions' weights. 1.0 demands perfect symmetry; 0.0 accepts
+    #: any mutual pair however lopsided.
+    reciprocity_min: float = 0.5
+
+    #: Smallest connected component treated as a ring. 2 = a mutual pair.
+    min_group: int = 2
+
+    def __post_init__(self) -> None:
+        if not (0.0 <= self.reciprocity_min <= 1.0):
+            raise ValueError(f"reciprocity_min must be in [0, 1], got {self.reciprocity_min}")
+        if self.min_group < 2:
+            raise ValueError(
+                "min_group must be >= 2 (a ring needs two accounts), got "
+                f"{self.min_group}"
+            )
+
+
+@dataclass(frozen=True)
 class FloodingConfig:
     """Post-frequency cap for OON discovery eligibility (§8.8)."""
 
@@ -390,6 +581,23 @@ class ALSConfig:
     regularization: float = 0.1
     alpha: float = 40.0
     cf_weight: float = 1.5
+
+    #: How many CF-affine authors to SOURCE candidates from (2026-08-01).
+    #: 0 = off, and off is the default.
+    #:
+    #: `CandidateSource.OON_ALS` was declared, priority-mapped in
+    #: `candidates.SOURCE_PRIORITY` and gated in `second_degree` — and produced
+    #: by NOTHING. Collaborative filtering could only ever re-score posts that
+    #: the follow graph, a subscription or a signup interest had already
+    #: surfaced; it has never introduced a single post to anyone. So
+    #: personalisation-by-DISCOVERY did not exist, and no weight change could
+    #: create it, because the candidates were never in the pool to weight.
+    #:
+    #: `OON_ALS` requires_second_degree, so anything sourced here still clears
+    #: the vouch gate and the graph-cred floor — the correct posture for a
+    #: source driven by other people's co-engagement, and deliberately unlike
+    #: the gate-exempt interest lane.
+    als_source_authors: int = 0
     seed: int = 0
     # §H11 between-batch anomaly gate (wired into
     # :func:`recsys.pipeline.build_trust_snapshot` via
@@ -574,6 +782,7 @@ class Settings:
     real_graph: RealGraphWeights = field(default_factory=RealGraphWeights)
     graph_cred: GraphCredConfig = field(default_factory=GraphCredConfig)
     flooding: FloodingConfig = field(default_factory=FloodingConfig)
+    ring: RingConfig = field(default_factory=RingConfig)
     als: ALSConfig = field(default_factory=ALSConfig)
     vote_signal: VoteSignalConfig = field(default_factory=VoteSignalConfig)
     hafsql: HafsqlConfig = field(default_factory=HafsqlConfig)

@@ -68,7 +68,12 @@ def test_interest_candidates_empty_gateway_is_empty() -> None:
     assert interest_candidates(viewer, gateway, EPOCH, limit=10, cfg=cfg) == []
 
 
-def test_popular_fallback_pulls_from_gateway_and_tags_interest_tag() -> None:
+def test_popular_fallback_is_labelled_as_padding_not_as_interest() -> None:
+    # ★ 2026-08-01: this padding used to be emitted AS ``INTEREST_TAG``. It is
+    # global popularity with no relation to anything the viewer picked, so
+    # labelling it as interest content made the interest lane's own coverage
+    # unfalsifiable — in the measured follow-cliff case 17 of 20 feed slots were
+    # popularity padding that read, in the output, as genuine interest matches.
     popular_post = make_post(author="carol", permlink="pop1")
     gateway = FakeGateway(popular=[popular_post])
 
@@ -76,7 +81,10 @@ def test_popular_fallback_pulls_from_gateway_and_tags_interest_tag() -> None:
 
     assert len(result) == 1
     assert result[0].post.key == popular_post.key
-    assert result[0].source == CandidateSource.INTEREST_TAG
+    assert result[0].source == CandidateSource.POPULAR_FALLBACK
+    # The property that DID matter is preserved: the viewer this serves has no
+    # follow graph, so the padding must stay exempt from the second-degree gate.
+    assert result[0].source.requires_second_degree is False
 
 
 def test_popular_fallback_empty_gateway_is_empty() -> None:
@@ -102,9 +110,24 @@ def test_popular_fallback_respects_limit() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_interest_lane_sources_are_exactly_the_gate_exempt_pair() -> None:
-    expected = frozenset({CandidateSource.INTEREST_COMMUNITY, CandidateSource.INTEREST_TAG})
-    assert expected == INTEREST_LANE_SOURCES
+def test_every_ungated_non_network_lane_has_cf_suppressed() -> None:
+    """★ Derived, not hardcoded — because the hardcoded version failed silently.
+
+    This asserted a literal PAIR. When `POPULAR_FALLBACK` was split out of
+    `INTEREST_TAG` (2026-08-01) the padding lane left this set as a side effect
+    of a labelling change, quietly removing H07's CF suppression from the single
+    most promotable lane served to exactly the viewers H07 is about — and the
+    test still passed, because the pair it named was still accurate.
+
+    The real invariant is a DERIVATION: a lane that applies no author floor has
+    nothing standing between a poisoned co-engagement edge and the viewer, so
+    every such lane except the viewer's own network must have CF suppressed.
+    Stated this way, a new gate-exempt source fails here until someone decides
+    where it belongs, instead of defaulting to unsuppressed.
+    """
+    ungated = {s for s in CandidateSource if not s.requires_author_floor}
+    assert ungated - {CandidateSource.IN_NETWORK} == INTEREST_LANE_SOURCES
+    assert CandidateSource.POPULAR_FALLBACK in INTEREST_LANE_SOURCES
 
 
 def test_established_followless_true_for_followless_viewer_with_als_row() -> None:

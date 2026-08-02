@@ -607,31 +607,75 @@ def test_established_viewer_with_dead_follows_is_never_served_an_empty_feed() ->
 
 
 def test_near_empty_feed_is_topped_up_without_losing_the_viewers_own_posts() -> None:
-    # 3 candidates when the feed wants 20 is nearly as broken as 0. Top up to
-    # min_feed_size, and keep all three genuine posts.
+    # 3 candidates when the feed wants 20 is nearly as broken as 0. Top up to at
+    # least min_feed_size, and keep all three genuine posts.
     own = [make_post("live", f"l{i}") for i in range(3)]
     gateway = FakeGateway(in_network=own, popular=_popular())
     viewer = make_viewer("quiet", follows=frozenset({"live"}))
 
     feed = rank_feed(viewer, gateway, _norm(), now=NOW, since=EPOCH, trust_policy=_PERMISSIVE)
 
-    assert len(feed) == DEFAULT_SETTINGS.fallback.min_feed_size == 20
+    assert len(feed) >= DEFAULT_SETTINGS.fallback.min_feed_size == 20
     assert {p.key for p in own} <= {sc.post.key for sc in feed}
 
 
-def test_top_up_is_exactly_the_shortfall_so_there_is_no_cliff_at_the_threshold() -> None:
-    # One post short of the threshold gains exactly one filler; at the
-    # threshold the fallback never runs. The transition is continuous.
+def test_feed_length_is_monotonic_in_the_follow_graph() -> None:
+    """★ More follows must never produce a SHORTER feed.
+
+    ★ REPLACES an "exactly the shortfall" assertion (2026-08-01). That property
+    was the cause of a worse cliff than the one it prevented: padding depth was
+    the FULL admissible pool for a viewer with zero eligible posts and exactly
+    one screen for a viewer with one, so a new user's first follow took their
+    feed from ~200 posts to 20 and held it there until roughly their sixth
+    active follow. Measured, 480-post window: 0 follows -> 200 served, 1 -> 20,
+    5 -> 20, 6 -> 24, 50 -> 200.
+
+    What still matters, and is asserted here, is that padding is a FALLBACK: it
+    stops completely the moment the viewer's own network can fill a screen, and
+    it never displaces their content (see the neighbouring test). Depth below
+    that threshold is now continuous in the pool rather than a step.
+    """
     popular = _popular()
-    for own_count, expected in ((19, 20), (20, 20), (21, 21)):
+    lengths = []
+    for own_count in (0, 1, 4, 5, 6, 20, 25, 40):
         gateway = FakeGateway(
             in_network=[make_post("live", f"l{i}") for i in range(own_count)], popular=popular
         )
-        viewer = make_viewer("quiet", follows=frozenset({"live"}))
+        viewer = make_viewer(
+            "quiet", follows=frozenset({"live"}) if own_count else frozenset()
+        )
         feed = rank_feed(viewer, gateway, _norm(), now=NOW, since=EPOCH, trust_policy=_PERMISSIVE)
-        assert len(feed) == expected
-        fillers = sum(1 for sc in feed if sc.post.author.startswith("pop"))
-        assert fillers == max(0, 20 - own_count)
+        own_in_feed = [sc for sc in feed if sc.post.author == "live"]
+        assert len(own_in_feed) == own_count, "the viewer lost their own posts"
+        assert feed[:own_count] == own_in_feed, "padding displaced the viewer's own posts"
+        lengths.append(len(feed))
+    assert lengths == sorted(lengths), (
+        f"feed length is not monotonic in the follow graph: {lengths} — more "
+        "follows must never produce a shorter feed"
+    )
+
+
+def test_the_first_follow_does_not_truncate_the_feed() -> None:
+    """★ THE CLIFF ITSELF, asserted on served feed length.
+
+    A viewer with no follows and a viewer with one follow must get feeds of
+    comparable depth. Before this fix the ratio was 10x.
+    """
+    popular = _popular()
+    followless = rank_feed(
+        make_viewer("new", follows=frozenset()),
+        FakeGateway(popular=popular), _norm(), now=NOW, since=EPOCH,
+        trust_policy=_PERMISSIVE,
+    )
+    one_follow = rank_feed(
+        make_viewer("new", follows=frozenset({"live"})),
+        FakeGateway(in_network=[make_post("live", "l0")], popular=popular),
+        _norm(), now=NOW, since=EPOCH, trust_policy=_PERMISSIVE,
+    )
+    assert len(followless) > 20, "fixture too small to show the cliff"
+    assert len(one_follow) >= len(followless), (
+        f"one follow cut the feed from {len(followless)} to {len(one_follow)} posts"
+    )
 
 
 def test_padding_never_outranks_the_viewers_own_posts() -> None:
@@ -651,13 +695,32 @@ def test_padding_never_outranks_the_viewers_own_posts() -> None:
 
     feed = rank_feed(viewer, gateway, _norm(), now=NOW, since=EPOCH, trust_policy=_PERMISSIVE)
 
-    assert [sc.post.key for sc in feed[:3]] == [p.key for p in own]
+    # The three own posts are identical apart from permlink, so they TIE on
+    # score. Their relative order is therefore decided by the tie-break, which
+    # is per-viewer as of 2026-08-01 (was global-alphabetical, which handed a
+    # permanent advantage to whoever sorts first). Assert the invariant this
+    # test is actually named for — padding never displaces the viewer's own
+    # posts — rather than the incidental ordering among tied items.
+    assert {sc.post.key for sc in feed[:3]} == {p.key for p in own}
     assert all(sc.post.author.startswith("pop") for sc in feed[3:])
 
 
-def test_healthy_feed_is_untouched_by_the_fallback() -> None:
-    # The top-up must not dilute a feed that is already full: a viewer with a
-    # healthy pool gets a byte-identical feed whether or not popular posts exist.
+def test_a_healthy_feed_is_never_DILUTED_by_the_fallback() -> None:
+    """Padding may EXTEND a feed; it must never enter or reorder the real one.
+
+    ★ WEAKENED DELIBERATELY FROM "untouched" TO "undiluted" (2026-08-01). The
+    old assertion was that a healthy viewer's feed is byte-identical whether or
+    not popular posts exist — i.e. padding runs only below one screen. That
+    threshold is what made served feed length non-monotonic in the follow graph
+    (4 follows -> 200 posts, 5 follows -> 20 and dead-ends), because pad-or-not
+    was decided at one screen while how-deep was decided at the whole pool.
+
+    Aligning the two means a healthy viewer's feed now has a popular TAIL. The
+    property that actually protects them is unchanged and is what is asserted
+    here: every post from their own network comes first, in the same order, and
+    no padding appears among them. Dilution would be padding interleaved into or
+    displacing the real pool — that is what must never happen.
+    """
     own = [make_post("live", f"l{i}") for i in range(40)]
     viewer = make_viewer("busy", follows=frozenset({"live"}))
     without = rank_feed(
@@ -669,9 +732,12 @@ def test_healthy_feed_is_untouched_by_the_fallback() -> None:
         since=EPOCH, trust_policy=_PERMISSIVE,
     )
 
-    assert with_popular == without
-    assert len(with_popular) == 40
-    assert not any(sc.post.author.startswith("pop") for sc in with_popular)
+    assert len(without) == 40
+    assert with_popular[:40] == without, "the viewer's own feed was reordered or displaced"
+    assert not any(sc.post.author.startswith("pop") for sc in with_popular[:40]), (
+        "padding was interleaved into the viewer's own posts"
+    )
+    assert len(with_popular) > 40, "the feed should extend rather than dead-end"
 
 
 def test_topped_up_fallback_still_respects_mutes_suppression_and_nsfw() -> None:
@@ -703,24 +769,70 @@ def test_starved_feed_stays_short_when_the_network_has_nothing_to_offer() -> Non
     assert rank_feed(viewer, gateway, _norm(), now=NOW, since=EPOCH, trust_policy=_PERMISSIVE) == []
 
 
-def test_established_viewer_subscribed_community_still_gates_strangers() -> None:
-    # An established viewer subscribes to a community a stranger posts into, with
-    # zero in-network engagers. Per §8.1 the subscribed-community source is OON
-    # and must NOT bypass the gate (regression for the cold-start exemption bug).
+def test_established_viewer_subscribed_community_admits_clean_strangers_only() -> None:
+    """A subscribed community admits a stranger — but only a CREDIBLE one.
+
+    ★ DELIBERATE CHANGE OF THE §8.1 RULE (2026-08-01). This used to assert that a
+    stranger posting into a community the viewer subscribed to was admitted ONLY
+    after a followed account engaged it. That rule was written when the
+    second-degree vouch gate was the only protection available, and measured end
+    to end it did not gate the lane, it DELETED it: 90 candidates -> 0 eligible ->
+    0 feed slots, and a new author posting into a community reached 0 of 40 of its
+    subscribers. The gate asks "has someone I follow already engaged this", which
+    is the predicate OON_ENGAGED selects on and which no new post can satisfy, so
+    a subscription delivered nothing a viewer was not already getting.
+
+    The PURPOSE of the rule — a stranger must not be able to self-inject into
+    anyone's feed — is preserved by two protections that did not exist when it
+    was written, and this test now asserts both:
+      1. the author graph-cred floor, so self-dealers and ring members are
+         refused (`requires_author_floor` stays True for OON_COMMUNITY);
+      2. the per-author OON flooding cap, so nobody can flood a community feed.
+
+    What is deliberately given up: an unknown but credible author can now reach a
+    viewer who explicitly subscribed to their community. That is what subscribing
+    means, and it is the only route by which a community can introduce anyone new.
+    """
     stranger_post = make_post("stranger", "s1", community="hive-1")
     gateway = FakeGateway(community=[stranger_post])
     viewer = make_viewer(
         "me", follows=frozenset({"alice"}), subscribed_communities=frozenset({"hive-1"})
     )
 
-    assert rank_feed(viewer, gateway, _norm(), now=NOW, since=EPOCH, trust_policy=_PERMISSIVE) == []
-
-    # It's admitted only once a followed account has engaged it.
-    vouched = FakeGateway(
-        community=[stranger_post], engagers={"@stranger/s1": frozenset({"alice"})}
+    admitted = rank_feed(viewer, gateway, _norm(), now=NOW, since=EPOCH, trust_policy=_PERMISSIVE)
+    assert {sc.post.key for sc in admitted} == {"@stranger/s1"}, (
+        "subscribing to a community must actually deliver its posts"
     )
-    admitted = rank_feed(viewer, vouched, _norm(), now=NOW, since=EPOCH, trust_policy=_PERMISSIVE)
-    assert {sc.post.key for sc in admitted} == {"@stranger/s1"}
+
+    # ...but a stranger caught self-dealing is still refused.
+    snapshot = TrustSnapshot(
+        graph_creds={"stranger": _cred(0.0)}, trusted_seeds=frozenset({"alice"})
+    )
+    gated = rank_feed(
+        viewer, gateway, _norm(), now=NOW, since=EPOCH,
+        snapshot=snapshot, trust_policy=_PERMISSIVE,
+    )
+    assert gated == [], "a floored author must not ride a community subscription in"
+
+
+def test_a_single_author_cannot_flood_a_subscribed_community_feed() -> None:
+    """★ The second protection standing in for the removed vouch gate.
+
+    Without this the community lane is an unbounded megaphone for one account:
+    the flooding cap is what keeps "a stranger may reach you" from becoming "a
+    stranger may BE your feed".
+    """
+    posts = [make_post("stranger", f"s{i}", community="hive-1") for i in range(30)]
+    viewer = make_viewer(
+        "me", follows=frozenset({"alice"}), subscribed_communities=frozenset({"hive-1"})
+    )
+    feed = rank_feed(
+        viewer, FakeGateway(community=posts), _norm(), now=NOW, since=EPOCH,
+        trust_policy=_PERMISSIVE,
+    )
+    assert len(feed) <= DEFAULT_SETTINGS.flooding.max_oon_posts_per_author, (
+        f"one author placed {len(feed)} posts in a subscribed-community feed"
+    )
 
 
 def _cred(score: float, *, outside_engaged: bool | None = None) -> GraphCred:

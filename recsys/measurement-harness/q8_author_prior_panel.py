@@ -50,11 +50,23 @@ that has stopped contributing should.
 """
 from __future__ import annotations
 
+import pathlib
 import sys
-from datetime import datetime
-from typing import TYPE_CHECKING
 
-sys.path.insert(0, "/mnt/o/HIVE-BLOG-REBUILD/recsys/measurement-harness")
+# ★ Derived from __file__ (2026-08-01). These were two hardcoded absolute paths:
+# a scratchpad from an unrelated session, and "/mnt/o/HIVE-BLOG-REBUILD/recsys",
+# which does not exist — so no panel ran from its own directory without
+# PYTHONPATH set by hand.
+#
+# Index 0 is DELIBERATE and stays: a measurement harness must bind to the tree
+# it sits in, never to an installed `recsys` that happens to be on the path, or
+# its numbers describe code nobody is looking at. The hazard the old code had
+# was not the precedence, it was pointing that precedence at a path outside the
+# repo; derived paths cannot drift. `metrics_v2.py` uses the same ordering.
+_HARNESS = pathlib.Path(__file__).resolve().parent
+sys.path.insert(0, str(_HARNESS))
+sys.path.insert(0, str(_HARNESS.parent))
+from typing import TYPE_CHECKING
 
 from metrics_v2 import (
     DECOMP_CONFIGS,
@@ -63,67 +75,34 @@ from metrics_v2 import (
     penalty_decomposition,
     viewer_metrics,
 )
-from simworld import COMMUNITY, EPOCH, NOW, TOPICS, SimGateway, build_norm, build_world
+from simworld import (
+    COMMUNITY,
+    EPOCH,
+    NOW,
+    TOPICS,
+    PriorlessSimGateway,
+    SimGateway,
+    build_norm,
+    build_world,
+)
 
 from recsys.config import DiversityConfig, Settings
 from recsys.contracts import ViewerProfile
-from recsys.core.scoring import AuthorEngagement, AuthorPriorGateway, post_base_engagement
-from recsys.core.vote_signal import VoterTrust
+from recsys.core.scoring import AuthorPriorGateway
 from recsys.pipeline import build_trust_snapshot, rank_feed
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    pass
 
 BIG = 100_000  # top_k beyond any pool size -> full preference order (prefix-stable)
 
 
-class AuthorPriorSimGateway(SimGateway):
-    """``SimGateway`` that also serves the author-pooled window aggregate,
-    against the CURRENT (2026-07-22, H05-hardened) ``AuthorPriorGateway``
-    protocol.
-
-    In-memory twin of ``_SQL_AUTHOR_ENGAGEMENT``: for each requested author,
-    sum ``log10(1 + independent engagement)`` over their top-level window
-    posts, where "independent" excludes self unconditionally plus whatever
-    additional identities ``excluded`` names for that author (stake lineage +
-    ring, when the caller supplies them) — exactly the set
-    ``recsys.pipeline._author_priors`` derives from the trust snapshot.
-
-    H05: also applies the SAME ``trust`` (``VoterTrust``) breadth budget each
-    post's OWN engagement already gets, via ``post_base_engagement``'s
-    ``trust=`` kwarg, before summing into ``total_base`` — mirroring
-    ``_SQL_AUTHOR_ENGAGEMENT``'s per-channel ``vouched + LEAST(unknown, ...)``
-    credit. Without it, this gateway would still let a swarm of unknown-tier
-    sock upvotes on an author's OTHER window posts inflate the pooled prior
-    even though ``own_base`` (per-candidate scoring) is already budgeted —
-    exactly the gap H05 closes. ``trust=None`` (no snapshot) is the honest
-    unbudgeted degrade, matching the live query's collapse to the raw count.
-    """
-
-    def author_engagement(
-        self,
-        authors: frozenset[str],
-        since: datetime,
-        excluded: Mapping[str, frozenset[str]] | None = None,
-        *,
-        trust: VoterTrust | None = None,
-    ) -> dict[str, AuthorEngagement]:
-        excluded = excluded or {}
-        counts: dict[str, int] = {}
-        totals: dict[str, float] = {}
-        for p in self.w.posts:
-            if p.created < since or p.author not in authors:
-                continue
-            ex = excluded.get(p.author, frozenset()) | {p.author}
-            counts[p.author] = counts.get(p.author, 0) + 1
-            totals[p.author] = totals.get(p.author, 0.0) + post_base_engagement(
-                p, ex, trust=trust
-            )
-        return {
-            a: AuthorEngagement(posts=counts[a], total_base=totals[a]) for a in counts
-        }
-
-
+# ★ The inline gateway that used to live here was DELETED (2026-08-01). Its
+# implementation — the one that correctly forwards `trust` to
+# `post_base_engagement` — was promoted to `simworld.SimGateway`, so every panel
+# now measures with it instead of only this one. Two live copies of the same
+# in-memory twin were free to drift apart, and had: the other copy omitted the
+# trust budget entirely.
 world = build_world(seed=7)
 norm = build_norm(world)
 seeds: set[str] = set()
@@ -131,10 +110,15 @@ for t in TOPICS:
     tops = sorted([a for a in world.authors() if a.topic == t], key=lambda a: -a.reputation)[:2]
     seeds.update(a.name for a in tops)
 
-gw_no_prior = SimGateway(world)
-gw_with_prior = AuthorPriorSimGateway(world)
-assert not isinstance(gw_no_prior, AuthorPriorGateway), "plain SimGateway must NOT satisfy Protocol"
-assert isinstance(gw_with_prior, AuthorPriorGateway), "AuthorPriorSimGateway must satisfy Protocol"
+# ★ The control is now EXPLICIT (2026-08-01). This used to be a plain
+# `SimGateway`, which was prior-less only by accident — and because every other
+# panel also used the plain gateway, they were all silently measuring this
+# control rather than the shipped algorithm. `author_engagement` now lives on
+# `SimGateway`, so the prior-less instrument has to be asked for by name.
+gw_no_prior = PriorlessSimGateway(world)
+gw_with_prior = SimGateway(world)
+assert not isinstance(gw_no_prior, AuthorPriorGateway), "PriorlessSimGateway must NOT satisfy Protocol"
+assert isinstance(gw_with_prior, AuthorPriorGateway), "SimGateway must satisfy Protocol"
 
 # Trust snapshot depends only on engagement_edges/follow_graph/stake_lineage —
 # all inherited unchanged from SimGateway — so it is identical regardless of

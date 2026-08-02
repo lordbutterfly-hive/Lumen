@@ -55,7 +55,7 @@ the pre-rebuild quality raw.
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol, runtime_checkable
@@ -70,6 +70,7 @@ from recsys.contracts import (
     ScoredCandidate,
 )
 from recsys.core.normalize import percentile_rank
+from recsys.core.viewer_affinity import blend as viewer_blend
 from recsys.core.vote_signal import VoterTrust, independent_organic_engagement
 
 
@@ -176,6 +177,7 @@ def post_base_engagement(
     *,
     trust: VoterTrust | None = None,
     require_attribution: bool = False,
+    weights: ScoreWeights | None = None,
 ) -> float:
     """One post's log-compressed independent engagement — the atom every
     other quantity here is built from, and the scale the §4 organic sample is
@@ -189,7 +191,11 @@ def post_base_engagement(
     return math.log10(
         1.0
         + independent_organic_engagement(
-            post, excluded, trust=trust, require_attribution=require_attribution
+            post,
+            excluded,
+            trust=trust,
+            require_attribution=require_attribution,
+            weights=weights,
         )
     )
 
@@ -271,7 +277,11 @@ def organic_quality_raw(
     behaviour the §4 norm sample is built on.
     """
     own_base = post_base_engagement(
-        post, excluded, trust=trust, require_attribution=require_attribution
+        post,
+        excluded,
+        trust=trust,
+        require_attribution=require_attribution,
+        weights=weights,
     )
     pooled = pooled_author_base(own_base, prior, weights.organic_post_share)
     if weights.organic_recency == 0.0:
@@ -289,6 +299,7 @@ def score_candidate(
     norm: NormContext,
     weights: ScoreWeights,
     cf_percentile: float | None = None,
+    viewer_percentile: float | None = None,
 ) -> ScoredCandidate:
     """Percentile-normalize each raw signal and blend per the ``ScoreWeights``
     (§0, §3.3).
@@ -335,6 +346,19 @@ def score_candidate(
             else weights.organic_cf * weights.organic_cf_oon_scale
         )
         organic = (1.0 - cf_w) * quality + cf_w * cf_percentile
+    # ★ VIEWER-OWN AFFINITY (2026-08-01). Trades against the blended quality
+    # value only; `organic_cf` and the 10/10/80 outer split are untouched.
+    #
+    # This is the channel that makes engagement move a feed at all — measured
+    # before it existed, 30 rounds of consistent topic engagement shifted a
+    # viewer's topic share by 0.0000. It is deliberately NOT the CF term: CF is
+    # cross-viewer and poisonable by strangers (hence H06/H07's caps), whereas
+    # only the viewer's own outgoing engagement moves this one.
+    #
+    # `viewer_percentile is None` (no history, or the channel disabled) returns
+    # `organic` unchanged, so a viewer with nothing to personalise on is scored
+    # exactly as before rather than being blended toward zero.
+    organic = viewer_blend(organic, viewer_percentile, weights.organic_viewer)
     final = weights.vote * vote_norm + weights.reputation * rep_norm + weights.organic * organic
     return ScoredCandidate(
         post=candidate.post,
@@ -350,6 +374,7 @@ def score_candidates(
     cf_percentiles: Mapping[str, float] | None = None,
     *,
     cf_suppressed_sources: frozenset[CandidateSource] = frozenset(),
+    viewer_percentiles: Callable[[Candidate], float | None] | None = None,
 ) -> list[ScoredCandidate]:
     """Score each ``(candidate, vote_signal_raw, organic_raw)`` triple
     independently (§3.3).
@@ -386,6 +411,12 @@ def score_candidates(
                 None
                 if cf_percentiles is None or candidate.source in cf_suppressed_sources
                 else cf_percentiles.get(candidate.post.author, 0.5)
+            ),
+            # Viewer-own affinity is a per-CANDIDATE lookup (author OR topic), not
+            # an author-keyed mapping like CF, so it arrives as a callable. None
+            # means "this viewer has no opinion" and leaves the score untouched.
+            viewer_percentile=(
+                None if viewer_percentiles is None else viewer_percentiles(candidate)
             ),
         )
         for candidate, vote_signal_raw, organic_raw in items

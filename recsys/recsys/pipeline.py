@@ -15,15 +15,16 @@ a producer feeding it.
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 
 from recsys.config import DEFAULT_SETTINGS, ScoreWeights, Settings
 from recsys.contracts import (
     Candidate,
     CandidateSource,
+    EngagementEdge,
     GraphCred,
     HafsqlGateway,
     NormContext,
@@ -37,6 +38,7 @@ from recsys.core.als_guard import als_batch_drift
 from recsys.core.candidates import merge_candidates, top_up
 from recsys.core.coldstart import (
     INTEREST_LANE_SOURCES,
+    established_interest_candidates,
     interest_candidates,
     is_established_followless,
     popular_fallback,
@@ -52,6 +54,12 @@ from recsys.core.scoring import (
     score_candidates,
 )
 from recsys.core.second_degree import filter_eligible
+from recsys.core.viewer_affinity import (
+    affinity_percentiles,
+    candidate_affinity,
+    viewer_author_affinity,
+    viewer_topic_affinity,
+)
 from recsys.core.vote_signal import (
     VoterTrust,
     independent_organic_engagement,
@@ -146,16 +154,38 @@ class TrustSnapshot:
     ring_members: frozenset[str] = frozenset()
     als: ALSModel | None = None
     degraded: bool = False
+    #: The engagement edges this snapshot was built from. Retained so a request
+    #: can compute the VIEWER'S OWN outgoing affinity without a second query —
+    #: it is already the exact window (`trust_days`) the trust layer uses.
+    edges: tuple[EngagementEdge, ...] = ()
+    #: The seed set this snapshot was built from. Vouch is anchored on it
+    #: (see :func:`_voter_trust_from_creds`), so it must travel with the
+    #: snapshot rather than being consumed and discarded by graph-cred.
+    trusted_seeds: frozenset[str] = frozenset()
 
 
 def build_trust_snapshot(
     gateway: HafsqlGateway,
     settings: Settings,
     *,
-    since: datetime,
+    since: datetime | None = None,
     now: datetime | None = None,
     trusted_seeds: frozenset[str] = frozenset(),
     previous: TrustSnapshot | None = None,
+    # ★ WIRING REQUIREMENT, NOT A SAFE DEFAULT (recorded 2026-08-01).
+    # This must be passed True by the production feed service. The F-R2 gate it
+    # controls refuses a snapshot with no usable trusted seeds — the state that
+    # silently reverts vouch anchoring to the pre-2026-08-01 local rule and
+    # reopens the directed-cycle sybil hole — and defaulting it OFF makes the
+    # safe behaviour opt-in, while its sibling `trust_policy` defaults to
+    # FAIL_CLOSED. Two guards for one failure shape with opposite defaults.
+    #
+    # It is NOT flipped here because 10 existing fixtures build worlds with no
+    # seed-eligible account and would start failing closed; migrating them means
+    # inventing seeds for security tests, which changes which accounts get
+    # vouched and therefore what those tests prove. That migration is worth doing
+    # deliberately — it is not worth doing as a side effect of a default change.
+    # Until then this is a live footgun, and the production caller MUST set it.
     production: bool = False,
 ) -> TrustSnapshot:
     """Weekly batch: detect rings, then compute Sybil-hardened graph-cred over
@@ -216,6 +246,13 @@ def build_trust_snapshot(
             "trusted_seeds set at deploy (F-R2), or pass production=False for the "
             "offline harness."
         )
+    resolved_now = now or datetime.now(UTC)
+    # ★ `trust_days` was enforced only by the COMMENT below — nothing read it, so
+    # a caller passing a short `since` silently gutted the "a wide window is
+    # itself the Sybil defence" property it describes. Default it from config;
+    # an explicit `since` still wins.
+    if since is None:
+        since = resolved_now - timedelta(days=settings.history.trust_days)
     # TIERED HISTORY (settings.history, 2026-07-23): `since` here is the LONG
     # TRUST window (now - history.trust_days). Engagement edges feed graph-cred /
     # ALS / ring detection, which must be slow-moving and expensive to fake — a
@@ -224,7 +261,21 @@ def build_trust_snapshot(
     edges = gateway.engagement_edges(since)
     accounts = frozenset({e.src for e in edges} | {e.dst for e in edges})
     follows = gateway.follow_graph(accounts)
-    ring_signals = detect_rings(edges, settings.real_graph, now=now)
+    # Ring knobs come from Settings now, not from function defaults nobody could
+    # reach (see RingConfig). `ring_days` bounds the window the detector sees:
+    # a cycle must persist across it, which makes persistence a cost multiplier
+    # on the attack rather than a one-off purchase.
+    ring_since = resolved_now - timedelta(days=settings.history.ring_days)
+    ring_edges = [
+        e for e in edges if e.last_interaction is None or e.last_interaction >= ring_since
+    ]
+    ring_signals = detect_rings(
+        ring_edges,
+        settings.real_graph,
+        now=now,
+        reciprocity_min=settings.ring.reciprocity_min,
+        min_group=settings.ring.min_group,
+    )
     ring_members = ring_member_set(ring_signals, settings.thresholds.ring_discount_threshold)
     lineage = {account: gateway.stake_lineage(account) for account in accounts}
     graph_creds = compute_graph_cred(
@@ -237,6 +288,33 @@ def build_trust_snapshot(
         lineage=lineage,
         now=now,
     )
+    # ★ F-R2 EXTENDED (2026-08-01). The production guard above checks
+    # `not trusted_seeds`, but seed-anchored vouch depends on
+    # `trusted_seeds & graph_creds` — a DIFFERENT condition. A curated seed list
+    # whose accounts have no engagement edges in the trust window never enters
+    # `_account_universe`, so `graph_creds` omits them, `seeds` empties, and the
+    # directed-cycle hardening silently reverts to the pre-anchoring local rule
+    # in production. Proven reachable with production=True and a dormant seed
+    # list. Partial loss degraded coverage with no signal at all.
+    if trusted_seeds:
+        landed = trusted_seeds & set(graph_creds)
+        if not landed:
+            message = (
+                "trusted_seeds are all absent from graph_cred (no engagement edges in the "
+                "trust window) — vouch anchoring cannot run and would silently revert to "
+                "the local rule that a directed sock cycle defeats"
+            )
+            if production:
+                raise ValueError(f"build_trust_snapshot: {message}")
+            logger.warning(message)
+        elif len(landed) < len(trusted_seeds):
+            logger.warning(
+                "%d of %d trusted seeds are absent from graph_cred — vouch coverage is "
+                "narrower than configured",
+                len(trusted_seeds) - len(landed),
+                len(trusted_seeds),
+            )
+
     trained = train_als(
         edges,
         settings.als,
@@ -244,7 +322,7 @@ def build_trust_snapshot(
         lineage=lineage,
         now=now,
         half_life_days=settings.real_graph.half_life_days,
-        trust=_voter_trust_from_creds(graph_creds, settings),
+        trust=_voter_trust_from_creds(graph_creds, settings, trusted_seeds),
     )
     # §H11 between-batch anomaly gate: refuse to freeze a model that swung wildly
     # from the one it replaces. Only compares when there is a comparable prior
@@ -269,7 +347,12 @@ def build_trust_snapshot(
             als = None
             degraded = True
     return TrustSnapshot(
-        graph_creds=graph_creds, ring_members=ring_members, als=als, degraded=degraded
+        graph_creds=graph_creds,
+        ring_members=ring_members,
+        als=als,
+        degraded=degraded,
+        trusted_seeds=trusted_seeds,
+        edges=tuple(edges),
     )
 
 
@@ -357,7 +440,42 @@ def _author_priors(
         for author in authors
     }
     trust = _voter_trust(snap, settings)
-    return dict(gateway.author_engagement(authors, since, excluded, trust=trust))
+    try:
+        return dict(gateway.author_engagement(authors, since, excluded, trust=trust))
+    except TypeError as exc:
+        # ★ ONLY an ARITY mismatch is the stale-gateway case (2026-08-01).
+        # A TypeError raised INSIDE a correctly-signed gateway — a NULL from the
+        # DB driver, say — was being caught here too, logged as "signature
+        # mismatch", and silently disabling the author prior for every request
+        # while an operator hunted a mismatch that did not exist.
+        # Python raises the arity error at the CALL site, so its traceback has no
+        # next frame; an error from the body does. Re-raise the body case.
+        if exc.__traceback__ is not None and exc.__traceback__.tb_next is not None:
+            raise
+        # ★ THE PROTOCOL GUARD ABOVE IS NAME-ONLY (found 2026-08-01).
+        #
+        # ``AuthorPriorGateway`` is @runtime_checkable, and a runtime-checkable
+        # Protocol's isinstance() checks that the METHOD NAME exists — never its
+        # signature. So a gateway written against the pre-H05 two-argument
+        # signature passes the guard and then raises TypeError here, turning the
+        # documented "falls back to per-post engagement" into a hard crash three
+        # frames deep.
+        #
+        # This was not hypothetical: the frozen measurement-harness gateway was
+        # exactly such an implementation, which meant the harness could not
+        # execute this path at all — and every tuning table in config.py is
+        # measured through that harness. A silent crash in the instrument is
+        # worse than a slow instrument.
+        #
+        # Fall back LOUDLY rather than silently: the prior genuinely degrades to
+        # per-post engagement (the documented contract), but a stale gateway is
+        # a defect someone must fix, not a mode to run in.
+        logger.error(
+            "author_engagement gateway is stale (signature mismatch: %s) — "
+            "falling back to per-post engagement; the author-pooled prior is NOT active",
+            exc,
+        )
+        return {}
 
 
 def _suppressed(gateway: HafsqlGateway, candidates: list[Candidate]) -> frozenset[str]:
@@ -366,12 +484,35 @@ def _suppressed(gateway: HafsqlGateway, candidates: list[Candidate]) -> frozense
     return gateway.suppressed_keys(keys) if keys else frozenset()
 
 
+
+def _cf_source_authors(
+    viewer: ViewerProfile, snapshot: TrustSnapshot, count: int
+) -> frozenset[str]:
+    """The viewer's top CF-affinity authors that they do NOT already follow.
+
+    Returns empty when the viewer has no trained row — a cold viewer has no CF
+    opinion, and inventing one from an untrained factor vector would be noise
+    presented as personalisation.
+    """
+    model = snapshot.als
+    if model is None or viewer.account not in model.user_index:
+        return frozenset()
+    trained = [a for a in model.item_index if a not in viewer.follows and a != viewer.account]
+    if not trained:
+        return frozenset()
+    pcts = viewer_affinity_percentiles(model, viewer.account, trained)
+    if not pcts:
+        return frozenset()
+    ranked = sorted(pcts.items(), key=lambda kv: (-kv[1], kv[0]))
+    return frozenset(a for a, _ in ranked[:count])
+
 def gather_candidates(
     viewer: ViewerProfile,
     gateway: HafsqlGateway,
     since: datetime,
     limit: int,
     settings: Settings,
+    snapshot: TrustSnapshot | None = None,
 ) -> list[Candidate]:
     """Collect and merge the Phase-0 candidate sources (§3.1), then cap OON
     post-flooding per author (§8.8). Cold viewers get the interest lane."""
@@ -384,8 +525,34 @@ def gather_candidates(
     # in-network feed — the exact spoofable-flag shape ``is_established_followless``
     # was hardened against (coldstart.py: "the ALS-row test is the one that cannot
     # be spoofed"). A true cold/followless viewer still gets the lane here.
+    # ★ THE FOLLOW-CLIFF (fixed 2026-08-01). These two branches used to be
+    # mutually exclusive — interest lane iff followless, in-network iff follows —
+    # so a new user's FIRST follow silently discarded every interest they picked
+    # at signup. Measured: pool 60 -> 3, on-interest share of the top 20 going
+    # 20/20 -> 0/20, the remainder filled with global-popularity padding. The
+    # dead zone lasts until in-network supply alone can fill a feed, i.e. exactly
+    # the window where a new user decides whether the product is for them.
+    #
+    # The interests do not stop being true when someone follows one account, so
+    # the lane is now unconditional. What changes with the follow graph is the
+    # TRUST CLASS, not the presence: a followless viewer keeps the gate-exempt
+    # INTEREST_* sources (they have no graph for the gate to use), while a viewer
+    # WITH a graph gets OON_INTEREST, which requires_author_floor — so their
+    # interest content must still come from an author clearing the graph-cred
+    # floor, and this does not widen the gate-exempt surface.
+    #
+    # ★ It deliberately does NOT require the second-degree VOUCH COUNT. The first
+    # version of this fix did, which read as safer and was a complete no-op: that
+    # gate admits a post only if someone the viewer already follows engaged it —
+    # the exact predicate OON_ENGAGED selects on — so new content from outside the
+    # viewer's network could never satisfy it. Re-measured end to end: 60
+    # candidates generated, 0/20 feed slots on-interest, 17/20 padding, i.e. the
+    # original bug's numbers. Now 19/20. See test_follow_cliff's end-to-end test,
+    # which exists because the boundary test passed while the feed did not.
     if not viewer.follows:
         groups.append(interest_candidates(viewer, gateway, since, limit, settings.cold_start))
+    else:
+        groups.append(established_interest_candidates(viewer, gateway, since, limit))
 
     if viewer.follows:
         groups.append(
@@ -395,6 +562,30 @@ def gather_candidates(
             ]
         )
         groups.append(list(gateway.engaged_oon_posts(viewer.follows, since, limit)))
+
+    # ★ OON_ALS PRODUCER (2026-08-01). This source was declared, prioritised and
+    # gated but emitted by NOTHING, so collaborative filtering could only
+    # re-score posts another lane had already surfaced — it had never introduced
+    # a post to anyone, and personalisation-by-discovery did not exist at all.
+    #
+    # Sourced from the authors the viewer's own CF row ranks highest, EXCLUDING
+    # anyone they already follow (those arrive via IN_NETWORK; re-sourcing them
+    # would just re-rank the same content). Gated, because CF is a cross-viewer
+    # signal: OON_ALS.requires_second_degree is True, so these still clear the
+    # vouch gate and the graph-cred floor.
+    if (
+        snapshot is not None
+        and snapshot.als is not None
+        and settings.als.als_source_authors > 0
+    ):
+        top_authors = _cf_source_authors(viewer, snapshot, settings.als.als_source_authors)
+        if top_authors:
+            groups.append(
+                [
+                    Candidate(post=p, source=CandidateSource.OON_ALS)
+                    for p in gateway.in_network_posts(top_authors, since, limit)
+                ]
+            )
 
     if viewer.subscribed_communities:
         groups.append(
@@ -474,7 +665,25 @@ def _fallback_filler(
     remaining gap — the *selection* order — that re-scoring alone leaves open
     when there are more admissible fallback posts than shortfall slots.)
     """
-    if len(eligible) >= settings.fallback.min_feed_size:
+    # ★ The bar is the FEED SIZE, not one screen (2026-08-01). Returning early at
+    # `min_feed_size` made feed length non-monotonic in the follow graph: a
+    # viewer with 4 follows got 16 own posts padded to 200, while a viewer with 5
+    # got 20 own posts and nothing else — more follows, a shorter feed, dead-
+    # ending after one screen. Fixing only the 0-vs-1 discontinuity moved that
+    # cliff to 4-vs-5 rather than removing it, because the CONDITION and the
+    # DEPTH disagreed: pad-or-not was decided at one screen and how-deep at the
+    # whole pool.
+    #
+    # Both now use the same bound, so the rule is simply "a feed is never shorter
+    # than the re-ranker can serve". Composition still varies with the follow
+    # graph — that is what should differ between viewers — but the feed does not
+    # run out.
+    #
+    # COST: the popular pool is now fetched for healthy viewers too. It is
+    # viewer-independent (`popular_posts(since, limit)` takes no viewer), so it
+    # is cacheable once per window across all requests; only `filter_eligible`
+    # and the exclusion re-order are per-viewer.
+    if len(eligible) >= settings.diversity.top_k:
         return []
 
     fallback = popular_fallback(gateway, since, limit)
@@ -488,8 +697,28 @@ def _fallback_filler(
         show_nsfw=show_nsfw,
     )
     admissible = _order_by_full_exclusion(admissible, gateway, snap, settings)
-    target = (
-        settings.fallback.min_feed_size if eligible else len(eligible) + len(admissible)
+    # ★ CONTINUOUS PADDING DEPTH (2026-08-01). This used to be
+    #     min_feed_size if eligible else len(eligible) + len(admissible)
+    # i.e. a viewer with ZERO eligible posts got the entire admissible pool,
+    # while a viewer with ONE got padded to exactly one screen. Measured on a
+    # 480-post window: 0 follows -> a 200-post feed; 1 follow -> a 20-post feed,
+    # staying 20 until roughly the sixth active follow. The docstring above
+    # claimed the discontinuity "costs at most one slot of the first screen" —
+    # true of the first screen, wrong by 180 slots of scroll depth.
+    #
+    # Following one account is the single most-encouraged onboarding action, and
+    # a signup flow with suggested follows performs it FOR the user. Truncating
+    # the feed at exactly that moment punishes the action the product asks for,
+    # in the window where a new user decides whether to stay.
+    #
+    # Depth is now continuous in the realised pool: pad as deep as the fallback
+    # allows, bounded by the re-ranker's own output size, never below one screen.
+    # This cannot dilute the viewer's own content — padding is scored and ranked
+    # as a strictly LATER block (see rank_feed), so a deeper tail can only extend
+    # the feed, never displace or reorder what the viewer's network produced.
+    target = max(
+        settings.fallback.min_feed_size,
+        min(len(eligible) + len(admissible), settings.diversity.top_k),
     )
     return top_up(eligible, admissible, target)[len(eligible) :]
 
@@ -523,7 +752,9 @@ def _order_by_full_exclusion(
 
 
 def _voter_trust_from_creds(
-    graph_creds: Mapping[str, GraphCred], settings: Settings
+    graph_creds: Mapping[str, GraphCred],
+    settings: Settings,
+    trusted_seeds: frozenset[str] = frozenset(),
 ) -> VoterTrust | None:
     """Build the request's breadth budget (§8.4 funded-alt hardening) from a
     graph-cred map. Shared by :func:`_voter_trust` (the per-request path, given
@@ -556,11 +787,92 @@ def _voter_trust_from_creds(
     if not graph_creds:
         return None
     floor = settings.graph_cred.min_vouched_score
-    vouched = frozenset(
-        account
-        for account, gc in graph_creds.items()
-        if gc.outside_engaged and gc.score > floor
-    )
+
+    # ★ SEED-ANCHORED VOUCH (2026-08-01). See GraphCredConfig.vouch_max_rounds.
+    #
+    # The old rule was `gc.outside_engaged and gc.score > floor` — a purely
+    # LOCAL test. It asked "did anyone outside my ring engage me", and a
+    # directed cycle S0->S1->S2->S0 answers yes for every member, because a
+    # directed cycle contains no reciprocal pair and therefore forms no ring at
+    # all. Three accounts and three one-way upvotes vouched themselves.
+    #
+    # Vouch now has to come FROM somewhere: it starts at the trusted seeds and
+    # propagates only along outside-engagement edges whose source is already
+    # vouched. A closed sock cycle touches no seed, so no amount of internal
+    # engagement lets it in. The score floor is retained as a belt.
+    #
+    # NOTE what this deliberately does NOT do: it does not block anyone. An
+    # honest newcomer no seed has reached yet is UNKNOWN-tier, which is
+    # budgeted (`unknown_free >= 1.0`) — their first genuine vote still counts.
+    # The newcomer invariant is untouched.
+    seeds = frozenset(a for a in trusted_seeds if a in graph_creds)
+    if not seeds:
+        # ★ FAIL SAFE, NOT FAIL SHUT. With no usable seed the propagation would
+        # vouch NOBODY, and an empty vouched set is not a neutral state: every
+        # honest account loses its credited breadth at once, which measurably
+        # hands ranking to the exact vote-farm the budget exists to demote
+        # (tests/test_pipeline.py::test_pooled_prior_sock_swarm_...). That is a
+        # worse outcome than the directed-cycle attack this anchoring closes.
+        #
+        # Production cannot reach here: build_trust_snapshot refuses an empty
+        # trusted_seeds outside dev (F-R2, see its `production` guard). So this
+        # branch is the dev/test path, and it keeps the pre-anchoring local rule
+        # rather than silently collapsing the tier.
+        logger.warning(
+            "vouch propagation has no usable trusted seed in this graph-cred set — "
+            "falling back to the LOCAL outside_engaged rule; the directed-cycle "
+            "hardening is NOT active for this snapshot"
+        )
+        return VoterTrust(
+            vouched=frozenset(
+                account
+                for account, gc in graph_creds.items()
+                if gc.outside_engaged and gc.score > floor
+            ),
+            unknown_free=settings.vote_signal.unknown_free,
+            unknown_per_vouched=settings.vote_signal.unknown_per_vouched,
+        )
+    # ★ Vouch propagates with BOTH a depth bound and a per-voucher FAN-OUT bound
+    # (2026-08-01). Depth alone bounded nothing, because the attacker picks the
+    # depth: a 500-sock star one hop from a single endorsement vouched 500/500.
+    # See GraphCredConfig.vouch_max_fanout for the measurements.
+    fanout_cap = max(0, settings.graph_cred.vouch_max_fanout)
+    vouched_set: set[str] = set(seeds)
+    for _ in range(max(0, settings.graph_cred.vouch_max_rounds)):
+        candidates = [
+            (account, gc)
+            for account, gc in graph_creds.items()
+            if account not in vouched_set
+            and gc.score > floor
+            and not gc.outside_engagers.isdisjoint(vouched_set)
+        ]
+        if fanout_cap:
+            # Charge each newly-vouchable account to ONE voucher (its highest-
+            # scoring already-vouched engager) and let each voucher spend at most
+            # `fanout_cap` of its budget this round, best engagees first. Charging
+            # to a single voucher is what makes the cap bind: splitting the same
+            # sock list across two hubs then costs the attacker a second hub.
+            by_voucher: dict[str, list[tuple[float, str]]] = {}
+            for account, gc in candidates:
+                vouchers = gc.outside_engagers & vouched_set
+                best = max(
+                    vouchers,
+                    key=lambda v: (
+                        graph_creds[v].score if v in graph_creds else 0.0,
+                        v,
+                    ),
+                )
+                by_voucher.setdefault(best, []).append((gc.score, account))
+            added: set[str] = set()
+            for _voucher, engagees in by_voucher.items():
+                engagees.sort(key=lambda pair: (-pair[0], pair[1]))
+                added.update(account for _score, account in engagees[:fanout_cap])
+        else:
+            added = {account for account, _gc in candidates}
+        if not added:
+            break
+        vouched_set |= added
+    vouched = frozenset(vouched_set)
     return VoterTrust(
         vouched=vouched,
         unknown_free=settings.vote_signal.unknown_free,
@@ -573,7 +885,7 @@ def _voter_trust(snap: TrustSnapshot, settings: Settings) -> VoterTrust | None:
     ``None`` when the snapshot carries no graph-cred. Thin wrapper over
     :func:`_voter_trust_from_creds` reading ``snap.graph_creds`` — see there for
     the H02 vouched-gate semantics."""
-    return _voter_trust_from_creds(snap.graph_creds, settings)
+    return _voter_trust_from_creds(snap.graph_creds, settings, snap.trusted_seeds)
 
 
 def _ring_exclusion(author: str, snap: TrustSnapshot) -> frozenset[str]:
@@ -662,15 +974,98 @@ def _score(
     cf_suppressed_sources = (
         INTEREST_LANE_SOURCES if is_established_followless(viewer, has_als_row) else frozenset()
     )
+    # ★ VIEWER-OWN AFFINITY (2026-08-01). Built from the viewer's OWN outgoing
+    # edges in the snapshot — no extra query, and the same decay the trust layer
+    # uses. Skipped entirely when the channel is off (weight 0.0), so a default
+    # deployment pays nothing and reproduces prior output bit-for-bit.
+    viewer_lookup = _viewer_affinity_lookup(
+        viewer, snap, settings, now, [c for c, _, _ in scored_inputs]
+    )
     scored = score_candidates(
         scored_inputs,
         norm,
         settings.weights,
         cf_percentiles,
         cf_suppressed_sources=cf_suppressed_sources,
+        viewer_percentiles=viewer_lookup,
     )
-    return rerank(scored, settings.diversity)
+    # Ties resolve per-viewer, not alphabetically — see rerank._tie_break.
+    # Session bucket: feeds vary between buckets and are stable within one, so a
+    # refresh cannot re-roll exploration into a better draw.
+    if not viewer.account:
+        # ★ NOT a silent degradation (2026-08-01). `_tie_break` falls back to the
+        # post key on an empty seed, which is correct for offline tooling but
+        # reinstates exactly the global alphabetical ordering the per-viewer
+        # tie-break exists to remove — and exploration collapses too, since every
+        # anonymous request shares one seed. If a logged-out or shared feed ever
+        # reaches this path, the compounding-advantage defect is live again for
+        # every viewer at once, so it says so rather than looking healthy.
+        logger.warning(
+            "rank_feed called with an empty viewer account: tie-breaks fall back "
+            "to global alphabetical order and exploration is shared across all "
+            "such callers. Pass a per-viewer seed for any user-facing feed."
+        )
+    bucket = int(now.timestamp()) // max(1, settings.diversity.explore_bucket_hours * 3600)
+    return rerank(
+        scored,
+        settings.diversity,
+        tie_break_seed=viewer.account,
+        explore_bucket=bucket,
+    )
 
+
+
+def _viewer_affinity_lookup(
+    viewer: ViewerProfile,
+    snap: TrustSnapshot,
+    settings: Settings,
+    now: datetime,
+    candidates: Sequence[Candidate],
+) -> Callable[[Candidate], float | None] | None:
+    """Per-request viewer-own affinity lookup, or ``None`` when inapplicable.
+
+    Returns ``None`` — meaning "leave every score untouched" — when the channel
+    is disabled, when the snapshot carries no edges, or when the viewer has
+    engaged too little to form a distribution to rank within. Those are the
+    honest answers, and each reproduces the pre-change score exactly.
+
+    ★ INVARIANT: only edges whose ``src`` is this viewer are consulted, and the
+    result is used for this request alone. It must never be written back into
+    graph-cred, ALS, the norm sample or another viewer's ranking — see
+    recsys/core/viewer_affinity.py for why that boundary is the whole point.
+    """
+    if settings.weights.organic_viewer <= 0.0 or not snap.edges:
+        return None
+
+    author_aff = viewer_author_affinity(viewer.account, snap.edges, settings.real_graph, now)
+    if not author_aff:
+        return None
+    pool_authors = [c.post.author for c in candidates]
+    author_pct = affinity_percentiles(author_aff, pool_authors)
+
+    # Topic affinity needs to know what the engaged authors write about. The
+    # candidate pool is the cheapest honest source available at request time.
+    author_topics: dict[str, set[str]] = {}
+    for cand in candidates:
+        keys = {k for k in (cand.post.community, cand.post.category, *cand.post.tags) if k}
+        if keys:
+            author_topics.setdefault(cand.post.author, set()).update(keys)
+    topic_aff = viewer_topic_affinity(
+        viewer.account,
+        snap.edges,
+        settings.real_graph,
+        now,
+        {a: tuple(t) for a, t in author_topics.items()},
+    )
+    pool_topics = sorted({k for ks in author_topics.values() for k in ks})
+    topic_pct = affinity_percentiles(topic_aff, pool_topics)
+    if not author_pct and not topic_pct:
+        return None
+
+    def lookup(candidate: Candidate) -> float | None:
+        return candidate_affinity(candidate.post, author_pct, topic_pct)
+
+    return lookup
 
 def _trust_is_fresh(snapshot: TrustSnapshot | None) -> bool:
     """Whether ``snapshot`` carries FRESH trust (H01): it is present, NOT flagged
@@ -690,13 +1085,25 @@ def _trust_is_fresh(snapshot: TrustSnapshot | None) -> bool:
     gate's own documented default. A batch that genuinely ran but found an
     all-newcomer network still produces a NON-empty ``graph_creds`` (every
     account is scored, unknown-tier included), so this rejects only the
-    never-populated empty default, not a legitimately quiet week."""
+    never-populated empty default, not a legitimately quiet week.
+
+    A ``trusted_seeds`` clause was considered here and DELIBERATELY NOT ADDED
+    (2026-08-01). Seed-anchored vouch does fail open without landed seeds — a
+    snapshot with empty seeds vouches a directed 10-cycle 10/10 — but that path
+    is already loud: ``_voter_trust_from_creds`` logs the fallback, and
+    ``build_trust_snapshot`` verifies its own seeds actually land. Enforcing it
+    HERE would make 24 snapshot construction sites across the suite fail closed,
+    including the H01/H02/funded-alt tests, whose snapshots would then need seeds
+    invented for them — and a seed changes which accounts are vouched, so those
+    security tests would start asserting something subtly different. Turning an
+    existing warning into a hard failure is not worth silently re-basing what
+    they prove. If fail-closed-on-unanchored is wanted, migrate those fixtures
+    deliberately rather than as a side effect of this gate."""
     return (
         snapshot is not None
         and not snapshot.degraded
         and bool(snapshot.graph_creds)
     )
-
 
 def rank_feed(
     viewer: ViewerProfile,
@@ -704,7 +1111,7 @@ def rank_feed(
     norm: NormContext,
     *,
     now: datetime,
-    since: datetime,
+    since: datetime | None = None,
     limit: int = 400,
     settings: Settings = DEFAULT_SETTINGS,
     snapshot: TrustSnapshot | None = None,
@@ -752,6 +1159,17 @@ def rank_feed(
     comparable; only their interleaving is suppressed. Author-diversity spacing
     is per-block, so one author may appear on both sides of the seam.
     """
+    # ★ `since` now DEFAULTS from config instead of being purely caller-supplied
+    # (2026-08-01). `HistoryWindows.sourcing_freshness_days` documents itself as
+    # "the only place a ~week is right: it decides which posts appear" — and it
+    # had zero consumers, so the horizon it describes was never enforced and any
+    # caller silently set its own. A config that validates a contract it does not
+    # apply is the same shape H01/F-R2 closed elsewhere. An explicit `since` still
+    # wins; omitting it now means the documented window rather than whatever the
+    # caller happened to pass.
+    if since is None:
+        since = now - timedelta(days=settings.history.sourcing_freshness_days)
+
     min_samples = settings.norm.min_samples
     if (
         min(len(norm.vote_signal_samples), len(norm.reputation_samples), len(norm.organic_samples))
@@ -781,7 +1199,7 @@ def rank_feed(
         TRUST_DEGRADATION.record()
     snap = snapshot if snapshot is not None else TrustSnapshot()
 
-    candidates = gather_candidates(viewer, gateway, since, limit, settings)
+    candidates = gather_candidates(viewer, gateway, since, limit, settings, snap)
     suppressed = _suppressed(gateway, candidates)
     gated_keys = frozenset(c.post.key for c in candidates if c.source.requires_second_degree)
     engager_index = (

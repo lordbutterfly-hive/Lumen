@@ -36,6 +36,14 @@ class CandidateSource(StrEnum):
     # — exempt from the gate, since they have no follow graph for it to use.
     INTEREST_COMMUNITY = "interest_community"
     INTEREST_TAG = "interest_tag"
+    #: Last-resort global-popularity padding for a viewer whose pool would
+    #: otherwise be empty (§13.5b). Emitted by :func:`coldstart.popular_fallback`.
+    #: It used to be emitted AS ``INTEREST_TAG``, which made the interest lane's
+    #: own coverage metric unfalsifiable — globally-popular posts the viewer
+    #: never asked for were indistinguishable from genuine interest matches.
+    #: Gate-exempt for the same reason the cold lane is: the viewer it serves has
+    #: no follow graph for the gate to use.
+    POPULAR_FALLBACK = "popular_fallback"
 
     @property
     def is_in_network(self) -> bool:
@@ -53,6 +61,62 @@ class CandidateSource(StrEnum):
             CandidateSource.IN_NETWORK,
             CandidateSource.INTEREST_COMMUNITY,
             CandidateSource.INTEREST_TAG,
+            CandidateSource.POPULAR_FALLBACK,
+            # ★ OON_INTEREST is exempt from the VOUCH COUNT but not from the
+            # author floor (see requires_author_floor). Measured 2026-08-01: with
+            # the vouch requirement, 60 interest candidates were gathered for a
+            # viewer with one follow and 0 of 20 feed slots were on-interest.
+            # That is structural, not a fixture artifact — the gate passes a post
+            # only if one of the viewer's follows already engaged it, which is
+            # exactly the predicate OON_ENGAGED selects on and which brand-new
+            # interest content can never satisfy. Requiring it made the lane
+            # empty-after-eligibility by construction.
+            CandidateSource.OON_INTEREST,
+            # ★ The two SIBLING lanes with the identical defect, found by the
+            # review council after OON_INTEREST was fixed alone (2026-08-01).
+            # The reasoning above is not specific to interests — it applies to
+            # any lane whose job is to surface content the viewer's network has
+            # NOT already seen, which is every discovery lane there is:
+            #
+            #   OON_COMMUNITY — a community the viewer explicitly SUBSCRIBED to.
+            #     Measured 90 candidates -> 0 eligible -> 0 feed slots, and a new
+            #     author posting into a community reached 0 of 40 subscribers. A
+            #     subscription is a stronger opt-in than a signup tag, and it
+            #     delivered literally nothing.
+            #   OON_ALS — the CF discovery producer. Measured byte-identical
+            #     feeds at every `als_source_authors` setting including the whole
+            #     author universe: everything it sourced either failed the vouch
+            #     gate or was relabelled to a higher-priority lane that then
+            #     failed it.
+            #
+            # Both keep `requires_author_floor`, so a self-dealer or ring member
+            # still cannot ride them in, and both remain subject to the per-author
+            # flooding cap (see core/flooding.py, which keys on that property).
+            CandidateSource.OON_COMMUNITY,
+            CandidateSource.OON_ALS,
+        )
+
+    @property
+    def requires_author_floor(self) -> bool:
+        """Whether the AUTHOR must clear the graph-cred floor (§8.3).
+
+        Split out from :attr:`requires_second_degree` (2026-08-01) so a source
+        can be exempt from the second-degree VOUCH COUNT — "someone you follow
+        already engaged this" — while still refusing self-dealers and ring
+        members. Those are different questions: the first asks whether the
+        viewer's own network has seen it, the second whether the author is
+        credible at all. Bundling them meant any discovery lane either demanded
+        prior in-network engagement (impossible for new content) or accepted
+        anyone (an injection vector).
+
+        The viewer's OWN network and the cold-start lanes they explicitly chose
+        stay exempt from both.
+        """
+        return self not in (
+            CandidateSource.IN_NETWORK,
+            CandidateSource.INTEREST_COMMUNITY,
+            CandidateSource.INTEREST_TAG,
+            CandidateSource.POPULAR_FALLBACK,
         )
 
 
@@ -149,6 +213,15 @@ class GraphCred:
     score: float
     follow_follower_ratio: float
     outside_engaged: bool = False
+    #: WHO engaged this account from outside its own ring/lineage. ``outside_engaged``
+    #: is the boolean summary; this is the evidence behind it, needed because a
+    #: DIRECTED sock cycle (S0->S1->S2->S0) produces no reciprocal pair, so
+    #: ``ring_members`` is empty, so every sock counts as another sock's "outside"
+    #: engager and the whole cycle vouches itself. Seed-anchored propagation
+    #: (:func:`recsys.pipeline._voter_trust_from_creds`) walks these sets from
+    #: ``trusted_seeds`` instead of trusting the boolean. Defaults empty so every
+    #: existing construction stays valid.
+    outside_engagers: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
