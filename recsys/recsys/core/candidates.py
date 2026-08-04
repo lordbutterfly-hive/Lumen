@@ -19,8 +19,13 @@ SOURCE_PRIORITY: dict[CandidateSource, int] = {
     CandidateSource.INTEREST_COMMUNITY: 4,
     CandidateSource.INTEREST_TAG: 5,
     CandidateSource.OON_ALS: 6,
+    # Reserved new-author lane. Priority only matters for dedup labelling —
+    # exploration picks are spliced in after re-ranking, not scored against the
+    # rest — but it must lose to every earned lane so a post that qualifies on
+    # merit is never relabelled into the budgeted one.
+    CandidateSource.EXPLORATION: 7,
     # Last resort: only fills slots nothing else could.
-    CandidateSource.POPULAR_FALLBACK: 7,
+    CandidateSource.POPULAR_FALLBACK: 8,
 }
 
 

@@ -29,7 +29,15 @@ def cap_oon_flooding(candidates: Iterable[Candidate], max_per_author: int) -> li
     kept: list[Candidate] = []
     seen_per_author: dict[str, int] = {}
     for candidate in candidates:
-        # ★ Keyed on `requires_author_floor`, NOT `requires_second_degree`
+        # ★ Keyed on its OWN predicate as of 2026-08-04 — see
+        # `CandidateSource.counts_toward_flooding_cap`. It previously borrowed
+        # `requires_author_floor`, which in turn had replaced
+        # `requires_second_degree`, and BOTH times the borrowing caused a silent
+        # behaviour change when the borrowed property was edited for an
+        # unrelated reason. Twice is a pattern; the predicate is now its own.
+        #
+        # (Historical note, kept because it is the argument for the split:
+        # keyed on `requires_author_floor`, NOT `requires_second_degree`
         # (2026-08-01). This asks "is this an out-of-network lane" — the whole
         # point of an OON post-frequency cap — and that is exactly the set
         # `requires_author_floor` names. `requires_second_degree` used to name
@@ -40,8 +48,8 @@ def cap_oon_flooding(candidates: Iterable[Candidate], max_per_author: int) -> li
         # account could place unlimited posts in an established viewer's feed
         # (measured: 60 of 103 slots). Same defect shape as the POPULAR_FALLBACK
         # label split — one property serving two unrelated purposes, so changing
-        # it for one silently changed the other.
-        if not candidate.source.requires_author_floor:
+        # it for one silently changed the other.)
+        if not candidate.source.counts_toward_flooding_cap:
             kept.append(candidate)
             continue
         author = candidate.post.author

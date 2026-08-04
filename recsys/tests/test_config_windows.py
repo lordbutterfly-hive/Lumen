@@ -14,9 +14,9 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from recsys.config import DEFAULT_SETTINGS, RingConfig
-from recsys.pipeline import build_trust_snapshot, rank_feed
-from tests.fakes import FakeGateway, make_viewer
+from recsys.config import DEFAULT_SETTINGS, HistoryWindows, RingConfig, Settings
+from recsys.pipeline import build_trust_snapshot, gather_candidates, rank_feed
+from tests.fakes import EPOCH, FakeGateway, make_post, make_viewer
 
 
 def _norm():
@@ -73,3 +73,87 @@ def test_ring_knobs_are_reachable_from_settings() -> None:
     tuned = replace(DEFAULT_SETTINGS, ring=RingConfig(reciprocity_min=0.9, min_group=3))
     assert tuned.ring.reciprocity_min == 0.9
     assert tuned.ring.min_group == 3
+
+
+# ---------------------------------------------------------------------------
+# in_network_freshness_days (2026-08-04). These exist because a scrutinizer
+# proved the widening was invisible to the whole suite: every panel and test
+# passes an explicit `since=EPOCH`, and `tests/fakes.py`'s FakeGateway ignores
+# its `since` argument entirely — so nothing could observe the window at all.
+# A sign flip or a wrong field would have shipped silently.
+# ---------------------------------------------------------------------------
+
+
+class _SinceRecordingGateway(FakeGateway):
+    """Records the `since` each source is actually asked for. The stock
+    FakeGateway ignores `since`, which is exactly why this is needed."""
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.in_network_since: datetime | None = None
+        self.other_since: list[datetime] = []
+
+    def in_network_posts(self, follows, since, limit):
+        self.in_network_since = since
+        return super().in_network_posts(follows, since, limit)
+
+    def engaged_oon_posts(self, follows, since, limit):
+        self.other_since.append(since)
+        return super().engaged_oon_posts(follows, since, limit)
+
+    def community_posts(self, communities, since, limit):
+        self.other_since.append(since)
+        return super().community_posts(communities, since, limit)
+
+
+def _windows(**kw) -> Settings:
+    return Settings(history=replace(HistoryWindows(), **kw))
+
+
+def test_in_network_window_is_widened_and_only_for_in_network() -> None:
+    gw = _SinceRecordingGateway(in_network=[make_post("a", "p1")])
+    viewer = make_viewer("me", follows=frozenset({"a"}), subscribed_communities=frozenset({"c"}))
+    since = EPOCH + timedelta(days=30)
+    gather_candidates(viewer, gw, since, 50, _windows(in_network_freshness_days=7))
+
+    # widened by exactly (in_network - sourcing) = 7 - 3 = 4 days
+    assert gw.in_network_since == since - timedelta(days=4)
+    # every other lane keeps the short window
+    assert gw.other_since, "no discovery lane was asked for"
+    assert all(s == since for s in gw.other_since)
+
+
+def test_in_network_window_zero_is_an_exact_no_op() -> None:
+    gw = _SinceRecordingGateway(in_network=[make_post("a", "p1")])
+    viewer = make_viewer("me", follows=frozenset({"a"}))
+    since = EPOCH + timedelta(days=30)
+    gather_candidates(viewer, gw, since, 50, _windows(in_network_freshness_days=0))
+    assert gw.in_network_since == since
+
+
+def test_in_network_window_never_ends_up_narrower_than_discovery() -> None:
+    # config forbids a narrower setting outright...
+    with pytest.raises(ValueError, match="in_network_freshness_days"):
+        _windows(in_network_freshness_days=1)
+    # ...and equal-to-sourcing is a no-op rather than a negative shift.
+    gw = _SinceRecordingGateway(in_network=[make_post("a", "p1")])
+    viewer = make_viewer("me", follows=frozenset({"a"}))
+    since = EPOCH + timedelta(days=30)
+    gather_candidates(viewer, gw, since, 50, _windows(in_network_freshness_days=3))
+    assert gw.in_network_since == since
+
+
+def test_default_rank_feed_path_keeps_in_network_inside_the_quality_prior_window() -> None:
+    """The one real hazard a scrutinizer found: `pooled_author_base` subtracts a
+    post's own base from an aggregate built over `quality_prior_days`, so a
+    candidate sourced from OUTSIDE that aggregate corrupts the leave-one-out
+    term. On `rank_feed`'s own default (`since=None`) this is unreachable, and
+    the config invariant is what guarantees it — pin that, because the guarantee
+    lives in an inequality rather than in code anyone would notice breaking.
+    """
+    h = HistoryWindows()
+    assert h.sourcing_freshness_days <= h.in_network_freshness_days <= h.quality_prior_days
+    # therefore in_network_since >= quality_since on the default path
+    extra = h.in_network_freshness_days - h.sourcing_freshness_days
+    in_network_days_back = h.sourcing_freshness_days + extra
+    assert in_network_days_back <= h.quality_prior_days

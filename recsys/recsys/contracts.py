@@ -36,6 +36,14 @@ class CandidateSource(StrEnum):
     # — exempt from the gate, since they have no follow graph for it to use.
     INTEREST_COMMUNITY = "interest_community"
     INTEREST_TAG = "interest_tag"
+    #: ★ The reserved new-author lane (cold-start spec §4.3, item B12). An
+    #: explicit, budgeted, DEFENDED bypass of the second-degree vouch — a
+    #: brand-new post has no vouch by definition, so the gate can only ever
+    #: exclude it. It is exempt from the author floor too, deliberately: a new
+    #: author is below every floor by construction, which is the point. Its
+    #: defences are the per-author budget, ring exclusion, interest targeting
+    #: and graduation-on-qualifying-vouch instead. See core/exploration.py.
+    EXPLORATION = "exploration"
     #: Last-resort global-popularity padding for a viewer whose pool would
     #: otherwise be empty (§13.5b). Emitted by :func:`coldstart.popular_fallback`.
     #: It used to be emitted AS ``INTEREST_TAG``, which made the interest lane's
@@ -48,6 +56,41 @@ class CandidateSource(StrEnum):
     @property
     def is_in_network(self) -> bool:
         return self is CandidateSource.IN_NETWORK
+
+    @property
+    def is_viewer_chosen(self) -> bool:
+        """Whether the viewer explicitly ASKED for this lane (2026-08-03).
+
+        Followed an author, subscribed to a community, picked an interest at
+        signup — all deliberate acts. The rest are inferences the system made
+        on their behalf: a post a friend happened to engage
+        (``OON_ENGAGED``), a CF neighbour's author (``OON_ALS``), or global
+        popularity padding (``POPULAR_FALLBACK``).
+
+        WHY THIS EXISTS. Measured 2026-08-03: at 20 same-topic follows,
+        ``OON_ENGAGED`` supplied 33% of the candidate pool and took **75% of
+        the top 20**, while ``IN_NETWORK`` supplied 67% and took 25% — and the
+        served feed's on-topic share fell from 85% at one follow to 25% at
+        twenty, so following MORE people made the feed WORSE. The cause is
+        selection bias, not volume: ``engaged_oon_posts`` selects posts
+        *because somebody already engaged them*, so the lane is an
+        engagement-selected sample by construction, while ``in_network_posts``
+        takes a followed author's posts regardless of engagement. Scored on an
+        ~80% engagement-derived, viewer-blind organic term, the selected sample
+        outscores the unselected one systematically — measured mean organic
+        +0.04 to +0.22 across seeds 7/11/23/42, every seed.
+
+        Capping the lane's VOLUME cannot fix that (the survivors still
+        outscore in-network content); what needs bounding is the share of the
+        FEED an unchosen lane may occupy. See ``DiversityConfig`` and
+        ``recsys.core.rerank.diversity_rerank``."""
+        return self in (
+            CandidateSource.IN_NETWORK,
+            CandidateSource.OON_COMMUNITY,
+            CandidateSource.OON_INTEREST,
+            CandidateSource.INTEREST_COMMUNITY,
+            CandidateSource.INTEREST_TAG,
+        )
 
     @property
     def requires_second_degree(self) -> bool:
@@ -72,6 +115,10 @@ class CandidateSource(StrEnum):
             # interest content can never satisfy. Requiring it made the lane
             # empty-after-eligibility by construction.
             CandidateSource.OON_INTEREST,
+            # ★ EXPLORATION: a new post has no vouch BY DEFINITION, so requiring
+            # one would make this lane structurally empty — the same defect that
+            # made OON_INTEREST/OON_COMMUNITY/OON_ALS deliver nothing.
+            CandidateSource.EXPLORATION,
             # ★ The two SIBLING lanes with the identical defect, found by the
             # review council after OON_INTEREST was fixed alone (2026-08-01).
             # The reasoning above is not specific to interests — it applies to
@@ -109,14 +156,70 @@ class CandidateSource(StrEnum):
         prior in-network engagement (impossible for new content) or accepted
         anyone (an injection vector).
 
-        The viewer's OWN network and the cold-start lanes they explicitly chose
-        stay exempt from both.
+        The viewer's OWN network stays exempt from both — they chose those
+        authors by name.
+
+        ★ THE COLD-START LANES NO LONGER DO (2026-08-04, cold-start spec item
+        B4). `INTEREST_COMMUNITY` and `INTEREST_TAG` were exempt from this
+        floor as well as from the vouch count, which inverted the protection:
+        measured, an author scored **0.0 — the band reserved for PROVEN
+        self-dealing** — was ADMITTED into a brand-new viewer's cold-start feed
+        via both lanes, while the same author was correctly blocked on
+        `OON_COMMUNITY` and `OON_INTEREST`. The audience with no follow graph to
+        defend them got the least protection of anyone.
+        Declaring an interest is a statement about TOPIC, not a statement that
+        the viewer vouches for whoever posts into it, so exemption from the
+        vouch COUNT was right and exemption from the credibility floor was not.
+
+        This cannot block a genuine newcomer: an author absent from
+        `graph_creds` passes (`filter_eligible` treats missing cred as
+        permissive), and an unknown/never-engaged account scores
+        `min_vouched_score` = 0.10, comfortably above `graph_cred_floor` = 0.05.
+        Only the explicit 0.0 self-dealing band is refused.
+
+        `POPULAR_FALLBACK` stays exempt here because `_fallback_filler` already
+        drops the 0.0 band itself before padding (see `pipeline.py`), and a
+        future `EXPLORATION` lane must also stay exempt — a brand-new author is
+        below every floor by construction, which is the whole point of that
+        lane; its defence is a per-author budget plus ring exclusion instead.
+        """
+        return self not in (
+            CandidateSource.IN_NETWORK,
+            CandidateSource.POPULAR_FALLBACK,
+            # A brand-new author is below every floor by construction; gating
+            # this lane on the floor would make it a lane that can never fire.
+            CandidateSource.EXPLORATION,
+        )
+
+    @property
+    def counts_toward_flooding_cap(self) -> bool:
+        """Whether one author may be capped to `max_oon_posts_per_author`
+        candidates from this lane (§8.8).
+
+        ★ ITS OWN PREDICATE AS OF 2026-08-04, and the reason is a repeat
+        offence. `flooding.cap_oon_flooding` keyed on `requires_author_floor`,
+        having previously keyed on `requires_second_degree` — and its own
+        comment records what happened last time: the moment `OON_INTEREST` was
+        exempted from the vouch count for an unrelated reason, it silently left
+        the flooding cap too and one account took 60 of 103 slots in a real
+        viewer's feed. Extending the author floor to the cold-start lanes (B4)
+        would have done the same thing again in the opposite direction — quietly
+        subjecting `INTEREST_*` to a per-author cap as a side effect of a
+        security fix nobody connected to flooding.
+
+        So the two questions are now named separately. This one preserves the
+        behaviour the flooding tests already pin; whether a cold-start interest
+        feed SHOULD also be flood-capped is a real question, but it is a
+        deliberate product decision, not something to change by accident while
+        editing a different property.
         """
         return self not in (
             CandidateSource.IN_NETWORK,
             CandidateSource.INTEREST_COMMUNITY,
             CandidateSource.INTEREST_TAG,
             CandidateSource.POPULAR_FALLBACK,
+            # already bounded by its own per-author epoch budget
+            CandidateSource.EXPLORATION,
         )
 
 

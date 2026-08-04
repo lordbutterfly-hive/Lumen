@@ -74,16 +74,52 @@ def _pair_weight(
     return pair_weight
 
 
-def _account_totals(pair_weight: Mapping[tuple[str, str], float]) -> dict[str, float]:
-    """Total engagement volume (sent + received, every partner) touching each
-    account — the denominator ``ring_score`` measures insularity against."""
-    totals: dict[str, float] = defaultdict(float)
+def _received_totals(
+    pair_weight: Mapping[tuple[str, str], float],
+    ignore_sources: frozenset[str] = frozenset(),
+) -> dict[str, float]:
+    """Total engagement volume each account RECEIVED, from every partner.
+
+    ★ RECEIVED, NOT sent+received (2026-08-03) — this is the insularity
+    denominator's outside term, and the change closes a live bypass.
+
+    THE BYPASS. ``ring_score`` is inside-volume / total-volume, and the old
+    denominator counted every edge touching the account in BOTH directions. So
+    an account diluted its own score by SPENDING engagement outward — free,
+    unlimited, entirely attacker-controlled, and indistinguishable from ordinary
+    activity. Measured on a dense 4-sock reciprocal ring: ~20 one-way upvotes
+    per sock aimed at one popular honest account took ``ring_score`` from 1.0000
+    to 0.4737, under the 0.6 discount threshold, and the socks' graph-cred went
+    from 0.0000 (condemned, self-dealing fully discounted) to **1.0000**. Four
+    accounts, twenty free upvotes each, whole detector defeated.
+
+    WHY RECEIVED IS THE RIGHT DENOMINATOR. Inbound engagement is evidence that
+    somebody outside chose you; outbound engagement is evidence of nothing,
+    because you chose it yourself and it costs an upvote. An insularity measure
+    must not be buyable with the very resource the attacker has in surplus.
+    After the change the same ring holds ``ring_score`` 1.0000 at 12, 20, 41,
+    100 and even 1000 noise upvotes per sock — the dilution vector is gone, not
+    merely raised in price.
+
+    MEASURED COST, honestly: dropping outside-SENT shrinks the denominator for
+    accounts that send much and receive little, so a few more accounts cross the
+    threshold. Across seeds 7/11/23/42 that is **4 newly-flagged accounts out of
+    579** that land in any group at all (0.7%) — profile 19-20 outgoing edges
+    against 1 incoming, and 3 of the 4 are viewers with ZERO posts (so there is
+    no content of theirs to suppress; the cost is that their votes are
+    discounted on flagged authors' posts). See ``ring_score``'s note in
+    :func:`detect_rings` for the residual attack this does NOT close.
+
+    ``ignore_sources`` names accounts whose outbound engagement must not be
+    credited to the receiver at all — the two-pass discount in
+    :func:`detect_rings`.
+    """
+    received: dict[str, float] = defaultdict(float)
     for (src, dst), w in pair_weight.items():
-        if w <= 0.0:
+        if w <= 0.0 or src in ignore_sources:
             continue
-        totals[src] += w
-        totals[dst] += w
-    return totals
+        received[dst] += w
+    return received
 
 
 def _reciprocal_adjacency(
@@ -132,6 +168,49 @@ def _connected_groups(adjacency: Mapping[str, set[str]]) -> list[list[str]]:
     return groups
 
 
+def _score_groups(
+    groups: Sequence[Sequence[str]],
+    pair_weight: Mapping[tuple[str, str], float],
+    *,
+    ignore_sources: frozenset[str],
+) -> dict[str, RingSignal]:
+    """Score every account in every group. ``ignore_sources`` names accounts
+    whose OUTBOUND engagement must not count as outside evidence for the
+    receiver — see the two-pass note in :func:`detect_rings`."""
+    # Single source of truth for the received-only denominator — do NOT inline
+    # this again; a hand-duplicated copy here went undetected once already.
+    received = _received_totals(pair_weight, ignore_sources)
+
+    signals: dict[str, RingSignal] = {}
+    for ring_id, group in enumerate(groups):
+        group_set = set(group)
+        for account in group:
+            reciprocated = 0.0
+            inside = 0.0
+            inside_credited_in = 0.0
+            for other in group_set:
+                if other == account:
+                    continue
+                w_out = pair_weight.get((account, other), 0.0)
+                w_in = pair_weight.get((other, account), 0.0)
+                inside += w_out + w_in
+                if w_in > 0.0 and other not in ignore_sources:
+                    inside_credited_in += w_in
+                if w_out <= 0.0 or w_in <= 0.0:
+                    continue
+                ratio = min(w_out, w_in) / max(w_out, w_in)
+                reciprocated += ratio * (w_out + w_in)
+            # Denominator = the group's own volume (both directions, since the
+            # numerator counts both) + engagement received from OUTSIDE it.
+            # Outbound engagement to outsiders is deliberately absent — see
+            # `_received_totals` for the bypass that including it opened.
+            outside_received = max(0.0, received.get(account, 0.0) - inside_credited_in)
+            total = inside + outside_received
+            score = min(1.0, reciprocated / total) if total > 0.0 else 0.0
+            signals[account] = RingSignal(account=account, ring_score=score, ring_id=ring_id)
+    return signals
+
+
 def detect_rings(
     edges: Sequence[EngagementEdge],
     weights: RealGraphWeights,
@@ -139,6 +218,7 @@ def detect_rings(
     now: datetime | None = None,
     reciprocity_min: float = 0.5,
     min_group: int = 2,
+    self_credit_threshold: float = 0.6,
 ) -> dict[str, RingSignal]:
     """Basic reciprocity + insularity ring detector (§8.5).
 
@@ -161,31 +241,55 @@ def detect_rings(
     if not pair_weight:
         return {}
 
-    totals = _account_totals(pair_weight)
     adjacency = _reciprocal_adjacency(pair_weight, reciprocity_min)
     groups = [group for group in _connected_groups(adjacency) if len(group) >= min_group]
 
-    signals: dict[str, RingSignal] = {}
-    for ring_id, group in enumerate(groups):
-        group_set = set(group)
-        for account in group:
-            total = totals.get(account, 0.0)
-            if total <= 0.0:
-                score = 0.0
-            else:
-                reciprocated = 0.0
-                for other in group_set:
-                    if other == account:
-                        continue
-                    w_out = pair_weight.get((account, other), 0.0)
-                    w_in = pair_weight.get((other, account), 0.0)
-                    if w_out <= 0.0 or w_in <= 0.0:
-                        continue
-                    ratio = min(w_out, w_in) / max(w_out, w_in)
-                    reciprocated += ratio * (w_out + w_in)
-                score = min(1.0, reciprocated / total)
-            signals[account] = RingSignal(account=account, ring_score=score, ring_id=ring_id)
-    return signals
+    # ★ TWO PASSES (2026-08-03). Pass 1 scores insularity with every outside
+    # engager counted. Pass 2 rescores, ignoring engagement received FROM an
+    # account pass 1 already flagged.
+    #
+    # WHY. With sending no longer able to dilute (see `_received_totals`), the
+    # only remaining way to inflate a denominator is to RECEIVE from outside —
+    # and an attacker can supply that themselves. Measured: a second, sacrificial
+    # ring B one-way engaging ring A cleaned A at just 5 upvotes each while B
+    # stayed condemned, so the attacker bought clean identities at 2x accounts.
+    # Discarding credit from flagged sources closes it: A holds ring_score
+    # 1.0000 at 5, 20, 100 and 1000 upvotes each.
+    #
+    # PRECEDENT: `graph_cred.py` already refuses to count a ring-flagged source
+    # toward `outside_received` (`if weight > 0.0 and not ring_flagged`). This is
+    # the same rule applied one layer earlier, at the place the score is formed.
+    #
+    # COST, measured across seeds 7/11/23/42: ONE additional account flagged out
+    # of 579 that land in any group. Deterministic, because pass 1 is.
+    #
+    # ★★ KNOWN-OPEN, DO NOT READ THIS AS "DILUTION IS CLOSED" (2026-08-03).
+    # Pass 1 can only flag an account that landed in a RECIPROCAL group, so a
+    # one-way PUPPET — an account that sprays engagement into the ring and never
+    # reciprocates — never joins a group, never gets flagged, and its credit is
+    # therefore never discounted here. Measured on the dense 4-sock ring: ONE
+    # puppet sending 13 upvotes to each sock drops all four to 0.5806 and the
+    # entire ring escapes (0/4 flagged). What the two changes above actually
+    # bought is a cost increase, not a closure: outward spraying (0 extra
+    # accounts) and the sacrificial reciprocal ring (~2x accounts) are dead;
+    # the one-way puppet (1 extra account) is not.
+    # Pinned by tests/test_ring.py::test_KNOWN_OPEN_one_way_puppet_dilutes_a_ring.
+    #
+    # The candidate fix is to weight each outside engager's credit by how
+    # CONCENTRATED its engagement is on this group — an engager whose entire
+    # footprint points at one group is not independent evidence of anything.
+    # NOT applied here because it collides with a documented intended behaviour:
+    # `test_honest_hub_with_one_reciprocal_edge_still_scores_low` builds fans
+    # whose only engagement IS the hub, so concentration cannot separate them
+    # from puppets on that fixture. Needs a decision about which of the two the
+    # metric is really for, on real-graph evidence rather than a synthetic star.
+    first = _score_groups(groups, pair_weight, ignore_sources=frozenset())
+    flagged = frozenset(
+        account for account, signal in first.items() if signal.ring_score >= self_credit_threshold
+    )
+    if not flagged:
+        return first
+    return _score_groups(groups, pair_weight, ignore_sources=flagged)
 
 
 def ring_member_set(signals: Mapping[str, RingSignal], threshold: float) -> frozenset[str]:

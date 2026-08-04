@@ -324,3 +324,122 @@ def test_rerank_low_affinity_not_injected_via_public_api() -> None:
     result = rerank(scored, diversity)
     keys = [c.post.permlink for c in result]
     assert keys == ["p1", "p2", "p3", "p4"]
+
+
+# ---------------------------------------------------------------------------
+# Unchosen-source penalty (2026-08-03): bound how much of a viewer's feed can
+# come from lanes they never asked for. See CandidateSource.is_viewer_chosen
+# for the measurement, and measurement-harness/q11_follow_curve.py for the sweep.
+# ---------------------------------------------------------------------------
+
+_NEUTRAL = dict(
+    author_decay=1.0, author_floor=1.0, topic_decay=1.0, topic_floor=1.0,
+    topic_affinity_strength=0.0,
+)
+
+
+def test_unchosen_floor_of_one_is_an_exact_no_op() -> None:
+    # The control column of every sweep. `_pen` returns exactly 1.0 at floor
+    # 1.0 for any decay, so the ordering must be byte-identical -- assert
+    # equality of the full order, not a metric.
+    scored = [
+        _scored("a", "p1", 0.90, CandidateSource.OON_ENGAGED),
+        _scored("b", "p2", 0.89, CandidateSource.IN_NETWORK),
+        _scored("c", "p3", 0.88, CandidateSource.OON_ENGAGED),
+        _scored("d", "p4", 0.87, CandidateSource.IN_NETWORK),
+    ]
+    off = diversity_rerank(scored, **_NEUTRAL)
+    explicit = diversity_rerank(scored, **_NEUTRAL, unchosen_decay=0.5, unchosen_floor=1.0)
+    assert [c.post.key for c in off] == [c.post.key for c in explicit]
+
+
+def test_unchosen_lane_cannot_monopolise_the_feed() -> None:
+    # The defect in miniature: an engagement-selected lane whose every candidate
+    # outscores every in-network one. Without the penalty it takes the whole
+    # head; with it, the viewer's own follows get in.
+    # Topics mirror the measured shape: at 20 same-topic follows EVERY
+    # IN_NETWORK post was on-topic and EVERY OON_ENGAGED post was off-topic.
+    # The score gap between the lanes is the MEASURED one (+0.05; the real range
+    # was +0.04 to +0.22 mean organic across seeds), not an invented landslide —
+    # a penalty is meant to correct a systematic edge, not to overturn any gap.
+    scored = [
+        _scored(f"oon{i}", f"o{i}", 0.75 - i * 0.01, CandidateSource.OON_ENGAGED,
+                community="misc")
+        for i in range(6)
+    ] + [
+        _scored(f"inn{i}", f"n{i}", 0.70 - i * 0.01, CandidateSource.IN_NETWORK,
+                community="photo")
+        for i in range(6)
+    ]
+    off = diversity_rerank(scored, **_NEUTRAL)
+    on = diversity_rerank(scored, **_NEUTRAL, unchosen_decay=0.8, unchosen_floor=0.4)
+    head_off = sum(1 for c in off[:6] if c.source == CandidateSource.IN_NETWORK)
+    head_on = sum(1 for c in on[:6] if c.source == CandidateSource.IN_NETWORK)
+    # Measured: control 1 of the first 6 slots in-network, penalty 4 of 6.
+    assert head_off <= 1, "control should be dominated by the unchosen lane"
+    assert head_on >= 4
+    assert head_on > head_off
+
+
+def test_KNOWN_LIMIT_penalty_is_inert_when_the_pool_is_one_topic() -> None:
+    """A real limit of the topic-attenuated form, pinned so it is not a surprise.
+
+    Affinity is a topic's share of the pool's score mass, so a single-topic pool
+    gives that topic affinity 1.0 and `_attenuate` switches the penalty fully
+    OFF. That is correct on its own terms — with no off-topic content there is
+    no spillover to bound.
+
+    ★ AND THE SAME-TOPIC CASE IT LEAVES OPEN IS BENIGN — measured 2026-08-03,
+    so this is a deliberate non-fix rather than an unexamined gap. Same-topic
+    strangers in a viewer's top-20, by same-topic follow count (seeds 7/11/23):
+
+        follows   own-follow slots   same-topic stranger slots
+           5            5-7                  6-11
+          12            9-11                  0-4
+          20           10-12                   0
+
+    The "crowding" is heaviest exactly when the viewer follows fewest people —
+    i.e. it is DISCOVERY inside their declared interest — and it disappears on
+    its own as they follow more of the topic (by 20 follows the pool contains no
+    same-topic strangers at all, because they follow them). Penalising it would
+    take content the viewer plainly wants and would hit the newest viewers
+    hardest. Left alone on purpose.
+    """
+    scored = [
+        _scored(f"oon{i}", f"o{i}", 0.90, CandidateSource.OON_ENGAGED, community="photo")
+        for i in range(4)
+    ] + [
+        _scored(f"inn{i}", f"n{i}", 0.70, CandidateSource.IN_NETWORK, community="photo")
+        for i in range(4)
+    ]
+    off = diversity_rerank(scored, **_NEUTRAL)
+    on = diversity_rerank(scored, **_NEUTRAL, unchosen_decay=0.8, unchosen_floor=0.4)
+    assert [c.post.key for c in off] == [c.post.key for c in on]
+
+
+def test_unchosen_penalty_spares_the_viewers_own_topic() -> None:
+    """The reason the penalty is topic-attenuated at all.
+
+    A BLANKET lane penalty was measured and rejected: it fixed the follow curve
+    but destroyed new-author discovery (q3's newcomer went from top-20 for 10/10
+    established viewers to 0/10), because the same lane carries both. Unchosen
+    content in the topic the viewer actually reads must therefore keep its
+    place, while unchosen content from elsewhere is what gets bounded.
+    """
+    # Pool mass is dominated by "photo", so photo affinity is high and "misc" low.
+    scored = [
+        _scored(f"p{i}", f"pp{i}", 0.80, CandidateSource.IN_NETWORK, community="photo")
+        for i in range(8)
+    ] + [
+        _scored("newcomer", "debut", 0.60, CandidateSource.OON_ENGAGED, community="photo"),
+        _scored("stranger", "off", 0.60, CandidateSource.OON_ENGAGED, community="misc"),
+    ]
+    ranked = diversity_rerank(
+        scored,
+        author_decay=1.0, author_floor=1.0, topic_decay=1.0, topic_floor=1.0,
+        topic_affinity_strength=0.0,
+        unchosen_decay=0.8, unchosen_floor=0.4,
+    )
+    order = [c.post.author for c in ranked]
+    # identical raw score, identical source — only the topic differs
+    assert order.index("newcomer") < order.index("stranger")

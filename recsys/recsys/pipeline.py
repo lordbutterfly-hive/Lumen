@@ -43,6 +43,11 @@ from recsys.core.coldstart import (
     is_established_followless,
     popular_fallback,
 )
+from recsys.core.exploration import (
+    eligible_for_exploration,
+    graduated_keys,
+    insert_exploration,
+)
 from recsys.core.flooding import cap_oon_flooding
 from recsys.core.graph_cred import compute_graph_cred
 from recsys.core.rerank import rerank
@@ -53,7 +58,7 @@ from recsys.core.scoring import (
     organic_quality_raw,
     score_candidates,
 )
-from recsys.core.second_degree import filter_eligible
+from recsys.core.second_degree import filter_eligible, qualifying_engagers
 from recsys.core.viewer_affinity import (
     affinity_percentiles,
     candidate_affinity,
@@ -186,6 +191,25 @@ def build_trust_snapshot(
     # vouched and therefore what those tests prove. That migration is worth doing
     # deliberately — it is not worth doing as a side effect of a default change.
     # Until then this is a live footgun, and the production caller MUST set it.
+    #
+    # ★★ RULING 2026-08-03 — DO NOT AUTO-DERIVE `trusted_seeds`. It is the
+    # obvious "missing piece" here and it is a trap. Seeds are the root of the
+    # whole vouch chain, so whatever rule picks them is what an attacker buys.
+    # The harness picks "top-2 reputation per topic", which looks defensible
+    # because in `simworld` reputation tracks QUALITY (corr +0.76..+0.83 across
+    # seeds 7/11/23/42) and barely tracks stake (-0.16..+0.24). **That
+    # correlation is an artefact of the simulator.** simworld's `reputation` is
+    # an independent per-account attribute; real Hive reputation is a monotone
+    # function of RECEIVED RSHARES (`rep += rshares >> 6`, build-plan Appendix A),
+    # i.e. stake-weighted votes — buyable. So this instrument structurally
+    # cannot validate any seed rule, and a rule validated on it would put the
+    # trust root up for sale on the real chain.
+    #
+    # THE CONTRACT, therefore, is human-curated: the deploy supplies a vetted
+    # account list AND passes `production=True`. Both halves are required — the
+    # refusal below is already implemented and pinned by
+    # tests/test_pipeline.py::(the F-R2 production-guard test). Nothing in this
+    # package should try to be clever in place of that list.
     production: bool = False,
 ) -> TrustSnapshot:
     """Weekly batch: detect rings, then compute Sybil-hardened graph-cred over
@@ -275,6 +299,11 @@ def build_trust_snapshot(
         now=now,
         reciprocity_min=settings.ring.reciprocity_min,
         min_group=settings.ring.min_group,
+        # The SAME threshold the membership set below applies, so the detector's
+        # internal second pass (which discards outside credit coming from an
+        # already-flagged account) agrees with what actually counts as flagged
+        # downstream. Passing it explicitly keeps the two from drifting apart.
+        self_credit_threshold=settings.thresholds.ring_discount_threshold,
     )
     ring_members = ring_member_set(ring_signals, settings.thresholds.ring_discount_threshold)
     lineage = {account: gateway.stake_lineage(account) for account in accounts}
@@ -555,10 +584,26 @@ def gather_candidates(
         groups.append(established_interest_candidates(viewer, gateway, since, limit))
 
     if viewer.follows:
+        # ★ THE VIEWER'S OWN FOLLOWS GET THEIR OWN, WIDER WINDOW (2026-08-03).
+        # One `since` used to gate every lane, so an author who went three days
+        # without posting vanished from the feed of people who explicitly asked
+        # to see them — 8-13% of authors are in that state at any moment. Only
+        # this lane is widened: they were chosen by name, and `organic_recency`
+        # still discounts age within it. Discovery lanes stay on the short
+        # window, where a wide horizon would surface stale strangers.
+        # 0 = identical to `since`, an exact no-op.
+        # Widened RELATIVE to whatever `since` the caller passed, so an explicit
+        # caller window keeps its meaning and only gains the extra days.
+        extra_days = max(
+            0,
+            settings.history.in_network_freshness_days
+            - settings.history.sourcing_freshness_days,
+        )
+        in_network_since = since - timedelta(days=extra_days) if extra_days else since
         groups.append(
             [
                 Candidate(post=p, source=CandidateSource.IN_NETWORK)
-                for p in gateway.in_network_posts(viewer.follows, since, limit)
+                for p in gateway.in_network_posts(viewer.follows, in_network_since, limit)
             ]
         )
         groups.append(list(gateway.engaged_oon_posts(viewer.follows, since, limit)))
@@ -571,8 +616,14 @@ def gather_candidates(
     # Sourced from the authors the viewer's own CF row ranks highest, EXCLUDING
     # anyone they already follow (those arrive via IN_NETWORK; re-sourcing them
     # would just re-rank the same content). Gated, because CF is a cross-viewer
-    # signal: OON_ALS.requires_second_degree is True, so these still clear the
-    # vouch gate and the graph-cred floor.
+    # signal. ★ CORRECTED 2026-08-04: this comment used to claim
+    # "OON_ALS.requires_second_degree is True, so these still clear the vouch
+    # gate". It is FALSE — `OON_ALS.requires_second_degree` is False
+    # (contracts.py); the lane was exempted from the vouch COUNT along with
+    # OON_COMMUNITY and OON_INTEREST, and keeps only `requires_author_floor`.
+    # `OON_ENGAGED` is now the ONLY source still carrying the second-degree
+    # gate. This is item B1 of the cold-start build plan — "do first so no one
+    # designs against it" — and it had not been done.
     if (
         snapshot is not None
         and snapshot.als is not None
@@ -696,6 +747,35 @@ def _fallback_filler(
         suppressed=_suppressed(gateway, fallback),
         show_nsfw=show_nsfw,
     )
+    # ★ PROVEN SELF-DEALERS ARE DROPPED FROM PADDING, NOT MERELY RE-ORDERED
+    # (2026-08-03). The re-order below fixes WHICH admissible post wins a slot;
+    # it cannot help when the shortfall is large enough to admit the whole pool,
+    # and `POPULAR_FALLBACK` is exempt from `requires_author_floor` so nothing
+    # else stops them. Measured: a dense 4-account mutual ring, graph-cred 0.0
+    # and ring-flagged, reached **10/10** thin-supply viewers through this lane
+    # on seeds 7/11/23 — while the same ring correctly reached 0/10 viewers whose
+    # own pool was healthy. Thin supply is exactly the early-growth/niche
+    # condition where this manipulation is cheapest, so the lane meant to rescue
+    # a starved feed was the one handing a condemned farm its audience.
+    #
+    # THE BAR IS THE SELF-DEALT BAND (score 0.0), NOT ring membership. Those are
+    # different populations: `_normalize_scores` puts a proven self-dealer at
+    # exactly 0.0, while an unknown/newcomer account sits at
+    # `min_vouched_score` (0.10) — so this cannot touch a genuine newcomer, and
+    # an author with no graph-cred entry at all is left alone (fail-open, the
+    # same posture the floor takes elsewhere).
+    #
+    # KNOWN COLLATERAL, stated rather than hidden: a rival-suppression victim is
+    # also forced to 0.0 (tests/test_rival_suppression.py, open), so they lose
+    # this padding lane too. That bug is upstream of this one; per the standing
+    # rule a ring evasion lets an attacker GAIN while suppression only griefs,
+    # and padding is the lane a victim least depends on — their own pool and
+    # every non-fallback lane are untouched.
+    self_dealt = {
+        account for account, cred in snap.graph_creds.items() if cred.score <= 0.0
+    }
+    if self_dealt:
+        admissible = [c for c in admissible if c.post.author not in self_dealt]
     admissible = _order_by_full_exclusion(admissible, gateway, snap, settings)
     # ★ CONTINUOUS PADDING DEPTH (2026-08-01). This used to be
     #     min_feed_size if eligible else len(eligible) + len(admissible)
@@ -1202,8 +1282,43 @@ def rank_feed(
     candidates = gather_candidates(viewer, gateway, since, limit, settings, snap)
     suppressed = _suppressed(gateway, candidates)
     gated_keys = frozenset(c.post.key for c in candidates if c.source.requires_second_degree)
+
+    # ★ EXPLORATION PRE-POOL, computed here and not after `filter_eligible`,
+    # because its keys have to join the SAME second-degree query (2026-08-04).
+    #
+    # Graduation (§4.3: "a post leaves the pool the moment it earns >= 1
+    # qualifying vouch") was structurally dead before this. It read the
+    # `engager_index` built for the GATE, and `gated_keys` holds only sources
+    # with `requires_second_degree` — which today is `OON_ENGAGED` and nothing
+    # else. Every other lane is gate-exempt, each for its own earlier reason.
+    # So for a pool drawn from ALL sources, `vouched_keys` was a set that could
+    # never contain the post's key no matter how many real vouches it had.
+    #
+    # The lanes that were blind are exactly the ones that matter: OON_COMMUNITY,
+    # OON_INTEREST and the INTEREST_* cold-start lanes are how unproven authors
+    # surface at all. A post arriving that way kept re-entering the rotation for
+    # its whole 7-day window after it had already earned its vouch and been
+    # promoted to the normal machinery — spending the scarce slot on content
+    # that no longer needed it, and crowding out the genuine 0-vouch newcomer
+    # the lane is for.
+    #
+    # `vouched_keys=frozenset()` here is deliberate: graduation is the ONE
+    # condition that cannot be evaluated yet, so the pre-pool applies the other
+    # conditions, its keys widen the single query below, and graduation is
+    # applied to the result. One round trip, not two.
+    explore_prepool = eligible_for_exploration(
+        candidates,
+        viewer,
+        now=now,
+        ring_members=snap.ring_members,
+        vouched_keys=frozenset(),
+        suppressed=suppressed,
+        show_nsfw=show_nsfw,
+        config=settings.exploration,
+    )
+    engager_keys = gated_keys | frozenset(c.post.key for c in explore_prepool)
     engager_index = (
-        gateway.second_degree_engagers(gated_keys, viewer.follows) if gated_keys else {}
+        gateway.second_degree_engagers(engager_keys, viewer.follows) if engager_keys else {}
     )
     eligible = filter_eligible(
         candidates,
@@ -1214,6 +1329,31 @@ def rank_feed(
         suppressed=suppressed,
         show_nsfw=show_nsfw,
     )
+
+    # ★ EXPLORATION POOL (cold-start spec §4.3, item B12). Drawn from the WHOLE
+    # gathered pool — no extra gateway round trip — and filtered on "no
+    # qualifying vouch yet", which is the spec's actual condition. An earlier
+    # build sourced this from the posts that FAILED eligibility; that was wrong,
+    # because a new author's post frequently PASSES the gate and then loses on
+    # score, which is the very case this lane exists for. Graduation is applied
+    # here: a post already holding a QUALIFYING vouch has earned the normal
+    # lanes and is excluded, so a ring cannot vote up its own boosted post to
+    # promote it (§4.4 "trusted graduation"). `insert_exploration` de-duplicates
+    # against the ranked feed so nothing is shown twice.
+    # Graduation applied to the pre-pool computed above. The vouch must come
+    # from someone the VIEWER follows (`& viewer.follows`) and must itself
+    # qualify on graph-cred — the same two-part test `filter_eligible` uses, so
+    # "graduated" means the identical thing in both places, and a ring cannot
+    # vote up its own boosted post to promote it out of the lane.
+    _graduated = graduated_keys(
+        {k: v & viewer.follows for k, v in engager_index.items()},
+        qualifying_engagers(
+            frozenset().union(*engager_index.values()) if engager_index else frozenset(),
+            snap.graph_creds,
+            settings.thresholds.vouch_graph_cred_floor,
+        ),
+    )
+    explore_pool = [c for c in explore_prepool if c.post.key not in _graduated]
 
     filler = _fallback_filler(
         eligible,
@@ -1248,4 +1388,26 @@ def rank_feed(
     ranked = _score(eligible, viewer, gateway, norm, now, snap, settings, priors)
     if filler:
         ranked = ranked + _score(filler, viewer, gateway, norm, now, snap, settings, priors)
+    # ★ Exploration is spliced in AFTER ranking, never scored against the rest —
+    # the whole reason the lane exists is that this content cannot win on score
+    # (a zero-engagement post sits at the 3rd-4th percentile by construction).
+    # It is scored only so the returned objects carry a real ScoreBreakdown for
+    # callers; its position is decided by the reserved slot, not by that score.
+    if explore_pool:
+        # ★ The scored list is RE-ORDERED back into `explore_pool` order before
+        # it is spliced (fixed 2026-08-04). `_score` sorts by score, and letting
+        # that sort stand silently replaced the lane's selection policy with
+        # "highest-scoring first" — which is the ranking rule the lane exists to
+        # bypass. Measured: the recency rotation correctly put the newcomer 7th
+        # in the pool, `_score` then dropped them below 60 established authors,
+        # every one of the 10 page slots went to an author already in the feed's
+        # top 15, and the newcomer stayed at positions 99/106/108 — bit-identical
+        # to having no exploration lane at all.
+        #
+        # Scoring still runs, only for the ScoreBreakdown the returned objects
+        # carry; position comes from the reserved slot, never from that score.
+        scored_explore = _score(explore_pool, viewer, gateway, norm, now, snap, settings, priors)
+        by_key = {sc.post.key: sc for sc in scored_explore}
+        ordered = [by_key[c.post.key] for c in explore_pool if c.post.key in by_key]
+        ranked = insert_exploration(ranked, ordered, settings.exploration)
     return ranked[: settings.diversity.top_k]

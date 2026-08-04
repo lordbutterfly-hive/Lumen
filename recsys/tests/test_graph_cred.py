@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import pathlib
 from datetime import datetime, timedelta
+
+import pytest
 
 from recsys.config import GraphCredConfig, RealGraphWeights
 from recsys.contracts import EngagementEdge
@@ -529,3 +532,187 @@ def test_min_ring_self_dealing_events_must_be_at_least_two() -> None:
         raise AssertionError(
             f"min_ring_self_dealing_events={bad} should have been rejected"
         )
+
+
+# ---------------------------------------------------------------------------
+# Sparse PageRank (2026-08-04). `_weighted_pagerank` was rewritten from a dense
+# N x N adjacency to a sparse COO scatter-add. These pin the two properties the
+# rewrite could plausibly have broken: agreement with the dense form, and
+# reproducibility.
+# ---------------------------------------------------------------------------
+
+
+def _dense_pagerank_oracle(nodes, follows, pair_weight, damping, iterations,
+                           trusted_seeds, seed_teleport_share):
+    """The pre-2026-08-04 DENSE implementation, kept here as a test oracle only.
+
+    Deliberately in the test file rather than the package: the package must have
+    exactly one implementation of this function. Three copies of the edge-weight
+    formula already drifted in this codebase (`ring._edge_weight`,
+    `viewer_affinity._decayed`, `graph_cred.edge_weight`) and the comment telling
+    people to keep them in sync did not prevent it.
+    """
+    import numpy as np
+
+    from recsys.core.graph_cred import _teleport_vector
+
+    n = len(nodes)
+    index = {a: i for i, a in enumerate(nodes)}
+    adjacency = np.zeros((n, n), dtype=np.float64)
+    for follower, followees in follows.items():
+        i = index[follower]
+        for followee in followees:
+            adjacency[i, index[followee]] = pair_weight.get((follower, followee), 0.0)
+    if not adjacency.any():
+        return dict.fromkeys(nodes, 0.0)
+    out_weight = adjacency.sum(axis=1)
+    dangling = out_weight == 0.0
+    safe = np.where(dangling, 1.0, out_weight)
+    transition = np.where(dangling[:, None], 0.0, adjacency / safe[:, None])
+    teleport = _teleport_vector(nodes, trusted_seeds, damping, seed_teleport_share)
+    rank = np.full(n, 1.0 / n, dtype=np.float64)
+    for _ in range(iterations):
+        dangling_mass = damping * rank[dangling].sum() / n
+        rank = teleport + dangling_mass + damping * (rank @ transition)
+    return dict(zip(nodes, rank.tolist(), strict=True))
+
+
+def _random_graph(seed: int, n: int, density: float):
+    import random
+
+    rng = random.Random(seed)
+    nodes = [f"a{i:04d}" for i in range(n)]
+    follows: dict[str, frozenset[str]] = {}
+    pair_weight: dict[tuple[str, str], float] = {}
+    for a in nodes:
+        targets = {b for b in nodes if b != a and rng.random() < density}
+        follows[a] = frozenset(targets)
+        for b in targets:
+            pair_weight[(a, b)] = rng.uniform(0.1, 20.0)
+    return nodes, follows, pair_weight
+
+
+@pytest.mark.parametrize("seeded", [False, True])
+@pytest.mark.parametrize("n,density", [(1, 0.5), (12, 0.4), (60, 0.08), (150, 0.03)])
+def test_sparse_pagerank_matches_the_dense_oracle(n: int, density: float, seeded: bool) -> None:
+    from recsys.core.graph_cred import _weighted_pagerank
+
+    nodes, follows, pair_weight = _random_graph(seed=n + int(seeded), n=n, density=density)
+    seeds = frozenset(nodes[: max(1, n // 10)]) if seeded else frozenset()
+    kwargs = dict(
+        damping=0.85, iterations=25, trusted_seeds=seeds, seed_teleport_share=0.5
+    )
+    got = _weighted_pagerank(nodes, follows, pair_weight, **kwargs)
+    want = _dense_pagerank_oracle(nodes, follows, pair_weight, **kwargs)
+    assert set(got) == set(want)
+    for account in nodes:
+        assert got[account] == pytest.approx(want[account], abs=1e-15)
+
+
+def test_sparse_pagerank_handles_the_degenerate_shapes() -> None:
+    """Dangling nodes, zero-weight edges, an all-zero graph, and a follow edge
+    with no engagement behind it — each must match the dense oracle exactly."""
+    from recsys.core.graph_cred import _weighted_pagerank
+
+    nodes = ["a", "b", "c", "d"]
+    follows = {
+        "a": frozenset({"b", "c"}),
+        "b": frozenset(),               # dangling: follows nobody
+        "c": frozenset({"d"}),          # edge with NO pair_weight entry -> 0.0
+        "d": frozenset({"a"}),
+    }
+    pair_weight = {("a", "b"): 3.0, ("a", "c"): 1.0, ("d", "a"): 2.0, ("c", "d"): 0.0}
+    kwargs = dict(
+        damping=0.85, iterations=30, trusted_seeds=frozenset(), seed_teleport_share=0.5
+    )
+    got = _weighted_pagerank(nodes, follows, pair_weight, **kwargs)
+    want = _dense_pagerank_oracle(nodes, follows, pair_weight, **kwargs)
+    for account in nodes:
+        assert got[account] == pytest.approx(want[account], abs=1e-15)
+
+    # every weight zero -> everyone 0.0, same short-circuit as dense
+    allzero = _weighted_pagerank(
+        nodes, follows, {k: 0.0 for k in pair_weight}, **kwargs
+    )
+    assert allzero == dict.fromkeys(nodes, 0.0)
+
+
+def test_sparse_pagerank_is_bit_identical_across_hash_seeds() -> None:
+    """★ The guarantee the canonical lexsort exists to protect.
+
+    `np.add.at` accumulates in argument order; that order follows Python's
+    hash-randomised iteration over `follows.items()`; float addition is not
+    associative. Without the sort, raw ranks wobble in the ~15th significant
+    digit between processes on byte-identical input — a reproducibility
+    guarantee the dense implementation had for free. Asserts BIT equality, not
+    approx: approx would pass with the bug present.
+    """
+    import json
+    import subprocess
+    import sys
+
+    program = (
+        "import json,sys;"
+        "sys.path.insert(0, '.');"
+        "from recsys.core.graph_cred import _weighted_pagerank as p;"
+        "n=[f'a{i:03d}' for i in range(80)];"
+        "import random;r=random.Random(7);"
+        # NOTE: iterate SORTED targets when assigning weights. Iterating a
+        # frozenset here would make the INPUT graph differ across hash seeds and
+        # the test would fail for a reason that has nothing to do with pagerank.
+        "f={a: frozenset(b for b in n if b!=a and r.random()<0.15) for a in n};"
+        "w={(a,b): r.uniform(0.1,9.0) for a in n for b in sorted(f[a])};"
+        "print(json.dumps(p(n,f,w,damping=0.85,iterations=20,"
+        "trusted_seeds=frozenset(n[:5]),seed_teleport_share=0.5)))"
+    )
+    outputs = []
+    for hash_seed in ("0", "1", "42"):
+        proc = subprocess.run(
+            [sys.executable, "-c", program],
+            capture_output=True, text=True, check=True,
+            env={"PYTHONHASHSEED": hash_seed, "PATH": "/usr/bin:/bin"},
+            cwd=str(pathlib.Path(__file__).resolve().parent.parent),
+        )
+        outputs.append(json.loads(proc.stdout))
+    for other in outputs[1:]:
+        assert other == outputs[0], "pagerank is not reproducible across hash seeds"
+
+
+def test_the_score_bands_leave_no_room_for_a_percentile_floor() -> None:
+    """★ Why cold-start spec item D2/B3 is closed as WON'T-BUILD.
+
+    D2 asked for the eligibility floors to become live percentiles excluding a
+    bottom slice. That is unreachable, and this pins the structural reason so
+    nobody re-opens it from the failing acceptance test alone: the score has a
+    GAP between the self-dealing band (0.0) and the unknown band
+    (`min_vouched_score`, 0.10), and the engaged band starts above the unknown
+    one. So a floor either sits in the gap — where it means exactly "not a
+    proven self-dealer" — or it rises past 0.10 and removes every newcomer
+    before it touches a single engaged account.
+    """
+    config = GraphCredConfig()
+    edges = [
+        # an engaged cluster
+        EngagementEdge(src="a", dst="b", upvotes=9, last_interaction=EPOCH),
+        EngagementEdge(src="b", dst="c", upvotes=7, last_interaction=EPOCH),
+        EngagementEdge(src="c", dst="a", upvotes=5, last_interaction=EPOCH),
+        # a never-engaged account: present in the graph, receives nothing
+        EngagementEdge(src="lurker", dst="a", upvotes=1, last_interaction=EPOCH),
+    ]
+    follows = {
+        "a": frozenset({"b"}), "b": frozenset({"c"}), "c": frozenset({"a"}),
+        "lurker": frozenset({"a"}),
+    }
+    creds = compute_graph_cred(
+        edges, follows, RealGraphWeights(), config=config, now=EPOCH
+    )
+    scores = {a: c.score for a, c in creds.items()}
+
+    # the never-engaged account sits at the unknown band, NOT below it
+    assert scores["lurker"] == pytest.approx(config.min_vouched_score)
+    # and nothing occupies the gap between "self-dealt" and "unknown"
+    assert not [s for s in scores.values() if 0.0 < s < config.min_vouched_score], (
+        "a score landed between the self-dealing and unknown bands — the gap "
+        "this project's floors rely on has closed; re-read Thresholds' note "
+        "before changing any floor"
+    )

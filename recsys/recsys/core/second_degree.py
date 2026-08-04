@@ -9,9 +9,10 @@ and ``recsys.config``.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+from dataclasses import replace
 
 from recsys.config import Thresholds
-from recsys.contracts import Candidate, GraphCred, ViewerProfile
+from recsys.contracts import Candidate, CandidateSource, GraphCred, Post, ViewerProfile
 
 
 def passes_second_degree(
@@ -70,6 +71,25 @@ def qualifying_engagers(
     )
 
 
+def _ungated_lane_for(post: Post, viewer: ViewerProfile) -> CandidateSource | None:
+    """The ungated, viewer-OPTED-IN lane this post already qualifies for, or
+    ``None``. Used to demote a candidate whose second-degree vouch failed rather
+    than dropping it — see the note in :func:`filter_eligible`.
+
+    Admits nothing new: every branch requires an explicit act by the viewer
+    (subscribing to a community, declaring an interest), and each returned lane
+    still carries ``requires_author_floor``, so the author credibility check
+    downstream is unchanged.
+    """
+    if post.community and post.community in viewer.subscribed_communities:
+        return CandidateSource.OON_COMMUNITY
+    if post.community and post.community in viewer.interest_communities:
+        return CandidateSource.OON_INTEREST
+    if viewer.interest_tags and set(post.tags) & viewer.interest_tags:
+        return CandidateSource.OON_INTEREST
+    return None
+
+
 def filter_eligible(
     candidates: Iterable[Candidate],
     viewer: ViewerProfile,
@@ -119,7 +139,35 @@ def filter_eligible(
             engagers = engager_index.get(post.key, frozenset()) & viewer.follows
             engagers = qualifying_engagers(engagers, graph_creds, thresholds.vouch_graph_cred_floor)
             if not passes_second_degree(candidate, engagers, thresholds.second_degree_min_engagers):
-                continue
+                # ★ DEMOTE, DO NOT DROP (2026-08-04). This was `continue`, and
+                # that made ENGAGEMENT ITSELF A WEAPON.
+                #
+                # `merge_candidates` labels a post by its HIGHEST-priority source,
+                # and OON_ENGAGED (1) outranks OON_COMMUNITY (2). So a post in a
+                # community the viewer subscribes to arrives ungated and is served
+                # — until somebody the viewer follows engages it, at which point it
+                # is re-labelled OON_ENGAGED, becomes gated, fails the vouch on the
+                # ENGAGER's credibility, and is dropped. It was never re-tested
+                # against the ungated lane it had already qualified for.
+                #
+                # Measured: one condemned account that any viewer follows, one
+                # upvote, and an honest author goes from 10/10 subscribed viewers
+                # to 0/10 — on ANY author, with no ring shape, no zero-audience
+                # precondition, and the target never flagged. That is cheaper and
+                # broader than the known rival-suppression bug, and the
+                # suppression machinery is itself the weapon.
+                #
+                # The fix restores the lane the post already qualified for rather
+                # than admitting anything new: the viewer must still have opted in
+                # (subscribed community / declared interest), and the demoted lane
+                # still carries `requires_author_floor`, so a genuine self-dealing
+                # AUTHOR is refused two lines below exactly as before. Only the
+                # vouch-COUNT requirement — which this post never needed — is
+                # dropped.
+                demoted = _ungated_lane_for(post, viewer)
+                if demoted is None:
+                    continue
+                candidate = replace(candidate, source=demoted)
         # The author floor is a SEPARATE question from the vouch count (2026-08-01):
         # "has my network seen this" vs "is this author credible at all". A
         # discovery lane can reasonably skip the first while never skipping the

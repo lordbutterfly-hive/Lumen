@@ -199,6 +199,22 @@ for label, gw in [("no_prior", gw_no_prior), ("with_prior", gw_with_prior)]:
     print(f"\n{label:12s} scoring_gap (picking failure, diversity OFF) = {scoring_gap[label]:.4f}")
 
 # ---- SELF-CHECK: the prior must be measurably improving picking quality ----
+# ★ READ THIS BEFORE TRUSTING THE FLOORS BELOW (measured 2026-08-03, 31 worlds).
+# These thresholds are calibrated on seed 7 ALONE, and seed 7 is the single most
+# FAVOURABLE world in a 31-seed sample on the auc_own_m5 axis: its +0.0503 is the
+# MAXIMUM observed (median +0.0253, p10 -0.0040, min -0.0176 on seed 11, where the
+# prior is outright negative on that axis). Only 16 of 31 worlds clear the 0.020
+# auc_own_m5 floor at the shipped config.
+#
+# So this panel is a REGRESSION GUARD FOR ONE WORLD — a legitimate thing to be —
+# and must NOT be read as evidence the prior helps everywhere. A change that helps
+# seed 7 while hurting other topologies passes here unnoticed; that nearly shipped
+# (the shrinkage sweep's k=5 candidate passed this panel and failed on seed 42).
+# The breadth counterpart is `q10_prior_robustness.py`, which runs 5 worlds
+# including seed 11 and asserts on the distribution. RUN BOTH.
+#
+# What DID survive the wider sample: mean_q and stack_capture_g are positive on
+# 31 of 31 worlds. The prior itself is not in doubt — auc_own_m5's floor is.
 # Measured on this exact panel/protocol (2026-07-22): mean_q +0.0227,
 # stack_capture_g +0.0377, auc_own_m5 +0.0462, scoring_gap -0.0645
 # (0.1561 -> 0.0916). Thresholds below sit well inside those margins (roughly
@@ -215,7 +231,19 @@ gap_improvement = scoring_gap["no_prior"] - scoring_gap["with_prior"]
 print("\nSELF-CHECK — author-pooled prior must beat the prior-less fallback:")
 checks = [
     ("mean_q delta", mean_q_delta, 0.010),
-    ("stack_capture_g delta", stack_capture_delta, 0.015),
+    # ★ FLOOR LOWERED 0.015 -> 0.008 (2026-08-03), for a known and measured
+    # cause — NOT because it was inconvenient. `DiversityConfig.unchosen_source_*`
+    # now decides more of the feed's COMPOSITION structurally, so the pooled
+    # prior has less headroom left to change which posts get served and its
+    # MARGINAL contribution on composition-sensitive columns shrinks. Re-measured
+    # across all 31 worlds (see q10_prior_robustness's docstring): stack_capture_g
+    # went min +0.0150 -> +0.0044, mean +0.0291 -> +0.0130, while `mean_q` — the
+    # anti-gaming anchor — was essentially UNCHANGED (min +0.0104 -> +0.0110,
+    # positive on 31/31). On this panel the prior's other three axes IMPROVED
+    # under the same change (mean_q +0.0225 -> +0.0296, auc_own_m5 +0.0264 ->
+    # +0.0377). Two mechanisms now share work one used to do alone. 0.008 is
+    # ~half the post-change median, matching how the other floors here were set.
+    ("stack_capture_g delta", stack_capture_delta, 0.008),
     ("auc_own_m5 delta", auc5_delta, 0.020),
     ("scoring_gap improvement (no_prior - with_prior)", gap_improvement, 0.025),
 ]

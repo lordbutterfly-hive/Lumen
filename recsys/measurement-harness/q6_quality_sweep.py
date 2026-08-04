@@ -1,17 +1,21 @@
 """Q6 — quality-vs-composition re-baseline over topic_affinity_strength.
 
 Runs the metrics_v2 vector for the 24-viewer panel (q1's sample) at
-``topic_affinity_strength`` in {0, .25, .5, .75, .9 (SHIPPED), 1.0} plus the
+``topic_affinity_strength`` in {0, .25, .5, .75, .9, 1.0} + the shipped value, plus the
 all-diversity-off reference, then the q5[A] session-feedback loop per config
 on a 6-viewer subpanel. Prints the verdict the last round couldn't answer:
-on the quality axis, is the shipped 0.9 better than the 0.0 baseline?
+on the quality axis, is the SHIPPED value better than the 0.0 baseline?
+(The shipped value is read from `Settings()`, never hardcoded — see STRENGTHS.)
 
 Setup mirrors q1_personalization.py exactly (seed=7 world, curated trusted
-seeds = top-2 reputation authors per topic) so the legacy nDCG column must
-reproduce the known 0.355 / 0.439 / 0.630 figures (s=0.00 / s=0.90 SHIPPED /
-noDiv) — that reproduction is the instrument's self-check. This script pins
-its imports to the harness directory (an instrument should not silently pick
-up scratchpad overrides).
+seeds = top-2 reputation authors per topic), so the legacy nDCG column must
+reproduce its pinned figures at s=0.00 / s=0.90 / noDiv — that reproduction is
+the instrument's self-check, and as of 2026-08-03 it is actually RUN (see
+NDCG_PINS below) rather than only asserted in this docstring. Note s=0.90 is
+NOT the shipped value any more; it is simply the grid point those legacy
+figures were captured at. The shipped value is read from ``Settings()``.
+This script pins its imports to the harness directory (an instrument should
+not silently pick up scratchpad overrides).
 
 REFRESHED 2026-07-22 (previous pins: 0.344 / 0.534 / 0.675 — captured before
 a later hardening pass on recsys.core.vote_signal / recsys.core.scoring /
@@ -51,7 +55,15 @@ from recsys.config import DiversityConfig, Settings
 from recsys.contracts import ViewerProfile
 from recsys.pipeline import build_trust_snapshot, rank_feed
 
-STRENGTHS = [0.0, 0.25, 0.5, 0.75, 0.9, 1.0]
+# ★ THE SHIPPED VALUE IS DERIVED, NOT HARDCODED (2026-08-03). This file's
+# verdict block compared s=0.00 against a literal "s=0.90 SHIPPED" — and the
+# shipped default is now 0.5 (`DiversityConfig.topic_affinity_strength`), so the
+# panel was reporting a verdict on a configuration nobody ships, under a heading
+# that said it was shipped. Reading it from `Settings()` means it can never go
+# stale again, and the assert below refuses to run rather than silently sweeping
+# a grid that omits the value actually in production.
+SHIPPED_S = Settings().diversity.topic_affinity_strength
+STRENGTHS = sorted({0.0, 0.25, 0.5, 0.75, 0.9, 1.0, SHIPPED_S})
 BIG = 100_000  # top_k beyond any pool size -> full preference order (prefix-stable)
 
 world = build_world(seed=7)
@@ -125,6 +137,45 @@ ROWS = [
     ("        distinct authors @20", "authors"),
 ]
 
+# ★ THE SELF-CHECK IS NOW RUN, NOT JUST CLAIMED (2026-08-03). This file's
+# docstring asserted that the legacy ndcg column "must reproduce" three known
+# figures and called that "the instrument's self-check" — but no code ever
+# compared them, so when they drifted nobody found out. They HAD drifted, on
+# both counts below. q7 prints exactly this kind of OK/MISMATCH line; this is
+# the same convention, applied to the pins this file already documented.
+#
+# RE-PINNED 2026-08-03. Old pins 0.355 / 0.439 / 0.630 (s=0.00 / s=0.90 / noDiv),
+# captured 2026-07-22. Decomposed by re-running this panel at
+# `organic_prior_shrinkage` 0.0 and 3.0 with nothing else changed (config
+# restored + checksum-verified afterwards):
+#
+#                          s=0.00   s=0.90    noDiv
+#   old pin (2026-07-22)    0.355    0.439    0.630
+#   k=0 today              0.335    0.416    0.616   <- PRE-EXISTING drift
+#   k=3 today (shipped)    0.339    0.422    0.581   <- + author-prior shrinkage
+#
+# So MOST of the drift on s=0.00/s=0.90 is pre-existing: the 2026-08-01
+# instrument fix (simworld emitting AttributedPost, the author prior becoming
+# active outside q8) moved every panel, and q7 was re-pinned for it while q6
+# was not. The 2026-08-03 shrinkage change is the smaller part there (+0.004 /
+# +0.006) but dominates the noDiv column (-0.035). nDCG is never optimised in
+# this project — it is recorded as legacy provenance, so a fall here is not by
+# itself a regression; the decision columns are elsewhere in this table.
+# ★ RE-PINNED AGAIN 2026-08-03 for the unchosen-source penalty
+# (`DiversityConfig.unchosen_source_*` 1.0/1.0 -> 0.8/0.40). Old pins 0.339 /
+# 0.422 / 0.581. nDCG rises sharply here because the penalty shifts composition
+# toward the viewer's own topic and this legacy column rewards that — which is
+# exactly why this project does NOT optimise nDCG and treats it as provenance
+# only. The decision columns for that change are recorded in q7's re-pin note;
+# the panel that judges it is q11_follow_curve.
+NDCG_PINS = [("s=0.00", 0.459), ("s=0.90", 0.580), ("noDiv", 0.782)]
+print("\nSELF-CHECK — legacy ndcg vs recorded pins (see the note above for the "
+      "decomposition):")
+for key, known in NDCG_PINS:
+    got = results[key]["ndcg"][0]
+    flag = "OK" if abs(got - known) < 0.0015 else "** MISMATCH — instrument moved **"
+    print(f"    ndcg @ {key:8s} {got:6.3f}   (known {known:5.3f})  {flag}")
+
 labels = [label for label, _ in CONFIGS]
 hdr = "metric".ljust(34) + "".join(f"{lb:>9s}" for lb in labels)
 print(hdr)
@@ -160,8 +211,13 @@ for label, s in CONFIGS:
           f"frozen (20/20) {frozen}/{len(all_ov)}")
 
 # ---- the verdict the last round couldn't answer ----
-a, b = results["s=0.00"], results["s=0.90"]
-print("\nVERDICT — shipped s=0.90 vs s=0.00 baseline, on the quality axis:")
+SHIPPED_KEY = f"s={SHIPPED_S:.2f}"
+assert SHIPPED_KEY in results, (
+    f"the shipped topic_affinity_strength ({SHIPPED_S}) was not swept — "
+    f"have {sorted(results)}. Refusing to print a verdict that skips production."
+)
+a, b = results["s=0.00"], results[SHIPPED_KEY]
+print(f"\nVERDICT — shipped {SHIPPED_KEY} vs s=0.00 baseline, on the quality axis:")
 for title, key in [("mean author quality @20", "mean_q"), ("own-slot quality", "q_own"),
                    ("own capture", "cap_own"), ("off capture", "cap_off"),
                    ("fcq capture (picking skill, comp-pinned)", "fcq_capture"),
@@ -170,12 +226,12 @@ for title, key in [("mean author quality @20", "mean_q"), ("own-slot quality", "
                    ("regret vs pool ceiling", "regret")]:
     m0, m9 = a[key][0], b[key][0]
     arrow = "UP" if m9 > m0 else ("DOWN" if m9 < m0 else "FLAT")
-    print(f"    {title:42s}: 0.0 -> {m0:6.3f}   0.9 -> {m9:6.3f}   ({arrow})")
+    print(f"    {title:42s}: 0.0 -> {m0:6.3f}   {SHIPPED_S:.2f} -> {m9:6.3f}   ({arrow})")
 
 # per-viewer appendix at the two decision points
-print("\nper-viewer appendix (s=0.00 | s=0.90): own_share  mean_q  fcq_capture  entropy")
+print(f"\nper-viewer appendix (s=0.00 | {SHIPPED_KEY}): own_share  mean_q  fcq_capture  entropy")
 for i, name in enumerate(PANEL):
-    r0, r9 = per_viewer["s=0.00"][i], per_viewer["s=0.90"][i]
+    r0, r9 = per_viewer["s=0.00"][i], per_viewer[SHIPPED_KEY][i]
     print(f"    {name:12s} {r0['own_share']:5.2f}|{r9['own_share']:5.2f} "
           f" {r0['mean_q']:5.3f}|{r9['mean_q']:5.3f} "
           f" {r0['fcq_capture']:5.3f}|{r9['fcq_capture']:5.3f} "

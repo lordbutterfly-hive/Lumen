@@ -208,10 +208,60 @@ def recency_bonus(post: Post, now: datetime, half_life_hours: float) -> float:
 
 
 def pooled_author_base(
-    own_base: float, prior: AuthorEngagement | None, post_share: float
+    own_base: float,
+    prior: AuthorEngagement | None,
+    post_share: float,
+    shrinkage: float = 0.0,
 ) -> float:
     """Blend a post's own log-engagement with a LEAVE-ONE-OUT mean over the
-    author's other window posts.
+    author's other window posts, SHRUNK toward the post's own signal by how
+    little evidence the mean is estimated from.
+
+    ★ SHRINKAGE (2026-08-03). The blend used to be a FIXED ``post_share`` /
+    ``1 - post_share`` split the moment an author had two window posts, which
+    made the estimator say the same thing about a mean over 1 other post as
+    about a mean over 40. Two measured consequences, both real:
+
+    * **A new author is buried by their own newness.** For a newcomer the
+      "other posts" are unengaged BECAUSE they are new, so the estimator
+      conflates *not yet discovered* with *low quality*: 1 good post + 2
+      unengaged took the pooled base from 1.0000 to 0.3333 (-67%), and
+      end-to-end a new author with 9 votes + 2 comments + 1 reblog reached
+      top-20 for 0/10 established viewers (q3).
+    * **A cliff at the second post.** ``posts <= 1`` returns ``own_base``
+      outright — no prior at all — and the very next post jumped straight to
+      two thirds prior. Nothing in the data justifies that discontinuity.
+
+    Both come from the same omission: the blend never asked how much evidence
+    the mean rests on. It does now. With ``n = posts - 1`` other posts and
+    shrinkage constant ``k``::
+
+        prior_weight = (1 - post_share) * n / (n + k)
+
+    ``k = 0`` reproduces the fixed blend BYTE-FOR-BYTE (``n / n == 1``), which
+    is why it is the default here — the behaviour change is opt-in through
+    ``ScoreWeights.organic_prior_shrinkage``. ``k > 0`` makes the prior earn
+    its weight: it approaches ``1 - post_share`` asymptotically, so an
+    established author with a deep window is scored as before, while a thin
+    pool is discounted toward the prior-less fallback. The ``n = 1`` cliff
+    disappears with it — ``prior_weight -> 0`` as ``n -> 0``, which is exactly
+    the ``posts <= 1`` branch above, so the estimator is now continuous across
+    that boundary instead of stepping.
+
+    It is deliberately SYMMETRIC: thin evidence withholds the prior's HELP as
+    well as its harm, so the steady author whose other posts all drew
+    engagement is also moved back toward their own post's signal at ``n = 1``.
+    This is a statement about the variance of a small-sample mean, not a
+    newcomer subsidy — a rule that only ever helped new authors would be a
+    thumb on the scale, and would be gamed by staying "new".
+
+    NOT IMPLEMENTED HERE — the other half of the designed fix, excluding posts
+    too young to have accumulated engagement, needs a per-post age the grouped
+    aggregate does not carry AND an instrument that models engagement arriving
+    over time. ``simworld`` does not: it draws every post's engagement
+    independently of the post's age (``simworld.build_world``), so a maturity
+    horizon tuned on it would be tuned against nothing. That lever is
+    LIVE-HAFSQL-GATED; do not add it on synthetic evidence.
 
     Why leave-one-out and not the plain author mean: the post's own draw
     already enters through ``own_base``: letting it into the prior as well
@@ -239,11 +289,26 @@ def pooled_author_base(
 
     The result is a convex combination of same-scale log-engagement values, so
     it can never leave the range of the §4 sample it will be ranked against.
+    Shrinkage does not weaken that: ``prior_weight`` is bounded by
+    ``1 - post_share`` from above and 0 from below for every ``n >= 1`` and
+    ``k >= 0``, so the blend stays convex and the range guarantee holds for
+    any shrinkage setting.
     """
     if prior is None or prior.posts <= 1:
         return own_base
-    loo = max((prior.total_base - own_base) / (prior.posts - 1), 0.0)
-    return post_share * own_base + (1.0 - post_share) * loo
+    others = prior.posts - 1
+    loo = max((prior.total_base - own_base) / others, 0.0)
+    # Written as "the weight shrinkage takes OFF the prior goes back to the
+    # post's own signal" rather than `1 - prior_weight`, so that at
+    # shrinkage == 0 (evidence == 1.0) these two coefficients collapse to
+    # EXACTLY `post_share` and `1 - post_share` — the pre-shrinkage expression,
+    # bit for bit. `1 - (1 - post_share)` does not: for post_share = 1/3 it is
+    # 0.33333333333333337, and a control column that is only ALMOST the shipped
+    # behaviour is not a control.
+    evidence = others / (others + shrinkage)
+    prior_weight = (1.0 - post_share) * evidence
+    own_weight = post_share + (1.0 - post_share) * (1.0 - evidence)
+    return own_weight * own_base + prior_weight * loo
 
 
 def organic_quality_raw(
@@ -283,7 +348,12 @@ def organic_quality_raw(
         require_attribution=require_attribution,
         weights=weights,
     )
-    pooled = pooled_author_base(own_base, prior, weights.organic_post_share)
+    pooled = pooled_author_base(
+        own_base,
+        prior,
+        weights.organic_post_share,
+        weights.organic_prior_shrinkage,
+    )
     if weights.organic_recency == 0.0:
         return pooled
     return pooled + weights.organic_recency * recency_bonus(

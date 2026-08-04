@@ -34,11 +34,33 @@ CREATE TABLE IF NOT EXISTS cf_factors (
 -- (outside_engaged=False), emptying the vouched set network-wide and dropping
 -- every genuinely-vouched account to unknown-tier breadth budgeting. Wire the
 -- persist/load of this column together with the F-R2 persistence layer.
+--
+-- ★★ AND THE BOOLEAN ALONE IS NOT ENOUGH (2026-08-04). The warning above names
+-- `outside_engaged`, but seed-anchored vouch propagation walks the SET —
+-- `GraphCred.outside_engagers` (contracts.py), read at pipeline.py:916 and :926
+-- to decide which already-vouched account may vouch whom. That column was
+-- missing entirely, so a snapshot round-tripped through this schema as written
+-- would reload every set empty and collapse propagation to the seeds alone.
+-- Simulated on the 180-account harness world: vouched 145 -> 12 (exactly the
+-- seeds), 133 honest accounts demoted to unknown-tier breadth, and 51.5% of all
+-- served top-20 slots changed — with nothing logged. `_trust_is_fresh` would
+-- NOT catch it: `graph_creds` is non-empty and `degraded` is False, so
+-- FAIL_CLOSED stays silent. Exactly the fail-open shape H01/F-R2 exist to close,
+-- hiding inside the persistence layer their own comments live in.
+--
+-- LATENT, NOT LIVE: nothing in the package writes any table here (grep for
+-- INSERT/UPDATE returns nothing), so this is a trap for whoever builds
+-- persistence rather than a current failure. The column is added now so the
+-- trap cannot be stepped in.
 CREATE TABLE IF NOT EXISTS graph_cred (
     account               text             PRIMARY KEY,
     score                 double precision NOT NULL,
     follow_follower_ratio double precision NOT NULL,
     outside_engaged       boolean          NOT NULL DEFAULT false,
+    -- WHO engaged this account from outside its ring/lineage. Persist and
+    -- reload alongside `outside_engaged`; an empty set here is not equivalent
+    -- to `outside_engaged = false`, it silently breaks vouch propagation.
+    outside_engagers      text[]           NOT NULL DEFAULT '{}',
     computed_at           timestamptz      NOT NULL DEFAULT now()
 );
 

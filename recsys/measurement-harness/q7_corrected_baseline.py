@@ -158,10 +158,89 @@ print("SELF-CHECK vs prior-round shipped figures (must reproduce):")
 # not measured. q6's swept optimum for `topic_affinity_strength` has already moved
 # to the LEFT EDGE of its range (argmax auc_own s=0.25 -> s=0.00 against a shipped
 # 0.90), so that sweep's range itself needs extending, not just re-running.
-for label, key, known in [("legacy ndcg (global ideal)", "ndcg", 0.378),
-                          ("DEPRECATED fcq_capture", "fcq_capture", 0.803),
-                          ("own capture (pool ceiling)", "cap_own", 0.821),
-                          ("AUC own (served slots)", "auc_own", 0.742)]:
+# ★ RE-PINNED 2026-08-03 — author-prior SHRINKAGE (`organic_prior_shrinkage`
+# 0.0 -> 3.0). An ALGORITHM change, deliberate, and unlike the 2026-08-01
+# re-pin this one is NOT an improvement on every axis: it is a measured TRADE,
+# so it is recorded as one. Isolated by running this panel at k = 0 and k = 3
+# with nothing else changed (config restored + checksum-verified afterwards):
+#
+#   decision column          k = 0    k = 3    delta
+#   scoring_gap  (down good) 0.069    0.094    +0.025  <- the cost, and it is
+#   stack_capture_g          0.803    0.785    -0.018     the headline number
+#   pinned_q_g               0.657    0.642    -0.015     a scoring round is
+#   mean_q@20                0.708    0.701    -0.007     meant to shrink
+#   q_own_m5                 0.751    0.756    +0.005
+#   cap_own_m5_g             0.858    0.865    +0.007
+#   auc_own_m5               0.789    0.795    +0.006
+#   q_own_m10                0.690    0.678    -0.012
+#   cap_own_m10_g            0.803    0.789    -0.014
+#   auc_own_m10              0.718    0.698    -0.020
+#   own_share / entropy      0.375    0.371    (flat composition, as required)
+#
+# WHAT IT BOUGHT, on the panel the defect was recorded against (q3): a new
+# author with 9 votes + 2 comments + 1 reblog went from top-20 for 0/10
+# established viewers to 10/10, and q8's prior-vs-prior-less guard still
+# clears every floor (+0.0225 / +0.0248 / +0.0503 / +0.0474).
+#
+# WHY THE COST IS REAL AND NOT A METRIC ARTIFACT: this world contains no new
+# author at all, so the movement above is purely "the pooled prior denoises
+# ESTABLISHED authors less". On a 7-day window many established simworld
+# authors also have thin pools (poisson mean 2.8-9.8 posts), and shrinkage
+# cannot tell "few posts because new" from "few posts because low-volume" —
+# only POST AGE can, which is the live-data-gated maturity lever. Read this
+# pin as: the blunt instrument was taken deliberately, and the targeted one is
+# still owed. k = 2.0 is the documented cheaper alternative (scoring_gap 0.087,
+# newcomer 8/10 rather than 10/10) and is a one-field flip.
+# ★ RE-PINNED AGAIN 2026-08-03 — the unchosen-source penalty
+# (`DiversityConfig.unchosen_source_decay/floor` 1.0/1.0 -> 0.8/0.40, topic-
+# attenuated). Unlike the shrinkage re-pin above, this one is an improvement on
+# EVERY decision column, measured on this panel with nothing else changed:
+#
+#   decision column          before   after    delta
+#   scoring_gap (down good)   0.094    0.081   -0.013  <- the target number
+#   stack_capture_g           0.785    0.811   +0.026
+#   pinned_q_g                0.642    0.663   +0.021
+#   mean_q@20                 0.701    0.713   +0.012
+#   q_own_m5 / m10        0.756/0.678  0.774/0.700  +0.018/+0.022
+#   cap_own_m5_g / m10_g  0.865/0.789  0.885/0.815  +0.020/+0.026
+#   auc_own_m5 / m10      0.795/0.698  0.829/0.737  +0.034/+0.039
+#   own_share                 0.371    0.575   +0.204  (descriptor)
+#   topic entropy@20          2.307    1.865   -0.442  (descriptor)
+#
+# The composition columns move a LOT and that is the point of the change: the
+# panel's viewers have 9 follows each, 8 of them same-topic, so they sit inside
+# the follow-count defect this fixes. They now see more of what they follow.
+# NOTE the honest asymmetry: on this 9-follow panel quality RISES, but the q11
+# probe at 20 same-topic follows measures a quality COST of 0.028 — at 9 follows
+# the penalty mostly removes weak spillover, at 20 it also removes genuinely
+# strong global content. Both are true; neither alone describes the change.
+# ★ RE-PINNED 2026-08-04 (third time). Two algorithm changes landed since the
+# last pin, both deliberate:
+#   1. `DiversityConfig.unchosen_max_per_page = 3` — a HARD per-page cap on lanes
+#      the viewer never asked for. The geometric penalty alone was insufficient
+#      (OON_ENGAGED still took 56% of the first page); the cap took the
+#      follow-curve defect ratio from 0.395 to 1.071, i.e. following more people
+#      no longer degrades the feed.
+#   2. `second_degree.filter_eligible` demote-not-drop — a failed second-degree
+#      vouch now re-labels the candidate to the ungated lane it already
+#      qualified for instead of dropping it. This closed a suppression vector
+#      where one condemned account's upvote deleted any post from any subscribed
+#      viewer's feed.
+# Both move composition, which is what these legacy columns are sensitive to.
+#
+# ★ The sparse-PageRank rewrite that landed alongside them CANNOT contribute to
+# this movement: it agrees with the dense form to ~5.6e-17 on raw ranks and
+# produces BIT-IDENTICAL banded scores (pinned by
+# tests/test_graph_cred.py::test_sparse_pagerank_matches_the_dense_oracle).
+#
+# HONEST LIMIT: the cap-vs-demote decomposition was NOT run. The box hit an
+# out-of-memory wall (19 GiB used, 260 MiB free, forks failing) while a
+# scrutiny agent benchmarked dense PageRank at scale, and re-running the 2x2
+# would have thrashed it further. Decompose before relying on either figure.
+for label, key, known in [("legacy ndcg (global ideal)", "ndcg", 0.644),
+                          ("DEPRECATED fcq_capture", "fcq_capture", 0.842),
+                          ("own capture (pool ceiling)", "cap_own", 0.830),
+                          ("AUC own (served slots)", "auc_own", 0.743)]:
     m, _ = base[key]
     flag = "OK" if abs(m - known) < 0.0015 else "** MISMATCH — instrument moved **"
     print(f"    {label:32s} {m:6.3f}   (known {known:5.3f})  {flag}")

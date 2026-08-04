@@ -29,6 +29,16 @@ INTEREST_LANE_SOURCES: frozenset[CandidateSource] = frozenset(
     {
         CandidateSource.INTEREST_COMMUNITY,
         CandidateSource.INTEREST_TAG,
+        # ★ EXPLORATION (2026-08-04, item B12). Added the moment the source was
+        # declared, because the CF-suppression invariant test refused to pass
+        # until it was classified — which is exactly what that test is for.
+        # It belongs here on the strongest possible grounds: this is the ONLY
+        # lane exempt from BOTH the second-degree vouch and the author floor, so
+        # nothing whatsoever stands between a poisoned one-directional
+        # co-engagement edge and the viewer. It is also, by design, served to
+        # brand-new authors nobody has vetted. An unsuppressed cross-viewer
+        # signal here would be the single most promotable surface in the system.
+        CandidateSource.EXPLORATION,
         # ★ POPULAR_FALLBACK belongs here (added 2026-08-01 with the label, and
         # NOT an extension of H07's scope — a restoration of it). Padding used to
         # be emitted AS `INTEREST_TAG`, so it was inside this set and had CF

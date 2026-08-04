@@ -119,14 +119,36 @@ def test_every_ungated_non_network_lane_has_cf_suppressed() -> None:
     most promotable lane served to exactly the viewers H07 is about — and the
     test still passed, because the pair it named was still accurate.
 
-    The real invariant is a DERIVATION: a lane that applies no author floor has
-    nothing standing between a poisoned co-engagement edge and the viewer, so
-    every such lane except the viewer's own network must have CF suppressed.
-    Stated this way, a new gate-exempt source fails here until someone decides
-    where it belongs, instead of defaulting to unsuppressed.
+    The real invariant is a DERIVATION, so a new gate-exempt source fails here
+    until someone decides where it belongs instead of defaulting to
+    unsuppressed.
+
+    ★ RE-DERIVED 2026-08-04. It used to read the invariant off
+    `requires_author_floor`, correct while the cold-start lanes applied no
+    floor. Spec item B4 gave them one — a PROVEN self-dealer (the 0.0 band) was
+    being admitted into a brand-new viewer's feed — so that property no longer
+    names this set.
+
+    The invariant itself is unchanged. CF is a CROSS-VIEWER signal, and what
+    stops a poisoned one-directional co-engagement edge is the second-degree
+    VOUCH COUNT ("someone you follow already engaged this"), not the author
+    floor: the floor rejects proven self-dealers, and does nothing about an
+    unknown-tier sock poisoning a viewer's ALS row. So the derivation now runs
+    off the vouch count, with the out-of-network lanes classified explicitly.
     """
-    ungated = {s for s in CandidateSource if not s.requires_author_floor}
-    assert ungated - {CandidateSource.IN_NETWORK} == INTEREST_LANE_SOURCES
+    vouch_exempt = {s for s in CandidateSource if not s.requires_second_degree}
+    classified_elsewhere = {
+        CandidateSource.IN_NETWORK,     # viewer chose these authors by name
+        CandidateSource.OON_COMMUNITY,  # opted-in + floored; CF via oon_scale
+        CandidateSource.OON_INTEREST,   # ditto
+        CandidateSource.OON_ALS,        # floored; also emits nothing today
+                                        # (`als_source_authors = 0`)
+    }
+    # EXPLORATION is vouch- AND floor-exempt, so it must be IN the suppressed
+    # set, not classified away from it.
+    assert vouch_exempt - classified_elsewhere == INTEREST_LANE_SOURCES
+    # and the property that makes CF poisoning reachable holds for every member
+    assert all(not s.requires_second_degree for s in INTEREST_LANE_SOURCES)
     assert CandidateSource.POPULAR_FALLBACK in INTEREST_LANE_SOURCES
 
 

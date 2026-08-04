@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from recsys.config import GraphCredConfig, RealGraphWeights, Thresholds
-from recsys.contracts import CandidateSource, EngagementEdge, GraphCred
+from recsys.contracts import Candidate, CandidateSource, EngagementEdge, GraphCred
 from recsys.core.graph_cred import compute_graph_cred
 from recsys.core.second_degree import filter_eligible, passes_second_degree, qualifying_engagers
 from tests.fakes import EPOCH, make_candidate, make_post, make_viewer
@@ -336,3 +336,113 @@ def test_author_floor_keeps_the_active_newcomer() -> None:
     viewer = make_viewer(follows=frozenset({"bob"}))
     engager_index = {post.key: frozenset({"bob"})}
     assert filter_eligible([candidate], viewer, engager_index, creds, THRESHOLDS) == [candidate]
+
+
+def test_engaging_with_a_post_cannot_delete_it_from_a_subscribed_feed() -> None:
+    """★ Regression for a suppression vector CHEAPER than the known one.
+
+    `merge_candidates` labels a post by its highest-priority source and
+    OON_ENGAGED outranks OON_COMMUNITY, so a post in a community the viewer
+    subscribes to arrives UNGATED and is served — until somebody the viewer
+    follows engages it. Then it is re-labelled OON_ENGAGED, becomes gated, fails
+    the vouch on the ENGAGER's credibility, and used to be dropped outright:
+    engagement itself removed the post.
+
+    One condemned account any viewer follows + one upvote, against ANY author,
+    with no ring shape and no zero-audience precondition. The author is never
+    flagged — the suppression machinery is the weapon.
+    """
+    post = make_post("honest_author", "p1", community="hive-1")
+    viewer = make_viewer(
+        "reader",
+        follows=frozenset({"condemned"}),
+        subscribed_communities=frozenset({"hive-1"}),
+    )
+    thresholds = Thresholds()
+    creds = {
+        "condemned": GraphCred(account="condemned", score=0.0, follow_follower_ratio=1.0),
+        "honest_author": GraphCred(
+            account="honest_author", score=0.5, follow_follower_ratio=1.0
+        ),
+    }
+
+    # Nobody engaged it: arrives via the subscribed community, ungated, served.
+    quiet = filter_eligible(
+        [Candidate(post=post, source=CandidateSource.OON_COMMUNITY)],
+        viewer, {}, creds, thresholds,
+    )
+    assert len(quiet) == 1
+
+    # The condemned account upvotes it -> relabelled OON_ENGAGED by the merge.
+    # It must still be served, demoted back to the lane it already qualified for.
+    attacked = filter_eligible(
+        [Candidate(post=post, source=CandidateSource.OON_ENGAGED)],
+        viewer,
+        {post.key: frozenset({"condemned"})},
+        creds,
+        thresholds,
+    )
+    assert len(attacked) == 1, "engagement deleted the post from a subscribed feed"
+    assert attacked[0].source is CandidateSource.OON_COMMUNITY
+
+    # But the demotion admits nothing new: a viewer who never opted in still
+    # does not get it, and a self-dealing AUTHOR is still refused.
+    stranger = make_viewer("stranger", follows=frozenset({"condemned"}))
+    assert filter_eligible(
+        [Candidate(post=post, source=CandidateSource.OON_ENGAGED)],
+        stranger, {post.key: frozenset({"condemned"})}, creds, thresholds,
+    ) == []
+    dealer_post = make_post("dealer", "d1", community="hive-1")
+    dealer_creds = dict(creds)
+    dealer_creds["dealer"] = GraphCred(account="dealer", score=0.0, follow_follower_ratio=1.0)
+    assert filter_eligible(
+        [Candidate(post=dealer_post, source=CandidateSource.OON_ENGAGED)],
+        viewer, {dealer_post.key: frozenset({"condemned"})}, dealer_creds, thresholds,
+    ) == []
+
+
+def test_cold_start_lanes_refuse_a_proven_self_dealer_but_not_a_newcomer() -> None:
+    """★ Spec item B4. The cold-start lanes were exempt from the author floor as
+    well as the vouch count, which inverted the protection: an author in the 0.0
+    band — PROVEN self-dealing — was admitted into a brand-new viewer's feed via
+    INTEREST_COMMUNITY and INTEREST_TAG, while the same author was refused on
+    OON_COMMUNITY and OON_INTEREST. The audience with no follow graph to defend
+    them got the least protection of anyone.
+
+    The distinction that makes this safe: 0.0 means caught self-dealing, whereas
+    an unknown or never-engaged account scores `min_vouched_score` (0.10) and an
+    author absent from the snapshot is treated permissively. Both must still
+    pass, or this would close the newcomer on-ramp it is meant to protect.
+    """
+    thresholds = Thresholds()
+    cold = make_viewer(
+        "newbie",
+        interest_communities=frozenset({"hive-1"}),
+        interest_tags=frozenset({"photo"}),
+        is_new=True,
+    )
+    cold_lanes = (CandidateSource.INTEREST_COMMUNITY, CandidateSource.INTEREST_TAG)
+
+    dealer = make_post("dealer", "d1", community="hive-1", tags=("photo",))
+    creds = {"dealer": GraphCred(account="dealer", score=0.0, follow_follower_ratio=1.0)}
+    for lane in cold_lanes:
+        assert filter_eligible(
+            [Candidate(post=dealer, source=lane)], cold, {}, creds, thresholds
+        ) == [], f"{lane.name} admitted a proven self-dealer"
+
+    # an UNKNOWN-tier account (0.10) must still reach a cold viewer
+    unknown = make_post("unknown", "u1", community="hive-1", tags=("photo",))
+    creds_unknown = {
+        "unknown": GraphCred(account="unknown", score=0.10, follow_follower_ratio=1.0)
+    }
+    for lane in cold_lanes:
+        assert len(filter_eligible(
+            [Candidate(post=unknown, source=lane)], cold, {}, creds_unknown, thresholds
+        )) == 1, f"{lane.name} blocked an unknown-tier account"
+
+    # and an author absent from the snapshot entirely (a true newcomer) passes
+    newcomer = make_post("newcomer", "n1", community="hive-1", tags=("photo",))
+    for lane in cold_lanes:
+        assert len(filter_eligible(
+            [Candidate(post=newcomer, source=lane)], cold, {}, creds, thresholds
+        )) == 1, f"{lane.name} blocked a brand-new author"

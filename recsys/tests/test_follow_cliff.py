@@ -99,8 +99,28 @@ def test_trust_class_changes_with_the_follow_graph_not_the_lane() -> None:
         _viewer(frozenset({"someone"})), gateway, EPOCH, limit=10
     )
 
+    # ★ UPDATED 2026-08-04 (spec item B4). The cold lane used to be exempt from
+    # the author floor as well as the vouch count, and this asserted that. It is
+    # no longer true, deliberately: measured, an author in the 0.0 band — which
+    # means PROVEN self-dealing, not merely "new" — was admitted into a
+    # brand-new viewer's cold-start feed through INTEREST_COMMUNITY and
+    # INTEREST_TAG, while the same author was correctly refused on the
+    # established-viewer lanes. The audience with no follow graph to protect
+    # them had the least protection of anyone.
+    #
+    # So BOTH interest lanes now clear the author floor, and what still changes
+    # with the follow graph is which producer emits the candidate and at what
+    # source priority — not the trust class. This test's title outlives its
+    # original mechanism; the surviving guarantee is that neither lane demands
+    # the vouch COUNT (that was the original follow-cliff defect) while both
+    # refuse proven self-dealers.
+    #
+    # A genuine newcomer is unaffected: absent from `graph_creds` passes, and an
+    # unknown/never-engaged account scores 0.10 against a 0.05 floor.
     assert all(c.source.requires_second_degree is False for c in cold)
-    assert all(c.source.requires_author_floor is False for c in cold)
+    assert all(c.source.requires_author_floor is True for c in cold), (
+        "cold-start interest content must also refuse proven self-dealers"
+    )
     assert all(c.source is CandidateSource.OON_INTEREST for c in warm)
     assert all(c.source.requires_second_degree is False for c in warm)
     assert all(c.source.requires_author_floor is True for c in warm), (

@@ -182,6 +182,73 @@ class ScoreWeights:
     organic_reply_breadth: float = 0.3
     organic_reblog_breadth: float = 0.5
     organic_post_share: float = 1.0 / 3.0
+    #: Shrinkage constant ``k`` for the author-pooled prior (2026-08-03). The
+    #: leave-one-out mean is weighted ``(1 - organic_post_share) * n / (n + k)``
+    #: where ``n`` is the number of OTHER window posts it is estimated from, so
+    #: the prior earns its weight with evidence instead of taking a fixed two
+    #: thirds from the author's second post onward. See
+    #: :func:`recsys.core.scoring.pooled_author_base` for the full rationale.
+    #:
+    #: 0.0 reproduces the pre-shrinkage fixed blend byte-for-byte, so the
+    #: k = 0 column below is also the control.
+    #:
+    #: SWEPT 2026-08-03 on `measurement-harness/q9_prior_shrinkage.py` over FOUR
+    #: worlds (seeds 7/11/23/42), because one world would have picked a
+    #: different k — seed 7 alone says 3, seed 11 says 2, seeds 23/42 say 5.
+    #: Section A is q3's new-author panel at its hardest loadout (9 votes + 2
+    #: comments + 1 reblog); section B is q8's protocol exactly (its k = 0
+    #: column reproduces the standing q8 output to 4dp, which is what validates
+    #: the sweep apparatus).
+    #:
+    #:   k     newcomer reaches top-20, by seed      largest k still clearing
+    #:         s7      s11     s23     s42           q8's floors, by seed
+    #:   0.0   0/10    0/10    0/10    0/10          s7: 8   s11: NONE
+    #:   1.0   0/10    0/10    0/10    0/10          s23: 8  s42: 3
+    #:   2.0   8/10   10/10    5/10    0/10
+    #:   3.0  10/10   10/10    8/10    0/10   <- shipped
+    #:   5.0  10/10   10/10   10/10   10/10
+    #:
+    #: 3.0 is the largest value that never costs the prior more than the
+    #: project's own guard allows on ANY world it was measured on (seed 42
+    #: binds: at k = 5 its depth-controlled picking delta falls to +0.0161,
+    #: under q8's 0.020 floor). Going to 5 to buy the last two seeds' top-20
+    #: would be buying newcomer reach by degrading the estimator past the bar
+    #: this project set for it — and it would still have PASSED the seed-7-only
+    #: q8 panel, which is exactly the "fix that passes its own test" failure
+    #: this round keeps re-teaching.
+    #:
+    #: WHAT IT COSTS, stated plainly: the prior's contribution to delivered
+    #: top-20 author quality gives back 15-26% (mean_q delta +0.0304 -> +0.0225
+    #: at seed 7), i.e. ~0.008 absolute on a 0-1 quality scale. What it buys:
+    #: the newcomer's pooled base goes from -66.7% of its own earned signal to
+    #: -26.7% on every seed, and on the two seeds where top-20 is still missed
+    #: the position moves from 64th/70th (invisible) to 20th/23rd.
+    #:
+    #: ★★ MEASURED LIMIT ON THE ABOVE (2026-08-03, council B, re-verified): the
+    #: newcomer win is CONDITIONAL ON WHO ENGAGES THEM. q3/q9 source the debut
+    #: post's votes from `a-photo-01..08`, who are established and graph-cred
+    #: VOUCHED. Re-run with a brand-new audience carrying no other footprint —
+    #: the realistic case in a young community, where the first arrivals are also
+    #: new — the same loadout scores **0/10 top-20 AND 0/10 top-50 on seeds
+    #: 7/11/23/42**, against 10/10/10/8/5 with an established audience. Cause is
+    #: upstream of this field entirely: `VoterTrust.credited_breadth` caps
+    #: UNVOUCHED engager breadth at `VoteSignalConfig.unknown_free = 1.0`
+    #: regardless of how many there are (vote_signal.py's own docstring: "10 bare
+    #: alts buy unknown_free breadth, not 10"), so `own_base` is already crushed
+    #: before the prior blends anything. Shrinkage cannot lift what breadth
+    #: budgeting has floored.
+    #: **So: WHO engages a newcomer matters far more than HOW MANY do, and this
+    #: field helps the discoverable-by-established case only.** Do not quote the
+    #: 0/10 -> 10/10 figure without that condition attached.
+    #:
+    #: ★ NOT tuned to close the gap entirely — that needs the OTHER lever
+    #: (excluding posts too young to have accumulated engagement), which
+    #: targets the actual confound instead of discounting every thin-pool
+    #: author symmetrically. It is LIVE-HAFSQL-GATED: simworld draws every
+    #: post's engagement independently of the post's age, so post age carries
+    #: no information here and a maturity horizon tuned on it would be tuned
+    #: against nothing.
+    organic_prior_shrinkage: float = 3.0
     # Additive freshness bonus inside the quality raw, ON THE SAME SCALE as the
     # log-engagement term (never a multiplicative decay, so an old well-engaged
     # post is not crushed and a brand-new empty post is not zero).
@@ -224,6 +291,11 @@ class ScoreWeights:
             raise ValueError(
                 f"organic_post_share must be in [0, 1], got {self.organic_post_share}"
             )
+        if self.organic_prior_shrinkage < 0.0:
+            raise ValueError(
+                "organic_prior_shrinkage must be >= 0, got "
+                f"{self.organic_prior_shrinkage}"
+            )
         if not 0.0 <= self.organic_cf_oon_scale <= 1.0:
             raise ValueError(
                 f"organic_cf_oon_scale must be in [0, 1], got {self.organic_cf_oon_scale}"
@@ -249,7 +321,44 @@ class NormConfig:
 
 @dataclass(frozen=True)
 class Thresholds:
-    """Out-of-network eligibility gates (§8)."""
+    """Out-of-network eligibility gates (§8).
+
+    ★★ BOTH FLOORS ARE, IN PRACTICE, A TEST FOR "score == 0.0" — AND THAT IS THE
+    ONLY COHERENT SETTING (measured 2026-08-04, closing cold-start spec item
+    D2/B3 as WON'T-BUILD rather than leaving it open).
+
+    D2 asked for these to become live percentiles — "vouch floor ≈
+    bottom-30%-excluding, author floor ≈ bottom-10%-excluding" — with an
+    acceptance test that each excludes a nonzero set. That test has always
+    failed (0 of 180 accounts on seeds 7/11/23/42), and the reason is not a
+    tuning miss: **the score distribution has a gap that makes the target
+    unreachable.**
+
+    `_normalize_scores` emits exactly three bands:
+
+        0.0            proven self-dealing (0 accounts in an honest population)
+        0.10           unknown / never-engaged  (23-35 of 180)
+        0.1993 - 1.0   engaged, percentile-ranked  (145-157 of 180)
+
+    Nothing ever lands strictly between 0.0 and 0.10. So a floor at 0.05
+    excludes precisely the self-dealing band and can never exclude anyone else,
+    and any floor raised far enough to bite the ENGAGED band must first pass
+    0.10 and therefore removes **every newcomer and unknown account**:
+
+        exclude bottom 10%  ->  floor 0.1000  (still only the 0.0 band)
+        exclude bottom 20%  ->  floor 0.1993  ->  all 35 unknowns excluded
+        exclude bottom 30%  ->  floor 0.3234  ->  all 35 unknowns excluded
+
+    Since the unknown tier IS the newcomer on-ramp this project spends most of
+    its effort protecting, a percentile floor cannot be adopted without undoing
+    that work. The band design and the percentile-floor design are mutually
+    exclusive; the bands won.
+
+    Do not "fix" the acceptance test by raising these numbers. If a graded
+    discount on low-standing authors is genuinely wanted, it belongs where the
+    spec's §8.3(iv) put it — a soft ranking discount, not an eligibility gate —
+    and that is a different mechanism from these two floors.
+    """
 
     second_degree_min_engagers: int = 1  # §8.1, adapts UTEG MinFavCount=1
     graph_cred_floor: float = 0.05  # §8.3 soft floor for OON distribution
@@ -290,6 +399,68 @@ class DiversityConfig:
     # and keep worsening while quality stays flat. Author diversity is never
     # affinity-scaled.
     topic_affinity_strength: float = 0.5
+    #: Geometric penalty on candidates from lanes the viewer did NOT ask for
+    #: (``CandidateSource.is_viewer_chosen`` is False: OON_ENGAGED, OON_ALS,
+    #: POPULAR_FALLBACK), counted across the whole served ordering — same shape
+    #: as the author/topic penalties. ``floor = 1.0`` is an EXACT no-op.
+    #:
+    #: SWEPT 2026-08-03 on `measurement-harness/q11_follow_curve.py` (4 seeds x
+    #: 2 topics, follow counts 1..20). "defect ratio" = on-topic share of the
+    #: top-20 at 20 follows divided by at 1 follow; below 1.0 means following
+    #: MORE people made the feed WORSE:
+    #:
+    #:   decay/floor   defect ratio   IN_NETWORK share @20   mean quality @20
+    #:   1.0 / 1.00        0.395            0.306                 0.791   <- off
+    #:   0.9 / 0.50        0.605            0.469                 0.773
+    #:   0.8 / 0.40        0.766            0.594                 0.761   <- shipped
+    #:   0.7 / 0.30        0.919            0.713                 0.744
+    #:   0.6 / 0.25        1.008            0.781                 0.734
+    #:   0.5 / 0.20        1.081            0.837                 0.729
+    #:
+    #: 0.8/0.40 is the knee: it closes most of the inversion (0.395 -> 0.766)
+    #: and makes the viewer's own follows the MAJORITY of their feed again
+    #: (0.306 -> 0.594) for a third of the quality cost the stronger settings
+    #: pay. Marginal rate: off -> 0.8/0.40 buys +0.371 ratio for -0.030 quality;
+    #: 0.8/0.40 -> 0.6/0.25 buys +0.242 more for another -0.027.
+    #:
+    #: ★ A REAL TRADE, NOT SOLD AS A FREE WIN. Measured against simworld's
+    #: ground-truth author quality, the OON_ENGAGED lane genuinely does surface
+    #: better authors — mean gap **+0.074** over IN_NETWORK across seeds
+    #: 7/11/23/42 x 2 topics. So part of its score advantage is real merit and
+    #: part is the selection artifact described in
+    #: `CandidateSource.is_viewer_chosen`. What does NOT follow from a +0.074
+    #: quality edge is 2.3x over-representation (33% of the pool taking 75% of
+    #: the top 20). This corrects the over-representation, not the merit, and
+    #: knowingly pays ~0.030 of delivered author quality to do it.
+    #:
+    #: The project's standing bar — "own-share UP, delivered quality DOWN is a
+    #: REGRESSION" (see `organic_cf` above) — was set for a case where the
+    #: quality drop bought NOTHING but a composition shift. Here it buys the
+    #: product's core promise: that following someone determines what you see.
+    #: This is therefore a deliberate, documented exception to that bar rather
+    #: than an oversight. LIVE-DATA-GATED like every other composition knob.
+    unchosen_source_decay: float = 0.8
+    unchosen_source_floor: float = 0.4
+    #: HARD cap: at most this many candidates from lanes the viewer never asked
+    #: for, per `explore_window` slots of the served feed, enforced as a running
+    #: prefix quota (so it binds at every depth, not only on page boundaries).
+    #: 0 = off.
+    #:
+    #: WHY A CAP AS WELL AS THE PENALTY ABOVE. The penalty alone was measured
+    #: insufficient: `OON_ENGAGED` still took 56% of the first page while the
+    #: viewer's own follows took 38%, and the lane's share of the FEED was less
+    #: on-topic (33%) than its share of the POOL (49%) — the ranker was
+    #: selecting that lane's least relevant members. A geometric penalty nudges;
+    #: this bounds. The lane is deliberately NOT removed: it is the
+    #: second-degree discovery channel, the only route a brand-new author has
+    #: into an established viewer's feed, and it does surface genuinely better
+    #: authors (+0.074 ground-truth quality). Budgeted, it keeps that job
+    #: without owning the page.
+    #:
+    #: SUPPLY-SAFE by construction — the cap is only enforced while a
+    #: viewer-chosen candidate is still available, so a viewer whose own network
+    #: is empty still gets a full feed.
+    unchosen_max_per_page: int = 3
     top_k: int = 200
 
     #: How many of the FIRST PAGE's slots are reserved for exploration
@@ -325,9 +496,67 @@ class DiversityConfig:
     explore_window: int = 20
 
     def __post_init__(self) -> None:
+        if not 0.0 < self.unchosen_source_decay <= 1.0:
+            raise ValueError(
+                "unchosen_source_decay must be in (0, 1], got "
+                f"{self.unchosen_source_decay}"
+            )
+        if not 0.0 <= self.unchosen_source_floor <= 1.0:
+            raise ValueError(
+                "unchosen_source_floor must be in [0, 1], got "
+                f"{self.unchosen_source_floor}"
+            )
         if not 0.0 <= self.topic_affinity_strength <= 1.0:
             raise ValueError(
                 f"topic_affinity_strength must be in [0, 1], got {self.topic_affinity_strength}"
+            )
+
+
+@dataclass(frozen=True)
+class ExplorationConfig:
+    """The reserved new-author slot (cold-start spec §4.3, item B12).
+
+    A brand-new post is not blocked, it is OUTSCORED: with no engagement and no
+    author history its organic raw is exactly `organic_recency` (0.10) against a
+    window median near 0.46 — the 3rd-4th percentile, by construction. Sweeping
+    `organic_recency` up to 2.0 was measured to cost nDCG at every step and STILL
+    leave a followed author's fresh post at 0/40 first-page reach. A reserved
+    slot is the only mechanism that reaches the page.
+
+    `slots_per_page = 1` is the spec's instruction verbatim — "start at 1 slot,
+    never 2" — and it is externally justified rather than guessed: YouTube's
+    production fresh/tail slot cost -0.12% overall dwell for +2.52% fresh-content
+    interactions and +5.5% small-provider dwell (Wang et al., KDD 2023);
+    TikTok's manual heating ran ~1-2% of daily views; Meta's backlash arrived at
+    tens-of-percent unconnected content. 0 disables the lane entirely.
+    """
+
+    slots_per_page: int = 1
+    page_size: int = 20
+    #: Deep enough not to displace the head, shallow enough to be seen.
+    position: int = 13
+    max_age_days: int = 7
+    #: Per-author epoch budget. A farm cannot convert account count into slots
+    #: because the rotation is round-robin over AUTHORS, but without this an
+    #: author with many fresh posts could still take consecutive rounds.
+    max_posts_per_author_epoch: int = 3
+
+    def __post_init__(self) -> None:
+        if self.slots_per_page < 0:
+            raise ValueError(f"slots_per_page must be >= 0, got {self.slots_per_page}")
+        if self.page_size <= 0:
+            raise ValueError(f"page_size must be > 0, got {self.page_size}")
+        if not 0 <= self.position < self.page_size:
+            raise ValueError(
+                f"position must be in [0, page_size); got {self.position} "
+                f"with page_size {self.page_size}"
+            )
+        if self.max_age_days <= 0:
+            raise ValueError(f"max_age_days must be > 0, got {self.max_age_days}")
+        if self.max_posts_per_author_epoch <= 0:
+            raise ValueError(
+                "max_posts_per_author_epoch must be > 0, got "
+                f"{self.max_posts_per_author_epoch}"
             )
 
 
@@ -753,6 +982,75 @@ class HistoryWindows:
     """
 
     sourcing_freshness_days: int = 3  # candidate pools: in-network / community / tag / engaged-OON
+    #: Separate, WIDER freshness window for the viewer's OWN FOLLOWS
+    #: (``IN_NETWORK`` only). 0 = "use ``sourcing_freshness_days``", an exact
+    #: no-op. See :func:`recsys.pipeline.gather_candidates`.
+    #:
+    #: WHY IT IS SEPARATE. `sourcing_freshness_days` gates EVERY source,
+    #: including a viewer's own follows, so an author who does not post for
+    #: three days disappears from the feed of people who explicitly asked to see
+    #: them — not deprioritised, ABSENT. Measured 2026-08-03: **8-13% of authors
+    #: are in that state at any moment** (seeds 7/11/23/42), at mean quality
+    #: 0.55-0.60 — mid-tier working authors, not junk. Meanwhile
+    #: `quality_prior_days` is 45 and `trust_days` is 365, so their reputation
+    #: and graph-cred persist for months after their content becomes
+    #: unreachable. Nothing justified one window doing both jobs.
+    #:
+    #: WHY NOT JUST WIDEN `sourcing_freshness_days`. Widening it globally
+    #: measures as a strict improvement here (pool 62->114, in-network share of
+    #: the top-20 0.400->0.480, mean quality 0.654->0.703 on seed 7) — but that
+    #: is an INSTRUMENT ARTEFACT: simworld contains exactly 7 days of posts, so
+    #: "widen to 7" means "use everything" and the discovery lanes cannot flood
+    #: because there is nothing more to flood with. On the real chain widening
+    #: every lane grows the pool without bound and surfaces stale strangers.
+    #: A viewer's own follows are the one lane where a wider window is safe:
+    #: they asked for those authors by name, and `organic_recency` still
+    #: discounts age within the lane.
+    #:
+    #: MEASURED (2026-08-03, in-network widened alone, discovery held at 3):
+    #:
+    #:   days   pool   in-net share @20   mean q @20   hidden follows served
+    #:   off      62         0.400           0.654            0.00
+    #:   5        72         0.470           0.673            1.10
+    #:   7        85         0.480           0.674            1.50   <- shipped
+    #:   14       85         0.480           0.674            1.50
+    #:
+    #: (seed 7; seeds 11/23/42 agree — in-net share up on all four, mean quality
+    #: UP on three and flat on the fourth, so unlike the unchosen-source penalty
+    #: this one costs nothing measurable.) It also does NOT squeeze discovery:
+    #: the pool grows rather than being reallocated.
+    #:
+    #: ★ 7 IS NOT A MEASURED OPTIMUM — simworld holds exactly 7 days of posts, so
+    #: every value >= 7 is the same run and the ladder saturates. The choice is
+    #: made on product grounds (a week is the natural "people I follow" cadence,
+    #: and `sourcing_freshness_days`' own note calls ~a week the right horizon for
+    #: deciding which posts appear) and is LIVE-DATA-GATED: on the real chain,
+    #: re-measure pool size and staleness before trusting it.
+    #:
+    #: ★ TWO THINGS A SCRUTINIZER FOUND, STATED RATHER THAN BURIED (2026-08-04):
+    #:
+    #: (a) **A HIGH-FREQUENCY FOLLOWED AUTHOR'S SHARE SCALES WITH THIS WINDOW,
+    #: and nothing caps it.** `IN_NETWORK` is exempt from `cap_oon_flooding`
+    #: (which keys on `requires_author_floor`) AND from the unchosen-source
+    #: penalty (`is_viewer_chosen` is True for it), so its only bound is the
+    #: author-diversity floor — and `author_floor=0.25` bottoms the penalty out
+    #: rather than blocking. Widening 3 -> 7 days roughly doubles a daily
+    #: poster's supply while a weekly poster gains nothing, so their share of a
+    #: follower's first page rises. Whether that is correct is genuinely
+    #: arguable — the viewer did follow them — but it is the "own-share up"
+    #: composition shift this file calls a regression pattern elsewhere, so it
+    #: is named here rather than left to be discovered.
+    #:
+    #: (b) **The standard panels CANNOT measure (a).** Every `q*.py` panel and
+    #: every test passes an explicit `since=EPOCH`, and the widening is computed
+    #: relative to the caller's `since`, so on those callers it is a byte-
+    #: identical no-op (q7's `distinct authors @20` is 18.333 before and after).
+    #: Only `rank_feed`'s own default (`since=None`) exercises it. The window
+    #: arithmetic is therefore pinned directly by
+    #: tests/test_config_windows.py rather than by any panel — do not assume a
+    #: green panel run says anything about this field.
+    in_network_freshness_days: int = 7
+
     quality_prior_days: int = 45  # author-pooled quality prior
     trust_days: int = 365  # engagement_edges -> graph-cred / ALS
     ring_days: int = 365  # temporal ring / self-deal detection
@@ -766,6 +1064,19 @@ class HistoryWindows:
             )
         if self.ring_days <= 0:
             raise ValueError(f"ring_days must be > 0, got {self.ring_days}")
+        # 0 means "same as sourcing". Anything else must be WIDER (never
+        # narrower — a viewer's own follows must not be gated harder than
+        # strangers) and must not outrun the quality-prior horizon.
+        if self.in_network_freshness_days and not (
+            self.sourcing_freshness_days
+            <= self.in_network_freshness_days
+            <= self.quality_prior_days
+        ):
+            raise ValueError(
+                "in_network_freshness_days must be 0 (= sourcing) or satisfy "
+                "sourcing_freshness_days <= in_network_freshness_days <= "
+                f"quality_prior_days; got {self.in_network_freshness_days}"
+            )
 
 
 @dataclass(frozen=True)
@@ -778,6 +1089,7 @@ class Settings:
     thresholds: Thresholds = field(default_factory=Thresholds)
     diversity: DiversityConfig = field(default_factory=DiversityConfig)
     cold_start: ColdStartConfig = field(default_factory=ColdStartConfig)
+    exploration: ExplorationConfig = field(default_factory=ExplorationConfig)
     fallback: FallbackConfig = field(default_factory=FallbackConfig)
     real_graph: RealGraphWeights = field(default_factory=RealGraphWeights)
     graph_cred: GraphCredConfig = field(default_factory=GraphCredConfig)

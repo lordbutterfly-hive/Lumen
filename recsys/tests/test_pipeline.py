@@ -761,6 +761,37 @@ def test_topped_up_fallback_still_respects_mutes_suppression_and_nsfw() -> None:
     assert {sc.post.author for sc in feed} == {"clean"}
 
 
+def test_proven_self_dealer_cannot_reach_a_starved_feed_via_the_fallback() -> None:
+    """POPULAR_FALLBACK is exempt from the author floor, and `_order_by_full_
+    exclusion` only re-ORDERS the admissible pool — so when the shortfall is big
+    enough to admit everything, a condemned farm rode the padding lane in.
+
+    Measured before the fix: a dense 4-account mutual ring at graph-cred 0.0
+    reached 10/10 thin-supply viewers on seeds 7/11/23 (0/10 for viewers whose
+    own pool was healthy). Thin supply is exactly the early-growth condition
+    where the manipulation is cheapest.
+
+    The bar is the SELF-DEALT band (0.0), not ring membership: an unknown or
+    newcomer account sits at `min_vouched_score` (0.10) and must still pad.
+    """
+    popular = [make_post("dealer", "d1"), make_post("newcomer", "n1")]
+    gateway = FakeGateway(in_network=[], popular=popular)
+    viewer = make_viewer("returning", follows=frozenset({"ghost"}))
+    snap = TrustSnapshot(
+        graph_creds={
+            "dealer": _cred(0.0),       # proven self-dealer
+            "newcomer": _cred(0.10),    # unknown tier — must NOT be filtered
+        }
+    )
+    feed = rank_feed(
+        viewer, gateway, _norm(), now=NOW, since=EPOCH, snapshot=snap,
+        trust_policy=_PERMISSIVE,
+    )
+    authors = {sc.post.author for sc in feed}
+    assert "dealer" not in authors
+    assert "newcomer" in authors
+
+
 def test_starved_feed_stays_short_when_the_network_has_nothing_to_offer() -> None:
     # Honest degradation: the top-up never invents posts. An empty network
     # yields an empty feed rather than fabricated filler.

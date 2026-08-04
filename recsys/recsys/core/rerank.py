@@ -77,6 +77,15 @@ def _topic_affinities(scored: list[ScoredCandidate]) -> dict[str, float]:
     return {key: value / total for key, value in mass.items()}
 
 
+def _page_quota(placed: int, page_size: int, per_page: int) -> int:
+    """How many unchosen candidates are allowed by the time ``placed`` slots are
+    filled. Expressed as a running prefix quota rather than a per-block reset so
+    the bound holds at EVERY depth, not just on page boundaries — a viewer who
+    stops scrolling at 12 gets the same protection as one who reaches 20."""
+    pages = placed // page_size + 1
+    return pages * per_page
+
+
 def _attenuate(value: float, affinity: float) -> float:
     """Pull a decay/floor ``value`` toward 1.0 (= penalty off) by ``affinity``.
 
@@ -131,6 +140,10 @@ def diversity_rerank(
     topic_decay: float,
     topic_floor: float,
     topic_affinity_strength: float,
+    unchosen_decay: float = 1.0,
+    unchosen_floor: float = 1.0,
+    unchosen_per_page: int = 0,
+    page_size: int = 20,
     tie_break_seed: str = "",
 ) -> list[ScoredCandidate]:
     """Greedily space out repeat authors AND repeat topics/communities (§3.4),
@@ -158,11 +171,35 @@ def diversity_rerank(
     remaining = list(scored)
     author_counts: dict[str, int] = {}
     topic_counts: dict[str, int] = {}
+    unchosen_placed = 0
     result: list[ScoredCandidate] = []
     while remaining:
+        # ★ HARD PER-PAGE CAP on lanes the viewer never asked for (2026-08-04).
+        # The geometric penalty below was not enough on its own: measured, the
+        # OON_ENGAGED lane still took 56% of the first page while the viewer's
+        # own follows got 38%, and its share of the feed was LESS on-topic (33%)
+        # than its share of the pool (49%) — the ranker was picking that lane's
+        # worst members. A penalty nudges; this bounds.
+        #
+        # The lane is NOT removed, deliberately. It is the second-degree
+        # discovery channel ("what the people you follow are engaging"), it is
+        # the only route a brand-new author has into an established feed, and it
+        # genuinely surfaces better authors (+0.074 ground-truth quality). What
+        # it may not do is take most of the page. Budgeted, it keeps its job.
+        #
+        # SUPPLY-SAFE: the cap is only enforced while a viewer-chosen candidate
+        # is actually available. A viewer whose own network is empty still gets
+        # a full feed rather than a short one.
+        capped = (
+            unchosen_per_page > 0
+            and (unchosen_placed >= _page_quota(len(result), page_size, unchosen_per_page))
+            and any(c.source.is_viewer_chosen for c in remaining)
+        )
         best_index = 0
         best_rank: tuple[float, str] | None = None
         for index, candidate in enumerate(remaining):
+            if capped and not candidate.source.is_viewer_chosen:
+                continue
             author_placed = author_counts.get(candidate.post.author, 0)
             topic_key = _topic_key(candidate.post)
             topic_placed = topic_counts.get(topic_key, 0)
@@ -176,6 +213,46 @@ def diversity_rerank(
                 topic_floor,
                 topic_affinity_strength * affinities.get(topic_key, 0.0),
             )
+            # ★ UNCHOSEN-LANE PENALTY (2026-08-03). Same geometric shape as the
+            # author and topic penalties, counted over every candidate the
+            # viewer did not ask for (see CandidateSource.is_viewer_chosen for
+            # the measurement that motivates it).
+            #
+            # A PENALTY, deliberately, not a quota. A hard cap would starve a
+            # viewer whose in-network supply runs out mid-feed; a penalty is
+            # supply-safe by construction — when nothing chosen remains, the
+            # penalized candidate is still the best available and is placed.
+            # It also stays honest when discovery genuinely IS better: a much
+            # stronger unchosen post still outranks a weak followed one.
+            #
+            # Exact no-op at floor 1.0 (see `_pen`), which is what makes the
+            # k=off control in the sweep a true control. It is also a no-op for
+            # a followless viewer, whose candidates are ALL unchosen and
+            # therefore all carry the identical factor at each step, leaving the
+            # argmax unchanged.
+            #
+            # ★ AND IT IS TOPIC-AWARE, which is the whole difficulty. A BLANKET
+            # lane penalty was measured and rejected: OON_ENGAGED is both the
+            # vector for the follow-curve defect AND the only path a brand-new
+            # author has into an established viewer's feed (someone the viewer
+            # follows engages the newcomer, so it arrives second-degree). Any
+            # uniform setting strong enough to move the follow curve destroyed
+            # new-author discovery — at decay 0.9/floor 0.5 the q3 newcomer went
+            # from top-20 for 10/10 established viewers to 0/10, undoing the
+            # author-prior shrinkage win from the same day.
+            #
+            # The two cases differ in one measurable way: the content crowding
+            # the feed is OFF-topic, the newcomer is ON-topic. So the penalty is
+            # attenuated by the viewer's own inferred affinity for the
+            # candidate's topic — full strength on unchosen content from a topic
+            # they show no affinity for, ~off on unchosen content from the topic
+            # they actually read. Discovery inside your interests stays open;
+            # spillover from everywhere else is what gets bounded.
+            if not candidate.source.is_viewer_chosen:
+                effective *= _attenuate(
+                    _pen(unchosen_placed, unchosen_decay, unchosen_floor),
+                    affinities.get(topic_key, 0.0),
+                )
             # ★ PER-VIEWER TIE-BREAK (2026-08-01). This was `candidate.post.key`
             # — i.e. ties resolved ALPHABETICALLY by @author/permlink, globally
             # and identically for every viewer. Determinism is right; a global
@@ -198,6 +275,8 @@ def diversity_rerank(
         author_counts[chosen.post.author] = author_counts.get(chosen.post.author, 0) + 1
         topic_key = _topic_key(chosen.post)
         topic_counts[topic_key] = topic_counts.get(topic_key, 0) + 1
+        if not chosen.source.is_viewer_chosen:
+            unchosen_placed += 1
         result.append(chosen)
     return result
 
@@ -276,6 +355,10 @@ def rerank(
         topic_decay=diversity.topic_decay,
         topic_floor=diversity.topic_floor,
         topic_affinity_strength=diversity.topic_affinity_strength,
+        unchosen_decay=diversity.unchosen_source_decay,
+        unchosen_floor=diversity.unchosen_source_floor,
+        unchosen_per_page=diversity.unchosen_max_per_page,
+        page_size=diversity.explore_window,
         tie_break_seed=tie_break_seed,
     )
     # Exploration runs AFTER diversity so it draws from a pool that is already
