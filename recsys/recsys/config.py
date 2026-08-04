@@ -1080,6 +1080,60 @@ class HistoryWindows:
 
 
 @dataclass(frozen=True)
+class LiteConfig:
+    """Lumen Lite reachability (§E.4). OFF by default — see the rollout note.
+
+    ★★ THE PROBLEM. Lite users have no Hive account. Every lite post is
+    published by a SHARED frontend account as a depth-1 COMMENT under a rolling
+    container post (`<publisher>/lumen-c-<ulid>`), because Hive caps root posts
+    at one per 5 minutes per account but replies at one per 3 seconds — the
+    container model is what takes the ceiling from 12/hour to ~1200/hour. That
+    is verified on mainnet (`CONTAINER-POST-MAP-2026-07-27.md`).
+
+    Two consequences made the entire Lite tier invisible to ranking:
+
+      * every candidate query filters `parent_author = ''`, so no lite post has
+        ever entered `gather_candidates`;
+      * a lite post's chain AUTHOR is the publisher account, not the writer, so
+        even if sourced, all engagement and all graph-cred would collapse onto
+        one account and every real lite user would score zero.
+
+    Worse than invisible: `_SQL_COMMENTS_FOR_POSTS` counts rows with
+    `parent_author <> ''`, so each lite post was counted as a COMMENT ON ITS
+    CONTAINER — lite writers were inflating the publisher's organic score.
+
+    THE FIX IS ON-CHAIN, NOT CROSS-DATABASE. `publisher/footer.ts` writes
+    `json_metadata.lumen_user_id` on every lite post, and HAFSQL stores
+    json_metadata, so the writer's identity is recoverable in the same query
+    that sources the post. No join against Lumen's Postgres, no ingestion job,
+    no new failure mode — the chain is the source of truth. (`lib/lite/recsys/
+    resolver.ts` was built for a cross-DB version of this and has zero
+    consumers; it is not needed for sourcing.)
+
+    THE TRUST BOUNDARY IS `publisher_accounts`, AND IT IS LOAD-BEARING.
+    `json_metadata` is attacker-controlled: anyone may publish a comment
+    claiming `app = lumen/1.0` and any `lumen_user_id` they like. The claim is
+    therefore honoured ONLY when the post's chain author is a configured
+    publisher account. Leave this empty and lite sourcing is off entirely —
+    which is the default, so this change is inert until someone deliberately
+    names the publishers.
+
+    ACCEPTED LIMITATION: a comment inherits its category from the container
+    root, so lite posts sit in category `lumen` and can never match a `hive-*`
+    community. They are reachable via the tag, in-network and engaged lanes —
+    not via the community lane. That is a property of the container model, not
+    of this config.
+    """
+
+    publisher_accounts: frozenset[str] = frozenset()
+    app_id: str = "lumen/1.0"
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.publisher_accounts)
+
+
+@dataclass(frozen=True)
 class Settings:
     """Root config object threaded through the pipeline."""
 
@@ -1098,6 +1152,7 @@ class Settings:
     als: ALSConfig = field(default_factory=ALSConfig)
     vote_signal: VoteSignalConfig = field(default_factory=VoteSignalConfig)
     hafsql: HafsqlConfig = field(default_factory=HafsqlConfig)
+    lite: LiteConfig = field(default_factory=LiteConfig)
 
 
 DEFAULT_SETTINGS = Settings()

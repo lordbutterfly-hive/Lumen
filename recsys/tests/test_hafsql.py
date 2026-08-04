@@ -13,7 +13,7 @@ from typing import Any, Final
 import pytest
 
 from recsys.config import HafsqlConfig
-from recsys.contracts import HafsqlGateway
+from recsys.contracts import HafsqlGateway, Vote
 from recsys.core.scoring import AuthorEngagement
 from recsys.core.vote_signal import AttributedPost, VoterTrust
 from recsys.io import hafsql
@@ -108,19 +108,21 @@ def test_suppressed_keys_empty_post_keys_short_circuits() -> None:
 
 
 def test_build_post_sets_is_nsfw_from_nsfw_tag() -> None:
-    row = ("alice", "p1", "hive-onboarding", datetime(2026, 1, 1, tzinfo=UTC), ["hive", "nsfw"])
+    row = ("alice", "p1", "hive-onboarding",
+           datetime(2026, 1, 1, tzinfo=UTC), ["hive", "nsfw"], None)
     post = hafsql._build_post(row, {}, {}, {}, {})
     assert post.is_nsfw is True
 
 
 def test_build_post_is_nsfw_false_without_nsfw_tag() -> None:
-    row = ("alice", "p1", "hive-onboarding", datetime(2026, 1, 1, tzinfo=UTC), ["hive", "art"])
+    row = ("alice", "p1", "hive-onboarding",
+           datetime(2026, 1, 1, tzinfo=UTC), ["hive", "art"], None)
     post = hafsql._build_post(row, {}, {}, {}, {})
     assert post.is_nsfw is False
 
 
 def test_build_post_is_nsfw_false_when_tags_missing() -> None:
-    row = ("alice", "p1", "hive-onboarding", datetime(2026, 1, 1, tzinfo=UTC), None)
+    row = ("alice", "p1", "hive-onboarding", datetime(2026, 1, 1, tzinfo=UTC), None, None)
     post = hafsql._build_post(row, {}, {}, {}, {})
     assert post.is_nsfw is False
 
@@ -132,7 +134,7 @@ def test_build_post_is_nsfw_false_when_tags_missing() -> None:
 
 
 def test_build_post_attaches_commenter_and_reblogger_identity() -> None:
-    row = ("alice", "p1", "photo", datetime(2026, 1, 1, tzinfo=UTC), ["photo"])
+    row = ("alice", "p1", "photo", datetime(2026, 1, 1, tzinfo=UTC), ["photo"], None)
     post = hafsql._build_post(
         row,
         {},
@@ -148,7 +150,7 @@ def test_build_post_attaches_commenter_and_reblogger_identity() -> None:
 
 
 def test_build_post_without_engagement_has_empty_attribution() -> None:
-    row = ("alice", "p1", "photo", datetime(2026, 1, 1, tzinfo=UTC), ["photo"])
+    row = ("alice", "p1", "photo", datetime(2026, 1, 1, tzinfo=UTC), ["photo"], None)
     post = hafsql._build_post(row, {}, {}, {}, {})
     assert isinstance(post, AttributedPost)
     assert post.commenters == ()
@@ -362,3 +364,106 @@ def test_engagement_edges_reply_back_uses_own_timestamp(monkeypatch: pytest.Monk
     edge = next(e for e in edges if e.src == "alice" and e.dst == "bob")
     assert edge.reply_backs == 1
     assert edge.last_interaction == new_ts
+
+
+# ---------------------------------------------------------------------------
+# Lumen Lite reachability. Lite posts are depth-1 comments published by a shared
+# frontend account under a rolling container, so before this the whole Lite tier
+# was invisible to ranking AND was inflating the publisher's comment count.
+# ---------------------------------------------------------------------------
+
+
+def test_a_lite_post_is_ranked_as_its_WRITER_not_as_the_publisher() -> None:
+    """The chain author is the shared publisher account. Ranking must use the
+    writer, or every lite user's engagement collapses onto one account and every
+    real lite user scores zero."""
+    row = ("lumen-publisher", "lumen-01k", "lumen",
+           datetime(2026, 1, 1, tzinfo=UTC), ["photo"], "u_alice")
+    post = hafsql._build_post(row, {}, {}, {}, {"lumen-publisher": 9_000_000_000})
+    assert post.author == "u_alice"
+
+
+def test_hydration_still_keys_on_the_CHAIN_identity() -> None:
+    """Votes, comments and reblogs are recorded on chain against the publisher
+    account + permlink. Substituting the author before the lookup would silently
+    zero every lite post's engagement."""
+    chain_key = ("lumen-publisher", "lumen-01k")
+    row = ("lumen-publisher", "lumen-01k", "lumen",
+           datetime(2026, 1, 1, tzinfo=UTC), ["photo"], "u_alice")
+    post = hafsql._build_post(
+        row, {chain_key: [Vote(voter="bob", rshares=100, timestamp=datetime(2026,1,1,tzinfo=UTC))]},
+        {chain_key: {"carol": 2}},
+        {chain_key: ("dave",)}, {},
+    )
+    assert post.author == "u_alice"
+    assert post.commenters == ("carol",)
+    assert post.rebloggers == ("dave",)
+    assert len(post.votes) == 1
+
+
+def test_a_lite_writer_does_not_inherit_the_publishers_reputation() -> None:
+    """Otherwise every lite user free-rides on a shared score they did not earn,
+    and one bad lite post drags down every other lite user at once."""
+    hive_row = ("alice", "p1", "photo", datetime(2026, 1, 1, tzinfo=UTC), ["photo"], None)
+    lite_row = ("lumen-publisher", "lumen-01k", "lumen",
+                datetime(2026, 1, 1, tzinfo=UTC), ["photo"], "u_alice")
+    reps = {"alice": 9_000_000_000, "lumen-publisher": 9_000_000_000}
+
+    hive_post = hafsql._build_post(hive_row, {}, {}, {}, reps)
+    lite_post = hafsql._build_post(lite_row, {}, {}, {}, reps)
+
+    assert lite_post.author_reputation == hafsql._reputation_display(0)
+    assert lite_post.author_reputation < hive_post.author_reputation
+
+
+def test_lite_sourcing_is_OFF_until_publishers_are_named() -> None:
+    """The trust boundary. `json_metadata` is attacker-controlled — anyone can
+    publish a comment claiming `app = lumen/1.0` and any writer id. The claim is
+    only honoured inside a container owned by a CONFIGURED publisher, and with no
+    publishers configured the predicate is dead, so this change is inert until
+    someone deliberately turns it on."""
+    from recsys.config import LiteConfig
+
+    assert LiteConfig().enabled is False
+    assert LiteConfig().publisher_accounts == frozenset()
+    assert LiteConfig(publisher_accounts=frozenset({"lumen-publisher"})).enabled is True
+
+    off = hafsql.HafsqlClient(HafsqlConfig())._lite_params()
+    assert off["lite_publishers"] == []
+
+    on = hafsql.HafsqlClient(
+        HafsqlConfig(), LiteConfig(publisher_accounts=frozenset({"b", "a"}))
+    )._lite_params()
+    assert on["lite_publishers"] == ["a", "b"]      # sorted -> deterministic SQL
+    assert on["lite_app"] == "lumen/1.0"
+
+
+def test_the_trust_boundary_requires_BOTH_author_and_parent_to_be_publishers() -> None:
+    """A lite post lives in OUR container, published by OUR account. Requiring
+    only one side would let anyone comment under a container (or claim our app id
+    on their own post) and be ranked as whatever writer they named."""
+    predicate = hafsql._LITE_POST.format(t="")
+    assert "author = ANY(%(lite_publishers)s)" in predicate
+    assert "parent_author = ANY(%(lite_publishers)s)" in predicate
+    assert "json_metadata->>'app' = %(lite_app)s" in predicate
+
+
+def test_a_lite_post_is_not_counted_as_a_comment_on_its_container() -> None:
+    """It is a POST that happens to be stored as a comment. Counting it credited
+    the whole Lite tier's output to the container owner's organic score."""
+    # COALESCE(..., false) matters as much as the NOT: json_metadata is NULL on
+    # ordinary comments, and NOT NULL is NULL, which Postgres filters out.
+    assert "AND NOT COALESCE(" in hafsql._SQL_COMMENTS_FOR_POSTS
+    assert ", false)" in hafsql._SQL_COMMENTS_FOR_POSTS
+    assert "rc.json_metadata->>'app' = %(lite_app)s" in hafsql._SQL_COMMENTS_FOR_POSTS
+
+
+def test_the_community_lane_is_deliberately_not_widened_for_lite() -> None:
+    """A comment inherits its category from the container root, so lite posts sit
+    in category `lumen` and can never match a `hive-*` community. Documented
+    limitation of the container model, not an oversight — pinned so nobody
+    'fixes' it by widening a query that cannot match."""
+    assert "lite_publishers" not in hafsql._SQL_COMMUNITY_POSTS
+    for sql in (hafsql._SQL_TAG_POSTS, hafsql._SQL_IN_NETWORK_POSTS,
+                hafsql._SQL_ENGAGED_OON_POSTS, hafsql._SQL_POPULAR_POSTS):
+        assert "lite_publishers" in sql

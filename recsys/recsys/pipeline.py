@@ -45,7 +45,6 @@ from recsys.core.coldstart import (
 )
 from recsys.core.exploration import (
     eligible_for_exploration,
-    graduated_keys,
     insert_exploration,
 )
 from recsys.core.flooding import cap_oon_flooding
@@ -58,7 +57,7 @@ from recsys.core.scoring import (
     organic_quality_raw,
     score_candidates,
 )
-from recsys.core.second_degree import filter_eligible, qualifying_engagers
+from recsys.core.second_degree import filter_eligible
 from recsys.core.viewer_affinity import (
     affinity_percentiles,
     candidate_affinity,
@@ -1283,42 +1282,8 @@ def rank_feed(
     suppressed = _suppressed(gateway, candidates)
     gated_keys = frozenset(c.post.key for c in candidates if c.source.requires_second_degree)
 
-    # ★ EXPLORATION PRE-POOL, computed here and not after `filter_eligible`,
-    # because its keys have to join the SAME second-degree query (2026-08-04).
-    #
-    # Graduation (§4.3: "a post leaves the pool the moment it earns >= 1
-    # qualifying vouch") was structurally dead before this. It read the
-    # `engager_index` built for the GATE, and `gated_keys` holds only sources
-    # with `requires_second_degree` — which today is `OON_ENGAGED` and nothing
-    # else. Every other lane is gate-exempt, each for its own earlier reason.
-    # So for a pool drawn from ALL sources, `vouched_keys` was a set that could
-    # never contain the post's key no matter how many real vouches it had.
-    #
-    # The lanes that were blind are exactly the ones that matter: OON_COMMUNITY,
-    # OON_INTEREST and the INTEREST_* cold-start lanes are how unproven authors
-    # surface at all. A post arriving that way kept re-entering the rotation for
-    # its whole 7-day window after it had already earned its vouch and been
-    # promoted to the normal machinery — spending the scarce slot on content
-    # that no longer needed it, and crowding out the genuine 0-vouch newcomer
-    # the lane is for.
-    #
-    # `vouched_keys=frozenset()` here is deliberate: graduation is the ONE
-    # condition that cannot be evaluated yet, so the pre-pool applies the other
-    # conditions, its keys widen the single query below, and graduation is
-    # applied to the result. One round trip, not two.
-    explore_prepool = eligible_for_exploration(
-        candidates,
-        viewer,
-        now=now,
-        ring_members=snap.ring_members,
-        vouched_keys=frozenset(),
-        suppressed=suppressed,
-        show_nsfw=show_nsfw,
-        config=settings.exploration,
-    )
-    engager_keys = gated_keys | frozenset(c.post.key for c in explore_prepool)
     engager_index = (
-        gateway.second_degree_engagers(engager_keys, viewer.follows) if engager_keys else {}
+        gateway.second_degree_engagers(gated_keys, viewer.follows) if gated_keys else {}
     )
     eligible = filter_eligible(
         candidates,
@@ -1330,30 +1295,48 @@ def rank_feed(
         show_nsfw=show_nsfw,
     )
 
-    # ★ EXPLORATION POOL (cold-start spec §4.3, item B12). Drawn from the WHOLE
-    # gathered pool — no extra gateway round trip — and filtered on "no
-    # qualifying vouch yet", which is the spec's actual condition. An earlier
-    # build sourced this from the posts that FAILED eligibility; that was wrong,
-    # because a new author's post frequently PASSES the gate and then loses on
-    # score, which is the very case this lane exists for. Graduation is applied
-    # here: a post already holding a QUALIFYING vouch has earned the normal
-    # lanes and is excluded, so a ring cannot vote up its own boosted post to
-    # promote it (§4.4 "trusted graduation"). `insert_exploration` de-duplicates
-    # against the ranked feed so nothing is shown twice.
-    # Graduation applied to the pre-pool computed above. The vouch must come
-    # from someone the VIEWER follows (`& viewer.follows`) and must itself
-    # qualify on graph-cred — the same two-part test `filter_eligible` uses, so
-    # "graduated" means the identical thing in both places, and a ring cannot
-    # vote up its own boosted post to promote it out of the lane.
-    _graduated = graduated_keys(
-        {k: v & viewer.follows for k, v in engager_index.items()},
-        qualifying_engagers(
-            frozenset().union(*engager_index.values()) if engager_index else frozenset(),
-            snap.graph_creds,
-            settings.thresholds.vouch_graph_cred_floor,
-        ),
+    # ★★ EXPLORATION POOL (cold-start spec §4.3, item B12). GRADUATION IS
+    # POSITIONAL, not vouch-based — changed 2026-08-04 after both councils
+    # measured the cliff it caused.
+    #
+    # The spec's rule was "a post leaves the pool the moment it earns >= 1
+    # qualifying vouch; from there the normal second-degree machinery serves
+    # it." The premise is that earning a vouch means the post no longer needs
+    # the slot. MEASURED, that premise is false. Graduation is viewer-relative,
+    # so one upvote from a well-followed account split the audience cleanly:
+    #
+    #     follows the voucher (x9) -> graduated -> debut at 102..123
+    #     does not follow      (x1) -> in pool  -> debut at  13
+    #
+    # So a newcomer's FIRST REAL ENDORSEMENT dropped them from 13 to ~115, and
+    # it did so precisely among the voucher's own followers — the audience most
+    # likely to care. A vouch does not make a post rank; the post still sits at
+    # the 3rd-4th percentile by construction, which is the whole reason this
+    # lane exists. There was no landing pad and the handoff was binary.
+    #
+    # The right question is not "has someone vouched?" but "does this post still
+    # need the slot?", and `insert_exploration` already answers it exactly: a
+    # pick already ranked at or above the slot is skipped WITHOUT spending it.
+    # That is graduation, measured against the thing that actually matters.
+    # It is self-regulating (a post leaves the moment it genuinely outranks the
+    # slot, not a moment before), needs no threshold, and recycles the budget
+    # the same way the vouch rule was supposed to.
+    #
+    # Deleting the vouch rule also removes two liabilities: a gateway round trip
+    # (the second-degree query no longer has to be widened past `gated_keys`),
+    # and a GRIEFING vector — under the old rule a third party could eject a
+    # newcomer from the lane by vouching for them, which is why the spec had to
+    # require a QUALIFYING voucher to make ejection expensive. Positional
+    # graduation cannot be triggered by anyone else at all.
+    explore_pool = eligible_for_exploration(
+        candidates,
+        viewer,
+        now=now,
+        ring_members=snap.ring_members,
+        suppressed=suppressed,
+        show_nsfw=show_nsfw,
+        config=settings.exploration,
     )
-    explore_pool = [c for c in explore_prepool if c.post.key not in _graduated]
 
     filler = _fallback_filler(
         eligible,

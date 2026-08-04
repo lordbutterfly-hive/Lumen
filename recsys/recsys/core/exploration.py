@@ -31,7 +31,11 @@ NOT take the author graph-cred floor, deliberately: a brand-new author is below
 every floor by construction, which is the entire point. Its defences are instead:
 
   * ring exclusion — a detected ring member is never eligible;
-  * a per-author epoch budget, so a farm cannot convert account count into slots;
+  * a per-author cap, bounding how much ONE author can occupy: at most 3 posts
+    in the pool, and at most ONE promotion per feed. Note what this does NOT do
+    — it cannot stop a farm converting ACCOUNT COUNT into slots, because every
+    new sock gets its own fresh budget. That threat is ring exclusion's job (the
+    bullet above), not this one. The wording here used to claim otherwise;
   * interest targeting, so a slot is spent on someone the viewer plausibly wants;
   * graduation on a QUALIFYING vouch only, so a ring voting up its own boosted
     post cannot graduate it into the normal lanes;
@@ -71,7 +75,7 @@ spec describes. B11 is the prerequisite for closing either.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Sequence
 from datetime import datetime, timedelta
 
 from recsys.config import ExplorationConfig
@@ -148,7 +152,6 @@ def eligible_for_exploration(
     *,
     now: datetime,
     ring_members: frozenset[str],
-    vouched_keys: frozenset[str],
     suppressed: frozenset[str],
     show_nsfw: bool,
     config: ExplorationConfig,
@@ -170,22 +173,57 @@ def eligible_for_exploration(
     the newcomer's three debut posts at positions 99, 106 and 108 — present,
     unreachable, and never once given the reserved slot.
 
-    ``vouched_keys`` names posts that already hold at least one qualifying
-    vouch; those have graduated and are excluded (§4.3). Because the pool is now
-    drawn from everything, the caller must also exclude whatever already made
-    the ranked feed — :func:`insert_exploration` does that — or a post could be
-    shown twice.
+    GRADUATION IS NOT APPLIED HERE. The spec's rule was "0 qualifying vouches",
+    and it is gone (2026-08-04) — a vouch does not make a post rank, so ejecting
+    on the first one dropped a newcomer from position 13 to ~115 among the
+    voucher's own followers. :func:`insert_exploration` graduates positionally
+    instead: a pick already at or above the slot is skipped without spending it.
+    Because the pool is drawn from everything, that same check is also what stops
+    a post being shown twice.
 
-    Every condition is required (§4.3): fresh enough, no qualifying vouch yet,
-    author not ring-flagged, matches the viewer's declared interests, and inside
-    the author's per-epoch budget. Ordering is a deterministic round-robin over
-    authors, newest-first within an author, so no author can monopolise the lane
-    and the same inputs always yield the same order.
+    Every remaining condition is required: fresh enough, author not ring-flagged,
+    not self-dealt, viewer-safe (mute/suppressed/NSFW), matches the viewer's
+    declared interests, and inside the author's per-request post cap. Ordering is
+    a deterministic round-robin over authors — least-heard first, newest-first
+    within an author — so the scarce slot goes to whoever needs it most and the
+    same inputs always yield the same order.
     """
     if config.slots_per_page <= 0:
         return []
     cutoff = now - timedelta(days=config.max_age_days)
+    # How much attention has each author ALREADY received in this window? Used
+    # to order the rotation by need (see below). Accumulated over every input
+    # candidate, before any filtering, so an author's footprint counts even
+    # through posts that are themselves ineligible.
+    #
+    # ★ DISTINCT ENGAGER IDENTITIES, never raw counters (fixed 2026-08-04, found
+    # by the adversary council). The first version summed
+    # `len(votes) + children + reblog_count`, and its docstring only reasoned
+    # about SELF-inflation — "inflating your own counts sorts you later". The
+    # real hole is the opposite: `children` is incremented by ANYONE who
+    # comments, so the key was a field the attacker writes on the VICTIM.
+    # Measured, one griefer account commenting 5 times on a newcomer's posts
+    # moved them from slot 13 (page 1) to slot 53 (page 3) for every viewer —
+    # cost, one account and 15 comments at Hive's 3-second interval.
+    #
+    # It had a blameless twin that is worse: those 5 comments could just as
+    # easily be 5 genuine readers, so the newcomer was demoted from the
+    # discovery lane BY THE LANE'S OWN SUCCESS.
+    #
+    # Counting distinct identities caps any single griefer's contribution at +1,
+    # so demoting someone now costs one account per unit of harm rather than one
+    # comment. The author is excluded so self-engagement cannot be used to
+    # manufacture "need" downward either.
+    received: dict[str, set[str]] = {}
     fresh: list[Candidate] = []
+    candidates = list(candidates)
+    for candidate in candidates:
+        post = candidate.post
+        engagers = {v.voter for v in post.votes}
+        engagers.update(getattr(post, "commenters", ()))
+        engagers.update(getattr(post, "rebloggers", ()))
+        engagers.discard(post.author)
+        received.setdefault(post.author, set()).update(engagers)
     for candidate in candidates:
         post = candidate.post
         # ★ VIEWER-SAFETY FILTERS (added 2026-08-04). These are NOT redundant
@@ -211,8 +249,6 @@ def eligible_for_exploration(
             continue
         if post.created < cutoff:
             continue
-        if post.key in vouched_keys:
-            continue
         if post.author in ring_members:
             continue
         if _is_self_dealt(post):
@@ -230,7 +266,38 @@ def eligible_for_exploration(
         if len(bucket) < config.max_posts_per_author_epoch:
             bucket.append(candidate)
 
-    # ★ Authors are rotated NEWEST-FIRST, not alphabetically (fixed 2026-08-04).
+    # ★★ AUTHORS ARE ROTATED LEAST-HEARD FIRST (2026-08-04, both councils).
+    #
+    # The key used to be post recency alone, and RECENCY IS NOT NEWNESS. Nothing
+    # in this function ever tested whether an author was actually new — the
+    # conditions are fresh + unvouched + interest-matched + not-ring +
+    # not-self-dealt, all of which an ESTABLISHED author's quiet recent post
+    # satisfies just as well. So the lane built for new writers was ordering its
+    # scarce slot by who posted most recently, which is uncorrelated with need
+    # and is the single most attacker-controlled variable in the system.
+    #
+    # Measured, cold viewer, simworld seed 7 — the pool's first five authors by
+    # the old key, with the engagement each had already received:
+    #     a-photo-04  0.6h  received 27
+    #     a-photo-08  2.5h  received 53
+    #     a-photo-02  4.7h  received 22
+    #     a-photo-01  5.3h  received 27
+    #     newbie-author 6.0h received  0   <- 5th, purely for being 1.3h older
+    # Slot 13 went to `a-photo-02`, an established author with 7 posts and 11
+    # votes received; the newcomer took slot 33 — page 2. Of 20 pool authors, 19
+    # had received engagement and exactly ONE was a genuine newcomer.
+    #
+    # Ordering by received engagement ascending costs nothing and is not a new
+    # gate: established authors simply sort last, and the previous recency key
+    # is kept as the tie-break, so among equally-unheard authors behaviour is
+    # unchanged. Sybil-neutral by construction — a sock has 0 received and
+    # already sorted first under recency, so this takes nothing from the
+    # defences and gives a farm nothing new. Note the incentive direction:
+    # inflating your own engagement counts sorts you LATER, never earlier.
+    #
+    # This does NOT make the lane new-author-only; that needs an author-age or
+    # graph-cred-absence condition, which both councils flagged as the real
+    # v1.0 gap. It makes the ORDERING serve need instead of clock.
     # The spec's phrase is "deterministic rotation WEIGHTED BY RECENCY"; the
     # first build implemented the rotation and dropped the weighting, ordering
     # authors by name. Measured, that made the lane useless in exactly its
@@ -245,7 +312,10 @@ def eligible_for_exploration(
     # in the same way — everyone can post now, and the per-author epoch budget
     # is what actually bounds a farm.
     rotated: list[Candidate] = []
-    authors = sorted(by_author, key=lambda a: (-by_author[a][0].post.created.timestamp(), a))
+    authors = sorted(
+        by_author,
+        key=lambda a: (len(received.get(a, ())), -by_author[a][0].post.created.timestamp(), a),
+    )
     for depth in range(config.max_posts_per_author_epoch):
         for author in authors:
             bucket = by_author[author]
@@ -306,6 +376,23 @@ def insert_exploration(
     page = max(1, config.page_size)
     base = min(config.position, page - 1)
     inserted = 0
+    # ★ ONE EXPLORATION PROMOTION PER AUTHOR PER FEED. Deliberate: the budget is
+    # ~10 slots in a 200-post feed and its whole purpose is spreading scarce
+    # reach across as many unheard authors as possible, so letting one author
+    # take 3 of 10 is a direct loss. Pages without a pick are not empty — they
+    # carry normally-ranked content. `max_posts_per_author_epoch` therefore
+    # bounds POOL PRESENCE, not promotions; the round-robin's depth-1/depth-2
+    # entries are pool shape, never a promise of a second slot.
+    #
+    # ★★ Enforced by the `i <= at` scan below, and NOT by a separate set. A
+    # `promoted_authors` set was added here to "make the policy explicit" and
+    # was then proved to be dead code: `at` is non-decreasing across the loop
+    # and a promoted item never moves (later inserts and pops both target
+    # strictly greater indices), so a promoted post is always at some index
+    # <= every later slot and the positional scan already declines its author.
+    # Reverting the set alone changed no test; reverting both mechanisms failed
+    # two. It was deleted rather than kept as belt-and-braces — the honest
+    # record is that the positional check was load-bearing all along.
     while picks:
         page_index, within = divmod(inserted, config.slots_per_page)
         at = page_index * page + min(base + within, page - 1)
@@ -355,20 +442,4 @@ def insert_exploration(
     return out
 
 
-def graduated_keys(
-    engager_index: Mapping[str, frozenset[str]],
-    qualifying: frozenset[str],
-) -> frozenset[str]:
-    """Post keys holding at least one QUALIFYING vouch — i.e. graduated out of
-    the exploration pool and into the normal lanes.
-
-    Qualifying, not merely any engagement: graduation on a bare engager would let
-    a ring vote up its own boosted post and promote it, which is the specific
-    hole §4.4's "trusted graduation" clause exists to close.
-    """
-    return frozenset(
-        key for key, engagers in engager_index.items() if engagers & qualifying
-    )
-
-
-__all__ = ["eligible_for_exploration", "graduated_keys", "insert_exploration"]
+__all__ = ["eligible_for_exploration", "insert_exploration"]

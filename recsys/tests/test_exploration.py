@@ -10,7 +10,6 @@ from recsys.config import ExplorationConfig
 from recsys.contracts import Candidate, CandidateSource, ScoreBreakdown, ScoredCandidate
 from recsys.core.exploration import (
     eligible_for_exploration,
-    graduated_keys,
     insert_exploration,
 )
 from tests.fakes import EPOCH, make_post, make_viewer
@@ -52,7 +51,6 @@ def _eligible(cands, viewer=None, **kw):
     return eligible_for_exploration(
         cands, viewer or _viewer(), now=NOW,
         ring_members=kw.pop("ring_members", frozenset()),
-        vouched_keys=kw.pop("vouched_keys", frozenset()),
         suppressed=kw.pop("suppressed", frozenset()),
         show_nsfw=kw.pop("show_nsfw", True),
         config=kw.pop("config", _cfg()),
@@ -76,11 +74,34 @@ def test_a_ring_member_never_gets_a_reserved_slot() -> None:
     assert _eligible([_cand("sock", "p1")], ring_members=frozenset({"sock"})) == []
 
 
-def test_a_graduated_post_leaves_the_pool() -> None:
-    """§4.3 graduation: once a post holds a qualifying vouch it has earned the
-    normal lanes and must stop consuming the scarce reserved slot."""
-    c = _cand("a", "p1")
-    assert _eligible([c], vouched_keys=frozenset({c.post.key})) == []
+def test_a_post_that_already_outranks_the_slot_does_not_consume_it() -> None:
+    """Graduation, positional. Replaces the spec's "0 qualifying vouches" rule,
+    which was measured to drop a newcomer from 13 to ~115 the moment they earned
+    their first real endorsement. The honest question is not "has someone
+    vouched?" but "does this post still need the slot?"."""
+    feed = [_scored(_cand("est", f"e{i}")) for i in range(40)]
+    arrived = _scored(_cand("newcomer", "debut"))
+    feed.insert(4, arrived)                      # already ahead of position 13
+    later = _scored(_cand("other", "debut"))
+    feed.insert(30, later)
+
+    out = insert_exploration(feed, [arrived, later], _cfg(page_size=20, position=13))
+
+    keys = [c.post.key for c in out]
+    assert keys.index(arrived.post.key) == 4     # left alone, not demoted
+    assert keys.index(later.post.key) == 13      # slot went to the one that needs it
+    assert len(out) == len(feed)
+
+
+def test_nobody_can_eject_a_newcomer_from_the_lane() -> None:
+    """The old vouch rule was a griefing vector — a third party could eject a
+    newcomer by vouching for them, which is why the spec had to make ejection
+    expensive by requiring a QUALIFYING voucher. Positional graduation cannot be
+    triggered by anyone other than the ranking itself."""
+    from recsys.contracts import Vote
+    votes = tuple(Vote(voter=f"griefer{i}", rshares=10**9, timestamp=NOW) for i in range(5))
+    got = _eligible([_attributed("newcomer", "debut", votes=votes)])
+    assert [c.post.author for c in got] == ["newcomer"]
 
 
 def test_content_the_viewer_never_asked_for_is_not_eligible() -> None:
@@ -144,14 +165,6 @@ def test_insertion_into_an_empty_or_short_feed_is_safe() -> None:
 def test_empty_pool_returns_the_feed_unchanged() -> None:
     ranked = [_scored(_cand(f"a{i}", "p")) for i in range(5)]
     assert insert_exploration(ranked, [], _cfg()) == ranked
-
-
-def test_graduation_requires_a_QUALIFYING_voucher_not_any_engager() -> None:
-    """§4.4 trusted graduation. If any engager graduated a post, a ring could
-    vote up its own boosted post and promote it out of the budgeted lane into
-    the unbudgeted ones."""
-    index = {"@a/p1": frozenset({"ringmate"}), "@b/p1": frozenset({"real"})}
-    assert graduated_keys(index, frozenset({"real"})) == frozenset({"@b/p1"})
 
 
 @pytest.mark.parametrize("bad", [
@@ -342,16 +355,21 @@ def test_nsfw_is_excluded_unless_the_viewer_opted_in() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_graduation_works_for_a_gate_exempt_lane_not_just_oon_engaged(monkeypatch) -> None:
-    """★ Asserts on the POOL, not on the final feed.
+def test_a_vouch_does_not_eject_a_post_from_the_lane(monkeypatch) -> None:
+    """★ THE GRADUATION CLIFF — the regression this pins (2026-08-04).
 
-    The first version of this test asserted the post's source in the returned
-    feed was not EXPLORATION, and was VACUOUS: the fixture's feed is one item
-    long, so `insert_exploration` breaks out at `at=13 > len(out)=1` and the
-    source could never have been EXPLORATION whether graduation worked or not.
-    It passed with the bug deliberately reintroduced. The bug is in what the
-    pipeline PUTS IN THE POOL, so that is what gets asserted — verified to fail
-    when `engager_keys` is reverted to `gated_keys`.
+    The spec ejected a post from the pool on its first qualifying vouch, on the
+    premise that a vouch means it no longer needs the slot. Measured, false: the
+    post still scores at the 3rd-4th percentile, so it fell from position 13 to
+    102-123. And because graduation was viewer-relative, the fall happened
+    exactly among the voucher's own followers:
+
+        follows the voucher (x9) -> ejected -> debut at 102..123
+        does not follow      (x1) -> in pool -> debut at  13
+
+    A newcomer's first real endorsement was the thing that buried them. The post
+    must now STAY in the pool; `insert_exploration` decides positionally whether
+    it still needs the slot.
     """
     import recsys.pipeline as pipeline_mod
     from recsys.config import Settings
@@ -360,18 +378,15 @@ def test_graduation_works_for_a_gate_exempt_lane_not_just_oon_engaged(monkeypatc
     from tests.fakes import FakeGateway
 
     settings = Settings()
-    samples = [float(i) for i in range(50)]  # >= NormConfig.min_samples
+    samples = [float(i) for i in range(50)]
     norms = build_norm_context(samples, samples, samples)
 
     post = make_post(author="newcomer", permlink="p1", community="hive-1", tags=("photo",))
     fresh = type(post)(**{**post.__dict__, "created": NOW - timedelta(hours=1)})
-
     viewer = make_viewer("v", follows=frozenset({"alice"}),
                          subscribed_communities=frozenset({"hive-1"}),
                          interest_tags=frozenset({"photo"}))
-
-    # The SAME post + the SAME "alice (a follow) engaged it" fact, surfaced via
-    # the community lane -- a lane with requires_second_degree == False.
+    # alice is someone the viewer follows, and she has vouched for the debut.
     gateway = FakeGateway(community=[fresh], engagers={fresh.key: frozenset({"alice"})})
 
     seen: list[list[str]] = []
@@ -385,10 +400,7 @@ def test_graduation_works_for_a_gate_exempt_lane_not_just_oon_engaged(monkeypatc
     rank_feed(viewer, gateway, norms, now=NOW, since=EPOCH,
               settings=settings, trust_policy=TrustPolicy.WARN)
 
-    # It holds a qualifying vouch from someone the viewer follows -> graduated,
-    # so the normal machinery serves it and it must be OUT of the pool. With the
-    # gate-only engager_index it stayed in forever.
-    assert all(fresh.key not in pool for pool in seen)
+    assert any(fresh.key in pool for pool in seen)
 
 
 def test_an_unvouched_post_in_the_same_lane_DOES_enter_the_pool(monkeypatch) -> None:
@@ -473,3 +485,96 @@ def test_the_author_check_does_not_break_promotion_of_the_pick_itself() -> None:
     out = insert_exploration(feed, [target], _cfg(page_size=20, position=13))
 
     assert [c.post.key for c in out].index(target.post.key) == 13
+
+
+def test_one_promotion_per_author_per_feed_even_when_pages_are_free() -> None:
+    """★ An explicit POLICY, previously only an accident of the `i <= at` check.
+
+    The round-robin builds depth-1/depth-2 entries per author, which reads like
+    a promise of up to `max_posts_per_author_epoch` slots. It is not: the budget
+    is ~10 slots in a 200-post feed and its purpose is spreading scarce reach
+    across as many unheard authors as possible, so one author taking 3 of 10 is
+    a direct loss. Pages without a pick are not empty — they carry normal
+    content.
+    """
+    feed = [_scored(_cand("est", f"e{i}")) for i in range(200)]
+    debuts = [_scored(_cand("newcomer", f"debut-{i}")) for i in range(3)]
+
+    out = insert_exploration(feed, debuts, _cfg(page_size=20, position=13))
+
+    keys = [c.post.key for c in out]
+    assert keys.index(debuts[0].post.key) == 13
+    # the 2nd and 3rd are NOT promoted, though pages 2..10 are all free
+    assert debuts[1].post.key not in keys
+    assert debuts[2].post.key not in keys
+
+
+def test_a_second_author_still_gets_the_next_page_slot() -> None:
+    """The control: one-per-author must not degrade into one-per-FEED."""
+    feed = [_scored(_cand("est", f"e{i}")) for i in range(200)]
+    a = _scored(_cand("newcomer-a", "d0"))
+    b = _scored(_cand("newcomer-b", "d0"))
+
+    out = insert_exploration(feed, [a, b], _cfg(page_size=20, position=13))
+
+    keys = [c.post.key for c in out]
+    assert keys.index(a.post.key) == 13
+    assert keys.index(b.post.key) == 33
+
+
+def test_rotation_is_ordered_by_NEED_not_by_post_recency() -> None:
+    """★ The change that finally made the lane reach page 1 (2026-08-04).
+
+    Recency is not newness. Nothing in eligibility tests whether an author is
+    new, so an established author's quiet recent post qualifies identically —
+    and under a pure recency key it took the slot for being a few hours fresher.
+    Measured, simworld seed 7: the pool's first four authors had received 27,
+    53, 22 and 27 engagements; the newcomer (0 received) was fifth and got page
+    2. With need-first ordering the newcomer takes position 13 — the actual
+    reserved slot — and q3 panel [A] flipped to `top-20 hit: True`.
+    """
+    veteran = _attributed("veteran", "quiet", days_old=0,
+                          commenters=tuple(f"reader{i}" for i in range(12)))
+    newcomer = _cand("newcomer", "debut", days_old=1)  # older, but 0 received
+
+    got = _eligible([veteran, newcomer])
+
+    assert [c.post.author for c in got] == ["newcomer", "veteran"]
+
+
+def test_need_ordering_keeps_recency_as_the_tie_break() -> None:
+    """Among equally-unheard authors, behaviour is exactly as before."""
+    got = _eligible([_cand("older", "p", days_old=3), _cand("fresher", "p", days_old=1)])
+    assert [c.post.author for c in got] == ["fresher", "older"]
+
+
+def test_one_griefer_cannot_demote_a_newcomer_by_commenting_repeatedly() -> None:
+    """★ The need key is a field the ATTACKER writes on the VICTIM.
+
+    The first version summed raw `len(votes) + children + reblog_count`, and
+    `children` is incremented by anyone who comments. Measured: ONE griefer
+    account, 5 comments per post, moved the newcomer from slot 13 (page 1) to
+    slot 53 (page 3) for every viewer. Counting DISTINCT identities caps any one
+    griefer at +1, so demotion costs an account per unit of harm, not a comment.
+    """
+    griefed = _attributed("newcomer", "debut", days_old=0,
+                          commenters=("griefer",) * 30, rebloggers=("griefer",))
+    rival = _attributed("rival", "p", days_old=1, commenters=("a", "b"))
+
+    got = _eligible([griefed, rival])
+
+    # 1 distinct griefer < 2 distinct readers -> the newcomer still leads
+    assert [c.post.author for c in got] == ["newcomer", "rival"]
+
+
+def test_genuine_distinct_readers_DO_count_as_being_heard() -> None:
+    """The control. The rule must not become "engagement never counts" — an
+    author five different people have engaged really has been heard, and should
+    yield the scarce slot to someone nobody has read yet."""
+    heard = _attributed("heard", "p", days_old=0,
+                        commenters=("a", "b", "c"), rebloggers=("d", "e"))
+    unheard = _cand("unheard", "p", days_old=1)
+
+    got = _eligible([heard, unheard])
+
+    assert [c.post.author for c in got] == ["unheard", "heard"]

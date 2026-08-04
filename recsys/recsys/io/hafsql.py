@@ -12,7 +12,7 @@ from collections.abc import Mapping
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from recsys.config import HafsqlConfig
+from recsys.config import HafsqlConfig, LiteConfig
 from recsys.contracts import Candidate, CandidateSource, EngagementEdge, Post, Vote
 from recsys.core.scoring import AuthorEngagement
 from recsys.core.vote_signal import AttributedPost, VoterTrust
@@ -27,7 +27,38 @@ _REP_LOG_FLOOR = 9.0
 _REP_SCALE = 9.0
 _REP_BASE = 25.0
 
-_PostRow = tuple[str, str, str, datetime, "list[str] | None"]
+# author, permlink, category, created, tags, lite_author
+# ``lite_author`` is `json_metadata->>'lumen_user_id'` and is NULL for every
+# ordinary Hive post. It is trusted only because the SQL that selects it also
+# requires the chain author to be a configured Lumen publisher — see
+# `_LITE_POST` and `LiteConfig`.
+_PostRow = tuple[str, str, str, datetime, "list[str] | None", "str | None"]
+
+# A Lumen Lite post: a depth-1 comment published by a configured publisher
+# account under its own container, carrying the writer's id in json_metadata.
+# Both the author AND the parent must be publishers — json_metadata is
+# attacker-controlled, so the claim is only honoured inside our own containers.
+# With `lite_publishers` empty, `= ANY('{}')` is false and lite sourcing is off.
+_LITE_POST = """(
+    {t}author = ANY(%(lite_publishers)s)
+    AND {t}parent_author = ANY(%(lite_publishers)s)
+    AND {t}json_metadata->>'app' = %(lite_app)s
+    AND {t}json_metadata->>'lumen_user_id' IS NOT NULL
+)"""
+
+
+def _top_level_or_lite(alias: str = "") -> str:
+    """`parent_author = ''` widened to also admit our own lite posts."""
+    t = f"{alias}." if alias else ""
+    return f"({t}parent_author = '' OR {_LITE_POST.format(t=t)})"
+
+
+def _identity(alias: str = "") -> str:
+    """The author identity RANKING uses: the lite writer where present, else the
+    chain author. Hydration still keys on the chain author (votes and comments
+    are recorded against it); only the ranked identity is substituted."""
+    t = f"{alias}." if alias else ""
+    return f"COALESCE({t}json_metadata->>'lumen_user_id', {t}author)"
 
 # H05: with no trust snapshot, the breadth budget in _SQL_AUTHOR_ENGAGEMENT
 # must never bind — an effectively-infinite unknown_free reproduces the
@@ -39,19 +70,24 @@ _UNBUDGETED_UNKNOWN_FREE = 1e18
 # post, §3.0; community == category for community-filed posts, on-chain).
 # ---------------------------------------------------------------------------
 
-_SQL_IN_NETWORK_POSTS = """
-SELECT author, permlink, category, created, tags
+_SQL_IN_NETWORK_POSTS = f"""
+SELECT author, permlink, category, created, tags,
+       json_metadata->>'lumen_user_id'
 FROM hafsql.comments
-WHERE parent_author = ''
+WHERE {_top_level_or_lite()}
   AND deleted = false
-  AND author = ANY(%(authors)s)
+  AND {_identity()} = ANY(%(authors)s)
   AND created >= %(since)s
 ORDER BY created DESC
 LIMIT %(limit)s
 """
 
+# NOT widened for lite: a comment inherits its category from the container
+# root, so every lite post sits in category `lumen` and can never match a
+# `hive-*` community. Lite reaches readers via the tag, in-network and engaged
+# lanes instead. Property of the container model, not an oversight.
 _SQL_COMMUNITY_POSTS = """
-SELECT author, permlink, category, created, tags
+SELECT author, permlink, category, created, tags, NULL::text
 FROM hafsql.comments
 WHERE parent_author = ''
   AND deleted = false
@@ -61,10 +97,11 @@ ORDER BY created DESC
 LIMIT %(limit)s
 """
 
-_SQL_TAG_POSTS = """
-SELECT author, permlink, category, created, tags
+_SQL_TAG_POSTS = f"""
+SELECT author, permlink, category, created, tags,
+       json_metadata->>'lumen_user_id'
 FROM hafsql.comments
-WHERE parent_author = ''
+WHERE {_top_level_or_lite()}
   AND deleted = false
   AND tags && %(tags)s
   AND created >= %(since)s
@@ -74,12 +111,13 @@ LIMIT %(limit)s
 
 # Out-of-network posts an in-network account engaged with (vote, reblog, or
 # reply) — the raw pool for the second-degree gate (§8.1).
-_SQL_ENGAGED_OON_POSTS = """
-SELECT DISTINCT c.author, c.permlink, c.category, c.created, c.tags
+_SQL_ENGAGED_OON_POSTS = f"""
+SELECT DISTINCT c.author, c.permlink, c.category, c.created, c.tags,
+       c.json_metadata->>'lumen_user_id'
 FROM hafsql.comments c
-WHERE c.parent_author = ''
+WHERE {_top_level_or_lite("c")}
   AND c.deleted = false
-  AND c.author <> ALL(%(follows)s)
+  AND {_identity("c")} <> ALL(%(follows)s)
   AND c.created >= %(since)s
   AND (
     EXISTS (
@@ -124,6 +162,19 @@ _SQL_COMMENTS_FOR_POSTS = """
 SELECT rc.parent_author, rc.parent_permlink, rc.author, COUNT(*)
 FROM hafsql.operation_comment_view rc
 WHERE rc.parent_author <> ''
+  -- ★ A lite post is a POST that happens to be stored as a comment. Counting it
+  -- here credited every lite writer's work to the container's owner, inflating
+  -- the publisher account's organic score with the whole Lite tier's output.
+  -- COALESCE is load-bearing: `json_metadata` is NULL on plenty of ordinary
+  -- comments, `NULL->>'app'` is NULL, and `NOT NULL` is NULL — which Postgres
+  -- treats as not-true and FILTERS THE ROW OUT. Without it, enabling lite would
+  -- silently drop a publisher's own metadata-less comments from every comment
+  -- count. Three-valued logic, failing toward data loss.
+  AND NOT COALESCE(
+    rc.author = ANY(%(lite_publishers)s)
+    AND rc.parent_author = ANY(%(lite_publishers)s)
+    AND rc.json_metadata->>'app' = %(lite_app)s
+  , false)
   AND (rc.parent_author, rc.parent_permlink) IN (
     SELECT * FROM unnest(%(authors)s::text[], %(permlinks)s::text[])
   )
@@ -259,10 +310,11 @@ WHERE follower_name = ANY(%(accounts)s)
 # posts are fetched; the snapshot-dependent lineage/ring exclusion decides
 # which survive. Both layers use identical weights and thresholds so the
 # pre-fetch never contradicts the authoritative pass, only widens it.
-_SQL_POPULAR_POSTS = """
-SELECT c.author, c.permlink, c.category, c.created, c.tags
+_SQL_POPULAR_POSTS = f"""
+SELECT c.author, c.permlink, c.category, c.created, c.tags,
+       c.json_metadata->>'lumen_user_id'
 FROM hafsql.comments c
-WHERE c.parent_author = ''
+WHERE {_top_level_or_lite("c")}
   AND c.deleted = false
   AND c.created >= %(since)s
 ORDER BY (
@@ -452,21 +504,30 @@ def _build_post(
     :class:`AttributedPost`. ``children``/``reblog_count`` are DERIVED from the
     attribution maps (total comments, distinct rebloggers), so the display
     counters and the scored identities can never disagree."""
-    author, permlink, category, created, tags = row
+    author, permlink, category, created, tags, lite_author = row
+    # Hydration keys on the CHAIN identity — votes, comments and reblogs are all
+    # recorded against the publisher account + permlink on chain. Only the
+    # ranked identity is substituted.
     key = (author, permlink)
     community = category if category.startswith("hive-") else None
     tag_tuple = tuple(tags or ())
     comment_counts = comments_by_key.get(key, {})
     rebloggers = rebloggers_by_key.get(key, ())
+    # ★ A lite writer has no Hive account and therefore no reputation. Taking
+    # the publisher's would be wrong in both directions: every lite user would
+    # free-ride on a shared score they did not earn, and one bad lite post would
+    # drag down every other lite user at once. They get the same neutral display
+    # reputation Hive gives a brand-new account, which is what they are.
+    reputation_raw = 0 if lite_author else reputation_by_author.get(author, 0)
     return AttributedPost(
-        author=author,
+        author=lite_author or author,
         permlink=permlink,
         category=category,
         community=community,
         created=created,
         children=sum(comment_counts.values()),
         reblog_count=len(rebloggers),
-        author_reputation=_reputation_display(reputation_by_author.get(author, 0)),
+        author_reputation=_reputation_display(reputation_raw),
         tags=tag_tuple,
         votes=tuple(votes_by_key.get(key, ())),
         is_nsfw=any(tag.lower() == "nsfw" for tag in tag_tuple),
@@ -478,8 +539,12 @@ def _build_post(
 class HafsqlClient:
     """Concrete ``HafsqlGateway`` backed by the public HAFSQL Postgres mirror."""
 
-    def __init__(self, config: HafsqlConfig) -> None:
+    def __init__(self, config: HafsqlConfig, lite: LiteConfig | None = None) -> None:
         self._config = config
+        # Lumen Lite reachability. Defaults to OFF (no publisher accounts), so
+        # every lite predicate evaluates false and the SQL behaves exactly as it
+        # did before lite existed. See `LiteConfig` for the trust boundary.
+        self._lite = lite if lite is not None else LiteConfig()
 
     def _connect(self) -> psycopg.Connection[Any]:
         """Open a HAFSQL connection. ``psycopg`` is imported lazily so this
@@ -495,6 +560,19 @@ class HafsqlClient:
             connect_timeout=self._config.connect_timeout,
         )
 
+    def _lite_params(self) -> dict[str, Any]:
+        """Bound into EVERY query, including the ones that do not source lite
+        content — `_SQL_COMMENTS_FOR_POSTS` needs them to EXCLUDE lite posts
+        from a container's comment count, and psycopg raises on an unbound
+        placeholder rather than ignoring it."""
+        return {
+            "lite_publishers": sorted(self._lite.publisher_accounts),
+            "lite_app": self._lite.app_id,
+        }
+
+    def _fetch_lite(self, sql: str, params: dict[str, Any]) -> list[tuple[Any, ...]]:
+        return self._fetch(sql, {**params, **self._lite_params()})
+
     def _fetch(self, sql: str, params: dict[str, Any]) -> list[tuple[Any, ...]]:
         """Execute one parameterized, read-only query and return all rows."""
         with self._connect() as conn, conn.cursor() as cur:
@@ -504,7 +582,7 @@ class HafsqlClient:
     def _votes_for_posts(
         self, authors: list[str], permlinks: list[str]
     ) -> dict[tuple[str, str], list[Vote]]:
-        rows = self._fetch(_SQL_VOTES_FOR_POSTS, {"authors": authors, "permlinks": permlinks})
+        rows = self._fetch_lite(_SQL_VOTES_FOR_POSTS, {"authors": authors, "permlinks": permlinks})
         grouped: dict[tuple[str, str], list[Vote]] = {}
         for author, permlink, voter, rshares, timestamp in rows:
             grouped.setdefault((author, permlink), []).append(
@@ -516,7 +594,9 @@ class HafsqlClient:
         self, authors: list[str], permlinks: list[str]
     ) -> dict[tuple[str, str], dict[str, int]]:
         """Per-post commenter attribution: ``{key: {commenter: comment_count}}``."""
-        rows = self._fetch(_SQL_COMMENTS_FOR_POSTS, {"authors": authors, "permlinks": permlinks})
+        rows = self._fetch_lite(
+            _SQL_COMMENTS_FOR_POSTS, {"authors": authors, "permlinks": permlinks}
+        )
         grouped: dict[tuple[str, str], dict[str, int]] = {}
         for author, permlink, commenter, count in rows:
             grouped.setdefault((author, permlink), {})[commenter] = count
@@ -526,14 +606,16 @@ class HafsqlClient:
         self, authors: list[str], permlinks: list[str]
     ) -> dict[tuple[str, str], tuple[str, ...]]:
         """Per-post reblogger attribution: ``{key: (distinct account names)}``."""
-        rows = self._fetch(_SQL_REBLOGGERS_FOR_POSTS, {"authors": authors, "permlinks": permlinks})
+        rows = self._fetch_lite(
+            _SQL_REBLOGGERS_FOR_POSTS, {"authors": authors, "permlinks": permlinks}
+        )
         grouped: dict[tuple[str, str], set[str]] = {}
         for author, permlink, account in rows:
             grouped.setdefault((author, permlink), set()).add(account)
         return {key: tuple(sorted(accounts)) for key, accounts in grouped.items()}
 
     def _reputations_for_authors(self, authors: list[str]) -> dict[str, int]:
-        rows = self._fetch(_SQL_REPUTATIONS_FOR_AUTHORS, {"authors": authors})
+        rows = self._fetch_lite(_SQL_REPUTATIONS_FOR_AUTHORS, {"authors": authors})
         return dict(rows)
 
     def _hydrate(self, rows: list[tuple[Any, ...]]) -> list[Post]:
@@ -592,7 +674,9 @@ class HafsqlClient:
         """Recent posts carrying any of the given tags (§13.1)."""
         if not tags:
             return []
-        rows = self._fetch(_SQL_TAG_POSTS, {"tags": list(tags), "since": since, "limit": limit})
+        rows = self._fetch_lite(
+            _SQL_TAG_POSTS, {"tags": list(tags), "since": since, "limit": limit}
+        )
         return self._hydrate(rows)
 
     def engagement_edges(self, since: datetime) -> list[EngagementEdge]:
@@ -631,7 +715,7 @@ class HafsqlClient:
 
     def stake_lineage(self, author: str) -> frozenset[str]:
         """Delegation-tied accounts sharing stake lineage with ``author`` (§8.4)."""
-        rows = self._fetch(_SQL_STAKE_LINEAGE, {"author": author})
+        rows = self._fetch_lite(_SQL_STAKE_LINEAGE, {"author": author})
         return frozenset(row[0] for row in rows) - {author}
 
     def second_degree_engagers(
@@ -656,7 +740,7 @@ class HafsqlClient:
         """follower -> followees among ``accounts`` (§8.3), for graph-cred."""
         if not accounts:
             return {}
-        rows = self._fetch(_SQL_FOLLOW_GRAPH, {"accounts": list(accounts)})
+        rows = self._fetch_lite(_SQL_FOLLOW_GRAPH, {"accounts": list(accounts)})
         grouped: dict[str, set[str]] = {}
         for follower, following in rows:
             grouped.setdefault(follower, set()).add(following)
@@ -665,7 +749,7 @@ class HafsqlClient:
     def popular_posts(self, since: datetime, limit: int) -> list[Post]:
         """Community-popular fallback for the fully-cold viewer (§13.5b), ranked
         by our own positive-engagement signals — never payout indexing."""
-        rows = self._fetch(_SQL_POPULAR_POSTS, {"since": since, "limit": limit})
+        rows = self._fetch_lite(_SQL_POPULAR_POSTS, {"since": since, "limit": limit})
         return self._hydrate(rows)
 
     def author_engagement(
@@ -742,5 +826,5 @@ class HafsqlClient:
         if not post_keys:
             return frozenset()
         authors, permlinks = _split_keys(post_keys)
-        rows = self._fetch(_SQL_SUPPRESSED_KEYS, {"authors": authors, "permlinks": permlinks})
+        rows = self._fetch_lite(_SQL_SUPPRESSED_KEYS, {"authors": authors, "permlinks": permlinks})
         return frozenset(f"@{author}/{permlink}" for author, permlink in rows)
