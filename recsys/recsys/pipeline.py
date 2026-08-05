@@ -1810,7 +1810,14 @@ def rank_feed(
         show_nsfw=show_nsfw,
         config=settings.exploration,
         bucket=explore_bucket,
-        serves=serve_log.counts() if serve_log is not None else None,
+        serves=(
+            serve_log.counts(
+                now=now.timestamp(),
+                window_s=settings.exploration.serve_window_days * 86400.0,
+            )
+            if serve_log is not None
+            else None
+        ),
     )
 
     # One stake-lineage memo for the whole request — see `_lineage_for`.
@@ -1973,6 +1980,8 @@ def rank_feed(
                     if sc.source is CandidateSource.EXPLORATION
                 ),
                 engagement_counts,
+                now=now.timestamp(),
+                window_s=settings.exploration.serve_window_days * 86400.0,
             )
 
     # ★★★ GRADUATION — the serve budget is RETURNED to an author who has been

@@ -750,8 +750,39 @@ def test_lite_edge_queries_execute_and_do_not_disturb_non_lite_edges() -> None:
     a = settled(plain)
     b = settled(with_lite)
     assert len(a) > 100, f"only {len(a)} settled edges — window or mirror problem, not a verdict"
-    assert a == b, {
-        "only_in_plain": sorted(set(a) - set(b))[:5],
-        "only_in_lite": sorted(set(b) - set(a))[:5],
-        "count_mismatches": [k for k in set(a) & set(b) if a[k] != b[k]][:5],
-    }
+
+    # ★★ THIRD ITERATION OF THIS COMPARISON, and the reason is worth recording.
+    # v1 compared the two reads raw and failed on mirror drift. v2 retried until
+    # two plain reads agreed and SKIPPED every run, because Hive never settles.
+    # v3 compared only edges whose last interaction predates the test — which is
+    # stable when run alone (3/3) and in its own file (4/4) but STILL failed
+    # intermittently in the full live suite, because a pair that receives NEW
+    # engagement between the two reads moves OUT of the settled window for the
+    # second one. The set is stable; membership of it is not.
+    #
+    # So the assertion is now on the SHARED pairs — where a real divergence
+    # would show as a count mismatch — plus a bound on how much churn is
+    # tolerated. A systematic difference (the lite branch dropping or
+    # duplicating edges) fails; a handful of pairs aging across the boundary
+    # mid-test does not. A gate that cries wolf on a live chain gets ignored,
+    # which is worse than not having it.
+    # ★ WHAT THIS TEST CANNOT DO, measured rather than assumed: corrupting the
+    # lite branch outright (every destination replaced with a constant) is NOT
+    # caught here, because no Hive account has ever engaged a lite post, so that
+    # branch emits ZERO rows against live data. Its semantics are covered by
+    # `tests/test_hafsql.py::test_only_a_publishers_post_may_redirect_its_engagement`,
+    # which supplies its own rows via a CTE and DOES catch that mutant. This
+    # test's job is narrower and worth stating: the SQL executes against the
+    # real schema, and the plain branch is unperturbed.
+    shared = set(a) & set(b)
+    mismatched = {key: (a[key], b[key]) for key in shared if a[key] != b[key]}
+    assert not mismatched, (
+        f"the lite branch changed {len(mismatched)} edges it must not touch: "
+        f"{dict(list(mismatched.items())[:5])}"
+    )
+    churn = len(set(a) ^ set(b))
+    assert churn <= max(5, len(a) // 100), (
+        f"{churn} of {len(a)} edge pairs differ between the two reads — that is "
+        f"more than live drift explains. only_in_plain="
+        f"{sorted(set(a) - set(b))[:5]} only_in_lite={sorted(set(b) - set(a))[:5]}"
+    )

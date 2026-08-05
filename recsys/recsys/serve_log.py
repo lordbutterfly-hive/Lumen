@@ -20,13 +20,23 @@ the lane self-limiting for honest authors, which is the same mechanism read
 kindly: three page-one placements that produce no engagement mean this post is
 not connecting, and the slot does more good elsewhere.
 
-SCOPE, stated plainly. This is an in-process counter with an explicit
-persistence seam (`snapshot()` / `merge()`), not a distributed ledger. One
-service process is what ships today; a restart without persistence forgets the
-counts, which fails OPEN (authors become eligible again) rather than shut. That
-is the correct direction to fail for a discovery lane, and it is why the service
-persists the snapshot alongside its other state rather than treating this as
-durable-by-construction.
+SCOPE, stated plainly and CORRECTED 2026-08-05 (punch list #7 — the previous
+version of this paragraph described a seam that does not exist and a behaviour
+the service does not have):
+
+* This is an IN-PROCESS counter. `counts()` reads it and `merge()` folds a
+  persisted map back in — there is no `snapshot()` method, and nothing in the
+  service persists this log at all. Both halves of the old claim were false.
+* A restart therefore forgets every count. That fails OPEN (authors become
+  eligible again), which is the correct direction for a discovery lane, but it
+  is an amnesty rather than a design.
+* **Two instances behind a load balancer do not share it**, so the effective
+  budget is `max_serves_per_author * replicas` — 3 per author becomes 6 on two
+  pods. Stated here because an operator scaling out will not otherwise know
+  that scaling changes a ranking bound.
+
+`merge()` exists so a caller CAN persist and restore; wiring that up is
+unstarted work, not a shipped capability.
 """
 
 from __future__ import annotations
@@ -47,13 +57,26 @@ class ExplorationServeLog:
     def __init__(self, counts: Mapping[str, int] | None = None) -> None:
         self._lock = threading.Lock()
         self._counts: dict[str, int] = dict(counts or {})
+        #: Epoch seconds at which each author's CURRENT budget window opened.
+        #: Absent = no window recorded yet (an author restored from a persisted
+        #: count, or one that has never been served under a windowed config);
+        #: such an author is treated as being inside their window, which fails
+        #: SHUT for the budget and is the safe direction.
+        self._window_start: dict[str, float] = {}
         #: Engager count observed for an author at their LAST serve. The basis
         #: for graduation (see :meth:`graduated`), and the reason this class
         #: needed state beyond a counter — see that method for the three failed
         #: attempts that led here.
         self._seen: dict[str, int] = {}
 
-    def record(self, authors: object, engagers: Mapping[str, int] | None = None) -> None:
+    def record(
+        self,
+        authors: object,
+        engagers: Mapping[str, int] | None = None,
+        *,
+        now: float | None = None,
+        window_s: float = 0.0,
+    ) -> None:
         """Count one served exploration slot for each author in ``authors``.
 
         Called with the authors actually SPLICED into a served feed — never with
@@ -68,16 +91,48 @@ class ExplorationServeLog:
         observed = dict(engagers or {})
         with self._lock:
             for author in names:
+                # ★★★ THE REFILL. With `window_s > 0` a budget is spent within a
+                # ROLLING WINDOW rather than for the lifetime of the process: an
+                # author whose window has elapsed starts a fresh one at 1 rather
+                # than accumulating forever. `window_s = 0` keeps the lifetime
+                # behaviour byte-for-byte, so this is opt-in and reversible.
+                if window_s > 0 and now is not None:
+                    started = self._window_start.get(author)
+                    if started is None or now - started >= window_s:
+                        self._counts[author] = 1
+                        self._window_start[author] = now
+                        self._seen[author] = observed.get(author, 0)
+                        continue
                 self._counts[author] = self._counts.get(author, 0) + 1
                 # Baseline for graduation: what this author had WHEN the slot
                 # was spent. Without it, "has engagement" and "earned something
                 # since we last helped them" are indistinguishable.
                 self._seen[author] = observed.get(author, 0)
 
-    def counts(self) -> dict[str, int]:
-        """A stable copy, safe to read while other threads record."""
+    def counts(self, *, now: float | None = None, window_s: float = 0.0) -> dict[str, int]:
+        """A stable copy, safe to read while other threads record.
+
+        ★ With a window configured, this reports the EFFECTIVE budget: an author
+        whose window has already elapsed reads as 0, because their next serve
+        will open a fresh window. The eligibility filter consumes this, so the
+        expiry has to be visible HERE — a count that only resets on the next
+        `record()` would keep an author retired right up until the moment they
+        are served, which is never, because being retired is what stops them
+        being served. (That circularity is the same shape as the two catch-22s
+        `graduated` documents; it is called out because it is easy to re-create.)
+        """
         with self._lock:
-            return dict(self._counts)
+            if window_s <= 0 or now is None:
+                return dict(self._counts)
+            return {
+                author: (
+                    0
+                    if (start := self._window_start.get(author)) is not None
+                    and now - start >= window_s
+                    else count
+                )
+                for author, count in self._counts.items()
+            }
 
     def merge(self, counts: Mapping[str, int]) -> None:
         """Fold persisted counts in, taking the MAXIMUM per author.
@@ -135,6 +190,7 @@ class ExplorationServeLog:
         with self._lock:
             self._counts.pop(author, None)
             self._seen.pop(author, None)
+            self._window_start.pop(author, None)
 
     def __len__(self) -> int:
         with self._lock:

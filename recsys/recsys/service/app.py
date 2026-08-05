@@ -392,6 +392,24 @@ class ServiceConfig:
     snapshot_refresh_s: float = 600.0
     #: Per-account ViewerProfile TTL — see `_ViewerProfileCache`.
     viewer_cache_ttl_s: float = 300.0
+    #: ★★★ LAUNCH PUNCH LIST #3 (2026-08-05) — TRUSTED REVERSE-PROXY HOPS.
+    #:
+    #: The rate limiter keys on the peer address. Behind the reverse proxy this
+    #: artifact documents, EVERY client shares one peer address, so ONE
+    #: unauthenticated caller spends the whole bucket and locks the feed out for
+    #: every real user — measured by two councils: 10 credential-free requests,
+    #: and the 11th with the CORRECT token gets 429.
+    #:
+    #: `0` (the default) means "no proxy in front, trust nobody": the peer
+    #: address is used, and `X-Forwarded-For` is IGNORED. That is the safe
+    #: default, because a forwarded header is attacker-supplied — trusting it
+    #: with no proxy in front lets anyone forge a fresh identity per request and
+    #: bypass the limiter entirely, which is a worse bug than the one it fixes.
+    #:
+    #: `N > 0` means "there are N proxies you control between you and the
+    #: client", and the client address is taken N entries from the RIGHT of
+    #: `X-Forwarded-For` — the only position an upstream attacker cannot write.
+    trusted_proxy_hops: int = 0
     viewer_cache_max_entries: int = 10_000
     #: How often the shared author-pooled engagement prior (§6) is
     #: rebuilt in the background — see `recsys.author_prior_cache`'s module
@@ -459,6 +477,9 @@ class ServiceConfig:
             host=os.environ.get("RECSYS_SERVICE_HOST", cls.host),
             port=int(os.environ.get("RECSYS_SERVICE_PORT", cls.port)),
             api_token=os.environ.get("RECSYS_API_TOKEN") or None,
+            trusted_proxy_hops=int(
+                os.environ.get("RECSYS_TRUSTED_PROXY_HOPS", cls.trusted_proxy_hops)
+            ),
             rate_limit_per_minute=int(
                 os.environ.get("RECSYS_RATE_LIMIT_PER_MINUTE", cls.rate_limit_per_minute)
             ),
@@ -659,6 +680,7 @@ def build_feed(
     *,
     explicit_interest_tags: frozenset[str] | None = None,
     explicit_follows: frozenset[str] | None = None,
+    explicit_mutes: frozenset[str] | None = None,
 ) -> FeedResult:
     """A10.2's assembly, in one function: cached NormContext + cached
     TrustSnapshot + a (per-viewer-cached) real ViewerProfile ->
@@ -701,11 +723,18 @@ def build_feed(
     is_lite = _viewer_is_lite(account)
     follows_arg = explicit_follows
     tags_arg = explicit_interest_tags
-    mutes_arg: frozenset[str] | None = None
+    # ★★★ LAUNCH PUNCH LIST #2 (2026-08-05) — A LITE VIEWER CAN NOW MUTE.
+    # `?mutes=` was parsed NOWHERE, and a lite viewer's mute list was forced to
+    # the empty set unconditionally, so muting somebody in the UI changed
+    # nothing at all and the exploration lane happily kept serving that author
+    # into position 13. A feature that silently does nothing is worse than an
+    # absent one: the user believes they acted. Found by two councils running.
+    mutes_arg: frozenset[str] | None = explicit_mutes
     if is_lite:
         if follows_arg is None:
             follows_arg = frozenset()
-        mutes_arg = frozenset()
+        if mutes_arg is None:
+            mutes_arg = frozenset()
         if tags_arg is None:
             # Same reason as follows/mutes: `derive_interest_tags` reads the
             # account's own chain history, which for a ULID is a live query
@@ -724,7 +753,11 @@ def build_feed(
             explicit_mutes=mutes_arg,
         )
 
-    if tags_arg is not None or follows_arg is not None:
+    # ★ `mutes_arg` joins the cache-bypass condition for the same reason tags
+    # and follows are on it: `viewer_cache` is keyed on ACCOUNT ALONE, so a
+    # cached profile would serve the FIRST request's mute list to every later
+    # request from that viewer — a mute that works once and then silently stops.
+    if tags_arg is not None or follows_arg is not None or explicit_mutes is not None:
         viewer = _build()
     else:
         viewer = state.viewer_cache.get(account, builder=_build)
@@ -879,6 +912,16 @@ def health_payload(state: ServiceState) -> dict[str, Any]:
     )
     if norm is None:
         status = "starting"
+    elif snapshot is None:
+        # ★★★ PUNCH LIST #4 (2026-08-05). A snapshot that has NEVER existed is a
+        # COLD START; one that exists and has gone stale is DEGRADATION. Both
+        # refuse to serve, but they are different operational facts and the
+        # container healthcheck has to tell them apart — collapsed into
+        # "degraded", every first deploy reported UNHEALTHY forever, because the
+        # weekly batch is deliberately unscheduled in the shipped compose file.
+        # An operator seeing "degraded" on a fresh install looks for a fault
+        # that is not there; what they need to be told is "run the batch".
+        status = "starting"
     elif not trust_fresh:
         # Not "ok": under FAIL_CLOSED this state serves NOTHING.
         status = "degraded"
@@ -893,6 +936,10 @@ def health_payload(state: ServiceState) -> dict[str, Any]:
         #: True only when a real request would succeed. An orchestrator should
         #: gate readiness on THIS, not on the process being alive.
         "serving": status == "ok",
+        #: ★ Why it is not serving, in one word an operator can act on:
+        #: `starting` -> warm up or run the trust batch; `degraded` -> the batch
+        #: has stopped running and the snapshot has aged out.
+        "not_serving_reason": None if status == "ok" else status,
         "norm": {
             "present": norm is not None,
             "vote_signal_samples": len(norm.vote_signal_samples) if norm else 0,
@@ -1048,6 +1095,27 @@ class FeedRequestHandler(BaseHTTPRequestHandler):
         super().setup()
         self.connection.settimeout(self.state.config.request_read_timeout_s)
 
+    def _client_identity(self) -> str:
+        """The address the rate limiter counts against.
+
+        ★ Punch list #3. `X-Forwarded-For` is only consulted when the operator
+        has declared how many proxies they run (`trusted_proxy_hops`), and then
+        only at the position those proxies control — counting from the RIGHT.
+        Everything to the left of that is client-supplied and forgeable; a
+        limiter keyed on a forgeable value is not a limiter.
+        """
+        hops = self.state.config.trusted_proxy_hops
+        if hops <= 0:
+            return self.client_address[0]
+        forwarded = self.headers.get("X-Forwarded-For", "")
+        chain = [part.strip() for part in forwarded.split(",") if part.strip()]
+        if len(chain) < hops:
+            # Fewer hops than declared: the request did not come through the
+            # expected proxy chain. Fall back to the peer address rather than
+            # trusting a short (and therefore forged) header.
+            return self.client_address[0]
+        return chain[-hops]
+
     def _authorized(self) -> bool:
         """Constant-time bearer check. `secrets.compare_digest`, never `==` —
         a byte-wise early-exit comparison on a shared secret is a timing oracle
@@ -1099,7 +1167,7 @@ class FeedRequestHandler(BaseHTTPRequestHandler):
             # for free, which is exactly what the limiter exists to stop.
             # Throttle FIRST, on the one identifier available before auth (the
             # peer address), then authenticate.
-            if not self.server.rate_limiter.allow(self.client_address[0], time.time()):
+            if not self.server.rate_limiter.allow(self._client_identity(), time.time()):
                 self._write_json(429, {"error": "rate_limited"})
                 return
             if not self._authorized():
@@ -1150,6 +1218,10 @@ class FeedRequestHandler(BaseHTTPRequestHandler):
         # explicit `in qs` check rather than a falsy one.
         explicit_tags = _csv_param(qs, "tags")
         explicit_follows = _csv_param(qs, "follows")
+        # ★ Launch punch list #2: `mutes` is parsed on the same terms as the
+        # other two — ABSENT means "derive it / ask the chain", PRESENT-but-empty
+        # means "supplied, and the viewer genuinely mutes nobody".
+        explicit_mutes = _csv_param(qs, "mutes")
         # ★ B4c — `limit` was PARSED NOWHERE and silently ignored, so every
         # caller got the full ranked page regardless of what it asked for.
         limit = _int_param(qs, "limit")
@@ -1164,6 +1236,7 @@ class FeedRequestHandler(BaseHTTPRequestHandler):
                 account,
                 explicit_interest_tags=explicit_tags,
                 explicit_follows=explicit_follows,
+                explicit_mutes=explicit_mutes,
             )
         except FeedUnavailableError as exc:
             # R8: MissingTrustError -> 503, never 500 — "trust is stale/absent" is

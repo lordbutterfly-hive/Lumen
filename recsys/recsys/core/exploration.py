@@ -208,6 +208,30 @@ logger = logging.getLogger("recsys.exploration")
 #: module-level default rather than inline in the function signature so a
 #: test (or a future config field) can reference the SAME shipped value
 #: instead of retyping the tuple.
+#: ★★★ THE 3-ENGAGER DEAD ZONE — MEASURED, NOT FIXED (2026-08-05, punch list
+#: item 6, deliberately left open).
+#:
+#: `_need_tier` puts 0 engagers in tier 0, 1-2 in tier 1, and **3+ in tier 2**,
+#: while merit needs roughly 4 vouched engagers to carry an author. So an author
+#: who earns their THIRD engager drops to a tier that never wins the reserved
+#: slot, and is not yet carried on merit: measured reach 10 -> 0, which is worse
+#: than having no engagement at all. Earning support makes you disappear.
+#:
+#: It also means ZERO ENGAGEMENT IS AN EXCLUSIVE TOP BAND, which is the property
+#: the account-count farm is built on.
+#:
+#: TRIED, MEASURED, AND REVERTED IN ONE PIECE — merging the low bands to
+#: `(0, 4, 8, 20)` so "unheard" spans up to the merit threshold:
+#:   * 13/13 panels stayed green;
+#:   * the farm attack IMPROVED on every axis — farm share 70.0% -> 66.7%,
+#:     distinct honest reached 5.0 -> 6.0 (no socks) and 1.0 -> 1.3 (20 socks);
+#:   * and it broke EIGHT tests that pin the current tiering, five of them
+#:     end-to-end pipeline behaviour.
+#:
+#: Reverted rather than pushed through: a ranking change whose blast radius is
+#: eight behavioural tests is its own measured pass, not a punch-list slot — and
+#: this lane has produced a regression from three of its last five changes. The
+#: numbers above say the merge is probably right; they do not say it is safe.
 DEFAULT_NEED_BANDS: tuple[int, ...] = (0, 1, 3, 8, 20)
 
 

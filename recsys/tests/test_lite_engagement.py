@@ -562,3 +562,55 @@ def test_a_lite_reblog_still_counts_as_a_person_for_merit() -> None:
     assert independent_organic_engagement(
         with_lite, exclusions.excluded()
     ) > independent_organic_engagement(plain, exclusions.excluded())
+
+
+def test_a_failing_lite_store_trips_a_breaker_instead_of_being_retried_forever(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """★★★ PUNCH LIST #5. The lite datastore is a THIRD database and had none of
+    the protections the HAFSQL client grew — no statement timeout, no breaker,
+    a fresh connection per call, twice per hydrate across five call sites.
+    Measured by a council at ~6s added per request when it is slow.
+
+    A secondary signal source must never spend a feed request's whole budget.
+
+    MUTANT: remove the breaker check, or stop recording failures. This fails —
+    the connect count keeps climbing.
+    """
+    lite_engagement.reset_breaker()
+    attempts: list[int] = []
+
+    def boom(dsn: str) -> None:
+        attempts.append(1)
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(lite_engagement, "_connect", boom)
+    cfg = LiteConfig(engagement_dsn="postgresql://x")
+    for _ in range(10):
+        assert lite_engagement.fetch_lite_votes(cfg, [("alice", "p1")]) == {}
+    assert len(attempts) == 3, (
+        f"the lite store was dialled {len(attempts)} times while down — the "
+        "breaker never opened"
+    )
+    lite_engagement.reset_breaker()
+
+
+def test_a_recovered_lite_store_closes_the_breaker(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Degrading to 'no lite engagement' is a real cost, so the breaker must let
+    go as soon as the store is healthy again — a success resets the count."""
+    lite_engagement.reset_breaker()
+    _reader([("alice", "p1", "01VOTER", _EPOCH)], monkeypatch)
+    cfg = LiteConfig(engagement_dsn="postgresql://x")
+    assert lite_engagement.fetch_lite_votes(cfg, [("alice", "p1")])
+    assert not lite_engagement._breaker_is_open(0.0)
+    lite_engagement.reset_breaker()
+
+
+def test_the_lite_connection_sets_a_statement_timeout() -> None:
+    """A connect timeout says nothing about a query that hangs AFTER
+    connecting, which is the shape that cost ~6s per request."""
+    import inspect
+
+    source = inspect.getsource(lite_engagement._connect)
+    assert "statement_timeout" in source
+    assert "connect_timeout=_CONNECT_TIMEOUT_S" in source

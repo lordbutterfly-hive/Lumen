@@ -32,7 +32,7 @@ from simworld import (
     harness_settings,
 )
 
-from recsys.contracts import EngagementEdge, Post, ViewerProfile, Vote
+from recsys.contracts import CandidateSource, EngagementEdge, Post, ViewerProfile, Vote
 from recsys.core.vote_signal import AttributedPost
 from recsys.pipeline import TrustPolicy, build_trust_snapshot, rank_feed
 
@@ -71,6 +71,34 @@ snap = build_trust_snapshot(
 
 def positions(feed_posts, keys):
     return [i for i, p in enumerate(feed_posts) if p.key in keys]
+
+
+def placements(feed, keys):
+    """★★★ PUNCH LIST #10 (2026-08-05) — WHERE a newcomer landed AND HOW.
+
+    This panel printed `positions [13]` and self-checked green, and position 13
+    IS the reserved exploration slot. So "the newcomer reached 10/10 viewers"
+    read as EARNED reach when it was a slot the lane handed out — three councils
+    quoted that number, and the cold-start spec's central premise ("one vouch
+    makes a newcomer visible") rests on it. A panel that cannot tell merit from
+    a reservation is measuring the wrong thing.
+
+    Returns `(index, source)` pairs so the two are never confusable again.
+    """
+    return [
+        (i, sc.source.value)
+        for i, sc in enumerate(feed)
+        if sc.post.key in keys
+    ]
+
+
+def merit_positions(feed, keys):
+    """Positions a newcomer reached WITHOUT the reserved slot — the number the
+    spec premise is actually about."""
+    return [
+        i for i, sc in enumerate(feed)
+        if sc.post.key in keys and sc.source is not CandidateSource.EXPLORATION
+    ]
 
 nk = {p.key for p in newbie_posts}
 
@@ -135,16 +163,28 @@ print(f"    accounts below OON graph-cred floor 0.05: {len(below)}/{len(snap1.gr
       f"({len(below)/len(snap1.graph_creds):.1%}) -> sample {sorted(below)[:6]}")
 seen = 0
 best_pos = []
+merit_seen = 0
+merit_pos = []
 for j in range(10):
     name = f"v-photo-{j:02d}"
     v = ViewerProfile(account=name, follows=world.follows[name],
                       interest_tags=frozenset(TAGS["photo"]))
-    f = [sc.post for sc in rank_feed(v, gw, norm, now=NOW, since=EPOCH, settings=settings, snapshot=snap1)]
+    scored = rank_feed(v, gw, norm, now=NOW, since=EPOCH, settings=settings, snapshot=snap1)
+    f = [sc.post for sc in scored]
     pos = positions(f, {p0v.key})
     if pos:
         seen += 1
         best_pos.append(pos[0])
+    # ★ PUNCH LIST #10: the SAME reach, counted WITHOUT the reserved slot.
+    mpos = merit_positions(scored, {p0v.key})
+    if mpos:
+        merit_seen += 1
+        merit_pos.append(mpos[0])
 print(f"    established photo viewers seeing vouched debut-0: {seen}/10, positions {sorted(best_pos)}")
+print(f"    ...of which EARNED (not the reserved slot): {merit_seen}/10, positions {sorted(merit_pos)}")
+print("    ★ the first line counts the exploration slot as reach; the second is "
+      "what the cold-start spec's 'one vouch makes a newcomer visible' premise "
+      "is actually about. Three councils quoted the first as if it were the second.")
 if cred_newbie is not None and cred_newbie.score < settings.thresholds.graph_cred_floor:
     print("    !! newbie IS in snapshot with cred < floor -> author-floor now BLOCKS them "
           "(fail-open only while absent)")

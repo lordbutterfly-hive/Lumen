@@ -1354,3 +1354,235 @@ def test_startup_actually_applies_the_token_rule() -> None:
     import inspect
 
     assert "require_ascii_api_token(" in inspect.getsource(service_app.main)
+
+
+def test_a_lite_viewer_can_actually_mute_someone() -> None:
+    """★★★ LAUNCH PUNCH LIST #2. `?mutes=` was parsed NOWHERE and a lite
+    viewer's mute list was forced empty unconditionally, so muting somebody in
+    the UI changed nothing and the exploration lane kept serving that author
+    into position 13. Found by two councils running.
+
+    A feature that silently does nothing is worse than an absent one — the user
+    believes they acted.
+
+    MUTANT: stop parsing `mutes`, or force the lite mute set empty again. This
+    fails.
+    """
+    captured: list[ViewerProfile] = []
+    real = service_app.build_viewer_profile
+
+    def spy(*args: Any, **kwargs: Any) -> ViewerProfile:
+        viewer = real(*args, **kwargs)
+        captured.append(viewer)
+        return viewer
+
+    state = _offline_state()
+    lite_id = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+    with _RunningServer(state) as server:
+        service_app.build_viewer_profile = spy  # type: ignore[assignment]
+        try:
+            status, _ = _get_with_headers(
+                server, f"/feed?viewer={lite_id}&tags=photo&mutes=spammer,troll"
+            )
+        finally:
+            service_app.build_viewer_profile = real  # type: ignore[assignment]
+
+    assert status == 200
+    assert captured, "the profile was served from cache — a per-request mute cannot apply"
+    assert captured[-1].mutes == frozenset({"spammer", "troll"}), (
+        f"a lite viewer's mutes never reached the ranker: {captured[-1].mutes}"
+    )
+
+
+def test_a_mute_list_is_never_served_from_another_requests_cache() -> None:
+    """`viewer_cache` is keyed on ACCOUNT ALONE, so a cached profile would serve
+    the FIRST request's mute list to every later request from that viewer — a
+    mute that works once and then silently stops."""
+    captured: list[frozenset[str]] = []
+    real = service_app.build_viewer_profile
+
+    def spy(*args: Any, **kwargs: Any) -> ViewerProfile:
+        viewer = real(*args, **kwargs)
+        captured.append(viewer.mutes)
+        return viewer
+
+    state = _offline_state()
+    lite_id = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+    with _RunningServer(state) as server:
+        service_app.build_viewer_profile = spy  # type: ignore[assignment]
+        try:
+            _get_with_headers(server, f"/feed?viewer={lite_id}&mutes=first")
+            _get_with_headers(server, f"/feed?viewer={lite_id}&mutes=second")
+        finally:
+            service_app.build_viewer_profile = real  # type: ignore[assignment]
+
+    assert captured == [frozenset({"first"}), frozenset({"second"})], captured
+
+
+def test_forwarded_for_is_ignored_unless_the_operator_declares_a_proxy() -> None:
+    """★★★ PUNCH LIST #3. Trusting `X-Forwarded-For` by default would be a
+    WORSE bug than the one it fixes: with no proxy in front, any client forges a
+    fresh identity per request and bypasses the limiter entirely.
+
+    MUTANT: read the header regardless of `trusted_proxy_hops`. This fails.
+    """
+    state = _offline_state()
+    state.config = replace(state.config, rate_limit_per_minute=3, trusted_proxy_hops=0)
+    with _RunningServer(state) as server:
+        codes = [
+            _get_with_headers(
+                server, "/feed?viewer=alice", {"X-Forwarded-For": f"10.0.0.{i}"}
+            )[0]
+            for i in range(5)
+        ]
+    assert codes[:3] == [200, 200, 200], codes
+    assert codes[3:] == [429, 429], (
+        f"a forged X-Forwarded-For bypassed the rate limiter: {codes}"
+    )
+
+
+def test_behind_a_declared_proxy_each_client_gets_its_own_budget() -> None:
+    """★★★ The bug itself: behind the reverse proxy this artifact documents,
+    every client shares one peer address, so ONE unauthenticated caller spent
+    the whole bucket and locked out every real user — measured by two councils
+    (10 credential-free requests, then the CORRECT token gets 429).
+
+    With one declared hop, the limiter keys on the address the proxy appended.
+
+    MUTANT: key on the peer address anyway, or take the LEFTMOST (forgeable)
+    entry. This fails.
+    """
+    state = _offline_state()
+    state.config = replace(state.config, rate_limit_per_minute=2, trusted_proxy_hops=1)
+    with _RunningServer(state) as server:
+        noisy = [
+            _get_with_headers(server, "/feed?viewer=alice", {"X-Forwarded-For": "203.0.113.9"})[0]
+            for _ in range(4)
+        ]
+        victim = _get_with_headers(
+            server, "/feed?viewer=alice", {"X-Forwarded-For": "198.51.100.7"}
+        )[0]
+    assert noisy[:2] == [200, 200] and noisy[2:] == [429, 429], noisy
+    assert victim == 200, "one noisy client spent another client's budget"
+
+
+def test_a_short_forwarded_chain_falls_back_to_the_peer_address() -> None:
+    """Fewer hops than declared means the request did not come through the
+    expected chain — trusting a short header would let a client shorten it on
+    purpose and pick its own identity."""
+    state = _offline_state()
+    state.config = replace(state.config, rate_limit_per_minute=2, trusted_proxy_hops=2)
+    with _RunningServer(state) as server:
+        codes = [
+            _get_with_headers(
+                server, "/feed?viewer=alice", {"X-Forwarded-For": f"10.0.0.{i}"}
+            )[0]
+            for i in range(4)
+        ]
+    assert codes[2:] == [429, 429], f"a short forwarded chain was trusted: {codes}"
+
+
+def test_a_client_cannot_forge_its_identity_by_prepending_to_the_chain() -> None:
+    """★★★ THE POSITION IS THE WHOLE POINT, and a single-entry chain cannot see
+    it — mutation testing caught that the first three tests here all used one
+    entry, where leftmost and rightmost are the same address.
+
+    `X-Forwarded-For` grows left-to-right: the client's own value first, then
+    each proxy appends the address it SAW. So with one trusted proxy the only
+    entry an upstream attacker cannot write is the LAST one. Reading the
+    leftmost means the client picks its own rate-limit identity.
+
+    Here two different real clients both send the same forged leading entry. If
+    the limiter reads position 0 they share one budget and the second is denied
+    by the first's traffic.
+
+    MUTANT: `chain[0]` instead of `chain[-hops]`. This fails.
+    """
+    state = _offline_state()
+    state.config = replace(state.config, rate_limit_per_minute=2, trusted_proxy_hops=1)
+    with _RunningServer(state) as server:
+        noisy = [
+            _get_with_headers(
+                server, "/feed?viewer=alice", {"X-Forwarded-For": "1.1.1.1, 203.0.113.9"}
+            )[0]
+            for _ in range(4)
+        ]
+        victim = _get_with_headers(
+            server, "/feed?viewer=alice", {"X-Forwarded-For": "1.1.1.1, 198.51.100.7"}
+        )[0]
+    assert noisy[:2] == [200, 200] and noisy[2:] == [429, 429], noisy
+    assert victim == 200, (
+        "a client spent another client's budget by sending the same forged "
+        "leading X-Forwarded-For entry — the limiter is reading a forgeable position"
+    )
+
+
+def test_a_never_built_snapshot_reads_as_starting_not_degraded() -> None:
+    """★★★ PUNCH LIST #4. A snapshot that has NEVER existed is a COLD START;
+    one that exists and has aged out is DEGRADATION. Both refuse to serve, but
+    collapsed into "degraded" every first deploy reported UNHEALTHY forever —
+    the weekly batch is deliberately unscheduled in the shipped compose file, so
+    a fresh install has no snapshot by construction and an operator sees a fault
+    that is not there.
+
+    MUTANT: drop the `snapshot is None` branch. This fails.
+    """
+    state = _offline_state(snapshot=None)
+    payload = service_app.health_payload(state)
+    assert payload["status"] == "starting", payload
+    assert payload["serving"] is False
+    assert payload["not_serving_reason"] == "starting"
+
+    stale = service_app.health_payload(_stale_state())
+    assert stale["status"] == "degraded", "a stale snapshot is not a cold start"
+    assert stale["not_serving_reason"] == "degraded"
+
+
+def test_the_probe_honours_a_total_deadline_against_a_dribbling_server() -> None:
+    """★★★ PUNCH LIST #8. `urlopen(timeout=)` bounds each SOCKET OPERATION, not
+    the call, so a server that sends one byte at a time resets it forever — the
+    probe was measured hanging ~20s against a documented 4s. A guarantee that
+    is not enforced is not a guarantee.
+
+    MUTANT: drop the worker-thread deadline. This fails (it takes ~4x longer
+    than the deadline and the assertion on elapsed time fires).
+    """
+    import socket
+    import threading as _threading
+    import time as _time
+
+    from recsys.service.healthcheck import probe
+
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    port = listener.getsockname()[1]
+    stop = _threading.Event()
+
+    def dribble() -> None:
+        try:
+            conn, _ = listener.accept()
+            with conn:
+                conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\n")
+                while not stop.is_set():
+                    try:
+                        conn.sendall(b"x")
+                    except OSError:
+                        return
+                    _time.sleep(0.4)
+        except OSError:
+            return
+
+    server = _threading.Thread(target=dribble, daemon=True)
+    server.start()
+    try:
+        started = _time.monotonic()
+        code = probe(f"http://127.0.0.1:{port}/health", timeout=1.0)
+        elapsed = _time.monotonic() - started
+    finally:
+        stop.set()
+        listener.close()
+
+    assert code == 2, f"a dribbling server should read as unreachable, got {code}"
+    assert elapsed < 4.0, f"the probe ignored its own deadline: {elapsed:.1f}s"

@@ -44,6 +44,9 @@ lite datastore being unreachable must cost engagement signal, not the page.
 from __future__ import annotations
 
 import logging
+import os
+import threading
+import time
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 
@@ -106,10 +109,61 @@ def _key_params(keys: list[PostKey]) -> dict[str, list[str]]:
     }
 
 
+#: ★★★ PUNCH LIST #5 (2026-08-05) — the lite datastore is a THIRD database and
+#: had none of the protections the HAFSQL client grew: no statement timeout, no
+#: breaker, and a fresh connection per call (twice per hydrate, five call sites).
+#: Measured by a council at ~6s added per request when it is slow. A secondary
+#: signal source must never be able to spend a feed request's whole budget.
+_STATEMENT_TIMEOUT_MS = int(os.environ.get("LUMEN_LITE_STATEMENT_TIMEOUT_MS", "2000"))
+_CONNECT_TIMEOUT_S = int(os.environ.get("LUMEN_LITE_CONNECT_TIMEOUT_S", "3"))
+#: Consecutive failures before the breaker opens, and how long it stays open.
+#: Deliberately small and short: this degrades to "no lite engagement", which is
+#: a real cost, so it should retry soon — but not on every request while the
+#: store is down.
+_BREAKER_THRESHOLD = 3
+_BREAKER_COOLDOWN_S = 30.0
+
+_breaker_lock = threading.Lock()
+_consecutive_failures = 0
+_opened_at = 0.0
+
+
+def _breaker_is_open(now: float) -> bool:
+    with _breaker_lock:
+        if _consecutive_failures < _BREAKER_THRESHOLD:
+            return False
+        return now - _opened_at < _BREAKER_COOLDOWN_S
+
+
+def _record_outcome(*, ok: bool, now: float) -> None:
+    global _consecutive_failures, _opened_at
+    with _breaker_lock:
+        if ok:
+            _consecutive_failures = 0
+            return
+        _consecutive_failures += 1
+        if _consecutive_failures >= _BREAKER_THRESHOLD:
+            _opened_at = now
+
+
+def reset_breaker() -> None:
+    """Test seam. Module-level breaker state would otherwise leak between
+    tests, which is its own class of flake."""
+    global _consecutive_failures, _opened_at
+    with _breaker_lock:
+        _consecutive_failures = 0
+        _opened_at = 0.0
+
+
 def _connect(dsn: str):  # type: ignore[no-untyped-def]
     import psycopg
 
-    return psycopg.connect(dsn, connect_timeout=10, autocommit=True)
+    conn = psycopg.connect(dsn, connect_timeout=_CONNECT_TIMEOUT_S, autocommit=True)
+    # A statement timeout is the bound that actually matters: a connect timeout
+    # says nothing about a query that hangs after connecting.
+    with conn.cursor() as cur:
+        cur.execute(f"SET statement_timeout = {_STATEMENT_TIMEOUT_MS}")
+    return conn
 
 
 def fetch_lite_votes(
@@ -133,6 +187,15 @@ def fetch_lite_votes(
         )
         return {}
     assert lite.engagement_dsn is not None
+    now = time.monotonic()
+    if _breaker_is_open(now):
+        logger.warning(
+            "lite engagement: breaker OPEN after %d consecutive failures — "
+            "skipping for up to %.0fs; ranking continues WITHOUT lite engagement",
+            _BREAKER_THRESHOLD,
+            _BREAKER_COOLDOWN_S,
+        )
+        return {}
     out: dict[PostKey, list[Vote]] = {}
     try:
         with _connect(lite.engagement_dsn) as conn, conn.cursor() as cur:
@@ -150,6 +213,7 @@ def fetch_lite_votes(
                     )
                 )
     except Exception as exc:  # a feed request must not die for this
+        _record_outcome(ok=False, now=now)
         logger.warning(
             "lite engagement: votes unavailable (%s: %s) — ranking continues "
             "WITHOUT lite engagement for this request",
@@ -157,6 +221,7 @@ def fetch_lite_votes(
             exc,
         )
         return {}
+    _record_outcome(ok=True, now=now)
     return out
 
 
@@ -168,6 +233,15 @@ def fetch_lite_rebloggers(
     if not wanted or not lite.engagement_enabled:
         return {}
     assert lite.engagement_dsn is not None
+    now = time.monotonic()
+    if _breaker_is_open(now):
+        logger.warning(
+            "lite engagement: breaker OPEN after %d consecutive failures — "
+            "skipping for up to %.0fs; ranking continues WITHOUT lite engagement",
+            _BREAKER_THRESHOLD,
+            _BREAKER_COOLDOWN_S,
+        )
+        return {}
     collected: dict[PostKey, set[str]] = {}
     try:
         with _connect(lite.engagement_dsn) as conn, conn.cursor() as cur:
@@ -175,6 +249,7 @@ def fetch_lite_rebloggers(
             for author, permlink, reblogger in cur.fetchall():
                 collected.setdefault((author, permlink), set()).add(reblogger)
     except Exception as exc:
+        _record_outcome(ok=False, now=now)
         logger.warning(
             "lite engagement: reblogs unavailable (%s: %s) — ranking continues "
             "WITHOUT lite reblogs for this request",
@@ -182,6 +257,7 @@ def fetch_lite_rebloggers(
             exc,
         )
         return {}
+    _record_outcome(ok=True, now=now)
     return {key: frozenset(names) for key, names in collected.items()}
 
 

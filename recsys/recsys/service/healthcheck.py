@@ -35,6 +35,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
 import urllib.error
 import urllib.request
 
@@ -42,21 +43,51 @@ import urllib.request
 #: rather than being killed without one.
 _TIMEOUT_S = 4.0
 
+#: A health payload is a few hundred bytes; anything larger is not ours.
+_MAX_BODY_BYTES = 64 * 1024
+
 
 def probe(url: str, timeout: float = _TIMEOUT_S) -> int:
-    """Return the exit code for one probe of ``url``. No side effects."""
-    try:
-        with urllib.request.urlopen(url, timeout=timeout) as response:
-            payload = json.load(response)
-    except (urllib.error.URLError, OSError, ValueError):
-        # ValueError covers a non-JSON body: something is answering on the port
-        # but it is not this service.
+    """Return the exit code for one probe of ``url``. No side effects.
+
+    ★ PUNCH LIST #8: `timeout` on `urlopen` bounds each SOCKET OPERATION, not
+    the call. A server that dribbles one byte at a time resets it forever, and
+    this probe was measured hanging ~20s against a stated 4s. The read now runs
+    under a hard total deadline enforced by a worker thread, so the documented
+    guarantee is the real one.
+    """
+    result: list[int] = []
+
+    def _attempt() -> None:
+        try:
+            with urllib.request.urlopen(url, timeout=timeout) as response:
+                # Cap the body too: a health payload is small, and an unbounded
+                # read is the other half of the same denial.
+                payload = json.loads(response.read(_MAX_BODY_BYTES))
+        except (urllib.error.URLError, OSError, ValueError):
+            result.append(2)
+            return
+        result.append(_verdict(payload))
+
+    worker = threading.Thread(target=_attempt, daemon=True)
+    worker.start()
+    worker.join(timeout)
+    if not result:
+        # Still running past the deadline: treat as unreachable rather than
+        # waiting. The thread is a daemon and dies with the process.
         return 2
+    return result[0]
+
+
+def _verdict(payload: object) -> int:
+    """Exit code for a parsed payload. Split out so the deadline wrapper stays
+    about timing and this stays about semantics."""
     if not isinstance(payload, dict):
+        # Something is answering on the port, but it is not this service.
         return 2
-    # `serving` is True only when a real /feed request would succeed — the
-    # field `health_payload` documents as the one an orchestrator should gate
-    # on. Absent field is treated as NOT serving: a payload this probe does not
+    # `serving` is True only when a real /feed request would succeed — the field
+    # `health_payload` documents as the one an orchestrator should gate on. An
+    # absent field is treated as NOT serving: a payload this probe does not
     # understand must never read as healthy.
     return 0 if payload.get("serving") is True else 1
 

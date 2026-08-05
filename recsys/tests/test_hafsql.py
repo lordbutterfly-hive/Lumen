@@ -1736,3 +1736,92 @@ def test_engagement_edges_keeps_the_plain_queries_when_lite_is_not_configured() 
         hafsql._SQL_REBLOG_EDGES,
     ]
     assert all(extra is None for _, extra in captured)
+
+
+# ---------------------------------------------------------------------------
+# THE LITE TRUST BOUNDARY — behavioural, not textual.
+# ---------------------------------------------------------------------------
+
+
+def _pg_or_skip():  # type: ignore[no-untyped-def]
+    psycopg = pytest.importorskip("psycopg")
+    cfg = HafsqlConfig()
+    try:
+        return psycopg.connect(
+            host=cfg.host, port=cfg.port, dbname=cfg.dbname, user=cfg.user,
+            password=cfg.password, connect_timeout=cfg.connect_timeout, autocommit=True,
+        )
+    except Exception as exc:  # a mirror outage is not our bug
+        pytest.skip(f"no reachable PostgreSQL to execute against: {type(exc).__name__}: {exc}")
+
+
+def test_only_a_publishers_post_may_redirect_its_engagement(monkeypatch) -> None:
+    """★★★ THE LITE TRUST BOUNDARY, executed rather than pattern-matched.
+
+    Round-3 condemned `assert "lumen_user_id" in sql` as a gate blind to a
+    WEAKENED predicate — and round 4 found the lesson had been closed with
+    ANOTHER substring gate: three mutants strip the publisher / app-id gating
+    while every assertion still passes, because the strings survive elsewhere in
+    the query. If that regressed, ANY Hive account could redirect the engagement
+    it receives to an identity of its choosing by writing its own
+    `json_metadata`.
+
+    So this executes the SHIPPED constant against a real PostgreSQL with a CTE
+    standing in for the chain tables, and feeds it the attack directly: two
+    posts, one by a configured publisher and one by an ordinary account, BOTH
+    carrying a `lumen_user_id`. Only the publisher's may resolve.
+
+    MUTANT: drop the publisher gate, or the app-id gate, from the `lite` CTE.
+    This fails — a substring assertion cannot.
+    """
+    prelude = """
+    WITH comments(author, permlink, json_metadata) AS (VALUES
+        -- a genuine lite post by a configured publisher
+        ('lumen.pub', 'p-lite',  '{"app":"lumen/1.0","lumen_user_id":"01LITEWRITER"}'::jsonb),
+        -- the SAME publisher posting through a DIFFERENT app, carrying a lumen
+        -- id it must not be trusted for: catches a stripped app-id gate
+        ('lumen.pub', 'p-other', '{"app":"peakd/1.0","lumen_user_id":"01WRONGAPP"}'::jsonb),
+        -- an ordinary account trying to redirect its own engagement, and
+        -- deliberately REUSING the publisher's permlink: catches a join that is
+        -- no longer restricted to (author, permlink) pairs
+        ('attacker',  'p-lite',  '{"app":"lumen/1.0","lumen_user_id":"01STOLEN"}'::jsonb)
+    ),
+    votes(voter, author, permlink, rshares, "timestamp") AS (VALUES
+        ('fan', 'lumen.pub', 'p-lite',  1000, now()),
+        ('fan', 'lumen.pub', 'p-other', 1000, now()),
+        ('fan', 'attacker',  'p-lite',  1000, now())
+    )
+    """
+    sql = hafsql._SQL_UPVOTE_EDGES_WITH_LITE
+    # Point the shipped query at the stand-in tables without touching its logic.
+    sql = sql.replace("hafsql.comments", "comments").replace(
+        "hafsql.operation_effective_comment_vote_view", "votes"
+    )
+    # `WITH lite AS ...` becomes a second CTE in our own WITH chain.
+    sql = prelude + "," + sql[len("WITH ") :]
+
+    conn = _pg_or_skip()
+    with conn, conn.cursor() as cur:
+        cur.execute(
+            sql,
+            {
+                "since": datetime(2020, 1, 1, tzinfo=UTC),
+                "lite_publishers": ["lumen.pub"],
+                "lite_app": "lumen/1.0",
+            },
+        )
+        edges = {(row[0], row[1]): row[2] for row in cur.fetchall()}
+
+    # Asserted as the WHOLE edge set with counts, not membership: a weakened
+    # join misattributes or DUPLICATES an edge rather than inventing a new
+    # destination, and a membership check cannot see either.
+    assert edges == {
+        ("fan", "01LITEWRITER"): 1,   # the genuine lite post resolves, once
+        ("fan", "lumen.pub"): 1,      # the publisher's non-lite post stays the publisher's
+        ("fan", "attacker"): 1,       # the attacker keeps their own edge
+    }, (
+        f"the lite trust boundary is not enforced: {edges}. "
+        "'01STOLEN' present = any account can redirect its engagement; "
+        "'01WRONGAPP' present = the app-id gate is off; "
+        "a count of 2 = the join is no longer keyed on (author, permlink)."
+    )

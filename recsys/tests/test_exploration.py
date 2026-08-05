@@ -1900,3 +1900,82 @@ def test_graduation_is_wired_into_the_served_pipeline() -> None:
     assert "serve_log.graduated(" in source
     assert "serve_log.clear(author)" in source
     assert "engagement_counts" in source, "record() is not given the baseline it compares against"
+
+
+def test_the_refill_window_ships_enabled_at_seven_days() -> None:
+    """The default is the shipped policy, so it is pinned separately from the
+    mechanism — a test that passes its own `window_s` cannot see the config
+    being turned off, which is exactly what mutation testing caught here.
+
+    7 days is measured, not picked: it spans more than one 3-day freshness
+    cycle and sits inside the ~4-day p75 posting gap of real Hive newcomers.
+
+    MUTANT: set the default to 0. This fails.
+    """
+    assert ExplorationConfig().serve_window_days == 7
+
+
+def test_a_negative_refill_window_is_refused() -> None:
+    with pytest.raises(ValueError, match="serve_window_days"):
+        ExplorationConfig(serve_window_days=-1)
+
+
+def test_the_serve_budget_refills_on_a_rolling_window() -> None:
+    """★★★ THE REFILLING BUDGET (owner's ruling: "we do need the refilling
+    budget for new accounts").
+
+    A lifetime cap meant "3 page-one impressions, EVER" — four councils objected
+    and it is what made denial worth running. The budget is now spent inside a
+    rolling window, so a new writer gets a recurring chance instead of being
+    exiled after three placements.
+
+    Enumerated as populations rather than one happy path, because every previous
+    version of this mechanism was verified against the wrong one:
+
+    MUTANT: ignore `window_s` in `record`, or in `counts`. This fails.
+    """
+    from recsys.serve_log import ExplorationServeLog
+
+    week = 7 * 86400.0
+    t0 = 1_000_000.0
+    log = ExplorationServeLog()
+    for i in range(3):
+        log.record(["newbie"], {}, now=t0 + i, window_s=week)
+
+    # (a) inside the window, the budget is spent and stays spent
+    assert log.counts(now=t0 + 10, window_s=week)["newbie"] == 3
+    assert log.counts(now=t0 + 6 * 86400, window_s=week)["newbie"] == 3
+
+    # (b) once the window elapses the budget reads as refilled — and it must
+    # read that way HERE, in `counts`, because the eligibility filter consumes
+    # this. A reset that only happened on the next `record()` would keep the
+    # author retired right up until they are served, which never happens
+    # BECAUSE they are retired.
+    assert log.counts(now=t0 + 8 * 86400, window_s=week)["newbie"] == 0
+
+    # (c) the next serve opens a FRESH window at 1, not 4
+    log.record(["newbie"], {}, now=t0 + 8 * 86400, window_s=week)
+    assert log.counts(now=t0 + 8 * 86400 + 1, window_s=week)["newbie"] == 1
+
+    # (d) window 0 keeps the lifetime cap byte-for-byte, so the change is
+    # opt-in and reversible
+    lifetime = ExplorationServeLog()
+    for i in range(3):
+        lifetime.record(["old"], {}, now=t0 + i, window_s=0.0)
+    assert lifetime.counts(now=t0 + 100 * 86400, window_s=0.0)["old"] == 3
+
+
+def test_the_refill_window_is_wired_into_the_served_pipeline() -> None:
+    """Behaviour is pinned above; this pins that `rank_feed` passes the clock
+    AND the window to both the eligibility read and the record. A windowed log
+    consulted without a window silently degrades to the lifetime cap — the
+    reachability failure this project keeps repeating."""
+    import inspect
+
+    from recsys.pipeline import rank_feed
+
+    source = inspect.getsource(rank_feed)
+    assert source.count("serve_window_days * 86400.0") == 2, (
+        "the refill window is not threaded to BOTH counts() and record()"
+    )
+    assert "now=now.timestamp()" in source

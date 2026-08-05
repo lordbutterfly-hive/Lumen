@@ -1246,6 +1246,36 @@ class ExplorationConfig:
     #: The shape that works is a budget that REFILLS — see the design work in
     #: `/mnt/o/LUMEN-DOCS/algo-tests/COUNCIL-2026-08-05-POSTCLOSEOUT/`.
     max_serves_per_author: int = 3
+    #: ★★★ THE REFILLING BUDGET (2026-08-05, owner's ruling: "we do need the
+    #: refilling budget for new accounts").
+    #:
+    #: `max_serves_per_author` is spent within a ROLLING WINDOW of this many
+    #: days rather than for the lifetime of the process. An author whose window
+    #: has elapsed starts a fresh one — so a new writer keeps getting a
+    #: recurring chance instead of being exiled after three placements, which is
+    #: what "3 impressions, ever" amounted to and what four councils objected to.
+    #:
+    #: **0 disables the refill and restores the lifetime cap byte-for-byte.**
+    #:
+    #: WHY 7 DAYS, and it is measured rather than picked: the lane's effective
+    #: freshness is 3 days (`sourcing_freshness_days`), so a 7-day window spans
+    #: more than one full cycle — a second genuine chance before reset — while
+    #: sitting inside the measured p75 posting gap of real Hive newcomers
+    #: (~4 days), so it refills faster than most newcomers post. Chain-measured
+    #: cohort: 1,506 accounts created in 30 days, ~14.5 true debuts/day, median
+    #: 3 posts in a newcomer's first 30 days.
+    #:
+    #: ★★ THE COST, STATED RATHER THAN DISCOVERED LATER. A refilling budget is
+    #: strictly MORE generous to a farm than a lifetime cap: a sock's budget
+    #: also returns every window, so account-count farming becomes a recurring
+    #: rather than a one-time yield. What still bounds it: `max_slots_per_feed`,
+    #: `max_posts_per_author_epoch`, the keyed seat rotation, ring/self-deal
+    #: exclusion, and graduation returning a budget only on engagement that is
+    #: NEW (`ExplorationServeLog.graduated`) so free engagement cannot refill
+    #: anyone. The adjudicated design also calls for a vouched-engagement gate
+    #: and a per-voucher fan-out cap; those are NOT built — see
+    #: `REFILL-DESIGN-ADJUDICATED-2026-08-05.md`. Measure before widening this.
+    serve_window_days: int = 7
     #: ★ MAC KEY for the reserved-seat rotation (C1a, 2026-08-04 — CRITICAL).
     #:
     #: THE BUG THIS CLOSES. The rotation key used to be an UNKEYED
@@ -1387,6 +1417,11 @@ class ExplorationConfig:
         # with no validation, so `-1` silently disabled the serve budget while
         # reading as "configured". 0 is the documented off switch; negative is a
         # typo, and a typo must never look like a policy.
+        if self.serve_window_days < 0:
+            raise ValueError(
+                f"serve_window_days must be >= 0 (0 disables the refill), "
+                f"got {self.serve_window_days}"
+            )
         if self.max_serves_per_author < 0:
             raise ValueError(
                 f"max_serves_per_author must be >= 0 (0 disables the serve budget), "

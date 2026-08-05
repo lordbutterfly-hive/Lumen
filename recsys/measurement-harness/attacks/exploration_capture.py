@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import pathlib
 import sys
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 _HARNESS = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_HARNESS))
@@ -95,7 +95,8 @@ def _add_post(world, author: str, permlink: str, *, hours_old: float) -> Post:
 
 
 def run(seed: int, *, n_socks: int, n_honest: int, griefer: bool,
-        serve_log: bool = True) -> dict[str, float]:
+        serve_log: bool = True, log: ExplorationServeLog | None = None,
+        now: datetime | None = None, settings_override=None) -> dict[str, object]:
     """One scenario. Returns the farm's and honest cohort's share of the
     exploration slots actually SERVED across the viewer panel."""
     world = build_world(seed=seed)
@@ -120,23 +121,33 @@ def run(seed: int, *, n_socks: int, n_honest: int, griefer: bool,
                 if post.author == victim:
                     world.post_engagers[post.key].add("griefer")
 
+    at = now or NOW
     gw = SimGateway(world)
     norm = build_norm(world)
-    settings = harness_settings()
+    settings = settings_override or harness_settings()
     curated: set[str] = set()
     for topic in {a.topic for a in world.authors()}:
         tops = sorted([a for a in world.authors() if a.topic == topic],
                       key=lambda a: -a.reputation)[:2]
         curated.update(a.name for a in tops)
+    # ★ Built at `at`, not at NOW: a caller driving epochs advances the clock,
+    # and a weekly snapshot stamped in the past goes stale — `rank_feed` then
+    # correctly refuses to rank. A real deployment rebuilds it weekly, so the
+    # measurement does too.
     snap = build_trust_snapshot(
-        gw, settings, since=EPOCH, now=NOW,
+        gw, settings, since=EPOCH, now=at,
         trusted_seeds=frozenset(curated), production=False,
     )
 
     # ★ B1: ONE log across the panel, which is what a real deployment has — the
     # counts accumulate as viewers are served, exactly as they would in
     # production. Passing None reproduces the pre-B1 lane for comparison.
-    log = ExplorationServeLog() if serve_log else None
+    # ★ `log`/`now` let a CALLER drive multiple epochs against ONE log with an
+    # advancing clock — the only way the refilling budget's effect is visible,
+    # since within a single panel the window never elapses. See
+    # `refill_epochs.py`.
+    if log is None:
+        log = ExplorationServeLog() if serve_log else None
     panel = [f"v-{TOPIC}-{j:02d}" for j in range(10)]
     farm_slots = honest_slots = total_slots = 0
     honest_reached: set[str] = set()
@@ -145,7 +156,7 @@ def run(seed: int, *, n_socks: int, n_honest: int, griefer: bool,
             account=name, follows=world.follows[name],
             interest_tags=frozenset(TAGS[TOPIC]),
         )
-        served = rank_feed(viewer, gw, norm, now=NOW, since=EPOCH,
+        served = rank_feed(viewer, gw, norm, now=at, since=EPOCH,
                            settings=settings, snapshot=snap, serve_log=log)[:K]
         for sc in served:
             if sc.source is not CandidateSource.EXPLORATION:
@@ -160,6 +171,10 @@ def run(seed: int, *, n_socks: int, n_honest: int, griefer: bool,
         "farm_share": farm_slots / total_slots if total_slots else 0.0,
         "honest_share": honest_slots / total_slots if total_slots else 0.0,
         "distinct_honest_reached": float(len(honest_reached)),
+        # ★ The NAMES, not just the count: a caller driving several epochs has
+        # to union them to get distinct reach ACROSS time, which is the only
+        # thing the refilling budget can change.
+        "honest_authors": tuple(sorted(honest_reached)),
         "total_slots": float(total_slots),
     }
 
@@ -181,6 +196,12 @@ for n_socks, griefer, use_log in (
     for seed in SEEDS:
         r = run(seed, n_socks=n_socks, n_honest=20, griefer=griefer, serve_log=use_log)
         for key, value in r.items():
+            # `honest_authors` is a tuple of NAMES (added so a multi-epoch
+            # caller can union distinct reach across time — see
+            # `refill_epochs.py`). It is not a mean-able quantity; skip it here
+            # rather than let a TypeError sink the whole gate.
+            if not isinstance(value, (int, float)):
+                continue
             agg[key] = agg.get(key, 0.0) + value / len(SEEDS)
     if use_log:
         worst_farm_share = max(worst_farm_share, agg["farm_share"])

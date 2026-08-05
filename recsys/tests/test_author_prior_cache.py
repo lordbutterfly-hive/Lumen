@@ -670,3 +670,66 @@ def test_discovery_keeps_its_measured_plan_when_lite_is_not_configured() -> None
         assert "lumen_user_id" not in sql
         assert "UNION" not in sql
         assert "lite_publishers" not in captured["params"]  # type: ignore[operator]
+
+
+def test_only_a_publishers_post_enters_the_warm_universe_as_a_lite_writer() -> None:
+    """★★★ The discovery half of the lite trust boundary, executed rather than
+    pattern-matched. Its previous gate was `assert "lumen_user_id" in sql` — the
+    exact form round 3 condemned and round 4 found still in place here.
+
+    If the publisher/app gating regressed, ANY Hive account could inject an
+    arbitrary identity into the warm author universe by writing its own
+    `json_metadata`, and that identity would then accrue a quality prior.
+
+    MUTANT: drop the publisher gate or the app-id gate from the lite branch.
+    This fails; a substring assertion cannot.
+    """
+    psycopg = pytest.importorskip("psycopg")
+    from recsys.author_prior_cache import _SQL_RECENT_AUTHORS_WITH_LITE
+    from recsys.config import HafsqlConfig
+
+    cfg = HafsqlConfig()
+    try:
+        conn = psycopg.connect(
+            host=cfg.host, port=cfg.port, dbname=cfg.dbname, user=cfg.user,
+            password=cfg.password, connect_timeout=cfg.connect_timeout, autocommit=True,
+        )
+    except Exception as exc:
+        pytest.skip(f"no reachable PostgreSQL: {type(exc).__name__}: {exc}")
+
+    prelude = """
+    WITH comments_table(author, permlink, parent_author, deleted, created) AS (VALUES
+        ('hiveauthor', 'p1', '', false, now())
+    ),
+    comments(author, permlink, parent_author, deleted, created, json_metadata) AS (VALUES
+        ('lumen.pub', 'p-lite',  'lumen.pub', false, now(),
+         '{"app":"lumen/1.0","lumen_user_id":"01LITEWRITER"}'::jsonb),
+        ('lumen.pub', 'p-other', 'lumen.pub', false, now(),
+         '{"app":"peakd/1.0","lumen_user_id":"01WRONGAPP"}'::jsonb),
+        ('attacker',  'p-x',     'attacker',  false, now(),
+         '{"app":"lumen/1.0","lumen_user_id":"01STOLEN"}'::jsonb)
+    )
+    """
+    sql = _SQL_RECENT_AUTHORS_WITH_LITE
+    sql = sql.replace("hafsql.comments_table", "comments_table").replace(
+        "hafsql.comments c", "comments c"
+    )
+    with conn, conn.cursor() as cur:
+        cur.execute(
+            prelude + sql,
+            {
+                "since": datetime(2020, 1, 1, tzinfo=UTC),
+                "limit": 50,
+                "lite_publishers": ["lumen.pub"],
+                "lite_app": "lumen/1.0",
+            },
+        )
+        authors = {row[0] for row in cur.fetchall()}
+
+    assert "01LITEWRITER" in authors, "a genuine lite writer is not discoverable"
+    assert "hiveauthor" in authors, "ordinary Hive authors stopped being discovered"
+    assert "01STOLEN" not in authors, (
+        "AN ORDINARY ACCOUNT INJECTED AN IDENTITY into the warm universe — the "
+        "publisher gate is not enforced"
+    )
+    assert "01WRONGAPP" not in authors, "the app-id gate is not enforced"
