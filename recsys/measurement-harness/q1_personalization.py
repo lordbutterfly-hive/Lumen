@@ -98,8 +98,10 @@ sample_viewers = [f"v-{t}-{j:02d}" for t in TOPICS for j in range(4)]
 for name in sample_viewers:
     v = viewer_for(name)
     f = feed(v)
-    algo_nd.append(ndcg_at_k(f, name, world)); algo_mr.append(mean_rel_at_k(f, name, world))
-    pops_nd.append(ndcg_at_k(pop_stake, name, world)); pops_mr.append(mean_rel_at_k(pop_stake, name, world))
+    algo_nd.append(ndcg_at_k(f, name, world))
+    algo_mr.append(mean_rel_at_k(f, name, world))
+    pops_nd.append(ndcg_at_k(pop_stake, name, world))
+    pops_mr.append(mean_rel_at_k(pop_stake, name, world))
     popc_nd.append(ndcg_at_k(pop_count, name, world))
     rnd = []
     for _ in range(60):
@@ -124,7 +126,8 @@ for name in sample_viewers:
     pos_on = {p.key: i for i, p in enumerate(f_on)}
     pos_off = {p.key: i for i, p in enumerate(f_off)}
     taus.append(spearman([pos_on[k] for k in common], [pos_off[k] for k in common]))
-    nd_on.append(ndcg_at_k(f_on, name, world)); nd_off.append(ndcg_at_k(f_off, name, world))
+    nd_on.append(ndcg_at_k(f_on, name, world))
+    nd_off.append(ndcg_at_k(f_off, name, world))
 print(f"\n[C] ALS-CF ablation (cf_weight 1.5 -> 0): top-20 changed posts "
       f"mean {np.mean(diffs):.1f}/20; full-list Spearman {np.nanmean(taus):.3f}; "
       f"nDCG on {np.mean(nd_on):.3f} vs off {np.mean(nd_off):.3f}")
@@ -135,7 +138,8 @@ for name in sample_viewers:
     v = viewer_for(name)
     f_ns = feed(v, sn=None)
     nd_nosnap.append(ndcg_at_k(f_ns, name, world))
-    sizes_ns.append(len(f_ns)); sizes_s.append(len(feed(v)))
+    sizes_ns.append(len(f_ns))
+    sizes_s.append(len(feed(v)))
 print(f"\n[D] snapshot=None (Phase-0 default): nDCG {np.mean(nd_nosnap):.3f} "
       f"(with snapshot {np.mean(algo_nd):.3f}); feed size {np.mean(sizes_ns):.0f} vs {np.mean(sizes_s):.0f}")
 
@@ -145,7 +149,8 @@ print(f"\n[E] same-topic pair (v-photo-00 vs v-photo-01) top-20 overlap: {overla
 
 # vote vs rep correlation + rep marginal
 scored = rank_feed(va, gw, norm, now=NOW, since=EPOCH, settings=settings, snapshot=snap)
-vn = [sc.score.vote_norm for sc in scored]; rn = [sc.score.rep_norm for sc in scored]
+vn = [sc.score.vote_norm for sc in scored]
+rn = [sc.score.rep_norm for sc in scored]
 on = [sc.score.organic for sc in scored]
 print(f"\n[F] corr over {len(scored)} scored candidates (viewer {va_name}):")
 print(f"    Pearson(vote_norm, rep_norm) = {np.corrcoef(vn, rn)[0,1]:.3f}")
@@ -158,7 +163,8 @@ for name in sample_viewers[:8]:
     f1, f2 = feed(v), feed(v, s=s_norep)
     ch.append(20 - overlap_at_k(f1, f2))
     common = [p.key for p in f1 if p.key in {q.key for q in f2}]
-    p1 = {p.key: i for i, p in enumerate(f1)}; p2 = {p.key: i for i, p in enumerate(f2)}
+    p1 = {p.key: i for i, p in enumerate(f1)}
+    p2 = {p.key: i for i, p in enumerate(f2)}
     tau2.append(spearman([p1[k] for k in common], [p2[k] for k in common]))
 print(f"    rep-term removed (0.111/0/0.889): top-20 changed mean {np.mean(ch):.1f}/20, "
       f"Spearman {np.nanmean(tau2):.3f}")

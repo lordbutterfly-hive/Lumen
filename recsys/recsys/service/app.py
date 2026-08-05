@@ -86,6 +86,7 @@ from recsys.pipeline import (
     _trust_is_fresh,
     rank_feed,
 )
+from recsys.serve_log import ExplorationServeLog
 from recsys.viewer import build_viewer_profile
 
 logger = logging.getLogger("recsys.service.app")
@@ -525,6 +526,11 @@ class ServiceState:
     #: in. Warmed and refreshed regardless, so `stats()` and `/health` are
     #: already meaningful ahead of that wiring landing.
     author_prior_cache: AuthorPriorCache
+    #: ★ B1 (2026-08-05) — process-wide exploration serve counts. In-process by
+    #: design (see `recsys.serve_log`): a restart forgets them, which fails OPEN
+    #: (authors become eligible again) rather than shut, the correct direction
+    #: for a discovery lane. Persistence is NOT implemented.
+    serve_log: ExplorationServeLog = field(default_factory=ExplorationServeLog)
     now_fn: Callable[[], datetime] = field(default=_default_now)
 
     @classmethod
@@ -743,6 +749,7 @@ def build_feed(
             snapshot=snapshot,
             trust_policy=TrustPolicy.FAIL_CLOSED,
             author_prior_cache=state.author_prior_cache.get,
+            serve_log=state.serve_log,
         )
     except MissingTrustError as exc:
         # ★★ B5 (2026-08-05) — THIS PATH USED TO BE COMPLETELY SILENT. Compare

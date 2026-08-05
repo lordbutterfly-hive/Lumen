@@ -112,7 +112,7 @@ nd_gap = float(np.mean(rows["noDiv"])) - float(np.mean(rows["full"]))
 # mutants' collapsed values.
 OWN_GAP_FLOOR = 0.05
 ok1 = own_gap > OWN_GAP_FLOOR
-print(f"\nSELF-CHECK — the diversity re-ranker must measurably change the feed:")
+print("\nSELF-CHECK — the diversity re-ranker must measurably change the feed:")
 print(f"    [1] own-topic@20 gap (noDiv - full) = {own_gap:.3f}   (must be > {OWN_GAP_FLOOR:.2f})   "
       f"{'OK' if ok1 else '** FAIL **'}")
 

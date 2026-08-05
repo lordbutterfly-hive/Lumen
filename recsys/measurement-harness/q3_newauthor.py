@@ -48,7 +48,8 @@ settings = harness_settings()
 
 NEWBIE = "newbie-author"
 world.accounts[NEWBIE] = Account(NEWBIE, "photo", 0.9, 1.0, 25.0, True)
-world.follows = dict(world.follows); world.follows[NEWBIE] = frozenset()
+world.follows = dict(world.follows)
+world.follows[NEWBIE] = frozenset()
 newbie_posts = []
 for i in range(3):
     p = Post(author=NEWBIE, permlink=f"debut-{i}", category="photo",
@@ -84,7 +85,8 @@ print(f"[A] cold photo viewer: feed {len(fc)}; newbie positions {pos_c} "
       f"(top-20 hit: {any(i < 20 for i in pos_c)})")
 
 # (b) established photo viewers: visible at all?
-est_hits = 0; est_n = 0
+est_hits = 0
+est_n = 0
 for j in range(10):
     name = f"v-photo-{j:02d}"
     v = ViewerProfile(account=name, follows=world.follows[name],
@@ -131,7 +133,8 @@ print(f"\n[C] after ONE vouch vote (voucher {voucher}):")
 print(f"    newbie now IN snapshot: cred={cred_newbie.score if cred_newbie else None}")
 print(f"    accounts below OON graph-cred floor 0.05: {len(below)}/{len(snap1.graph_creds)} "
       f"({len(below)/len(snap1.graph_creds):.1%}) -> sample {sorted(below)[:6]}")
-seen = 0; best_pos = []
+seen = 0
+best_pos = []
 for j in range(10):
     name = f"v-photo-{j:02d}"
     v = ViewerProfile(account=name, follows=world.follows[name],
@@ -139,7 +142,8 @@ for j in range(10):
     f = [sc.post for sc in rank_feed(v, gw, norm, now=NOW, since=EPOCH, settings=settings, snapshot=snap1)]
     pos = positions(f, {p0v.key})
     if pos:
-        seen += 1; best_pos.append(pos[0])
+        seen += 1
+        best_pos.append(pos[0])
 print(f"    established photo viewers seeing vouched debut-0: {seen}/10, positions {sorted(best_pos)}")
 if cred_newbie is not None and cred_newbie.score < settings.thresholds.graph_cred_floor:
     print("    !! newbie IS in snapshot with cred < floor -> author-floor now BLOCKS them "

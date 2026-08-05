@@ -1146,6 +1146,36 @@ class ExplorationConfig:
     #: only ever has one eligible newcomer per feed, well under any cap 1; the
     #: cost above is a multi-newcomer/cohort effect, not visible in that panel.
     max_slots_per_feed: int = 3
+    #: ★★★ B1 / THE SERVING LOG (2026-08-05) — how many exploration slots ONE
+    #: author may be given before the lane stops offering them, unless engagement
+    #: arrives. ``0`` disables the log entirely (exact pre-B1 behaviour).
+    #:
+    #: THE HOLE THIS CLOSES. Every other bound on this lane is per-author or
+    #: per-feed, and the lane's PRIORITY key was ``len(distinct engagers
+    #: received)`` — a number the attacker controls BY NOT ACTING. An account
+    #: that never engages and is never engaged sits in need-band 0 forever, and
+    #: band 0 is the exclusive top band (``DEFAULT_NEED_BANDS[0] == 0``). So the
+    #: cheapest way to own the new-author lane was to create accounts and do
+    #: nothing: measured (``attacks/exploration_capture.py``) at 20 socks taking
+    #: **100% of every served exploration slot** across 3 seeds, with honest
+    #: newcomers reaching 0%.
+    #:
+    #: WHY A SERVE COUNT FIXES WHAT A CAP COULD NOT. Being SERVED is something
+    #: the SYSTEM observes and the attacker cannot decline, refuse or fake — it
+    #: is the one fact in this lane that is not attacker-writable. Counting it
+    #: converts a free, permanent position into a CONSUMABLE: each identity buys
+    #: at most this many slots, so owning the lane costs a fresh account per
+    #: ``max_serves_per_author`` slots instead of nothing. That is what "pricing
+    #: account count" means here, and it is why the fix is a log rather than
+    #: another threshold.
+    #:
+    #: 3 is deliberately small. The lane exists to give an unheard author a
+    #: chance to be heard, not a subscription: if three page-one placements
+    #: produce no engagement at all, the honest reading is that this post is not
+    #: connecting, and the slot is better spent on someone unheard. An author who
+    #: DOES earn engagement leaves band 0 by the normal route and no longer needs
+    #: the lane.
+    max_serves_per_author: int = 3
     #: ★ MAC KEY for the reserved-seat rotation (C1a, 2026-08-04 — CRITICAL).
     #:
     #: THE BUG THIS CLOSES. The rotation key used to be an UNKEYED

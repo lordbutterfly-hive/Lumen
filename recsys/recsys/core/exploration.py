@@ -504,6 +504,7 @@ def eligible_for_exploration(
     config: ExplorationConfig,
     bucket: int = 0,
     need_bands: tuple[int, ...] = DEFAULT_NEED_BANDS,
+    serves: Mapping[str, int] | None = None,
 ) -> list[Candidate]:
     """The exploration pool: posts that could not get in on merit and should be
     given one bounded chance to.
@@ -631,6 +632,11 @@ def eligible_for_exploration(
     # zero-only band (0 -> 1 always crosses it). This does not close the
     # vector — see :func:`_need_tier`'s docstring for the full honest limit.
     received: dict[str, set[str]] = {}
+    # ★ B1 (2026-08-05). `{}` when the caller supplies no log, which makes every
+    # serve-log branch below inert and reproduces pre-B1 behaviour exactly — the
+    # many callers that rerank a pool in isolation (unit tests, panels that are
+    # not measuring this lane) are deliberately unaffected.
+    served_counts: Mapping[str, int] = serves or {}
     fresh: list[Candidate] = []
     candidates = list(candidates)
     for candidate in candidates:
@@ -657,6 +663,24 @@ def eligible_for_exploration(
         # very viewer who muted them. A mute is an unconditional promise to the
         # reader, and the discovery lane was quietly overriding it. Suppressed
         # posts and NSFW leaked by the same route.
+        # ★★★ B1 / SERVING LOG (2026-08-05) — RETIRE ON FUTILITY.
+        #
+        # An author who has already been given `max_serves_per_author` reserved
+        # slots and STILL has no engagement leaves the lane. This is the one
+        # bound here keyed on something the attacker cannot control: they choose
+        # whether to post and whether to engage, but not whether the system
+        # already served them.
+        #
+        # Measured before this existed: 20 accounts that each posted once and
+        # did nothing else took 100% of every served exploration slot
+        # (`attacks/exploration_capture.py`). Retiring on serves makes an
+        # identity worth a bounded number of slots instead of an unbounded
+        # position, which is what prices ACCOUNT COUNT.
+        if (
+            config.max_serves_per_author > 0
+            and served_counts.get(post.author, 0) >= config.max_serves_per_author
+        ):
+            continue
         if post.author in viewer.mutes:
             continue
         # ★★ P1 (2026-08-05) — and the SELF-POST exclusion belongs here for
@@ -752,6 +776,15 @@ def eligible_for_exploration(
         by_author,
         key=lambda a: (
             _need_tier(len(received.get(a, ())), need_bands),
+            # ★ B1 (2026-08-05): within a need tier, an author the system has
+            # ALREADY served ranks below one it has not. Need bands answer "how
+            # unheard is this author" from engagement they receive — which a
+            # sock suppresses by doing nothing — so two accounts can be equally
+            # "unheard" while one has already had three page-one placements.
+            # Serve count breaks that tie on observed fact, and it is why a farm
+            # can no longer hold the lane simply by being numerous: each sock
+            # sinks as it is spent.
+            served_counts.get(a, 0),
             -by_author[a][0].post.created.timestamp(),
             a,
         ),

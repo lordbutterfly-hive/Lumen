@@ -39,7 +39,6 @@ from simworld import (
     topic_entropy,
 )
 
-from recsys.config import Settings
 from recsys.contracts import EngagementEdge, Post, ViewerProfile, Vote
 from recsys.pipeline import TrustPolicy, build_trust_snapshot, rank_feed
 
@@ -93,14 +92,17 @@ for s in range(5):
 world = build_world(seed=SEED)
 FLOOD = "flooder"
 world.accounts[FLOOD] = Account(FLOOD, "photo", 0.5, 10.0, 45.0, True)
-world.follows = dict(world.follows); world.follows[FLOOD] = frozenset()
+world.follows = dict(world.follows)
+world.follows[FLOOD] = frozenset()
 flood_posts = []
 for i in range(50):
     p = Post(author=FLOOD, permlink=f"flood-{i}", category="photo",
              community=COMMUNITY["photo"], created=NOW - timedelta(minutes=5 + 2*i),
              children=0, reblog_count=0, author_reputation=45.0, tags=TAGS["photo"], votes=())
-    flood_posts.append(p); world.posts.append(p)
-    world.post_topic[p.key] = "photo"; world.post_engagers[p.key] = set()
+    flood_posts.append(p)
+    world.posts.append(p)
+    world.post_topic[p.key] = "photo"
+    world.post_engagers[p.key] = set()
 gw = SimGateway(world)
 norm = build_norm(world)
 snap = build_trust_snapshot(
@@ -141,12 +143,14 @@ TINY_TAG = "tiny"
 for i in range(3):
     a = Account(f"tiny-{i}", "photo", 0.6, 5.0, 40.0, True)
     world.accounts[a.name] = a
-    world.follows = dict(world.follows); world.follows[a.name] = frozenset()
+    world.follows = dict(world.follows)
+    world.follows[a.name] = frozenset()
     for j in range(2):
         p = Post(author=a.name, permlink=f"t{j}", category="tiny", community="hive-999",
                  created=NOW - timedelta(hours=10 + i + j), children=0, reblog_count=0,
                  author_reputation=40.0, tags=(TINY_TAG,), votes=())
-        world.posts.append(p); world.post_topic[p.key] = "photo"
+        world.posts.append(p)
+        world.post_topic[p.key] = "photo"
         world.post_engagers[p.key] = set()
 gw = SimGateway(world)
 norm = build_norm(world)
@@ -160,7 +164,8 @@ print(f"\n[C] cold viewer whose ONLY interest is a 3-person tag cluster: feed si
 world = build_world(seed=SEED)
 for i in range(3):
     world.accounts[f"ghost-{i}"] = Account(f"ghost-{i}", "photo", 0.3, 1.0, 25.0, True)
-    world.follows = dict(world.follows); world.follows[f"ghost-{i}"] = frozenset()
+    world.follows = dict(world.follows)
+    world.follows[f"ghost-{i}"] = frozenset()
 gw = SimGateway(world)
 norm = build_norm(world)
 vd = ViewerProfile(account="quiet", follows=frozenset({"ghost-0", "ghost-1", "ghost-2"}))
@@ -209,7 +214,8 @@ print(f"\n[E] whale (50k HP) votes on EVERY post: top-20 overlap with baseline {
 world = build_world(seed=SEED)
 gw = SimGateway(world)
 norm = build_norm(world)
-nonempty = 0; n = 0
+nonempty = 0
+n = 0
 for t in TOPICS:
     for j in range(2):
         nm = f"v-{t}-{j:02d}"

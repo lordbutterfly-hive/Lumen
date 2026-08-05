@@ -34,7 +34,7 @@ is `io/hafsql.py`, whose live queries need a reachable HAFSQL/Postgres and the
 pip install --user numpy pytest ruff mypy      # (psycopg only for the live io layer)
 cd recsys
 export PATH="$HOME/.local/bin:$PATH"
-ruff check .        # style/lint
+ruff check .        # style/lint — REPO-WIDE, harness included (E3)
 mypy recsys         # types
 pytest -q           # 75 tests, pure — no DB needed
 ```

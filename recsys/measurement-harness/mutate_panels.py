@@ -67,6 +67,63 @@ from recsys.config import Settings
 # =============================================================================
 Mutant = tuple[str, dict[str, object]]  # (short name, {"dotted.path": value})
 
+# ============================================================================
+# ★★★ E2 (2026-08-05) — DECLARED BLINDNESS.
+#
+# This unit exited 1 with 6-7 MISSED rows and was reported nowhere, while the
+# project's status line quoted "13/13 panels exit 0". BUILDMAP-B:498 makes
+# "every panel must FAIL its own mutants" a release requirement, so a
+# permanently-red gate nobody runs is worse than no gate: it trains people to
+# ignore it.
+#
+# Not every MISS is a defect, and pretending otherwise is why it stayed red.
+# Some are STRUCTURAL — the panel genuinely cannot perceive the mutation, for a
+# reason already written down. The honest gate is therefore: a miss must be
+# DECLARED HERE WITH A REASON, or the run fails. SILENCE fails, not blindness.
+#
+# TWO WAYS TO FAIL, both deliberate:
+#   * an UNDECLARED miss -> a new blind spot appeared and nobody said so;
+#   * a DECLARED miss that is now CAUGHT -> the declaration is STALE. Coverage
+#     improving must force the note to be deleted, or this file slowly fills
+#     with excuses for problems that no longer exist.
+#
+# Keyed by (panel filename, exact mutant label).
+# ============================================================================
+EXPECTED_MISSES: dict[tuple[str, str], str] = {
+    ("q11_follow_curve.py", "emerging_per_page=0 [B-04, N/A at HEAD]"):
+        "`emerging_per_page` is DOCUMENTED INERT — a newcomer's graph-cred jumps past "
+        "`min_vouched_score` on the first vote, so this budget is never the binding "
+        "constraint. A mutant of an inert field cannot be caught by anything. Delete "
+        "this entry if the field is ever made live.",
+    ("q3_newauthor.py", "emerging_per_page=0 [B-04, N/A at HEAD]"):
+        "Same inert field as above.",
+    ("q8_author_prior_panel.py", "organic_prior_shrinkage=0.0"):
+        "STRUCTURAL, and documented in ALGO-STATE §1b: shrinkage's cost is paid on "
+        "q8's OWN axis, so deleting it makes q8's numbers BETTER (+0.0118 -> +0.0189). "
+        "A metric that improves when you delete the mechanism cannot gate it. "
+        "`organic_prior_shrinkage=0.0` IS caught — by q3_newauthor.py, which measures "
+        "the newcomer reach shrinkage actually exists to buy.",
+    ("q9_prior_shrinkage.py", "organic_prior_shrinkage=0.0"):
+        "STRUCTURAL. q9 is a SWEEP over k, and k=0.0 is one of its own swept points "
+        "and a legitimate control. E1 gave this panel a real gate (the SHIPPED k must "
+        "clear q8's floors) and k=0.0 clears them — the prior still works at k=0, only "
+        "the newcomer refinement is gone. Caught by q3_newauthor.py. The gate DOES fire "
+        "if the shipped k moves to a failing value or off the swept grid.",
+    ("q5b_spam_coldlane.py", "exploration.slots_per_page=0"):
+        "The REGISTERED MUTANT IS WRONG, and q5b's own comments say so: this panel's "
+        "gating mutation is `organic_recency`, not the exploration lane. Kept visible "
+        "rather than quietly re-pointed, because silently swapping a mutant is how a "
+        "registry stops describing what it tests. Real exploration-lane coverage is "
+        "q3_newauthor.py (CAUGHT) and attacks/exploration_capture.py.",
+    ("q11_follow_curve.py", "unchosen_source_floor=1.0"):
+        "★ THE ONE GENUINE GAP, recorded rather than papered over. NO panel catches "
+        "this mutant — disabling the unchosen-lane penalty FLOOR alone (leaving the "
+        "cap) does not move q11's accepted-curve check enough to trip it, and no other "
+        "panel measures it. This is a real hole in the evidence base, not a structural "
+        "impossibility. It needs a panel that measures lane composition directly.",
+}
+
+
 MUTANTS: dict[str, list[Mutant]] = {
     "q11_follow_curve.py": [
         ("unchosen_max_share=1.0 [B-03, N/A at HEAD]", {"diversity.unchosen_max_share": 1.0}),
@@ -161,7 +218,8 @@ def run_matrix(
     panels: list[str],
 ) -> tuple[dict[str, list[tuple[str, str, str]]], int, int, int, int, int]:
     """Full run: spawns the baseline once per panel + one subprocess per
-    applicable mutant. Returns (matrix, n_caught, n_missed, n_na, n_ne, n_ne_blind).
+    applicable mutant. Returns (matrix, n_caught, n_missed, n_na, n_ne, n_ne_blind,
+    n_declared, n_stale).
 
     N/E (baseline itself exits non-zero — RED BY DESIGN) still runs the
     mutant subprocess and compares its FULL stdout+stderr, byte-for-byte,
@@ -174,6 +232,7 @@ def run_matrix(
     """
     out: dict[str, list[tuple[str, str, str]]] = {}
     n_caught = n_missed = n_na = n_ne = n_ne_blind = 0
+    n_declared = n_stale = 0
     baseline_cache: dict[str, tuple[int, float, str]] = {}
     for panel in panels:
         rows = []
@@ -200,15 +259,28 @@ def run_matrix(
                     n_ne += 1
                 continue
             mut_rc, mut_t, _ = _run(panel, mutation)
+            declared = EXPECTED_MISSES.get((panel, name))
             if mut_rc != 0:
-                rows.append((name, "CAUGHT", f"mutant exit {mut_rc} in {mut_t:.0f}s"))
-                n_caught += 1
+                if declared is not None:
+                    # E2: coverage improved and the declaration is now a lie.
+                    rows.append((name, "STALE-DECL",
+                                 f"mutant exit {mut_rc} in {mut_t:.0f}s — this miss is "
+                                 f"DECLARED in EXPECTED_MISSES but is now CAUGHT; delete "
+                                 f"the declaration"))
+                    n_stale += 1
+                else:
+                    rows.append((name, "CAUGHT", f"mutant exit {mut_rc} in {mut_t:.0f}s"))
+                    n_caught += 1
+            elif declared is not None:
+                rows.append((name, "DECLARED",
+                             f"blind in {mut_t:.0f}s — {declared}"))
+                n_declared += 1
             else:
                 rows.append((name, "MISSED",
                              f"mutant exit 0 in {mut_t:.0f}s — panel is BLIND to this mutant"))
                 n_missed += 1
         out[panel] = rows
-    return out, n_caught, n_missed, n_na, n_ne, n_ne_blind
+    return out, n_caught, n_missed, n_na, n_ne, n_ne_blind, n_declared, n_stale
 
 
 def print_matrix(matrix: dict[str, list[tuple[str, str, str]]]) -> None:
@@ -242,9 +314,12 @@ def main() -> int:
 
     print(f"running full mutant matrix over {len(panels)} panel(s); "
           f"{sum(len(MUTANTS[p]) for p in panels)} declared mutant row(s)...\n")
-    matrix, n_caught, n_missed, n_na, n_ne, n_ne_blind = run_matrix(panels)
+    (matrix, n_caught, n_missed, n_na, n_ne, n_ne_blind,
+     n_declared, n_stale) = run_matrix(panels)
     print_matrix(matrix)
-    print(f"\nTOTALS: {n_caught} CAUGHT, {n_missed} MISSED, {n_na} N/A (field not built yet), "
+    print(f"\nTOTALS: {n_caught} CAUGHT, {n_missed} MISSED, {n_declared} DECLARED "
+          f"(structurally blind, reason recorded), {n_stale} STALE-DECL, "
+          f"{n_na} N/A (field not built yet), "
           f"{n_ne} N/E (baseline already red, output differs — not gatable either way), "
           f"{n_ne_blind} N/E-BLIND (baseline already red AND mutant output byte-identical)")
     if n_missed:
@@ -261,7 +336,16 @@ def main() -> int:
               "baseline, which is SOME evidence the mutation is visible, but not proof a real "
               "gate would fire. Not counted as "
               "pass or fail.")
-    return 1 if (n_missed or n_ne_blind) else 0
+    if n_stale:
+        print(f"\n*** {n_stale} STALE DECLARATION(S) — a miss recorded in EXPECTED_MISSES is "
+              "now CAUGHT. Coverage improved; delete the declaration so this file keeps "
+              "describing reality. ***")
+    if n_declared:
+        print(f"\nNOTE: {n_declared} row(s) are DECLARED blind spots with a recorded reason "
+              "(see EXPECTED_MISSES). They do not fail this gate — an UNDECLARED miss does, "
+              "and so does a declaration that has gone stale. Blindness is allowed here; "
+              "silence about it is not.")
+    return 1 if (n_missed or n_ne_blind or n_stale) else 0
 
 
 if __name__ == "__main__":

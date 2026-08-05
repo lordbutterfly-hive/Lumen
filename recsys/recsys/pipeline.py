@@ -71,6 +71,7 @@ from recsys.core.vote_signal import (
     independent_vote_signal,
 )
 from recsys.io.hafsql import chain_author_map
+from recsys.serve_log import ExplorationServeLog
 
 logger = logging.getLogger("recsys.pipeline")
 
@@ -1587,6 +1588,17 @@ def rank_feed(
     #: pool — see `_author_priors`. Production supplies it; nothing else has to.
     author_prior_cache: Callable[[frozenset[str]], Mapping[str, AuthorEngagement]]
     | None = None,
+    #: ★ B1 (2026-08-05) — the exploration SERVING LOG. Supplied, the reserved
+    #: new-author slot both READS it (retire an author who has already had
+    #: `max_serves_per_author` slots without earning engagement) and WRITES to it
+    #: (record whoever was actually spliced into this feed). Absent — the default
+    #: — the lane behaves exactly as it did before B1, which is what keeps every
+    #: unit test and panel that does not measure this lane unchanged.
+    #:
+    #: It is threaded here rather than owned inside the lane because a serve is a
+    #: fact about a SERVED FEED, and `rank_feed` is the only thing that knows
+    #: which picks survived to the returned list.
+    serve_log: ExplorationServeLog | None = None,
 ) -> list[ScoredCandidate]:
     """Rank a viewer's discovery feed end to end (§3).
 
@@ -1768,6 +1780,7 @@ def rank_feed(
         show_nsfw=show_nsfw,
         config=settings.exploration,
         bucket=explore_bucket,
+        serves=serve_log.counts() if serve_log is not None else None,
     )
 
     # One stake-lineage memo for the whole request — see `_lineage_for`.
@@ -1907,4 +1920,25 @@ def rank_feed(
         # one (`test_c2c_at_most_one_promotion_per_lineage_group_per_feed`).
         lineage = _lineage_for(gateway, {c.post.author for c in ordered}, lineage_cache)
         ranked = insert_exploration(ranked, ordered, settings.exploration, lineage=lineage)
+        # ★ B1: record the authors ACTUALLY SPLICED, not the ones that merely
+        # qualified. `insert_exploration` declines picks (per-author, per-page,
+        # ceiling), so counting `ordered` would charge authors for slots they
+        # never received — and an author charged for a slot they did not get is
+        # retired early, which would make the log a griefing vector instead of a
+        # defence. Read off the returned feed, which is the served truth.
+        if serve_log is not None:
+            # ★ Filter on SOURCE, not on membership of the pool. A post can be in
+            # the exploration pool AND independently eligible on merit — the pool
+            # is drawn from the raw candidate set, not from what failed. Matching
+            # pool KEYS against the served feed therefore charged authors for
+            # slots the lane never gave them, and an author charged for a slot
+            # they did not receive retires early, turning the log into a griefing
+            # vector. Caught by `attacks/exploration_capture.py`: served
+            # exploration slots collapsed 10 -> 3 because most "serves" were
+            # merit placements being miscounted.
+            serve_log.record(
+                sc.post.author
+                for sc in ranked
+                if sc.source is CandidateSource.EXPLORATION
+            )
     return ranked[: settings.diversity.top_k]

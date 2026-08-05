@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import os
+import pathlib
 from datetime import timedelta
 
 import pytest
@@ -1547,4 +1549,108 @@ def test_a_buried_author_is_still_promoted_the_regression_this_must_not_cause() 
     assert out[13].post.author == "newb", (
         "a newcomer whose every post is buried at 99+ was NOT promoted — this is "
         "the whole-feed regression the page-scoped bound exists to avoid"
+    )
+
+
+# ---------------------------------------------------------------------------
+# M04 (2026-08-05) — the dev seat key must be STABLE ACROSS PROCESSES.
+#
+# This is the fix for this project's single worst instrument failure: run-to-run
+# non-reproducibility that was initially misdiagnosed as BLAS/numpy. The cause
+# was `_DEV_FALLBACK_SECRET` being `secrets.token_bytes(32)` PER PROCESS, so
+# every panel run used a different MAC key and the exploration seat rotated
+# differently each time.
+#
+# The 2026-08-05 mutation audit found this fix had ZERO test coverage: reverting
+# it to a per-process random value passed all 754 tests AND all 13 panels, while
+# silently destroying reproducibility again. A future "simplification" back to
+# `token_bytes` would have gone green everywhere.
+# ---------------------------------------------------------------------------
+
+
+def test_the_dev_fallback_secret_is_stable_across_processes() -> None:
+    """★ THE M04 REGRESSION TEST. Spawns real subprocesses — an in-process check
+    cannot distinguish a module constant from a per-process random value, which
+    is exactly why nothing caught this.
+
+    Also varies PYTHONHASHSEED, since the same class of nondeterminism was
+    separately found in `simworld` set iteration.
+    """
+    import subprocess
+    import sys
+
+    prog = (
+        "from recsys.core.exploration import _dev_fallback_secret;"
+        "import sys; sys.stdout.write(_dev_fallback_secret().hex())"
+    )
+    seen = set()
+    for hashseed in ("0", "1", "42"):
+        env = {**os.environ, "PYTHONHASHSEED": hashseed}
+        out = subprocess.run(
+            [sys.executable, "-c", prog], capture_output=True, text=True, env=env,
+            cwd=str(pathlib.Path(__file__).resolve().parent.parent),
+        )
+        assert out.returncode == 0, out.stderr
+        seen.add(out.stdout.strip())
+    assert len(seen) == 1, (
+        f"the dev seat key differs across processes ({len(seen)} distinct values: "
+        f"{seen}) — the measurement harness is non-reproducible again, which is "
+        f"the defect that was once misdiagnosed as BLAS. It must be a FIXED "
+        f"constant; production still refuses to start without a real secret."
+    )
+
+
+def test_the_dev_fallback_secret_is_not_a_production_path() -> None:
+    """The control: the key above is safe to be public ONLY because production
+    cannot reach it. If that ever stops being true, the fixed key becomes a
+    grindable seat again."""
+    with pytest.raises(ValueError):
+        ExplorationConfig(production=True, seat_secret=None)
+
+
+def test_the_serving_log_retires_an_author_at_the_cap() -> None:
+    """★ B1 — the one bound in this lane keyed on something the attacker cannot
+    control. An author already given `max_serves_per_author` slots without
+    earning engagement leaves the pool.
+
+    Mutation-checked: removing the retire branch in `eligible_for_exploration`
+    makes this fail."""
+    cand = _cand("spent", "d")
+    cfg = _cfg(max_serves_per_author=3)
+    fresh = eligible_for_exploration(
+        [cand], _viewer(), now=NOW, graph_creds={}, suppressed=frozenset(),
+        show_nsfw=False, config=cfg, serves={"spent": 0},
+    )
+    retired = eligible_for_exploration(
+        [cand], _viewer(), now=NOW, graph_creds={}, suppressed=frozenset(),
+        show_nsfw=False, config=cfg, serves={"spent": 3},
+    )
+    assert fresh, "an unserved author must be eligible"
+    assert retired == [], "an author at the serve cap must leave the lane"
+
+
+def test_the_serving_log_is_inert_when_no_caller_supplies_one() -> None:
+    """Every existing unit test and panel reranks without a log; that path must
+    reproduce pre-B1 behaviour exactly."""
+    cand = _cand("nobody", "d")
+    with_none = eligible_for_exploration(
+        [cand], _viewer(), now=NOW, graph_creds={}, suppressed=frozenset(),
+        show_nsfw=False, config=_cfg(), serves=None,
+    )
+    assert with_none, "absent a serve log the lane must behave as before"
+
+
+def test_serve_count_breaks_ties_within_a_need_tier() -> None:
+    """Two equally-unheard authors are NOT equal if the system already served
+    one of them — that is the observed fact the need bands cannot see."""
+    cands = [_cand("served", "d"), _cand("unserved", "d")]
+    out = eligible_for_exploration(
+        cands, _viewer(), now=NOW, graph_creds={}, suppressed=frozenset(),
+        show_nsfw=False, config=_cfg(max_serves_per_author=5),
+        serves={"served": 2},
+    )
+    assert out, "both authors should still be eligible below the cap"
+    assert out[0].post.author == "unserved", (
+        f"the already-served author outranked the unserved one: "
+        f"{[c.post.author for c in out]}"
     )

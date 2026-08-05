@@ -32,7 +32,6 @@ from simworld import (
     spearman,
 )
 
-from recsys.config import Settings
 from recsys.contracts import EngagementEdge
 from recsys.core.ring import detect_rings, ring_member_set
 from recsys.pipeline import build_trust_snapshot
@@ -134,12 +133,15 @@ def aff_sample(pred):
             if pred(v, a):
                 out.append(als.affinity(v, a))
     return np.array(out)
-same_t = lambda v, a: world.accounts[v].topic == world.accounts[a].topic
+def same_t(v, a):
+    return world.accounts[v].topic == world.accounts[a].topic
+
 eng = aff_sample(lambda v, a: (v, a) in engaged_pairs)
 same_uneng = aff_sample(lambda v, a: (v, a) not in engaged_pairs and same_t(v, a))
 cross_uneng = aff_sample(lambda v, a: (v, a) not in engaged_pairs and not same_t(v, a))
 def auc(pos, neg, n=4000):
-    p = rng.choice(pos, n); q = rng.choice(neg, n)
+    p = rng.choice(pos, n)
+    q = rng.choice(neg, n)
     return float(np.mean(p > q) + 0.5 * np.mean(p == q))
 print("\n[D] ALS affinity (cf_weight x this lands on organic_raw whose global sample "
       "spread is ~[0, 2.2]):")

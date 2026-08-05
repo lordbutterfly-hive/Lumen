@@ -46,7 +46,8 @@ settings = harness_settings()
 
 SPAM = "spammer"
 world.accounts[SPAM] = Account(SPAM, "photo", 0.1, 1.0, 25.0, True)
-world.follows = dict(world.follows); world.follows[SPAM] = frozenset()
+world.follows = dict(world.follows)
+world.follows[SPAM] = frozenset()
 # 3 spam posts, each with 60 self-comments + 20 self-reblogs, zero votes.
 #
 # ★ ATTRIBUTED (2026-08-01). These were plain `Post`s carrying bare counters,
@@ -64,8 +65,10 @@ for i in range(3):
              children=60, reblog_count=20, author_reputation=25.0,
              tags=TAGS["photo"], votes=(),
              commenters=(SPAM,), rebloggers=(SPAM,))
-    spam_posts.append(p); world.posts.append(p)
-    world.post_topic[p.key] = "photo"; world.post_engagers[p.key] = set()
+    spam_posts.append(p)
+    world.posts.append(p)
+    world.post_topic[p.key] = "photo"
+    world.post_engagers[p.key] = set()
 gw = SimGateway(world)
 norm = build_norm(world)
 snap = build_trust_snapshot(

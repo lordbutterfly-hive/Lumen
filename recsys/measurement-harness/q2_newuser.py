@@ -54,7 +54,8 @@ snap = build_trust_snapshot(
 # ground-truth identity for the new user: loves photo
 NU = "newuser"
 world.accounts[NU] = Account(NU, "photo", 0.5, 3.0, 25.0, False, secondary=None)
-world.follows = dict(world.follows); world.follows[NU] = frozenset()
+world.follows = dict(world.follows)
+world.follows[NU] = frozenset()
 
 def feed(v, sn=snap):
     return rank_feed(v, gw, norm, now=NOW, since=EPOCH, settings=settings, snapshot=sn)
@@ -134,7 +135,8 @@ for k in [1, 10, 50]:
                        interest_tags=frozenset(TAGS["photo"]))
     fk = feed(vk, sn=snap_k)
     pk = [sc.post for sc in fk]
-    nd = ndcg_at_k(pk, NU, world); mr = mean_rel_at_k(pk, NU, world)
+    nd = ndcg_at_k(pk, NU, world)
+    mr = mean_rel_at_k(pk, NU, world)
     own = sum(1 for p in pk[:20] if world.accounts[p.author].topic == "photo") / 20
     src = Counter(sc.source.value for sc in fk[:20])
     aff = snap_k.als.affinity(NU, "a-photo-05") if snap_k.als else 0.0
