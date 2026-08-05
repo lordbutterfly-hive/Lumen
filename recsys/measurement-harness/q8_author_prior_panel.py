@@ -66,6 +66,7 @@ import sys
 _HARNESS = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(_HARNESS))
 sys.path.insert(0, str(_HARNESS.parent))
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from metrics_v2 import (
@@ -76,17 +77,17 @@ from metrics_v2 import (
     viewer_metrics,
 )
 from simworld import (
-    COMMUNITY,
     EPOCH,
     NOW,
+    TAGS,
     TOPICS,
     PriorlessSimGateway,
     SimGateway,
     build_norm,
     build_world,
+    harness_settings,
 )
 
-from recsys.config import DiversityConfig, Settings
 from recsys.contracts import ViewerProfile
 from recsys.core.scoring import AuthorPriorGateway
 from recsys.pipeline import build_trust_snapshot, rank_feed
@@ -120,21 +121,30 @@ gw_with_prior = SimGateway(world)
 assert not isinstance(gw_no_prior, AuthorPriorGateway), "PriorlessSimGateway must NOT satisfy Protocol"
 assert isinstance(gw_with_prior, AuthorPriorGateway), "SimGateway must satisfy Protocol"
 
+# ★ B-07 (2026-08-04): the shipped base is routed through harness_settings()
+# so mutate_panels.py's LUMEN_SETTINGS_MUTANT reaches this panel's weights.
+# Byte-identical to Settings() when the env var is unset. Using `replace()`
+# (rather than a fresh `Settings(diversity=DiversityConfig(top_k=BIG))`) is
+# deliberate: a fresh construction would silently reset `weights` to its
+# class default and drop any mutation to e.g. `organic_prior_shrinkage`.
+SHIPPED = harness_settings()
+
 # Trust snapshot depends only on engagement_edges/follow_graph/stake_lineage —
 # all inherited unchanged from SimGateway — so it is identical regardless of
 # which of the two gateways builds it; built once, shared by both runs below.
 snap = build_trust_snapshot(
-    gw_no_prior, Settings(), since=EPOCH, now=NOW, trusted_seeds=frozenset(seeds)
+    gw_no_prior, SHIPPED, since=EPOCH, now=NOW,
+    trusted_seeds=frozenset(seeds), production=False,  # C5/R2: synthetic seeds
 )
 
 PANEL = [f"v-{t}-{j:02d}" for t in TOPICS for j in range(4)]
-SETTINGS = Settings(diversity=DiversityConfig(top_k=BIG))  # shipped weights; full order
+SETTINGS = replace(SHIPPED, diversity=replace(SHIPPED.diversity, top_k=BIG))  # full order
 
 
 def viewer_for(name: str) -> ViewerProfile:
     acct = world.accounts[name]
     return ViewerProfile(account=name, follows=world.follows[name],
-                         subscribed_communities=frozenset({COMMUNITY[acct.topic]}))
+                         interest_tags=frozenset(TAGS[acct.topic]))
 
 
 print(f"world: {len(world.posts)} posts, {len(world.accounts)} accounts; "

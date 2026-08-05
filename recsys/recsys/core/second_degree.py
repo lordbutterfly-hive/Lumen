@@ -20,7 +20,7 @@ def passes_second_degree(
 ) -> bool:
     """Second-degree gate (§8.1): only un-opted-in OON discovery sources
     (``OON_ENGAGED`` / ``OON_ALS``) need enough in-network engagers; in-network
-    and viewer-chosen community/interest lanes are exempt.
+    and the viewer-chosen interest lane are exempt.
 
     ``in_network_engagers`` should already be vouch-quality filtered (see
     :func:`qualifying_engagers`) by the caller — this function just counts.
@@ -76,15 +76,18 @@ def _ungated_lane_for(post: Post, viewer: ViewerProfile) -> CandidateSource | No
     ``None``. Used to demote a candidate whose second-degree vouch failed rather
     than dropping it — see the note in :func:`filter_eligible`.
 
-    Admits nothing new: every branch requires an explicit act by the viewer
-    (subscribing to a community, declaring an interest), and each returned lane
-    still carries ``requires_author_floor``, so the author credibility check
-    downstream is unchanged.
+    Admits nothing new: the branch requires an explicit act by the viewer
+    (declaring an interest tag), and the returned lane still carries
+    ``requires_author_floor``, so the author credibility check downstream is
+    unchanged.
+
+    ★ FULL TAG INTERSECTION, deliberately (ruling R3, 2026-08-04) — unlike
+    ``exploration._interest_match``'s primary-tag-only test. This lane keeps
+    ``requires_author_floor=True``, so tag-spray buys an attacker nothing here
+    without also clearing the author's graph-cred floor; the exploration lane
+    has no such backstop (it bypasses both the vouch gate and the author
+    floor), which is why it gets the stricter test instead.
     """
-    if post.community and post.community in viewer.subscribed_communities:
-        return CandidateSource.OON_COMMUNITY
-    if post.community and post.community in viewer.interest_communities:
-        return CandidateSource.OON_INTEREST
     if viewer.interest_tags and set(post.tags) & viewer.interest_tags:
         return CandidateSource.OON_INTEREST
     return None
@@ -108,8 +111,8 @@ def filter_eligible(
     must drop a muted author even from an in-network candidate (see the loop
     below: the mute check sits OUTSIDE the ``requires_second_degree`` block). Only
     the second-degree gate and the author graph-cred floor apply solely to gated
-    sources — in-network and viewer-opted-in (community/interest) candidates are
-    exempt from those two (``source.requires_second_degree``).
+    sources — in-network and viewer-opted-in (interest) candidates are exempt
+    from those two (``source.requires_second_degree``).
     Missing graph-cred data never drops a candidate (Phase 0): both the vouch
     floor and the author floor fall back to permissive behavior when
     ``graph_creds`` is empty.
@@ -143,27 +146,30 @@ def filter_eligible(
                 # that made ENGAGEMENT ITSELF A WEAPON.
                 #
                 # `merge_candidates` labels a post by its HIGHEST-priority source,
-                # and OON_ENGAGED (1) outranks OON_COMMUNITY (2). So a post in a
-                # community the viewer subscribes to arrives ungated and is served
-                # — until somebody the viewer follows engages it, at which point it
+                # and OON_ENGAGED (1) outranks OON_INTEREST (3). So a post matching
+                # a viewer's declared interest tag arrives ungated and is served —
+                # until somebody the viewer follows engages it, at which point it
                 # is re-labelled OON_ENGAGED, becomes gated, fails the vouch on the
                 # ENGAGER's credibility, and is dropped. It was never re-tested
-                # against the ungated lane it had already qualified for.
+                # against the ungated lane it had already qualified for. (Measured
+                # originally through the now-retired OON_COMMUNITY lane — subscribed
+                # community, priority 2 — communities were removed as a lane
+                # 2026-08-04, R1/R3; the mechanism and the numbers below are
+                # unchanged for its OON_INTEREST successor.)
                 #
                 # Measured: one condemned account that any viewer follows, one
-                # upvote, and an honest author goes from 10/10 subscribed viewers
-                # to 0/10 — on ANY author, with no ring shape, no zero-audience
+                # upvote, and an honest author goes from 10/10 opted-in viewers to
+                # 0/10 — on ANY author, with no ring shape, no zero-audience
                 # precondition, and the target never flagged. That is cheaper and
                 # broader than the known rival-suppression bug, and the
                 # suppression machinery is itself the weapon.
                 #
                 # The fix restores the lane the post already qualified for rather
                 # than admitting anything new: the viewer must still have opted in
-                # (subscribed community / declared interest), and the demoted lane
-                # still carries `requires_author_floor`, so a genuine self-dealing
-                # AUTHOR is refused two lines below exactly as before. Only the
-                # vouch-COUNT requirement — which this post never needed — is
-                # dropped.
+                # (declared the interest tag), and the demoted lane still carries
+                # `requires_author_floor`, so a genuine self-dealing AUTHOR is
+                # refused two lines below exactly as before. Only the vouch-COUNT
+                # requirement — which this post never needed — is dropped.
                 demoted = _ungated_lane_for(post, viewer)
                 if demoted is None:
                     continue

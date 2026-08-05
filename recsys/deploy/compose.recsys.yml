@@ -1,0 +1,114 @@
+# A10/A7 deploy artifact — recsys serving + trust-batch, in the frontend's
+# existing Compose stack shape (`../../frontend/stack/compose.*.yml`:
+# `profiles:`, `networks: docker`, a `wget --spider` healthcheck, env vars
+# read from the environment rather than hardcoded). Include this file from
+# the frontend's own `compose.yml` the same way it already includes
+# `compose.auth.yml`/`compose.blog.yml`/etc., or run it standalone with
+# `docker compose -f deploy/compose.recsys.yml up`.
+#
+# Image: build from `../Dockerfile` (`docker build -t recsys:latest ..`ready
+# via the `build:` block below) — one image, two roles (see that file's own
+# header comment): `recsys-feed` runs it as the continuous HTTP service
+# (A10); `recsys-trust-batch` runs the SAME image with its CMD overridden to
+# the weekly batch (A7).
+#
+# 🚩 SCHEDULING THE BATCH IS AN OPERATOR DECISION, DELIBERATELY NOT MADE
+# HERE (BUILDMAP-A A7's own "not a Sonnet unit end-to-end" flag). This file
+# makes `recsys-trust-batch` a RUNNABLE one-shot service
+# (`docker compose run --rm recsys-trust-batch`) but does not wire a
+# scheduler — no cron sidecar, no `profiles`-gated always-on loop. Pick one:
+#   * host cron -> `docker compose -f deploy/compose.recsys.yml run --rm recsys-trust-batch`
+#   * a scheduler container (e.g. `ofelia`) pointed at this same service
+#   * a k8s CronJob running this same image with the same CMD override
+# if this stack is ever migrated off Compose entirely.
+
+services:
+  recsys-feed:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: recsys:${RECSYS_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      # Public, read-only HAFSQL mirror (recsys/config.py:HafsqlConfig
+      # defaults — override only to point at a different mirror/replica).
+      HAFSQL_HOST:
+      HAFSQL_PORT:
+      HAFSQL_DB:
+      HAFSQL_USER:
+      HAFSQL_PASSWORD:
+      HAFSQL_STATEMENT_TIMEOUT_MS:
+      HAFSQL_POOL_MIN:
+      HAFSQL_POOL_MAX:
+      # recsys's OWN Postgres (A6/A15) — trust snapshots, network suppression.
+      # REQUIRED for a real deployment: absent, the service starts (a missing
+      # snapshot is a legitimate cold-start state) but /feed refuses every
+      # request under FAIL_CLOSED until this is set AND a batch has run.
+      RECSYS_DATABASE_URL:
+      # Lumen Lite (A13) — off until an operator names the publisher account(s).
+      LITE_PUBLISHER_ACCOUNTS:
+      LITE_FRONTEND_ACCOUNT_MAINNET:
+      LITE_FRONTEND_ACCOUNT_MIRRORNET:
+      LITE_FRONTEND_ACCOUNT_TESTNET:
+      # This service's own tuning (recsys/service/app.py:ServiceConfig).
+      # RECSYS_SERVICE_HOST/PORT are the CONTAINER-INTERNAL bind address —
+      # deliberately FIXED, never templated from the host-facing port below.
+      # (Found running this file: templating both from the same operator
+      # variable means changing "which host port to publish on" also changes
+      # what the app listens on INSIDE the container, breaking the `ports:`
+      # mapping the moment an operator overrides it — reproduced live: the
+      # app ended up listening on the host port instead of 8000, and the
+      # container:8000 side of the mapping had nothing behind it, so every
+      # request got a connection reset. Publish on a different HOST port via
+      # `RECSYS_HOST_PORT` instead, below — the container side never moves.)
+      RECSYS_SERVICE_HOST: "0.0.0.0"
+      RECSYS_SERVICE_PORT: "8000"
+      RECSYS_NORM_REFRESH_S:
+      RECSYS_SNAPSHOT_REFRESH_S:
+      RECSYS_VIEWER_CACHE_TTL_S:
+      RECSYS_LOG_LEVEL:
+    ports:
+      - "${RECSYS_HOST_PORT:-8000}:8000"
+    networks:
+      - docker
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s  # NormContext warm-up (window_posts) is a few real seconds, not instant
+
+  # One-shot: `docker compose -f deploy/compose.recsys.yml run --rm recsys-trust-batch`.
+  # Never started by `up` on its own — no `restart:` policy, and deliberately
+  # not part of the default service set an operator gets by running `up` with
+  # no arguments (Compose still starts it under plain `up` unless a profile
+  # gates it out; add `profiles: ["batch"]` here if the stack this joins
+  # already uses profiles the way `frontend/stack/*.yml` does, and gate
+  # accordingly — left unset here so this file works standalone too).
+  recsys-trust-batch:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: recsys:${RECSYS_IMAGE_TAG:-latest}
+    command: ["python", "-m", "recsys.jobs.trust_batch"]
+    environment:
+      HAFSQL_HOST:
+      HAFSQL_PORT:
+      HAFSQL_DB:
+      HAFSQL_USER:
+      HAFSQL_PASSWORD:
+      RECSYS_DATABASE_URL:
+      RECSYS_LOG_LEVEL:
+    networks:
+      - docker
+
+networks:
+  # No `external: true`: the frontend's own root `compose.yml` declares this
+  # same network name and every sibling `compose.*.yml` (auth/blog/wallet/
+  # caddy/stack) just references `- docker` and relies on that root
+  # declaration when included — this file matches that convention so it
+  # merges cleanly if included the same way, while still being runnable
+  # fully standalone (`docker compose -f deploy/compose.recsys.yml up`
+  # creates the network fresh when there is no root file to supply it).
+  docker:
+

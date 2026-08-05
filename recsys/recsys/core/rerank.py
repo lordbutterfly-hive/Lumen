@@ -50,10 +50,21 @@ def _topic_key(post: Post) -> str:
     return post.community or (post.tags[0] if post.tags else "")
 
 
+def _earned(candidate: ScoredCandidate) -> float:
+    """The part of ``final`` the candidate EARNED — everything except the
+    additive declared-interest offset (:attr:`ScoreBreakdown.interest_bonus`).
+
+    Never negative: ``final = (1 - W)*earned_score + W*interest_pct`` and
+    ``interest_bonus = W*interest_pct``, so the difference is ``(1 - W)`` times
+    a non-negative score. ``max(..., 0.0)`` is float-noise defence, not logic.
+    """
+    return max(candidate.score.final - candidate.score.interest_bonus, 0.0)
+
+
 def _topic_affinities(scored: list[ScoredCandidate]) -> dict[str, float]:
     """Per-topic-key viewer affinity in ``[0, 1]``, inferred from the pool.
 
-    Affinity = the key's share of the pool's TOTAL final-score mass (all
+    Affinity = the key's share of the pool's TOTAL EARNED-score mass (all
     affinities sum to 1). Volume *is* signal here: the eligible pool is built
     from the viewer's own follows, subscriptions and vouched out-of-network
     reach, and the scores carry the per-viewer CF term, so a topic the viewer
@@ -66,11 +77,25 @@ def _topic_affinities(scored: list[ScoredCandidate]) -> dict[str, float]:
     carries the whole pool; co-equal interests split the share and each keeps
     real alternation pressure. A degenerate all-zero-score pool yields
     all-zero affinities (flat penalty), never a division by zero.
+
+    ★ EARNED mass, NOT ``final`` (2026-08-05). This summed ``score.final``,
+    which since B-02 carries the viewer's DECLARED-interest offset. That closed
+    a feedback loop: the declaration raised the topic's score mass, the raised
+    mass was read back as "the viewer has affinity for this topic", and
+    :func:`_attenuate` used that affinity to switch OFF the very topic penalty
+    that exists to bound how much of the feed one topic takes. The declaration
+    was counted twice — once to lift the scores, once again to remove the
+    brake. Measured over 32 worlds at the shipped ``interest_match = 0.4``
+    (with the penalty-scope fix in :func:`_effective_score` also in place):
+    summing earned mass instead moves topic entropy @20 from 0.485 -> 0.590
+    bits and own-topic share from 0.910 -> 0.889, with no quality column worse.
+    The inference stays about what the POOL contains, which is the only thing
+    this function claims to measure.
     """
     mass: dict[str, float] = {}
     for candidate in scored:
         key = _topic_key(candidate.post)
-        mass[key] = mass.get(key, 0.0) + max(candidate.score.final, 0.0)
+        mass[key] = mass.get(key, 0.0) + _earned(candidate)
     total = sum(mass.values())
     if total <= 0.0:
         return dict.fromkeys(mass, 0.0)
@@ -78,12 +103,36 @@ def _topic_affinities(scored: list[ScoredCandidate]) -> dict[str, float]:
 
 
 def _page_quota(placed: int, page_size: int, per_page: int) -> int:
-    """How many unchosen candidates are allowed by the time ``placed`` slots are
-    filled. Expressed as a running prefix quota rather than a per-block reset so
-    the bound holds at EVERY depth, not just on page boundaries — a viewer who
-    stops scrolling at 12 gets the same protection as one who reaches 20."""
+    """How many candidates from a per-page-counted budget are allowed by the
+    time ``placed`` slots are filled. Expressed as a running prefix quota
+    rather than a per-block reset so the bound holds at EVERY depth, not just
+    on page boundaries — a viewer who stops scrolling at 12 gets the same
+    protection as one who reaches 20. Used for the emerging-author budget
+    (B-04, ``DiversityConfig.emerging_per_page``) — the unchosen-lane budget
+    itself moved to :func:`_quota` (B-03)."""
     pages = placed // page_size + 1
     return pages * per_page
+
+
+def _quota(placed: int, page_size: int, share: float, minimum: int) -> int:
+    """★ B-03 (2026-08-04). How many UNCHOSEN candidates are allowed by the
+    time ``placed`` slots are filled — the share-based replacement for the old
+    flat ``unchosen_max_per_page`` count.
+
+    ``max(minimum * pages, floor(share * (placed + 1)))``: a per-page FLOOR
+    (running-prefix, like :func:`_page_quota`, so discovery never reaches
+    exactly zero mid-page) combined with a running SHARE of everything placed
+    so far (continuous in ``placed``, not stepped at page boundaries, so the
+    bound tightens smoothly rather than jumping at every 20th slot).
+
+    ``share = 1.0`` is an EXACT no-op: ``floor(1.0 * (placed + 1)) ==
+    placed + 1``, which the caller's ``unchosen_placed <= placed`` invariant
+    can never reach or exceed, so the quota never binds regardless of
+    ``minimum`` — pinned by
+    ``test_unchosen_share_of_one_is_an_exact_no_op``.
+    """
+    pages = placed // page_size + 1
+    return max(minimum * pages, int(share * (placed + 1)))
 
 
 def _attenuate(value: float, affinity: float) -> float:
@@ -104,19 +153,146 @@ def _effective_score(
     topic_decay: float,
     topic_floor: float,
     topic_affinity: float,
+    unchosen_pen: float = 1.0,
 ) -> float:
-    """Diversity-discounted score: author penalty times the interest-aware
-    topic penalty (§3.4). The author penalty is never affinity-scaled."""
+    """Diversity-discounted score (§3.4).
+
+        effective = (earned * author_pen * unchosen_pen + interest_bonus) * topic_pen
+
+    The author penalty is never affinity-scaled; the topic penalty is
+    (:func:`_attenuate`). ``unchosen_pen`` is the caller's already-attenuated
+    unchosen-lane factor, ``1.0`` for a viewer-chosen candidate.
+
+    ★ WHICH PART OF THE SCORE EACH PENALTY DISCOUNTS (2026-08-05). This used to
+    be ``final * author_pen * topic_pen``, with the caller multiplying the
+    unchosen factor on afterwards — every penalty applied to the WHOLE score.
+    That was wrong for two of the three, and it was expensive.
+
+    THE DEFECT. These penalties are MULTIPLICATIVE, i.e. they act on the score's
+    RATIO scale, so their real strength depends on where the score's zero sits —
+    and ``ScoreWeights.interest_match`` (B-02) moved it. An on-interest post
+    carries a flat ``+0.32`` offset, and in a served feed ~89% of slots are
+    on-interest, so within that block every score is lifted into a high, narrow
+    band while the quality-driven spread is simultaneously compressed. A fixed
+    factor like the second-post author penalty (``0.625``) then outweighs a
+    quality gap roughly TWICE as large as it did before B-02: measured in
+    quality-percentile units the author penalty's displacement threshold went
+    from ~0.33 to ~0.66. Nobody chose that; it is an accident of one term's
+    offset leaking into another term's strength.
+
+    MEASURED CONSEQUENCE (32 worlds x 24 viewers, prior ON vs OFF, own-stratum
+    capture at depth 20 — `measurement-harness/q10_prior_robustness.py`'s
+    ``stack_capture_g`` is exactly this quantity): the author-pooled quality
+    prior's contribution fell from +0.0102 to +0.0049 and went NEGATIVE on 5 of
+    32 worlds. With the author penalty switched off entirely the prior is worth
+    +0.0196 at ``interest_match = 0.4`` versus +0.0200 at 0.0 — i.e. the prior
+    was never redundant and was never "front-run" by the interest term; it was
+    being MASKED by a penalty that this term had silently doubled. The
+    interference is specific: with the author penalty off, ``interest_match``
+    costs own-stratum capture 0.9188 -> 0.9191 (nothing at all).
+
+    THE RULE. A diversity penalty discounts what a candidate EARNED — its
+    engagement, its author's standing, the lane it arrived on. It must not
+    discount the viewer's DECLARED-interest offset, because:
+
+    * that offset is a per-TOPIC constant, identical for every post and every
+      author in the topic, so discounting it on an AUTHOR repeat makes the
+      author penalty double as a topic penalty — a job the topic penalty
+      already does, at a combined strength nobody set; and
+    * the UNCHOSEN-lane penalty has the same problem and already carries its
+      own explicit topic channel (it is ``_attenuate``-d by topic affinity), so
+      letting it also scale the topic offset is the same double-count twice.
+
+    THE TOPIC PENALTY KEEPS THE WHOLE SCORE, deliberately — including the
+    offset. It is precisely the mechanism that bounds how much of a feed one
+    topic may take, and the declared-interest offset is the topic signal, so
+    exempting it there would be removing the brake from the thing it brakes.
+    That is not a guess: exempting the offset from the topic penalty too was
+    measured and collapses topic entropy @20 from 0.590 to 0.159 bits and
+    pushes own-topic share to 0.97. Same reason the split is written as
+    ``(earned*pen_a*pen_u + bonus) * pen_t`` and not as one product.
+
+    EXACT NO-OP WHEN THE CHANNEL IS OFF: ``interest_bonus`` is 0.0 at
+    ``interest_match = 0.0`` or for a viewer with no declared interests, and
+    the expression collapses to the old ``final * pen_a * pen_u * pen_t``.
+    """
+    bonus = candidate.score.interest_bonus
+    earned = _earned(candidate)
     return (
-        candidate.score.final
-        * _pen(author_placed, author_decay, author_floor)
-        * _pen(
-            topic_placed,
-            _attenuate(topic_decay, topic_affinity),
-            _attenuate(topic_floor, topic_affinity),
-        )
+        earned * _pen(author_placed, author_decay, author_floor) * unchosen_pen + bonus
+    ) * _pen(
+        topic_placed,
+        _attenuate(topic_decay, topic_affinity),
+        _attenuate(topic_floor, topic_affinity),
     )
 
+
+def _best_effective(
+    remaining: list[ScoredCandidate],
+    *,
+    chosen: bool,
+    author_counts: dict[str, int],
+    topic_counts: dict[str, int],
+    author_decay: float,
+    author_floor: float,
+    topic_decay: float,
+    topic_floor: float,
+    topic_affinity_strength: float,
+    affinities: dict[str, float],
+    unchosen_decay: float,
+    unchosen_floor: float,
+    unchosen_placed: int,
+) -> float | None:
+    """★ B-03's relevance-guard comparison point. The strongest
+    diversity-discounted effective score among ``remaining`` on one side of
+    the viewer-chosen/unchosen split, or ``None`` when no candidate on that
+    side remains.
+
+    Unchosen candidates additionally carry the topic-attenuated unchosen-lane
+    penalty (same as the main selection loop) — the guard must compare what
+    each side would ACTUALLY score if picked right now, not a pre-penalty
+    number. Chosen candidates never carry that penalty (it does not apply to
+    them). This is one extra O(n) pass over ``remaining``, run only when the
+    share quota is under pressure — the selection loop below is already
+    O(n^2), so this adds no complexity class.
+
+    ★ The unchosen factor is now PASSED INTO :func:`_effective_score` rather
+    than multiplied onto its result (2026-08-05). It has to be: that penalty
+    applies to the earned part only, and once the earned/declared-interest
+    split lives inside ``_effective_score`` there is no way to apply it
+    correctly from outside. Both call sites had to move together or the guard
+    would compare a differently-computed number than the selection loop —
+    which is exactly the class of drift this guard exists to prevent.
+    """
+    best: float | None = None
+    for candidate in remaining:
+        if candidate.source.is_viewer_chosen != chosen:
+            continue
+        author_placed = author_counts.get(candidate.post.author, 0)
+        topic_key = _topic_key(candidate.post)
+        topic_placed = topic_counts.get(topic_key, 0)
+        unchosen_pen = (
+            1.0
+            if chosen
+            else _attenuate(
+                _pen(unchosen_placed, unchosen_decay, unchosen_floor),
+                affinities.get(topic_key, 0.0),
+            )
+        )
+        effective = _effective_score(
+            candidate,
+            author_placed,
+            topic_placed,
+            author_decay,
+            author_floor,
+            topic_decay,
+            topic_floor,
+            topic_affinity_strength * affinities.get(topic_key, 0.0),
+            unchosen_pen,
+        )
+        if best is None or effective > best:
+            best = effective
+    return best
 
 
 def _tie_break(seed: str, post_key: str) -> str:
@@ -142,7 +318,11 @@ def diversity_rerank(
     topic_affinity_strength: float,
     unchosen_decay: float = 1.0,
     unchosen_floor: float = 1.0,
-    unchosen_per_page: int = 0,
+    unchosen_share: float = 1.0,
+    unchosen_min_per_page: int = 0,
+    unchosen_displacement_ratio: float = 0.0,
+    emerging_authors: frozenset[str] = frozenset(),
+    emerging_per_page: int = 0,
     page_size: int = 20,
     tie_break_seed: str = "",
 ) -> list[ScoredCandidate]:
@@ -160,6 +340,21 @@ def diversity_rerank(
     — so the feed diversifies *within* the viewer's interest profile instead
     of interleaving every topic equally. ``topic_affinity_strength = 0.0``
     restores the interest-blind behavior. Does not mutate ``scored``.
+
+    ``unchosen_share``/``unchosen_min_per_page``/``unchosen_displacement_ratio``
+    (B-03, 2026-08-04) replace the old flat ``unchosen_per_page`` count with a
+    share-based running quota plus a relevance guard — see :func:`_quota` and
+    :data:`recsys.config.DiversityConfig.unchosen_max_share` for the full
+    rationale. Defaults (``share=1.0``, ``min_per_page=0``,
+    ``displacement_ratio=0.0``) reproduce the old ``unchosen_per_page=0``
+    ("off") behaviour exactly: the quota never binds.
+
+    ``emerging_authors``/``emerging_per_page`` (B-04) give a small, SEPARATE
+    budget — outside the unchosen share above — to candidates whose author is
+    in the set and whose source is not ``IN_NETWORK``: see
+    :data:`recsys.config.DiversityConfig.emerging_per_page`. An emerging
+    candidate that has already used this page's emerging budget falls back to
+    the ordinary unchosen share, never a second free pass.
     """
     affinities = _topic_affinities(scored)
     # ★ Hoisted out of the selection loop (2026-08-01). `_tie_break` is a blake2b
@@ -172,14 +367,22 @@ def diversity_rerank(
     author_counts: dict[str, int] = {}
     topic_counts: dict[str, int] = {}
     unchosen_placed = 0
+    emerging_placed = 0
     result: list[ScoredCandidate] = []
     while remaining:
-        # ★ HARD PER-PAGE CAP on lanes the viewer never asked for (2026-08-04).
-        # The geometric penalty below was not enough on its own: measured, the
-        # OON_ENGAGED lane still took 56% of the first page while the viewer's
-        # own follows got 38%, and its share of the feed was LESS on-topic (33%)
-        # than its share of the pool (49%) — the ranker was picking that lane's
-        # worst members. A penalty nudges; this bounds.
+        # ★ SHARE-BASED QUOTA on lanes the viewer never asked for, PLUS a
+        # relevance guard (B-03, 2026-08-04 — replaces the old flat
+        # `unchosen_max_per_page` count). The geometric penalty below was not
+        # enough on its own: measured, the OON_ENGAGED lane still took 56% of
+        # the first page while the viewer's own follows got 38%, and its share
+        # of the feed was LESS on-topic (33%) than its share of the pool
+        # (49%) — the ranker was picking that lane's worst members. A penalty
+        # nudges; a quota bounds. But a FLAT COUNT could not serve both the
+        # reader (who wants ~1/page) and a genuine newcomer (who needs
+        # >=5/page) at once, and its only supply condition —
+        # `any(chosen for c in remaining)` — evicted a strong unchosen
+        # candidate for an ARBITRARILY WEAK chosen one merely because one
+        # existed, with no score comparison at all.
         #
         # The lane is NOT removed, deliberately. It is the second-degree
         # discovery channel ("what the people you follow are engaging"), it is
@@ -190,29 +393,70 @@ def diversity_rerank(
         # SUPPLY-SAFE: the cap is only enforced while a viewer-chosen candidate
         # is actually available. A viewer whose own network is empty still gets
         # a full feed rather than a short one.
-        capped = (
-            unchosen_per_page > 0
-            and (unchosen_placed >= _page_quota(len(result), page_size, unchosen_per_page))
-            and any(c.source.is_viewer_chosen for c in remaining)
+        quota = _quota(len(result), page_size, unchosen_share, unchosen_min_per_page)
+        quota_pressure = unchosen_placed >= quota and any(
+            c.source.is_viewer_chosen for c in remaining
         )
+        capped = False
+        if quota_pressure:
+            if unchosen_displacement_ratio > 0.0:
+                # ★ THE RELEVANCE GUARD. Only actually restrict the pool to
+                # chosen-only sources when a COMPARABLY STRONG chosen
+                # candidate exists to take the slot — otherwise a much
+                # stronger unchosen post still wins, exactly as the pre-B-03
+                # geometric penalty already promises for the un-capped case.
+                best_chosen = _best_effective(
+                    remaining, chosen=True,
+                    author_counts=author_counts, topic_counts=topic_counts,
+                    author_decay=author_decay, author_floor=author_floor,
+                    topic_decay=topic_decay, topic_floor=topic_floor,
+                    topic_affinity_strength=topic_affinity_strength,
+                    affinities=affinities,
+                    unchosen_decay=unchosen_decay, unchosen_floor=unchosen_floor,
+                    unchosen_placed=unchosen_placed,
+                )
+                best_unchosen = _best_effective(
+                    remaining, chosen=False,
+                    author_counts=author_counts, topic_counts=topic_counts,
+                    author_decay=author_decay, author_floor=author_floor,
+                    topic_decay=topic_decay, topic_floor=topic_floor,
+                    topic_affinity_strength=topic_affinity_strength,
+                    affinities=affinities,
+                    unchosen_decay=unchosen_decay, unchosen_floor=unchosen_floor,
+                    unchosen_placed=unchosen_placed,
+                )
+                capped = best_unchosen is not None and (
+                    best_chosen is not None
+                    and best_chosen >= unchosen_displacement_ratio * best_unchosen
+                )
+            else:
+                # Guard disabled (ratio <= 0): every candidate score is >= 0.0,
+                # so `best_chosen >= 0.0 * best_unchosen` is always true once a
+                # chosen candidate exists — this reproduces the pre-guard, B-03
+                # hard-quota-only behaviour exactly.
+                capped = True
+        # ★ THE EMERGING BUDGET (B-04, 2026-08-04). A SEPARATE, small budget —
+        # outside the share above, never eating into it — for candidates whose
+        # author has not yet earned real standing (absent from `graph_creds`,
+        # or at/below `min_vouched_score` — see
+        # :func:`recsys.pipeline._score`'s `emerging_authors`). Computed once
+        # per outer iteration, same as `quota`/`capped` above: only one
+        # candidate is popped per iteration, so it cannot go stale mid-scan.
+        emerging_quota = _page_quota(len(result), page_size, emerging_per_page)
+        emerging_room = emerging_placed < emerging_quota
         best_index = 0
         best_rank: tuple[float, str] | None = None
         for index, candidate in enumerate(remaining):
-            if capped and not candidate.source.is_viewer_chosen:
+            emerging_exempt = (
+                emerging_room
+                and not candidate.source.is_in_network
+                and candidate.post.author in emerging_authors
+            )
+            if capped and not candidate.source.is_viewer_chosen and not emerging_exempt:
                 continue
             author_placed = author_counts.get(candidate.post.author, 0)
             topic_key = _topic_key(candidate.post)
             topic_placed = topic_counts.get(topic_key, 0)
-            effective = _effective_score(
-                candidate,
-                author_placed,
-                topic_placed,
-                author_decay,
-                author_floor,
-                topic_decay,
-                topic_floor,
-                topic_affinity_strength * affinities.get(topic_key, 0.0),
-            )
             # ★ UNCHOSEN-LANE PENALTY (2026-08-03). Same geometric shape as the
             # author and topic penalties, counted over every candidate the
             # viewer did not ask for (see CandidateSource.is_viewer_chosen for
@@ -248,11 +492,31 @@ def diversity_rerank(
             # they show no affinity for, ~off on unchosen content from the topic
             # they actually read. Discovery inside your interests stays open;
             # spillover from everywhere else is what gets bounded.
-            if not candidate.source.is_viewer_chosen:
-                effective *= _attenuate(
+            #
+            # ★ It is now PASSED INTO `_effective_score` (2026-08-05) instead of
+            # multiplied onto its result, because — like the author penalty —
+            # it applies to the EARNED part of the score only. See that
+            # function's docstring for the measurement. `1.0` for a
+            # viewer-chosen candidate is the exact no-op it always was.
+            unchosen_pen = (
+                1.0
+                if candidate.source.is_viewer_chosen
+                else _attenuate(
                     _pen(unchosen_placed, unchosen_decay, unchosen_floor),
                     affinities.get(topic_key, 0.0),
                 )
+            )
+            effective = _effective_score(
+                candidate,
+                author_placed,
+                topic_placed,
+                author_decay,
+                author_floor,
+                topic_decay,
+                topic_floor,
+                topic_affinity_strength * affinities.get(topic_key, 0.0),
+                unchosen_pen,
+            )
             # ★ PER-VIEWER TIE-BREAK (2026-08-01). This was `candidate.post.key`
             # — i.e. ties resolved ALPHABETICALLY by @author/permlink, globally
             # and identically for every viewer. Determinism is right; a global
@@ -276,7 +540,22 @@ def diversity_rerank(
         topic_key = _topic_key(chosen.post)
         topic_counts[topic_key] = topic_counts.get(topic_key, 0) + 1
         if not chosen.source.is_viewer_chosen:
-            unchosen_placed += 1
+            # ★ B-04: an emerging placement counts against `emerging_placed`,
+            # NOT `unchosen_placed` — it is a budget OUTSIDE the share, so it
+            # must never eat into the reader's general protection. Recomputed
+            # from `chosen` directly (not carried from the scan loop) so this
+            # stays correct regardless of which candidate the argmax actually
+            # picked; `emerging_room` is still valid — nothing in this
+            # iteration has changed `emerging_placed` yet.
+            chosen_is_emerging = (
+                emerging_room
+                and not chosen.source.is_in_network
+                and chosen.post.author in emerging_authors
+            )
+            if chosen_is_emerging:
+                emerging_placed += 1
+            else:
+                unchosen_placed += 1
         result.append(chosen)
     return result
 
@@ -345,9 +624,26 @@ def rerank(
     diversity: DiversityConfig,
     tie_break_seed: str = "",
     explore_bucket: int = 0,
+    *,
+    emerging_authors: frozenset[str] = frozenset(),
 ) -> list[ScoredCandidate]:
     """Author + interest-aware topic diversity re-rank then truncate to
-    ``diversity.top_k`` (§3.4)."""
+    ``diversity.top_k`` (§3.4).
+
+    ``emerging_authors`` (B-04) is the caller-computed set of authors who
+    qualify for the emerging budget — see
+    :func:`recsys.pipeline._score`, which builds it from ``graph_creds``, and
+    :data:`recsys.config.DiversityConfig.emerging_per_page` for the field this
+    threads.
+    """
+    # ★ B-03 (2026-08-04): `unchosen_max_per_page` is now a DEPRECATED ON/OFF
+    # TOGGLE for the share-based quota below, not the quota itself — see that
+    # field's own docstring for why it survives at all (BUILD-ADJUDICATION
+    # R5: the harness constructs it by name). `<= 0` disables the whole
+    # mechanism (share + floor + guard), reproducing its old "0 = off"
+    # meaning exactly; any positive value enables it, sized by the three
+    # fields it no longer itself controls.
+    quota_enabled = diversity.unchosen_max_per_page > 0
     diversified = diversity_rerank(
         scored,
         author_decay=diversity.author_decay,
@@ -357,7 +653,13 @@ def rerank(
         topic_affinity_strength=diversity.topic_affinity_strength,
         unchosen_decay=diversity.unchosen_source_decay,
         unchosen_floor=diversity.unchosen_source_floor,
-        unchosen_per_page=diversity.unchosen_max_per_page,
+        unchosen_share=diversity.unchosen_max_share if quota_enabled else 1.0,
+        unchosen_min_per_page=diversity.unchosen_min_per_page if quota_enabled else 0,
+        unchosen_displacement_ratio=(
+            diversity.unchosen_displacement_ratio if quota_enabled else 0.0
+        ),
+        emerging_authors=emerging_authors,
+        emerging_per_page=diversity.emerging_per_page,
         page_size=diversity.explore_window,
         tie_break_seed=tie_break_seed,
     )

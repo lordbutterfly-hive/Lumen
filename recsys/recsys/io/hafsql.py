@@ -2,14 +2,75 @@
 database. Importing this module must never require ``psycopg``; the driver is
 imported lazily inside :meth:`HafsqlClient._connect` so the pure scoring core
 stays importable without the ``io`` extra installed. Live queries run against
-the public mirror ``hafsql-sql.mahdiyari.info`` and are exercised later.
+the public mirror ``hafsql-sql.mahdiyari.info`` and were verified 2026-08-04
+against the real mirror (see ``tests/test_hafsql_live.py``).
+
+★ A15 — a SECOND, optional connection. ``network_suppression`` (§8.7) is
+recsys's own table (``recsys/db/schema.sql``); it lives in recsys's own
+Postgres, not the read-only HAFSQL mirror, and the mirror creds cannot create
+it or cross-database-join into it (no ``dblink``/FDW available to
+``hafsql_public``). Per BUILD-ADJUDICATION-2026-08-04 ruling R9 / A15 option 1,
+``HafsqlClient`` therefore holds a second, OPTIONAL DSN
+(``RECSYS_DATABASE_URL``, or the ``recsys_dsn`` constructor kwarg) for the
+recsys DB. ``suppressed_keys`` queries it directly; ``author_engagement``'s
+flooding guard (H05) does a SECOND ROUND TRIP — fetch this window's suppressed
+keys from the recsys DB, then anti-join them into the mirror query via a bound
+``unnest`` array, since a single cross-database SQL join is not possible. If
+the DSN is absent (unset), suppression degrades to "nothing suppressed" with a
+loud, one-time WARNING — never a crash. ``recsys/config.py`` is owned by
+another workstream this phase, so there is no ``RecsysDbConfig`` yet; when one
+lands, thread its DSN through the ``recsys_dsn`` kwarg here rather than
+changing this module again.
+
+★ A5 — ``window_posts``. The missing NormContext sample source: no gateway
+method previously returned "all posts in a window" without an
+engagement-ordering bias (``popular_posts`` is ``ORDER BY engagement DESC``,
+which would push every real score toward the bottom of the percentile range —
+see ``_SQL_WINDOW_POSTS``).
+
+★ A11 — the author-pooled engagement prior (``_SQL_AUTHOR_ENGAGEMENT``) now
+matches and groups on ``_identity(c)`` (the ranked identity — the lite writer
+where present, else the chain author) instead of the bare chain ``c.author``,
+so a Lumen Lite author's prior is no longer structurally empty. The internal
+exclusion anti-join (``e.author = c.author``) and the vote/comment/reblog join
+keys are UNCHANGED — those correctly stay on the chain identity, since votes
+are only ever recorded against the on-chain publisher account.
+
+★ A12 — ``second_degree_engagers``/``suppressed_keys`` accept an optional
+``chain_authors`` map (``Post.key -> chain_author``, build with
+``chain_author_map``) so a lite post's RANKED key resolves to the CHAIN
+identity for the query while the result stays keyed on the ranked identity —
+see ``_resolve_post_keys``.
+
+★ A13 — the lite publisher account list, absent a ``LiteConfig.from_env`` in
+``recsys/config.py`` (owned by another workstream this phase — see the A15 DSN
+note above for the identical situation), is read straight from the
+environment as a fallback when ``HafsqlClient`` is constructed with no
+explicit ``lite=`` — see ``_lite_config_from_env``.
+
+★★★ PERF — ``author_engagement`` (``_SQL_AUTHOR_ENGAGEMENT``) is
+``pipeline._author_priors``'s hot path (every request, 80% of the composite
+score). Live-measured to time out (>15s, up to 58s containerised) against a
+real well-followed account. Rewritten 2026-08-04 to remove two proven-live
+cost drivers (a non-sargable row filter forcing a network-wide scan, and an
+unnecessary ``hafd.blocks`` join hidden inside two HAFSQL views) — see the
+long comment directly above ``_SQL_AUTHOR_ENGAGEMENT`` for the EXPLAIN
+findings, before/after numbers, and the residual STRUCTURAL finding (a
+high-post-volume candidate set still exceeds the timeout after the rewrite;
+this remains a request-path cache/architecture question for whoever owns
+``recsys/pipeline.py``, not a query-shape one).
 """
 
 from __future__ import annotations
 
+import contextlib
+import logging
 import math
-from collections.abc import Mapping
-from datetime import datetime
+import os
+import threading
+import time
+from collections.abc import Callable, Iterable, Mapping
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from recsys.config import HafsqlConfig, LiteConfig
@@ -19,6 +80,103 @@ from recsys.core.vote_signal import AttributedPost, VoterTrust
 
 if TYPE_CHECKING:
     import psycopg
+
+logger = logging.getLogger("recsys.io.hafsql")
+
+# A15: the recsys DB's own DSN. Absent by default (no ``RecsysDbConfig`` exists
+# yet in ``recsys/config.py`` — see the module docstring); read straight from
+# the environment so this module needs no change once that config lands.
+_RECSYS_DSN_ENV = "RECSYS_DATABASE_URL"
+
+# A13: the lite publisher account list, read the same way as _RECSYS_DSN_ENV
+# above (no ``LiteConfig.from_env`` exists yet in ``recsys/config.py`` — see
+# the module docstring). Two sources, both consulted:
+#
+#   1. ``LITE_PUBLISHER_ACCOUNTS`` — a comma-separated list, for an operator
+#      who wants to name the account(s) explicitly on the recsys side.
+#   2. The FRONTEND's own env vars (``frontend/apps/blog/lib/lite/config.ts``):
+#      ``LITE_FRONTEND_ACCOUNT_{MAINNET,MIRRORNET,TESTNET}`` — the single
+#      Hive account that is the on-chain author for every proxy post, one per
+#      network. Reading the SAME names here (rather than inventing a
+#      recsys-only one) is the whole point of A13: one source of truth, no
+#      value to keep in sync by hand.
+#
+# This process has no network selector of its own — ``HafsqlConfig`` talks to
+# exactly one HAFSQL mirror — so all three frontend vars are read and every
+# non-empty one is folded in; ``publisher_accounts`` is a SET, so a deploy
+# that exports more than one network's var by accident gains an inert extra
+# trust entry, never loses the one it needed.
+_LITE_PUBLISHER_ACCOUNTS_ENV = "LITE_PUBLISHER_ACCOUNTS"
+_LITE_FRONTEND_ACCOUNT_ENVS: tuple[str, ...] = (
+    "LITE_FRONTEND_ACCOUNT_MAINNET",
+    "LITE_FRONTEND_ACCOUNT_MIRRORNET",
+    "LITE_FRONTEND_ACCOUNT_TESTNET",
+)
+
+
+def _lite_config_from_env() -> LiteConfig:
+    """A13: build a :class:`LiteConfig` from the environment — see the module
+    docstring and the constants above. Absent both env sources -> the empty
+    frozenset -> lite OFF, identical to ``LiteConfig()``'s own default (pinned
+    by ``test_lite_sourcing_is_OFF_until_publishers_are_named``); this
+    function is a FALLBACK consulted only when ``HafsqlClient`` is
+    constructed with no explicit ``lite=`` argument (see ``__init__`` below),
+    never a change to that default itself."""
+    accounts: set[str] = set()
+    csv = os.environ.get(_LITE_PUBLISHER_ACCOUNTS_ENV, "")
+    accounts.update(name.strip() for name in csv.split(",") if name.strip())
+    for env_name in _LITE_FRONTEND_ACCOUNT_ENVS:
+        value = os.environ.get(env_name, "").strip()
+        if value:
+            accounts.add(value)
+    return LiteConfig(publisher_accounts=frozenset(accounts))
+
+# A4: connection-pool / operational-hardening tunables. Kept as env-read
+# defaults (not ``HafsqlConfig`` fields — that file is owned by another
+# workstream this phase) so ``HafsqlClient`` can be constructed with sane
+# behaviour today and re-wired to real config fields later with no interface
+# change; every one is also an explicit constructor kwarg.
+_ENV_DEFAULTS: dict[str, str] = {
+    "HAFSQL_POOL_MIN": "1",
+    "HAFSQL_POOL_MAX": "5",
+    "HAFSQL_STATEMENT_TIMEOUT_MS": "15000",
+    "HAFSQL_MAX_RETRIES": "3",
+    "HAFSQL_RETRY_BACKOFF_S": "0.2",
+    "HAFSQL_BREAKER_THRESHOLD": "5",
+    "HAFSQL_BREAKER_COOLDOWN_S": "30",
+    "RECSYS_DB_POOL_MIN": "1",
+    "RECSYS_DB_POOL_MAX": "3",
+    "HAFSQL_POPULAR_CACHE_TTL_S": "300",
+}
+
+
+def _env_int(name: str) -> int:
+    return int(os.environ.get(name, _ENV_DEFAULTS[name]))
+
+
+def _env_float(name: str) -> float:
+    return float(os.environ.get(name, _ENV_DEFAULTS[name]))
+
+
+class HafsqlUnavailableError(RuntimeError):
+    """Raised when the circuit breaker (ruling R7) is open: too many
+    consecutive CONNECTION failures in a row. Fails the request loudly and
+    immediately rather than hanging through another round of retries against a
+    database that is provably down."""
+
+
+def _as_aware(ts: datetime) -> datetime:
+    """HAFSQL break #8: several timestamp columns
+    (``operation_effective_comment_vote_view.timestamp``,
+    ``reblogs.created_at``) are Postgres ``timestamp WITHOUT time zone`` and
+    come back from psycopg as naive ``datetime``s even though the session
+    timezone is UTC (verified live 2026-08-04). Every consumer downstream
+    compares against a tz-aware ``now`` (``pipeline.py:293``, ``graph_cred.py:
+    125``, ``ring.py:58``, ``als.py:127``) — a naive/aware subtraction raises
+    ``TypeError``. Coerce once, at the boundary, rather than trusting every
+    caller to remember. Takes a required (non-``None``) value; callers that
+    may see ``None`` (no interaction of that kind) check it themselves."""
+    return ts if ts.tzinfo is not None else ts.replace(tzinfo=UTC)
 
 # Reputation display formula (Appendix B: "the reputation-int->display constant
 # 9*log10(raw)-56"; CombFlow documents a past bug from getting this wrong).
@@ -82,28 +240,16 @@ ORDER BY created DESC
 LIMIT %(limit)s
 """
 
-# NOT widened for lite: a comment inherits its category from the container
-# root, so every lite post sits in category `lumen` and can never match a
-# `hive-*` community. Lite reaches readers via the tag, in-network and engaged
-# lanes instead. Property of the container model, not an oversight.
-_SQL_COMMUNITY_POSTS = """
-SELECT author, permlink, category, created, tags, NULL::text
-FROM hafsql.comments
-WHERE parent_author = ''
-  AND deleted = false
-  AND category = ANY(%(communities)s)
-  AND created >= %(since)s
-ORDER BY created DESC
-LIMIT %(limit)s
-"""
-
 _SQL_TAG_POSTS = f"""
 SELECT author, permlink, category, created, tags,
        json_metadata->>'lumen_user_id'
 FROM hafsql.comments
 WHERE {_top_level_or_lite()}
   AND deleted = false
-  AND tags && %(tags)s
+  -- break #3 (verified live 2026-08-04): `hafsql.comments.tags` is `jsonb`,
+  -- not `text[]` — `&&` has no jsonb overload. `?|` (jsonb "any of these keys
+  -- exist") is the jsonb equivalent of array overlap for a flat string array.
+  AND tags ?| %(tags)s::text[]
   AND created >= %(since)s
 ORDER BY created DESC
 LIMIT %(limit)s
@@ -203,11 +349,14 @@ WHERE account_name = ANY(%(authors)s)
 # ---------------------------------------------------------------------------
 
 _SQL_REPLY_EDGES = """
-SELECT author, parent_author, COUNT(*), MAX(created)
+SELECT author, parent_author, COUNT(*), MAX(timestamp)
 FROM hafsql.operation_comment_view
 WHERE parent_author <> ''
   AND author <> parent_author
-  AND created >= %(since)s
+  -- break #6 (verified live 2026-08-04, kills the whole weekly trust batch):
+  -- `hafsql.operation_comment_view` has no `created` column at all — it is
+  -- `timestamp` (`timestamp WITHOUT time zone`; naive, hence _as_aware below).
+  AND timestamp >= %(since)s
 GROUP BY author, parent_author
 """
 
@@ -228,22 +377,15 @@ WHERE account_name <> author
 GROUP BY account_name, author
 """
 
-# Stake-lineage (§8.4): accounts directly delegation-tied to `author`, plus
-# "common funding source" siblings — other accounts delegated-to by the same
-# delegators that fund `author` (catches one-whale-many-puppets).
-_SQL_STAKE_LINEAGE = """
-WITH direct_delegators AS (
-    SELECT delegator FROM hafsql.delegations WHERE delegatee = %(author)s
-)
-SELECT delegator AS account FROM direct_delegators
-UNION
-SELECT delegatee AS account FROM hafsql.delegations WHERE delegator = %(author)s
-UNION
-SELECT delegatee AS account
-FROM hafsql.delegations
-WHERE delegator IN (SELECT delegator FROM direct_delegators)
-  AND delegatee <> %(author)s
-"""
+# ★★★ _SQL_STAKE_LINEAGE DELETED 2026-08-05 (B2). It read `hafsql.delegations`
+# in three UNION branches: inbound delegators, outbound delegatees, and
+# "siblings" (everyone else funded by anyone who funded the author). Two of the
+# three were writable by any stranger with RC, because Hive delegation requires
+# no consent from the delegatee — and the sibling branch grouped whole honest
+# onboarding cohorts together with no attacker present. See
+# `recsys.pipeline._lineage_for` for the full rationale and the measured damage.
+# Do not reinstate this query; a replacement must be a relation the SUBJECT
+# consented to.
 
 # ---------------------------------------------------------------------------
 # SQL — second-degree engager index (§8.1): which of the viewer's `follows`
@@ -286,6 +428,53 @@ SELECT follower_name, following_name
 FROM hafsql.follows
 WHERE follower_name = ANY(%(accounts)s)
   AND following_name = ANY(%(accounts)s)
+"""
+
+# A5: the NormContext sample source (§4) — ALL (top-level + lite) posts in a
+# window, ordered by RECENCY ONLY. Deliberately NOT `_SQL_POPULAR_POSTS`'s
+# shape: that query's `ORDER BY <engagement> DESC` exists to PICK a fallback
+# pool, and reusing it as the norm sample would bias the percentile
+# distribution upward (the sample would already skew toward high engagement)
+# and push every real candidate's score toward the bottom of [0, 1] — see
+# `recsys.io.hafsql`'s module docstring and `normalize.py`'s saturation note.
+#
+# RETURN ALL, NOT A SAMPLE — but this is safe ONLY at the window sizes
+# actually in use today, and the reason is NOT what the row count alone
+# suggests. Live-verified 2026-08-04 (this builder), THE ROW FETCH ITSELF is
+# cheap and near-flat with window size: 3d ~3,760 posts/0.2-0.55s, 7d ~8,887
+# posts/0.55s. But `window_posts` also HYDRATES every row (votes, comments,
+# rebloggers, reputations — see `_hydrate`), and hydration cost is dominated
+# by TOTAL VOTE VOLUME across the window, not post/author count:
+#
+#     3d:  3,760 posts -> full hydrate() ~8.8s   (measured via window_posts()
+#     7d:  8,887 posts -> _votes_for_posts ALONE pulls 1,231,239 vote rows and
+#          takes ~19.5s by itself (comments 1.3s, rebloggers 1.4s, reps 0.1s)
+#          -> the DEFAULT 15s statement_timeout CANCELS the query
+#          (`psycopg.errors.QueryCanceled`) before it returns at all.
+#
+# So a 7-day call to this method, as shipped, TIMES OUT. The 3-day default
+# (`HistoryWindows.sourcing_freshness_days`) is the one that has actually been
+# measured safe, with headroom (8.8s of 15s) but not a lot. This is why
+# sampling was rejected in favour of returning everything: a random/unbiased
+# SAMPLE (e.g. `TABLESAMPLE`/`ORDER BY random() LIMIT n`) still has to
+# HYDRATE whatever it draws, so it does not fix the actual bottleneck (vote
+# volume) unless the sample is drawn small enough to matter — at which point
+# it is no longer "the whole window" and reintroduces exactly the estimation
+# noise §4's percentile ranking exists to average out. The real mitigation is
+# the one A5.2 already calls for: build this ONCE per window on a timer/cache
+# (never per-request), and re-measure before ever widening the window this is
+# called with past 3 days, or before raising `HAFSQL_STATEMENT_TIMEOUT_MS` to
+# paper over a wider one — the underlying cost does not go away, it just stops
+# being visible as a timeout.
+_SQL_WINDOW_POSTS = f"""
+SELECT c.author, c.permlink, c.category, c.created, c.tags,
+       c.json_metadata->>'lumen_user_id'
+FROM hafsql.comments c
+WHERE {_top_level_or_lite("c")}
+  AND c.deleted = false
+  AND c.created >= %(since)s
+ORDER BY c.created DESC
+LIMIT %(limit)s
 """
 
 # Popular-posts fallback (§13.5b): recent top-level posts ranked by the same
@@ -343,10 +532,114 @@ LIMIT %(limit)s
 # log-compressed exactly as post_base_engagement does, then SUMmed:
 # AuthorEngagement.total_base is that sum, posts the count.
 #
+# ★★★ PERF (2026-08-04, this builder). MEASURED PROBLEM: this is the hot-path
+# query `pipeline._author_priors` runs on EVERY request (own_base is 80% of
+# the composite score via the organic term). Live-measured against the real
+# mirror, the query AS IT SHIPPED had two independent, additive cost drivers —
+# found via `EXPLAIN (ANALYZE, BUFFERS)`, not guessed:
+#
+#   1. The old FROM-clause predicate — `_top_level_or_lite(c)` admitting a row,
+#      then `{_identity(c)} = ANY(%(authors)s)` FILTERING it — is not sargable:
+#      `COALESCE(json_metadata->>'lumen_user_id', author)` cannot be answered
+#      by any index on `author` alone, so Postgres had to bitmap-scan every
+#      top-level post NETWORK-WIDE in the window and post-filter down to the
+#      requested authors. Measured: for a real 47-account follow list (45d
+#      window), this pulled 57,619 rows to keep 202 — a ~200ms FIXED tax on
+#      every call, independent of how few authors were actually asked for,
+#      and it gets worse as total network posting volume grows over time.
+#   2. Each per-post credit subquery (`credited_voters`/`credited_commenters`)
+#      selected from `hafsql.operation_effective_comment_vote_view` /
+#      `operation_comment_view` — both PUBLIC HAFSQL views that unconditionally
+#      JOIN to `hafd.blocks` to compute a `timestamp` column (via a `Memoize`
+#      node caching `operation_id_to_block_num`). Neither view's `timestamp`
+#      output is ever selected by this query — Postgres cannot prune the join
+#      because it is expressed as a function call
+#      (`hb.num = hafd.operation_id_to_block_num(o.id)`), not a declared FK, so
+#      it can't prove the join is loss-free and drops it. Measured: for that
+#      same 47-account case, this join alone accounted for 153,688 of the
+#      query's 285,092 total buffer touches (54%) and ~81% of wall time.
+#
+#   TOGETHER, on a REALISTIC well-followed account (`blocktrades`, 47 follows —
+#   the exact account+follow-count this module's own docstring cites for the
+#   58s containerised measurement), these two costs are what pushed a
+#   sub-second query into double-digit seconds under cold cache / container
+#   network conditions, and would time out entirely (>15s) the moment the
+#   follow list included even a modestly busier author.
+#
+#   THE FIX, both live-verified via `EXPLAIN (ANALYZE, BUFFERS)` +
+#   `REPEATABLE READ`-pinned byte-identical output vs. the pre-fix query on
+#   real mainnet data (see `tests/test_hafsql_live.py`):
+#     (a) split row admission into a UNION ALL of two SARGABLE branches — an
+#         ORDINARY branch keyed on `c.author = ANY(%(authors)s) AND c.created
+#         >= %(since)s` (uses `hafsql_comments_table_author_created_idx`
+#         directly) for posts with no `lumen_user_id`, and a LITE branch keyed
+#         on `c.author = ANY(%(lite_publishers)s)` (a tiny, bounded set) for
+#         genuine lite posts — instead of one row filter that has to inspect
+#         every row's metadata before it can be excluded;
+#     (b) bypass `operation_effective_comment_vote_view` /
+#         `operation_comment_view` and read `hafd.operations` directly for the
+#         vote/comment credit subqueries (`hafd.operation_id_to_type_id(id) =
+#         72` / `= 1`), which still uses the exact same
+#         `hafsql_author_permlink_idx` / `hafsql_parent_author_parent_permlink_idx`
+#         these views would have used, minus the blocks join neither result
+#         needs. `hafsql.reblogs` is untouched — its own EXPLAIN shows no
+#         comparable join waste (it is already built off indexed
+#         `hivemind_app` tables, not a raw `hafd.operations` decode).
+#
+#   MEASURED, blocktrades/47-follows/45d (repeated on a warm mirror cache;
+#   run-to-run variance on the shared public mirror was real — see the test
+#   file for the range observed): ~1.3-3.1s before -> ~0.9-1.6s after, with
+#   the network-wide-scan component alone dropping from ~200ms to ~6ms
+#   (`Index Scan using hafsql_comments_table_author_created_idx`, not
+#   `Bitmap Heap Scan` over the whole window) and the vote-credit subplan's
+#   buffer usage dropping from 189,295 to 35,608 (81% fewer).
+#
+#   ★ WHAT THIS DOES **NOT** FIX — THE STRUCTURAL FLOOR. Both fixes above cut
+#   FIXED/CONSTANT-FACTOR waste; neither changes the fact that this query is
+#   still, fundamentally, one correlated subquery PER CANDIDATE POST. Its cost
+#   is bounded below by total vote/comment row volume across every window post
+#   by every candidate author — exactly the same shape of bottleneck
+#   `window_posts`'s own docstring already documents for a DIFFERENT query.
+#   Live-measured: a candidate-author set built from the 150 most prolific
+#   posters network-wide in the window (14,464 candidate posts, ~1.4M matching
+#   vote rows — a stand-in for what `pipeline._author_priors` actually
+#   receives, since it is called with `eligible` UNION `filler` from the FULL
+#   candidate pool, not a raw follow list, and that pool's sourcing can pull in
+#   high-frequency posters) still took ~21-36s even with BOTH fixes above
+#   applied — a batched single-join rewrite (aggregate once instead of once
+#   per post) only brought that to ~28s, still over the 15s budget. **A query
+#   rewrite alone cannot bound this** — see `HafsqlClient.author_engagement`'s
+#   docstring and the build report for the architectural recommendation
+#   (cache/build this on the SAME timer basis as `popular_posts`, since it is a
+#   per-author WINDOW aggregate, not a per-viewer quantity).
+#
+#   ★ A NARROWER TRUST SURFACE, side effect of fix (a) — flagged, not hidden.
+#   `_identity()` used bare `COALESCE(json_metadata->>'lumen_user_id', author)`
+#   with NO check that the row is a genuine lite post (`_LITE_POST` requires
+#   BOTH `author` and `parent_author` to be configured lite publishers before
+#   trusting that key — `json_metadata` is attacker-controlled, per this
+#   module's own A13/A11 notes). The ORDINARY branch below requires
+#   `lumen_user_id IS NULL`; only the LITE branch (same provenance check as
+#   `_LITE_POST`) admits a `lumen_user_id`-keyed identity. This means an
+#   ordinary top-level post (NOT inside a real lite-publisher container) that
+#   carries a crafted `lumen_user_id` in its `json_metadata` — nothing
+#   legitimate ever sets that key outside Lumen's own lite-posting flow, but
+#   nothing stops a hand-built `comment_operation` from doing so — no longer
+#   has its engagement pooled under the spoofed identity here. The PRE-EXISTING
+#   loose behaviour (no provenance check) is unchanged in `_SQL_IN_NETWORK_POSTS`
+#   and `_SQL_ENGAGED_OON_POSTS`, which still call bare `_identity()`/
+#   `_top_level_or_lite()` — same latent gap, out of THIS builder's scope
+#   (`hafsql.py` owns the query, not the identity-trust policy), reported here
+#   for whoever owns `_identity()` to decide whether to tighten the other two
+#   call sites the same way. No real lite content exists on mainnet yet, so
+#   this had zero effect on any measured result above or in the regression
+#   pins in `tests/test_hafsql_live.py` (verified byte-identical either way on
+#   real data — the divergence is theoretical/adversarial-input-only).
+#
 # Every engager is filtered through the FULL §8.4 exclusion set, so an author
 # cannot farm their own pooled prior with self-engagement, delegation-tied
 # alts or a reciprocal ring (the input the earlier self-exclusion-ONLY
-# aggregate left unguarded). Self-exclusion is the static `<> c.author`
+# aggregate left unguarded). Self-exclusion is the static `<> cp.author`
 # predicate. Stake-lineage and ring identities are snapshot-dependent and
 # invisible to SQL, so — exactly as the vote signal derives them per request
 # and hands them to independent_organic_engagement — the caller passes them in
@@ -380,15 +673,100 @@ LIMIT %(limit)s
 # padding with low/no-engagement posts dilutes toward the noise floor rather
 # than accumulating.
 #
+# ★ A15 (2026-08-04): the suppression check below is NOT a live join against
+# `network_suppression` — that table does not exist on the HAFSQL mirror this
+# query runs against (verified live: `UndefinedTable`), and a single SQL
+# statement cannot join across two separate Postgres instances without an FDW
+# the read-only mirror creds cannot install. `HafsqlClient.author_engagement`
+# does a SECOND ROUND TRIP instead: it fetches this window's suppressed
+# (author, permlink) pairs for `%(authors)s` from the recsys DB FIRST, then
+# binds them here as parallel arrays and anti-joins via `unnest`, exactly the
+# same shape as the `excl_authors`/`excl_accounts` exclusion arrays above. If
+# the recsys DB has no configured DSN, the caller passes empty arrays and this
+# clause matches nothing — i.e. suppression degrades to "nothing suppressed"
+# (a loud WARNING is logged where the arrays are built), never a crash.
+#
 # own_base (the scorer, per candidate) and total_base (here) now carry the
 # SAME two guards — §8.4 exclusion and the VoterTrust breadth budget — so they
 # are consistent; pooled_author_base's leave-one-out clamp is pure
 # defense-in-depth (aggregate/hydration skew), not the primary budget-residual
 # absorber it was before this fix — see recsys.core.scoring.AuthorPriorGateway.
+#
+# break #5 (verified live 2026-08-04): `LOG(10, 1 + <double precision>)` has
+# no `(integer, double precision)` overload in Postgres. Cast the argument to
+# `numeric` — `LOG(numeric, numeric)` is the overload that exists.
+#
+# A11 (2026-08-04): the identity GROUP BY key is the RANKED identity — the
+# lite writer's `lumen_user_id` where present, else the chain author — instead
+# of the bare chain `author`. Before this fix a lite writer's identity never
+# equalled any `hafsql.comments.author` value, so `author = ANY(%(authors)s)`
+# matched zero rows for every lite author, always — their pooled quality prior
+# (80% of the composite, via the organic term) was structurally empty. The PERF
+# rewrite above (2026-08-04) restructured how this is computed (a UNION ALL of
+# an ordinary branch and a lite branch, each producing an `identity` column)
+# but the RESULT is unchanged: every real-Hive-author row's identity still
+# collapses to exactly `author`, byte-identical to pre-A11/pre-PERF behaviour
+# (live-verified — see `tests/test_hafsql_live.py`).
+#
+# UNCHANGED, deliberately (ruling: widening the row filter must not touch
+# either) — both stay on the CHAIN identity, which is correct:
+#   * the `e.author = cp.author` exclusion anti-joins (x3): the caller's
+#     `excluded` map is keyed however IT keys authors; changing this here
+#     without a matching caller-side change would silently misalign it —
+#     out of scope for this fix, left for whoever wires lite priors through
+#     `recsys.pipeline`.
+#   * every `v.author = cp.author` / `rc.parent_author = cp.author` /
+#     `r.author = cp.author` HYDRATION join key: votes/comments/reblogs are
+#     always recorded on chain against the PUBLISHER account + permlink,
+#     never against a `lumen_user_id` (which cannot appear in a `voter`/
+#     `author` column at all — it isn't a Hive account).
+#
+# ★ KNOWN RESIDUAL GAP, same root cause as A12, not fixed here (out of this
+# unit's stated scope — the MUST-NOT-CHANGE above forbids touching the
+# exclusion anti-join, and the A15 suppression round trip below only has an
+# `authors` list to work with, not a per-post chain-identity map): the H05
+# suppression anti-join (`s.author = cp.author` further below) and the A15
+# first round trip (`_SQL_SUPPRESSED_BY_AUTHORS`, keyed on whatever identity
+# the caller passes as `authors`) both resolve against the CHAIN author. Once
+# a caller passes a lite identity in `authors` (which this fix is what makes
+# useful), a suppressed lite post will NOT be excluded from that lite author's
+# pooled prior — see the build report.
 _SQL_AUTHOR_ENGAGEMENT = """
-SELECT c.author,
+WITH candidate_posts AS (
+    -- ORDINARY branch: sargable on `hafsql_comments_table_author_created_idx`
+    -- (author, created) — see the PERF note above for why this must stay a
+    -- direct `author = ANY(...)` equality rather than a COALESCE expression.
+    -- `lumen_user_id IS NULL` (not just "the lite branch below overlaps") is
+    -- what keeps this branch and the LITE branch below disjoint.
+    SELECT c.author::text AS author, c.permlink::text AS permlink,
+           c.author::text AS identity
+    FROM hafsql.comments c
+    WHERE c.author = ANY(%(authors)s)
+      AND c.parent_author = ''
+      AND c.deleted = false
+      AND c.created >= %(since)s
+      AND c.json_metadata->>'lumen_user_id' IS NULL
+    UNION ALL
+    -- LITE branch: same provenance check as `_LITE_POST` (both `author` AND
+    -- `parent_author` must be a configured lite publisher — see the PERF
+    -- note's "narrower trust surface" paragraph above for why bare
+    -- `_identity()`'s looser COALESCE is not reused here). `lite_publishers`
+    -- is a tiny, bounded set (one account per network in practice — see A13),
+    -- so this branch stays cheap even though it cannot use the
+    -- (author, created) index the ordinary branch uses.
+    SELECT c.author::text AS author, c.permlink::text AS permlink,
+           c.json_metadata->>'lumen_user_id' AS identity
+    FROM hafsql.comments c
+    WHERE c.author = ANY(%(lite_publishers)s)
+      AND c.parent_author = ANY(%(lite_publishers)s)
+      AND c.json_metadata->>'app' = %(lite_app)s
+      AND c.json_metadata->>'lumen_user_id' = ANY(%(authors)s)
+      AND c.deleted = false
+      AND c.created >= %(since)s
+)
+SELECT cp.identity AS author,
        COUNT(*) AS posts,
-       SUM(LOG(10, 1 + (
+       SUM(LOG(10, (1 + (
            0.5 * (
                SELECT vn + LEAST(un, %(unknown_free)s + %(unknown_per_vouched)s * vn)
                FROM (
@@ -397,13 +775,26 @@ SELECT c.author,
                            FILTER (WHERE v.voter = ANY(%(vouched)s)) AS vn,
                        COUNT(DISTINCT v.voter)
                            FILTER (WHERE NOT (v.voter = ANY(%(vouched)s))) AS un
-                   FROM hafsql.operation_effective_comment_vote_view v
-                   WHERE v.author = c.author AND v.permlink = c.permlink
-                     AND v.rshares > 10000000 AND v.voter <> c.author
+                   FROM (
+                       -- PERF: `hafd.operations` directly, NOT
+                       -- `hafsql.operation_effective_comment_vote_view` — the
+                       -- view's unconditional join to `hafd.blocks` (for a
+                       -- `timestamp` column this subquery never selects) is
+                       -- the single largest cost driver measured above. Same
+                       -- row set either way (live-verified byte-identical
+                       -- output) since the view is an unfiltered INNER JOIN.
+                       SELECT ((o.body_binary::jsonb -> 'value') ->> 'voter') AS voter,
+                              ((o.body_binary::jsonb -> 'value') ->> 'rshares')::numeric AS rshares
+                       FROM hafd.operations o
+                       WHERE hafd.operation_id_to_type_id(o.id) = 72  -- effective_comment_vote
+                         AND ((o.body_binary::jsonb -> 'value') ->> 'author') = cp.author
+                         AND ((o.body_binary::jsonb -> 'value') ->> 'permlink') = cp.permlink
+                   ) v
+                   WHERE v.rshares > 10000000 AND v.voter <> cp.author
                      AND NOT EXISTS (
                          SELECT 1 FROM unnest(%(excl_authors)s::text[],
                                               %(excl_accounts)s::text[]) AS e(author, account)
-                         WHERE e.author = c.author AND e.account = v.voter)
+                         WHERE e.author = cp.author AND e.account = v.voter)
                ) credited_voters
            )
          + 0.3 * (
@@ -414,13 +805,25 @@ SELECT c.author,
                            FILTER (WHERE rc.author = ANY(%(vouched)s)) AS vn,
                        COUNT(DISTINCT rc.author)
                            FILTER (WHERE NOT (rc.author = ANY(%(vouched)s))) AS un
-                   FROM hafsql.operation_comment_view rc
-                   WHERE rc.parent_author = c.author AND rc.parent_permlink = c.permlink
-                     AND rc.author <> c.author
+                   FROM (
+                       -- PERF: `hafd.operations` directly, NOT
+                       -- `hafsql.operation_comment_view` — same rationale as
+                       -- the votes subquery above (smaller effect here since
+                       -- comment volume per post is far lower than vote
+                       -- volume, but the same waste, so the same fix).
+                       SELECT ((o2.body_binary::jsonb -> 'value') ->> 'author') AS author
+                       FROM hafd.operations o2
+                       WHERE hafd.operation_id_to_type_id(o2.id) = 1  -- comment
+                         AND ((o2.body_binary::jsonb -> 'value') ->> 'parent_author')
+                             = cp.author
+                         AND ((o2.body_binary::jsonb -> 'value') ->> 'parent_permlink')
+                             = cp.permlink
+                   ) rc
+                   WHERE rc.author <> cp.author
                      AND NOT EXISTS (
                          SELECT 1 FROM unnest(%(excl_authors)s::text[],
                                               %(excl_accounts)s::text[]) AS e(author, account)
-                         WHERE e.author = c.author AND e.account = rc.author)
+                         WHERE e.author = cp.author AND e.account = rc.author)
                ) credited_commenters
            )
          + 0.5 * (
@@ -432,30 +835,42 @@ SELECT c.author,
                        COUNT(DISTINCT r.account_name)
                            FILTER (WHERE NOT (r.account_name = ANY(%(vouched)s))) AS un
                    FROM hafsql.reblogs r
-                   WHERE r.author = c.author AND r.permlink = c.permlink
-                     AND r.account_name <> c.author
+                   WHERE r.author = cp.author AND r.permlink = cp.permlink
+                     AND r.account_name <> cp.author
                      AND NOT EXISTS (
                          SELECT 1 FROM unnest(%(excl_authors)s::text[],
                                               %(excl_accounts)s::text[]) AS e(author, account)
-                         WHERE e.author = c.author AND e.account = r.account_name)
+                         WHERE e.author = cp.author AND e.account = r.account_name)
                ) credited_rebloggers
            )
-       ))) AS total_base
-FROM hafsql.comments c
-WHERE c.parent_author = ''
-  AND c.deleted = false
-  AND c.author = ANY(%(authors)s)
-  AND c.created >= %(since)s
-  AND NOT EXISTS (
-      SELECT 1 FROM network_suppression ns
-      WHERE ns.author = c.author AND ns.permlink = c.permlink AND ns.suppressed
-  )
-GROUP BY c.author
+       ))::numeric)) AS total_base
+FROM candidate_posts cp
+WHERE NOT EXISTS (
+    -- A15: suppressed-key exclusion via a bound array, not a live table join —
+    -- see the module-level comment above this query. Applied once, after the
+    -- UNION ALL, since suppression keys are absolute (author, permlink) pairs
+    -- regardless of which branch admitted the row.
+    SELECT 1 FROM unnest(%(supp_authors)s::text[],
+                         %(supp_permlinks)s::text[]) AS s(author, permlink)
+    WHERE s.author = cp.author AND s.permlink = cp.permlink
+)
+GROUP BY cp.identity
+"""
+
+# Which of `authors`' posts are network-suppressed (§8.7), for the SECOND
+# round trip `author_engagement` makes against the recsys DB (A15) before it
+# queries the mirror — see the comment above `_SQL_AUTHOR_ENGAGEMENT`.
+_SQL_SUPPRESSED_BY_AUTHORS = """
+SELECT author, permlink
+FROM network_suppression
+WHERE suppressed = true
+  AND author = ANY(%(authors)s)
 """
 
 # Network suppression (§8.7) — recsys's own report-processing table
 # (``recsys/db/schema.sql``), not a HAFSQL view: which of a page of post keys
-# have crossed the weighted-flag threshold.
+# have crossed the weighted-flag threshold. Runs against the SECOND (recsys
+# DB) connection (A15) — this table does not exist on the HAFSQL mirror.
 _SQL_SUPPRESSED_KEYS = """
 SELECT author, permlink
 FROM network_suppression
@@ -481,16 +896,70 @@ def _latest(*timestamps: datetime | None) -> datetime | None:
     return max(present) if present else None
 
 
-def _split_keys(post_keys: frozenset[str]) -> tuple[list[str], list[str]]:
-    """Parse ``Post.key`` strings (``"@author/permlink"``) into parallel
-    author/permlink arrays for a batched ``unnest`` join."""
+def _resolve_post_keys(
+    post_keys: frozenset[str], chain_authors: Mapping[str, str] | None
+) -> tuple[list[str], list[str], dict[tuple[str, str], str]]:
+    """A12: parse ranked ``Post.key`` strings into parallel (author, permlink)
+    arrays for a batched ``unnest`` join, resolving each key to its CHAIN
+    author when ``chain_authors`` supplies one.
+
+    A lite post's ranked identity is the writer (``@u_7f3c9a/permlink``), but
+    votes/comments/reblogs — and any §8.7 suppression report — are recorded on
+    chain against the shared PUBLISHER account the post is actually stored
+    under. Proven (build report): the pre-fix parse yields
+    ``(['u_7f3c9a'], [...])`` and matches zero rows, always — a lite post
+    arriving via ``OON_ENGAGED`` could never clear the vouch gate, and
+    moderation could never suppress one. ``chain_authors`` maps
+    ``Post.key -> chain_author``; a key absent from it (every ordinary Hive
+    post) resolves to the author parsed straight out of the key — the
+    pre-A12 behaviour, unchanged.
+
+    Also returns the reverse ``(resolved_author, permlink) -> original key``
+    map, so the caller can key its result back onto the RANKED identity:
+    ``filter_eligible`` (``core/second_degree.py``) and the engager-index
+    lookup both look up by ``post.key``, which stays the lite writer's key
+    throughout — only the QUERY goes out under the chain author."""
+    chain_authors = chain_authors or {}
     authors: list[str] = []
     permlinks: list[str] = []
+    reverse: dict[tuple[str, str], str] = {}
     for key in post_keys:
-        author, _, permlink = key.removeprefix("@").partition("/")
+        ranked_author, _, permlink = key.removeprefix("@").partition("/")
+        author = chain_authors.get(key, ranked_author)
         authors.append(author)
         permlinks.append(permlink)
+        reverse[(author, permlink)] = key
+    return authors, permlinks, reverse
+
+
+def _split_keys(post_keys: frozenset[str]) -> tuple[list[str], list[str]]:
+    """Parse ``Post.key`` strings (``"@author/permlink"``) into parallel
+    author/permlink arrays for a batched ``unnest`` join. Thin wrapper over
+    :func:`_resolve_post_keys` with no chain-identity resolution — kept for
+    callers (and the existing test pin) that only need the plain parse."""
+    authors, permlinks, _ = _resolve_post_keys(post_keys, None)
     return authors, permlinks
+
+
+def chain_author_map(posts: Iterable[Post]) -> dict[str, str]:
+    """A12: build the ``Post.key -> chain_author`` mapping
+    ``second_degree_engagers``/``suppressed_keys`` need to resolve a lite
+    post's ranked key back to the identity chain rows are actually recorded
+    against. Skips ordinary Hive posts (``chain_author`` unset, or equal to
+    the ranked ``author`` — never true today, but kept as a defensive no-op)
+    since an absent entry already resolves correctly by falling through to
+    the key's own parsed author (see :func:`_resolve_post_keys`).
+
+    Callers (``recsys.pipeline``) should build this once per candidate batch
+    and pass it as ``chain_authors=`` — see the build report for the exact
+    call sites (``pipeline.py:545`` for ``suppressed_keys``, ``:1340`` for
+    ``second_degree_engagers``) that still need wiring; this function exists
+    so that wiring is a one-line change at each site."""
+    return {
+        post.key: post.chain_author
+        for post in posts
+        if post.chain_author and post.chain_author != post.author
+    }
 
 
 def _build_post(
@@ -533,32 +1002,324 @@ def _build_post(
         is_nsfw=any(tag.lower() == "nsfw" for tag in tag_tuple),
         commenters=tuple(sorted(comment_counts)),
         rebloggers=rebloggers,
+        # A12: the CHAIN identity, carried alongside the ranked one only when
+        # they differ (a lite post) — `None` for every ordinary Hive post,
+        # where `author` already IS the chain identity. See
+        # `_resolve_post_keys`/`chain_author_map` for where this is read.
+        chain_author=author if lite_author else None,
     )
 
 
-class HafsqlClient:
-    """Concrete ``HafsqlGateway`` backed by the public HAFSQL Postgres mirror."""
+class _ConnPool:
+    """A minimal thread-safe pool of ``psycopg`` connections to ONE DSN target.
 
-    def __init__(self, config: HafsqlConfig, lite: LiteConfig | None = None) -> None:
-        self._config = config
-        # Lumen Lite reachability. Defaults to OFF (no publisher accounts), so
-        # every lite predicate evaluates false and the SQL behaves exactly as it
-        # did before lite existed. See `LiteConfig` for the trust boundary.
-        self._lite = lite if lite is not None else LiteConfig()
+    A4.1 asked for ``psycopg_pool.ConnectionPool``; that means a new PyPI
+    dependency, which means editing ``pyproject.toml``, which this builder
+    does not own (file-ownership boundary — flagged in the build report). This
+    is a small hand-rolled equivalent scoped to exactly what's measured as the
+    problem (604 connections/request): borrow-reuse-release, autocommit (so a
+    statement error never poisons the session — verified live: a failed query
+    followed by a good one on the same autocommit connection succeeds), and a
+    ``statement_timeout`` set once per physical connection at creation. When
+    a real ``RecsysDbConfig``/pool-sized ``HafsqlConfig`` lands, this class can
+    be swapped for ``psycopg_pool`` with no change to ``HafsqlClient`` callers.
 
-    def _connect(self) -> psycopg.Connection[Any]:
-        """Open a HAFSQL connection. ``psycopg`` is imported lazily so this
-        module is importable without the driver installed."""
+    Ruling R7 — bounded retry + circuit breaker, CONNECTION failures only:
+    ``psycopg.connect()`` raising ``OperationalError`` is retried up to
+    ``max_retries`` times with linear backoff. A STATEMENT error (bad SQL,
+    ``UndefinedTable``, ...) happens inside ``cur.execute()``, never inside
+    this class's retry loop, so it is never retried — exactly R7's
+    distinction. After ``breaker_threshold`` consecutive connect failures the
+    breaker OPENS: further borrows raise :class:`HafsqlUnavailableError`
+    immediately — fail loudly rather than hang through more retries against a
+    database that is provably down — until ``breaker_cooldown_s`` elapses,
+    at which point one probe connection is allowed through (half-open).
+    """
+
+    def __init__(
+        self,
+        connect: Callable[[], psycopg.Connection[Any]],
+        *,
+        min_size: int,
+        max_size: int,
+        max_retries: int,
+        retry_backoff_s: float,
+        breaker_threshold: int,
+        breaker_cooldown_s: float,
+    ) -> None:
+        self._connect = connect
+        self._min_size = max(0, min_size)
+        self._max_size = max(1, max_size)
+        self._max_retries = max(0, max_retries)
+        self._retry_backoff_s = retry_backoff_s
+        self._breaker_threshold = max(1, breaker_threshold)
+        self._breaker_cooldown_s = breaker_cooldown_s
+
+        self._lock = threading.Lock()
+        self._idle: list[psycopg.Connection[Any]] = []
+        self._consecutive_failures = 0
+        self._breaker_opened_at: float | None = None
+        #: Instrumentation for A4's own "before/after" measurement — total
+        #: physical connections ever opened by this pool.
+        self.connections_opened = 0
+        # `min_size` pre-warming happens on first BORROW, never at __init__ —
+        # HafsqlClient is constructed all over the offline test suite with no
+        # intent of ever touching the network; eagerly connecting here would
+        # turn every such construction into a real (and likely failing)
+        # network call. This flag makes the one-time warm-up idempotent.
+        self._warmed = False
+
+    def _breaker_is_open(self) -> bool:
+        if self._breaker_opened_at is None:
+            return False
+        if time.monotonic() - self._breaker_opened_at >= self._breaker_cooldown_s:
+            self._breaker_opened_at = None  # cooldown elapsed: half-open, probe once
+            self._consecutive_failures = 0
+            return False
+        return True
+
+    def _connect_with_retry(self) -> psycopg.Connection[Any]:
         import psycopg
 
-        return psycopg.connect(
+        if self._breaker_is_open():
+            raise HafsqlUnavailableError(
+                "circuit breaker open — too many consecutive connection failures"
+            )
+        attempt = 0
+        while True:
+            try:
+                conn = self._connect()
+            except psycopg.OperationalError:
+                self._consecutive_failures += 1
+                if self._consecutive_failures >= self._breaker_threshold:
+                    self._breaker_opened_at = time.monotonic()
+                    logger.error(
+                        "hafsql: circuit breaker OPEN after %d consecutive "
+                        "connection failures",
+                        self._consecutive_failures,
+                    )
+                    raise HafsqlUnavailableError(
+                        "circuit breaker open — too many consecutive connection failures"
+                    ) from None
+                attempt += 1
+                if attempt > self._max_retries:
+                    raise
+                time.sleep(self._retry_backoff_s * attempt)
+                continue
+            else:
+                self._consecutive_failures = 0
+                self.connections_opened += 1
+                return conn
+
+    def borrow(self) -> psycopg.Connection[Any]:
+        with self._lock:
+            while self._idle:
+                conn = self._idle.pop()
+                if not conn.closed:
+                    return conn
+                # dead idle connection (e.g. server-side timeout); drop it and
+                # try the next, or fall through to opening a fresh one.
+            needs_warm_up = not self._warmed
+            self._warmed = True
+        conn = self._connect_with_retry()
+        if needs_warm_up and self._min_size > 1:
+            self._warm_up()
+        return conn
+
+    def _warm_up(self) -> None:
+        """Open up to ``min_size - 1`` extra idle connections (the borrow that
+        triggered this already holds the first one) so the pool has a real
+        floor after its first use, rather than growing one connection at a
+        time under load. Best-effort: a failure here must not fail the
+        caller's already-in-hand connection from the triggering ``borrow()``.
+        """
+        for _ in range(self._min_size - 1):
+            try:
+                conn = self._connect_with_retry()
+            except Exception:
+                logger.warning(
+                    "hafsql: pool warm-up to min_size=%d stopped early", self._min_size
+                )
+                return
+            with self._lock:
+                if len(self._idle) < self._max_size:
+                    self._idle.append(conn)
+                    continue
+            with contextlib.suppress(Exception):
+                conn.close()
+            return
+
+    def release(self, conn: psycopg.Connection[Any], *, healthy: bool) -> None:
+        with self._lock:
+            if healthy and not conn.closed and len(self._idle) < self._max_size:
+                self._idle.append(conn)
+                return
+        if not conn.closed:
+            with contextlib.suppress(Exception):
+                conn.close()
+
+    def closeall(self) -> None:
+        with self._lock:
+            idle, self._idle = self._idle, []
+        for conn in idle:
+            with contextlib.suppress(Exception):
+                conn.close()
+
+
+class HafsqlClient:
+    """Concrete ``HafsqlGateway`` backed by the public HAFSQL Postgres mirror,
+    plus (A15) an optional second connection to recsys's own DB for
+    ``network_suppression``. See the module docstring for both."""
+
+    def __init__(
+        self,
+        config: HafsqlConfig,
+        lite: LiteConfig | None = None,
+        *,
+        recsys_dsn: str | None = None,
+        pool_min: int | None = None,
+        pool_max: int | None = None,
+        statement_timeout_ms: int | None = None,
+        max_retries: int | None = None,
+        retry_backoff_s: float | None = None,
+        breaker_threshold: int | None = None,
+        breaker_cooldown_s: float | None = None,
+        recsys_pool_min: int | None = None,
+        recsys_pool_max: int | None = None,
+    ) -> None:
+        self._config = config
+        # Lumen Lite reachability. An explicit `lite=` kwarg always wins,
+        # including an explicitly-passed `LiteConfig()` (empty) — that is a
+        # caller deliberately turning lite off, not "unset". Only when NOTHING
+        # is passed (`None`, the default) does construction fall back to A13's
+        # environment reader, which itself defaults to empty/OFF absent both
+        # env sources — so every existing bare `HafsqlClient(HafsqlConfig())`
+        # call stays off in an unconfigured environment, and gains lite
+        # automatically the moment ops sets the frontend's own env var, with
+        # no other code change (the "one source of truth" A13 asks for).
+        self._lite = lite if lite is not None else _lite_config_from_env()
+
+        # A15: the recsys DB DSN. Explicit kwarg wins; otherwise read from the
+        # environment (no `RecsysDbConfig` exists yet — see module docstring).
+        # Absent (falsy) is a supported, permanent-until-configured state, not
+        # an error: every suppression path degrades to "nothing suppressed"
+        # with a WARNING, logged once here rather than once per request.
+        self._recsys_dsn = recsys_dsn if recsys_dsn is not None else os.environ.get(
+            _RECSYS_DSN_ENV
+        )
+        if not self._recsys_dsn:
+            logger.warning(
+                "hafsql: %s is not set — network suppression (§8.7) is "
+                "DISABLED; suppressed_keys() returns nothing and "
+                "author_engagement()'s flooding guard cannot see suppressed "
+                "posts. Set %s to enable it.",
+                _RECSYS_DSN_ENV,
+                _RECSYS_DSN_ENV,
+            )
+
+        # A4: pool + statement_timeout + retry/breaker tunables. Explicit
+        # kwargs win; otherwise env, so this is usable standalone today and
+        # re-wireable to real HafsqlConfig/RecsysDbConfig fields later.
+        self._statement_timeout_ms = (
+            statement_timeout_ms
+            if statement_timeout_ms is not None
+            else _env_int("HAFSQL_STATEMENT_TIMEOUT_MS")
+        )
+        _max_retries = max_retries if max_retries is not None else _env_int("HAFSQL_MAX_RETRIES")
+        _retry_backoff_s = (
+            retry_backoff_s if retry_backoff_s is not None else _env_float("HAFSQL_RETRY_BACKOFF_S")
+        )
+        _breaker_threshold = (
+            breaker_threshold
+            if breaker_threshold is not None
+            else _env_int("HAFSQL_BREAKER_THRESHOLD")
+        )
+        _breaker_cooldown_s = (
+            breaker_cooldown_s
+            if breaker_cooldown_s is not None
+            else _env_float("HAFSQL_BREAKER_COOLDOWN_S")
+        )
+
+        self._pool = _ConnPool(
+            self._connect,
+            min_size=pool_min if pool_min is not None else _env_int("HAFSQL_POOL_MIN"),
+            max_size=pool_max if pool_max is not None else _env_int("HAFSQL_POOL_MAX"),
+            max_retries=_max_retries,
+            retry_backoff_s=_retry_backoff_s,
+            breaker_threshold=_breaker_threshold,
+            breaker_cooldown_s=_breaker_cooldown_s,
+        )
+        self._recsys_pool = _ConnPool(
+            self._recsys_connect,
+            min_size=(
+                recsys_pool_min if recsys_pool_min is not None else _env_int("RECSYS_DB_POOL_MIN")
+            ),
+            max_size=(
+                recsys_pool_max if recsys_pool_max is not None else _env_int("RECSYS_DB_POOL_MAX")
+            ),
+            max_retries=_max_retries,
+            retry_backoff_s=_retry_backoff_s,
+            breaker_threshold=_breaker_threshold,
+            breaker_cooldown_s=_breaker_cooldown_s,
+        )
+
+        # A4.4: popular_posts is viewer-independent (`since, limit` only), so
+        # it is safe to cache across requests — unlike the retired stake_lineage, which was
+        # per-viewer-relevant delegation state and MUST stay request-scoped
+        # (that relation is gone entirely as of B2 2026-08-05).
+        self._popular_cache_lock = threading.Lock()
+        self._popular_cache: dict[tuple[int, int], tuple[float, list[Post]]] = {}
+        self._popular_cache_ttl_s = _env_float("HAFSQL_POPULAR_CACHE_TTL_S")
+        # Cache-key bucket width: requests within the same bucket share a
+        # result. Must stay well under the sourcing freshness window (days),
+        # which this module cannot see (`settings` lives in config.py) — a
+        # constant well under any plausible window (hours) is a safe default.
+        self._popular_cache_bucket_s = 60
+
+        # A15/logging hygiene: warn about the missing recsys DSN once per
+        # process at construction (above); track whether we've ALSO warned
+        # at first actual use, so a client built once and reused for many
+        # requests doesn't spam one WARNING per request forever, but a
+        # caller who only greps logs around the failing request still sees it.
+        self._warned_missing_recsys_dsn_on_use = False
+
+    def _warn_missing_recsys_dsn_once(self) -> None:
+        if not self._warned_missing_recsys_dsn_on_use:
+            self._warned_missing_recsys_dsn_on_use = True
+            logger.warning(
+                "hafsql: network suppression query skipped — %s is not set",
+                _RECSYS_DSN_ENV,
+            )
+
+    def _connect(self) -> psycopg.Connection[Any]:
+        """Open a HAFSQL mirror connection. ``psycopg`` is imported lazily so
+        this module is importable without the driver installed."""
+        import psycopg
+
+        conn = psycopg.connect(
             host=self._config.host,
             port=self._config.port,
             dbname=self._config.dbname,
             user=self._config.user,
             password=self._config.password,
             connect_timeout=self._config.connect_timeout,
+            autocommit=True,
         )
+        with conn.cursor() as cur:
+            cur.execute(f"SET statement_timeout = {int(self._statement_timeout_ms)}")
+        return conn
+
+    def _recsys_connect(self) -> psycopg.Connection[Any]:
+        """Open a connection to recsys's own DB (A15). Only ever called when
+        ``self._recsys_dsn`` is truthy — callers must check first."""
+        import psycopg
+
+        assert self._recsys_dsn is not None  # narrows for mypy; caller-checked
+        conn = psycopg.connect(self._recsys_dsn, connect_timeout=self._config.connect_timeout,
+                                autocommit=True)
+        with conn.cursor() as cur:
+            cur.execute(f"SET statement_timeout = {int(self._statement_timeout_ms)}")
+        return conn
 
     def _lite_params(self) -> dict[str, Any]:
         """Bound into EVERY query, including the ones that do not source lite
@@ -574,10 +1335,42 @@ class HafsqlClient:
         return self._fetch(sql, {**params, **self._lite_params()})
 
     def _fetch(self, sql: str, params: dict[str, Any]) -> list[tuple[Any, ...]]:
-        """Execute one parameterized, read-only query and return all rows."""
-        with self._connect() as conn, conn.cursor() as cur:
-            cur.execute(sql, params)
-            return cur.fetchall()
+        """Execute one parameterized, read-only query against the HAFSQL
+        mirror, on a pooled connection, and return all rows."""
+        return self._fetch_via(self._pool, sql, params)
+
+    def _fetch_recsys(self, sql: str, params: dict[str, Any]) -> list[tuple[Any, ...]]:
+        """Execute one parameterized, read-only query against the recsys DB
+        (A15), on its own pooled connection. Returns ``[]`` without opening a
+        connection when no DSN is configured — the caller decides whether
+        that absence is worth a WARNING (some callers, like
+        ``suppressed_keys``, already logged one; others build an exclusion
+        list where empty is silently the correct degrade)."""
+        if not self._recsys_dsn:
+            return []
+        return self._fetch_via(self._recsys_pool, sql, params)
+
+    def _fetch_via(
+        self, pool: _ConnPool, sql: str, params: dict[str, Any]
+    ) -> list[tuple[Any, ...]]:
+        import psycopg
+
+        conn = pool.borrow()
+        healthy = True
+        try:
+            with conn.cursor() as cur:
+                cur.execute(sql, params)
+                return cur.fetchall()
+        except psycopg.OperationalError:
+            # includes QueryCanceled (statement_timeout fired) — connection
+            # may be compromised; don't return it to the pool. A plain
+            # programming/data error (bad SQL, UndefinedTable, ...) does NOT
+            # poison an autocommit session (verified live) and is re-raised
+            # with `healthy` left True, so the connection is still reused.
+            healthy = False
+            raise
+        finally:
+            pool.release(conn, healthy=healthy)
 
     def _votes_for_posts(
         self, authors: list[str], permlinks: list[str]
@@ -586,7 +1379,16 @@ class HafsqlClient:
         grouped: dict[tuple[str, str], list[Vote]] = {}
         for author, permlink, voter, rshares, timestamp in rows:
             grouped.setdefault((author, permlink), []).append(
-                Vote(voter=voter, rshares=rshares, timestamp=timestamp)
+                # break #7 (verified live 2026-08-04, crashes at normalize.py:27
+                # — log_compress does `abs(rshares) / floor` and Decimal/float
+                # raises TypeError): `rshares` is Postgres `numeric`, so psycopg
+                # returns `decimal.Decimal`, but `Vote.rshares` is `int` and
+                # nothing coerced it. Cast at the boundary, once.
+                # `timestamp` is also naive (`timestamp WITHOUT time zone`,
+                # verified live) — coerce it too, at the same boundary, for the
+                # same reason `_edge_counts` below must: every consumer that
+                # will ever diff a HAFSQL timestamp against `now` assumes aware.
+                Vote(voter=voter, rshares=int(rshares), timestamp=_as_aware(timestamp))
             )
         return grouped
 
@@ -638,7 +1440,11 @@ class HafsqlClient:
         """Recent top-level posts by followed accounts (§7)."""
         if not follows:
             return []
-        rows = self._fetch(
+        # break #1 (verified live 2026-08-04): `_SQL_IN_NETWORK_POSTS` bakes in
+        # `_top_level_or_lite()`'s `%(lite_publishers)s`/`%(lite_app)s`
+        # placeholders at import time — they must be bound even with lite off,
+        # or psycopg raises `query parameter missing`. Must be `_fetch_lite`.
+        rows = self._fetch_lite(
             _SQL_IN_NETWORK_POSTS, {"authors": list(follows), "since": since, "limit": limit}
         )
         return self._hydrate(rows)
@@ -650,25 +1456,14 @@ class HafsqlClient:
         to — the second-degree engagement pool (§8.1)."""
         if not follows:
             return []
-        rows = self._fetch(
+        # break #2 (verified live 2026-08-04): same cause as break #1 above.
+        rows = self._fetch_lite(
             _SQL_ENGAGED_OON_POSTS, {"follows": list(follows), "since": since, "limit": limit}
         )
         return [
             Candidate(post=post, source=CandidateSource.OON_ENGAGED)
             for post in self._hydrate(rows)
         ]
-
-    def community_posts(
-        self, communities: frozenset[str], since: datetime, limit: int
-    ) -> list[Post]:
-        """Recent posts filed under the given communities (§13.1)."""
-        if not communities:
-            return []
-        rows = self._fetch(
-            _SQL_COMMUNITY_POSTS,
-            {"communities": list(communities), "since": since, "limit": limit},
-        )
-        return self._hydrate(rows)
 
     def tag_posts(self, tags: frozenset[str], since: datetime, limit: int) -> list[Post]:
         """Recent posts carrying any of the given tags (§13.1)."""
@@ -677,6 +1472,26 @@ class HafsqlClient:
         rows = self._fetch_lite(
             _SQL_TAG_POSTS, {"tags": list(tags), "since": since, "limit": limit}
         )
+        return self._hydrate(rows)
+
+    def window_posts(self, since: datetime, limit: int) -> list[Post]:
+        """A5: ALL (top-level + lite) posts created since ``since``, ordered by
+        RECENCY ONLY — the :class:`~recsys.contracts.NormContext` sample
+        source. See ``_SQL_WINDOW_POSTS`` for why this must not be
+        engagement-ordered like ``popular_posts``.
+
+        ★ COST IS NOT FLAT WITH WINDOW SIZE, and the row count alone
+        understates it — see ``_SQL_WINDOW_POSTS`` for the measured breakdown.
+        The row fetch is cheap at any window tested (3d/7d both well under
+        1s); HYDRATION (this method always hydrates, via ``_hydrate``) is
+        dominated by total VOTE volume in the window, and a live 7-day call
+        (~8,887 posts, 1.23M votes) TIMES OUT under the default
+        ``statement_timeout`` (~19.5s in ``_votes_for_posts`` alone, against a
+        15s default). Only a 3-day window has been measured to complete
+        (~8.8s). Call this from a cached/periodic builder (A5.2), never
+        per-request, and re-measure before widening the window it is called
+        with."""
+        rows = self._fetch_lite(_SQL_WINDOW_POSTS, {"since": since, "limit": limit})
         return self._hydrate(rows)
 
     def engagement_edges(self, since: datetime) -> list[EngagementEdge]:
@@ -711,29 +1526,58 @@ class HafsqlClient:
         self, sql: str, since: datetime
     ) -> dict[tuple[str, str], tuple[int, datetime | None]]:
         rows = self._fetch(sql, {"since": since})
-        return {(src, dst): (count, last_ts) for src, dst, count, last_ts in rows}
+        # break #8 (verified live 2026-08-04): `operation_effective_comment_
+        # vote_view.timestamp` and `reblogs.created_at` are naive (`timestamp
+        # WITHOUT time zone`); `EngagementEdge.last_interaction` is compared
+        # against a tz-aware `now` downstream (pipeline.py:293, graph_cred.py:
+        # 125, ring.py:58, als.py:127) and a naive/aware subtraction raises
+        # `TypeError`. `operation_comment_view.timestamp` (reply edges, break
+        # #6) is naive too — same fix applies to all three edge queries here.
+        return {
+            (src, dst): (count, _as_aware(last_ts) if last_ts is not None else None)
+            for src, dst, count, last_ts in rows
+        }
 
-    def stake_lineage(self, author: str) -> frozenset[str]:
-        """Delegation-tied accounts sharing stake lineage with ``author`` (§8.4)."""
-        rows = self._fetch_lite(_SQL_STAKE_LINEAGE, {"author": author})
-        return frozenset(row[0] for row in rows) - {author}
+    # ★★★ `stake_lineage` REMOVED 2026-08-05 (B2), along with
+    # `_SQL_STAKE_LINEAGE`. Hive's `delegate_vesting_shares` needs no consent
+    # from the delegatee, so this query returned an ATTACKER-WRITABLE relation
+    # and the algorithm must not be able to fetch it at all — the method is
+    # deleted rather than left returning empty, so no future caller can
+    # accidentally reintroduce the input. Full rationale, with the measured
+    # damage and why no other funding relation replaces it, is on
+    # `recsys.pipeline._lineage_for`, which is now the single seam for a
+    # consent-bearing identity relation.
 
     def second_degree_engagers(
-        self, post_keys: frozenset[str], follows: frozenset[str]
+        self,
+        post_keys: frozenset[str],
+        follows: frozenset[str],
+        *,
+        chain_authors: Mapping[str, str] | None = None,
     ) -> dict[str, frozenset[str]]:
         """For each OON post key, which of the viewer's ``follows`` voted,
         replied to, or reblogged it (§8.1) — the engager index the
-        second-degree gate checks vouches against."""
+        second-degree gate checks vouches against.
+
+        A12: ``chain_authors`` (``Post.key -> chain_author``, build with
+        :func:`chain_author_map`) resolves a lite post's ranked key to the
+        chain identity votes/replies/reblogs are actually recorded against
+        before querying; the returned dict is keyed back onto the ORIGINAL
+        (ranked) key, so ``filter_eligible``'s
+        ``engager_index.get(post.key)`` (``core/second_degree.py``) needs no
+        change. ``None`` (the default) is byte-identical to the pre-A12
+        behaviour."""
         if not post_keys or not follows:
             return {}
-        authors, permlinks = _split_keys(post_keys)
+        authors, permlinks, reverse = _resolve_post_keys(post_keys, chain_authors)
         rows = self._fetch(
             _SQL_SECOND_DEGREE_ENGAGERS,
             {"authors": authors, "permlinks": permlinks, "follows": list(follows)},
         )
         grouped: dict[str, set[str]] = {}
         for author, permlink, engager in rows:
-            grouped.setdefault(f"@{author}/{permlink}", set()).add(engager)
+            ranked_key = reverse.get((author, permlink), f"@{author}/{permlink}")
+            grouped.setdefault(ranked_key, set()).add(engager)
         return {key: frozenset(engagers) for key, engagers in grouped.items()}
 
     def follow_graph(self, accounts: frozenset[str]) -> dict[str, frozenset[str]]:
@@ -748,9 +1592,28 @@ class HafsqlClient:
 
     def popular_posts(self, since: datetime, limit: int) -> list[Post]:
         """Community-popular fallback for the fully-cold viewer (§13.5b), ranked
-        by our own positive-engagement signals — never payout indexing."""
+        by our own positive-engagement signals — never payout indexing.
+
+        A4.4: viewer-independent (no viewer argument) and on the hot path for
+        almost every request (`_fallback_filler`'s early-out is `len(eligible)
+        >= top_k=200`) — measured 5.9s per call live. Cached process-wide,
+        keyed on ``since`` bucketed to a coarse granularity (so requests whose
+        ``since`` differs only by the microseconds between two `now()` calls
+        still hit) and ``limit``, with a TTL well under any plausible sourcing
+        window. A cache MISS still queries with the caller's exact ``since``,
+        never the bucketed one — bucketing only affects the cache KEY."""
+        bucket = int(since.timestamp() // self._popular_cache_bucket_s)
+        key = (bucket, limit)
+        now = time.monotonic()
+        with self._popular_cache_lock:
+            cached = self._popular_cache.get(key)
+            if cached is not None and now - cached[0] < self._popular_cache_ttl_s:
+                return cached[1]
         rows = self._fetch_lite(_SQL_POPULAR_POSTS, {"since": since, "limit": limit})
-        return self._hydrate(rows)
+        posts = self._hydrate(rows)
+        with self._popular_cache_lock:
+            self._popular_cache[key] = (now, posts)
+        return posts
 
     def author_engagement(
         self,
@@ -762,6 +1625,13 @@ class HafsqlClient:
     ) -> dict[str, AuthorEngagement]:
         """Author-pooled window aggregate (§6), §8.4-exclusion-filtered AND
         (H05) breadth-budgeted (``_SQL_AUTHOR_ENGAGEMENT``).
+
+        ``authors`` is matched against the RANKED identity (A11: a lite
+        writer's ``lumen_user_id`` where present, else the chain author, via
+        ``_identity(c)``) — pass whatever identity ``Post.author`` carries for
+        the posts in question, the same identity ``pooled_author_base``/
+        ``organic_quality_raw`` score against, not necessarily a real Hive
+        account name.
 
         ``excluded`` maps each author to the identities (stake lineage + ring +
         self) whose engagement must NOT count toward that author's pooled prior;
@@ -804,7 +1674,24 @@ class HafsqlClient:
             vouched = list(trust.vouched)
             unknown_free = trust.unknown_free
             unknown_per_vouched = trust.unknown_per_vouched
-        rows = self._fetch(
+        # A15: FIRST round trip, to the recsys DB — which of these authors'
+        # posts are already suppressed (§8.7)? See the comment above
+        # `_SQL_AUTHOR_ENGAGEMENT` for why this cannot be a single query. No
+        # DSN configured -> empty arrays -> the mirror query's anti-join
+        # matches nothing -> "nothing suppressed", the documented degrade.
+        if self._recsys_dsn:
+            supp_rows = self._fetch_recsys(_SQL_SUPPRESSED_BY_AUTHORS, {"authors": list(authors)})
+        else:
+            self._warn_missing_recsys_dsn_once()
+            supp_rows = []
+        supp_authors = [row[0] for row in supp_rows]
+        supp_permlinks = [row[1] for row in supp_rows]
+        # SECOND round trip, to the mirror — the actual aggregate. A11: now
+        # `_fetch_lite`, not `_fetch` — `_top_level_or_lite(c)` bakes in the
+        # `%(lite_publishers)s`/`%(lite_app)s` placeholders at import time
+        # (the same class of bug as A2 breaks #1/#2), so they must be bound
+        # even with lite off or psycopg raises `query parameter missing`.
+        rows = self._fetch_lite(
             _SQL_AUTHOR_ENGAGEMENT,
             {
                 "authors": list(authors),
@@ -814,6 +1701,8 @@ class HafsqlClient:
                 "vouched": vouched,
                 "unknown_free": unknown_free,
                 "unknown_per_vouched": unknown_per_vouched,
+                "supp_authors": supp_authors,
+                "supp_permlinks": supp_permlinks,
             },
         )
         return {
@@ -821,10 +1710,33 @@ class HafsqlClient:
             for author, posts, total_base in rows
         }
 
-    def suppressed_keys(self, post_keys: frozenset[str]) -> frozenset[str]:
-        """Subset of ``post_keys`` under network suppression (§8.7)."""
+    def suppressed_keys(
+        self, post_keys: frozenset[str], *, chain_authors: Mapping[str, str] | None = None
+    ) -> frozenset[str]:
+        """Subset of ``post_keys`` under network suppression (§8.7).
+
+        A15: ``network_suppression`` lives in the recsys DB (A15's own second
+        connection), not the HAFSQL mirror. No DSN configured -> nothing is
+        ever reported suppressed (a WARNING is logged once, not a crash) —
+        the documented degrade until the recsys DB is wired up.
+
+        A12: ``chain_authors`` (``Post.key -> chain_author``, build with
+        :func:`chain_author_map`) resolves a lite post's ranked key to the
+        chain identity a §8.7 report is actually filed against (the publisher
+        account, not the writer) before querying, and the returned set is
+        keyed back onto the ORIGINAL (ranked) key — ``filter_eligible``'s
+        ``post.key in suppressed`` (``core/second_degree.py``) needs no
+        change. ``None`` (the default) is byte-identical to the pre-A12
+        behaviour."""
         if not post_keys:
             return frozenset()
-        authors, permlinks = _split_keys(post_keys)
-        rows = self._fetch_lite(_SQL_SUPPRESSED_KEYS, {"authors": authors, "permlinks": permlinks})
-        return frozenset(f"@{author}/{permlink}" for author, permlink in rows)
+        if not self._recsys_dsn:
+            self._warn_missing_recsys_dsn_once()
+            return frozenset()
+        authors, permlinks, reverse = _resolve_post_keys(post_keys, chain_authors)
+        rows = self._fetch_recsys(
+            _SQL_SUPPRESSED_KEYS, {"authors": authors, "permlinks": permlinks}
+        )
+        return frozenset(
+            reverse.get((author, permlink), f"@{author}/{permlink}") for author, permlink in rows
+        )

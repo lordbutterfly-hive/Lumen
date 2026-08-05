@@ -21,17 +21,34 @@ sys.path.insert(0, str(_HARNESS.parent))
 from collections import Counter
 
 import numpy as np
-from simworld import EPOCH, NOW, TOPICS, Account, SimGateway, build_world, spearman
+from simworld import (
+    EPOCH,
+    NOW,
+    TOPICS,
+    Account,
+    SimGateway,
+    build_world,
+    harness_settings,
+    spearman,
+)
 
 from recsys.config import Settings
 from recsys.contracts import EngagementEdge
 from recsys.core.ring import detect_rings, ring_member_set
 from recsys.pipeline import build_trust_snapshot
 
-world = build_world(seed=7)
+# SEED is an argument (matches q9's convention): the project's established
+# multi-seed calibration set is 7/11/23/42. Default unchanged (7).
+SEED = int(sys.argv[1]) if len(sys.argv) > 1 else 7
+world = build_world(seed=SEED)
 gw = SimGateway(world)
-settings = Settings()
-snap = build_trust_snapshot(gw, settings, since=EPOCH, now=NOW)
+# ★ B-07 (2026-08-04): routed through harness_settings() (mutate_panels.py).
+settings = harness_settings()
+# production=False, trusted_seeds=frozenset() EXPLICIT (C5/R2): synthetic
+# simworld accounts, no real curated seed lands in this graph.
+snap = build_trust_snapshot(
+    gw, settings, since=EPOCH, now=NOW, trusted_seeds=frozenset(), production=False
+)
 
 # ---- [A] what does cred correlate with? ----
 authors = [a for a in world.authors() if a.name in snap.graph_creds]
@@ -88,10 +105,16 @@ gw2 = SimGateway(w2)
 
 seeds = frozenset({f"a-{t}-{j:02d}" for t in TOPICS for j in range(2)})
 base_cred = snap.graph_creds[PATSY].score
+c_results: dict[str, tuple[int, float]] = {}  # label -> (n_flagged, max(ring_creds))
 for label, seed_set in [("unseeded", frozenset()), ("seeded", seeds)]:
-    s2 = build_trust_snapshot(gw2, settings, since=EPOCH, now=NOW, trusted_seeds=seed_set)
+    # production=False: the "unseeded" arm needs the F-R2 guard to NOT fire so
+    # this panel can still compare against the pre-anchoring local rule (C5).
+    s2 = build_trust_snapshot(
+        gw2, settings, since=EPOCH, now=NOW, trusted_seeds=seed_set, production=False
+    )
     ring_creds = [s2.graph_creds[s].score for s in RING]
     n_flagged = len(s2.ring_members & set(RING))
+    c_results[label] = (n_flagged, float(np.max(ring_creds)))
     print(f"\n[C:{label}] ring detection flagged {n_flagged}/20 sybils "
           f"(+{len(s2.ring_members - set(RING))} others)")
     print(f"    patsy cred: baseline {base_cred:.3f} -> {s2.graph_creds[PATSY].score:.3f}")
@@ -123,5 +146,69 @@ print("\n[D] ALS affinity (cf_weight x this lands on organic_raw whose global sa
 print(f"    engaged pairs        : mean {eng.mean():.3f} std {eng.std():.3f} (n={len(eng)})")
 print(f"    same-topic unengaged : mean {same_uneng.mean():.4f} std {same_uneng.std():.4f} (n={len(same_uneng)})")
 print(f"    cross-topic unengaged: mean {cross_uneng.mean():.4f} std {cross_uneng.std():.4f} (n={len(cross_uneng)})")
-print(f"    AUC engaged vs unengaged          : {auc(eng, np.concatenate([same_uneng, cross_uneng])):.3f}")
-print(f"    AUC same-topic vs cross-topic (DISCOVERY signal): {auc(same_uneng, cross_uneng):.3f}")
+auc_engaged = auc(eng, np.concatenate([same_uneng, cross_uneng]))
+auc_discovery = auc(same_uneng, cross_uneng)
+print(f"    AUC engaged vs unengaged          : {auc_engaged:.3f}")
+print(f"    AUC same-topic vs cross-topic (DISCOVERY signal): {auc_discovery:.3f}")
+
+# ===========================================================================
+# SELF-CHECK (B-07) — q4's two headline claims: (1) the ring/sybil defense
+# actually flags a coordinated ring AND zeroes its members' graph-cred, not
+# just prints a number; (2) ALS actually separates engaged from unengaged
+# pairs, and same-topic from cross-topic unengaged pairs (the discovery
+# signal), at this sparsity. Verified by mutation (LUMEN_SETTINGS_MUTANT)
+# across seeds 7/11/23/42 before the floors below were chosen.
+# ===========================================================================
+print("\nSELF-CHECK — the sybil defense and the ALS signal must both be real, not printed noise:")
+
+# [1] the 20-account ring must be FLAGGED and ZEROED in both the unseeded and
+# seeded arms. MEASURED baseline, seeds 7/11/23/42: n_flagged EXACTLY 20/20
+# and max(ring_creds) EXACTLY 0.000, in BOTH arms, every seed -- no
+# exceptions. Mutating `thresholds.ring_discount_threshold` to 1.5 (above the
+# ring score's own [0,1] range, so nothing can ever clear it) collapses this
+# completely on every one of the same 4 seeds: n_flagged drops to EXACTLY
+# 0/20 and sybil cred jumps to 0.596-0.684 -- ALL 20 sybils now PASS the
+# 0.05 author/vouch floor entirely. 10 (flagged count) and 0.05 (cred, the
+# floor value itself) sit with maximum margin between baseline and mutant.
+NFLAG_FLOOR = 10
+RING_CRED_CEILING = 0.05
+ok1 = all(n > NFLAG_FLOOR and maxcred < RING_CRED_CEILING for n, maxcred in c_results.values())
+for label, (n, maxcred) in c_results.items():
+    print(f"    [1:{label}] flagged={n}/20 (must be > {NFLAG_FLOOR}), max sybil cred={maxcred:.3f} "
+          f"(must be < {RING_CRED_CEILING})   "
+          f"{'OK' if (n > NFLAG_FLOOR and maxcred < RING_CRED_CEILING) else '** FAIL **'}")
+
+# [2] ALS must separate engaged from unengaged pairs, AND same-topic from
+# cross-topic unengaged pairs (the discovery signal q4 exists to grade).
+# MEASURED baseline, seeds 7/11/23/42: AUC engaged-vs-unengaged 0.999-1.000
+# (min 0.999); AUC discovery 0.759-0.787 (min 0.759). Mutating `als.factors`
+# to 1 (a degenerate rank-1 factorization) collapses both on every one of the
+# same 4 seeds: AUC engaged-vs-unengaged to 0.667-0.691 (max 0.691, barely
+# above coin-flip); AUC discovery to 0.373-0.408 (max 0.408, WORSE than
+# random). 0.90 and 0.60 each sit with a wide, seed-stable margin between
+# baseline and mutant.
+AUC_ENGAGED_FLOOR = 0.90
+AUC_DISCOVERY_FLOOR = 0.60
+ok2 = auc_engaged > AUC_ENGAGED_FLOOR
+ok3 = auc_discovery > AUC_DISCOVERY_FLOOR
+print(f"    [2] AUC engaged-vs-unengaged = {auc_engaged:.3f}   (must be > {AUC_ENGAGED_FLOOR:.2f})   "
+      f"{'OK' if ok2 else '** FAIL **'}")
+print(f"    [3] AUC discovery (same-vs-cross-topic) = {auc_discovery:.3f}   "
+      f"(must be > {AUC_DISCOVERY_FLOOR:.2f})   {'OK' if ok3 else '** FAIL **'}")
+
+assert ok1, (
+    f"ring/sybil defense failed on at least one arm: {c_results} -- "
+    "thresholds.ring_discount_threshold and/or the ring detector may no longer be "
+    "flagging and zeroing a coordinated ring"
+)
+assert ok2, (
+    f"AUC engaged-vs-unengaged = {auc_engaged:.3f} did not clear {AUC_ENGAGED_FLOOR:.2f} -- "
+    "ALS (als.factors/iterations/alpha/regularization) may no longer be separating engaged "
+    "from unengaged pairs"
+)
+assert ok3, (
+    f"AUC discovery = {auc_discovery:.3f} did not clear {AUC_DISCOVERY_FLOOR:.2f} -- ALS may no "
+    "longer carry a same-topic-vs-cross-topic discovery signal"
+)
+print("\nALL SELF-CHECKS PASSED — the sybil ring is flagged and zeroed in both arms, and ALS "
+      "measurably separates both engaged-vs-unengaged and same-vs-cross-topic pairs.")

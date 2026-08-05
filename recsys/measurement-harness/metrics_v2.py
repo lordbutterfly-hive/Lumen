@@ -490,7 +490,7 @@ def session_overlap_loop(
 
     Returns the ``sessions - 1`` consecutive overlaps (each 0..k). k/k means a
     fully frozen session — the feedback loop reserved that screen."""
-    from simworld import COMMUNITY, EPOCH, NOW, SimGateway, build_norm, build_world
+    from simworld import EPOCH, NOW, TAGS, SimGateway, build_norm, build_world
 
     from recsys.contracts import EngagementEdge, ViewerProfile
     from recsys.pipeline import build_trust_snapshot, rank_feed
@@ -503,11 +503,19 @@ def session_overlap_loop(
     prev: list[Post] | None = None
     overlaps: list[int] = []
     for _ in range(sessions):
-        snap = build_trust_snapshot(gw, settings, since=EPOCH, now=NOW)
+        # C5/R2: trusted_seeds=frozenset() EXPLICITLY — this synthetic world has
+        # no real Hive account names to land, so leaving it to default from
+        # settings.trusted_seeds would only add per-call landed-check overhead
+        # and log noise across this loop's many iterations for no behavioural
+        # difference (empty and all-unlanded both fall back to the local rule
+        # under production=False).
+        snap = build_trust_snapshot(
+            gw, settings, since=EPOCH, now=NOW, trusted_seeds=frozenset(), production=False
+        )
         v = ViewerProfile(
             account=viewer_name,
             follows=world.follows[viewer_name],
-            subscribed_communities=frozenset({COMMUNITY[topic]}),
+            interest_tags=frozenset(TAGS[topic]),
         )
         f = [
             sc.post

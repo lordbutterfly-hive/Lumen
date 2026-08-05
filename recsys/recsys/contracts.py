@@ -16,6 +16,7 @@ Design rules:
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
@@ -29,12 +30,10 @@ class CandidateSource(StrEnum):
 
     IN_NETWORK = "in_network"
     OON_ENGAGED = "oon_engaged"
-    OON_COMMUNITY = "oon_community"  # subscribed community, established viewer — gated
     OON_INTEREST = "oon_interest"  # tag/category discovery, established viewer — gated
     OON_ALS = "oon_als"
     # Cold-start exploration lane the viewer explicitly picked at signup (rev 2.2)
     # — exempt from the gate, since they have no follow graph for it to use.
-    INTEREST_COMMUNITY = "interest_community"
     INTEREST_TAG = "interest_tag"
     #: ★ The reserved new-author lane (cold-start spec §4.3, item B12). An
     #: explicit, budgeted, DEFENDED bypass of the second-degree vouch — a
@@ -42,7 +41,9 @@ class CandidateSource(StrEnum):
     #: exclude it. It is exempt from the author floor too, deliberately: a new
     #: author is below every floor by construction, which is the point. Its
     #: defences are the per-author budget, ring exclusion, interest targeting
-    #: and graduation-on-qualifying-vouch instead. See core/exploration.py.
+    #: and self-deal exclusion instead. (Graduation used to be listed here as a
+    #: fifth; it is positional as of 2026-08-04 and is no longer a Sybil
+    #: defence — core/exploration.py says why it never had to be.)
     EXPLORATION = "exploration"
     #: Last-resort global-popularity padding for a viewer whose pool would
     #: otherwise be empty (§13.5b). Emitted by :func:`coldstart.popular_fallback`.
@@ -61,8 +62,8 @@ class CandidateSource(StrEnum):
     def is_viewer_chosen(self) -> bool:
         """Whether the viewer explicitly ASKED for this lane (2026-08-03).
 
-        Followed an author, subscribed to a community, picked an interest at
-        signup — all deliberate acts. The rest are inferences the system made
+        Followed an author, or picked an interest tag at signup — both
+        deliberate acts. The rest are inferences the system made
         on their behalf: a post a friend happened to engage
         (``OON_ENGAGED``), a CF neighbour's author (``OON_ALS``), or global
         popularity padding (``POPULAR_FALLBACK``).
@@ -86,9 +87,7 @@ class CandidateSource(StrEnum):
         ``recsys.core.rerank.diversity_rerank``."""
         return self in (
             CandidateSource.IN_NETWORK,
-            CandidateSource.OON_COMMUNITY,
             CandidateSource.OON_INTEREST,
-            CandidateSource.INTEREST_COMMUNITY,
             CandidateSource.INTEREST_TAG,
         )
 
@@ -98,11 +97,10 @@ class CandidateSource(StrEnum):
         and graph-cred floor (§8.3). Exempt: the viewer's own network
         (``IN_NETWORK``) and the cold-start exploration lane they explicitly
         picked at signup (``INTEREST_*``, rev 2.2). Every general out-of-network
-        discovery source — including a *subscribed* community for an established
-        viewer — is gated, so a stranger cannot self-inject into anyone's feed."""
+        discovery source is gated, so a stranger cannot self-inject into
+        anyone's feed."""
         return self not in (
             CandidateSource.IN_NETWORK,
-            CandidateSource.INTEREST_COMMUNITY,
             CandidateSource.INTEREST_TAG,
             CandidateSource.POPULAR_FALLBACK,
             # ★ OON_INTEREST is exempt from the VOUCH COUNT but not from the
@@ -117,29 +115,28 @@ class CandidateSource(StrEnum):
             CandidateSource.OON_INTEREST,
             # ★ EXPLORATION: a new post has no vouch BY DEFINITION, so requiring
             # one would make this lane structurally empty — the same defect that
-            # made OON_INTEREST/OON_COMMUNITY/OON_ALS deliver nothing.
+            # made OON_INTEREST/OON_ALS deliver nothing.
             CandidateSource.EXPLORATION,
-            # ★ The two SIBLING lanes with the identical defect, found by the
-            # review council after OON_INTEREST was fixed alone (2026-08-01).
-            # The reasoning above is not specific to interests — it applies to
-            # any lane whose job is to surface content the viewer's network has
-            # NOT already seen, which is every discovery lane there is:
+            # ★ THE SIBLING LANE with the identical defect, found by the review
+            # council after OON_INTEREST was fixed alone (2026-08-01). The
+            # reasoning above is not specific to interests — it applies to any
+            # lane whose job is to surface content the viewer's network has NOT
+            # already seen, which is every discovery lane there is:
             #
-            #   OON_COMMUNITY — a community the viewer explicitly SUBSCRIBED to.
-            #     Measured 90 candidates -> 0 eligible -> 0 feed slots, and a new
-            #     author posting into a community reached 0 of 40 subscribers. A
-            #     subscription is a stronger opt-in than a signup tag, and it
-            #     delivered literally nothing.
             #   OON_ALS — the CF discovery producer. Measured byte-identical
             #     feeds at every `als_source_authors` setting including the whole
             #     author universe: everything it sourced either failed the vouch
             #     gate or was relabelled to a higher-priority lane that then
             #     failed it.
             #
-            # Both keep `requires_author_floor`, so a self-dealer or ring member
-            # still cannot ride them in, and both remain subject to the per-author
+            # (A second sibling, OON_COMMUNITY — a subscribed community, measured
+            # 90 candidates -> 0 eligible -> 0 feed slots the same way — carried
+            # the identical exemption until communities were retired as a lane
+            # 2026-08-04, R1/R3.)
+            #
+            # It keeps `requires_author_floor`, so a self-dealer or ring member
+            # still cannot ride it in, and it remains subject to the per-author
             # flooding cap (see core/flooding.py, which keys on that property).
-            CandidateSource.OON_COMMUNITY,
             CandidateSource.OON_ALS,
         )
 
@@ -159,14 +156,13 @@ class CandidateSource(StrEnum):
         The viewer's OWN network stays exempt from both — they chose those
         authors by name.
 
-        ★ THE COLD-START LANES NO LONGER DO (2026-08-04, cold-start spec item
-        B4). `INTEREST_COMMUNITY` and `INTEREST_TAG` were exempt from this
-        floor as well as from the vouch count, which inverted the protection:
-        measured, an author scored **0.0 — the band reserved for PROVEN
-        self-dealing** — was ADMITTED into a brand-new viewer's cold-start feed
-        via both lanes, while the same author was correctly blocked on
-        `OON_COMMUNITY` and `OON_INTEREST`. The audience with no follow graph to
-        defend them got the least protection of anyone.
+        ★ THE COLD-START LANE NO LONGER DOES (2026-08-04, cold-start spec item
+        B4). `INTEREST_TAG` was exempt from this floor as well as from the
+        vouch count, which inverted the protection: measured, an author scored
+        **0.0 — the band reserved for PROVEN self-dealing** — was ADMITTED into
+        a brand-new viewer's cold-start feed via the lane, while the same
+        author was correctly blocked on `OON_INTEREST`. The audience with no
+        follow graph to defend them got the least protection of anyone.
         Declaring an interest is a statement about TOPIC, not a statement that
         the viewer vouches for whoever posts into it, so exemption from the
         vouch COUNT was right and exemption from the credibility floor was not.
@@ -178,10 +174,11 @@ class CandidateSource(StrEnum):
         Only the explicit 0.0 self-dealing band is refused.
 
         `POPULAR_FALLBACK` stays exempt here because `_fallback_filler` already
-        drops the 0.0 band itself before padding (see `pipeline.py`), and a
-        future `EXPLORATION` lane must also stay exempt — a brand-new author is
-        below every floor by construction, which is the whole point of that
-        lane; its defence is a per-author budget plus ring exclusion instead.
+        drops the 0.0 band itself before padding (see `pipeline.py`), and
+        `EXPLORATION` is exempt too — a brand-new author is below every floor by
+        construction, which is the whole point of that lane; its defence is a
+        per-author budget plus ring and self-deal exclusion instead. (That lane
+        shipped 2026-08-04; this paragraph called it "future" until then.)
         """
         return self not in (
             CandidateSource.IN_NETWORK,
@@ -215,7 +212,6 @@ class CandidateSource(StrEnum):
         """
         return self not in (
             CandidateSource.IN_NETWORK,
-            CandidateSource.INTEREST_COMMUNITY,
             CandidateSource.INTEREST_TAG,
             CandidateSource.POPULAR_FALLBACK,
             # already bounded by its own per-author epoch budget
@@ -249,6 +245,20 @@ class Post:
     votes: tuple[Vote, ...]
     is_short_form: bool = False
     is_nsfw: bool = False
+    #: A12 (2026-08-04): the identity votes/comments/reblogs/suppression
+    #: reports are actually recorded against ON CHAIN, when it differs from
+    #: ``author``. Set only for a Lumen Lite post: ``author`` there is the
+    #: writer's ``lumen_user_id`` (the RANKED identity, substituted at
+    #: hydration — ``recsys.io.hafsql._build_post``), while every on-chain row
+    #: (votes, comments, reblogs, a §8.7 suppression report) is against the
+    #: shared publisher account this field carries. ``None`` means "same as
+    #: ``author``" (every ordinary Hive post), so every existing construction
+    #: of ``Post`` stays valid. ``key`` (below) deliberately keeps using
+    #: ``author``, not this field — the ranked identity is the whole point of
+    #: the lite substitution; ONLY the two chain-identity lookups
+    #: (``HafsqlGateway.second_degree_engagers`` / ``.suppressed_keys``, via
+    #: ``recsys.io.hafsql.chain_author_map``) read this field.
+    chain_author: str | None = None
 
     @property
     def key(self) -> str:
@@ -264,9 +274,7 @@ class ViewerProfile:
     account: str
     follows: frozenset[str] = frozenset()
     mutes: frozenset[str] = frozenset()
-    subscribed_communities: frozenset[str] = frozenset()
     interest_tags: frozenset[str] = frozenset()
-    interest_communities: frozenset[str] = frozenset()
     interest_vec: tuple[float, ...] | None = None
     is_new: bool = False
 
@@ -363,13 +371,38 @@ class NormContext:
 
 @dataclass(frozen=True)
 class ScoreBreakdown:
-    """The composite score and its three normalized components, all in
-    ``[0, 1]`` (§0: ``0.10*vote + 0.10*rep + 0.80*organic``)."""
+    """The composite score and its normalized components, all in ``[0, 1]``.
+
+    ``vote_norm``/``rep_norm``/``organic`` are the three EARNED signals — what
+    this post and this author actually did — combined at the §0 outer split::
+
+        earned = 0.10*vote_norm + 0.10*rep_norm + 0.80*organic
+
+    ``final`` is that earned score blended with the viewer's DECLARED-interest
+    percentile (:data:`recsys.config.ScoreWeights.interest_match`)::
+
+        final = (1 - W)*earned + W*interest_pct,  W = organic_weight * interest_match
+
+    and ``interest_bonus`` records the additive part that blend contributed,
+    ``W * interest_pct`` — i.e. ``final - interest_bonus`` is the earned score
+    after dilution, and ``interest_bonus`` is 0.0 whenever the channel is off
+    or the viewer supplied no interest signal for this candidate (which is what
+    makes ``interest_match = 0.0`` byte-identical to the pre-B02 score).
+
+    ★ WHY ``interest_bonus`` IS CARRIED RATHER THAN RECOMPUTED (2026-08-05).
+    The re-ranker's AUTHOR-repeat and UNCHOSEN-lane penalties are MULTIPLICATIVE
+    and must be applied to the earned part only — see
+    :func:`recsys.core.rerank._effective_score` for the measurement that forced
+    this. The re-ranker cannot recompute the split (it holds no weights and no
+    viewer), so the scorer hands it over. It is a decomposition of ``final``,
+    never a separate signal: nothing may rank on it.
+    """
 
     vote_norm: float
     rep_norm: float
     organic: float
     final: float
+    interest_bonus: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -403,24 +436,47 @@ class HafsqlGateway(Protocol):
         self, follows: frozenset[str], since: datetime, limit: int
     ) -> list[Candidate]: ...
 
-    def community_posts(
-        self, communities: frozenset[str], since: datetime, limit: int
-    ) -> list[Post]: ...
-
     def tag_posts(
         self, tags: frozenset[str], since: datetime, limit: int
     ) -> list[Post]: ...
 
+    def window_posts(self, since: datetime, limit: int) -> list[Post]:
+        """A5: ALL (top-level + lite) posts created since ``since``, ordered by
+        RECENCY ONLY — never by engagement. The source
+        ``build_window_norm``/:class:`NormContext` draws its percentile sample
+        from. ``popular_posts`` is ``ORDER BY engagement DESC``; reusing it here
+        would bias the sample upward and push every real score toward the
+        bottom of the percentile range — see the module note in
+        ``recsys.io.hafsql`` for the live sizing that makes returning the whole
+        window (rather than sampling) the right call."""
+        ...
+
     def engagement_edges(self, since: datetime) -> list[EngagementEdge]: ...
 
-    def stake_lineage(self, author: str) -> frozenset[str]: ...
+    # ★ `stake_lineage` REMOVED from this protocol 2026-08-05 (B2) — stake
+    # delegation is no longer an input to the algorithm, and dropping it from
+    # the gateway contract is what makes that structural rather than a
+    # convention. See `recsys.pipeline._lineage_for`.
 
     def second_degree_engagers(
-        self, post_keys: frozenset[str], follows: frozenset[str]
+        self,
+        post_keys: frozenset[str],
+        follows: frozenset[str],
+        *,
+        chain_authors: Mapping[str, str] | None = None,
     ) -> dict[str, frozenset[str]]:
         """For each OON post key, which of the viewer's ``follows`` engaged it
         (§8.1). Produces the engager index the second-degree gate consumes —
-        so the gate *checks vouches* instead of blocking every OON post."""
+        so the gate *checks vouches* instead of blocking every OON post.
+
+        A12: ``chain_authors`` (``Post.key -> Post.chain_author``, build with
+        ``recsys.io.hafsql.chain_author_map``) resolves a lite post's RANKED
+        key to the identity votes/replies/reblogs are actually recorded
+        against before querying. The result stays keyed on the ORIGINAL
+        (ranked) key regardless — ``filter_eligible``'s
+        ``engager_index.get(post.key)`` needs no change. ``None`` (the
+        default) is byte-identical to the pre-A12 behaviour, so every existing
+        caller is unaffected until it opts in."""
         ...
 
     def follow_graph(self, accounts: frozenset[str]) -> dict[str, frozenset[str]]:
@@ -432,8 +488,16 @@ class HafsqlGateway(Protocol):
         by our own positive-engagement signals — never payout indexing."""
         ...
 
-    def suppressed_keys(self, post_keys: frozenset[str]) -> frozenset[str]:
-        """Subset of ``post_keys`` under network suppression (§8.7)."""
+    def suppressed_keys(
+        self, post_keys: frozenset[str], *, chain_authors: Mapping[str, str] | None = None
+    ) -> frozenset[str]:
+        """Subset of ``post_keys`` under network suppression (§8.7).
+
+        A12: same ``chain_authors`` resolution as ``second_degree_engagers`` —
+        a §8.7 report is filed against the on-chain (author, permlink), which
+        for a lite post is the publisher account, not the writer's ranked
+        identity. ``None`` (the default) is byte-identical to the pre-A12
+        behaviour."""
         ...
 
 

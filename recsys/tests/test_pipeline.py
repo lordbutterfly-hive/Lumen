@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import logging
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta
@@ -12,6 +13,7 @@ import pytest
 from recsys.config import (
     DEFAULT_SETTINGS,
     ALSConfig,
+    ExplorationConfig,
     GraphCredConfig,
     Settings,
     VoteSignalConfig,
@@ -35,6 +37,7 @@ from recsys.pipeline import (
     MissingTrustError,
     TrustPolicy,
     TrustSnapshot,
+    _lineage_for,
     _organic_signal,
     _ring_exclusion,
     _voter_trust,
@@ -42,6 +45,7 @@ from recsys.pipeline import (
     gather_candidates,
     rank_feed,
 )
+from recsys.viewer import build_viewer_profile
 from tests.fakes import EPOCH, FakeGateway, make_post, make_viewer, make_vote
 
 NOW = EPOCH + timedelta(hours=1)
@@ -92,20 +96,59 @@ def test_muted_author_is_filtered() -> None:
 
 def test_cold_viewer_served_interest_lane() -> None:
     # A brand-new viewer with no follows must still get a feed from the
-    # community/interest lane (rev 2.2) — those sources bypass the gate.
-    community_post = make_post("author1", "c1", community="hive-1")
+    # interest lane (rev 2.2, tags-only since communities were retired as a
+    # lane 2026-08-04, R1/R3) — that source bypasses the gate.
     tag_post = make_post("author2", "t1", tags=("art",))
-    gateway = FakeGateway(community=[community_post], tag=[tag_post])
+    gateway = FakeGateway(tag=[tag_post])
     viewer = make_viewer(
         "newbie",
         is_new=True,
-        interest_communities=frozenset({"hive-1"}),
         interest_tags=frozenset({"art"}),
     )
 
     feed = rank_feed(viewer, gateway, _norm(), now=NOW, since=EPOCH, trust_policy=_PERMISSIVE)
 
-    assert {sc.post.author for sc in feed} == {"author1", "author2"}
+    assert {sc.post.author for sc in feed} == {"author2"}
+
+
+def test_tagless_viewer_falls_through_to_popular_fallback_with_a_warning(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """★ R12 (2026-08-04): removing communities left `interest_candidates` /
+    `established_interest_candidates` with no way to source anything for a
+    viewer who declared no `interest_tags` — before, they could still be
+    reached via a subscribed/interest community. This must never crash and
+    never serve an empty feed: it falls through to the popular lane
+    (`_fallback_filler`) and logs loudly, so the state is visible to an
+    operator rather than a silently degraded feed. Covers both halves of R12
+    part 3 in one call: a followless AND tagless viewer, the strictest case.
+    """
+    popular = [make_post(f"pop{i}", f"p{i}") for i in range(30)]
+    gateway = FakeGateway(popular=popular)
+    viewer = make_viewer("blank")  # no follows, no interest_tags: the R12 case
+
+    with caplog.at_level(logging.WARNING, logger="recsys.pipeline"):
+        feed = rank_feed(viewer, gateway, _norm(), now=NOW, since=EPOCH, trust_policy=_PERMISSIVE)
+
+    assert feed, "a tagless viewer must never be served an empty feed"
+    assert all(sc.source is CandidateSource.POPULAR_FALLBACK for sc in feed)
+    assert "no interest_tags" in caplog.text
+
+
+def test_a_declared_interest_tag_silences_the_tagless_warning(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The control: a viewer who DID declare a tag must not trip R12's warning,
+    even when it happens to source nothing (e.g. an empty gateway) — the log is
+    about the viewer's own declaration, not about realised supply."""
+    gateway = FakeGateway()
+    viewer = make_viewer("has-tags", interest_tags=frozenset({"art"}))
+
+    with caplog.at_level(logging.WARNING, logger="recsys.pipeline"):
+        candidates = gather_candidates(viewer, gateway, EPOCH, 400, DEFAULT_SETTINGS)
+
+    assert candidates == []
+    assert "no interest_tags" not in caplog.text
 
 
 def test_unrequested_oon_still_needs_second_degree_vouch() -> None:
@@ -125,11 +168,11 @@ def test_unrequested_oon_still_needs_second_degree_vouch() -> None:
     assert {sc.post.key for sc in admitted} == {"@stranger/x1"}
 
 
-def test_gather_dedups_in_network_over_community() -> None:
-    shared = make_post("alice", "a1", community="hive-1")
-    gateway = FakeGateway(in_network=[shared], community=[shared])
+def test_gather_dedups_in_network_over_interest_tag() -> None:
+    shared = make_post("alice", "a1", tags=("art",))
+    gateway = FakeGateway(in_network=[shared], tag=[shared])
     viewer = make_viewer(
-        "me", follows=frozenset({"alice"}), subscribed_communities=frozenset({"hive-1"})
+        "me", follows=frozenset({"alice"}), interest_tags=frozenset({"art"})
     )
 
     candidates = gather_candidates(viewer, gateway, EPOCH, 400, DEFAULT_SETTINGS)
@@ -143,17 +186,15 @@ def test_interest_lane_not_appended_for_followed_viewer_claiming_new() -> None:
     # `not viewer.follows`, never the client-set `is_new` flag. A viewer WITH
     # follows must NOT be able to force the exempt lane onto their feed by
     # claiming is_new=True (the spoofable-flag shape hardened elsewhere).
-    interest_sources = {CandidateSource.INTEREST_COMMUNITY, CandidateSource.INTEREST_TAG}
-    community_post = make_post("author1", "c1", community="hive-1")
+    interest_sources = {CandidateSource.INTEREST_TAG}
     tag_post = make_post("author2", "t1", tags=("art",))
     in_net = make_post("alice", "a1")
-    gateway = FakeGateway(in_network=[in_net], community=[community_post], tag=[tag_post])
+    gateway = FakeGateway(in_network=[in_net], tag=[tag_post])
 
     followed_new = make_viewer(
         "me",
         follows=frozenset({"alice"}),
         is_new=True,  # spoofable client flag — must NOT open the interest lane
-        interest_communities=frozenset({"hive-1"}),
         interest_tags=frozenset({"art"}),
     )
     followed_cands = gather_candidates(followed_new, gateway, EPOCH, 400, DEFAULT_SETTINGS)
@@ -163,7 +204,6 @@ def test_interest_lane_not_appended_for_followed_viewer_claiming_new() -> None:
     followless = make_viewer(
         "newbie",
         is_new=False,
-        interest_communities=frozenset({"hive-1"}),
         interest_tags=frozenset({"art"}),
     )
     cold_sources = {
@@ -357,8 +397,12 @@ class _HonoringPriorGateway(FakeGateway):
 
 def test_author_prior_is_fed_the_full_exclusion_set() -> None:
     # The pooled prior's input must be filtered by the SAME §8.4 set the scorer
-    # applies to own_base: self + stake lineage + per-author ring. Without this
-    # the aggregate is self-excluded only and an author farms their own prior.
+    # applies to own_base. Since B2 (2026-08-05) that set is self + per-author
+    # ring; STAKE LINEAGE WAS REMOVED because Hive delegation needs no consent
+    # from the delegatee, so a stranger could edit any author's exclusion set
+    # (see `pipeline._lineage_for`). The alt-farm case lineage used to cover is
+    # now carried by the unknown-tier breadth budget — pinned by
+    # `test_alt_farm_is_defeated_by_the_breadth_budget_not_by_lineage` below.
     post = make_post("farm", "p1", votes=[make_vote("h1", 50_000_000)])
     priors = {"farm": AuthorEngagement(posts=2, total_base=0.6)}
     gateway = _PriorGateway(priors, in_network=[post], lineage={"farm": frozenset({"alt1"})})
@@ -371,7 +415,7 @@ def test_author_prior_is_fed_the_full_exclusion_set() -> None:
     rank_feed(viewer, gateway, _norm(), now=NOW, since=EPOCH, snapshot=snap,
               trust_policy=_PERMISSIVE)
 
-    assert gateway.last_excluded == {"farm": frozenset({"alt1", "ringmate", "farm"})}
+    assert gateway.last_excluded == {"farm": frozenset({"ringmate", "farm"})}
     # No graph-cred in this snapshot -> _voter_trust is honestly None -> the
     # gateway must be handed None too, not a default/empty VoterTrust that
     # would silently zero every unknown-tier identity's breadth.
@@ -403,47 +447,58 @@ def test_author_prior_is_fed_the_same_trust_budget_the_scorer_uses() -> None:
     assert gateway.last_excluded == {"farm": frozenset({"farm"})}
 
 
-def test_pooled_prior_no_longer_lifts_an_alt_farmed_author() -> None:
-    # farm farms its OTHER window posts with six delegation-tied alts; honest
-    # has the same own-post engagement but genuine independent engagement on its
-    # other posts. Self-exclusion-only (pre-fix) counts the alts and lifts farm
-    # ABOVE honest; the §8.4-filtered aggregate strips them and farm falls back.
-    farm_p0 = make_post(
-        "farm", "p0", votes=[make_vote("h1", 50_000_000), make_vote("h2", 50_000_000)]
+def test_lineage_is_gone_from_the_prior_exclusion_set_and_H05_still_guards_it() -> None:
+    """★ THE B2 SAFETY PROOF (2026-08-05), stated at the level the evidence
+    actually supports.
+
+    Stake lineage used to do two opposite things in the author prior: it caught
+    an author farming their own pooled prior with alts, AND it was the vector
+    that let a stranger poison any author (33 dust delegations -> organic
+    percentile 0.79 -> 0.07). B2 removes it, so the question that had to be
+    answered before removing was: does the alt-farm case lose its defence?
+
+    It does not. `scoring.py` states `total_base` carries TWO guards, and the
+    second is independent of lineage: "since H05, the same graph-cred breadth
+    BUDGET (VoterTrust) applied per window post before summing — so neither
+    lineage/ring farming NOR UN-BUDGETED SOCK BREADTH can inflate the pool."
+    The budget exists precisely because the exclusion set alone was insufficient
+    (`test_hafsql.py`: "H05: exclusion alone leaves BREADTH un-budgeted —
+    unknown-tier socks"). Six unvouched alts buy `unknown_free` breadth between
+    them, not six.
+
+    ★ WHAT THIS TEST DOES NOT DO, deliberately. An earlier draft asserted the
+    served ORDER on `_HonoringPriorGateway`, and it failed — because that stub
+    models the §8.4 exclusion guard and NOT the H05 budget, so it cannot express
+    the defence that now carries the case. Asserting order there would have
+    reported a production hole that does not exist. The behavioural proof of the
+    budget lives where the budget lives: `test_hafsql.py` (query level) and
+    `test_author_prior_cache.py::...passes_voter_trust...`. What is pinned HERE
+    is the seam B2 actually changed: lineage is out of the exclusion set, and
+    the H05 trust guard is still threaded to the prior.
+    """
+    post = make_post("farm", "p1", votes=[make_vote("h1", 50_000_000)])
+    priors = {"farm": AuthorEngagement(posts=2, total_base=0.6)}
+    gateway = _PriorGateway(priors, in_network=[post], lineage={"farm": frozenset({"alt1"})})
+    viewer = make_viewer("me", follows=frozenset({"farm"}))
+    snap = TrustSnapshot(
+        graph_creds={"h1": GraphCred(account="h1", score=0.5, follow_follower_ratio=1.0)},
+        ring_members=frozenset({"farm", "ringmate"}),
+        trusted_seeds=frozenset({"h1"}),
+        built_at=NOW,
     )
-    honest_q0 = make_post(
-        "honest", "q0", votes=[make_vote("h3", 50_000_000), make_vote("h4", 50_000_000)]
+
+    rank_feed(viewer, gateway, _norm(), now=NOW, since=EPOCH, snapshot=snap,
+              trust_policy=_PERMISSIVE)
+
+    # The gateway still OFFERS a lineage map; the pipeline no longer asks for it.
+    assert gateway.last_excluded == {"farm": frozenset({"ringmate", "farm"})}
+    assert "alt1" not in gateway.last_excluded["farm"]
+    # ...and the guard that replaced it is live for this request.
+    assert gateway.last_trust is not None, (
+        "the H05 breadth budget is NOT reaching the pooled prior — with lineage "
+        "removed it is the only remaining defence against alt-farmed priors, so "
+        "this failing means B2 DID cost a real protection"
     )
-    alt_votes = [make_vote(f"alt{i}", 50_000_000) for i in range(6)]
-    farm_others = [make_post("farm", f"p{i}", votes=alt_votes) for i in range(1, 5)]
-    honest_others = [
-        make_post(
-            "honest", f"q{i}",
-            votes=[make_vote("h5", 50_000_000), make_vote("h6", 50_000_000)],
-        )
-        for i in range(1, 5)
-    ]
-    window = [farm_p0, honest_q0, *farm_others, *honest_others]
-    lineage = {"farm": frozenset(f"alt{i}" for i in range(6))}
-
-    # a norm fine enough on the organic axis to resolve the two nearby raws
-    fine = [i / 50.0 for i in range(50)]
-    coarse = [float(i) for i in range(50)]
-    norm = build_norm_context(coarse, coarse, fine)
-    viewer = make_viewer("me", follows=frozenset({"farm", "honest"}))
-
-    def served(honor: bool) -> list[str]:
-        gw = _HonoringPriorGateway(
-            window, in_network=[farm_p0, honest_q0], lineage=lineage, honor=honor
-        )
-        feed = rank_feed(viewer, gw, norm, now=NOW, since=EPOCH, trust_policy=_PERMISSIVE)
-        return [sc.post.author for sc in feed]
-
-    # pre-fix: the alt farm lifts farm above honest.
-    assert served(honor=False) == ["farm", "honest"]
-    # after the fix: alts stripped from the prior -> farm loses the rented lift
-    # and honest (genuine engagement) is served first.
-    assert served(honor=True) == ["honest", "farm"]
 
 
 def test_pooled_prior_sock_swarm_is_breadth_budgeted_not_farmed() -> None:
@@ -553,7 +608,13 @@ def test_build_trust_snapshot_produces_graph_cred() -> None:
     gateway = FakeGateway(
         edges=edges, follow_graph={"a": frozenset({"b"}), "b": frozenset({"a"})}
     )
-    snap = build_trust_snapshot(gateway, DEFAULT_SETTINGS, since=EPOCH, now=EPOCH)
+    # production=False (C5/R2, 2026-08-04): this synthetic 2-account world has
+    # no account named from the real curated seed list, so production=True
+    # (now the default) would refuse under F-R2 — explicit opt-out per the
+    # fixture-migration ruling, not an invented seed.
+    snap = build_trust_snapshot(
+        gateway, DEFAULT_SETTINGS, since=EPOCH, now=EPOCH, production=False
+    )
     assert {"a", "b"} <= set(snap.graph_creds)
     assert isinstance(snap.ring_members, frozenset)
 
@@ -563,6 +624,15 @@ def test_build_trust_snapshot_refuses_empty_seeds_in_production() -> None:
     # teleport mass revert to uniform, letting a Sybil clique mint free rank
     # with nothing raising. The production guard refuses it, mirroring the
     # fail-closed posture rank_feed already takes for a missing snapshot.
+    #
+    # ★ C5/R2 (2026-08-04): `production` now DEFAULTS to True, and an omitted
+    # `trusted_seeds` now defaults to `settings.trusted_seeds` (the real,
+    # non-empty curated list) rather than empty — see `build_trust_snapshot`'s
+    # docstring. So the "empty seeds" case below is exercised with
+    # `trusted_seeds=frozenset()` EXPLICITLY, and the "offline" case with
+    # `production=False` EXPLICITLY; neither is reachable by omission anymore,
+    # which is the entire point of the ruling ("a wiring requirement every
+    # caller must remember is the defect, not the fix").
     edges = [
         EngagementEdge(src="a", dst="b", upvotes=5),
         EngagementEdge(src="b", dst="a", upvotes=5),
@@ -572,16 +642,28 @@ def test_build_trust_snapshot_refuses_empty_seeds_in_production() -> None:
     )
     with pytest.raises(ValueError, match="trusted_seeds"):
         build_trust_snapshot(
-            gateway, DEFAULT_SETTINGS, since=EPOCH, now=EPOCH, production=True
+            gateway, DEFAULT_SETTINGS, since=EPOCH, now=EPOCH,
+            trusted_seeds=frozenset(), production=True,
         )
-    # With seeds supplied, the production build succeeds.
+    # A non-empty but entirely UNLANDED seed set (the real curated list,
+    # against this synthetic 2-account world) refuses too — F-R2 EXTENDED,
+    # and now the reachable-by-omission case: a caller that supplies
+    # `settings` and forgets `trusted_seeds` gets this path, not a silent
+    # empty-seeds revert.
+    with pytest.raises(ValueError, match="trusted_seeds"):
+        build_trust_snapshot(gateway, DEFAULT_SETTINGS, since=EPOCH, now=EPOCH)
+    # With seeds supplied AND landed, the production build succeeds.
     snap = build_trust_snapshot(
         gateway, DEFAULT_SETTINGS, since=EPOCH, now=EPOCH,
         trusted_seeds=frozenset({"a"}), production=True,
     )
     assert {"a", "b"} <= set(snap.graph_creds)
-    # The offline/harness default (production=False) still allows empty seeds.
-    offline = build_trust_snapshot(gateway, DEFAULT_SETTINGS, since=EPOCH, now=EPOCH)
+    # The offline/harness path (production=False, EXPLICIT) still allows
+    # empty seeds — this is no longer the default, so it must be requested.
+    offline = build_trust_snapshot(
+        gateway, DEFAULT_SETTINGS, since=EPOCH, now=EPOCH,
+        trusted_seeds=frozenset(), production=False,
+    )
     assert {"a", "b"} <= set(offline.graph_creds)
 
 
@@ -601,9 +683,16 @@ def test_established_viewer_with_dead_follows_is_never_served_an_empty_feed() ->
 
     feed = rank_feed(viewer, gateway, _norm(), now=NOW, since=EPOCH, trust_policy=_PERMISSIVE)
 
-    # No personalized pool at all -> the popular lane IS the feed, at full depth
-    # (unchanged §13.5b behavior, now reached by every viewer state).
-    assert len(feed) == 30
+    # ★ C6 (2026-08-04): the popular lane is no longer allowed to BE the whole
+    # feed at full pool depth — `FallbackConfig.max_share_of_feed` (default
+    # 0.25) bounds padding's share of the RETURNED feed, applied uniformly
+    # including at zero eligible posts (see `_fallback_filler`'s comment on
+    # why an exemption at eligible==0 would reintroduce a non-monotonic
+    # feed-length cliff). What this test actually guards — a dead-follows
+    # viewer is NEVER served an empty feed — still holds: `min_feed_size` is
+    # a floor the share cap cannot go below.
+    assert len(feed) == DEFAULT_SETTINGS.fallback.min_feed_size == 20
+    assert all(sc.source is CandidateSource.POPULAR_FALLBACK for sc in feed)
 
 
 def test_near_empty_feed_is_topped_up_without_losing_the_viewers_own_posts() -> None:
@@ -659,7 +748,18 @@ def test_the_first_follow_does_not_truncate_the_feed() -> None:
     """★ THE CLIFF ITSELF, asserted on served feed length.
 
     A viewer with no follows and a viewer with one follow must get feeds of
-    comparable depth. Before this fix the ratio was 10x.
+    comparable depth. Before the original fix the ratio was 10x.
+
+    ★ C6 (2026-08-04): `FallbackConfig.max_share_of_feed` now bounds both
+    cases to exactly `min_feed_size` (20) — the popular lane can no longer
+    pad a thin-supply viewer out to the full admissible pool the way it did
+    when this test was written (see `test_established_viewer_with_dead_
+    follows_is_never_served_an_empty_feed`'s updated comment for why, and
+    `_fallback_filler` for the formula). The two feeds are therefore now
+    EQUAL in length rather than merely "comparable" — a strictly stronger
+    guarantee against the cliff this test exists to catch than the original
+    `> 20` / `>=` pair, which assumed an uncapped popular lane and would
+    misfire ("fixture too small") under the cap regardless of pool size.
     """
     popular = _popular()
     followless = rank_feed(
@@ -672,7 +772,7 @@ def test_the_first_follow_does_not_truncate_the_feed() -> None:
         FakeGateway(in_network=[make_post("live", "l0")], popular=popular),
         _norm(), now=NOW, since=EPOCH, trust_policy=_PERMISSIVE,
     )
-    assert len(followless) > 20, "fixture too small to show the cliff"
+    assert len(followless) == DEFAULT_SETTINGS.fallback.min_feed_size
     assert len(one_follow) >= len(followless), (
         f"one follow cut the feed from {len(followless)} to {len(one_follow)} posts"
     )
@@ -800,8 +900,8 @@ def test_starved_feed_stays_short_when_the_network_has_nothing_to_offer() -> Non
     assert rank_feed(viewer, gateway, _norm(), now=NOW, since=EPOCH, trust_policy=_PERMISSIVE) == []
 
 
-def test_established_viewer_subscribed_community_admits_clean_strangers_only() -> None:
-    """A subscribed community admits a stranger — but only a CREDIBLE one.
+def test_established_viewer_interest_tag_admits_clean_strangers_only() -> None:
+    """A declared interest tag admits a stranger — but only a CREDIBLE one.
 
     ★ DELIBERATE CHANGE OF THE §8.1 RULE (2026-08-01). This used to assert that a
     stranger posting into a community the viewer subscribed to was admitted ONLY
@@ -817,22 +917,28 @@ def test_established_viewer_subscribed_community_admits_clean_strangers_only() -
     anyone's feed — is preserved by two protections that did not exist when it
     was written, and this test now asserts both:
       1. the author graph-cred floor, so self-dealers and ring members are
-         refused (`requires_author_floor` stays True for OON_COMMUNITY);
-      2. the per-author OON flooding cap, so nobody can flood a community feed.
+         refused (`requires_author_floor` stays True for OON_INTEREST);
+      2. the per-author OON flooding cap, so nobody can flood an interest feed.
 
     What is deliberately given up: an unknown but credible author can now reach a
-    viewer who explicitly subscribed to their community. That is what subscribing
-    means, and it is the only route by which a community can introduce anyone new.
+    viewer who explicitly declared that interest tag. That is what declaring an
+    interest means, and it is the only route by which a tag can introduce anyone
+    new.
+
+    ★ Communities were retired as a lane 2026-08-04 (R1/R3) — this test used to
+    exercise OON_COMMUNITY specifically (a subscribed community); the mechanism
+    it pins (author floor + flooding cap standing in for the retired vouch gate)
+    is identical for OON_INTEREST, the surviving discovery lane.
     """
-    stranger_post = make_post("stranger", "s1", community="hive-1")
-    gateway = FakeGateway(community=[stranger_post])
+    stranger_post = make_post("stranger", "s1", tags=("photo",))
+    gateway = FakeGateway(tag=[stranger_post])
     viewer = make_viewer(
-        "me", follows=frozenset({"alice"}), subscribed_communities=frozenset({"hive-1"})
+        "me", follows=frozenset({"alice"}), interest_tags=frozenset({"photo"})
     )
 
     admitted = rank_feed(viewer, gateway, _norm(), now=NOW, since=EPOCH, trust_policy=_PERMISSIVE)
     assert {sc.post.key for sc in admitted} == {"@stranger/s1"}, (
-        "subscribing to a community must actually deliver its posts"
+        "declaring an interest tag must actually deliver its posts"
     )
 
     # ...but a stranger caught self-dealing is still refused.
@@ -843,26 +949,26 @@ def test_established_viewer_subscribed_community_admits_clean_strangers_only() -
         viewer, gateway, _norm(), now=NOW, since=EPOCH,
         snapshot=snapshot, trust_policy=_PERMISSIVE,
     )
-    assert gated == [], "a floored author must not ride a community subscription in"
+    assert gated == [], "a floored author must not ride an interest tag in"
 
 
-def test_a_single_author_cannot_flood_a_subscribed_community_feed() -> None:
+def test_a_single_author_cannot_flood_an_interest_tag_feed() -> None:
     """★ The second protection standing in for the removed vouch gate.
 
-    Without this the community lane is an unbounded megaphone for one account:
-    the flooding cap is what keeps "a stranger may reach you" from becoming "a
+    Without this an interest tag is an unbounded megaphone for one account: the
+    flooding cap is what keeps "a stranger may reach you" from becoming "a
     stranger may BE your feed".
     """
-    posts = [make_post("stranger", f"s{i}", community="hive-1") for i in range(30)]
+    posts = [make_post("stranger", f"s{i}", tags=("photo",)) for i in range(30)]
     viewer = make_viewer(
-        "me", follows=frozenset({"alice"}), subscribed_communities=frozenset({"hive-1"})
+        "me", follows=frozenset({"alice"}), interest_tags=frozenset({"photo"})
     )
     feed = rank_feed(
-        viewer, FakeGateway(community=posts), _norm(), now=NOW, since=EPOCH,
+        viewer, FakeGateway(tag=posts), _norm(), now=NOW, since=EPOCH,
         trust_policy=_PERMISSIVE,
     )
     assert len(feed) <= DEFAULT_SETTINGS.flooding.max_oon_posts_per_author, (
-        f"one author placed {len(feed)} posts in a subscribed-community feed"
+        f"one author placed {len(feed)} posts in an interest-tag feed"
     )
 
 
@@ -1031,7 +1137,10 @@ def test_h02_laundered_reciprocal_pairs_stay_unknown_and_spam_breadth_is_flat() 
     # engages ITSELF has none of.
     edges, follows = _laundered_pairs(40)
     gw_trust = FakeGateway(edges=edges, follow_graph=follows)
-    snap = build_trust_snapshot(gw_trust, DEFAULT_SETTINGS, since=EPOCH, now=EPOCH)
+    # production=False (C5/R2): synthetic sock world, no real seed lands.
+    snap = build_trust_snapshot(
+        gw_trust, DEFAULT_SETTINGS, since=EPOCH, now=EPOCH, production=False
+    )
 
     socks = [f"sock{i}" for i in range(40)]
     floor = DEFAULT_SETTINGS.graph_cred.min_vouched_score
@@ -1074,8 +1183,10 @@ def test_h02_genuine_newcomer_pair_is_unknown_but_not_blocked_and_flips_on_outsi
         EngagementEdge(src="newb", dst="newa", upvotes=1),
     ]
     follows = {"newa": frozenset({"newb"}), "newb": frozenset({"newa"})}
+    # production=False (C5/R2): synthetic newcomer-pair world, no real seed lands.
     snap = build_trust_snapshot(
-        FakeGateway(edges=edges, follow_graph=follows), DEFAULT_SETTINGS, since=EPOCH, now=EPOCH
+        FakeGateway(edges=edges, follow_graph=follows), DEFAULT_SETTINGS, since=EPOCH, now=EPOCH,
+        production=False,
     )
     th = DEFAULT_SETTINGS.thresholds
     for who in ("newa", "newb"):
@@ -1092,7 +1203,8 @@ def test_h02_genuine_newcomer_pair_is_unknown_but_not_blocked_and_flips_on_outsi
     edges2 = [*edges, EngagementEdge(src="peer", dst="newa", upvotes=1)]
     follows2 = {**follows, "peer": frozenset({"newa"})}
     snap2 = build_trust_snapshot(
-        FakeGateway(edges=edges2, follow_graph=follows2), DEFAULT_SETTINGS, since=EPOCH, now=EPOCH
+        FakeGateway(edges=edges2, follow_graph=follows2), DEFAULT_SETTINGS, since=EPOCH, now=EPOCH,
+        production=False,
     )
     assert snap2.graph_creds["newa"].outside_engaged is True
     trust2 = _voter_trust(snap2, DEFAULT_SETTINGS)
@@ -1161,9 +1273,9 @@ def test_h07_followless_established_viewer_gets_no_cf_lift_in_interest_lane() ->
     assert "me" in als.user_index  # established: has a trained row
     assert als.affinity("me", "liked") > als.affinity("me", "other")
 
-    liked_post = make_post("liked", "ic1", community="hive-1")
-    gateway = FakeGateway(community=[liked_post])
-    viewer = make_viewer("me", follows=frozenset(), interest_communities=frozenset({"hive-1"}))
+    liked_post = make_post("liked", "ic1", tags=("photo",))
+    gateway = FakeGateway(tag=[liked_post])
+    viewer = make_viewer("me", follows=frozenset(), interest_tags=frozenset({"photo"}))
     cf_on = dataclasses.replace(
         DEFAULT_SETTINGS,
         weights=dataclasses.replace(DEFAULT_SETTINGS.weights, organic_cf_oon_scale=1.0),
@@ -1199,14 +1311,13 @@ def test_h07_true_cold_newcomer_still_served_ungated_interest_lane() -> None:
     als = train_als(_cf_edges(), ALSConfig())  # "newbie" never appears in these edges
     assert "newbie" not in als.user_index
 
-    community_post = make_post("author1", "c1", community="hive-1")
-    tag_post = make_post("author2", "t1", tags=("art",))
-    gateway = FakeGateway(community=[community_post], tag=[tag_post])
+    tag_post1 = make_post("author1", "c1", tags=("photo",))
+    tag_post2 = make_post("author2", "t1", tags=("art",))
+    gateway = FakeGateway(tag=[tag_post1, tag_post2])
     viewer = make_viewer(
         "newbie",
         is_new=True,
-        interest_communities=frozenset({"hive-1"}),
-        interest_tags=frozenset({"art"}),
+        interest_tags=frozenset({"photo", "art"}),
     )
     cf_on = dataclasses.replace(
         DEFAULT_SETTINGS,
@@ -1330,7 +1441,10 @@ def _h11_snap(
     previous: TrustSnapshot | None = None,
 ) -> TrustSnapshot:
     gw = FakeGateway(edges=edges, follow_graph=follows)
-    return build_trust_snapshot(gw, settings, since=EPOCH, now=EPOCH, previous=previous)
+    # production=False (C5/R2): synthetic H11 drift-gate world, no real seed lands.
+    return build_trust_snapshot(
+        gw, settings, since=EPOCH, now=EPOCH, previous=previous, production=False
+    )
 
 
 def test_h11_poisoned_batch_degrades_snapshot_and_disables_cf() -> None:
@@ -1451,3 +1565,1042 @@ def test_h11_default_threshold_is_conservative_backstop() -> None:
     week2 = _h11_snap(poison, follows, DEFAULT_SETTINGS, previous=week1)
     assert week2.degraded is False          # 0.22 < default 0.5 -> not tripped
     assert week2.als is not None
+
+
+# ---------------------------------------------------------------------------
+# Exploration lane, through the SERVED feed (cold-start spec §4.3, item B12).
+#
+# ★ Added 2026-08-04. Every other test of this lane calls `eligible_for_
+# exploration` / `insert_exploration` directly, and this package has already
+# been burned four times by fixes that passed their own tests because they were
+# verified at the candidate boundary instead of at the feed the viewer actually
+# receives. These two go through `rank_feed`.
+# ---------------------------------------------------------------------------
+
+
+def _explore_norm() -> NormContext:
+    """A norm whose samples actually BRACKET this fixture's raw values.
+
+    The shared `_norm()` draws its samples from `range(50)`, which is orders of
+    magnitude above any real raw here — every post then percentile-ranks below
+    sample 0, the whole feed ties at one score, and the tie-break silently
+    becomes the ranker. A ranking test built on it measures nothing. Measured
+    raws for this fixture: organic 0.40 established vs 0.099 debut, vote signal
+    1.41 vs 0.0.
+    """
+    return build_norm_context(
+        [i / 25 for i in range(50)],     # vote signal, spans 0 .. 1.96
+        [float(i) for i in range(50)],   # reputation, uniform at 50.0 for all
+        [i / 100 for i in range(50)],    # organic quality, spans 0 .. 0.49
+    )
+
+
+def _explore_world() -> tuple[FakeGateway, object, Settings, Settings]:
+    """An established viewer, a well-engaged in-network feed, and one brand-new
+    author posting under the tag the viewer declared as an interest.
+
+    ★ All posts (established + debut) share one topic key deliberately — they
+    used to all carry `community="hive-1"` before communities were retired as a
+    lane (2026-08-04, R1/R3); giving every post the same `category`/`tags` here
+    reproduces that "one topic bucket" shape exactly, so the diversity re-ranker's
+    behaviour (and therefore the positions this test pins) is unchanged.
+
+    ★ THREE distinct voters per established post, not two (fixed 2026-08-04,
+    C8 fallout). `_need_tier`'s shipped bands are ``(0, 3, 8, 20)``
+    (`core/exploration.py`), so a received-count of 0, 1 OR 2 distinct
+    engagers all land in the SAME bottom tier as the newcomer's true zero.
+    With only two voters each, every "established" author was actually TIED
+    with the newcomer in need-tier 0, so which of the 26 tied accounts won
+    the reserved slot depended on the seat-rotation hash instead of on the
+    newcomer genuinely being the least-heard — this fixture stopped
+    demonstrating what its own name claims. Three voters (>= the tier-1
+    boundary) keeps every established author OUT of tier 0, so the newcomer
+    is the sole occupant again and the slot is deterministic regardless of
+    bucket/secret.
+    """
+    # 25 DISTINCT established authors, one post each. A handful of authors with
+    # many posts each does not work as a fixture: the author-diversity re-ranker
+    # decays the repeats hard enough to float the debut to position 3 on its own,
+    # and the test would then be measuring rerank rather than the lane.
+    # rshares must clear `_ORGANIC_VOTER_MIN_RSHARES` (1e7) or the organic term
+    # — 80% of the composite — cannot see the votes at all and the established
+    # posts differ from the debut only on the 10% vote channel. `make_vote`'s
+    # default (1e6) is dust by that measure.
+    in_network = [
+        make_post(
+            f"est{i:02d}", f"e{i}", category="photo", tags=("photo",),
+            created_min=i, children=2,
+            votes=[
+                make_vote(f"reader{i}", 50_000_000),
+                make_vote(f"reader{i + 100}", 40_000_000),
+                make_vote(f"reader{i + 200}", 30_000_000),
+            ],
+        )
+        for i in range(25)
+    ]
+    debut = make_post("newcomer", "debut", category="photo", tags=("photo",), created_min=30)
+    gateway = FakeGateway(in_network=in_network, tag=[debut])
+    viewer = make_viewer(
+        "me",
+        follows=frozenset(f"est{i:02d}" for i in range(25)),
+        interest_tags=frozenset({"photo"}),
+    )
+    # ★ PINNED SEAT SECRET (C1a fallout, 2026-08-04). Belt-and-braces on top of
+    # the tier fix above: the unconfigured default is a per-process-RANDOM dev
+    # key (`ExplorationConfig.seat_secret=None`, `production=False`), which
+    # would make this fixture's outcome depend on process-random state rather
+    # than only on fixture content. Same rationale and pattern as
+    # `tests/test_exploration.py`'s own `seat-stability-fixed-secret-v2`.
+    seat_secret = hashlib.sha256(b"test-pipeline-explore-world-fixed-secret").digest()
+    on = Settings(exploration=ExplorationConfig(seat_secret=seat_secret))
+    off = dataclasses.replace(
+        on, exploration=dataclasses.replace(on.exploration, slots_per_page=0)
+    )
+    return gateway, viewer, on, off
+
+
+def test_exploration_reaches_the_served_feed_end_to_end() -> None:
+    """The acceptance shape of §4.3: a zero-engagement debut that loses on score
+    is served at the reserved slot instead of being buried past the first page."""
+    gateway, viewer, on, off = _explore_world()
+
+    without = rank_feed(viewer, gateway, _explore_norm(), now=NOW, since=EPOCH,
+                        settings=off, trust_policy=_PERMISSIVE)
+    with_lane = rank_feed(viewer, gateway, _explore_norm(), now=NOW, since=EPOCH,
+                          settings=on, trust_policy=_PERMISSIVE)
+
+    buried = [sc.post.key for sc in without].index("@newcomer/debut")
+    served = [sc.post.key for sc in with_lane].index("@newcomer/debut")
+    assert buried > on.exploration.position      # it really did lose on score
+    assert served == on.exploration.position     # and the lane is what fixed it
+    assert with_lane[served].source is CandidateSource.EXPLORATION
+
+
+def test_the_lane_costs_the_rest_of_the_served_feed_nothing() -> None:
+    """★ NON-HARM, measured where the viewer experiences it.
+
+    A reserved slot is only honest if it comes out of unused space. Turning the
+    lane on must not admit a post that was ineligible, must not change anyone's
+    score, and must not re-order what the viewer's own network earned — the sole
+    permitted effect is that everything below the slot shifts down by one.
+
+    Scope, stated: this feed is far short of `top_k`, so nothing is dropped. At
+    the truncation boundary the marginal tail item DOES fall outside the cut —
+    that is what reserving a slot costs, and `insert_exploration.__doc__` owns
+    that case. Here the claim is only that the lane takes nothing else.
+    """
+    gateway, viewer, on, off = _explore_world()
+
+    without = rank_feed(viewer, gateway, _explore_norm(), now=NOW, since=EPOCH,
+                        settings=off, trust_policy=_PERMISSIVE)
+    with_lane = rank_feed(viewer, gateway, _explore_norm(), now=NOW, since=EPOCH,
+                          settings=on, trust_policy=_PERMISSIVE)
+
+    assert {sc.post.key for sc in with_lane} == {sc.post.key for sc in without}
+    promoted = "@newcomer/debut"
+    assert [sc.post.key for sc in with_lane if sc.post.key != promoted] == [
+        sc.post.key for sc in without if sc.post.key != promoted
+    ]
+    # The scores are untouched too: the lane pays REACH, never score (§4.3).
+    by_key = {sc.post.key: sc.score.final for sc in without}
+    assert all(sc.score.final == by_key[sc.post.key] for sc in with_lane)
+
+
+def _rotating_explore_world() -> tuple[FakeGateway, object, Settings]:
+    """Like `_explore_world`, but with SEVERAL equally-unheard debut authors.
+
+    ★ The single-author fixture cannot exercise rotation at all — a tier of one
+    has nothing to rotate — which is why the wiring, the time unit and the
+    rotation guard all survived mutation testing untested.
+    """
+    in_network = [
+        make_post(
+            f"est{i:02d}", f"e{i}", category="photo", tags=("photo",),
+            created_min=i, children=2,
+            votes=[make_vote(f"reader{i}", 50_000_000), make_vote(f"reader{i + 100}", 40_000_000)],
+        )
+        for i in range(25)
+    ]
+    debuts = [
+        make_post(f"newcomer{i}", "debut", category="photo", tags=("photo",), created_min=30 + i)
+        for i in range(6)
+    ]
+    gateway = FakeGateway(in_network=in_network, tag=debuts)
+    viewer = make_viewer(
+        "me",
+        follows=frozenset(f"est{i:02d}" for i in range(25)),
+        interest_tags=frozenset({"photo"}),
+    )
+    return gateway, viewer, Settings()
+
+
+def _seat(gateway, viewer, settings, now) -> str:
+    feed = rank_feed(viewer, gateway, _explore_norm(), now=now, since=EPOCH,
+                     settings=settings, trust_policy=_PERMISSIVE)
+    return feed[settings.exploration.position].post.author
+
+
+def test_the_reserved_seat_rotates_on_the_clock_through_rank_feed() -> None:
+    """★ End-to-end proof that the bucket is actually WIRED. Deleting
+    `bucket=explore_bucket` from `rank_feed` passed the entire suite before this
+    test existed.
+
+    NOW is deliberately offset from midnight: the measurement harness pins its
+    clock to exact midnight, which makes the bucket a multiple of 4 and hid the
+    feature from every panel.
+    """
+    gateway, viewer, on = _rotating_explore_world()
+    base = NOW + timedelta(hours=1)
+
+    seats = {_seat(gateway, viewer, on, base + timedelta(hours=6 * k)) for k in range(4)}
+
+    assert len(seats) > 1, "the seat never changed across four 6-hour buckets"
+
+
+def test_the_bucket_is_measured_in_hours_not_seconds() -> None:
+    """★ A mutant that computed the bucket in SECONDS passed all 502 tests. It
+    destroys the property the setting exists for — a viewer could re-roll their
+    feed by refreshing — so it needs its own pin."""
+    gateway, viewer, on = _rotating_explore_world()
+    base = NOW + timedelta(hours=1)
+
+    assert _seat(gateway, viewer, on, base) == _seat(
+        gateway, viewer, on, base + timedelta(minutes=5)
+    )
+    assert _seat(gateway, viewer, on, base) == _seat(
+        gateway, viewer, on, base + timedelta(seconds=1)
+    )
+
+
+def test_rotation_hours_zero_pins_the_seat_through_rank_feed() -> None:
+    """The revert path: if rotation misbehaves live it must be switchable off by
+    config alone. A mutant that ignored `rotation_hours` also passed everything."""
+    gateway, viewer, on = _rotating_explore_world()
+    off = dataclasses.replace(on, exploration=dataclasses.replace(on.exploration,
+                                                                 rotation_hours=0))
+    base = NOW + timedelta(hours=1)
+
+    seats = {_seat(gateway, viewer, off, base + timedelta(hours=6 * k)) for k in range(4)}
+
+    assert len(seats) == 1, "rotation still ran with rotation_hours = 0"
+
+
+def test_lineage_is_no_longer_fetched_for_any_author() -> None:
+    """Replaces `test_stake_lineage_is_asked_once_per_author_per_request`, which
+    pinned a request-scoped memo over `gateway.stake_lineage`. B2 removed that
+    query outright, so the property worth pinning is no longer "asked once" but
+    "never asked, and empty for everyone" — the memo's redundancy is moot when
+    the round trip does not exist."""
+    gateway, viewer, on, _ = _explore_world()
+    assert not hasattr(gateway, "stake_lineage")
+    result = _lineage_for(gateway, frozenset({"a", "b"}), None)
+    assert result == {"a": frozenset(), "b": frozenset()}
+    rank_feed(viewer, gateway, _explore_norm(), now=NOW, since=EPOCH,
+              settings=on, trust_policy=_PERMISSIVE)
+
+
+def _lineage_farm_world(farm_size: int = 5) -> tuple[FakeGateway, object, Settings]:
+    """130 established authors, each with real votes, fill `ranked` with
+    enough room for all 3 `max_slots_per_feed` pages (page 2's slot sits at
+    index 53). They carry `tags=("photo",)` — the SAME declared-interest
+    score boost the farm gets, so the farm cannot out-merit them purely on
+    the interest-match term — but `category="news"`, which keeps them OUT of
+    the exploration pool: `eligible_for_exploration`'s `_interest_match`
+    gates on `post.category` only (the primary/filed tag), not the full tag
+    set (see that function's own docstring for why), so 'news' vs the
+    viewer's declared 'photo' interest excludes them there while still
+    scoring them fairly against the farm everywhere else. This isolates the
+    exploration pool to exactly the farm without silently favouring it.
+
+    ``farm_size`` sock accounts (`category='photo'`, matching the viewer's
+    interest, zero engagement, one post each) share ONE funding lineage —
+    the same shape as `test_exploration.py`'s reference fixture
+    (`test_c2c_at_most_one_promotion_per_lineage_group_per_feed`), just
+    reached through `rank_feed` instead of `insert_exploration` directly.
+    Zero engagement against 130 real-voted established authors keeps every
+    sock buried on merit (confirmed by hand: all 5 land at the tail,
+    positions 130+, before any exploration splice), which is exactly the
+    "lost on score" precondition the lane exists for.
+    """
+    in_network = [
+        make_post(
+            f"est{i:03d}", f"e{i}", category="news", tags=("photo",),
+            created_min=i % 55, children=2,
+            votes=[
+                make_vote(f"reader{i}", 50_000_000),
+                make_vote(f"reader{i + 1000}", 40_000_000),
+                make_vote(f"reader{i + 2000}", 30_000_000),
+            ],
+        )
+        for i in range(130)
+    ]
+    farm = [
+        make_post(
+            f"sock{i:02d}", "debut", category="photo", tags=("photo",), created_min=40 + i
+        )
+        for i in range(farm_size)
+    ]
+    lineage = {
+        f"sock{i:02d}": frozenset(
+            f"sock{j:02d}" for j in range(farm_size) if j != i
+        )
+        for i in range(farm_size)
+    }
+    gateway = FakeGateway(in_network=in_network, tag=farm, lineage=lineage)
+    viewer = make_viewer(
+        "me",
+        follows=frozenset(f"est{i:03d}" for i in range(130)),
+        interest_tags=frozenset({"photo"}),
+    )
+    seat_secret = hashlib.sha256(b"test-pipeline-lineage-farm-fixed-secret-v1").digest()
+    settings = Settings(
+        exploration=ExplorationConfig(seat_secret=seat_secret, max_slots_per_feed=3)
+    )
+    return gateway, viewer, settings
+
+
+def test_c2c_lineage_cap_is_retired_with_the_relation_it_depended_on() -> None:
+    """Replaces `test_c2c_lineage_cap_is_wired_end_to_end_through_rank_feed`.
+
+    C2c capped exploration promotions to one per lineage GROUP. It is retired
+    with B2 because its input was attacker-writable, and — decisive here — the
+    2026-08-05 council measured it INERT against the attack it was built for:
+    an account-count farm has no reason to delegate between its own socks
+    (100.0% of the exploration budget captured without shared lineage, 41.1%
+    with). So this removes a defence that did not defend.
+
+    ★ THE REPLACEMENT IS NOT THIS FILE'S. Account count is priced by the
+    SERVING LOG (B11/B1) — "has this author been heard" as a fact the system
+    OBSERVED rather than a number the attacker writes. Until that lands, the
+    exploration lane has NO account-count pricing, which is the honest state and
+    is recorded as such rather than implied by a still-green cap test.
+    """
+    gateway, viewer, on, _ = _explore_world()
+    ranked = rank_feed(viewer, gateway, _explore_norm(), now=NOW, since=EPOCH,
+                       settings=on, trust_policy=_PERMISSIVE)
+    explore_picks = [sc for sc in ranked if sc.source is CandidateSource.EXPLORATION]
+    # The lane still works...
+    assert explore_picks, "the exploration lane stopped producing picks entirely"
+    # ...and the group input the cap depended on is empty for every author in it,
+    # so no promotion can be constrained by a lineage group any more. When B1's
+    # serving log lands it will bound this lane by OBSERVED SERVES instead; this
+    # assertion is what should fail then, prompting a deliberate update.
+    authors = frozenset(sc.post.author for sc in explore_picks)
+    assert _lineage_for(gateway, authors, None) == {a: frozenset() for a in authors}
+
+def test_c2c_lineage_cap_wiring_costs_nothing_when_no_farm_is_present() -> None:
+    """Control: a single, genuinely unrelated newcomer (no shared lineage with
+    anyone) must still take its seat normally -- the wire must not accidentally
+    throttle ordinary, non-farmed exploration."""
+    gateway, viewer, settings = _lineage_farm_world(farm_size=1)
+
+    ranked = rank_feed(
+        viewer, gateway, _explore_norm(), now=NOW, since=EPOCH,
+        settings=settings, trust_policy=_PERMISSIVE,
+    )
+
+    explore_picks = [sc for sc in ranked if sc.source is CandidateSource.EXPLORATION]
+    assert [sc.post.author for sc in explore_picks] == ["sock00"]
+
+
+# ---------------------------------------------------------------------------
+# A12 — lite `chain_authors` resolution (2026-08-04). `second_degree_engagers`
+# and `suppressed_keys` accept an optional `chain_authors` mapping
+# (`recsys.io.hafsql.chain_author_map`), and the real `HafsqlClient`
+# implementation resolves through it: a Lumen Lite post's RANKED key
+# (`@u_7f3c9a/permlink`) is queried against votes/replies/reblogs and §8.7
+# suppression reports filed against the shared PUBLISHER account
+# (`Post.chain_author`), not the writer's ranked pseudo-identity. Without the
+# map, the query runs under the ranked pseudo-author and matches ZERO rows,
+# always — a lite post can never clear the second-degree vouch gate, and
+# moderation can never suppress one. `pipeline.py` never built or passed the
+# map at either call site.
+#
+# `tests/fakes.py::FakeGateway` does not implement the `chain_authors`
+# parameter at all (an in-memory fake predating A12), and it is shared by
+# nearly every test module in this suite — unconditionally passing the
+# keyword would raise `TypeError` for every one of them. `_suppressed`/
+# `rank_feed` therefore only pass the keyword when `chain_author_map(...)` is
+# non-empty (see their own comments), which is byte-for-byte identical to
+# omitting it whenever a batch has no lite posts — true for every existing
+# fixture — and only takes effect the moment a real `Post.chain_author` is
+# present. `_ChainAuthorGateway` below is a small, LOCAL double (this test
+# file's own, touching no shared fixture) that accepts the parameter and
+# resolves through it exactly the way `HafsqlClient` does, so these tests can
+# prove the wiring changes the OBSERVABLE result, not merely that a kwarg
+# reaches the call.
+# ---------------------------------------------------------------------------
+
+
+class _ChainAuthorGateway(FakeGateway):
+    """Models engagement/suppression records the way the real gateway does:
+    filed against the on-chain ``(chain_author, permlink)`` identity, never
+    the lite writer's ranked pseudo-author. Records every ``chain_authors``
+    argument it actually receives, so a test can also assert the map reached
+    the gateway (not just that the output happened to be right)."""
+
+    def __init__(
+        self,
+        *,
+        chain_engagers: Mapping[tuple[str, str], frozenset[str]] | None = None,
+        chain_suppressed: frozenset[tuple[str, str]] = frozenset(),
+        **kw: object,
+    ) -> None:
+        super().__init__(**kw)  # type: ignore[arg-type]
+        self._chain_engagers = dict(chain_engagers or {})
+        self._chain_suppressed = frozenset(chain_suppressed)
+        self.second_degree_calls: list[Mapping[str, str] | None] = []
+        self.suppressed_calls: list[Mapping[str, str] | None] = []
+
+    @staticmethod
+    def _resolve(
+        post_keys: frozenset[str], chain_authors: Mapping[str, str] | None
+    ) -> dict[str, tuple[str, str]]:
+        chain_authors = chain_authors or {}
+        out = {}
+        for key in post_keys:
+            ranked_author, _, permlink = key.removeprefix("@").partition("/")
+            out[key] = (chain_authors.get(key, ranked_author), permlink)
+        return out
+
+    def second_degree_engagers(
+        self,
+        post_keys: frozenset[str],
+        follows: frozenset[str],
+        *,
+        chain_authors: Mapping[str, str] | None = None,
+    ) -> dict[str, frozenset[str]]:
+        self.second_degree_calls.append(chain_authors)
+        resolved = self._resolve(post_keys, chain_authors)
+        out = {}
+        for key, identity in resolved.items():
+            hit = self._chain_engagers.get(identity, frozenset()) & follows
+            if hit:
+                out[key] = hit
+        return out
+
+    def suppressed_keys(
+        self, post_keys: frozenset[str], *, chain_authors: Mapping[str, str] | None = None
+    ) -> frozenset[str]:
+        self.suppressed_calls.append(chain_authors)
+        resolved = self._resolve(post_keys, chain_authors)
+        return frozenset(
+            key for key, identity in resolved.items() if identity in self._chain_suppressed
+        )
+
+
+def test_a12_suppression_resolves_a_lite_posts_chain_author() -> None:
+    """A §8.7 report filed against the CHAIN identity must suppress the lite
+    post it was actually filed against — proven by comparing the SAME post
+    served with and without the moderation report present, on the SAME
+    gateway/settings, so the only variable is whether the report exists.
+
+    FAILS if `_suppressed` stops building/passing `chain_authors`: the
+    gateway would then resolve every key under its own ranked pseudo-author
+    (`u_7f3c9a`), never match `("publisher_wallet", "lite-permlink")`, and
+    the post would stay in the feed regardless of the report.
+    """
+    lite = dataclasses.replace(
+        make_post("u_7f3c9a", "lite-permlink", created_min=1),
+        chain_author="publisher_wallet",
+    )
+    # A follow is required for `gather_candidates` to source the IN_NETWORK
+    # lane at all (see `gather_candidates`: `if viewer.follows: ...`) -- the
+    # gateway's `chain_authors` resolution is what is under test, not
+    # sourcing, so `FakeGateway.in_network_posts` ignoring its `follows`
+    # argument (it always returns the whole `in_network=` list) means any
+    # non-empty follow set works.
+    viewer = make_viewer("me", follows=frozenset({"u_7f3c9a"}))
+
+    clean_gateway = _ChainAuthorGateway(in_network=[lite])
+    reported_gateway = _ChainAuthorGateway(
+        in_network=[lite],
+        chain_suppressed=frozenset({("publisher_wallet", "lite-permlink")}),
+    )
+
+    clean_feed = rank_feed(
+        viewer, clean_gateway, _norm(), now=NOW, since=EPOCH,
+        settings=DEFAULT_SETTINGS, trust_policy=_PERMISSIVE,
+    )
+    reported_feed = rank_feed(
+        viewer, reported_gateway, _norm(), now=NOW, since=EPOCH,
+        settings=DEFAULT_SETTINGS, trust_policy=_PERMISSIVE,
+    )
+
+    assert lite.key in {sc.post.key for sc in clean_feed}, (
+        "fixture sanity: with no suppression report at all the lite post must "
+        "be served normally"
+    )
+    assert lite.key not in {sc.post.key for sc in reported_feed}, (
+        "A12 chain_authors not wired: a §8.7 report filed against the lite "
+        "post's real chain identity (publisher_wallet, lite-permlink) failed "
+        "to suppress it"
+    )
+    assert reported_gateway.suppressed_calls, "suppressed_keys was never called"
+    assert any(
+        m is not None and m.get(lite.key) == "publisher_wallet"
+        for m in reported_gateway.suppressed_calls
+    ), "suppressed_keys was called without the lite post's chain_authors entry"
+
+
+def test_a12_second_degree_gate_resolves_a_lite_posts_chain_author() -> None:
+    """A lite post sourced OON_ENGAGED (someone the viewer follows engaged it)
+    can only clear the second-degree vouch gate if the engagement query
+    resolves to the CHAIN identity votes/replies are actually recorded
+    against. `viewer.interest_tags` is deliberately empty here so the
+    "demote to an ungated lane" fallback (`_ungated_lane_for`, triggered when
+    the vouch check fails) has nothing to demote INTO — the only way this
+    post can survive is the vouch gate genuinely passing.
+
+    FAILS if `rank_feed` stops building/passing `chain_authors` at the
+    `second_degree_engagers` call site: the gateway would resolve the query
+    under `u_7f3c9a` instead of `publisher_wallet`, find no engagement, the
+    vouch check would fail, and (with no ungated lane to fall back to) the
+    post would be dropped entirely.
+    """
+    lite = dataclasses.replace(
+        make_post("u_7f3c9a", "lite-permlink", created_min=1),
+        chain_author="publisher_wallet",
+    )
+    viewer = make_viewer("me", follows=frozenset({"friend1"}))
+    gateway = _ChainAuthorGateway(
+        oon=[Candidate(post=lite, source=CandidateSource.OON_ENGAGED)],
+        chain_engagers={("publisher_wallet", "lite-permlink"): frozenset({"friend1"})},
+    )
+
+    feed = rank_feed(
+        viewer, gateway, _norm(), now=NOW, since=EPOCH,
+        settings=DEFAULT_SETTINGS, trust_policy=_PERMISSIVE,
+    )
+
+    assert lite.key in {sc.post.key for sc in feed}, (
+        "A12 chain_authors not wired: friend1's engagement of the lite post's "
+        "real chain identity (publisher_wallet, lite-permlink) failed to clear "
+        "the second-degree gate, and the post was dropped"
+    )
+    assert gateway.second_degree_calls, "second_degree_engagers was never called"
+    assert any(
+        m is not None and m.get(lite.key) == "publisher_wallet"
+        for m in gateway.second_degree_calls
+    ), "second_degree_engagers was called without the lite post's chain_authors entry"
+
+
+# ---------------------------------------------------------------------------
+# A9 — build_viewer_profile. `recsys/viewer.py` queries a gateway through one
+# generic ``_fetch(sql, params) -> list[tuple]`` method (matching
+# `HafsqlClient._fetch`'s shape) rather than one method per capability, so the
+# test double dispatches on a distinguishing substring of the SQL text —
+# mirroring how `tests/fakes.py`'s own doubles work for the rest of the
+# package. See `recsys/viewer.py`'s module docstring for why this module talks
+# to `_fetch` directly instead of adding methods to `HafsqlGateway` (that
+# Protocol, and `recsys/io/hafsql.py`, are owned by a different workstream
+# this phase).
+# ---------------------------------------------------------------------------
+
+
+class _ViewerFetchDouble:
+    """Dispatches `_fetch` calls by SQL substring to canned rows. `calls`
+    records which query kind ran, in order, so a test can assert a query was
+    (or was NOT) issued — e.g. that declared/explicit tags skip derivation."""
+
+    def __init__(
+        self,
+        follows: Sequence[str] = (),
+        mutes: Sequence[str] = (),
+        own_post_tags: Sequence[tuple[Sequence[str] | None, str | None]] = (),
+        votes: Sequence[tuple[str, str]] = (),
+        tags_by_pair: Mapping[tuple[str, str], tuple[Sequence[str] | None, str | None]]
+        | None = None,
+    ) -> None:
+        self._follows = list(follows)
+        self._mutes = list(mutes)
+        self._own_post_tags = list(own_post_tags)
+        self._votes = list(votes)
+        self._tags_by_pair = dict(tags_by_pair or {})
+        self.calls: list[str] = []
+
+    def _fetch(self, sql: str, params: dict) -> list[tuple]:
+        if "hafsql.follows" in sql:
+            self.calls.append("follows")
+            return [(f,) for f in self._follows]
+        if "hafsql.mutes" in sql:
+            self.calls.append("mutes")
+            return [(m,) for m in self._mutes]
+        if "hafsql.comments" in sql and "parent_author" in sql:
+            self.calls.append("own_posts")
+            return list(self._own_post_tags)
+        if "operation_effective_comment_vote_view" in sql:
+            self.calls.append("votes")
+            return list(self._votes)
+        if "unnest(%(authors)s" in sql:
+            self.calls.append("tag_pairs")
+            pairs = zip(params["authors"], params["permlinks"], strict=True)
+            return [self._tags_by_pair[p] for p in pairs if p in self._tags_by_pair]
+        raise AssertionError(f"unexpected SQL in _ViewerFetchDouble: {sql[:60]!r}")
+
+
+def test_build_viewer_profile_pulls_follows_and_mutes_from_the_gateway() -> None:
+    gateway = _ViewerFetchDouble(
+        follows=["blocktrades", "gtg"], mutes=["spammer"],
+    )
+
+    profile = build_viewer_profile(
+        "acidyo", gateway, now=NOW, explicit_interest_tags=frozenset({"photography"})
+    )
+
+    assert profile.account == "acidyo"
+    assert profile.follows == frozenset({"blocktrades", "gtg"})
+    assert profile.mutes == frozenset({"spammer"})
+
+
+def test_build_viewer_profile_explicit_tags_win_over_derived() -> None:
+    """R12 precedence: a real signup-time pick beats any inference, and
+    derivation's own queries are skipped entirely rather than run and
+    discarded — see the module docstring's `explicit_interest_tags` note."""
+    gateway = _ViewerFetchDouble(
+        own_post_tags=[(["food", "travel"], "food")],
+    )
+
+    profile = build_viewer_profile(
+        "acidyo", gateway, now=NOW, explicit_interest_tags=frozenset({"photography"})
+    )
+
+    assert profile.interest_tags == frozenset({"photography"})
+    assert gateway.calls == ["follows", "mutes"], (
+        "an explicit override was supplied — deriving from history was unnecessary work"
+    )
+
+
+def test_build_viewer_profile_derives_tags_for_a_returning_user_with_none_declared() -> None:
+    """R12 part 2: a returning user's OWN posting/voting history fills in for
+    a missing declared interest, rather than treating them as tagless."""
+    gateway = _ViewerFetchDouble(
+        own_post_tags=[(["gaming"], "gaming"), (["music"], "music")],
+    )
+
+    profile = build_viewer_profile("returning", gateway, now=NOW, is_new=False)
+
+    assert profile.interest_tags == frozenset({"gaming", "music"})
+    assert "own_posts" in gateway.calls
+
+
+def test_build_viewer_profile_neither_declared_nor_derivable_is_empty_not_a_crash() -> None:
+    """R12 part 3's defensive path lives downstream (gather_candidates already
+    warns and falls through to the popular fallback — see
+    test_tagless_viewer_falls_through_to_popular_fallback_with_a_warning).
+    This function's job is only to not invent a crash or a fake tag here."""
+    gateway = _ViewerFetchDouble()  # no follows, no mutes, no history at all
+
+    profile = build_viewer_profile("brandnew", gateway, now=NOW, is_new=False)
+
+    assert profile.interest_tags == frozenset()
+    assert profile.follows == frozenset()
+    assert profile.mutes == frozenset()
+    # And the downstream contract R12 part 3 relies on actually holds:
+    feed = rank_feed(
+        profile, FakeGateway(popular=_popular()), _norm(), now=NOW, since=EPOCH,
+        trust_policy=_PERMISSIVE,
+    )
+    assert feed, "a viewer built with no tags at all must never get an empty feed"
+
+
+def test_build_viewer_profile_is_new_true_skips_derivation_and_is_still_a_passthrough() -> None:
+    """★ MUST NOT CHANGE (A9's own instruction): `is_new` stays client-supplied
+    and un-load-bearing FOR GATING — `gather_candidates` must keep routing on
+    the unspoofable `not viewer.follows`, never on this flag (untouched by
+    this module). Within `build_viewer_profile` itself, `is_new=True` is
+    used ONLY as a harmless optimisation (skip a derivation query that would
+    return nothing for a genuinely brand-new account) — not as a signal
+    fed back into ranking, and not derived FROM `follows` in either direction."""
+    gateway = _ViewerFetchDouble(
+        follows=["someone"], own_post_tags=[(["photo"], "photo")],
+    )
+
+    default = build_viewer_profile("me", gateway, now=NOW)
+    assert default.is_new is False  # default, regardless of having follows
+    assert "own_posts" in gateway.calls  # derivation ran (is_new defaulted False)
+
+    gateway2 = _ViewerFetchDouble(
+        follows=["someone"], own_post_tags=[(["photo"], "photo")],
+    )
+    flagged = build_viewer_profile("me", gateway2, now=NOW, is_new=True)
+    assert flagged.is_new is True  # explicit passthrough honoured
+    assert flagged.follows == frozenset({"someone"})  # is_new did not suppress follows
+    assert "own_posts" not in gateway2.calls  # derivation skipped for a declared-new account
+
+
+# ---------------------------------------------------------------------------
+# A8.3 — TrustSnapshot.built_at / staleness. `_trust_is_fresh` gained a
+# fourth clause; these pin the three shapes: built_at absent, fresh, and
+# stale, plus that build_trust_snapshot actually stamps it.
+# ---------------------------------------------------------------------------
+
+
+def test_build_trust_snapshot_stamps_built_at_with_its_own_now() -> None:
+    edges = [EngagementEdge(src="a", dst="b", upvotes=5)]
+    gateway = FakeGateway(edges=edges, follow_graph={"a": frozenset({"b"})})
+    snap = build_trust_snapshot(
+        gateway, DEFAULT_SETTINGS, since=EPOCH, now=NOW, production=False
+    )
+    assert snap.built_at == NOW
+
+
+def test_a_snapshot_with_no_built_at_stays_fresh_regardless_of_age() -> None:
+    """A8.3: `built_at=None` (every fixture/snapshot built before this field
+    existed) must not newly fail freshness — only a snapshot that POSITIVELY
+    knows its own age and has aged out does."""
+    post = make_post("a", "1", votes=[make_vote("v", 1_000_000_000)])
+    gateway = FakeGateway(in_network=[post])
+    viewer = make_viewer("me", follows=frozenset({"a"}))
+    snap = TrustSnapshot(graph_creds={"a": _cred(0.5)}, built_at=None)
+    trust14 = dataclasses.replace(DEFAULT_SETTINGS.trust, max_snapshot_age_days=14)
+    settings = dataclasses.replace(DEFAULT_SETTINGS, trust=trust14)
+    # Must not raise MissingTrustError under FAIL_CLOSED.
+    feed = rank_feed(
+        viewer, gateway, _norm(), now=NOW, since=EPOCH, snapshot=snap, settings=settings
+    )
+    assert feed
+
+
+def test_a_recent_snapshot_stays_fresh() -> None:
+    post = make_post("a", "1", votes=[make_vote("v", 1_000_000_000)])
+    gateway = FakeGateway(in_network=[post])
+    viewer = make_viewer("me", follows=frozenset({"a"}))
+    snap = TrustSnapshot(graph_creds={"a": _cred(0.5)}, built_at=NOW - timedelta(days=1))
+    trust14 = dataclasses.replace(DEFAULT_SETTINGS.trust, max_snapshot_age_days=14)
+    settings = dataclasses.replace(DEFAULT_SETTINGS, trust=trust14)
+    feed = rank_feed(
+        viewer, gateway, _norm(), now=NOW, since=EPOCH, snapshot=snap, settings=settings
+    )
+    assert feed
+
+
+def test_a_stale_snapshot_fails_closed() -> None:
+    """The real gap A8.3 closes: a snapshot built long ago used to be served
+    as fresh forever. Now it is refused under FAIL_CLOSED (the default) —
+    consistent with how a missing/degraded snapshot is already refused."""
+    post = make_post("a", "1", votes=[make_vote("v", 1_000_000_000)])
+    gateway = FakeGateway(in_network=[post])
+    viewer = make_viewer("me", follows=frozenset({"a"}))
+    stale = TrustSnapshot(graph_creds={"a": _cred(0.5)}, built_at=NOW - timedelta(days=15))
+    trust14 = dataclasses.replace(DEFAULT_SETTINGS.trust, max_snapshot_age_days=14)
+    settings = dataclasses.replace(DEFAULT_SETTINGS, trust=trust14)
+    with pytest.raises(MissingTrustError):
+        rank_feed(viewer, gateway, _norm(), now=NOW, since=EPOCH, snapshot=stale, settings=settings)
+    # And it degrades loudly rather than silently under the permissive policy.
+    feed = rank_feed(
+        viewer, gateway, _norm(), now=NOW, since=EPOCH, snapshot=stale, settings=settings,
+        trust_policy=_PERMISSIVE,
+    )
+    assert feed
+
+
+def test_max_snapshot_age_days_zero_disables_the_staleness_check() -> None:
+    """0 = off (matches the codebase's own convention elsewhere), so a
+    deployment that has not tuned this yet reproduces pre-A8.3 behaviour."""
+    post = make_post("a", "1", votes=[make_vote("v", 1_000_000_000)])
+    gateway = FakeGateway(in_network=[post])
+    viewer = make_viewer("me", follows=frozenset({"a"}))
+    ancient = TrustSnapshot(graph_creds={"a": _cred(0.5)}, built_at=NOW - timedelta(days=3650))
+    trust_off = dataclasses.replace(DEFAULT_SETTINGS.trust, max_snapshot_age_days=0)
+    settings = dataclasses.replace(DEFAULT_SETTINGS, trust=trust_off)
+    feed = rank_feed(
+        viewer, gateway, _norm(), now=NOW, since=EPOCH, snapshot=ancient, settings=settings
+    )
+    assert feed
+
+
+# ---------------------------------------------------------------------------
+# C3 — `_score` must not silently drop exploration picks when the pool
+# exceeds `diversity.top_k`. Reproduces `A11_pool_truncation.py`'s shape at
+# test scale: enough padding authors to push the exploration pool past 200.
+# ---------------------------------------------------------------------------
+
+
+def test_exploration_pool_larger_than_top_k_loses_no_picks() -> None:
+    # 220 established (well-engaged, need-tier >= 1) authors + 1 zero-
+    # engagement debut = a 221-candidate exploration pool against the
+    # shipped `diversity.top_k` of 200. Before the fix, `_score`'s internal
+    # `rerank` truncated to 200 by SCORE, and the debut — the lowest-scoring
+    # item in the pool by construction, which is also the #1 NEED pick the
+    # lane exists to promote — was exactly the kind of item that fell off.
+    in_network = [
+        make_post(
+            f"est{i:03d}", f"e{i}", category="photo", tags=("photo",),
+            created_min=i, children=2,
+            votes=[
+                make_vote(f"r{i}a", 50_000_000),
+                make_vote(f"r{i}b", 40_000_000),
+                make_vote(f"r{i}c", 30_000_000),
+            ],
+        )
+        for i in range(220)
+    ]
+    debut = make_post("newcomer", "debut", category="photo", tags=("photo",), created_min=300)
+    gateway = FakeGateway(in_network=in_network, tag=[debut])
+    viewer = make_viewer(
+        "me",
+        follows=frozenset(f"est{i:03d}" for i in range(220)),
+        interest_tags=frozenset({"photo"}),
+    )
+    seat_secret = hashlib.sha256(b"test-pipeline-c3-large-pool-secret").digest()
+    settings = Settings(exploration=ExplorationConfig(seat_secret=seat_secret))
+    assert settings.diversity.top_k == 200  # the fixture only proves the point if pool > top_k
+
+    feed = rank_feed(
+        viewer, gateway, _explore_norm(), now=NOW, since=EPOCH, settings=settings,
+        trust_policy=_PERMISSIVE,
+    )
+    authors = [sc.post.author for sc in feed]
+    assert "newcomer" in authors, (
+        "the #1 NEED pick was dropped by top_k truncation inside _score — the "
+        "exact C3 defect"
+    )
+    assert authors[settings.exploration.position] == "newcomer"
+
+
+def test_score_top_k_override_is_an_exact_noop_when_none() -> None:
+    """`_score`'s new `top_k` parameter must not change ordinary (eligible
+    pool) scoring by omission — this is the same pinned end-to-end shape as
+    `test_exploration_reaches_the_served_feed_end_to_end`, just asserting the
+    no-override path stays byte-identical."""
+    gateway, viewer, _on, off = _explore_world()
+    feed = rank_feed(viewer, gateway, _explore_norm(), now=NOW, since=EPOCH,
+                     settings=off, trust_policy=_PERMISSIVE)
+    assert len(feed) == 26  # 25 established + 1 debut, well under top_k=200
+
+
+# ---------------------------------------------------------------------------
+# C6 — POPULAR_FALLBACK's share of the returned feed is bounded by
+# `FallbackConfig.max_share_of_feed`.
+# ---------------------------------------------------------------------------
+
+
+def test_popular_fallback_share_is_bounded_when_the_pool_is_thin_but_nonzero() -> None:
+    # 20 real eligible posts (a viewer who is not fully cold) against a huge
+    # popular pool that would, uncapped, pad the feed out to `top_k`.
+    own = [make_post("live", f"l{i}") for i in range(20)]
+    popular = [make_post(f"pop{i}", f"p{i}", author_reputation=60.0) for i in range(300)]
+    gateway = FakeGateway(in_network=own, popular=popular)
+    viewer = make_viewer("v", follows=frozenset({"live"}))
+
+    feed = rank_feed(viewer, gateway, _norm(), now=NOW, since=EPOCH, trust_policy=_PERMISSIVE)
+
+    fallback_count = sum(1 for sc in feed if sc.source is CandidateSource.POPULAR_FALLBACK)
+    share = fallback_count / len(feed)
+    assert share <= DEFAULT_SETTINGS.fallback.max_share_of_feed + 1e-9, (
+        f"padding was {share:.1%} of a {len(feed)}-post feed, over the "
+        f"{DEFAULT_SETTINGS.fallback.max_share_of_feed:.0%} cap"
+    )
+    # The 20 real posts are never displaced by the cap — they still lead (as
+    # a SET; they are identical apart from permlink so they tie on score and
+    # the per-viewer tie-break, not insertion order, decides among them —
+    # same shape as test_padding_never_outranks_the_viewers_own_posts).
+    assert {sc.post.key for sc in feed[:20]} == {p.key for p in own}
+    assert all(sc.post.author == "live" for sc in feed[:20])
+
+
+def test_max_share_of_feed_one_point_zero_is_an_exact_noop() -> None:
+    """1.0 disables the cap — byte-identical to pre-C6 behaviour."""
+    own = [make_post("live", f"l{i}") for i in range(3)]
+    popular = [make_post(f"pop{i}", f"p{i}", author_reputation=60.0) for i in range(60)]
+    gateway = FakeGateway(in_network=own, popular=popular)
+    viewer = make_viewer("v", follows=frozenset({"live"}))
+    fallback_uncapped = dataclasses.replace(DEFAULT_SETTINGS.fallback, max_share_of_feed=1.0)
+    settings = dataclasses.replace(DEFAULT_SETTINGS, fallback=fallback_uncapped)
+
+    feed = rank_feed(
+        viewer, gateway, _norm(), now=NOW, since=EPOCH, settings=settings, trust_policy=_PERMISSIVE
+    )
+    # Uncapped: target = max(20, min(3+60, 200)) = 63 -> all 60 popular admitted.
+    assert len(feed) == 63
+
+
+# ---------------------------------------------------------------------------
+# B-02 (2026-08-04): declared-interest scoring, end to end through rank_feed.
+# ---------------------------------------------------------------------------
+
+
+def test_declared_interest_end_to_end_prefers_the_matching_post() -> None:
+    """With `interest_match` ON, two out-of-network candidates with otherwise
+    IDENTICAL engagement must rank by tag overlap with the viewer's declared
+    interests — the exact channel that was entirely absent before B-02
+    (measured: two accounts with identical follows got the identical top-20
+    set 33/48 of the time, because nothing read `viewer.interest_tags` at
+    scoring time at all).
+
+    Both candidates get real second-degree engagement from a follow (so
+    neither is dropped, or silently RELABELLED to the ungated interest lane
+    -- `second_degree._ungated_lane_for` -- purely because it happens to
+    match a tag; that would prove the wrong mechanism)."""
+    same_votes = [make_vote(f"v{i}", 2_000_000, minutes=i) for i in range(5)]
+    matching = make_post("author-match", "m1", tags=("photo", "art"), votes=same_votes)
+    other = make_post("author-other", "o1", tags=("cooking", "food"), votes=same_votes)
+    gateway = FakeGateway(
+        oon=[
+            Candidate(post=matching, source=CandidateSource.OON_ENGAGED),
+            Candidate(post=other, source=CandidateSource.OON_ENGAGED),
+        ],
+        engagers={matching.key: frozenset({"someone"}), other.key: frozenset({"someone"})},
+    )
+    viewer = make_viewer(
+        "me", follows=frozenset({"someone"}), interest_tags=frozenset({"photo"})
+    )
+    weighted = dataclasses.replace(
+        DEFAULT_SETTINGS,
+        weights=dataclasses.replace(DEFAULT_SETTINGS.weights, interest_match=0.5),
+    )
+
+    feed = rank_feed(
+        viewer, gateway, _norm(), now=NOW, since=EPOCH, settings=weighted, trust_policy=_PERMISSIVE
+    )
+    authors = [sc.post.author for sc in feed]
+    assert set(authors) == {"author-match", "author-other"}
+    assert authors.index("author-match") < authors.index("author-other")
+
+
+def test_declared_interest_end_to_end_is_a_no_op_at_the_default_off_weight() -> None:
+    """Byte-identity through the full pipeline (not just score_candidate in
+    isolation): a viewer with declared interests, scored under
+    `interest_match=0.0`, must reproduce EXACTLY what an identical viewer with
+    NO declared interests gets, all else equal."""
+    same_votes = [make_vote(f"v{i}", 2_000_000, minutes=i) for i in range(5)]
+    a = make_post("author-a", "a1", tags=("photo",), votes=same_votes)
+    b = make_post("author-b", "b1", tags=("cooking",), votes=same_votes)
+    gateway = FakeGateway(
+        oon=[
+            Candidate(post=a, source=CandidateSource.OON_ENGAGED),
+            Candidate(post=b, source=CandidateSource.OON_ENGAGED),
+        ],
+        engagers={a.key: frozenset({"someone"}), b.key: frozenset({"someone"})},
+    )
+    off_settings = dataclasses.replace(
+        DEFAULT_SETTINGS,
+        weights=dataclasses.replace(DEFAULT_SETTINGS.weights, interest_match=0.0),
+    )
+    with_interests = make_viewer(
+        "me", follows=frozenset({"someone"}), interest_tags=frozenset({"photo"})
+    )
+    without_interests = make_viewer("me", follows=frozenset({"someone"}))
+
+    feed_with = rank_feed(
+        with_interests, gateway, _norm(), now=NOW, since=EPOCH,
+        settings=off_settings, trust_policy=_PERMISSIVE,
+    )
+    feed_without = rank_feed(
+        without_interests, gateway, _norm(), now=NOW, since=EPOCH,
+        settings=off_settings, trust_policy=_PERMISSIVE,
+    )
+    assert feed_with == feed_without
+
+
+# ---------------------------------------------------------------------------
+# B-04 (2026-08-04): the emerging-author budget, end to end through
+# rank_feed — `_score` builds `emerging_authors` from `snap.graph_creds` and
+# threads it into `rerank()`.
+# ---------------------------------------------------------------------------
+
+
+def test_emerging_author_budget_end_to_end_lets_an_unknown_author_through() -> None:
+    """An author ABSENT from graph_creds entirely (never engaged, the
+    structural newcomer state `requires_author_floor` already treats
+    permissively) must be able to win a slot the ordinary unchosen quota has
+    fully closed, via the SEPARATE emerging budget — while an author who IS
+    in graph_creds at a normal/high standing does not get this exemption and
+    is bound by the ordinary quota."""
+    own_votes = [make_vote(f"vv{i}", 5_000_000, minutes=i) for i in range(9)]
+    followed = [make_post("me-follow", f"f{i}") for i in range(3)]
+    emerging_post = make_post(
+        "emerging-author", "deb1", tags=("hive",), votes=own_votes,
+    )
+    established_spillover = make_post(
+        "established-spillover", "sp1", tags=("hive",), votes=own_votes,
+    )
+    gateway = FakeGateway(
+        in_network=followed,
+        oon=[
+            Candidate(post=emerging_post, source=CandidateSource.OON_ENGAGED),
+            Candidate(post=established_spillover, source=CandidateSource.OON_ENGAGED),
+        ],
+        engagers={
+            emerging_post.key: frozenset({"me-follow"}),
+            established_spillover.key: frozenset({"me-follow"}),
+        },
+    )
+    viewer = make_viewer("me", follows=frozenset({"me-follow"}))
+    # Quota fully closed (share=0, min=0, ratio=0) but the toggle is ON, and
+    # emerging_per_page gives exactly one bypass slot.
+    tight = dataclasses.replace(
+        DEFAULT_SETTINGS,
+        diversity=dataclasses.replace(
+            DEFAULT_SETTINGS.diversity,
+            unchosen_max_per_page=1,
+            unchosen_max_share=0.0,
+            unchosen_min_per_page=0,
+            unchosen_displacement_ratio=0.0,
+            emerging_per_page=1,
+        ),
+    )
+    # "established-spillover" IS in graph_creds, well above min_vouched_score
+    # -- an ordinary engaged author, NOT emerging. "emerging-author" is
+    # entirely absent from graph_creds. "me-follow" (the engager/voucher for
+    # BOTH OON candidates) also needs a real entry once `graph_creds` is
+    # non-empty: `second_degree.qualifying_engagers` only falls back to
+    # count-only vouching when the WHOLE map is empty (Phase-0); with real
+    # entries present, an engager absent from the map fails the vouch-quality
+    # floor and both candidates would be silently dropped before scoring ever
+    # runs -- not the mechanism this test is about.
+    snap = TrustSnapshot(
+        graph_creds={
+            "established-spillover": GraphCred(
+                account="established-spillover", score=0.9, follow_follower_ratio=1.0,
+            ),
+            "me-follow": GraphCred(account="me-follow", score=0.5, follow_follower_ratio=1.0),
+        },
+    )
+
+    feed = rank_feed(
+        viewer, gateway, _norm(), now=NOW, since=EPOCH, settings=tight,
+        snapshot=snap, trust_policy=_PERMISSIVE,
+    )
+    authors = [sc.post.author for sc in feed]
+    assert "emerging-author" in authors
+    # The ordinary engaged author has no exemption and queues behind it
+    # relative to the emerging pick (both are unchosen, only one bypasses).
+    assert authors.index("emerging-author") < authors.index("established-spillover")
+
+
+def test_emerging_author_budget_end_to_end_zero_disables_it() -> None:
+    """The control: `emerging_per_page=0` must leave a graph-cred-absent
+    author with no exemption at all -- purely an ordinary unchosen candidate
+    bound by the (here, fully closed) quota."""
+    own_votes = [make_vote(f"vv{i}", 5_000_000, minutes=i) for i in range(9)]
+    followed = [make_post("me-follow", f"f{i}") for i in range(3)]
+    emerging_post = make_post("emerging-author", "deb1", tags=("hive",), votes=own_votes)
+    gateway = FakeGateway(
+        in_network=followed,
+        oon=[Candidate(post=emerging_post, source=CandidateSource.OON_ENGAGED)],
+        engagers={emerging_post.key: frozenset({"me-follow"})},
+    )
+    viewer = make_viewer("me", follows=frozenset({"me-follow"}))
+    no_budget = dataclasses.replace(
+        DEFAULT_SETTINGS,
+        diversity=dataclasses.replace(
+            DEFAULT_SETTINGS.diversity,
+            unchosen_max_per_page=1,
+            unchosen_max_share=0.0,
+            unchosen_min_per_page=0,
+            unchosen_displacement_ratio=0.0,
+            emerging_per_page=0,
+        ),
+    )
+    snap = TrustSnapshot(graph_creds={})
+
+    feed = rank_feed(
+        viewer, gateway, _norm(), now=NOW, since=EPOCH, settings=no_budget,
+        snapshot=snap, trust_policy=_PERMISSIVE,
+    )
+    authors = [sc.post.author for sc in feed]
+    # The 3 followed posts (chosen, exempt from the quota) still lead;
+    # the emerging-but-unbudgeted author is pushed behind all of them.
+    assert authors.index("emerging-author") >= 3

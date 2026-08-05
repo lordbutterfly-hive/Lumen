@@ -27,7 +27,6 @@ def is_cold(viewer: ViewerProfile) -> bool:
 # :func:`is_established_followless` exists to partially re-gate (H07).
 INTEREST_LANE_SOURCES: frozenset[CandidateSource] = frozenset(
     {
-        CandidateSource.INTEREST_COMMUNITY,
         CandidateSource.INTEREST_TAG,
         # ★ EXPLORATION (2026-08-04, item B12). Added the moment the source was
         # declared, because the CF-suppression invariant test refused to pass
@@ -109,24 +108,15 @@ def interest_candidates(
 ) -> list[Candidate]:
     """Candidate pool for a cold viewer's interest picks (§13.1, rev 2.2).
 
-    Pulls posts from the viewer's interest communities (``INTEREST_COMMUNITY``)
-    and interest tags (``INTEREST_TAG``), then dedups by ``post.key`` locally
-    — a post surfaced by both keeps its community source. These are the
-    gate-exempt exploration-lane sources (a cold viewer has no follow graph for
-    the second-degree gate to use), distinct from the *gated* ``OON_COMMUNITY``
-    source an established viewer's subscribed communities use. Community-over-tag
-    precedence here matches :data:`recsys.core.candidates.SOURCE_PRIORITY`, which
-    also ranks ``INTEREST_COMMUNITY`` above ``INTEREST_TAG`` on dedup.
+    Pulls posts from the viewer's interest tags (``INTEREST_TAG``) — the sole
+    interest substrate since communities were retired as a lane (2026-08-04,
+    R1/R3; ``post.community`` survives only as an internal topic-grouping key,
+    see ``core/rerank.py::_topic_key``). This is the gate-exempt
+    exploration-lane source (a cold viewer has no follow graph for the
+    second-degree gate to use).
     """
-    community_posts = gateway.community_posts(viewer.interest_communities, since, limit)
     tag_posts = gateway.tag_posts(viewer.interest_tags, since, limit)
-    merged: dict[str, Candidate] = {
-        post.key: Candidate(post=post, source=CandidateSource.INTEREST_COMMUNITY)
-        for post in community_posts
-    }
-    for post in tag_posts:
-        merged.setdefault(post.key, Candidate(post=post, source=CandidateSource.INTEREST_TAG))
-    return list(merged.values())
+    return [Candidate(post=post, source=CandidateSource.INTEREST_TAG) for post in tag_posts]
 
 
 def established_interest_candidates(
@@ -169,15 +159,8 @@ def established_interest_candidates(
     ``OON_INTEREST`` was declared, priority-mapped and gated but never produced
     by anything; this is its first producer.
     """
-    community_posts = gateway.community_posts(viewer.interest_communities, since, limit)
     tag_posts = gateway.tag_posts(viewer.interest_tags, since, limit)
-    merged: dict[str, Candidate] = {
-        post.key: Candidate(post=post, source=CandidateSource.OON_INTEREST)
-        for post in community_posts
-    }
-    for post in tag_posts:
-        merged.setdefault(post.key, Candidate(post=post, source=CandidateSource.OON_INTEREST))
-    return list(merged.values())
+    return [Candidate(post=post, source=CandidateSource.OON_INTEREST) for post in tag_posts]
 
 
 def popular_fallback(gateway: HafsqlGateway, since: datetime, limit: int) -> list[Candidate]:

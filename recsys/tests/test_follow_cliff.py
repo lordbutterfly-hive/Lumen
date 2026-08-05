@@ -22,25 +22,21 @@ from recsys.core.coldstart import established_interest_candidates, interest_cand
 from tests.fakes import EPOCH, make_post
 
 
-def _post(author: str, permlink: str, community: str = "hive-photo") -> Post:
+def _post(author: str, permlink: str) -> Post:
     """Reuse the shared factory so this test tracks Post's real shape."""
     return make_post(
         author=author,
         permlink=permlink,
-        community=community,
         category="photography",
         tags=("photography",),
     )
 
 
 class _Gateway:
-    """Minimal gateway: serves the interest lane's two reads."""
+    """Minimal gateway: serves the interest lane's one read (tags)."""
 
     def __init__(self, posts: list[Post]) -> None:
         self._posts = posts
-
-    def community_posts(self, communities, since, limit):
-        return list(self._posts) if communities else []
 
     def tag_posts(self, tags, since, limit):
         return list(self._posts) if tags else []
@@ -51,7 +47,6 @@ def _viewer(follows: frozenset[str]) -> ViewerProfile:
         account="newbie",
         follows=follows,
         interest_tags=frozenset({"photography"}),
-        interest_communities=frozenset({"hive-photo"}),
     )
 
 
@@ -103,12 +98,13 @@ def test_trust_class_changes_with_the_follow_graph_not_the_lane() -> None:
     # the author floor as well as the vouch count, and this asserted that. It is
     # no longer true, deliberately: measured, an author in the 0.0 band — which
     # means PROVEN self-dealing, not merely "new" — was admitted into a
-    # brand-new viewer's cold-start feed through INTEREST_COMMUNITY and
-    # INTEREST_TAG, while the same author was correctly refused on the
-    # established-viewer lanes. The audience with no follow graph to protect
-    # them had the least protection of anyone.
+    # brand-new viewer's cold-start feed through INTEREST_TAG (and, before it
+    # was retired as a lane later the same day by R1/R3, INTEREST_COMMUNITY),
+    # while the same author was correctly refused on the established-viewer
+    # lanes. The audience with no follow graph to protect them had the least
+    # protection of anyone.
     #
-    # So BOTH interest lanes now clear the author floor, and what still changes
+    # So the interest lane now clears the author floor, and what still changes
     # with the follow graph is which producer emits the candidate and at what
     # source priority — not the trust class. This test's title outlives its
     # original mechanism; the surviving guarantee is that neither lane demands
@@ -162,7 +158,7 @@ def _e2e_on_interest(follows: frozenset[str]) -> tuple[int, int]:
     from tests.fakes import FakeGateway
 
     on = [
-        make_post(author=f"ph{i}", permlink=f"ph{i}", community="hive-photo",
+        make_post(author=f"ph{i}", permlink=f"ph{i}",
                   category="photography", tags=("photography",))
         for i in range(60)
     ]
@@ -174,12 +170,11 @@ def _e2e_on_interest(follows: frozenset[str]) -> tuple[int, int]:
         make_post(author=f"pop{i}", permlink=f"pop{i}", category="other", tags=("other",))
         for i in range(30)
     ]
-    gateway = FakeGateway(in_network=mine, popular=pop, community=on, tag=on)
+    gateway = FakeGateway(in_network=mine, popular=pop, tag=on)
     viewer = ViewerProfile(
         account="me",
         follows=follows,
         interest_tags=frozenset({"photography"}),
-        interest_communities=frozenset({"hive-photo"}),
     )
     samples = [float(i) for i in range(50)]
     feed = rank_feed(

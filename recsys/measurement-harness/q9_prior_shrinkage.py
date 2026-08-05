@@ -70,9 +70,10 @@ from simworld import (
     SimGateway,
     build_norm,
     build_world,
+    harness_settings,
 )
 
-from recsys.config import DiversityConfig, Settings
+from recsys.config import Settings
 from recsys.contracts import EngagementEdge, Post, ViewerProfile, Vote
 from recsys.core.scoring import pooled_author_base, post_base_engagement
 from recsys.core.vote_signal import AttributedPost
@@ -104,7 +105,19 @@ print("A. NEW-AUTHOR DISCOVERY (q3 protocol, [D] loadout: 9 votes + 2 comments +
 print("=" * 78)
 
 world = build_world(seed=SEED)
-base_settings = Settings()
+# ★ B-07 (2026-08-04): routed through harness_settings() (mutate_panels.py).
+# Byte-identical to Settings() when LUMEN_SETTINGS_MUTANT is unset.
+#
+# HONEST LIMIT, checked by grep before writing this comment: this file NEVER
+# reads `base_settings.weights.organic_prior_shrinkage` — every use (Section A
+# and B's `weighted(base_settings, k)` / `weighted(SETTINGS_B, k)`, and the
+# mechanism-print loop's `pooled_author_base(..., k)`) passes `k` from the
+# literal `SHRINKAGE` sweep list instead, including `k=0.0` as the explicit
+# control. So a `weights.organic_prior_shrinkage` MUTATION HAS ZERO OBSERVABLE
+# EFFECT on this file, by construction — not "weakly caught", genuinely
+# invisible. `organic_post_share`, which nothing here sweeps, IS affected
+# normally.
+base_settings = harness_settings()
 
 NEWBIE = "newbie-author"
 world.accounts[NEWBIE] = Account(NEWBIE, "photo", 0.9, 1.0, 25.0, True)
@@ -157,7 +170,9 @@ world.edges.append(
 
 gw = SimGateway(world)
 norm = build_norm(world)
-snap = build_trust_snapshot(gw, base_settings, since=EPOCH, now=NOW)
+snap = build_trust_snapshot(
+    gw, base_settings, since=EPOCH, now=NOW, trusted_seeds=frozenset(), production=False
+)  # C5/R2
 
 # --- mechanism: the pooled base itself, before any ranking ---------------
 own_base = post_base_engagement(p0x, frozenset({NEWBIE}))
@@ -181,7 +196,7 @@ PHOTO_VIEWERS = [f"v-photo-{j:02d}" for j in range(10)]
 
 def photo_viewer(name: str) -> ViewerProfile:
     return ViewerProfile(account=name, follows=world.follows[name],
-                         subscribed_communities=frozenset({COMMUNITY["photo"]}))
+                         interest_tags=frozenset(TAGS["photo"]))
 
 
 print(f"\n{'k':>6s}{'top-20':>10s}{'top-50':>10s}{'best pos':>10s}{'median pos':>12s}")
@@ -224,16 +239,20 @@ for t in TOPICS:
 gw_no_prior = PriorlessSimGateway(world_b)
 gw_with_prior = SimGateway(world_b)
 snap_b = build_trust_snapshot(
-    gw_no_prior, base_settings, since=EPOCH, now=NOW, trusted_seeds=frozenset(seeds)
+    gw_no_prior, base_settings, since=EPOCH, now=NOW,
+    trusted_seeds=frozenset(seeds), production=False,  # C5/R2: synthetic seeds, not the real list
 )
 PANEL = [f"v-{t}-{j:02d}" for t in TOPICS for j in range(4)]
-SETTINGS_B = Settings(diversity=DiversityConfig(top_k=BIG))
+# `replace(base_settings, ...)`, not a fresh `Settings(diversity=DiversityConfig(...))`
+# — the latter would silently reset `weights` to its class default and drop
+# any B-07 mutation (same reasoning as q8's SETTINGS).
+SETTINGS_B = replace(base_settings, diversity=replace(base_settings.diversity, top_k=BIG))
 
 
 def panel_viewer(name: str) -> ViewerProfile:
     acct = world_b.accounts[name]
     return ViewerProfile(account=name, follows=world_b.follows[name],
-                         subscribed_communities=frozenset({COMMUNITY[acct.topic]}))
+                         interest_tags=frozenset(TAGS[acct.topic]))
 
 
 def run_panel(gw_, s: Settings) -> tuple[dict[str, tuple[float, float]], list[frozenset[str]]]:

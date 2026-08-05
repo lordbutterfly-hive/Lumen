@@ -14,7 +14,18 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["recsys", "recsys.core", "recsys.io"]
+packages = ["recsys", "recsys.core", "recsys.io", "recsys.db", "recsys.jobs"]
+
+# C5 (2026-08-04): recsys/data/trusted_seeds.txt is read at runtime via
+# importlib.resources (recsys.config._load_trusted_seeds), not a path relative
+# to a source file, so it must be declared as package data or it silently
+# vanishes from an installed wheel/sdist while still working from a repo
+# checkout — exactly the packaging trap importlib.resources exists to avoid.
+# `recsys.data` is a plain data directory (no __init__.py, not itself in
+# `packages` above); setuptools still ships glob-matched files under a listed
+# package's own directory tree, so no separate package entry is needed for it.
+[tool.setuptools.package-data]
+recsys = ["data/*.txt"]
 
 [tool.ruff]
 line-length = 100
@@ -44,3 +55,12 @@ ignore_missing_imports = true
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-p no:cacheprovider"
+# ★ The live-mirror suite (tests/test_hafsql_live.py). Registered so the marker
+# is a real selector (`pytest -m live`) rather than an unknown-mark warning.
+# It is SKIPPED unless RECSYS_LIVE_DB is set, so an offline run — CI included —
+# stays green and network-free. It exists because eight hard I/O breaks
+# survived every gate: the offline hafsql tests assert that SQL strings are
+# non-empty and never execute one against a schema.
+markers = [
+    "live: hits the real public HAFSQL mirror; requires RECSYS_LIVE_DB=1",
+]

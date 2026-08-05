@@ -15,8 +15,8 @@ a producer feeding it.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from collections.abc import Callable, Iterable, Mapping, MutableMapping, Sequence
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 
@@ -54,6 +54,7 @@ from recsys.core.ring import detect_rings, ring_member_set
 from recsys.core.scoring import (
     AuthorEngagement,
     AuthorPriorGateway,
+    declared_interest_raw,
     organic_quality_raw,
     score_candidates,
 )
@@ -69,6 +70,7 @@ from recsys.core.vote_signal import (
     independent_organic_engagement,
     independent_vote_signal,
 )
+from recsys.io.hafsql import chain_author_map
 
 logger = logging.getLogger("recsys.pipeline")
 
@@ -166,6 +168,21 @@ class TrustSnapshot:
     #: (see :func:`_voter_trust_from_creds`), so it must travel with the
     #: snapshot rather than being consumed and discarded by graph-cred.
     trusted_seeds: frozenset[str] = frozenset()
+    #: ★ A8.3 (2026-08-04): when this snapshot was built (the batch's own
+    #: ``now``/``resolved_now``, not wall-clock at load time). Set by
+    #: :func:`build_trust_snapshot`. ``_trust_is_fresh`` refuses a snapshot
+    #: that carries a timestamp older than
+    #: ``TrustConfig.max_snapshot_age_days`` — see that function and
+    #: :class:`~recsys.config.TrustConfig` for why the gap this closes is
+    #: real (a snapshot could be arbitrarily old and still read as "fresh")
+    #: and why ``None`` deliberately stays fresh rather than failing every
+    #: existing snapshot built before this field existed.
+    #:
+    #: SHAPE NOTE for persistence (A6, concurrent unit): this is a plain
+    #: ``datetime | None`` (UTC, matching every other timestamp in this
+    #: package) — round-trip it through the snapshot store exactly like
+    #: ``degraded``/``trusted_seeds``, no encoding decisions needed.
+    built_at: datetime | None = None
 
 
 def build_trust_snapshot(
@@ -174,42 +191,60 @@ def build_trust_snapshot(
     *,
     since: datetime | None = None,
     now: datetime | None = None,
-    trusted_seeds: frozenset[str] = frozenset(),
+    trusted_seeds: frozenset[str] | None = None,
     previous: TrustSnapshot | None = None,
-    # ★ WIRING REQUIREMENT, NOT A SAFE DEFAULT (recorded 2026-08-01).
-    # This must be passed True by the production feed service. The F-R2 gate it
-    # controls refuses a snapshot with no usable trusted seeds — the state that
-    # silently reverts vouch anchoring to the pre-2026-08-01 local rule and
-    # reopens the directed-cycle sybil hole — and defaulting it OFF makes the
-    # safe behaviour opt-in, while its sibling `trust_policy` defaults to
-    # FAIL_CLOSED. Two guards for one failure shape with opposite defaults.
+    # ★★ C5/R2 (2026-08-04) — THE DEFAULT IS NOW True. This ruling explicitly
+    # overrides the prior "do not flip the default" note (BUILD-ADJUDICATION
+    # R2: "C5 wins, and A8.2 is struck. Flip and migrate the fixtures
+    # together — the code's own comment calls the False default 'a live
+    # footgun', and a wiring requirement every caller must remember is the
+    # defect, not the fix.").
     #
-    # It is NOT flipped here because 10 existing fixtures build worlds with no
-    # seed-eligible account and would start failing closed; migrating them means
-    # inventing seeds for security tests, which changes which accounts get
-    # vouched and therefore what those tests prove. That migration is worth doing
-    # deliberately — it is not worth doing as a side effect of a default change.
-    # Until then this is a live footgun, and the production caller MUST set it.
+    # What made True unsafe as a default before this unit was TWO gaps
+    # closing at once, both closed here:
+    #   1. `trusted_seeds` had no connection to `settings` at all — a caller
+    #      had to remember to thread the curated list by hand, so True would
+    #      have failed shut for anyone who forgot. It now defaults from
+    #      `settings.trusted_seeds` (see the parameter above) — the loader in
+    #      `recsys.config._load_trusted_seeds` reads the operator-curated,
+    #      package-shipped `recsys/data/trusted_seeds.txt` (C5, R13), so a
+    #      caller who supplies `settings` and nothing else already gets a
+    #      real, human-curated seed list.
+    #   2. The 24 existing snapshot construction sites (tests + measurement
+    #      harness) build SYNTHETIC worlds with no account named e.g.
+    #      "hiveio" or "blocktrades" in them, so those real seed names never
+    #      LAND in a synthetic `graph_creds` and the F-R2 landed-seeds guard
+    #      below would refuse every one of them under `production=True`.
+    #      Migrated in this same unit: every such fixture now passes
+    #      `production=False` EXPLICITLY (never an invented seed set — see
+    #      the ruling below on why not).
     #
-    # ★★ RULING 2026-08-03 — DO NOT AUTO-DERIVE `trusted_seeds`. It is the
-    # obvious "missing piece" here and it is a trap. Seeds are the root of the
-    # whole vouch chain, so whatever rule picks them is what an attacker buys.
-    # The harness picks "top-2 reputation per topic", which looks defensible
-    # because in `simworld` reputation tracks QUALITY (corr +0.76..+0.83 across
-    # seeds 7/11/23/42) and barely tracks stake (-0.16..+0.24). **That
-    # correlation is an artefact of the simulator.** simworld's `reputation` is
-    # an independent per-account attribute; real Hive reputation is a monotone
-    # function of RECEIVED RSHARES (`rep += rshares >> 6`, build-plan Appendix A),
-    # i.e. stake-weighted votes — buyable. So this instrument structurally
-    # cannot validate any seed rule, and a rule validated on it would put the
-    # trust root up for sale on the real chain.
+    # The production feed service (A7's weekly batch, once built) gets the
+    # safe behaviour by doing nothing, matching `trust_policy`'s
+    # `TrustPolicy.FAIL_CLOSED` default — two guards, same posture, finally.
     #
-    # THE CONTRACT, therefore, is human-curated: the deploy supplies a vetted
-    # account list AND passes `production=True`. Both halves are required — the
-    # refusal below is already implemented and pinned by
-    # tests/test_pipeline.py::(the F-R2 production-guard test). Nothing in this
-    # package should try to be clever in place of that list.
-    production: bool = False,
+    # ★★ RULING 2026-08-03 — DO NOT AUTO-DERIVE `trusted_seeds` FROM CHAIN
+    # DATA. It is the obvious "missing piece" here and it is a trap. Seeds are
+    # the root of the whole vouch chain, so whatever RULE picks them is what
+    # an attacker buys. The harness's own "top-2 reputation per topic" rule
+    # looks defensible because in `simworld` reputation tracks QUALITY (corr
+    # +0.76..+0.83 across seeds 7/11/23/42) and barely tracks stake
+    # (-0.16..+0.24). **That correlation is an artefact of the simulator.**
+    # simworld's `reputation` is an independent per-account attribute; real
+    # Hive reputation is a monotone function of RECEIVED RSHARES
+    # (`rep += rshares >> 6`, build-plan Appendix A), i.e. stake-weighted
+    # votes — buyable. So this instrument structurally cannot validate any
+    # seed rule, and a rule validated on it would put the trust root up for
+    # sale on the real chain.
+    #
+    # THE CONTRACT, therefore, stays human-curated: `recsys/data/
+    # trusted_seeds.txt` is a file a human wrote and reviewed (composition and
+    # the measured cost of every inclusion rule are recorded in
+    # O:/LUMEN-DOCS/algo-tests/TRUSTED-SEEDS-2026-08-04.md), never computed
+    # from chain data by this package. Defaulting `trusted_seeds` from
+    # `settings.trusted_seeds` is reading that file, not deriving a rule —
+    # it does not weaken this ruling.
+    production: bool = True,
 ) -> TrustSnapshot:
     """Weekly batch: detect rings, then compute Sybil-hardened graph-cred over
     the follow graph (§8.3/§8.5). Ring membership feeds graph-cred's self-dealing
@@ -256,11 +291,21 @@ def build_trust_snapshot(
     graph-cred silently revert toward uniform teleport — a Sybil clique then mints
     free rank with nothing raising. ``rank_feed`` already fails CLOSED on a
     missing/degraded snapshot; this mirrors that posture for the one remaining
-    silent-degradation path. When ``production`` is set, refuse to build a snapshot
-    from an empty ``trusted_seeds`` rather than fall back to uniform teleport. The
-    empty-seeds path stays allowed for the offline harness/unit tests (the default,
-    ``production=False`` — the same deliberate opt-in as ``TrustPolicy.WARN``).
+    silent-degradation path. Under ``production`` (the default, see above), refuse
+    to build a snapshot from an empty OR entirely-unlanded ``trusted_seeds`` rather
+    than fall back to uniform teleport / the pre-anchoring local vouch rule — FAIL
+    SHUT, never warn-and-continue. The empty-seeds path stays allowed only for the
+    offline harness/unit tests that opt out with ``production=False`` (the same
+    deliberate, explicit opt-in ``TrustPolicy.WARN`` already requires).
+
+    ``trusted_seeds=None`` (the default) resolves to ``settings.trusted_seeds`` —
+    the curated file loaded by :func:`recsys.config._load_trusted_seeds` — so a
+    caller need not thread it by hand. Pass ``trusted_seeds=frozenset()``
+    EXPLICITLY (not by omission) to build with no seeds at all; that combination
+    only succeeds when ``production=False``.
     """
+    if trusted_seeds is None:
+        trusted_seeds = settings.trusted_seeds
     if production and not trusted_seeds:
         raise ValueError(
             "build_trust_snapshot: refusing to build a production trust snapshot "
@@ -305,7 +350,12 @@ def build_trust_snapshot(
         self_credit_threshold=settings.thresholds.ring_discount_threshold,
     )
     ring_members = ring_member_set(ring_signals, settings.thresholds.ring_discount_threshold)
-    lineage = {account: gateway.stake_lineage(account) for account in accounts}
+    # ★ B2 (2026-08-05) — stake delegation is no longer an input. This used to be
+    # `{account: gateway.stake_lineage(account) for account in accounts}`, one
+    # query per account against `hafsql.delegations`. See `_lineage_for` for why
+    # the relation was retired; `compute_graph_cred` and `train_als` below both
+    # document their no-lineage behaviour as the tested default.
+    lineage: dict[str, frozenset[str]] = {account: frozenset() for account in accounts}
     graph_creds = compute_graph_cred(
         edges,
         follows,
@@ -381,6 +431,9 @@ def build_trust_snapshot(
         degraded=degraded,
         trusted_seeds=trusted_seeds,
         edges=tuple(edges),
+        # A8.3: stamp with the batch's OWN clock (`resolved_now`), not
+        # wall-clock at persistence/load time — see TrustSnapshot.built_at.
+        built_at=resolved_now,
     )
 
 
@@ -430,12 +483,88 @@ def _organic_signal(
     )
 
 
+def _lineage_for(
+    gateway: HafsqlGateway,
+    authors: Iterable[str],
+    cache: MutableMapping[str, frozenset[str]] | None = None,
+) -> dict[str, frozenset[str]]:
+    """Identity-group sets for ``authors``. **RETIRED 2026-08-05 — always empty.**
+
+    ★★★ STAKE DELEGATION IS NO LONGER AN INPUT TO THIS ALGORITHM (B2).
+
+    This used to return each author's `stake_lineage`: the accounts tied to them
+    through Hive `delegate_vesting_shares`. It fed three consumers — the §8.4
+    vote-exclusion set, `compute_graph_cred`/`train_als`, and the C2c per-farm
+    exploration cap — as a Sybil heuristic ("one wallet funding twenty accounts
+    is probably one person").
+
+    **It was removed because a delegation needs NO CONSENT FROM THE RECIPIENT.**
+    Any account with RC — no HP spent, no privileged position — could insert
+    itself into any author's lineage set. Measured by the 2026-08-05 council:
+    33 dust delegations (1 raw VESTS each) dropped a real author's mean organic
+    percentile 0.7902 -> 0.0655 and their top-20 slots 15 -> 0. The relation was
+    also the SQL's third UNION branch ("everyone else funded by anyone who
+    funded you"), which grouped whole honest onboarding cohorts with no attacker
+    present at all: `ecency` delegates to ~165 accounts it onboarded, so the
+    largest genuine newcomer cohort on Hive was one lineage group, mutually
+    excluded from each other's organic base.
+
+    That inverts this project's founding premise. Lumen exists so that stake does
+    NOT determine reach — measured reach-vs-stake correlation is +0.18/-0.14,
+    i.e. noise, against +0.80 for quality. A relation that lets a STRANGER'S
+    stake operation SUBTRACT another author's reach is a worse version of the
+    thing the whole system was built to avoid.
+
+    It is not replaced by a different funding relation, because none can work:
+    on-chain, an onboarding service and a Sybil farm are the same shape
+    (`ecency` both CREATED 427 of the chain's 1,491 new accounts in 30 days and
+    delegates to them). Account-creation lineage would mis-group the same cohort.
+
+    **Nothing is lost that was working.** The council measured the C2c cap as
+    INERT against the actual attack — an account-count farm has no reason to
+    delegate between its own socks (100.0% exploration capture without shared
+    lineage, 41.1% with). Account count is instead priced by the serving log
+    (B11/B1), which keys on what the SYSTEM OBSERVED rather than on a relation
+    the attacker writes.
+
+    Every consumer's no-lineage behaviour is its documented, already-tested
+    path: `VoteExclusions.excluded()` degrades to self + ring, and
+    `insert_exploration`'s group check "reduces algebraically to exactly the old
+    author-only comparison" (its own docstring). This function is kept as the
+    single seam where a CONSENT-BEARING identity relation would plug in — one
+    edit here, no re-threading of six call sites.
+
+    Historical note on the signature (the memoization it documented is now moot):
+    ★ A4/R7 (2026-08-04). `stake_lineage` was one query per author, and a single
+    `rank_feed` asked for the same authors up to five times — `_author_priors`
+    once, `_order_by_full_exclusion` once, and `_score` three times (eligible,
+    filler, exploration). Measured on the harness load: **287 calls for 109
+    distinct authors, a 2.63x redundancy with zero memoization**, against a live
+    per-call latency of ~35 ms. That is ~6 seconds of the request spent
+    re-asking questions already answered.
+
+    The cache is deliberately REQUEST-scoped, not attached to the gateway:
+    stake lineage changes when a delegation changes, so a process-lifetime cache
+    would serve a stale exclusion set — and the §8.4 exclusions are a security
+    boundary, not a display detail. One dict per `rank_feed`, discarded with the
+    request.
+
+    Memoizing here rather than inside the gateway also keeps
+    :class:`~recsys.contracts.HafsqlGateway` unchanged, so every existing
+    implementation (the fakes, the simulator) keeps working untouched.
+    """
+    del gateway, cache  # retired inputs — see the notice above
+    return {author: frozenset() for author in authors}
+
+
 def _author_priors(
     gateway: HafsqlGateway,
     authors: frozenset[str],
     since: datetime,
     snap: TrustSnapshot,
     settings: Settings,
+    lineage_cache: MutableMapping[str, frozenset[str]] | None = None,
+    prior_cache: Callable[[frozenset[str]], Mapping[str, AuthorEngagement]] | None = None,
 ) -> dict[str, AuthorEngagement]:
     """Author-pooled engagement priors for ``authors`` over the window (§6).
 
@@ -461,11 +590,37 @@ def _author_priors(
     as ``own_base`` is credited, before summing — see
     :class:`~recsys.core.scoring.AuthorPriorGateway`.
     """
-    if not authors or not isinstance(gateway, AuthorPriorGateway):
+    if not authors:
+        return {}
+    # ★★ SERVED FROM A WARMED CACHE WHEN ONE IS SUPPLIED (2026-08-04).
+    #
+    # This prior is a per-author WINDOW aggregate — it does not depend on who is
+    # asking — and it was measured to be the last thing standing between this
+    # library and real traffic. `author_engagement` against the live mirror runs
+    # ~1s for a 47-author follow list but **exceeds the 15s statement timeout**
+    # for a realistic candidate pool (150 busy posters: 16.1s -> QueryCanceled,
+    # 21-36s uncapped). A query rewrite took the easy case from ~1.3-3.1s to
+    # ~0.9-1.6s and did NOT clear that structural floor; no rewrite does.
+    #
+    # So it comes off the request path entirely. `recsys.author_prior_cache`
+    # builds it on a timer, the same discipline as the NormContext, and the
+    # request only reads: measured 0.042ms for the 150-author case that used to
+    # time out, with 150/150 hits.
+    #
+    # A `Callable`, deliberately, not a class import — `author_prior_cache`
+    # imports FROM this module, so importing it back would be circular.
+    #
+    # MISS POLICY: a cache miss is simply absent from the returned map, and the
+    # scorer degrades to the post's own engagement — the documented pre-existing
+    # behaviour. That degradation moves ~80% of the composite, so it must never
+    # be silent: the cache counts and logs misses and surfaces them on /health.
+    if prior_cache is not None:
+        return dict(prior_cache(authors))
+    if not isinstance(gateway, AuthorPriorGateway):
         return {}
     excluded = {
-        author: gateway.stake_lineage(author) | _ring_exclusion(author, snap) | {author}
-        for author in authors
+        author: lineage | _ring_exclusion(author, snap) | {author}
+        for author, lineage in _lineage_for(gateway, authors, lineage_cache).items()
     }
     trust = _voter_trust(snap, settings)
     try:
@@ -507,9 +662,34 @@ def _author_priors(
 
 
 def _suppressed(gateway: HafsqlGateway, candidates: list[Candidate]) -> frozenset[str]:
-    """Network-suppressed keys among ``candidates`` (§8.7)."""
+    """Network-suppressed keys among ``candidates`` (§8.7).
+
+    ★ A12 (2026-08-04). A §8.7 report is filed against the on-chain
+    ``(author, permlink)`` a post is actually stored under — for a Lumen Lite
+    post that is the shared PUBLISHER account, not the writer's ranked
+    pseudo-identity (``@u_7f3c9a/...``). Without resolving that, the query
+    ran under the ranked pseudo-author, matched zero rows, always — moderation
+    could never suppress a lite post, no matter what was filed against its
+    real chain identity. ``chain_author_map`` (``recsys.io.hafsql``) builds
+    exactly the ``Post.key -> chain_author`` map ``suppressed_keys`` needs to
+    resolve it; see that function's own docstring, which named this call site
+    directly as the wiring it was still waiting on.
+
+    Passed only when non-empty (``chain_authors or None`` reduces to omitting
+    the keyword entirely) so a gateway that has not yet picked up the
+    ``chain_authors`` parameter — any fake/sim double built before A12 landed
+    — keeps working unchanged for every batch that contains no lite posts,
+    which is every batch today. The moment a real lite post appears, the
+    kwarg is supplied and MUST be honoured; a gateway lacking it then fails
+    loudly (``TypeError``) rather than silently shipping the pre-A12 miss.
+    """
     keys = frozenset(c.post.key for c in candidates)
-    return gateway.suppressed_keys(keys) if keys else frozenset()
+    if not keys:
+        return frozenset()
+    chain_authors = chain_author_map(c.post for c in candidates)
+    if chain_authors:
+        return gateway.suppressed_keys(keys, chain_authors=chain_authors)
+    return gateway.suppressed_keys(keys)
 
 
 
@@ -577,6 +757,34 @@ def gather_candidates(
     # candidates generated, 0/20 feed slots on-interest, 17/20 padding, i.e. the
     # original bug's numbers. Now 19/20. See test_follow_cliff's end-to-end test,
     # which exists because the boundary test passed while the feed did not.
+    # ★ THE TAGLESS-VIEWER RULING (R12, 2026-08-04). Removing communities left
+    # this the interest lane's ONLY way to source anything — before, a viewer
+    # with no declared tags could still be reached via a subscribed/interest
+    # community. R12 rules this defensively, in three parts; only the third is
+    # this package's job (the other two are a signup-API change and a
+    # cold-start-history derivation, both outside `recsys/`, and are recorded in
+    # the launch checklist, not built here): a viewer who still arrives with no
+    # `interest_tags` must fall through to the popular fallback and log loudly —
+    # never an empty feed, never a crash. `interest_candidates` /
+    # `established_interest_candidates` already degrade honestly to `[]` on an
+    # empty tag set (both call `gateway.tag_posts(frozenset(), ...)`, and every
+    # gateway — `HafsqlClient`, `SimGateway`, `FakeGateway` — treats that as "no
+    # match"), `_interest_match` (exploration.py) and `_ungated_lane_for`
+    # (second_degree.py) both fail closed the same way, and `_fallback_filler`
+    # already pads ANY starved pool from `popular_posts` regardless of
+    # `interest_tags` — so nothing here crashes or silently serves an empty
+    # feed. What was missing was the log: a tagless viewer's entire interest
+    # lane going dark is worth an operator's attention, not silence.
+    if not viewer.interest_tags:
+        logger.warning(
+            "gather_candidates: viewer %s declared no interest_tags — the "
+            "interest lane (cold-start §13.1) can source nothing now that "
+            "communities are retired as a lane (R12). Falling through to the "
+            "popular fallback (_fallback_filler) for a non-empty feed; wire "
+            "signup-mandatory tags or a history-derived fallback (R12 parts "
+            "1-2) to stop this from being the steady-state path.",
+            viewer.account,
+        )
     if not viewer.follows:
         groups.append(interest_candidates(viewer, gateway, since, limit, settings.cold_start))
     else:
@@ -637,14 +845,6 @@ def gather_candidates(
                 ]
             )
 
-    if viewer.subscribed_communities:
-        groups.append(
-            [
-                Candidate(post=p, source=CandidateSource.OON_COMMUNITY)
-                for p in gateway.community_posts(viewer.subscribed_communities, since, limit)
-            ]
-        )
-
     merged = merge_candidates(*groups)
     return cap_oon_flooding(merged, settings.flooding.max_oon_posts_per_author)
 
@@ -659,6 +859,7 @@ def _fallback_filler(
     settings: Settings,
     *,
     show_nsfw: bool,
+    lineage_cache: MutableMapping[str, frozenset[str]] | None = None,
 ) -> list[Candidate]:
     """The popular-lane padding a starved viewer needs — empty for a healthy
     one. Guarantees a non-empty, non-starved feed for **every** viewer (§13.5b).
@@ -714,6 +915,11 @@ def _fallback_filler(
     re-scored under the same exclusions in :func:`rank_feed`; this closes the
     remaining gap — the *selection* order — that re-scoring alone leaves open
     when there are more admissible fallback posts than shortfall slots.)
+
+    ``FallbackConfig.max_share_of_feed`` (C6, 2026-08-04) additionally bounds
+    how much of the RETURNED feed this padding may be — see the comment at
+    ``target``'s computation below for the formula and why it applies at
+    every ``eligible`` count, including zero.
     """
     # ★ The bar is the FEED SIZE, not one screen (2026-08-01). Returning early at
     # `min_feed_size` made feed length non-monotonic in the follow graph: a
@@ -775,7 +981,7 @@ def _fallback_filler(
     }
     if self_dealt:
         admissible = [c for c in admissible if c.post.author not in self_dealt]
-    admissible = _order_by_full_exclusion(admissible, gateway, snap, settings)
+    admissible = _order_by_full_exclusion(admissible, gateway, snap, settings, lineage_cache)
     # ★ CONTINUOUS PADDING DEPTH (2026-08-01). This used to be
     #     min_feed_size if eligible else len(eligible) + len(admissible)
     # i.e. a viewer with ZERO eligible posts got the entire admissible pool,
@@ -799,6 +1005,50 @@ def _fallback_filler(
         settings.fallback.min_feed_size,
         min(len(eligible) + len(admissible), settings.diversity.top_k),
     )
+    # ★ C6 (2026-08-04): bound padding's share of the RETURNED feed.
+    # POPULAR_FALLBACK is exempt from BOTH the second-degree vouch gate and
+    # (until now, functionally — see `contracts.py`'s `requires_author_floor`)
+    # the author floor — the only defense left was dropping the proven-
+    # self-dealt band just above. Measured (`A8_popular_lane.py`): 60/60
+    # viewers received padding, mean 38.7% of the served feed, max 56.0%.
+    #
+    # Solving `F <= share * (E + F)` for the largest F consistent with the cap
+    # gives a ceiling on the TOTAL feed length: `E + F <= E / (1 - share)`.
+    # Applied as a THIRD ceiling alongside the two already in `target` above
+    # (never below `min_feed_size`, never inventing supply beyond
+    # `len(admissible)`/`top_k`) — whichever of the three binds hardest wins.
+    #
+    # ★ DELIBERATELY NOT exempted at `len(eligible) == 0`. An exemption there
+    # ("no personalized pool, so the popular lane simply IS the feed") sounds
+    # right but creates a WORSE bug than the one it avoids: it makes served
+    # feed length drop sharply the instant `eligible` goes from 0 to 1 (e.g.
+    # ~30 posts uncapped at 0 eligible vs. ~20 capped at 1), which is exactly
+    # the non-monotonic "one follow shortens your feed" shape this codebase
+    # has already fixed twice (see the CONTINUOUS PADDING DEPTH note above,
+    # and `tests/test_pipeline.py::test_feed_length_is_monotonic_in_the_
+    # follow_graph`). Applying the SAME formula at every `eligible` count,
+    # including zero, keeps total feed length monotonic in the follow graph —
+    # verified by that test — at the cost of the zero-eligible feed also
+    # shrinking to `min_feed_size` under the default share (was: full
+    # `admissible` depth). `min_feed_size` itself is still an absolute floor
+    # here (see `share_ceiling` below), so "never truly empty" is preserved;
+    # "full pool depth when eligible is empty" is not, and that is the
+    # intended trade — see `FallbackConfig.max_share_of_feed`'s docstring.
+    share = settings.fallback.max_share_of_feed
+    # ★ 0.0 <= share, NOT 0.0 < share: share=0.0 is a real, documented setting
+    # (FallbackConfig.max_share_of_feed's docstring: "the tightest legal
+    # setting — the floor still wins"), not a second spelling of "off". At
+    # share=0.0, `len(eligible) / (1 - share) == len(eligible)`, so the
+    # formula below collapses to `target = max(min_feed_size, len(eligible))`
+    # — pad only up to one screen, never beyond it. Excluding it here would
+    # have silently reproduced share=1.0 (uncapped) at the one value whose
+    # own docstring promises the opposite.
+    if 0.0 <= share < 1.0:
+        share_ceiling = max(
+            settings.fallback.min_feed_size,
+            len(eligible) / (1.0 - share),
+        )
+        target = min(target, max(len(eligible), int(share_ceiling)))
     return top_up(eligible, admissible, target)[len(eligible) :]
 
 
@@ -807,6 +1057,7 @@ def _order_by_full_exclusion(
     gateway: HafsqlGateway,
     snap: TrustSnapshot,
     settings: Settings,
+    lineage_cache: MutableMapping[str, frozenset[str]] | None = None,
 ) -> list[Candidate]:
     """Stable-sort ``candidates`` by their attributed independent engagement
     under the FULL §8.4 exclusion set (self + stake-lineage + per-author ring)
@@ -820,7 +1071,7 @@ def _order_by_full_exclusion(
         return candidates
     trust = _voter_trust(snap, settings)
     authors = {c.post.author for c in candidates}
-    lineage = {author: gateway.stake_lineage(author) for author in authors}
+    lineage = _lineage_for(gateway, authors, lineage_cache)
 
     def key(candidate: Candidate) -> float:
         author = candidate.post.author
@@ -990,9 +1241,21 @@ def _score(
     snap: TrustSnapshot,
     settings: Settings,
     priors: dict[str, AuthorEngagement] | None = None,
+    lineage_cache: MutableMapping[str, frozenset[str]] | None = None,
+    top_k: int | None = None,
 ) -> list[ScoredCandidate]:
     """Hydrate vote-exclusions once per author, score each candidate in
     isolation (§3.3), then diversity-re-rank (§3.4).
+
+    ``top_k`` (C3, 2026-08-04) overrides ``settings.diversity.top_k`` for the
+    ``truncate`` step inside :func:`~recsys.core.rerank.rerank` ONLY — every
+    other diversity/exploration knob still reads ``settings.diversity``
+    unchanged. ``None`` (the default) is an exact no-op, used for the two
+    ordinary callers (the eligible pool, the fallback filler) where truncating
+    to the real page size is correct. The THIRD caller — the exploration pool,
+    see the splice in :func:`rank_feed` — passes ``len(explore_pool)`` so
+    every candidate the lane selected survives scoring; see that call site's
+    comment for why silently truncating there is a defect, not a feature.
 
     Personalization enters at ONE place: ``cf_percentiles``, the viewer's own
     ALS affinity ranks over the candidate authors (§6.1). It is computed once
@@ -1017,9 +1280,27 @@ def _score(
     poisoned co-engagement edge would otherwise have to lift a spam author
     through, without touching a TRUE cold newcomer (no ALS row), whose CF
     slice is already ``None`` for the ordinary reason (no trained factors).
+
+    B-04 (2026-08-04): ``emerging_authors`` — threaded into
+    :func:`~recsys.core.rerank.rerank` below — is built HERE, from
+    ``snap.graph_creds``, because that is the one place both this batch's
+    candidates and the trust snapshot are already in scope. An author
+    qualifies when they are absent from ``graph_creds`` entirely (never
+    engaged) or sit at or below ``settings.graph_cred.min_vouched_score`` —
+    the SAME "unknown, not bad" band ``CandidateSource.requires_author_floor``
+    already treats permissively, so this introduces no new trust concept, only
+    a re-ranking budget for candidates the re-ranker would otherwise queue
+    behind ordinary off-topic spillover for the same shared quota (see
+    :data:`recsys.config.DiversityConfig.emerging_per_page`).
     """
     authors = {candidate.post.author for candidate in candidates}
-    lineage = {author: gateway.stake_lineage(author) for author in authors}
+    emerging_authors = frozenset(
+        author
+        for author in authors
+        if author not in snap.graph_creds
+        or snap.graph_creds[author].score <= settings.graph_cred.min_vouched_score
+    )
+    lineage = _lineage_for(gateway, authors, lineage_cache)
     author_priors = priors if priors is not None else {}
     trust = _voter_trust(snap, settings)
     require_attribution = settings.vote_signal.require_attribution
@@ -1053,6 +1334,11 @@ def _score(
     cf_suppressed_sources = (
         INTEREST_LANE_SOURCES if is_established_followless(viewer, has_als_row) else frozenset()
     )
+    # ★ DECLARED INTEREST (B-02, 2026-08-04). Request-scoped, percentile-ranked
+    # within THIS pool — see `_interest_lookup`. Skipped entirely when the
+    # channel is off or the viewer declared nothing, so that caller reproduces
+    # prior output bit-for-bit.
+    interest_lookup = _interest_lookup(viewer, [c for c, _, _ in scored_inputs], settings.weights)
     # ★ VIEWER-OWN AFFINITY (2026-08-01). Built from the viewer's OWN outgoing
     # edges in the snapshot — no extra query, and the same decay the trust layer
     # uses. Skipped entirely when the channel is off (weight 0.0), so a default
@@ -1066,6 +1352,7 @@ def _score(
         settings.weights,
         cf_percentiles,
         cf_suppressed_sources=cf_suppressed_sources,
+        interest_percentiles=interest_lookup,
         viewer_percentiles=viewer_lookup,
     )
     # Ties resolve per-viewer, not alphabetically — see rerank._tie_break.
@@ -1085,13 +1372,62 @@ def _score(
             "such callers. Pass a per-viewer seed for any user-facing feed."
         )
     bucket = int(now.timestamp()) // max(1, settings.diversity.explore_bucket_hours * 3600)
+    # ★ C3: only the truncation width changes for an overriding caller — every
+    # other diversity/exploration field is untouched, so the diversity re-rank
+    # itself (author/topic decay, the unchosen-source penalty/cap, the
+    # re-ranker's OWN `explore_slots` swap) behaves identically either way.
+    diversity = (
+        settings.diversity if top_k is None else replace(settings.diversity, top_k=top_k)
+    )
     return rerank(
         scored,
-        settings.diversity,
+        diversity,
         tie_break_seed=viewer.account,
         explore_bucket=bucket,
+        emerging_authors=emerging_authors,
     )
 
+
+
+def _interest_lookup(
+    viewer: ViewerProfile,
+    candidates: Sequence[Candidate],
+    weights: ScoreWeights,
+) -> Callable[[Candidate], float | None] | None:
+    """★ B-02 (2026-08-04). Per-request declared-interest percentile lookup, or
+    ``None`` when inapplicable — the channel is off (``weights.interest_match
+    <= 0.0``), or the viewer declared no ``interest_tags``. Both reproduce the
+    pre-B-02 score exactly (see :func:`recsys.core.viewer_affinity.blend`).
+
+    Percentile-ranked WITHIN THIS REQUEST'S OWN POOL, not against any global
+    or historical distribution — declared-interest raw is unconditionally
+    request-scoped (:func:`recsys.core.scoring.declared_interest_raw` reads
+    only ``post.tags`` and ``viewer.interest_tags``, no snapshot, no history),
+    so there is no wider distribution to rank against even in principle. Reuses
+    :func:`recsys.core.viewer_affinity.affinity_percentiles` — the same
+    per-distribution-normalization doctrine CF and viewer-own-affinity apply
+    (a raw value ranked against the wrong distribution either saturates or, for
+    an already-[0,1]-bounded raw like this one, compresses everyone toward the
+    same value with nothing to spread them apart) — keyed by ``post.key`` so
+    every post in the pool, including a genuine 0.0 (no tag overlap), supplies
+    its own entry; passing every key back as ``universe`` is what keeps those
+    honest zeros IN the ranked distribution rather than silently dropped (see
+    ``affinity_percentiles``'s own "UNENGAGED ITEMS ARE ZEROS, NOT ABSENCES"
+    note — the same trap, if this call omitted ``universe``).
+    """
+    if weights.interest_match <= 0.0 or not viewer.interest_tags:
+        return None
+    raw = {c.post.key: declared_interest_raw(c.post, viewer.interest_tags) for c in candidates}
+    if not raw:
+        return None
+    pct = affinity_percentiles(raw, universe=list(raw.keys()))
+    if not pct:
+        return None
+
+    def lookup(candidate: Candidate) -> float | None:
+        return pct.get(candidate.post.key)
+
+    return lookup
 
 
 def _viewer_affinity_lookup(
@@ -1146,14 +1482,32 @@ def _viewer_affinity_lookup(
 
     return lookup
 
-def _trust_is_fresh(snapshot: TrustSnapshot | None) -> bool:
+def _trust_is_fresh(
+    snapshot: TrustSnapshot | None,
+    *,
+    now: datetime,
+    max_age_days: int = 0,
+) -> bool:
     """Whether ``snapshot`` carries FRESH trust (H01): it is present, NOT flagged
-    ``degraded`` by the §H11 between-batch anomaly gate, AND actually carries
-    trust inputs (``graph_creds`` non-empty). A ``None``, degraded, OR
-    empty-but-present snapshot means every Sybil defense (breadth budget,
-    ring/lineage exclusion, graph-cred floor, CF) would revert to full-breadth
-    fail-open — so all three are refused (FAIL_CLOSED) or served loudly (WARN),
-    never silently.
+    ``degraded`` by the §H11 between-batch anomaly gate, actually carries
+    trust inputs (``graph_creds`` non-empty), AND — A8.3 — is not too OLD. A
+    ``None``, degraded, empty-but-present, OR stale snapshot means every Sybil
+    defense (breadth budget, ring/lineage exclusion, graph-cred floor, CF)
+    would revert to full-breadth fail-open — so all four are refused
+    (FAIL_CLOSED) or served loudly (WARN), never silently.
+
+    ★ A8.3 STALENESS (2026-08-04). ``TrustSnapshot`` used to carry no
+    timestamp at all, so a snapshot from six months ago and one from this
+    morning were equally "fresh" here — the calendar-axis twin of the
+    graph_creds-emptiness gap fixed below. ``max_age_days`` (default 0 = the
+    check is off, so a caller that does not thread
+    ``settings.trust.max_snapshot_age_days`` reproduces the pre-A8.3 behaviour
+    exactly) refuses a snapshot whose ``built_at`` is more than that many days
+    before ``now``. ``built_at is None`` — EVERY existing fixture/harness
+    snapshot, and any snapshot built before this field existed — stays fresh
+    regardless of ``max_age_days``: only a snapshot that positively KNOWS its
+    own age and has aged out newly fails, so nothing already-passing changes
+    behaviour by omission.
 
     The ``graph_creds`` non-emptiness clause is the H01 RESIDUAL fix (Opus
     council 2026-07-22). The documented Phase-0 default ``TrustSnapshot()`` has
@@ -1178,10 +1532,12 @@ def _trust_is_fresh(snapshot: TrustSnapshot | None) -> bool:
     existing warning into a hard failure is not worth silently re-basing what
     they prove. If fail-closed-on-unanchored is wanted, migrate those fixtures
     deliberately rather than as a side effect of this gate."""
-    return (
-        snapshot is not None
-        and not snapshot.degraded
-        and bool(snapshot.graph_creds)
+    if snapshot is None or snapshot.degraded or not snapshot.graph_creds:
+        return False
+    return not (
+        snapshot.built_at is not None
+        and max_age_days > 0
+        and now - snapshot.built_at > timedelta(days=max_age_days)
     )
 
 def rank_feed(
@@ -1196,6 +1552,12 @@ def rank_feed(
     snapshot: TrustSnapshot | None = None,
     show_nsfw: bool = False,
     trust_policy: TrustPolicy = TrustPolicy.FAIL_CLOSED,
+    #: A warmed author-prior lookup (`recsys.author_prior_cache.AuthorPriorCache.get`).
+    #: When absent the prior is computed per request, which is correct offline and
+    #: in tests but EXCEEDS the live statement timeout for a realistic candidate
+    #: pool — see `_author_priors`. Production supplies it; nothing else has to.
+    author_prior_cache: Callable[[frozenset[str]], Mapping[str, AuthorEngagement]]
+    | None = None,
 ) -> list[ScoredCandidate]:
     """Rank a viewer's discovery feed end to end (§3).
 
@@ -1222,9 +1584,18 @@ def rank_feed(
 
     No viewer, in any state, receives an empty feed while the network has a
     single eligible post for them: a realised pool shorter than
-    ``settings.fallback.min_feed_size`` is padded from the popular lane
-    (:func:`_fallback_filler`). A pool at or above that size never touches the
-    fallback and is returned exactly as it would have been before.
+    ``settings.diversity.top_k`` is topped up from the popular lane
+    (:func:`_fallback_filler`) — that is the guard the function actually runs
+    (``len(eligible) >= settings.diversity.top_k``), corrected here (C6,
+    2026-08-04) from an earlier version of this paragraph that described the
+    since-replaced ``min_feed_size`` guard; see ``_fallback_filler``'s own
+    docstring for why that guard was moved to fix a non-monotonic feed-length
+    cliff, which this text must not undo. A pool at or above ``top_k`` never
+    touches the fallback and is returned exactly as it would have been
+    before. However much padding is admitted, ``FallbackConfig.
+    max_share_of_feed`` additionally bounds its share of the final feed
+    (C6) — a starved viewer is still topped up, just not diluted past that
+    share.
 
     The viewer's own pool and the padding are **scored and re-ranked as two
     separate blocks**, padding strictly after. Interleaving them by score was
@@ -1259,7 +1630,9 @@ def rank_feed(
             "to percentile-rank meaningfully (it would degenerate toward a flat 0.5 and let "
             "the tie-break become the real ranker). Build it from the rolling window (§4)."
         )
-    if not _trust_is_fresh(snapshot):
+    if not _trust_is_fresh(
+        snapshot, now=now, max_age_days=settings.trust.max_snapshot_age_days
+    ):
         reason = "no trust snapshot" if snapshot is None else "degraded trust snapshot"
         if trust_policy is TrustPolicy.FAIL_CLOSED:
             raise MissingTrustError(
@@ -1282,8 +1655,22 @@ def rank_feed(
     suppressed = _suppressed(gateway, candidates)
     gated_keys = frozenset(c.post.key for c in candidates if c.source.requires_second_degree)
 
+    # ★ A12 (2026-08-04). Same resolution `_suppressed` above needs, for the
+    # same reason: a lite post's ranked key (`@u_7f3c9a/...`) queried without
+    # `chain_authors` matches zero engagement rows, always, because
+    # votes/replies/reblogs are recorded against the shared publisher account.
+    # Unresolved, a lite post sourced OON_ENGAGED could never clear the
+    # second-degree vouch gate no matter who among the viewer's follows
+    # actually engaged it. Built from the full `candidates` batch (not just
+    # `gated_keys`) to match `chain_author_map`'s own "build once per
+    # candidate batch" contract; omitted when empty for the same
+    # already-updated-gateways-keep-working reason `_suppressed` documents.
+    chain_authors = chain_author_map(c.post for c in candidates)
+    chain_author_kwargs = {"chain_authors": chain_authors} if chain_authors else {}
     engager_index = (
-        gateway.second_degree_engagers(gated_keys, viewer.follows) if gated_keys else {}
+        gateway.second_degree_engagers(gated_keys, viewer.follows, **chain_author_kwargs)
+        if gated_keys
+        else {}
     )
     eligible = filter_eligible(
         candidates,
@@ -1328,16 +1715,34 @@ def rank_feed(
     # newcomer from the lane by vouching for them, which is why the spec had to
     # require a QUALIFYING voucher to make ejection expensive. Positional
     # graduation cannot be triggered by anyone else at all.
+    #
+    # ★ The rotation bucket (2026-08-04). Derived from the clock alone, so it
+    # needs no stored state — which is the whole point, since the serve cap it
+    # partially substitutes for is blocked on the serving log. Same shape as the
+    # re-ranker's `explore_bucket` above; a SEPARATE setting, because that one
+    # governs a different (and switched-off) mechanism.
+    explore_bucket = (
+        int(now.timestamp()) // (settings.exploration.rotation_hours * 3600)
+        if settings.exploration.rotation_hours > 0
+        else 0
+    )
     explore_pool = eligible_for_exploration(
         candidates,
         viewer,
         now=now,
-        ring_members=snap.ring_members,
+        # ★ C4 (2026-08-04): PROVEN self-dealing (graph-cred == 0.0), not the
+        # raw ring flag — see recsys/core/exploration.py's docstring for the
+        # measured attack (ring-flag exclusion let a suppressor GAIN the seat
+        # it evicted a victim from) this closes.
+        graph_creds=snap.graph_creds,
         suppressed=suppressed,
         show_nsfw=show_nsfw,
         config=settings.exploration,
+        bucket=explore_bucket,
     )
 
+    # One stake-lineage memo for the whole request — see `_lineage_for`.
+    lineage_cache: dict[str, frozenset[str]] = {}
     filler = _fallback_filler(
         eligible,
         viewer,
@@ -1347,6 +1752,7 @@ def rank_feed(
         snap,
         settings,
         show_nsfw=show_nsfw,
+        lineage_cache=lineage_cache,
     )
     # One grouped author-prior read for BOTH blocks (§6): the prior is a
     # per-author window aggregate, so it is identical for the viewer's own
@@ -1367,10 +1773,14 @@ def rank_feed(
         quality_since,
         snap,
         settings,
+        lineage_cache,
+        prior_cache=author_prior_cache,
     )
-    ranked = _score(eligible, viewer, gateway, norm, now, snap, settings, priors)
+    ranked = _score(eligible, viewer, gateway, norm, now, snap, settings, priors, lineage_cache)
     if filler:
-        ranked = ranked + _score(filler, viewer, gateway, norm, now, snap, settings, priors)
+        ranked = ranked + _score(
+            filler, viewer, gateway, norm, now, snap, settings, priors, lineage_cache
+        )
     # ★ Exploration is spliced in AFTER ranking, never scored against the rest —
     # the whole reason the lane exists is that this content cannot win on score
     # (a zero-engagement post sits at the 3rd-4th percentile by construction).
@@ -1389,8 +1799,72 @@ def rank_feed(
         #
         # Scoring still runs, only for the ScoreBreakdown the returned objects
         # carry; position comes from the reserved slot, never from that score.
-        scored_explore = _score(explore_pool, viewer, gateway, norm, now, snap, settings, priors)
+        #
+        # ★ C3 (2026-08-04): `top_k=len(explore_pool)` so `rerank`'s internal
+        # `truncate` step (see `_score`'s own `top_k` docstring) cannot drop
+        # any pick. Without this, `_score` was silently replacing the lane's
+        # NEED-based selection policy with score order one line before the
+        # re-order below tried to restore it: `rerank` truncates to
+        # `settings.diversity.top_k` (200) BEFORE the re-order runs, so any
+        # pick past that cut was already gone. Measured (`A11_pool_
+        # truncation.py`): a 347-candidate exploration pool survived at 200 —
+        # 147 dropped — and the pick ranked #0 in the lane's own NEED order
+        # (the account that would take the reserved slot) was among them,
+        # because a zero-engagement debut is the LOWEST-scoring thing in the
+        # pool by construction — the exact property this lane exists to
+        # bypass, silently reinstated by the truncation.
+        scored_explore = _score(
+            explore_pool,
+            viewer,
+            gateway,
+            norm,
+            now,
+            snap,
+            settings,
+            priors,
+            lineage_cache,
+            top_k=len(explore_pool),
+        )
         by_key = {sc.post.key: sc for sc in scored_explore}
+        # ★ Kept as a safety net BEHIND the invariant below, never as the only
+        # handling (C3) — a silent `in by_key` filter is exactly how the
+        # truncation bug above went unnoticed the first time.
+        if len(scored_explore) != len(explore_pool):
+            dropped = sorted(
+                {c.post.author for c in explore_pool}
+                - {sc.post.author for sc in scored_explore}
+            )
+            logger.error(
+                "exploration pool lost %d of %d picks inside _score; the lane's "
+                "NEED-based selection policy has been silently replaced by score "
+                "order for the missing picks. dropped authors: %s",
+                len(explore_pool) - len(scored_explore),
+                len(explore_pool),
+                dropped[:20],
+            )
         ordered = [by_key[c.post.key] for c in explore_pool if c.post.key in by_key]
-        ranked = insert_exploration(ranked, ordered, settings.exploration)
+        # ★ C2c (2026-08-04). `insert_exploration` has accepted a `lineage`
+        # map since it shipped — see its own "PER-FARM LINEAGE BOUND"
+        # docstring section and `tests/test_exploration.py`'s
+        # `test_c2c_at_most_one_promotion_per_lineage_group_per_feed` — but
+        # nothing ever called it with one, so the cap was built and inert:
+        # an account-count farm still took every slot the per-feed ceiling
+        # allowed (measured 83.6% share, 0 ring flags). `_lineage_for`
+        # already builds exactly this shape from `gateway.stake_lineage` for
+        # every OTHER purpose in this function (own-base exclusion, ring
+        # exclusion); reusing the same request-scoped `lineage_cache` here
+        # costs nothing extra — every one of these authors was already
+        # looked up by the `_score(explore_pool, ...)` call just above.
+        #
+        # HONEST LIMIT, stated where the call is made, not just in
+        # `insert_exploration`'s own docstring: `stake_lineage` is
+        # DELEGATION lineage. The vector this bounds is an account-count
+        # farm sharing one CREATION/FUNDING lineage; delegation is a partial
+        # proxy for that, not the same relation — a farm that never
+        # delegates between its socks is not caught here. What IS caught,
+        # measured at unit scale: five socks sharing one lineage group drop
+        # from taking every one of 3 per-feed exploration slots to exactly
+        # one (`test_c2c_at_most_one_promotion_per_lineage_group_per_feed`).
+        lineage = _lineage_for(gateway, {c.post.author for c in ordered}, lineage_cache)
+        ranked = insert_exploration(ranked, ordered, settings.exploration, lineage=lineage)
     return ranked[: settings.diversity.top_k]

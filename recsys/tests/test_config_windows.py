@@ -56,8 +56,15 @@ def test_build_trust_snapshot_defaults_to_the_long_trust_window() -> None:
 
     This exercises `now=None`/`since=None`, which no other test did — the branch
     that shipped a missing `timezone` import.
+
+    ``production=False`` explicitly (C5/R2, 2026-08-04): the default flipped to
+    ``True``, and this synthetic ``FakeGateway()`` world has no account named
+    from ``DEFAULT_SETTINGS.trusted_seeds`` (the real curated Hive list), so a
+    ``production=True`` build would refuse on F-R2's landed-seeds guard. This
+    test is about the window defaulting, not about seed anchoring — an
+    explicit opt-out preserves that.
     """
-    snap = build_trust_snapshot(FakeGateway(), DEFAULT_SETTINGS)
+    snap = build_trust_snapshot(FakeGateway(), DEFAULT_SETTINGS, production=False)
     assert snap is not None
 
 
@@ -101,9 +108,9 @@ class _SinceRecordingGateway(FakeGateway):
         self.other_since.append(since)
         return super().engaged_oon_posts(follows, since, limit)
 
-    def community_posts(self, communities, since, limit):
+    def tag_posts(self, tags, since, limit):
         self.other_since.append(since)
-        return super().community_posts(communities, since, limit)
+        return super().tag_posts(tags, since, limit)
 
 
 def _windows(**kw) -> Settings:
@@ -112,7 +119,7 @@ def _windows(**kw) -> Settings:
 
 def test_in_network_window_is_widened_and_only_for_in_network() -> None:
     gw = _SinceRecordingGateway(in_network=[make_post("a", "p1")])
-    viewer = make_viewer("me", follows=frozenset({"a"}), subscribed_communities=frozenset({"c"}))
+    viewer = make_viewer("me", follows=frozenset({"a"}))
     since = EPOCH + timedelta(days=30)
     gather_candidates(viewer, gw, since, 50, _windows(in_network_freshness_days=7))
 
@@ -157,3 +164,108 @@ def test_default_rank_feed_path_keeps_in_network_inside_the_quality_prior_window
     extra = h.in_network_freshness_days - h.sourcing_freshness_days
     in_network_days_back = h.sourcing_freshness_days + extra
     assert in_network_days_back <= h.quality_prior_days
+
+
+# ---------------------------------------------------------------------------
+# `Settings.from_env` (2026-08-04). `ExplorationConfig.from_env` was built,
+# documented and unit-tested (`tests/test_exploration.py`) but nothing ever
+# called it: `grep -rn 'ExplorationConfig.from_env'` returned exactly one
+# hit, inside that method's own error-message string. `Settings()` — what
+# `DEFAULT_SETTINGS` and every production caller actually construct — never
+# read `LUMEN_EXPLORE_SEAT_SECRET`, so `Settings().exploration.seat_secret`
+# was always `None` regardless of the real environment: the keyed-MAC fix for
+# the measured 85.1%-seat-capture hole (C1a, `ExplorationConfig.seat_secret`'s
+# own docstring) had no path to ever receive a real secret. This is the same
+# "a config that validates a contract it never applies" shape this module's
+# own header describes for `HistoryWindows` — just one class over.
+# ---------------------------------------------------------------------------
+
+
+def test_settings_from_env_reads_the_seat_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The wiring itself: `Settings.from_env` must actually call
+    `ExplorationConfig.from_env`, not merely exist. FAILS if `Settings.from_env`
+    is reverted to `cls()` (ignoring the environment) — the exact "built but
+    never called" shape this section exists to close."""
+    monkeypatch.setenv("LUMEN_EXPLORE_SEAT_SECRET", "42" * 32)
+    settings = Settings.from_env()
+    assert settings.exploration.seat_secret == bytes.fromhex("42" * 32)
+
+
+def test_settings_from_env_production_with_no_secret_refuses_to_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """'production=True cannot silently run unkeyed' must hold reachable
+    THROUGH `Settings`, not only when `ExplorationConfig` is constructed by
+    hand — this is the whole point of a caller having a `Settings.from_env`
+    to call at all."""
+    monkeypatch.delenv("LUMEN_EXPLORE_SEAT_SECRET", raising=False)
+    with pytest.raises(ValueError, match="seat_secret"):
+        Settings.from_env(production=True)
+
+
+def test_settings_from_env_production_with_a_real_secret_starts_cleanly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LUMEN_EXPLORE_SEAT_SECRET", "7a" * 32)
+    settings = Settings.from_env(production=True)
+    assert settings.exploration.production is True
+    assert settings.exploration.seat_secret == bytes.fromhex("7a" * 32)
+
+
+def test_settings_from_env_rejects_a_non_hex_secret_loudly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A misconfigured deploy (typo, truncated copy-paste, wrong env var
+    entirely) must raise, never silently fall through to the unkeyed/random
+    dev default — that would be the exact silent-downgrade shape C1a closed
+    at the `ExplorationConfig` layer, reopened one level up if `Settings.
+    from_env` swallowed the error instead of propagating it."""
+    monkeypatch.setenv("LUMEN_EXPLORE_SEAT_SECRET", "not-hex-at-all")
+    with pytest.raises(ValueError, match="LUMEN_EXPLORE_SEAT_SECRET"):
+        Settings.from_env()
+
+
+def test_settings_from_env_rejects_a_wrong_length_secret_loudly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Valid hex, wrong byte length (a truncated copy-paste is exactly this
+    shape) must also raise loudly rather than being silently accepted as a
+    weaker-than-intended key."""
+    monkeypatch.setenv("LUMEN_EXPLORE_SEAT_SECRET", "11" * 10)  # 10 bytes, not 32
+    with pytest.raises(ValueError, match="32 bytes"):
+        Settings.from_env()
+
+
+def test_settings_from_env_with_nothing_set_matches_bare_settings_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Control: an operator who calls `Settings.from_env()` in an environment
+    with nothing configured (the dev/test default posture) must get the same
+    non-raising, randomly-keyed-with-a-warning behaviour as plain `Settings()`
+    — this method must not change behaviour for anyone who has not yet set
+    the env var, only ADD a path for those who have."""
+    monkeypatch.delenv("LUMEN_EXPLORE_SEAT_SECRET", raising=False)
+    monkeypatch.delenv("LUMEN_EXPLORE_SEAT_SECRET_PREVIOUS", raising=False)
+    monkeypatch.delenv("LUMEN_EXPLORE_SEAT_SECRET_ACTIVE_FROM_BUCKET", raising=False)
+    from_env = Settings.from_env()
+    bare = Settings()
+    assert from_env.exploration.seat_secret is None
+    assert from_env.exploration.production is False
+    # Every OTHER field is untouched -- only `exploration` is sourced from the
+    # environment today (see the method's own docstring for why).
+    assert from_env.weights == bare.weights
+    assert from_env.diversity == bare.diversity
+    assert from_env.hafsql == bare.hafsql
+    assert from_env.history == bare.history
+
+
+def test_settings_from_env_does_not_disturb_default_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`DEFAULT_SETTINGS` is evaluated once at import time and is the stable,
+    offline baseline ~700 tests and every measurement-harness panel build on
+    (see `Settings.from_env`'s own docstring for why it is deliberately NOT
+    routed through this method). Setting the env var must not retroactively
+    change the already-constructed `DEFAULT_SETTINGS` singleton."""
+    monkeypatch.setenv("LUMEN_EXPLORE_SEAT_SECRET", "99" * 32)
+    assert DEFAULT_SETTINGS.exploration.seat_secret is None

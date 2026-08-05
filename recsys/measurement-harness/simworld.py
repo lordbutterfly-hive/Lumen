@@ -26,7 +26,10 @@ import sys
 _HARNESS = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(_HARNESS))
 sys.path.insert(0, str(_HARNESS.parent))
+import dataclasses
+import json
 import math
+import os
 import random
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -46,7 +49,15 @@ from recsys.contracts import (
 )
 from recsys.core.normalize import build_norm_context
 from recsys.core.scoring import AuthorEngagement, post_base_engagement
-from recsys.core.vote_signal import AttributedPost, VoterTrust, independent_vote_signal
+from recsys.core.vote_signal import (
+    _ORGANIC_REBLOG_WEIGHT,
+    _ORGANIC_REPLY_WEIGHT,
+    _ORGANIC_VOTER_MIN_RSHARES,
+    _ORGANIC_VOTER_WEIGHT,
+    AttributedPost,
+    VoterTrust,
+    independent_vote_signal,
+)
 from recsys.pipeline import _organic_signal
 
 EPOCH = datetime(2026, 1, 1, tzinfo=UTC)
@@ -100,10 +111,57 @@ class World:
         return self.interest_match(viewer_name, author.topic) * author.quality
 
 
+def _apply_tag_noise(
+    true_tags: tuple[str, ...], topic: str, tag_noise: float, tag_rng: random.Random
+) -> tuple[str, ...]:
+    """B-17 (2026-08-04): simulate an attacker/free-text-controlled first tag.
+
+    WHY THIS EXISTS. Measured at ``tag_noise=0.0`` (the only value that ever
+    ran before this unit): **100% of posts** have ``tags[0] == true topic``
+    (760/713/751/724 posts across 4 seeds) and every post carries exactly
+    ``TAGS[topic] = (topic, f"{topic}-life")`` — two tags, both perfectly
+    topic-correlated. After B-00, ``_topic_key`` (``rerank.py``) is
+    ``post.tags[0] if post.tags else ""`` with no community fallback, so the
+    topic-attenuated unchosen-lane penalty, ``_topic_affinities``,
+    ``_attenuate``, the exploration lane's ``_interest_match``, and any
+    declared-interest scoring term ALL key off a tag oracle that cannot exist
+    on real Hive — there the first tag is attacker-chosen free text.
+
+    DESIGN. Two independent coin flips per post, each at probability
+    ``tag_noise``:
+      1. tags[0] is REPLACED by a popular tag from a DIFFERENT topic —
+         tag-stuffing toward an audience the post has nothing to do with.
+      2. the true-topic tag is DROPPED from the tag set entirely — an author
+         who never uses the canonical tag (loose/clickbait tagging), rather
+         than one actively spraying a foreign tag.
+    ``tag_noise=0.0`` never calls ``tag_rng`` (short-circuit) and returns
+    ``true_tags`` unchanged, so every existing panel/pin is byte-identical
+    unless noise is explicitly requested (§0 of BUILDMAP-B, "must not regress").
+
+    ``tag_rng`` is a caller-supplied, INDEPENDENT random stream (never the
+    world's own ``rng``/``nrng``) so that turning noise on or off, or sweeping
+    its level, never shifts which random numbers the rest of `build_world`
+    consumes — the population, posts, votes, comments and follow graph stay
+    byte-identical across ``tag_noise`` values; only tag assignment differs.
+    Without this, comparing tag_noise=0.0 against 0.3 would be comparing two
+    different random WORLDS, not the same world with noisier tags.
+    """
+    out = list(true_tags)
+    if tag_noise > 0 and tag_rng.random() < tag_noise:
+        off_topic = tag_rng.choice([t for t in TOPICS if t != topic])
+        out = [off_topic] + [t for t in out if t != off_topic]
+    if tag_noise > 0 and tag_rng.random() < tag_noise:
+        out = [t for t in out if t != topic] or [f"{topic}-life"]
+    return tuple(out)
+
+
 def build_world(seed: int = 7, authors_per_topic: int = 20, viewers_per_topic: int = 10,
-                whales: int = 3) -> World:
+                whales: int = 3, tag_noise: float = 0.0) -> World:
     rng = random.Random(seed)
     nrng = np.random.default_rng(seed)
+    # Independent stream — see `_apply_tag_noise` docstring for why tag noise
+    # must never consume from `rng`/`nrng`.
+    tag_rng = random.Random(f"tag_noise:{seed}")
     accounts: dict[str, Account] = {}
 
     # --- authors ---
@@ -150,7 +208,8 @@ def build_world(seed: int = 7, authors_per_topic: int = 20, viewers_per_topic: i
                 author=a.name, permlink=key_perm, category=a.topic,
                 community=COMMUNITY[a.topic] if in_comm else None,
                 created=created, children=0, reblog_count=0,
-                author_reputation=a.reputation, tags=TAGS[a.topic],
+                author_reputation=a.reputation,
+                tags=_apply_tag_noise(TAGS[a.topic], a.topic, tag_noise, tag_rng),
                 votes=(),
             ))
 
@@ -245,7 +304,10 @@ def build_world(seed: int = 7, authors_per_topic: int = 20, viewers_per_topic: i
                 bump(v.voter, post.author, "upvotes", 1, v.timestamp)
         for commenter, n in per_post_replies[key].items():
             bump(commenter, post.author, "replies", n, post.created + timedelta(hours=2))
-        for rb in per_post_reblogs[key]:
+        # sorted(): `per_post_reblogs[key]` is a SET, and iterating it raw made
+        # the ORDER of `pair` insertions hash-dependent — see the note at the
+        # follow-back loop below for why that is not cosmetic.
+        for rb in sorted(per_post_reblogs[key]):
             bump(rb, post.author, "reblogs", 1, post.created + timedelta(hours=3))
 
     # reply-backs: engaged author replies back to heavy commenters
@@ -287,8 +349,27 @@ def build_world(seed: int = 7, authors_per_topic: int = 20, viewers_per_topic: i
             other = [a for a in author_list if a.topic != v.topic]
             follows[v.name].add(rng.choice(other).name)
     # some follow-backs so viewers aren't all ratio-9 sinks
+    # ★ sorted(), NOT list() — DETERMINISM, not style (fixed 2026-08-04).
+    #
+    # `fset` is a SET of strings, so raw iteration order follows Python's
+    # hash randomisation and differs between processes on identical input. That
+    # would be harmless if the loop only read, but it draws `rng.random()` per
+    # item — so the seeded stream is CONSUMED IN A DIFFERENT ORDER and a
+    # different set of follow-backs is created. The generated world itself
+    # therefore changed run to run, despite `build_world(seed=...)`.
+    #
+    # Measured before the fix, q3's newcomer graph-cred: 0.48219 / 0.48836 /
+    # 0.49452 at PYTHONHASHSEED 1 / 0 and 42 / 2 — stable within a seed, moving
+    # between them. The mechanism is `percentile_rank`, a STEP function: a
+    # difference too small to see becomes a full band jump when it straddles a
+    # sample point. Aggregate panel metrics absorbed it, which is why every
+    # self-check still passed while a single-account readout wandered.
+    #
+    # PRODUCTION WAS NEVER EXPOSED — `io/hafsql.py` builds its edge list from
+    # `keys = sorted(...)`. This was an instrument defect only, and instrument
+    # defects here have twice been mistaken for algorithm movement.
     for follower, fset in list(follows.items()):
-        for followee in list(fset):
+        for followee in sorted(fset):
             if rng.random() < 0.15:
                 follows[followee].add(follower)
 
@@ -296,6 +377,118 @@ def build_world(seed: int = 7, authors_per_topic: int = 20, viewers_per_topic: i
                  post_engagers=post_engagers, edges=edges,
                  follows={k: frozenset(v) for k, v in follows.items()},
                  rng=rng, nrng=nrng)
+
+
+# =============================================================================
+# B-07 — generic config-mutant support (measurement-harness/mutate_panels.py)
+# =============================================================================
+#
+# "A panel that passes on its own mutant is not a gate" (BUILDMAP-B-QUALITY,
+# B-07). Measured on q11 (`scratchpad/eI_q11_mutants.py`): deleting the
+# unchosen-source penalty, gutting it toward a no-op floor, deleting the
+# per-page cap, or loosening the cap to 10/page ALL passed q11's self-check —
+# and deleting the penalty made the headline number BETTER than shipped. This
+# module gives every panel a cheap way to be tested against a declared list of
+# CONFIG mutants (no code mutation, so it is buildable deterministically):
+# `mutate_panels.py` sets `LUMEN_SETTINGS_MUTANT` to a JSON `{"dotted.path":
+# value}` object and re-execs the panel as a subprocess; a panel that routes
+# its top-level ``Settings()`` construction through `harness_settings()`
+# picks the mutation up automatically. Absent the env var, `harness_settings()`
+# is byte-identical to calling `Settings()` (or replacing fields on a caller-
+# supplied base) directly — adopting it changes no panel's behaviour.
+
+_MUTANT_ENV = "LUMEN_SETTINGS_MUTANT"
+
+
+class MutantFieldAbsent(Exception):
+    """A mutant path names a field that does not exist on the current
+    `Settings` tree. Several fields named in B-07's own mutant table
+    (`unchosen_max_share`, `emerging_per_page`, `weights.interest_match`) are
+    created by units B-02/B-03/B-04, which have not landed — `mutate_panels.py`
+    catches this and marks the row N/A rather than crashing."""
+
+
+def settings_path_exists(base: object, path: str) -> bool:
+    """True iff every dotted segment of ``path`` names a real dataclass field,
+    starting from ``base`` (typically a `Settings()` instance). Used by
+    `mutate_panels.py` to detect not-yet-built config fields UP FRONT, before
+    ever spawning a subprocess for that row."""
+    obj = base
+    for part in path.split("."):
+        if not dataclasses.is_dataclass(obj):
+            return False
+        if part not in {f.name for f in dataclasses.fields(obj)}:
+            return False
+        obj = getattr(obj, part)
+    return True
+
+
+def apply_settings_mutation(base: object, mutation: Mapping[str, object]) -> object:
+    """``base`` (a `Settings` instance) with every ``{"dotted.path": value}``
+    pair in ``mutation`` applied — CONFIG mutation only, never code.
+
+    ★ ALL SIBLING CHANGES AT ONE DATACLASS LEVEL ARE APPLIED IN A SINGLE
+    ``dataclasses.replace()`` CALL, grouped by their shared parent. This is
+    not a style choice — several config dataclasses enforce CROSS-FIELD
+    invariants in ``__post_init__`` (e.g. ``ScoreWeights``:
+    ``organic_quality + organic_cf == 1.0``), and ``dataclasses.replace()``
+    re-runs ``__post_init__`` on every call. An early version of this
+    function applied each dotted path with its OWN independent `replace()`
+    call: mutating `{"weights.organic_cf": 0.0, "weights.organic_quality":
+    1.0}` set `organic_cf` first, and THAT INTERMEDIATE OBJECT (organic_cf=0,
+    organic_quality still the 0.9 default) failed validation before the
+    paired change ever landed — a real bug caught by actually running
+    `mutate_panels.py` against a paired mutant, not by inspection. Grouping
+    by parent and recursing means every sibling change at a level reaches
+    `replace()` together, so intermediate invalid states never exist.
+
+    Raises `MutantFieldAbsent` if any path segment does not exist; callers
+    (`mutate_panels.py`) use that to mark a row N/A instead of crashing."""
+    if not dataclasses.is_dataclass(base):
+        raise MutantFieldAbsent(
+            f"{type(base).__name__} is not a dataclass — cannot apply {mutation!r}"
+        )
+    field_names = {f.name for f in dataclasses.fields(base)}
+
+    leaves: dict[str, object] = {}
+    groups: dict[str, dict[str, object]] = {}
+    for path, value in mutation.items():
+        head, sep, rest = path.partition(".")
+        if sep:
+            groups.setdefault(head, {})[rest] = value
+        else:
+            leaves[head] = value
+
+    changes: dict[str, object] = {}
+    for head, value in leaves.items():
+        if head not in field_names:
+            raise MutantFieldAbsent(f"{head!r} is not a field of {type(base).__name__}")
+        changes[head] = value
+    for head, sub_mutation in groups.items():
+        if head not in field_names:
+            raise MutantFieldAbsent(f"{head!r} is not a field of {type(base).__name__}")
+        changes[head] = apply_settings_mutation(getattr(base, head), sub_mutation)
+
+    return dataclasses.replace(base, **changes)
+
+
+def harness_settings(base: object | None = None):
+    """``base`` (default: shipped ``Settings()``) with `LUMEN_SETTINGS_MUTANT`
+    applied if the env var is set (B-07's mutant harness); otherwise returns
+    ``base`` UNCHANGED. Every panel wired for mutation testing builds its
+    top-level "shipped" `Settings` object through this function — panel-
+    internal ablation configs (e.g. "penalty off", "no diversity") that are
+    constructed FRESH rather than via `dataclasses.replace(base, ...)` do NOT
+    inherit the mutation on fields they don't explicitly set, by design: they
+    are deliberately isolated scenarios, not the shipped path under test."""
+    from recsys.config import Settings
+
+    s = base if base is not None else Settings()
+    raw = os.environ.get(_MUTANT_ENV)
+    if not raw:
+        return s
+    mutation = json.loads(raw)
+    return apply_settings_mutation(s, mutation)
 
 
 class SimGateway:
@@ -333,17 +526,17 @@ class SimGateway:
         out.sort(key=lambda p: p.created, reverse=True)
         return [Candidate(post=p, source=CandidateSource.OON_ENGAGED) for p in out[:limit]]
 
-    def community_posts(self, communities: frozenset[str], since: datetime, limit: int) -> list[Post]:
-        return self._fresh([p for p in self.w.posts if p.community in communities], since, limit)
-
     def tag_posts(self, tags: frozenset[str], since: datetime, limit: int) -> list[Post]:
         return self._fresh([p for p in self.w.posts if set(p.tags) & tags], since, limit)
 
     def engagement_edges(self, since: datetime) -> list[EngagementEdge]:
         return list(self.w.edges)
 
-    def stake_lineage(self, author: str) -> frozenset[str]:
-        return self._lineage.get(author, frozenset())
+    # `stake_lineage` removed 2026-08-05 (B2). NOTE FOR THE RECORD: no panel
+    # ever constructed this gateway WITH a lineage map, so this method returned
+    # an empty set on every harness run ever made — the §8.4 lineage exclusion
+    # and the C2c per-farm cap were never exercised by the measurement harness
+    # at all. That is why removing the relation moves no panel number.
 
     def second_degree_engagers(self, post_keys: frozenset[str], follows: frozenset[str]
                                ) -> dict[str, frozenset[str]]:
@@ -358,9 +551,34 @@ class SimGateway:
         return {a: self.w.follows[a] for a in accounts if a in self.w.follows}
 
     def popular_posts(self, since: datetime, limit: int) -> list[Post]:
+        # ★ C9 (2026-08-04). This used to sort by raw
+        # `len(distinct voters) + p.children + p.reblog_count` — self-farmable
+        # counters (children/reblog_count are display totals, not
+        # exclusion-filtered), so a self-liking ring could pad its own rank
+        # here for free. Production `_SQL_POPULAR_POSTS` (io/hafsql.py:298-320)
+        # orders by 0.5*distinct non-self voters + 0.3*distinct non-self
+        # commenters + 0.5*distinct non-self rebloggers, voters gated by the
+        # same chain-dust floor the organic scorer uses
+        # (`_ORGANIC_VOTER_MIN_RSHARES`). The sim was EASIER TO FARM than
+        # production, so every harness measurement of the fallback lane's
+        # Sybil resistance was measuring the wrong object. Mirrors production
+        # exactly, using the same weight/threshold constants so the two
+        # cannot drift apart silently. World posts are AttributedPost (built
+        # in build_world), so `.commenters`/`.rebloggers` carry real distinct
+        # identities, not just counts.
         posts = [p for p in self.w.posts if p.created >= since]
-        posts.sort(key=lambda p: -(len({v.voter for v in p.votes if v.rshares > 0})
-                                   + p.children + p.reblog_count))
+
+        def score(p: Post) -> float:
+            voters = {v.voter for v in p.votes
+                      if v.rshares > _ORGANIC_VOTER_MIN_RSHARES and v.voter != p.author}
+            commenters = {c for c in getattr(p, "commenters", ()) if c != p.author}
+            rebloggers = {r for r in getattr(p, "rebloggers", ()) if r != p.author}
+            return (_ORGANIC_VOTER_WEIGHT * len(voters)
+                    + _ORGANIC_REPLY_WEIGHT * len(commenters)
+                    + _ORGANIC_REBLOG_WEIGHT * len(rebloggers))
+
+        # tie-break DESC by created, matching `ORDER BY (...) DESC, c.created DESC`
+        posts.sort(key=lambda p: (-score(p), -p.created.timestamp()))
         return posts[:limit]
 
     def suppressed_keys(self, post_keys: frozenset[str]) -> frozenset[str]:

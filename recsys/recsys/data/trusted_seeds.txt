@@ -1,0 +1,100 @@
+# Lumen trusted seeds — the root of the trust chain.
+#
+# WHAT THESE DO. Two things, both in `build_trust_snapshot`:
+#   1. Seeded PageRank teleport — `GraphCredConfig.seed_teleport_share` of the
+#      teleport mass starts here instead of spreading uniformly, so a closed
+#      sock clique cannot mint rank out of nothing.
+#   2. Vouch anchoring — vouch STARTS here and propagates only along
+#      outside-engagement edges from an already-vouched source, bounded by
+#      `vouch_max_rounds` (3) and `vouch_max_fanout` (50). An account the
+#      propagation never reaches is UNKNOWN-tier: its supporters are credited
+#      `unknown_free` (1.0) in total, not one each.
+#
+# So this list decides WHOSE ENGAGEMENT COUNTS. Everything downstream — the
+# vote signal, the organic term, the author prior, CF — inherits from it.
+#
+# Blank lines and `#` comments ignored. One account per line, no `@`.
+# `build_trust_snapshot(production=True)` REFUSES to build without a usable
+# seed that lands in graph_creds — fail shut, never fail open.
+#
+# 57 accounts (6 ecosystem + 15 GHOST individuals + 21 whales + 15 community
+# leaders). Curated 2026-08-04 by the operator. Composition and measured cost are
+# recorded in O:/LUMEN-DOCS/algo-tests/TRUSTED-SEEDS-2026-08-04.md — read it
+# before changing this file, especially the fan-out note.
+
+# ── Ecosystem / project accounts (from GHOST ORACLE_ACCOUNTS) ────────────────
+# Operator decision: kept deliberately, despite organizational rather than
+# personal engagement. `hbdstabilizer` dropped (pure bot); `threespeak` was
+# already banned in the GHOST list.
+hiveio
+splinterlands
+leofinance
+peakd
+ecency
+magi.network
+
+# ── Individuals from the GHOST oracle list ──────────────────────────────────
+lordbutterfly
+dalz
+blocktrades
+crimsonclad
+arcange
+khaleelkazi
+acidyo
+smooth
+gtg
+roelandp
+edicted
+taskmaster4450
+theycallmedan
+guiltyparties
+good-karma
+
+# ── Accounts over 1,000,000 own HP (operator rule) ───────────────────────────
+# 25 qualify chain-wide; the 6 already listed above are not repeated.
+# NOTE: 9 of these cast ZERO votes in the last 30 days (freedom, darthknight,
+# mika, jamesc, roadscape, smooth.witness) — a seed that never engages
+# propagates nothing, so they are inert rather than harmful. Kept for
+# completeness of the stated rule.
+freedom
+alpha
+darthknight
+honey-swap
+blocktrades.com
+mika
+ranchorelaxo
+trafalgar
+adm
+altleft
+jamesc
+themarkymark
+steempty
+solominer
+roadscape
+azircon
+steemmonsters
+yabapmatt
+pharesim
+stoodkev
+smooth.witness
+
+# ── Active community leaders ────────────────────────────────────────────────
+# Selected on CONVERSATION, not payout: >=30 distinct people replied to in the
+# last 7 days, reputation >= 65. Engagement is what propagates vouch, so
+# someone who actually talks to people is worth more here than someone who
+# only posts.
+melinda010100
+wiseagent
+jlinaresp
+seckorama
+noemilunastorta
+bhattg
+steevc
+erikah
+davidpena21
+avdesing
+oadissin
+roswelborges
+worldmappin
+qurator
+hivewatchers

@@ -200,6 +200,40 @@ def post_base_engagement(
     )
 
 
+def declared_interest_raw(post: Post, interest_tags: frozenset[str]) -> float:
+    """★ B-02 (2026-08-04). Share of the post's own tags the viewer explicitly
+    declared as an interest at signup — the raw the declared-interest term
+    (:data:`recsys.config.ScoreWeights.interest_match`) is built from.
+
+    ``0.0`` when the viewer declared nothing, or the post carries no tags —
+    never ``None``, never a made-up constant: an absence of signal is an
+    honest zero here, and the caller (:func:`score_candidate`, via the
+    percentile step) treats it as such rather than inventing one.
+
+    ★ VIEWER-OWN, not cross-viewer: only the viewer's own ``interest_tags``
+    choice moves this, so unlike CF no stranger can move it by engaging
+    anything.
+
+    ★★ THE CEILING, STATED HONESTLY. ``post.tags`` is attacker-controlled free
+    text — any author may tag a post with every popular interest. The
+    ``len(post.tags)`` denominator is the only bound: spreading N genuinely
+    matching tags across M total tags caps the achievable share at N/M, so
+    padding with MORE tags than truly apply can only shrink the share, never
+    lift it above 1.0 — but a post with FEW tags, all of them popular, still
+    farms this cheaply. This is exactly why the gate-EXEMPT exploration lane
+    (``core/exploration.py::_interest_match``, BUILD-ADJUDICATION R3)
+    restricts itself to the post's PRIMARY tag only: that lane bypasses the
+    vouch gate and the author floor, so it needs the strict form. This
+    function backs a term that does NOT bypass those gates — it only
+    re-ranks candidates that already cleared ``filter_eligible`` — so the
+    full-intersection form here matches what R3 already permits for the
+    equivalent gated case (``second_degree._ungated_lane_for``).
+    """
+    if not interest_tags or not post.tags:
+        return 0.0
+    return len(set(post.tags) & interest_tags) / len(post.tags)
+
+
 def recency_bonus(post: Post, now: datetime, half_life_hours: float) -> float:
     """Additive freshness bonus in ``(0, 1]`` — never a multiplicative decay
     (§6), so age discounts a post, it does not erase it."""
@@ -369,6 +403,7 @@ def score_candidate(
     norm: NormContext,
     weights: ScoreWeights,
     cf_percentile: float | None = None,
+    interest_percentile: float | None = None,
     viewer_percentile: float | None = None,
 ) -> ScoredCandidate:
     """Percentile-normalize each raw signal and blend per the ``ScoreWeights``
@@ -382,6 +417,61 @@ def score_candidate(
     viewer, or the ``cf_weight`` ablation — and the quality percentile then
     carries the full organic weight instead of being silently blended with a
     made-up constant.
+
+    ★ B-02 (2026-08-04): ``interest_percentile`` is this candidate's
+    declared-interest percentile (:func:`declared_interest_raw`, ranked within
+    the request's own pool — see :func:`recsys.pipeline._interest_lookup`).
+    ``None`` (no declared interests, or the channel off) leaves the score
+    exactly as it would be without the channel, same as every other viewer-own
+    channel here.
+
+    ★★ WHERE THE DECLARED-INTEREST TERM BLENDS — MOVED FROM THE ORGANIC SLICE
+    TO THE COMPOSITE (2026-08-05). It used to blend INSIDE ``organic``, between
+    the CF blend and the viewer-own-affinity blend::
+
+        organic = (1 - w)*organic + w*interest_pct        # OLD
+        final   = 0.1*vote + 0.1*rep + 0.8*organic
+
+    Its own docstring said that "trades against the quality percentile only —
+    the 10/10/80 outer split is untouched". That is true of the arithmetic and
+    FALSE OF THE EFFECT, and the difference was measured. The declared-interest
+    percentile is very nearly CONSTANT inside a topic (every post the viewer
+    declared an interest in scores the same on it), so within the block that
+    makes up ~89% of a served feed it supplies no ordering at all — while still
+    taking 40% of the organic slice. The composite's DISCRIMINATING weights
+    inside that block therefore became ``0.10 vote / 0.10 rep / 0.48 quality``,
+    i.e. the vote and reputation terms went from 11%/11% of the deciding mass
+    to 17%/17% — a 1.67x amplification nobody chose, paid for entirely by the
+    quality percentile. The author-pooled prior lives ONLY in that quality
+    percentile, so the prior is what paid.
+
+    So the blend now happens at the composite, against the earned score::
+
+        earned = 0.1*vote + 0.1*rep + 0.8*organic        # organic: CF + viewer-own
+        final  = (1 - W)*earned + W*interest_pct
+        W      = weights.organic * weights.interest_match
+
+    All three earned signals are scaled by the same ``1 - W``, so the 10/10/80
+    balance among them is preserved at EVERY ``interest_match`` value.
+
+    ``W = weights.organic * weights.interest_match`` IS THE SLOPE-PRESERVING
+    CHOICE, deliberately: under the old form the term's contribution to
+    ``final`` was ``0.8 * interest_match * interest_pct``, and it still is. The
+    gap this term opens between an on-interest and an off-interest candidate is
+    therefore BYTE-IDENTICAL to the old form — this is a re-basing of what the
+    term takes its weight FROM, not a strengthening or weakening of the term.
+
+    ``interest_match = 0.0``, and ``interest_percentile = None`` at any weight,
+    both still reproduce the pre-B02 score exactly (``W = 0`` /
+    :func:`~recsys.core.viewer_affinity.blend`'s identity), which is what the
+    byte-identity invariant in ``tests/test_scoring.py`` pins.
+
+    The viewer-own-affinity blend consequently now runs BEFORE the declared
+    -interest blend rather than after. That is a real ordering change and it is
+    a no-op at the shipped ``organic_viewer = 0.0``; the two channels answer
+    different questions (one is per-author/topic engagement, one is a per-topic
+    signup declaration) and the composite-level blend is the right home for the
+    one that is constant across a topic.
 
     H06 (PRUNED audit 2026-07-22): the CF weight is source-discounted —
     ``weights.organic_cf`` applies at full strength only to ``IN_NETWORK``
@@ -429,11 +519,35 @@ def score_candidate(
     # `organic` unchanged, so a viewer with nothing to personalise on is scored
     # exactly as before rather than being blended toward zero.
     organic = viewer_blend(organic, viewer_percentile, weights.organic_viewer)
-    final = weights.vote * vote_norm + weights.reputation * rep_norm + weights.organic * organic
+    # The EARNED score: what this post and this author actually did, at the §0
+    # outer split. Every term in it is something someone else can observe about
+    # the candidate — nothing here is a statement the viewer made about
+    # themselves.
+    earned = weights.vote * vote_norm + weights.reputation * rep_norm + weights.organic * organic
+    # ★ DECLARED INTEREST (B-02 2026-08-04; re-based to the composite
+    # 2026-08-05 — see this function's docstring for the measurement). It
+    # blends against the EARNED score, so vote, reputation and quality are all
+    # scaled by the same `1 - interest_weight` and their 10/10/80 balance
+    # survives every `interest_match` value. `interest_weight` is
+    # `organic * interest_match`, which keeps this term's contribution to
+    # `final` byte-identical to the pre-2026-08-05 form.
+    interest_weight = weights.organic * weights.interest_match
+    final = viewer_blend(earned, interest_percentile, interest_weight)
+    interest_bonus = (
+        0.0
+        if interest_percentile is None or interest_weight <= 0.0
+        else interest_weight * interest_percentile
+    )
     return ScoredCandidate(
         post=candidate.post,
         source=candidate.source,
-        score=ScoreBreakdown(vote_norm=vote_norm, rep_norm=rep_norm, organic=organic, final=final),
+        score=ScoreBreakdown(
+            vote_norm=vote_norm,
+            rep_norm=rep_norm,
+            organic=organic,
+            final=final,
+            interest_bonus=interest_bonus,
+        ),
     )
 
 
@@ -444,6 +558,7 @@ def score_candidates(
     cf_percentiles: Mapping[str, float] | None = None,
     *,
     cf_suppressed_sources: frozenset[CandidateSource] = frozenset(),
+    interest_percentiles: Callable[[Candidate], float | None] | None = None,
     viewer_percentiles: Callable[[Candidate], float | None] | None = None,
 ) -> list[ScoredCandidate]:
     """Score each ``(candidate, vote_signal_raw, organic_raw)`` triple
@@ -455,13 +570,19 @@ def score_candidates(
     cross-item state. ``None`` (the default) drops the CF slice for the whole
     batch.
 
+    ``interest_percentiles`` (B-02, 2026-08-04) is a per-CANDIDATE lookup, like
+    ``viewer_percentiles`` below (declared interest is scored per POST — a
+    tag-intersection share — not per author). ``None`` means "this viewer
+    declared no interests, or the channel is off" and leaves every score
+    untouched.
+
     ``cf_suppressed_sources`` (H07/C1, 2026-07-22) forces
     ``cf_percentile=None`` for any candidate whose ``source`` is in the set,
     regardless of what ``cf_percentiles`` holds for its author — the
     CF-suppression half of the followless-established interest-lane gap (see
     :func:`recsys.core.coldstart.is_established_followless`). The gate-exempt
-    interest lane (``INTEREST_COMMUNITY``/``INTEREST_TAG``) applies NO
-    graph-cred floor at all, so for a viewer who is routed there for the
+    interest lane (``INTEREST_TAG``) applies NO graph-cred floor at all, so
+    for a viewer who is routed there for the
     FOLLOWLESS reason but is not actually a true cold start (they have a
     trained ALS row), a poisoned co-engagement edge could otherwise lift a
     spam author's interest-lane candidate through the CF percentile with
@@ -482,6 +603,9 @@ def score_candidates(
                 if cf_percentiles is None or candidate.source in cf_suppressed_sources
                 else cf_percentiles.get(candidate.post.author, 0.5)
             ),
+            interest_percentile=(
+                None if interest_percentiles is None else interest_percentiles(candidate)
+            ),
             # Viewer-own affinity is a per-CANDIDATE lookup (author OR topic), not
             # an author-keyed mapping like CF, so it arrives as a callable. None
             # means "this viewer has no opinion" and leaves the score untouched.
@@ -496,6 +620,7 @@ def score_candidates(
 __all__ = [
     "AuthorEngagement",
     "AuthorPriorGateway",
+    "declared_interest_raw",
     "organic_quality_raw",
     "pooled_author_base",
     "post_base_engagement",

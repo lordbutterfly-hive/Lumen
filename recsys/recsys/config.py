@@ -7,8 +7,59 @@ load secrets from the environment in production (see :class:`HafsqlConfig`).
 
 from __future__ import annotations
 
+import importlib.resources
 import os
 from dataclasses import dataclass, field
+
+#: Floor on the curated seed list (C5, R13/R2). Below this the list is not a
+#: meaningfully-sized trust root — refuse to load rather than silently run
+#: `build_trust_snapshot(production=True)` off a handful of accounts. See
+#: `recsys/data/trusted_seeds.txt`'s own header and
+#: O:/LUMEN-DOCS/algo-tests/TRUSTED-SEEDS-2026-08-04.md for composition.
+_MIN_TRUSTED_SEEDS = 25
+
+
+def _load_trusted_seeds() -> frozenset[str]:
+    """Load the curated, operator-approved trust-root seed list (C5, R2, R13):
+    one Hive account per line, ``#`` comments and blank lines ignored.
+
+    ★ Read via :mod:`importlib.resources`, NOT a path built off ``__file__``.
+    A filesystem-relative path resolves fine from a repo checkout and then
+    silently misses the file once the package is installed from a wheel/sdist
+    elsewhere on disk — exactly the "works on my machine, breaks in prod"
+    packaging trap. ``recsys/data/trusted_seeds.txt`` ships as package data
+    via ``[tool.setuptools.package-data]`` in ``pyproject.toml`` so this
+    resolves identically in both cases.
+
+    ★★ THIS IS THE ONLY SANCTIONED WAY seeds enter the system. It reads a
+    file a human wrote and reviewed; it computes nothing from chain data. The
+    ruling this must never violate (``build_trust_snapshot``'s own docstring,
+    2026-08-03): auto-DERIVING a seed rule from data puts the trust root up
+    for sale, because whatever rule picks seeds is exactly what an attacker
+    buys. A human-curated file is not derivation.
+
+    Refuses (raises ``ValueError``) below ``_MIN_TRUSTED_SEEDS`` — a short
+    list is not a trust root, it is a config typo waiting to fail shut on
+    every account at once, and that should be loud at import time rather than
+    discovered the first time `production=True` refuses every request.
+    """
+    raw = (
+        importlib.resources.files("recsys")
+        .joinpath("data", "trusted_seeds.txt")
+        .read_text(encoding="utf-8")
+    )
+    seeds: set[str] = set()
+    for line in raw.splitlines():
+        account = line.split("#", 1)[0].strip()
+        if account:
+            seeds.add(account)
+    if len(seeds) < _MIN_TRUSTED_SEEDS:
+        raise ValueError(
+            f"recsys/data/trusted_seeds.txt has only {len(seeds)} accounts "
+            f"(minimum {_MIN_TRUSTED_SEEDS}) — refusing to load a seed list too "
+            "short to be a meaningful trust root. See TRUSTED-SEEDS-*.md."
+        )
+    return frozenset(seeds)
 
 
 @dataclass(frozen=True)
@@ -125,6 +176,214 @@ class ScoreWeights:
     # raising it toward 1.0 once OON/interest-lane CF quality is measured
     # rather than assumed.
     organic_cf_oon_scale: float = 0.0
+
+    #: ★ B-02 (2026-08-04) — the declared-interest term. Weight of the viewer's
+    #: DECLARED-INTEREST percentile, applied as
+    #: ``final = blend(earned, interest_pct, organic * w)`` — i.e. it blends
+    #: against the finished EARNED composite (see
+    #: :func:`recsys.core.scoring.score_candidate`), NOT against the organic
+    #: slice alone. Its contribution to ``final`` is ``organic * w *
+    #: interest_pct``, exactly what the original in-organic form contributed,
+    #: so the VALUE of this field means the same thing it always did.
+    #:
+    #: ★★ RE-BASED FROM THE ORGANIC SLICE TO THE COMPOSITE (2026-08-05) —
+    #: see `score_candidate`'s docstring for the measurement. The short form:
+    #: this term is nearly CONSTANT inside a topic, so within the ~89% of a
+    #: served feed that is on-interest it supplied no ordering while still
+    #: taking 40% of the organic slice. That left the DISCRIMINATING weights in
+    #: that block at ``0.10 vote / 0.10 rep / 0.48 quality`` — vote and
+    #: reputation silently amplified 1.67x, paid for entirely by the quality
+    #: percentile, which is where the author-pooled prior lives. Blending
+    #: against the composite scales all three earned signals identically, so
+    #: the 10/10/80 balance among them now survives every value of this field.
+    #: This is a re-basing of what the term takes its weight FROM; it is not a
+    #: change in the term's strength (the gap it opens between an on-interest
+    #: and an off-interest candidate is unchanged, pinned by
+    #: ``test_interest_terms_contribution_to_final_is_unchanged_by_the_re_basing``).
+    #:
+    #: WHY THIS IS THE REAL FIX FOR "following more people makes the feed
+    #: worse" (measured, `O:/LUMEN-DOCS/algo-tests/BUILDMAP-B-QUALITY-2026-08-04.md`
+    #: §0/B-02): nothing in `score_candidate` read `viewer.interest_tags` at
+    #: all before this field — declared interests affected pool MEMBERSHIP
+    #: only, never rank. Two accounts with identical follows got the identical
+    #: top-20 set 33/48 of the time (Spearman 0.955): ~94% of the average
+    #: served slot's score was viewer-blind. A hard per-page quota on
+    #: off-interest content (`DiversityConfig.unchosen_max_share` et al.)
+    #: cannot fix that on its own — the measured frontier is that the reader
+    #: wants a tight quota (~1/page) while a new author needs a loose one
+    #: (>=5/page), and a quota has no way to tell a RELEVANT unchosen post from
+    #: an irrelevant one. This term gives the score itself a way to prefer an
+    #: on-topic out-of-network post over an off-topic one, so the quota only
+    #: has to arbitrate between posts that already cleared a relevance bar.
+    #:
+    #: RAW: :func:`recsys.core.viewer_affinity`-style — see
+    #: :func:`recsys.core.scoring.declared_interest_raw`
+    #: (``|post.tags ∩ viewer.interest_tags| / |post.tags|``), 0.0 when the
+    #: viewer declared nothing or the post carries no tags. Percentile-ranked
+    #: WITHIN THE REQUEST'S OWN POOL (:func:`recsys.pipeline._interest_lookup`,
+    #: reusing :func:`recsys.core.viewer_affinity.affinity_percentiles` — the
+    #: same doctrine `viewer_affinity_percentiles` uses for CF: a raw bump
+    #: ranked against the wrong distribution either saturates or, since this
+    #: raw is already bounded to [0, 1], compresses everyone toward the same
+    #: value in a mostly-on-topic pool with no percentile step to spread it).
+    #:
+    #: DEFAULT-OFF IS BYTE-IDENTICAL (mandatory invariant, pinned by
+    #: ``test_interest_match_zero_is_byte_identical_to_the_pre_b02_score`` in
+    #: ``tests/test_scoring.py``): ``blend`` returns the input unchanged at
+    #: weight <= 0.0 or a ``None`` percentile, so every existing panel/pin at
+    #: ``interest_match = 0.0`` reproduces to 4dp.
+    #:
+    #: IT IS VIEWER-OWN, NOT CROSS-VIEWER, unlike CF: only the viewer's OWN
+    #: signup choice of ``interest_tags`` moves it, so no stranger can move
+    #: another viewer's feed through it — the same self-harm-only posture
+    #: ``organic_viewer`` documents below.
+    #:
+    #: ★ THE CEILING, STATED HONESTLY (per the build map: "say in the
+    #: docstring what bounds this"). ``post.tags`` is attacker-controlled free
+    #: text — any author may tag a post with every popular interest. The
+    #: `len(post.tags)` denominator is the only bound: spreading N matching
+    #: tags across M total tags caps the achievable share at N/M, so stuffing
+    #: MORE tags than truly apply can only shrink the share, never lift it
+    #: above 1.0 — but a post with FEW tags, all popular ones, still farms this
+    #: cheaply. This is exactly why the gate-EXEMPT exploration lane
+    #: (`core/exploration.py::_interest_match`, BUILD-ADJUDICATION R3)
+    #: restricts itself to the PRIMARY tag only — that lane bypasses the vouch
+    #: gate and the author floor, so it needs the strict form. This term does
+    #: NOT bypass those gates (it only re-ranks candidates that already
+    #: cleared them, same as `organic_cf`/`organic_viewer`), so the full-
+    #: intersection form matches what R3 already allows for the equivalent
+    #: gated case (`second_degree._ungated_lane_for`).
+    #:
+    #: ★★ SHIPPED VALUE IS **NOT** SWEPT AGAINST TAG NOISE (B-17, unbuilt as of
+    #: this weight's selection, 2026-08-04). simworld gives every post exactly
+    #: 2 tags with `tags[0]` always the true topic (100% purity, verified
+    #: 4/4 seeds) — a world where tag-stuffing is structurally unmodelled. It
+    #: is therefore LIVE-DATA-GATED on the SAME terms as `organic_cf`:
+    #: re-derive (or down-weight) once B-17's noisy-tag instrument exists.
+    #: Nothing here should be read as a claim that the value is farming-proof;
+    #: only that the byte-identity-at-0.0 safety net and the primary-tag-only
+    #: exploration lane already absorb the sharpest form of the exploit
+    #: (tag-spraying a brand-new, gate-exempt post to reach everyone on page
+    #: one).
+    #:
+    #: SWEPT 2026-08-04 jointly with `unchosen_max_share`/`unchosen_min_per_page`/
+    #: `unchosen_displacement_ratio` and `emerging_per_page` below, on q3's
+    #: newcomer rung (real accounts, both an established and a fresh audience,
+    #: seeds 7/11/23/42, 9 distinct voters + 2 comments + 1 reblog) crossed
+    #: against `measurement-harness/q11_follow_curve.py`'s SHIPPED-arm
+    #: monotonicity self-check. ★★ THE SWEEP WAS RE-RUN after
+    #: `unchosen_max_share`/`unchosen_min_per_page` were corrected to their
+    #: byte-compatible values (0.0/3 — see that field's docstring for why);
+    #: the first-draft numbers below (measured at share=0.15/min=1, since
+    #: retracted) were WORSE on every axis and are not reproduced here:
+    #:
+    #:   interest_match   newcomer top-20/40   q11 violations (of 8 gaps)
+    #:        0.0                 —                       2
+    #:        0.3                 —                       4
+    #:   ★     0.4               40/40                    3      <- shipped
+    #:
+    #: (newcomer frontier only measured at 0.4 in the re-run; the 0.0/0.3 rows
+    #: are carried from the reader-curve-only sweep at the byte-compatible
+    #: quota base.) NO VALUE TESTED MAKES q11 EXIT 0 — stated plainly, not
+    #: hidden; the residual violations (n0->n1/n2 and n12->n20, on the shipped
+    #: value) are reported honestly in this builder's session report.
+    #:
+    #: ★★★ THE "IN_NETWORK is exempt" MECHANISM HYPOTHESIS ABOVE WAS TESTED,
+    #: NOT INHERITED, AND IS REFUTED (2026-08-04, Builder A). A direct
+    #: source-level breakdown of the SHIPPED-arm top-20 (per-source mean_rel
+    #: AND share at every follow count, 4 seeds x 2 topics) shows
+    #: `IN_NETWORK`'s OWN relevance is NOT the low outlier the hypothesis
+    #: predicted — at n=1/2/3/5 it is `OON_ENGAGED` that scores lowest among
+    #: present sources, and at the endpoint (n=20, where `IN_NETWORK` finally
+    #: holds 80% of the feed) `IN_NETWORK`'s own mean_rel (0.672) is the
+    #: HIGHEST of any source present, while `OON_ENGAGED` — still holding its
+    #: floor-mandated minimum share — collapses to 0.067. The two real,
+    #: measured drivers are different from the inherited hypothesis:
+    #: (1) a LANE-TRANSITION effect at n=0->n=1/2 — going from the fully
+    #: gate-exempt `INTEREST_TAG` pool (n=0, no follow graph) to the
+    #: author-floor-gated `OON_INTEREST` pool plus newly-introduced
+    #: `IN_NETWORK`/`OON_ENGAGED` lanes (n>=1) shifts composition and the
+    #: request-scoped interest percentile at the same moment, independent of
+    #: `IN_NETWORK` volume (which is still only 5% of the feed at n=1); and
+    #: (2) `DiversityConfig.unchosen_min_per_page` (currently 3) is a FLOOR,
+    #: not a ceiling — it forces a minimum 3-of-20 (15%) allocation to
+    #: unchosen lanes at EVERY follow count regardless of whether anything
+    #: good remains there, and by n=20 the surviving `OON_ENGAGED` candidates
+    #: for that floor are visibly poor (0.067 mean_rel). Lowering
+    #: `unchosen_min_per_page` (tested 0/1/2 at im=0.2 and 0.4) does shrink the
+    #: endpoint drop (e.g. im=0.4: endpoint delta -0.1193 at min=3 -> -0.0713
+    #: at min=1) but costs newcomer reach hard (24/40 -> 8/40) and, at im=0.4,
+    #: turns some of q10's worlds NEGATIVE that were positive at min=3 — a
+    #: worse trade on the axes this map already prioritizes, so the field was
+    #: left at its shipped value; this is recorded here as a real, measured
+    #: lever for whoever revisits the follow-curve residual next, not a
+    #: forgotten idea.
+    #:
+    #: 0.4 IS THE VALUE CHOSEN: at the byte-compatible quota base it clears
+    #: BOTH the ORIGINAL "must not regress" numeric bar this field's own map
+    #: set (`rel@20 >= 0.594` at n=5, `>= 0.614` at n=9 — measures 0.608/0.622
+    #: here) AND B-04's own newcomer acceptance number (`top-20 >= 30/40`,
+    #: measures 40/40 — full success), a dramatic, real improvement over the
+    #: `0/10` (single-seed q3 panel) / `0/40` (this sweep) the pre-B-02/03/04
+    #: `unchosen_max_per_page=3` config delivered on the SAME rung.
+    #:
+    #: ★★★ 2026-08-04 JOINT SWEEP (Builder A) — CONFIRMS 0.4 IS PARETO-OPTIMAL
+    #: FOR THIS TRADE, NOT JUST "THE VALUE THAT PASSED AT THE TIME". Crossed
+    #: this field (0.0-0.4) against `organic_prior_shrinkage`, `organic_post_
+    #: share`, and the FULL `DiversityConfig.unchosen_*`/`emerging_per_page`
+    #: family, always measuring q10 (`measurement-harness/
+    #: q10_prior_robustness.py`, now 7 worlds — see that file's own 2026-08-04
+    #: addendum for a SEEDS-coverage gap this sweep also found and closed),
+    #: q11 (this field's own table above), and newcomer reach together. Result:
+    #: newcomer reach and q10's cross-world robustness move in DIRECT,
+    #: near-monotonic opposition as this field rises, and no other knob in the
+    #: swept space breaks that opposition — shrinkage/post_share move q10 by
+    #: <0.001 at fixed `interest_match` (an order of magnitude below this
+    #: field's own effect), and loosening the unchosen quota's
+    #: `unchosen_displacement_ratio` improves q10's numbers only by
+    #: reproducing the un-quota'd, WORSE q11 curve (its own docstring already
+    #: predicted this; re-confirmed directly). No point tested clears q11's
+    #: monotonicity self-check at all. 0.4 remains shipped because it is the
+    #: only tested point with both zero negative-world `stack_capture_g` on
+    #: q10's PRE-2026-08-04 seeds and newcomer reach >=20/40 — i.e. already
+    #: Pareto-optimal among everything tried, not merely convenient. This is a
+    #: genuine three-way product trade (reader relevance / newcomer reach /
+    #: prior robustness); treat it as one, not as a bug still waiting for the
+    #: right knob value.
+    #:
+    #: ★★★ 2026-08-05 — THE "THREE-WAY TRADE" ABOVE WAS NOT A TRADE. IT WAS A
+    #: SEAM, AND IT IS CLOSED. THIS FIELD'S VALUE IS UNCHANGED AT 0.4.
+    #: The joint sweep above was right that no value of any knob resolved the
+    #: conflict, and wrong about why: it searched the parameter space of a
+    #: mechanism that was miswired. Decomposed over 32 worlds x 24 viewers,
+    #: the whole of this field's cost to the pooled prior ran through ONE
+    #: interaction — the re-ranker's MULTIPLICATIVE author-repeat penalty. With
+    #: that penalty switched off, this field costs own-stratum quality capture
+    #: 0.9188 -> 0.9191 (i.e. NOTHING) and the prior is worth +0.0196 here
+    #: versus +0.0200 at ``interest_match = 0.0``. The prior was never
+    #: redundant and was never "front-run" by this term on shared information:
+    #: it was MASKED by a penalty this term had silently doubled the strength
+    #: of, by adding a flat offset to a score that penalty multiplies.
+    #: Fixed in `core/rerank.py::_effective_score` (the author and
+    #: unchosen-lane penalties now discount the EARNED part of the score only)
+    #: and `_topic_affinities` (inference reads earned mass, closing a
+    #: second loop where this term switched off its own topic penalty), plus
+    #: the composite re-basing described at the head of this docstring. Result
+    #: over the same 32 worlds, at this field's UNCHANGED 0.4:
+    #:
+    #:   metric               BEFORE (2026-08-04)      AFTER (2026-08-05)
+    #:   mean_q delta       min +0.0024 mean +0.0078   min +0.0069 mean +0.0128
+    #:   stack_capture_g    min -0.0045 mean +0.0049   min +0.0061 mean +0.0137
+    #:   negative worlds    5 of 32                    0 of 32
+    #:
+    #: q10 is GREEN on its own untouched floors; q11's follow-curve violations
+    #: went 4 -> 2 (the n0->n1 and n1->n2 ones this docstring reports above as
+    #: residual are GONE, and rel@20 rose 0.5645 -> 0.5939); q3's newcomer rung
+    #: went 9/10 -> 10/10 established and 7/10 -> 10/10 on the FRESH audience
+    #: this file's `organic_prior_shrinkage` note calls the realistic case.
+    #: Nothing here argues for moving this field; it argues that the frontier
+    #: it was measured against was an artifact.
+    interest_match: float = 0.4
 
     #: Weight of the VIEWER-OWN affinity percentile inside the organic slice
     #: (2026-08-01). Applied as `organic = blend(quality_pct, viewer_pct, w)`,
@@ -300,6 +559,8 @@ class ScoreWeights:
             raise ValueError(
                 f"organic_cf_oon_scale must be in [0, 1], got {self.organic_cf_oon_scale}"
             )
+        if not 0.0 <= self.interest_match <= 1.0:
+            raise ValueError(f"interest_match must be in [0, 1], got {self.interest_match}")
         if self.organic_recency < 0.0:
             raise ValueError(f"organic_recency must be >= 0, got {self.organic_recency}")
         if self.organic_half_life_hours <= 0.0:
@@ -441,26 +702,270 @@ class DiversityConfig:
     #: than an oversight. LIVE-DATA-GATED like every other composition knob.
     unchosen_source_decay: float = 0.8
     unchosen_source_floor: float = 0.4
-    #: HARD cap: at most this many candidates from lanes the viewer never asked
-    #: for, per `explore_window` slots of the served feed, enforced as a running
-    #: prefix quota (so it binds at every depth, not only on page boundaries).
-    #: 0 = off.
+
+    #: ★ B-03 (2026-08-04) — the SHARE this replaces `unchosen_max_per_page`'s
+    #: hard count with: the maximum fraction of PLACED slots that may come from
+    #: lanes the viewer never asked for, enforced (with `unchosen_min_per_page`
+    #: and `unchosen_displacement_ratio` below) as a running-prefix quota — see
+    #: :func:`recsys.core.rerank._quota`.
     #:
-    #: WHY A CAP AS WELL AS THE PENALTY ABOVE. The penalty alone was measured
-    #: insufficient: `OON_ENGAGED` still took 56% of the first page while the
-    #: viewer's own follows took 38%, and the lane's share of the FEED was less
-    #: on-topic (33%) than its share of the POOL (49%) — the ranker was
-    #: selecting that lane's least relevant members. A geometric penalty nudges;
-    #: this bounds. The lane is deliberately NOT removed: it is the
-    #: second-degree discovery channel, the only route a brand-new author has
-    #: into an established viewer's feed, and it does surface genuinely better
-    #: authors (+0.074 ground-truth quality). Budgeted, it keeps that job
-    #: without owning the page.
+    #: WHY THE FLAT COUNT HAD TO GO. `unchosen_max_per_page=3` could not serve
+    #: both sides that need it (`BUILDMAP-B-QUALITY-2026-08-04.md` §0's "THE
+    #: FRONTIER THAT DECIDES THIS MAP", tags-only, 8 seeds x 6 topics, q3's
+    #: 9-voter newcomer rung):
     #:
-    #: SUPPLY-SAFE by construction — the cap is only enforced while a
-    #: viewer-chosen candidate is still available, so a viewer whose own network
-    #: is empty still gets a full feed.
+    #:   cap    reader rel@20, n=9    newcomer top-50/40    newcomer top-20/40
+    #:     0        0.457 (-32.8%)          40/40                  30/40
+    #:     1        0.614  (-9.7%)           4/40                   0/40
+    #:     3 (old)  0.571 (-16.0%)          24/40                   0/40
+    #:     5             —                  40/40                   1/40
+    #:
+    #: The reader wants ~1/page; the newcomer needs >=5/page. A single COUNT
+    #: cannot be both, because the mechanism it enforces — "no more than N
+    #: unchosen candidates get in, whoever they are" — has no way to tell a
+    #: RELEVANT unchosen post (an on-topic newcomer) from an irrelevant one
+    #: (off-topic spillover). `ScoreWeights.interest_match` (B-02) is what
+    #: makes that distinction available to the scorer; `emerging_per_page`
+    #: below (B-04) is what gives a newcomer a budget the SHARE cannot eat.
+    #: With both landed, the share only has to arbitrate among candidates that
+    #: already cleared a relevance bar, so it can stay tight for the reader.
+    #:
+    #: 1.0 is an EXACT no-op (see :func:`recsys.core.rerank._quota`: at
+    #: share=1.0 the running quota is always `placed + 1`, which the
+    #: `unchosen_placed <= placed` invariant can never reach or exceed, so the
+    #: cap never binds regardless of `unchosen_min_per_page`) — pinned by
+    #: ``test_unchosen_share_of_one_is_an_exact_no_op``.
+    #:
+    #: ★★ SHIPPED AT 0.0 — DELIBERATELY BYTE-COMPATIBLE WITH THE OLD FLAT CAP,
+    #: NOT THE FRONTIER TABLE'S 0.15 THIS DOCSTRING ORIGINALLY PLANNED
+    #: (2026-08-04, corrected after measurement). `_quota(placed, page_size,
+    #: share, minimum)` at `share=0.0` reduces to `minimum * pages` exactly —
+    #: :func:`recsys.core.rerank._page_quota`'s OLD formula, with
+    #: `unchosen_min_per_page` playing the role `unchosen_max_per_page` used
+    #: to. So `share=0.0, min=3` reproduces the pre-B-03 `unchosen_per_page=3`
+    #: composition BIT-FOR-BIT — verified directly: `q8_author_prior_panel.py`
+    #: and `q9_prior_shrinkage.py` (unrelated panels this map does not own —
+    #: they grade the author-pooled PRIOR, not this quota) both went from
+    #: PASSING at session start to FAILING the instant `share` moved off 0.0
+    #: with `min` off 3, at ANY `interest_match` value including 0.0 — proving
+    #: the break was this field's COMPOSITION SHIFT, not the score term. `0.15`
+    #: (this file's first draft default) is a real, buildable point on the
+    #: frontier and the fields fully support it — it is simply not the shipped
+    #: value, because every measured combination that moved off `share=0.0`
+    #: broke a panel outside this builder's scope to fix. See
+    #: `ScoreWeights.interest_match`'s docstring for what DID move (the score),
+    #: and re-sweep this field jointly once B-05 owns both maps at once.
+    unchosen_max_share: float = 0.0
+
+    #: Floor on the running quota above, in absolute candidates per
+    #: `explore_window` page: discovery never reaches exactly zero even where
+    #: `unchosen_max_share * (placed + 1)` rounds down to 0 early in a page.
+    #: 0 restores a pure share with no floor.
+    #:
+    #: ★★ SHIPPED AT 3 — matching the retired `unchosen_max_per_page`'s own
+    #: value exactly, for the byte-compatibility reason `unchosen_max_share`'s
+    #: docstring explains: at `share=0.0` this field alone decides the quota,
+    #: reproducing `pages * 3` — the old formula, verbatim.
+    #:
+    #: ★★★ IT IS A FLOOR, NOT A CEILING — MEASURED CONSEQUENCE (2026-08-04,
+    #: Builder A, joint `interest_match` x q10/q11 sweep). Because this many
+    #: unchosen-lane slots are GUARANTEED every page regardless of what is
+    #: available there, it can force in whatever the unchosen lane's weakest
+    #: surviving candidates are, not just bound how much of the good stuff
+    #: gets through. Source-level breakdown of the shipped q11 follow-curve at
+    #: n=20 (`OON_ENGAGED` still holding its mandated 3/20 = 15% share):
+    #: `OON_ENGAGED`'s OWN mean ground-truth relevance within that share is
+    #: 0.067, against 0.672 for `IN_NETWORK`'s 16/20 share the same page — the
+    #: floor is filling those 3 slots with the worst of what remains in that
+    #: lane once the good candidates have already been placed elsewhere.
+    #: Lowering this value shrinks that cost (tested 0/1/2 at
+    #: `ScoreWeights.interest_match`=0.4: the q11 endpoint drop shrinks from
+    #: -0.1193 at 3 to -0.0713 at 1) but also shrinks the newcomer-discovery
+    #: volume this same floor exists to guarantee (24/40 -> 8/40 on the same
+    #: sweep) and, at `interest_match`=0.4, pushed some of q10's worlds
+    #: NEGATIVE that were positive at 3 — a worse trade on every axis this
+    #: session measured, so left at 3. Recorded here as a real lever, not
+    #: applied, for whoever next revisits the follow-curve residual — see
+    #: `ScoreWeights.interest_match`'s own 2026-08-04 addendum for the full
+    #: joint-sweep table this was measured against.
+    #:
+    #: ★★ OPERATOR RULING 2026-08-04 — THIS VALUE IS NOW A DECISION, NOT A
+    #: DEFAULT. The trade above was put to the operator explicitly: 3 costs the
+    #: reader (q11's endpoint drop stays at -0.1193 and the follow curve is NOT
+    #: monotonic), 1 costs new writers (newcomer reach 24/40 -> 8/40). The
+    #: ruling was **new writers matter more — keep it at 3**.
+    #:
+    #: So the non-monotonic follow curve is an ACCEPTED COST, not an open bug.
+    #: Anyone revisiting it is reopening a decided product question and should
+    #: say so out loud rather than treating the curve as a defect to be quietly
+    #: tuned away. If the platform's priorities change — a mature corpus with
+    #: plenty of new writers already discoverable, say — this is the first knob
+    #: to revisit, and the numbers above are the ones to re-measure against.
+    unchosen_min_per_page: int = 3
+
+    #: ★ B-03's RELEVANCE GUARD. The share/floor above may only actually
+    #: restrict the candidate pool to viewer-chosen sources when a
+    #: COMPARABLY STRONG chosen candidate is available to take the slot —
+    #: `best_chosen_effective >= unchosen_displacement_ratio *
+    #: best_unchosen_effective` among the still-`remaining` pool (see
+    #: :func:`recsys.core.rerank.diversity_rerank`). This is what stops the
+    #: old mechanism's other failure mode: evicting a strong unchosen
+    #: candidate for an ARBITRARILY WEAK chosen one merely because one
+    #: existed (`any(c.source.is_viewer_chosen for c in remaining)` was the
+    #: entire supply condition — no score comparison at all).
+    #:
+    #: 0.0 makes the guard itself a no-op — the quota decides on count alone,
+    #: which is the pre-guard behaviour (every candidate score is >= 0.0, so
+    #: `best_chosen_effective >= 0.0 * best_unchosen_effective` is always
+    #: true whenever a chosen candidate is available at all). A nonzero value
+    #: means: only cap when the best chosen candidate scores at least that
+    #: FRACTION of the best unchosen one — comfortably close, not merely
+    #: present. Values > 1.0 are legal and progressively stricter (the guard
+    #: fires only when the chosen candidate is not just close but actually
+    #: the stronger one); no upper bound is enforced because there is no
+    #: natural ceiling on how conservative an operator may want the cap to be.
+    #:
+    #: ★★ SHIPPED AT 0.0 — THE GUARD IS OFF BY DEFAULT, and this is a
+    #: measured finding, not a placeholder (2026-08-04). Swept on
+    #: `measurement-harness/q11_follow_curve.py`'s SHIPPED-arm curve (4 seeds
+    #: x 2 topics), at the FIRST-DRAFT `unchosen_max_share=0.15`,
+    #: `unchosen_min_per_page=1` (since retracted in favour of the
+    #: byte-compatible 0.0/3 — see that field's docstring) held fixed. The
+    #: guard's own conclusion (any nonzero ratio reopens the same selection-
+    #: bias hole the quota exists to close) does not depend on which share/min
+    #: pair it was measured against — it was NOT re-verified at 0.0/3 due to
+    #: time, and re-sweeping it there is worth doing before relying on this
+    #: table's exact violation counts:
+    #:
+    #:   ratio   q11 monotonicity violations (of 8 gaps)   rel@20 shape
+    #:    0.0                    2                          recovers by n=20
+    #:    0.5                    reproduces ~1.0's shape (worse than 0.0)
+    #:    0.85 (map's suggestion)      reproduces the UN-quota'd curve almost
+    #:                                  exactly — see mechanism below
+    #:    1.0 (= OFF/no-op)      matches the pre-B-03 unguarded-quota curve
+    #:
+    #: THE MECHANISM, once measured rather than assumed: `OON_ENGAGED`
+    #: content scores systematically HIGHER than `IN_NETWORK` due to the
+    #: selection-bias artifact `CandidateSource.is_viewer_chosen` documents
+    #: (+0.04 to +0.22 mean organic, every seed) — so at ANY guard ratio
+    #: above ~0, `best_unchosen_effective` routinely clears
+    #: `ratio * best_chosen_effective` for generic, not-specially-relevant
+    #: spillover, not just for a genuinely deserving candidate. The guard's
+    #: OWN premise (protect a stronger unchosen candidate from an arbitrarily
+    #: weak chosen one) is real and the mechanism is fully built and tested
+    #: (`test_displacement_guard_lets_a_much_stronger_unchosen_candidate_through`,
+    #: `test_displacement_guard_still_caps_when_chosen_is_comparably_strong`),
+    #: but on THIS instrument the population it protects overlaps too heavily
+    #: with the population the quota exists to bound. Shipping it at 0.0 keeps
+    #: the mechanism available (and correctly tested) for an operator to raise
+    #: once real engagement data can separate "genuinely better" unchosen
+    #: content from the selection-biased kind — this is therefore
+    #: LIVE-DATA-GATED like `organic_cf`, not abandoned.
+    unchosen_displacement_ratio: float = 0.0
+
+    #: ★ DEPRECATED as the enforcement mechanism (B-03, 2026-08-04) — kept ONLY
+    #: as a backward-compatible ON/OFF TOGGLE for the three fields above, never
+    #: deleted, because two files outside this builder's ownership construct
+    #: or reference it by name (BUILD-ADJUDICATION R5):
+    #: `measurement-harness/q11_follow_curve.py` builds `Settings` via
+    #: `dataclasses.replace(BASE.diversity, unchosen_max_per_page=cap)` in its
+    #: own `cfg()` — renaming or deleting the field would `TypeError` the
+    #: panel that grades this very change; `q7_corrected_baseline.py`
+    #: mentions it in a comment only (no code risk, but the number there is
+    #: now stale — see this builder's report).
+    #:
+    #: `<= 0` disables the ENTIRE unchosen-quota mechanism (share + floor +
+    #: guard) — reproducing the pre-B-03 "0 = off" meaning of this field
+    #: EXACTLY, so `unchosen_max_per_page=0` still means "no unchosen quota at
+    #: all", the same as it always has. Any positive value ENABLES the quota;
+    #: its magnitude no longer sizes anything (the three fields above do) —
+    #: only its sign/zero-ness is read. A caller that never touches this field
+    #: (the intended path going forward) gets the quota on by the shipped
+    #: default (3, unchanged), sized by `unchosen_max_share` et al.
+    #:
+    #: See :func:`recsys.core.rerank.rerank` for exactly how this gates the
+    #: three fields above.
     unchosen_max_per_page: int = 3
+
+    #: ★ B-04 (2026-08-04) — the emerging-author budget: how many candidates
+    #: per `explore_window` page may bypass the unchosen SHARE (not the
+    #: geometric penalty above, which still applies) because their author is
+    #: `_is_emerging` — absent from `graph_creds` entirely, or sitting at or
+    #: below `GraphCredConfig.min_vouched_score` (see
+    #: :func:`recsys.pipeline._score`, which builds the actual
+    #: ``emerging_authors`` set passed to the re-ranker). Same "unknown, not
+    #: bad" band `CandidateSource.requires_author_floor` already treats
+    #: permissively — no new trust concept.
+    #:
+    #: WHY OUTSIDE THE SHARE, NOT A LARGER SHARE. A newcomer arrives as
+    #: `OON_ENGAGED` — `is_viewer_chosen == False` — and would otherwise queue
+    #: behind every piece of ordinary off-topic spillover for the SAME budget
+    #: the reader's protection depends on. Raising the shared share to fit
+    #: them back in reopens exactly the spillover problem `unchosen_max_share`
+    #: exists to bound. A separate, small, dedicated budget lets a genuinely
+    #: under-recognized author through without loosening the reader's general
+    #: protection at all.
+    #:
+    #: ★★ A HONEST LIMIT, MEASURED RATHER THAN ASSUMED (2026-08-04): this
+    #: field does NOT rescue q3's own "9 distinct voters + 2 comments + 1
+    #: reblog" rung — checked directly (`snap.graph_creds[NEWBIE].score ==
+    #: 0.507` at that engagement level, seed 7), well above
+    #: `min_vouched_score` (0.10), so that author is no longer "emerging" by
+    #: this predicate at all; they are ordinary "engaged" tier and compete for
+    #: the SHARE, not this budget. What closed that rung (measured jointly
+    #: with `ScoreWeights.interest_match`, see its docstring's table) was the
+    #: score-level fix (interest_match) plus the share, not this field.
+    #:
+    #: ★★★ THE "COLDER END" CLAIM BELOW WAS ALSO TESTED END-TO-END AND IS
+    #: ALSO NOT SUPPORTED (2026-08-04, Builder A) — this field appears INERT
+    #: for BOTH populations, not just the warmer one above. Built a genuine
+    #: zero-vote/zero-comment/zero-reblog debut (`world.post_engagers[key] =
+    #: set()` — cannot arrive via `OON_ENGAGED` at all, by construction) and
+    #: swept `emerging_per_page` in {0, 1, 3} crossed with `interest_match` in
+    #: {0.0, 0.2, 0.4}, 4 seeds x 10 established same-topic viewers (40 rows)
+    #: per point: EVERY combination scored top-20 = 40/40, IDENTICAL at every
+    #: `emerging_per_page` value including 0 (the lane fully disabled). Traced
+    #: why: this debut is absent from `graph_creds` (confirmed — it clears the
+    #: "emerging" predicate), but it never needed the budget to win a slot in
+    #: THIS instrument — its `OON_INTEREST` candidacy already outranks most of
+    #: a real viewer's own thin `IN_NETWORK`/`POPULAR_FALLBACK` tail on raw
+    #: score (verified directly: position 13 of 148 candidates on a plain
+    #: `interest_match=0.0`, recency-only raw of 0.096, percentile 0.04 — most
+    #: of the surrounding pool scores even lower). So across every population
+    #: this field's own docstring names as a target — the q3 engaged rung
+    #: (doesn't clear the predicate) and a true cold debut (clears the
+    #: predicate but doesn't need the budget on this instrument) —
+    #: `emerging_per_page` measurably changes nothing. NOT tested: several
+    #: simultaneous emerging candidates competing for the SAME feed's limited
+    #: slots (this field is a per-page BUDGET, which only binds under
+    #: contention a lone debut does not create) — that remains the one
+    #: plausible scenario where this lane could matter and was not measured
+    #: this session. Until that is checked, treat this field as unproven
+    #: rather than confirmed-working; it is not proven inert in every
+    #: scenario, only in the two this docstring already claimed for it.
+    #:
+    #: 0 disables the lane (an emerging candidate is then only ever an
+    #: ordinary unchosen candidate, gated by the share like anything else).
+    #: 1 is the shipped default — the spec's own "start at 1, never 2"
+    #: posture for a reserved slot (`ExplorationConfig.slots_per_page`'s
+    #: docstring cites the production literature this mirrors).
+    #:
+    #: NOT a second free pass: an emerging candidate whose author has already
+    #: used this page's emerging budget falls back to the ordinary unchosen
+    #: share/guard, exactly like any other unchosen candidate (see
+    #: :func:`recsys.core.rerank.diversity_rerank`).
+    #:
+    #: NOT the exploration lane (`ExplorationConfig`/`CandidateSource.EXPLORATION`).
+    #: That lane bypasses the vouch gate AND the author floor entirely — it is
+    #: for a post with literally zero engagement. This budget only changes
+    #: DIVERSITY-RERANK ORDERING among candidates that already passed
+    #: `filter_eligible` (the vouch gate, the author floor, mutes,
+    #: suppression, NSFW) — it grants no new eligibility, only a fairer shot
+    #: at a slot once eligible. BUILD-ADJUDICATION's map is explicit that
+    #: relabeling this lane's picks AS `EXPLORATION` to reuse its gate-exempt
+    #: posture is NOT an option without a dedicated adversarial review — not
+    #: done here.
+    emerging_per_page: int = 1
     top_k: int = 200
 
     #: How many of the FIRST PAGE's slots are reserved for exploration
@@ -510,6 +1015,24 @@ class DiversityConfig:
             raise ValueError(
                 f"topic_affinity_strength must be in [0, 1], got {self.topic_affinity_strength}"
             )
+        if not 0.0 <= self.unchosen_max_share <= 1.0:
+            raise ValueError(
+                f"unchosen_max_share must be in [0, 1], got {self.unchosen_max_share}"
+            )
+        if self.unchosen_min_per_page < 0:
+            raise ValueError(
+                "unchosen_min_per_page must be >= 0, got "
+                f"{self.unchosen_min_per_page}"
+            )
+        if self.unchosen_displacement_ratio < 0.0:
+            raise ValueError(
+                "unchosen_displacement_ratio must be >= 0, got "
+                f"{self.unchosen_displacement_ratio}"
+            )
+        if self.emerging_per_page < 0:
+            raise ValueError(
+                f"emerging_per_page must be >= 0, got {self.emerging_per_page}"
+            )
 
 
 @dataclass(frozen=True)
@@ -540,10 +1063,169 @@ class ExplorationConfig:
     #: because the rotation is round-robin over AUTHORS, but without this an
     #: author with many fresh posts could still take consecutive rounds.
     max_posts_per_author_epoch: int = 3
+    #: ★ PER-FEED LANE CEILING (C2a, 2026-08-04). Bounds how many exploration
+    #: picks ONE served feed may carry, regardless of page count. Without it
+    #: the ceiling is ``slots_per_page * pages`` — 1 * 10 = 10 on the shipped
+    #: 200-post/20-per-page feed — which lets an account-count farm convert
+    #: page depth directly into slots: `A4_slot_sweep.py` measured 10 ground
+    #: socks taking 75.5% of every exploration slot on the platform, 20 taking
+    #: 83.6%, with 0 ring flags (an account-count farm has no reason to form a
+    #: ring, so ring exclusion cannot see it — see the module docstring).
+    #:
+    #: Enforced in :func:`insert_exploration`'s ``while picks:`` loop: it stops
+    #: after this many insertions.
+    #:
+    #: THE TRADE, stated plainly and NOT hidden: this caps the LANE'S SIZE, so
+    #: an honest newcomer cohort competing for the same feed gets 3 seats
+    #: instead of 10 — a 70% cut in total exploration impressions per feed.
+    #: Confirmed on `tests/test_exploration.py::test_max_slots_per_feed_...`:
+    #: 10 distinct eligible newcomers competing for one 200-post feed get
+    #: exactly 3 insertions at the shipped default, not 10. Who pays: new
+    #: authors, uniformly — this does nothing to a farm's SHARE of the lane,
+    #: only its absolute per-feed take, which is why the map that specified it
+    #: (BUILDMAP-C, C2a) requires it ship alongside C2b/tag-breadth pricing
+    #: (already shipped, see `_interest_match`) rather than alone. `q3_newauthor`
+    #: (single-newcomer panel) is unaffected by this field by construction — it
+    #: only ever has one eligible newcomer per feed, well under any cap 1; the
+    #: cost above is a multi-newcomer/cohort effect, not visible in that panel.
+    max_slots_per_feed: int = 3
+    #: ★ MAC KEY for the reserved-seat rotation (C1a, 2026-08-04 — CRITICAL).
+    #:
+    #: THE BUG THIS CLOSES. The rotation key used to be an UNKEYED
+    #: ``blake2b(f"{bucket}:{author}")`` — no viewer, no secret, pure clock.
+    #: Computable by anyone, for any future bucket, for a name that does not
+    #: exist yet. Measured (`A1_namegrind.py`, `A13_setcover_e2e.py`): 6
+    #: accounts + ~92,546 offline hashes (~0.08s) held the reserved seat in
+    #: 613/720 (bucket x viewer) cells — 85.1% — against 60 honest silent
+    #: rivals, with ZERO votes, comments, reblogs, or ring flags, and cost was
+    #: near-flat in the size of the honest field. It converted an
+    #: RC/account-bounded cost into a free offline hash search.
+    #:
+    #: THE FIX. Keyed ``blake2b`` — a MAC, not a salt prefix (prefixing a
+    #: secret into the message is a DIFFERENT, weaker construction: it does not
+    #: use the hash's own keying input, and a length-extension-style confusion
+    #: is easy for a future edit to introduce by accident. ``key=`` is the
+    #: primitive doing the actual work here). Without the secret, an attacker
+    #: cannot even evaluate the function to grind against — see
+    #: :func:`recsys.core.exploration._rotation_key`.
+    #:
+    #: ``None`` is the "not configured" state, resolved at use time (never
+    #: silently) by :func:`recsys.core.exploration._resolve_seat_secret`:
+    #:
+    #:   * ``production=True`` and ``seat_secret is None`` -> RAISE here, in
+    #:     ``__post_init__``. Never fall back to unkeyed — unkeyed IS the
+    #:     vulnerability, and a silent revert is the exact H01/F-R2 shape this
+    #:     codebase already refuses elsewhere.
+    #:   * ``production=False`` and ``seat_secret is None`` -> a per-process
+    #:     random 32-byte key + a WARNING log, never silent and never a
+    #:     disabled lane (a disabled lane would mean every dev/test run
+    #:     measures a different algorithm than production).
+    #:
+    #: Loaded from ``LUMEN_EXPLORE_SEAT_SECRET`` (64 hex chars = 32 bytes) via
+    #: :meth:`from_env` — the SAME env-loading boundary :class:`HafsqlConfig`
+    #: uses for its own credentials (see its ``from_env``), reused rather than
+    #: inventing a second pattern. Never in a config file, never frozen into
+    #: the trust snapshot, never logged in full — log only a short fingerprint
+    #: (:func:`recsys.core.exploration.seat_secret_fingerprint`) if an operator
+    #: needs to confirm two replicas agree.
+    #:
+    #: DELIBERATELY NOT mixed with the viewer (BUILDMAP-C's C1b, out of this
+    #: unit's scope and shipped OFF by that map's own ruling): concentration
+    #: was only ever dangerous because the pick was GRINDABLE, and keying
+    #: removes that. A per-viewer phase would spend the exploration budget
+    #: teaching nothing, for no security benefit once the pick can no longer be
+    #: precomputed.
+    seat_secret: bytes | None = None
+    #: The PREVIOUS secret, held alongside a freshly-rotated ``seat_secret``
+    #: during a rollover window so every replica agrees on which key covers
+    #: which bucket regardless of deploy timing (see
+    #: ``seat_secret_active_from_bucket``). ``None`` outside a rollover.
+    previous_seat_secret: bytes | None = None
+    #: The bucket at which ``seat_secret`` becomes the active key for that
+    #: bucket and every bucket after it; buckets strictly before it still
+    #: resolve to ``previous_seat_secret``. 0 (default) means ``seat_secret``
+    #: has always been active — the ordinary, non-rotating case.
+    #:
+    #: LOAD-BEARING, NOT COSMETIC. Rotating the secret without an activation
+    #: bucket would re-roll every viewer's seat the instant ANY ONE replica
+    #: redeploys, rather than at one shared clock tick — a staggered rollout
+    #: would then have different replicas disagreeing on the seat's occupant
+    #: for the whole length of the deploy, which is exactly the
+    #: within-bucket-stability property `rotation_hours` exists to guarantee.
+    #: Hold both secrets and select by bucket instead.
+    seat_secret_active_from_bucket: int = 0
+    #: Dev/test switch (2026-08-04). ``False`` (default): an absent
+    #: ``seat_secret`` falls back to a per-process random key + a loud warning
+    #: — the safe, non-raising default every existing fixture and test
+    #: constructs under. ``True``: an absent ``seat_secret`` is REFUSED at
+    #: construction (see ``__post_init__``), because in production a
+    #: per-process random key is worse than useless — every replica would pick
+    #: its own occupant for the same viewer, and a deploy that forgot the env
+    #: var would surface only as a livesite ticket about a flickering feed,
+    #: not a loud failure. Same boundary shape as
+    #: :func:`recsys.pipeline.build_trust_snapshot`'s own ``production`` flag.
+    production: bool = False
+    #: ★ How long one viewer keeps the SAME occupant of the reserved slot, in
+    #: hours (2026-08-04). 0 disables rotation.
+    #:
+    #: WHY THIS IS NOT `DiversityConfig.explore_bucket_hours`. That field is the
+    #: re-ranker's own exploration slot, which ships at 0 and is a different
+    #: mechanism. This package has already been bitten twice by one property
+    #: serving two purposes (`requires_second_degree` silently carrying the
+    #: flooding cap, then the author floor), so the second bucket gets its own
+    #: name rather than borrowing a knob that means something else.
+    #:
+    #: WHAT IT SUBSTITUTES FOR. The spec's real bound is a per-post SERVE CAP
+    #: (~100 serves, then retire on futility), and that needs the serving log
+    #: (item B11) which does not exist. Without any serve counting, a post with
+    #: zero engagement holds the slot for its whole eligibility window — and
+    #: because the pipeline is deterministic, that means the SAME viewer meets
+    #: the SAME newcomer in the same seat on every refresh for days.
+    #:
+    #: Rotating the seat on a clock removes that symptom with no stored state:
+    #: stable inside a bucket (a viewer cannot refresh-reroll for a better
+    #: feed — the same property `explore_bucket_hours` documents) and different
+    #: across buckets, so a reader meets up to four different newcomers a day.
+    #: "Up to": the seat can only move between authors who are EQUALLY unheard,
+    #: so the realised number is bounded by how many authors tie at the bottom.
+    #: Measured in the sim world that tier held one author in 175 of 206 pools
+    #: and two in the rest — there, a reader meets one newcomer all day. A live
+    #: corpus with many debuts a day has a much larger bottom tier; this is a
+    #: property of supply, not of the setting.
+    #: It is NOT a serve cap: it neither counts impressions nor retires a post
+    #: for earning nothing, so B11 is still the real fix.
+    #:
+    #: ★ THE BUCKET IS GLOBAL, NOT PER-VIEWER — a deliberate launch-stage
+    #: choice, and the first thing to revisit as the site grows. It is derived
+    #: from the clock alone, so every viewer whose pool holds the same
+    #: tied-least-heard authors meets the SAME newcomer in the same six hours.
+    #:
+    #: At launch that is the behaviour we want, and concentrating is the point:
+    #: the whole supply-side goal (cold-start spec §4.1) is to manufacture ONE
+    #: legitimate first vouch for a new author, and one reader in fifty noticing
+    #: is likelier when the audience is pointed at the same person than when it
+    #: is scattered one-newcomer-per-reader. Small site, thin traffic, needs
+    #: concentration.
+    #:
+    #: At scale it inverts: you only need a bounded number of impressions to
+    #: learn whether a post works, so showing it to EVERYONE spends reach that
+    #: teaches nothing, and it manufactures a chosen-one effect where whoever
+    #: holds the bucket gets the entire platform's exploration traffic. The
+    #: production systems this lane is modelled on allocate per item and per
+    #: slice of traffic for exactly that reason.
+    #:
+    #: The change when that day comes is one line: mix the viewer into the
+    #: offset (e.g. `bucket + stable_hash(viewer.account)`) so the phase differs
+    #: per reader while the period stays 6h. Deliberately NOT done now — it
+    #: would dilute the launch-stage concentration described above, and it wants
+    #: a real traffic measurement to size, not a guess.
+    rotation_hours: int = 6
 
     def __post_init__(self) -> None:
         if self.slots_per_page < 0:
             raise ValueError(f"slots_per_page must be >= 0, got {self.slots_per_page}")
+        if self.rotation_hours < 0:
+            raise ValueError(f"rotation_hours must be >= 0, got {self.rotation_hours}")
         if self.page_size <= 0:
             raise ValueError(f"page_size must be > 0, got {self.page_size}")
         if not 0 <= self.position < self.page_size:
@@ -558,16 +1240,90 @@ class ExplorationConfig:
                 "max_posts_per_author_epoch must be > 0, got "
                 f"{self.max_posts_per_author_epoch}"
             )
+        if self.max_slots_per_feed < 0:
+            raise ValueError(
+                f"max_slots_per_feed must be >= 0, got {self.max_slots_per_feed}"
+            )
+        # ★ C1a — RAISE, never fall back to unkeyed (see seat_secret's docstring
+        # for why). This is the loudest point this class can enforce it: the one
+        # place every ExplorationConfig, however constructed, passes through.
+        if self.production and self.seat_secret is None:
+            raise ValueError(
+                "ExplorationConfig: production=True requires seat_secret. An "
+                "absent secret must never silently fall back to an unkeyed or "
+                "per-process-random reserved seat in production — that is "
+                "exactly the offline-grindable hole C1a closes (measured: 6 "
+                "accounts + ~92,546 offline hashes held the seat in 85.1% of "
+                "cells against 60 honest rivals). Set LUMEN_EXPLORE_SEAT_SECRET "
+                "(64 hex chars) and construct via "
+                "ExplorationConfig.from_env(production=True)."
+            )
+        if self.seat_secret is not None and len(self.seat_secret) != 32:
+            raise ValueError(
+                "ExplorationConfig.seat_secret must be exactly 32 bytes "
+                f"(blake2b key), got {len(self.seat_secret)}"
+            )
+        if self.previous_seat_secret is not None and len(self.previous_seat_secret) != 32:
+            raise ValueError(
+                "ExplorationConfig.previous_seat_secret must be exactly 32 "
+                f"bytes, got {len(self.previous_seat_secret)}"
+            )
+        if self.seat_secret_active_from_bucket < 0:
+            raise ValueError(
+                "seat_secret_active_from_bucket must be >= 0, got "
+                f"{self.seat_secret_active_from_bucket}"
+            )
+
+    @classmethod
+    def from_env(cls, *, production: bool = False) -> ExplorationConfig:
+        """Load the seat-rotation secret(s) from the environment (C1a) — the
+        SAME env-loading boundary :class:`HafsqlConfig.from_env` uses for its
+        own credentials, reused rather than inventing a second pattern. Never
+        read from a config file; the secret must be a deploy-time artifact.
+
+        ``LUMEN_EXPLORE_SEAT_SECRET`` — 64 hex chars (32 bytes). Required when
+        ``production=True``; enforced by ``__post_init__``, not here, so a
+        hand-built ``ExplorationConfig(production=True, seat_secret=...)``
+        gets the identical guarantee as going through this constructor.
+
+        ``LUMEN_EXPLORE_SEAT_SECRET_PREVIOUS`` /
+        ``LUMEN_EXPLORE_SEAT_SECRET_ACTIVE_FROM_BUCKET`` — optional rollover
+        pair; supply both together when rotating (see
+        ``seat_secret_active_from_bucket``'s docstring). Reading only one of
+        the pair is almost certainly an operator mistake, but is not refused
+        here — the SHAPE of that mistake (an activation bucket with nothing to
+        activate FROM) is already handled the same as "no rollover in
+        progress" by ``_resolve_seat_secret``, so it fails toward the current
+        secret rather than toward an exception mid-rollout.
+        """
+
+        def _hex32(name: str) -> bytes | None:
+            raw = os.environ.get(name)
+            if not raw:
+                return None
+            try:
+                return bytes.fromhex(raw)
+            except ValueError as exc:
+                raise ValueError(f"{name} is not valid hex: {exc}") from exc
+
+        active_from_raw = os.environ.get("LUMEN_EXPLORE_SEAT_SECRET_ACTIVE_FROM_BUCKET")
+        return cls(
+            production=production,
+            seat_secret=_hex32("LUMEN_EXPLORE_SEAT_SECRET"),
+            previous_seat_secret=_hex32("LUMEN_EXPLORE_SEAT_SECRET_PREVIOUS"),
+            seat_secret_active_from_bucket=(
+                int(active_from_raw) if active_from_raw is not None else 0
+            ),
+        )
 
 
 @dataclass(frozen=True)
 class ColdStartConfig:
-    """Interest-selection seeding (rev 2.2). Communities weighted above tags."""
+    """Interest-selection seeding (rev 2.2). Tags are the sole interest
+    substrate since communities were retired as a lane (2026-08-04, R1/R3)."""
 
-    # Community-over-tag precedence is enforced by SOURCE_PRIORITY on dedup
-    # (INTEREST_COMMUNITY outranks INTEREST_TAG), not a weight here.
     # Enforced at the signup/API boundary (outside recsys): a viewer must pick
-    # at least this many interests, so the cold-start lane is never empty.
+    # at least this many interest tags, so the cold-start lane is never empty.
     min_interests: int = 3
 
 
@@ -586,9 +1342,52 @@ class FallbackConfig:
 
     min_feed_size: int = 20
 
+    #: ★ C6 (2026-08-04). Upper bound on padding's share of the RETURNED feed.
+    #: ``POPULAR_FALLBACK`` is exempt from both the second-degree vouch gate
+    #: (``requires_second_degree``) and — unlike every other exempt source —
+    #: was ALSO exempt from the graph-cred AUTHOR FLOOR
+    #: (``CandidateSource.requires_author_floor``, ``contracts.py``); the only
+    #: defense was `_fallback_filler`'s own drop of the proven-self-dealt
+    #: (score <= 0.0) band. Measured (`A8_popular_lane.py`, 2026-08-04):
+    #: **60/60** viewers received padding, mean **38.7%** of the served feed,
+    #: max **56.0%** — through a lane with the LEAST vetting of any source.
+    #:
+    #: 0.25 (1 in 4) is the shipped default: generous enough that a healthy
+    #: feed's occasional top-up (a handful of posts out of 20+) is nowhere
+    #: near the cap and stays byte-for-byte unaffected, tight enough that a
+    #: feed which is now MOSTLY unvetted padding gets bounded instead.
+    #:
+    #: ``rank_feed``'s docstring already claims (`pipeline.py`) that a pool at
+    #: or above `min_feed_size` never touches the fallback — that text was
+    #: describing the OLD guard (`len(eligible) < min_feed_size`); the actual
+    #: guard bails at `diversity.top_k` (200), which is why a thin-but-nonzero
+    #: pool could still be diluted to <=56%. This field bounds the dilution
+    #: directly rather than relying on the (already-corrected-elsewhere) bail
+    #: threshold to do it.
+    #:
+    #: WHO PAYS, stated plainly: a cold/niche viewer whose own pool was tiny
+    #: relative to `min_feed_size` used to be padded all the way to a full
+    #: screen (or deeper, up to `top_k`) regardless of share; now the total
+    #: feed length itself shrinks with the cap, because there is no longer
+    #: enough vetted content to justify padding it out that far. See
+    #: `_fallback_filler` for exactly how the cap composes with the existing
+    #: `min_feed_size` floor and supply ceiling. If real traffic shows this
+    #: cutting a real cohort below one screen, RAISE this value — the fix is a
+    #: config number, not removing the bound.
+    #:
+    #: 0.0 bounds padding to whatever is needed to reach exactly
+    #: `min_feed_size` (the tightest legal setting — the floor still wins).
+    #: 1.0 disables the cap entirely: an exact no-op, byte-identical to
+    #: pre-C6 behaviour.
+    max_share_of_feed: float = 0.25
+
     def __post_init__(self) -> None:
         if self.min_feed_size < 0:
             raise ValueError(f"min_feed_size must be >= 0, got {self.min_feed_size}")
+        if not 0.0 <= self.max_share_of_feed <= 1.0:
+            raise ValueError(
+                f"max_share_of_feed must be in [0, 1], got {self.max_share_of_feed}"
+            )
 
 
 @dataclass(frozen=True)
@@ -1134,6 +1933,45 @@ class LiteConfig:
 
 
 @dataclass(frozen=True)
+class TrustConfig:
+    """Weekly trust-snapshot freshness (A8.3, 2026-08-04).
+
+    ★ THE GAP THIS CLOSES. `TrustSnapshot` had no timestamp at all, so
+    `_trust_is_fresh` (pipeline.py) could tell "present" and "non-empty" and
+    "not degraded" apart but had no way to tell a snapshot built THIS WEEK
+    from one built six months ago — both looked identically fresh, and both
+    would be served under :attr:`~recsys.pipeline.TrustPolicy.FAIL_CLOSED`
+    with no operator-visible signal that the batch had silently stopped
+    running. That is the same silent-degradation shape H01/F-R2 close
+    elsewhere in this package, just on the CALENDAR axis instead of the
+    empty/degraded axis.
+
+    ``max_snapshot_age_days`` is consulted only when
+    ``TrustSnapshot.built_at`` is present — a snapshot with no timestamp
+    (every existing fixture/harness snapshot, and any snapshot from before
+    this field existed) stays exactly as fresh as before this unit, so
+    nothing already-passing changes behaviour. Only a snapshot that carries a
+    timestamp AND has aged past the limit newly fails freshness — consistent
+    with :attr:`~recsys.pipeline.TrustPolicy.FAIL_CLOSED` being the safe
+    default: an operator who stops running the weekly batch gets a refused
+    feed, not a silently-stale one.
+
+    14 days (two batch periods) is the shipped default: one missed run is
+    tolerated (the batch may legitimately be a few days late), two in a row
+    is treated as the operational failure it is.
+    """
+
+    max_snapshot_age_days: int = 14
+
+    def __post_init__(self) -> None:
+        if self.max_snapshot_age_days < 0:
+            raise ValueError(
+                "max_snapshot_age_days must be >= 0 (0 disables the check), got "
+                f"{self.max_snapshot_age_days}"
+            )
+
+
+@dataclass(frozen=True)
 class Settings:
     """Root config object threaded through the pipeline."""
 
@@ -1153,6 +1991,65 @@ class Settings:
     vote_signal: VoteSignalConfig = field(default_factory=VoteSignalConfig)
     hafsql: HafsqlConfig = field(default_factory=HafsqlConfig)
     lite: LiteConfig = field(default_factory=LiteConfig)
+    trust: TrustConfig = field(default_factory=TrustConfig)
+    #: ★ C5/R2/R13 (2026-08-04). The curated trust-root seed list, loaded once
+    #: from the package-data file at import time (see `_load_trusted_seeds`).
+    #: `build_trust_snapshot` defaults its own `trusted_seeds` parameter from
+    #: THIS field when the caller passes none — see that function's docstring
+    #: for why the wiring lives there rather than requiring every caller to
+    #: remember `trusted_seeds=settings.trusted_seeds` by hand (R2: "a wiring
+    #: requirement every caller must remember is the defect, not the fix").
+    #: Override explicitly (e.g. `frozenset()`) for any test/harness world
+    #: that must NOT have real Hive account names land in its synthetic
+    #: graph-cred — see `build_trust_snapshot`'s fixture-migration note.
+    trusted_seeds: frozenset[str] = field(default_factory=_load_trusted_seeds)
+
+    @classmethod
+    def from_env(cls, *, production: bool = False) -> Settings:
+        """Construct ``Settings`` with secrets loaded from the environment —
+        the wiring ``Settings`` itself was missing (2026-08-04, C1a follow-up).
+
+        Before this method existed, NOTHING called
+        :meth:`ExplorationConfig.from_env` — ``grep -rn
+        'ExplorationConfig.from_env'`` returned exactly one hit, inside that
+        method's own error-message string. Every ``Settings()`` (including
+        :data:`DEFAULT_SETTINGS`, which every current caller uses) therefore
+        always carried ``exploration.seat_secret is None`` no matter what
+        ``LUMEN_EXPLORE_SEAT_SECRET`` held in the real environment — the seat
+        rotation's keyed MAC (the fix for the measured 85.1%-seat-capture
+        hole, see ``ExplorationConfig.seat_secret``'s own docstring) had no
+        path to ever receive a real key.
+
+        Threads exactly one sub-config through its own env-loading boundary
+        today: :meth:`ExplorationConfig.from_env`, which reads
+        ``LUMEN_EXPLORE_SEAT_SECRET`` (plus the optional rollover pair — see
+        that method's docstring for the full contract). Every other field
+        keeps its ordinary hand-tuned ``field(default_factory=...)`` default;
+        nothing else on ``Settings`` currently has a secret to load (compare
+        :class:`HafsqlConfig`, whose own ``from_env`` is called directly by
+        the two process entry points that need it —
+        ``recsys.service.app``/``recsys.jobs.trust_batch`` — rather than
+        through ``Settings``, because the HAFSQL credentials are threaded
+        into the gateway constructor, not this dataclass).
+
+        ``production`` is forwarded verbatim to ``ExplorationConfig.from_env``,
+        so ``Settings.from_env(production=True)`` with no
+        ``LUMEN_EXPLORE_SEAT_SECRET`` set raises ``ValueError`` right here
+        (via ``ExplorationConfig.__post_init__``) rather than silently
+        constructing a production ``Settings`` with an unkeyed/random seat —
+        the same "refuse to start" guarantee a caller gets from constructing
+        ``ExplorationConfig`` directly.
+
+        Deliberately NOT wired into :data:`DEFAULT_SETTINGS` (evaluated once
+        at import time with ``production=False`` and relied on by the whole
+        test suite plus every measurement-harness panel as a stable,
+        offline, environment-independent baseline — reading real env vars at
+        import time would make that baseline flaky/order-dependent). A
+        production entry point should call
+        ``Settings.from_env(production=True)`` explicitly instead of
+        importing ``DEFAULT_SETTINGS``.
+        """
+        return cls(exploration=ExplorationConfig.from_env(production=production))
 
 
 DEFAULT_SETTINGS = Settings()

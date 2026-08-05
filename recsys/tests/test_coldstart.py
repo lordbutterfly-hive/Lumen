@@ -30,35 +30,16 @@ def test_is_cold_false_for_established_account() -> None:
 
 
 def test_interest_candidates_pulls_from_gateway() -> None:
-    viewer = make_viewer(
-        interest_communities=frozenset({"hive-167922"}), interest_tags=frozenset({"art"})
-    )
-    community_post = make_post(author="alice", permlink="c1")
+    viewer = make_viewer(interest_tags=frozenset({"art"}))
     tag_post = make_post(author="bob", permlink="t1")
-    gateway = FakeGateway(community=[community_post], tag=[tag_post])
-    cfg = ColdStartConfig()
-
-    result = interest_candidates(viewer, gateway, EPOCH, limit=10, cfg=cfg)
-
-    by_key = {c.post.key: c for c in result}
-    assert by_key[community_post.key].source == CandidateSource.INTEREST_COMMUNITY
-    assert by_key[tag_post.key].source == CandidateSource.INTEREST_TAG
-    assert len(result) == 2
-
-
-def test_interest_candidates_dedups_keeping_community_source() -> None:
-    viewer = make_viewer(
-        interest_communities=frozenset({"hive-167922"}), interest_tags=frozenset({"art"})
-    )
-    shared_post = make_post(author="alice", permlink="shared")
-    gateway = FakeGateway(community=[shared_post], tag=[shared_post])
+    gateway = FakeGateway(tag=[tag_post])
     cfg = ColdStartConfig()
 
     result = interest_candidates(viewer, gateway, EPOCH, limit=10, cfg=cfg)
 
     assert len(result) == 1
-    assert result[0].post.key == shared_post.key
-    assert result[0].source == CandidateSource.INTEREST_COMMUNITY
+    assert result[0].post.key == tag_post.key
+    assert result[0].source == CandidateSource.INTEREST_TAG
 
 
 def test_interest_candidates_empty_gateway_is_empty() -> None:
@@ -139,8 +120,7 @@ def test_every_ungated_non_network_lane_has_cf_suppressed() -> None:
     vouch_exempt = {s for s in CandidateSource if not s.requires_second_degree}
     classified_elsewhere = {
         CandidateSource.IN_NETWORK,     # viewer chose these authors by name
-        CandidateSource.OON_COMMUNITY,  # opted-in + floored; CF via oon_scale
-        CandidateSource.OON_INTEREST,   # ditto
+        CandidateSource.OON_INTEREST,   # opted-in + floored; CF via oon_scale
         CandidateSource.OON_ALS,        # floored; also emits nothing today
                                         # (`als_source_authors = 0`)
     }

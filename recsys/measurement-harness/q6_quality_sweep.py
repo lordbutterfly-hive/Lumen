@@ -49,7 +49,7 @@ sys.path.insert(0, str(_HARNESS.parent))
 
 import numpy as np
 from metrics_v2 import aggregate, session_overlap_loop, viewer_metrics
-from simworld import COMMUNITY, EPOCH, NOW, TOPICS, SimGateway, build_norm, build_world
+from simworld import EPOCH, NOW, TAGS, TOPICS, SimGateway, build_norm, build_world
 
 from recsys.config import DiversityConfig, Settings
 from recsys.contracts import ViewerProfile
@@ -73,7 +73,9 @@ seeds: set[str] = set()
 for t in TOPICS:
     tops = sorted([a for a in world.authors() if a.topic == t], key=lambda a: -a.reputation)[:2]
     seeds.update(a.name for a in tops)
-snap = build_trust_snapshot(gw, Settings(), since=EPOCH, now=NOW, trusted_seeds=frozenset(seeds))
+snap = build_trust_snapshot(
+    gw, Settings(), since=EPOCH, now=NOW, trusted_seeds=frozenset(seeds), production=False
+)  # C5/R2: synthetic seeds, not the real curated list
 
 PANEL = [f"v-{t}-{j:02d}" for t in TOPICS for j in range(4)]
 SUBPANEL = [f"v-{t}-00" for t in TOPICS]
@@ -82,7 +84,7 @@ SUBPANEL = [f"v-{t}-00" for t in TOPICS]
 def viewer_for(name: str) -> ViewerProfile:
     acct = world.accounts[name]
     return ViewerProfile(account=name, follows=world.follows[name],
-                         subscribed_communities=frozenset({COMMUNITY[acct.topic]}))
+                         interest_tags=frozenset(TAGS[acct.topic]))
 
 
 def cfg(strength: float) -> Settings:
@@ -168,13 +170,90 @@ ROWS = [
 # exactly why this project does NOT optimise nDCG and treats it as provenance
 # only. The decision columns for that change are recorded in q7's re-pin note;
 # the panel that judges it is q11_follow_curve.
-NDCG_PINS = [("s=0.00", 0.459), ("s=0.90", 0.580), ("noDiv", 0.782)]
+#
+# ★ RE-PINNED 2026-08-04 (B-05). Old pins 0.459 / 0.580 / 0.782. Measured
+# 0.696 / 0.780 / 0.908 today — all three drifted, s=0.00 badly. Decomposed on
+# this exact world/panel by constructing each mutant directly
+# (`dataclasses.replace`), same method as q7's re-pin note (scratch harness,
+# not committed), at all three pinned grid points:
+#
+#                                          s=0.00   s=0.90   noDiv
+#   shipped (today, full)                   0.696    0.780   0.908
+#   interest_match=0.0                      0.610    0.643   0.770
+#   max_share_of_feed=1.0 (cap off)         0.696    0.780   0.908   <- ndcg unmoved
+#   exploration off                         0.705    0.790   0.926
+#   unchosen quota OFF (max_per_page<=0)    0.622    0.764   0.908   <- s=0.00 dominant
+#   ALL FOUR OFF                            0.458    0.577   0.782
+#   old pin (2026-08-03)                    0.459    0.580   0.782
+#
+# "ALL FOUR OFF" reproduces the old pin to within 0.0006 / 0.0032 / 0.0003 —
+# fully explained, no unnamed fifth cause needed. Same first three causes as
+# q7's re-pin (`interest_match` B-02, `max_share_of_feed` cap C6, the
+# exploration C3 truncation fix — `emerging_per_page` is again an EXACT
+# byte-identical no-op on this world, omitted from the table above; verified
+# once in q7's note, this panel shares q7's seed/panel/curated-seeds
+# protocol so the same authors are in scope). The FOURTH and, at s=0.00,
+# DOMINANT cause is new to this panel: the unchosen-lane quota
+# (`DiversityConfig.unchosen_max_per_page` capping unchosen candidates at
+# 3/page, later refactored by B-03 into a mathematically-verified
+# byte-compatible share/floor formula — `_quota(placed, page_size, 0.0, 3) ==
+# max(0, 3*pages) == _page_quota(placed, page_size, 3)` exactly, confirmed by
+# reading both formulas, not assumed). q6 was simply NEVER RE-PINNED for this
+# quota landing at all — q7's "third re-pin" (2026-08-04, earlier in the
+# build than this session) explicitly caught it (as "unchosen_max_per_page =
+# 3 — a HARD per-page cap") and re-pinned; q6's own history above already
+# names this exact failure mode once before ("q7 was re-pinned for it while
+# q6 was not", 2026-08-01) — this is that same gap recurring one cycle later.
+# `unchosen_max_per_page=0` at noDiv makes NO difference (own_share is
+# already 1.0 with author/topic penalties off, so there is no "unchosen" set
+# left for a quota to bind on) — consistent with noDiv's near-zero residual
+# either way.
+#
+# VERDICT: same as q7's — all three pinned points are the legacy/"never
+# chase" ndcg column (metrics_v2 D1-D3), moving mechanically with composition
+# (own_share swings, e.g. s=0.00: 0.82 shipped vs 0.47 with quota+interest_match
+# off) — NEUTRAL, explained provenance, not a quality judgment on its own.
+# The composition-immune decision column, mean_q, DOES fall on every grid
+# point (s=0.00: 0.705->0.663, s=0.90: 0.710->0.631, noDiv: 0.768->0.733) —
+# the same own-share-up/mean_q-down pattern q7 recorded, same two dominant
+# causes (`interest_match`, exploration), same verdict: a real, already-priced
+# cost of two already-shipped decisions, not a new defect. The FOURTH cause
+# found here (the unchosen quota) does NOT move mean_q at s=0.00/s=0.90 in
+# isolation (0.6632->0.6668, 0.6312->0.6194 respectively — small/mixed) — its
+# effect is overwhelmingly compositional (own_share), which is exactly its
+# documented job (bounding off-interest spillover), already validated on q11/
+# q3's rel@20 bar, not on this panel's nDCG.
+# ★ RE-PINNED 2026-08-05 by the coordinator, cause recorded rather than
+# silently overwritten. The interest/prior conflict was resolved at the
+# MECHANISM level: the declared-interest offset is no longer discounted by the
+# author-repeat penalty (it is a per-TOPIC constant, so discounting it on an
+# AUTHOR repeat made the author penalty double as a topic penalty), topic
+# affinity is now inferred from EARNED mass only, and interest blends the
+# composite rather than the organic slice.
+#
+# Effect on the world distribution: the author-pooled prior's benefit went from
+# NEGATIVE on 5 of 32 worlds to positive on 32 of 32 (stack_capture_g min
+# -0.0045 -> +0.0061). q10 is green on its own unmodified floors.
+#
+# Why re-pinning is legitimate here, having refused it all session: these are
+# ABSOLUTE provenance pins at 0.0015 tolerance, so they move for ANY effective
+# scoring change in either direction. I verified the direction of every one
+# before touching them — 6 of 7 improved (q7's decision-grade own-AUC
+# 0.619 -> 0.676), and the only decrease is noDiv nDCG -0.003, on the metric
+# this project explicitly does NOT optimise. The builder correctly refused to
+# re-pin its own change; this is the adjudicator doing it with the cause on
+# record. Old values: 0.696 / 0.780 / 0.908.
+NDCG_PINS = [("s=0.00", 0.719), ("s=0.90", 0.802), ("noDiv", 0.905)]
 print("\nSELF-CHECK — legacy ndcg vs recorded pins (see the note above for the "
       "decomposition):")
+_q6_drift: list[str] = []
 for key, known in NDCG_PINS:
     got = results[key]["ndcg"][0]
-    flag = "OK" if abs(got - known) < 0.0015 else "** MISMATCH — instrument moved **"
+    drifted = abs(got - known) >= 0.0015
+    flag = "** MISMATCH — instrument moved **" if drifted else "OK"
     print(f"    ndcg @ {key:8s} {got:6.3f}   (known {known:5.3f})  {flag}")
+    if drifted:
+        _q6_drift.append(f"    ndcg @ {key}: measured {got:.3f} vs pinned {known:.3f}")
 
 labels = [label for label, _ in CONFIGS]
 hdr = "metric".ljust(34) + "".join(f"{lb:>9s}" for lb in labels)
@@ -236,3 +315,24 @@ for i, name in enumerate(PANEL):
           f" {r0['mean_q']:5.3f}|{r9['mean_q']:5.3f} "
           f" {r0['fcq_capture']:5.3f}|{r9['fcq_capture']:5.3f} "
           f" {r0['entropy']:5.2f}|{r9['entropy']:5.2f}")
+
+
+# ★ ASSERT, DO NOT MERELY PRINT (2026-08-04). This block used to compute a
+# flag string, print it, and exit 0 regardless — the identical defect fixed in
+# q7 the same day, and the reason "13/13 panels exit 0" was compatible with
+# four silently drifted pins. A panel that reports a mismatch and then declares
+# success is not a gate.
+#
+# The raise is at the very END so every diagnostic table above still prints on
+# a failing run; a gate that hides the evidence is its own kind of useless.
+#
+# Re-pinning these values is a SEPARATE, DELIBERATE act (unit B-05), not
+# something to do to make this green. The pins below are the last recorded
+# stable measurement and are intentionally left untouched.
+if _q6_drift:
+    raise AssertionError(
+        f"{len(_q6_drift)} of {len(NDCG_PINS)} q6 ndcg pins drifted:\n"
+        + "\n".join(_q6_drift)
+        + "\n  These are legacy provenance pins; this project does NOT optimise"
+        " nDCG. Re-derive deliberately (B-05) — do not silence this."
+    )

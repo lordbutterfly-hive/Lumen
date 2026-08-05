@@ -10,7 +10,7 @@ from tests.fakes import make_candidate, make_post
 def test_dup_keys_are_deduped() -> None:
     post = make_post(author="alice", permlink="p1")
     a = make_candidate(post, CandidateSource.OON_ENGAGED)
-    b = make_candidate(post, CandidateSource.OON_COMMUNITY)
+    b = make_candidate(post, CandidateSource.OON_INTEREST)
     merged = merge_candidates([a], [b])
     assert len(merged) == 1
 
@@ -34,11 +34,11 @@ def test_higher_priority_source_wins_regardless_of_input_order() -> None:
 def test_output_ordered_by_priority_highest_first() -> None:
     als = make_candidate(make_post(permlink="p-als"), CandidateSource.OON_ALS)
     in_network = make_candidate(make_post(permlink="p-in"), CandidateSource.IN_NETWORK)
-    community = make_candidate(make_post(permlink="p-comm"), CandidateSource.OON_COMMUNITY)
-    merged = merge_candidates([als, in_network, community])
+    interest = make_candidate(make_post(permlink="p-int"), CandidateSource.OON_INTEREST)
+    merged = merge_candidates([als, in_network, interest])
     assert [c.source for c in merged] == [
         CandidateSource.IN_NETWORK,
-        CandidateSource.OON_COMMUNITY,
+        CandidateSource.OON_INTEREST,
         CandidateSource.OON_ALS,
     ]
 
@@ -97,7 +97,6 @@ def test_source_priority_ranks_in_network_highest() -> None:
     ordered = [
         CandidateSource.IN_NETWORK,
         CandidateSource.OON_ENGAGED,
-        CandidateSource.OON_COMMUNITY,
         CandidateSource.OON_INTEREST,
         CandidateSource.OON_ALS,
     ]

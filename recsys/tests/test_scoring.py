@@ -8,6 +8,7 @@ from recsys.config import ScoreWeights
 from recsys.contracts import CandidateSource, NormContext
 from recsys.core.scoring import (
     AuthorEngagement,
+    declared_interest_raw,
     pooled_author_base,
     score_candidate,
     score_candidates,
@@ -164,9 +165,7 @@ def test_cf_blend_default_scale_drops_cf_entirely_for_oon_sources() -> None:
     # at all for that candidate, even though the request has one.
     for source in (
         CandidateSource.INTEREST_TAG,
-        CandidateSource.INTEREST_COMMUNITY,
         CandidateSource.OON_ENGAGED,
-        CandidateSource.OON_COMMUNITY,
         CandidateSource.OON_INTEREST,
         CandidateSource.OON_ALS,
     ):
@@ -534,3 +533,198 @@ def test_negative_shrinkage_is_refused() -> None:
 
     with pytest.raises(ValueError, match="organic_prior_shrinkage must be >= 0"):
         replace(ScoreWeights(), organic_prior_shrinkage=-1.0)
+
+
+# ---------------------------------------------------------------------------
+# B-02 (2026-08-04): the declared-interest term. `declared_interest_raw` is the
+# raw; `score_candidate`'s `interest_percentile` kwarg is where it enters the
+# organic blend, AFTER the CF blend and BEFORE the viewer-own-affinity blend.
+# ---------------------------------------------------------------------------
+
+
+def test_declared_interest_raw_full_and_partial_and_no_overlap() -> None:
+    post = make_post(tags=("photo", "travel"))
+    assert declared_interest_raw(post, frozenset({"photo", "travel"})) == pytest.approx(1.0)
+    assert declared_interest_raw(post, frozenset({"photo"})) == pytest.approx(0.5)
+    assert declared_interest_raw(post, frozenset({"cooking"})) == 0.0
+
+
+def test_declared_interest_raw_empty_interests_or_empty_tags_is_zero_never_none() -> None:
+    tagged = make_post(tags=("photo",))
+    assert declared_interest_raw(tagged, frozenset()) == 0.0
+    untagged = make_post(tags=())
+    assert declared_interest_raw(untagged, frozenset({"photo"})) == 0.0
+    assert declared_interest_raw(untagged, frozenset()) == 0.0
+
+
+def test_declared_interest_raw_denominator_bounds_tag_stuffing() -> None:
+    # The farming ceiling stated in the docstring: padding MORE tags than
+    # truly apply can only shrink the achievable share, never lift it above
+    # 1.0. A post that stuffs every popular interest alongside its one real
+    # match scores LOWER than a post that carries only the matching tag.
+    focused = make_post(tags=("photo",))
+    stuffed = make_post(tags=("photo", "dev", "food", "travel", "music"))
+    interests = frozenset({"photo", "dev", "food", "travel", "music"})
+    assert declared_interest_raw(focused, interests) == pytest.approx(1.0)
+    assert declared_interest_raw(stuffed, interests) == pytest.approx(1.0)
+    # But stuffing with tags that do NOT match dilutes the share below what
+    # the single real match alone would earn.
+    stuffed_off_topic = make_post(tags=("photo", "unrelated-1", "unrelated-2"))
+    diluted = declared_interest_raw(stuffed_off_topic, frozenset({"photo"}))
+    assert diluted == pytest.approx(1.0 / 3.0)
+    assert diluted < declared_interest_raw(focused, frozenset({"photo"}))
+
+
+def test_interest_match_zero_is_byte_identical_to_the_pre_b02_score() -> None:
+    # The mandatory safety-net invariant: interest_match=0.0 (an explicit
+    # weight, not just an absent percentile) must reproduce the score exactly,
+    # regardless of what interest_percentile is supplied.
+    candidate = make_candidate(post=make_post(author_reputation=30.0))
+    off_weights = ScoreWeights(interest_match=0.0)
+    baseline = score_candidate(
+        candidate, vote_signal_raw=2.0, organic_raw=0.5, norm=NORM, weights=off_weights,
+    )
+    for interest_percentile in (0.0, 0.5, 0.9, None):
+        result = score_candidate(
+            candidate, vote_signal_raw=2.0, organic_raw=0.5, norm=NORM, weights=off_weights,
+            interest_percentile=interest_percentile,
+        )
+        assert result == baseline, interest_percentile
+
+
+def test_interest_percentile_none_leaves_organic_unchanged_at_any_weight() -> None:
+    # The other half of the safety net: a viewer with no interest signal for
+    # THIS candidate (None) must not be silently blended toward zero, even
+    # when the weight is on.
+    candidate = make_candidate(post=make_post(author_reputation=30.0))
+    weighted = ScoreWeights(interest_match=0.3)
+    with_none = score_candidate(
+        candidate, vote_signal_raw=2.0, organic_raw=0.5, norm=NORM, weights=weighted,
+        interest_percentile=None,
+    )
+    without_kwarg = score_candidate(
+        candidate, vote_signal_raw=2.0, organic_raw=0.5, norm=NORM, weights=weighted,
+    )
+    assert with_none == without_kwarg
+
+
+def test_interest_percentile_blends_the_COMPOSITE_not_just_the_organic_slice() -> None:
+    # ★ 2026-08-05: the declared-interest term blends against the EARNED
+    # composite, so vote/rep/quality are all diluted by the same factor and
+    # the 10/10/80 balance among them survives every `interest_match` value.
+    candidate = make_candidate(post=make_post(author_reputation=30.0))
+    weights = ScoreWeights(interest_match=0.4)
+    quality = 0.6  # organic_raw=0.5 against NORM.organic_samples, see the CF test above
+    result = score_candidate(
+        candidate, vote_signal_raw=2.0, organic_raw=0.5, norm=NORM, weights=weights,
+        interest_percentile=1.0,
+    )
+    # organic is now the EARNED organic only — the interest term is not in it.
+    assert result.score.organic == pytest.approx(quality)
+    earned = (
+        weights.vote * result.score.vote_norm
+        + weights.reputation * result.score.rep_norm
+        + weights.organic * quality
+    )
+    w = weights.organic * weights.interest_match
+    assert result.score.final == pytest.approx((1.0 - w) * earned + w * 1.0)
+    assert result.score.interest_bonus == pytest.approx(w * 1.0)
+
+
+def test_interest_terms_contribution_to_final_is_unchanged_by_the_re_basing() -> None:
+    # ★ THE SLOPE-PRESERVATION INVARIANT (2026-08-05). Moving the blend from
+    # the organic slice to the composite must not strengthen or weaken the
+    # term: the GAP it opens between an on-interest and an off-interest
+    # candidate that are otherwise identical is `organic * interest_match`,
+    # exactly what the old in-organic form contributed.
+    weights = ScoreWeights(interest_match=0.4)
+    on, off = (
+        score_candidate(
+            make_candidate(post=make_post(author_reputation=30.0)),
+            vote_signal_raw=2.0, organic_raw=0.5, norm=NORM, weights=weights,
+            interest_percentile=pct,
+        )
+        for pct in (1.0, 0.0)
+    )
+    gap = on.score.final - off.score.final
+    assert gap == pytest.approx(weights.organic * weights.interest_match)
+
+
+def test_interest_blend_runs_on_the_composite_after_cf_and_viewer_own_affinity() -> None:
+    # Ordering: CF and viewer-own affinity still compose inside `organic`
+    # (each blends against whatever the previous step left behind); the
+    # declared-interest term then blends the finished composite.
+    candidate = make_candidate(post=make_post(author_reputation=30.0))
+    weights = ScoreWeights(
+        organic_quality=0.9, organic_cf=0.1, interest_match=0.5, organic_viewer=0.5,
+    )
+    quality = 0.6
+    after_cf = (1.0 - weights.organic_cf) * quality + weights.organic_cf * 0.8  # cf_percentile
+    expected_organic = (1.0 - weights.organic_viewer) * after_cf + weights.organic_viewer * 0.2
+    result = score_candidate(
+        candidate, vote_signal_raw=2.0, organic_raw=0.5, norm=NORM, weights=weights,
+        cf_percentile=0.8, interest_percentile=1.0, viewer_percentile=0.2,
+    )
+    assert result.score.organic == pytest.approx(expected_organic)
+    earned = (
+        weights.vote * result.score.vote_norm
+        + weights.reputation * result.score.rep_norm
+        + weights.organic * expected_organic
+    )
+    w = weights.organic * weights.interest_match
+    assert result.score.final == pytest.approx((1.0 - w) * earned + w * 1.0)
+
+
+def test_interest_percentile_stays_in_unit_interval() -> None:
+    candidate = make_candidate(post=make_post(author_reputation=30.0))
+    weights = ScoreWeights(interest_match=0.7)
+    for organic_raw, interest_percentile in ((0.0, 1.0), (1.0, 0.0), (0.5, 0.5)):
+        result = score_candidate(
+            candidate, vote_signal_raw=2.0, organic_raw=organic_raw, norm=NORM,
+            weights=weights, interest_percentile=interest_percentile,
+        )
+        assert 0.0 <= result.score.organic <= 1.0
+        # `final` is the one that now carries the interest term, so it is the
+        # one whose bound matters — and the bonus can never exceed it.
+        assert 0.0 <= result.score.final <= 1.0
+        assert 0.0 <= result.score.interest_bonus <= result.score.final
+
+
+def test_interest_match_out_of_range_is_refused() -> None:
+    with pytest.raises(ValueError, match="interest_match"):
+        ScoreWeights(interest_match=1.5)
+    with pytest.raises(ValueError, match="interest_match"):
+        ScoreWeights(interest_match=-0.1)
+
+
+def test_score_candidates_threads_interest_percentiles_per_candidate() -> None:
+    a = make_candidate(post=make_post(author="alice", author_reputation=30.0))
+    b = make_candidate(post=make_post(author="bob", author_reputation=30.0))
+    weights = ScoreWeights(interest_match=0.5)
+    items = [(a, 2.0, 0.5), (b, 2.0, 0.5)]
+
+    def lookup(candidate):
+        return {"alice": 0.9, "bob": 0.1}[candidate.post.author]
+
+    batch = score_candidates(items, NORM, weights, interest_percentiles=lookup)
+    individual = [
+        score_candidate(
+            cand, vote_signal_raw=v, organic_raw=o, norm=NORM, weights=weights,
+            interest_percentile=lookup(cand),
+        )
+        for cand, v, o in items
+    ]
+    assert batch == individual
+    # Per-candidate: the interest term reaches `final` (and its recorded
+    # decomposition), not `organic` — see the composite-blend tests above.
+    assert batch[0].score.final != batch[1].score.final
+    assert batch[0].score.interest_bonus != batch[1].score.interest_bonus
+
+
+def test_score_candidates_interest_percentiles_default_is_a_no_op() -> None:
+    candidate = make_candidate(post=make_post(author_reputation=30.0))
+    items = [(candidate, 2.0, 0.5)]
+    weighted = ScoreWeights(interest_match=0.5)
+    default_call = score_candidates(items, NORM, weighted)
+    explicit_none = score_candidates(items, NORM, weighted, interest_percentiles=None)
+    assert default_call == explicit_none

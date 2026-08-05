@@ -14,9 +14,11 @@ from recsys.contracts import Candidate, CandidateSource
 SOURCE_PRIORITY: dict[CandidateSource, int] = {
     CandidateSource.IN_NETWORK: 0,
     CandidateSource.OON_ENGAGED: 1,
-    CandidateSource.OON_COMMUNITY: 2,
+    # 2 and 4 are gaps left by the retired OON_COMMUNITY/INTEREST_COMMUNITY
+    # members (communities removed as a lane, 2026-08-04, R1/R3) — relative
+    # order of the survivors must stay identical, so the numbers are not
+    # renumbered densely.
     CandidateSource.OON_INTEREST: 3,
-    CandidateSource.INTEREST_COMMUNITY: 4,
     CandidateSource.INTEREST_TAG: 5,
     CandidateSource.OON_ALS: 6,
     # Reserved new-author lane. Priority only matters for dedup labelling —

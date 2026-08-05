@@ -25,6 +25,7 @@ are reliable; exact figures are directional.
 """
 from __future__ import annotations
 
+import json
 import pathlib
 import sys
 
@@ -42,6 +43,20 @@ _HARNESS = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(_HARNESS))
 sys.path.insert(0, str(_HARNESS.parent))
 
+# ★ B-08 (2026-08-04). The self-check below used to print
+# `** MISMATCH — instrument moved **` on a drifted row and exit 0 regardless —
+# a red instrument reporting green. Pins now live in a checked-in JSON file
+# (not the drifted-values-in-code this replaces) and a mismatch is a real
+# assertion failure. `--update-pins` is the ONLY sanctioned way to move them:
+# it rewrites the JSON from THIS run's measurements and prints the before/after
+# diff to paste into the commit message, so a re-pin is always accompanied by
+# a recorded reason. This unit does not call it — re-deriving the pins is
+# B-05's job; this unit only makes the gate real.
+PINS_PATH = _HARNESS / "pins" / "q7.json"
+UPDATE_PINS = "--update-pins" in sys.argv
+with open(PINS_PATH) as _f:
+    PINS: dict[str, dict[str, object]] = json.load(_f)
+
 
 from metrics_v2 import (
     DECOMP_CONFIGS,
@@ -50,9 +65,8 @@ from metrics_v2 import (
     penalty_decomposition,
     viewer_metrics,
 )
-from simworld import COMMUNITY, EPOCH, NOW, TOPICS, SimGateway, build_norm, build_world
+from simworld import EPOCH, NOW, TAGS, TOPICS, SimGateway, build_norm, build_world, harness_settings
 
-from recsys.config import Settings
 from recsys.contracts import Post, ViewerProfile
 from recsys.pipeline import build_trust_snapshot, rank_feed
 
@@ -63,16 +77,22 @@ seeds: set[str] = set()
 for t in TOPICS:
     tops = sorted([a for a in world.authors() if a.topic == t], key=lambda a: -a.reputation)[:2]
     seeds.update(a.name for a in tops)
-snap = build_trust_snapshot(gw, Settings(), since=EPOCH, now=NOW, trusted_seeds=frozenset(seeds))
+# ★ B-07 (2026-08-04): the shipped base is routed through harness_settings()
+# so mutate_panels.py's LUMEN_SETTINGS_MUTANT reaches both the trust snapshot
+# and the decomposition configs below. Byte-identical to Settings() when unset.
+SHIPPED = harness_settings()
+snap = build_trust_snapshot(
+    gw, SHIPPED, since=EPOCH, now=NOW, trusted_seeds=frozenset(seeds), production=False
+)  # C5/R2: synthetic seeds, not the real curated list
 
 PANEL = [f"v-{t}-{j:02d}" for t in TOPICS for j in range(4)]
-CONFIGS = decomposition_settings()  # base = shipped Settings()
+CONFIGS = decomposition_settings(SHIPPED)  # base = shipped Settings() (mutation-aware)
 
 
 def viewer_for(name: str) -> ViewerProfile:
     acct = world.accounts[name]
     return ViewerProfile(account=name, follows=world.follows[name],
-                         subscribed_communities=frozenset({COMMUNITY[acct.topic]}))
+                         interest_tags=frozenset(TAGS[acct.topic]))
 
 
 print(f"world: {len(world.posts)} posts, {len(world.accounts)} accounts; "
@@ -237,16 +257,105 @@ print("SELF-CHECK vs prior-round shipped figures (must reproduce):")
 # out-of-memory wall (19 GiB used, 260 MiB free, forks failing) while a
 # scrutiny agent benchmarked dense PageRank at scale, and re-running the 2x2
 # would have thrashed it further. Decompose before relying on either figure.
-for label, key, known in [("legacy ndcg (global ideal)", "ndcg", 0.644),
-                          ("DEPRECATED fcq_capture", "fcq_capture", 0.842),
-                          ("own capture (pool ceiling)", "cap_own", 0.830),
-                          ("AUC own (served slots)", "auc_own", 0.743)]:
+#
+# ★ RE-PINNED 2026-08-04 (B-05, fourth time). Old pins 0.644 / 0.842 / 0.830 /
+# 0.743 (the "third re-pin" above). FIVE things landed on top of that pin in
+# this session: `ScoreWeights.interest_match` 0.0->0.4 (B-02), an
+# emerging-author budget `DiversityConfig.emerging_per_page` 0->1 (B-04), a
+# popular-fallback cap `FallbackConfig.max_share_of_feed` 1.0->0.25 (C6),
+# exploration picks no longer silently dropped by `_score`'s internal
+# truncation (C3), and communities retired as a candidate-sourcing lane
+# (R1/R3). Decomposed on this exact world/panel/snapshot by constructing each
+# mutant directly (`dataclasses.replace` on `Settings()`, not the mutant env
+# var, so every combination could be checked including the 2-/4-way
+# interaction) — scratch harness, not committed:
+#
+#                                    ndcg    fcq_c  cap_own  auc_own   mean_q  own_share
+#   shipped (today, full)           0.740   0.767   0.769    0.619    0.651     0.885
+#   interest_match=0.0              0.631   0.818   0.804    0.682    0.685     0.792
+#   emerging_per_page=0             0.740   0.767   0.769    0.619    0.651     0.885   <- EXACT no-op
+#   max_share_of_feed=1.0 (off)     0.740   0.766   0.768    0.638    0.651     0.885
+#   exploration off                 0.752   0.779   0.787    0.644    0.664     0.885
+#   ALL FOUR OFF ("yesterday")      0.644   0.837   0.829    0.740    0.704     0.785
+#   old pin (pre-session)           0.644   0.842   0.830    0.743      -         -
+#
+# "ALL FOUR OFF" reproduces the old pin to within 0.0004 / 0.0053 / 0.0009 /
+# 0.0034 — i.e. these four causes account for essentially the WHOLE move; no
+# fifth unexplained mechanism is needed (residuals are inside this panel's own
+# 24-viewer noise floor, std(auc_own) ~0.07 -> SEM ~0.015).
+#
+# `emerging_per_page` is a MEASURED, EXACT, byte-identical no-op on this
+# panel (every column 0.0000 delta) — this world's authors never fall into
+# the graph-cred band `_is_emerging` tests for (q7's curated seeds are all
+# established, high-reputation authors), so the budget never has anything to
+# spend on here. `max_share_of_feed` barely moves ndcg/fcq/cap_own (<=0.001)
+# but DOES move auc_own (+0.019 when the cap is off): capping the
+# popular-fallback padding SHRINKS the "out of feed" pool auc_own compares
+# served posts against (mean pool size 164 capped vs 444 uncapped on this
+# world) — a measurement-denominator effect of the new cap, not a picking
+# change (confirmed: depth-controlled auc_own_m5 barely moves, +0.001-0.017,
+# vs raw auc_own's +0.018-0.124 swing). Communities-lane removal is a
+# STRUCTURAL NO-OP here by construction, not merely measured-zero: this
+# panel's `viewer_for()` never set `interest_communities` (the field no
+# longer even exists on `ViewerProfile`), so the removed lane always received
+# an empty set and `community_posts(frozenset(), ...)` always returned `[]`,
+# before or after — nothing for the removal to have changed for THIS panel.
+#
+# VERDICT, per number. All four pinned columns are the DEPRECATED/legacy/raw
+# columns metrics_v2's own docstring says to "never chase" (D1-D3: pool-
+# ceiling-relative, penalty-dominated, or depth-channel-confounded) — their
+# purpose here is drift detection, not a quality judgment, and this decomp
+# shows their movement is mechanical: `interest_match` shifts composition
+# toward the viewer's own topic (own_share 0.79->0.89), which the
+# depth-CONFOUNDED raw cap_own/auc_own/ndcg mechanically reward/punish
+# regardless of picking skill (metrics_v2 D3) — confirmed by the
+# depth-controlled variants moving 5-10x less than the raw ones
+# (cap_own_m5_g +0.007 vs raw cap_own +0.035; auc_own_m10 +0.018 vs raw
+# auc_own +0.063, both for interest_match alone). NEUTRAL / explained
+# provenance, not itself a quality signal.
+#
+# The one DECISION-grade, composition-immune column this decomp touches is
+# `mean_q`, which is NOT pinned but IS printed below: shipped 0.651 vs
+# "yesterday" 0.704, DOWN 0.053, with own_share UP 0.10 in the same
+# comparison — the "own-share-up + mean_q-down" pattern this codebase's own
+# `organic_viewer` docstring names as its regression signature. Decomposed:
+# `interest_match` alone costs 0.034 of that, exploration's now-working C3
+# fix costs another 0.013 (residual ~0.006, likely the two compounding).
+# Read plainly: this is a REAL, measured quality cost on q7's specific
+# panel — but BOTH causes are already-shipped, already-justified product
+# decisions made by their own units on OTHER grounds (`interest_match`
+# validated on q3's newcomer-reach + q11's monotonicity frontier;
+# exploration's cost is the pre-approved, cited YouTube-analog trade dated
+# 2026-08-01, not new today — C3 only made the existing, budgeted lane
+# actually reach the feed as designed). Not a new algorithmic defect;
+# recorded here because q7 is the first panel to price it since they landed.
+TOLERANCE = 0.0015
+_mismatches: list[tuple[str, str, float, float]] = []
+for key, spec in PINS.items():
+    label, known = str(spec["label"]), float(spec["known"])
     m, _ = base[key]
-    flag = "OK" if abs(m - known) < 0.0015 else "** MISMATCH — instrument moved **"
+    ok = abs(m - known) < TOLERANCE
+    flag = "OK" if ok else "** MISMATCH — instrument moved **"
     print(f"    {label:32s} {m:6.3f}   (known {known:5.3f})  {flag}")
+    if not ok:
+        _mismatches.append((key, label, m, known))
 print("    NOTE: the round brief also quotes 'quality 0.630'; mean_q@20 on this"
       "\n    panel reads different (see output below) and no reproducible column"
       "\n    matches 0.630 — treat that one brief figure as unpinned provenance.")
+
+if UPDATE_PINS:
+    print(f"\n--update-pins: rewriting {PINS_PATH}")
+    print("Paste this diff into the commit message:")
+    new_pins: dict[str, dict[str, object]] = {}
+    for key, spec in PINS.items():
+        old_known = float(spec["known"])
+        new_known = round(base[key][0], 3)
+        print(f"    {key:14s} {old_known:.3f} -> {new_known:.3f}"
+              f"  (delta {new_known - old_known:+.3f})")
+        new_pins[key] = {"label": spec["label"], "known": new_known}
+    with open(PINS_PATH, "w") as _f:
+        json.dump(new_pins, _f, indent=2)
+        _f.write("\n")
 
 print("\nCORRECTED HEAD BASELINE (shipped config):")
 HEAD_ROWS = [
@@ -293,3 +402,20 @@ print("A scoring-term change is judged on: scoring_gap (down = better), "
       "mean_q, q_own_m5/m10, cap_own_m*_g, auc_own_m5/m10 (up = better).")
 print("Deprecated fcq_* and raw per-stratum/ndcg columns are NOT decision "
       "numbers — see the metrics_v2 module docstring defect ledger.")
+
+# ★ B-08 gate, checked LAST so the full diagnostic report above always prints
+# (the "must not regress" requirement) — a pin mismatch is a real failure, but
+# it must not swallow the numbers a human needs to diagnose WHY it mismatched.
+if not UPDATE_PINS and _mismatches:
+    detail = "\n".join(
+        f"      {key:14s} measured {m:.3f} vs pinned {known:.3f} (delta {m - known:+.3f})"
+        for key, label, m, known in _mismatches
+    )
+    raise AssertionError(
+        f"{len(_mismatches)} of {len(PINS)} q7 pins drifted from {PINS_PATH}:\n{detail}\n"
+        "The instrument moved (or the algorithm did) and nothing above is comparable "
+        "to prior rounds until re-pinned. Re-pinning is a separate, deliberate act "
+        "(B-05) with the cause recorded — it is not this assert's job. To accept a "
+        "legitimate move, record why it moved, then regenerate with:\n"
+        "    python3 measurement-harness/q7_corrected_baseline.py --update-pins"
+    )

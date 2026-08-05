@@ -1,0 +1,1017 @@
+"""A10 — the HTTP entry: ``GET /feed?viewer=<account>`` -> a real, ranked
+feed. THE UNIT THAT MAKES IT REAL — before this module, nothing in
+``/mnt/o/Lumen`` ever called :func:`recsys.pipeline.rank_feed`.
+
+No web framework is a dependency. ``pyproject.toml`` is shared with other
+builders this phase, so adding one (FastAPI+uvicorn, as BUILDMAP-A A10.1
+suggested) means editing a file this builder does not own, for a choice the
+build brief itself flags as "a deploy decision". The brief's own fallback —
+``http.server`` from the stdlib — is dependency-free and, for one GET route
+plus a health check, simpler to keep honest: there is no framework layer
+whose behaviour needs auditing on top of what this file actually does.
+
+WHAT THIS ASSEMBLES, end to end, per request:
+
+  1. a cached :class:`~recsys.contracts.NormContext` (built by
+     :func:`recsys.norm_builder.build_window_norm`, refreshed on a
+     background timer — see :class:`_TimerCache` and the OPERATIONAL
+     CONSTRAINT note below);
+  2. a cached :class:`~recsys.pipeline.TrustSnapshot` (loaded from
+     ``recsys.db.store``, same timer-cache treatment — see
+     :func:`_load_snapshot_fixed` for a cross-file bug this had to route
+     around, documented there);
+  3. a per-viewer, TTL-cached :class:`~recsys.contracts.ViewerProfile`
+     (built by :func:`recsys.viewer.build_viewer_profile`);
+  4. :func:`recsys.pipeline.rank_feed`, ALWAYS under
+     :attr:`~recsys.pipeline.TrustPolicy.FAIL_CLOSED` — this module never
+     passes ``TrustPolicy.WARN``, by design (see ``rank_feed``'s own "MUST
+     NOT CHANGE" note in the build map).
+
+OPERATIONAL CONSTRAINT (measured 2026-08-04, BUILDMAP-A-LAUNCH): a 3-day
+``window_posts`` call costs ~8.8s and a 7-day one is within a couple of
+seconds of the 15s default statement timeout. The NormContext therefore MUST
+be built on a timer and never inside a request — :class:`_TimerCache`
+enforces this structurally (the request path only ever reads ``.value``;
+only a background thread, or the blocking warm-up before the server starts
+accepting connections, ever calls the builder). ``tests/test_service.py``
+proves the builder function is invoked exactly once across many requests
+inside one refresh window, not once per request.
+
+R8 — THE DONE-CHECK THIS MODULE IS BUILT AGAINST (BUILD-ADJUDICATION
+ruling R8, overriding the original "curl returns 200" bar): a live request
+must return a non-empty ranked feed, with ``trust_policy`` provably
+FAIL_CLOSED (the refusal path must actually fire against a stale/absent
+snapshot), every score in ``[0, 1]``, and the served order identical to a
+direct in-process ``rank_feed()`` call on the same inputs. See
+``tests/test_service.py::test_r8_*`` for the automated proof, not a manual
+curl.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import json
+import logging
+import os
+import re
+import threading
+import time
+from collections.abc import Callable
+from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any, Generic, TypeVar
+from urllib.parse import ParseResult, parse_qs, urlparse
+
+from recsys import db as _recsys_db_pkg  # noqa: F401  (see recsys.db.store import below)
+from recsys.author_prior_cache import (
+    DEFAULT_CHUNK_SIZE,
+    DEFAULT_DISCOVERY_DAYS,
+    DEFAULT_DISCOVERY_LIMIT,
+    AuthorPriorCache,
+    build_warm_author_priors,
+)
+from recsys.config import DEFAULT_SETTINGS, HafsqlConfig, LiteConfig, Settings
+from recsys.contracts import NormContext, ScoredCandidate, ViewerProfile
+from recsys.db import store as recsys_store
+from recsys.io.hafsql import HafsqlClient
+from recsys.norm_builder import build_window_norm
+from recsys.pipeline import (
+    ALS_DRIFT_REJECTIONS,
+    TRUST_DEGRADATION,
+    MissingTrustError,
+    TrustPolicy,
+    TrustSnapshot,
+    rank_feed,
+)
+from recsys.viewer import build_viewer_profile
+
+logger = logging.getLogger("recsys.service.app")
+
+# Same env var `recsys/io/hafsql.py` (A15) and `recsys/db/store.py` (A6)
+# already read for the recsys DB connection — kept as a local literal rather
+# than importing either module's private constant, since this module must
+# stay decoupled from their internal naming.
+_RECSYS_DSN_ENV = "RECSYS_DATABASE_URL"
+
+# Loose Hive-account-name sanity check (real chain rules are more precise:
+# dot-separated segments, no leading/trailing/doubled hyphens per segment —
+# not reproduced in full here). This exists to reject obviously-junk input
+# before it spends a live round trip, not as the injection defense — every
+# query this service reaches (via `recsys.viewer`/`recsys.io.hafsql`) is
+# parameterized regardless of what reaches it.
+_ACCOUNT_RE = re.compile(r"^[a-z][a-z0-9.-]{1,15}$")
+
+# ★ B3 (2026-08-05) — LUMEN LITE VIEWER IDENTITIES.
+#
+# A lite user has no Hive account. Their id is a 26-char Crockford base32 ULID
+# (48-bit ms timestamp + 80 bits CSPRNG), generated by
+# `frontend/apps/blog/lib/lite/ids.ts` — alphabet `0123456789ABCDEFGHJKMNPQRSTVWXYZ`,
+# which deliberately omits I, L, O and U. Kept byte-identical to that file; if
+# the frontend's alphabet or length ever changes, this must change with it.
+#
+# WHY THIS WAS A BLOCKER: `_ACCOUNT_RE` requires a lowercase leading letter and
+# caps length at 16, so EVERY lite id failed it and `/feed?viewer=<lite-id>`
+# returned 400 — the entire Lite tier could not obtain a feed at all, while the
+# product treats lite accounts as first-class. Verified before the fix: a real
+# 26-char ULID matched neither as generated nor lowercased.
+#
+# The two alphabets cannot collide: a Hive name must start [a-z] and is at most
+# 16 chars; a lite id is exactly 26 and uppercase-only. So `_viewer_is_lite`
+# below is a total, unambiguous discriminator, not a heuristic.
+_LITE_ID_RE = re.compile(r"^[0-9A-HJKMNP-TV-Z]{26}$")
+
+
+def _valid_account(name: str) -> bool:
+    """Cheap plausibility check before spending a live round trip. As the note
+    above `_ACCOUNT_RE` says, this is NOT the injection defense — every query
+    downstream is parameterized regardless of what reaches it."""
+    return (bool(_ACCOUNT_RE.match(name)) and len(name) <= 16) or bool(_LITE_ID_RE.match(name))
+
+
+def _viewer_is_lite(name: str) -> bool:
+    """True for a Lumen Lite identity, which has no chain-side follow/mute list
+    and therefore cannot be profiled from HAFSQL at all."""
+    return bool(_LITE_ID_RE.match(name))
+
+
+def _csv_param(qs: dict[str, list[str]], key: str) -> frozenset[str] | None:
+    """Parse a comma-separated query parameter into a set.
+
+    Returns ``None`` when the parameter is ABSENT (meaning "derive it" / "ask
+    the chain") and a possibly-EMPTY frozenset when it is present. Collapsing
+    those two into a falsy check would make ``?tags=`` silently mean "go derive
+    tags from chain history", which is the opposite of what a caller sending an
+    empty pick list is asking for.
+
+    Note `parse_qs` drops empty values by default, so `?tags=` does not appear
+    in `qs` at all; the `in` check below is against the caller sending the key
+    with only separators or whitespace (e.g. `?tags=,`), which IS present and
+    IS an explicit empty set.
+    """
+    if key not in qs:
+        return None
+    return frozenset(part.strip() for value in qs[key] for part in value.split(",") if part.strip())
+
+
+# ---------------------------------------------------------------------------
+# _TimerCache — build-once-refresh-on-a-timer, never inside a request.
+# ---------------------------------------------------------------------------
+
+T = TypeVar("T")
+
+
+class _TimerCache(Generic[T]):
+    """Builds a ``T`` once (blocking, via :meth:`warm`), then refreshes it on
+    a background daemon thread every ``refresh_s`` seconds. The request path
+    only ever reads :attr:`value` — it never triggers a rebuild, which is the
+    property the OPERATIONAL CONSTRAINT (module docstring) requires."""
+
+    def __init__(self, name: str, builder: Callable[[], T], refresh_s: float) -> None:
+        self._name = name
+        self._builder = builder
+        self._refresh_s = refresh_s
+        self._lock = threading.Lock()
+        self._value: T | None = None
+        self._last_built_monotonic: float | None = None
+        self._last_built_wall: datetime | None = None
+        self.build_count = 0
+        self.build_failures = 0
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def warm(self, *, guard: bool = False) -> None:
+        """Blocking initial build, called before the server accepts any
+        connections. ``guard=True`` logs-and-continues (leaving ``value`` at
+        ``None``) instead of raising on failure — for the trust snapshot,
+        where "nothing persisted yet" is an expected cold-start state that
+        ``rank_feed``'s own FAIL_CLOSED already answers correctly (503, not a
+        crash). ``guard=False`` (the default, used for the norm context) lets
+        a startup failure propagate and crash the process: a NormContext that
+        cannot be built means no request could ever be ranked, so failing
+        loudly at boot beats accepting traffic that can only 503 forever."""
+        try:
+            self._rebuild()
+        except Exception:
+            self.build_failures += 1
+            if guard:
+                logger.exception(
+                    "%s: initial build failed — starting with no cached value; "
+                    "dependent requests are refused until the next successful "
+                    "background refresh.",
+                    self._name,
+                )
+                return
+            raise
+
+    def start_background_refresh(self) -> None:
+        if self._thread is not None:
+            return
+        self._thread = threading.Thread(
+            target=self._loop, name=f"{self._name}-refresh", daemon=True
+        )
+        self._thread.start()
+
+    def _loop(self) -> None:
+        while not self._stop.wait(self._refresh_s):
+            try:
+                self._rebuild()
+            except Exception:
+                self.build_failures += 1
+                logger.exception(
+                    "%s: background refresh failed — keeping the last-known-good "
+                    "cached value (age %.0fs); a transient failure must never "
+                    "silently discard a good cache.",
+                    self._name,
+                    self.age_s if self.age_s is not None else -1.0,
+                )
+
+    def _rebuild(self) -> None:
+        value = self._builder()
+        with self._lock:
+            self._value = value
+            self._last_built_monotonic = time.monotonic()
+            self._last_built_wall = datetime.now(UTC)
+            self.build_count += 1
+
+    @property
+    def value(self) -> T | None:
+        with self._lock:
+            return self._value
+
+    @property
+    def last_built_wall(self) -> datetime | None:
+        with self._lock:
+            return self._last_built_wall
+
+    @property
+    def age_s(self) -> float | None:
+        with self._lock:
+            if self._last_built_monotonic is None:
+                return None
+            return time.monotonic() - self._last_built_monotonic
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=5)
+
+
+class _ViewerProfileCache:
+    """Per-account TTL cache for ``build_viewer_profile`` — the per-VIEWER
+    analogue of :class:`_TimerCache` above. Unlike the norm/snapshot (shared,
+    proactively refreshed), a profile is per-account and unbounded in
+    cardinality, so it is cached LAZILY: built on first request for that
+    account, reused until it ages out.
+
+    Exists because ``recsys.viewer.derive_interest_tags``'s voting-history
+    half is measured live at ~0.7-4s (see that module's own note) — cheap
+    enough for a genuine per-viewer login/profile-build, too expensive to
+    redo on every single feed poll from the same viewer.
+    """
+
+    def __init__(self, ttl_s: float, max_entries: int) -> None:
+        self._ttl_s = ttl_s
+        self._max_entries = max(1, max_entries)
+        self._lock = threading.Lock()
+        self._entries: dict[str, tuple[float, ViewerProfile]] = {}
+
+    def get(self, account: str, builder: Callable[[], ViewerProfile]) -> ViewerProfile:
+        now_m = time.monotonic()
+        with self._lock:
+            cached = self._entries.get(account)
+            if cached is not None and now_m - cached[0] < self._ttl_s:
+                return cached[1]
+        profile = builder()
+        with self._lock:
+            if account not in self._entries and len(self._entries) >= self._max_entries:
+                # Cheap unbounded-growth guard, not real LRU: evict whatever
+                # is oldest by insertion order (dicts preserve it, py3.7+).
+                # Phase-0 traffic does not need a precise eviction policy.
+                self._entries.pop(next(iter(self._entries)))
+            self._entries[account] = (now_m, profile)
+        return profile
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._entries)
+
+
+def _load_snapshot_fixed(dsn: str | None) -> TrustSnapshot | None:
+    """Load the current :class:`TrustSnapshot`, applying a fix for a bug this
+    builder found (and does not own the file to fix directly) in
+    ``recsys.db.store.load_snapshot``.
+
+    ★★ A CROSS-FILE BUG WORKED AROUND, NOT FIXED (found 2026-08-04, live-
+    verified against a real recsys Postgres). ``load_snapshot`` returns a
+    ``PersistedSnapshot(snapshot, built_at)`` — but ``snapshot.built_at``
+    (the field ``recsys.pipeline._trust_is_fresh`` actually reads for A8.3
+    staleness) is left at its dataclass default, ``None``, on EVERY load.
+    Only the wrapper's OWN ``built_at`` carries the real timestamp. Proven
+    live: persisted a snapshot with ``built_at`` 400 days in the past,
+    ``_trust_is_fresh(persisted.snapshot, now=now, max_age_days=14)``
+    returned ``True`` (a 400-day-old snapshot reading as fresh — exactly the
+    silent-staleness gap A8.3 exists to close), while
+    ``_trust_is_fresh(dataclasses.replace(persisted.snapshot,
+    built_at=persisted.built_at), ...)`` correctly returned ``False``. Any
+    caller that does the natural, obvious thing —
+    ``rank_feed(..., snapshot=load_snapshot().snapshot)`` — silently defeats
+    its own staleness gate. This is exactly the shape R8 says to prove:
+    "assert the refusal path actually fires with a stale ... snapshot", and
+    it would NOT fire without this fix. Reported for ``recsys/db/store.py``'s
+    owner to fix at the source (make ``load_snapshot`` stamp ``built_at`` on
+    the returned dataclass directly) — applied here via ``dataclasses.
+    replace`` in the meantime, since this builder does not own that file.
+
+    Returns ``None`` — never raises — for the two EXPECTED "no snapshot"
+    states: no ``RECSYS_DATABASE_URL`` configured at all (permanent until an
+    operator sets one), and a DSN configured but nothing persisted yet
+    (``load_snapshot`` itself returns ``None`` for this — "a real, expected
+    state, not an error", per its own docstring). ``rank_feed``'s
+    FAIL_CLOSED default already answers a ``None`` snapshot correctly (503
+    via :class:`MissingTrustError`, never a crash). Any OTHER exception (a
+    genuine DB error) is left to PROPAGATE: :meth:`_TimerCache.warm` (guarded
+    at startup) and :meth:`_TimerCache._loop` (background refresh) both treat
+    that as "could not refresh this time", not "the snapshot is gone" — a
+    transient recsys-DB blip must never silently erase a good cached
+    snapshot.
+    """
+    resolved_dsn = dsn if dsn is not None else os.environ.get(_RECSYS_DSN_ENV)
+    if not resolved_dsn:
+        logger.warning(
+            "trust_snapshot cache: no %s configured — treating the trust snapshot "
+            "as permanently absent; /feed will refuse under FAIL_CLOSED until one "
+            "is configured and a batch has run.",
+            _RECSYS_DSN_ENV,
+        )
+        return None
+    persisted = recsys_store.load_snapshot(resolved_dsn)
+    if persisted is None:
+        return None
+    return replace(persisted.snapshot, built_at=persisted.built_at)
+
+
+def _default_now() -> datetime:
+    return datetime.now(UTC)
+
+
+@dataclass(frozen=True)
+class ServiceConfig:
+    host: str = "0.0.0.0"
+    port: int = 8000
+    #: How often the shared NormContext is rebuilt in the background. 30 min
+    #: default: `sourcing_freshness_days` (3d default) changes slowly, and a
+    #: rebuild costs several seconds (window_posts hydration) that must never
+    #: land inside a request.
+    norm_refresh_s: float = 1800.0
+    #: How often the shared TrustSnapshot is reloaded from the recsys DB.
+    #: 10 min default: the batch runs weekly, so promptness is not the
+    #: concern — bounding how long a stale operator DSN misconfiguration or a
+    #: fresh batch run takes to be *noticed* is.
+    snapshot_refresh_s: float = 600.0
+    #: Per-account ViewerProfile TTL — see `_ViewerProfileCache`.
+    viewer_cache_ttl_s: float = 300.0
+    viewer_cache_max_entries: int = 10_000
+    #: How often the shared author-pooled engagement prior (§6) is
+    #: rebuilt in the background — see `recsys.author_prior_cache`'s module
+    #: docstring for why this is on the SAME cache/timer basis as
+    #: `norm_refresh_s` rather than a per-request computation. 30 min
+    #: default, matching `norm_refresh_s`: the prior is a per-author WINDOW
+    #: aggregate over `settings.history.quality_prior_days` (45d default),
+    #: which moves slowly. Live-measured 2026-08-04 (this builder), stated
+    #: honestly rather than rounded down: a FULL warm build over the
+    #: default 7-day/6000-author discovery scope (2,227 real distinct
+    #: authors on the live network at measurement time) took 508s (8.5
+    #: min) — ~62s of per-author `stake_lineage` calls plus chunked
+    #: `author_engagement`, ~28% of this 1800s default. That is real
+    #: background cost, but it is BACKGROUND cost: it must never land inside
+    #: a request (`_TimerCache`'s own discipline, mirrored here), and 1800s
+    #: leaves comfortable room for it even at today's network size. Shrink
+    #: this default only alongside re-measuring the warm-build time it would
+    #: then need to fit inside.
+    author_prior_refresh_s: float = 1800.0
+    #: How many days back the warm-set author UNIVERSE is discovered from
+    #: (see `recsys.author_prior_cache.discover_recent_authors`) — NOT the
+    #: window the prior itself is pooled over (that stays
+    #: `settings.history.quality_prior_days`, unconditionally, to match
+    #: `rank_feed`'s own `quality_since`). Defaults to
+    #: `recsys.author_prior_cache.DEFAULT_DISCOVERY_DAYS` (7d — the WIDEST
+    #: candidate-sourcing horizon any lane in `gather_candidates` uses).
+    author_prior_discovery_days: int = DEFAULT_DISCOVERY_DAYS
+    #: Hard cap on the warm-set size — see
+    #: `recsys.author_prior_cache.DEFAULT_DISCOVERY_LIMIT`'s own docstring
+    #: for the live-measured headroom this leaves today.
+    author_prior_discovery_limit: int = DEFAULT_DISCOVERY_LIMIT
+    #: Authors per `author_engagement` call during a warm build — see
+    #: `recsys.author_prior_cache`'s module docstring for the live-measured
+    #: cost curve this default is chosen from.
+    author_prior_chunk_size: int = DEFAULT_CHUNK_SIZE
+
+    @classmethod
+    def from_env(cls) -> ServiceConfig:
+        return cls(
+            host=os.environ.get("RECSYS_SERVICE_HOST", cls.host),
+            port=int(os.environ.get("RECSYS_SERVICE_PORT", cls.port)),
+            norm_refresh_s=float(os.environ.get("RECSYS_NORM_REFRESH_S", cls.norm_refresh_s)),
+            snapshot_refresh_s=float(
+                os.environ.get("RECSYS_SNAPSHOT_REFRESH_S", cls.snapshot_refresh_s)
+            ),
+            viewer_cache_ttl_s=float(
+                os.environ.get("RECSYS_VIEWER_CACHE_TTL_S", cls.viewer_cache_ttl_s)
+            ),
+            viewer_cache_max_entries=int(
+                os.environ.get(
+                    "RECSYS_VIEWER_CACHE_MAX_ENTRIES", cls.viewer_cache_max_entries
+                )
+            ),
+            author_prior_refresh_s=float(
+                os.environ.get("RECSYS_AUTHOR_PRIOR_REFRESH_S", cls.author_prior_refresh_s)
+            ),
+            author_prior_discovery_days=int(
+                os.environ.get(
+                    "RECSYS_AUTHOR_PRIOR_DISCOVERY_DAYS", cls.author_prior_discovery_days
+                )
+            ),
+            author_prior_discovery_limit=int(
+                os.environ.get(
+                    "RECSYS_AUTHOR_PRIOR_DISCOVERY_LIMIT", cls.author_prior_discovery_limit
+                )
+            ),
+            author_prior_chunk_size=int(
+                os.environ.get("RECSYS_AUTHOR_PRIOR_CHUNK_SIZE", cls.author_prior_chunk_size)
+            ),
+        )
+
+
+@dataclass
+class ServiceState:
+    """Everything one running service process holds: the pooled gateway, the
+    two timer-refreshed caches, the per-viewer cache, and ``now_fn`` — the
+    ONE seam this module exposes for deterministic testing (R8's "served
+    order is IDENTICAL to a direct in-process rank_feed() call" proof needs
+    the HTTP path and the comparison call to share an identical ``now``; see
+    ``tests/test_service.py``). Production never overrides it; the default is
+    plain wall-clock UTC."""
+
+    config: ServiceConfig
+    settings: Settings
+    gateway: HafsqlClient
+    recsys_dsn: str | None
+    norm_cache: _TimerCache[NormContext]
+    snapshot_cache: _TimerCache[TrustSnapshot | None]
+    viewer_cache: _ViewerProfileCache
+    #: The author-pooled engagement prior (§6) warm cache — see
+    #: `recsys.author_prior_cache`'s module docstring. NOT YET READ by
+    #: `build_feed`/`rank_feed`: `recsys.pipeline._author_priors` still
+    #: calls `gateway.author_engagement(...)` directly on every request, and
+    #: this builder does not own `recsys/pipeline.py` — see this class's own
+    #: module docstring note at the `rank_feed` call site in `build_feed`
+    #: below, and the build report, for the exact change needed to wire it
+    #: in. Warmed and refreshed regardless, so `stats()` and `/health` are
+    #: already meaningful ahead of that wiring landing.
+    author_prior_cache: AuthorPriorCache
+    now_fn: Callable[[], datetime] = field(default=_default_now)
+
+    @classmethod
+    def build(
+        cls,
+        *,
+        config: ServiceConfig | None = None,
+        settings: Settings = DEFAULT_SETTINGS,
+        hafsql_config: HafsqlConfig | None = None,
+        lite_config: LiteConfig | None = None,
+        recsys_dsn: str | None = None,
+    ) -> ServiceState:
+        cfg = config or ServiceConfig.from_env()
+        resolved_dsn = recsys_dsn if recsys_dsn is not None else os.environ.get(_RECSYS_DSN_ENV)
+        resolved_hafsql_config = hafsql_config or HafsqlConfig.from_env()
+        gateway = HafsqlClient(resolved_hafsql_config, lite_config, recsys_dsn=resolved_dsn)
+        norm_cache: _TimerCache[NormContext] = _TimerCache(
+            "norm_context",
+            lambda: build_window_norm(gateway, settings, now=datetime.now(UTC)),
+            cfg.norm_refresh_s,
+        )
+        snapshot_cache: _TimerCache[TrustSnapshot | None] = _TimerCache(
+            "trust_snapshot",
+            lambda: _load_snapshot_fixed(resolved_dsn),
+            cfg.snapshot_refresh_s,
+        )
+        # Closes over the LOCAL `snapshot_cache` above (not `self`/`state`,
+        # which does not exist yet at this point in `build()`) so the warm
+        # builder always reads the CURRENT shared TrustSnapshot at rebuild
+        # time — see `recsys.author_prior_cache.build_warm_author_priors`'s
+        # own docstring for why the exclusion/breadth budget it computes
+        # must track the same snapshot `_author_priors` would use live.
+        author_prior_cache = AuthorPriorCache(
+            "author_prior",
+            lambda: build_warm_author_priors(
+                gateway,
+                resolved_hafsql_config,
+                settings,
+                lambda: snapshot_cache.value,
+                discovery_days=cfg.author_prior_discovery_days,
+                discovery_limit=cfg.author_prior_discovery_limit,
+                chunk_size=cfg.author_prior_chunk_size,
+            ),
+            cfg.author_prior_refresh_s,
+        )
+        viewer_cache = _ViewerProfileCache(cfg.viewer_cache_ttl_s, cfg.viewer_cache_max_entries)
+        return cls(
+            config=cfg,
+            settings=settings,
+            gateway=gateway,
+            recsys_dsn=resolved_dsn,
+            norm_cache=norm_cache,
+            snapshot_cache=snapshot_cache,
+            viewer_cache=viewer_cache,
+            author_prior_cache=author_prior_cache,
+        )
+
+    def warm(self) -> None:
+        """Blocking. Call once, before the server starts accepting
+        connections — see `_TimerCache.warm`'s own docstring for why the norm
+        build is fatal-on-failure and the snapshot build is not."""
+        logger.info(
+            "service: warming NormContext cache (blocking — window_posts is a few "
+            "seconds at the default window)..."
+        )
+        self.norm_cache.warm(guard=False)
+        logger.info("service: warming TrustSnapshot cache (blocking)...")
+        self.snapshot_cache.warm(guard=True)
+        logger.info(
+            "service: warming author-prior cache (blocking — chunked "
+            "author_engagement over the warm-set author universe; see "
+            "recsys.author_prior_cache's module docstring for measured cost)..."
+        )
+        self.author_prior_cache.warm(guard=True)
+
+    def start_background_refresh(self) -> None:
+        self.norm_cache.start_background_refresh()
+        self.snapshot_cache.start_background_refresh()
+        self.author_prior_cache.start_background_refresh()
+
+    def close(self) -> None:
+        self.norm_cache.stop()
+        self.snapshot_cache.stop()
+        self.author_prior_cache.stop()
+        for pool_attr in ("_pool", "_recsys_pool"):
+            pool = getattr(self.gateway, pool_attr, None)
+            if pool is not None:
+                try:
+                    pool.closeall()
+                except Exception:
+                    logger.warning("service: error closing gateway %s", pool_attr, exc_info=True)
+
+
+# ---------------------------------------------------------------------------
+# The core assembly (A10.2) — importable and directly callable with no HTTP
+# involved at all, which is what lets `tests/test_service.py` compare it
+# against the HTTP response for the R8 "identical order" proof.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class FeedResult:
+    account: str
+    now: datetime
+    viewer: ViewerProfile
+    scored: list[ScoredCandidate]
+
+
+class FeedUnavailableError(RuntimeError):
+    """What ``build_feed`` raises for every REFUSAL ``rank_feed`` can produce
+    — carries enough for the HTTP layer to pick the right status/body without
+    re-deriving it. ``kind`` is a short machine-readable tag, not free text."""
+
+    def __init__(
+        self, kind: str, detail: str, *, norm_samples: dict[str, int] | None = None
+    ) -> None:
+        super().__init__(detail)
+        self.kind = kind
+        self.detail = detail
+        self.norm_samples = norm_samples
+
+
+def build_feed(
+    state: ServiceState,
+    account: str,
+    *,
+    explicit_interest_tags: frozenset[str] | None = None,
+    explicit_follows: frozenset[str] | None = None,
+) -> FeedResult:
+    """A10.2's assembly, in one function: cached NormContext + cached
+    TrustSnapshot + a (per-viewer-cached) real ViewerProfile ->
+    ``rank_feed(..., trust_policy=TrustPolicy.FAIL_CLOSED)``. Never passes
+    ``TrustPolicy.WARN`` — see the module docstring.
+
+    ★ B3 (2026-08-05). The two ``explicit_*`` arguments carry caller-supplied
+    viewer state. They serve two constituencies:
+
+      * **Lumen Lite viewers**, whose follow graph exists only in Lumen's own
+        store — see ``_viewer_is_lite`` and ``build_viewer_profile``'s note.
+      * **The signup interest picker** (spec D3) for EITHER tier, which until
+        now had no consumer anywhere in the package: ``explicit_interest_tags``
+        existed on ``build_viewer_profile`` and was never once passed by
+        production code, so a brand-new account's picks could not reach the
+        ranker and it fell through to popular-fallback padding.
+
+    ★★ THESE REQUESTS BYPASS ``viewer_cache`` DELIBERATELY. That cache is keyed
+    on ``account`` ALONE, so caching a profile built from per-request tags or
+    follows would serve the FIRST request's picks to every later request from
+    the same viewer — stale in a way no test keyed on account would notice. The
+    bypass is close to free for the case that needs it: with follows and tags
+    both supplied there is no chain query left to make, which is exactly the
+    lite path. A request with neither argument keeps the cached path unchanged.
+    """
+    now = state.now_fn()
+    norm = state.norm_cache.value
+    if norm is None:
+        raise FeedUnavailableError(
+            "norm_unavailable",
+            "NormContext has not been built yet (service is still warming up)",
+        )
+    snapshot = state.snapshot_cache.value  # None is a legitimate value — FAIL_CLOSED handles it
+
+    # A lite identity has no chain-side follow/mute list at all, so its profile
+    # must NEVER fall through to `follows_of`/`mutes_of` — those would query
+    # HAFSQL for an account name that does not exist on chain. Absent an
+    # explicit list, a lite viewer's graph is empty (the signup state), which is
+    # `frozenset()` and emphatically NOT `None`.
+    is_lite = _viewer_is_lite(account)
+    follows_arg = explicit_follows
+    tags_arg = explicit_interest_tags
+    mutes_arg: frozenset[str] | None = None
+    if is_lite:
+        if follows_arg is None:
+            follows_arg = frozenset()
+        mutes_arg = frozenset()
+        if tags_arg is None:
+            # Same reason as follows/mutes: `derive_interest_tags` reads the
+            # account's own chain history, which for a ULID is a live query
+            # guaranteed to return nothing. A lite viewer who sent no picks has
+            # no interests yet — that is an empty set, not something to derive.
+            tags_arg = frozenset()
+
+    def _build() -> ViewerProfile:
+        return build_viewer_profile(
+            account,
+            state.gateway,
+            now=now,
+            settings=state.settings,
+            explicit_interest_tags=tags_arg,
+            explicit_follows=follows_arg,
+            explicit_mutes=mutes_arg,
+        )
+
+    if tags_arg is not None or follows_arg is not None:
+        viewer = _build()
+    else:
+        viewer = state.viewer_cache.get(account, builder=_build)
+
+    # ★ WIRED 2026-08-04. `state.author_prior_cache.get` is exactly the
+    # `Callable[[frozenset[str]], Mapping[str, AuthorEngagement]]` shape
+    # `rank_feed` wants — no adapter. Without it, `_author_priors` calls
+    # `author_engagement(...)` fresh on every request, which EXCEEDS the live
+    # 15s statement timeout for a realistic candidate pool (measured: 150 busy
+    # authors -> QueryCanceled at 16.1s). With it, that same lookup is 0.042ms.
+    #
+    # A miss degrades to the post's own engagement — the documented pre-existing
+    # behaviour — and the cache counts and logs misses and reports them on
+    # /health, because that degradation silently moves ~80% of the composite.
+    try:
+        scored = rank_feed(
+            viewer,
+            state.gateway,
+            norm,
+            now=now,
+            settings=state.settings,
+            snapshot=snapshot,
+            trust_policy=TrustPolicy.FAIL_CLOSED,
+            author_prior_cache=state.author_prior_cache.get,
+        )
+    except MissingTrustError as exc:
+        raise FeedUnavailableError("trust_unavailable", str(exc)) from exc
+    except ValueError as exc:
+        raise FeedUnavailableError(
+            "norm_unavailable",
+            str(exc),
+            norm_samples={
+                "vote_signal": len(norm.vote_signal_samples),
+                "reputation": len(norm.reputation_samples),
+                "organic": len(norm.organic_samples),
+            },
+        ) from exc
+    except Exception as exc:
+        # ★ OPERATIONAL FINDING (2026-08-04, found running this service for
+        # real against the live mirror, including containerized). `rank_feed`
+        # -> `_author_priors` -> `HafsqlClient.author_engagement` (both files
+        # this builder does not own) queries `hafsql.comments` filtered by
+        # the FULL candidate-author set, and cost scales with that set's
+        # size. Live-measured: ~0.5-1s for 3 authors, but a real, ordinary,
+        # well-followed account (1,731 follows) hit the 15s statement timeout
+        # — reproduced repeatedly running this exact service in a real Docker
+        # container against the real mirror (`psycopg.errors.QueryCanceled`
+        # inside `author_engagement`). This is NOT a bug this module
+        # introduced — `rank_feed` had no production caller before A10 — but
+        # A10 is what makes it a REQUEST a real viewer can trigger, so it
+        # gets handled here rather than left as a stack trace. A DB timeout
+        # deep in the gateway is an operational, likely-transient condition —
+        # the same posture `MissingTrustError` already gets (503, not 500) —
+        # not evidence of a bug in the ranking logic itself. Full traceback
+        # still goes to the server log (`exc_info=True`) so it stays
+        # diagnosable; only the HTTP-facing classification changes. Report:
+        # `author_engagement`'s query likely needs either a narrower author
+        # set, a dedicated shorter timeout, or an index — out of this
+        # builder's file ownership to fix directly.
+        logger.error(
+            "build_feed: unexpected error from the gateway while ranking for "
+            "viewer=%s — treating as an operational/upstream condition (503), "
+            "not an application bug (500). See traceback.",
+            account,
+            exc_info=True,
+        )
+        raise FeedUnavailableError("upstream_error", f"{type(exc).__name__}: {exc}") from exc
+
+    return FeedResult(account=account, now=now, viewer=viewer, scored=scored)
+
+
+def serialize_scored(scored: ScoredCandidate) -> dict[str, Any]:
+    return {
+        "key": scored.post.key,
+        "author": scored.post.author,
+        "permlink": scored.post.permlink,
+        "category": scored.post.category,
+        "created": scored.post.created.isoformat(),
+        "source": scored.source.value,
+        "score": {
+            "vote_norm": scored.score.vote_norm,
+            "rep_norm": scored.score.rep_norm,
+            "organic": scored.score.organic,
+            "final": scored.score.final,
+        },
+    }
+
+
+def serialize_feed(result: FeedResult) -> dict[str, Any]:
+    return {
+        "viewer": result.account,
+        "generated_at": result.now.isoformat(),
+        "count": len(result.scored),
+        "posts": [serialize_scored(sc) for sc in result.scored],
+    }
+
+
+def health_payload(state: ServiceState) -> dict[str, Any]:
+    """A10.3 — snapshot age, norm sample counts, pool stats, and the two
+    counters `pipeline.py` already exposes for exactly this
+    (`TRUST_DEGRADATION`, `ALS_DRIFT_REJECTIONS`) — wired, not reinvented."""
+    norm = state.norm_cache.value
+    snapshot = state.snapshot_cache.value
+    author_prior_stats = state.author_prior_cache.stats()
+    now = datetime.now(UTC)
+
+    snapshot_age_days = None
+    if snapshot is not None and snapshot.built_at is not None:
+        snapshot_age_days = (now - snapshot.built_at).total_seconds() / 86400.0
+
+    pool_connections_opened = None
+    with contextlib.suppress(Exception):
+        # defensive: `_pool` is another builder's private implementation detail.
+        pool_connections_opened = state.gateway._pool.connections_opened
+
+    return {
+        # A10.4 — whole-site cold start is a GLOBAL gate (norm.min_samples):
+        # below it every viewer gets nothing. Reported explicitly here so
+        # that state is diagnosable in one look, not as a wall of 503s.
+        "status": "ok" if norm is not None else "starting",
+        "norm": {
+            "present": norm is not None,
+            "vote_signal_samples": len(norm.vote_signal_samples) if norm else 0,
+            "reputation_samples": len(norm.reputation_samples) if norm else 0,
+            "organic_samples": len(norm.organic_samples) if norm else 0,
+            "min_samples": state.settings.norm.min_samples,
+            "last_built": (
+                state.norm_cache.last_built_wall.isoformat()
+                if state.norm_cache.last_built_wall
+                else None
+            ),
+            "age_s": state.norm_cache.age_s,
+            "refresh_s": state.config.norm_refresh_s,
+            "build_count": state.norm_cache.build_count,
+            "build_failures": state.norm_cache.build_failures,
+        },
+        "trust_snapshot": {
+            "present": snapshot is not None,
+            "built_at": (
+                snapshot.built_at.isoformat() if snapshot and snapshot.built_at else None
+            ),
+            "age_days": snapshot_age_days,
+            "max_age_days": state.settings.trust.max_snapshot_age_days,
+            "degraded": snapshot.degraded if snapshot is not None else None,
+            "graph_creds": len(snapshot.graph_creds) if snapshot is not None else 0,
+            "last_refresh_attempt": (
+                state.snapshot_cache.last_built_wall.isoformat()
+                if state.snapshot_cache.last_built_wall
+                else None
+            ),
+            "refresh_s": state.config.snapshot_refresh_s,
+            "build_count": state.snapshot_cache.build_count,
+            "build_failures": state.snapshot_cache.build_failures,
+        },
+        "viewer_cache": {"entries": len(state.viewer_cache)},
+        # ★ Warmed/refreshed already; NOT YET READ by `build_feed` — see
+        # `ServiceState.author_prior_cache`'s own docstring. `authors_hit`/
+        # `authors_missed`/`miss_rate` will stay 0/0/None until the reported
+        # `recsys/pipeline.py` change lands and something actually calls
+        # `.get()`; `authors_cached`/`build_count`/`age_s` are meaningful now.
+        "author_prior_cache": {
+            "authors_cached": author_prior_stats.authors_cached,
+            "last_built": (
+                author_prior_stats.last_built_wall.isoformat()
+                if author_prior_stats.last_built_wall
+                else None
+            ),
+            "age_s": author_prior_stats.age_s,
+            "refresh_s": author_prior_stats.refresh_s,
+            "build_count": author_prior_stats.build_count,
+            "build_failures": author_prior_stats.build_failures,
+            "authors_requested": author_prior_stats.authors_requested,
+            "authors_hit": author_prior_stats.authors_hit,
+            "authors_missed": author_prior_stats.authors_missed,
+            "miss_rate": author_prior_stats.miss_rate,
+        },
+        "pool": {"connections_opened": pool_connections_opened},
+        "counters": {
+            "trust_degradation": TRUST_DEGRADATION.count,
+            "als_drift_rejections": ALS_DRIFT_REJECTIONS.count,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# HTTP layer — thin. All decisions above are already made by build_feed/
+# health_payload; this just routes and serializes.
+# ---------------------------------------------------------------------------
+
+
+class _FeedHTTPServer(ThreadingHTTPServer):
+    """Carries `state` on the SERVER object (not the per-connection handler)
+    — the standard `http.server` pattern for sharing state across handler
+    instances without a module-level global."""
+
+    daemon_threads = True
+
+    def __init__(
+        self, server_address: tuple[str, int], handler_cls: type[BaseHTTPRequestHandler],
+        state: ServiceState,
+    ) -> None:
+        self.state = state
+        super().__init__(server_address, handler_cls)
+
+
+class FeedRequestHandler(BaseHTTPRequestHandler):
+    server: _FeedHTTPServer  # narrows self.server's type for readability
+    server_version = "recsys-feed/0.1"
+
+    @property
+    def state(self) -> ServiceState:
+        return self.server.state
+
+    def log_message(self, format: str, *args: Any) -> None:
+        logger.info("%s - %s", self.address_string(), format % args)
+
+    def _write_json(self, status: int, payload: dict[str, Any]) -> None:
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self) -> None:
+        parsed = urlparse(self.path)
+        if parsed.path == "/health":
+            self._write_json(200, health_payload(self.state))
+            return
+        if parsed.path == "/feed":
+            self._handle_feed(parsed)
+            return
+        self._write_json(404, {"error": "not_found"})
+
+    def _handle_feed(self, parsed: ParseResult) -> None:
+        qs = parse_qs(parsed.query)
+        viewers = qs.get("viewer")
+        if not viewers or not viewers[0]:
+            self._write_json(
+                400,
+                {"error": "bad_request", "detail": "missing required 'viewer' query parameter"},
+            )
+            return
+        account = viewers[0]
+        if not _valid_account(account):
+            self._write_json(
+                400,
+                {
+                    "error": "bad_request",
+                    "detail": (
+                        "'viewer' is neither a plausible Hive account name nor a "
+                        "Lumen Lite identity"
+                    ),
+                },
+            )
+            return
+        # ★ B3 (2026-08-05). `tags` carries the signup interest picks (spec D3);
+        # `follows` carries a lite viewer's Lumen-side follow graph. Both are
+        # comma-separated. An ABSENT parameter is None ("derive it / ask the
+        # chain"); a PRESENT but empty one is an empty set ("supplied, and the
+        # viewer genuinely has none") — the same distinction
+        # `build_viewer_profile` documents, and the reason this parses with an
+        # explicit `in qs` check rather than a falsy one.
+        explicit_tags = _csv_param(qs, "tags")
+        explicit_follows = _csv_param(qs, "follows")
+        try:
+            result = build_feed(
+                self.state,
+                account,
+                explicit_interest_tags=explicit_tags,
+                explicit_follows=explicit_follows,
+            )
+        except FeedUnavailableError as exc:
+            # R8: MissingTrustError -> 503, never 500 — "trust is stale/absent" is
+            # an operational state with a fix, not a bug.
+            body: dict[str, Any] = {"error": exc.kind, "detail": exc.detail}
+            if exc.norm_samples is not None:
+                body["norm_samples"] = exc.norm_samples
+            self._write_json(503, body)
+            return
+        except Exception:
+            logger.exception("feed: unexpected error ranking for viewer=%s", account)
+            self._write_json(500, {"error": "internal_error"})
+            return
+        self._write_json(200, serialize_feed(result))
+
+
+def make_server(state: ServiceState) -> _FeedHTTPServer:
+    return _FeedHTTPServer((state.config.host, state.config.port), FeedRequestHandler, state)
+
+
+def main() -> int:
+    logging.basicConfig(
+        level=os.environ.get("RECSYS_LOG_LEVEL", "INFO"),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    # ★★ PRODUCTION SETTINGS COME FROM THE ENVIRONMENT, NOT `DEFAULT_SETTINGS`
+    # (2026-08-04). `Settings.from_env(production=True)` is what reads
+    # `LUMEN_EXPLORE_SEAT_SECRET` and REFUSES to start without it.
+    #
+    # This call site is the whole point of that machinery. The keyed MAC on the
+    # reserved new-author seat exists because the unkeyed version was grindable:
+    # 6 offline-ground account names took 85% of the seat platform-wide, with no
+    # votes and nothing ring-flagged. `from_env` was built and tested, and for a
+    # while NOTHING CALLED IT — the capability existed and was unreachable, which
+    # is the same defect class as a config that validates a contract it never
+    # applies. A service that boots on `DEFAULT_SETTINGS` boots with the critical
+    # still open and no warning.
+    #
+    # `RECSYS_PRODUCTION=0` opts out for local runs; anything else fails shut.
+    production = os.environ.get("RECSYS_PRODUCTION", "1") != "0"
+    settings = Settings.from_env(production=production)
+    if not production:
+        logger.warning(
+            "recsys.service.app: RECSYS_PRODUCTION=0 — running with the fixed "
+            "dev seat key and no fail-shut. Never serve real users this way."
+        )
+    state = ServiceState.build(settings=settings)
+    state.warm()
+    state.start_background_refresh()
+    server = make_server(state)
+    logger.info(
+        "recsys.service.app: listening on %s:%d", state.config.host, state.config.port
+    )
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.shutdown()
+        state.close()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+
+
+__all__ = [
+    "FeedRequestHandler",
+    "FeedResult",
+    "FeedUnavailableError",
+    "ServiceConfig",
+    "ServiceState",
+    "build_feed",
+    "health_payload",
+    "main",
+    "make_server",
+    "serialize_feed",
+    "serialize_scored",
+]

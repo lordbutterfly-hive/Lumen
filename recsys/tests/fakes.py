@@ -68,18 +68,14 @@ def make_viewer(
     *,
     follows: frozenset[str] = frozenset(),
     mutes: frozenset[str] = frozenset(),
-    subscribed_communities: frozenset[str] = frozenset(),
     interest_tags: frozenset[str] = frozenset(),
-    interest_communities: frozenset[str] = frozenset(),
     is_new: bool = False,
 ) -> ViewerProfile:
     return ViewerProfile(
         account=account,
         follows=follows,
         mutes=mutes,
-        subscribed_communities=subscribed_communities,
         interest_tags=interest_tags,
-        interest_communities=interest_communities,
         is_new=is_new,
     )
 
@@ -92,7 +88,6 @@ class FakeGateway:
         *,
         in_network: Sequence[Post] = (),
         oon: Sequence[Candidate] = (),
-        community: Sequence[Post] = (),
         tag: Sequence[Post] = (),
         edges: Sequence[EngagementEdge] = (),
         lineage: dict[str, frozenset[str]] | None = None,
@@ -103,7 +98,6 @@ class FakeGateway:
     ) -> None:
         self._in_network = list(in_network)
         self._oon = list(oon)
-        self._community = list(community)
         self._tag = list(tag)
         self._edges = list(edges)
         self._lineage = dict(lineage or {})
@@ -122,19 +116,15 @@ class FakeGateway:
     ) -> list[Candidate]:
         return self._oon[:limit]
 
-    def community_posts(
-        self, communities: frozenset[str], since: datetime, limit: int
-    ) -> list[Post]:
-        return self._community[:limit]
-
     def tag_posts(self, tags: frozenset[str], since: datetime, limit: int) -> list[Post]:
         return self._tag[:limit]
 
     def engagement_edges(self, since: datetime) -> list[EngagementEdge]:
         return list(self._edges)
 
-    def stake_lineage(self, author: str) -> frozenset[str]:
-        return self._lineage.get(author, frozenset())
+    # `stake_lineage` removed 2026-08-05 (B2) — the gateway protocol no longer
+    # declares it. `_lineage` is retained because subclassed stubs in
+    # tests/test_pipeline.py read it directly to model their own behaviour.
 
     def second_degree_engagers(
         self, post_keys: frozenset[str], follows: frozenset[str]

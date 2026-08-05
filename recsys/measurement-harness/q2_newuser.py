@@ -22,7 +22,6 @@ sys.path.insert(0, str(_HARNESS.parent))
 from collections import Counter
 
 from simworld import (
-    COMMUNITY,
     EPOCH,
     NOW,
     TAGS,
@@ -30,19 +29,27 @@ from simworld import (
     SimGateway,
     build_norm,
     build_world,
+    harness_settings,
     mean_rel_at_k,
     ndcg_at_k,
 )
 
-from recsys.config import Settings
 from recsys.contracts import EngagementEdge, ViewerProfile
 from recsys.pipeline import build_trust_snapshot, rank_feed
 
-world = build_world(seed=7)
+# SEED is an argument (matches q9's convention): the project's established
+# multi-seed calibration set is 7/11/23/42. Default unchanged (7).
+SEED = int(sys.argv[1]) if len(sys.argv) > 1 else 7
+world = build_world(seed=SEED)
 gw = SimGateway(world)
 norm = build_norm(world)
-settings = Settings()
-snap = build_trust_snapshot(gw, settings, since=EPOCH, now=NOW)
+# ★ B-07 (2026-08-04): routed through harness_settings() (mutate_panels.py).
+settings = harness_settings()
+# production=False, trusted_seeds=frozenset() EXPLICIT (C5/R2): synthetic
+# simworld accounts, no real curated seed lands in this graph.
+snap = build_trust_snapshot(
+    gw, settings, since=EPOCH, now=NOW, trusted_seeds=frozenset(), production=False
+)
 
 # ground-truth identity for the new user: loves photo
 NU = "newuser"
@@ -54,7 +61,6 @@ def feed(v, sn=snap):
 
 # ---- stage 0: brand-new, interest picks only ----
 v0 = ViewerProfile(account=NU, is_new=True,
-                   interest_communities=frozenset({COMMUNITY["photo"]}),
                    interest_tags=frozenset(TAGS["photo"]))
 f0 = feed(v0)
 posts0 = [sc.post for sc in f0]
@@ -75,7 +81,7 @@ print(f"\n[B] zero-pick user: feed size {len(fb)}, top-20 sources {dict(srcb)}, 
 # ---- gate reachability: what fraction of the post universe can each archetype see? ----
 est = "v-photo-00"
 vest = ViewerProfile(account=est, follows=world.follows[est],
-                     subscribed_communities=frozenset({COMMUNITY["photo"]}))
+                     interest_tags=frozenset(TAGS["photo"]))
 fest = feed(vest)
 photo_posts = [p for p in world.posts if world.accounts[p.author].topic == "photo"]
 photo_keys = {p.key for p in photo_posts}
@@ -121,9 +127,10 @@ for k in [1, 10, 50]:
     elif k >= 10:
         follows = frozenset(sorted(eng, key=lambda a: -eng[a])[:2])
     world.follows[NU] = follows
-    snap_k = build_trust_snapshot(gw2, settings, since=EPOCH, now=NOW)
+    snap_k = build_trust_snapshot(
+        gw2, settings, since=EPOCH, now=NOW, trusted_seeds=frozenset(), production=False
+    )
     vk = ViewerProfile(account=NU, is_new=True, follows=follows,
-                       interest_communities=frozenset({COMMUNITY["photo"]}),
                        interest_tags=frozenset(TAGS["photo"]))
     fk = feed(vk, sn=snap_k)
     pk = [sc.post for sc in fk]
@@ -137,3 +144,53 @@ print("\n[D] engagement growth (is_new=True kept; snapshot retrained each stage)
 print(f"    k=0  follows=0: nDCG {ndcg_at_k(posts0, NU, world):.3f} own-topic {own0:.2f}")
 for k, nf, nd, mr, own, src in results:
     print(f"    k={k:<3d} follows={nf}: nDCG {nd:.3f} mean-rel {mr:.3f} own-topic {own:.2f} sources {src}")
+
+# ===========================================================================
+# SELF-CHECK (B-07) — q2's two headline claims: (1) a viewer with zero picks
+# at all still gets a real feed, not an empty one (the fallback in [B] must
+# actually fire); (2) the gate does NOT strangle a new user's reach into
+# their own declared topic (the interest lane in [A]/[C] must actually be
+# gate-exempt in practice, not just by comment). Verified by mutation
+# (LUMEN_SETTINGS_MUTANT) across seeds 7/11/23/42 before the floors below
+# were chosen.
+# ===========================================================================
+blank_feed_size = len(fb)
+new_reach_frac = len(new_keys & photo_keys) / len(photo_keys)
+
+# [1] [B]: zero-pick user must still get a real feed via popular_fallback.
+# MEASURED baseline feed size, seeds 7/11/23/42: 20, 20, 20, 20 (== shipped
+# `fallback.min_feed_size` exactly, every seed). Mutating
+# `fallback.min_feed_size` to 0 disables the top-up entirely and the feed
+# collapses to EXACTLY size 0 on every one of the same 4 seeds (the blank
+# viewer has no follows, no interests and no engagement, so nothing else
+# fills the pool). 5 sits comfortably between the two.
+BLANK_FEED_FLOOR = 5
+ok1 = blank_feed_size > BLANK_FEED_FLOOR
+print("\nSELF-CHECK — the gate must not strangle cold-start, and the fallback must not be dead:")
+print(f"    [1] zero-pick [B] feed size = {blank_feed_size}   (must be > {BLANK_FEED_FLOOR})   "
+      f"{'OK' if ok1 else '** FAIL **'}")
+
+# [2] [A]/[C]: a brand-new user's declared-interest reach into their own
+# topic's post universe. MEASURED baseline, seeds 7/11/23/42: 106/106,
+# 93/93, 129/129, 120/120 -- EXACTLY 100% every seed (the interest lane pulls
+# the full matching-tag universe, well under the 200-candidate top_k cap in
+# every one of these worlds). Mutating `diversity.top_k` down to 10 (a stand-
+# in for "something is truncating the pool before the interest lane's full
+# reach lands") collapses this to 9-11% on the seeds checked. 0.90 sits just
+# under the baseline's exact 1.00 and far above the collapsed value.
+NEW_REACH_FLOOR = 0.90
+ok2 = new_reach_frac > NEW_REACH_FLOOR
+print(f"    [2] new-user own-topic reach [C] = {new_reach_frac:.0%}   (must be > "
+      f"{NEW_REACH_FLOOR:.0%})   {'OK' if ok2 else '** FAIL **'}")
+
+assert ok1, (
+    f"zero-pick [B] feed size = {blank_feed_size} did not clear {BLANK_FEED_FLOOR} -- the "
+    "starved-feed top-up (FallbackConfig.min_feed_size) may be dead"
+)
+assert ok2, (
+    f"new-user own-topic reach [C] = {new_reach_frac:.0%} did not clear {NEW_REACH_FLOOR:.0%} "
+    "-- the gate-exempt cold-start interest lane may be strangled (check "
+    "DiversityConfig.top_k or the interest-lane candidate gathering path)"
+)
+print("\nALL SELF-CHECKS PASSED — zero-pick viewers get a real feed and new users reach their "
+      "own declared topic in full, not a starved fraction of it.")

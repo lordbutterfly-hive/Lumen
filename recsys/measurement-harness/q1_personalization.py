@@ -20,13 +20,14 @@ sys.path.insert(0, str(_HARNESS.parent))
 
 import numpy as np
 from simworld import (
-    COMMUNITY,
     EPOCH,
     NOW,
+    TAGS,
     TOPICS,
     SimGateway,
     build_norm,
     build_world,
+    harness_settings,
     mean_rel_at_k,
     ndcg_at_k,
     overlap_at_k,
@@ -37,24 +38,34 @@ from recsys.config import ALSConfig, ScoreWeights, Settings
 from recsys.contracts import ViewerProfile
 from recsys.pipeline import TrustPolicy, build_trust_snapshot, rank_feed
 
-world = build_world(seed=7)
+# SEED is an argument (matches q9's convention), not a constant: the project's
+# established multi-seed calibration set for this codebase is 7/11/23/42 (see
+# e.g. ScoreWeights.organic_prior_shrinkage's docstring). Default unchanged
+# (7), so a bare `python3 q1_personalization.py` reproduces byte-for-byte.
+SEED = int(sys.argv[1]) if len(sys.argv) > 1 else 7
+world = build_world(seed=SEED)
 gw = SimGateway(world)
 norm = build_norm(world)
-settings = Settings()
+# ★ B-07 (2026-08-04): routed through harness_settings() (mutate_panels.py /
+# LUMEN_SETTINGS_MUTANT) so this panel's assertions can be verified by
+# mutation. Byte-identical to Settings() when the env var is unset.
+settings = harness_settings()
 
 # curated seeds: top-2 reputation authors per topic (a plausible deploy list)
 seeds = set()
 for t in TOPICS:
     tops = sorted([a for a in world.authors() if a.topic == t], key=lambda a: -a.reputation)[:2]
     seeds.update(a.name for a in tops)
-snap = build_trust_snapshot(gw, settings, since=EPOCH, now=NOW, trusted_seeds=frozenset(seeds))
+snap = build_trust_snapshot(
+    gw, settings, since=EPOCH, now=NOW, trusted_seeds=frozenset(seeds), production=False
+)  # C5/R2: synthetic seeds ("top-2 reputation per topic"), not the real curated list
 print(f"world: {len(world.posts)} posts, {len(world.accounts)} accounts, "
       f"{len(world.edges)} edges, snapshot creds={len(snap.graph_creds)} rings={len(snap.ring_members)}")
 
 def viewer_for(name: str) -> ViewerProfile:
     acct = world.accounts[name]
     return ViewerProfile(account=name, follows=world.follows[name],
-                         subscribed_communities=frozenset({COMMUNITY[acct.topic]}))
+                         interest_tags=frozenset(TAGS[acct.topic]))
 
 def feed(v: ViewerProfile, s=settings, sn=snap):
     # trust_policy=WARN: this OFFLINE harness measures pre-hardening Phase-0 behaviour, incl.
@@ -156,3 +167,71 @@ print(f"    rep-term removed (0.111/0/0.889): top-20 changed mean {np.mean(ch):.
 gpop20 = {p.key for p in pop_count[:20]}
 shares = [len({p.key for p in feed(viewer_for(n))[:20]} & gpop20) for n in sample_viewers[:8]]
 print(f"\n[G] top-20 posts also in GLOBAL engagement-pop top-20: mean {np.mean(shares):.1f}/20")
+
+# ===========================================================================
+# SELF-CHECK (B-07) — this panel exists to prove the feed is personalized,
+# not to print numbers nobody gates on. Three checks below, each verified by
+# mutation (`LUMEN_SETTINGS_MUTANT`, see mutate_panels.py's technique) across
+# seeds 7/11/23/42 before its floor was chosen. Floors sit well inside the
+# measured baseline range and well outside what the corresponding mutant
+# produces -- see each check's own comment for the exact numbers.
+# ===========================================================================
+print("\nSELF-CHECK — the feed must be measurably personalized, not merely printed:")
+
+# [1] HEADLINE ([B]): algorithm nDCG@20 must clearly beat a flat/incumbent
+# ranking. MEASURED baseline mean, seeds 7/11/23/42: 0.740, 0.742, 0.742,
+# 0.754 (min 0.740). Two independent mutations that gut personalization both
+# collapse this well below the baseline range on every one of the same 4
+# seeds: `weights.interest_match=0.0` (disable the declared-interest term)
+# -> 0.619-0.631; `weights.vote=1.0, reputation=0.0, organic=0.0` (collapse
+# to a raw per-pool-vote-count ranking, organic term OFF entirely) ->
+# 0.589-0.606. 0.70 sits ~0.04 below the baseline min and >=0.08 above the
+# higher of the two mutant maxima -- comfortable margin on both sides.
+algo_ndcg_mean = float(np.mean(algo_nd))
+NDCG_FLOOR = 0.70
+ok1 = algo_ndcg_mean > NDCG_FLOOR
+print(f"    [1] algo nDCG@20 = {algo_ndcg_mean:.3f}   (must be > {NDCG_FLOOR:.2f})   "
+      f"{'OK' if ok1 else '** FAIL **'}")
+
+# [2] the CF ablation in [C] must show CF actually MOVES the ranking -- a
+# panel whose own "on vs off" comparison silently became "off vs off" is
+# exactly the defect this self-check exists to catch. MEASURED baseline
+# top-20-changed mean, seeds 7/11/23/42: 0.5, 0.8, 0.6, 0.9 (min 0.5).
+# Mutating the shipped `als.cf_weight` to 0.0 makes this section's "on" feed
+# (which now also carries cf_weight=0) byte-identical to the internal
+# `s_nocf` control on every one of the same 4 seeds: diffs collapse to
+# EXACTLY 0.0/20 and full-list Spearman to EXACTLY 1.000. 0.2 sits
+# comfortably between the two.
+cf_diff_mean = float(np.mean(diffs))
+CF_DIFF_FLOOR = 0.2
+ok2 = cf_diff_mean > CF_DIFF_FLOOR
+print(f"    [2] CF ablation [C] top-20-changed = {cf_diff_mean:.2f}/20   "
+      f"(must be > {CF_DIFF_FLOOR:.2f})   {'OK' if ok2 else '** FAIL **'}")
+
+# [3] the reputation-term ablation in [F] must show the rep term actually
+# MOVES the ranking. MEASURED baseline top-20-changed mean, seeds
+# 7/11/23/42: 2.9, 3.1, 2.1, 2.5 (min 2.1). Mutating the shipped weights to
+# EXACTLY the ablation's own values (vote=1/9, reputation=0, organic=8/9)
+# collapses this section's `f1` (shipped) onto `f2` (the ablation) on every
+# one of the same 4 seeds: diffs EXACTLY 0.0/20, Spearman EXACTLY 1.000. 0.5
+# sits comfortably between the two.
+rep_diff_mean = float(np.mean(ch))
+REP_DIFF_FLOOR = 0.5
+ok3 = rep_diff_mean > REP_DIFF_FLOOR
+print(f"    [3] rep-term-removed [F] top-20-changed = {rep_diff_mean:.2f}/20   "
+      f"(must be > {REP_DIFF_FLOOR:.2f})   {'OK' if ok3 else '** FAIL **'}")
+
+assert ok1, (
+    f"algo nDCG@20 = {algo_ndcg_mean:.3f} did not clear {NDCG_FLOOR:.2f} -- personalization "
+    "(the interest-match term and/or the vote/reputation/organic split) may be broken"
+)
+assert ok2, (
+    f"CF ablation [C] top-20-changed = {cf_diff_mean:.2f}/20 did not clear {CF_DIFF_FLOOR:.2f} "
+    "-- the CF term may no longer be reaching the ranking (check als.cf_weight)"
+)
+assert ok3, (
+    f"rep-term-removed [F] top-20-changed = {rep_diff_mean:.2f}/20 did not clear "
+    f"{REP_DIFF_FLOOR:.2f} -- the reputation term may no longer be reaching the ranking"
+)
+print("\nALL SELF-CHECKS PASSED — the feed is measurably personalized: interest/vote/organic "
+      "split, CF, and the reputation term each demonstrably move the ranking.")
