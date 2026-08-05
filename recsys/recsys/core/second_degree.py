@@ -138,6 +138,30 @@ def filter_eligible(
             continue
         if post.author in viewer.mutes:
             continue
+        # ★★ P1 (2026-08-05) — NEVER SHOW SOMEONE THEIR OWN POST IN DISCOVERY.
+        #
+        # There was no self-post exclusion anywhere in this path. Live-proven on
+        # the real mirror by the 2026-08-05 council: `acidyo`'s own post ranked
+        # **#1 in `acidyo`'s own discovery feed**.
+        #
+        # It is structural, not a fluke. `derive_interest_tags` reads an
+        # account's OWN posting history, so a viewer's declared/derived tags are
+        # by construction the tags they publish under; the interest lane then
+        # sources posts by tag, so it sources theirs; and that lane is
+        # viewer-opted-in, hence exempt from the second-degree gate. Every step
+        # is working as intended and the composition is a bug.
+        #
+        # Placed with the mute check — OUTSIDE the `requires_second_degree`
+        # block — because it must hold for EVERY source. A discovery feed
+        # showing you your own writing is wrong whether it arrived via the
+        # interest lane, popular padding, or someone you follow reblogging you.
+        #
+        # Comparison is on the RANKED identity, which is what `viewer.account`
+        # also is: for a lite post `post.author` is the lite writer, not the
+        # shared publisher account (see `LiteConfig`), so this works for both
+        # tiers without special-casing.
+        if post.author == viewer.account:
+            continue
         if candidate.source.requires_second_degree:
             engagers = engager_index.get(post.key, frozenset()) & viewer.follows
             engagers = qualifying_engagers(engagers, graph_creds, thresholds.vouch_graph_cred_floor)

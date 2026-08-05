@@ -26,11 +26,19 @@ from pathlib import Path
 
 import pytest
 
-from recsys.config import DEFAULT_SETTINGS
+from recsys.config import DEFAULT_SETTINGS, MIN_TRUSTED_SEEDS
 from recsys.contracts import EngagementEdge
 from recsys.db.store import DegradedSnapshotError, ensure_schema, load_snapshot
 from recsys.jobs.trust_batch import load_trusted_seeds, main, run_batch
 from tests.fakes import EPOCH, FakeGateway
+
+
+def _enough_seeds(*named: str) -> frozenset[str]:
+    """A seed set that clears `MIN_TRUSTED_SEEDS` (C4, 2026-08-05) while keeping
+    the accounts a test actually reasons about. Before C4 these tests could pass
+    one seed, which is exactly the state that made the floor inert."""
+    return frozenset(named) | {f"seed-filler-{i:02d}" for i in range(MIN_TRUSTED_SEEDS)}
+
 
 _DSN = os.environ.get("RECSYS_DATABASE_URL")
 _live = pytest.mark.skipif(
@@ -44,12 +52,34 @@ _live = pytest.mark.skipif(
 
 
 def test_load_trusted_seeds_ignores_blank_lines_and_comments(tmp_path: Path) -> None:
+    """Parsing only. The list is padded to clear `MIN_TRUSTED_SEEDS` (C4,
+    2026-08-05) so this tests the PARSER rather than accidentally also testing
+    the floor — the three named accounts are what the assertions are about."""
     seeds_file = tmp_path / "seeds.txt"
+    padding = "\n".join(f"filler{i:02d}" for i in range(MIN_TRUSTED_SEEDS))
     seeds_file.write_text(
         "\n# a full-line comment\nalice\n\nbob  # trailing comment\n"
-        "   # indented comment\ncharlie\n"
+        "   # indented comment\ncharlie\n" + padding + "\n"
     )
-    assert load_trusted_seeds(seeds_file) == frozenset({"alice", "bob", "charlie"})
+    loaded = load_trusted_seeds(seeds_file)
+    assert {"alice", "bob", "charlie"} <= loaded
+    assert "# a full-line comment" not in loaded
+    assert not any(s.startswith("#") for s in loaded)
+
+
+def test_load_trusted_seeds_refuses_a_file_shorter_than_the_floor(tmp_path: Path) -> None:
+    """★★ C4 (2026-08-05) — THE INERT-GUARD REGRESSION.
+
+    `config._load_trusted_seeds` refused below `MIN_TRUSTED_SEEDS`; THIS loader
+    had no minimum and never raised — and `run_batch` calls THIS one, then hands
+    the result to `build_trust_snapshot` explicitly, bypassing the branch that
+    carried the config loader's guard. `build_trust_snapshot`'s own F-R2 check
+    tested emptiness, not length. So the floor was inert on the only path that
+    mattered, and a truncated seeds file silently became the trust root."""
+    seeds_file = tmp_path / "seeds.txt"
+    seeds_file.write_text("alice\nbob\n")
+    with pytest.raises(ValueError, match="minimum"):
+        load_trusted_seeds(seeds_file)
 
 
 def test_load_trusted_seeds_returns_empty_set_for_a_missing_file(tmp_path: Path) -> None:
@@ -77,7 +107,7 @@ def test_run_batch_dry_run_builds_without_persisting_or_requiring_a_dsn() -> Non
     snapshot = run_batch(
         gateway,
         DEFAULT_SETTINGS,
-        trusted_seeds=frozenset({"seed1"}),
+        trusted_seeds=_enough_seeds("seed1"),
         now=EPOCH,
         dsn=None,
         production=True,

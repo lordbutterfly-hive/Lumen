@@ -67,6 +67,47 @@ services:
       RECSYS_SNAPSHOT_REFRESH_S:
       RECSYS_VIEWER_CACHE_TTL_S:
       RECSYS_LOG_LEVEL:
+      # ★★★ REQUIRED — WITHOUT THIS THE CONTAINER CRASH-LOOPS (fixed 2026-08-05).
+      # `main()` calls `Settings.from_env(production=True)` unless
+      # RECSYS_PRODUCTION=0, and that REFUSES to start with no seat secret. This
+      # file previously did not mention the variable at all, so the shipped
+      # artifact could not boot under `restart: unless-stopped` — reproduced by
+      # running it. The blank value is a PASS-THROUGH from the operator's
+      # environment/.env; it is deliberately not defaulted, because a default
+      # would silently reinstate the publicly-known dev key in production.
+      #
+      # Generate one: `python -c "import secrets; print(secrets.token_hex(32))"`
+      # (64 hex chars = 32 bytes).
+      #
+      # The seat MAC stops offline NAME GRINDING of the reserved new-author
+      # slot — unkeyed, 6 ground names took 85% of that seat platform-wide.
+      LUMEN_EXPLORE_SEAT_SECRET:
+      # Optional rollover pair. Set PREVIOUS to the outgoing secret and
+      # ACTIVE_FROM_BUCKET to a FUTURE bucket so in-flight pages do not reroll
+      # mid-rotation; see ExplorationConfig.from_env for the contract.
+      LUMEN_EXPLORE_SEAT_SECRET_PREVIOUS:
+      LUMEN_EXPLORE_SEAT_SECRET_ACTIVE_FROM_BUCKET:
+      # ★★★ ALSO REQUIRED IN PRODUCTION (B4c, 2026-08-05). /feed returns any
+      # account's ranked feed plus the full score decomposition, in front of a
+      # pool pointed at a SHARED third-party mirror — an open instance is both a
+      # data-exposure and an abuse-amplification problem for someone else's
+      # database. `main()` refuses to start without this unless
+      # RECSYS_PRODUCTION=0. Generate:
+      # `python -c "import secrets; print(secrets.token_urlsafe(32))"`
+      # Callers send it as `Authorization: Bearer <token>`. /health stays open
+      # so container healthchecks and load balancers keep working.
+      RECSYS_API_TOKEN:
+      # Optional throttles; these have working defaults (120/min, 16 in flight,
+      # 10s read timeout) and are listed so an operator can find them.
+      RECSYS_RATE_LIMIT_PER_MINUTE:
+      RECSYS_MAX_CONCURRENT_REQUESTS:
+      RECSYS_REQUEST_READ_TIMEOUT_S:
+      # Bounds how long `borrow()` waits for a pool slot before returning 503
+      # instead of opening an unbounded connection (B4b).
+      HAFSQL_POOL_ACQUIRE_TIMEOUT_S:
+      # `0` opts out of the production fail-shut for LOCAL runs only. Unset
+      # means production, which is the safe default and what this file assumes.
+      RECSYS_PRODUCTION:
     ports:
       - "${RECSYS_HOST_PORT:-8000}:8000"
     networks:
@@ -99,6 +140,13 @@ services:
       HAFSQL_PASSWORD:
       RECSYS_DATABASE_URL:
       RECSYS_LOG_LEVEL:
+      # ★ REQUIRED for the same reason as the service above: `trust_batch`'s
+      # own entry point calls `Settings.from_env(production=not args.dry_run)`,
+      # so a real (non-dry-run) batch dies on an uncaught ValueError without
+      # this. Found 2026-08-05 running the shipped artifact.
+      LUMEN_EXPLORE_SEAT_SECRET:
+      LUMEN_EXPLORE_SEAT_SECRET_PREVIOUS:
+      LUMEN_EXPLORE_SEAT_SECRET_ACTIVE_FROM_BUCKET:
     networks:
       - docker
 

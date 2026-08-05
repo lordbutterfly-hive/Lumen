@@ -659,6 +659,15 @@ def eligible_for_exploration(
         # posts and NSFW leaked by the same route.
         if post.author in viewer.mutes:
             continue
+        # ★★ P1 (2026-08-05) — and the SELF-POST exclusion belongs here for
+        # exactly the reason the mute check above does: this lane sources from
+        # the RAW gathered pool, deliberately bypassing `filter_eligible`, so a
+        # guard added there does NOT cover this path. Fixing only
+        # `second_degree.filter_eligible` would have left a viewer's own post
+        # able to take the reserved seat at position 13 — the most prominent
+        # slot on the page — which is a louder version of the same bug.
+        if post.author == viewer.account:
+            continue
         if post.key in suppressed:
             continue
         if post.is_nsfw and not show_nsfw:
@@ -1021,9 +1030,35 @@ def insert_exploration(
         # guaranteed symmetric for every edge shape (see its docstring) — a
         # one-directional check would make the cap depend on pool POP ORDER,
         # which must never decide whether it fires.
+        # ★★★ C2 / DOUBLE-SERVE (2026-08-05). The bound is THIS PAGE, not "at or
+        # above the slot".
+        #
+        # `i <= at` declined an author only when they were already ahead of slot
+        # 13. But B-04's emerging-author budget frequently lands a newcomer on
+        # page 1 BELOW 13 — the realistic case on a busy feed — and that author
+        # then ALSO drew an exploration promotion, spending one of only
+        # `max_slots_per_feed` (3) slots on somebody who already had guaranteed
+        # page-1 reach. Reproduced twice independently: a newcomer pre-placed at
+        # 15 ended up occupying [13, 16], and at 19 -> [13, 20].
+        # BUILDMAP-B flagged "check for double-serve" and it was never closed.
+        #
+        # ★ WHY NOT "APPEARS ANYWHERE" — the check this replaces has history and
+        # it must not be undone. Comparing against the WHOLE feed broke the
+        # lane's primary case: the q3 newcomer publishes three debut posts buried
+        # together at 99/106/108, and each blocked the promotion of the other
+        # two, sending the newcomer straight back to 99. Those posts have no
+        # reach; blocking on them was wrong.
+        #
+        # `page_end` is the honest line between those two. An author already
+        # placed ON THIS PAGE (or an earlier one) has the reach this slot exists
+        # to grant, so the slot goes to someone genuinely unseen instead. An
+        # author whose every post sits at 99+ is still exactly who the slot is
+        # for and is still promoted. The rule scales to page 2 (`at` = 33) by
+        # construction rather than by a second special case.
+        page_end = (page_index + 1) * page
         pick_group = lineage_map.get(pick.post.author, frozenset()) | {pick.post.author}
         if any(
-            i <= at
+            i < page_end
             and c.post.key != pick.post.key
             and (
                 c.post.author in pick_group
@@ -1032,13 +1067,14 @@ def insert_exploration(
             for i, c in enumerate(out)
         ):
             continue
-        # Already in the feed? Promote it from wherever it landed. Deeper than
-        # the slot only — a post already ahead of the slot keeps its better
-        # place, and the slot stays open for the next pick rather than being
-        # spent demoting someone.
+        # Already in the feed? Promote it from wherever it landed — but only
+        # from OFF this page. A post already on the page has its reach; moving
+        # it from 15 to 13 buys the reader nothing and costs the lane a scarce
+        # slot that an unseen author could have had. That was the other half of
+        # the double-serve: same author, same budget spent, no new discovery.
         existing = next((i for i, c in enumerate(out) if c.post.key == pick.post.key), None)
         if existing is not None:
-            if existing <= at:
+            if existing < page_end:
                 continue
             out.pop(existing)
         out.insert(at, pick)

@@ -20,7 +20,7 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 
-from recsys.config import DEFAULT_SETTINGS, ScoreWeights, Settings
+from recsys.config import DEFAULT_SETTINGS, MIN_TRUSTED_SEEDS, ScoreWeights, Settings
 from recsys.contracts import (
     Candidate,
     CandidateSource,
@@ -306,13 +306,21 @@ def build_trust_snapshot(
     """
     if trusted_seeds is None:
         trusted_seeds = settings.trusted_seeds
-    if production and not trusted_seeds:
+    if production and len(trusted_seeds) < MIN_TRUSTED_SEEDS:
+        # ★ C4 (2026-08-05) — was `not trusted_seeds`, i.e. EMPTINESS ONLY. A
+        # one-account seed list passed this guard and became the trust root,
+        # concentrating the entire seed teleport mass on a single account —
+        # strictly worse than the empty case this was written to catch, because
+        # it looks configured. The floor is the same constant both loaders use;
+        # a caller with a genuinely small set for an offline experiment passes
+        # `production=False`, which is what that flag is for.
         raise ValueError(
-            "build_trust_snapshot: refusing to build a production trust snapshot "
-            "with empty trusted_seeds — TrustRank's seed teleport mass would revert "
-            "to uniform, letting a Sybil clique mint free rank. Supply a curated "
-            "trusted_seeds set at deploy (F-R2), or pass production=False for the "
-            "offline harness."
+            f"build_trust_snapshot: refusing to build a production trust snapshot "
+            f"with {len(trusted_seeds)} trusted_seeds (minimum {MIN_TRUSTED_SEEDS}) — "
+            "TrustRank's seed teleport mass would revert to uniform, or concentrate "
+            "on a handful of accounts, letting a Sybil clique mint free rank. Supply "
+            "a curated trusted_seeds set at deploy (F-R2), or pass production=False "
+            "for the offline harness."
         )
     resolved_now = now or datetime.now(UTC)
     # ★ `trust_days` was enforced only by the COMMENT below — nothing read it, so

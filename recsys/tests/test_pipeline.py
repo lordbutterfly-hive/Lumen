@@ -12,6 +12,7 @@ import pytest
 
 from recsys.config import (
     DEFAULT_SETTINGS,
+    MIN_TRUSTED_SEEDS,
     ALSConfig,
     ExplorationConfig,
     GraphCredConfig,
@@ -28,6 +29,7 @@ from recsys.contracts import (
 )
 from recsys.core.als import train_als
 from recsys.core.coldstart import is_cold
+from recsys.core.exploration import eligible_for_exploration
 from recsys.core.normalize import build_norm_context
 from recsys.core.scoring import AuthorEngagement, post_base_engagement
 from recsys.core.vote_signal import AttributedPost, AttributionMissingError, VoterTrust
@@ -652,10 +654,20 @@ def test_build_trust_snapshot_refuses_empty_seeds_in_production() -> None:
     # empty-seeds revert.
     with pytest.raises(ValueError, match="trusted_seeds"):
         build_trust_snapshot(gateway, DEFAULT_SETTINGS, since=EPOCH, now=EPOCH)
-    # With seeds supplied AND landed, the production build succeeds.
+    # A seed set that LANDS but is shorter than `MIN_TRUSTED_SEEDS` is refused
+    # too (C4, 2026-08-05). Concentrating the whole seed teleport mass on one
+    # account is strictly worse than the empty case this guard was written for,
+    # because it looks configured.
+    with pytest.raises(ValueError, match="minimum"):
+        build_trust_snapshot(
+            gateway, DEFAULT_SETTINGS, since=EPOCH, now=EPOCH,
+            trusted_seeds=frozenset({"a"}), production=True,
+        )
+    # With enough seeds supplied AND at least one landed, production succeeds.
+    seeds = frozenset({"a"}) | {f"seed-filler-{i:02d}" for i in range(MIN_TRUSTED_SEEDS)}
     snap = build_trust_snapshot(
         gateway, DEFAULT_SETTINGS, since=EPOCH, now=EPOCH,
-        trusted_seeds=frozenset({"a"}), production=True,
+        trusted_seeds=seeds, production=True,
     )
     assert {"a", "b"} <= set(snap.graph_creds)
     # The offline/harness path (production=False, EXPLICIT) still allows
@@ -2604,3 +2616,48 @@ def test_emerging_author_budget_end_to_end_zero_disables_it() -> None:
     # The 3 followed posts (chosen, exempt from the quota) still lead;
     # the emerging-but-unbudgeted author is pushed behind all of them.
     assert authors.index("emerging-author") >= 3
+
+
+# ---------------------------------------------------------------------------
+# P1 (2026-08-05) — a viewer never sees their OWN post in discovery.
+#
+# Live-proven on the real mirror by the 2026-08-05 council: `acidyo`'s own post
+# ranked #1 in `acidyo`'s own discovery feed. Structural, not a fluke —
+# `derive_interest_tags` reads your own posting history, so your tags are the
+# tags you publish under, the interest lane sources by tag, and that lane is
+# viewer-opted-in and therefore gate-exempt.
+# ---------------------------------------------------------------------------
+
+
+def test_a_viewer_never_sees_their_own_post_through_rank_feed() -> None:
+    """★ END-TO-END, at the served feed — not at the candidate boundary. Two
+    guards were needed (`filter_eligible` AND `eligible_for_exploration`),
+    and only a whole-feed assertion proves BOTH."""
+    mine = make_post("me", "mine", category="photo")
+    theirs = make_post("other", "theirs", category="photo")
+    gateway = FakeGateway(in_network=[mine, theirs], tag=[mine, theirs], popular=[mine, theirs])
+    viewer = make_viewer("me", follows=frozenset({"other"}), interest_tags=frozenset({"photo"}))
+    served = rank_feed(viewer, gateway, _norm(), now=NOW, since=EPOCH, trust_policy=_PERMISSIVE)
+    authors = [sc.post.author for sc in served]
+    assert "me" not in authors, f"the viewer was served their own post: {authors}"
+    assert "other" in authors, "control: the other author must still be served"
+
+
+def test_the_exploration_seat_cannot_be_taken_by_the_viewers_own_post() -> None:
+    """★ THE SECOND PATH. `eligible_for_exploration` sources from the RAW pool
+    and bypasses `filter_eligible` by design, so a guard added only there leaves
+    a viewer's own post able to take position 13 — the most prominent slot on
+    the page. Mutation-checked: removing the check in `exploration.py` (while
+    keeping the one in `second_degree.py`) makes this fail."""
+    mine = make_post("me", "mine", category="photo")
+    viewer = make_viewer("me", interest_tags=frozenset({"photo"}))
+    pool = eligible_for_exploration(
+        [Candidate(post=mine, source=CandidateSource.OON_INTEREST)],
+        viewer,
+        now=NOW,
+        graph_creds={},
+        suppressed=frozenset(),
+        show_nsfw=False,
+        config=ExplorationConfig(seat_secret=b"k" * 32),
+    )
+    assert pool == [], "the viewer's own post entered the exploration pool"

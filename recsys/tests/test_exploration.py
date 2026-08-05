@@ -1485,3 +1485,66 @@ def test_c8_banding_does_not_hide_a_genuinely_well_heard_author() -> None:
     got = _eligible([heard, unheard])
 
     assert [c.post.author for c in got] == ["unheard", "heard"]
+
+
+# ---------------------------------------------------------------------------
+# C2 / DOUBLE-SERVE (2026-08-05).
+#
+# `insert_exploration` declined an author only when they were already at or
+# ABOVE the reserved slot. B-04's emerging-author budget routinely lands a
+# newcomer on page 1 BELOW slot 13 — the realistic case — and that author then
+# ALSO drew an exploration promotion, spending one of only `max_slots_per_feed`
+# (3) slots on somebody who already had guaranteed page-1 reach.
+# ---------------------------------------------------------------------------
+
+
+def test_an_author_already_on_page_one_does_not_also_take_the_reserved_slot() -> None:
+    """★ THE DOUBLE-SERVE. `newb` sits at 15 with one post (as B-04 would place
+    them) and offers a SECOND post to the lane. Pre-fix the second post was
+    spliced at 13, so one author held [13, 16] and a scarce slot bought no new
+    discovery. The slot must go to the genuinely unseen author instead."""
+    ranked = [_scored(_cand(f"est{i}", "p"), final=1.0 - i / 1000) for i in range(40)]
+    ranked[15] = _scored(_cand("newb", "already"), final=0.5)
+    picks = [_scored(_cand("newb", "second")), _scored(_cand("unseen", "debut"))]
+
+    out = insert_exploration(ranked, picks, _cfg(max_slots_per_feed=3))
+    at13 = out[13].post.author
+    assert at13 == "unseen", f"slot 13 went to {at13!r}, not the unseen author"
+    newb_positions = [i for i, c in enumerate(out) if c.post.author == "newb"]
+    assert len(newb_positions) == 1, (
+        f"newb occupies {newb_positions} — an author already on page 1 drew a "
+        f"second slot from the exploration budget"
+    )
+
+
+def test_a_pick_already_on_page_one_is_not_re_promoted_within_the_page() -> None:
+    """The other half: promoting a post from 15 to 13 buys the reader nothing
+    and costs the lane a slot an unseen author could have had."""
+    ranked = [_scored(_cand(f"est{i}", "p"), final=1.0 - i / 1000) for i in range(40)]
+    ranked[15] = _scored(_cand("newb", "debut"), final=0.5)
+    out = insert_exploration(
+        ranked, [_scored(_cand("newb", "debut")), _scored(_cand("unseen", "debut"))],
+        _cfg(max_slots_per_feed=1),
+    )
+    assert out[13].post.author == "unseen"
+    # Exactly one occurrence, and NOT the reserved slot. It sits at 16 rather
+    # than 15 only because inserting `unseen` at 13 shifts everything below it
+    # down by one — the post was not moved by the lane.
+    assert [i for i, c in enumerate(out) if c.post.author == "newb"] == [16]
+
+
+def test_a_buried_author_is_still_promoted_the_regression_this_must_not_cause() -> None:
+    """★ THE GUARD ON THE GUARD. An earlier attempt at this check compared
+    against the WHOLE feed and broke the lane's primary case: the q3 newcomer's
+    three debut posts, buried together at 99/106/108, each blocked the others.
+    Posts that deep have no reach — they are exactly who the slot is for."""
+    ranked = [_scored(_cand(f"est{i}", "p"), final=1.0 - i / 1000) for i in range(120)]
+    ranked[99] = _scored(_cand("newb", "a"), final=0.01)
+    ranked[106] = _scored(_cand("newb", "b"), final=0.01)
+    out = insert_exploration(
+        ranked, [_scored(_cand("newb", "c"))], _cfg(max_slots_per_feed=3)
+    )
+    assert out[13].post.author == "newb", (
+        "a newcomer whose every post is buried at 99+ was NOT promoted — this is "
+        "the whole-feed regression the page-scoped bound exists to avoid"
+    )

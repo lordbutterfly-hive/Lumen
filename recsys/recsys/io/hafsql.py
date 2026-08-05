@@ -144,6 +144,15 @@ _ENV_DEFAULTS: dict[str, str] = {
     "HAFSQL_RETRY_BACKOFF_S": "0.2",
     "HAFSQL_BREAKER_THRESHOLD": "5",
     "HAFSQL_BREAKER_COOLDOWN_S": "30",
+    # B4b (2026-08-05). How long `borrow()` will WAIT for a pool slot before
+    # giving up. Before this existed there was no waiting and no bound at all —
+    # `borrow()` opened a fresh physical connection whenever the idle list was
+    # empty, so N concurrent requests opened N connections to a SHARED
+    # third-party mirror (measured: 50 -> 50). Timing out is the correct
+    # failure: it surfaces as the same `HafsqlUnavailableError` -> 503 an
+    # operator already handles, instead of silently exhausting someone else's
+    # database and getting the deployment banned.
+    "HAFSQL_POOL_ACQUIRE_TIMEOUT_S": "10",
     "RECSYS_DB_POOL_MIN": "1",
     "RECSYS_DB_POOL_MAX": "3",
     "HAFSQL_POPULAR_CACHE_TTL_S": "300",
@@ -1046,6 +1055,7 @@ class _ConnPool:
         retry_backoff_s: float,
         breaker_threshold: int,
         breaker_cooldown_s: float,
+        acquire_timeout_s: float | None = None,
     ) -> None:
         self._connect = connect
         self._min_size = max(0, min_size)
@@ -1054,9 +1064,29 @@ class _ConnPool:
         self._retry_backoff_s = retry_backoff_s
         self._breaker_threshold = max(1, breaker_threshold)
         self._breaker_cooldown_s = breaker_cooldown_s
+        self._acquire_timeout_s = (
+            acquire_timeout_s
+            if acquire_timeout_s is not None
+            else _env_float("HAFSQL_POOL_ACQUIRE_TIMEOUT_S")
+        )
 
         self._lock = threading.Lock()
+        #: ★ B4b — capacity signal. Waiters block here when every slot is in
+        #: use; `release`/`closeall`/a failed open all notify.
+        self._cond = threading.Condition(self._lock)
         self._idle: list[psycopg.Connection[Any]] = []
+        #: ★ B4b — PHYSICAL connections currently in existence (idle + checked
+        #: out). This, not `len(self._idle)`, is what `max_size` now bounds.
+        #: Before B4b `max_size` gated only whether a RETURNED connection was
+        #: kept, so it capped reuse and never capped concurrency.
+        self._live = 0
+        #: ★ B4b — breaker state is mutated from `_connect_with_retry`, which
+        #: deliberately runs OUTSIDE `_lock` (a blocking connect must not hold
+        #: the capacity lock). It therefore needs its own mutex: previously
+        #: `_consecutive_failures` was incremented unguarded and the breaker was
+        #: observed opening after anywhere from 5 to 12 failures under
+        #: concurrency instead of the configured threshold.
+        self._breaker_lock = threading.Lock()
         self._consecutive_failures = 0
         self._breaker_opened_at: float | None = None
         #: Instrumentation for A4's own "before/after" measurement — total
@@ -1070,12 +1100,33 @@ class _ConnPool:
         self._warmed = False
 
     def _breaker_is_open(self) -> bool:
-        if self._breaker_opened_at is None:
-            return False
-        if time.monotonic() - self._breaker_opened_at >= self._breaker_cooldown_s:
-            self._breaker_opened_at = None  # cooldown elapsed: half-open, probe once
-            self._consecutive_failures = 0
-            return False
+        with self._breaker_lock:
+            if self._breaker_opened_at is None:
+                return False
+            if time.monotonic() - self._breaker_opened_at >= self._breaker_cooldown_s:
+                self._breaker_opened_at = None  # cooldown elapsed: half-open, probe once
+                self._consecutive_failures = 0
+                return False
+            return True
+
+    def _record_failure(self) -> bool:
+        """Count one connect failure. Returns True if that tripped the breaker.
+
+        ★ B4b — the increment, the threshold comparison and the trip must be ONE
+        atomic step. Unguarded, concurrent failures interleave between the `+= 1`
+        and the compare, so the breaker was observed opening after 5..12
+        failures against a configured threshold of 5.
+        """
+        with self._breaker_lock:
+            self._consecutive_failures += 1
+            if self._consecutive_failures < self._breaker_threshold:
+                return False
+            self._breaker_opened_at = time.monotonic()
+            failures = self._consecutive_failures
+        logger.error(
+            "hafsql: circuit breaker OPEN after %d consecutive connection failures",
+            failures,
+        )
         return True
 
     def _connect_with_retry(self) -> psycopg.Connection[Any]:
@@ -1090,14 +1141,7 @@ class _ConnPool:
             try:
                 conn = self._connect()
             except psycopg.OperationalError:
-                self._consecutive_failures += 1
-                if self._consecutive_failures >= self._breaker_threshold:
-                    self._breaker_opened_at = time.monotonic()
-                    logger.error(
-                        "hafsql: circuit breaker OPEN after %d consecutive "
-                        "connection failures",
-                        self._consecutive_failures,
-                    )
+                if self._record_failure():
                     raise HafsqlUnavailableError(
                         "circuit breaker open — too many consecutive connection failures"
                     ) from None
@@ -1107,24 +1151,62 @@ class _ConnPool:
                 time.sleep(self._retry_backoff_s * attempt)
                 continue
             else:
-                self._consecutive_failures = 0
+                with self._breaker_lock:
+                    self._consecutive_failures = 0
                 self.connections_opened += 1
                 return conn
 
     def borrow(self) -> psycopg.Connection[Any]:
-        with self._lock:
-            while self._idle:
-                conn = self._idle.pop()
-                if not conn.closed:
-                    return conn
-                # dead idle connection (e.g. server-side timeout); drop it and
-                # try the next, or fall through to opening a fresh one.
-            needs_warm_up = not self._warmed
-            self._warmed = True
-        conn = self._connect_with_retry()
+        """Hand out a pooled connection, opening one only if the pool is below
+        ``max_size``, and WAITING (not opening) when it is at capacity.
+
+        ★ B4b (2026-08-05). This used to fall straight through to
+        ``_connect_with_retry()`` whenever the idle list was empty, with no
+        check against ``max_size``, no semaphore and no wait — so
+        ``HAFSQL_POOL_MAX`` bounded only how many connections were RETAINED,
+        never how many existed. Measured: 30 concurrent borrows on
+        ``max_size=5`` produced 30 live connections, and 50 produced 50 —
+        against a shared third-party public mirror, i.e. one traffic spike away
+        from exhausting somebody else's database.
+        """
+        deadline = time.monotonic() + self._acquire_timeout_s
+        with self._cond:
+            while True:
+                while self._idle:
+                    conn = self._idle.pop()
+                    if not conn.closed:
+                        return conn
+                    # Dead idle connection (e.g. server-side timeout). It no
+                    # longer exists physically, so free its slot before looking
+                    # at the next one.
+                    self._live -= 1
+                if self._live < self._max_size:
+                    self._live += 1  # claim the slot BEFORE releasing the lock
+                    needs_warm_up = not self._warmed
+                    self._warmed = True
+                    break
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise HafsqlUnavailableError(
+                        f"connection pool exhausted: {self._max_size} in use and none "
+                        f"released within {self._acquire_timeout_s}s"
+                    )
+                self._cond.wait(remaining)
+        # Connect OUTSIDE the lock — a blocking network call must never hold the
+        # capacity mutex, or one slow connect stalls every other borrower.
+        try:
+            conn = self._connect_with_retry()
+        except BaseException:
+            self._free_slot()  # never leak the claimed slot on failure
+            raise
         if needs_warm_up and self._min_size > 1:
             self._warm_up()
         return conn
+
+    def _free_slot(self) -> None:
+        with self._cond:
+            self._live -= 1
+            self._cond.notify()
 
     def _warm_up(self) -> None:
         """Open up to ``min_size - 1`` extra idle connections (the borrow that
@@ -1134,33 +1216,51 @@ class _ConnPool:
         caller's already-in-hand connection from the triggering ``borrow()``.
         """
         for _ in range(self._min_size - 1):
+            # B4b: warm-up connections are real physical connections and must
+            # claim a slot like any other, or pre-warming would itself overshoot
+            # the bound this method's own `max_size` check was meant to keep.
+            with self._cond:
+                if self._live >= self._max_size:
+                    return
+                self._live += 1
             try:
                 conn = self._connect_with_retry()
             except Exception:
+                self._free_slot()
                 logger.warning(
                     "hafsql: pool warm-up to min_size=%d stopped early", self._min_size
                 )
                 return
-            with self._lock:
+            with self._cond:
                 if len(self._idle) < self._max_size:
                     self._idle.append(conn)
+                    self._cond.notify()
                     continue
+            self._free_slot()
             with contextlib.suppress(Exception):
                 conn.close()
             return
 
     def release(self, conn: psycopg.Connection[Any], *, healthy: bool) -> None:
-        with self._lock:
+        with self._cond:
             if healthy and not conn.closed and len(self._idle) < self._max_size:
+                # Still live, now reusable: the slot stays claimed, but a waiter
+                # can take this exact connection off the idle list.
                 self._idle.append(conn)
+                self._cond.notify()
                 return
+            # About to be closed -> the slot is genuinely freed.
+            self._live -= 1
+            self._cond.notify()
         if not conn.closed:
             with contextlib.suppress(Exception):
                 conn.close()
 
     def closeall(self) -> None:
-        with self._lock:
+        with self._cond:
             idle, self._idle = self._idle, []
+            self._live -= len(idle)
+            self._cond.notify_all()
         for conn in idle:
             with contextlib.suppress(Exception):
                 conn.close()

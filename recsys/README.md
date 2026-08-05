@@ -41,6 +41,50 @@ pytest -q           # 75 tests, pure — no DB needed
 
 Public API: `recsys.pipeline.rank_feed(viewer, gateway, norm, now=..., since=...)`.
 
+### Deploying it (required environment)
+
+`recsys.service.app` and `recsys.jobs.trust_batch` both call
+`Settings.from_env(production=True)` unless `RECSYS_PRODUCTION=0`, and that
+**refuses to start** without a seat secret. Set it, or the container
+crash-loops:
+
+```bash
+export LUMEN_EXPLORE_SEAT_SECRET=$(python -c "import secrets; print(secrets.token_hex(32))")
+export RECSYS_API_TOKEN=$(python -c "import secrets; print(secrets.token_urlsafe(32))")
+docker compose -f deploy/compose.recsys.yml up
+```
+
+`RECSYS_API_TOKEN` is equally required in production — `/feed` returns any
+account's ranked feed plus its full score decomposition, so an open instance
+leaks data *and* amplifies abuse against the shared upstream mirror. Callers
+send `Authorization: Bearer <token>`; `/health` stays open so container
+healthchecks keep working. Throttles (`RECSYS_RATE_LIMIT_PER_MINUTE`,
+`RECSYS_MAX_CONCURRENT_REQUESTS`, `RECSYS_REQUEST_READ_TIMEOUT_S`,
+`HAFSQL_POOL_ACQUIRE_TIMEOUT_S`) have working defaults.
+
+That MAC keys the reserved new-author seat so its occupant cannot be chosen by
+grinding account names offline (unkeyed, 6 ground names took 85% of the seat
+platform-wide). To rotate, set `LUMEN_EXPLORE_SEAT_SECRET_PREVIOUS` to the
+outgoing value and `LUMEN_EXPLORE_SEAT_SECRET_ACTIVE_FROM_BUCKET` to a *future*
+bucket, so pages in flight do not reroll mid-rotation.
+
+`RECSYS_DATABASE_URL` is required for a real deployment too: absent it the
+service still starts (a missing snapshot is a legitimate cold-start state) but
+`/feed` refuses every request under FAIL_CLOSED until a trust batch has run.
+
+**You must schedule the weekly trust batch yourself** — the compose file makes
+it runnable but deliberately does not pick a scheduler:
+
+```bash
+docker compose -f deploy/compose.recsys.yml run --rm recsys-trust-batch
+```
+
+If it stops running, the snapshot ages past `max_snapshot_age_days` (14) and
+**every** `/feed` request starts failing closed. That is now visible rather than
+silent: `/health` reports `status: "degraded"`, `serving: false` and
+`trust_snapshot.fresh: false`, and the refusal logs at ERROR. Point readiness
+probes at `serving`, not at the process being alive.
+
 ## Built since the initial Phase-0 (council fix loop + Phase-0.5)
 
 - **Sybil-hardened graph-cred** (`core/graph_cred.py`): seeded teleport, ring/

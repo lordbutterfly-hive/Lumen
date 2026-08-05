@@ -14,7 +14,18 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["recsys", "recsys.core", "recsys.io", "recsys.db", "recsys.jobs"]
+# ★ `recsys.service` added 2026-08-05. It was omitted while the Dockerfile
+# copies raw source, so the gap was latent — but an installed wheel/sdist
+# would have shipped without the HTTP service entirely, i.e. `python -m
+# recsys.service.app` (the container's own CMD) would fail on a real install.
+packages = [
+    "recsys",
+    "recsys.core",
+    "recsys.io",
+    "recsys.db",
+    "recsys.jobs",
+    "recsys.service",
+]
 
 # C5 (2026-08-04): recsys/data/trusted_seeds.txt is read at runtime via
 # importlib.resources (recsys.config._load_trusted_seeds), not a path relative

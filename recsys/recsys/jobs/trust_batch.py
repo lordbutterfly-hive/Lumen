@@ -50,7 +50,13 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
-from recsys.config import DEFAULT_SETTINGS, HafsqlConfig, LiteConfig, Settings
+from recsys.config import (
+    DEFAULT_SETTINGS,
+    MIN_TRUSTED_SEEDS,
+    HafsqlConfig,
+    LiteConfig,
+    Settings,
+)
 from recsys.contracts import HafsqlGateway
 from recsys.db.store import DegradedSnapshotError, ensure_schema, load_snapshot, save_snapshot
 from recsys.pipeline import TrustSnapshot, build_trust_snapshot
@@ -83,6 +89,28 @@ def load_trusted_seeds(path: Path | None = None) -> frozenset[str]:
         line = raw_line.split("#", 1)[0].strip()
         if line:
             seeds.add(line)
+    # ★★★ C4 (2026-08-05) — THE SAME FLOOR `config._load_trusted_seeds`
+    # ENFORCES. Without this, the two loaders had contradictory contracts and
+    # THE WEAKER ONE WAS ON THE PRODUCTION PATH: `run_batch` calls this
+    # function, then passes the result to `build_trust_snapshot` EXPLICITLY, so
+    # the `trusted_seeds is None -> settings.trusted_seeds` branch that carries
+    # the config loader's guard is never taken. `build_trust_snapshot`'s own
+    # F-R2 guard tests EMPTINESS, not length. Net effect: `MIN_TRUSTED_SEEDS`
+    # was inert on the only path that matters, and a truncated seeds file — one
+    # bad deploy, one botched edit — silently became the trust root for the
+    # whole network. Demonstrated with a 2-account file: accepted.
+    #
+    # An ABSENT file still returns empty rather than raising: that is the
+    # documented cold-start shape, and it fails shut one layer down at F-R2. A
+    # file that EXISTS and is too short is a different thing — a config error
+    # that must be loud here, where the operator can see which file is wrong.
+    if len(seeds) < MIN_TRUSTED_SEEDS:
+        raise ValueError(
+            f"load_trusted_seeds: {resolved} has {len(seeds)} seed(s), minimum "
+            f"{MIN_TRUSTED_SEEDS}. A short list is not a trust root — TrustRank's "
+            f"seed teleport mass would concentrate on a handful of accounts. Fix "
+            f"the file or point {_SEEDS_PATH_ENV} at the curated one."
+        )
     return frozenset(seeds)
 
 

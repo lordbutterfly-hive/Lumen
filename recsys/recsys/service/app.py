@@ -54,6 +54,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import threading
 import time
 from collections.abc import Callable
@@ -82,6 +83,7 @@ from recsys.pipeline import (
     MissingTrustError,
     TrustPolicy,
     TrustSnapshot,
+    _trust_is_fresh,
     rank_feed,
 )
 from recsys.viewer import build_viewer_profile
@@ -152,6 +154,24 @@ def _csv_param(qs: dict[str, list[str]], key: str) -> frozenset[str] | None:
     if key not in qs:
         return None
     return frozenset(part.strip() for value in qs[key] for part in value.split(",") if part.strip())
+
+
+def _int_param(qs: dict[str, list[str]], key: str) -> int | None:
+    """Parse an integer query parameter; ``None`` when absent or unparseable.
+
+    Unparseable is treated as absent rather than as an error: `?limit=abc` is a
+    caller bug that should not cost them their feed, and the alternative (a 400)
+    turns a typo into an outage for a client that was going to ignore the extra
+    posts anyway. A NEGATIVE value is rejected by the caller, because that one
+    is unambiguous rather than merely malformed.
+    """
+    values = qs.get(key)
+    if not values:
+        return None
+    try:
+        return int(values[0])
+    except ValueError:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -407,11 +427,46 @@ class ServiceConfig:
     #: cost curve this default is chosen from.
     author_prior_chunk_size: int = DEFAULT_CHUNK_SIZE
 
+    # ------------------------------------------------------------------
+    # B4c (2026-08-05) — HTTP surface controls.
+    #
+    # Before these, `/feed` had NO auth, NO rate limit, NO concurrency cap and
+    # NO per-connection read timeout, in front of a pool that (pre-B4b) opened
+    # unbounded connections to a SHARED third-party mirror. One loop took the
+    # service down and plausibly got the deployment banned by the mirror
+    # operator. `/feed?viewer=<anyone>` also returned any account's feed
+    # including the full {vote_norm, rep_norm, organic, final} decomposition.
+    # ------------------------------------------------------------------
+
+    #: Shared bearer token. ``None`` disables auth — permitted in dev, REFUSED
+    #: in production by `main()`, exactly like the exploration seat secret.
+    api_token: str | None = None
+    #: Requests per minute per client address. 0 disables.
+    rate_limit_per_minute: int = 120
+    #: Concurrent in-flight `/feed` requests. Bounds thread and pool pressure
+    #: independently of the rate limit, which cannot stop 100 simultaneous
+    #: slow requests. 0 disables.
+    max_concurrent_requests: int = 16
+    #: Per-connection socket read timeout. `BaseHTTPRequestHandler.timeout` is
+    #: `None` by default, so a slow-loris client held a thread indefinitely;
+    #: `daemon_threads` bounds shutdown, not occupancy.
+    request_read_timeout_s: float = 10.0
+
     @classmethod
     def from_env(cls) -> ServiceConfig:
         return cls(
             host=os.environ.get("RECSYS_SERVICE_HOST", cls.host),
             port=int(os.environ.get("RECSYS_SERVICE_PORT", cls.port)),
+            api_token=os.environ.get("RECSYS_API_TOKEN") or None,
+            rate_limit_per_minute=int(
+                os.environ.get("RECSYS_RATE_LIMIT_PER_MINUTE", cls.rate_limit_per_minute)
+            ),
+            max_concurrent_requests=int(
+                os.environ.get("RECSYS_MAX_CONCURRENT_REQUESTS", cls.max_concurrent_requests)
+            ),
+            request_read_timeout_s=float(
+                os.environ.get("RECSYS_REQUEST_READ_TIMEOUT_S", cls.request_read_timeout_s)
+            ),
             norm_refresh_s=float(os.environ.get("RECSYS_NORM_REFRESH_S", cls.norm_refresh_s)),
             snapshot_refresh_s=float(
                 os.environ.get("RECSYS_SNAPSHOT_REFRESH_S", cls.snapshot_refresh_s)
@@ -690,6 +745,19 @@ def build_feed(
             author_prior_cache=state.author_prior_cache.get,
         )
     except MissingTrustError as exc:
+        # ★★ B5 (2026-08-05) — THIS PATH USED TO BE COMPLETELY SILENT. Compare
+        # the generic handler below, which documents `exc_info=True`: a stale or
+        # absent trust snapshot took down every single request while writing
+        # nothing to the server log at all, so the only evidence an operator had
+        # was client-side 503s. Logged at ERROR because under FAIL_CLOSED this
+        # is a total outage, not a degraded mode.
+        logger.error(
+            "feed: REFUSING every request — trust snapshot absent or stale "
+            "(viewer=%s): %s. The weekly trust batch has probably stopped "
+            "running; /health now reports status=degraded for this.",
+            account,
+            exc,
+        )
         raise FeedUnavailableError("trust_unavailable", str(exc)) from exc
     except ValueError as exc:
         raise FeedUnavailableError(
@@ -768,7 +836,14 @@ def health_payload(state: ServiceState) -> dict[str, Any]:
     norm = state.norm_cache.value
     snapshot = state.snapshot_cache.value
     author_prior_stats = state.author_prior_cache.stats()
-    now = datetime.now(UTC)
+    # ★ B5 (2026-08-05) — the SAME clock the request path uses
+    # (`build_feed` -> `state.now_fn()`), not a second independent
+    # `datetime.now(UTC)`. Now that `/health` reports whether trust is fresh,
+    # judging freshness on a different clock from the one `rank_feed` gates on
+    # would let health and serving disagree — which is precisely the failure
+    # this task exists to remove. In production they are the same wall clock;
+    # the difference is that this is now deterministically testable.
+    now = state.now_fn()
 
     snapshot_age_days = None
     if snapshot is not None and snapshot.built_at is not None:
@@ -779,11 +854,38 @@ def health_payload(state: ServiceState) -> dict[str, Any]:
         # defensive: `_pool` is another builder's private implementation detail.
         pool_connections_opened = state.gateway._pool.connections_opened
 
+    # ★★★ B5 (2026-08-05) — `/health` MUST REFLECT WHETHER /feed CAN ACTUALLY
+    # SERVE. It previously computed `status` from the NORM ALONE and never
+    # looked at the snapshot, so the documented worst case was: the weekly batch
+    # stops running, `max_snapshot_age_days` (14) elapses, EVERY /feed request
+    # 503s under FAIL_CLOSED — and `/health` still returned `"ok"`, the
+    # `wget --spider` container healthcheck still passed, and the refusal path
+    # logged nothing. A total outage that nothing alerts on, for two weeks
+    # before it even begins.
+    #
+    # `_trust_is_fresh` is the SAME predicate `rank_feed` gates on, called with
+    # the same `max_snapshot_age_days`, deliberately reused rather than
+    # reimplemented — a second copy of this rule would be free to drift from the
+    # one that actually decides whether requests succeed.
+    trust_fresh = _trust_is_fresh(
+        snapshot, now=now, max_age_days=state.settings.trust.max_snapshot_age_days
+    )
+    if norm is None:
+        status = "starting"
+    elif not trust_fresh:
+        # Not "ok": under FAIL_CLOSED this state serves NOTHING.
+        status = "degraded"
+    else:
+        status = "ok"
+
     return {
         # A10.4 — whole-site cold start is a GLOBAL gate (norm.min_samples):
         # below it every viewer gets nothing. Reported explicitly here so
         # that state is diagnosable in one look, not as a wall of 503s.
-        "status": "ok" if norm is not None else "starting",
+        "status": status,
+        #: True only when a real request would succeed. An orchestrator should
+        #: gate readiness on THIS, not on the process being alive.
+        "serving": status == "ok",
         "norm": {
             "present": norm is not None,
             "vote_signal_samples": len(norm.vote_signal_samples) if norm else 0,
@@ -807,6 +909,10 @@ def health_payload(state: ServiceState) -> dict[str, Any]:
             ),
             "age_days": snapshot_age_days,
             "max_age_days": state.settings.trust.max_snapshot_age_days,
+            # B5: the decisive field. `present` was true for a six-month-old
+            # snapshot too, which is why `present` alone was never a health
+            # signal. `fresh` is what `rank_feed` actually gates on.
+            "fresh": trust_fresh,
             "degraded": snapshot.degraded if snapshot is not None else None,
             "graph_creds": len(snapshot.graph_creds) if snapshot is not None else 0,
             "last_refresh_attempt": (
@@ -819,11 +925,15 @@ def health_payload(state: ServiceState) -> dict[str, Any]:
             "build_failures": state.snapshot_cache.build_failures,
         },
         "viewer_cache": {"entries": len(state.viewer_cache)},
-        # ★ Warmed/refreshed already; NOT YET READ by `build_feed` — see
-        # `ServiceState.author_prior_cache`'s own docstring. `authors_hit`/
-        # `authors_missed`/`miss_rate` will stay 0/0/None until the reported
-        # `recsys/pipeline.py` change lands and something actually calls
-        # `.get()`; `authors_cached`/`build_count`/`age_s` are meaningful now.
+        # ★ CORRECTED 2026-08-05 (B5). This comment used to say the prior cache
+        # was "NOT YET READ by `build_feed`" — stale since 2026-08-04, when it
+        # was wired (see the `★ WIRED` note at the `rank_feed` call site, which
+        # passes `state.author_prior_cache.get`). The 2026-08-05 council flagged
+        # the contradiction: two comments in one file disagreeing about the same
+        # fact, with the false one reaching the reader first. `authors_hit`/
+        # `authors_missed`/`miss_rate` are LIVE and meaningful now, and a rising
+        # miss rate matters — a miss silently swaps ~80% of the composite for
+        # the post's own engagement.
         "author_prior_cache": {
             "authors_cached": author_prior_stats.authors_cached,
             "last_built": (
@@ -854,6 +964,34 @@ def health_payload(state: ServiceState) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+class _RateLimiter:
+    """Fixed-window request counter, keyed by client address.
+
+    B4c (2026-08-05). Deliberately the simplest thing that bounds abuse: a
+    sliding window or token bucket would be more elegant and is not what this
+    service is missing. Memory is bounded by pruning windows older than the
+    current one on every check, so an attacker cycling source addresses cannot
+    grow the dict without bound the way a never-evicted cache would.
+    """
+
+    def __init__(self, per_minute: int) -> None:
+        self._per_minute = per_minute
+        self._lock = threading.Lock()
+        self._counts: dict[tuple[str, int], int] = {}
+
+    def allow(self, client: str, now_s: float) -> bool:
+        if self._per_minute <= 0:
+            return True
+        window = int(now_s // 60)
+        with self._lock:
+            for key in [k for k in self._counts if k[1] != window]:
+                del self._counts[key]
+            key = (client, window)
+            count = self._counts.get(key, 0) + 1
+            self._counts[key] = count
+            return count <= self._per_minute
+
+
 class _FeedHTTPServer(ThreadingHTTPServer):
     """Carries `state` on the SERVER object (not the per-connection handler)
     — the standard `http.server` pattern for sharing state across handler
@@ -866,6 +1004,11 @@ class _FeedHTTPServer(ThreadingHTTPServer):
         state: ServiceState,
     ) -> None:
         self.state = state
+        # B4c: shared across handler instances, like `state` itself.
+        self.rate_limiter = _RateLimiter(state.config.rate_limit_per_minute)
+        self.inflight = threading.BoundedSemaphore(
+            max(1, state.config.max_concurrent_requests)
+        )
         super().__init__(server_address, handler_cls)
 
 
@@ -888,13 +1031,55 @@ class FeedRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def setup(self) -> None:
+        # B4c: bound how long one connection may hold a thread. Applied AFTER
+        # `super().setup()` — `self.connection` does not exist until
+        # `StreamRequestHandler.setup()` assigns it from `self.request`, and the
+        # socket timeout still governs every read through the `rfile` it builds.
+        # (`BaseHTTPRequestHandler.timeout` is a ClassVar and cannot carry a
+        # per-instance, config-driven value, which is why this sets the socket.)
+        super().setup()
+        self.connection.settimeout(self.state.config.request_read_timeout_s)
+
+    def _authorized(self) -> bool:
+        """Constant-time bearer check. `secrets.compare_digest`, never `==` —
+        a byte-wise early-exit comparison on a shared secret is a timing oracle
+        (this project's own checklist item)."""
+        expected = self.state.config.api_token
+        if not expected:
+            return True  # auth disabled; `main()` refuses this in production
+        header = self.headers.get("Authorization", "")
+        scheme, _, presented = header.partition(" ")
+        if scheme.lower() != "bearer":
+            return False
+        return secrets.compare_digest(presented.strip(), expected)
+
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
+        # /health is deliberately UNAUTHENTICATED and un-throttled: container
+        # healthchecks and load balancers must reach it without credentials,
+        # and it exposes counters only, never feed content.
         if parsed.path == "/health":
             self._write_json(200, health_payload(self.state))
             return
         if parsed.path == "/feed":
-            self._handle_feed(parsed)
+            if not self._authorized():
+                # No detail: a 401 that distinguishes "no token" from "wrong
+                # token" is a probing aid and buys the operator nothing.
+                self._write_json(401, {"error": "unauthorized"})
+                return
+            if not self.server.rate_limiter.allow(self.client_address[0], time.time()):
+                self._write_json(429, {"error": "rate_limited"})
+                return
+            if not self.server.inflight.acquire(blocking=False):
+                # Shed rather than queue: queueing converts a burst into a
+                # thread pile-up behind a bounded connection pool.
+                self._write_json(503, {"error": "overloaded"})
+                return
+            try:
+                self._handle_feed(parsed)
+            finally:
+                self.server.inflight.release()
             return
         self._write_json(404, {"error": "not_found"})
 
@@ -929,6 +1114,14 @@ class FeedRequestHandler(BaseHTTPRequestHandler):
         # explicit `in qs` check rather than a falsy one.
         explicit_tags = _csv_param(qs, "tags")
         explicit_follows = _csv_param(qs, "follows")
+        # ★ B4c — `limit` was PARSED NOWHERE and silently ignored, so every
+        # caller got the full ranked page regardless of what it asked for.
+        limit = _int_param(qs, "limit")
+        if limit is not None and limit <= 0:
+            self._write_json(
+                400, {"error": "bad_request", "detail": "'limit' must be a positive integer"}
+            )
+            return
         try:
             result = build_feed(
                 self.state,
@@ -939,7 +1132,13 @@ class FeedRequestHandler(BaseHTTPRequestHandler):
         except FeedUnavailableError as exc:
             # R8: MissingTrustError -> 503, never 500 — "trust is stale/absent" is
             # an operational state with a fix, not a bug.
-            body: dict[str, Any] = {"error": exc.kind, "detail": exc.detail}
+            #
+            # ★ B4c — `exc.detail` is built from `str(exc)` on the underlying
+            # error, which for a driver failure carries the upstream DB HOST AND
+            # PORT. That reached the client verbatim. The full text still goes to
+            # the server log; only the client-facing body is now generic.
+            logger.warning("feed: unavailable for viewer=%s: %s: %s", account, exc.kind, exc.detail)
+            body: dict[str, Any] = {"error": exc.kind}
             if exc.norm_samples is not None:
                 body["norm_samples"] = exc.norm_samples
             self._write_json(503, body)
@@ -948,7 +1147,13 @@ class FeedRequestHandler(BaseHTTPRequestHandler):
             logger.exception("feed: unexpected error ranking for viewer=%s", account)
             self._write_json(500, {"error": "internal_error"})
             return
-        self._write_json(200, serialize_feed(result))
+        payload = serialize_feed(result)
+        if limit is not None:
+            payload["posts"] = payload["posts"][:limit]
+            # `count` documents the payload, not the ranking — leaving it at the
+            # full length would make the two fields disagree.
+            payload["count"] = len(payload["posts"])
+        self._write_json(200, payload)
 
 
 def make_server(state: ServiceState) -> _FeedHTTPServer:
@@ -981,7 +1186,27 @@ def main() -> int:
             "recsys.service.app: RECSYS_PRODUCTION=0 — running with the fixed "
             "dev seat key and no fail-shut. Never serve real users this way."
         )
-    state = ServiceState.build(settings=settings)
+    # ★★ B4c (2026-08-05) — REFUSE TO SERVE UNAUTHENTICATED IN PRODUCTION.
+    # Same posture as the seat secret directly above: a control that is
+    # optional-by-default is a control nobody sets. `/feed?viewer=<anyone>`
+    # returns any account's ranked feed plus the full score decomposition, in
+    # front of a bounded-but-finite pool pointed at a SHARED third-party mirror,
+    # so an open instance is both a data-exposure and an abuse-amplification
+    # problem for someone else's database.
+    service_config = ServiceConfig.from_env()
+    if production and not service_config.api_token:
+        raise ValueError(
+            "RECSYS_API_TOKEN is required when RECSYS_PRODUCTION is on: /feed would "
+            "otherwise be open to the internet. Generate one with "
+            '`python -c "import secrets; print(secrets.token_urlsafe(32))"`, or set '
+            "RECSYS_PRODUCTION=0 for a local run."
+        )
+    if not service_config.api_token:
+        logger.warning(
+            "recsys.service.app: no RECSYS_API_TOKEN — /feed is UNAUTHENTICATED. "
+            "Local runs only."
+        )
+    state = ServiceState.build(settings=settings, config=service_config)
     state.warm()
     state.start_background_refresh()
     server = make_server(state)

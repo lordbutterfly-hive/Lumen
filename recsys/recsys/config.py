@@ -16,7 +16,14 @@ from dataclasses import dataclass, field
 #: `build_trust_snapshot(production=True)` off a handful of accounts. See
 #: `recsys/data/trusted_seeds.txt`'s own header and
 #: O:/LUMEN-DOCS/algo-tests/TRUSTED-SEEDS-2026-08-04.md for composition.
-_MIN_TRUSTED_SEEDS = 25
+#: Smallest seed list that can honestly serve as a trust root. PUBLIC as of
+#: 2026-08-05 (C4): `recsys.jobs.trust_batch` has its OWN loader on the
+#: production path and must enforce the SAME floor. Two loaders with two
+#: different contracts is how `_MIN_TRUSTED_SEEDS` came to be inert exactly
+#: where it mattered — see `trust_batch.load_trusted_seeds`.
+MIN_TRUSTED_SEEDS = 25
+#: Backwards-compatible private alias; prefer the public name.
+_MIN_TRUSTED_SEEDS = MIN_TRUSTED_SEEDS
 
 
 def _load_trusted_seeds() -> frozenset[str]:

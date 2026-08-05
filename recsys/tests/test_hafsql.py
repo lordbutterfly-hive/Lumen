@@ -7,6 +7,7 @@ No connection is opened and no query is executed.
 
 from __future__ import annotations
 
+import threading
 import time
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -1526,3 +1527,117 @@ def test_client_explicit_lite_config_kwarg_is_used_verbatim_even_with_env_set(
     assert client._lite.publisher_accounts == frozenset({"lumen-explicit-account"})
 
 
+
+
+# ---------------------------------------------------------------------------
+# B4b (2026-08-05) — the pool bounds LIVE connections, not just retained ones.
+#
+# The 2026-08-05 council measured 30 concurrent borrows on max_size=5 producing
+# 30 live connections, and 50 producing 50, against a SHARED third-party public
+# mirror. `HAFSQL_POOL_MAX` gated only whether a RETURNED connection was kept in
+# the idle list; `borrow()` opened a fresh one whenever idle was empty, with no
+# check against max_size, no semaphore and no wait.
+# ---------------------------------------------------------------------------
+
+
+def test_concurrent_borrows_never_exceed_max_size() -> None:
+    """★ THE BOUND. N threads borrow at once against a small pool; the number of
+    physical connections ever opened must not exceed `max_size`. Pre-B4b this
+    produced one connection per thread.
+
+    Mutation-checked: deleting the `self._live < self._max_size` guard in
+    `borrow()` makes `created` reach `THREADS` and this fails.
+    """
+    THREADS = 12
+    MAX = 3
+    created: list[_FakeConn] = []
+    created_lock = threading.Lock()
+
+    def connect() -> _FakeConn:
+        conn = _FakeConn()
+        with created_lock:
+            created.append(conn)
+        return conn
+
+    pool = _pool(connect, min_size=1, max_size=MAX, acquire_timeout_s=5.0)
+    barrier = threading.Barrier(THREADS)
+    errors: list[BaseException] = []
+
+    def worker() -> None:
+        try:
+            barrier.wait(timeout=5)
+            conn = pool.borrow()
+            time.sleep(0.01)  # hold it, so contention is real
+            pool.release(conn, healthy=True)
+        except BaseException as exc:  # reported, not swallowed
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker) for _ in range(THREADS)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=20)
+
+    assert not errors, f"borrowers failed: {errors!r}"
+    assert len(created) <= MAX, (
+        f"pool opened {len(created)} physical connections for {THREADS} concurrent "
+        f"borrowers against max_size={MAX} — the bound is not being enforced"
+    )
+
+
+def test_borrow_times_out_rather_than_opening_an_unbounded_connection() -> None:
+    """At capacity with nothing released, `borrow()` must FAIL — as the same
+    `HafsqlUnavailableError` an operator already handles as a 503 — rather than
+    quietly opening connection number max_size+1."""
+    pool = _pool(lambda: _FakeConn(), min_size=1, max_size=1, acquire_timeout_s=0.05)
+    held = pool.borrow()
+    try:
+        with pytest.raises(hafsql.HafsqlUnavailableError, match="pool exhausted"):
+            pool.borrow()
+    finally:
+        pool.release(held, healthy=True)
+
+
+def test_a_released_connection_unblocks_a_waiter() -> None:
+    """The bound must not become a deadlock: a waiter blocked at capacity has to
+    wake as soon as a slot frees, and reuse the returned connection rather than
+    opening a new one."""
+    created: list[_FakeConn] = []
+
+    def connect() -> _FakeConn:
+        conn = _FakeConn()
+        created.append(conn)
+        return conn
+
+    pool = _pool(connect, min_size=1, max_size=1, acquire_timeout_s=5.0)
+    first = pool.borrow()
+    got: list[Any] = []
+
+    def waiter() -> None:
+        got.append(pool.borrow())
+
+    t = threading.Thread(target=waiter)
+    t.start()
+    time.sleep(0.05)  # let it reach the wait
+    assert not got, "waiter should still be blocked while the only slot is held"
+    pool.release(first, healthy=True)
+    t.join(timeout=5)
+    assert got, "waiter was never woken after a release"
+    assert len(created) == 1, "the released connection should have been reused"
+
+
+def test_a_failed_connect_does_not_leak_its_slot() -> None:
+    """A slot is claimed BEFORE the (unlocked) connect, so a failing connect has
+    to hand it back — otherwise repeated failures silently retire the pool."""
+    import psycopg
+
+    def failing() -> _FakeConn:
+        raise psycopg.OperationalError("nope")
+
+    pool = _pool(failing, min_size=1, max_size=1, max_retries=0, acquire_timeout_s=0.05)
+    for _ in range(3):
+        with pytest.raises((psycopg.OperationalError, hafsql.HafsqlUnavailableError)):
+            pool.borrow()
+    # If the slot leaked, _live would be pinned at max_size and this would raise
+    # "pool exhausted" instead of the connect error above.
+    assert pool._live == 0

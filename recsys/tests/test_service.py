@@ -1056,3 +1056,201 @@ def test_per_request_tags_are_NOT_served_from_the_account_keyed_cache() -> None:
     assert len(captured) == 2, "the second request was served from cache"
     assert captured[0].interest_tags == frozenset({"first"})
     assert captured[1].interest_tags == frozenset({"second"})
+
+
+# ---------------------------------------------------------------------------
+# B4c (2026-08-05) — the HTTP surface has controls.
+#
+# Before this: no auth, no rate limit, no concurrency cap, no per-connection
+# read timeout, `?limit` silently ignored, and the 503 body echoed
+# f"{type(exc).__name__}: {exc}" — which for a driver failure carries the
+# upstream DB host and port — straight to the client.
+# ---------------------------------------------------------------------------
+
+
+def _get_with_headers(
+    server: _RunningServer, path: str, headers: dict[str, str] | None = None
+) -> tuple[int, dict[str, Any]]:
+    req = urllib.request.Request(server.base_url + path, headers=headers or {})
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            return resp.status, json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        return exc.code, json.loads(exc.read())
+
+
+def _authed_state(**kwargs: Any) -> service_app.ServiceState:
+    state = _offline_state(**kwargs)
+    state.config = replace(state.config, api_token="s3cret-token")
+    return state
+
+
+def test_feed_requires_the_bearer_token_when_one_is_configured() -> None:
+    state = _authed_state()
+    with _RunningServer(state) as server:
+        status, body = _get_with_headers(server, "/feed?viewer=alice")
+    assert status == 401
+    assert body == {"error": "unauthorized"}
+
+
+def test_feed_accepts_the_correct_bearer_token() -> None:
+    state = _authed_state()
+    with _RunningServer(state) as server:
+        status, _ = _get_with_headers(
+            server, "/feed?viewer=alice", {"Authorization": "Bearer s3cret-token"}
+        )
+    assert status == 200
+
+
+def test_feed_rejects_a_wrong_or_malformed_bearer_token() -> None:
+    state = _authed_state()
+    with _RunningServer(state) as server:
+        for header in (
+            {"Authorization": "Bearer wrong"},
+            {"Authorization": "s3cret-token"},          # no scheme
+            {"Authorization": "Basic s3cret-token"},    # wrong scheme
+            {"Authorization": "Bearer "},
+        ):
+            status, _ = _get_with_headers(server, "/feed?viewer=alice", header)
+            assert status == 401, header
+
+
+def test_health_stays_reachable_without_a_token() -> None:
+    """Container healthchecks and load balancers have no credentials, and
+    /health exposes counters only — never feed content."""
+    state = _authed_state()
+    with _RunningServer(state) as server:
+        status, body = _get_with_headers(server, "/health")
+    assert status == 200
+    assert body["status"] in ("ok", "starting")
+
+
+def test_rate_limit_returns_429_once_the_window_budget_is_spent() -> None:
+    state = _offline_state()
+    state.config = replace(state.config, rate_limit_per_minute=3)
+    with _RunningServer(state) as server:
+        codes = [server.get("/feed?viewer=alice")[0] for _ in range(5)]
+    assert codes[:3] == [200, 200, 200]
+    assert codes[3:] == [429, 429], codes
+
+
+def test_limit_parameter_truncates_the_payload_and_count_agrees() -> None:
+    """`?limit` was parsed nowhere — every caller got the full page regardless."""
+    state = _offline_state(popular=[make_post(f"pop{i}", f"p{i}") for i in range(6)])
+    with _RunningServer(state) as server:
+        full_status, full_body = server.get("/feed?viewer=alice")
+        status, body = server.get("/feed?viewer=alice&limit=2")
+        bad_status, _ = server.get("/feed?viewer=alice&limit=0")
+    assert full_status == 200 and status == 200
+    assert len(body["posts"]) == 2
+    assert body["count"] == 2, "count must describe the payload, not the full ranking"
+    assert len(full_body["posts"]) >= len(body["posts"])
+    assert bad_status == 400
+
+
+def test_the_503_body_does_not_leak_upstream_error_text() -> None:
+    """★ THE INFO-LEAK REGRESSION. `FeedUnavailableError.detail` is built from
+    `str(exc)` on the underlying failure; for a driver error that carries the
+    upstream DB host and port. It must reach the LOG, never the client."""
+    state = _offline_state(snapshot=None)
+    with _RunningServer(state) as server:
+        status, body = server.get("/feed?viewer=alice")
+    assert status == 503
+    assert body["error"] == "trust_unavailable"
+    assert "detail" not in body, f"503 body leaked upstream text: {body!r}"
+
+
+def test_the_inflight_cap_sheds_rather_than_queues() -> None:
+    """A bounded pool behind an unbounded thread pile-up is still an outage;
+    over the cap the service must return 503 immediately."""
+    state = _offline_state()
+    state.config = replace(state.config, max_concurrent_requests=1)
+    with _RunningServer(state) as server:
+        # Exhaust the semaphore from outside so the next request must shed.
+        assert server.server.inflight.acquire(blocking=False)
+        try:
+            status, body = server.get("/feed?viewer=alice")
+        finally:
+            server.server.inflight.release()
+    assert status == 503
+    assert body == {"error": "overloaded"}
+
+
+def test_main_refuses_to_start_unauthenticated_in_production(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Same posture as the seat secret: a control that is optional by default is
+    a control nobody sets."""
+    monkeypatch.setenv("RECSYS_PRODUCTION", "1")
+    monkeypatch.setenv("LUMEN_EXPLORE_SEAT_SECRET", "ab" * 32)
+    monkeypatch.delenv("RECSYS_API_TOKEN", raising=False)
+    with pytest.raises(ValueError, match="RECSYS_API_TOKEN"):
+        service_app.main()
+
+
+# ---------------------------------------------------------------------------
+# B5 (2026-08-05) — staleness is LOUD.
+#
+# The documented worst case before this: the weekly batch stops, 14 days pass,
+# every /feed 503s under FAIL_CLOSED — and /health still returned "ok", the
+# container healthcheck still passed, and the refusal path logged NOTHING. A
+# total outage that nothing alerts on, preceded by two silent weeks.
+# ---------------------------------------------------------------------------
+
+
+def _stale_state() -> service_app.ServiceState:
+    """A snapshot older than `max_snapshot_age_days` — the state a stopped
+    weekly batch reaches on its own."""
+    now = EPOCH + timedelta(days=400)
+    state = _offline_state(now=now, snapshot=_fresh_snapshot(built_at=EPOCH))
+    return state
+
+
+def test_health_reports_degraded_and_not_serving_when_trust_is_stale() -> None:
+    """★ THE HEADLINE REGRESSION. `status` used to be computed from the norm
+    alone and never looked at the snapshot at all."""
+    with _RunningServer(_stale_state()) as server:
+        status, body = server.get("/health")
+    assert status == 200, "health must stay reachable — it is how you SEE the outage"
+    assert body["status"] == "degraded", body["status"]
+    assert body["serving"] is False
+    assert body["trust_snapshot"]["fresh"] is False
+    assert body["trust_snapshot"]["present"] is True, (
+        "'present' was always true for a six-month-old snapshot — which is "
+        "exactly why it was never a health signal"
+    )
+
+
+def test_health_says_serving_when_trust_is_fresh() -> None:
+    """Control: without it, a bug that reported `degraded` unconditionally
+    would pass the test above."""
+    with _RunningServer(_offline_state()) as server:
+        _, body = server.get("/health")
+    assert body["status"] == "ok"
+    assert body["serving"] is True
+    assert body["trust_snapshot"]["fresh"] is True
+
+
+def test_the_stale_refusal_path_logs(caplog: pytest.LogCaptureFixture) -> None:
+    """★ It refused every request while writing nothing to the server log, so
+    the only evidence was client-side 503s."""
+    state = _stale_state()
+    with (
+        caplog.at_level("ERROR", logger="recsys.service.app"),
+        pytest.raises(service_app.FeedUnavailableError),
+    ):
+        service_app.build_feed(state, "alice")
+    assert any("REFUSING every request" in r.getMessage() for r in caplog.records), (
+        f"stale-trust refusal logged nothing: {[r.getMessage() for r in caplog.records]}"
+    )
+
+
+def test_health_and_serving_agree_on_the_same_clock() -> None:
+    """`health_payload` used its own `datetime.now(UTC)` while the request path
+    used `state.now_fn()`. Two clocks meant health could report ok while every
+    request 503'd — the exact disagreement this task removes."""
+    state = _stale_state()
+    payload = service_app.health_payload(state)
+    assert payload["serving"] is False
+    with pytest.raises(service_app.FeedUnavailableError):
+        service_app.build_feed(state, "alice")
