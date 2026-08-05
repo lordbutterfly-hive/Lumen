@@ -232,6 +232,30 @@ logger = logging.getLogger("recsys.exploration")
 #: eight behavioural tests is its own measured pass, not a punch-list slot — and
 #: this lane has produced a regression from three of its last five changes. The
 #: numbers above say the merge is probably right; they do not say it is safe.
+#: ★★★ THE 3-ENGAGER DEAD ZONE — FIX IDENTIFIED, NOT SHIPPED (2026-08-06).
+#:
+#: `(0,1,4,8,20)` is the RIGHT answer and it is not here yet. It closes the dead
+#: zone (3 engagers stay in band 1 instead of dropping to band 2 while merit
+#: needs ~4) AND keeps band 0 exclusive to genuine zero-engagement newcomers —
+#: round-5 Seat 3's variant, strictly better than the `(0,4,8,20)` merge, whose
+#: farm "gain" came FROM destroying the zero band.
+#:
+#: IT WAS APPLIED, MEASURED, AND BACKED OUT for one reason, measured causally by
+#: running `mutate_panels.py --panel q11_follow_curve.py` under each setting:
+#:
+#:     (0,1,3,8,20)  ->  3 CAUGHT, 0 MISSED
+#:     (0,1,4,8,20)  ->  1 caught, 2 MISSED
+#:
+#: It silently BLINDS q11 to `unchosen_max_share` and `unchosen_max_per_page` —
+#: the diversity caps. Not because those caps break, but because the shifted
+#: lane composition stops q11's world exercising them, so the panel can no
+#: longer fail when they are removed. Everything else was green: 14/14 panels,
+#: 864 tests, farm attack unchanged, 2 boundary pins updated.
+#:
+#: Shipping it would have traded a real product bug for a silent loss of
+#: evidence, on a project whose defining failure is gates that pass while the
+#: thing is broken. It lands when q11's fixture still exercises those caps
+#: afterwards — that is the whole remaining task, and it is small.
 DEFAULT_NEED_BANDS: tuple[int, ...] = (0, 1, 3, 8, 20)
 
 

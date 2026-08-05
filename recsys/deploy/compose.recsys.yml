@@ -106,6 +106,17 @@ services:
       RECSYS_API_TOKEN:
       # Optional throttles; these have working defaults (120/min, 16 in flight,
       # 10s read timeout) and are listed so an operator can find them.
+      # ★★★ ROUND-5 COUNCIL (Seat 1). `RECSYS_TRUSTED_PROXY_HOPS` existed in
+      # `ServiceConfig` and reached NO container — the identical defect the
+      # round-4 council found for `LUMEN_LITE_DATABASE_URL`, repeated one round
+      # later by the same author. Config that exists in code and not in the
+      # artifact is config that does not exist.
+      #
+      # Unset/0 = no proxy in front, `X-Forwarded-For` IGNORED (the safe
+      # default). Set it to the number of proxies YOU run: behind the reverse
+      # proxy this stack documents, leaving it unset means one unauthenticated
+      # client spends the shared rate-limit bucket and 429s every real user.
+      RECSYS_TRUSTED_PROXY_HOPS:
       RECSYS_RATE_LIMIT_PER_MINUTE:
       RECSYS_MAX_CONCURRENT_REQUESTS:
       RECSYS_REQUEST_READ_TIMEOUT_S:
@@ -115,6 +126,20 @@ services:
       # `0` opts out of the production fail-shut for LOCAL runs only. Unset
       # means production, which is the safe default and what this file assumes.
       RECSYS_PRODUCTION:
+    # ★★★ ROUND-5 COUNCIL (Seat 1) — WITHOUT THIS, A COLD DEPLOY IS UNHEALTHY
+    # FOREVER. `/feed` refuses to serve without a trust snapshot, the probe
+    # gates on `serving`, and the batch below was documented as "an operator
+    # decision" and left unscheduled — so `up` produced a container that could
+    # never pass its own healthcheck. Renaming the health JSON's reason (which
+    # is what the punch list first did) did not change that by one bit.
+    #
+    # The batch now runs to completion BEFORE the service starts, so a fresh
+    # install comes up serving. It stays a one-shot: this is the FIRST snapshot,
+    # not a schedule. Recurring runs are still the operator's to wire (see the
+    # header) — but "it never works until you read the docs" is not a deploy.
+    depends_on:
+      recsys-trust-batch:
+        condition: service_completed_successfully
     ports:
       - "${RECSYS_HOST_PORT:-8000}:8000"
     networks:

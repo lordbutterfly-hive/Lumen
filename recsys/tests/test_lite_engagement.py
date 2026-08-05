@@ -511,7 +511,7 @@ def test_the_deploy_artifact_passes_lite_configuration_to_both_services() -> Non
 
     compose = (pathlib.Path(__file__).resolve().parent.parent / "deploy" / "compose.recsys.yml")
     text = compose.read_text()
-    feed, batch = text.split("recsys-trust-batch:", 1)
+    feed, batch = text.split("\n  recsys-trust-batch:", 1)
     assert "LUMEN_LITE_DATABASE_URL:" in feed, "the feed service cannot read lite engagement"
     assert "LITE_PUBLISHER_ACCOUNTS:" in batch, (
         "the trust batch cannot see lite publishers — L1 is inert where the graph is built"
@@ -564,6 +564,44 @@ def test_a_lite_reblog_still_counts_as_a_person_for_merit() -> None:
     ) > independent_organic_engagement(plain, exclusions.excluded())
 
 
+def test_one_failing_query_cannot_be_held_closed_by_another_succeeding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """★★★ ROUND-5 COUNCIL (Seat 3). The breaker was ONE global counter that any
+    success reset — so with the votes query failing and the reblogs query
+    succeeding, the success zeroed the count on every request and the breaker
+    NEVER opened. Measured over 12 requests: a single slow table cost +2s per
+    request, forever. A breaker that a healthy sibling can hold closed is not a
+    breaker.
+
+    MUTANT: share one counter across both queries again. This fails.
+    """
+    lite_engagement.reset_breaker()
+    votes_attempts: list[int] = []
+    real_connect = lite_engagement._connect
+
+    def selective(dsn: str):  # type: ignore[no-untyped-def]
+        # The reblogs path is exercised via `_reader` below; this stands in for
+        # the votes path only, and always fails.
+        votes_attempts.append(1)
+        raise OSError("votes table unavailable")
+
+    cfg = LiteConfig(engagement_dsn="postgresql://x")
+    for _ in range(8):
+        monkeypatch.setattr(lite_engagement, "_connect", selective)
+        lite_engagement.fetch_lite_votes(cfg, [("alice", "p1")])
+        # ...and the sibling query succeeds on the same request.
+        _reader([], monkeypatch)
+        lite_engagement.fetch_lite_rebloggers(cfg, [("alice", "p1")])
+    monkeypatch.setattr(lite_engagement, "_connect", real_connect)
+
+    assert len(votes_attempts) == 3, (
+        f"the votes query was dialled {len(votes_attempts)} times while failing "
+        "— a succeeding sibling held its breaker closed"
+    )
+    lite_engagement.reset_breaker()
+
+
 def test_a_failing_lite_store_trips_a_breaker_instead_of_being_retried_forever(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -602,15 +640,35 @@ def test_a_recovered_lite_store_closes_the_breaker(monkeypatch: pytest.MonkeyPat
     _reader([("alice", "p1", "01VOTER", _EPOCH)], monkeypatch)
     cfg = LiteConfig(engagement_dsn="postgresql://x")
     assert lite_engagement.fetch_lite_votes(cfg, [("alice", "p1")])
-    assert not lite_engagement._breaker_is_open(0.0)
+    assert not lite_engagement._breaker_is_open("votes", 0.0)
     lite_engagement.reset_breaker()
 
 
-def test_the_lite_connection_sets_a_statement_timeout() -> None:
-    """A connect timeout says nothing about a query that hangs AFTER
-    connecting, which is the shape that cost ~6s per request."""
-    import inspect
+def test_the_lite_connection_actually_enforces_a_statement_timeout() -> None:
+    """★★★ ROUND-5 COUNCIL (Seat 3) — THE THIRD SUBSTRING GATE THIS PROJECT HAS
+    SHIPPED, and the third to be caught. The previous version asserted
+    `"statement_timeout" in source`, which passes with the value set to `0` —
+    and `0` means NO LIMIT in PostgreSQL, so the mutant `2000 -> 0` survived
+    offline, live and targeted runs while `pg_sleep(8)` completed happily.
 
-    source = inspect.getsource(lite_engagement._connect)
-    assert "statement_timeout" in source
-    assert "connect_timeout=_CONNECT_TIMEOUT_S" in source
+    Executed against a real PostgreSQL instead: a query that sleeps past the
+    limit must be CANCELLED, which is the behaviour the fix exists for. A
+    connect timeout says nothing about a query that hangs after connecting.
+
+    MUTANT: set `_STATEMENT_TIMEOUT_MS = 0`. This fails.
+    """
+    psycopg = pytest.importorskip("psycopg")
+    from recsys.config import HafsqlConfig
+
+    cfg = HafsqlConfig()
+    dsn = (
+        f"host={cfg.host} port={cfg.port} dbname={cfg.dbname} "
+        f"user={cfg.user} password={cfg.password}"
+    )
+    try:
+        conn = lite_engagement._connect(dsn)
+    except Exception as exc:
+        pytest.skip(f"no reachable PostgreSQL: {type(exc).__name__}: {exc}")
+    with conn, conn.cursor() as cur, pytest.raises(psycopg.errors.QueryCanceled):
+        # Comfortably past the 2s limit the module sets.
+        cur.execute("SELECT pg_sleep(8)")

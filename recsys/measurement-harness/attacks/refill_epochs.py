@@ -14,44 +14,49 @@ effect at all.
 Run: `python3 measurement-harness/attacks/refill_epochs.py`
 Prints a table; does not gate. It exists to make a trade VISIBLE, not to pass.
 
-★★★ THE RESULT, RECORDED BECAUSE IT IS A NEGATIVE AND NEGATIVES GET LOST.
+★★★ THE RESULT — AND THE FIRST VERSION OF THIS NOTE WAS WRONG.
 
-Measured 2026-08-05, 4 epochs x 8 panels x seeds (7, 11, 23), the ONLY variable
-being `serve_window_days`:
+**Corrected 2026-08-06 after the round-5 council (Seat 1) refuted it.** What
+stood here said the refill was byte-identical to the lifetime cap, blamed the
+seat rotation, and told the reader "do not quote a refill benefit from this
+file". All three were wrong, and the last one was actively harmful — it was a
+doc-lie of exactly the class this diff fixed for `serve_log`.
 
-    window        socks    farm share   distinct honest reached
-    lifetime          0         0.0%                      11.3
-    lifetime         20         7.4%                      10.7
-    7d refill         0         0.0%                      11.3
-    7d refill        20         7.4%                      10.7
+THE BUG WAS IN THIS SCRIPT, NOT IN THE MECHANISM. `exploration_capture._add_post`
+stamps every post at absolute `NOW`, while this script advances the clock; the
+lane cuts candidates at `now - max_age_days` (7 days). So epochs 1, 2 and 3
+served **ZERO** slots — every post had aged out. The arms agreed because three
+of four epochs measured nothing at all, which is also why the identical table
+looked so clean.
 
-**Byte-identical.** The refilling budget is verified to work at the mechanism
-level (`tests/test_exploration.py::test_the_serve_budget_refills_on_a_rolling_window`
-— 3 serves, window elapses, budget returns) and has NO measurable effect on
-served outcomes here.
+Measured properly (world translated WITH the clock, 4 epochs 8 days apart, one
+shared log), distinct honest authors reached per epoch:
 
-The reason is that the SEAT ROTATION, not the budget, decides who occupies this
-lane: the occupant is `f(clock bucket, author)` within a need tier, so advancing
-the clock a week changes the occupant regardless of anyone's budget, and the cap
-is second-order. Which means one of two things, and this harness cannot tell
-them apart:
+    lifetime cap   11.3,  0.0,  0.0,  0.0   -> union 11.3
+    7-day refill   11.3, 10.7, 13.7,  9.3   -> union 19.3
 
-  * the refill is genuinely inert at these volumes, or
-  * this instrument cannot see it — 10 viewers per panel is ~10 slots against
-    20 candidates, so a 3-serve budget rarely binds even repeated 32 times.
+**+71% newcomer reach (+75% under farm pressure).** The lifetime cap does not
+merely ration the lane — it KILLS it after one epoch, which is what four
+councils were objecting to without being able to name.
 
-Two earlier versions of THIS script produced a confident-looking table that was
-wrong, and both are worth knowing about:
+THE COST IS REAL AND WAS PREDICTED: the farm's budget refills too, so farm share
+goes from ~0% (post-exhaustion) to ~26-30% in later epochs. A refilling budget is
+strictly more generous to an attacker than a lifetime cap. That trade was
+accepted deliberately — see `ExplorationConfig.serve_window_days`.
+
+THREE WRONG VERSIONS OF THIS MEASUREMENT, all worth knowing about:
   1. the arms advanced the clock by DIFFERENT amounts (`window_days * epoch`, so
-     0 for the lifetime arm) — four panels at one instant compared against four
-     a week apart, varying two things at once;
-  2. one panel per epoch, where the budget never binds at all and both arms are
-     identical for a reason that has nothing to do with the window.
+     0 for the lifetime arm) — four panels at one instant against four a week
+     apart, varying two things at once;
+  2. one panel per epoch, where the budget never binds and both arms agree for a
+     reason unrelated to the window;
+  3. posts stamped at a fixed `NOW` while the clock moved, so every epoch after
+     the first was empty — and the resulting identical table was reported as a
+     finding, with a confident and incorrect causal story attached.
 
-Do not quote a refill benefit from this file. Measuring it needs an instrument
-where the budget is the binding constraint — which is the multi-epoch harness
-the adjudicated design asks for BEFORE the mechanism, and which this is only a
-first step toward.
+The lesson is not "measure more". It is that **an identical result is a claim
+that something did not happen, and needs the same proof as a positive** — in
+this case, one line checking that later epochs served any slots at all.
 """
 from __future__ import annotations
 

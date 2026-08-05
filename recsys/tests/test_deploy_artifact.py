@@ -162,3 +162,42 @@ def test_the_healthcheck_start_period_covers_a_real_cold_start() -> None:
         if line.strip().startswith("start_period:")
     ]
     assert compose and compose[0].split(":", 1)[1].strip().startswith("300s"), compose
+
+
+def test_the_artifact_passes_the_proxy_hop_count_to_the_service() -> None:
+    """★★★ ROUND-5 COUNCIL (Seat 1 + Seat 3). `RECSYS_TRUSTED_PROXY_HOPS`
+    existed in `ServiceConfig`, was read by `from_env`, was covered by four
+    tests — and reached NO container. The rate-limit fix it controls was
+    therefore unreachable in the shipped artifact.
+
+    This is the IDENTICAL defect the round-4 council found for
+    `LUMEN_LITE_DATABASE_URL`, repeated one round later by the same author, in
+    the same file. Config that exists in code and not in the artifact is config
+    that does not exist.
+
+    MUTANT: remove the variable from compose. This fails.
+    """
+    compose = (_ROOT / "deploy" / "compose.recsys.yml").read_text()
+    feed = compose.split("\n  recsys-trust-batch:", 1)[0]
+    assert "RECSYS_TRUSTED_PROXY_HOPS:" in feed, (
+        "the feed service cannot be told how many proxies sit in front of it, "
+        "so X-Forwarded-For is ignored and one client can 429 every user"
+    )
+
+
+def test_a_cold_deploy_runs_the_trust_batch_before_serving() -> None:
+    """★★★ ROUND-5 COUNCIL (Seat 1). `/feed` refuses to serve without a trust
+    snapshot and the probe gates on `serving`, while the batch was documented as
+    "an operator decision" and left unscheduled — so `docker compose up` on a
+    fresh install produced a container that could NEVER pass its own
+    healthcheck. Renaming the health JSON's reason, which is what the punch list
+    first did, did not change that by one bit.
+
+    MUTANT: drop the `depends_on`. This fails.
+    """
+    compose = (_ROOT / "deploy" / "compose.recsys.yml").read_text()
+    feed = compose.split("\n  recsys-trust-batch:", 1)[0]
+    assert "depends_on:" in feed and "service_completed_successfully" in feed, (
+        "a cold deploy never gets a first trust snapshot, so it can never "
+        "report healthy"
+    )

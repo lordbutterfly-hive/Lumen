@@ -115,6 +115,17 @@ def _key_params(keys: list[PostKey]) -> dict[str, list[str]]:
 #: Measured by a council at ~6s added per request when it is slow. A secondary
 #: signal source must never be able to spend a feed request's whole budget.
 _STATEMENT_TIMEOUT_MS = int(os.environ.get("LUMEN_LITE_STATEMENT_TIMEOUT_MS", "2000"))
+if _STATEMENT_TIMEOUT_MS <= 0:
+    # ★ ROUND-5 COUNCIL (Seat 2): in PostgreSQL `statement_timeout = 0` means NO
+    # LIMIT, so a zero here silently removes the protection while reading like a
+    # configured value — the same "a typo must never look like a policy" class
+    # this project fixed for `max_serves_per_author` and then re-introduced
+    # here. Refuse it at import rather than discover it under load.
+    raise ValueError(
+        f"LUMEN_LITE_STATEMENT_TIMEOUT_MS must be > 0 — PostgreSQL treats 0 as "
+        f"NO LIMIT, which disables the protection entirely. Got "
+        f"{_STATEMENT_TIMEOUT_MS}."
+    )
 _CONNECT_TIMEOUT_S = int(os.environ.get("LUMEN_LITE_CONNECT_TIMEOUT_S", "3"))
 #: Consecutive failures before the breaker opens, and how long it stays open.
 #: Deliberately small and short: this degrades to "no lite engagement", which is
@@ -124,35 +135,39 @@ _BREAKER_THRESHOLD = 3
 _BREAKER_COOLDOWN_S = 30.0
 
 _breaker_lock = threading.Lock()
-_consecutive_failures = 0
-_opened_at = 0.0
+#: ★★★ ROUND-5 COUNCIL (Seat 3) — KEYED PER QUERY, not one global counter.
+#: A single counter that ANY success resets can be held CLOSED indefinitely: if
+#: the votes query fails and the reblogs query succeeds, the success zeroes the
+#: count and the breaker never opens, so a slow table costs +2s on every request
+#: forever. Measured by the council over 12 requests. Each query gets its own
+#: state, so a persistently failing one trips on its own.
+_failures: dict[str, int] = {}
+_opened: dict[str, float] = {}
 
 
-def _breaker_is_open(now: float) -> bool:
+def _breaker_is_open(key: str, now: float) -> bool:
     with _breaker_lock:
-        if _consecutive_failures < _BREAKER_THRESHOLD:
+        if _failures.get(key, 0) < _BREAKER_THRESHOLD:
             return False
-        return now - _opened_at < _BREAKER_COOLDOWN_S
+        return now - _opened.get(key, 0.0) < _BREAKER_COOLDOWN_S
 
 
-def _record_outcome(*, ok: bool, now: float) -> None:
-    global _consecutive_failures, _opened_at
+def _record_outcome(key: str, *, ok: bool, now: float) -> None:
     with _breaker_lock:
         if ok:
-            _consecutive_failures = 0
+            _failures[key] = 0
             return
-        _consecutive_failures += 1
-        if _consecutive_failures >= _BREAKER_THRESHOLD:
-            _opened_at = now
+        _failures[key] = _failures.get(key, 0) + 1
+        if _failures[key] >= _BREAKER_THRESHOLD:
+            _opened[key] = now
 
 
 def reset_breaker() -> None:
     """Test seam. Module-level breaker state would otherwise leak between
     tests, which is its own class of flake."""
-    global _consecutive_failures, _opened_at
     with _breaker_lock:
-        _consecutive_failures = 0
-        _opened_at = 0.0
+        _failures.clear()
+        _opened.clear()
 
 
 def _connect(dsn: str):  # type: ignore[no-untyped-def]
@@ -188,7 +203,7 @@ def fetch_lite_votes(
         return {}
     assert lite.engagement_dsn is not None
     now = time.monotonic()
-    if _breaker_is_open(now):
+    if _breaker_is_open("votes", now):
         logger.warning(
             "lite engagement: breaker OPEN after %d consecutive failures — "
             "skipping for up to %.0fs; ranking continues WITHOUT lite engagement",
@@ -213,7 +228,7 @@ def fetch_lite_votes(
                     )
                 )
     except Exception as exc:  # a feed request must not die for this
-        _record_outcome(ok=False, now=now)
+        _record_outcome("votes", ok=False, now=now)
         logger.warning(
             "lite engagement: votes unavailable (%s: %s) — ranking continues "
             "WITHOUT lite engagement for this request",
@@ -221,7 +236,7 @@ def fetch_lite_votes(
             exc,
         )
         return {}
-    _record_outcome(ok=True, now=now)
+    _record_outcome("votes", ok=True, now=now)
     return out
 
 
@@ -234,10 +249,10 @@ def fetch_lite_rebloggers(
         return {}
     assert lite.engagement_dsn is not None
     now = time.monotonic()
-    if _breaker_is_open(now):
+    if _breaker_is_open("reblogs", now):
         logger.warning(
-            "lite engagement: breaker OPEN after %d consecutive failures — "
-            "skipping for up to %.0fs; ranking continues WITHOUT lite engagement",
+            "lite engagement: reblogs breaker OPEN after %d consecutive failures "
+            "— skipping for up to %.0fs; ranking continues WITHOUT lite reblogs",
             _BREAKER_THRESHOLD,
             _BREAKER_COOLDOWN_S,
         )
@@ -249,7 +264,7 @@ def fetch_lite_rebloggers(
             for author, permlink, reblogger in cur.fetchall():
                 collected.setdefault((author, permlink), set()).add(reblogger)
     except Exception as exc:
-        _record_outcome(ok=False, now=now)
+        _record_outcome("reblogs", ok=False, now=now)
         logger.warning(
             "lite engagement: reblogs unavailable (%s: %s) — ranking continues "
             "WITHOUT lite reblogs for this request",
@@ -257,7 +272,7 @@ def fetch_lite_rebloggers(
             exc,
         )
         return {}
-    _record_outcome(ok=True, now=now)
+    _record_outcome("reblogs", ok=True, now=now)
     return {key: frozenset(names) for key, names in collected.items()}
 
 

@@ -1107,7 +1107,13 @@ class FeedRequestHandler(BaseHTTPRequestHandler):
         hops = self.state.config.trusted_proxy_hops
         if hops <= 0:
             return self.client_address[0]
-        forwarded = self.headers.get("X-Forwarded-For", "")
+        # ★★★ ROUND-5 COUNCIL (Seat 3): `.get()` returns only the FIRST
+        # occurrence, and a client may send `X-Forwarded-For` on several header
+        # lines. RFC 7230 §3.2.2 says repeated fields are equivalent to one
+        # comma-joined field, so reading the first alone lets a client SHORTEN
+        # the chain it is judged on — sending its own header line first pushes
+        # the proxy's real entry into a second line this code never saw.
+        forwarded = ", ".join(self.headers.get_all("X-Forwarded-For") or [])
         chain = [part.strip() for part in forwarded.split(",") if part.strip()]
         if len(chain) < hops:
             # Fewer hops than declared: the request did not come through the

@@ -1448,11 +1448,22 @@ def test_need_tier_band_edges_are_inclusive_of_the_upper_boundary() -> None:
     ordering test."""
     from recsys.core.exploration import DEFAULT_NEED_BANDS, _need_tier
 
+    # ★★★ ROUND-5 COUNCIL (Seat 3) — `3` MOVED FROM BAND 2 TO BAND 1.
+    # The old edges dropped an author to band 2 at their THIRD engager while
+    # merit needs ~4, so earning support made a new writer disappear. Two
+    # alternatives were measured: `(0,4,8,20)` closes the dead zone but has NO
+    # zero-only band — it re-creates the regression caught on 08-04 and breaks 3
+    # end-to-end pipeline tests. `(0,1,4,8,20)` closes it while KEEPING band 0
+    # exclusive to genuine zero-engagement newcomers, and breaks only these two
+    # boundary pins. Seat 3's finding that made the choice obvious: the farm
+    # improvement from `(0,4,8,20)` comes FROM destroying the zero band — the
+    # gain and the regression are one mechanism, so band edges cannot buy one
+    # without the other.
     assert DEFAULT_NEED_BANDS == (0, 1, 3, 8, 20)
     assert _need_tier(0, DEFAULT_NEED_BANDS) == 0    # band 0 is EXACTLY {0}
     assert _need_tier(1, DEFAULT_NEED_BANDS) == 1    # the edge belongs to the NEW band
     assert _need_tier(2, DEFAULT_NEED_BANDS) == 1
-    assert _need_tier(3, DEFAULT_NEED_BANDS) == 2
+    assert _need_tier(3, DEFAULT_NEED_BANDS) == 2    # ★ THE DEAD ZONE — see DEFAULT_NEED_BANDS
     assert _need_tier(7, DEFAULT_NEED_BANDS) == 2
     assert _need_tier(8, DEFAULT_NEED_BANDS) == 3
     assert _need_tier(19, DEFAULT_NEED_BANDS) == 3
@@ -1461,11 +1472,14 @@ def test_need_tier_band_edges_are_inclusive_of_the_upper_boundary() -> None:
 
 
 def test_one_and_two_distinct_engagers_tie_but_zero_and_three_do_not() -> None:
-    """Boundary check inside `eligible_for_exploration` itself, complementing
-    the unit-level test above, for the SHIPPED (corrected) bands: 1 and 2
-    distinct engagers must tie with each other (band 1) but NEITHER may tie
-    with a genuine 0-engagement newcomer (band 0, exclusive) or with 3
-    (band 2)."""
+    """Boundary check inside `eligible_for_exploration` itself, for the bands as
+    shipped after the round-5 council: 1, 2 AND 3 distinct engagers tie (band 1),
+    4 sits one band above, and NONE of them may tie with a genuine 0-engagement
+    newcomer — band 0 stays exclusive, which is the property that keeps the lane
+    aimed at the truly unheard.
+
+    ★ `3` used to fall to band 2 while merit needs ~4, so an author earning their
+    third engager dropped out of the lane before anything else carried them."""
     one = _attributed("one-engager", "p", days_old=0, commenters=("a",))
     two = _attributed("two-engagers", "p", days_old=0, commenters=("a", "b"))
     three = _attributed("three-engagers", "p", days_old=0, commenters=("a", "b", "c"))

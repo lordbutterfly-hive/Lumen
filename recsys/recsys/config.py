@@ -1265,6 +1265,26 @@ class ExplorationConfig:
     #: cohort: 1,506 accounts created in 30 days, ~14.5 true debuts/day, median
     #: 3 posts in a newcomer's first 30 days.
     #:
+    #: ★★★ MEASURED 2026-08-06, three seats independently, after the first
+    #: measurement was WRONG (it pinned posts at a fixed clock while advancing
+    #: the reading clock, so epochs 1-3 served zero slots and the arms agreed by
+    #: construction). 4 epochs x 8 panels x 3 seeds, only this field varying:
+    #:
+    #:     lifetime cap   distinct honest reached 9.3-11.3   farm share  7.2-7.4%
+    #:     7-day refill   distinct honest reached 18.7-19.0  farm share 28.0-30.2%
+    #:
+    #: **+71-101% newcomer reach for roughly 4x the farm's share of the lane.**
+    #: The lifetime cap does not ration this lane, it KILLS it after one epoch —
+    #: socks are permanently exiled but so is every honest newcomer, and only
+    #: epoch 0 ever serves anyone. That is what four councils were objecting to.
+    #:
+    #: The farm cost is accepted DELIBERATELY: farms are to be handled by a
+    #: report/takedown path (owner ruling 2026-08-06), which truncates a farm's
+    #: yield once noticed. Without takedown a refill hands a farm a recurring
+    #: harvest (~52/year rather than one). Judge this lane on HONEST REACH and
+    #: treat farm share as a cost capped downstream — see
+    #: `/mnt/o/LUMEN-DOCS/algo-tests/PLAN-TO-LAUNCH-2026-08-05.md`.
+    #:
     #: ★★ THE COST, STATED RATHER THAN DISCOVERED LATER. A refilling budget is
     #: strictly MORE generous to a farm than a lifetime cap: a sock's budget
     #: also returns every window, so account-count farming becomes a recurring

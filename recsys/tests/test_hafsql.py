@@ -1825,3 +1825,87 @@ def test_only_a_publishers_post_may_redirect_its_engagement(monkeypatch) -> None
         "'01WRONGAPP' present = the app-id gate is off; "
         "a count of 2 = the join is no longer keyed on (author, permlink)."
     )
+
+
+# ---------------------------------------------------------------------------
+# ★★★ ROUND-5 COUNCIL (Seat 2): the trust boundary is enforced in THREE edge
+# queries and only the UPVOTE one had an executed test. Four mutants stripping
+# the publisher/app gating on the REPLY and REBLOG branches went uncaught — the
+# round-4 rule ("a filter is not landed until it has run against every channel
+# the producer writes") violated inside the fix written FOR that rule.
+# ---------------------------------------------------------------------------
+
+_LITE_ROWS = """
+    comments(author, permlink, json_metadata) AS (VALUES
+        ('lumen.pub', 'p-lite',  '{"app":"lumen/1.0","lumen_user_id":"01LITEWRITER"}'::jsonb),
+        ('lumen.pub', 'p-other', '{"app":"peakd/1.0","lumen_user_id":"01WRONGAPP"}'::jsonb),
+        ('attacker',  'p-lite',  '{"app":"lumen/1.0","lumen_user_id":"01STOLEN"}'::jsonb)
+    )
+"""
+
+_REPLY_PRELUDE = f"""
+    WITH {_LITE_ROWS},
+    replies(author, parent_author, parent_permlink, "timestamp") AS (VALUES
+        ('fan', 'lumen.pub', 'p-lite',  now()),
+        ('fan', 'lumen.pub', 'p-other', now()),
+        ('fan', 'attacker',  'p-lite',  now())
+    )
+"""
+
+_REBLOG_PRELUDE = f"""
+    WITH {_LITE_ROWS},
+    reblogs(account_name, author, permlink, created_at) AS (VALUES
+        ('fan', 'lumen.pub', 'p-lite',  now()),
+        ('fan', 'lumen.pub', 'p-other', now()),
+        ('fan', 'attacker',  'p-lite',  now())
+    )
+"""
+
+_EXPECTED_EDGES = {
+    ("fan", "01LITEWRITER"): 1,   # the genuine lite post resolves, once
+    ("fan", "lumen.pub"): 1,      # the publisher's non-lite post stays theirs
+    ("fan", "attacker"): 1,       # the attacker keeps their own edge
+}
+
+
+@pytest.mark.parametrize(
+    ("constant", "prelude", "source_table"),
+    [
+        ("_SQL_REPLY_EDGES_WITH_LITE", _REPLY_PRELUDE, "hafsql.operation_comment_view"),
+        ("_SQL_REBLOG_EDGES_WITH_LITE", _REBLOG_PRELUDE, "hafsql.reblogs"),
+    ],
+)
+def test_every_lite_edge_query_enforces_the_publisher_boundary(
+    constant: str, prelude: str, source_table: str
+) -> None:
+    """The same attack the upvote branch is tested against, applied to the other
+    two channels: an ordinary account carrying a `lumen_user_id`, a publisher
+    post through a FOREIGN app, and a permlink collision between them.
+
+    MUTANT: strip the publisher gate or the app-id gate from either branch.
+    This fails.
+    """
+    replacement = {"hafsql.operation_comment_view": "replies", "hafsql.reblogs": "reblogs"}
+    sql = getattr(hafsql, constant)
+    sql = sql.replace("hafsql.comments", "comments").replace(
+        source_table, replacement[source_table]
+    )
+    sql = prelude + "," + sql[len("WITH ") :]
+
+    conn = _pg_or_skip()
+    with conn, conn.cursor() as cur:
+        cur.execute(
+            sql,
+            {
+                "since": datetime(2020, 1, 1, tzinfo=UTC),
+                "lite_publishers": ["lumen.pub"],
+                "lite_app": "lumen/1.0",
+            },
+        )
+        edges = {(row[0], row[1]): row[2] for row in cur.fetchall()}
+
+    assert edges == _EXPECTED_EDGES, (
+        f"{constant} does not enforce the lite trust boundary: {edges}. "
+        "'01STOLEN' present = any account can redirect its engagement; "
+        "'01WRONGAPP' present = the app-id gate is off."
+    )

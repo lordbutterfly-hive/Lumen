@@ -1395,6 +1395,17 @@ def test_a_lite_viewer_can_actually_mute_someone() -> None:
 
 
 def test_a_mute_list_is_never_served_from_another_requests_cache() -> None:
+    """★★★ ROUND-5 COUNCIL (Seat 1): the first version of this used a LITE
+    viewer, where the cache bypass is unconditional anyway (`tags_arg` and
+    `follows_arg` are both forced non-None), so the `explicit_mutes is not None`
+    clause could be DELETED with all 858 tests passing. An 18th mutant, uncaught.
+
+    A HIVE viewer is the case where the clause is the only thing bypassing the
+    cache — `viewer_cache` is keyed on ACCOUNT ALONE, so without it the first
+    request's mute list is served to every later request from that viewer.
+
+    MUTANT: drop `or explicit_mutes is not None`. This fails.
+    """
     """`viewer_cache` is keyed on ACCOUNT ALONE, so a cached profile would serve
     the FIRST request's mute list to every later request from that viewer — a
     mute that works once and then silently stops."""
@@ -1407,16 +1418,18 @@ def test_a_mute_list_is_never_served_from_another_requests_cache() -> None:
         return viewer
 
     state = _offline_state()
-    lite_id = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
     with _RunningServer(state) as server:
         service_app.build_viewer_profile = spy  # type: ignore[assignment]
         try:
-            _get_with_headers(server, f"/feed?viewer={lite_id}&mutes=first")
-            _get_with_headers(server, f"/feed?viewer={lite_id}&mutes=second")
+            # A HIVE account: nothing else forces the bypass here.
+            _get_with_headers(server, "/feed?viewer=alice&mutes=first")
+            _get_with_headers(server, "/feed?viewer=alice&mutes=second")
         finally:
             service_app.build_viewer_profile = real  # type: ignore[assignment]
 
-    assert captured == [frozenset({"first"}), frozenset({"second"})], captured
+    assert captured == [frozenset({"first"}), frozenset({"second"})], (
+        f"the second request's mute list was served from cache: {captured}"
+    )
 
 
 def test_forwarded_for_is_ignored_unless_the_operator_declares_a_proxy() -> None:
@@ -1539,7 +1552,14 @@ def test_a_never_built_snapshot_reads_as_starting_not_degraded() -> None:
 
 
 def test_the_probe_honours_a_total_deadline_against_a_dribbling_server() -> None:
-    """★★★ PUNCH LIST #8. `urlopen(timeout=)` bounds each SOCKET OPERATION, not
+    """★ TIMING-SENSITIVE — DO NOT RUN THIS IN PARALLEL. Round-5 Seat 2 measured
+    that under a 4-way parallel run this test and its socket siblings can report
+    a FALSE PASS on a mutated tree: the deadline they assert is wall-clock, and
+    contention moves it. That seat only caught it because its harness carried a
+    no-op control that must report MISSED. The shipped suite runs serially, so
+    this is a caveat for anyone adding xdist, not a live defect.
+
+    ★★★ PUNCH LIST #8. `urlopen(timeout=)` bounds each SOCKET OPERATION, not
     the call, so a server that sends one byte at a time resets it forever — the
     probe was measured hanging ~20s against a documented 4s. A guarantee that
     is not enforced is not a guarantee.
@@ -1586,3 +1606,50 @@ def test_the_probe_honours_a_total_deadline_against_a_dribbling_server() -> None
 
     assert code == 2, f"a dribbling server should read as unreachable, got {code}"
     assert elapsed < 4.0, f"the probe ignored its own deadline: {elapsed:.1f}s"
+
+
+def test_repeated_forwarded_for_header_lines_are_joined_not_truncated() -> None:
+    """★★★ ROUND-5 COUNCIL (Seat 3). `headers.get()` returns only the FIRST
+    occurrence, and a client can send `X-Forwarded-For` on several lines. RFC
+    7230 §3.2.2 makes repeated fields equivalent to one comma-joined field — so
+    reading the first line alone lets a client SHORTEN the chain it is judged
+    on: put its own line first, and the proxy's real entry lands in a second
+    line this code never saw.
+
+    Both clients below send an identical FIRST line and differ only in the
+    second, which is where the proxy's entry lives. If the lines are not joined
+    they are indistinguishable and share one budget.
+
+    MUTANT: `self.headers.get("X-Forwarded-For", "")`. This fails.
+    """
+    import http.client
+    import urllib.parse
+
+    state = _offline_state()
+    state.config = replace(state.config, rate_limit_per_minute=2, trusted_proxy_hops=1)
+
+    def get_two_lines(server: _RunningServer, second: str) -> int:
+        # ★ `urllib` MERGES repeated headers into one line, so the first version
+        # of this test could not send the shape it was written for and passed
+        # with the mutant applied. `http.client`'s putheader emits genuinely
+        # separate lines, which is what a client would do.
+        parsed = urllib.parse.urlparse(server.base_url)
+        conn = http.client.HTTPConnection(parsed.hostname, parsed.port, timeout=5)
+        try:
+            conn.putrequest("GET", "/feed?viewer=alice")
+            conn.putheader("X-Forwarded-For", "1.1.1.1")
+            conn.putheader("X-Forwarded-For", second)
+            conn.endheaders()
+            return conn.getresponse().status
+        finally:
+            conn.close()
+
+    with _RunningServer(state) as server:
+        noisy = [get_two_lines(server, "203.0.113.9") for _ in range(4)]
+        victim = get_two_lines(server, "198.51.100.7")
+
+    assert noisy[:2] == [200, 200] and noisy[2:] == [429, 429], noisy
+    assert victim == 200, (
+        "two clients differing only in a SECOND X-Forwarded-For line shared one "
+        "rate-limit budget — the header lines are not being joined"
+    )
