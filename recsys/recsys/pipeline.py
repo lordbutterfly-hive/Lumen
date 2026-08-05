@@ -49,7 +49,7 @@ from recsys.core.exploration import (
 )
 from recsys.core.flooding import cap_oon_flooding
 from recsys.core.graph_cred import compute_graph_cred
-from recsys.core.rerank import rerank
+from recsys.core.rerank import _FeedCounters, rerank
 from recsys.core.ring import detect_rings, ring_member_set
 from recsys.core.scoring import (
     AuthorEngagement,
@@ -1251,6 +1251,8 @@ def _score(
     priors: dict[str, AuthorEngagement] | None = None,
     lineage_cache: MutableMapping[str, frozenset[str]] | None = None,
     top_k: int | None = None,
+    carried: _FeedCounters | None = None,
+    skip_rerank: bool = False,
 ) -> list[ScoredCandidate]:
     """Hydrate vote-exclusions once per author, score each candidate in
     isolation (§3.3), then diversity-re-rank (§3.4).
@@ -1384,6 +1386,24 @@ def _score(
     # other diversity/exploration field is untouched, so the diversity re-rank
     # itself (author/topic decay, the unchosen-source penalty/cap, the
     # re-ranker's OWN `explore_slots` swap) behaves identically either way.
+    # ★★ C3 (2026-08-05) — SKIP A DIVERSITY PASS WHOSE OUTPUT IS DISCARDED.
+    #
+    # The exploration caller needs exactly two things from this function: a real
+    # `ScoreBreakdown` on each returned object, and every pick preserved. It
+    # needs the ORDER not at all — `rank_feed` immediately rebuilds the sequence
+    # from `explore_pool`'s own need/rotation order, so whatever `rerank`
+    # produced is thrown away one line later.
+    #
+    # Running it anyway cost a full O(n^2) greedy selection (author/topic
+    # penalties, the quota, the emerging budget, tie-breaks) over the whole
+    # exploration pool on EVERY request — on the 347-candidate pool this file's
+    # own C3 note cites, roughly 120k effective-score computations for no
+    # effect, on a request path already flagged for its latency.
+    #
+    # `top_k=len(explore_pool)` had already neutralised the truncation half; with
+    # the ordering discarded too, nothing `rerank` did there reached the output.
+    if skip_rerank:
+        return scored
     diversity = (
         settings.diversity if top_k is None else replace(settings.diversity, top_k=top_k)
     )
@@ -1393,6 +1413,7 @@ def _score(
         tie_break_seed=viewer.account,
         explore_bucket=bucket,
         emerging_authors=emerging_authors,
+        carried=carried,
     )
 
 
@@ -1784,10 +1805,20 @@ def rank_feed(
         lineage_cache,
         prior_cache=author_prior_cache,
     )
-    ranked = _score(eligible, viewer, gateway, norm, now, snap, settings, priors, lineage_cache)
+    # ★ C3 (2026-08-05) — ONE diversity accounting across BOTH blocks of this
+    # feed. Previously each `_score` call started its author/topic counters at
+    # zero, so an author already placed three times in the eligible block was
+    # spaced as if unseen once the fallback filler ran. The counters are
+    # documented as feed-scoped; now they are.
+    feed_counters = _FeedCounters()
+    ranked = _score(
+        eligible, viewer, gateway, norm, now, snap, settings, priors, lineage_cache,
+        carried=feed_counters,
+    )
     if filler:
         ranked = ranked + _score(
-            filler, viewer, gateway, norm, now, snap, settings, priors, lineage_cache
+            filler, viewer, gateway, norm, now, snap, settings, priors, lineage_cache,
+            carried=feed_counters,
         )
     # ★ Exploration is spliced in AFTER ranking, never scored against the rest —
     # the whole reason the lane exists is that this content cannot win on score
@@ -1832,6 +1863,7 @@ def rank_feed(
             priors,
             lineage_cache,
             top_k=len(explore_pool),
+            skip_rerank=True,
         )
         by_key = {sc.post.key: sc for sc in scored_explore}
         # ★ Kept as a safety net BEHIND the invariant below, never as the only

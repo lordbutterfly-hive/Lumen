@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
+import recsys.pipeline as pipeline_mod
 from recsys.config import (
     DEFAULT_SETTINGS,
     MIN_TRUSTED_SEEDS,
@@ -2661,3 +2662,46 @@ def test_the_exploration_seat_cannot_be_taken_by_the_viewers_own_post() -> None:
         config=ExplorationConfig(seat_secret=b"k" * 32),
     )
     assert pool == [], "the viewer's own post entered the exploration pool"
+
+
+def test_rank_feed_threads_ONE_counter_object_across_both_rerank_blocks() -> None:
+    """★ THE WIRING TEST (C3, 2026-08-05), and it exists because the unit test
+    was not enough.
+
+    `test_author_penalty_carries_across_rerank_blocks` proves `diversity_rerank`
+    HONOURS a carried counter. It does NOT prove `rank_feed` passes one —
+    removing `carried=feed_counters` from the filler call left that unit test
+    green. That is this project's documented failure mode: verified at the
+    mechanism boundary instead of where the user experiences it.
+
+    So this asserts the seam directly: both rerank calls of one feed receive the
+    SAME object, and the second sees state accumulated by the first.
+    """
+    seen: list[object] = []
+    real = pipeline_mod.rerank
+
+    def _spy(*args: object, **kwargs: object) -> object:
+        seen.append(kwargs.get("carried"))
+        return real(*args, **kwargs)  # type: ignore[arg-type]
+
+    # A starved viewer: one eligible post, so `_fallback_filler` pads and the
+    # SECOND block actually runs. Without padding there is only one block and
+    # the test would pass vacuously — hence the assertion on len(seen).
+    post = make_post("alice", "p1")
+    gateway = FakeGateway(in_network=[post], popular=_popular(30))
+    viewer = make_viewer("me", follows=frozenset({"alice"}))
+    pipeline_mod.rerank = _spy  # type: ignore[assignment]
+    try:
+        rank_feed(viewer, gateway, _norm(), now=NOW, since=EPOCH, trust_policy=_PERMISSIVE)
+    finally:
+        pipeline_mod.rerank = real  # type: ignore[assignment]
+
+    carried_args = [c for c in seen if c is not None]
+    assert len(carried_args) >= 2, (
+        f"expected the eligible AND filler blocks to both rerank with a carried "
+        f"counter; got {len(carried_args)} of {len(seen)} calls"
+    )
+    assert carried_args[0] is carried_args[1], (
+        "the two blocks of one feed received DIFFERENT counter objects — "
+        "author/topic spacing resets at the block boundary again"
+    )

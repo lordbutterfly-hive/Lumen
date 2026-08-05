@@ -6,10 +6,11 @@ from collections.abc import Sequence
 
 import pytest
 
-from recsys.config import DiversityConfig
+from recsys.config import DiversityConfig, ScoreWeights
 from recsys.contracts import CandidateSource, ScoreBreakdown, ScoredCandidate
 from recsys.core.rerank import (
     _attenuate,
+    _FeedCounters,
     _pen,
     _tie_break,
     _topic_key,
@@ -927,3 +928,145 @@ def _pre_20260805_rerank(
             unchosen_placed += 1
         result.append(chosen)
     return result
+
+
+# ---------------------------------------------------------------------------
+# C3 (2026-08-05) — diversity counters are FEED-scoped, not block-scoped.
+#
+# `rank_feed` reranks up to three disjoint pools per request. These counters
+# were local to each call, so author/topic spacing reset at every block
+# boundary while every mechanism built on them is documented as feed-scoped.
+# ---------------------------------------------------------------------------
+
+
+_DIV = dict(
+    author_decay=0.5,
+    author_floor=0.1,
+    topic_decay=1.0,
+    topic_floor=1.0,
+    topic_affinity_strength=0.0,
+)
+
+
+def test_author_penalty_carries_across_rerank_blocks() -> None:
+    """★ THE DEFECT. An author placed repeatedly in block 1 must not start from
+    zero penalty in block 2. Same author, two blocks, one feed.
+
+    Mutation-checked: dropping `carried=` from the second call restores the
+    identical effective score and this fails.
+    """
+    counters = _FeedCounters()
+    block1 = [_scored("hog", f"p{i}", 0.9) for i in range(4)]
+    diversity_rerank(block1, **_DIV, carried=counters)
+    assert counters.author_counts["hog"] == 4
+
+    # Block 2: the same author against a fresh rival of equal raw score.
+    block2 = [_scored("hog", "p9", 0.5), _scored("newcomer", "p1", 0.5)]
+    carried_out = diversity_rerank(block2, **_DIV, carried=counters)
+    fresh_out = diversity_rerank(block2, **_DIV)
+
+    assert carried_out[0].post.author == "newcomer", (
+        "with four prior placements carried over, the hogging author must not "
+        "still win the first slot of the next block"
+    )
+    assert fresh_out[0].post.author == "hog", (
+        "control: with counters reset (the old behaviour) the tie-break favours "
+        "'hog', which is exactly the bug"
+    )
+
+
+def test_omitting_carried_reproduces_the_old_per_call_behaviour_exactly() -> None:
+    """Every unit test and panel that reranks ONE pool must be untouched — the
+    feed-scoping is opt-in by the caller that actually has multiple blocks."""
+    pool = [_scored("a", f"p{i}", 0.9 - i / 100) for i in range(3)] + [
+        _scored("b", "p0", 0.5)
+    ]
+    assert [c.post.key for c in diversity_rerank(pool, **_DIV)] == [
+        c.post.key for c in diversity_rerank(pool, **_DIV, carried=None)
+    ]
+
+
+# ---------------------------------------------------------------------------
+# C1 (2026-08-05) — the declared-interest offset vs AUTHOR diversity.
+#
+# `_effective_score` is `(earned * pen_a * pen_u + interest_bonus) * pen_t`, so
+# the offset is deliberately immune to the AUTHOR penalty (see that function's
+# docstring for the measured reason — the offset is a per-topic constant and
+# discounting it on an author repeat makes the author penalty double as a topic
+# penalty at a combined strength nobody set).
+#
+# The reciprocal was never priced: because the offset is added AFTER the author
+# penalty, a prolific ON-interest author's repeat is compared against an
+# OFF-interest rival with no offset at all, so a large enough offset lets the
+# repeat win. `interest_match`'s own sweep table has NO author-diversity axis,
+# and no panel gates it.
+#
+# MEASURED HERE (1 prolific on-interest author, 30 off-interest rivals, 20 slots):
+#
+#     interest_match | distinct authors@20 | slots to the prolific author
+#              0.00  |                 20  |  1
+#              0.40  |                 20  |  1   <- SHIPPED: no cost at all
+#              0.50  |                 20  |  1
+#              0.60  |                 19  |  2
+#              0.80  |                 19  |  2
+#
+# So the shipped value is clear of it and this is NOT a live defect. What was
+# missing is a guard on RAISING it, which is what these tests are.
+# ---------------------------------------------------------------------------
+
+
+def _interest_diversity_probe(interest_match: float) -> tuple[int, int]:
+    """Distinct authors in the top 20, and the prolific author's share, for a
+    pool of one prolific ON-interest author against 30 OFF-interest rivals of
+    equal earned score. Returns (distinct_authors, prolific_slots)."""
+    bonus = interest_match * 0.8  # W = organic weight (0.8) * interest_match
+    pool = [
+        _scored("hog", f"p{i}", 0.85, tags=("photo",)) for i in range(20)
+    ]
+    pool = [
+        ScoredCandidate(
+            post=c.post,
+            source=c.source,
+            score=ScoreBreakdown(
+                vote_norm=0.0, rep_norm=0.0, organic=0.85,
+                final=0.85 + bonus, interest_bonus=bonus,
+            ),
+        )
+        for c in pool
+    ]
+    pool += [_scored(f"off{j}", "p0", 0.85, tags=(f"topic{j}",)) for j in range(30)]
+    out = diversity_rerank(
+        pool, author_decay=0.5, author_floor=0.1, topic_decay=0.9,
+        topic_floor=0.5, topic_affinity_strength=0.0,
+    )[:20]
+    authors = [c.post.author for c in out]
+    return len(set(authors)), authors.count("hog")
+
+
+def test_the_shipped_interest_match_costs_no_author_diversity() -> None:
+    """★ THE GUARD ON RAISING IT. At the shipped weight the author-diversity
+    outcome must be IDENTICAL to the interest term being off. If a future sweep
+    raises `interest_match` past the point where the offset starts overpowering
+    the author penalty, this fails and forces the trade to be made explicitly —
+    which is the whole thing that was missing (no sweep axis, no panel)."""
+    shipped = ScoreWeights().interest_match
+    control_distinct, control_hog = _interest_diversity_probe(0.0)
+    distinct, hog = _interest_diversity_probe(shipped)
+    assert (distinct, hog) == (control_distinct, control_hog), (
+        f"at interest_match={shipped} the declared-interest offset costs author "
+        f"diversity: {distinct} distinct authors / {hog} slots to one author, "
+        f"versus {control_distinct}/{control_hog} with the term off. The offset "
+        f"is exempt from the author penalty by design, so raising this weight "
+        f"weakens author diversity — make that trade explicitly."
+    )
+
+
+def test_the_interaction_is_real_above_the_shipped_value() -> None:
+    """The control for the guard above: without it, a change that made the
+    offset penalty-scaled again (undoing the measured 2026-08-05 fix) would
+    leave the guard passing for the wrong reason."""
+    assert _interest_diversity_probe(0.8)[0] < _interest_diversity_probe(0.0)[0], (
+        "a large declared-interest offset no longer displaces off-interest "
+        "authors — if that is deliberate, this test and C1's note in "
+        "_effective_score both need updating"
+    )

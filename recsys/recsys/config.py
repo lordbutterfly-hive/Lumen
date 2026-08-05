@@ -390,6 +390,34 @@ class ScoreWeights:
     #: this file's `organic_prior_shrinkage` note calls the realistic case.
     #: Nothing here argues for moving this field; it argues that the frontier
     #: it was measured against was an artifact.
+    #: ★★★ C1 (2026-08-05) — THE AXIS THIS SWEEP TABLE WAS MISSING.
+    #:
+    #: Every sweep recorded for this field measured relevance, quality and the
+    #: follow curve. NONE of them measured AUTHOR DIVERSITY, and there is a real
+    #: interaction: `_effective_score` is
+    #: ``(earned * pen_a * pen_u + interest_bonus) * pen_t``, so the offset is
+    #: deliberately immune to the AUTHOR penalty (see that function's docstring
+    #: for the measured reason). The reciprocal was never priced — because the
+    #: offset is added AFTER the author penalty, a prolific ON-interest author's
+    #: repeat competes against an OFF-interest rival that receives no offset at
+    #: all, so a large enough offset lets the repeat win.
+    #:
+    #: MEASURED (1 prolific on-interest author vs 30 off-interest rivals, 20
+    #: slots — `tests/test_rerank.py::_interest_diversity_probe`):
+    #:
+    #:     interest_match | distinct authors@20 | slots to the prolific author
+    #:              0.00  |                 20  |  1
+    #:              0.40  |                 20  |  1   <- SHIPPED, no cost
+    #:              0.50  |                 20  |  1
+    #:              0.60  |                 19  |  2
+    #:              0.80  |                 19  |  2
+    #:
+    #: So the shipped value is CLEAR of the interaction — this is not a live
+    #: defect, and the 2026-08-05 council's report of a one-slot cost at 0.4 did
+    #: not reproduce. Degradation begins at 0.6. Raising this field past 0.5
+    #: trades author diversity and must be a stated decision, not a sweep
+    #: outcome: `test_the_shipped_interest_match_costs_no_author_diversity`
+    #: fails if the shipped value moves into that region.
     interest_match: float = 0.4
 
     #: Weight of the VIEWER-OWN affinity percentile inside the organic slice
@@ -808,6 +836,28 @@ class DiversityConfig:
     #: tuned away. If the platform's priorities change — a mature corpus with
     #: plenty of new writers already discoverable, say — this is the first knob
     #: to revisit, and the numbers above are the ones to re-measure against.
+    #:
+    #: ★★★ SCOPE CORRECTION 2026-08-05 (C3) — READ THIS BEFORE QUOTING A SHARE.
+    #: This quota binds ONLY within a single ``diversity_rerank`` call, and
+    #: ``rank_feed`` reranks the eligible pool and the fallback-filler pool as
+    #: TWO SEPARATE BLOCKS. The filler block is 100% ``POPULAR_FALLBACK``, which
+    #: is never ``is_viewer_chosen``, so the quota's supply condition
+    #: (``any(chosen in remaining)``) is False there BY CONSTRUCTION and the
+    #: quota cannot fire on it at ANY configured value — it cannot prefer a
+    #: viewer-chosen candidate from a pool that contains none.
+    #:
+    #: Measured for a starved viewer: served feed 85% unchosen, against the
+    #: "3 per 20-post page" (<=15%) this field reads as promising. That is NOT a
+    #: bug in the quota; padding is unconditionally unchosen, so composition is
+    #: not a thing a quota can bound there. The real and only bound on padding
+    #: dilution is :attr:`FallbackConfig.max_share_of_feed` (0.25), a different
+    #: and coarser cap. C3 made the author/topic counters feed-scoped, which
+    #: fixes SPACING across the boundary; it deliberately did not pretend to
+    #: make this quota apply to padding.
+    #:
+    #: So: this value governs the composition of the ELIGIBLE block. Quote it
+    #: for that, and quote ``max_share_of_feed`` for how much of a thin feed is
+    #: padding at all.
     unchosen_min_per_page: int = 3
 
     #: ★ B-03's RELEVANCE GUARD. The share/floor above may only actually

@@ -103,8 +103,15 @@ def run(tag_noise: float) -> NoiseResult:
             tops = sorted([a for a in world.authors() if a.topic == t],
                           key=lambda a: -a.reputation)[:2]
             curated.update(a.name for a in tops)
+        # `production=False`: these are SYNTHETIC seeds from a simulated world,
+        # not the real curated list — the same opt-out every other panel uses
+        # (cf. q7/q8's "C5/R2: synthetic seeds, not the real curated list").
+        # Made explicit 2026-08-05 when C4 gave `build_trust_snapshot` a minimum
+        # seed count: this panel's world yields ~12 curated accounts, which is a
+        # perfectly good simulation and not a production trust root.
         snap = build_trust_snapshot(gw, BASE, since=EPOCH, now=NOW,
-                                    trusted_seeds=frozenset(curated))
+                                    trusted_seeds=frozenset(curated),
+                                    production=False)
 
         mismatch_num += sum(1 for p in world.posts
                             if p.tags and p.tags[0] != world.post_topic[p.key])
@@ -189,4 +196,75 @@ print(
     "wiring `category` to track the same noisy first-tag `_apply_tag_noise` produces would change "
     "candidate-pool COMPOSITION for every panel that touches exploration or second-degree tag "
     "matching, which is a bigger blast radius than 'add a tag-noise parameter, default off.'"
+)
+
+
+# ============================================================================
+# ★★★ E1 (2026-08-05) — THIS PANEL NOW HAS A GATE.
+#
+# Until today this file contained ZERO executable assertions in ~190 lines: no
+# `assert`, no `raise`, no `sys.exit`. It could not fail short of a crash. That
+# matters more here than in most panels, because BUILDMAP-B:392 makes this file
+# the HARD GATE for `ScoreWeights.interest_match` — "B-02's `interest_match`
+# weight MUST NOT be chosen before this exists". The shipped 0.4 was therefore
+# chosen against a gate that was incapable of failing.
+#
+# WHAT IS GATED, and why these and not the headline number:
+#
+#   1. QUALITY SURVIVES NOISE. The finding this file exists to report is that
+#      tag noise breaks TARGETING, not ranking: mean author quality @20 is flat
+#      or better at noise 0.3 (measured +0.0120). If quality ever collapses with
+#      the tags, the ranker has started depending on attacker-supplied text for
+#      something other than topic matching, which is a different and worse
+#      system. Bound is generous (0.05) because the direction, not the
+#      magnitude, is the claim.
+#
+#   2. RELEVANCE DEGRADES BUT DOES NOT COLLAPSE TO CHANCE. Relevance SHOULD
+#      fall — pinning it tight would gate away the finding. What must hold is
+#      that a noisy-tag world is still meaningfully personalised: with 6 topics,
+#      a topic-blind feed scores ~1/6; measured at noise 0.3 is 0.4596. The
+#      floor sits well above chance and well below measured, so it catches a
+#      collapse without policing ordinary drift.
+#
+#      CALIBRATION, measured 2026-08-05: with the declared-interest term OFF
+#      (`weights.interest_match=0.0`) this metric falls to 0.3404 — i.e. the
+#      term is worth ~0.12 of relevance in a noisy-tag world, and the floor
+#      sits just under the value the system reaches WITHOUT it. So the gate is
+#      calibrated to catch "personalisation stopped working", not "the interest
+#      term was retuned", which is the distinction it should be making.
+#
+# Deliberately NOT gated: own-topic share and topic entropy. Both move a lot
+# with noise BY DESIGN (that is the measurement), and a bound on either would
+# be a bound on the instrument rather than on the system.
+# ============================================================================
+_HI = max(NOISE_LEVELS)
+_LO = min(NOISE_LEVELS)
+_MAX_QUALITY_DROP = 0.05
+_MIN_REL_UNDER_NOISE = 0.30
+
+_q_lo, _ = results[_LO].metrics["mean_q"]
+_q_hi, _ = results[_HI].metrics["mean_q"]
+_rel_hi, _ = results[_HI].metrics["mean_rel"]
+
+_failures = []
+if _q_lo - _q_hi > _MAX_QUALITY_DROP:
+    _failures.append(
+        f"author quality @20 fell {_q_lo - _q_hi:+.4f} from noise {_LO} to {_HI} "
+        f"({_q_lo:.4f} -> {_q_hi:.4f}), past the {_MAX_QUALITY_DROP} bound — the "
+        f"ranker's QUALITY judgement should not depend on attacker-supplied tags"
+    )
+if _rel_hi < _MIN_REL_UNDER_NOISE:
+    _failures.append(
+        f"mean_rel@20 at noise {_HI} is {_rel_hi:.4f}, below the "
+        f"{_MIN_REL_UNDER_NOISE} floor — personalisation has collapsed toward "
+        f"topic-blind (~1/{len(TOPICS)} = {1 / len(TOPICS):.3f}) under tag noise"
+    )
+if _failures:
+    raise AssertionError(
+        "tag_noise_sensitivity gate failed:\n  - " + "\n  - ".join(_failures)
+    )
+print(
+    f"\nGATE: quality holds under tag noise ({_q_lo:.4f} -> {_q_hi:.4f}, bound "
+    f"{_MAX_QUALITY_DROP}) and relevance stays above chance "
+    f"({_rel_hi:.4f} >= {_MIN_REL_UNDER_NOISE})."
 )

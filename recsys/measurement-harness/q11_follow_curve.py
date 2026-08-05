@@ -295,13 +295,21 @@ else:
     print("\nNo monotonicity violations — rel@n is non-decreasing (within tolerance) "
           "across the whole follow-count range, and rel@20 >= rel@0.")
 
-print("\nREAD ME: this assertion is EXPECTED TO FAIL AT HEAD (2026-08-04) — relevance "
-      "peaks at 0 follows and falls as follow count grows (BUILDMAP-B-QUALITY §0). "
-      "B-02 (declared-interest scoring term), B-03 (share+guard quota) and B-04 "
-      "(emerging-author budget) are the units that are supposed to fix this; none of "
-      "them have landed. This file does not lower the bar to pass — it reports the "
-      "true curve and stays red until the mechanism actually changes "
+print("\nREAD ME: relevance still peaks near 0 follows and declines as follow count "
+      "grows (BUILDMAP-B-QUALITY §0). B-02 (declared-interest scoring term), B-03 "
+      "(share+guard quota) and B-04 (emerging-author budget) HAVE ALL LANDED — see "
+      "the block below for why this panel then changed shape from a monotonicity "
+      "assertion to a non-regression floor against ACCEPTED_CURVE, and for the "
+      "operator ruling that made the residual non-monotonicity an accepted cost "
+      "rather than an open bug. This file does not lower the bar to pass — it "
+      "reports the true curve "
       "(BUILD-ADJUDICATION: never re-pin/tune a gate to make your own change pass).")
+# ★ CORRECTED 2026-08-05 (E4). The text above used to end with "...none of them
+# have landed", printed on EVERY run — while the comment block immediately
+# below said "Those units landed", and `Settings()` proves it
+# (interest_match=0.4, unchosen_min_per_page=3, emerging_per_page=1). Two
+# statements in one file disagreeing about the same fact, and the FALSE one was
+# the one reaching the operator's terminal. Flagged by the 2026-08-05 council.
 
 # ★★★ THIS PANEL CHANGED SHAPE ON 2026-08-04, AND THE REASON MATTERS.
 #

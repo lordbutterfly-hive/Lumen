@@ -25,7 +25,9 @@ are reliable; exact figures are directional.
 """
 from __future__ import annotations
 
+import datetime as _dt
 import json
+import os
 import pathlib
 import sys
 
@@ -332,6 +334,13 @@ print("SELF-CHECK vs prior-round shipped figures (must reproduce):")
 TOLERANCE = 0.0015
 _mismatches: list[tuple[str, str, float, float]] = []
 for key, spec in PINS.items():
+    # Keys starting with "_" are FILE METADATA, not pins (E4, 2026-08-05):
+    # `_provenance` records the previous values, the cause of the last re-pin,
+    # and when it happened relative to the code change it followed — the record
+    # an auditor needs to tell a verified improvement from a silent re-bless,
+    # and which nothing on disk held while this directory was untracked.
+    if key.startswith("_"):
+        continue
     label, known = str(spec["label"]), float(spec["known"])
     m, _ = base[key]
     ok = abs(m - known) < TOLERANCE
@@ -346,13 +355,43 @@ print("    NOTE: the round brief also quotes 'quality 0.630'; mean_q@20 on this"
 if UPDATE_PINS:
     print(f"\n--update-pins: rewriting {PINS_PATH}")
     print("Paste this diff into the commit message:")
-    new_pins: dict[str, dict[str, object]] = {}
+    # ★ E4 (2026-08-05) — RE-PINNING NOW RECORDS ITS OWN PROVENANCE.
+    #
+    # This used to write `{label, known}` and nothing else, so every re-pin
+    # destroyed the only copy of the value it replaced. Combined with the pins
+    # directory being UNTRACKED in git, that made `--update-pins` completely
+    # unauditable: the 2026-08-04 re-pin was in fact a verified improvement
+    # (six of seven directions better, checked before updating), but nothing on
+    # disk could distinguish it from someone quietly re-blessing a red panel,
+    # and the previous values were only recovered from a session transcript
+    # that very nearly went with /tmp. Carrying `previous`/`moved` forward means
+    # the next auditor reads the delta out of the file itself.
+    new_pins: dict[str, object] = {}
     for key, spec in PINS.items():
+        if key.startswith("_"):
+            continue  # metadata, rebuilt below
         old_known = float(spec["known"])
         new_known = round(base[key][0], 3)
         print(f"    {key:14s} {old_known:.3f} -> {new_known:.3f}"
               f"  (delta {new_known - old_known:+.3f})")
-        new_pins[key] = {"label": spec["label"], "known": new_known}
+        new_pins[key] = {
+            "label": spec["label"],
+            "known": new_known,
+            "previous": old_known,
+            "moved": round(new_known - old_known, 4),
+        }
+    prior = PINS.get("_provenance", {})
+    new_pins["_provenance"] = {
+        "repinned_at": _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds"),
+        "cause": os.environ.get(
+            "RECSYS_REPIN_CAUSE",
+            "NOT RECORDED — set RECSYS_REPIN_CAUSE to describe why these moved. "
+            "q7's own assert message requires re-pinning to be a deliberate act "
+            "with the cause recorded; an unexplained re-pin is the thing this "
+            "field exists to make visible.",
+        ),
+        "supersedes": prior.get("repinned_at") if isinstance(prior, dict) else None,
+    }
     with open(PINS_PATH, "w") as _f:
         json.dump(new_pins, _f, indent=2)
         _f.write("\n")

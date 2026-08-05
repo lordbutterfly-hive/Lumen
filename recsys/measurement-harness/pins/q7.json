@@ -1,18 +1,32 @@
 {
   "ndcg": {
     "label": "legacy ndcg (global ideal)",
-    "known": 0.763
+    "known": 0.763,
+    "previous": 0.74,
+    "moved": 0.023
   },
   "fcq_capture": {
     "label": "DEPRECATED fcq_capture",
-    "known": 0.806
+    "known": 0.806,
+    "previous": 0.767,
+    "moved": 0.039
   },
   "cap_own": {
     "label": "own capture (pool ceiling)",
-    "known": 0.805
+    "known": 0.805,
+    "previous": 0.769,
+    "moved": 0.036
   },
   "auc_own": {
     "label": "AUC own (served slots)",
-    "known": 0.676
+    "known": 0.676,
+    "previous": 0.619,
+    "moved": 0.057
+  },
+  "_provenance": {
+    "repinned_at": "2026-08-04T23:37:09Z",
+    "code_changed_at": "2026-08-04T23:22:07Z",
+    "cause": "Re-pinned after the interest/author-penalty scope fix in rerank.py/scoring.py (the `(earned*pen_a*pen_u + bonus)*pen_t` split). All FOUR q7 pins moved UP; across q6+q7 six of seven directions improved and one (q6 ndcg @ noDiv) fell 0.003. Verified BEFORE updating, not after.",
+    "recovered": "The `previous` values were recovered on 2026-08-05 from the originating session's transcript. They were nearly lost: the deliberate backup (cp pins/q7.json /tmp/.../q7pins.bak) was destroyed with /tmp, and this directory was UNTRACKED in git, so nothing on disk held the baseline. That is why the directory is tracked now \u2014 an untracked pin file makes `--update-pins` unauditable, and an auditor with only the checkout cannot tell a verified improvement from a silent re-bless."
   }
 }

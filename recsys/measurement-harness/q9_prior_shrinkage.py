@@ -285,6 +285,8 @@ ctl_gap = scoring_gap_for(gw_no_prior, SETTINGS_B)
 
 # q8's standing self-check floors — reproduced so the sweep shows which k pass.
 FLOORS = {"mean_q": 0.010, "stack_capture_g": 0.015, "auc_own_m5": 0.020, "gap": 0.025}
+#: k -> (passed, deltas). Populated by the sweep below and ASSERTED on after it.
+verdicts: dict[float, tuple[bool, dict[str, float]]] = {}
 print(f"\ncontrol (prior OFF): mean_q={ctl['mean_q'][0]:.4f}  "
       f"stack_cap={ctl['stack_capture_g'][0]:.4f}  auc5={ctl['auc_own_m5'][0]:.4f}  "
       f"scoring_gap={ctl_gap:.4f}")
@@ -308,9 +310,51 @@ for k in SHRINKAGE:
         "gap": ctl_gap - gap,
     }
     passes = all(d[key] > floor for key, floor in FLOORS.items())
+    verdicts[k] = (passes, dict(d))
     print(f"{k:6.1f}{d['mean_q']:+11.4f}{d['stack_capture_g']:+13.4f}"
           f"{d['auc_own_m5']:+10.4f}{d['gap']:+10.4f}"
           f"{('PASS' if passes else '** FAIL **'):>16s}")
+
+# ============================================================================
+# ★★★ E1 (2026-08-05) — THIS PANEL NOW HAS A GATE.
+#
+# Until today the per-k verdict above was computed into a local named `passes`
+# and used ONLY inside the f-string that prints it. It was never returned,
+# compared or raised on: the panel printed `** FAIL **` and exited 0. That is
+# the same "prints a verdict, exits 0 anyway" defect this project believes it
+# eradicated in 2026-08-04 — still live here, and consistent with the
+# independent finding that q9 catches 0 of 14 mechanism mutants.
+#
+# WHAT IS AND IS NOT GATED, deliberately. This file is a SWEEP: its job is to
+# show where the ceiling is, so k=5.0 and k=8.0 failing q8's floors is the
+# panel WORKING, not a regression. Asserting "every row passes" would destroy
+# the measurement. What must hold is narrower and is the decision this panel
+# exists to inform: THE SHIPPED k CLEARS THE FLOORS.
+#
+# This also closes the mutation blindness documented at the top of this file.
+# `k` came from the literal SHRINKAGE list, so a change to
+# `ScoreWeights.organic_prior_shrinkage` had zero observable effect here. The
+# gate reads the SHIPPED value from settings, so moving it to a k that fails —
+# or off the swept grid entirely — now fails this panel instead of passing
+# silently.
+# ============================================================================
+shipped_k = base_settings.weights.organic_prior_shrinkage
+if shipped_k not in verdicts:
+    raise AssertionError(
+        f"the shipped organic_prior_shrinkage={shipped_k} is not in this sweep "
+        f"({sorted(verdicts)}), so this panel says NOTHING about the configuration "
+        f"actually being served. Add it to SHRINKAGE."
+    )
+shipped_passed, shipped_deltas = verdicts[shipped_k]
+if not shipped_passed:
+    failed = {k: v for k, v in shipped_deltas.items() if v <= FLOORS[k]}
+    raise AssertionError(
+        f"the SHIPPED organic_prior_shrinkage={shipped_k} does not clear q8's "
+        f"floors: {failed} (floors {FLOORS}). Either the prior has regressed or "
+        f"the shipped k has been moved past the ceiling this sweep measures — "
+        f"re-pick k from the table above, deliberately, and record why."
+    )
+print(f"\nGATE: shipped k={shipped_k} clears every q8 floor.")
 
 print("\npool-set invariance held at every k (asserted): all deltas are scoring-only.")
 print("Read A and B together — pick the largest k that still clears q8's floors, "

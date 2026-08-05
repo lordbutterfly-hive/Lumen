@@ -29,10 +29,29 @@ that needs no extra plumbing through the pipeline. Consequences:
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from hashlib import blake2b
 
 from recsys.config import DiversityConfig
 from recsys.contracts import Post, ScoredCandidate
+
+
+@dataclass
+class _FeedCounters:
+    """Diversity accounting for ONE feed, carried across its rerank blocks (C3,
+    2026-08-05).
+
+    `rank_feed` reranks up to three disjoint pools per request, and these
+    counters used to be local to each call — so author/topic spacing reset at
+    every block boundary while the mechanisms they drive are documented as
+    feed-scoped. Passing one instance through makes the documented scope the
+    real one; passing nothing keeps the old per-call behaviour for the many
+    callers that legitimately rerank a single pool.
+    """
+
+    author_counts: dict[str, int] = field(default_factory=dict)
+    topic_counts: dict[str, int] = field(default_factory=dict)
+    unchosen_placed: int = 0
 
 
 def _pen(placed_count: int, decay: float, floor: float) -> float:
@@ -325,6 +344,7 @@ def diversity_rerank(
     emerging_per_page: int = 0,
     page_size: int = 20,
     tie_break_seed: str = "",
+    carried: _FeedCounters | None = None,
 ) -> list[ScoredCandidate]:
     """Greedily space out repeat authors AND repeat topics/communities (§3.4),
     with the topic penalty attenuated by inferred viewer affinity.
@@ -364,9 +384,31 @@ def diversity_rerank(
     # invariants, so one pass over the pool is exactly equivalent.
     tie_breaks = {sc.post.key: _tie_break(tie_break_seed, sc.post.key) for sc in scored}
     remaining = list(scored)
-    author_counts: dict[str, int] = {}
-    topic_counts: dict[str, int] = {}
-    unchosen_placed = 0
+    # ★★★ C3 (2026-08-05) — THE COUNTERS ARE FEED-SCOPED WHEN A CALLER SAYS SO.
+    #
+    # These used to be unconditionally local, while `rank_feed` calls this
+    # function THREE times over three disjoint pools (eligible, fallback filler,
+    # exploration) and every mechanism built on them is documented as
+    # feed-scoped. So an author placed three times in the eligible block started
+    # again from zero penalty in the filler block, and the same for topics: the
+    # spacing promise held *within* a block and silently reset at the boundary.
+    #
+    # `carried` lets `pipeline._score` thread one accounting across the blocks
+    # of a single feed. Omitted (the default) reproduces the old per-call
+    # behaviour exactly, which is what every unit test and panel that reranks
+    # one pool in isolation relies on.
+    #
+    # NOTE, stated honestly: this does NOT make the B-03 unchosen quota fire on
+    # the filler block, and nothing can. That block is 100% POPULAR_FALLBACK,
+    # which is never `is_viewer_chosen`, so the quota's supply condition
+    # (`any(chosen in remaining)`) is False there by construction — the quota
+    # cannot prefer a chosen candidate from a pool that contains none. Padding's
+    # only real bound is `FallbackConfig.max_share_of_feed`, and the docs now
+    # say so rather than promising a share the quota never enforced.
+    counters = carried if carried is not None else _FeedCounters()
+    author_counts: dict[str, int] = counters.author_counts
+    topic_counts: dict[str, int] = counters.topic_counts
+    unchosen_placed = counters.unchosen_placed
     emerging_placed = 0
     result: list[ScoredCandidate] = []
     while remaining:
@@ -557,6 +599,10 @@ def diversity_rerank(
             else:
                 unchosen_placed += 1
         result.append(chosen)
+    # C3: publish the running total back so a following block continues this
+    # feed's accounting instead of restarting at zero. `author_counts` and
+    # `topic_counts` are the same dict objects and were mutated in place.
+    counters.unchosen_placed = unchosen_placed
     return result
 
 
@@ -626,6 +672,7 @@ def rerank(
     explore_bucket: int = 0,
     *,
     emerging_authors: frozenset[str] = frozenset(),
+    carried: _FeedCounters | None = None,
 ) -> list[ScoredCandidate]:
     """Author + interest-aware topic diversity re-rank then truncate to
     ``diversity.top_k`` (§3.4).
@@ -660,6 +707,7 @@ def rerank(
         ),
         emerging_authors=emerging_authors,
         emerging_per_page=diversity.emerging_per_page,
+        carried=carried,
         page_size=diversity.explore_window,
         tie_break_seed=tie_break_seed,
     )
