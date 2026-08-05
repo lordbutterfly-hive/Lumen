@@ -36,7 +36,7 @@ cd recsys
 export PATH="$HOME/.local/bin:$PATH"
 ruff check .        # style/lint — REPO-WIDE, harness included (E3)
 mypy recsys         # types
-pytest -q           # 75 tests, pure — no DB needed
+pytest -q           # the full suite, pure — no DB needed (live/DB suites skip)
 ```
 
 Public API: `recsys.pipeline.rank_feed(viewer, gateway, norm, now=..., since=...)`.

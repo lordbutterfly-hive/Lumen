@@ -1059,7 +1059,29 @@ class FeedRequestHandler(BaseHTTPRequestHandler):
         scheme, _, presented = header.partition(" ")
         if scheme.lower() != "bearer":
             return False
-        return secrets.compare_digest(presented.strip(), expected)
+        # ★★ 2026-08-05 POST-CLOSEOUT COUNCIL (Seat 3, verified). `compare_digest`
+        # on `str` raises TypeError the moment either side contains a non-ASCII
+        # character, and this runs on UNAUTHENTICATED, attacker-supplied input:
+        # one request with an accented byte in the header crashed the handler.
+        # Comparing BYTES has no such restriction and is the documented use of
+        # this primitive. `surrogateescape` keeps any undecodable byte sequence
+        # a comparison rather than a second exception — the header arrives as
+        # latin-1-decoded text from http.client, so a raw byte can survive here.
+        # ★★ ROUND-3 COUNCIL (Seat 2, verified): the first version of this fix
+        # stopped the crash and made a LEGITIMATE non-ASCII token impossible to
+        # authenticate. `http.client` decodes header bytes as LATIN-1, while the
+        # environment decodes the configured token as UTF-8, so encoding the
+        # header back as UTF-8 compared two different byte strings and the
+        # correct token got a 401. The original test asserted 401 — identical to
+        # a wrong token — so it passed in both worlds.
+        #
+        # Latin-1 round-trips the bytes the client actually sent, so this is an
+        # exact comparison for every ASCII token (which is all of them:
+        # `secrets.token_urlsafe` is ASCII by construction, and `main()` now
+        # REFUSES a non-ASCII token at startup rather than shipping one that can
+        # never authenticate).
+        presented_bytes = presented.strip().encode("latin-1", "replace")
+        return secrets.compare_digest(presented_bytes, expected.encode("latin-1", "replace"))
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
@@ -1070,13 +1092,20 @@ class FeedRequestHandler(BaseHTTPRequestHandler):
             self._write_json(200, health_payload(self.state))
             return
         if parsed.path == "/feed":
+            # ★★ 2026-08-05 POST-CLOSEOUT COUNCIL (Seat 3, verified). The rate
+            # limiter used to run AFTER the auth check, so wrong-token traffic
+            # was unthrottled: 40 bad tokens produced 40 x 401 and 0 x 429. An
+            # unauthenticated client could therefore spend the server's threads
+            # for free, which is exactly what the limiter exists to stop.
+            # Throttle FIRST, on the one identifier available before auth (the
+            # peer address), then authenticate.
+            if not self.server.rate_limiter.allow(self.client_address[0], time.time()):
+                self._write_json(429, {"error": "rate_limited"})
+                return
             if not self._authorized():
                 # No detail: a 401 that distinguishes "no token" from "wrong
                 # token" is a probing aid and buys the operator nothing.
                 self._write_json(401, {"error": "unauthorized"})
-                return
-            if not self.server.rate_limiter.allow(self.client_address[0], time.time()):
-                self._write_json(429, {"error": "rate_limited"})
                 return
             if not self.server.inflight.acquire(blocking=False):
                 # Shed rather than queue: queueing converts a burst into a
@@ -1167,6 +1196,37 @@ def make_server(state: ServiceState) -> _FeedHTTPServer:
     return _FeedHTTPServer((state.config.host, state.config.port), FeedRequestHandler, state)
 
 
+def require_ascii_api_token(token: str | None) -> None:
+    """Refuse a non-ASCII bearer token at STARTUP rather than at every request.
+
+    ★★ ROUND-3 COUNCIL (Seat 2). HTTP header bytes arrive latin-1-decoded while
+    the environment decodes this token as UTF-8, so a non-ASCII token cannot be
+    compared unambiguously — the first version of the crash fix silently made
+    such a token IMPOSSIBLE to authenticate with, and its test asserted 401,
+    which is exactly what a WRONG token gets, so it passed in both worlds.
+
+    Rather than guess an encoding on the wire, the configuration is refused.
+    Every real token is ASCII (`secrets.token_urlsafe` is ASCII by
+    construction), so this rejects nothing an operator would legitimately
+    choose.
+
+    A free function, not inline in `main()`, for a test-design reason worth
+    recording: the first version of its gate called `main()` itself, which
+    builds state and WARMS CACHES AGAINST THE LIVE MIRROR. Inside the full
+    suite it inherited another test's environment, missed the raise, and spent
+    168 seconds booting a real service. A validation rule must be testable
+    without starting a server.
+    """
+    if token and not token.isascii():
+        raise ValueError(
+            "RECSYS_API_TOKEN contains non-ASCII characters. HTTP headers are "
+            "transmitted as bytes and decoded latin-1 by the server, so such a "
+            "token cannot be matched reliably and would reject every request. "
+            'Generate an ASCII token: `python -c "import secrets; '
+            'print(secrets.token_urlsafe(32))"`.'
+        )
+
+
 def main() -> int:
     logging.basicConfig(
         level=os.environ.get("RECSYS_LOG_LEVEL", "INFO"),
@@ -1208,6 +1268,16 @@ def main() -> int:
             '`python -c "import secrets; print(secrets.token_urlsafe(32))"`, or set '
             "RECSYS_PRODUCTION=0 for a local run."
         )
+    # ★★ ROUND-3 COUNCIL (Seat 2). HTTP header bytes arrive latin-1-decoded
+    # while the environment decodes this token as UTF-8, so a non-ASCII token
+    # cannot be compared unambiguously — the first version of the crash fix
+    # silently made such a token IMPOSSIBLE to authenticate with, and its test
+    # could not tell that apart from a wrong token. Rather than guess an
+    # encoding on the wire, refuse the configuration: every real token is ASCII
+    # (`secrets.token_urlsafe` is ASCII by construction), so this rejects
+    # nothing an operator would legitimately choose, and it fails LOUDLY at
+    # startup instead of at every request.
+    require_ascii_api_token(service_config.api_token)
     if not service_config.api_token:
         logger.warning(
             "recsys.service.app: no RECSYS_API_TOKEN — /feed is UNAUTHENTICATED. "

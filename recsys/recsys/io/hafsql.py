@@ -73,7 +73,12 @@ from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from recsys.config import HafsqlConfig, LiteConfig
+from recsys.config import (
+    LITE_FRONTEND_ACCOUNT_ENVS,
+    LITE_PUBLISHER_ACCOUNTS_ENV,
+    HafsqlConfig,
+    LiteConfig,
+)
 from recsys.contracts import Candidate, CandidateSource, EngagementEdge, Post, Vote
 from recsys.core.scoring import AuthorEngagement
 from recsys.core.vote_signal import AttributedPost, VoterTrust
@@ -106,8 +111,12 @@ _RECSYS_DSN_ENV = "RECSYS_DATABASE_URL"
 # non-empty one is folded in; ``publisher_accounts`` is a SET, so a deploy
 # that exports more than one network's var by accident gains an inert extra
 # trust entry, never loses the one it needed.
-_LITE_PUBLISHER_ACCOUNTS_ENV = "LITE_PUBLISHER_ACCOUNTS"
-_LITE_FRONTEND_ACCOUNT_ENVS: tuple[str, ...] = (
+# ★ Re-exported from `recsys.config`, which is now the single resolver
+# (`LiteConfig.from_env`). Kept as module names so this file's own docstrings
+# and tests keep working.
+_LITE_PUBLISHER_ACCOUNTS_ENV = LITE_PUBLISHER_ACCOUNTS_ENV
+_LITE_FRONTEND_ACCOUNT_ENVS: tuple[str, ...] = LITE_FRONTEND_ACCOUNT_ENVS
+_UNUSED_LITE_ENVS: tuple[str, ...] = (
     "LITE_FRONTEND_ACCOUNT_MAINNET",
     "LITE_FRONTEND_ACCOUNT_MIRRORNET",
     "LITE_FRONTEND_ACCOUNT_TESTNET",
@@ -115,21 +124,20 @@ _LITE_FRONTEND_ACCOUNT_ENVS: tuple[str, ...] = (
 
 
 def _lite_config_from_env() -> LiteConfig:
-    """A13: build a :class:`LiteConfig` from the environment — see the module
-    docstring and the constants above. Absent both env sources -> the empty
-    frozenset -> lite OFF, identical to ``LiteConfig()``'s own default (pinned
-    by ``test_lite_sourcing_is_OFF_until_publishers_are_named``); this
-    function is a FALLBACK consulted only when ``HafsqlClient`` is
-    constructed with no explicit ``lite=`` argument (see ``__init__`` below),
-    never a change to that default itself."""
-    accounts: set[str] = set()
-    csv = os.environ.get(_LITE_PUBLISHER_ACCOUNTS_ENV, "")
-    accounts.update(name.strip() for name in csv.split(",") if name.strip())
-    for env_name in _LITE_FRONTEND_ACCOUNT_ENVS:
-        value = os.environ.get(env_name, "").strip()
-        if value:
-            accounts.add(value)
-    return LiteConfig(publisher_accounts=frozenset(accounts))
+    """A13: build a :class:`LiteConfig` from the environment.
+
+    ★ Now a thin delegation to :meth:`LiteConfig.from_env` (2026-08-05). It used
+    to own a second copy of the publisher-resolution rules and knew nothing
+    about the engagement DSN, so `LUMEN_LITE_DATABASE_URL` was read nowhere and
+    L2 could never switch on. Two env readers that can disagree is how a config
+    path rots; there is one now.
+
+    Absent every source -> the empty frozenset -> lite OFF, identical to
+    ``LiteConfig()``'s own default (pinned by
+    ``test_lite_sourcing_is_OFF_until_publishers_are_named``); this function is
+    a FALLBACK consulted only when ``HafsqlClient`` is constructed with no
+    explicit ``lite=`` argument, never a change to that default itself."""
+    return LiteConfig.from_env()
 
 # A4: connection-pool / operational-hardening tunables. Kept as env-read
 # defaults (not ``HafsqlConfig`` fields — that file is owned by another
@@ -376,6 +384,155 @@ WHERE rshares > 0
   AND voter <> author
   AND timestamp >= %(since)s
 GROUP BY voter, author
+"""
+
+# ---------------------------------------------------------------------------
+# ★★★ L1 (2026-08-05) — EDGE DESTINATIONS RESOLVE TO THE LITE WRITER.
+#
+# THE BUG. The three queries above take the DESTINATION of every engagement
+# edge from the raw on-chain `author`/`parent_author` column. A lite post is
+# published by a shared PUBLISHER account with the writer's id in
+# `json_metadata->>'lumen_user_id'`, so every upvote, reply and reblog aimed at
+# a lite writer was credited to the publisher instead. Consequences, all
+# following from that one substitution being absent:
+#
+#   * `graph_creds` never contained an entry keyed by a lite identity, so a
+#     lite writer could NEVER be vouched, could never leave the unknown tier,
+#     and was permanently ineligible for anything gated on trust.
+#   * A lite sock ring was invisible to ring detection for the same reason —
+#     every one of its edges pointed at the publisher, not at its members.
+#   * The publisher account accrued the graph-cred of EVERY lite writer
+#     combined: an accidental trust supernode that grows with adoption. Live
+#     check 2026-08-05: 10 lite posts on mainnet, 9 distinct writers, ONE
+#     publisher (`hbd-temp`) — small today, which is exactly why this is
+#     cheaper to fix now than after volume.
+#
+# `_identity()` (above) already exists for precisely this substitution and is
+# already used for post SOURCING; only these edge queries never called it. Its
+# docstring's "hydration still keys on the chain author" was right about vote
+# ROWS and wrong as a conclusion about edge ENDPOINTS.
+#
+# SCOPE, deliberately: DESTINATION only. The SOURCE stays the on-chain account.
+# Resolving sources belongs to L2 and is NOT symmetric with this — inbound
+# engagement is paid for in RC and stake by a real Hive account, while a lite
+# user's own engagement is free (`lumen_vote`, off chain), so crediting it at
+# face value would be a free vouch printer. See, under
+# `/mnt/o/LUMEN-DOCS/algo-tests/COUNCIL-2026-08-05-POSTCLOSEOUT/`,
+# `SCOPE-LITE-ENGAGEMENT-SIGNAL-2026-08-05.md`.
+#
+# SHAPE: a UNION of the plain branch (rows NOT authored by a publisher, byte
+# for byte the predicate above) and a lite branch (publisher-authored rows,
+# joined to the post for its metadata). The plain query above is still used
+# verbatim when no publishers are configured, so a non-lite deploy pays nothing
+# and keeps its measured plan. The lite branch is bounded by `lite_publishers`,
+# a set of one account in practice.
+#
+# Self-engagement stays excluded by the UNRESOLVED `voter <> author` predicate,
+# which is the correct test: a publisher voting a post it published is caught
+# there before resolution, and a lite user cannot vote on chain at all.
+# ---------------------------------------------------------------------------
+
+_SQL_UPVOTE_EDGES_WITH_LITE = """
+WITH lite AS MATERIALIZED (
+    -- Every post authored by a lite publisher, with the writer's id where the
+    -- provenance check passes. Bounded by the number of lite posts (10 on
+    -- mainnet today), and MATERIALIZED deliberately: inlined, Postgres pushes
+    -- this into the join and the reblog variant measured **197.6s** for a
+    -- 6-hour window against **0.0s** materialised. The weekly trust batch runs
+    -- a 365-day window.
+    -- Publisher posts that are NOT lite (or carry no writer id) are still
+    -- included, with a NULL `uid`, so the COALESCE below resolves them back to
+    -- the publisher rather than the row being dropped by a non-matching join.
+    SELECT author, permlink,
+           CASE WHEN json_metadata->>'app' = %(lite_app)s
+                THEN json_metadata->>'lumen_user_id' END AS uid
+    FROM hafsql.comments
+    WHERE author = ANY(%(lite_publishers)s)
+)
+SELECT voter, dst, COUNT(*), MAX(ts) FROM (
+    SELECT v.voter AS voter, v.author AS dst, v.timestamp AS ts
+    FROM hafsql.operation_effective_comment_vote_view v
+    WHERE v.rshares > 0
+      AND v.voter <> v.author
+      AND v.timestamp >= %(since)s
+      AND NOT (v.author = ANY(%(lite_publishers)s))
+    UNION ALL
+    SELECT v.voter AS voter, COALESCE(l.uid, v.author) AS dst, v.timestamp AS ts
+    FROM hafsql.operation_effective_comment_vote_view v
+    JOIN lite l ON l.author = v.author AND l.permlink = v.permlink
+    WHERE v.rshares > 0
+      AND v.voter <> v.author
+      AND v.timestamp >= %(since)s
+) e
+GROUP BY voter, dst
+"""
+
+_SQL_REPLY_EDGES_WITH_LITE = """
+WITH lite AS MATERIALIZED (
+    -- Every post authored by a lite publisher, with the writer's id where the
+    -- provenance check passes. Bounded by the number of lite posts (10 on
+    -- mainnet today), and MATERIALIZED deliberately: inlined, Postgres pushes
+    -- this into the join and the reblog variant measured **197.6s** for a
+    -- 6-hour window against **0.0s** materialised. The weekly trust batch runs
+    -- a 365-day window.
+    -- Publisher posts that are NOT lite (or carry no writer id) are still
+    -- included, with a NULL `uid`, so the COALESCE below resolves them back to
+    -- the publisher rather than the row being dropped by a non-matching join.
+    SELECT author, permlink,
+           CASE WHEN json_metadata->>'app' = %(lite_app)s
+                THEN json_metadata->>'lumen_user_id' END AS uid
+    FROM hafsql.comments
+    WHERE author = ANY(%(lite_publishers)s)
+)
+SELECT src, dst, COUNT(*), MAX(ts) FROM (
+    SELECT r.author AS src, r.parent_author AS dst, r.timestamp AS ts
+    FROM hafsql.operation_comment_view r
+    WHERE r.parent_author <> ''
+      AND r.author <> r.parent_author
+      AND r.timestamp >= %(since)s
+      AND NOT (r.parent_author = ANY(%(lite_publishers)s))
+    UNION ALL
+    SELECT r.author AS src, COALESCE(l.uid, r.parent_author) AS dst, r.timestamp AS ts
+    FROM hafsql.operation_comment_view r
+    JOIN lite l ON l.author = r.parent_author AND l.permlink = r.parent_permlink
+    WHERE r.parent_author <> ''
+      AND r.author <> r.parent_author
+      AND r.timestamp >= %(since)s
+) e
+GROUP BY src, dst
+"""
+
+_SQL_REBLOG_EDGES_WITH_LITE = """
+WITH lite AS MATERIALIZED (
+    -- Every post authored by a lite publisher, with the writer's id where the
+    -- provenance check passes. Bounded by the number of lite posts (10 on
+    -- mainnet today), and MATERIALIZED deliberately: inlined, Postgres pushes
+    -- this into the join and the reblog variant measured **197.6s** for a
+    -- 6-hour window against **0.0s** materialised. The weekly trust batch runs
+    -- a 365-day window.
+    -- Publisher posts that are NOT lite (or carry no writer id) are still
+    -- included, with a NULL `uid`, so the COALESCE below resolves them back to
+    -- the publisher rather than the row being dropped by a non-matching join.
+    SELECT author, permlink,
+           CASE WHEN json_metadata->>'app' = %(lite_app)s
+                THEN json_metadata->>'lumen_user_id' END AS uid
+    FROM hafsql.comments
+    WHERE author = ANY(%(lite_publishers)s)
+)
+SELECT src, dst, COUNT(*), MAX(ts) FROM (
+    SELECT b.account_name AS src, b.author AS dst, b.created_at AS ts
+    FROM hafsql.reblogs b
+    WHERE b.account_name <> b.author
+      AND b.created_at >= %(since)s
+      AND NOT (b.author = ANY(%(lite_publishers)s))
+    UNION ALL
+    SELECT b.account_name AS src, COALESCE(l.uid, b.author) AS dst, b.created_at AS ts
+    FROM hafsql.reblogs b
+    JOIN lite l ON l.author = b.author AND l.permlink = b.permlink
+    WHERE b.account_name <> b.author
+      AND b.created_at >= %(since)s
+) e
+GROUP BY src, dst
 """
 
 _SQL_REBLOG_EDGES = """
@@ -977,6 +1134,7 @@ def _build_post(
     comments_by_key: dict[tuple[str, str], dict[str, int]],
     rebloggers_by_key: dict[tuple[str, str], tuple[str, ...]],
     reputation_by_author: dict[str, int],
+    lite_rebloggers_by_key: dict[tuple[str, str], tuple[str, ...]] | None = None,
 ) -> Post:
     """Map one ``hafsql.comments`` row plus its hydrated side-tables to an
     :class:`AttributedPost`. ``children``/``reblog_count`` are DERIVED from the
@@ -1004,13 +1162,14 @@ def _build_post(
         community=community,
         created=created,
         children=sum(comment_counts.values()),
-        reblog_count=len(rebloggers),
+        reblog_count=len(rebloggers) + len((lite_rebloggers_by_key or {}).get(key, ())),
         author_reputation=_reputation_display(reputation_raw),
         tags=tag_tuple,
         votes=tuple(votes_by_key.get(key, ())),
         is_nsfw=any(tag.lower() == "nsfw" for tag in tag_tuple),
         commenters=tuple(sorted(comment_counts)),
         rebloggers=rebloggers,
+        lite_rebloggers=(lite_rebloggers_by_key or {}).get(key, ()),
         # A12: the CHAIN identity, carried alongside the ranked one only when
         # they differ (a lite post) — `None` for every ordinary Hive post,
         # where `author` already IS the chain identity. See
@@ -1532,7 +1691,48 @@ class HafsqlClient:
         comments = self._comments_for_posts(authors, permlinks)
         rebloggers = self._rebloggers_for_posts(authors, permlinks)
         reputations = self._reputations_for_authors(list(dict.fromkeys(authors)))
-        return [_build_post(row, votes, comments, rebloggers, reputations) for row in rows]
+        lite_rebloggers: dict[tuple[str, str], tuple[str, ...]] = {}
+        self._merge_lite_engagement(
+            votes, lite_rebloggers, list(zip(authors, permlinks, strict=True))
+        )
+        return [
+            _build_post(row, votes, comments, rebloggers, reputations, lite_rebloggers)
+            for row in rows
+        ]
+
+    def _merge_lite_engagement(
+        self,
+        votes: dict[tuple[str, str], list[Vote]],
+        lite_rebloggers: dict[tuple[str, str], tuple[str, ...]],
+        keys: list[tuple[str, str]],
+    ) -> None:
+        """★★★ L2 (2026-08-05) — fold in engagement cast by LITE accounts.
+
+        Done HERE, in `_hydrate`, because it is the single choke point every
+        post-returning method already passes through, so every lane picks lite
+        engagement up at once and none can be forgotten. (This project's
+        recurring defect is a mechanism wired in one path and silently missing
+        from another; one choke point is the structural answer to that.)
+
+        Lite engagement is confined to hydration on purpose — it never reaches
+        `engagement_edges`, so free identities can never build graph-cred or
+        confer vouch. See `recsys.io.lite_engagement` and `Vote.lite`.
+
+        Mutates in place, additively: a lite vote is appended to whatever chain
+        votes the post already has, never replacing them, and a lite reblogger
+        is unioned into the attributed set. Both no-op when the DSN is unset.
+        """
+        if not self._lite.engagement_enabled:
+            return
+        from recsys.io import lite_engagement
+
+        for key, lite_votes in lite_engagement.fetch_lite_votes(self._lite, keys).items():
+            votes.setdefault(key, []).extend(lite_votes)
+        for key, names in lite_engagement.fetch_lite_rebloggers(self._lite, keys).items():
+            # ★ ROUND-4: into `lite_rebloggers`, NEVER merged into `rebloggers`.
+            # Merged, they were indistinguishable bare names and the need bands
+            # counted free reblogs at full value — see `AttributedPost`.
+            lite_rebloggers[key] = tuple(sorted(names))
 
     def in_network_posts(
         self, follows: frozenset[str], since: datetime, limit: int
@@ -1595,10 +1795,27 @@ class HafsqlClient:
         return self._hydrate(rows)
 
     def engagement_edges(self, since: datetime) -> list[EngagementEdge]:
-        """Directed RealGraph engagement summary since ``since`` (§8.3)."""
-        replies = self._edge_counts(_SQL_REPLY_EDGES, since)
-        upvotes = self._edge_counts(_SQL_UPVOTE_EDGES, since)
-        reblogs = self._edge_counts(_SQL_REBLOG_EDGES, since)
+        """Directed RealGraph engagement summary since ``since`` (§8.3).
+
+        ★ L1 (2026-08-05): with lite publishers configured, edge DESTINATIONS
+        resolve through `lumen_user_id` so a lite writer accrues their own
+        graph-cred instead of donating it to the publisher account. Sources are
+        deliberately NOT resolved — see the SQL block's own comment.
+        """
+        lite_params = (
+            {
+                "lite_publishers": sorted(self._lite.publisher_accounts),
+                "lite_app": self._lite.app_id,
+            }
+            if self._lite.enabled
+            else None
+        )
+        reply_sql = _SQL_REPLY_EDGES_WITH_LITE if lite_params else _SQL_REPLY_EDGES
+        upvote_sql = _SQL_UPVOTE_EDGES_WITH_LITE if lite_params else _SQL_UPVOTE_EDGES
+        reblog_sql = _SQL_REBLOG_EDGES_WITH_LITE if lite_params else _SQL_REBLOG_EDGES
+        replies = self._edge_counts(reply_sql, since, lite_params)
+        upvotes = self._edge_counts(upvote_sql, since, lite_params)
+        reblogs = self._edge_counts(reblog_sql, since, lite_params)
         keys = sorted(set(replies) | set(upvotes) | set(reblogs))
         edges = []
         for src, dst in keys:
@@ -1623,9 +1840,12 @@ class HafsqlClient:
         return edges
 
     def _edge_counts(
-        self, sql: str, since: datetime
+        self, sql: str, since: datetime, extra: Mapping[str, object] | None = None
     ) -> dict[tuple[str, str], tuple[int, datetime | None]]:
-        rows = self._fetch(sql, {"since": since})
+        params: dict[str, object] = {"since": since}
+        if extra:
+            params.update(extra)
+        rows = self._fetch(sql, params)
         # break #8 (verified live 2026-08-04): `operation_effective_comment_
         # vote_view.timestamp` and `reblogs.created_at` are naive (`timestamp
         # WITHOUT time zone`); `EngagementEdge.last_interaction` is compared

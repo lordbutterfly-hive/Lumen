@@ -139,6 +139,22 @@ class AttributedPost(Post):
 
     commenters: tuple[str, ...] = ()
     rebloggers: tuple[str, ...] = ()
+    #: ★★★ ROUND-4 COUNCIL (Seat 1) — LITE rebloggers, kept SEPARATE from
+    #: `rebloggers` rather than merged into it.
+    #:
+    #: The lite-vote fix carried a `Vote.lite` flag, so every consumer could
+    #: filter it. Lite REBLOGGERS were merged into the plain tuple as bare
+    #: names, with nothing to filter on — so the need bands counted them at full
+    #: value and the round-3 headline reproduced byte-for-byte on the other half
+    #: of the same feature: **3 lite reblogs took a debut from rank 13 seen by
+    #: 3 viewers to rank 33 seen by 0**, and one free lite reblog bought a sock
+    #: 93% of the new-writer lane.
+    #:
+    #: Separate field, same rule as votes: counted as PEOPLE for organic breadth
+    #: (bounded by `unknown_free`, since a lite identity is unknown), and
+    #: invisible to the need bands, which decide who is "unheard" and must never
+    #: move on engagement that costs nothing.
+    lite_rebloggers: tuple[str, ...] = ()
 
 
 def independent_vote_signal(
@@ -162,7 +178,24 @@ def independent_vote_signal(
     rshares; only the *breadth multiplier*, the Sybil lever, is budgeted.
     """
     excluded = exclusions.excluded()
-    kept = [vote for vote in post.votes if vote.rshares > 0 and vote.voter not in excluded]
+    # ★★★ L2 (2026-08-05) — LITE VOTES ARE EXCLUDED FROM THIS TERM ENTIRELY, in
+    # both halves, and the reason is the shape of the formula rather than a
+    # policy preference. The return is
+    # `log_compress(raw) * (1 + log10(1 + breadth))`: breadth MULTIPLIES stake
+    # magnitude. A lite vote carries no rshares, so admitting it for breadth
+    # alone would let free accounts AMPLIFY a whale's stake-weighted vote —
+    # strictly worse than letting them add their own, and the exact inversion of
+    # what this project exists to prevent.
+    #
+    # This is the §4 stake signal; it stays purely about stake. Lite voters are
+    # counted as people in the ORGANIC breadth term below
+    # (`organic_attributed_breadth`), which is where "how many distinct humans
+    # engaged" belongs and where the `unknown_free` budget already bounds them.
+    kept = [
+        vote
+        for vote in post.votes
+        if vote.rshares > 0 and not vote.lite and vote.voter not in excluded
+    ]
     if not kept:
         return 0.0
     raw = sum(vote.rshares for vote in kept)
@@ -238,16 +271,39 @@ def independent_organic_engagement(
             "data-plumbing failure, not a low-engagement post. Refusing to "
             "score it as a silent zero."
         )
+    # ★★★ L2 (2026-08-05) — a LITE vote counts as a distinct person here even
+    # though it carries no rshares. The dust floor exists to drop votes too
+    # small to mean anything on a STAKE-weighted signal; a lite vote is not a
+    # dust vote, it is a real person with no chain stake at all, and this term
+    # measures people rather than stake. Excluded from the §4 stake term above,
+    # counted here — and only ever as an UNKNOWN identity, so
+    # `trust.credited_breadth` applies the budget below. ★★ It is
+    # `unknown_free + unknown_per_vouched * (vouched engagers)` — NOT a flat
+    # 1.0. 50 lite accounts buy one unit only when no vouched engager is on the
+    # post; with vouched engagers the budget grows (measured 31.0 at 10 vouched,
+    # 300.0 with a follow graph). Stated conditionally because the unconditional
+    # version was disproved and then repeated for two more rounds.
     voters = frozenset(
         vote.voter
         for vote in post.votes
-        if vote.rshares > _ORGANIC_VOTER_MIN_RSHARES and vote.voter not in excluded
+        if ((vote.lite and vote.rshares >= 0) or vote.rshares > _ORGANIC_VOTER_MIN_RSHARES)
+        # ★ ROUND-3 COUNCIL (Seat 2): `vote.lite` alone admitted a lite
+        # DOWNVOTE as positive breadth. The reader filters `weight > 0` in SQL
+        # so it cannot produce one today — but the identical producer-bug guard
+        # was already considered necessary on the stake side, and leaving the
+        # organic side unguarded is the asymmetry that gets found later.
+        # Downvotes never affect ranking (`Vote`, rev 2.1).
+        and vote.voter not in excluded
     )
     commenters: frozenset[str] = frozenset()
     rebloggers: frozenset[str] = frozenset()
     if isinstance(post, AttributedPost):
         commenters = frozenset(post.commenters) - excluded
-        rebloggers = frozenset(post.rebloggers) - excluded
+        # Lite rebloggers count as people here — the same treatment a lite VOTE
+        # gets — and land in the unknown tier, so `credited_breadth` budgets
+        # them. They are excluded from the need bands, not from merit.
+        rebloggers = frozenset(post.rebloggers) | frozenset(post.lite_rebloggers)
+        rebloggers -= excluded
     if trust is None:
         voter_breadth: float = len(voters)
         commenter_breadth: float = len(commenters)

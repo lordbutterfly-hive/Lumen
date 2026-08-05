@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import importlib.resources
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 #: Floor on the curated seed list (C5, R13/R2). Below this the list is not a
 #: meaningfully-sized trust root — refuse to load rather than silently run
@@ -1175,6 +1175,76 @@ class ExplorationConfig:
     #: connecting, and the slot is better spent on someone unheard. An author who
     #: DOES earn engagement leaves band 0 by the normal route and no longer needs
     #: the lane.
+    #: ★★★ SHIPPED AT 3 — 2026-08-05, OWNER'S RULING after the round-3 council
+    #: measured the off-switch and found it WORSE for the class it was meant to
+    #: protect. Both sides of this are recorded because the reasoning reversed
+    #: twice in one day and the next person deserves the whole picture:
+    #:
+    #:   cap 0 (unlimited) -> 1 of 20 newcomers reached
+    #:   cap 1             -> 7 of 20
+    #:   cap 3             -> 7 of 20 on seed 7; 4 of 20 on seeds 11 and 23,
+    #:                        i.e. MEAN 5 of 20   <- SHIPPED
+    #:
+    #: ★★ THE "7-8 of 20" THIS ORIGINALLY SAID WAS SEED 7 ONLY, generalised from
+    #: the first of three worlds and then repeated in three places. A re-run
+    #: varying only the cap gives 7/4/4. Worse for the ruling: with socks
+    #: present, cap 1 measured BETTER than cap 3 on both axes on every seed
+    #: (50% vs 70% farm capture; 5 vs 1 honest newcomers reached), and
+    #: `attacks/exploration_capture.py`'s own message already says "1 -> 5".
+    #: THE CAP CHOICE IS THEREFORE NOT SETTLED BY EVIDENCE — re-measure across
+    #: seeds, with and without socks, before treating 3 as justified.
+    #:   cap 100           -> 1 of 20
+    #:
+    #: 0 does NOT mean "no rationing"; it means one author holds the reserved
+    #: seat for a whole clock bucket, because the rotation is keyed per BUCKET
+    #: and not per VIEWER. So "turn it off" concentrated the lane instead of
+    #: opening it — the opposite of the intent, and the failure mode the block
+    #: below already described.
+    #:
+    #: THE COST, STATED: the serve budget is what makes a free DENIAL attack
+    #: worth running — an attacker who creates no accounts and spends nothing
+    #: burns an honest newcomer's budget by requesting feeds (~1.1 requests per
+    #: newcomer retired). `ExplorationServeLog.clear()` is now WIRED (see
+    #: `pipeline.rank_feed`), so retirement is no longer PERMANENT — an author
+    #: who earns engagement gets their budget back. That removes the permanence,
+    #: NOT the attack: a newcomer who is denied impressions cannot earn the
+    #: engagement that would clear them. The real answer is the refilling budget
+    #: (`REFILL-DESIGN-ADJUDICATED-2026-08-05.md`), still unbuilt.
+    #:
+    #: (Previous note, kept because its measurements stand:)
+    #: ★★ 2026-08-05 POST-CLOSEOUT COUNCIL — why this was briefly set to 0.
+    #:
+    #: This shipped at 3 for one day. All three council seats found it
+    #: NET-NEGATIVE, from three independent lenses, and the orchestrator
+    #: verified the mechanism at source:
+    #:
+    #: * The counter (`recsys.serve_log.ExplorationServeLog`) keys on AUTHOR
+    #:   ALONE — no viewer, no time window, no refill. So "3" is not "3 per
+    #:   reader" or "3 per week": it is **3 exploration slots in total, across
+    #:   every viewer who ever loads a feed, for the lifetime of the process**.
+    #: * `ExplorationServeLog.clear()` — the method whose docstring promises to
+    #:   un-retire an author who earns engagement — has NO production caller.
+    #:   Retirement is permanent.
+    #: * Measured: the lane goes permanently empty after ~36-48 requests **with
+    #:   no attacker present**; 11 requests retired 10 of 20 honest newcomers.
+    #: * It prices the attacker at nothing: 100 accounts buy 300 slots, and
+    #:   then the farm creates 100 more. A defence that is free to the attacker
+    #:   and fatal to the class it protects is worse than no defence.
+    #: * It was invisible to every gate this project owns: deleting
+    #:   `serve_log.record()` left all 799 tests passing and all 14 panels
+    #:   byte-identical, and `max_serves_per_author` appears ZERO times in
+    #:   `mutate_panels.py`.
+    #:
+    #: 0 restores the pre-B1 behaviour exactly (the lane is farmable but OPEN),
+    #: which is the state consistent with the standing ruling that new writers
+    #: matter more than the reader-side gain from closing it.
+    #:
+    #: THE REPLACEMENT IS A REFILLING BUDGET, NOT A BIGGER NUMBER. Raising this
+    #: value was measured to make things WORSE, not better (3 -> 7 of 20
+    #: newcomers reached; 10 or 100 -> 1 of 20), because a lifetime cap on a
+    #: global counter concentrates the whole lane on whoever is served first.
+    #: The shape that works is a budget that REFILLS — see the design work in
+    #: `/mnt/o/LUMEN-DOCS/algo-tests/COUNCIL-2026-08-05-POSTCLOSEOUT/`.
     max_serves_per_author: int = 3
     #: ★ MAC KEY for the reserved-seat rotation (C1a, 2026-08-04 — CRITICAL).
     #:
@@ -1313,6 +1383,15 @@ class ExplorationConfig:
             raise ValueError(f"slots_per_page must be >= 0, got {self.slots_per_page}")
         if self.rotation_hours < 0:
             raise ValueError(f"rotation_hours must be >= 0, got {self.rotation_hours}")
+        # ★ 2026-08-05 council (Seat 2): this was the ONE ExplorationConfig field
+        # with no validation, so `-1` silently disabled the serve budget while
+        # reading as "configured". 0 is the documented off switch; negative is a
+        # typo, and a typo must never look like a policy.
+        if self.max_serves_per_author < 0:
+            raise ValueError(
+                f"max_serves_per_author must be >= 0 (0 disables the serve budget), "
+                f"got {self.max_serves_per_author}"
+            )
         if self.page_size <= 0:
             raise ValueError(f"page_size must be > 0, got {self.page_size}")
         if not 0 <= self.position < self.page_size:
@@ -1965,6 +2044,18 @@ class HistoryWindows:
             )
 
 
+#: ★ Env names for the lite publisher accounts. These lived in
+#: ``recsys/io/hafsql.py`` alone; they are here now because
+#: :meth:`LiteConfig.from_env` is the single resolver and that module delegates
+#: to it. `hafsql` re-exports them so its own docstrings stay accurate.
+LITE_PUBLISHER_ACCOUNTS_ENV = "LITE_PUBLISHER_ACCOUNTS"
+LITE_FRONTEND_ACCOUNT_ENVS: tuple[str, ...] = (
+    "LITE_FRONTEND_ACCOUNT_MAINNET",
+    "LITE_FRONTEND_ACCOUNT_MIRRORNET",
+    "LITE_FRONTEND_ACCOUNT_TESTNET",
+)
+
+
 @dataclass(frozen=True)
 class LiteConfig:
     """Lumen Lite reachability (§E.4). OFF by default — see the rollout note.
@@ -2013,10 +2104,73 @@ class LiteConfig:
 
     publisher_accounts: frozenset[str] = frozenset()
     app_id: str = "lumen/1.0"
+    #: ★★★ L2 (2026-08-05) — DSN for the Lumen app's OWN Postgres, where lite
+    #: engagement lives (`lumen_vote` / `lumen_reblog`, migration
+    #: `0009_engagement.sql`). This is a THIRD database, distinct from both the
+    #: public HAFSQL mirror and the recsys DB (`RECSYS_DATABASE_URL`): the
+    #: frontend calls it `LITE_DATABASE_URL`.
+    #:
+    #: `None` (the default) means lite engagement is simply not read — the same
+    #: honest-degrade posture A15 network-suppression already takes for its own
+    #: optional connection: a WARNING, an empty result, never a crash and never
+    #: a silent pretence that there was no engagement.
+    #:
+    #: Lite engagement is deliberately confined to POST HYDRATION. It never
+    #: reaches `engagement_edges`, so it cannot build graph-cred or confer
+    #: vouch — see `Vote.lite` for why that boundary is the whole design.
+    engagement_dsn: str | None = None
 
     @property
     def enabled(self) -> bool:
         return bool(self.publisher_accounts)
+
+    @property
+    def engagement_enabled(self) -> bool:
+        """Separate from :attr:`enabled` on purpose: a deploy can source lite
+        POSTS (publishers configured) long before it can reach the app database,
+        and reading engagement without the DSN is not a degraded mode, it is a
+        different one."""
+        return self.engagement_dsn is not None
+
+    @classmethod
+    def from_env(cls, base: LiteConfig | None = None) -> LiteConfig:
+        """Resolve publishers and the engagement DSN from the environment.
+
+        ★★★ THE SINGLE SOURCE, deliberately. The publisher env names lived in
+        ``recsys/io/hafsql.py`` only, and the DSN was read nowhere at all, so
+        ``LiteConfig.from_env`` had NO CALLER — the identical shape of the
+        2026-08-04 defect where ``ExplorationConfig.from_env`` was referenced
+        only inside its own error message and the keyed seat could never
+        receive a real key. Two separate consequences, both live:
+
+        * ``Settings.lite`` was always the empty default, so the L1 lite-author
+          discovery fix could never fire in production;
+        * nothing read ``LUMEN_LITE_DATABASE_URL``, so L2 lite engagement could
+          never be read either.
+
+        Both entry points now come through here. ``recsys.io.hafsql``'s own
+        ``_lite_config_from_env`` delegates to this rather than keeping a second
+        copy of the rules, because two env readers that can disagree is how a
+        config path rots.
+
+        ``base`` lets an operator name publishers in code and keep the DSN in
+        the environment, where a credential belongs, without either clobbering
+        the other: anything already set on ``base`` wins over an absent
+        variable, and an explicitly-set variable wins over the default.
+        """
+        source = base if base is not None else cls()
+        accounts: set[str] = set(source.publisher_accounts)
+        csv = os.environ.get(LITE_PUBLISHER_ACCOUNTS_ENV, "")
+        accounts.update(name.strip() for name in csv.split(",") if name.strip())
+        for env_name in LITE_FRONTEND_ACCOUNT_ENVS:
+            value = os.environ.get(env_name, "").strip()
+            if value:
+                accounts.add(value)
+        return replace(
+            source,
+            publisher_accounts=frozenset(accounts),
+            engagement_dsn=os.environ.get("LUMEN_LITE_DATABASE_URL", source.engagement_dsn),
+        )
 
 
 @dataclass(frozen=True)
@@ -2136,7 +2290,19 @@ class Settings:
         ``Settings.from_env(production=True)`` explicitly instead of
         importing ``DEFAULT_SETTINGS``.
         """
-        return cls(exploration=ExplorationConfig.from_env(production=production))
+        # ★★★ L1/L2 (2026-08-05) — `lite` is threaded for exactly the reason
+        # the docstring above records for `exploration`, and it was the SAME
+        # defect one layer over: `Settings.lite` was always the empty default,
+        # so `settings.lite.enabled` was False everywhere in production and the
+        # L1 lite-author discovery fix (`author_prior_cache.discover_recent_
+        # authors(..., lite=settings.lite)`) could never fire — a fix that
+        # passes its own tests and is unreachable where it matters, which is
+        # this codebase's most-repeated failure. `LiteConfig.from_env` also
+        # carries the L2 engagement DSN, so both halves come through one door.
+        return cls(
+            exploration=ExplorationConfig.from_env(production=production),
+            lite=LiteConfig.from_env(),
+        )
 
 
 DEFAULT_SETTINGS = Settings()

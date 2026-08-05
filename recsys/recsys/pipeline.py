@@ -45,6 +45,7 @@ from recsys.core.coldstart import (
 )
 from recsys.core.exploration import (
     eligible_for_exploration,
+    engagement_received,
     insert_exploration,
 )
 from recsys.core.flooding import cap_oon_flooding
@@ -383,16 +384,37 @@ def build_trust_snapshot(
     # directed-cycle hardening silently reverts to the pre-anchoring local rule
     # in production. Proven reachable with production=True and a dormant seed
     # list. Partial loss degraded coverage with no signal at all.
+    # ★★ 2026-08-05 POST-CLOSEOUT COUNCIL (Seat 2, verified). The check below
+    # tested EMPTINESS of `landed` — exactly the bug C4 fixed 78 lines above at
+    # the CONFIGURED list, surviving untouched on the LANDED set. 25 configured
+    # seeds with 24 dormant left ONE account carrying the entire PageRank
+    # teleport mass, in production, with a `logger.warning` as the only signal.
+    # A single trust root is strictly worse than none: it looks configured.
+    #
+    # The floor belongs on the EFFECTIVE seed set, not the configured one —
+    # `MIN_TRUSTED_SEEDS` is this project's own stated bar for what constitutes
+    # a trust root at all (`config.py:24`, `jobs/trust_batch.py:107`: "a short
+    # list is not a trust root"), and a configured seed that never lands
+    # contributes exactly nothing to it. Failing here fails SHUT: the batch
+    # aborts, the previous good snapshot is retained, and staleness is now loud
+    # (B5) rather than silent.
     if trusted_seeds:
         landed = trusted_seeds & set(graph_creds)
+        if production and len(landed) < MIN_TRUSTED_SEEDS:
+            raise ValueError(
+                f"build_trust_snapshot: only {len(landed)} of {len(trusted_seeds)} "
+                f"accounts in trusted_seeds have engagement edges in the trust window (minimum "
+                f"{MIN_TRUSTED_SEEDS}) — the effective trust root is too small, so "
+                f"PageRank teleport mass concentrates on a handful of accounts and "
+                f"seed-anchored vouch degrades toward the local rule a directed sock "
+                f"cycle defeats"
+            )
         if not landed:
             message = (
                 "trusted_seeds are all absent from graph_cred (no engagement edges in the "
                 "trust window) — vouch anchoring cannot run and would silently revert to "
                 "the local rule that a directed sock cycle defeats"
             )
-            if production:
-                raise ValueError(f"build_trust_snapshot: {message}")
             logger.warning(message)
         elif len(landed) < len(trusted_seeds):
             logger.warning(
@@ -1767,6 +1789,14 @@ def rank_feed(
         if settings.exploration.rotation_hours > 0
         else 0
     )
+    # ★ ONE engagement map per request, shared by the serve log's `record` (the
+    # baseline) and its `graduated` check (the comparison). Two computations of
+    # "how many people engaged this author" that could disagree is precisely how
+    # the previous two designs broke.
+    engagement_counts = {
+        author: len(engagers)
+        for author, engagers in engagement_received(candidates).items()
+    }
     explore_pool = eligible_for_exploration(
         candidates,
         viewer,
@@ -1937,8 +1967,39 @@ def rank_feed(
             # exploration slots collapsed 10 -> 3 because most "serves" were
             # merit placements being miscounted.
             serve_log.record(
-                sc.post.author
-                for sc in ranked
-                if sc.source is CandidateSource.EXPLORATION
+                (
+                    sc.post.author
+                    for sc in ranked
+                    if sc.source is CandidateSource.EXPLORATION
+                ),
+                engagement_counts,
             )
+
+    # ★★★ GRADUATION — the serve budget is RETURNED to an author who has been
+    # heard since it was spent. Third design; the first two are recorded in
+    # `ExplorationServeLog.graduated`, because each looked right and each was a
+    # regression found by a council rather than by review:
+    #
+    #   1. clear on "has engagement", every request -> a per-request RESET; one
+    #      author took 288 of 300 slots.
+    #   2. clear on "has engagement AND is not in the exploration pool" -> an
+    #      author AT THE CAP is filtered out of that pool BY THE CAP, so it
+    #      fired for exactly the population it had to hold, and the lane went
+    #      back to 100% farm capture.
+    #
+    # Both keyed on the EXISTENCE of engagement. Graduation is engagement that
+    # is NEW since the slot was spent, which is a fact only the log can know —
+    # hence the baseline it now records at `record()` time.
+    #
+    # `engagement_received` is the SAME rule the need bands use (lite votes and
+    # lite reblogs excluded), so engagement that costs nothing cannot graduate
+    # anyone either.
+    #
+    # HONEST LIMIT, at the call site: this returns the budget to an author who
+    # earns something new. It does not close the DENIAL attack — a newcomer
+    # denied impressions cannot earn the engagement that would clear them. The
+    # refilling budget remains the real answer.
+    if serve_log is not None:
+        for author in serve_log.graduated(engagement_counts):
+            serve_log.clear(author)
     return ranked[: settings.diversity.top_k]

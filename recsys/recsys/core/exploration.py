@@ -493,6 +493,35 @@ def _is_self_dealt(post: Post) -> bool:
     return author in commenters or author in rebloggers
 
 
+def engagement_received(candidates: Iterable[Candidate]) -> dict[str, set[str]]:
+    """Distinct identities that have engaged each author, for the need bands.
+
+    ★ Extracted 2026-08-05 so the SERVE LOG's `clear()` and the need bands use
+    ONE definition of "has this author been heard". A second, hand-copied rule
+    would drift, and this project has already shipped that exact failure twice.
+
+    ★★★ LITE VOTES ARE EXCLUDED (round-3 council, Seat 1, measured). Need bands
+    govern the new-writer lane, so an unfiltered lite vote counted FULL VALUE
+    and UNBOUNDED here while being capped at 0.5 (breadth) and 0 (stake) for
+    merit. The consequence was backwards and severe: a lite reader LIKING a
+    newcomer's post PUSHED THEM OUT of the lane — 0-1 lite likes: rank 13, seen
+    by 10/10 viewers; 3 lite likes: rank 33, seen by 0/10; 4 CHAIN votes: rank
+    10, 10/10 (merit carries them out, lite never does). Latent while L1/L2
+    could not reach production, LIVE the moment that was fixed. Free engagement
+    must not move the band that decides who is unheard — it is exactly the
+    signal an attacker gets for nothing.
+    """
+    received: dict[str, set[str]] = {}
+    for candidate in candidates:
+        post = candidate.post
+        engagers = {v.voter for v in post.votes if not v.lite}
+        engagers.update(getattr(post, "commenters", ()))
+        engagers.update(getattr(post, "rebloggers", ()))
+        engagers.discard(post.author)
+        received.setdefault(post.author, set()).update(engagers)
+    return received
+
+
 def eligible_for_exploration(
     candidates: Iterable[Candidate],
     viewer: ViewerProfile,
@@ -639,13 +668,7 @@ def eligible_for_exploration(
     served_counts: Mapping[str, int] = serves or {}
     fresh: list[Candidate] = []
     candidates = list(candidates)
-    for candidate in candidates:
-        post = candidate.post
-        engagers = {v.voter for v in post.votes}
-        engagers.update(getattr(post, "commenters", ()))
-        engagers.update(getattr(post, "rebloggers", ()))
-        engagers.discard(post.author)
-        received.setdefault(post.author, set()).update(engagers)
+    received = engagement_received(candidates)
     for candidate in candidates:
         post = candidate.post
         # ★ VIEWER-SAFETY FILTERS (added 2026-08-04). These are NOT redundant
@@ -784,7 +807,13 @@ def eligible_for_exploration(
             # Serve count breaks that tie on observed fact, and it is why a farm
             # can no longer hold the lane simply by being numerous: each sock
             # sinks as it is spent.
-            served_counts.get(a, 0),
+            # ★★ ROUND-3 COUNCIL (Seat 2, verified). This tie-break is part of
+            # B1 and was left LIVE when the serve budget was turned off, so
+            # "max_serves_per_author=0 restores the pre-B1 behaviour exactly"
+            # was false: the log still recorded, and ordering still flipped with
+            # serve counts at the shipped default. A half-revert is its own bug.
+            # 0 now means OFF in both halves — the count and the ordering.
+            (served_counts.get(a, 0) if config.max_serves_per_author > 0 else 0),
             -by_author[a][0].post.created.timestamp(),
             a,
         ),

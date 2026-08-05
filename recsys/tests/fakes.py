@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 
+from recsys.config import MIN_TRUSTED_SEEDS
 from recsys.contracts import (
     Candidate,
     CandidateSource,
@@ -19,6 +20,37 @@ from recsys.contracts import (
 )
 
 EPOCH = datetime(2026, 1, 1, tzinfo=UTC)
+
+
+def seeds_that_land(
+    *named: str, sink: str = "seed-sink"
+) -> tuple[frozenset[str], list[EngagementEdge]]:
+    """A trusted-seed set that clears ``MIN_TRUSTED_SEEDS`` **and whose members
+    actually land in ``graph_cred``** — returned together with the edges a
+    fixture must include for that to be true.
+
+    ★★ 2026-08-05 POST-CLOSEOUT COUNCIL. The helper this replaces padded a seed
+    list with filler names that existed in NO world, so every test using it
+    built a *production* snapshot whose EFFECTIVE trust root was the one named
+    account — 25 configured, 1 landed. That is precisely the configuration
+    ``build_trust_snapshot`` now refuses (`pipeline.py`, the landed-seeds
+    floor), and precisely the state the C4 fix left open one level down: the
+    floor was applied to the CONFIGURED list and never to the LANDED set.
+
+    A helper that manufactures a passing seed COUNT without manufacturing the
+    engagement that makes those seeds real is a helper that pins the guard's
+    absence. Hence this shape: it hands back the edges too, so a fixture cannot
+    silently get the count without the substance.
+
+    Each seed sends one upvote to a shared ``sink``. Sent engagement, never
+    received, so no seed accrues insularity from this (``ring.py``'s
+    denominator counts engagement RECEIVED — see the 2026-08-03 dilution fix),
+    and no pair is reciprocal, so the set cannot read as a ring.
+    """
+    fillers = [f"seed-filler-{i:02d}" for i in range(MIN_TRUSTED_SEEDS)]
+    seeds = frozenset(named) | set(fillers)
+    edges = [EngagementEdge(src=seed, dst=sink, upvotes=5) for seed in sorted(seeds)]
+    return seeds, edges
 
 
 def make_vote(voter: str = "voter", rshares: int = 1_000_000, minutes: int = 0) -> Vote:

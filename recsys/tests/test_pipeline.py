@@ -49,7 +49,7 @@ from recsys.pipeline import (
     rank_feed,
 )
 from recsys.viewer import build_viewer_profile
-from tests.fakes import EPOCH, FakeGateway, make_post, make_viewer, make_vote
+from tests.fakes import EPOCH, FakeGateway, make_post, make_viewer, make_vote, seeds_that_land
 
 NOW = EPOCH + timedelta(hours=1)
 
@@ -664,13 +664,34 @@ def test_build_trust_snapshot_refuses_empty_seeds_in_production() -> None:
             gateway, DEFAULT_SETTINGS, since=EPOCH, now=EPOCH,
             trusted_seeds=frozenset({"a"}), production=True,
         )
-    # With enough seeds supplied AND at least one landed, production succeeds.
-    seeds = frozenset({"a"}) | {f"seed-filler-{i:02d}" for i in range(MIN_TRUSTED_SEEDS)}
+    # ★★ 2026-08-05 POST-CLOSEOUT COUNCIL (Seat 2). THIS BLOCK PREVIOUSLY
+    # ASSERTED THE BUG. It supplied 26 seeds of which exactly ONE ("a") existed
+    # in the world, and asserted that production SUCCEEDS — i.e. it pinned, as
+    # correct, a production snapshot whose entire PageRank teleport mass sat on
+    # one account. That is the same defect C4 closed for the CONFIGURED list,
+    # surviving untouched on the LANDED set 78 lines below it.
+    #
+    # The contract now: enough seeds must LAND, not merely be configured.
+    unlanded = frozenset({"a"}) | {f"never-in-this-world-{i:02d}" for i in range(MIN_TRUSTED_SEEDS)}
+    with pytest.raises(ValueError, match="engagement edges in the trust window"):
+        build_trust_snapshot(
+            gateway, DEFAULT_SETTINGS, since=EPOCH, now=EPOCH,
+            trusted_seeds=unlanded, production=True,
+        )
+    # ...and with a seed set that genuinely lands, production succeeds.
+    seeds, seed_edges = seeds_that_land("a")
+    landed_gateway = FakeGateway(
+        edges=edges + seed_edges,
+        follow_graph={"a": frozenset({"b"}), "b": frozenset({"a"})},
+    )
     snap = build_trust_snapshot(
-        gateway, DEFAULT_SETTINGS, since=EPOCH, now=EPOCH,
+        landed_gateway, DEFAULT_SETTINGS, since=EPOCH, now=EPOCH,
         trusted_seeds=seeds, production=True,
     )
     assert {"a", "b"} <= set(snap.graph_creds)
+    # The guard is about the EFFECTIVE root, so prove the effective root is
+    # actually big — not just that the call returned.
+    assert len(seeds & set(snap.graph_creds)) >= MIN_TRUSTED_SEEDS
     # The offline/harness path (production=False, EXPLICIT) still allows
     # empty seeds — this is no longer the default, so it must be requested.
     offline = build_trust_snapshot(

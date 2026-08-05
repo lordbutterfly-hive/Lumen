@@ -39,11 +39,15 @@ A5/A11/A12 (2026-08-04, this builder): three more sections below.
 ``window_posts`` (A5) is live-timed and live-sized against the real mirror.
 ``author_engagement`` (A11) gets a regression pin (an ordinary account's
 result is unchanged) plus a lite-turned-on execution proof. A12's key
-resolution gets an end-to-end proof built from REAL on-chain data — no real
-Lumen Lite content exists on mainnet yet (Lite posting has not launched), so
-it constructs the SAME shape a real lite post would have (a synthetic ranked
-identity substituted over a real post's real chain author + real engagement)
-rather than fabricate on-chain content; see that section's docstring.
+resolution gets an end-to-end proof built from REAL on-chain data.
+
+★ CORRECTED 2026-08-05: Lite posting HAS launched — 10 lite posts are on
+mainnet, published 2026-07-27 by `hbd-temp`, carrying 9 distinct
+`lumen_user_id` values. What is still true, and is why the synthetic-shape
+proofs below remain synthetic, is that **no Hive account has ever voted,
+replied to or reblogged one of them**, so no ENGAGED lite post can be pulled
+off the live mirror. The L1 section at the bottom of this file measures that
+directly rather than assuming it.
 """
 
 from __future__ import annotations
@@ -247,9 +251,11 @@ def test_window_posts_returns_the_whole_recency_ordered_window(
 def test_window_posts_includes_lite_posts_on_the_same_terms_live(
     client: hafsql.HafsqlClient,
 ) -> None:
-    """No real Lumen Lite content exists on mainnet yet (see module
-    docstring), so this proves the LITE BRANCH of the query executes live
-    without error — the same class of proof A2 breaks #1/#2 required
+    """★ CORRECTED 2026-08-05: lite content DOES now exist on mainnet — 10
+    posts, published 2026-07-27 by `hbd-temp`, 9 distinct `lumen_user_id`s.
+    This test still uses a deliberately non-existent publisher, because what it
+    pins is that the LITE BRANCH executes live WITH NOBODY MATCHING — the
+    same class of proof A2 breaks #1/#2 required
     (`_top_level_or_lite` bakes in `%(lite_publishers)s`/`%(lite_app)s` at
     import time, so a missing bind crashes even when nobody matches)."""
     client_with_lite = hafsql.HafsqlClient(
@@ -508,9 +514,10 @@ def test_author_engagement_structural_floor_persists_for_a_busy_candidate_set(
 
 
 # ---------------------------------------------------------------------------
-# A12 — the Post.key / chain-identity mismatch. No real Lumen Lite content
-# exists on mainnet yet (Lite posting has not launched), so this cannot pull a
-# genuine lite post off the live mirror. Instead it builds the SAME shape a
+# A12 — the Post.key / chain-identity mismatch. ★ CORRECTED 2026-08-05: lite
+# posting HAS launched (10 posts on mainnet by `hbd-temp`), but none has ever
+# been voted, replied to or reblogged, so this still cannot pull a genuine
+# ENGAGED lite post off the live mirror. Instead it builds the SAME shape a
 # real one would have: a SYNTHETIC ranked identity (standing in for a
 # `lumen_user_id`) substituted over a REAL on-chain post with REAL live
 # engagement, exactly what `_build_post` does for an actual lite post (only
@@ -649,3 +656,102 @@ class TestNetworkSuppressionSecondConnection:
             frozenset({_ACTIVE_ACCOUNT}), _SINCE_45D()
         )
         assert _ACTIVE_ACCOUNT in result
+
+
+# ---------------------------------------------------------------------------
+# L1 (2026-08-05) — lite edge resolution, against the real mirror.
+#
+# ★ The module docstring above says no real Lumen Lite content exists on
+# mainnet. That is now STALE: measured 2026-08-05, 10 lite posts exist,
+# published 2026-07-27 by ONE publisher account (`hbd-temp`), carrying 9
+# distinct `lumen_user_id` values.
+# ---------------------------------------------------------------------------
+
+_LIVE_LITE_PUBLISHER = "hbd-temp"
+
+
+def test_lite_posts_on_mainnet_carry_a_resolvable_writer_identity() -> None:
+    """The resolution SOURCE is real data, not a hypothesis: publisher-authored
+    posts carry a 26-char ULID in `json_metadata.lumen_user_id`, which is what
+    the edge queries' `lite` CTE maps a permlink to."""
+    import psycopg
+
+    from recsys.config import HafsqlConfig
+
+    cfg = HafsqlConfig()
+    with (
+        psycopg.connect(
+            host=cfg.host, port=cfg.port, dbname=cfg.dbname,
+            user=cfg.user, password=cfg.password, connect_timeout=cfg.connect_timeout,
+            autocommit=True,
+        ) as conn,
+        conn.cursor() as cur,
+    ):
+        cur.execute(
+            "SELECT json_metadata->>'lumen_user_id' FROM hafsql.comments "
+            "WHERE author = %(pub)s AND json_metadata->>'app' = %(app)s "
+            "AND json_metadata->>'lumen_user_id' IS NOT NULL LIMIT 5",
+            {"pub": _LIVE_LITE_PUBLISHER, "app": "lumen/1.0"},
+        )
+        ids = [row[0] for row in cur.fetchall()]
+    assert ids, "no lite posts found on mainnet — re-check the publisher account"
+    assert all(len(i) == 26 for i in ids), ids
+
+
+def test_lite_edge_queries_execute_and_do_not_disturb_non_lite_edges() -> None:
+    """★ THE NON-REGRESSION PROOF, on real data. With lite publishers
+    configured, the edge sets must be IDENTICAL to the plain queries' for every
+    pair that has nothing to do with lite — the lite branch adds resolution, it
+    does not perturb the existing graph.
+
+    ★★ HONEST LIMIT, recorded rather than papered over: end-to-end resolution
+    (a Hive account's vote crediting a LITE WRITER instead of the publisher)
+    **cannot be demonstrated on mainnet today, because no Hive account has ever
+    voted, replied to or reblogged a lite post.** Measured 2026-08-05: the only
+    vote on any `hbd-temp` post is on a non-lite permlink. What is proven here
+    is that the queries execute against the real schema (the break class that
+    once killed the entire weekly trust batch) and that they are equivalent
+    everywhere else. The remaining step is pinned offline in
+    `tests/test_hafsql.py`'s wiring gates.
+
+    Also a PERFORMANCE pin. The first version of the reblog variant joined
+    `hafsql.comments` inline and measured **197.6s for a 6-hour window** — the
+    trust batch runs 365 days. `MATERIALIZED` on the bounded CTE took it to
+    ~1.1s. If this test starts timing out, that is what regressed.
+    """
+    since = datetime.now(UTC) - timedelta(hours=6)
+    plain = hafsql.HafsqlClient(HafsqlConfig(), LiteConfig())
+    with_lite = hafsql.HafsqlClient(
+        HafsqlConfig(),
+        LiteConfig(publisher_accounts=frozenset({_LIVE_LITE_PUBLISHER}), app_id="lumen/1.0"),
+    )
+
+    # ★ The mirror is a MOVING TARGET: `since` is fixed but the chain is not, so
+    # two sequential reads of the same window legitimately differ by whatever
+    # arrived between them. The first version of this test compared them raw and
+    # failed on exactly that — `only_in_plain` EMPTY, `only_in_lite` carrying
+    # five pairs that all landed mid-test. The second version retried until two
+    # reads agreed, and simply never did: Hive is busy enough that the test
+    # SKIPPED every run. A gate that cannot run is this project's signature
+    # defect and must not be added by the fix for one.
+    #
+    # So: compare only the SETTLED part of the window — pairs whose most recent
+    # interaction predates the test itself. Anything arriving during the test
+    # necessarily carries a newer timestamp and drops out of both sides.
+    settled_before = datetime.now(UTC) - timedelta(minutes=15)
+
+    def settled(client: hafsql.HafsqlClient) -> dict[tuple[str, str], tuple[int, int, int]]:
+        return {
+            (e.src, e.dst): (e.upvotes, e.replies, e.reblogs)
+            for e in client.engagement_edges(since)
+            if e.last_interaction is not None and e.last_interaction <= settled_before
+        }
+
+    a = settled(plain)
+    b = settled(with_lite)
+    assert len(a) > 100, f"only {len(a)} settled edges — window or mirror problem, not a verdict"
+    assert a == b, {
+        "only_in_plain": sorted(set(a) - set(b))[:5],
+        "only_in_lite": sorted(set(b) - set(a))[:5],
+        "count_mismatches": [k for k in set(a) & set(b) if a[k] != b[k]][:5],
+    }

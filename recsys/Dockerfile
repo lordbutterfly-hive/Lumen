@@ -61,16 +61,25 @@ ENV PYTHONUNBUFFERED=1 \
 
 EXPOSE 8000
 
-# Matches the frontend image's own healthcheck shape (`wget --spider`,
-# `frontend/stack/compose.*.yml`) so both services are diagnosed the same
-# way in the stack. `/health` never requires a fresh trust snapshot to
-# return 200 — it reports staleness/absence as DATA (A10.3), not as a
-# healthcheck failure, so a container is not killed for a stale weekly
-# batch; that failure mode belongs in `/health`'s own body and in
-# monitoring, not in whether the process is considered alive.
-HEALTHCHECK --interval=15s --timeout=5s --start-period=60s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider \
-        http://127.0.0.1:${RECSYS_SERVICE_PORT}/health || exit 1
+# ★★ 2026-08-05 POST-CLOSEOUT COUNCIL. This WAS `wget --no-verbose --tries=1
+# --spider`, copied from the frontend image — which is Alpine and has busybox
+# wget. THIS image is `python:3.11-slim` and installs only `tini`, so the probe
+# returned 127 on every run this artifact has ever made; and `--spider` sends
+# HEAD, which a GET-only handler answers with 501. See
+# `recsys/service/healthcheck.py` for the full autopsy.
+#
+# It also now reads `serving` from the BODY rather than the status line.
+# `/health` deliberately returns 200 even when the trust snapshot is stale, so
+# that state stays diagnosable instead of killing the container — but that
+# means a status-line probe reports HEALTHY during a total serving outage.
+# Reading the body is what makes the outage visible without changing the
+# endpoint's contract.
+#
+# `start_period` is 300s, not 60s: NormContext warm-up against the real mirror
+# was measured at ~232s, so the old 60s + 15s x 5 retries = 135s deadline could
+# not be met by a cold, honest start.
+HEALTHCHECK --interval=15s --timeout=5s --start-period=300s --retries=3 \
+    CMD python3 -m recsys.service.healthcheck
 
 ENTRYPOINT ["tini", "--"]
 

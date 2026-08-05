@@ -148,7 +148,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from recsys.config import HafsqlConfig, Settings
+from recsys.config import HafsqlConfig, LiteConfig, Settings
 from recsys.contracts import HafsqlGateway
 from recsys.core.scoring import AuthorEngagement, AuthorPriorGateway
 from recsys.core.vote_signal import VoterTrust
@@ -209,9 +209,62 @@ SELECT author FROM (
 ) busiest
 """
 
+# ★★ 2026-08-05 POST-CLOSEOUT COUNCIL. The comment above this pair is CORRECT
+# that widening the predicate to `parent_author = '' OR <lite post>` buys
+# nothing — a lite post's `author` column holds the PUBLISHER account, never the
+# writer — but it drew the wrong conclusion from it ("nothing is lost"). What is
+# lost is the writer: a lite identity lives in `json_metadata->>'lumen_user_id'`
+# and appears in NO branch of the plain query, so a lite writer never enters the
+# warm author universe at all. The cache is deliberately cache-only with no
+# fetch-on-miss (see this module's MISS POLICY), so "not discovered" means "no
+# pooled quality prior, permanently" — every lite post falls back to its own
+# engagement forever, while a Hive author starts earning a prior from their
+# second post.
+#
+# That is backwards for this product: Lumen's OWN signups (Gmail/BTC/EVM) are
+# all lite, so the platform's own writers were the ones structurally denied a
+# track record.
+#
+# The downstream prior query already resolves lite identity correctly
+# (`io/hafsql.py`'s `_SQL_AUTHOR_ENGAGEMENT` lite branch selects
+# `lumen_user_id AS identity` and groups on it) — discovery was the only place
+# it was missing. Same provenance check as that branch: BOTH `author` and
+# `parent_author` must be a configured publisher, so the trust boundary is
+# `LiteConfig.publisher_accounts`, exactly as documented there.
+#
+# The plain query above is kept and still used verbatim whenever lite sourcing
+# is off, so the measured 0.27-0.31s path is untouched for a deploy with no lite
+# publishers configured. Only a lite-enabled deploy pays the union.
+_SQL_RECENT_AUTHORS_WITH_LITE = """
+SELECT author FROM (
+    SELECT author, count(*) AS n
+    FROM (
+        SELECT author
+        FROM hafsql.comments_table
+        WHERE parent_author = '' AND deleted = false AND created >= %(since)s
+        UNION ALL
+        SELECT c.json_metadata->>'lumen_user_id' AS author
+        FROM hafsql.comments c
+        WHERE c.author = ANY(%(lite_publishers)s)
+          AND c.parent_author = ANY(%(lite_publishers)s)
+          AND c.json_metadata->>'app' = %(lite_app)s
+          AND c.json_metadata->>'lumen_user_id' IS NOT NULL
+          AND c.deleted = false
+          AND c.created >= %(since)s
+    ) posts
+    GROUP BY author
+    ORDER BY n DESC
+    LIMIT %(limit)s
+) busiest
+"""
+
 
 def discover_recent_authors(
-    config: HafsqlConfig, since: datetime, limit: int = DEFAULT_DISCOVERY_LIMIT
+    config: HafsqlConfig,
+    since: datetime,
+    limit: int = DEFAULT_DISCOVERY_LIMIT,
+    *,
+    lite: LiteConfig | None = None,
 ) -> tuple[str, ...]:
     """The warm-set author universe: distinct top-level-post authors since
     ``since``, ordered BUSIEST-FIRST (descending post count) and capped at
@@ -255,7 +308,22 @@ def discover_recent_authors(
         ) as conn,
         conn.cursor() as cur,
     ):
-        cur.execute(_SQL_RECENT_AUTHORS, {"since": since, "limit": limit})
+        # ★ Lite writers are only discoverable through the union form (see
+        # `_SQL_RECENT_AUTHORS_WITH_LITE`). With no publishers configured the
+        # lite branch could only ever match zero rows, so the plain query runs
+        # unchanged and keeps its measured plan.
+        if lite is not None and lite.enabled:
+            cur.execute(
+                _SQL_RECENT_AUTHORS_WITH_LITE,
+                {
+                    "since": since,
+                    "limit": limit,
+                    "lite_publishers": sorted(lite.publisher_accounts),
+                    "lite_app": lite.app_id,
+                },
+            )
+        else:
+            cur.execute(_SQL_RECENT_AUTHORS, {"since": since, "limit": limit})
         return tuple(row[0] for row in cur.fetchall())
 
 
@@ -382,7 +450,13 @@ def build_warm_author_priors(
     now = now_fn()
     days = discovery_days if discovery_days is not None else DEFAULT_DISCOVERY_DAYS
     since_discovery = now - timedelta(days=days)
-    warm_authors = discover_recent_authors(hafsql_config, since_discovery, discovery_limit)
+    # ★ `settings.lite` threaded 2026-08-05: without it a lite writer is never
+    # discovered, so never warmed, so permanently prior-less (see
+    # `_SQL_RECENT_AUTHORS_WITH_LITE`). The same `settings` this function
+    # already uses for every other window.
+    warm_authors = discover_recent_authors(
+        hafsql_config, since_discovery, discovery_limit, lite=settings.lite
+    )
     if not warm_authors:
         return {}
     snap = snapshot_fn() or TrustSnapshot()

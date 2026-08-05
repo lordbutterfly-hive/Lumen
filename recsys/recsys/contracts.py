@@ -221,12 +221,45 @@ class CandidateSource(StrEnum):
 
 @dataclass(frozen=True)
 class Vote:
-    """A single on-chain vote. ``rshares`` is signed; the vote signal (§4)
-    keeps positive rshares only (rev 2.1 — downvotes never affect ranking)."""
+    """A single vote. ``rshares`` is signed; the vote signal (§4) keeps positive
+    rshares only (rev 2.1 — downvotes never affect ranking)."""
 
     voter: str
     rshares: int
     timestamp: datetime
+    #: ★★★ L2 (2026-08-05) — this vote came from a Lumen Lite account and never
+    #: touched a chain (`lumen_vote`, the app's own Postgres). It therefore has
+    #: NO rshares to speak of, and the two scoring terms must treat it
+    #: differently, which is the entire reason this flag exists rather than a
+    #: synthetic rshares value:
+    #:
+    #: * **BREADTH — counted.** A lite voter is a distinct person expressing a
+    #:   preference, which is what the breadth term measures. They enter as an
+    #:   UNKNOWN identity, so `VoterTrust.credited_breadth`'s existing
+    #:   `unknown_free` budget applies. ★★ PRECISELY: the bound is
+    #:   `unknown_free + unknown_per_vouched * (vouched engagers)`, NOT a flat
+    #:   1.0. With no vouched engager, 50 lite accounts buy one unit and the
+    #:   shipped test pins that; with vouched engagers present it GROWS —
+    #:   measured at 31.0 (10 vouched) and 300.0 (with a follow graph). The
+    #:   unconditional phrasing was disproved in round 3 and propagated anyway.
+    #:   The defence is the one that already
+    #:   exists; no new one was invented for this.
+    #: * **STAKE MAGNITUDE — excluded, always.** A lite vote costs nothing: no
+    #:   RC, no stake, no chain record. Letting it sum into the rshares term
+    #:   would let free accounts move the stake-weighted signal, which is the
+    #:   one thing this project's whole thesis says money should not buy either.
+    #:
+    #: The rejected alternative was a synthetic rshares just above
+    #: `_ORGANIC_VOTER_MIN_RSHARES`. Arithmetically its pollution is negligible
+    #: against real whale votes — and it would record something FALSE in the
+    #: data model, which is how nearly every bug in this project's history
+    #: started: true-ish in one layer, wrong in the next.
+    #:
+    #: Lite votes never enter `engagement_edges`, so they can never build
+    #: graph-cred or confer vouch. A lite user gains trust only from chain
+    #: engagement they RECEIVE (L1), which is expensive — so there is no loop
+    #: where free votes mint the trust that would make free votes count more.
+    lite: bool = False
 
 
 @dataclass(frozen=True)

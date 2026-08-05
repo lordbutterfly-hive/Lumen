@@ -9,13 +9,14 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Final
 
 import pytest
 
-from recsys.config import HafsqlConfig
+from recsys.config import HafsqlConfig, LiteConfig
 from recsys.contracts import HafsqlGateway, Vote
 from recsys.core.scoring import AuthorEngagement
 from recsys.core.vote_signal import AttributedPost, VoterTrust
@@ -396,8 +397,13 @@ def test_engagement_edges_reply_back_uses_own_timestamp(monkeypatch: pytest.Monk
     new_ts = datetime(2026, 6, 1, tzinfo=UTC)
 
     def fake_edge_counts(
-        self: hafsql.HafsqlClient, sql: str, since: datetime
+        self: hafsql.HafsqlClient,
+        sql: str,
+        since: datetime,
+        extra: Mapping[str, object] | None = None,
     ) -> dict[tuple[str, str], tuple[int, datetime | None]]:
+        # `extra` carries the lite params (L1, 2026-08-05); this fixture has no
+        # lite publishers configured, so it is always None here.
         if sql == hafsql._SQL_REPLY_EDGES:
             return {("alice", "bob"): (1, old_ts), ("bob", "alice"): (1, new_ts)}
         return {}
@@ -1641,3 +1647,92 @@ def test_a_failed_connect_does_not_leak_its_slot() -> None:
     # If the slot leaked, _live would be pinned at max_size and this would raise
     # "pool exhausted" instead of the connect error above.
     assert pool._live == 0
+
+
+# ---------------------------------------------------------------------------
+# L1 (2026-08-05) — edge destinations resolve to the lite writer.
+# ---------------------------------------------------------------------------
+
+
+def test_engagement_edges_resolves_destinations_when_lite_publishers_are_configured() -> None:
+    """★★★ THE WIRING GATE. Every upvote, reply and reblog aimed at a lite
+    writer used to be credited to the shared PUBLISHER account, because the edge
+    queries took their destination from the raw on-chain `author` column and
+    never called `_identity()` — the substitution post sourcing already used.
+
+    Consequences of that one omission: a lite writer could never be vouched (no
+    `graph_creds` entry keyed by their identity), a lite sock ring was invisible
+    to ring detection, and the publisher accrued the graph-cred of every lite
+    writer combined — a trust supernode growing with adoption.
+
+    MUTANT: send the plain SQL when lite is configured. This fails.
+    """
+    captured: list[tuple[str, Mapping[str, object] | None]] = []
+
+    def capture(
+        self: hafsql.HafsqlClient,
+        sql: str,
+        since: datetime,
+        extra: Mapping[str, object] | None = None,
+    ) -> dict[tuple[str, str], tuple[int, datetime | None]]:
+        captured.append((sql, extra))
+        return {}
+
+    client = hafsql.HafsqlClient(
+        HafsqlConfig(),
+        LiteConfig(publisher_accounts=frozenset({"lumen.pub"}), app_id="lumen/1.0"),
+    )
+    original = hafsql.HafsqlClient._edge_counts
+    hafsql.HafsqlClient._edge_counts = capture  # type: ignore[method-assign]
+    try:
+        client.engagement_edges(datetime(2026, 1, 1, tzinfo=UTC))
+    finally:
+        hafsql.HafsqlClient._edge_counts = original  # type: ignore[method-assign]
+
+    assert len(captured) == 3
+    for sql, extra in captured:
+        # ★ ROUND-3 COUNCIL (Seat 2): this used to assert only
+        # `"lumen_user_id" in sql`, a substring check blind to a WEAKENED
+        # predicate — a variant that resolved EVERY author's metadata, not just
+        # a publisher's, still contains the string and still passed. That is the
+        # lite trust boundary, so it is pinned properly now: resolution must be
+        # gated on the publisher set AND on our own app id.
+        assert "lumen_user_id" in sql, "edge destination is not resolved"
+        assert "%(lite_publishers)s" in sql, (
+            "resolution is not gated on the publisher set — any account could "
+            "write its own destination via json_metadata"
+        )
+        assert "%(lite_app)s" in sql, "resolution is not gated on the app id"
+        assert extra is not None
+        assert extra["lite_publishers"] == ["lumen.pub"]
+        assert extra["lite_app"] == "lumen/1.0"
+
+
+def test_engagement_edges_keeps_the_plain_queries_when_lite_is_not_configured() -> None:
+    """A non-lite deploy must pay nothing for this: same SQL, same plan, no
+    extra binds. The lite branch could only ever match zero rows there."""
+    captured: list[tuple[str, Mapping[str, object] | None]] = []
+
+    def capture(
+        self: hafsql.HafsqlClient,
+        sql: str,
+        since: datetime,
+        extra: Mapping[str, object] | None = None,
+    ) -> dict[tuple[str, str], tuple[int, datetime | None]]:
+        captured.append((sql, extra))
+        return {}
+
+    client = hafsql.HafsqlClient(HafsqlConfig(), LiteConfig())
+    original = hafsql.HafsqlClient._edge_counts
+    hafsql.HafsqlClient._edge_counts = capture  # type: ignore[method-assign]
+    try:
+        client.engagement_edges(datetime(2026, 1, 1, tzinfo=UTC))
+    finally:
+        hafsql.HafsqlClient._edge_counts = original  # type: ignore[method-assign]
+
+    assert [sql for sql, _ in captured] == [
+        hafsql._SQL_REPLY_EDGES,
+        hafsql._SQL_UPVOTE_EDGES,
+        hafsql._SQL_REBLOG_EDGES,
+    ]
+    assert all(extra is None for _, extra in captured)

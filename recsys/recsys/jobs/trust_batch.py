@@ -267,10 +267,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     from recsys.io.hafsql import HafsqlClient
 
     hafsql_config = HafsqlConfig.from_env()
-    # A13 (lite publisher-account wiring) is a separate, gated build unit;
-    # this batch runs with lite off by construction (LiteConfig()'s default
-    # empty publisher_accounts) until that lands.
-    lite = LiteConfig()
+    # ★★★ 2026-08-05 ROUND-3 COUNCIL (Seat 2, verified). This read
+    # `lite = LiteConfig()` — hardcoded OFF — with a comment deferring to "when
+    # A13 lands". A13 HAD landed. And `run_batch` is the ONLY production caller
+    # of `engagement_edges`, so the L1 fix (edge destinations resolving to the
+    # lite writer) could never execute in production: unreachable at the exact
+    # moment its own change was called "THE FINDING THAT MATTERED MOST".
+    # Third instance of this defect class in two days. Resolve from the
+    # environment like every other config this entry point reads.
+    lite = LiteConfig.from_env()
     gateway = HafsqlClient(hafsql_config, lite, recsys_dsn=dsn)
 
     # ★★ ENV SETTINGS, NOT `DEFAULT_SETTINGS` (2026-08-04). The batch does not

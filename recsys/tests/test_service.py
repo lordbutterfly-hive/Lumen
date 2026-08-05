@@ -1254,3 +1254,103 @@ def test_health_and_serving_agree_on_the_same_clock() -> None:
     assert payload["serving"] is False
     with pytest.raises(service_app.FeedUnavailableError):
         service_app.build_feed(state, "alice")
+
+
+# ---------------------------------------------------------------------------
+# 2026-08-05 POST-CLOSEOUT COUNCIL — gates for the service-side fixes.
+#
+# Each test below names the MUTANT it catches. All four were verified by
+# applying that mutant and watching only these tests fail.
+# ---------------------------------------------------------------------------
+
+
+def test_a_non_ascii_bearer_token_is_rejected_rather_than_crashing() -> None:
+    """★★ Seat 3, verified. `secrets.compare_digest` raises TypeError the moment
+    either side is a `str` containing non-ASCII — and this ran on
+    UNAUTHENTICATED, attacker-supplied input, BEFORE the rate limiter. One
+    request with an accented character killed the handler.
+
+    MUTANT: compare the `str` values instead of encoding to bytes. The request
+    then dies mid-connection instead of answering 401, and this fails.
+    """
+    state = _authed_state()
+    with _RunningServer(state) as server:
+        status, body = _get_with_headers(
+            server, "/feed?viewer=alice", {"Authorization": "Bearer s3crét-tøken"}
+        )
+    assert status == 401
+    assert body == {"error": "unauthorized"}
+
+
+def test_unauthenticated_traffic_is_rate_limited_too() -> None:
+    """★★ Seat 3, measured: 40 wrong-token requests produced 40x401 and 0x429,
+    because auth ran BEFORE the limiter. An unauthenticated client could spend
+    the server's threads for free — precisely what the limiter exists to stop.
+
+    MUTANT: move `_authorized()` back in front of `rate_limiter.allow()`. Every
+    code becomes 401 and this fails.
+    """
+    state = _authed_state()
+    state.config = replace(state.config, rate_limit_per_minute=3)
+    with _RunningServer(state) as server:
+        codes = [
+            _get_with_headers(
+                server, "/feed?viewer=alice", {"Authorization": "Bearer wrong"}
+            )[0]
+            for _ in range(5)
+        ]
+    assert codes[:3] == [401, 401, 401], codes
+    assert codes[3:] == [429, 429], codes
+
+
+def test_healthcheck_probe_fails_when_the_service_cannot_serve() -> None:
+    """★★ Seat 1 + Seat 3, verified. `/health` returns 200 unconditionally by
+    design (so a stale batch stays diagnosable rather than fatal), which means a
+    probe reading only the STATUS LINE reports a healthy container during a
+    total serving outage — the exact failure B5 was built to make loud.
+
+    MUTANT: have `probe()` return 0 on any HTTP 200 (i.e. ignore the body). The
+    stale case then passes and this fails.
+    """
+    from recsys.service.healthcheck import probe
+
+    with _RunningServer(_offline_state()) as server:
+        assert probe(server.base_url + "/health") == 0
+    with _RunningServer(_stale_state()) as server:
+        assert probe(server.base_url + "/health") == 1
+
+
+def test_healthcheck_probe_separates_unreachable_from_not_serving() -> None:
+    """"Up but refusing to serve" and "process is gone" need different operator
+    responses, and both look identical to a probe that only checks that
+    something answered."""
+    from recsys.service.healthcheck import probe
+
+    assert probe("http://127.0.0.1:1/health", timeout=1.0) == 2
+
+
+def test_a_non_ascii_api_token_is_refused_at_startup() -> None:
+    """★★ ROUND-3 COUNCIL (Seat 2). The first crash fix made a legitimate
+    non-ASCII token IMPOSSIBLE to authenticate with — headers arrive latin-1,
+    the environment decodes UTF-8 — and the test asserted 401, which is
+    indistinguishable from a wrong token, so it passed in both worlds.
+
+    ★ The first version of THIS test called `main()`, which warms caches
+    against the live mirror; inside the full suite it inherited another test's
+    environment, missed the raise and spent 168 SECONDS booting a real service.
+    A validation rule must be testable without starting a server.
+
+    MUTANT: drop the `isascii()` check. This fails.
+    """
+    service_app.require_ascii_api_token(None)
+    service_app.require_ascii_api_token("s3cret-token")
+    with pytest.raises(ValueError, match="ASCII"):
+        service_app.require_ascii_api_token("s3cr\u00e9t-token")
+
+
+def test_startup_actually_applies_the_token_rule() -> None:
+    """Behaviour is pinned above; this pins that `main()` still CONSULTS it —
+    the reachability half, which is the half this project keeps dropping."""
+    import inspect
+
+    assert "require_ascii_api_token(" in inspect.getsource(service_app.main)

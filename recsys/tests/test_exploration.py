@@ -10,12 +10,19 @@ from datetime import timedelta
 import pytest
 
 from recsys.config import ExplorationConfig
-from recsys.contracts import Candidate, CandidateSource, GraphCred, ScoreBreakdown, ScoredCandidate
+from recsys.contracts import (
+    Candidate,
+    CandidateSource,
+    GraphCred,
+    ScoreBreakdown,
+    ScoredCandidate,
+    Vote,
+)
 from recsys.core.exploration import (
     eligible_for_exploration,
     insert_exploration,
 )
-from tests.fakes import EPOCH, make_post, make_viewer
+from tests.fakes import EPOCH, make_post, make_viewer, make_vote
 
 NOW = EPOCH + timedelta(days=30)
 
@@ -1654,3 +1661,242 @@ def test_serve_count_breaks_ties_within_a_need_tier() -> None:
         f"the already-served author outranked the unserved one: "
         f"{[c.post.author for c in out]}"
     )
+
+
+# ---------------------------------------------------------------------------
+# 2026-08-05 POST-CLOSEOUT COUNCIL — the serve budget is OFF, and cannot be
+# turned on by accident.
+# ---------------------------------------------------------------------------
+
+
+def test_the_serve_budget_ships_at_three() -> None:
+    """★★★ OWNER'S RULING 2026-08-05, after the round-3 council measured the
+    off-switch and found it WORSE for the class it protects.
+
+    `0` does NOT mean "no rationing" — it means ONE author holds the reserved
+    seat for a whole clock bucket, because the rotation is keyed per bucket and
+    not per viewer. Measured across 3 seeds: cap 0 -> 1 of 20 newcomers reached;
+    cap 1 -> 7/20; cap 3 -> 7 on seed 7 but 4 on seeds 11 and 23 (mean 5);
+    cap 100 -> 1/20. The original "7-8" was seed 7 only — see
+    `ExplorationConfig.max_serves_per_author`, which records that the cap choice
+    is NOT settled by evidence and that cap 1 measured better under attack.
+
+    The reasoning reversed twice in one day, so both directions are recorded in
+    `ExplorationConfig`'s own docstring rather than only in a report.
+
+    MUTANT: set the default back to 0. This fails.
+    """
+    assert ExplorationConfig().max_serves_per_author == 3
+
+
+def test_earning_engagement_clears_a_spent_serve_budget() -> None:
+    """★★★ `clear()` WIRED — it had NO production caller since B1 shipped, so
+    retirement was PERMANENT and the method's own docstring promise ("used when
+    they leave the lane by earning engagement") was unkept. Both Seat 1 and
+    Seat 3 found it independently.
+
+    Asserted through `rank_feed`, not on the log in isolation: this project's
+    signature defect is a mechanism that works while the pipeline never calls
+    it, and that is exactly what `clear()` was.
+
+    HONEST LIMIT, pinned in the docstring so nobody over-reads this gate: it
+    proves retirement is not permanent for an author who EARNS engagement. It
+    does not close the denial attack — a newcomer denied impressions cannot earn
+    the engagement that would clear them.
+
+    MUTANT: remove the `serve_log.clear(...)` loop from `rank_feed`. This fails.
+    """
+    from recsys.config import Settings
+    from recsys.core.normalize import build_norm_context
+    from recsys.pipeline import TrustPolicy, rank_feed
+    from recsys.serve_log import ExplorationServeLog
+    from tests.fakes import FakeGateway
+
+    settings = Settings()
+    samples = [float(i) for i in range(50)]
+    norms = build_norm_context(samples, samples, samples)
+    post = make_post(author="newcomer", permlink="p1", category="photo", tags=("photo",))
+    fresh = type(post)(**{**post.__dict__, "created": NOW - timedelta(hours=1)})
+    viewer = make_viewer("v", follows=frozenset({"alice"}), interest_tags=frozenset({"photo"}))
+
+    # The author is carrying a spent budget from earlier serves.
+    log = ExplorationServeLog({"newcomer": 3})
+
+    # No engagement yet: the spent budget must survive, or "retire at the cap"
+    # would mean nothing at all.
+    quiet = FakeGateway(tag=[fresh])
+    rank_feed(viewer, quiet, norms, now=NOW, since=EPOCH, settings=settings,
+              trust_policy=TrustPolicy.WARN, serve_log=log)
+    assert log.counts().get("newcomer", 0) >= 3, (
+        "an author with no engagement lost their spent budget — the cap is inert"
+    )
+
+    # Now someone real engages them: the budget is returned. The engagement has
+    # to be ON THE POST — `FakeGateway(engagers=...)` is second-degree data and
+    # is deliberately NOT what "has this author been heard" reads, which the
+    # first version of this test got wrong.
+    voted = type(fresh)(**{**fresh.__dict__, "votes": (make_vote("alice"),)})
+    heard = FakeGateway(tag=[voted])
+    rank_feed(viewer, heard, norms, now=NOW, since=EPOCH, settings=settings,
+              trust_policy=TrustPolicy.WARN, serve_log=log)
+    assert "newcomer" not in log.counts(), (
+        "an author who earned engagement is still carrying a spent budget — "
+        "retirement is permanent"
+    )
+
+
+def test_a_negative_serve_budget_is_refused_rather_than_silently_disabling() -> None:
+    """★ Seat 2: this was the ONE `ExplorationConfig` field with no validation,
+    so `-1` silently disabled the budget while reading as configured. 0 is the
+    documented off switch; a typo must never look like a policy.
+
+    MUTANT: drop the `__post_init__` check. This fails.
+    """
+    with pytest.raises(ValueError, match="max_serves_per_author"):
+        ExplorationConfig(max_serves_per_author=-1)
+
+
+def test_disabling_the_serve_budget_also_disables_its_ordering() -> None:
+    """★★ ROUND-3 COUNCIL (Seat 2). Turning `max_serves_per_author` to 0 stopped
+    RETIREMENT but left B1's serve-count TIE-BREAK live in the sort key, so
+    ordering still flipped with serve counts at the shipped default. "0 restores
+    the pre-B1 behaviour exactly" was false — a half-revert is its own bug.
+
+    ★ The first version of this test built its own fixture, produced an EMPTY
+    lane, and passed with the mechanism deleted. Second vacuous gate written in
+    one session; both were caught only by mutation testing. It now uses the
+    fixture the rest of this file uses and asserts the lane is non-empty FIRST.
+
+    MUTANT: ungate the `served_counts` term in the sort key. This fails.
+    """
+    pool = [_cand("served", "p-served"), _cand("unserved", "p-unserved")]
+    common = dict(
+        now=NOW, graph_creds={}, suppressed=frozenset(), show_nsfw=False,
+        config=_cfg(max_serves_per_author=0),
+    )
+    with_serves = [
+        c.post.author for c in eligible_for_exploration(pool, _viewer(), **common,
+                                                        serves={"served": 99})
+    ]
+    without = [
+        c.post.author for c in eligible_for_exploration(pool, _viewer(), **common, serves={})
+    ]
+    assert len(without) == 2, f"empty lane — the comparison would be vacuous: {without}"
+    assert with_serves == without, (
+        f"serve counts still reorder the lane with the budget disabled: "
+        f"{without} -> {with_serves}"
+    )
+
+    # And the mechanism genuinely works when it is ON, so the assertion above
+    # is about the OFF switch rather than about a term that never mattered.
+    on = dict(common, config=_cfg(max_serves_per_author=3))
+    assert [
+        c.post.author for c in eligible_for_exploration(pool, _viewer(), **on,
+                                                        serves={"served": 2})
+    ] != [c.post.author for c in eligible_for_exploration(pool, _viewer(), **on, serves={})]
+
+
+def test_a_lite_like_never_reorders_the_new_writer_lane() -> None:
+    """★★★ THE NET-NEW DEFECT THIS ROUND CREATED — composition, not mechanism.
+
+    `Vote.lite` was honoured in both `vote_signal` consumers and missed in a
+    THIRD: the need-band computation that governs this lane. Unfiltered, a free
+    lite vote counted FULL VALUE and UNBOUNDED there while being capped for
+    merit, so a lite reader LIKING a newcomer's post pushed them OUT of the lane
+    — measured end to end at 0-1 lite likes -> rank 13, seen by 10/10 viewers;
+    3 lite likes -> rank 33, seen by 0/10.
+
+    Latent while L1/L2 could not reach production; LIVE the moment that was
+    fixed. Neither change was wrong on its own.
+
+    ★ The first version of this test compared two EMPTY lanes and passed with
+    the mechanism deleted. It is written against the fixture the rest of this
+    file uses, and asserts the lane is non-empty FIRST, because a vacuous
+    equality is how a gate stops being one.
+
+    MUTANT: drop `if not v.lite` from the engagers set. This fails.
+    """
+    lite_votes = tuple(
+        Vote(voter=f"01LITE{i}", rshares=0, timestamp=EPOCH, lite=True) for i in range(3)
+    )
+    plain = _cand("newcomer", "p-new")
+    liked = Candidate(
+        post=type(plain.post)(**{**plain.post.__dict__, "votes": lite_votes}),
+        source=plain.source,
+    )
+    rival = _cand("rival", "p-rival")
+    common = dict(
+        now=NOW, graph_creds={}, suppressed=frozenset(), show_nsfw=False, config=_cfg()
+    )
+    def lane(pool: list[Candidate]) -> list[str]:
+        return [c.post.author for c in eligible_for_exploration(pool, _viewer(), **common)]
+
+    without = lane([plain, rival])
+    with_likes = lane([liked, rival])
+    assert len(without) == 2, (
+        f"fixture produced no lane — the comparison would be vacuous: {without}"
+    )
+    assert with_likes == without, (
+        "free lite likes reordered the new-writer lane — a like from a lite "
+        f"reader evicts the newcomer it was meant to help: {without} -> {with_likes}"
+    )
+
+
+def test_graduation_requires_engagement_that_is_NEW_since_the_slot_was_spent() -> None:
+    """★★★ THE POPULATION MATRIX. Two previous designs of this rule shipped and
+    both were regressions, each found by a council rather than by review, and
+    each because it was verified against the WRONG POPULATION:
+
+      1. "clear on has-engagement, every request" — a per-request RESET. One
+         author took 288 of 300 slots.
+      2. "clear on has-engagement AND not in the exploration pool" — an author
+         AT THE CAP is filtered out of that pool BY THE CAP, so it fired for
+         exactly the population it existed to hold. Budget 3 -> 0 on the next
+         request; the lane went back to 100% farm capture.
+
+    Both keyed on the EXISTENCE of engagement. So this test enumerates the four
+    populations explicitly rather than checking one happy path — the at-cap rows
+    are the ones both previous designs got wrong.
+
+    MUTANT: compare against `>= 0` instead of the recorded baseline, or drop the
+    `author in self._counts` guard. This fails.
+    """
+    from recsys.serve_log import ExplorationServeLog
+
+    log = ExplorationServeLog()
+
+    # (a) AT THE CAP with STATIC engagement -> must NOT graduate. This is the
+    # row design #2 got wrong, and it is the farm's whole attack.
+    log.record(["capped"], {"capped": 1})
+    log.record(["capped"], {"capped": 1})
+    log.record(["capped"], {"capped": 1})
+    assert log.counts()["capped"] == 3
+    assert log.graduated({"capped": 1}) == [], "static engagement graduated an author at the cap"
+
+    # (b) AT THE CAP with NEW engagement -> must graduate; that is the point.
+    assert log.graduated({"capped": 2}) == ["capped"]
+
+    # (c) BELOW the cap with static engagement -> must NOT graduate, so the
+    # budget still accumulates. This is the row design #1 got wrong.
+    log2 = ExplorationServeLog()
+    log2.record(["young"], {"young": 4})
+    assert log2.graduated({"young": 4}) == []
+    log2.record(["young"], {"young": 4})
+    assert log2.counts()["young"] == 2, "the budget stopped accumulating for an engaged author"
+
+    # (d) An author who never spent a slot has nothing to graduate from.
+    assert log2.graduated({"stranger": 99}) == []
+
+
+def test_graduation_is_wired_into_the_served_pipeline() -> None:
+    """Behaviour is pinned above; this pins that `rank_feed` CONSULTS it — the
+    reachability half, which is the half this project keeps dropping. `clear()`
+    sat with no production caller at all for a full round."""
+    import inspect
+
+    from recsys.pipeline import rank_feed
+
+    source = inspect.getsource(rank_feed)
+    assert "serve_log.graduated(" in source
+    assert "serve_log.clear(author)" in source
+    assert "engagement_counts" in source, "record() is not given the baseline it compares against"

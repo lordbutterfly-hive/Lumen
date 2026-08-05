@@ -412,7 +412,7 @@ def test_returns_empty_when_discovery_finds_no_authors(monkeypatch: pytest.Monke
     gw = _AuthorPriorStubGateway()
     monkeypatch.setattr(
         "recsys.author_prior_cache.discover_recent_authors",
-        lambda config, since, limit: (),
+        lambda config, since, limit, *, lite=None: (),
     )
     result = build_warm_author_priors(
         gw, HafsqlConfig(), DEFAULT_SETTINGS, lambda: None, now_fn=lambda: _EPOCH
@@ -431,7 +431,7 @@ def test_no_snapshot_degrades_to_self_exclusion_only_and_no_trust_budget(
     (``trust=None``), byte-identical to what ``rank_feed`` would do live."""
     monkeypatch.setattr(
         "recsys.author_prior_cache.discover_recent_authors",
-        lambda config, since, limit: ("alice",),
+        lambda config, since, limit, *, lite=None: ("alice",),
     )
     gw = _AuthorPriorStubGateway(
         engagement={"alice": AuthorEngagement(posts=3, total_base=2.0)},
@@ -462,7 +462,7 @@ def test_a_real_snapshot_produces_a_real_trust_budget(monkeypatch: pytest.Monkey
     request."""
     monkeypatch.setattr(
         "recsys.author_prior_cache.discover_recent_authors",
-        lambda config, since, limit: ("alice",),
+        lambda config, since, limit, *, lite=None: ("alice",),
     )
     gw = _AuthorPriorStubGateway(engagement={"alice": AuthorEngagement(posts=1, total_base=1.0)})
     snapshot = TrustSnapshot(
@@ -486,7 +486,7 @@ def test_chunk_size_is_threaded_through_to_the_mapper(monkeypatch: pytest.Monkey
     authors = tuple(f"author{i}" for i in range(5))
     monkeypatch.setattr(
         "recsys.author_prior_cache.discover_recent_authors",
-        lambda config, since, limit: authors,
+        lambda config, since, limit, *, lite=None: authors,
     )
     gw = _AuthorPriorStubGateway(engagement=_engagement_for(authors))
     build_warm_author_priors(
@@ -576,3 +576,97 @@ def test_warm_build_closes_the_structural_floor_for_the_busiest_real_authors() -
         f"times out (>15s) or takes 21-36s uncapped on a live per-request call "
         f"— it must be a near-instant in-memory lookup, not a live query"
     )
+
+
+# ---------------------------------------------------------------------------
+# 2026-08-05 POST-CLOSEOUT COUNCIL — lite writers are discoverable.
+# ---------------------------------------------------------------------------
+
+
+class _CapturingCursor:
+    def __init__(self, sink: dict[str, object]) -> None:
+        self._sink = sink
+
+    def __enter__(self) -> _CapturingCursor:
+        return self
+
+    def __exit__(self, *exc: object) -> bool:
+        return False
+
+    def execute(self, sql: str, params: dict[str, object]) -> None:
+        self._sink["sql"] = sql
+        self._sink["params"] = params
+
+    def fetchall(self) -> list[tuple[str]]:
+        return [("alice",)]
+
+
+class _CapturingConn:
+    def __init__(self, sink: dict[str, object]) -> None:
+        self._sink = sink
+
+    def __enter__(self) -> _CapturingConn:
+        return self
+
+    def __exit__(self, *exc: object) -> bool:
+        return False
+
+    def cursor(self) -> _CapturingCursor:
+        return _CapturingCursor(self._sink)
+
+
+def _captured_discovery(lite: LiteConfig | None) -> dict[str, object]:
+    import psycopg
+
+    sink: dict[str, object] = {}
+    original = psycopg.connect
+    psycopg.connect = lambda **kwargs: _CapturingConn(sink)  # type: ignore[assignment]
+    try:
+        discover_recent_authors(HafsqlConfig(), _EPOCH, 10, lite=lite)
+    finally:
+        psycopg.connect = original  # type: ignore[assignment]
+    return sink
+
+
+def test_lite_writers_enter_the_warm_author_universe() -> None:
+    """★★ POST-CLOSEOUT COUNCIL, found while fixing the lane.
+
+    A lite writer's identity lives in `json_metadata->>'lumen_user_id'`; the
+    `author` column of their post holds the PUBLISHER account. The discovery
+    query read `author` with `parent_author = ''`, so a lite writer appeared in
+    NO branch of it — and because this cache is deliberately cache-only with no
+    fetch-on-miss, "never discovered" means "no pooled quality prior, ever".
+    Every lite post fell back to its own engagement forever while a Hive author
+    started earning a prior from their second post.
+
+    That is backwards for this product: Lumen's own signups (Gmail/BTC/EVM) are
+    ALL lite, so the platform's own writers were the ones structurally denied a
+    track record.
+
+    Note what does NOT fix it: widening the predicate to `parent_author = '' OR
+    <lite post>`. That returns the publisher account, not the writer — which is
+    why the original comment's "nothing is lost" conclusion was wrong even
+    though its premise was right.
+
+    MUTANT: send the plain query when lite is enabled. This fails.
+    """
+    lite = LiteConfig(publisher_accounts=frozenset({"lumen.pub"}), app_id="lumen/1.0")
+    captured = _captured_discovery(lite)
+    sql = str(captured["sql"])
+    assert "lumen_user_id" in sql, "lite writers are not discoverable"
+    params = captured["params"]
+    assert isinstance(params, dict)
+    assert params["lite_publishers"] == ["lumen.pub"]
+    assert params["lite_app"] == "lumen/1.0"
+
+
+def test_discovery_keeps_its_measured_plan_when_lite_is_not_configured() -> None:
+    """The union branch could only ever match zero rows with no publishers
+    configured, so a non-lite deploy must keep running the plain, measured
+    (0.27-0.31s) single-table aggregate rather than paying for a dead branch."""
+    for lite in (None, LiteConfig()):
+        captured = _captured_discovery(lite)
+        sql = str(captured["sql"])
+        assert "lumen_user_id" not in sql
+        assert "UNION" not in sql
+        assert "lite_publishers" not in captured["params"]  # type: ignore[operator]

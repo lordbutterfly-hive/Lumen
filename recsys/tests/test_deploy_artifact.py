@@ -92,3 +92,73 @@ def test_service_package_is_declared_for_packaging() -> None:
     for pkg in ("recsys", "recsys.core", "recsys.io", "recsys.db", "recsys.jobs",
                 "recsys.service"):
         assert pkg in packages, f"{pkg} missing from [tool.setuptools] packages"
+
+
+# ---------------------------------------------------------------------------
+# 2026-08-05 POST-CLOSEOUT COUNCIL — the healthcheck. This file previously had
+# NO healthcheck coverage at all, which is how a probe that could never pass
+# shipped inside the very artifact B4a was written to make bootable.
+# ---------------------------------------------------------------------------
+
+
+def _probe_lines(text: str) -> list[str]:
+    """Only the lines that actually INVOKE the probe — never the prose around
+    it, which necessarily names the broken command it replaced."""
+    return [
+        line
+        for line in text.splitlines()
+        if not line.lstrip().startswith("#")
+        and ("HEALTHCHECK" in line or "test:" in line or "CMD" in line)
+    ]
+
+
+def test_the_healthcheck_uses_something_the_image_actually_contains() -> None:
+    """★★ Seat 1 + Seat 3, both verified, and provable from the files alone.
+
+    The probe was `wget --no-verbose --tries=1 --spider` in BOTH the Dockerfile
+    and the compose file. The base image is `python:3.11-slim` and installs
+    exactly one OS package, `tini` — **there is no wget in it**, so every
+    healthcheck this artifact ever ran returned 127. The shape was copied, as
+    the Dockerfile comment conceded, from the frontend's image, which is Alpine
+    and gets wget from busybox.
+
+    And even with wget present, `--spider` issues HEAD while the service defines
+    only `do_GET`, so `BaseHTTPRequestHandler` answers 501 — fixing the missing
+    binary alone would have swapped one permanent failure for another.
+
+    MUTANT: put either `wget` probe back. This fails.
+    """
+    dockerfile = (_ROOT / "Dockerfile").read_text()
+    compose = (_ROOT / "deploy" / "compose.recsys.yml").read_text()
+
+    # The image installs no probe binary, so the probe must be the interpreter.
+    assert "python:3.11-slim" in dockerfile, "base image changed — re-check the probe"
+    for name, text in (("Dockerfile", dockerfile), ("compose", compose)):
+        lines = _probe_lines(text)
+        assert lines, f"{name}: no healthcheck invocation found at all"
+        assert any("recsys.service.healthcheck" in line for line in lines), (
+            f"{name}: healthcheck does not invoke the probe module"
+        )
+        assert not any("wget" in line for line in lines), (
+            f"{name}: healthcheck invokes wget, which is not in python:3.11-slim"
+        )
+
+
+def test_the_healthcheck_start_period_covers_a_real_cold_start() -> None:
+    """Warm-up against the real mirror was measured at ~232s. The old
+    `start_period: 60s` plus 15s x 5 retries gave a 135s deadline an honest cold
+    start could not meet — the container would be declared unhealthy while
+    correctly warming."""
+    # ★ ROUND-3 COUNCIL (Seat 2): this asserted `"300s" in text`, which passes
+    # on the COMMENT describing the fix rather than the directive doing it —
+    # a gate that reads its own prose. Parse the actual setting.
+    dockerfile = [
+        line for line in (_ROOT / "Dockerfile").read_text().splitlines()
+        if "start-period" in line and not line.lstrip().startswith("#")
+    ]
+    assert dockerfile and "--start-period=300s" in dockerfile[0], dockerfile
+    compose = [
+        line for line in (_ROOT / "deploy" / "compose.recsys.yml").read_text().splitlines()
+        if line.strip().startswith("start_period:")
+    ]
+    assert compose and compose[0].split(":", 1)[1].strip().startswith("300s"), compose

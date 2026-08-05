@@ -50,6 +50,13 @@ services:
       LITE_FRONTEND_ACCOUNT_MAINNET:
       LITE_FRONTEND_ACCOUNT_MIRRORNET:
       LITE_FRONTEND_ACCOUNT_TESTNET:
+      # ★★ L2 (2026-08-05, round-3 council): the lite ENGAGEMENT datastore —
+      # the Lumen app's own Postgres (`LITE_DATABASE_URL` on the frontend
+      # side), a THIRD database distinct from the HAFSQL mirror and the recsys
+      # DB. Absent, lite votes and reblogs are simply not read: the four
+      # publisher vars above were passed and this one was not, so lite POSTS
+      # were sourced while lite ENGAGEMENT was silently inert.
+      LUMEN_LITE_DATABASE_URL:
       # This service's own tuning (recsys/service/app.py:ServiceConfig).
       # RECSYS_SERVICE_HOST/PORT are the CONTAINER-INTERNAL bind address —
       # deliberately FIXED, never templated from the host-facing port below.
@@ -112,12 +119,21 @@ services:
       - "${RECSYS_HOST_PORT:-8000}:8000"
     networks:
       - docker
+    # ★★ 2026-08-05 POST-CLOSEOUT COUNCIL. Was `wget --spider`, which (a) is not
+    # in the `python:3.11-slim` image at all, (b) sends HEAD to a GET-only
+    # handler, and (c) read only the status line, so it reported HEALTHY during
+    # a total serving outage — `/health` returns 200 by design even when it
+    # cannot serve. The probe now reads `serving` from the body. Full autopsy in
+    # `recsys/service/healthcheck.py`. Keep this in step with the Dockerfile's
+    # own HEALTHCHECK: two probes that disagree are worse than one.
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8000/health || exit 1"]
+      test: ["CMD", "python3", "-m", "recsys.service.healthcheck"]
       interval: 15s
       timeout: 5s
       retries: 5
-      start_period: 60s  # NormContext warm-up (window_posts) is a few real seconds, not instant
+      # Measured ~232s for NormContext warm-up against the real mirror, so the
+      # old 60s could not be met by an honest cold start.
+      start_period: 300s
 
   # One-shot: `docker compose -f deploy/compose.recsys.yml run --rm recsys-trust-batch`.
   # Never started by `up` on its own — no `restart:` policy, and deliberately
@@ -147,6 +163,15 @@ services:
       LUMEN_EXPLORE_SEAT_SECRET:
       LUMEN_EXPLORE_SEAT_SECRET_PREVIOUS:
       LUMEN_EXPLORE_SEAT_SECRET_ACTIVE_FROM_BUCKET:
+      # ★★★ REQUIRED FOR L1 (2026-08-05, round-3 council). `run_batch` is the
+      # ONLY production caller of `engagement_edges`, so these four decide
+      # whether a lite writer accrues their own graph-cred or donates it to the
+      # shared publisher account. Passed to the SERVICE and not to the BATCH,
+      # they would do nothing at all — the trust graph is built here.
+      LITE_PUBLISHER_ACCOUNTS:
+      LITE_FRONTEND_ACCOUNT_MAINNET:
+      LITE_FRONTEND_ACCOUNT_MIRRORNET:
+      LITE_FRONTEND_ACCOUNT_TESTNET:
     networks:
       - docker
 

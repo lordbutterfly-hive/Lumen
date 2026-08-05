@@ -30,14 +30,13 @@ from recsys.config import DEFAULT_SETTINGS, MIN_TRUSTED_SEEDS
 from recsys.contracts import EngagementEdge
 from recsys.db.store import DegradedSnapshotError, ensure_schema, load_snapshot
 from recsys.jobs.trust_batch import load_trusted_seeds, main, run_batch
-from tests.fakes import EPOCH, FakeGateway
+from tests.fakes import EPOCH, FakeGateway, seeds_that_land
 
-
-def _enough_seeds(*named: str) -> frozenset[str]:
-    """A seed set that clears `MIN_TRUSTED_SEEDS` (C4, 2026-08-05) while keeping
-    the accounts a test actually reasons about. Before C4 these tests could pass
-    one seed, which is exactly the state that made the floor inert."""
-    return frozenset(named) | {f"seed-filler-{i:02d}" for i in range(MIN_TRUSTED_SEEDS)}
+# ★★ 2026-08-05 POST-CLOSEOUT COUNCIL: `_enough_seeds` lived here and padded a
+# seed list with filler names that existed in no world, so this suite built
+# production snapshots whose EFFECTIVE trust root was one account. Replaced by
+# `tests.fakes.seeds_that_land`, which hands back the edges too, so a fixture
+# cannot get the seed COUNT without the engagement that makes those seeds real.
 
 
 _DSN = os.environ.get("RECSYS_DATABASE_URL")
@@ -99,15 +98,17 @@ def test_load_trusted_seeds_reads_the_real_operator_file_by_default() -> None:
 
 
 def test_run_batch_dry_run_builds_without_persisting_or_requiring_a_dsn() -> None:
+    seeds, seed_edges = seeds_that_land("seed1")
     edges = [
         EngagementEdge(src="seed1", dst="alice", replies=1, upvotes=1),
         EngagementEdge(src="alice", dst="bob", upvotes=2),
+        *seed_edges,
     ]
     gateway = FakeGateway(edges=edges)
     snapshot = run_batch(
         gateway,
         DEFAULT_SETTINGS,
-        trusted_seeds=_enough_seeds("seed1"),
+        trusted_seeds=seeds,
         now=EPOCH,
         dsn=None,
         production=True,

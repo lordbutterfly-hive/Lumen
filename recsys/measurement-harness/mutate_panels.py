@@ -95,6 +95,19 @@ EXPECTED_MISSES: dict[tuple[str, str], str] = {
         "`min_vouched_score` on the first vote, so this budget is never the binding "
         "constraint. A mutant of an inert field cannot be caught by anything. Delete "
         "this entry if the field is ever made live.",
+    ("q3_newauthor.py", "exploration.max_serves_per_author=0"):
+        "STRUCTURAL, and the reason is q3's own fixture: it has exactly ONE "
+        "eligible newcomer per feed, so a PER-AUTHOR serve cap has nothing to "
+        "bind against — there is no second newcomer for a spent author to yield "
+        "to. Registered anyway (round-3 council, Seat 1: this field appeared "
+        "ZERO times in this registry while being a live bound on the lane q3 "
+        "measures), because a blind spot that is WRITTEN DOWN is a different "
+        "thing from one nobody looked for. REAL coverage of this field is the "
+        "multi-newcomer case: `attacks/exploration_capture.py` plus "
+        "`tests/test_exploration.py::test_the_serve_budget_ships_at_three` and "
+        "`::test_earning_engagement_clears_a_spent_serve_budget`, which measured "
+        "1 of 20 newcomers reached at 0 against 7-8 of 20 at the shipped 3. "
+        "Delete this entry if q3 ever grows a multi-newcomer cohort.",
     ("q3_newauthor.py", "emerging_per_page=0 [B-04, N/A at HEAD]"):
         "Same inert field as above.",
     ("q8_author_prior_panel.py", "organic_prior_shrinkage=0.0"):
@@ -141,6 +154,15 @@ MUTANTS: dict[str, list[Mutant]] = {
     ],
     "q3_newauthor.py": [
         ("emerging_per_page=0 [B-04, N/A at HEAD]", {"diversity.emerging_per_page": 0}),
+        # ★ ROUND-3 COUNCIL (Seat 1): `max_serves_per_author` appeared ZERO
+        # times in this registry while being a live, shipped bound on the very
+        # lane q3 measures. Registered here so its coverage is a FACT rather
+        # than an assumption — if no panel catches it, that becomes a DECLARED
+        # blind spot with a written reason, which is the whole point of this
+        # file. Note 0 does not mean "off" in the newcomer-reach sense: it
+        # removes the cap, and removing the cap concentrates the lane on one
+        # author (measured 1 of 20 newcomers reached, vs 7-8 at the shipped 3).
+        ("exploration.max_serves_per_author=0", {"exploration.max_serves_per_author": 0}),
         ("exploration.slots_per_page=0", {"exploration.slots_per_page": 0}),
         ("organic_prior_shrinkage=0.0", {"weights.organic_prior_shrinkage": 0.0}),
     ],
