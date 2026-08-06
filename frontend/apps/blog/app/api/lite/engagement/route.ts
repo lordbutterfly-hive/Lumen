@@ -3,6 +3,7 @@ import { getLogger } from '@ui/lib/logging';
 import { guardRead } from '@/blog/lib/lite/http/guard';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { getEngagement } from '@/blog/lib/lite/repositories/engagement-repository';
+import { liteTargetServable } from '@/blog/lib/lite/content/engagement-target';
 
 const logger = getLogger('app');
 
@@ -35,6 +36,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const userId = user?.account_tier === 'lite' && user.userId ? user.userId : null;
 
   try {
+    // ★ B5 — a taken-down post must not keep reporting live counts. QA found
+    // `posts/:id` 404ing while THIS endpoint served incrementable numbers for
+    // the same post; same predicate as the write path, one helper.
+    if (!(await liteTargetServable(author, permlink))) {
+      return NextResponse.json({ error: 'target_unavailable' }, { status: 404 });
+    }
     const engagement = await getEngagement(userId, author, permlink);
     // Mirrors a chain vote row closely enough for the existing consumer; `voter` is
     // the lite display name, which is exactly what the component compares against.

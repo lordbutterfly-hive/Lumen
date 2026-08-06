@@ -1952,6 +1952,19 @@ class VoteSignalConfig:
     # voters — absorbs proportionally more real newcomers without penalty.
     unknown_free: float = 1.0
     unknown_per_vouched: float = 2.0
+    #: ★★★ B4 (2026-08-06) — CEILING on the unknown-identity budget.
+    #:
+    #: Without it the budget is `unknown_free + unknown_per_vouched * vouched`,
+    #: which grows without bound in the target's own popularity — measured 31.0
+    #: at 10 vouched engagers and ~300 once a follow graph exists. Lite signups
+    #: are FREE, so that is a zero-cost purchase, and QA measured 3-4x inflation
+    #: of the organic score on posts that already had genuine votes. The
+    #: per-vouched growth is still right in principle; being unbounded is not.
+    #:
+    #: 10.0: a post with 5+ vouched engagers already sits at the cap, so the
+    #: newcomer floor (`unknown_free`) and the funded-alt bound are untouched,
+    #: and only the runaway tail is removed. `<= 0` disables the cap.
+    unknown_max: float = 10.0
     require_attribution: bool = False
 
     def __post_init__(self) -> None:

@@ -561,6 +561,54 @@ def test_http_feed_happy_path_returns_200_with_the_expected_shape() -> None:
         assert 0.0 <= post["score"]["final"] <= 1.0
 
 
+def test_the_feed_carries_chain_identity_so_a_lite_post_can_be_RENDERED() -> None:
+    """★ 2026-08-06. Ranking a post the consumer then cannot display is useless.
+
+    A Lumen Lite post's `author` is the writer's `lumen_user_id` (a ULID) — the
+    RANKED identity, deliberately substituted so a lite writer accrues their own
+    standing instead of donating it to the shared publisher account. But nothing
+    can fetch `@01KZAC…/permlink` from Hive: on chain the post belongs to the
+    publisher. So the serialized feed must carry BOTH identities or the frontend
+    ranks lite posts and then 404s them.
+
+    `chain_author` is `None` for an ordinary Hive post (meaning "same as
+    author"), and consumers hydrate from `chain_author or author`.
+
+    MUTANT: drop `chain_author` from `serialize_scored`. This fails.
+    """
+    from recsys.contracts import CandidateSource, ScoreBreakdown, ScoredCandidate
+
+    chain_post = make_post("realhiveuser", "p1")
+    lite_post = replace(
+        make_post("publisher-acct", "lite-abc"),
+        author="01KZAC4F526A03FY1ES9K0YH85",
+        chain_author="publisher-acct",
+    )
+
+    score = ScoreBreakdown(vote_norm=0.5, rep_norm=0.5, organic=0.5, final=0.5)
+    rows = [
+        service_app.serialize_scored(
+            ScoredCandidate(post=p, source=CandidateSource.IN_NETWORK, score=score)
+        )
+        for p in (chain_post, lite_post)
+    ]
+
+    assert "chain_author" in rows[0], "the field must always be present, not omitted when null"
+    assert rows[0]["chain_author"] is None, "an ordinary Hive post has no separate chain identity"
+
+    assert rows[1]["author"] == "01KZAC4F526A03FY1ES9K0YH85", "ranked identity must stay the ULID"
+    assert rows[1]["chain_author"] == "publisher-acct", (
+        "a lite post must carry the account it actually lives under on chain, or no "
+        "consumer can fetch it to display"
+    )
+    # The rule a consumer follows, pinned here so it cannot drift:
+    for row in rows:
+        fetch_author = row["chain_author"] or row["author"]
+        assert fetch_author and not fetch_author.startswith("0"), (
+            "chain_author or author must resolve to a real Hive account name"
+        )
+
+
 def test_http_feed_missing_viewer_param_is_400() -> None:
     state = _offline_state()
     with _RunningServer(state) as server:

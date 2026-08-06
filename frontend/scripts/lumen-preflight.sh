@@ -99,6 +99,18 @@ else
   green "account-creator disabled (upgrade path off)"
 fi
 
+# ---- 5b. ranked feed -------------------------------------------------------
+if has RECSYS_FEED_URL; then
+  if has RECSYS_API_TOKEN; then
+    green "ranked For You feed ON (RECSYS_FEED_URL + token set)"
+  else
+    red "RECSYS_FEED_URL set without RECSYS_API_TOKEN — recsys will 401 every request and For You silently serves trending instead"
+  fi
+  has LITE_RECSYS_TOKEN || amber "LITE_RECSYS_TOKEN unset — recsys cannot pull the lite follow graph back"
+else
+  amber "RECSYS_FEED_URL unset — 'For You' serves Hive trending, NOT the ranking engine"
+fi
+
 # ---- 6. database reachable + migrated -------------------------------------
 if command -v psql >/dev/null 2>&1 && has LITE_DATABASE_URL; then
   DSN=$(val LITE_DATABASE_URL)

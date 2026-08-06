@@ -41,6 +41,7 @@ from recsys.core.normalize import log_compress
 _VOTE_SIGNAL_DEFAULTS = VoteSignalConfig()
 _DEFAULT_UNKNOWN_FREE = _VOTE_SIGNAL_DEFAULTS.unknown_free
 _DEFAULT_UNKNOWN_PER_VOUCHED = _VOTE_SIGNAL_DEFAULTS.unknown_per_vouched
+_DEFAULT_UNKNOWN_MAX = _VOTE_SIGNAL_DEFAULTS.unknown_max
 
 # Organic-engagement weights (§6). Votes are weighted low here because their
 # magnitude is already the 10% vote bucket's job (avoid double-counting).
@@ -105,6 +106,9 @@ class VoterTrust:
     vouched: frozenset[str]
     unknown_free: float = _DEFAULT_UNKNOWN_FREE
     unknown_per_vouched: float = _DEFAULT_UNKNOWN_PER_VOUCHED
+    #: ★ B4 — hard ceiling on the unknown budget, however popular the target is.
+    #: `<= 0` disables the cap (the pre-2026-08-06 behaviour).
+    unknown_max: float = _DEFAULT_UNKNOWN_MAX
 
     def credited_breadth(self, identities: frozenset[str]) -> float:
         """Breadth credit for a set of distinct, already-exclusion-filtered
@@ -117,6 +121,29 @@ class VoterTrust:
         vouched_n = len(identities & self.vouched)
         unknown_n = len(identities) - vouched_n
         budget = self.unknown_free + self.unknown_per_vouched * vouched_n
+        # ★★★ B4 (2026-08-06) — THE BUDGET IS NOW CAPPED.
+        #
+        # `unknown_free + unknown_per_vouched * vouched_n` grows without bound in
+        # the target's OWN popularity: measured 31.0 unknown units at 10 vouched
+        # engagers and ~300 once a follow graph exists. Lumen Lite signups are
+        # free (a keypair, no RC, no ACT), so that budget is purchasable at zero
+        # cost — and the more genuine support a post already has, the more free
+        # identities it will absorb. QA measured 3-4x inflation of the organic
+        # score on posts that already had real votes, on the MAIN ranking path
+        # rather than the accepted exploration lane.
+        #
+        # The per-vouched growth is still right in principle (a genuinely popular
+        # post really does attract more legitimate unknown readers) — it just
+        # must not be unbounded, because the attacker's cost per unit is zero
+        # while the honest signal it is meant to model saturates.
+        #
+        # `unknown_max <= 0` disables the cap and reproduces the previous
+        # behaviour exactly, so any caller pinning the old numbers can say so.
+        # Monotonicity is preserved: `min` with a constant is still
+        # non-decreasing in the identity set, so "more independent people never
+        # hurts an honest post" still holds.
+        if self.unknown_max > 0:
+            budget = min(budget, self.unknown_max)
         return vouched_n + min(float(unknown_n), budget)
 
 

@@ -9,8 +9,8 @@ from dataclasses import replace
 
 import pytest
 
-from recsys.config import DEFAULT_SETTINGS
-from recsys.contracts import VoteExclusions
+from recsys.config import DEFAULT_SETTINGS, VoteSignalConfig
+from recsys.contracts import GraphCred, VoteExclusions
 from recsys.core.normalize import log_compress
 from recsys.core.vote_signal import (
     AttributedPost,
@@ -318,6 +318,104 @@ def test_voter_trust_defaults_match_config() -> None:
     default = VoterTrust(vouched=frozenset())
     assert default.unknown_free == DEFAULT_SETTINGS.vote_signal.unknown_free
     assert default.unknown_per_vouched == DEFAULT_SETTINGS.vote_signal.unknown_per_vouched
+
+
+def test_every_voter_trust_knob_is_actually_threaded_from_settings() -> None:
+    """★★★ 2026-08-06 — THE GENERAL FORM OF A DEFECT THIS PROJECT KEEPS SHIPPING.
+
+    `VoterTrust`'s defaults are derived from `VoteSignalConfig` so the two cannot
+    diverge — but the PIPELINE builds `VoterTrust` by naming fields one at a
+    time, and a field nobody remembers to name silently keeps the dataclass
+    default and ignores the operator's setting. That has happened here before:
+    this module's own comment records `unknown_free` running at a hard-coded 2.0
+    while the config said 1.0. It nearly happened again with `unknown_max`,
+    added minutes before this test, which was left unthreaded at BOTH call sites
+    and only worked because the two defaults coincided.
+
+    So this asks the general question mechanically instead of naming fields:
+    every tunable `VoterTrust` shares with `VoteSignalConfig` must be passed
+    through by `_voter_trust`, proven by CHANGING it and observing the change.
+
+    MUTANT: drop any `unknown_*=settings.vote_signal.*` line in pipeline.py.
+    This fails and names the field.
+    """
+    import dataclasses
+
+    from recsys.core.vote_signal import VoterTrust as _VT
+    from recsys.pipeline import TrustSnapshot, _voter_trust
+
+    shared = {f.name for f in dataclasses.fields(_VT)} & {
+        f.name for f in dataclasses.fields(VoteSignalConfig)
+    }
+    assert shared, "extraction is broken — this gate would be vacuous"
+
+    # A snapshot fresh enough that `_voter_trust` returns a real object.
+    snap = TrustSnapshot(graph_creds={"someone": GraphCred(account="someone", score=0.9,
+                                                          follow_follower_ratio=1.0,
+                                                          outside_engaged=True)})
+
+    unthreaded = []
+    for name in sorted(shared):
+        base = getattr(DEFAULT_SETTINGS.vote_signal, name)
+        # A value that cannot coincide with the default, so "it happens to match"
+        # can never be mistaken for "it was threaded".
+        bumped = float(base) + 7.0
+        cfg = replace(DEFAULT_SETTINGS.vote_signal, **{name: bumped})
+        settings = replace(DEFAULT_SETTINGS, vote_signal=cfg)
+        trust = _voter_trust(snap, settings)
+        assert trust is not None, "fixture precondition: a usable snapshot"
+        if getattr(trust, name) != bumped:
+            unthreaded.append(name)
+
+    assert not unthreaded, (
+        f"{len(unthreaded)} VoterTrust knob(s) are configured but NEVER REACH the "
+        f"pipeline: {', '.join(unthreaded)}. The operator's setting is silently "
+        "ignored and the dataclass default is used instead."
+    )
+
+
+def test_free_lite_identities_cannot_ride_a_popular_posts_own_budget() -> None:
+    """★★★ B4 (2026-08-06). The unknown budget must not scale without bound.
+
+    `unknown_free + unknown_per_vouched * vouched_n` grows in the TARGET's own
+    popularity — 41 unknown units at 20 vouched engagers, ~300 once a follow
+    graph exists. Lumen Lite signups are free (a keypair, no RC, no ACT), so
+    that budget is purchasable at zero cost, and QA measured 3-4x inflation of
+    the organic score on posts that already had genuine votes. The more real
+    support a post has, the more free identities it would absorb.
+
+    MUTANT: delete the `unknown_max` clamp in `credited_breadth`. This fails.
+    """
+    vouched = frozenset(f"v{i}" for i in range(20))
+    identities = vouched | frozenset(f"lite{i}" for i in range(50))
+
+    capped = VoterTrust(vouched=vouched)
+    uncapped = VoterTrust(vouched=vouched, unknown_max=0.0)  # cap disabled
+
+    free_before = uncapped.credited_breadth(identities) - 20
+    free_after = capped.credited_breadth(identities) - 20
+
+    assert free_before == 41.0, "fixture drifted: the uncapped budget should be 1 + 2*20"
+    assert free_after == DEFAULT_SETTINGS.vote_signal.unknown_max
+    assert free_after < free_before / 3, (
+        f"the cap must materially bound purchasable breadth: {free_before} -> {free_after}"
+    )
+
+
+def test_the_b4_cap_does_not_touch_the_newcomer_floor_or_the_alt_bound() -> None:
+    """The control for the test above, and the invariant that must survive it.
+
+    A cap that also crushed the newcomer floor would be a regression dressed as
+    a hardening — `unknown_free >= 1` exists so a genuine new user's FIRST
+    upvote always counts, and this project has broken and undone that once
+    already. With zero vouched engagers the budget is `unknown_free` and the cap
+    (10.0) is nowhere near binding, so both arms must be identical.
+    """
+    solo = frozenset(f"n{i}" for i in range(10))
+    capped = VoterTrust(vouched=frozenset())
+    uncapped = VoterTrust(vouched=frozenset(), unknown_max=0.0)
+    assert capped.credited_breadth(solo) == uncapped.credited_breadth(solo)
+    assert capped.credited_breadth(solo) == DEFAULT_SETTINGS.vote_signal.unknown_free
 
 
 def test_credited_breadth_all_vouched_is_full_count() -> None:

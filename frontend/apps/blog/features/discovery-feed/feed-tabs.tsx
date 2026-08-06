@@ -2,17 +2,16 @@
 
 import { useEffect, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { useInfiniteQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useInView } from 'react-intersection-observer';
 import { getPostsRanked } from '@transaction/lib/bridge-api';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
-import { DEFAULT_OBSERVER, SortTypes } from '@/blog/lib/utils';
+import { SortTypes } from '@/blog/lib/utils';
 import { StaleTime } from '@/blog/lib/react-query';
 import { Entry } from '@hive/common-hiveio-packages/wax';
 import { PostListSkeleton } from '@hive/ui';
 import { cn } from '@ui/lib/utils';
 import NoDataError from '@/blog/components/no-data-error';
-import { useSSRObserver } from '@/blog/components/observer-provider';
 import MarketTab from '@/blog/features/prediction-market/market-tab';
 import MediumPostCard from './medium-post-card';
 import LiteFeedStrip from './lite-feed-strip';
@@ -26,6 +25,7 @@ const LABELS = {
   loadMore: 'Load more',
   nothingMore: "You're all caught up",
   empty: 'No posts yet.',
+  degraded: 'Personalised ranking is warming up — showing popular posts meanwhile.',
   loginPrompt: 'Log in to see your Feed'
 };
 
@@ -37,10 +37,76 @@ function toTabKey(raw: string | null): TabKey {
   return raw !== null && (TAB_KEYS as readonly string[]).includes(raw) ? (raw as TabKey) : 'for-you';
 }
 
-// PLACEHOLDER: "For You" stands in for real discovery ranking until that
-// backend exists.
-// TODO: replace with the real discovery-ranking backend
-const FOR_YOU_SORT: SortTypes = 'trending';
+// ★★★ "For You" IS THE RANKING ENGINE NOW (2026-08-06).
+//
+// This used to be `const FOR_YOU_SORT: SortTypes = 'trending'` behind a
+// PLACEHOLDER/TODO — Hive's global payout-ranked list, byte-identical for every
+// viewer, on a product built around its own recommender. recsys had been
+// hardened across five councils and 870 tests and had no consumer at all.
+// `ForYouFeed` below calls `/api/feed/for-you`, which is that consumer.
+//
+// `trending` survives ONLY as the fallback inside that route (recsys is
+// FAIL_CLOSED and refuses to rank on a stale trust snapshot, so a reader must
+// still get a feed) — which is why no `trending` constant remains here. There is
+// no trending TAB and there should not be one: trending content is meant to
+// surface inside For You, ranked, not as a separate destination.
+
+interface ForYouResponse {
+  entries: Entry[];
+  source: 'recsys' | 'trending-fallback';
+  degraded?: string;
+  detail?: string;
+  ranked?: number;
+}
+
+/**
+ * The ranked feed. One page: recsys `/feed` scores a candidate set and returns
+ * an ORDER, and that order is the product — it has no cursor to paginate, and
+ * inventing one client-side would just re-sort a slice by recency and quietly
+ * undo the ranking.
+ */
+function ForYouFeed({ enabled }: { enabled: boolean }) {
+  const { data, isLoading, isError } = useQuery<ForYouResponse>({
+    queryKey: ['forYouRanked', enabled],
+    queryFn: async () => {
+      const res = await fetch(`/api/feed/for-you?limit=${FOR_YOU_LIMIT}`);
+      if (!res.ok) throw new Error(`for-you ${res.status}`);
+      return (await res.json()) as ForYouResponse;
+    },
+    staleTime: StaleTime.MEDIUM
+  });
+
+  if (isLoading) return <PostListSkeleton count={5} />;
+  if (isError || !data) return <NoDataError />;
+
+  const ranked = data.source === 'recsys';
+  const entries = data.entries ?? [];
+
+  return (
+    <div>
+      {/* The lite strip is the ONLY place lite posts appear when the ranker is
+          not serving. Once it is, lite posts arrive ranked inline and showing
+          them twice is duplication, so the strip stands down. */}
+      {!ranked ? <LiteFeedStrip /> : null}
+
+      {!ranked && enabled ? (
+        <p className="mb-4 rounded-[9px] bg-[#fdf6e7] px-3 py-2 font-sans text-[12.5px] text-[#9a7b2e]">
+          {LABELS.degraded}
+        </p>
+      ) : null}
+
+      {entries.length === 0 ? (
+        <p className="py-12 text-center font-sans text-sm text-muted-foreground">{LABELS.empty}</p>
+      ) : (
+        entries.map((entry) => (
+          <MediumPostCard key={`${entry.author}-${entry.permlink}`} post={entry} />
+        ))
+      )}
+    </div>
+  );
+}
+
+const FOR_YOU_LIMIT = 30;
 // "created" + tag "my" is Hive's genuine "people I follow" feed, resolved
 // server-side by bridge.get_ranked_posts against the observer's on-chain
 // follow list, newest first (see /created/my for the existing usage).
@@ -142,12 +208,12 @@ export default function FeedTabs() {
   const router = useRouter();
   const pathname = usePathname();
   const [activeTab, setActiveTab] = useState<TabKey>(() => toTabKey(searchParams?.get(TAB_PARAM) ?? null));
-  const ssrObserver = useSSRObserver();
   const { user, isHydrated } = useUserClient();
   const loggedIn = isHydrated && user.isLoggedIn;
-  // Match SortedPagesPosts's hydration-safe observer resolution: use the
-  // SSR-resolved observer until the client auth state is known, then switch.
-  const observer = isHydrated ? (user.isLoggedIn ? user.username : DEFAULT_OBSERVER) : ssrObserver;
+  // NOTE: the SSR observer resolution that used to live here went with the
+  // trending For You feed. The ranked route resolves the viewer from the SESSION
+  // server-side (a client-supplied viewer would let anyone request anyone else's
+  // personalised feed), and the Following tab passes `user.username` directly.
 
   // Keep the tab in sync with ?tab= so the right-rail widget's "View market"
   // link and browser back/forward switch tabs without remounting.
@@ -196,10 +262,7 @@ export default function FeedTabs() {
           </div>
         )
       ) : (
-        <>
-          <LiteFeedStrip />
-          <EntryFeed sort={FOR_YOU_SORT} tag="" observer={observer} />
-        </>
+        <ForYouFeed enabled={loggedIn} />
       )}
     </div>
   );

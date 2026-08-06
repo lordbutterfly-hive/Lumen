@@ -393,6 +393,22 @@ export async function requeuePublish(post: LumenPost): Promise<boolean> {
 }
 
 export async function reconcileOrphans(limit = 25): Promise<number> {
+  // ★ B7: posts past their retry budget are NOT silently forgotten. They are
+  // still being served to readers with `hive_permlink: null`, so an operator has
+  // to know they exist — this is the surface the old code had none of.
+  try {
+    const dead = await posts.listPermanentlyFailed(limit);
+    if (dead.length > 0) {
+      logger.error(
+        'reconcileOrphans: %d post(s) have exhausted their publish attempts and will NEVER reach Hive without intervention — they are still being served: %s',
+        dead.length,
+        dead.map((p) => p.postId).join(', ')
+      );
+    }
+  } catch (error) {
+    logger.error({ err: error }, 'reconcileOrphans: could not list permanently-failed posts');
+  }
+
   const orphans = await posts.listOrphaned(limit);
   let repaired = 0;
   for (const post of orphans) {
@@ -401,12 +417,26 @@ export async function reconcileOrphans(limit = 25): Promise<number> {
     // the whole thing down.
     try {
       const parent = await publishParentFor(post);
+      // ★ B7: a DISTINCT key per generation, or `ON CONFLICT DO NOTHING` makes
+      // the retry a silent no-op and the post stays stranded. Generation 0 keeps
+      // the historic `<postId>:create` key exactly, so nothing already queued
+      // changes shape.
+      const generation = await publishJobs.countJobsForPost(post.postId);
+      const idempotencyKey =
+        generation === 0 ? `${post.postId}:create` : `${post.postId}:create:r${generation}`;
       const job = await publishJobs.enqueue({
         postId: post.postId,
         jobType: 'create',
-        idempotencyKey: `${post.postId}:create`,
+        idempotencyKey,
         payload: buildPayload(post, parent)
       });
+      if (job && generation > 0) {
+        logger.warn(
+          'reconcileOrphans: RETRY %d for post %s — its previous publish job(s) died',
+          generation,
+          post.postId
+        );
+      }
       if (job) repaired++;
     } catch (error) {
       logger.error({ err: error, postId: post.postId }, 'Lite orphan repair failed for one post');

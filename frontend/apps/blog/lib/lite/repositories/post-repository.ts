@@ -258,6 +258,63 @@ export async function resolveByHiveBatch(
   }));
 }
 
+export interface RankedLiteMapping {
+  hiveAuthor: string;
+  hivePermlink: string;
+  userId: string;
+  displayName: string;
+  /** False when a moderator hid it or the author deleted it in Lumen. */
+  servable: boolean;
+}
+
+/**
+ * ★ 2026-08-06 — chain identity -> lite identity AND SERVABILITY, for the
+ * ranked "For You" feed.
+ *
+ * Distinct from `resolveByHiveBatch` on purpose. That one answers "whose post
+ * is this?" for attribution and deliberately returns every row. This one is
+ * consumed by a FEED, so it must also answer "may this still be shown?".
+ *
+ * The recsys ranker reads Hive through HAFSQL and has no idea what Lumen has
+ * moderated — it will happily rank a post you took down an hour ago, because on
+ * chain it is still there. Without the `servable` flag the ranked feed becomes a
+ * way to resurface hidden content, which would quietly defeat the takedown that
+ * is the whole moderation strategy. Same predicate as `listRecent`
+ * (`feed_visibility = 'visible' AND deleted_locally = false`), kept in one shape
+ * so the two feeds cannot disagree about what "hidden" means.
+ *
+ * Rows are returned for hidden posts too, flagged `servable: false`, rather than
+ * filtered out here — the caller must be able to tell "this is a lite post I
+ * must drop" apart from "this is not a lite post at all", and silently omitting
+ * them would make those two cases identical.
+ */
+export async function resolveRankedLiteBatch(
+  authors: string[],
+  permlinks: string[]
+): Promise<RankedLiteMapping[]> {
+  if (authors.length === 0) return [];
+  const { rows } = await query<{
+    hive_author: string;
+    hive_permlink: string;
+    user_id: string;
+    display_name_snapshot: string;
+    servable: boolean;
+  }>(
+    `SELECT hive_author, hive_permlink, user_id, display_name_snapshot,
+            (feed_visibility = 'visible' AND deleted_locally = false) AS servable
+       FROM lumen_post
+      WHERE (hive_author, hive_permlink) IN (SELECT * FROM unnest($1::text[], $2::text[]))`,
+    [authors, permlinks]
+  );
+  return rows.map((r) => ({
+    hiveAuthor: r.hive_author,
+    hivePermlink: r.hive_permlink,
+    userId: r.user_id,
+    displayName: r.display_name_snapshot,
+    servable: r.servable
+  }));
+}
+
 /**
  * The on-chain parent this post was first published under (container or reply
  * target), or null if it has never been pinned.
@@ -325,15 +382,68 @@ export async function pinPublishParent(
  *
  * Excludes locally deleted posts and anything already on chain.
  */
-export async function listOrphaned(limit: number): Promise<LumenPost[]> {
+/**
+ * Posts that never reached Hive and have no LIVE job working on them.
+ *
+ * ★★★ B7 (2026-08-06) — THIS USED TO STRAND A FAILED POST FOREVER.
+ *
+ * The old predicate was `NOT EXISTS (any publish_job row)`. `publish_job.status`
+ * includes the TERMINAL values `failed` and `rejected`, so a post whose create
+ * job exhausted its retries was excluded from reconciliation permanently: no
+ * retry path, no operator surface, and still served in feeds and profiles with
+ * `hive_permlink: null` — indistinguishable from a post that really is on chain.
+ *
+ * Now only a job in a NON-terminal state (`pending`/`holding`/`publishing`/
+ * `published`) suppresses reconciliation, so a dead job lets the post be picked
+ * up again. `published` is deliberately in that list: a post with a completed
+ * job is not orphaned, it is done.
+ *
+ * ★ BOUNDED, because "retry forever" is its own bug. `maxGenerations` caps how
+ * many publish attempts a post may ever accumulate. Past that it stops being
+ * reconciled and needs a human — retrying a post Hive keeps refusing (malformed
+ * payload, banned content) would otherwise spin every drain for the life of the
+ * deployment. `reconcileOrphans` logs the ones it gives up on.
+ */
+export async function listOrphaned(limit: number, maxGenerations = 3): Promise<LumenPost[]> {
   const res = await query<PostRow>(
     `SELECT p.* FROM lumen_post p
       WHERE p.deleted_locally = false
         AND p.hive_permlink IS NULL
-        AND NOT EXISTS (SELECT 1 FROM publish_job j WHERE j.post_id = p.post_id)
+        AND NOT EXISTS (
+              SELECT 1 FROM publish_job j
+               WHERE j.post_id = p.post_id
+                 AND j.status NOT IN ('failed','rejected')
+            )
+        AND (SELECT count(*) FROM publish_job j2 WHERE j2.post_id = p.post_id) < $2
       ORDER BY p.post_id
       LIMIT $1`,
-    [limit]
+    [limit, maxGenerations]
+  );
+  return res.rows.map(mapPost);
+}
+
+/**
+ * ★ B7. Posts that have exhausted their publish generations — they will never
+ * reach Hive without a human, and they are still being SERVED. The operator
+ * surface the old code had none of.
+ */
+export async function listPermanentlyFailed(
+  limit: number,
+  maxGenerations = 3
+): Promise<LumenPost[]> {
+  const res = await query<PostRow>(
+    `SELECT p.* FROM lumen_post p
+      WHERE p.deleted_locally = false
+        AND p.hive_permlink IS NULL
+        AND (SELECT count(*) FROM publish_job j WHERE j.post_id = p.post_id) >= $2
+        AND NOT EXISTS (
+              SELECT 1 FROM publish_job j
+               WHERE j.post_id = p.post_id
+                 AND j.status NOT IN ('failed','rejected')
+            )
+      ORDER BY p.post_id
+      LIMIT $1`,
+    [limit, maxGenerations]
   );
   return res.rows.map(mapPost);
 }

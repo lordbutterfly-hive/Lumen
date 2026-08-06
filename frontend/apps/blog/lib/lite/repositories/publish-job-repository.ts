@@ -61,6 +61,26 @@ export async function enqueue(input: EnqueueInput): Promise<PublishJob | null> {
 }
 
 /**
+ * ★ B7 (2026-08-06). How many publish jobs this post has ever had — the RETRY
+ * GENERATION, used to mint a distinct idempotency key.
+ *
+ * `enqueue` is `ON CONFLICT (idempotency_key) DO NOTHING`, so re-queueing a
+ * permanently-failed post under its original `<postId>:create` key is a silent
+ * no-op. That is exactly why the old `listOrphaned` excluded any post with ANY
+ * job row: without a fresh key the sweep would have looped forever achieving
+ * nothing. Counting generations lets the retry actually insert, AND lets it be
+ * bounded so a genuinely unpublishable post stops being retried instead of
+ * being retried forever.
+ */
+export async function countJobsForPost(postId: string): Promise<number> {
+  const { rows } = await query<{ n: string }>(
+    `SELECT count(*)::text AS n FROM publish_job WHERE post_id = $1`,
+    [postId]
+  );
+  return Number(rows[0]?.n ?? 0);
+}
+
+/**
  * Atomically claim the next job, FAIRLY.
  *
  * Ordering is by the author's `last_publish_at` (oldest first), not by job age, so

@@ -1192,6 +1192,7 @@ def _voter_trust_from_creds(
             ),
             unknown_free=settings.vote_signal.unknown_free,
             unknown_per_vouched=settings.vote_signal.unknown_per_vouched,
+            unknown_max=settings.vote_signal.unknown_max,
         )
     # ★ Vouch propagates with BOTH a depth bound and a per-voucher FAN-OUT bound
     # (2026-08-01). Depth alone bounded nothing, because the attacker picks the
@@ -1238,6 +1239,7 @@ def _voter_trust_from_creds(
         vouched=vouched,
         unknown_free=settings.vote_signal.unknown_free,
         unknown_per_vouched=settings.vote_signal.unknown_per_vouched,
+        unknown_max=settings.vote_signal.unknown_max,
     )
 
 

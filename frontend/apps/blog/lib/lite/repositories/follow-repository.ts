@@ -111,6 +111,34 @@ export async function followingAmong(
  * statement and the failure it prevents is silent — the same person appearing as two
  * nodes in the graph, with their followers split across both.
  */
+/**
+ * ★ 2026-08-06 — every account this actor follows, in the identity the RANKER
+ * uses. Added for the "For You" feed: recsys cannot resolve a Lumen follow graph
+ * on its own (a lite viewer is a ULID, invisible on chain), so the caller has to
+ * hand it over per request via `?follows=`.
+ *
+ * The identity returned is deliberately `followee_user_id` when present and the
+ * Hive name otherwise, because that is exactly how recsys keys an author: a lite
+ * post is ranked under its writer's `lumen_user_id` (see `Post.chain_author`),
+ * an ordinary post under the Hive account. Returning display names here would
+ * match nothing for lite followees and silently produce an emptier feed than the
+ * viewer actually earned.
+ *
+ * Only `active` edges — an unfollow soft-deletes, and a feed built from
+ * retracted follows would be a bug the user cannot see.
+ */
+export async function listFolloweesOf(actor: FollowActor, limit = 2000): Promise<string[]> {
+  const { rows } = await query<{ followee: string }>(
+    `SELECT COALESCE(followee_user_id, followee_hive::text) AS followee
+       FROM lumen_follow
+      WHERE follower_key = $1 AND active = true
+      ORDER BY seq DESC
+      LIMIT $2`,
+    [actorKey(actor), limit]
+  );
+  return rows.map((r) => r.followee).filter((f): f is string => Boolean(f));
+}
+
 export async function absorbHiveActor(userId: string, hiveName: string): Promise<void> {
   const name = hiveName.toLowerCase();
   // Re-point what can be re-pointed, and bump `seq` while doing it: the re-pointed edge

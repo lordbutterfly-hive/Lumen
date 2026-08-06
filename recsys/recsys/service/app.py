@@ -1007,6 +1007,18 @@ def serialize_scored(scored: ScoredCandidate) -> dict[str, Any]:
         "key": scored.post.key,
         "author": scored.post.author,
         "permlink": scored.post.permlink,
+        # ★ CHAIN IDENTITY (2026-08-06) — required to make this feed RENDERABLE.
+        #
+        # For a Lumen Lite post, `author` above is the writer's `lumen_user_id`
+        # (a ULID) — the RANKED identity, which is the whole point of the lite
+        # substitution. But a consumer cannot fetch `@01KZAC…/permlink` from
+        # Hive, because on chain the post belongs to the shared publisher
+        # account. Without this field the frontend can rank lite posts and then
+        # fail to display them, which is the worst of both.
+        #
+        # `None` for every ordinary Hive post, meaning "same as author" — see
+        # `Post.chain_author`. Consumers hydrate from `chain_author or author`.
+        "chain_author": scored.post.chain_author,
         "category": scored.post.category,
         "created": scored.post.created.isoformat(),
         "source": scored.source.value,

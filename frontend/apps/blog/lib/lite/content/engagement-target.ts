@@ -40,6 +40,34 @@ export type TargetCheck = { ok: true } | { ok: false; code: string; status: numb
  */
 const LITE_PERMLINK_RE = /^lumen-[0-9a-hjkmnp-tv-z]{26}$/;
 
+/**
+ * ★ B5 (2026-08-06). Whether a target that is ONE OF OUR OWN lite posts may
+ * still be engaged with or reported on. `true` for everything else — a native
+ * Hive post is not ours to gate, and requiring a `lumen_post` row in general
+ * would reject the legitimate case this module's docstring protects.
+ *
+ * Shared by the WRITE path (`checkEngagementTarget`) and the READ path
+ * (`GET /api/lite/engagement`) deliberately: QA found the two disagreeing —
+ * `posts/:id` 404'd a hidden post while `engagement` happily served its live,
+ * still-incrementable counts. Two call sites, one predicate, so they cannot
+ * drift apart again.
+ */
+export async function liteTargetServable(author: string, permlink: string): Promise<boolean> {
+  const a = author.trim().toLowerCase();
+  const p = permlink.trim().toLowerCase();
+  const frontend = liteConfig.frontendAccount.toLowerCase();
+  if (!frontend || a !== frontend || !LITE_PERMLINK_RE.test(p)) return true;
+  try {
+    const target = await resolveByHive(liteConfig.frontendAccount, p);
+    if (!target) return true; // not one of ours after all
+    return target.feedVisibility === 'visible' && !target.deletedLocally;
+  } catch {
+    // Cannot prove it is hidden => do not silently hide it. The WRITE path is
+    // the one that must fail closed, and it resolves the row itself.
+    return true;
+  }
+}
+
 export async function checkEngagementTarget(
   user: LumenUser,
   author: string,
@@ -81,6 +109,26 @@ export async function checkEngagementTarget(
     const target = await resolveByHive(liteConfig.frontendAccount, p);
     if (target && target.userId === user.userId) {
       return { ok: false, code: 'self_engagement', status: 400 };
+    }
+    // ★★★ B5 (2026-08-06) — A TAKEN-DOWN POST STOPS EARNING.
+    //
+    // `lumen_vote`/`lumen_reblog` key on free-text `(author, permlink)` with no
+    // FK to `lumen_post` and no visibility check anywhere, so a post a moderator
+    // hid kept accruing votes and reblogs forever. Proven over HTTP during QA:
+    // `GET /api/lite/posts/:id` returned 404 while `GET /api/lite/engagement`
+    // returned 200 with live, still-incrementable counts for the same post.
+    //
+    // That is not a cosmetic leak. This project's ENTIRE abuse strategy is
+    // report-and-take-down, so a hidden post that remains farmable means the
+    // takedown does not stop the thing it exists to stop — and lite engagement
+    // feeds the ranker's organic breadth, so those counts have a live consumer.
+    //
+    // The check costs NOTHING extra: the row is already fetched immediately
+    // above for the self-engagement guard. It applies only to OUR OWN posts, so
+    // the deliberate design note above still holds in full — a lite user voting
+    // on a native Hive post is never resolved and never blocked.
+    if (target && (target.feedVisibility !== 'visible' || target.deletedLocally)) {
+      return { ok: false, code: 'target_unavailable', status: 404 };
     }
   }
 
