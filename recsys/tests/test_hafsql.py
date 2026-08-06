@@ -1447,7 +1447,21 @@ def test_suppressed_keys_without_chain_authors_is_unaffected(
 # ---------------------------------------------------------------------------
 
 
-def test_lite_config_from_env_defaults_to_off() -> None:
+def test_lite_config_from_env_defaults_to_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    """★ QA RUN 2026-08-06: this asserted "off by default" while reading the
+    AMBIENT environment, so it passed only on a machine with no lite variables
+    set and failed the moment a developer exported one — which is exactly what
+    happened the first time the service was pointed at a real lite database.
+    A test whose result depends on the operator's shell is not a test of the
+    default; it clears the variables it is making a claim about."""
+    for name in (
+        "LITE_PUBLISHER_ACCOUNTS",
+        "LUMEN_LITE_DATABASE_URL",
+        "LITE_FRONTEND_ACCOUNT_MAINNET",
+        "LITE_FRONTEND_ACCOUNT_MIRRORNET",
+        "LITE_FRONTEND_ACCOUNT_TESTNET",
+    ):
+        monkeypatch.delenv(name, raising=False)
     assert hafsql._lite_config_from_env() == hafsql.LiteConfig()
     assert hafsql._lite_config_from_env().enabled is False
 

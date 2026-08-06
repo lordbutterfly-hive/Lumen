@@ -22,7 +22,7 @@ export async function GET(): Promise<NextResponse> {
   const session = await getLiteSession();
   // Reading your own profile is not participation — a suspended account may still
   // see what it has, the same reasoning the unfollow route uses.
-  const actor = await requireLiteUser(session.user);
+  const actor = await requireLiteUser(session.user, session.sessionEpoch);
   if (!actor.ok) return actor.response;
 
   return NextResponse.json({ ok: true, profile: actor.user.profile ?? {} });

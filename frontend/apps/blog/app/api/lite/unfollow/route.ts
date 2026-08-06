@@ -22,7 +22,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   try {
-    const result = await unfollowByName(session.user, followeeName);
+    const result = await unfollowByName(session.user, followeeName, session.sessionEpoch);
     if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
     return NextResponse.json({ ok: true, following: false });
   } catch (error) {

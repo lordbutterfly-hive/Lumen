@@ -71,6 +71,20 @@ async function actorFor(
   // to check — the status model only applies to accounts we host.
   if (!actor.userId) return { ok: true, actor };
 
+  // ★★★ QA 2026-08-06 — EPOCH BEFORE THE STATUS EARLY-RETURN.
+  // This early return sat ABOVE the only epoch check, so `unfollowByName`
+  // (requireActive=false) never validated the cookie's epoch at all: after
+  // `logout-all`, a replayed revoked cookie still unfollowed, and really
+  // mutated `lumen_follow.active`. Two QA seats reproduced it independently.
+  // The STATUS exemption below is deliberate and unchanged — a suspended user
+  // may still withdraw. Revocation is a different thing: the user said "stop
+  // this session", so it must stop, withdrawal or not.
+  if (sessionEpoch !== undefined) {
+    const row = await users.findUserById(actor.userId);
+    if (!row || row.sessionEpoch !== sessionEpoch) {
+      return { ok: false, status: 401, error: 'session_revoked' };
+    }
+  }
   if (!requireActive) return { ok: true, actor };
   // Checked by USER ID, not by the cookie's tier. An upgraded user signs in with their
   // own Hive keys, so their session has no lite tier at all — checking the cookie
@@ -114,9 +128,10 @@ export async function followByName(
 
 export async function unfollowByName(
   sessionUser: User | undefined,
-  targetName: string
+  targetName: string,
+  sessionEpoch?: number
 ): Promise<FollowOutcome> {
-  const from = await actorFor(sessionUser, false);
+  const from = await actorFor(sessionUser, false, sessionEpoch);
   if (!from.ok) return from;
 
   // FOLLOW-RECSYS-1: unfollow is capped too — it was not, so follow/unfollow churn

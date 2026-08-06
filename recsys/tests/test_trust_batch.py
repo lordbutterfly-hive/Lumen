@@ -186,8 +186,16 @@ def test_run_batch_persists_and_threads_previous_for_the_h11_gate(clean_dsn: str
         EngagementEdge(src="seed1", dst="alice", replies=2, upvotes=3),
         EngagementEdge(src="alice", dst="bob", upvotes=1),
     ]
-    gateway = FakeGateway(edges=edges)
-    seeds = frozenset({"seed1"})
+    # ★★★ QA RUN 2026-08-06 — THIS TEST HAD NEVER EXECUTED. It is gated on
+    # `RECSYS_DATABASE_URL`, which was unset in every run this project has ever
+    # made, so it was SKIPPED continuously — including through the C4 change
+    # that added the `MIN_TRUSTED_SEEDS` floor. The moment a real Postgres was
+    # stood up it failed immediately: one seed against a floor of 25.
+    #
+    # The fixture was stale, not the guard. But note what this means: the C4
+    # floor has never been exercised on the PERSISTENCE path until now.
+    seeds, seed_edges = seeds_that_land("seed1")
+    gateway = FakeGateway(edges=edges + seed_edges)
 
     first = run_batch(
         gateway, DEFAULT_SETTINGS, trusted_seeds=seeds, now=EPOCH,
@@ -220,9 +228,14 @@ def test_run_batch_persists_and_threads_previous_for_the_h11_gate(clean_dsn: str
 def test_run_batch_refuses_empty_and_leaves_the_previous_snapshot_in_place(
     clean_dsn: str,
 ) -> None:
-    good_gateway = FakeGateway(edges=[EngagementEdge(src="seed1", dst="alice", upvotes=1)])
+    # ★ Same stale fixture as the test above, same reason it was never caught:
+    # skipped in every run until a real Postgres was stood up 2026-08-06.
+    good_seeds, good_seed_edges = seeds_that_land("seed1")
+    good_gateway = FakeGateway(
+        edges=[EngagementEdge(src="seed1", dst="alice", upvotes=1), *good_seed_edges]
+    )
     run_batch(
-        good_gateway, DEFAULT_SETTINGS, trusted_seeds=frozenset({"seed1"}), now=EPOCH,
+        good_gateway, DEFAULT_SETTINGS, trusted_seeds=good_seeds, now=EPOCH,
         dsn=clean_dsn, production=True, persist=True,
     )
     before = load_snapshot(clean_dsn)
