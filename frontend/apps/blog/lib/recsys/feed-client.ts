@@ -72,7 +72,13 @@ export function getRecsysConfig(): RecsysConfig | null {
   const token = process.env.RECSYS_API_TOKEN || '';
   if (!baseUrl) return null;
   const raw = Number(process.env.RECSYS_FEED_TIMEOUT_MS);
-  const timeoutMs = Number.isFinite(raw) && raw > 0 ? raw : 4000;
+  // ★ MEASURED 2026-08-06 against a real recsys with a real trust snapshot:
+  // 9.6s for a viewer whose profile cache is COLD, 0.51s once warm. 4000ms —
+  // the first guess here — fell back to trending on every first view, so a
+  // reader would never see a ranked feed until something else warmed them.
+  // 15s covers the cold case with headroom; the fallback still protects
+  // against a genuinely wedged recsys.
+  const timeoutMs = Number.isFinite(raw) && raw > 0 ? raw : 15000;
   return { baseUrl, token, timeoutMs };
 }
 

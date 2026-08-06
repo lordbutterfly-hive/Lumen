@@ -153,16 +153,41 @@ def test_the_healthcheck_start_period_covers_a_real_cold_start() -> None:
     # ★ ROUND-3 COUNCIL (Seat 2): this asserted `"300s" in text`, which passes
     # on the COMMENT describing the fix rather than the directive doing it —
     # a gate that reads its own prose. Parse the actual setting.
+    # ★ RE-MEASURED 2026-08-06 by cold-starting the service for real: 1242s
+    # (20.7 min), not the ~232s the old 300s was set from. The author-prior warm
+    # (2,237 authors) runs BEFORE the port opens and dominates. At 300s Docker
+    # marks the container unhealthy ~4x before it can serve, and a restart policy
+    # loops it forever. Both probes must clear the MEASURED cold start, and must
+    # AGREE with each other — two probes that disagree are worse than one.
+    MEASURED_COLD_START_S = 1242
+
+    def _seconds(v: str) -> int:
+        v = v.strip().rstrip("s")
+        return int(v)
+
     dockerfile = [
         line for line in (_ROOT / "Dockerfile").read_text().splitlines()
         if "start-period" in line and not line.lstrip().startswith("#")
     ]
-    assert dockerfile and "--start-period=300s" in dockerfile[0], dockerfile
+    assert dockerfile, "no HEALTHCHECK start-period in the Dockerfile"
+    df_val = _seconds(dockerfile[0].split("--start-period=")[1].split()[0])
+
     compose = [
         line for line in (_ROOT / "deploy" / "compose.recsys.yml").read_text().splitlines()
         if line.strip().startswith("start_period:")
     ]
-    assert compose and compose[0].split(":", 1)[1].strip().startswith("300s"), compose
+    assert compose, "no start_period in compose"
+    co_val = _seconds(compose[0].split(":", 1)[1])
+
+    assert df_val == co_val, (
+        f"the two healthcheck probes disagree: Dockerfile {df_val}s vs compose "
+        f"{co_val}s — they must be kept in step"
+    )
+    assert df_val > MEASURED_COLD_START_S, (
+        f"start_period {df_val}s is below the MEASURED cold start "
+        f"({MEASURED_COLD_START_S}s). Docker will mark the container unhealthy "
+        "before it can finish warming, and a restart policy will loop it forever."
+    )
 
 
 def test_the_artifact_passes_the_proxy_hop_count_to_the_service() -> None:
@@ -229,6 +254,38 @@ def test_every_env_var_the_service_reads_reaches_the_container() -> None:
         "environment: block in deploy/compose.recsys.yml. Config that exists in "
         "code and not in the artifact is config that does not exist."
     )
+
+
+def test_the_trust_batch_can_set_its_own_hafsql_statement_timeout() -> None:
+    """★★★ 2026-08-06 — FOUND BY RUNNING THE BATCH, NOT BY READING IT.
+
+    `HAFSQL_STATEMENT_TIMEOUT_MS` defaults to 15s, which is right for the
+    REQUEST path and fatal for this one. The batch queries `engagement_edges`
+    over the 365-day `trust_days` window; against the real public mirror that is
+    cancelled outright (`psycopg.errors.QueryCanceled`), the batch dies, no
+    trust snapshot is ever written, and `/feed` — being FAIL_CLOSED — refuses
+    every request forever. A deployment that can never serve a feed.
+
+    The variable was passed to the feed service and to NEITHER batch, so there
+    was no way to fix it from the artifact at all. That is the fourth instance
+    of "config exists in code and reaches no container" on this project.
+
+    MUTANT: remove the variable from either batch service. This fails.
+    """
+    compose = (_ROOT / "deploy" / "compose.recsys.yml").read_text()
+    # Slice each batch service's own block, so a variable present only on the
+    # feed service cannot satisfy this.
+    one_shot = compose.split("\n  recsys-trust-batch:", 1)[1].split(
+        "\n  recsys-trust-batch-cron:", 1
+    )[0]
+    cron = compose.split("\n  recsys-trust-batch-cron:", 1)[1].split("\nnetworks:", 1)[0]
+
+    for name, block in (("recsys-trust-batch", one_shot), ("recsys-trust-batch-cron", cron)):
+        assert "HAFSQL_STATEMENT_TIMEOUT_MS:" in block, (
+            f"{name} cannot set HAFSQL_STATEMENT_TIMEOUT_MS, so it is stuck with the "
+            "15s request-path default and its 365-day engagement_edges query is "
+            "cancelled — the batch dies and /feed FAIL_CLOSEs forever"
+        )
 
 
 def test_the_trust_batch_is_rescheduled_faster_than_the_snapshot_expires() -> None:

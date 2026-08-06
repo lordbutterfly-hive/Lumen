@@ -75,10 +75,17 @@ EXPOSE 8000
 # Reading the body is what makes the outage visible without changing the
 # endpoint's contract.
 #
-# `start_period` is 300s, not 60s: NormContext warm-up against the real mirror
-# was measured at ~232s, so the old 60s + 15s x 5 retries = 135s deadline could
-# not be met by a cold, honest start.
-HEALTHCHECK --interval=15s --timeout=5s --start-period=300s --retries=3 \
+# `start_period` is 1800s. ★ RE-MEASURED 2026-08-06 by actually cold-starting
+# the service: 1242s (20.7 min). The previous 300s came from the ~232s
+# NormContext warm alone and missed the real cost — the AUTHOR-PRIOR warm (2,237
+# authors, chunked `author_engagement` against the shared mirror) runs BEFORE the
+# port opens. At 300s Docker marks the container unhealthy ~4x before it can
+# serve, and a restart policy then loops it forever: it never finishes warming,
+# so it never becomes healthy.
+#
+# Keep in step with deploy/compose.recsys.yml — two probes that disagree are
+# worse than one. `tests/test_deploy_artifact.py` enforces that mechanically.
+HEALTHCHECK --interval=15s --timeout=5s --start-period=1800s --retries=3 \
     CMD python3 -m recsys.service.healthcheck
 
 ENTRYPOINT ["tini", "--"]

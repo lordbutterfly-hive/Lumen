@@ -891,7 +891,13 @@ def test_fetch_via_does_not_retry_a_statement_error() -> None:
         def __exit__(self, *exc: object) -> bool:
             return False
 
-        def execute(self, sql: str, params: dict[str, Any]) -> None:
+        def execute(self, sql: str, params: dict[str, Any] | None = None) -> None:
+            # `_fetch_via` re-asserts `statement_timeout` before every query
+            # (2026-08-06: the mirror's pooler silently reverts a SET made at
+            # connection creation). That SET must succeed; only the REAL query
+            # raises, so this still tests exactly what it claims to.
+            if sql.startswith("SET statement_timeout"):
+                return
             raise psycopg.errors.UndefinedTable("boom")
 
         def fetchall(self) -> list[Any]:

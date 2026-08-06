@@ -1613,6 +1613,31 @@ class HafsqlClient:
         healthy = True
         try:
             with conn.cursor() as cur:
+                # ★★★ RE-ASSERT statement_timeout PER QUERY (2026-08-06), not
+                # once per physical connection as `_ConnPool` documents.
+                #
+                # FOUND BY RUNNING THE TRUST BATCH, and it is invisible any other
+                # way. The public HAFSQL mirror sits behind a CONNECTION POOLER,
+                # and `hafsql_public` carries a role-level
+                # `statement_timeout=45s`. A `SET` issued at connection creation
+                # is silently REVERTED once the connection goes idle — measured
+                # directly: `SET statement_timeout = 900000` reads back as
+                # `15min`, then reads back as `45s` after a 40s idle gap, and the
+                # next long query is cancelled at exactly 45s.
+                #
+                # The batch's symptom was bizarre until this was understood: its
+                # FIRST edge query survived 10m25s (it ran immediately after
+                # connect, so the SET still held) while its SECOND died at 45s
+                # (it ran after the first, i.e. after an idle gap, so the SET was
+                # gone). Same process, same configured timeout, different
+                # outcome — which reads like flakiness and is not.
+                #
+                # Re-asserting here costs one trivial round-trip per query and
+                # makes `HAFSQL_STATEMENT_TIMEOUT_MS` mean what it says against a
+                # pooled upstream. Without it the setting is decorative: a batch
+                # that needs minutes silently gets 45 seconds and no trust
+                # snapshot is ever written, so /feed FAIL_CLOSEs forever.
+                cur.execute(f"SET statement_timeout = {int(self._statement_timeout_ms)}")
                 cur.execute(sql, params)
                 return cur.fetchall()
         except psycopg.OperationalError:

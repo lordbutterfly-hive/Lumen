@@ -186,9 +186,18 @@ services:
       interval: 15s
       timeout: 5s
       retries: 5
-      # Measured ~232s for NormContext warm-up against the real mirror, so the
-      # old 60s could not be met by an honest cold start.
-      start_period: 300s
+      # ★★★ RE-MEASURED 2026-08-06 BY ACTUALLY COLD-STARTING IT: 1242s (20.7
+      # min), not the ~232s this line was set from. That figure covered the
+      # NormContext warm only; the AUTHOR-PRIOR warm (2,237 authors, chunked
+      # `author_engagement` against the shared mirror) is the real cost and runs
+      # BEFORE the port opens at all.
+      #
+      # At 300s Docker marks the container unhealthy ~4x before it can serve,
+      # and a restart policy then loops it forever — it never finishes warming,
+      # so it never becomes healthy. Set from the measurement with headroom.
+      # Cut the warm cost with RECSYS_AUTHOR_PRIOR_DISCOVERY_DAYS/_LIMIT if a
+      # faster start matters more than a full warm set.
+      start_period: 1800s
 
   # One-shot: `docker compose -f deploy/compose.recsys.yml run --rm recsys-trust-batch`.
   # Never started by `up` on its own — no `restart:` policy, and deliberately
@@ -209,6 +218,24 @@ services:
       HAFSQL_DB:
       HAFSQL_USER:
       HAFSQL_PASSWORD:
+      # ★★★ 2026-08-06 — WITHOUT THIS THE BATCH CANNOT COMPLETE. Found by
+      # running it against the real mirror: `engagement_edges` over the 365-day
+      # `trust_days` window is cancelled by the DEFAULT 15s statement timeout
+      # (`psycopg.errors.QueryCanceled`), so the batch dies and no trust
+      # snapshot is ever written — which means /feed FAIL_CLOSEs on every
+      # request forever.
+      #
+      # 15s is a REQUEST-path default and correct there. This is a weekly
+      # background job; a statement that runs for minutes is exactly what it is
+      # for. Set generously (e.g. 600000) for the batch only.
+      #
+      # This is the FOURTH instance of "config exists in code and reaches no
+      # container" on this project (after LUMEN_LITE_DATABASE_URL,
+      # RECSYS_TRUSTED_PROXY_HOPS and the AUTHOR_PRIOR family) — the variable
+      # was passed to the feed service and to neither batch.
+      HAFSQL_STATEMENT_TIMEOUT_MS:
+      HAFSQL_POOL_MIN:
+      HAFSQL_POOL_MAX:
       RECSYS_DATABASE_URL:
       RECSYS_LOG_LEVEL:
       # ★ REQUIRED for the same reason as the service above: `trust_batch`'s
@@ -284,6 +311,24 @@ services:
       HAFSQL_DB:
       HAFSQL_USER:
       HAFSQL_PASSWORD:
+      # ★★★ 2026-08-06 — WITHOUT THIS THE BATCH CANNOT COMPLETE. Found by
+      # running it against the real mirror: `engagement_edges` over the 365-day
+      # `trust_days` window is cancelled by the DEFAULT 15s statement timeout
+      # (`psycopg.errors.QueryCanceled`), so the batch dies and no trust
+      # snapshot is ever written — which means /feed FAIL_CLOSEs on every
+      # request forever.
+      #
+      # 15s is a REQUEST-path default and correct there. This is a weekly
+      # background job; a statement that runs for minutes is exactly what it is
+      # for. Set generously (e.g. 600000) for the batch only.
+      #
+      # This is the FOURTH instance of "config exists in code and reaches no
+      # container" on this project (after LUMEN_LITE_DATABASE_URL,
+      # RECSYS_TRUSTED_PROXY_HOPS and the AUTHOR_PRIOR family) — the variable
+      # was passed to the feed service and to neither batch.
+      HAFSQL_STATEMENT_TIMEOUT_MS:
+      HAFSQL_POOL_MIN:
+      HAFSQL_POOL_MAX:
       RECSYS_DATABASE_URL:
       RECSYS_LOG_LEVEL:
       RECSYS_TRUST_BATCH_INTERVAL_S:
