@@ -5,6 +5,8 @@ import { getPost, getPostsRanked } from '@transaction/lib/bridge-api';
 import { fetchRankedFeed, getRecsysConfig, RecsysPost } from '@/blog/lib/recsys/feed-client';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { listFolloweesOf } from '@/blog/lib/lite/repositories/follow-repository';
+import { findUserById } from '@/blog/lib/lite/repositories/user-repository';
+import { tagsForInterests } from '@/blog/lib/lite/interests/taxonomy';
 import { resolveRankedLiteBatch } from '@/blog/lib/lite/repositories/post-repository';
 import { liteConfig } from '@/blog/lib/lite/config';
 import { DEFAULT_OBSERVER } from '@/blog/lib/utils';
@@ -13,8 +15,96 @@ const logger = getLogger('app');
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 50;
-/** See the over-fetch note in GET: hydration drops moderated/unfetchable posts. */
+/** See the top-up note in `hydrate`. */
 const OVER_FETCH_RATIO = 1.5;
+
+/**
+ * ★★★ HYDRATION CACHE (2026-08-06) — MEASURED, NOT SPECULATIVE.
+ *
+ * recsys answers a 30-post ranked feed in 0.5-0.7s. The same request through
+ * this route took 3.5-15s, and the first view after login TIMED OUT. All of that
+ * gap is here: recsys returns identity + scores, so every ranked post costs one
+ * `bridge.get_post` against a public Hive node, and a 20-post page was firing 30
+ * of them.
+ *
+ * Posts change slowly (payout and vote counts drift; title and body do not), and
+ * ranked feeds OVERLAP heavily between viewers — the same popular post is on
+ * many pages at once. A short TTL therefore turns most of that cost into a map
+ * lookup, for every viewer after the first.
+ */
+/**
+ * ★★★ PER-VIEWER FEED CACHE — the 14 seconds happens ONCE, not every login.
+ *
+ * MEASURED 2026-08-06: a viewer whose recsys profile is cold costs ~9.6s inside
+ * recsys plus first-time post hydration — ~14s end to end. recsys's own viewer
+ * cache TTL is 300s, so a reader who comes back tomorrow is cold AGAIN. Paying
+ * that on every login is not a product.
+ *
+ * So the assembled feed is cached per viewer and served STALE-WHILE-REVALIDATE:
+ *
+ *   < FRESH  serve straight from cache, no upstream work at all
+ *   < STALE  serve the cached feed INSTANTLY and rebuild in the background, so
+ *            the reader waits for nothing and the next view is current
+ *   older    rebuild synchronously (the genuine first-ever view)
+ *
+ * That makes the expensive build a ONE-TIME onboarding cost — paid behind the
+ * interest picker's spinner, where the reader has been told their feed is being
+ * built — and every subsequent login instant.
+ *
+ * Deliberately in-process and bounded. A shared cache (Redis) would survive
+ * restarts and is the right end state; it is also infrastructure this does not
+ * have yet, and an in-process one already removes the per-login cost that makes
+ * the product unusable.
+ */
+const FEED_FRESH_MS = 5 * 60_000;
+const FEED_STALE_MS = 24 * 60 * 60_000;
+const FEED_MAX_VIEWERS = 5_000;
+
+interface CachedFeed {
+  entries: Entry[];
+  ranked: number;
+  at: number;
+}
+const feedCache = new Map<string, CachedFeed>();
+const rebuilding = new Set<string>();
+
+function feedCachePut(viewer: string, entries: Entry[], ranked: number): void {
+  if (feedCache.size >= FEED_MAX_VIEWERS) {
+    const oldest = feedCache.keys().next().value;
+    if (oldest !== undefined) feedCache.delete(oldest);
+  }
+  feedCache.set(viewer, { entries, ranked, at: Date.now() });
+}
+
+// NOTE: no exported invalidator here — Next allows a route file to export ONLY
+// route handlers, and exporting anything else is a build-time type error. A
+// viewer whose interests just changed is handled by the picker itself, which
+// re-requests the feed with `?refresh=1` (see GET) rather than by reaching into
+// this module's cache from outside.
+
+const HYDRATION_TTL_MS = 60_000;
+const HYDRATION_MAX_ENTRIES = 1_000;
+const hydrationCache = new Map<string, { entry: Entry; at: number }>();
+
+function cacheGet(key: string): Entry | null {
+  const hit = hydrationCache.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.at > HYDRATION_TTL_MS) {
+    hydrationCache.delete(key);
+    return null;
+  }
+  return hit.entry;
+}
+
+function cachePut(key: string, entry: Entry): void {
+  // Bounded, oldest-first. A feed cache that can grow without limit is a memory
+  // leak with extra steps.
+  if (hydrationCache.size >= HYDRATION_MAX_ENTRIES) {
+    const oldest = hydrationCache.keys().next().value;
+    if (oldest !== undefined) hydrationCache.delete(oldest);
+  }
+  hydrationCache.set(key, { entry, at: Date.now() });
+}
 
 /**
  * ★★★ GET /api/feed/for-you — the ranked feed, finally plugged in (2026-08-06).
@@ -83,16 +173,82 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return fallback(chainObserver, limit, 'anonymous', 'no signed-in viewer to rank for');
   }
 
+  // ---- CACHE DECISION, before any upstream work ----
+  // `?refresh=1` forces a rebuild: the interest picker calls it right after
+  // saving, because serving a viewer the generic feed they had BEFORE telling us
+  // what they like would make the picker look broken.
+  const forceRefresh = req.nextUrl.searchParams.get('refresh') === '1';
+  const cached = forceRefresh ? undefined : feedCache.get(viewer);
+  const age = cached ? Date.now() - cached.at : Infinity;
+
+  if (cached && age < FEED_FRESH_MS) {
+    return NextResponse.json({
+      entries: cached.entries, source: 'recsys', ranked: cached.ranked,
+      served: cached.entries.length, cache: 'fresh'
+    });
+  }
+  if (cached && age < FEED_STALE_MS) {
+    // Serve NOW, refresh behind the reader. `rebuilding` stops a burst of
+    // requests each kicking off its own expensive rebuild.
+    if (!rebuilding.has(viewer)) {
+      rebuilding.add(viewer);
+      void buildFeed(viewer, isLite, limit, chainObserver)
+        .then((b) => { if (b) feedCachePut(viewer, b.entries, b.ranked); })
+        .catch((e) => logger.warn('for-you: background refresh failed: %o', e))
+        .finally(() => rebuilding.delete(viewer));
+    }
+    return NextResponse.json({
+      entries: cached.entries, source: 'recsys', ranked: cached.ranked,
+      served: cached.entries.length, cache: 'stale-revalidating'
+    });
+  }
+
+  const built = await buildFeed(viewer, isLite, limit, chainObserver);
+  if (!built) {
+    return fallback(chainObserver, limit, 'unavailable', 'recsys did not return a usable feed');
+  }
+  feedCachePut(viewer, built.entries, built.ranked);
+  return NextResponse.json({
+    entries: built.entries, source: 'recsys', ranked: built.ranked,
+    served: built.entries.length, cache: 'miss'
+  });
+}
+
+/**
+ * Assemble one viewer's ranked feed: recsys -> hydrate -> order preserved.
+ * Returns null when recsys cannot serve, so the caller falls back.
+ */
+async function buildFeed(
+  viewer: string,
+  isLite: boolean,
+  limit: number,
+  chainObserver: string
+): Promise<{ entries: Entry[]; ranked: number } | null> {
   // A lite viewer's graph lives only in Lumen's Postgres — recsys cannot look up
   // a ULID on chain. Hand it over, or they are ranked as following nobody.
   let follows: string[] | undefined;
+  let tags: string[] | undefined;
   if (isLite && liteConfig.enabled && liteConfig.databaseUrl) {
     try {
       const session = await getLiteSession();
       const userId = session.user?.userId;
       follows = userId ? await listFolloweesOf({ userId }) : [];
+      // ★★★ THE SIGNUP INTEREST PICKS, FINALLY REACHING THE RANKER.
+      //
+      // recsys has accepted `explicit_interest_tags` since it was written and
+      // nothing ever supplied them. Without these a fresh lite account arrives
+      // with no follows, no interests and no history, and recsys correctly
+      // serves the cold-start popular lane — measured 2026-08-06: every result
+      // came back `popular_fallback`, identically for every new reader.
+      //
+      // Ids are mapped to real Hive tags here rather than stored as tags, so the
+      // taxonomy can be re-tuned (a tag dies, a better one appears) without a
+      // migration and without rewriting what readers already chose.
+      const user = userId ? await findUserById(userId) : null;
+      const picks = user?.interests ?? [];
+      tags = picks.length > 0 ? tagsForInterests(picks) : undefined;
     } catch (error) {
-      logger.warn('for-you: could not read lite follows, ranking without them: %o', error);
+      logger.warn('for-you: could not read lite viewer state, ranking without it: %o', error);
       follows = [];
     }
   }
@@ -104,32 +260,35 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // of content that is later taken down would shrink everyone's page. Ask for
   // headroom and cut back afterwards.
   const overFetch = Math.min(Math.ceil(limit * OVER_FETCH_RATIO), MAX_LIMIT * 2);
-  const outcome = await fetchRankedFeed({ viewer, limit: overFetch, follows });
-  if (!outcome.ok) {
-    return fallback(chainObserver, limit, outcome.reason, outcome.detail);
-  }
+  const outcome = await fetchRankedFeed({ viewer, limit: overFetch, follows, tags });
+  if (!outcome.ok) return null;
 
-  const hydrated = await hydrate(outcome.feed.posts, chainObserver);
+  // ★ HYDRATE ONLY WHAT WE WILL SERVE, then top up if some dropped.
+  //
+  // Eagerly hydrating the whole over-fetched set cost `limit * 1.5` Hive calls
+  // on EVERY request to insure against a drop that usually does not happen —
+  // 30 round-trips for a 20-post page. Hydrating the first `limit` and only
+  // reaching for the remainder when moderation or a fetch failure actually
+  // removed something makes the common case cost `limit`, and the bad case no
+  // worse than before.
+  const ranked = outcome.feed.posts;
+  const hydrated = await hydrate(ranked.slice(0, limit), chainObserver);
+  if (hydrated.length < limit && ranked.length > limit) {
+    const shortfall = limit - hydrated.length;
+    const topUp = await hydrate(
+      ranked.slice(limit, limit + Math.ceil(shortfall * OVER_FETCH_RATIO)),
+      chainObserver
+    );
+    hydrated.push(...topUp);
+  }
   const entries = hydrated.slice(0, limit);
   if (hydrated.length === 0 && outcome.feed.posts.length > 0) {
     // Ranked results that ALL failed to hydrate is not an empty feed — it is a
     // broken one, and serving a blank page would look identical to "nothing new".
-    logger.warn(
-      'for-you: %d ranked posts but 0 hydrated — falling back',
-      outcome.feed.posts.length
-    );
-    return fallback(chainObserver, limit, 'unavailable', 'ranked posts could not be hydrated');
+    logger.warn('for-you: %d ranked posts but 0 hydrated', outcome.feed.posts.length);
+    return null;
   }
-
-  return NextResponse.json({
-    entries,
-    source: 'recsys',
-    generatedAt: outcome.feed.generated_at,
-    ranked: outcome.feed.count,
-    // How many ranked posts survived hydration, so a shrinking gap between
-    // `ranked` and this is visible instead of looking like a quiet feed.
-    served: entries.length
-  });
+  return { entries, ranked: outcome.feed.count };
 }
 
 /**
@@ -175,9 +334,15 @@ async function hydrate(posts: RecsysPost[], observer: string): Promise<Entry[]> 
       // dropped: it is not something we can vouch for.
       if (p.chain_author && (!lite || !lite.servable)) return null;
 
+      const cacheKey = `${fetchAuthor}/${p.permlink}/${observer}`;
+      const cached = cacheGet(cacheKey);
+      if (cached) {
+        return lite?.displayName ? ({ ...cached, author: lite.displayName } as Entry) : cached;
+      }
       try {
         const entry = await getPost(fetchAuthor, p.permlink, observer);
         if (!entry) return null;
+        cachePut(cacheKey, entry);
         // Re-attribute to the ranked identity so a lite writer is credited in
         // the UI, matching how they were ranked.
         return lite?.displayName ? ({ ...entry, author: lite.displayName } as Entry) : entry;

@@ -41,6 +41,10 @@ export interface LumenUser {
   /** Monotonic cookie-invalidation counter (F-L3): bumped on upgrade, suspend/ban and
    *  logout-all. A session whose stamped epoch differs from this is stale and refused. */
   sessionEpoch: number;
+  /** Signup interest picks (taxonomy ids). See lib/lite/interests/taxonomy.ts. */
+  interests: string[];
+  /** NULL = never asked. Set with an empty `interests` = asked and declined. */
+  interestsSetAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
   upgradedAt: Date | null;

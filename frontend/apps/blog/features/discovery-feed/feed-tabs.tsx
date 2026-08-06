@@ -15,6 +15,7 @@ import NoDataError from '@/blog/components/no-data-error';
 import MarketTab from '@/blog/features/prediction-market/market-tab';
 import MediumPostCard from './medium-post-card';
 import LiteFeedStrip from './lite-feed-strip';
+import InterestPicker from '@/blog/features/lite-auth/interests/interest-picker';
 
 // TODO: move to i18n
 const LABELS = {
@@ -236,6 +237,10 @@ export default function FeedTabs() {
 
   return (
     <div>
+      {/* Post-login onboarding: renders only for a lite account that has never
+          been asked. Self-gating, so mounting it here costs a logged-out or
+          full-Hive visitor nothing. */}
+      <InterestPicker />
       <div
         role="tablist"
         className="mb-5 inline-flex w-fit gap-1.5 rounded-[14px] border border-[#ebedf0] bg-[#f4f5f7] p-[5px]"

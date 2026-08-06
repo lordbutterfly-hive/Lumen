@@ -14,6 +14,8 @@ interface UserRow {
   status: string;
   suspended_reason: string | null;
   session_epoch: number;
+  interests: string[] | null;
+  interests_set_at: Date | null;
   created_at: Date;
   updated_at: Date;
   upgraded_at: Date | null;
@@ -33,6 +35,11 @@ function mapUser(r: UserRow): LumenUser {
     status: r.status as UserStatus,
     suspendedReason: r.suspended_reason,
     sessionEpoch: r.session_epoch ?? 0,
+    interests: Array.isArray(r.interests) ? r.interests : [],
+    // NULL means "never asked" -> show the picker. An empty array with a
+    // timestamp means "asked, chose to skip" -> never nag again. Collapsing
+    // those two would re-prompt forever anyone who declined.
+    interestsSetAt: r.interests_set_at,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
     upgradedAt: r.upgraded_at,
@@ -183,6 +190,24 @@ export async function setUserStatus(
     [userId, status, reason]
   );
   return res.rows[0] ? mapUser(res.rows[0]) : null;
+}
+
+/**
+ * ★ 0023 — persist the signup interest picks.
+ *
+ * `interests_set_at` is stamped even for an EMPTY selection, because "asked and
+ * declined" must be distinguishable from "not asked yet" — otherwise the picker
+ * reappears on every login for anyone who skipped it.
+ */
+export async function setInterests(userId: string, interests: string[]): Promise<LumenUser | null> {
+  const { rows } = await query<UserRow>(
+    `UPDATE lumen_user
+        SET interests = $2::jsonb, interests_set_at = now(), updated_at = now()
+      WHERE user_id = $1
+      RETURNING *`,
+    [userId, JSON.stringify(interests)]
+  );
+  return rows[0] ? mapUser(rows[0]) : null;
 }
 
 /**
