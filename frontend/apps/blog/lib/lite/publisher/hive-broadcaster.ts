@@ -13,9 +13,11 @@ const logger = getLogger('app');
  *
  * The key is held in an IN-MEMORY beekeeper wallet — it is imported once at
  * bootstrap and never written to disk, never logged, and never leaves this module.
- * In development the WIF comes from `LITE_PUBLISHER_POSTING_WIF`; in production
- * that path is refused outright and a KMS-backed implementation must be injected
- * via `setBroadcaster` instead.
+ * The WIF comes from `LITE_PUBLISHER_POSTING_WIF`. In production that path
+ * requires the operator to opt in explicitly with
+ * `LITE_PUBLISHER_ALLOW_WIF_IN_PROD=yes` (see `installWifBroadcaster` for why
+ * refusing outright was worse than the risk it avoided); a KMS-backed
+ * implementation injected via `setBroadcaster` remains the destination.
  *
  * Two safety properties this module enforces before it will ever broadcast:
  *  1. The imported key's public key MUST be listed in the configured account's
@@ -259,9 +261,36 @@ export const hiveBroadcaster: PostBroadcaster = {
 };
 
 /**
- * Wire the publisher in DEVELOPMENT only. Returns false (and stays dark) when the
- * WIF is absent or when running in production — prod must call `setBroadcaster`
- * with a KMS-backed implementation from its own bootstrap.
+ * Wire the WIF-backed publisher. Returns false (and stays dark) when no WIF is
+ * configured. Production requires an explicit opt-in — see below.
+ *
+ * ★★★ RENAMED FROM `installDevBroadcaster` + PRODUCTION OPT-IN ADDED 2026-08-06.
+ *
+ * This used to throw unconditionally under `NODE_ENV=production`, telling the
+ * operator to "inject a KMS-backed broadcaster via setBroadcaster". **Nothing in
+ * this repository ever calls `setBroadcaster` with a production implementation.**
+ * So a normal production build had NO broadcaster at all: posts accumulated in
+ * Postgres, the author saw their post in Lumen, and nothing anywhere reported a
+ * problem — which `docker/lumen-publisher.yml` itself calls "the single most
+ * silent failure mode in the lite-accounts feature". The guard was written to
+ * stop an accident and instead guaranteed a silent outage on every real deploy.
+ *
+ * A KMS-backed signer is still the right end state and is NOT what this is. This
+ * is the honest interim: the WIF path may run in production if the operator says
+ * so out loud with `LITE_PUBLISHER_ALLOW_WIF_IN_PROD=yes`, and it screams in the
+ * log every time it arms so nobody forgets it is there.
+ *
+ * Why this is an acceptable trade for a soft launch, stated plainly rather than
+ * assumed: the key is a POSTING key, not active and not owner. Its worst case is
+ * that someone who reads the environment can post, comment and vote as the
+ * publisher account — bad, recoverable, and revocable on Hive with a single
+ * `account_update` that rotates the posting authority. It cannot move funds,
+ * cannot change keys, and cannot touch any other account.
+ *
+ * The two guards are INDEPENDENT and both must be passed to publish to mainnet
+ * from a production process. They answer different questions — "may this process
+ * hold a raw key at all?" and "may it write to the permanent public ledger?" —
+ * and collapsing them into one flag is how one careless export becomes both.
  *
  * ★ MAINNET GUARD, added 2026-07-28 after a real incident: an automated audit hit
  * `POST /api/lite/publisher/drain` believing it was a read-only wiring check, and
@@ -274,11 +303,23 @@ export const hiveBroadcaster: PostBroadcaster = {
  * ever loaded. Wanting to test the publisher is not the same as wanting to write to a
  * public permanent ledger.
  */
-export function installDevBroadcaster(): boolean {
+export function installWifBroadcaster(): boolean {
   if (!liteConfig.publisherPostingWif) return false;
   if (process.env.NODE_ENV === 'production') {
-    throw new Error(
-      'LITE_PUBLISHER_POSTING_WIF must not be used in production — inject a KMS-backed broadcaster via setBroadcaster'
+    if (process.env.LITE_PUBLISHER_ALLOW_WIF_IN_PROD !== 'yes') {
+      throw new Error(
+        'Refusing to arm the WIF publisher in production. Nothing in this repo injects a ' +
+          'KMS-backed broadcaster, so leaving this unset means posts queue in Postgres ' +
+          'FOREVER and no error is ever reported — set LITE_PUBLISHER_ALLOW_WIF_IN_PROD=yes ' +
+          'to run on the raw posting key (revocable on Hive with one account_update), or ' +
+          'inject a real signer via setBroadcaster.'
+      );
+    }
+    logger.warn(
+      'lite publisher: ARMED IN PRODUCTION WITH A RAW POSTING WIF ' +
+        '(LITE_PUBLISHER_ALLOW_WIF_IN_PROD=yes). This is the interim path, not the ' +
+        'destination — replace it with a KMS-backed broadcaster via setBroadcaster, and ' +
+        'rotate the publisher posting authority if this key is ever exposed.'
     );
   }
   const endpoint = siteConfig.endpoint ?? '';
@@ -286,7 +327,7 @@ export function installDevBroadcaster(): boolean {
     liteConfig.chainEnv === 'mainnet' || /api\.hive\.blog|api\.openhive\.network|hived\.emre\.sh/i.test(endpoint);
   if (looksLikeMainnet && process.env.LITE_PUBLISHER_ALLOW_MAINNET !== 'yes') {
     throw new Error(
-      `Refusing to arm the dev publisher against MAINNET (${endpoint || liteConfig.chainEnv}): a broadcast here is public and permanent. ` +
+      `Refusing to arm the publisher against MAINNET (${endpoint || liteConfig.chainEnv}): a broadcast here is public and permanent. ` +
         'Point the app at a testnet, or set LITE_PUBLISHER_ALLOW_MAINNET=yes to state the intent explicitly.'
     );
   }

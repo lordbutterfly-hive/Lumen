@@ -458,7 +458,7 @@ export const hiveAccountCreator: AccountCreator = {
  * no WIF is configured — production must call `setAccountCreator` with a KMS-backed
  * implementation from its own bootstrap.
  *
- * ★ MAINNET GUARD. Same shape as `installDevBroadcaster()`, and for a sharper reason.
+ * ★ MAINNET GUARD. Same shape as `installWifBroadcaster()`, and for a sharper reason.
  * That guard exists because an automated run broadcast a real comment to Hive mainnet
  * believing an endpoint was read-only (2026-07-28). A comment can at least be deleted.
  * An account creation cannot: it permanently consumes a token, permanently occupies a

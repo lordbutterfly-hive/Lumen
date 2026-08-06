@@ -4,7 +4,7 @@ import { guardPublisher } from '@/blog/lib/lite/http/guard';
 import { reconcileOrphans } from '@/blog/lib/lite/content/post-service';
 import { runPublisherOnce, ProcessOutcome } from '@/blog/lib/lite/publisher/worker';
 import { withAdvisoryLock } from '@/blog/lib/lite/db/pool';
-import { installDevBroadcaster } from '@/blog/lib/lite/publisher/hive-broadcaster';
+import { installWifBroadcaster } from '@/blog/lib/lite/publisher/hive-broadcaster';
 import { hasBroadcaster } from '@/blog/lib/lite/publisher/broadcaster';
 
 /** Arbitrary but fixed key: all drains across all processes contend on this one. */
@@ -35,7 +35,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // this throws unless a KMS-backed broadcaster was already injected at boot.
   if (!hasBroadcaster()) {
     try {
-      installDevBroadcaster();
+      installWifBroadcaster();
     } catch (error) {
       logger.error(error, 'Publisher drain: refusing to install dev broadcaster');
       return NextResponse.json({ error: 'broadcaster_unavailable' }, { status: 503 });
