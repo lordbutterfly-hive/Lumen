@@ -4,7 +4,6 @@ import { FC, useEffect, useState } from 'react';
 import { Dialog, DialogContentBare, DialogDescription, DialogTitle } from '@ui/components/dialog';
 import { Button } from '@ui/components/button';
 import { cn } from '@ui/lib/utils';
-import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 
 /**
  * ★★★ THE SIGNUP INTEREST PICKER.
@@ -43,7 +42,6 @@ interface InterestOption {
 }
 
 const InterestPicker: FC = () => {
-  const { user, isHydrated } = useUserClient();
   const [open, setOpen] = useState(false);
   const [options, setOptions] = useState<InterestOption[]>([]);
   const [picked, setPicked] = useState<string[]>([]);
@@ -51,10 +49,12 @@ const InterestPicker: FC = () => {
   const [min, setMin] = useState(3);
   const [saving, setSaving] = useState(false);
 
-  const isLite = isHydrated && user.isLoggedIn && user.account_tier === 'lite';
-
+  // ★ NO CLIENT AUTH STATE. `useUserClient()` was measured reporting logged-OUT
+  // for a session the same page's `/api/users/me` reported logged-IN — the
+  // header rendered "Log in" while authenticated — so a picker gated on it never
+  // rendered at all. `/api/lite/interests` resolves the session SERVER-side and
+  // returns `eligible`, which is the only trustworthy answer here.
   useEffect(() => {
-    if (!isLite) return;
     let cancelled = false;
     (async () => {
       try {
@@ -66,9 +66,9 @@ const InterestPicker: FC = () => {
         setPicked(body.selected ?? []);
         setMax(body.max ?? 20);
         setMin(body.min ?? 3);
-        // ★ `asked`, never "selected is empty". Someone who deliberately skipped
-        // must not be asked again on every single login.
-        if (!body.asked) setOpen(true);
+        // `eligible` gates on a real lite session; `asked` (never "selected is
+        // empty") stops re-prompting anyone who deliberately skipped.
+        if (body.eligible && !body.asked) setOpen(true);
       } catch {
         /* the picker is an enhancement to onboarding, never a blocker */
       }
@@ -76,7 +76,7 @@ const InterestPicker: FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [isLite]);
+  }, []);
 
   const toggle = (id: string) => {
     setPicked((prev) =>
@@ -104,7 +104,7 @@ const InterestPicker: FC = () => {
     }
   };
 
-  if (!isLite || !open) return null;
+  if (!open) return null;
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v && !saving) setOpen(false); }}>

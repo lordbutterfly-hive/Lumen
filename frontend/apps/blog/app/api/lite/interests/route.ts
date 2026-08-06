@@ -29,12 +29,20 @@ export async function GET(): Promise<NextResponse> {
 
   let selected: string[] = [];
   let asked = false;
+  // ★ Whether a LITE ACTOR resolved server-side. The client MUST NOT infer this
+  // from its own auth state: `useUserClient()` was measured reporting
+  // logged-OUT on a page whose own `/api/users/me` said logged-in (the header
+  // rendered "Log in" for an authenticated lite session), so a picker gated on
+  // that hook never appeared. The session cookie is the truth and only the
+  // server can read it.
+  let eligible = false;
   try {
     const session = await getLiteSession();
     const actor = await requireActiveLiteUser(session.user, session.sessionEpoch);
     if (actor.ok) {
       selected = actor.user.interests ?? [];
       asked = actor.user.interestsSetAt !== null;
+      eligible = true;
     }
   } catch {
     /* logged out — still serve the taxonomy so the picker can render */
@@ -46,6 +54,7 @@ export async function GET(): Promise<NextResponse> {
     interests: INTERESTS,
     selected,
     asked,
+    eligible,
     max: MAX_INTERESTS,
     min: MIN_INTERESTS
   });

@@ -80,8 +80,17 @@ user_action() { # action name reason hide
 }
 
 post_action() { # target reason visibility takedown
+  # ★ SEND EXACTLY ONE IDENTIFIER. Sending both made every permlink takedown
+  # fail with `post_not_found`: the route reads `postId` FIRST and only falls
+  # back to `permlink`, so a permlink passed in both fields was looked up as an
+  # id. Found running a real takedown against a live mainnet post.
+  # A lite permlink is `lumen-<lowercased ULID>`; anything else is an id.
+  case "$1" in
+    lumen-*) key="permlink" ;;
+    *)       key="postId" ;;
+  esac
   report "$(post_json /api/lite/moderation/post \
-    "{\"permlink\":$(esc "$1"),\"postId\":$(esc "$1"),\"reason\":$(esc "$2"),\"visibility\":\"$3\",\"takedown\":$4}")"
+    "{\"$key\":$(esc "$1"),\"reason\":$(esc "$2"),\"visibility\":\"$3\",\"takedown\":$4}")"
 }
 
 case "$cmd" in

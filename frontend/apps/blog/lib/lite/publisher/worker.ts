@@ -136,10 +136,48 @@ export async function runPublisherOnce(workerId: string): Promise<ProcessOutcome
     // re-broadcast the blank soft-delete stub onto the permlink it had just freed,
     // re-creating the object on chain.
     const already = await broadcaster.postExists(author, permlink);
-    if (job.jobType === 'delete' && !already) {
+
+    // ★★★ DELETE IS HANDLED HERE, OUTSIDE THE `!already` GUARD (2026-08-06).
+    //
+    // THE BUG THIS FIXES, found by taking down a real post on mainnet: every
+    // line below — including `deleteComment` — used to live inside `if
+    // (!already)`. That guard exists so a CREATE job does not re-broadcast a
+    // post already on chain. For a DELETE it reads exactly backwards:
+    // `already === true` means "the comment is still there, so remove it", and
+    // the code skipped the whole block and fell through to `markPublished`.
+    //
+    // So a takedown against a post that actually existed reported SUCCESS and
+    // did nothing. The job went `published`, the row went hidden in Lumen, the
+    // operator saw `takedownQueued: true` — and the content stayed on the public
+    // chain, unchanged, `last_update` untouched. The only case that worked was
+    // deleting something already gone.
+    //
+    // That is the moderation lever this product's entire abuse strategy rests
+    // on: "someone tells me and I take it down myself."
+    if (job.jobType === 'delete') {
+      if (!already) {
+        // Absence means the delete already landed, not that it never ran —
+        // re-broadcasting here would put the blank soft-delete stub back onto
+        // the permlink it had just freed, re-creating the object on chain.
+        await jobs.markPublished(job.jobId);
+        return 'processed';
+      }
+      await pauseForCommentInterval();
+      // Prefer a real delete_comment. Hive refuses it once the comment has
+      // replies, net-positive votes, or has paid out
+      // (hive_evaluator_social.cpp:60,66,68-69) — in that case blank the content
+      // instead, which always works. `canDelete` fails closed, so an unreachable
+      // node soft-deletes rather than burning retries on a doomed op.
+      if (await broadcaster.canDelete(author, permlink)) {
+        await broadcaster.deleteComment(author, permlink);
+      } else {
+        await broadcaster.broadcastComment(buildCommentOp(job));
+      }
+      noteBroadcast();
       await jobs.markPublished(job.jobId);
       return 'processed';
     }
+
     if (!already) {
       // A child can only be broadcast once its container root exists on chain —
       // otherwise the node rejects it ("Comment ... not found"). The container root
@@ -165,41 +203,31 @@ export async function runPublisherOnce(workerId: string): Promise<ProcessOutcome
       // land, and neither can stop a job that is already claimed (`cancelPending` only
       // reaches 'pending'). Checked here, the window is closed for good.
       //
-      // Every job type except `delete` itself: an `update` queued before a takedown and
-      // rescheduled past it would otherwise REPUBLISH the removed content — Hive's
-      // comment op is an upsert, so the deleted object simply comes back, invisible in
-      // Lumen because the row stays hidden, and no operator ever learns of it.
-      if (job.jobType !== 'delete') {
-        const live = await posts.getPostById(job.postId);
-        if (!live) {
-          await jobs.markTerminal(job.jobId, 'the post no longer exists', 'rejected');
-          return 'failed';
-        }
-        if (live.deletedLocally || live.feedVisibility !== 'visible') {
-          await jobs.markTerminal(
-            job.jobId,
-            live.deletedLocally ? 'deleted before publishing' : 'moderated before publishing',
-            'rejected'
-          );
-          return 'failed';
-        }
+      // An `update` queued before a takedown and rescheduled past it would
+      // otherwise REPUBLISH the removed content — Hive's comment op is an
+      // upsert, so the deleted object simply comes back, invisible in Lumen
+      // because the row stays hidden, and no operator ever learns of it.
+      //
+      // The `jobType !== 'delete'` guard that used to wrap this is gone: `delete`
+      // now returns above, and TypeScript proves it — narrowing this to
+      // `'create' | 'update'` is what flagged the old comparison as dead.
+      const live = await posts.getPostById(job.postId);
+      if (!live) {
+        await jobs.markTerminal(job.jobId, 'the post no longer exists', 'rejected');
+        return 'failed';
+      }
+      if (live.deletedLocally || live.feedVisibility !== 'visible') {
+        await jobs.markTerminal(
+          job.jobId,
+          live.deletedLocally ? 'deleted before publishing' : 'moderated before publishing',
+          'rejected'
+        );
+        return 'failed';
       }
 
       await pauseForCommentInterval();
-      if (job.jobType === 'delete') {
-        // Prefer a real delete_comment. Hive refuses it once the comment has
-        // replies, net-positive votes, or has paid out
-        // (hive_evaluator_social.cpp:60,66,68-69) — in that case blank the content
-        // instead, which always works. `canDelete` fails closed, so an unreachable
-        // node means we soft-delete rather than burn retries on a doomed op.
-        if (await broadcaster.canDelete(author, permlink)) {
-          await broadcaster.deleteComment(author, permlink);
-        } else {
-          await broadcaster.broadcastComment(buildCommentOp(job));
-        }
-      } else {
-        await broadcaster.broadcastComment(buildCommentOp(job));
-      }
+      // `delete` returned above and can never reach here.
+      await broadcaster.broadcastComment(buildCommentOp(job));
       noteBroadcast();
     }
 
