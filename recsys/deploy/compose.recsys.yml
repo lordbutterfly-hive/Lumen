@@ -73,6 +73,23 @@ services:
       RECSYS_NORM_REFRESH_S:
       RECSYS_SNAPSHOT_REFRESH_S:
       RECSYS_VIEWER_CACHE_TTL_S:
+      # ★★★ 2026-08-06 — FIVE MORE INSTANCES OF THE SAME DEFECT, found by
+      # replacing the per-variable assertions in `test_deploy_artifact.py` with a
+      # SWEEP over everything `app.py` reads. `RECSYS_TRUSTED_PROXY_HOPS` and
+      # `LUMEN_LITE_DATABASE_URL` were each caught one at a time, a round apart;
+      # nobody asked the general question, and these five had been unreachable
+      # the whole time.
+      #
+      # None is a security control — they are tuning knobs with working defaults
+      # — but the author-prior warm build was live-measured at 508s against the
+      # real mirror, and an operator could not change its size or cadence
+      # without editing the image. Config that exists in code and not in the
+      # artifact is config that does not exist.
+      RECSYS_VIEWER_CACHE_MAX_ENTRIES:
+      RECSYS_AUTHOR_PRIOR_REFRESH_S:
+      RECSYS_AUTHOR_PRIOR_DISCOVERY_DAYS:
+      RECSYS_AUTHOR_PRIOR_DISCOVERY_LIMIT:
+      RECSYS_AUTHOR_PRIOR_CHUNK_SIZE:
       RECSYS_LOG_LEVEL:
       # ★★★ REQUIRED — WITHOUT THIS THE CONTAINER CRASH-LOOPS (fixed 2026-08-05).
       # `main()` calls `Settings.from_env(production=True)` unless
@@ -117,6 +134,19 @@ services:
       # proxy this stack documents, leaving it unset means one unauthenticated
       # client spends the shared rate-limit bucket and 429s every real user.
       RECSYS_TRUSTED_PROXY_HOPS:
+      # ★★★ B10 (2026-08-06 QA) — REQUIRED WHENEVER HOPS > 0, and the service
+      # REFUSES TO START without it. Declaring how many proxies you run is not
+      # declaring WHO they are: the hops fix above trusted `X-Forwarded-For` on
+      # the strength of a number, so anything that could reach port 8000
+      # directly — a sibling container on this very network — forged the whole
+      # chain and minted an unlimited number of rate-limit buckets.
+      #
+      # Comma-separated IPs or CIDRs, matched against the PEER address (the one
+      # the kernel reports; no header can change it). For a proxy container on
+      # this compose network that is the Docker bridge subnet — find it with
+      #   docker network inspect <project>_default -f '{{(index .IPAM.Config 0).Subnet}}'
+      # e.g. RECSYS_TRUSTED_PROXY_PEERS=172.18.0.0/16
+      RECSYS_TRUSTED_PROXY_PEERS:
       RECSYS_RATE_LIMIT_PER_MINUTE:
       RECSYS_MAX_CONCURRENT_REQUESTS:
       RECSYS_REQUEST_READ_TIMEOUT_S:
@@ -193,6 +223,74 @@ services:
       # whether a lite writer accrues their own graph-cred or donates it to the
       # shared publisher account. Passed to the SERVICE and not to the BATCH,
       # they would do nothing at all — the trust graph is built here.
+      LITE_PUBLISHER_ACCOUNTS:
+      LITE_FRONTEND_ACCOUNT_MAINNET:
+      LITE_FRONTEND_ACCOUNT_MIRRORNET:
+      LITE_FRONTEND_ACCOUNT_TESTNET:
+    networks:
+      - docker
+
+  # ★★★ 2026-08-06 — WITHOUT THIS, THE WHOLE SERVICE 503s ON DAY 14.
+  #
+  # `recsys-trust-batch` above is a ONE-SHOT: it runs once before the service
+  # starts (that is the cold-deploy fix) and is never run again. Meanwhile
+  # `TrustConfig.max_snapshot_age_days = 14` and `/feed` is FAIL_CLOSED, so the
+  # snapshot ages out two weeks after deploy and **every feed request refuses**.
+  # Not degrades — refuses. The batch cadence was documented as "an operator
+  # decision", which is the same shape as every other control this project left
+  # optional and nobody set (the seat secret, the API token, the lite DSN, the
+  # proxy peers). A deployment that is guaranteed to break on a known date is
+  # not an operator preference; it is a missing part of the artifact.
+  #
+  # Deliberately a `sleep` loop and not cron: the image is `python:3.11-slim`
+  # with no cron daemon (the same "the binary is not in the image" mistake that
+  # shipped a `wget` healthcheck into an image without wget), and this needs no
+  # new dependency, no new base image and no host-level scheduling.
+  #
+  # It sleeps FIRST so it does not duplicate the one-shot that just ran, and it
+  # retries in an hour rather than a week if a run fails — a failed batch must
+  # not silently consume the entire freshness budget waiting for the next tick.
+  recsys-trust-batch-cron:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: recsys:${RECSYS_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      recsys-trust-batch:
+        condition: service_completed_successfully
+    # RECSYS_TRUST_BATCH_INTERVAL_S must stay STRICTLY BELOW
+    # `max_snapshot_age_days` in seconds (14d = 1209600). 7 days leaves a full
+    # extra cycle of headroom, so one failed run cannot age the snapshot out.
+    # `tests/test_deploy_artifact.py` enforces that relationship mechanically —
+    # raise this and the gate fails.
+    command:
+      - sh
+      - -c
+      - |
+        while true; do
+          sleep "${RECSYS_TRUST_BATCH_INTERVAL_S:-604800}"
+          echo "trust_batch: starting scheduled run"
+          if python -m recsys.jobs.trust_batch; then
+            echo "trust_batch: scheduled run OK"
+          else
+            echo "trust_batch: scheduled run FAILED — retrying in ${RECSYS_TRUST_BATCH_RETRY_S:-3600}s"
+            sleep "${RECSYS_TRUST_BATCH_RETRY_S:-3600}"
+          fi
+        done
+    environment:
+      HAFSQL_HOST:
+      HAFSQL_PORT:
+      HAFSQL_DB:
+      HAFSQL_USER:
+      HAFSQL_PASSWORD:
+      RECSYS_DATABASE_URL:
+      RECSYS_LOG_LEVEL:
+      RECSYS_TRUST_BATCH_INTERVAL_S:
+      RECSYS_TRUST_BATCH_RETRY_S:
+      LUMEN_EXPLORE_SEAT_SECRET:
+      LUMEN_EXPLORE_SEAT_SECRET_PREVIOUS:
+      LUMEN_EXPLORE_SEAT_SECRET_ACTIVE_FROM_BUCKET:
       LITE_PUBLISHER_ACCOUNTS:
       LITE_FRONTEND_ACCOUNT_MAINNET:
       LITE_FRONTEND_ACCOUNT_MIRRORNET:

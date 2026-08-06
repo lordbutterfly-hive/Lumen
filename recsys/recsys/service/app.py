@@ -50,6 +50,8 @@ curl.
 from __future__ import annotations
 
 import contextlib
+import functools
+import ipaddress
 import json
 import logging
 import os
@@ -155,6 +157,60 @@ def _csv_param(qs: dict[str, list[str]], key: str) -> frozenset[str] | None:
     if key not in qs:
         return None
     return frozenset(part.strip() for value in qs[key] for part in value.split(",") if part.strip())
+
+
+def _csv_env(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
+    """★ B10. Comma-separated ENV var -> tuple, preserving order.
+
+    An UNSET variable falls back to ``default``; a SET-BUT-EMPTY one is an
+    explicit empty tuple. That distinction matters for
+    ``RECSYS_TRUSTED_PROXY_PEERS`` specifically: `compose.recsys.yml` lists it
+    as a pass-through key, so the variable can arrive as `""` on a host that
+    never set it, and treating that as "unset" would silently reinstate the
+    default rather than letting ``__post_init__`` refuse a hops-without-peers
+    configuration.
+    """
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return tuple(part.strip() for part in raw.split(",") if part.strip())
+
+
+@functools.lru_cache(maxsize=32)
+def _proxy_networks(
+    peers: tuple[str, ...],
+) -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]:
+    """★ B10. Parse (once) the trusted-proxy allowlist into networks.
+
+    Cached on the tuple itself — ``ServiceConfig`` is frozen, so the value is
+    hashable and stable for the process, and this runs on the hot path of every
+    request. Entries are already validated by ``ServiceConfig.__post_init__``;
+    this never sees an unparseable one in practice, and the guard is here so a
+    hand-built config in a test cannot turn a typo into a crash mid-request.
+    """
+    out = []
+    for peer in peers:
+        try:
+            out.append(ipaddress.ip_network(peer, strict=False))
+        except ValueError:  # pragma: no cover - refused at construction
+            logger.error("ignoring unparseable trusted proxy peer %r", peer)
+    return tuple(out)
+
+
+def _peer_is_trusted_proxy(peer: str, peers: tuple[str, ...]) -> bool:
+    """★ B10. Whether the KERNEL-REPORTED peer address is one of the declared
+    proxies. No header participates in this decision — that is the entire
+    point: ``X-Forwarded-For`` is attacker-controlled, and the peer address is
+    the one fact about a request a client cannot rewrite."""
+    if not peers:
+        return False
+    try:
+        addr = ipaddress.ip_address(peer)
+    except ValueError:
+        # Not an IP at all (e.g. a UNIX socket path, or a test double). Cannot
+        # be shown to be a declared proxy, so it is not one.
+        return False
+    return any(addr in net for net in _proxy_networks(peers))
 
 
 def _int_param(qs: dict[str, list[str]], key: str) -> int | None:
@@ -409,7 +465,38 @@ class ServiceConfig:
     #: `N > 0` means "there are N proxies you control between you and the
     #: client", and the client address is taken N entries from the RIGHT of
     #: `X-Forwarded-For` — the only position an upstream attacker cannot write.
+    #:
+    #: ★★★ B10 (2026-08-06 QA) — `N > 0` ALONE WAS NOT SAFE, and this is a gap in
+    #: the fix directly above, found by the QA seat one round after it shipped.
+    #: See `trusted_proxy_peers`.
     trusted_proxy_hops: int = 0
+    #: ★★★ B10 — WHO IS ALLOWED TO SPEAK FOR A `X-Forwarded-For` HEADER.
+    #:
+    #: Taking `chain[-hops]` is only sound if the request ACTUALLY ARRIVED
+    #: THROUGH those proxies. Nothing checked that. `_client_identity` read the
+    #: header purely on the strength of a number in the config, so any client
+    #: that could reach the port DIRECTLY — a sibling container on the same
+    #: Docker network, anything inside the VPC, anyone at all if the port is
+    #: published — supplied the whole chain itself, including the position we
+    #: call unforgeable, and minted an unlimited number of fresh rate-limit
+    #: buckets. The limiter is the only thing standing between one script and
+    #: the shared third-party mirror, so "unlimited buckets" means "no limiter".
+    #:
+    #: Entries are IPs or CIDRs (`10.0.0.7`, `172.18.0.0/16`, `::1`), matched
+    #: against the PEER address — the one the kernel reports, which no header
+    #: can change. A request from outside the set is judged on its peer address
+    #: and its `X-Forwarded-For` is ignored entirely, exactly as at `hops=0`.
+    #:
+    #: ★ REQUIRED whenever `trusted_proxy_hops > 0`, refused at construction
+    #: otherwise (`__post_init__`). Not defaulted to something permissive and
+    #: not merely documented in a comment: this project has now shipped the same
+    #: defect three times — a control that is optional-by-default is a control
+    #: nobody sets, and "documented precondition" is how the seat secret, the
+    #: API token and the lite DSN each went missing in turn. Setting hops
+    #: without peers is far more likely to be an operator who does not know
+    #: about this than a deliberate choice, so it fails LOUDLY at startup rather
+    #: than serving a silently-forgeable limiter.
+    trusted_proxy_peers: tuple[str, ...] = ()
     viewer_cache_max_entries: int = 10_000
     #: How often the shared author-pooled engagement prior (§6) is
     #: rebuilt in the background — see `recsys.author_prior_cache`'s module
@@ -471,6 +558,32 @@ class ServiceConfig:
     #: `daemon_threads` bounds shutdown, not occupancy.
     request_read_timeout_s: float = 10.0
 
+    def __post_init__(self) -> None:
+        # ★ B10. Validate at CONSTRUCTION, so a bad value cannot reach a request.
+        # Every entry must parse, because a typo (`10.0.0.7 ` with a stray comma,
+        # or a hostname) that silently matched nothing would degrade to "peer
+        # address" — the shared-bucket outage punch-list #3 exists to fix —
+        # while the config still claimed a proxy was trusted.
+        for peer in self.trusted_proxy_peers:
+            try:
+                ipaddress.ip_network(peer, strict=False)
+            except ValueError as exc:
+                raise ValueError(
+                    f"RECSYS_TRUSTED_PROXY_PEERS entry {peer!r} is not an IP or CIDR: "
+                    f"{exc}. Use e.g. '172.18.0.0/16' or '127.0.0.1' (hostnames are "
+                    "not resolved — the peer address is compared numerically)."
+                ) from exc
+        if self.trusted_proxy_hops > 0 and not self.trusted_proxy_peers:
+            raise ValueError(
+                "RECSYS_TRUSTED_PROXY_HOPS > 0 requires RECSYS_TRUSTED_PROXY_PEERS. "
+                "Declaring hops without declaring WHO the proxies are means "
+                "X-Forwarded-For is trusted from any caller that can reach this "
+                "port directly, and each forged header is a fresh rate-limit "
+                "bucket — the limiter stops existing. Set the proxy's address or "
+                "CIDR (e.g. RECSYS_TRUSTED_PROXY_PEERS=172.18.0.0/16), or set "
+                "RECSYS_TRUSTED_PROXY_HOPS=0 if there is no proxy in front."
+            )
+
     @classmethod
     def from_env(cls) -> ServiceConfig:
         return cls(
@@ -479,6 +592,9 @@ class ServiceConfig:
             api_token=os.environ.get("RECSYS_API_TOKEN") or None,
             trusted_proxy_hops=int(
                 os.environ.get("RECSYS_TRUSTED_PROXY_HOPS", cls.trusted_proxy_hops)
+            ),
+            trusted_proxy_peers=_csv_env(
+                "RECSYS_TRUSTED_PROXY_PEERS", cls.trusted_proxy_peers
             ),
             rate_limit_per_minute=int(
                 os.environ.get("RECSYS_RATE_LIMIT_PER_MINUTE", cls.rate_limit_per_minute)
@@ -714,6 +830,49 @@ def build_feed(
             "NormContext has not been built yet (service is still warming up)",
         )
     snapshot = state.snapshot_cache.value  # None is a legitimate value — FAIL_CLOSED handles it
+
+    # ★★★ B6 (2026-08-06 full-system QA) — THE REFUSAL RUNS FIRST NOW.
+    #
+    # This gate used to fire inside `rank_feed`, i.e. AFTER `build_viewer_profile`
+    # had already made its live HAFSQL calls (`follows_of`/`mutes_of`/
+    # `derive_interest_tags`) and after `gather_candidates` had hydrated the pool.
+    # Measured by the QA seat: 33s uncached vs 7ms cached — so under exactly the
+    # condition this refusal exists for (the weekly trust batch has stopped, or
+    # the DB holding the snapshot is unreachable), every request paid the FULL
+    # live cost and was then thrown away with a 503.
+    #
+    # That is backwards twice over. FAIL_CLOSED exists to PROTECT during an
+    # outage, and running it last meant it protected nothing; worse, it amplified
+    # a local outage into sustained load on a SHARED third-party mirror we do not
+    # own and were nearly banned from once already (see `ServiceConfig`'s B4c
+    # block). A refusal that costs more than a success is not a safety valve.
+    #
+    # ★ DELIBERATELY THE SAME PREDICATE, NOT A SECOND ONE. `_trust_is_fresh` is
+    # the exact function `rank_feed` gates on, called with the exact same
+    # arguments (`snapshot`, `now`, `settings.trust.max_snapshot_age_days`), so
+    # this cannot drift into refusing a request `rank_feed` would have served or
+    # vice versa. `health_payload` below calls the same function for the same
+    # reason. The `except MissingTrustError` handler further down is KEPT as
+    # defence in depth rather than deleted: if these two ever DO disagree, the
+    # request is still refused rather than silently served fail-open.
+    if not _trust_is_fresh(
+        snapshot, now=now, max_age_days=state.settings.trust.max_snapshot_age_days
+    ):
+        reason = "no trust snapshot" if snapshot is None else "degraded or stale trust snapshot"
+        logger.error(
+            "feed: REFUSING every request BEFORE any upstream work — %s "
+            "(viewer=%s). The weekly trust batch has probably stopped running; "
+            "/health reports status=degraded for this.",
+            reason,
+            account,
+        )
+        raise FeedUnavailableError(
+            "trust_unavailable",
+            f"refusing to rank ({reason}): the breadth budget, ring/lineage exclusion, "
+            "graph-cred floor and CF would all silently revert to full-breadth "
+            "fail-open. Refused before building the viewer profile so an outage "
+            "costs no upstream queries.",
+        )
 
     # A lite identity has no chain-side follow/mute list at all, so its profile
     # must NEVER fall through to `follows_of`/`mutes_of` — those would query
@@ -1103,10 +1262,27 @@ class FeedRequestHandler(BaseHTTPRequestHandler):
         only at the position those proxies control — counting from the RIGHT.
         Everything to the left of that is client-supplied and forgeable; a
         limiter keyed on a forgeable value is not a limiter.
+
+        ★ B10. And only when the request actually CAME from one of those
+        proxies (`trusted_proxy_peers`) — see the comment below and the field's
+        own docstring.
         """
         hops = self.state.config.trusted_proxy_hops
+        peer = self.client_address[0]
         if hops <= 0:
-            return self.client_address[0]
+            return peer
+        # ★★★ B10 (2026-08-06 QA) — AND THE REQUEST MUST HAVE COME THROUGH THEM.
+        # `hops > 0` said "there are N proxies in front of me"; nothing checked
+        # that THIS request arrived via one. A caller reaching the port directly
+        # supplied the entire chain, including `chain[-hops]`, and got a fresh
+        # rate-limit bucket per request — the limiter, which is the only thing
+        # bounding load onto a shared third-party mirror, silently stopped
+        # existing. The peer address is the one property of a request no header
+        # can rewrite, so it is what decides whether the header is heard at all.
+        # An untrusted peer is treated exactly as `hops=0`: judged on its own
+        # address, header ignored.
+        if not _peer_is_trusted_proxy(peer, self.state.config.trusted_proxy_peers):
+            return peer
         # ★★★ ROUND-5 COUNCIL (Seat 3): `.get()` returns only the FIRST
         # occurrence, and a client may send `X-Forwarded-For` on several header
         # lines. RFC 7230 §3.2.2 says repeated fields are equivalent to one
@@ -1119,7 +1295,7 @@ class FeedRequestHandler(BaseHTTPRequestHandler):
             # Fewer hops than declared: the request did not come through the
             # expected proxy chain. Fall back to the peer address rather than
             # trusting a short (and therefore forged) header.
-            return self.client_address[0]
+            return peer
         return chain[-hops]
 
     def _authorized(self) -> bool:

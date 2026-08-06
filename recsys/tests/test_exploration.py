@@ -1459,11 +1459,12 @@ def test_need_tier_band_edges_are_inclusive_of_the_upper_boundary() -> None:
     # improvement from `(0,4,8,20)` comes FROM destroying the zero band — the
     # gain and the regression are one mechanism, so band edges cannot buy one
     # without the other.
-    assert DEFAULT_NEED_BANDS == (0, 1, 3, 8, 20)
+    assert DEFAULT_NEED_BANDS == (0, 1, 4, 8, 20)
     assert _need_tier(0, DEFAULT_NEED_BANDS) == 0    # band 0 is EXACTLY {0}
     assert _need_tier(1, DEFAULT_NEED_BANDS) == 1    # the edge belongs to the NEW band
     assert _need_tier(2, DEFAULT_NEED_BANDS) == 1
-    assert _need_tier(3, DEFAULT_NEED_BANDS) == 2    # ★ THE DEAD ZONE — see DEFAULT_NEED_BANDS
+    assert _need_tier(3, DEFAULT_NEED_BANDS) == 1    # ★ DEAD ZONE CLOSED — 3 stays in band 1
+    assert _need_tier(4, DEFAULT_NEED_BANDS) == 2    # the merit threshold is where you leave it
     assert _need_tier(7, DEFAULT_NEED_BANDS) == 2
     assert _need_tier(8, DEFAULT_NEED_BANDS) == 3
     assert _need_tier(19, DEFAULT_NEED_BANDS) == 3
@@ -1471,25 +1472,44 @@ def test_need_tier_band_edges_are_inclusive_of_the_upper_boundary() -> None:
     assert _need_tier(1000, DEFAULT_NEED_BANDS) == 4
 
 
-def test_one_and_two_distinct_engagers_tie_but_zero_and_three_do_not() -> None:
+def test_one_two_and_three_engagers_tie_but_zero_and_four_do_not() -> None:
     """Boundary check inside `eligible_for_exploration` itself, for the bands as
-    shipped after the round-5 council: 1, 2 AND 3 distinct engagers tie (band 1),
-    4 sits one band above, and NONE of them may tie with a genuine 0-engagement
-    newcomer — band 0 stays exclusive, which is the property that keeps the lane
-    aimed at the truly unheard.
+    shipped after the dead-zone fix landed (2026-08-06): 1, 2 AND 3 distinct
+    engagers tie (band 1), 4 sits one band above, and NONE of them may tie with a
+    genuine 0-engagement newcomer — band 0 stays exclusive, which is the property
+    that keeps the lane aimed at the truly unheard.
 
-    ★ `3` used to fall to band 2 while merit needs ~4, so an author earning their
-    third engager dropped out of the lane before anything else carried them."""
+    ★★★ THIS IS THE DEAD ZONE, CLOSED. `3` used to fall to band 2 while merit
+    needs ~4 vouched engagers to carry an author, so someone earning their THIRD
+    reader dropped out of the lane before anything else picked them up —
+    measured reach 10 -> 0, strictly worse than having no engagement at all.
+    Earning support made you disappear. Now the band runs to the merit threshold,
+    so there is no count at which an author is both too engaged for the lane and
+    not engaged enough for merit.
+
+    This test previously asserted the opposite (`three-engagers` alone in a
+    higher band) and is inverted deliberately, not deleted — the old assertion
+    was pinning the bug.
+    """
     one = _attributed("one-engager", "p", days_old=0, commenters=("a",))
     two = _attributed("two-engagers", "p", days_old=0, commenters=("a", "b"))
     three = _attributed("three-engagers", "p", days_old=0, commenters=("a", "b", "c"))
+    four = _attributed("four-engagers", "p", days_old=0, commenters=("a", "b", "c", "d"))
     newcomer = _cand("zero-engagers", "p", days_old=0)
 
-    got = _eligible([one, two, three, newcomer])
+    got = _eligible([one, two, three, four, newcomer])
 
-    assert got[0].post.author == "zero-engagers"     # alone, ahead of everyone
-    assert got[-1].post.author == "three-engagers"   # alone, one band above 1-2
-    assert {c.post.author for c in got[1:3]} == {"one-engager", "two-engagers"}
+    assert got[0].post.author == "zero-engagers"    # alone, ahead of everyone
+    assert got[-1].post.author == "four-engagers"   # alone, one band above 1-3
+    assert {c.post.author for c in got[1:4]} == {
+        "one-engager",
+        "two-engagers",
+        "three-engagers",
+    }, (
+        "the 3-engager dead zone is back: an author with 3 distinct engagers must "
+        "sit in the SAME band as 1 and 2, not be demoted out of the lane while "
+        "merit still needs ~4 to carry them"
+    )
 
 
 def test_c8_banding_does_not_hide_a_genuinely_well_heard_author() -> None:

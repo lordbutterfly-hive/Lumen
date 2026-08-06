@@ -361,6 +361,60 @@ def test_build_feed_raises_trust_unavailable_when_snapshot_is_stale() -> None:
     assert exc_info.value.kind == "trust_unavailable"
 
 
+def test_build_feed_refuses_a_stale_snapshot_before_touching_the_gateway() -> None:
+    """★ B6 (2026-08-06 QA) — the FAIL_CLOSED refusal must cost NOTHING upstream.
+
+    The two tests above only prove the 503 happens. It used to happen inside
+    `rank_feed`, i.e. AFTER `build_viewer_profile` had already run its live
+    HAFSQL queries — measured 33s of upstream work per request, thrown away.
+    Under the exact condition the refusal exists for (trust batch stopped), the
+    service was hammering a shared third-party mirror to produce 503s.
+
+    This test gates the ORDER, which is the whole fix, by counting gateway
+    queries. It is written to FAIL if the hoisted gate in `build_feed` is
+    deleted: without it, `build_viewer_profile` runs and `fetch_calls` is
+    non-empty.
+
+    ★★ THE CONTROL IS THE POINT, and it is not decoration. "0 queries" is
+    trivially true of a gateway nothing ever asks — a vacuous pass of exactly
+    the class this project shipped twice (an assertion comparing two empty
+    results, passing with the mechanism deleted). So the SAME gateway, the SAME
+    viewer and the SAME call are run once more with only the snapshot's age
+    changed, and that run MUST issue queries. The refusing arm is only
+    meaningful because the serving arm proves the queries were there to skip.
+    """
+    trust_cfg = replace(DEFAULT_SETTINGS.trust, max_snapshot_age_days=14)
+    settings = replace(DEFAULT_SETTINGS, trust=trust_cfg)
+
+    stale = _fresh_snapshot(built_at=EPOCH - timedelta(days=400))
+    refusing_gw = _FetchStubGateway(popular=[make_post("pop1", "p1")])
+    state = _state_with(
+        gateway=refusing_gw, norm=_flat_norm(), snapshot=stale, now=EPOCH, settings=settings
+    )
+    with pytest.raises(service_app.FeedUnavailableError) as exc_info:
+        service_app.build_feed(state, "alice")
+    assert exc_info.value.kind == "trust_unavailable"
+    assert refusing_gw.fetch_calls == [], (
+        "the trust refusal ran AFTER upstream work: build_feed issued "
+        f"{len(refusing_gw.fetch_calls)} gateway quer(ies) before refusing. The "
+        "FAIL_CLOSED gate must be hoisted above build_viewer_profile — a refusal "
+        "that costs a live round-trip amplifies an outage onto a shared mirror."
+    )
+
+    # ---- CONTROL: same everything, fresh snapshot -> the queries DO happen ----
+    fresh = _fresh_snapshot(built_at=EPOCH)
+    serving_gw = _FetchStubGateway(popular=[make_post("pop1", "p1")])
+    serving_state = _state_with(
+        gateway=serving_gw, norm=_flat_norm(), snapshot=fresh, now=EPOCH, settings=settings
+    )
+    service_app.build_feed(serving_state, "alice")
+    assert serving_gw.fetch_calls, (
+        "CONTROL FAILED — this viewer issues no gateway queries even when served, "
+        "so the assertion above proves nothing about ordering. Fix the fixture "
+        "before trusting this test."
+    )
+
+
 def test_build_feed_succeeds_with_fresh_snapshot_and_norm_scores_in_0_1() -> None:
     posts = [make_post(f"author{i}", f"p{i}", votes=[make_vote(f"voter{i}")]) for i in range(5)]
     gateway = _FetchStubGateway(popular=posts)
@@ -1466,7 +1520,14 @@ def test_behind_a_declared_proxy_each_client_gets_its_own_budget() -> None:
     entry. This fails.
     """
     state = _offline_state()
-    state.config = replace(state.config, rate_limit_per_minute=2, trusted_proxy_hops=1)
+    state.config = replace(
+        state.config,
+        rate_limit_per_minute=2,
+        trusted_proxy_hops=1,
+        # ★ B10: the loopback peer these tests connect from must be a
+        # DECLARED proxy, or X-Forwarded-For is ignored (and it should be).
+        trusted_proxy_peers=("127.0.0.1",),
+    )
     with _RunningServer(state) as server:
         noisy = [
             _get_with_headers(server, "/feed?viewer=alice", {"X-Forwarded-For": "203.0.113.9"})[0]
@@ -1484,7 +1545,14 @@ def test_a_short_forwarded_chain_falls_back_to_the_peer_address() -> None:
     expected chain — trusting a short header would let a client shorten it on
     purpose and pick its own identity."""
     state = _offline_state()
-    state.config = replace(state.config, rate_limit_per_minute=2, trusted_proxy_hops=2)
+    state.config = replace(
+        state.config,
+        rate_limit_per_minute=2,
+        trusted_proxy_hops=2,
+        # ★ B10: the loopback peer these tests connect from must be a
+        # DECLARED proxy, or X-Forwarded-For is ignored (and it should be).
+        trusted_proxy_peers=("127.0.0.1",),
+    )
     with _RunningServer(state) as server:
         codes = [
             _get_with_headers(
@@ -1512,7 +1580,14 @@ def test_a_client_cannot_forge_its_identity_by_prepending_to_the_chain() -> None
     MUTANT: `chain[0]` instead of `chain[-hops]`. This fails.
     """
     state = _offline_state()
-    state.config = replace(state.config, rate_limit_per_minute=2, trusted_proxy_hops=1)
+    state.config = replace(
+        state.config,
+        rate_limit_per_minute=2,
+        trusted_proxy_hops=1,
+        # ★ B10: the loopback peer these tests connect from must be a
+        # DECLARED proxy, or X-Forwarded-For is ignored (and it should be).
+        trusted_proxy_peers=("127.0.0.1",),
+    )
     with _RunningServer(state) as server:
         noisy = [
             _get_with_headers(
@@ -1528,6 +1603,103 @@ def test_a_client_cannot_forge_its_identity_by_prepending_to_the_chain() -> None
         "a client spent another client's budget by sending the same forged "
         "leading X-Forwarded-For entry — the limiter is reading a forgeable position"
     )
+
+
+def test_forwarded_for_from_an_undeclared_peer_is_ignored() -> None:
+    """★★★ B10 (2026-08-06 QA) — DECLARING HOPS IS NOT DECLARING WHO.
+
+    `trusted_proxy_hops > 0` used to be sufficient on its own: `_client_identity`
+    read `X-Forwarded-For` on the strength of a number in the config, without
+    ever checking that the request arrived through a proxy. Anything that could
+    reach the port directly — a sibling container, anything inside the VPC, the
+    whole internet if the port is published — supplied the entire chain itself,
+    INCLUDING the rightmost position the code calls unforgeable, and minted a
+    fresh rate-limit bucket per request. The limiter is what bounds load onto a
+    shared third-party mirror, so unlimited buckets means no limiter.
+
+    Here the peer (loopback, where the test client actually connects from) is
+    NOT in `trusted_proxy_peers`, so every request must fall back to the peer
+    address and share one bucket, despite each carrying a distinct forged chain.
+
+    MUTANT: drop the `_peer_is_trusted_proxy` guard in `_client_identity`. Then
+    each forged header is its own bucket, nothing is ever throttled, and this
+    fails.
+    """
+    state = _offline_state()
+    state.config = replace(
+        state.config,
+        rate_limit_per_minute=2,
+        trusted_proxy_hops=1,
+        # A real proxy address that is NOT where these requests come from.
+        trusted_proxy_peers=("10.9.9.9",),
+    )
+    with _RunningServer(state) as server:
+        codes = [
+            _get_with_headers(
+                server, "/feed?viewer=alice", {"X-Forwarded-For": f"203.0.113.{i}"}
+            )[0]
+            for i in range(4)
+        ]
+    assert codes[:2] == [200, 200], codes
+    assert codes[2:] == [429, 429], (
+        "a caller that is NOT a declared proxy forged a fresh rate-limit bucket "
+        f"per request by supplying X-Forwarded-For: {codes}. The peer address, "
+        "not a config number, decides whether that header is heard."
+    )
+
+
+def test_a_declared_proxy_cidr_matches_the_peer() -> None:
+    """★ B10 control, and it is what makes the test above non-vacuous.
+
+    "Everything got throttled" is also what a totally broken forwarded-header
+    path looks like. The SAME server, the SAME forged chains, differing only in
+    whether the loopback peer is inside the declared CIDR — and here it is, so
+    the two clients get SEPARATE budgets. Without this arm, the assertion above
+    would pass just as happily if `X-Forwarded-For` had stopped working
+    altogether.
+    """
+    state = _offline_state()
+    state.config = replace(
+        state.config,
+        rate_limit_per_minute=2,
+        trusted_proxy_hops=1,
+        trusted_proxy_peers=("127.0.0.0/8",),  # CIDR form, contains 127.0.0.1
+    )
+    with _RunningServer(state) as server:
+        noisy = [
+            _get_with_headers(server, "/feed?viewer=alice", {"X-Forwarded-For": "203.0.113.9"})[0]
+            for _ in range(4)
+        ]
+        victim = _get_with_headers(
+            server, "/feed?viewer=alice", {"X-Forwarded-For": "198.51.100.7"}
+        )[0]
+    assert noisy[:2] == [200, 200] and noisy[2:] == [429, 429], noisy
+    assert victim == 200, (
+        "CONTROL FAILED — the peer is inside the declared CIDR, so X-Forwarded-For "
+        "must be honoured and each client must get its own budget. If this is 429, "
+        "the forwarded path is broken and the test above proves nothing."
+    )
+
+
+def test_hops_without_declared_peers_is_refused_at_construction() -> None:
+    """★ B10. The precondition is ENFORCED, not documented.
+
+    A comment saying "bind to localhost or firewall the port" is exactly the
+    shape of control this project has now lost three times (the seat secret, the
+    API token, the lite DSN). An operator who sets hops because they added a
+    proxy, and does not know this field exists, must not get a silently
+    forgeable limiter — they get a startup error naming the fix.
+    """
+    with pytest.raises(ValueError, match="RECSYS_TRUSTED_PROXY_PEERS"):
+        service_app.ServiceConfig(trusted_proxy_hops=1)
+
+    # hops=0 needs no peers — the safe default must stay constructible.
+    assert service_app.ServiceConfig().trusted_proxy_hops == 0
+
+    # An unparseable entry is refused too: a typo that matched nothing would
+    # silently degrade to the shared-bucket outage punch list #3 fixed.
+    with pytest.raises(ValueError, match="not an IP or CIDR"):
+        service_app.ServiceConfig(trusted_proxy_hops=1, trusted_proxy_peers=("proxy.internal",))
 
 
 def test_a_never_built_snapshot_reads_as_starting_not_degraded() -> None:
@@ -1626,7 +1798,14 @@ def test_repeated_forwarded_for_header_lines_are_joined_not_truncated() -> None:
     import urllib.parse
 
     state = _offline_state()
-    state.config = replace(state.config, rate_limit_per_minute=2, trusted_proxy_hops=1)
+    state.config = replace(
+        state.config,
+        rate_limit_per_minute=2,
+        trusted_proxy_hops=1,
+        # ★ B10: the loopback peer these tests connect from must be a
+        # DECLARED proxy, or X-Forwarded-For is ignored (and it should be).
+        trusted_proxy_peers=("127.0.0.1",),
+    )
 
     def get_two_lines(server: _RunningServer, second: str) -> int:
         # ★ `urllib` MERGES repeated headers into one line, so the first version

@@ -13,9 +13,15 @@ attack under version control so the claim can be re-tested — in particular
 AFTER the fixes that followed it, which is the whole point: the same script has
 to be runnable before and after B1's serving log to say whether it worked.
 
-TWO ATTACKS, both keyed on the same fact — `DEFAULT_NEED_BANDS = (0, 1, 3, 8,
+TWO ATTACKS, both keyed on the same fact — `DEFAULT_NEED_BANDS = (0, 1, 4, 8,
 20)` makes "zero distinct engagers" an EXCLUSIVE TOP BAND, and an account with
-no engagement is a permanent, unassailable member of it:
+no engagement is a permanent, unassailable member of it.
+
+(The tuple was `(0, 1, 3, 8, 20)` when this was written; the 2026-08-06 dead-zone
+fix widened band 1 from `[1,3)` to `[1,4)`. That does NOT touch either attack:
+both are keyed on band 0 being exactly `{0}`, which is unchanged and was
+deliberately preserved by choosing this variant over the `(0,4,8,20)` merge —
+re-measured after the change, the farm's share of the lane is identical.)
 
   A. FARM — N sock authors post once each and do nothing else. Every other
      defence on this lane is per-AUTHOR or per-FEED (`max_posts_per_author_epoch`,

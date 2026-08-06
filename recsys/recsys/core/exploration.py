@@ -208,14 +208,17 @@ logger = logging.getLogger("recsys.exploration")
 #: module-level default rather than inline in the function signature so a
 #: test (or a future config field) can reference the SAME shipped value
 #: instead of retyping the tuple.
-#: ★★★ THE 3-ENGAGER DEAD ZONE — MEASURED, NOT FIXED (2026-08-05, punch list
-#: item 6, deliberately left open).
+#: ★★★ THE 3-ENGAGER DEAD ZONE — CLOSED 2026-08-06 (punch list item 6). The
+#: history below is kept because two of the three attempts were wrong in ways
+#: worth not repeating, and because the reason this took three days is a lesson
+#: about gates, not about band edges. Read to the end before changing this tuple.
 #:
-#: `_need_tier` puts 0 engagers in tier 0, 1-2 in tier 1, and **3+ in tier 2**,
-#: while merit needs roughly 4 vouched engagers to carry an author. So an author
-#: who earns their THIRD engager drops to a tier that never wins the reserved
-#: slot, and is not yet carried on merit: measured reach 10 -> 0, which is worse
-#: than having no engagement at all. Earning support makes you disappear.
+#: THE DEFECT. `_need_tier` used to put 0 engagers in tier 0, 1-2 in tier 1, and
+#: **3+ in tier 2**, while merit needs roughly 4 vouched engagers to carry an
+#: author. So an author who earned their THIRD engager dropped to a tier that
+#: never wins the reserved slot, and was not yet carried on merit: measured reach
+#: 10 -> 0, which is worse than having no engagement at all. Earning support made
+#: you disappear.
 #:
 #: It also means ZERO ENGAGEMENT IS AN EXCLUSIVE TOP BAND, which is the property
 #: the account-count farm is built on.
@@ -232,31 +235,65 @@ logger = logging.getLogger("recsys.exploration")
 #: eight behavioural tests is its own measured pass, not a punch-list slot — and
 #: this lane has produced a regression from three of its last five changes. The
 #: numbers above say the merge is probably right; they do not say it is safe.
-#: ★★★ THE 3-ENGAGER DEAD ZONE — FIX IDENTIFIED, NOT SHIPPED (2026-08-06).
+#: ★★★ SHIPPED 2026-08-06 — `(0,1,4,8,20)`, and WHY THE BLOCKER WAS NOT REAL.
 #:
-#: `(0,1,4,8,20)` is the RIGHT answer and it is not here yet. It closes the dead
-#: zone (3 engagers stay in band 1 instead of dropping to band 2 while merit
-#: needs ~4) AND keeps band 0 exclusive to genuine zero-engagement newcomers —
-#: round-5 Seat 3's variant, strictly better than the `(0,4,8,20)` merge, whose
-#: farm "gain" came FROM destroying the zero band.
+#: This is round-5 Seat 3's variant, and it is strictly better than the
+#: `(0,4,8,20)` merge above: it closes the dead zone (3 engagers stay in band 1
+#: instead of dropping to band 2 while merit needs ~4) AND keeps band 0
+#: exclusive to genuine zero-engagement newcomers. The merge's farm
+#: "improvement" came FROM destroying that band — the gain and the regression
+#: were one mechanism, so band edges could not buy one without the other.
 #:
-#: IT WAS APPLIED, MEASURED, AND BACKED OUT for one reason, measured causally by
-#: running `mutate_panels.py --panel q11_follow_curve.py` under each setting:
+#: IT WAS APPLIED, MEASURED, AND BACKED OUT ONCE (2026-08-05), because
+#: `mutate_panels.py --panel q11_follow_curve.py` reported:
 #:
 #:     (0,1,3,8,20)  ->  3 CAUGHT, 0 MISSED
 #:     (0,1,4,8,20)  ->  1 caught, 2 MISSED
 #:
-#: It silently BLINDS q11 to `unchosen_max_share` and `unchosen_max_per_page` —
-#: the diversity caps. Not because those caps break, but because the shifted
-#: lane composition stops q11's world exercising them, so the panel can no
-#: longer fail when they are removed. Everything else was green: 14/14 panels,
-#: 864 tests, farm attack unchanged, 2 boundary pins updated.
+#: and that was read as "the shifted lane composition stops q11's world
+#: exercising `unchosen_max_share`/`unchosen_max_per_page`, so the panel can no
+#: longer fail when they are deleted." Backing out was the right call on the
+#: evidence available: trading a real product bug for a silent loss of evidence
+#: is the wrong trade on a project whose signature failure is gates that pass
+#: while the thing is broken.
 #:
-#: Shipping it would have traded a real product bug for a silent loss of
-#: evidence, on a project whose defining failure is gates that pass while the
-#: thing is broken. It lands when q11's fixture still exercises those caps
-#: afterwards — that is the whole remaining task, and it is small.
-DEFAULT_NEED_BANDS: tuple[int, ...] = (0, 1, 3, 8, 20)
+#: ★ THAT DIAGNOSIS WAS WRONG, and re-measuring it directly is what finally
+#: shipped this (2026-08-06). Both numbers reproduce exactly; the explanation
+#: does not survive contact with the curves behind them:
+#:
+#:   * The caps are exercised just as hard under the new bands. Deleting the cap
+#:     still moves q11's curve by -0.036 at n=12 and -0.044 at n=20.
+#:   * The lane composition barely moved AT ALL. Baseline and mutant curves under
+#:     the two band settings differ by ~0.0004 at every follow count.
+#:   * What actually flipped:
+#:
+#:         cap-off mutant, n=20, old bands:  0.5494  vs threshold 0.54950 -> CAUGHT
+#:         cap-off mutant, n=20, new bands:  0.5495  vs threshold 0.54950 -> MISSED
+#:
+#: A margin of ONE TEN-THOUSANDTH, at one follow count, on a tolerance of 0.015.
+#: q11's `ACCEPTED_CURVE` had gone stale — the system had improved 0.02-0.04
+#: above it at six of eight points — and that stale headroom was quietly
+#: absorbing the entire effect of deleting the mechanism. The band change did not
+#: remove coverage. It nudged a number by 0.0001 across a line it was already
+#: sitting on. **The coverage this "blocker" was protecting did not exist.**
+#:
+#: Re-anchoring `ACCEPTED_CURVE` to the measured current baseline (UPWARD — a
+#: tightening, see the long note at that constant) restores the gate honestly:
+#: the same two mutants now fail at THREE follow counts by up to 0.044, 2-3x the
+#: tolerance instead of 0.7% of it. Then this shipped.
+#:
+#: THE LESSON, which is worth more than the tuple: a gate reported CAUGHT for
+#: months while its true margin was 0.0001. "3 CAUGHT, 0 MISSED" is not evidence
+#: of coverage unless somebody has looked at the MARGIN. A pass and a coincidence
+#: are indistinguishable from the outside — exactly the failure mode the
+#: mutation harness exists to prevent, reappearing one level up, inside the
+#: harness's own reference values.
+#:
+#: Verified at ship: 869 tests pass, 14/14 panels exit 0, panel mutation gate
+#: 11 CAUGHT / 0 MISSED / 7 DECLARED, farm attack unchanged, and the two
+#: boundary pins in `tests/test_exploration.py` inverted deliberately (they were
+#: pinning the bug).
+DEFAULT_NEED_BANDS: tuple[int, ...] = (0, 1, 4, 8, 20)
 
 
 def _rotation_key(author: str, bucket: int, secret: bytes) -> bytes:

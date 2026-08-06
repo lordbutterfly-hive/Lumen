@@ -19,6 +19,7 @@ being done on text.
 from __future__ import annotations
 
 import pathlib
+import re
 import tomllib
 
 _ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -182,6 +183,103 @@ def test_the_artifact_passes_the_proxy_hop_count_to_the_service() -> None:
     assert "RECSYS_TRUSTED_PROXY_HOPS:" in feed, (
         "the feed service cannot be told how many proxies sit in front of it, "
         "so X-Forwarded-For is ignored and one client can 429 every user"
+    )
+
+
+def test_every_env_var_the_service_reads_reaches_the_container() -> None:
+    """★★★ 2026-08-06 — THE GENERAL FORM OF A DEFECT THIS PROJECT SHIPPED THREE
+    TIMES, and the reason it kept happening.
+
+    `LUMEN_LITE_DATABASE_URL` (round 4), then `RECSYS_TRUSTED_PROXY_HOPS`
+    (round 5), then `RECSYS_TRUSTED_PROXY_PEERS` — each found by a human
+    noticing ONE variable, and each answered with ONE more assertion naming that
+    variable. The round-5 ruling said it plainly: *knowing the rule has not been
+    enough; the rules need to be checked mechanically, not remembered.* A gate
+    that names a variable can only ever catch the variable somebody already
+    thought of.
+
+    So this asks the general question — every `RECSYS_*` name `app.py` reads
+    from the environment must appear in the feed service's `environment:` block
+    — and asking it for the first time immediately found FIVE more: the four
+    author-prior knobs and `RECSYS_VIEWER_CACHE_MAX_ENTRIES`, all unreachable
+    since they were written. None was a security control, which is exactly why
+    no human ever went looking.
+
+    MUTANT: delete any one variable from compose. This fails and names it.
+    """
+    app = (_ROOT / "recsys" / "service" / "app.py").read_text()
+    feed = (_ROOT / "deploy" / "compose.recsys.yml").read_text().split(
+        "\n  recsys-trust-batch:", 1
+    )[0]
+
+    read = set(re.findall(r'os\.environ\.get\(\s*"(RECSYS_[A-Z0-9_]+)"', app))
+    read |= set(re.findall(r'_csv_env\(\s*\n?\s*"(RECSYS_[A-Z0-9_]+)"', app))
+    # Non-empty control: a regex that silently stops matching would make this
+    # test pass by measuring nothing — the vacuous-gate failure mode this
+    # project has shipped twice.
+    assert len(read) >= 15, (
+        f"only found {len(read)} RECSYS_* env reads in app.py — the extraction "
+        "is broken, so this gate is vacuous. Fix the pattern before trusting it."
+    )
+
+    missing = sorted(name for name in read if f"{name}:" not in feed)
+    assert not missing, (
+        f"{len(missing)} env var(s) are read by the service and reach NO "
+        f"container: {', '.join(missing)}. Add them to the feed service's "
+        "environment: block in deploy/compose.recsys.yml. Config that exists in "
+        "code and not in the artifact is config that does not exist."
+    )
+
+
+def test_the_trust_batch_is_rescheduled_faster_than_the_snapshot_expires() -> None:
+    """★★★ 2026-08-06 — THE DEPLOYMENT HAD A GUARANTEED EXPIRY DATE.
+
+    `recsys-trust-batch` is a ONE-SHOT that runs once before the service starts.
+    Nothing ran it again. `TrustConfig.max_snapshot_age_days = 14` and `/feed` is
+    FAIL_CLOSED, so **fourteen days after any deploy every feed request refuses**
+    — not degrades, refuses — and the only symptom before that moment is nothing
+    at all. The cadence was documented as "an operator decision", which is the
+    same shape as every other control this project left optional and nobody set.
+
+    The real invariant is not "a scheduler exists" — it is that the schedule runs
+    STRICTLY FASTER THAN THE SNAPSHOT EXPIRES, and that relationship spans two
+    files that no human would think to compare (a YAML sleep and a Python
+    dataclass default). So this reads both and compares them.
+
+    MUTANT: raise `RECSYS_TRUST_BATCH_INTERVAL_S`'s default past 14 days, or
+    lower `max_snapshot_age_days` below the interval, or delete the scheduler.
+    Each fails here.
+    """
+    compose = (_ROOT / "deploy" / "compose.recsys.yml").read_text()
+
+    assert "recsys-trust-batch-cron:" in compose, (
+        "no recurring trust-batch scheduler in the artifact — the snapshot ages "
+        "out and /feed FAIL_CLOSEs on every request once it does"
+    )
+    cron = compose.split("\n  recsys-trust-batch-cron:", 1)[1]
+    assert "recsys.jobs.trust_batch" in cron, "the scheduler does not run the batch"
+    assert "restart: unless-stopped" in cron, (
+        "the scheduler has no restart policy, so one crash silently ends all "
+        "future trust snapshots"
+    )
+
+    match = re.search(r"RECSYS_TRUST_BATCH_INTERVAL_S:-(\d+)", cron)
+    assert match, "cannot find the scheduler's default interval to check it"
+    interval_s = int(match.group(1))
+
+    from recsys.config import DEFAULT_SETTINGS
+
+    max_age_s = DEFAULT_SETTINGS.trust.max_snapshot_age_days * 86_400
+    assert 0 < interval_s < max_age_s, (
+        f"the trust batch is scheduled every {interval_s}s "
+        f"({interval_s / 86_400:.1f}d) but a snapshot is refused once it is older "
+        f"than {max_age_s}s ({max_age_s / 86_400:.1f}d). The feed FAIL_CLOSEs in "
+        "the gap. The schedule must be strictly faster than the expiry."
+    )
+    # And with real headroom: one failed run must not exhaust the budget.
+    assert interval_s * 2 <= max_age_s, (
+        f"interval {interval_s / 86_400:.1f}d leaves no room for a failed run "
+        f"before the {max_age_s / 86_400:.1f}d expiry — one bad week is an outage"
     )
 
 
