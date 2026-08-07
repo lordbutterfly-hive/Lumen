@@ -99,13 +99,18 @@ export function useAccountEntries(
     initialDataUpdatedAt: seed ? Date.now() : undefined,
     staleTime: StaleTime.MEDIUM
   });
-  const { hasNextPage, isFetching, fetchNextPage } = result;
+  const { hasNextPage, isFetching, isError, fetchNextPage } = result;
 
   useEffect(() => {
-    if (inView && hasNextPage && !isFetching) {
+      // ★ DO NOT REFIRE INTO A FAILURE.
+      // The sentinel refired every time a failed attempt's retries exhausted —
+      // roughly one request every 2s, unbounded, for as long as the reader sat
+      // at the bottom of the list — while the control read "Loading". Adding
+      // `!isError` stops the storm and lets the button say what happened.
+    if (inView && hasNextPage && !isFetching && !isError) {
       fetchNextPage();
     }
-  }, [inView, hasNextPage, isFetching, fetchNextPage]);
+  }, [inView, hasNextPage, isFetching, isError, fetchNextPage]);
 
   const entries = result.data?.pages.flat() ?? [];
   return { ...result, entries, loadMoreRef: ref };

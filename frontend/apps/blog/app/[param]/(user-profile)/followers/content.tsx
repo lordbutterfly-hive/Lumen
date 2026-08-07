@@ -45,7 +45,17 @@ const FollowersContent = ({
     if (page + 1 < followersData.data.pages.length) {
       return setPage((prev) => prev + 1);
     }
-    followersData.fetchNextPage().then(() => setPage((prev) => prev + 1));
+    // ★ ADVANCE ONLY IF THE PAGE ACTUALLY ARRIVED.
+    // react-query's `fetchNextPage()` RESOLVES on failure too, so `.then()` fired
+    // regardless and `page` moved to an index that was never fetched: the list
+    // body rendered empty, the pagination chrome duplicated, "page 3 of 287" was
+    // a claim about nothing, and Next went permanently disabled with no error —
+    // recoverable only by a full reload. Pre-existing; surfaced by a forced
+    // network failure 2026-08-07.
+    followersData.fetchNextPage().then((result) => {
+      if (result.isError) return;
+      setPage((prev) => prev + 1);
+    });
   };
   const handlePrevPage = () => {
     if (page <= 0) return;

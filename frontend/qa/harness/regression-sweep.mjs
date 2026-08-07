@@ -35,7 +35,22 @@ export const CHANGES = [
   { area: 'empty vs error', what: 'tag page treats "does not exist" as empty', neighbour: 'Does a real outage now read as "nobody posted here yet"? That is the failure this fix could have introduced.' }
 ];
 
-/** Force a page to fail so you can see whether the app admits it. */
+/**
+ * Force a page to fail so you can see whether the app admits it.
+ *
+ * ★ CAUTION — THIS DOES NOT PRODUCE AN ERROR STATE.
+ * `setOffline(true)` sets `navigator.onLine = false`, and TanStack Query then
+ * PAUSES queries (`fetchStatus: 'paused'`) rather than failing them — it never
+ * even attempts the request, so `isError` never becomes true and every
+ * error-handling path stays untested. A tester lost real time to that false
+ * negative on 2026-08-07.
+ *
+ * To exercise `isError`, abort the specific request instead, scoped to the host
+ * (an unscoped `page.route('**\/*')` also blocks the app's own JS and produces a
+ * broken render that looks like a product bug):
+ *
+ *   await page.route('https://api.hive.blog/**', (r) => r.abort());
+ */
 export async function withOffline(page, fn) {
   await page.context().setOffline(true);
   try { return await fn(); } finally { await page.context().setOffline(false); }

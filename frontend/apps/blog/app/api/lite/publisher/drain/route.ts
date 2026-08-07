@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
 import { guardPublisher } from '@/blog/lib/lite/http/guard';
 import { reconcileOrphans } from '@/blog/lib/lite/content/post-service';
-import { runPublisherOnce, ProcessOutcome } from '@/blog/lib/lite/publisher/worker';
+import { runPublisherOnce, lastPauseReason, ProcessOutcome } from '@/blog/lib/lite/publisher/worker';
+import { countPending } from '@/blog/lib/lite/repositories/publish-job-repository';
 import { withAdvisoryLock } from '@/blog/lib/lite/db/pool';
 import { installWifBroadcaster } from '@/blog/lib/lite/publisher/hive-broadcaster';
 import { hasBroadcaster } from '@/blog/lib/lite/publisher/broadcaster';
@@ -48,7 +49,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const body = (await req.json().catch(() => ({}))) as { max?: number };
   const max = Math.min(Math.max(1, Number(body?.max) || 1), MAX_BATCH);
 
-  const counts: Record<ProcessOutcome, number> = { idle: 0, processed: 0, failed: 0 };
+  const counts: Record<ProcessOutcome, number> = { idle: 0, paused: 0, processed: 0, failed: 0 };
   // One drain at a time, cluster-wide. Broadcast pacing is process-local, so a
   // second overlapping drain would ignore the 3-second interval and get its
   // transactions rejected. Skipping is correct: the queue is still there next tick.
@@ -62,7 +63,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     for (let i = 0; i < max; i++) {
       const outcome = await runPublisherOnce(`drain-${process.pid}`);
       counts[outcome] += 1;
-      if (outcome === 'idle') break; // queue is empty — stop early
+      // 'idle' = nothing queued. 'paused' = something is WRONG and the queue is
+      // still there. Both stop this tick; only one of them is good news, and the
+      // response now says which — see ProcessOutcome's note for what an operator
+      // used to see instead.
+      if (outcome === 'idle' || outcome === 'paused') break;
     }
     return true;
   });
@@ -70,5 +75,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ status: 'skipped', reason: 'another drain is running', repaired });
   }
 
-  return NextResponse.json({ status: 'ok', ...counts, repaired });
+  // ★ A scheduler polling this must be able to tell "all caught up" from
+  //   "blocked, backlog growing". `status` says which, `reason` says why, and
+  //   `pending` says how much is waiting — so a stall is visible from the
+  //   response alone instead of only in a log line.
+  const stalled = counts.paused > 0;
+  return NextResponse.json({
+    status: stalled ? 'paused' : 'ok',
+    ...counts,
+    repaired,
+    ...(stalled ? { reason: lastPauseReason, pending: await countPending() } : {})
+  });
 }

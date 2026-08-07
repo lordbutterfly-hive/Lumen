@@ -56,14 +56,19 @@ export default function ProfileCommentsList({
           ref={loadMoreRef}
           type="button"
           onClick={() => fetchNextPage()}
-          disabled={!hasNextPage || isFetchingNextPage}
+          disabled={isFetchingNextPage || (!hasNextPage && !isError)}
           className="font-sans text-sm text-muted-foreground hover:text-foreground disabled:cursor-default"
         >
+          {/* ★ "Loading" while a fetch is FAILING is a lie the reader cannot
+              act on. With the retry storm stopped, this is the only remaining
+              signal — so it has to say what happened and let them try again. */}
           {isFetchingNextPage
             ? t('global.loading')
-            : hasNextPage
-              ? t('user_profile.load_newer')
-              : t('user_profile.nothing_more_to_load')}
+            : isError
+              ? t('user_profile.load_failed_retry')
+              : hasNextPage
+                ? t('user_profile.load_newer')
+                : t('user_profile.nothing_more_to_load')}
         </button>
       </div>
     </div>

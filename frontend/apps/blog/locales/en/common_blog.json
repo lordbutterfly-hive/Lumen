@@ -389,7 +389,8 @@
       "followed_you": "@{{username}} followed you",
       "mentioned_you_and_others": "@{{username}} mentioned you and {{others}} others",
       "subscribed_to": "@{{username}} subscribed to {{community}}"
-    }
+    },
+    "load_failed_retry": "Couldn't load more — tap to try again"
   },
   "communities": {
     "set_title_for_user": "Set Title for @{{username}}",

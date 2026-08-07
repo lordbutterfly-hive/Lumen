@@ -77,11 +77,36 @@ function isRetriable(error: unknown): boolean {
   return true;
 }
 
-export type ProcessOutcome = 'idle' | 'processed' | 'failed';
+/**
+ * ★ 'paused' EXISTS BECAUSE 'idle' WAS A LIE BY OMISSION.
+ *
+ * Three separate conditions used to return 'idle': the queue is empty, no
+ * broadcaster is armed, and the account is out of resource credits. The drain
+ * route reports that verbatim, so an operator polling it sees
+ * `{"status":"ok","idle":1}` — "nothing to do" — while a backlog grows and the
+ * real reason sits in a log line nobody is reading.
+ *
+ * Found 2026-08-07: 22 posts had been queued for 2h45m across many accounts
+ * while the drain answered "ok, idle" every five seconds. The publisher's own
+ * behaviour was CORRECT throughout (pausing below the RC floor is right —
+ * grinding jobs into terminal failure because the account is broke is worse);
+ * only its report of that behaviour was indistinguishable from healthy.
+ */
+export type ProcessOutcome = 'idle' | 'paused' | 'processed' | 'failed';
+
+/** Why the publisher is not working, when it is not working. Read by the drain route. */
+export let lastPauseReason: string | null = null;
 
 /** Process at most one job. Returns 'idle' when there is nothing to do. */
 export async function runPublisherOnce(workerId: string): Promise<ProcessOutcome> {
-  if (!liteConfig.enabled || !hasBroadcaster()) return 'idle';
+  if (!liteConfig.enabled) {
+    lastPauseReason = 'lite accounts are disabled';
+    return 'paused';
+  }
+  if (!hasBroadcaster()) {
+    lastPauseReason = 'no broadcaster is armed — nothing can be published';
+    return 'paused';
+  }
 
   // Recover jobs whose worker died mid-broadcast. Without this they sit in
   // 'publishing' forever — and that stall is the window in which an edit can
@@ -91,10 +116,18 @@ export async function runPublisherOnce(workerId: string): Promise<ProcessOutcome
   // Look before spending: every broadcast costs resource credits, and grinding jobs
   // into terminal failure because the account is out of RC is worse than pausing.
   const rc = await checkRc();
-  if (!rc.ok) return 'idle';
+  if (!rc.ok) {
+    lastPauseReason = rc.reason ?? 'resource credits below the floor';
+    return 'paused';
+  }
 
   const job = await jobs.claimNext(workerId);
-  if (!job) return 'idle';
+  if (!job) {
+    // The only genuinely idle case: armed, funded, and nothing waiting.
+    lastPauseReason = null;
+    return 'idle';
+  }
+  lastPauseReason = null;
 
   const { author, permlink } = job.payloadSnapshot;
   try {

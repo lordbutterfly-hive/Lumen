@@ -128,7 +128,7 @@ const VotesComponent = ({ post, type }: { post: Entry; type: 'comment' | 'post' 
         />
       ) : user.isLoggedIn && enable_slider && !vote_upvoted ? (
         <Popover>
-          <PopoverTrigger disabled={voteMutation.isLoading}>
+          <PopoverTrigger aria-label={t('cards.post_card.upvote')} disabled={voteMutation.isLoading}>
             <TooltipContainer
               loading={voteMutation.isLoading}
               text={t('cards.post_card.upvote')}
@@ -410,8 +410,16 @@ const TooltipContainer = ({
   return (
     <TooltipProvider>
       <Tooltip>
+        {/* ★ `text` is already the human label ("Upvote"/"Downvote") — it was
+            only ever shown in the tooltip, which a screen reader does not read.
+            Both vote controls on EVERY post card reported `name: ""` in
+            Chromium's accessibility tree: the two most important buttons on a
+            post announced as "button, button". Same string, now also the
+            accessible name. */}
         <TooltipTrigger data-testid={dataTestId} disabled={loading} asChild>
-          <span className="cursor-pointer">{children}</span>
+          <span className="cursor-pointer" role="button" aria-label={text} tabIndex={0}>
+            {children}
+          </span>
         </TooltipTrigger>
         <TooltipContent
           data-testid={dataTestId + '-tooltip'}

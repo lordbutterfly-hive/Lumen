@@ -105,7 +105,15 @@ case "$cmd" in
     ;;
   unkick|reinstate)
     name="${1:?usage: unkick <name>}"
-    user_action "$name" "${2:-}" false reinstate
+    # ★ TRUE, not false. `kick` passes hideContent=true and hides every post;
+    # `unkick` passed FALSE, so the account came back but its posts stayed
+    # hidden — the response even said `postsRestored: 0` and nobody read it.
+    # A moderator undoing a ban with the documented inverse command reasonably
+    # expects the ban's effects undone; leaving content hidden required knowing
+    # to run `show` per post. Verified 2026-08-06: two kick/unkick cycles left
+    # both posts at feed_visibility='hidden' and 404ing for other viewers.
+    # To reinstate the ACCOUNT but keep one post down, use `hide <permlink>`.
+    user_action "$name" "${2:-}" true reinstate
     ;;
   hide)
     post_action "${1:?usage: hide <permlink|id> \"reason\"}" "${2:?a reason is required}" hidden false

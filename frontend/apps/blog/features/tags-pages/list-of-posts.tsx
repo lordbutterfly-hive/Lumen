@@ -70,10 +70,15 @@ const SortedPagesPosts = ({ sort, tag = '' }: { sort: SortTypes; tag?: string })
   // can't fire while any fetch is in flight — otherwise empty/short pages keep
   // the sentinel in view and we'd loop until exhausting the feed.
   useEffect(() => {
-    if ((prefetchInView || inView) && hasNextPage && !isFetching) {
+      // ★ DO NOT REFIRE INTO A FAILURE.
+      // The sentinel refired every time a failed attempt's retries exhausted —
+      // roughly one request every 2s, unbounded, for as long as the reader sat
+      // at the bottom of the list — while the control read "Loading". Adding
+      // `!isError` stops the storm and lets the button say what happened.
+    if ((prefetchInView || inView) && hasNextPage && !isFetching && !isError) {
       fetchNextPage();
     }
-  }, [prefetchInView, inView, hasNextPage, isFetching, fetchNextPage]);
+  }, [prefetchInView, inView, hasNextPage, isFetching, isError, fetchNextPage]);
 
   // Calculate total posts to determine when to show prefetch trigger
   const totalPosts = data?.pages?.reduce((acc, page) => acc + (page?.length || 0), 0) || 0;

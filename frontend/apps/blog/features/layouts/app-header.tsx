@@ -167,12 +167,23 @@ const AppHeader: FC = () => {
           ) : user?.isLoggedIn ? (
             <TooltipProvider>
               <Tooltip>
-                <TooltipTrigger data-testid="profile-avatar-button" className="cursor-pointer">
-                  {/* Lane-A item 12: UserMenu no longer takes a notifications
-                      count — the dropdown's own Notifications row is gone,
-                      so the only remaining consumer of `data.unread` here is
-                      the badge on the avatar itself, below. */}
-                  <UserMenu user={user}>
+                {/* ★★★ THE MENU TRIGGER MUST BE THE FOCUSABLE ELEMENT.
+                    This was `<TooltipTrigger><UserMenu><div>…`: the tooltip
+                    rendered the real <button>, and the dropdown's own trigger
+                    was a plain <div> INSIDE it. A mouse click landed on the div
+                    and worked; a keyboard Enter fired on the outer button and
+                    never reached the menu, so the dropdown could not be opened
+                    by keyboard at all — and it is the ONLY route to Logout,
+                    Language, Sign-in & recovery and Upgrade, none of which are
+                    in the sidebar. A keyboard-only user could not log out.
+                    Now the menu wraps the tooltip, so the button Radix makes
+                    focusable is the one that opens the menu. */}
+                <UserMenu user={user}>
+                  <TooltipTrigger
+                    data-testid="profile-avatar-button"
+                    aria-label="Account menu"
+                    className="cursor-pointer"
+                  >
                     <div className="group relative inline-flex w-fit cursor-pointer items-center justify-center">
                       {data && data.unread !== 0 ? (
                         <div className="absolute bottom-auto left-auto right-0 top-0.5 z-50 inline-block -translate-y-1/2 translate-x-2/4 rotate-0 skew-x-0 skew-y-0 scale-x-100 scale-y-100 whitespace-nowrap rounded-full bg-destructive-icon px-1.5 py-1 text-center align-baseline text-xs font-bold leading-none text-white">
@@ -225,8 +236,8 @@ const AppHeader: FC = () => {
                         </AvatarFallback>
                       </Avatar>
                     </div>
-                  </UserMenu>
-                </TooltipTrigger>
+                  </TooltipTrigger>
+                </UserMenu>
                 {manabarsData && (
                   <TooltipContent className="flex flex-col bg-background-tertiary">
                     <span>Resource Credits</span>

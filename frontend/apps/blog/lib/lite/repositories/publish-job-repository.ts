@@ -72,6 +72,14 @@ export async function enqueue(input: EnqueueInput): Promise<PublishJob | null> {
  * bounded so a genuinely unpublishable post stops being retried instead of
  * being retried forever.
  */
+/** How many posts are waiting to reach Hive — the number an operator needs when the drain reports itself paused. */
+export async function countPending(): Promise<number> {
+  const { rows } = await query<{ n: string }>(
+    `SELECT count(*)::text AS n FROM publish_job WHERE status = 'pending'`
+  );
+  return Number(rows[0]?.n ?? 0);
+}
+
 export async function countJobsForPost(postId: string): Promise<number> {
   const { rows } = await query<{ n: string }>(
     `SELECT count(*)::text AS n FROM publish_job WHERE post_id = $1`,
