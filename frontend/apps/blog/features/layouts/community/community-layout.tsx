@@ -17,7 +17,7 @@ import PostSelectFilter from '@/blog/features/layouts/post-select-filter';
 import { usePathname } from 'next/navigation';
 import BasePathLink from '@/blog/components/base-path-link';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
-import { DEFAULT_OBSERVER } from '@/blog/lib/utils';
+import { DEFAULT_OBSERVER, chainObserver } from '@/blog/lib/utils';
 import { StaleTime } from '@/blog/lib/react-query';
 import {
   useSSRObserver,
@@ -33,7 +33,7 @@ const CommunityLayout = ({ children, community }: { children: ReactNode; communi
   const ssrObserver = useSSRObserver();
   const initialCommunity = useInitialCommunity();
   const initialSubscriptions = useInitialSubscriptions();
-  const clientObserver = user.isLoggedIn ? user.username : DEFAULT_OBSERVER;
+  const clientObserver = chainObserver(user);
   const observer = isHydrated ? clientObserver : ssrObserver;
   const isRolesPage = pathname?.includes('/roles/');
   const isCommunity = community?.startsWith('hive-');

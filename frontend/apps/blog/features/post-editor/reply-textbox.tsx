@@ -25,6 +25,7 @@ import RendererContainer from '../post-rendering/rendererContainer';
 import { getLogger } from '@ui/lib/logging';
 import { useCommentMutation, useUpdateCommentMutation } from '../post-rendering/hooks/use-comment-mutations';
 import { createLitePost } from '@/blog/lib/lite/client/lite-write';
+import { toast } from '@ui/components/hooks/use-toast';
 import { handleError } from '@ui/lib/handle-error';
 import { commentClassName } from '../post-rendering/comment-list-item';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
@@ -251,6 +252,20 @@ export function ReplyTextbox({
           handleError(new Error(result.message), { method: 'lite-comment', params: { username, permlink } });
           throw new Error(result.message);
         }
+        // ★ SAY SOMETHING, AND SAY THE TRUE THING.
+        //
+        // A lite reply is accepted here and BROADCAST LATER by the publisher
+        // account, so for a short while it genuinely is not in the thread yet.
+        // The reply box simply closed and the comment count did not move, which
+        // a UX tester read — reasonably — as the reply having vanished. Root
+        // posts have confirmed since this morning; replies never did. The wait
+        // is real, so the message names it rather than claiming it is already
+        // there.
+        toast({
+          title: 'Reply sent',
+          description: 'It will appear in this thread once it reaches Hive, usually within a minute.',
+          variant: 'success'
+        });
       } else {
         const commentParams = {
           parentAuthor: username,
@@ -368,7 +383,16 @@ export function ReplyTextbox({
               ref={btnRef}
               variant="redHover"
               className="w-24"
-              disabled={text === '' || commentMutation.isLoading || updateCommentMutation.isLoading}
+              // ★ Trim, and strip zero-width characters, before deciding it is
+              //   empty. `text === ''` let a reply of four spaces and a
+              //   zero-width space through to a 201 — invisible content posted
+              //   under your name. The composer and editor were fixed this
+              //   morning; the reply box kept the old test.
+              disabled={
+                text.replace(/[\u200B-\u200D\uFEFF]/g, '').trim() === '' ||
+                commentMutation.isLoading ||
+                updateCommentMutation.isLoading
+              }
               onClick={() => postComment()}
             >
               {commentMutation.isLoading || updateCommentMutation.isLoading ? (

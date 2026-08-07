@@ -40,6 +40,15 @@ export const consentPageController: GetServerSideProps = async (ctx) => {
         throw new Error('No user in session');
       }
 
+      // ★ Same gate as /api/auth/consent and /api/oauth/authorize: an OIDC
+      //   interaction hands a relying party an identity, and a Lumen lite
+      //   session has proved no keys for the name it carries. This controller
+      //   also honoured stored consent and finished the interaction without
+      //   ever checking the tier — the second half of the same seam.
+      if (!user.authenticateOnBackend) {
+        throw new Error('Session is not backend-authenticated; cannot complete an OIDC interaction');
+      }
+
       const clientDetails = await oidc.Client.find(params.client_id as string);
       const oidcClientDetails: OidcClientDetails = {
         clientId: params.client_id,

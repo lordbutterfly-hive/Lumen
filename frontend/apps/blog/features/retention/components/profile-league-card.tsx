@@ -13,6 +13,9 @@ import { useRetention } from '../hooks/use-retention';
 
 export interface ProfileLeagueCardProps {
   username: string;
+  /** False for a Lumen lite account: it has no chain tenure to look up. */
+  chainAccount?: boolean;
+
   className?: string;
 }
 
@@ -41,9 +44,9 @@ function GateMeter({ label, value, core, glow }: GateMeterProps) {
   );
 }
 
-export function ProfileLeagueCard({ username, className }: ProfileLeagueCardProps) {
+export function ProfileLeagueCard({ username, className, chainAccount = true }: ProfileLeagueCardProps) {
   const { t } = useTranslation('common_blog');
-  const { data: summary } = useRetention(username);
+  const { data: summary } = useRetention(username, chainAccount);
 
   if (!summary) return null;
 

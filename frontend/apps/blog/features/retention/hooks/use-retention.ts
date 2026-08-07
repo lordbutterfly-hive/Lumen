@@ -53,11 +53,25 @@ async function fetchRetention(username: string): Promise<RetentionSummary> {
   };
 }
 
-export function useRetention(username: string): UseQueryResult<RetentionSummary> {
+/**
+ * ★ A LUMEN LITE ACCOUNT HAS NO CHAIN TENURE, SO THERE IS NOTHING TO ASK FOR.
+ *
+ * `/api/streak/[user]` derives rank, streak and active weeks from the CHAIN, and
+ * answers `404 account not found` for a name that has no Hive account. Four of
+ * six UX testers independently noticed it firing — and failing — on essentially
+ * every page load, with no streak UI anywhere on screen to show for it. The
+ * consumers already render nothing without data, so the only thing the call was
+ * producing was load: this is the route that was once measured taking 639
+ * seconds, and it was being issued for readers it can never answer.
+ *
+ * `chainAccount` defaults to true so existing callers keep their behaviour; the
+ * profile passes the account's real tier.
+ */
+export function useRetention(username: string, chainAccount = true): UseQueryResult<RetentionSummary> {
   return useQuery({
     queryKey: ['retention', username, RETENTION_SOURCE ?? 'mock'],
     queryFn: () => fetchRetention(username),
-    enabled: Boolean(username),
+    enabled: Boolean(username) && chainAccount,
     staleTime: 5 * 60 * 1000,
     // On a failed chain read we deliberately do NOT fall back to the mock: the
     // consumers all render null without data, so the block disappears rather

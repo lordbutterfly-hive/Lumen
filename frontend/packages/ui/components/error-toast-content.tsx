@@ -44,11 +44,16 @@ const ErrorToastContent: React.FC<ErrorToastContentProps> = ({
           </div>
         )}
       </div>
-      {displayControls && (
+      {/* ★ RENDER IT OR DON'T — do not "hide" it at zero size.
+          This was `h-0 w-0 overflow-hidden`, toggled to `h-full` on expand. A
+          percentage height inside an auto-height toast has nothing to resolve
+          against, so the box stayed measurably 0x0 even after the chevron was
+          clicked: a UX tester found the text present in the accessibility tree
+          at 0x0 px while the reader saw nothing at all. Mounting it only when
+          it should be visible cannot fail that way. */}
+      {displayControls && showMoreOpen && (
         <pre
-          className={cn('h-0 w-0 overflow-hidden text-wrap break-words', {
-            'h-full max-h-[60vh] w-full overflow-y-auto px-4 md:max-h-[80vh]': showMoreOpen
-          })}
+          className="mt-2 max-h-[60vh] w-full overflow-y-auto whitespace-pre-wrap break-words px-4 text-xs md:max-h-[80vh]"
           data-testid="error-toast-content-message"
         >
           {fullError}

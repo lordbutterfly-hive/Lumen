@@ -96,7 +96,7 @@ test.describe('Post creation — basic (§2.1)', () => {
     });
 
     // Summary travels via json_metadata.summary (transactionService.post
-    // builds `jsonMetadata: { summary, app: 'hive.blog/0.9' }` — the
+    // builds `jsonMetadata: { summary, app: 'lumen/1.0' }` — the
     // `description` field that the optimistic UI cache uses lives only
     // in the React-Query state, never in the broadcast). The existing
     // expectCommentOperation only validates the textual fields, so we

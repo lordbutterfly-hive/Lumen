@@ -43,10 +43,34 @@ export function useUserCore(
   const { data: user } = useQuery<User>({
     queryKey: [QUERY_KEY.user],
     queryFn: async (): Promise<User> => getUser(),
-    refetchOnMount: false,
+    // ★★★ STALE-WHILE-REVALIDATE, NOT "TRUST LOCALSTORAGE FOREVER" (2026-08-06).
+    //
+    // THE BUG THIS FIXES, observed three separate times today: this hook
+    // reported LOGGED-OUT for a genuinely authenticated session. The header
+    // rendered "Log in" while `/api/users/me` on the very same page returned
+    // `{isLoggedIn: true, account_tier: "lite"}`.
+    //
+    // Cause: `initialData` seeds from localStorage, and with
+    // `refetchOnMount: false` React Query treats that seed as fresh and NEVER
+    // calls `getUser()`. So a browser whose local copy is empty or stale — a
+    // new browser, cleared storage, a session established in another tab, or a
+    // cookie that outlived the local copy — is pinned to `defaultUser`
+    // (logged out) for the whole page life, no matter what the server says.
+    //
+    // Consequences were not cosmetic: the signup interest picker silently never
+    // rendered, the short-form composer's post button did nothing, and the app
+    // looked "unpopulated" to a signed-in user.
+    //
+    // `initialDataUpdatedAt: 0` marks the seed as arbitrarily old, so it is used
+    // for the FIRST PAINT (no logged-out flash, which is why the seed exists)
+    // and is then immediately revalidated against the server, which is the only
+    // authority on whether the cookie is still good. Focus/reconnect refetches
+    // stay OFF — those were about chattiness, not correctness on load.
+    refetchOnMount: true,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     initialData: storedUser,
+    initialDataUpdatedAt: 0,
     onError: () => {
       storeUser(defaultUser);
     }

@@ -19,6 +19,9 @@ interface UserInfoProps extends UserPopoverCardProps {
   blacklist: string[];
 }
 
+/** Hive addresses a community by an id of this shape; a tag never looks like this. */
+const isCommunityId = (value: string): boolean => /^hive-\d+$/i.test(value ?? '');
+
 function UserInfo({
   permlink,
   moderateEnabled,
@@ -80,7 +83,19 @@ function UserInfo({
         data-testid={community_title ? 'comment-community-title' : 'comment-category-title'}
         translate="no"
       >
-        {community_title || `#${category}`}
+        {/* ★ `#${category}` IS RIGHT FOR A TAG AND WRONG FOR A COMMUNITY.
+            A post in a community carries the community's ID as its category —
+            `hive-174301` — so when the community title has not resolved, this
+            fallback printed "in #hive-174301" and styled it as a topic link.
+            The very same post's card in the feed, one click earlier, correctly
+            reads "in Sketchbook". A reader cannot interpret a numbered id and
+            has no reason to trust a page that shows them one.
+
+            The link itself still works (that URL is how communities are
+            addressed), so only the LABEL is wrong. `hive-<digits>` is the
+            community-id shape; anything else really is a tag and keeps its
+            leading hash. */}
+        {community_title || (isCommunityId(category) ? t('post_content.a_community') : `#${category}`)}
       </Link>
       <span className="text-muted-foreground">•</span>
       <span className="text-muted-foreground" title={String(parseDate(created))}>

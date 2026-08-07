@@ -10,6 +10,20 @@ const basePath = process.env.NEXT_PUBLIC_BASE_PATH || '';
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // ★ TWO INSTANCES, ONE WORKSPACE.
+  //
+  // `next dev` and `next start` both use `.next` by default, so running a dev
+  // server in this directory while a production server is serving from it
+  // overwrites the production build UNDER the running process: BUILD_ID goes
+  // empty, every static chunk 500s, and every route but `/` returns a bare
+  // "Internal Server Error". That is exactly what happened on 2026-08-07 when a
+  // second instance was started here for creator-token QA, and it cost a tester
+  // six of their eight charter steps.
+  //
+  // Default is unchanged. Set NEXT_DIST_DIR=.next-dev for the secondary
+  // instance and the two can no longer touch each other.
+  distDir: process.env.NEXT_DIST_DIR || '.next',
+
   reactStrictMode: true,
   poweredByHeader: false, // Don't expose X-Powered-By: Next.js
   compress: false, // Nginx handles compression; disabling avoids zlib memory retention (denser#886)

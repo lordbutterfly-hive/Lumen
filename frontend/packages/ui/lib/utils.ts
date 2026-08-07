@@ -89,7 +89,15 @@ export const blockGap = (
   return years + t('witnesses_page.bock_gap.years_ago');
 };
 
-export const numberWithCommas = (x: string) => x.replace(/\\B(?=(\d{3})+(?!\d))/g, ',');
+// BUG FIXED (was `/\\B.../`): a regex LITERAL only needs `\B` (zero-width
+// non-boundary) — `\\B` matches a literal backslash-then-"B", which never
+// occurs in a numeric string, so `.replace()` found nothing and every
+// caller (wallet balances, HP on both the legacy and redesigned profile,
+// the post-hover HP popover) silently rendered ungrouped digits, e.g. HP
+// "63241" instead of "63,241". This is the shared thousands-separator
+// helper for the whole app — grep call sites before ever touching this
+// regex again, and add a test if you do.
+export const numberWithCommas = (x: string) => x.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 
 export function convertToHP(
   vests: Big | NaiAsset,

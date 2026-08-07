@@ -7,7 +7,7 @@ import { getChain } from '@transaction/lib/chain';
 import { convertToHP } from '@ui/lib/utils';
 import { convertStringToBig } from '@ui/lib/helpers';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
-import { DEFAULT_OBSERVER } from '@/blog/lib/utils';
+import { DEFAULT_OBSERVER, chainObserver } from '@/blog/lib/utils';
 import { extractUsernameFromParam } from '@/blog/utils/validate-links';
 import { useSSRObserver, useInitialPosts } from '@/blog/components/observer-provider';
 import { useFollowingInfiniteQuery } from '@/blog/features/account-lists/hooks/use-following-infinitequery';
@@ -36,7 +36,7 @@ export default function ProfileMain() {
   const { user, isHydrated } = useUserClient();
   const ssrObserver = useSSRObserver();
   const initialPosts = useInitialPosts();
-  const observer = isHydrated ? (user.isLoggedIn ? user.username : DEFAULT_OBSERVER) : ssrObserver;
+  const observer = isHydrated ? (chainObserver(user)) : ssrObserver;
 
   const {
     data: profileData,
@@ -106,7 +106,19 @@ export default function ProfileMain() {
     dynamicGlobalData.total_vesting_shares,
     dynamicGlobalData.total_vesting_fund_hive
   );
-  const hp = vestingHive.minus(delegatedHive);
+  // ★ HP HEADLINE = OWN STAKE, matching how Hive's own wallet presents it
+  // (2026-08-06, owner ruling). Hive shows the account's OWN staked HIVE as the
+  // prominent figure and the delegation-adjusted total underneath as "Tot:":
+  //
+  //     74,842.337        <- own vesting_shares converted   (headline)
+  //     Tot: 69,665.865   <- own - delegated out + received  (secondary)
+  //
+  // This page previously showed ONLY the second number, unlabelled, so it read
+  // as a wrong balance next to every other Hive frontend. Both are correct —
+  // they answer different questions (what you own vs what you can vote with) —
+  // and the fix is to show them the way a Hive user already expects.
+  const hp = vestingHive;
+  const hpEffective = vestingHive.minus(delegatedHive);
 
   const isOwnProfile = user.isLoggedIn && username === user.username;
   const followingCount =
@@ -121,6 +133,7 @@ export default function ProfileMain() {
       <div className="mt-[58px] flex flex-wrap items-start justify-between gap-5 pl-1.5">
         <ProfileIdentity
           username={username}
+          chainAccount={!profileData._temporary}
           displayName={profileData.profile?.name || profileData.name}
           profile={profileData.profile}
           created={profileData.created}
@@ -143,9 +156,10 @@ export default function ProfileMain() {
         postCount={profileData.post_count ?? 0}
         followingCount={followingCount}
         hp={hp.toFixed(0)}
+        hpEffective={hpEffective.toFixed(0)}
       />
 
-      <ProfileLeagueCard username={username} className="mt-5" />
+      <ProfileLeagueCard username={username} className="mt-5" chainAccount={!profileData._temporary} />
 
       <div className="mt-7">
         <ProfileTabs
@@ -153,6 +167,7 @@ export default function ProfileMain() {
           observer={observer}
           postsCount={profileData.post_count}
           initialPosts={initialPosts}
+          lite={Boolean(profileData._temporary)}
         />
       </div>
     </div>

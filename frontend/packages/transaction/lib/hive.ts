@@ -64,7 +64,8 @@ export const getWitnessesByVote = async (limit: number): Promise<IWitness[]> => 
  */
 export const getTrendingTags = async (limit: number): Promise<ITrendingTag[]> => {
   const chain = await getChain();
-  return chain.api.database_api.get_trending_tags(['', limit]);
+  // condenser_api, NOT database_api — see the note on the declaration.
+  return chain.api.condenser_api.get_trending_tags(['', limit]);
 };
 
 export const getAuthority = async (username: string): Promise<AccountAuthorityUpdateOperation> => {

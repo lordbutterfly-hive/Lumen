@@ -22,6 +22,26 @@ const CAP_PRESETS = [
   { label: 'Generous', value: 100000, note: 'more buyers' }
 ];
 
+/**
+ * ★ A PRICE FIELD THAT ACCEPTS "banana".
+ *
+ * The service-price and first-buy inputs stored whatever was typed — `abc`,
+ * `-50`, `999999999999` all survived into later steps and kept Continue
+ * enabled. The Supply step one screen along already strips non-digits from its
+ * own field, so the wizard disagreed with itself about whether its money inputs
+ * are validated. Found by an exploratory UX tester 2026-08-06.
+ *
+ * Permissive on purpose: it never rejects a keystroke mid-typing (`1.` and ``
+ * are both fine while the reader is still going), it only refuses what cannot
+ * be a dollar amount — letters, symbols, a minus sign, a second decimal point,
+ * and more than two decimal places.
+ */
+function sanitizeMoneyInput(raw: string): string {
+  const cleaned = (raw ?? '').replace(/[^\d.]/g, '');
+  const [whole, ...rest] = cleaned.split('.');
+  return rest.length ? `${whole}.${rest.join('').slice(0, 2)}` : whole;
+}
+
 const LaunchWizard: FC = () => {
   const router = useRouter();
   const studio = useLiveStudio();
@@ -127,12 +147,55 @@ const LaunchWizard: FC = () => {
               <div className="mt-4 flex items-center gap-3 rounded-xl border border-[#e4e6e9] px-4 py-3.5">
                 <span className="h-11 w-11 rounded-[13px]" style={{ background: 'linear-gradient(135deg,#c0392b,#e07b3e)' }} />
                 <div>
-                  <div className="text-[15px] font-bold text-[#161511]">@{studio.creator ?? '—'}</div>
-                  <div className="text-[12.5px] text-[#6b7280]">Hive reputation 68 · 1,240 followers</div>
+                  <div className="text-[15px] font-bold text-[#161511]">
+                    {/* ★ `@—` and "@your account" are placeholder strings that
+                        reached real readers: a signed-OUT visitor was walked
+                        through all four steps of a wizard whose entire premise
+                        is "a token bound to your account", and the first thing
+                        they saw was a dash where their name should be. */}
+                    {studio.loggedIn ? `@${studio.creator ?? '—'}` : 'Not signed in'}
+                  </div>
+                  {/* ★ REMOVED 2026-08-06: this line was HARDCODED "Hive reputation 68 ·
+                      1,240 followers". It rendered before the username had even
+                      resolved (@—) and kept the same numbers afterwards, so a
+                      brand-new account with no Hive history was shown someone
+                      else's standing. Inventing a number next to a real handle is
+                      the one thing this product must never do. Restore only when
+                      it reads live reputation/followers for the actual account. */}
                 </div>
               </div>
               <p className="mt-3 font-serif text-[14px] leading-[1.55] text-[#4b5563]">
-                Your token is bound to <strong>@{studio.creator ?? 'your account'}</strong> — one per account. It can’t be moved or renamed, and nobody can create one pretending to be you.
+                {studio.loggedIn && studio.isLite ? (
+                  <>
+                    {/* ★ SAY IT ON STEP 1, NOT STEP 4.
+                        Creator Studio tells a lite account the truth the moment
+                        it loads. This wizard let the same account name a token,
+                        price four services and choose a supply cap — three
+                        steps of real work — before mentioning it at the last
+                        screen. The effort is the cost; disclose before it is
+                        spent, exactly as the Studio one click away already does. */}
+                    Your token is bound to <strong>@{studio.creator}</strong> — one per account. But this account
+                    can’t sign transactions yet, so it can’t launch one. You can look through the steps;{' '}
+                    <a href="/upgrade" className="font-semibold text-[#c0392b] hover:underline">
+                      upgrade to a full account
+                    </a>{' '}
+                    when you want to go ahead.
+                  </>
+                ) : studio.loggedIn ? (
+                  <>
+                    Your token is bound to <strong>@{studio.creator ?? 'your account'}</strong> — one per account. It
+                    can’t be moved or renamed, and nobody can create one pretending to be you.
+                  </>
+                ) : (
+                  <>
+                    A creator token is bound to one account, so you’ll need to be signed in to launch one. You can
+                    look through the steps first —{' '}
+                    <a href="/login" className="font-semibold text-[#c0392b] hover:underline">
+                      sign in
+                    </a>{' '}
+                    when you’re ready.
+                  </>
+                )}
               </p>
             </>
           ) : null}
@@ -149,7 +212,7 @@ const LaunchWizard: FC = () => {
                       <span className="font-bold text-[#9ca3af]">$</span>
                       <input
                         value={prices[t.key] ?? ''}
-                        onChange={(e) => setPrices({ ...prices, [t.key]: e.target.value })}
+                        onChange={(e) => setPrices({ ...prices, [t.key]: sanitizeMoneyInput(e.target.value) })}
                         inputMode="decimal"
                         className="ml-1 w-[70px] border-0 text-[15px] font-bold tabular-nums text-[#161511] outline-none"
                       />
@@ -208,7 +271,7 @@ const LaunchWizard: FC = () => {
                 <label className="mb-1.5 block text-[12.5px] font-semibold text-[#6b7280]">Optional anti-snipe first buy</label>
                 <div className="flex items-center rounded-xl border border-[#e4e6e9] px-4 py-3">
                   <span className="text-[18px] font-bold text-[#161511]">$</span>
-                  <input value={firstBuy} onChange={(e) => setFirstBuy(e.target.value)} placeholder="0" inputMode="decimal" className="ml-1 flex-1 border-0 text-[18px] font-bold tabular-nums outline-none" />
+                  <input value={firstBuy} onChange={(e) => setFirstBuy(sanitizeMoneyInput(e.target.value))} placeholder="0" inputMode="decimal" className="ml-1 flex-1 border-0 text-[18px] font-bold tabular-nums outline-none" />
                 </div>
                 <div className="mt-1.5 text-[11.5px] text-[#9ca3af]">Buy some of your own token at launch, at full price — this stops a bot grabbing the cheap first tokens ahead of you.</div>
               </div>
@@ -232,6 +295,20 @@ const LaunchWizard: FC = () => {
               {studio.isLite ? (
                 <div className="mt-4 rounded-[12px] border border-[#e4e6e9] bg-[#f6f7f8] px-4 py-3.5 text-[13.5px] text-[#6b7280]">
                   This account can’t sign transactions yet, so it can’t launch a token. Upgrade to a full account first.
+                </div>
+              ) : null}
+              {/* ★ The same courtesy for a signed-out visitor. The button was
+                  already correctly disabled for them (`!studio.loggedIn`) but
+                  said nothing about why — a dead control with no explanation,
+                  in the one flow where the lite path explains itself perfectly
+                  one condition away. */}
+              {!studio.loggedIn ? (
+                <div className="mt-4 rounded-[12px] border border-[#e4e6e9] bg-[#f6f7f8] px-4 py-3.5 text-[13.5px] text-[#6b7280]">
+                  You’ll need to be signed in to launch a token —{' '}
+                  <a href="/login" className="font-semibold text-[#c0392b] hover:underline">
+                    sign in
+                  </a>{' '}
+                  and your choices here stay as you set them.
                 </div>
               ) : null}
               <button

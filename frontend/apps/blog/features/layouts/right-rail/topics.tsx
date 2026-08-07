@@ -12,6 +12,45 @@ const MAX_TOPICS = 9;
 // moderation/system tags that aren't meaningful as a "browse by topic" link.
 const EXCLUDED_TAGS = new Set(['', 'nsfw', 'test']);
 
+/**
+ * ★ WHAT COMES BACK FROM `get_trending_tags` IS MOSTLY NOT TOPICS.
+ *
+ * Measured against api.hive.blog 2026-08-06, the top of the list was:
+ * `hbd`, `burnpost`, `hive-13323`, `hive-105017`, `hive-163772`, `hive-110713`,
+ * `hive-124838`, `hive-193552`, `hive-194913` — rendered, that is a Topics card
+ * reading "Hbd · Burnpost · Hive-13323 · Hive-105017 …", which tells a reader
+ * nothing and invites a click into a numbered void.
+ *
+ * Two kinds of noise, excluded for two different reasons:
+ *
+ *  * `hive-<digits>` are COMMUNITY ids, not topics. They dominate the ranking
+ *    because a community post carries its id as the first tag. They are also
+ *    exactly the surface that was deliberately removed from this rail, so
+ *    smuggling them back in under a different heading would undo that.
+ *
+ *  * reward-token TRIBE tags (`pob`, `neoxian`, `cent`, `palnet`, …) are added
+ *    to route rewards, not to say what a post is about — the same reasoning,
+ *    with the same evidence, as `lib/lite/interests/taxonomy.ts`. A post tagged
+ *    `pob` can be about anything at all.
+ *
+ * Tribes that ARE genuinely topical (`leofinance`, `splinterlands`, `actifit`)
+ * are left in on purpose: they name one subject each.
+ */
+const COMMUNITY_ID = /^hive-\d+$/i;
+const REWARD_TRIBE_TAGS = new Set([
+  'pob', 'proofofbrain', 'neoxian', 'cent', 'waivio', 'waiv', 'pimp', 'archon',
+  'palnet', 'creativecoin', 'vyb', 'ctp', 'alive', 'oneup', 'lassecash', 'bbh',
+  'burnpost', 'hbd', 'hive', 'ecency', 'peakd', 'listnerds', 'dbuzz',
+  // Meta tags about the act of posting rather than any subject: `posh` marks a
+  // cross-post to Twitter, `curation`/`blog` label the format.
+  'posh', 'curation', 'blog'
+]);
+
+function isBrowsableTopic(name: string): boolean {
+  const tag = name.toLowerCase();
+  return !EXCLUDED_TAGS.has(tag) && !COMMUNITY_ID.test(tag) && !REWARD_TRIBE_TAGS.has(tag);
+}
+
 const Topics = () => {
   const { t } = useTranslation('common_blog');
   const {
@@ -20,12 +59,14 @@ const Topics = () => {
     isError
   } = useQuery({
     queryKey: ['right-rail-trending-tags'],
-    queryFn: () => getTrendingTags(MAX_TOPICS + EXCLUDED_TAGS.size),
+    // Ask for far more than we show: community ids and tribe tags occupy most of
+    // the head of this list, so a request for 12 yielded 0 usable topics.
+    queryFn: () => getTrendingTags(120),
     staleTime: StaleTime.LONG
   });
 
   const topics = (tags ?? [])
-    .filter((tag) => !EXCLUDED_TAGS.has(tag.name))
+    .filter((tag) => isBrowsableTopic(tag.name))
     .slice(0, MAX_TOPICS)
     .map((tag) => tag.name);
 

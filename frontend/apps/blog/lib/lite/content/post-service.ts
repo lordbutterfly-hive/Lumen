@@ -11,6 +11,7 @@ import { reserveContainerParent } from '../publisher/container';
 import * as containers from '../repositories/container-repository';
 import { ulid } from '../ids';
 import { preScreen } from './pre-screen';
+import { shortPostTitle } from '@/blog/lib/short-post-title';
 
 const logger = getLogger('app');
 
@@ -39,15 +40,12 @@ export type CreatePostResult =
   | { status: 'ok'; post: LumenPost }
   | { status: 'error'; code: string; message: string };
 
-/** Derive a title from the first line of the body for NORMAL posts. */
-function autoTitle(body: string): string {
-  const firstLine = body
-    .trim()
-    .split('\n')[0]
-    .replace(/[#*_>`~-]/g, '')
-    .trim();
-  return firstLine.length <= 60 ? firstLine : `${firstLine.slice(0, 57)}...`;
-}
+/**
+ * Derive a title from the first line of the body for NORMAL posts.
+ * The rule lives in lib/short-post-title.ts so the browser composer (which
+ * titles a Hive-keyed account's short post) cannot drift from it.
+ */
+const autoTitle = shortPostTitle;
 
 /** The on-chain thing a post hangs off: a real Hive post, a lite post, or a container. */
 interface OnChainParent {
@@ -347,9 +345,14 @@ export async function getLiteFeed(opts: { limit?: number; before?: string }): Pr
 
 export async function getLiteUserPosts(
   userId: string,
-  opts: { limit?: number; before?: string }
+  opts: { limit?: number; before?: string; visibleOnly?: boolean; kind?: 'posts' | 'comments' | 'all' }
 ): Promise<LumenPost[]> {
-  return posts.getUserPosts(userId, { limit: Math.max(1, Math.min(opts.limit ?? 20, MAX_PAGE)), before: opts.before });
+  return posts.getUserPosts(userId, {
+    limit: Math.max(1, Math.min(opts.limit ?? 20, MAX_PAGE)),
+    before: opts.before,
+    visibleOnly: opts.visibleOnly,
+    kind: opts.kind
+  });
 }
 
 export async function getLitePost(postId: string): Promise<LumenPost | null> {

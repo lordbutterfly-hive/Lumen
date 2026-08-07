@@ -8,16 +8,13 @@ import {
   DropdownMenuTrigger
 } from '@ui/components/dropdown-menu';
 import { ReactNode } from 'react';
-import ModeToggle from '../mode-toggle';
 import { Link } from '@hive/ui';
 import BasePathLink from '../../../components/base-path-link';
 import { Icons } from '@ui/components/icons';
-import { Button } from '@ui/components';
 import LangToggle from '../lang-toggle';
 import { useLogout } from '@smart-signer/lib/auth/use-logout';
-import { User, LoginType } from '@smart-signer/types/common';
+import { User } from '@smart-signer/types/common';
 import { useTranslation } from '@/blog/i18n/client';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@ui/components/tooltip';
 
 // TODO i18n — staged copy, same precedent as app-header's LABELS; move to
 // locales/*/common_blog.json with the rest of the Lumen copy.
@@ -26,36 +23,12 @@ const LITE_LABELS = {
   upgrade: 'Upgrade to a Hive account'
 };
 
-// Helper function to get login method icon
-const getLoginMethodIcon = (loginType: LoginType) => {
-  switch (loginType) {
-    case LoginType.google:
-      return <Icons.google className="h-4 w-4" />;
-    case LoginType.keychain:
-      return <Icons.hivekeychain className="h-4 w-4" />;
-    case LoginType.peakvault:
-      return <Icons.peakvault className="h-4 w-4" />;
-    case LoginType.metamask:
-      return <Icons.metamask className="h-4 w-4" />;
-    case LoginType.hiveauth:
-      return <Icons.hiveauth className="h-4 w-4" />;
-    case LoginType.hivesigner:
-      return <Icons.hivesigner className="h-4 w-4" />;
-    case LoginType.hbauth:
-    case LoginType.wif:
-    default:
-      return <Icons.keyRound className="h-4 w-4" />;
-  }
-};
-
 const UserMenu = ({
   children,
-  user,
-  notifications
+  user
 }: {
   children: ReactNode;
   user: User;
-  notifications?: number;
 }) => {
   const onLogout = useLogout();
   const { t } = useTranslation('common_blog');
@@ -64,31 +37,11 @@ const UserMenu = ({
     <DropdownMenu>
       <DropdownMenuTrigger asChild>{children}</DropdownMenuTrigger>
       <DropdownMenuContent className="w-56 bg-background-secondary" data-testid="user-profile-menu-content">
-        <DropdownMenuLabel className="flex w-full items-center justify-between">
+        {/* Item 11: this used to also show a login-method icon (e.g. the Hive
+            Keychain glyph) next to a "Hive"/"Blog" wordmark — a stray brand
+            escape hatch in a Lumen-only dropdown. Username only now. */}
+        <DropdownMenuLabel>
           <span data-testid="user-name-in-profile-menu">{user.username}</span>
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div
-                  className="flex items-center space-x-2"
-                  data-testid="login-method-indicator"
-                >
-                  {getLoginMethodIcon(user.loginType)}
-                  <div className="flex flex-col text-sm font-semibold">
-                    <span>Hive</span>
-                    <span className="text-destructive">Blog</span>
-                  </div>
-                </div>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>
-                  {t('navigation.user_menu.logged_in_with', {
-                    method: t(`navigation.user_menu.login_method.${user.loginType}`)
-                  })}
-                </p>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
         </DropdownMenuLabel>
 
         <DropdownMenuSeparator />
@@ -99,27 +52,20 @@ const UserMenu = ({
               <span className="w-full">{t('navigation.user_menu.profile')}</span>
             </DropdownMenuItem>
           </BasePathLink>
-          <Link href={`/@${user.username}/notifications`} data-testid="user-profile-menu-notifications-link">
-            <DropdownMenuItem className="cursor-pointer">
-              <Icons.clock className="mr-2" />
-              <span className="w-full">
-                {t('navigation.user_menu.notifications')}
-                {notifications ? `(${notifications})` : null}
-              </span>
-            </DropdownMenuItem>
-          </Link>
-          <Link href={`/@${user.username}/comments`} data-testid="user-profile-menu-comments-link">
-            <DropdownMenuItem className="cursor-pointer">
-              <Icons.comment className="mr-2" />
-              <span className="w-full">{t('navigation.user_menu.comments')}</span>
-            </DropdownMenuItem>
-          </Link>
-          <Link href={`/@${user.username}/replies`} data-testid="user-profile-menu-replies-link">
-            <DropdownMenuItem className="cursor-pointer">
-              <Icons.undo className="mr-2" />
-              <span className="w-full">{t('navigation.user_menu.replies')}</span>
-            </DropdownMenuItem>
-          </Link>
+          {/* Item 12: Notifications used to live here too, pointing at the same
+              route as the bell in app-header.tsx but reachable from a second
+              place. Notifications now have exactly one door: the bell. */}
+          {/* Comments removed for the same reason, 2026-08-06. The redesigned
+              profile already has a Comments TAB (`?tab=comments`), so this was a
+              second door to the same thing — except it led somewhere WORSE: the
+              legacy `/@user/comments` page, which still wears the old chrome
+              (the "Blacklisted Users • Muted Users • Followed Blacklists" strip,
+              "Blog / Posts / Social / Block Explorer" nav) and, for a lite
+              account, settles on "No Data Available … Check Node Status"
+              because it asks Hive for the posts of a handle that has no Hive
+              account. Driven signed-in against the production build. */}
+          {/* Item 10: Replies removed — it's the other route (besides
+              Notifications) that pointed at the legacy, unredesigned page. */}
           {/*
             The two doors a lite account needs and could not previously find. Both
             pages existed with nothing anywhere linking to them — the same way /login
@@ -142,22 +88,8 @@ const UserMenu = ({
               </Link>
             </>
           ) : null}
-          <DropdownMenuItem className="cursor-pointer">
-            <ModeToggle>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="flex h-6 w-full p-0 text-start font-normal"
-                data-testid="theme-mode"
-              >
-                <div className="h-6 w-8">
-                  <Icons.sun className="absolute rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
-                  <Icons.moon className="absolute rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
-                </div>
-                <span className="w-full">{t('navigation.user_menu.toggle_theme')}</span>
-              </Button>
-            </ModeToggle>
-          </DropdownMenuItem>
+          {/* Item 9: theme toggle removed — Lumen is light-only, dark mode
+              was unfinished/broken, and this was the only user-facing way in. */}
           <DropdownMenuItem className="cursor-pointer">
             <LangToggle logged={true} />
           </DropdownMenuItem>

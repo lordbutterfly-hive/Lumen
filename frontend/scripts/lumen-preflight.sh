@@ -92,6 +92,41 @@ else
   green "Google signup off (removes the OAuth token exposure)"
 fi
 
+# ---- 4b. CAPTCHA — the pair that must be set TOGETHER ----------------------
+# ★ 2026-08-06, found driving a PRODUCTION build behind real TLS. There are two
+# variables and three ways to get this wrong, and each one kills signup silently
+# in a different place:
+#
+#   secret only      -> the client renders no widget (it keys off the SITE key),
+#                       so it posts no token; the server demands one. Every
+#                       signup answers 403 captcha_failed.
+#   site key only    -> assertLiteEnabled() refuses to start signup in
+#                       production at all. Every signup answers 503.
+#   neither, in prod -> same 503. Captcha is NOT optional in production; the
+#                       code refuses to open signup without it rather than run
+#                       with bot protection that fails open.
+#
+# Only "both set" works. Cloudflare's always-pass TEST keys are fine for a
+# staging box: site 1x00000000000000000000AA / secret 1x0000000000000000000000000000000AA.
+if has LITE_TURNSTILE_SECRET && has REACT_APP_TURNSTILE_SITE_KEY; then
+  green "Turnstile fully configured (secret + public site key)"
+elif has LITE_TURNSTILE_SECRET; then
+  red "LITE_TURNSTILE_SECRET without REACT_APP_TURNSTILE_SITE_KEY — the widget never renders, no token is sent, and EVERY signup answers 403 captcha_failed"
+elif has REACT_APP_TURNSTILE_SITE_KEY; then
+  red "REACT_APP_TURNSTILE_SITE_KEY without LITE_TURNSTILE_SECRET — in production assertLiteEnabled() refuses signup entirely (503)"
+else
+  red "no Turnstile keys — in production signup is refused outright (503 lite_accounts_disabled). Captcha is mandatory there by design."
+fi
+
+# ---- 4c. the browser must be ALLOWED to load those third-party scripts ------
+# The CSP grants challenges.cloudflare.com / accounts.google.com only when the
+# matching PUBLIC (REACT_APP_*) variable is present in the SERVER's environment.
+# A key set only in a secret store the Next server does not see leaves the CSP
+# closed, and the symptom is a widget that never appears — not an error.
+if has LITE_GOOGLE_CLIENT_ID && ! has REACT_APP_LITE_GOOGLE_CLIENT_ID; then
+  red "LITE_GOOGLE_CLIENT_ID without REACT_APP_LITE_GOOGLE_CLIENT_ID — the Google button stays disabled AND the CSP blocks accounts.google.com"
+fi
+
 # ---- 5. upgrade path -------------------------------------------------------
 if has LITE_ACCOUNT_CREATOR_ACTIVE_WIF; then
   amber "LITE_ACCOUNT_CREATOR_ACTIVE_WIF set — this is an ACTIVE key, and the upgrade path has never broadcast a real transaction. Drive it on a testnet first."
@@ -109,6 +144,22 @@ if has RECSYS_FEED_URL; then
   has LITE_RECSYS_TOKEN || amber "LITE_RECSYS_TOKEN unset — recsys cannot pull the lite follow graph back"
 else
   amber "RECSYS_FEED_URL unset — 'For You' serves Hive trending, NOT the ranking engine"
+fi
+
+# ---- 5c. can recsys SEE Lumen's own posts? --------------------------------
+# ★ 2026-08-06: recsys gates ALL lite-post sourcing on `LiteConfig.enabled`,
+# which is `bool(publisher_accounts)`. With it unset the ranker silently ignores
+# every Lumen-native post — the feed looks fine and is quietly Hive-only. This
+# is a RECSYS-side variable, so it is checked against recsys's env file.
+RECSYS_ENV="${RECSYS_ENV_FILE:-/mnt/o/Lumen/recsys/.env.local}"
+if [ -f "$RECSYS_ENV" ]; then
+  if grep -qE '^(LITE_PUBLISHER_ACCOUNTS|LITE_FRONTEND_ACCOUNT_[A-Z]+)=.+' "$RECSYS_ENV"; then
+    green "recsys can source Lumen-native posts (publisher accounts set)"
+  else
+    red "recsys has no LITE_PUBLISHER_ACCOUNTS/LITE_FRONTEND_ACCOUNT_* — it will IGNORE every Lumen post and serve a silently Hive-only feed"
+  fi
+else
+  amber "recsys env not found at $RECSYS_ENV — cannot check lite sourcing"
 fi
 
 # ---- 6. database reachable + migrated -------------------------------------

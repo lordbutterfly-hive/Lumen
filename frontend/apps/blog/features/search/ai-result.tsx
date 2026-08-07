@@ -7,7 +7,7 @@ import { useEffect, useState, useMemo } from 'react';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { Entry, MixedPostsResponse, PostStub } from '@hive/common-hiveio-packages/wax';
 import { PER_PAGE } from './lib/utils';
-import { DEFAULT_OBSERVER, Preferences } from '@/blog/lib/utils';
+import { DEFAULT_OBSERVER, Preferences, chainObserver } from '@/blog/lib/utils';
 import { PostListItemSkeleton } from '@hive/ui';
 import { StaleTime } from '@/blog/lib/react-query';
 import { useSSRObserver } from '@/blog/components/observer-provider';
@@ -33,7 +33,7 @@ const AIResult = ({
   // Use SSR observer (from cookie) before hydration to match the prefetched
   // initialData and avoid sending DEFAULT_OBSERVER for a logged-in user during
   // the brief pre-hydration window.
-  const clientObserver = user.isLoggedIn ? user.username : DEFAULT_OBSERVER;
+  const clientObserver = chainObserver(user);
   const observer = isHydrated ? clientObserver : ssrObserver;
   const [loadedStubPosts, setLoadedStubPosts] = useState<Entry[]>([]);
   const [currentPage, setCurrentPage] = useState(1);

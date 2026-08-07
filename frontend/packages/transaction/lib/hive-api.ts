@@ -370,6 +370,42 @@ export const getFollowers = async (params?: Partial<IGetFollowParams>): Promise<
   }
 };
 
+/**
+ * ★★★ NORMALISE THE SEARCH PATTERN BEFORE IT REACHES HIVE.
+ *
+ * `search_api.find_text` feeds the pattern straight into a PostgreSQL text
+ * query, and characters that are meaningful to a `tsquery` blow it up. Measured
+ * against api.hive.blog 2026-08-06:
+ *
+ *     pattern "O'Brien"  -> HTTP 502, XX000 "could not parse query string"
+ *     pattern "don't"    -> HTTP 502, XX000 "could not parse query string"
+ *     pattern "O Brien"  -> HTTP 200, results
+ *
+ * An apostrophe is not an edge case. It is in `don't`, `it's`, `O'Brien`,
+ * `we're` — a huge share of what anyone types into a search box. Unhandled, the
+ * page span a spinner for 10-15 s and then told the reader to go check whether
+ * the node was running.
+ *
+ * So the metacharacters become SPACES rather than being deleted: `don't` as
+ * `don t` matches the post that contains "don't", while `dont` would not.
+ * Zero-width characters are removed outright — they are invisible, carry no
+ * meaning, and produce a query the reader cannot see or correct.
+ *
+ * (`<` was reported alongside this and is NOT part of it: `hive<` searches fine.
+ * `<script>` fails for an unrelated reason — it reduces to the very common term
+ * "script" and hits the backend's own statement timeout, the same limit that
+ * makes the "Newest" sort fail on broad words.)
+ */
+export function normalizeSearchPattern(pattern: string): string {
+  return (pattern ?? '')
+    // Invisible characters: zero-width space/non-joiner/joiner, BOM, soft hyphen.
+    .replace(/[\u200B-\u200D\uFEFF\u00AD]/g, '')
+    // tsquery operators and quoting. Space, not deletion — see above.
+    .replace(/['"&|!()<>:*\\]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 export const getByText = async ({
   pattern,
   sort = 'relevance',
@@ -380,8 +416,12 @@ export const getByText = async ({
   start_permlink = ''
 }: Parameters<Awaited<ReturnType<typeof getChain>>['api']['search-api']['find_text']>[0] // Temporary solution
 ): Promise<Entry[]> => {
+  const safePattern = normalizeSearchPattern(pattern);
+  // Nothing searchable left (e.g. the reader typed only punctuation). Asking
+  // anyway returns a parse error the reader cannot act on.
+  if (safePattern.length === 0) return [];
   return (await getChain()).api['search-api'].find_text({
-    pattern,
+    pattern: safePattern,
     sort,
     author,
     limit,

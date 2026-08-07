@@ -4,6 +4,7 @@ import AccountTopicResult from '@/blog/features/search/account-topic-result';
 import AIResult from '@/blog/features/search/ai-result';
 import { DEFAULT_PREFERENCES, Preferences } from '@/blog/lib/utils';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useTranslation } from '@/blog/i18n/client';
 import { useQuery } from '@tanstack/react-query';
 import { getHiveSenseStatus } from '@transaction/lib/hivesense-api';
 import { ModeSwitchInput } from '@ui/components/mode-switch-input';
@@ -17,7 +18,7 @@ interface SearchContentProps {
   classicQuery: string | undefined;
   userTopicQuery: string | undefined;
   topicQuery: string | undefined;
-  sortQuery: SearchSort | undefined;
+  sortQuery: SearchSort;
   initialAIResults?: MixedPostsResponse | null;
   initialClassicResults?: Entry[] | null;
   initialTopicResults?: Entry[] | null;
@@ -39,6 +40,7 @@ const SearchContent = ({
     refetchOnWindowFocus: false,
     refetchOnMount: false
   });
+  const { t } = useTranslation('common_blog');
   const { user } = useUserClient();
   const [preferences] = useStorageWithTTL<Preferences>(
     user.username ? `user-preferences-${user.username}` : '',
@@ -52,10 +54,18 @@ const SearchContent = ({
           <ModeSwitchInput searchPage aiAvailable={!!hiveSense} />
         </div>
       </div>
+      {/* ★ Nothing asked for yet. Without this the page rendered ONE stray
+          control ("Sort by: Relevance") floating over blank space, which reads
+          as a half-loaded page rather than an invitation to type. */}
+      {!aiParam && !classicQuery && !userTopicQuery ? (
+        <p className="py-10 text-center font-sans text-sm text-muted-foreground">
+          {t('search_page.start_prompt')}
+        </p>
+      ) : null}
       {!!aiParam ? (
         <AIResult query={aiParam} nsfwPreferences={preferences.nsfw} initialData={initialAIResults} />
       ) : null}
-      {!!classicQuery && !!sortQuery ? (
+      {!!classicQuery ? (
         <AccountTopicResult
           nsfwPreferences={preferences.nsfw}
           query={classicQuery}
@@ -63,7 +73,7 @@ const SearchContent = ({
           initialData={initialClassicResults}
         />
       ) : null}
-      {!!userTopicQuery && !!topicQuery && !!sortQuery ? (
+      {!!userTopicQuery && !!topicQuery ? (
         <AccountTopicResult
           author={userTopicQuery}
           query={userTopicQuery}

@@ -40,6 +40,7 @@ import { PostFormHeader } from "@/blog/features/post-editor/PostFormHeader";
 import { PostMetadataSection } from "@/blog/features/post-editor/PostMetadataSection";
 import { PostPublishingSection } from "@/blog/features/post-editor/PostPublishingSection";
 import { PostPreviewPanel } from "@/blog/features/post-editor/PostPreviewPanel";
+import { chainObserver } from '@/blog/lib/utils';
 
 const MdEditor = dynamic(() => import("@/blog/features/post-editor/md-editor"), {
   ssr: false,
@@ -91,7 +92,7 @@ export default function PostForm({
   const btnRef = useRef<HTMLButtonElement>(null);
   const { user } = useUserClient();
   const { signer } = useSignerContext();
-  const observer = user.isLoggedIn ? user.username : DEFAULT_OBSERVER;
+  const observer = chainObserver(user);
   const searchParams = useSearchParams();
   const categoryParam = searchParams?.get("category") ?? undefined;
   const { t } = useTranslation("common_blog");
@@ -348,8 +349,25 @@ export default function PostForm({
                   variant="redHover"
                   className="w-28"
                   disabled={
-                    !storedPost?.title ||
-                    !storedPost?.postArea ||
+                    // ★ GATE ON WHAT IS ON SCREEN, NOT ON THE SAVED DRAFT.
+                    //
+                    // This read `storedPost` — the localStorage draft. Two ways
+                    // that goes wrong, both measured 2026-08-06:
+                    //
+                    //  * EDITING: the draft still holds the ORIGINAL title and
+                    //    body, so clearing both fields left Submit fully
+                    //    enabled with no warning, while the create form
+                    //    correctly refuses the same empty state. Whatever the
+                    //    server then does with an empty payload, the UI should
+                    //    never have offered it — and there is no undo here.
+                    //  * WHITESPACE: a title of four spaces is a truthy string,
+                    //    so it passed, and the refusal arrived from the server
+                    //    afterwards.
+                    //
+                    // `watchedValues` is the live form state; trimming makes
+                    // "  " mean empty, which is what a reader means by it.
+                    !watchedValues.title?.trim() ||
+                    !watchedValues.postArea?.trim() ||
                     Boolean(tagsCheck) ||
                     Boolean(summaryCheck) ||
                     Boolean(altUsernameCheck) ||

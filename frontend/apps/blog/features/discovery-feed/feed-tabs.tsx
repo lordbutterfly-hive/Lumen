@@ -4,9 +4,8 @@ import { useEffect, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useInView } from 'react-intersection-observer';
-import { getPostsRanked } from '@transaction/lib/bridge-api';
+import { getAccountPosts } from '@transaction/lib/bridge-api';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
-import { SortTypes } from '@/blog/lib/utils';
 import { StaleTime } from '@/blog/lib/react-query';
 import { Entry } from '@hive/common-hiveio-packages/wax';
 import { PostListSkeleton } from '@hive/ui';
@@ -27,6 +26,7 @@ const LABELS = {
   nothingMore: "You're all caught up",
   empty: 'No posts yet.',
   degraded: 'Personalised ranking is warming up — showing popular posts meanwhile.',
+  degradedAnonymous: 'Log in to see posts picked for you — showing trending posts for now.',
   loginPrompt: 'Log in to see your Feed'
 };
 
@@ -83,6 +83,24 @@ function ForYouFeed({ enabled }: { enabled: boolean }) {
   const ranked = data.source === 'recsys';
   const entries = data.entries ?? [];
 
+  // ★ BUG FOUND 2026-08-06 (owner report: "for you isnt populated... seems it
+  // has mock posts"). Live-verified against the running dev server: an
+  // anonymous request to /api/feed/for-you returns REAL trending posts
+  // (`source: "trending-fallback"`, `degraded: "anonymous"`) — never mocks.
+  // But this banner used to gate on the client's `enabled` (== `loggedIn`)
+  // prop, which is FALSE for exactly the anonymous case, so the one message
+  // that would have explained "you're seeing trending, not your feed" was the
+  // one message that never rendered — an unlabelled trending list is
+  // indistinguishable from junk. It also used the wrong copy ("warming up")
+  // for every other degraded reason regardless of `enabled`. Both are fixed by
+  // reading `data.degraded` — the server's own reason — instead of client
+  // login state, which can also be stale relative to the session cookie.
+  const degradedMessage = ranked
+    ? null
+    : data.degraded === 'anonymous'
+      ? LABELS.degradedAnonymous
+      : LABELS.degraded;
+
   return (
     <div>
       {/* The lite strip is the ONLY place lite posts appear when the ranker is
@@ -90,9 +108,9 @@ function ForYouFeed({ enabled }: { enabled: boolean }) {
           them twice is duplication, so the strip stands down. */}
       {!ranked ? <LiteFeedStrip /> : null}
 
-      {!ranked && enabled ? (
+      {degradedMessage ? (
         <p className="mb-4 rounded-[9px] bg-[#fdf6e7] px-3 py-2 font-sans text-[12.5px] text-[#9a7b2e]">
-          {LABELS.degraded}
+          {degradedMessage}
         </p>
       ) : null}
 
@@ -108,27 +126,66 @@ function ForYouFeed({ enabled }: { enabled: boolean }) {
 }
 
 const FOR_YOU_LIMIT = 30;
-// "created" + tag "my" is Hive's genuine "people I follow" feed, resolved
-// server-side by bridge.get_ranked_posts against the observer's on-chain
-// follow list, newest first (see /created/my for the existing usage).
-const FEED_SORT: SortTypes = 'created';
-const FEED_TAG = 'my';
+// ★ SWITCHED 2026-08-06 (owner item 5b: reblogs must show in Following, with no
+// separate reblog feed on the profile). This used to be
+// `bridge.get_ranked_posts({ sort: 'created', tag: 'my' })` — Hive's "people I
+// follow, newest first" list — but LIVE-VERIFIED against api.hive.blog that
+// endpoint never populates `reblogged_by`: 96 posts fetched across 5 pages of
+// a real account's "my" feed, zero carried it, and posts independently
+// confirmed reblogged by a followee didn't even appear in the list. Hivemind's
+// reblog-aware feed lives in a DIFFERENT endpoint: `bridge.get_account_posts`
+// with `sort: 'feed'` (the classic "Feed" tab), backed by account_feed_cache —
+// verified live: a followee's reblog of another author's post arrives with
+// `reblogged_by: [<the reblogging followee>]` set. `account` and `observer`
+// are both the viewer here: it's their own follow-feed, viewed by themselves.
+const FEED_SORT = 'feed';
 
 /**
- * Same `useInfiniteQuery` + `getPostsRanked` shape as `SortedPagesPosts`
+ * Same `useInfiniteQuery` shape as `SortedPagesPosts`
  * (apps/blog/features/tags-pages/list-of-posts.tsx), rendering
- * `MediumPostCard`s instead of the classic `PostList` item.
+ * `MediumPostCard`s instead of the classic `PostList` item. Uses
+ * `getAccountPosts` (bridge.get_account_posts), not `getPostsRanked` — see the
+ * FEED_SORT note above for why.
  */
-function EntryFeed({ sort, tag, observer }: { sort: SortTypes; tag: string; observer: string }) {
+/**
+ * ★★★ A LITE ACCOUNT HAS NO FOLLOW FEED ON HIVE, BECAUSE IT HAS NO ACCOUNT ON HIVE.
+ *
+ * `bridge.get_account_posts({ sort: 'feed', account: <viewer> })` is Hive's own
+ * follow feed, keyed on a real chain account. Asking it for a lite handle got
+ * `assert_exception — "Account <name> does not exist"` back, six retries deep,
+ * and then rendered "There was a problem fetching the data… check if permlink
+ * is correct or the node is running properly" — on a feed, about no permlink,
+ * with a healthy node. Unconditionally broken for the product's whole target
+ * audience, on the tab right next to For You.
+ *
+ * Their follows live in Lumen's own store and point at both Lumen and Hive
+ * authors, so a lite viewer reads `/api/lite/feed/following`, which merges the
+ * two. A Hive-keyed viewer keeps the chain feed, which is correct for them.
+ */
+async function fetchLiteFollowing(limit: number): Promise<Entry[]> {
+  const res = await fetch(`/api/lite/feed/following?limit=${limit}`);
+  if (!res.ok) throw new Error(`following feed ${res.status}`);
+  const body = (await res.json()) as { entries?: Entry[] };
+  return body.entries ?? [];
+}
+
+const LITE_FOLLOWING_LIMIT = 30;
+
+function EntryFeed({ sort, observer, lite = false }: { sort: string; observer: string; lite?: boolean }) {
   const { ref, inView } = useInView();
   const { data, isFetching, isFetchingNextPage, fetchNextPage, hasNextPage, isError, isLoading } = useInfiniteQuery({
-    queryKey: ['discoveryFeedEntries', sort, tag, observer],
+    queryKey: ['discoveryFeedEntries', sort, observer, lite],
     queryFn: async ({ pageParam }) => {
+      if (lite) return await fetchLiteFollowing(LITE_FOLLOWING_LIMIT);
       const { author, permlink } = (pageParam as { author?: string; permlink?: string }) || {};
-      const postsData = await getPostsRanked(sort, tag, author ?? '', permlink ?? '', observer);
+      const postsData = await getAccountPosts(sort, observer, observer, author ?? '', permlink ?? '');
       return postsData ?? [];
     },
     getNextPageParam: (lastPage: Entry[]) => {
+      // The lite route returns one merged page today; paging it would have to
+      // page two stores at once, and offering a "load more" that silently
+      // repeats the same page is worse than not offering one.
+      if (lite) return undefined;
       if (!Array.isArray(lastPage) || lastPage.length === 0) return undefined;
       const last = lastPage[lastPage.length - 1] as { author?: string; permlink?: string };
       if (!last?.author || !last?.permlink) return undefined;
@@ -243,7 +300,15 @@ export default function FeedTabs() {
       <InterestPicker />
       <div
         role="tablist"
-        className="mb-5 inline-flex w-fit gap-1.5 rounded-[14px] border border-[#ebedf0] bg-[#f4f5f7] p-[5px]"
+        /* ★ At 390px the three labels are wider than the viewport, and every
+           ancestor had `overflow-x: visible`, so "Prediction Market" was simply
+           cut off at the screen edge with nothing to scroll — worse once
+           selected, because the active state is wider still. Measured by a
+           small-screen tester: tab bar right edge at 416px against a 390px
+           viewport. `max-w-full` + `overflow-x-auto` lets the row scroll
+           itself; `w-fit` keeps it hugging its content at every larger size,
+           where it already fit (820px: 674px against 820). */
+        className="mb-5 inline-flex w-fit max-w-full gap-1.5 overflow-x-auto rounded-[14px] border border-[#ebedf0] bg-[#f4f5f7] p-[5px] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         <TabButton isActive={activeTab === 'for-you'} onClick={() => selectTab('for-you')}>
           {LABELS.forYou}
@@ -260,7 +325,7 @@ export default function FeedTabs() {
         <MarketTab />
       ) : activeTab === 'feed' ? (
         loggedIn ? (
-          <EntryFeed sort={FEED_SORT} tag={FEED_TAG} observer={user.username} />
+          <EntryFeed sort={FEED_SORT} observer={user.username} lite={user.account_tier === 'lite'} />
         ) : (
           <div className="flex items-center justify-center py-16 font-sans text-sm text-muted-foreground">
             {LABELS.loginPrompt}

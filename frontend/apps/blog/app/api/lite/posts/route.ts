@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
 import { guardWrite, guardRead } from '@/blog/lib/lite/http/guard';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
-import { createLitePost, getLiteFeed, CreatePostRequest } from '@/blog/lib/lite/content/post-service';
+import { createLitePost, getLiteFeed, getLiteUserPosts, CreatePostRequest } from '@/blog/lib/lite/content/post-service';
+import { findUserByDisplayName } from '@/blog/lib/lite/repositories/user-repository';
 import { dbPostToEntry } from '@/blog/lib/lite/render/db-post-to-entry';
 import { resolvePublicNames } from '@/blog/lib/lite/render/current-name';
 import { ParentRef } from '@/blog/lib/lite/types';
@@ -66,6 +67,11 @@ function parseParentRef(v: unknown): ParentRef | undefined {
 function httpStatusFor(code: string): number {
   if (code === 'unauthorized') return 401;
   if (code.startsWith('account_') || code === 'moderated') return 403;
+  // ★ Same outcome, same status. `not_found` fell through to 400 here while the
+  //   sibling DELETE /api/lite/posts/[id] returns 404 for the identical
+  //   condition — editing someone else's post and deleting someone else's post
+  //   are the same refusal and were answered two different ways.
+  if (code === 'not_found') return 404;
   if (code.endsWith('rate_limited')) return 429;
   return 400;
 }
@@ -128,6 +134,31 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const before = req.nextUrl.searchParams.get('before') ?? undefined;
   const limitParam = req.nextUrl.searchParams.get('limit');
   const limit = limitParam && Number.isFinite(Number(limitParam)) ? Number(limitParam) : 20;
+
+  // ★ `?author=` — ONE lite account's own posts, for their profile.
+  //
+  // Without this the profile's Posts tab asked Hive for the posts of a name that
+  // has no Hive account and got `Account <name> does not exist`, so a lite author
+  // could never see their own writing on their own profile. Their posts live in
+  // this database (and on chain under the publisher account), not under their
+  // handle. `kind` separates the Posts tab from the Comments tab.
+  const author = req.nextUrl.searchParams.get('author');
+  if (author) {
+    const kindParam = req.nextUrl.searchParams.get('kind');
+    const kind = kindParam === 'comments' ? 'comments' : kindParam === 'all' ? 'all' : 'posts';
+    try {
+      const user = await findUserByDisplayName(author.toLowerCase());
+      // Not a Lumen account: an empty list, not a 404. This route is asked about
+      // every profile the reader opens, most of which are ordinary Hive accounts.
+      if (!user) return NextResponse.json({ entries: [] });
+      const list = await getLiteUserPosts(user.userId, { limit, before, kind, visibleOnly: true });
+      const names = await resolvePublicNames(list);
+      return NextResponse.json({ entries: list.map((post) => dbPostToEntry(post, names.get(post.postId))) });
+    } catch (error) {
+      logger.error(error, 'Lite author posts failed');
+      return NextResponse.json({ error: 'server_error' }, { status: 500 });
+    }
+  }
 
   try {
     const list = await getLiteFeed({ limit, before });

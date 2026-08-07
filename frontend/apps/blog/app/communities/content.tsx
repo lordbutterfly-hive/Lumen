@@ -13,7 +13,7 @@ import { Link } from '@hive/ui';
 import env from '@beam-australia/react-env';
 import { getCommunities } from '@transaction/lib/bridge-api';
 import { useTranslation } from '@/blog/i18n/client';
-import { DEFAULT_OBSERVER } from '@/blog/lib/utils';
+import { DEFAULT_OBSERVER, chainObserver } from '@/blog/lib/utils';
 import { StaleTime } from '@/blog/lib/react-query';
 import { useSSRObserver, useInitialCommunities, useInitialSubscriptions } from '@/blog/components/observer-provider';
 import { getSubscriptions } from '@transaction/lib/bridge-api';
@@ -46,7 +46,8 @@ function CommunitiesListSkeleton() {
 }
 
 const CommunitiesContent = () => {
-  const walletHost = env('WALLET_ENDPOINT');
+  // Optional deployment setting — see profile-layout.tsx for what an unset host does to a template-literal href.
+  const walletHost = env('WALLET_ENDPOINT') || '';
   const { t } = useTranslation('common_blog');
   const ssrObserver = useSSRObserver();
   const initialCommunities = useInitialCommunities();
@@ -55,7 +56,7 @@ const CommunitiesContent = () => {
   const [sort, setSort] = useState('rank');
   const [inputQuery, setInputQuery] = useState<string>('');
   const [query, setQuery] = useState<string | null>(null);
-  const clientObserver = user.isLoggedIn ? user.username : DEFAULT_OBSERVER;
+  const clientObserver = chainObserver(user);
   const observer = isHydrated ? clientObserver : ssrObserver;
   // initialData only applies when sort/query match the SSR-prefetched values ('rank'/null)
   // and the observer hasn't changed after hydration (SSR data has context.subscribed

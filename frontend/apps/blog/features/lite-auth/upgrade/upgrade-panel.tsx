@@ -72,6 +72,8 @@ const COPY = {
     'Your Lumen account posts through Lumen. A full Hive account is yours alone: your own keys, your own name on chain, and you keep your posting history.',
   namePick: 'Choose your Hive account name',
   nameHint: 'Lowercase letters, numbers and dashes. 3–16 characters. This cannot be changed later.',
+  nameLowercased: (lower: string) =>
+    `Hive names are lowercase, so yours will be created as “${lower}”.`,
   // The one thing this screen must set expectations about. Lumen never reserved the
   // handle on Hive — reserving one means creating the account, which permanently
   // spends a token — so a Hive account needs its own, different name.
@@ -610,6 +612,19 @@ const UpgradePanel: FC = () => {
             </div>
           ) : null}
         </>
+      ) : null}
+      {/* ★ TELL THEM THE NAME CHANGED, BEFORE THE IRREVERSIBLE STEP.
+          Hive account names are lowercase-only, so normalising the input is
+          CORRECT — that part is not a bug and is not being changed here. What
+          was wrong is that it happened in silence: the field accepted
+          "QAUpper-Case" as valid, went green, and the first time the reader saw
+          `qaupper-case` was on the screen that generates five irreversible
+          private keys for it. A name you cannot change later should never be
+          altered without saying so. */}
+      {name.trim() && name.trim() !== name.trim().toLowerCase() ? (
+        <p className="mt-2 text-xs leading-[1.55] text-[#b45309]">
+          {COPY.nameLowercased(name.trim().toLowerCase())}
+        </p>
       ) : null}
       <p className="mt-2 text-xs text-[#9ca3af]">{COPY.nameHint}</p>
       <p className="mt-2 text-xs leading-[1.55] text-[#9ca3af]">{COPY.nameWarning}</p>

@@ -120,16 +120,66 @@ export async function getPostsByIds(postIds: string[]): Promise<LumenPost[]> {
 }
 
 /** Newest-first keyset pagination by ULID post_id (which is time-sortable). */
+/**
+ * One account's own Lumen posts, newest first.
+ *
+ * ★ WHY THE FILTERS ARE NOT OPTIONAL EXTRAS (wired 2026-08-06).
+ *
+ * This function existed with ZERO callers while the profile's Posts tab asked
+ * HIVE for a lite account's posts — `bridge.get_account_posts {account: "<lite
+ * name>"}`, which answers `Account <name> does not exist`, retries three times
+ * and settles empty. A reader saw "3 Posts" in the stat bar (counted from this
+ * database) above a list that was permanently blank.
+ *
+ * `visibleOnly` defaults to TRUE because the first consumer is a PUBLIC profile:
+ * a post hidden by moderation must not come back through a different door than
+ * the feed it was removed from (`listRecent` filters the same way).
+ *
+ * `kind` splits the Posts tab from the Comments tab. A Lumen reply is a row in
+ * this same table carrying a `parent_ref`, exactly as a Hive comment is a post
+ * with a parent — so "root vs reply" is `parent_ref IS NULL`.
+ */
 export async function getUserPosts(
   userId: string,
-  opts: { limit: number; before?: string }
+  opts: { limit: number; before?: string; visibleOnly?: boolean; kind?: 'posts' | 'comments' | 'all' }
 ): Promise<LumenPost[]> {
+  const visibleOnly = opts.visibleOnly ?? true;
+  const kind = opts.kind ?? 'all';
   const { rows } = await query<PostRow>(
     `SELECT * FROM lumen_post
        WHERE user_id = $1 AND deleted_locally = false
          AND ($2::text IS NULL OR post_id < $2)
+         AND ($4::boolean = false OR feed_visibility = 'visible')
+         AND ($5::text = 'all'
+              OR ($5::text = 'posts'    AND parent_ref IS NULL)
+              OR ($5::text = 'comments' AND parent_ref IS NOT NULL))
      ORDER BY post_id DESC LIMIT $3`,
-    [userId, opts.before ?? null, opts.limit]
+    [userId, opts.before ?? null, opts.limit, visibleOnly, kind]
+  );
+  return rows.map(mapPost);
+}
+
+/**
+ * Visible root posts by ANY of these Lumen authors, newest first.
+ *
+ * One query, not one per author: a Following feed can name hundreds of people,
+ * and a per-author round trip would make the feed's cost scale with how social
+ * the reader is — precisely backwards.
+ */
+export async function listByUsers(
+  userIds: readonly string[],
+  opts: { limit: number; before?: string }
+): Promise<LumenPost[]> {
+  if (userIds.length === 0) return [];
+  const { rows } = await query<PostRow>(
+    `SELECT * FROM lumen_post
+       WHERE user_id = ANY($1::text[])
+         AND deleted_locally = false
+         AND feed_visibility = 'visible'
+         AND parent_ref IS NULL
+         AND ($2::text IS NULL OR post_id < $2)
+     ORDER BY post_id DESC LIMIT $3`,
+    [[...userIds], opts.before ?? null, opts.limit]
   );
   return rows.map(mapPost);
 }
@@ -487,9 +537,20 @@ export async function countPublishedByUser(userId: string): Promise<number> {
 }
 
 /** Total non-deleted posts by this user — the one profile figure we can state truly. */
+/**
+ * The post count shown on a PUBLIC profile.
+ *
+ * ★ Must exclude moderation-hidden rows, and this was measured wrong: an account
+ * with three posts, one of them taken down, advertised "3 Posts" above a list of
+ * two. A count that disagrees with the list it labels reads as a bug in the list
+ * — and worse, it silently tells the world that something was removed. The
+ * visibility rule here is deliberately the same one `getUserPosts` and
+ * `listRecent` apply, so all three can only ever agree.
+ */
 export async function countByUser(userId: string): Promise<number> {
   const res = await query<{ n: string }>(
-    `SELECT count(*)::text AS n FROM lumen_post WHERE user_id = $1 AND deleted_locally = false`,
+    `SELECT count(*)::text AS n FROM lumen_post
+      WHERE user_id = $1 AND deleted_locally = false AND feed_visibility = 'visible'`,
     [userId]
   );
   return Number(res.rows[0]?.n ?? 0);

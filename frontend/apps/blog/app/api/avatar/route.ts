@@ -73,7 +73,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         }
         return initialAvatar(username);
       }
-      return NextResponse.json({ error: 'Failed to fetch avatar' }, { status: response.status });
+      // ★ AND THE SAME FOR A HIVE ACCOUNT WHOSE STORED PICTURE IS DEAD.
+      //
+      // The reasoning above applies identically here and the code stopped one
+      // branch short: a JSON error body is not an image, so every consumer that
+      // renders this as a bare `background-image` — the search results, bylines,
+      // hover cards — showed a blank circle. Measured 2026-08-06:
+      // `/api/avatar?username=akatsuki28121997` -> 400, because that account's
+      // on-chain `profile_image` points at a Steemit-era host that no longer
+      // exists. That is not an unusual account; it is what a meaningful share of
+      // eight years of Hive history looks like.
+      return initialAvatar(username);
     }
 
     // Prepare headers, copying content-type from the origin

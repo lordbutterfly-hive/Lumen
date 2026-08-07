@@ -11,6 +11,34 @@ export { Symbol, accountReputation };
 // NaiMap is replaced by NaiToSymbol from @hive/ui
 
 export const DEFAULT_OBSERVER = 'hive.blog';
+
+/**
+ * ★★★ THE CHAIN `observer` FOR THE CURRENT VIEWER — NEVER A LITE ACCOUNT.
+ *
+ * `observer` personalises Hive reads (have I voted this, do I follow them, am I
+ * subscribed) and only means anything for a REAL chain account. A Lumen lite
+ * handle has no chain account at all, so passing it makes the node answer
+ * `Account <name> does not exist` — and it was being passed from TWELVE places,
+ * each written as the same unguarded `user.isLoggedIn ? user.username : …`.
+ *
+ * The server-side equivalent (`getObserver` in lib/auth-utils.ts) has always
+ * refused a lite account, citing spec §A.5 as a must-fix. The client never got
+ * the same rule, which is why an upvote could show a red "Error" toast on top
+ * of its own success: the vote itself worked, and `bridge.get_community` /
+ * `bridge.get_follow_list` alongside it did not.
+ *
+ * One function so the rule lives in one place, and so the next person who needs
+ * an observer cannot accidentally reintroduce this.
+ */
+export function chainObserver(user: {
+  isLoggedIn?: boolean;
+  username?: string;
+  account_tier?: string;
+}): string {
+  if (!user?.isLoggedIn || !user.username) return DEFAULT_OBSERVER;
+  if (user.account_tier === 'lite') return DEFAULT_OBSERVER;
+  return user.username;
+}
 export type SortTypes = 'trending' | 'hot' | 'created' | 'payout' | 'muted';
 
 export interface Preferences {

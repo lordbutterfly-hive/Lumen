@@ -31,7 +31,13 @@ export const Providers: FC<PropsWithChildren> = ({ children }) => {
         <meta name="theme-color" content={resolvedTheme === 'dark' ? '#030711' : '#ffffff'} />
       </Head>
       <QueryClientProvider client={queryClient}>
-        <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+        {/* ★ LIGHT ONLY (2026-08-06, owner ruling). The in-app theme toggle was
+            removed, but `defaultTheme="system" enableSystem` meant anyone whose OS
+            was set to dark still got a dark, unstyled-in-places UI with no way to
+            opt out — QA confirmed `html.dark` and a dark body background. The
+            provider stays (providers.tsx reads useTheme() for the theme-color meta
+            tag), it is simply pinned to light. */}
+        <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false} forcedTheme="light">
           <NavigationProgressProvider>
             <NavigationProgress />
             <NavigationProgressHandler />

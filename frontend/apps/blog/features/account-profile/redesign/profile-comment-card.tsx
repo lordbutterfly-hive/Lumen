@@ -3,7 +3,7 @@
 import { Link } from '@hive/ui';
 import { Icons } from '@ui/components/icons';
 import TimeAgo from '@ui/components/time-ago';
-import { cn } from '@ui/lib/utils';
+import { cn, numberWithCommas } from '@ui/lib/utils';
 import { Entry } from '@hive/common-hiveio-packages/wax';
 import { useLiteOverlay } from '@/blog/lib/lite/client/use-lite-overlay';
 import { useTranslation } from '@/blog/i18n/client';
@@ -91,7 +91,7 @@ export default function ProfileCommentCard({ post }: { post: Entry }) {
               payoutDeclined && 'bg-transparent text-muted-foreground line-through'
             )}
           >
-            ${post.payout.toFixed(2)}
+            ${numberWithCommas(post.payout.toFixed(2))}
           </span>
         </DetailsCardHover>
       </div>

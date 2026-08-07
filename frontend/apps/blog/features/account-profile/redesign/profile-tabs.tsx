@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Entry } from '@hive/common-hiveio-packages/wax';
-import { cn } from '@ui/lib/utils';
+import { cn, numberWithCommas } from '@ui/lib/utils';
 import { useTranslation } from '@/blog/i18n/client';
 import ProfilePostsList from './profile-posts-list';
 import ProfileCommentsList from './profile-comments-list';
@@ -30,12 +30,16 @@ export default function ProfileTabs({
   username,
   observer,
   postsCount,
-  initialPosts
+  initialPosts,
+  lite = false
 }: {
   username: string;
   observer: string;
   postsCount?: number;
   initialPosts?: Entry[] | null;
+  /** True for a Lumen lite account: its posts live in Lumen's own store, not on
+   *  Hive under this handle. Decides which source both tabs read from. */
+  lite?: boolean;
 }) {
   const { t } = useTranslation('common_blog');
   const searchParams = useSearchParams();
@@ -77,9 +81,9 @@ export default function ProfileTabs({
       </div>
 
       {activeTab === 'comments' ? (
-        <ProfileCommentsList username={username} observer={observer} />
+        <ProfileCommentsList username={username} observer={observer} lite={lite} />
       ) : (
-        <ProfilePostsList username={username} observer={observer} initialEntries={initialPosts} />
+        <ProfilePostsList username={username} observer={observer} initialEntries={initialPosts} lite={lite} />
       )}
     </div>
   );
@@ -115,7 +119,7 @@ function TabButton({
             isActive ? 'bg-[#fdecea] text-[#c0392b]' : 'bg-[#f1f3f5] text-[#9ca3af]'
           )}
         >
-          {count}
+          {numberWithCommas(String(count))}
         </span>
       ) : null}
     </button>

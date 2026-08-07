@@ -14,7 +14,14 @@ export function convertStringToBig(number: string | NaiAsset): Big {
   if (typeof number === 'string') {
     return new Big(number.split(' ')[0]);
   }
-  // For NaiAsset, divide amount by 10^precision to get actual value
+  // For NaiAsset, divide amount by 10^precision to get actual value.
+  // ★ DEFENSIVE (2026-08-06): a missing/partial asset used to crash the whole
+  // app here (`reading 'amount' of undefined`) because callers pass chain
+  // responses straight in, and a keyless Lumen Lite account has no chain data
+  // to return. The real fix is at the caller (don't ask the chain about a
+  // non-chain account); this stops any future caller turning absent data into
+  // a blank white page.
+  if (!number || number.amount === undefined || number.amount === null) return new Big(0);
   return new Big(number.amount).div(new Big(10).pow(number.precision));
 }
 

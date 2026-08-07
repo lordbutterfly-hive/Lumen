@@ -657,7 +657,15 @@ export class TransactionService {
       images: [image ? image : ''],
       jsonMetadata: {
         summary,
-        app: 'hive.blog/0.9'
+        // ★ This fork is Lumen, and every post it broadcasts says so. It read
+        // `hive.blog/0.9`, inherited from the upstream denser codebase, so every
+        // post published from a Hive-keyed account announced itself on chain as
+        // somebody else's frontend. Lite posts already carried the lumen/1.0 tag
+        // (lib/lite/publisher/footer.ts, container.ts), so the two tiers disagreed
+        // about what app the reader was using. Changed 2026-08-06 at the owner's
+        // instruction, kept identical to the lite string so anything grouping by
+        // `app` sees one product.
+        app: 'lumen/1.0'
       }
     });
     return await this.processHiveAppOperation((builder) => {
@@ -686,7 +694,8 @@ export class TransactionService {
       images: [image ? image : ''],
       jsonMetadata: {
         summary,
-        app: 'hive.blog/0.9'
+        // Same string as post() above — an edit must not relabel the post.
+        app: 'lumen/1.0'
       }
     });
 

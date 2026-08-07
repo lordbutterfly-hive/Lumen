@@ -1,6 +1,6 @@
 'use client';
 
-import { FC, useEffect, useState } from 'react';
+import { FC, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import type { Service } from '../../market/token-detail';
 import { buyQuote, serviceQuote } from '../../market/curve';
@@ -59,6 +59,17 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
   // complex expression React cannot statically check.
   const hasMarket = market !== null;
 
+  const writeBlockedReason: string | null = !live.loggedIn
+    ? 'Sign in to trade this token.'
+    : live.isLite
+      ? 'This account has no Hive keys yet, so it can’t sign a transaction. Upgrade to a full account to trade.'
+      : null;
+  const writesBlocked = writeBlockedReason !== null;
+
+  // Set when the interstitial pre-empts a deep-linked action, so the action can
+  // run once the reader dismisses it instead of being lost.
+  const pendingAction = useRef<TokenDialog>(null);
+
   // Deep-link an action from the Your-Tokens row buttons (?a=buy|sell|spend|send).
   // buy.go/ask.go RequireInflowOpen (RULING K3): a winding-down market refuses
   // every new inflow, so a deep link must not silently open Buy/Ask around the
@@ -66,20 +77,42 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
   // are outflows and stay open in every state (the rail-switch doc).
   useEffect(() => {
     if (!market) return;
+    // ★ A DEEP LINK MUST HONOUR THE SAME GATE AS THE BUTTON IT MIRRORS.
+    //
+    // `writeBlockedReason` disables every write control on this page and states
+    // why, BEFORE the reader invests anything. The `?a=` links the portfolio
+    // generates skipped it, so a lite account could open Buy, type a budget,
+    // read a live quote and press submit — and only then be told it has no keys.
+    // The one disclosure this feature is otherwise careful to put first was the
+    // one thing put last.
+    if (writesBlocked) return;
     const a = searchParams?.get('a');
     if (a === 'buy') {
       // buy.go/ask.go RequireInflowOpen: a deep link must respect the SAME gate
       // the buttons do, including delinquency — canBuy/canAsk already fold in
       // pause, wind-down and delivery standing.
       if (market.canBuy) setDialog('buy');
-    } else if (a === 'sell' || a === 'send') {
-      setDialog(a);
+    } else if (a === 'sell') {
+      // ★ THE SAME RAIL THE BUTTON WOULD PICK, NOT ALWAYS THE CURVE.
+      //
+      // The visible Sell button is `market.windingDown ? 'redeem' : 'sell'`,
+      // because once a market winds down the curve is CLOSED and the only exit
+      // is a pro-rata redeem at the floor. This deep link — which the portfolio
+      // page generates for every holding's "Sell" — set 'sell' literally, so a
+      // holder arriving from their own wallet was shown the curve dialog with
+      // a "Curve proceeds" line and a 10% trade fee for a sale that cannot
+      // execute. On a mock holder that renders as $0.00; on a real one it is a
+      // plausible dollar figure for a transaction the contract will refuse, on
+      // the exit screen, which is precisely where trust matters most.
+      setDialog(market.windingDown ? 'redeem' : 'sell');
+    } else if (a === 'send') {
+      setDialog('send');
     } else if (a === 'spend' && market.services[0] && market.canAsk) {
       setService(market.services[0]);
       setDialog('ask');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams, hasMarket]);
+  }, [searchParams, hasMarket, writesBlocked]);
 
   // Market interstitial — first view per creator, per session. Only once there
   // is a real market: interrupting someone to explain a market that failed to
@@ -88,7 +121,18 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
     if (typeof window === 'undefined' || !market) return;
     const key = `lumen-token-inter-${handle}`;
     if (!window.sessionStorage.getItem(key)) {
-      setDialog('inter');
+      // ★ DO NOT THROW AWAY WHAT THEY ASKED FOR.
+      //
+      // This effect is declared AFTER the deep-link effect above, so on a first
+      // visit it overwrote the dialog that link had just opened — clicking
+      // "Buy" on a holding in /wallet/tokens showed the "Before you trade"
+      // interstitial instead, and dismissing it landed on the plain market page
+      // with the original intent silently gone. Remember it, and honour it once
+      // the reader has read the warning they were shown for a reason.
+      setDialog((current) => {
+        if (current && current !== 'inter') pendingAction.current = current;
+        return 'inter';
+      });
       window.sessionStorage.setItem(key, '1');
     }
     // `market` itself is deliberately NOT a dependency: it is a fresh object on
@@ -126,12 +170,6 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
   // now sits with the control that offers the action, and states WHY — the
   // hook's throw remains the backstop for a stale render or a deep link, per
   // its own doc.
-  const writeBlockedReason: string | null = !live.loggedIn
-    ? 'Sign in to trade this token.'
-    : live.isLite
-      ? 'This account has no Hive keys yet, so it can’t sign a transaction. Upgrade to a full account to trade.'
-      : null;
-  const writesBlocked = writeBlockedReason !== null;
 
   const handleBuy = async (usd: number, maxTotalUsd?: number): Promise<void> => {
     const local = buyQuote(usd, market);
@@ -235,6 +273,24 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
         <div className="mb-4 rounded-[14px] border border-[#f6e2c4] bg-[#fdf6ec] px-5 py-3.5 text-[13.5px] font-semibold text-[#b45309]">
           This creator’s market is winding down — buying and new asks are closed. Selling on the curve is closed too;
           use Redeem to take your pro-rata share of the reserve at the floor.
+        </div>
+      ) : market.phase === 'OVERDUE' ? (
+        // ★ OVERDUE WAS COMPLETELY SILENT TO A BUYER.
+        //
+        // The page was textually and functionally identical to a healthy market:
+        // Buy enabled, no banner, no badge. The only place this state appeared
+        // anywhere in the product was the creator's OWN dashboard — which a
+        // buyer has no reason to open. Yet it is the one state where the
+        // downside is about to change shape: when grace runs out the market
+        // FREEZES, the curve closes, and the only exit becomes a redeem at the
+        // floor. On the fixture that surfaced this the spot price was $3.04 and
+        // the floor $2.00 — a third of the position, turning on a clock nobody
+        // was shown. This page already discloses wind-down and delinquency
+        // plainly; overdue is the state that most needs it.
+        <div className="mb-4 rounded-[14px] border border-[#f6e2c4] bg-[#fdf6ec] px-5 py-3.5 text-[13.5px] font-semibold text-[#b45309]">
+          This creator’s listing has lapsed. If it isn’t renewed the market freezes: buying and selling on the curve
+          close, and the only way out becomes Redeem at the floor
+          {market.floorUsd ? ` (currently ${usdPrice(market.floorUsd)} a token, against ${usdPrice(market.priceUsd)} now)` : ''}.
         </div>
       ) : market.delinquentUntilBlock !== null ? (
         // delivery.go: RequireInflowOpen also refuses while a creator is
@@ -482,7 +538,12 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
           live.ask({ offeringId, contentHash: askReference(question), deadlineDays, maxCostUsd: usd })
         }
         onTransfer={(to, tokens) => live.transfer(to, tokens)}
-        onClose={() => setDialog(null)}
+        onClose={() => {
+          // Hand back the action the interstitial interrupted, if any.
+          const queued = pendingAction.current;
+          pendingAction.current = null;
+          setDialog(queued ?? null);
+        }}
       />
     </TokenShell>
   );

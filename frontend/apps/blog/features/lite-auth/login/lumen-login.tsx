@@ -64,11 +64,28 @@ const LumenLogin: FC = () => {
   // ready / fetch failed → the real button is withheld rather than minting a token the
   // server will reject as a replay.
   const [googleNonce, setGoogleNonce] = useState<string | null>(null);
+  // ★★★ RESOLVED ON THE CLIENT, NOT DURING SSR (2026-08-06).
+  //
+  // `googleConfigured()` reads the client id through `@beam-australia/react-env`,
+  // whose `env()` resolves from `window.__ENV` in the BROWSER but from
+  // `process.env` on the SERVER. Those two disagreed here: the browser had
+  // `REACT_APP_LITE_GOOGLE_CLIENT_ID` (verified in `window.__ENV`) while the
+  // server render did not, so SSR emitted the disabled "Google sign-in is being
+  // set up" fallback — and because nothing re-rendered after hydration, that
+  // fallback STUCK. Google sign-in was permanently dead on a correctly
+  // configured deploy, and it also produced a React hydration mismatch.
+  //
+  // Evaluating it in an effect makes the browser the authority: the server
+  // renders the safe "not available" state, and the client corrects it on mount.
+  const [googleReady, setGoogleReady] = useState(false);
   const refreshGoogleNonce = useCallback(() => {
     void googleChallenge().then((n) => setGoogleNonce(n));
   }, [googleChallenge]);
   useEffect(() => {
-    if (googleConfigured()) refreshGoogleNonce();
+    if (googleConfigured()) {
+      setGoogleReady(true);
+      refreshGoogleNonce();
+    }
   }, [refreshGoogleNonce]);
 
   // Already signed in → leave the pre-auth page.
@@ -80,11 +97,6 @@ const LumenLogin: FC = () => {
     router.replace('/');
     router.refresh();
   };
-
-  // Google Identity Services seam: acquiring the ID token needs the GIS SDK +
-  // NEXT_PUBLIC_LITE_GOOGLE_CLIENT_ID. The backend (/api/lite/auth/google) is
-  // built and ready; wiring the token acquisition here is the follow-up.
-  const startGoogle = () => setError(COPY.googleSeam);
 
   /** Google returned an ID token — hand it to the (already built) backend. */
   const handleGoogleToken = async (idToken: string) => {
@@ -160,7 +172,7 @@ const LumenLogin: FC = () => {
                 {/* Primary: Google identity (Lumen Lite, no keys). The real Google
                     button renders when a client id is configured; otherwise the styled
                     fallback below explains the state instead of failing on click. */}
-                {googleConfigured() ? (
+                {googleReady ? (
                   googleNonce ? (
                     // key + nonce: GIS captures the nonce at init, so a fresh nonce
                     // remounts the button (F-L11).
@@ -180,18 +192,27 @@ const LumenLogin: FC = () => {
                     </button>
                   )
                 ) : (
-                  <button
-                    onClick={startGoogle}
-                    className="flex h-[52px] w-full items-center justify-center gap-[11px] rounded-[14px] border border-[#e4e6e9] bg-white text-[15.5px] font-semibold text-[#161511] hover:border-[#d3d6da] hover:bg-[#f9fafb]"
-                  >
-                    <svg width="20" height="20" viewBox="0 0 48 48" aria-hidden>
-                      <path fill="#4285F4" d="M45.1 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h11.8c-.5 2.7-2 5-4.4 6.6v5.5h7.1c4.1-3.8 6.6-9.4 6.6-16.1z" />
-                      <path fill="#34A853" d="M24 46c5.9 0 10.9-2 14.5-5.4l-7.1-5.5c-2 1.3-4.5 2.1-7.4 2.1-5.7 0-10.5-3.8-12.2-9H4.5v5.7C8.1 41.1 15.4 46 24 46z" />
-                      <path fill="#FBBC05" d="M11.8 27.2c-.4-1.3-.7-2.7-.7-4.2s.2-2.9.7-4.2v-5.7H4.5C3 16.1 2.1 19.9 2.1 23s.9 6.9 2.4 9.9l7.3-5.7z" />
-                      <path fill="#EA4335" d="M24 9.9c3.2 0 6.1 1.1 8.4 3.3l6.3-6.3C34.9 3.3 29.9 1 24 1 15.4 1 8.1 5.9 4.5 13.1l7.3 5.7c1.7-5.2 6.5-8.9 12.2-8.9z" />
-                    </svg>
-                    {COPY.google}
-                  </button>
+                  // Not configured client-side (REACT_APP_LITE_GOOGLE_CLIENT_ID unset — see
+                  // google-signin.tsx googleConfigured()). Rendering this as a normal-looking,
+                  // clickable button was the F-14b bug: it looked identical to a working button
+                  // but did nothing visible on click. Disabled + an always-visible reason instead.
+                  <div>
+                    <button
+                      type="button"
+                      disabled
+                      aria-disabled="true"
+                      className="flex h-[52px] w-full cursor-not-allowed items-center justify-center gap-[11px] rounded-[14px] border border-[#e4e6e9] bg-white text-[15.5px] font-semibold text-[#161511] opacity-60"
+                    >
+                      <svg width="20" height="20" viewBox="0 0 48 48" aria-hidden>
+                        <path fill="#4285F4" d="M45.1 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h11.8c-.5 2.7-2 5-4.4 6.6v5.5h7.1c4.1-3.8 6.6-9.4 6.6-16.1z" />
+                        <path fill="#34A853" d="M24 46c5.9 0 10.9-2 14.5-5.4l-7.1-5.5c-2 1.3-4.5 2.1-7.4 2.1-5.7 0-10.5-3.8-12.2-9H4.5v5.7C8.1 41.1 15.4 46 24 46z" />
+                        <path fill="#FBBC05" d="M11.8 27.2c-.4-1.3-.7-2.7-.7-4.2s.2-2.9.7-4.2v-5.7H4.5C3 16.1 2.1 19.9 2.1 23s.9 6.9 2.4 9.9l7.3-5.7z" />
+                        <path fill="#EA4335" d="M24 9.9c3.2 0 6.1 1.1 8.4 3.3l6.3-6.3C34.9 3.3 29.9 1 24 1 15.4 1 8.1 5.9 4.5 13.1l7.3 5.7c1.7-5.2 6.5-8.9 12.2-8.9z" />
+                      </svg>
+                      {COPY.google}
+                    </button>
+                    <p className="mt-2 text-center text-[13px] leading-[1.5] text-[#6b7280]">{COPY.googleSeam}</p>
+                  </div>
                 )}
 
                 <div className="mt-2.5" />

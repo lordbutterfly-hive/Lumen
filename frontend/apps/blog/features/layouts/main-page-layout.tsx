@@ -10,7 +10,7 @@ import PostSelectFilter from '@/blog/features/layouts/post-select-filter';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { getSubscriptions } from '@transaction/lib/bridge-api';
 import { useQuery } from '@tanstack/react-query';
-import { DEFAULT_OBSERVER } from '@/blog/lib/utils';
+import { DEFAULT_OBSERVER, chainObserver } from '@/blog/lib/utils';
 import { StaleTime } from '@/blog/lib/react-query';
 import { useSSRObserver, useInitialSubscriptions } from '@/blog/components/observer-provider';
 
@@ -27,7 +27,7 @@ const MainPageLayout = ({
   const initialSubscriptions = useInitialSubscriptions();
   const { user, isHydrated } = useUserClient();
   const { t } = useTranslation('common_blog');
-  const clientObserver = user.isLoggedIn ? user.username : DEFAULT_OBSERVER;
+  const clientObserver = chainObserver(user);
   const observer = isHydrated ? clientObserver : ssrObserver;
   const { data } = useQuery({
     queryKey: ['subscriptions', observer],

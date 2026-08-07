@@ -20,7 +20,21 @@ const SearchPage = async ({ searchParams }: SearchPageProps) => {
   const classicQuery = validatedParams.q;
   const userTopicQuery = validatedParams.a;
   const topicQuery = validatedParams.p;
-  const sortQuery = validatedParams.s as SearchSort | undefined;
+
+  /**
+   * ★ A SORT IS ALWAYS IMPLIED, SO NEVER LET ITS ABSENCE CANCEL THE SEARCH.
+   *
+   * Every consumer below gates on `classicQuery && sortQuery`, so a URL with a
+   * query but no `s=` searched for nothing and rendered a blank page — measured
+   * on `/search?q=photography`, which is exactly what a hand-typed, bookmarked
+   * or shared search URL looks like. The header's search box happens to append
+   * `&s=relevance`, which is the only reason this was ever invisible. An invalid
+   * `s=` is dropped by `parseSearchParams` and lands here identically.
+   *
+   * Relevance is the default the UI itself shows, so this makes the URL agree
+   * with the control rather than inventing a behaviour.
+   */
+  const sortQuery: SearchSort = (validatedParams.s as SearchSort | undefined) ?? 'relevance';
 
   const observer = await getObserverFromCookies();
 

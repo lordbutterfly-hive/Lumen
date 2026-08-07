@@ -1,6 +1,7 @@
 'use client';
 
 import { Link } from '@hive/ui';
+import { useTranslation } from '@/blog/i18n/client';
 import { useLiteOverlay } from '@/blog/lib/lite/client/use-lite-overlay';
 import { Icons } from '@ui/components/icons';
 import TimeAgo from '@ui/components/time-ago';
@@ -37,6 +38,7 @@ const LABELS = {
  * voting/reblog behaviour stays identical to the classic feed.
  */
 export default function MediumPostCard({ post }: { post: Entry }) {
+  const { t } = useTranslation('common_blog');
   const { user } = useUserClient();
   const reblogMutation = useReblogMutation();
   // A Lumen proxy post arrives from Hivemind authored by the shared publishing
@@ -77,6 +79,30 @@ export default function MediumPostCard({ post }: { post: Entry }) {
 
   return (
     <article className="mx-[-18px] rounded-2xl border-b border-[#ebebeb] p-[24px_18px] transition-colors hover:bg-[#faf9f6]">
+      {/* Reblog provenance line — only present when the underlying query supplies
+          it. `EntryFeed` in feed-tabs.tsx fetches the Following tab via
+          `bridge.get_account_posts({ sort: 'feed' })` specifically because that
+          endpoint (unlike `get_ranked_posts`) carries `reblogged_by`, live-verified
+          against api.hive.blog 2026-08-06. Mirrors the classic feed's own marker
+          (post-list-item.tsx: Icons.forward + t('cards.reblogged')) so a reblog
+          reads the same way everywhere in the app. */}
+      {post.reblogged_by && post.reblogged_by.length > 0 ? (
+        <div
+          className="mb-2.5 flex items-center gap-1.5 font-sans text-[12.5px] font-medium text-[#6b7280]"
+          data-testid="medium-card-reblogged-by"
+        >
+          <Icons.forward className="h-3.5 w-3.5 shrink-0" />
+          <Link
+            href={`/@${post.reblogged_by[0]}`}
+            className="hover:underline"
+            data-testid="medium-card-reblogged-by-link"
+          >
+            {post.reblogged_by[0]}
+          </Link>
+          <span>{t('cards.reblogged')}</span>
+        </div>
+      ) : null}
+
       {/* Byline row */}
       <div className="flex flex-wrap items-center gap-2 font-sans text-[13.5px] text-[#6b7280]">
         <Link href={`/@${displayAuthor}`} className="shrink-0" data-testid="medium-card-avatar">

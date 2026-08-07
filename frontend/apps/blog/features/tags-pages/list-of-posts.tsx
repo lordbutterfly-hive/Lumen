@@ -7,7 +7,7 @@ import { getPostsRanked } from '@transaction/lib/bridge-api';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useStorageWithTTL } from '@ui/hooks/useStorageWithTTL';
 import { StorageTTL } from '@ui/lib/storage-with-ttl';
-import { DEFAULT_OBSERVER, DEFAULT_PREFERENCES, Preferences, SortTypes } from '@/blog/lib/utils';
+import { DEFAULT_OBSERVER, DEFAULT_PREFERENCES, Preferences, SortTypes, chainObserver } from '@/blog/lib/utils';
 import { StaleTime } from '@/blog/lib/react-query';
 import { useTranslation } from '@/blog/i18n/client';
 import { Entry } from '@hive/common-hiveio-packages/wax';
@@ -23,7 +23,7 @@ const SortedPagesPosts = ({ sort, tag = '' }: { sort: SortTypes; tag?: string })
   const { user, isHydrated } = useUserClient();
   // Use SSR observer before hydration to match prefetched cache keys,
   // then switch to client observer (which should be the same value for logged-in users)
-  const clientObserver = user.isLoggedIn ? user.username : DEFAULT_OBSERVER;
+  const clientObserver = chainObserver(user);
   const observer = isHydrated ? clientObserver : ssrObserver;
   const { t } = useTranslation('common_blog');
   const { ref, inView } = useInView();
@@ -41,7 +41,7 @@ const SortedPagesPosts = ({ sort, tag = '' }: { sort: SortTypes; tag?: string })
     StorageTTL.PERMANENT
   );
 
-  const { data, isFetching, isFetchingNextPage, fetchNextPage, hasNextPage, isError, isLoading } = useInfiniteQuery({
+  const { data, isFetching, isFetchingNextPage, fetchNextPage, hasNextPage, isError, error, isLoading } = useInfiniteQuery({
     queryKey: ['entriesInfinite', sort, tag, observer],
     queryFn: async ({ pageParam }) => {
       const { author, permlink } = (pageParam as { author?: string; permlink?: string }) || {};
@@ -78,8 +78,21 @@ const SortedPagesPosts = ({ sort, tag = '' }: { sort: SortTypes; tag?: string })
   // Calculate total posts to determine when to show prefetch trigger
   const totalPosts = data?.pages?.reduce((acc, page) => acc + (page?.length || 0), 0) || 0;
 
-  // Handle API error - show error state with retry option
-  if (isError) {
+  // ★ "Tag X does not exist" IS AN EMPTY RESULT, NOT A FAILURE.
+  //
+  // Hive answers a tag nobody has posted under with an assertion —
+  // `assert_exception: Tag <x> does not exist` — so React Query calls it an
+  // error and the reader was shown "There was a problem fetching the data.
+  // Please check if permlink is correct or the node is running properly." for a
+  // page the app had already labelled "Unmoderated tag" in its own header. The
+  // node is fine; the tag is simply empty. Verified against api.hive.blog.
+  const tagSimplyEmpty = /does not exist/i.test(
+    error instanceof Error ? error.message : JSON.stringify(error ?? '')
+  );
+
+  // Only when there is nothing to show: a failed `fetchNextPage` must not wipe
+  // out the pages already rendered (same fault as the profile tabs).
+  if (isError && totalPosts === 0 && !tagSimplyEmpty) {
     return <NoDataError />;
   }
 
@@ -92,11 +105,24 @@ const SortedPagesPosts = ({ sort, tag = '' }: { sort: SortTypes; tag?: string })
   // Handle empty feed for "my" (friends) page
   // Guard with !isFetching to avoid flash during observer transition
   // (when hydration briefly changes observer before auth state resolves)
-  const isEmpty = !data?.pages?.[0]?.length;
+  const isEmpty = !data?.pages?.[0]?.length || (isError && tagSimplyEmpty);
   if (isEmpty && tag === 'my' && !isFetching) {
     return (
       <div className="flex flex-col items-center justify-center py-12 text-center">
         <p className="text-lg text-primary/70">{t('user_profile.empty_feed_not_following')}</p>
+      </div>
+    );
+  }
+  // ★ A TAG WITH NO POSTS IS NOT A BROKEN NODE, AND IT IS NOT NOTHING EITHER.
+  // A tag nobody has posted under rendered a blank column (or, when the upstream
+  // call also failed, the "problem fetching the data… check if the node is
+  // running properly" panel — for a page the app had already correctly labelled
+  // "Unmoderated tag"). Both leave the reader unable to tell "no posts" from
+  // "something is wrong".
+  if (isEmpty && !isFetching) {
+    return (
+      <div className="flex flex-col items-center justify-center py-12 text-center">
+        <p className="text-lg text-primary/70">{t('tags_page.no_posts_for_tag', { tag })}</p>
       </div>
     );
   }

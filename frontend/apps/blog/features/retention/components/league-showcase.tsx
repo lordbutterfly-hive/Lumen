@@ -27,7 +27,8 @@ import { StreakFlame } from './streak-flame';
 export function LeagueShowcase() {
   const { user } = useUserClient();
   const { t } = useTranslation('common_blog');
-  const { data: summary } = useRetention(user.username);
+  // A lite account has no chain tenure — see useRetention's note.
+  const { data: summary } = useRetention(user.username, user.account_tier !== 'lite');
 
   if (!user.isLoggedIn || !summary) return null;
 

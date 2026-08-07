@@ -31,3 +31,9 @@ docker/.env
 NOTES/
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
+
+# Local TLS cert for production-mode QA (scripts/lumen-https-front.mjs). Never committed.
+.tls/
+
+# Secondary Next instance (scripts/dev:3010) — see next.config.js distDir.
+.next-dev/

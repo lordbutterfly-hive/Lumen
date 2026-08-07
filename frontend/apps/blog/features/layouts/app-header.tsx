@@ -15,6 +15,7 @@ import { useTranslation } from '@/blog/i18n/client';
 import { hoursAndMinutes } from '@/blog/lib/utils';
 import DialogLogin from '@/blog/components/dialog-login';
 import UserMenu from '@/blog/features/layouts/site-header/user-menu';
+import NotificationsMenu from '@/blog/features/layouts/site-header/notifications-menu';
 import { ManabarRing } from '@/blog/features/layouts/site-header/manabar-ring';
 import SearchButton from '@/blog/features/layouts/site-header/search-button';
 import { ModeSwitchInput } from '@ui/components/mode-switch-input';
@@ -42,14 +43,26 @@ const AppHeader: FC = () => {
   }, []);
 
   const { manabarsData } = useLoggedUserContext();
+  // ★ A LITE ACCOUNT HAS NO CHAIN NOTIFICATIONS, BECAUSE IT HAS NO CHAIN ACCOUNT.
+  //
+  // `bridge.unread_notifications({account})` asserts `Account <name> does not
+  // exist` for a Lumen handle, and React Query retried it — measured FOUR
+  // failing cross-origin calls on every single page load for every lite reader,
+  // which is also why the bell could sit on "Loading". The bell degrades to
+  // "No notifications yet" either way; this just stops asking a question whose
+  // answer cannot exist.
+  const isChainAccount = !!user.username && user.account_tier !== 'lite';
   const { data } = useQuery({
     queryKey: ['unreadNotifications', user.username],
     queryFn: () => getUnreadNotifications(user.username),
-    enabled: !!user.username
+    enabled: isChainAccount
   });
   const upvotePercent = manabarsData?.upvote.percentageValue ?? 0;
   const downvotePercent = manabarsData?.downvote.percentageValue ?? 0;
   const rcPercent = manabarsData?.rc.percentageValue ?? 0;
+  // Same fallback the deleted notifications page used: if nothing's been
+  // read yet, treat "now" as the cutoff so nothing is retroactively unread.
+  const lastRead = data?.lastread ? new Date(data.lastread) : new Date();
 
   return (
     <header
@@ -105,8 +118,12 @@ const AppHeader: FC = () => {
           </TooltipContainer>
 
           {user?.isLoggedIn ? (
+            /* Item 12: the bell used to be a Link to /@{user}/notifications
+               (now a deleted route). It's a NotificationsMenu popover
+               trigger instead — notifications render inline, right here,
+               nothing to navigate to. Badge behaviour is unchanged. */
             <TooltipContainer title={LABELS.notifications}>
-              <Link href={`/@${user.username}/notifications`} data-testid="nav-notifications">
+              <NotificationsMenu username={user.username} lastRead={lastRead} chainAccount={isChainAccount}>
                 <Button
                   variant="ghost"
                   size="sm"
@@ -116,6 +133,7 @@ const AppHeader: FC = () => {
                       ? `${LABELS.notifications} (${data.unread} unread)`
                       : LABELS.notifications
                   }
+                  data-testid="nav-notifications"
                 >
                   <Icons.bell className="h-5 w-5" />
                   {data && data.unread !== 0 ? (
@@ -124,7 +142,7 @@ const AppHeader: FC = () => {
                     </span>
                   ) : null}
                 </Button>
-              </Link>
+              </NotificationsMenu>
             </TooltipContainer>
           ) : null}
 
@@ -150,7 +168,11 @@ const AppHeader: FC = () => {
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger data-testid="profile-avatar-button" className="cursor-pointer">
-                  <UserMenu user={user} notifications={data?.unread}>
+                  {/* Lane-A item 12: UserMenu no longer takes a notifications
+                      count — the dropdown's own Notifications row is gone,
+                      so the only remaining consumer of `data.unread` here is
+                      the badge on the avatar itself, below. */}
+                  <UserMenu user={user}>
                     <div className="group relative inline-flex w-fit cursor-pointer items-center justify-center">
                       {data && data.unread !== 0 ? (
                         <div className="absolute bottom-auto left-auto right-0 top-0.5 z-50 inline-block -translate-y-1/2 translate-x-2/4 rotate-0 skew-x-0 skew-y-0 scale-x-100 scale-y-100 whitespace-nowrap rounded-full bg-destructive-icon px-1.5 py-1 text-center align-baseline text-xs font-bold leading-none text-white">

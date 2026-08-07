@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@hive/ui/components/ca
 import { FC } from 'react';
 import { useTranslation } from '@/blog/i18n/client';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
-import { DEFAULT_OBSERVER } from '@/blog/lib/utils';
+import { DEFAULT_OBSERVER, chainObserver } from '@/blog/lib/utils';
 import { StaleTime } from '@/blog/lib/react-query';
 import { useSSRObserver, useInitialCommunities } from '@/blog/components/observer-provider';
 
@@ -21,7 +21,7 @@ const CommunitiesSidebar: FC = () => {
   const { user, isHydrated } = useUserClient();
   // Use SSR observer before hydration to match prefetched cache keys,
   // then switch to client observer (which should be the same value for logged-in users)
-  const clientObserver = user.isLoggedIn ? user.username : DEFAULT_OBSERVER;
+  const clientObserver = chainObserver(user);
   const observer = isHydrated ? clientObserver : ssrObserver;
 
   const { data } = useQuery({

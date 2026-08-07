@@ -66,6 +66,45 @@ const wellKnownErrorDescriptions = [
  * @param {{ method: string, params: T }} ctx
  * @returns error description
  */
+/**
+ * ★★★ A HUMAN-READABLE MESSAGE, WHEN THE ERROR ACTUALLY CARRIES ONE.
+ *
+ * Without this, `errorTitle` was the literal string 'Error' for anything not in
+ * `wellKnownErrorDescriptions`, and the real explanation went into `fullError`
+ * — which the toast hides behind a chevron. Measured 2026-08-06: submitting a
+ * post with a whitespace-only title made the server answer
+ * `{"code":"title_required","message":"Advanced posts need a title."}` and the
+ * reader was shown a red box containing the single word "Error".
+ *
+ * Deliberately conservative. It promotes ONLY plain prose, because the other
+ * thing hiding in these payloads is raw chain output — `WaxAssertionError`,
+ * `assert_exception`, stack frames, JSON — and putting that in front of a
+ * reader is worse than saying nothing. If it does not look like a sentence
+ * written for a person, it stays where it was.
+ */
+function humanMessage(raw: string): string | undefined {
+  const fromJson = (() => {
+    const match = raw.match(/"message"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+    if (!match) return undefined;
+    try {
+      return JSON.parse(`"${match[1]}"`) as string;
+    } catch {
+      return undefined;
+    }
+  })();
+  // `Error: something went wrong` -> `something went wrong`
+  const fromError = /^[A-Za-z]*Error:\s*(.+)$/s.exec(raw)?.[1];
+  const candidate = (fromJson ?? fromError ?? '').trim();
+
+  if (candidate.length < 3 || candidate.length > 160) return undefined;
+  // Prose only: no structure, no markup, no multi-line dumps.
+  if (/[{}\[\]<>\\]|\n|"/.test(candidate)) return undefined;
+  if (!/\s/.test(candidate)) return undefined;
+  // Machine-speak that happens to be short, e.g. "Assert Exception".
+  if (/assert|exception|undefined|null|NaN|stack/i.test(candidate)) return undefined;
+  return candidate;
+}
+
 export function transformError<T>(e: any, ctx?: { method: string; params: T }, defaultDescription?: string) {
   logger.error('in transformError: got error (will be swallowed): %o on method: %s', e, ctx?.method);
 
@@ -93,7 +132,15 @@ export function transformError<T>(e: any, ctx?: { method: string; params: T }, d
       description = wellKnownErrorDescription;
       isWellKnownError = true;
     } else {
-      description = errorDescription;
+      // Prefer what the failure itself said, if it said something a person can
+      // read. Falls back to the generic 'Error' exactly as before.
+      const human = humanMessage(e);
+      if (human) {
+        description = human;
+        isWellKnownError = true; // it explains itself; no raw dump needed
+      } else {
+        description = errorDescription;
+      }
     }
   }
 

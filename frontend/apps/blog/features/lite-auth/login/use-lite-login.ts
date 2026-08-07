@@ -86,9 +86,28 @@ export function useLiteLogin() {
       if (!user || typeof user !== 'object') return;
       queryClient.setQueryData([QUERY_KEY.user], user);
       const username = (user as { username?: string }).username;
-      if (username) {
-        const secure = typeof location !== 'undefined' && location.protocol === 'https:' ? '; Secure' : '';
+      const tier = (user as { account_tier?: string }).account_tier;
+      const secure = typeof location !== 'undefined' && location.protocol === 'https:' ? '; Secure' : '';
+      // ★★★ NEVER NAME A LITE ACCOUNT AS THE CHAIN `observer`.
+      //
+      // The `observer` cookie tells the server who to personalise Hive reads
+      // for, and it is only meaningful for a REAL chain account. `getObserver`
+      // (lib/auth-utils.ts) already refuses a lite account when it falls back to
+      // the session — citing spec §A.5 as a must-fix — but it checks this cookie
+      // FIRST, and a lite display name passes its `[a-z0-9.-]{1,16}` shape test.
+      // So writing it here quietly defeated that guard, and every Hive call on
+      // every page went out with an account name the chain has never heard of:
+      // `bridge.get_community`, `bridge.get_follow_list`, `get_discussion`,
+      // each answering `Account <name> does not exist`, each retried. That is
+      // what made an upvote show an "Error" toast on top of its own success.
+      //
+      // An empty cookie is written deliberately rather than skipped: anyone who
+      // signed in before this fix is carrying a poisoned one, and it has to be
+      // cleared rather than left to expire.
+      if (username && tier !== 'lite') {
         document.cookie = `observer=${username}; path=/; SameSite=Lax${secure}`;
+      } else {
+        document.cookie = 'observer=; path=/; max-age=0';
       }
       queryClient.invalidateQueries();
     },

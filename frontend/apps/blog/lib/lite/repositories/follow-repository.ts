@@ -139,6 +139,54 @@ export async function listFolloweesOf(actor: FollowActor, limit = 2000): Promise
   return rows.map((r) => r.followee).filter((f): f is string => Boolean(f));
 }
 
+/**
+ * ★★★ THE PEOPLE BEHIND THE COUNT.
+ *
+ * The Followers/Following PAGES asked Hive (`condenser_api.get_following`) for a
+ * name that has no chain account, so a lite reader saw an accurate header —
+ * "1 Following", counted from this very table — above a list body that rendered
+ * nothing, forever. Two numbers from two different stores, one of which could
+ * never be shown. Found by an exploratory UX tester 2026-08-06 and reproduced.
+ *
+ * Returns each edge as either a Lumen `userId` or a Hive `name`, exactly as it
+ * is stored — the caller resolves display names, because a Lumen account's name
+ * can change (an upgrade) and the edge deliberately does not record it.
+ */
+export interface FollowEdgePeer {
+  userId: string | null;
+  hive: string | null;
+}
+
+export async function listFollowingPeers(
+  actor: FollowActor,
+  opts: { limit: number; before?: number } = { limit: 100 }
+): Promise<FollowEdgePeer[]> {
+  const { rows } = await query<{ followee_user_id: string | null; followee_hive: string | null }>(
+    `SELECT followee_user_id, followee_hive::text AS followee_hive
+       FROM lumen_follow
+      WHERE follower_key = $1 AND active = true
+        AND ($2::bigint IS NULL OR seq < $2)
+      ORDER BY seq DESC LIMIT $3`,
+    [actorKey(actor), opts.before ?? null, opts.limit]
+  );
+  return rows.map((r) => ({ userId: r.followee_user_id, hive: r.followee_hive }));
+}
+
+export async function listFollowerPeers(
+  actor: FollowActor,
+  opts: { limit: number; before?: number } = { limit: 100 }
+): Promise<FollowEdgePeer[]> {
+  const { rows } = await query<{ follower_user_id: string | null; follower_hive: string | null }>(
+    `SELECT follower_user_id, follower_hive::text AS follower_hive
+       FROM lumen_follow
+      WHERE followee_key = $1 AND active = true
+        AND ($2::bigint IS NULL OR seq < $2)
+      ORDER BY seq DESC LIMIT $3`,
+    [actorKey(actor), opts.before ?? null, opts.limit]
+  );
+  return rows.map((r) => ({ userId: r.follower_user_id, hive: r.follower_hive }));
+}
+
 export async function absorbHiveActor(userId: string, hiveName: string): Promise<void> {
   const name = hiveName.toLowerCase();
   // Re-point what can be re-pointed, and bump `seq` while doing it: the re-pointed edge

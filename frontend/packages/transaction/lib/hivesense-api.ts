@@ -7,12 +7,30 @@ const logStandarizedError = (methodName: string, error: unknown): null => {
   throw new Error(`Error in ${methodName}`);
 };
 
+/**
+ * Is AI ("Hivesense") search available on the configured node?
+ *
+ * ★ ANSWERS THE QUESTION. DOES NOT THROW IT BACK.
+ *
+ * This is an availability probe, and "unavailable" is a perfectly good answer —
+ * it is the whole point of asking. It used to rethrow, which meant that on any
+ * node without the hivesense extension (api.hive.blog among them: the request is
+ * cross-origin-blocked before it even 404s) EVERY visit to /search fired the
+ * failing request three times over — React Query retries a rejection — and left
+ * a CORS error in the console each time. Measured 2026-08-06 on the production
+ * build. The page behaved correctly throughout, which is exactly why nobody
+ * chased it; it just looked broken to anyone who opened dev tools.
+ *
+ * Kept at `debug`: on a node that simply lacks the extension this is expected,
+ * not an error, and logging it as one buries real failures.
+ */
 export const getHiveSenseStatus = async (): Promise<boolean> => {
   try {
     const response = await (await getChain()).restApi['hivesense-api']();
     return response.info.title === 'Hivesense';
   } catch (error) {
-    return !!logStandarizedError('getHiveSenseStatus', error);
+    logger.debug(error, 'hivesense-api not available on this node — AI search stays off');
+    return false;
   }
 };
 

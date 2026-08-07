@@ -61,8 +61,15 @@ const ProfileLayout = ({ children }: { children: ReactNode }) => {
   const pathname = usePathname();
   const username = pathname?.split('/')[1].replace('@', '') ?? '';
   const currentTab = pathname?.split('/')[2] ?? 'blog';
-  const walletHost = env('WALLET_ENDPOINT');
-  const explorerHost = env('EXPLORER_DOMAIN');
+  // ★ These are OPTIONAL deployment settings, and when they are unset a template
+  // literal happily stringifies `undefined` — producing the literal href
+  // "undefined/@bhattg", which resolves against the current path and lands the
+  // reader on Lumen's own 404. Found by a UX tester 2026-08-06 on the legacy
+  // followers page. `|| ''` is not enough either: an empty host yields "/@user",
+  // a link that silently goes somewhere real but wrong. So the links are only
+  // rendered when there is somewhere to send people.
+  const walletHost = env('WALLET_ENDPOINT') || '';
+  const explorerHost = env('EXPLORER_DOMAIN') || '';
   const userFromGDPRList = gdprUserList.includes(username);
   const thirdPartyEnabled = isThirdPartyApiEnabled();
 
@@ -280,7 +287,7 @@ const ProfileLayout = ({ children }: { children: ReactNode }) => {
                       className="group flex flex-col items-center transition-colors"
                     >
                       <span className="text-lg font-semibold sm:text-xl">
-                        {profileData?.follow_stats?.follower_count ?? 0}
+                        {numberWithCommas(String(profileData?.follow_stats?.follower_count ?? 0))}
                       </span>
                       <span className="text-xs text-white/70 group-hover:text-white sm:text-sm">
                         {t('user_profile.lists.followers_label')}
@@ -290,7 +297,9 @@ const ProfileLayout = ({ children }: { children: ReactNode }) => {
                       href={`/@${profileData.name}`}
                       className="group flex flex-col items-center transition-colors"
                     >
-                      <span className="text-lg font-semibold sm:text-xl">{profileData?.post_count ?? 0}</span>
+                      <span className="text-lg font-semibold sm:text-xl">
+                        {numberWithCommas(String(profileData?.post_count ?? 0))}
+                      </span>
                       <span className="text-xs text-white/70 group-hover:text-white sm:text-sm">
                         {t('user_profile.lists.posts_label')}
                       </span>
@@ -299,7 +308,7 @@ const ProfileLayout = ({ children }: { children: ReactNode }) => {
                       href={`/@${profileData.name}/followed`}
                       className="group flex flex-col items-center transition-colors"
                     >
-                      <span className="text-lg font-semibold sm:text-xl">{followingCount}</span>
+                      <span className="text-lg font-semibold sm:text-xl">{numberWithCommas(String(followingCount))}</span>
                       <span className="text-xs text-white/70 group-hover:text-white sm:text-sm">
                         {t('user_profile.lists.following_label')}
                       </span>
@@ -424,33 +433,28 @@ const ProfileLayout = ({ children }: { children: ReactNode }) => {
                       currentTab={currentTab === 'blog'}
                       label={t('navigation.profile_navbar.blog')}
                     />
-                    <ListItem
-                      href={`/@${username}/posts`}
-                      currentTab={
-                        currentTab === 'posts' || currentTab === 'comments' || currentTab === 'payout'
-                      }
-                      label={t('navigation.profile_navbar.posts')}
-                    />
-                    <ListItem
-                      href={`/@${username}/replies`}
-                      currentTab={currentTab === 'replies'}
-                      label={t('navigation.profile_navbar.replies')}
-                    />
+                    {/* Posts tab removed 2026-08-06 along with the routes behind
+                        it: app/[param]/(user-profile)/(posts-tabs)/{posts,payout}
+                        were deleted, so this link was a guaranteed 404. The
+                        redesigned profile at /@username owns Posts and Comments
+                        as tabs (`?tab=`); this legacy shell no longer duplicates
+                        them. Same treatment as Replies, below. */}
+                    {/* Replies tab removed 2026-08-06: the route it pointed at
+                        (app/[param]/(user-profile)/replies) was deleted, so this
+                        was a guaranteed 404. Replies are not a Lumen surface. */}
                     <ListItem
                       href={`/@${username}/communities`}
                       currentTab={currentTab === 'communities'}
                       label={t('navigation.profile_navbar.social')}
                     />
-                    <ListItem
-                      href={`/@${username}/notifications`}
-                      currentTab={currentTab === 'notifications'}
-                      label={t('navigation.profile_navbar.notifications')}
-                    />
+                    {/* Notifications tab removed 2026-08-06: that route was
+                        deleted too. Notifications live ONLY in the header bell,
+                        which now renders them inline (notifications-menu.tsx). */}
                   </ul>
                 </nav>
                 {/* Secondary links - hidden on mobile */}
                 <ul className="hidden flex-shrink-0 items-center gap-1 text-white md:flex">
-                  <li>
+                  <li hidden={!explorerHost}>
                     <Link
                       href={`${explorerHost}/@${username}`}
                       target="_blank"
@@ -461,7 +465,7 @@ const ProfileLayout = ({ children }: { children: ReactNode }) => {
                       {t('navigation.profile_navbar.block_explorer')}
                     </Link>
                   </li>
-                  <li>
+                  <li hidden={!walletHost}>
                     <Link
                       href={`${walletHost}/@${username}/transfers`}
                       target="_blank"
@@ -502,7 +506,7 @@ const ProfileLayout = ({ children }: { children: ReactNode }) => {
                       </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-48">
-                      <DropdownMenuItem asChild>
+                      <DropdownMenuItem asChild hidden={!explorerHost}>
                         <Link
                           href={`${explorerHost}/@${username}`}
                           target="_blank"
@@ -513,7 +517,7 @@ const ProfileLayout = ({ children }: { children: ReactNode }) => {
                           {t('navigation.profile_navbar.block_explorer')}
                         </Link>
                       </DropdownMenuItem>
-                      <DropdownMenuItem asChild>
+                      <DropdownMenuItem asChild hidden={!walletHost}>
                         <Link
                           href={`${walletHost}/@${username}/transfers`}
                           target="_blank"

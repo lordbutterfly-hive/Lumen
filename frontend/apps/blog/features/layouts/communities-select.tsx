@@ -16,7 +16,7 @@ import { withBasePath } from '@ui/lib/path-utils';
 import { getCommunities, getSubscriptions } from '@transaction/lib/bridge-api';
 import { useRouter } from 'next/navigation';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
-import { DEFAULT_OBSERVER } from '@/blog/lib/utils';
+import { DEFAULT_OBSERVER, chainObserver } from '@/blog/lib/utils';
 import { StaleTime } from '@/blog/lib/react-query';
 import { useSSRObserver, useInitialCommunities, useInitialSubscriptions } from '@/blog/components/observer-provider';
 
@@ -27,7 +27,7 @@ export function CommunitiesSelect({ title }: { title: string }) {
   const ssrObserver = useSSRObserver();
   const initialCommunities = useInitialCommunities();
   const initialSubscriptions = useInitialSubscriptions();
-  const clientObserver = user.isLoggedIn ? user.username : DEFAULT_OBSERVER;
+  const clientObserver = chainObserver(user);
   const observer = isHydrated ? clientObserver : ssrObserver;
   const sort = 'rank';
   const query = null;

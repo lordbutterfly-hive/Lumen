@@ -32,19 +32,30 @@ export default function WalletRightRail() {
   const isLite = user.account_tier === 'lite';
   const { figures, pendingClaimedAccounts } = useWalletAccount(isLite ? '' : user.username);
 
+  const marketStatsUrl = getMarketStatsUrl();
+
   return (
     <aside className="flex w-full flex-col gap-5 font-sans" data-testid="wallet-right-rail">
       <PriceCardHive />
       <PriceCardHbd />
-      <a
-        href={getMarketStatsUrl()}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-center text-[13px] font-semibold text-[#c0392b] hover:text-[#96271b]"
-        data-testid="wallet-view-more-market-stats"
-      >
-        {t('wallet.market.view_more')}
-      </a>
+      {/* ★ Only offer the link when there is somewhere to send people.
+          `getMarketStatsUrl()` falls back to '#' when REACT_APP_WALLET_ENDPOINT
+          is unset, and a UX tester found exactly that: a link whose href was
+          literally "#", so clicking it did nothing at all. The helper's own
+          comment says these exist to link out to real deployed pages "instead
+          of dead-ending on '#'" — this makes that true. Same treatment as the
+          profile's Block Explorer link. */}
+      {marketStatsUrl !== '#' ? (
+        <a
+          href={marketStatsUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-center text-[13px] font-semibold text-[#c0392b] hover:text-[#96271b]"
+          data-testid="wallet-view-more-market-stats"
+        >
+          {t('wallet.market.view_more')}
+        </a>
+      ) : null}
       {/* Hidden for logged-out and lite accounts. Every tool in here (power
           up/down, delegate, claim account tokens) is a real, unconditional
           transactionService call with no tier/login check inside the tool

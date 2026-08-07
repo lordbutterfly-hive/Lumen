@@ -907,6 +907,14 @@ export type ExtendedNodeApi = {
     list_rc_direct_delegations: TWaxApiRequest<{ limit: number; start: [string, string] }, IDirectDelegation>;
   };
   condenser_api: { /* XXX: Temporary until we resolve follow_api not working for those methods: */
+    /**
+     * ★ Lives HERE, not on database_api. hived only registers this method on
+     * condenser_api; `database_api.get_trending_tags` answers with an Assert
+     * Exception ("method_itr != api_itr->second.end()") on every public node,
+     * which is why the right-rail Topics card showed "Couldn't load trending
+     * topics." permanently. Verified against api.hive.blog 2026-08-06.
+     */
+    get_trending_tags: TWaxApiRequest<(string | number)[], ITrendingTag[]>;
     get_reblogged_by: TWaxApiRequest<[ /* author: */ string /*; permlink: */, string ], string[]>;
     get_followers: TWaxApiRequest<
       [ /* account: */ string /*; start: */, string /*; type: */, string /*; limit: */, number ],
@@ -934,7 +942,8 @@ export type ExtendedNodeApi = {
       params: VerifySignaturesParams;
       result: VerifySignaturesResponse;
     };
-    get_trending_tags: TWaxApiRequest<(string | number)[], ITrendingTag[]>;
+    // get_trending_tags moved to condenser_api — hived does not expose it here,
+    // and declaring it made a call that can only ever fail look type-safe.
     get_collateralized_conversion_requests: TWaxApiRequest<string[], ICollateralizedConversionRequest[]>;
     list_witness_votes: TWaxApiRequest<{ start: string[]; limit: number; order: string }, IListWitnessVotes>;
     list_witnesses: TWaxApiRequest<

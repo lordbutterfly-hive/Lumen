@@ -7,6 +7,7 @@ import { createAsset, createPermlink } from "@transaction/lib/utils";
 import { withBasePath } from "@ui/lib/path-utils";
 import { getLogger } from "@ui/lib/logging";
 import { handleError } from "@ui/lib/handle-error";
+import { toast } from "@ui/components/hooks/use-toast";
 import { Entry } from "@hive/common-hiveio-packages/wax";
 import { parseTags } from "@/blog/features/post-editor/lib/utils";
 import { usePostMutation } from "@/blog/features/post-editor/hooks/use-post-mutation";
@@ -142,7 +143,31 @@ export function usePostFormActions({
         latestPostAreaRef.current = defaultValues.postArea;
         form.reset(defaultValues);
         setPreviewContent(undefined);
-        await router.push(withBasePath("/"), undefined);
+        // ★ SAY SOMETHING. The chain path has always toasted here (see
+        // usePostMutation.onSuccess) and then navigated to the new post. The
+        // lite path did neither: it pushed the reader to the home feed in
+        // silence, so the only way to learn whether your post existed was to go
+        // to your profile and look for it. Measured 2026-08-06 at 300 ms, 1 s
+        // and 2.5 s after Submit — nothing on screen at any of them, while the
+        // 201 sat in the network log. Publishing is the scariest thing a
+        // newcomer does here; an unacknowledged one reads as a failure.
+        toast({
+          title: editMode ? "Changes saved" : "Post published",
+          description: editMode
+            ? "Your post has been updated."
+            : "It is on its way to Hive and is already visible on Lumen.",
+          variant: "success"
+        });
+        // ★ An EDIT should return you to what you edited, not to the feed.
+        //   Creating a post has no page to go to yet (the lite post is not on
+        //   chain at the moment of writing), so the home feed is right there —
+        //   but after an edit the post exists and the reader was just looking
+        //   at it. Reported as "a minor UX surprise" by an adversarial pass;
+        //   it is also the only way to see that the edit took.
+        await router.push(
+          withBasePath(editMode && post_s?.url ? post_s.url : "/"),
+          undefined
+        );
       } else {
         handleError(new Error(result.message), { method: "lite-post", params: { title: data.title } });
       }

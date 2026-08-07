@@ -7,12 +7,35 @@ import ProfileCommentCard from './profile-comment-card';
 import { useAccountEntries } from './hooks/use-account-entries';
 
 /** Comments tab body — reply cards, no SSR-prefetched initial page (see use-account-entries TODO). */
-export default function ProfileCommentsList({ username, observer }: { username: string; observer: string }) {
+export default function ProfileCommentsList({
+  username,
+  observer,
+  lite = false
+}: {
+  username: string;
+  observer: string;
+  lite?: boolean;
+}) {
   const { t } = useTranslation('common_blog');
   const { entries, isError, isLoading, isFetching, isFetchingNextPage, hasNextPage, fetchNextPage, loadMoreRef } =
-    useAccountEntries(username, 'comments', observer);
+    useAccountEntries(username, 'comments', observer, undefined, lite);
 
-  if (isError) return <NoDataError />;
+  // ★★★ AN ERROR ON PAGE 2 MUST NOT DELETE PAGE 1.
+  //
+  // `isError` on an infinite query goes true when ANY page fails — including a
+  // `fetchNextPage` the scroll observer fired on its own, seconds after the
+  // first page rendered fine. Returning the error component here threw away
+  // content the reader was already looking at and replaced it with "There was a
+  // problem fetching the data. Please check if permlink is correct or the node
+  // is running properly."
+  //
+  // That is how a UX tester saw this tab fail while simultaneously capturing a
+  // HTTP 200 carrying twenty real comments: both were true. The first page had
+  // loaded; a later one had not.
+  //
+  // Show what we have. Only surrender the whole surface when there is genuinely
+  // nothing to show.
+  if (isError && entries.length === 0) return <NoDataError />;
   if (isLoading || (isFetching && entries.length === 0)) return <PostListSkeleton count={4} />;
 
   if (entries.length === 0) {

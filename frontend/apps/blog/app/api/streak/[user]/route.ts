@@ -37,6 +37,18 @@ const MAX_PAGES = 25; // ⇒ up to 500 items per feed before we stop walking bac
 const WINDOW_WEEKS = 26; // the rolling window the league's active-weeks arm scores
 const VOTE_SAMPLE_POSTS = 3; // posts we actually walk voters for (bounded cost)
 const CACHE_TTL_MS = 5 * 60 * 1000;
+// PERF: this route previously had NO overall deadline — a single slow public
+// Hive node turned a ~50-call fan-out into a 639,506ms (10.6 minute) response
+// (observed live, GET /api/streak/lordbutterfly). Two bounds now apply together:
+// a per-call timeout (one hung fetch can't stall the route forever) and an
+// overall wall-clock budget (the route always answers within a predictable time,
+// even if every call is individually slow-but-not-hung). A call that times out or
+// a budget that runs out mid-walk degrades coverage — it reuses the EXISTING
+// `capped` concept (see FeedWalk) rather than inventing a second "partial" idea,
+// so a client that already understands `capped`/`activeWeeksIsLowerBound` needs
+// no new logic to render this correctly.
+const CALL_TIMEOUT_MS = 6_000; // bounds any single upstream Hive call
+const REQUEST_BUDGET_MS = 20_000; // bounds the whole route's wall-clock time
 // F-L15: a DEFINITIVE not-found is negative-cached, but for a SHORTER window than a
 // positive result and NEVER for a transient upstream failure (that returns 502 and is
 // left uncached, so a node hiccup can't pin a real account as missing for 5 minutes).
@@ -75,8 +87,31 @@ interface FeedWalk {
   items: PostLike[];
   /** Oldest item actually seen, so coverage can be stated rather than assumed. */
   oldestISO: string;
-  /** True when MAX_PAGES ran out before reaching the window — coverage is partial. */
+  /** True when MAX_PAGES ran out, a call timed out, or the request budget ran
+   *  out before reaching the window — coverage is partial either way. */
   capped: boolean;
+}
+
+/**
+ * Bound a single upstream call. We don't own the Hive API client (`@transaction`
+ * is another lane's package), so this can't cancel the underlying socket — but
+ * it stops the ROUTE from waiting on it, which is what turns a hung public node
+ * into a bounded response instead of an unbounded one.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    promise.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      }
+    );
+  });
 }
 
 /**
@@ -92,7 +127,7 @@ interface FeedWalk {
  * If the cap is hit we report partial coverage instead of extrapolating: the
  * resulting active-weeks is then an honest LOWER bound, never an invented one.
  */
-async function walkFeed(sort: string, user: string, cutoffMs: number): Promise<FeedWalk> {
+async function walkFeed(sort: string, user: string, cutoffMs: number, deadlineAt: number): Promise<FeedWalk> {
   const items: PostLike[] = [];
   let startAuthor = '';
   let startPermlink = '';
@@ -100,8 +135,33 @@ async function walkFeed(sort: string, user: string, cutoffMs: number): Promise<F
   let capped = false;
 
   for (let page = 0; page < MAX_PAGES; page++) {
-    const batch = ((await getAccountPosts(sort, user, '', startAuthor, startPermlink, PAGE_SIZE)) ??
-      []) as PostLike[];
+    // Overall wall-clock budget check, ahead of every page — not just the page
+    // cap. Without this a slow-but-not-hung node (each call answers, just
+    // slowly) could still walk all 25 pages and take minutes.
+    const remaining = deadlineAt - Date.now();
+    if (remaining <= 0) return { items, oldestISO, capped: true };
+
+    let batch: PostLike[];
+    try {
+      batch = ((await withTimeout(
+        getAccountPosts(sort, user, '', startAuthor, startPermlink, PAGE_SIZE),
+        Math.min(CALL_TIMEOUT_MS, remaining),
+        `getAccountPosts(${sort})`
+      )) ?? []) as PostLike[];
+    } catch (err) {
+      // A hung/slow/erroring page must not discard everything already walked —
+      // that would turn one flaky call late in a long walk into a full 502 for
+      // an otherwise-fine request. Once we have SOME progress, degrade to
+      // partial (capped) coverage instead of failing the whole walk.
+      // Zero progress (page 0 itself failed) is NOT swallowed here — it
+      // rethrows so the existing FAIL LOUD contract (502, never cached as
+      // "inactive") still holds for a total upstream failure.
+      if (items.length > 0) {
+        logger.warn(err, 'streak: %s walk for %s stopped early at page %d (partial coverage kept)', sort, user, page);
+        return { items, oldestISO, capped: true };
+      }
+      throw err;
+    }
     // A paged call echoes the cursor item back as the first element; drop it.
     const fresh = startPermlink ? batch.filter((p) => p.permlink !== startPermlink) : batch;
     if (fresh.length === 0) return { items, oldestISO, capped: false };
@@ -147,11 +207,15 @@ export async function GET(req: NextRequest, { params }: { params: { user: string
 
   try {
     const cutoffMs = Date.now() - WINDOW_WEEKS * 7 * 86_400_000;
+    // Absolute deadline for the whole route, computed once so every branch
+    // below (both feed walks, and the vote sample after them) shares the same
+    // clock rather than each getting its own fresh budget.
+    const deadlineAt = Date.now() + REQUEST_BUDGET_MS;
     const [accountRes, profileRes, postsRes, commentsRes] = await Promise.allSettled([
-      getAccount(user),
-      getProfileInfo(user),
-      walkFeed('posts', user, cutoffMs),
-      walkFeed('comments', user, cutoffMs)
+      withTimeout(getAccount(user), CALL_TIMEOUT_MS, 'getAccount'),
+      withTimeout(getProfileInfo(user), CALL_TIMEOUT_MS, 'getProfileInfo'),
+      walkFeed('posts', user, cutoffMs, deadlineAt),
+      walkFeed('comments', user, cutoffMs, deadlineAt)
     ]);
 
     // F-L15: distinguish a TRANSIENT upstream failure (the getAccount call rejected)
@@ -200,9 +264,17 @@ export async function GET(req: NextRequest, { params }: { params: { user: string
 
     // Distinct voters over a bounded sample of recent posts. Sampled, not total —
     // labelled as such in the response so nobody reads it as lifetime breadth.
-    const voteTargets = posts.filter((p) => p.permlink).slice(0, VOTE_SAMPLE_POSTS);
+    // If the feed walks above already ate the whole request budget, skip this
+    // step rather than add another wait on top — the reduced fan-out this
+    // implies is the deliberate fix, not an accident: the two feed walks are
+    // load-bearing (streak, active-weeks), the vote sample is a bounded
+    // secondary metric, so it is the one that gives way under time pressure.
+    const budgetLeft = deadlineAt - Date.now();
+    const voteTargets = budgetLeft > 0 ? posts.filter((p) => p.permlink).slice(0, VOTE_SAMPLE_POSTS) : [];
     const voterSets = await Promise.allSettled(
-      voteTargets.map((p) => getActiveVotes(user, p.permlink as string))
+      voteTargets.map((p) =>
+        withTimeout(getActiveVotes(user, p.permlink as string), Math.min(CALL_TIMEOUT_MS, budgetLeft), 'getActiveVotes')
+      )
     );
     const distinct = new Set<string>();
     for (const r of voterSets) {

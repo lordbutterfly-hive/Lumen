@@ -29,6 +29,8 @@ import LinkedInShare from '@/blog/features/post-rendering/share-post-linkedin';
 import RedditShare from '@/blog/features/post-rendering/share-post-reddit';
 import TwitterShare from '@/blog/features/post-rendering/share-post-twitter';
 import UserInfo from '@/blog/features/post-rendering/user-info';
+import ButtonsContainer from '@/blog/features/mute-follow/buttons-container';
+import { useFollowingInfiniteQuery } from '@/blog/features/account-lists/hooks/use-following-infinitequery';
 import { UserPopoverCard } from '@/blog/features/post-rendering/user-popover-card';
 import { useLiteOverlay } from '@/blog/lib/lite/client/use-lite-overlay';
 import AnimatedList from '@/blog/features/suggestions-posts/animated-tab';
@@ -36,14 +38,14 @@ import SuggestionsList from '@/blog/features/suggestions-posts/list';
 import { useTranslation } from '@/blog/i18n/client';
 import { postContainerClasses } from '@/blog/lib/post-layout-classes';
 import sorter, { SortOrder } from '@/blog/lib/sorter';
-import { DEFAULT_OBSERVER } from '@/blog/lib/utils';
+import { DEFAULT_OBSERVER, chainObserver } from '@/blog/lib/utils';
 import { getBasePath } from '@ui/lib/path-utils';
 import { useQuery } from '@tanstack/react-query';
 import { getCommunity, getDiscussion, getListCommunityRoles, getPost } from '@transaction/lib/bridge-api';
 import { fetchLiteEntryByPermlink } from '@/blog/lib/lite/client/lite-post-fetch';
 import { Entry } from '@hive/common-hiveio-packages/wax';
 import { getActiveVotes } from '@transaction/lib/hive-api';
-import { getSimilarPostsByPost, isPostStub } from '@transaction/lib/hivesense-api';
+import { getSimilarPostsByPost, getHiveSenseStatus, isPostStub } from '@transaction/lib/hivesense-api';
 import { Badge } from '@ui/components/badge';
 import { Button } from '@ui/components/button';
 import { Icons } from '@ui/components/icons';
@@ -96,7 +98,7 @@ const PostContent = () => {
   const initialMutedList = useInitialFollowList();
   // Use SSR observer before hydration to match prefetched cache keys,
   // then switch to client observer (which should be the same value for logged-in users)
-  const clientObserver = user.isLoggedIn ? user.username : DEFAULT_OBSERVER;
+  const clientObserver = chainObserver(user);
   const observer = isHydrated ? clientObserver : ssrObserver;
   // Use empty key when user is not logged in to disable storage hooks
   const replyStorageId = user.username ? `replybox-/${author}/${permlink}-${user.username}` : '';
@@ -202,7 +204,30 @@ const PostContent = () => {
     enabled: crossedPost
   });
 
+  /**
+   * ★ ASK WHETHER THE SERVICE EXISTS BEFORE ASKING IT FOR ANYTHING.
+   *
+   * "Similar posts" comes from Hivesense, an OPTIONAL extension that the
+   * configured node does not have — so the browser fired a cross-origin request
+   * at `api.hive.blog/hivesense-api/...` on EVERY post and comment page, got a
+   * CORS rejection, retried, and rendered nothing. Three separate UX testers
+   * reported the console noise; the widget itself has never worked here.
+   *
+   * The availability probe is already cached app-wide (`getHiveSenseStatus`,
+   * `refetchOnMount: false`), so gating on it costs one shared request instead
+   * of two or three per page — and the moment a node DOES offer Hivesense, the
+   * feature lights up with no further change.
+   */
+  const { data: hiveSenseAvailable } = useQuery({
+    queryKey: ['hivesense-api'],
+    queryFn: () => getHiveSenseStatus(),
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
+    staleTime: Infinity
+  });
+
   const { data: suggestionData } = useQuery({
+    enabled: hiveSenseAvailable === true,
     queryKey: ['suggestions', author, permlink, observer],
     queryFn: async () => {
       const results = await getSimilarPostsByPost({
@@ -236,9 +261,44 @@ const PostContent = () => {
     }
   });
 
+  /**
+   * ★★★ A LUMEN POST THAT IS NOT ON CHAIN YET HAS NO CHAIN THREAD AND NO CHAIN
+   * VOTES — SO DO NOT ASK FOR THEM.
+   *
+   * A lite post is published asynchronously by the proxy account. Until that
+   * lands, its permlink is our own `lite-<ulid>` and it exists ONLY in Lumen's
+   * store. Asking Hivemind for `@<lite name>/lite-<ulid>` therefore returns a
+   * real assertion — `Post ... does not exist` — and both queries below routed
+   * that straight into `handleError`, which put a red toast carrying a raw
+   * `WaxAssertionError` in front of EVERY visitor, signed in or not, for the
+   * life of the post. Measured 2026-08-06 by a UX tester, then reproduced: it
+   * was still firing on a four-hour-old post, and on an anonymous page load.
+   *
+   * `lite-` prefixed permlinks are pre-publish by construction (once broadcast,
+   * the row carries the real `lumen-<ulid>` chain permlink and these queries are
+   * correct again). Reblogs and any other chain lookup on this page should use
+   * the same gate.
+   */
+  const isOnChain = !/^lite-/i.test(permlink);
+  // Whose follow button the byline offers: the Lumen identity when this is a
+  // Lumen post, the chain author otherwise. Never yourself.
+  const postFollowTarget = (() => {
+    const target = litePost?.author || crossPostData?.author || postData?.author;
+    if (!target || !user.isLoggedIn) return null;
+    return target === user.username ? null : target;
+  })();
+  // The viewer's own follow/mute lists, which ButtonsContainer diffs against to
+  // decide whether it is showing Follow or Unfollow.
+  const postAuthorFollow = useFollowingInfiniteQuery(user.username, 1000, 'blog', ['blog']);
+  const postAuthorMute = useFollowingInfiniteQuery(user.username, 1000, 'ignore', ['ignore']);
+  // A Lumen-authored post, published or not: its lifecycle is ours, not the
+  // chain's payout clock.
+  const isLumenPost = !isOnChain || /^lumen-/i.test(permlink);
+
   const { data: discussionData } = useQuery({
     queryKey: ['discussionData', author, permlink, observer],
     queryFn: () => getDiscussion(author, permlink, observer),
+    enabled: isOnChain,
     initialData: initialDiscussion ?? undefined,
     initialDataUpdatedAt: initialDiscussion ? Date.now() : undefined,
     staleTime: StaleTime.MEDIUM,
@@ -387,14 +447,20 @@ const PostContent = () => {
   });
 
   const { data: activeVotesData } = useQuery({
-    queryKey: ['activeVotes'],
+    queryKey: ['activeVotes', author, permlink],
     queryFn: () => getActiveVotes(author, permlink),
+    enabled: isOnChain,
     onError: (error) => {
       handleError(error, { method: 'getActiveVotes', params: { author, permlink } });
     }
   });
 
-  const { data: mutedList } = useFollowListQuery(user.username, 'muted', initialMutedList);
+  const { data: mutedList } = useFollowListQuery(
+    user.username,
+    'muted',
+    initialMutedList,
+    user.account_tier !== 'lite'
+  );
 
   const pinMutations = usePinMutation();
   const unpinMutation = useUnpinMutation();
@@ -426,16 +492,18 @@ const PostContent = () => {
       // Use window.location for subdirectory deployments to ensure catch-all route works
       if (basepath) {
         // Security: Build path safely to prevent XSS
-        const safePath = buildSafePath(basepath, `/@${author}/posts`);
+        // ★ /@author/posts was deleted 2026-08-06; land on the profile itself,
+        // which is the redesigned page and already opens on its Posts tab.
+        const safePath = buildSafePath(basepath, `/@${author}`);
         if (safePath) {
           window.location.href = safePath;
         } else {
           // Fallback to client navigation if path construction fails
-          router.push(`/@${author}/posts`);
+          router.push(`/@${author}`);
         }
       } else {
         // Use client-side navigation for root deployments (faster)
-        router.push(`/@${author}/posts`);
+        router.push(`/@${author}`);
       }
     } catch (error) {
       setIsSubmitting(false);
@@ -553,9 +621,19 @@ const PostContent = () => {
                     />
                   )}
                   {postData._optimistic && (
-                    <OptimisticStatusBanner createdAt={postData.created} />
+                    <OptimisticStatusBanner createdAt={postData.created} lite={!isOnChain} />
                   )}
                   <div className="flex flex-wrap items-start justify-between gap-2">
+                    {/* ★ FOLLOW THE PERSON YOU JUST READ, WHERE YOU READ THEM.
+                        The only follow control lived on the author's PROFILE, one
+                        navigation away — so the natural moment ("I liked that,
+                        who wrote it?") had nothing to act on. A newcomer walking
+                        the ordinary path of open-a-post-then-follow-its-author
+                        found no Follow anywhere on the page; the byline offered
+                        Reblog and nothing else. Reproduced on three posts.
+                        Mute stays off deliberately: this is a reading surface,
+                        not a moderation one, and `hideMute` is the same switch
+                        the lite-author case already uses. */}
                     <UserInfo
                       permlink={permlink}
                       moderateEnabled={!!userCanModerate}
@@ -567,7 +645,19 @@ const PostContent = () => {
                       author_title={postData.author_title}
                       authored={postData.json_metadata?.author}
                       community_title={
-                        crossPostData?.community_title ?? communityData?.title ?? ''
+                        // ★ `postData.community_title` was missing from this chain
+                        //   while TWO other elements on this same page already used
+                        //   it (lines ~546 and ~725) — so the byline rendered empty
+                        //   and fell through to its placeholder while the correct
+                        //   name, "Splinterlands", sat in the payload it was handed.
+                        //   A UX tester spotted the two elements disagreeing about
+                        //   the same post. `communityData` is a separate request
+                        //   that need not have resolved; the post itself always
+                        //   carries this.
+                        crossPostData?.community_title ??
+                        postData.community_title ??
+                        communityData?.title ??
+                        ''
                       }
                       community={crossPostData?.community ?? category}
                       category={postData.category}
@@ -576,6 +666,17 @@ const PostContent = () => {
                         firstPost ? firstPost.blacklists : thisPost ? thisPost.blacklists : postData.blacklists
                       }
                     />
+                    {postFollowTarget ? (
+                      <ButtonsContainer
+                        username={postFollowTarget}
+                        user={user}
+                        variant="outlineRed"
+                        liteTarget={Boolean(litePost?.author)}
+                        hideMute
+                        follow={postAuthorFollow}
+                        mute={postAuthorMute}
+                      />
+                    ) : null}
                     {/* Reblog Button in Header */}
                     {!commentSite && (
                       <ReblogTrigger
@@ -847,9 +948,21 @@ const PostContent = () => {
                           </button>
                         </DialogLogin>
                       )}
+                      {/* ★ THE DELETE CONTROL COULD NEVER APPEAR ON A LUMEN POST.
+                          `payout_at` is Hive's cashout time — a real post gets
+                          seven days, and this gate means "still editable". A
+                          Lumen entry has no cashout, and `dbPostToEntry` sets
+                          `payout_at` to the CREATION time, so `now < payout_at`
+                          was false one second after posting and the author was
+                          left with no way to remove their own post — while
+                          `deleteLitePost` sat fully implemented and wired into
+                          `useDeletePostMutation`. A tester searched the post
+                          page, the profile list, settings and the whole DOM for
+                          a delete affordance and correctly reported there was
+                          none. The feature existed; the gate hid it. */}
                       {postData.children === 0 &&
                       viewerIsAuthor &&
-                      new Date() < new Date(`${postData.payout_at}Z`) ? (
+                      (isLumenPost || new Date() < new Date(`${postData.payout_at}Z`)) ? (
                         <>
                           <span className="mx-1">|</span>
                           <PostDeleteDialog

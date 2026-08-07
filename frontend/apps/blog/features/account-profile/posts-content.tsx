@@ -4,7 +4,7 @@ import NoDataError from '@/blog/components/no-data-error';
 import PostList from '@/blog/features/list-of-posts/posts-loader';
 import { PER_PAGE } from '@/blog/features/search/lib/utils';
 import { useTranslation } from '@/blog/i18n/client';
-import { DEFAULT_OBSERVER, DEFAULT_PREFERENCES, Preferences } from '@/blog/lib/utils';
+import { DEFAULT_OBSERVER, DEFAULT_PREFERENCES, Preferences, chainObserver } from '@/blog/lib/utils';
 import { StaleTime } from '@/blog/lib/react-query';
 import { useSSRObserver, useInitialPosts } from '@/blog/components/observer-provider';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
@@ -38,7 +38,7 @@ const PostsContent = ({ query }: { query: QueryTypes }) => {
   const { user, isHydrated } = useUserClient();
   // Use SSR observer before hydration to match prefetched cache keys,
   // then switch to client observer (which should be the same value for logged-in users)
-  const clientObserver = user.isLoggedIn ? user.username : DEFAULT_OBSERVER;
+  const clientObserver = chainObserver(user);
   const observer = isHydrated ? clientObserver : ssrObserver;
   const [preferences] = useStorageWithTTL<Preferences>(
     user.username ? `user-preferences-${user.username}` : '',

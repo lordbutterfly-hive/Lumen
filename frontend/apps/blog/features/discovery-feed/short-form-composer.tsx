@@ -7,59 +7,143 @@ import { Avatar, AvatarFallback, AvatarImage } from '@ui/components';
 import { getUserAvatarUrl } from '@hive/ui';
 import { Button } from '@ui/components/button';
 import { cn } from '@ui/lib/utils';
-import { setStorageItem, StorageTTL } from '@ui/lib/storage-with-ttl';
-import { withBasePath } from '@ui/lib/path-utils';
 import DialogLogin from '@/blog/components/dialog-login';
 import { createLitePost } from '@/blog/lib/lite/client/lite-write';
+import { toast } from '@ui/components/hooks/use-toast';
+import { createAsset, createPermlink } from '@transaction/lib/utils';
+import { usePostMutation } from '@/blog/features/post-editor/hooks/use-post-mutation';
+import { shortPostTitle } from '@/blog/lib/short-post-title';
 
 // TODO: move to i18n (t('...'))
 const LABELS = {
   placeholder: "What's on your mind?",
   postButton: 'Post',
-  loginPrompt: 'Start writing — log in to post',
-  fullStory: 'Write a full story'
+  loginPrompt: 'Start writing — log in to post'
 };
 
-const SUBMIT_PATH = '/submit.html';
+/**
+ * Tag every short post carries. Deliberately the SAME constant the lite backend
+ * puts on a normal-tier post (`NORMAL_TAG` in lib/lite/content/post-service.ts),
+ * so a short post is the same kind of thing on chain whichever tier wrote it.
+ * It also becomes the parent permlink of a Hive root post, which needs a tag.
+ */
+const SHORT_POST_TAG = 'lumen';
+
+/** Hive's default max accepted payout, in the units `createAsset` expects. */
+const MAX_PAYOUT_HBD = '1000000000';
 
 /**
  * "What's on your mind?" compose box near the top of the home feed. At rest it is
  * a single-line card (avatar + placeholder + ink Post button, all Open Sans per
  * design-handoff-v2 — no serif display face); clicking it expands into the real
- * editor surface. Both the "Post" button and the "Write a
- * full story" link hand the typed draft to the real editor: they write it to the
- * same localStorage draft key the editor reads on mount (`postData-new-<user>`),
- * then navigate to /submit.html — so the composer reuses the existing
- * sign/broadcast pipeline instead of a second one. Short-form and long-form are
- * the same on-chain object (a top-level comment op with parent_author="").
+ * editor surface.
+ *
+ * ★★★ "POST" POSTS. FOR EVERY ACCOUNT TIER. THAT IS THE WHOLE CONTRACT.
+ *
+ * It did not, and this is what the owner hit. A visible "write a full post"
+ * link was removed from here earlier, but the ESCAPE HATCH ITSELF SURVIVED
+ * INSIDE THE BUTTON: for a Hive-keyed account, clicking Post stashed the text in
+ * localStorage and navigated to /submit.html. So the label said Post, and what
+ * happened was "you have been moved to a different, much larger editor and
+ * nothing has been published". Removing the link while leaving the behaviour is
+ * worse than leaving both — at least a link announces where it is taking you.
+ *
+ * Both tiers now publish from here, by the path each one actually has:
+ *
+ *  * LITE — no Hive keys, cannot sign in-browser. `createLitePost` hands the
+ *    text to /api/lite/posts, which persists it and enqueues a publish job; the
+ *    publisher account broadcasts it to Hive inside a container, exactly like
+ *    any other lite post. Nothing about a short post makes it a special case.
+ *
+ *  * HIVE-KEYED — signs in the browser through the SAME `usePostMutation` the
+ *    full editor uses. Not a second broadcast path: the same optimistic cache
+ *    seeding, the same shadow draft, the same toast, the same error handling.
+ *    A short post is a normal Hive root post; it is short, not different.
+ *
+ * The only thing this composer derives that the editor asks for explicitly is
+ * the title — `shortPostTitle` in lib/short-post-title.ts, the SAME module the
+ * lite backend titles with, so the two tiers cannot drift.
  */
 export default function ShortFormComposer() {
-  const { user } = useUserClient();
+  const { user, isHydrated } = useUserClient();
   const router = useRouter();
+  // The full editor's mutation, reused verbatim for the Hive-keyed tier.
+  const postMutation = usePostMutation();
   const [text, setText] = useState('');
   const [isFocused, setIsFocused] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // Hydration-safe, matching the pattern already used for this same hook
+  // elsewhere (e.g. useLiveStudio): before the client has hydrated, `user` is
+  // still the SSR default (isLoggedIn: false) even for a genuinely signed-in
+  // visitor, so `isLoggedIn` alone must never gate real behaviour ahead of it.
+  const loggedIn = isHydrated && user.isLoggedIn;
   // A lite account has no Hive keys, so it cannot sign in-browser: its short
   // post is proxied via /api/lite/posts instead of the Keychain/wax editor.
   const isLite = user.account_tier === 'lite';
   const isExpanded = isFocused || text.length > 0;
 
-  const submitLite = async () => {
+  /**
+   * One handler, because there is one user-facing action. The tier decides which
+   * machinery runs, never whether a post happens.
+   */
+  const submit = async () => {
     const trimmed = text.trim();
     if (trimmed === '' || submitting) return;
     setSubmitting(true);
     setError(null);
-    const result = await createLitePost({ body: trimmed });
-    setSubmitting(false);
-    if (result.status === 'ok') {
+    try {
+      if (isLite) {
+        const result = await createLitePost({ body: trimmed });
+        if (result.status !== 'ok') {
+          setError(result.message);
+          return;
+        }
+      } else {
+        const title = shortPostTitle(trimmed);
+        // `createPermlink` dedupes against the author's existing permlinks, so
+        // two short posts opening with the same words cannot collide.
+        const [permlink, maxAcceptedPayout] = await Promise.all([
+          createPermlink(title, user.username),
+          createAsset(MAX_PAYOUT_HBD, 'HBD')
+        ]);
+        await postMutation.mutateAsync({
+          permlink,
+          title,
+          body: trimmed,
+          reputation: 0,
+          tags: [SHORT_POST_TAG],
+          category: SHORT_POST_TAG,
+          summary: '',
+          altAuthor: '',
+          editMode: false,
+          beneficiaries: [],
+          maxAcceptedPayout,
+          percentHbd: 10000
+        });
+      }
       setText('');
       setIsFocused(false);
+      // ★ Confirm here too. The full editor got this and the composer did not —
+      // and the composer is the one on the home page, so it is where most posts
+      // are written. The text vanishing from the box is not confirmation; it is
+      // exactly what a silent failure would also look like.
+      toast({
+        title: 'Post published',
+        description: 'It is on its way to Hive and is already visible on Lumen.',
+        variant: 'success'
+      });
+      // Refresh the feed so the new post can appear. The toast is queued first
+      // and survives it — measured visible for ~3.6 s afterwards.
       router.refresh();
-    } else {
-      setError(result.message);
+    } catch (e) {
+      // usePostMutation already reports through handleError/toast; this keeps the
+      // failure visible in the composer itself so the text is not silently lost.
+      setError(e instanceof Error ? e.message : 'Could not post — please try again.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -76,7 +160,7 @@ export default function ShortFormComposer() {
     if (isExpanded) textareaRef.current?.focus();
   }, [isExpanded]);
 
-  if (!user.isLoggedIn) {
+  if (!loggedIn) {
     return (
       <DialogLogin>
         <div
@@ -89,28 +173,6 @@ export default function ShortFormComposer() {
       </DialogLogin>
     );
   }
-
-  // Hand the draft to the real editor (which reads this key on mount and prefills
-  // it), reusing the entire existing broadcast pipeline rather than a second path.
-  const openEditor = () => {
-    if (text.trim() === '') return;
-    setStorageItem(
-      `postData-new-${user.username}`,
-      {
-        title: '',
-        postArea: text,
-        postSummary: '',
-        tags: '',
-        author: '',
-        category: 'blog',
-        beneficiaries: [],
-        maxAcceptedPayout: 1000000,
-        payoutType: '50%'
-      },
-      StorageTTL.DRAFT
-    );
-    router.push(withBasePath(SUBMIT_PATH));
-  };
 
   // REST state — single-line card.
   if (!isExpanded) {
@@ -178,23 +240,16 @@ export default function ShortFormComposer() {
         />
       </div>
       <div className="mt-3 flex items-center justify-between border-t border-border pl-[56px] pt-3">
-        <button
-          type="button"
-          onClick={openEditor}
-          className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
-        >
-          {LABELS.fullStory}
-        </button>
+        <span className="text-xs tabular-nums text-muted-foreground">{text.length}</span>
         <div className="flex items-center gap-3">
           {error ? <span className="text-xs text-red-600">{error}</span> : null}
-          <span className="text-xs tabular-nums text-muted-foreground">{text.length}</span>
           <Button
             type="button"
             variant="default"
             size="sm"
             className="rounded-[11px] bg-[#1a1a17] px-[22px] font-semibold text-white hover:bg-[#1a1a17]/90"
             disabled={text.trim() === '' || submitting}
-            onClick={isLite ? submitLite : openEditor}
+            onClick={submit}
           >
             {submitting ? 'Posting…' : LABELS.postButton}
           </Button>

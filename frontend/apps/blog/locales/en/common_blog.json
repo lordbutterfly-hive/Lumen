@@ -50,7 +50,8 @@
       "a_month": " a month",
       "years": " years",
       "a_year": " a year"
-    }
+    },
+    "publish_queued": "Saved and visible on Lumen. It will appear on Hive shortly."
   },
   "navigation": {
     "main_nav_bar": {
@@ -586,7 +587,8 @@
       "cancel": "Cancel",
       "ok": "OK",
       "lite_cannot_flag": "Reporting a post to its community moderators needs a full Hive account. Upgrade to report."
-    }
+    },
+    "a_community": "a community"
   },
   "submit_page": {
     "log_in_to_post": "Log in to make a post.",
@@ -707,7 +709,11 @@
   "search_page": {
     "placeholder": "Search",
     "no_results": "Nothing was found.",
-    "error": "There was an error"
+    "error": "There was an error",
+    "start_prompt": "Search Hive for posts, topics or people — type above to begin.",
+    "newest_too_broad": "Sorting by newest is too much work for the search index on a broad term like this, so it timed out.",
+    "try_relevance": "Search this by relevance instead",
+    "no_results_for": "No results for “{{query}}”. Try different or fewer words."
   },
   "settings_page": {
     "invalid_url": "Invalid URL",
@@ -967,6 +973,7 @@
   "profile": {
     "following": "Following",
     "wallet": "Wallet",
+    "creator_token": "Token",
     "overflow_menu_label": "More options",
     "overflow": {
       "view_on_explorer": "View on chain explorer"
@@ -1282,5 +1289,8 @@
       "error": "Couldn't load trending topics.",
       "empty": "No trending topics right now."
     }
+  },
+  "tags_page": {
+    "no_posts_for_tag": "Nobody has posted under #{{tag}} yet."
   }
 }

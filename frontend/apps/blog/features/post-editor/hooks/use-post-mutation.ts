@@ -78,7 +78,9 @@ export function usePostMutation() {
             tags,
             image: image ? [image] : [],
             description: summary,
-            app: 'denser/0.1'
+            // Must match what transactionService.post actually broadcasts,
+            // or the optimistic card and the real post disagree.
+            app: 'lumen/1.0'
           },
           created: new Date().toISOString(),
           updated: new Date().toISOString(),

@@ -12,6 +12,9 @@ import type { AccountProfile } from '@hive/common-hiveio-packages/wax';
 
 interface ProfileIdentityProps {
   username: string;
+  /** False for a Lumen lite account: it has no chain tenure to look up. */
+  chainAccount?: boolean;
+
   displayName: string;
   profile?: AccountProfile;
   created: string;
@@ -20,9 +23,9 @@ interface ProfileIdentityProps {
 }
 
 /** Small league chip pairing the real emblem + tier name — replaces the handoff's placeholder "79" badge. */
-function LeagueChip({ username }: { username: string }) {
+function LeagueChip({ username, chainAccount }: { username: string; chainAccount: boolean }) {
   const { t } = useTranslation('common_blog');
-  const { data: summary } = useRetention(username);
+  const { data: summary } = useRetention(username, chainAccount);
   if (!summary) return null;
 
   const { rank } = summary;
@@ -51,7 +54,8 @@ export default function ProfileIdentity({
   profile,
   created,
   lastVoteTime,
-  lastPost
+  lastPost,
+  chainAccount = true
 }: ProfileIdentityProps) {
   const { t } = useTranslation('common_blog');
 
@@ -61,7 +65,7 @@ export default function ProfileIdentity({
         <h1 className="font-sans text-[32px] font-bold leading-tight tracking-[-0.02em] text-[#161511]">
           {displayName}
         </h1>
-        <LeagueChip username={username} />
+        <LeagueChip username={username} chainAccount={chainAccount} />
       </div>
 
       <div className="mt-1 font-sans text-[14.5px] text-[#6b7280]">
