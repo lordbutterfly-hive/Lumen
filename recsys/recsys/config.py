@@ -224,8 +224,19 @@ class ScoreWeights:
     #: has to arbitrate between posts that already cleared a relevance bar.
     #:
     #: RAW: :func:`recsys.core.viewer_affinity`-style — see
-    #: :func:`recsys.core.scoring.declared_interest_raw`
-    #: (``|post.tags ∩ viewer.interest_tags| / |post.tags|``), 0.0 when the
+    #: :func:`recsys.core.scoring.declared_interest_raw`. ★ REBUILT 2026-08-08:
+    #: the RARITY of the rarest interest the post actually claims
+    #: (``max over (post.tags ∩ interest_tags) of tag_rarity_weight``), NOT the
+    #: share ``|post.tags ∩ interest_tags| / |post.tags|`` it was until then.
+    #: The share form could not tell a topic from a namespace — `hive` is worn
+    #: by 10.6% of every root post on the chain, 13 of 20 posts on the owner's
+    #: own served page carried it, and a post tagged `[hive]` scored a perfect
+    #: 1.000 — and its denominator punished a post that described itself with 8
+    #: honest tags 8:1 against that. See that function's docstring for the
+    #: measurement, the spray bound that replaced the denominator, and the proof
+    #: that the rebuild carries NO tuning constant (the caller percentile-ranks
+    #: the raw, and `max` commutes with any monotone rescaling of the weight, so
+    #: the served order is invariant to it). Still 0.0 when the
     #: viewer declared nothing or the post carries no tags. Percentile-ranked
     #: WITHIN THE REQUEST'S OWN POOL (:func:`recsys.pipeline._interest_lookup`,
     #: reusing :func:`recsys.core.viewer_affinity.affinity_percentiles` — the
@@ -247,19 +258,37 @@ class ScoreWeights:
     #:
     #: ★ THE CEILING, STATED HONESTLY (per the build map: "say in the
     #: docstring what bounds this"). ``post.tags`` is attacker-controlled free
-    #: text — any author may tag a post with every popular interest. The
-    #: `len(post.tags)` denominator is the only bound: spreading N matching
-    #: tags across M total tags caps the achievable share at N/M, so stuffing
-    #: MORE tags than truly apply can only shrink the share, never lift it
-    #: above 1.0 — but a post with FEW tags, all popular ones, still farms this
-    #: cheaply. This is exactly why the gate-EXEMPT exploration lane
-    #: (`core/exploration.py::_interest_match`, BUILD-ADJUDICATION R3)
-    #: restricts itself to the PRIMARY tag only — that lane bypasses the vouch
-    #: gate and the author floor, so it needs the strict form. This term does
-    #: NOT bypass those gates (it only re-ranks candidates that already
-    #: cleared them, same as `organic_cf`/`organic_viewer`), so the full-
-    #: intersection form matches what R3 already allows for the equivalent
-    #: gated case (`second_degree._ungated_lane_for`).
+    #: text — any author may tag a post with every popular interest. UNTIL
+    #: 2026-08-08 the `len(post.tags)` denominator was the stated bound, and it
+    #: bounded the wrong case: it only ever charged for spraying tags OUTSIDE
+    #: the viewer's interests, so a post carrying the viewer's interests and
+    #: NOTHING else scored a perfect 1.000 however many it sprayed — the
+    #: pre-existing tag-stuffing test asserted exactly that, at 1.0.
+    #:
+    #: The bound is now on the case that was open: the raw is a `max`, so the
+    #: 2nd..kth sprayed interest tag is worth EXACTLY ZERO. A post claiming all
+    #: six of a viewer's interests scores precisely what the single rarest of
+    #: them scores and can never out-rank an honest post carrying that same
+    #: tag. That is strictly stronger than the denominator was, and it is why
+    #: no rarity-weighted SUM form (`min(hits, k)/k`, noisy-OR, decayed sums)
+    #: was acceptable — each of them lets a sprayer beat an honest single-topic
+    #: post. It is also the trade the gate-EXEMPT exploration lane
+    #: (`core/exploration.py::_interest_match`, BUILD-ADJUDICATION R3) already
+    #: made when it restricted itself to the PRIMARY tag only. This term does
+    #: NOT bypass the vouch gate or the author floor (it only re-ranks
+    #: candidates that already cleared them, same as
+    #: `organic_cf`/`organic_viewer`), so it is free to look at the whole
+    #: intersection — it just takes the best of it rather than the sum.
+    #:
+    #: ★ RARITY IS NOT SEMANTICS, and the split is deliberate.
+    #: `tag_rarity_weight` cannot tell a niche topic from a mechanical marker
+    #: (`hiveposh`, df 9, means only "cross-posted to Twitter" and would score
+    #: 0.61). That is handled at DERIVATION
+    #: (`recsys.viewer.derive_interest_tags`, which refuses to INFER a
+    #: non-topical tag as somebody's interest) and deliberately NOT here: an
+    #: interest a viewer picked EXPLICITLY is their own word and is honoured at
+    #: whatever rarity it has — the signup picker really does offer "Hive
+    #: Community".
     #:
     #: ★★ SHIPPED VALUE IS **NOT** SWEPT AGAINST TAG NOISE (B-17, unbuilt as of
     #: this weight's selection, 2026-08-04). simworld gives every post exactly
@@ -497,7 +526,7 @@ class ScoreWeights:
     #: follows happen to write about, which is a genuine fact about the pool
     #: rather than a restatement of the term itself. Measured on the panels at
     #: the shipped value — see the 2026-08-08 run recorded below.
-    in_network_bonus: float = 0.0
+    in_network_bonus: float = 0.05
 
     #: Weights on DISTINCT-PERSON breadth inside the organic term (§6): how much
     #: one more independent voter / commenter / reblogger is worth. Previously
@@ -1087,6 +1116,34 @@ class DiversityConfig:
     #: posture is NOT an option without a dedicated adversarial review — not
     #: done here.
     emerging_per_page: int = 1
+
+    #: ★★★ THE POPULARITY LANE'S BUDGET (2026-08-08). A SEPARATE, small budget
+    #: — outside `unchosen_max_share`, never eating into it — for
+    #: `OON_POPULAR` candidates, built exactly like `emerging_per_page` above
+    #: and for the same reason.
+    #:
+    #: WHY THE LANE NEEDS ONE AT ALL. `OON_POPULAR` is not `is_viewer_chosen`
+    #: (the viewer did not ask for chain-wide popularity — calling it "chosen"
+    #: to dodge the cap would be a lie in a predicate whose whole job is to
+    #: record what the viewer asked for). So without this it shares ONE running
+    #: quota — `unchosen_min_per_page` = 3 per page — with `OON_ENGAGED`,
+    #: `OON_ALS` and any padding. A lane the owner wants at ~4 of 20 with >=3
+    #: inside the top 10 cannot live inside a 3-per-page budget it does not own.
+    #:
+    #: ★ IT IS NOT A RESERVED SLOT, and the distinction is the requirement.
+    #: This budget only EXEMPTS a popular candidate from the unchosen cap; it
+    #: never places one. Every member still competes on diversity-discounted
+    #: effective score against everything else on the page, still carries the
+    #: unchosen-lane penalty, and still loses to a better post. Removing an
+    #: obstacle is what "earn it" permits; splicing at a fixed index (what the
+    #: exploration seat does) is what it forbids. If the lane does not reach 3
+    #: in the top 10 on real viewers, the honest report is the measured number —
+    #: not a bigger number here.
+    #:
+    #: 0 disables the budget (the lane, if sourced, then competes inside the
+    #: shared unchosen quota) and is an exact no-op for every pre-2026-08-08
+    #: measurement.
+    popular_per_page: int = 4
     top_k: int = 200
 
     #: How many of the FIRST PAGE's slots are reserved for exploration
@@ -1154,6 +1211,10 @@ class DiversityConfig:
             raise ValueError(
                 f"emerging_per_page must be >= 0, got {self.emerging_per_page}"
             )
+        if self.popular_per_page < 0:
+            raise ValueError(
+                f"popular_per_page must be >= 0, got {self.popular_per_page}"
+            )
 
 
 @dataclass(frozen=True)
@@ -1178,7 +1239,27 @@ class ExplorationConfig:
     slots_per_page: int = 1
     page_size: int = 20
     #: Deep enough not to displace the head, shallow enough to be seen.
-    #: POSITION-PENDING — measured before it moves.
+    #:
+    #: ★★★ THE OWNER ASKED FOR THIS INSIDE THE TOP TEN ("1 needs to be in top
+    #: 10") AND IT IS DELIBERATELY STILL 13 (2026-08-08). The move itself is a
+    #: one-character change and its cost is measured and cheap — see the report;
+    #: what blocks it is an ENFORCEMENT fact about the lane, not the position:
+    #:
+    #: `ExplorationServeLog` is an IN-PROCESS dict (`recsys/serve_log.py` says
+    #: so in its own scope note). So `max_serves_per_author = 3` — the only
+    #: bound on this lane keyed on something an attacker cannot control, on the
+    #: least-gated source in the system (`requires_second_degree` False AND
+    #: `requires_author_floor` False) — is in reality "3 per replica, reset to
+    #: zero by every deploy". A restart is a total amnesty on every serve count,
+    #: two replicas do not share one, and `graduated()` refunds the whole budget
+    #: as soon as an author's distinct-engager count rises, which one comment
+    #: from a second sock achieves.
+    #:
+    #: Doubling that lane's visibility before its only real budget survives a
+    #: deploy is the wrong order to do two things in. `ExplorationServeLog.merge`
+    #: already exists, so the work is a STORE (a table beside
+    #: `recsys/db/schema.sql`, load-on-start, flush-on-timer), not a redesign.
+    #: **Flip this to 9 the day serve counts are persisted and shared.**
     position: int = 13
     #: ★★ SEAT OCCUPANT = THE BEST OF THE EQUALLY-UNHEARD (2026-08-08, owner:
     #: "the highest ranked one has an assured top 10 slot"). See
@@ -1190,10 +1271,110 @@ class ExplorationConfig:
     #: ``False`` restores the pre-2026-08-08 order byte-for-byte — the pool
     #: arrives in need-band order with :func:`~recsys.core.exploration.
     #: _rotation_key`'s keyed shuffle inside each band, and nothing re-sorts it.
-    #: Kept as a switch rather than hard-wired because this lane has produced a
-    #: regression from a majority of its recent changes and the rollback has to
-    #: be a config flip, not a revert.
+    #:
+    #: ★★★ SHIPPED **OFF**, AND THE REASON IS AN OPEN BUG, NOT A PREFERENCE
+    #: (2026-08-08). RIVAL SUPPRESSION IS LIVE: `tests/test_rival_suppression.py`
+    #: is 2 passed / 2 **xfail(strict=True)** at this tree, i.e. no fix has
+    #: landed. Two sock accounts comment on a newcomer's post, the newcomer
+    #: replies as anyone would, and the resulting reciprocal edges floor their
+    #: graph-cred to 0.0000 (against 0.5286 with one sock). `eligible_for_
+    #: exploration` then drops `cred.score <= 0.0` outright, so suppression
+    #: EVICTS a rival from this lane. 51 of 15,855 live `graph_cred` rows sit at
+    #: exactly 0.0 today.
+    #:
+    #: THE ARITHMETIC THAT DECIDED THIS. Let the leading need band hold N
+    #: members and let the attacker's post score below k of them.
+    #:
+    #:   * keyed lottery (this field False): the attacker holds the seat with
+    #:     probability 1/N, and to make that 1 they must suppress ALL N-1
+    #:     rivals — the cost is the whole band and it does not fall as their own
+    #:     post gets better or worse;
+    #:   * score order (True): the attacker holds the seat with probability 0
+    #:     unless they suppress, and with probability **1** once they suppress
+    #:     just the k members ABOVE them. k <= N-1 always, and for a mediocre
+    #:     post k is small. So score order converts a probabilistic 1/N into a
+    #:     DETERMINISTIC 1 at strictly lower cost, and — the part the lottery
+    #:     never rewarded — it does so for a LOW-scoring attacker.
+    #:
+    #: The mechanism itself is built, tested and measured (see
+    #: :func:`recsys.core.exploration.seat_order`), and it is one flip away the
+    #: day `test_rival_suppression.py`'s two strict xfails go green. Shipping it
+    #: before then would make suppression the cheapest way to buy the reserved
+    #: seat, which is a worse trade than leaving the occupant to the lottery.
+    #:
+    #: ★ WHAT ACTUALLY FIXED THE OWNER'S COMPLAINT was not this field. The seat
+    #: was going to a 28,777-post 2020 account because the lane had no newness
+    #: test at all; `max_author_age_days` above is the fix, and it is on.
     seat_by_score: bool = False
+    #: ★★★ THE NEWNESS PREDICATE (2026-08-08). Maximum ACCOUNT age, in days
+    #: since the author's first post, for the reserved seat. `0` disables it and
+    #: reproduces the pre-2026-08-08 lane byte-for-byte.
+    #:
+    #: WHY IT HAD TO EXIST BEFORE THE SEAT COULD MOVE INTO THE TOP TEN. This
+    #: lane bands authors on `engagement_received` — the UNENGAGED — and read no
+    #: author age at all. `core/exploration.py`'s own comment conceded the gap:
+    #: "This does NOT make the lane new-author-only; that needs an author-age or
+    #: graph-cred-absence condition, which both councils flagged as the real
+    #: v1.0 gap." On Hive the unengaged are overwhelmingly DOWNVOTED VETERANS,
+    #: not debuts. Measured across 5 real viewers (2026-08-08), the seat went to:
+    #:
+    #:     tdvtv             created 2020-12-17   28,777 posts
+    #:     darkflame         created 2016         15,552 posts
+    #:     sadcorp           since 2018            1,233 posts, rep -40.8bn
+    #:     alexwo            since 2023              947 posts, rep -843bn
+    #:     toluwanispecial                           768 posts
+    #:     liza-amin                                   3 posts  <- the only debut
+    #:
+    #: Promoting that population into the top ten would make a WORSE post more
+    #: visible, which is the opposite of the change's purpose.
+    #:
+    #: 30 DAYS is the same horizon the chain-measured newcomer cohort behind
+    #: `serve_window_days` uses (1,506 accounts created in 30 days, ~14.5 true
+    #: debuts/day, median 3 posts in a newcomer's first 30 days) — so a genuine
+    #: debut gets a month of eligibility, spanning several `serve_window_days`
+    #: refills, and a 2016 account gets none.
+    #:
+    #: ★ FAIL-CLOSED, and that is the deliberate direction. An author whose
+    #: first-post date could not be resolved is treated as NOT new and refused
+    #: the lane. Fail-open would mean any author the lookup missed is silently
+    #: treated as a debut — precisely the state this predicate exists to detect,
+    #: reintroduced as the failure mode. The cost is stated plainly: a lookup
+    #: outage empties the lane rather than filling it with veterans, and an empty
+    #: lane FORFEITS the seat (see `ExplorationConfig`'s class docstring), which
+    #: costs a measured 2.18% of page composite and returns the slot to merit
+    #: content.
+    max_author_age_days: int = 30
+    #: ★★★ OPTION C — PREFER AN INTEREST MATCH, FALL BACK TO ANY NEWCOMER
+    #: (2026-08-09, owner's explicit choice). ``False`` restores the
+    #: pre-2026-08-09 lane byte-for-byte: an interest match is MANDATORY and the
+    #: seat forfeits without one.
+    #:
+    #: THE MEASUREMENT THAT FORCED IT. `_interest_match` requires the newcomer's
+    #: post CATEGORY to be one of the viewer's interest tags. Measured on the
+    #: live chain: **136 genuinely new authors posted in 3 days across 91
+    #: distinct categories, and 91 of 91 fell outside all three test viewers'
+    #: interest sets combined** — so the gate did not TARGET the seat, it
+    #: DELETED it, for everyone, every request. A reserved slot that never fills
+    #: is not a conservative default; it is a lane that has been off since it
+    #: shipped while reporting "correctly forfeits".
+    #:
+    #: ★ WHAT THE FALLBACK DOES NOT RELAX. Nothing. Every other condition in
+    #: :func:`~recsys.core.exploration.eligible_for_exploration` still applies to
+    #: a fallback pick — mute, self-post, suppressed, NSFW, post age,
+    #: `max_author_age_days` newness, proven-self-dealt cred, on-post
+    #: self-dealing, `max_serves_per_author`, `max_slots_per_feed`, the keyed
+    #: `_rotation_key` seat MAC. The ONLY thing that changes is that "the viewer
+    #: never declared this topic" stops being fatal when the alternative is
+    #: showing them nothing.
+    #:
+    #: ★★ THE PREFERENCE IS ABSOLUTE, NOT A BLEND, and that is what keeps R3
+    #: intact. When ANY interest-matched newcomer is eligible, the pool is
+    #: EXACTLY those and a non-matching candidate cannot outrank one — see the
+    #: split in `eligible_for_exploration`. A mixed pool would have handed the
+    #: seat back to whoever scored best across both sets, i.e. to tag-spray
+    #: pressure, which ruling R3 (primary-tag-only matching) closed for good
+    #: reason after one sock tagged 12 topics and reached 60/60 viewers.
+    interest_fallback: bool = False
     max_age_days: int = 7
     #: Per-author epoch budget. A farm cannot convert account count into slots
     #: because the rotation is round-robin over AUTHORS, but without this an
@@ -2360,6 +2541,106 @@ class TrustConfig:
 
 
 @dataclass(frozen=True)
+class PopularConfig:
+    """The across-Hive popularity lane (2026-08-08, owner: "we need across Hive
+    popularity lane and that needs at least 3 slots inside top 10 but not
+    manually set. it has to surface there").
+
+    See :mod:`recsys.core.popular` for the mechanism. The short version: a
+    genuinely huge post outside the viewer's follows and outside their tags was
+    never a CANDIDATE, so no ranking change could reach it;
+    ``POPULAR_FALLBACK`` is padding for a starved pool, not a lane. This sources
+    chain-wide top posts for every viewer on every request and selects among
+    them by TRUST-BUDGETED credited breadth.
+
+    ★ "NOT MANUALLY SET" IS AN ARCHITECTURAL CONSTRAINT, not a preference. The
+    lane is NOT spliced at fixed indices the way the exploration seat is
+    (:func:`recsys.core.exploration.insert_exploration`). Its members are scored
+    by the ordinary composite and placed by the ordinary greedy re-ranker; the
+    only thing this build gives them is
+    :attr:`DiversityConfig.popular_per_page`, which stops the UNCHOSEN-lane
+    quota from capping them — a removal of an obstacle, not a reserved seat. If
+    they do not genuinely out-score the page they do not appear, and the
+    measured count is what it is.
+    """
+
+    #: How many posts the lane may contribute to the candidate pool. Sized
+    #: against the owner's target shape (popularity ~4 of 20 served, >=3 inside
+    #: the top 10) with headroom for the ones that lose on score, get deduped
+    #: into a higher-priority lane, or fail `filter_eligible`.
+    #:
+    #: 0 DISABLES the lane and is an exact no-op — `select_popular` returns []
+    #: and `gather_candidates` appends nothing, so every measurement taken
+    #: before 2026-08-08 reproduces bit-for-bit.
+    #:
+    #: ★★★ SHIPPED AT **0**, AND THE LANE IS THE MEASUREMENT THAT SAYS WHY
+    #: (2026-08-08). This is not a half-built feature: the sourcing gap is
+    #: closed, selection is credited-breadth, the recall set is per-author
+    #: capped, and it is covered by tests. It is off because at the CURRENT
+    #: SCORING WEIGHTS it does not pay for itself, on two independent measures:
+    #:
+    #: * **It fails the requirement it was asked to meet.** The owner's terms
+    #:   were ">=3 slots inside top 10 but not manually set — it has to
+    #:   surface there". Measured over 96 feeds: with `popular_per_page`
+    #:   exemption ON the lane holds 3.72 of 20 but only **0.93 of the top
+    #:   10**; with the exemption OFF but still sourced, **0.76**. Against the
+    #:   required 3.0 that is a margin of **-2.24**. Popular posts simply do
+    #:   not out-score their neighbours here, so the only route to 3 is to
+    #:   SPLICE them at fixed indices — precisely what "not manually set"
+    #:   forbids. Widening the exemption until the number appears would be
+    #:   dressing a reserved slot up as earned.
+    #: * **It costs the reader more than any other lane.** `q11_follow_curve`
+    #:   is GREEN with `limit = 0` and RED at all 8 follow counts with the lane
+    #:   on, by **-0.046 to -0.110** against `ACCEPTED_CURVE`; `q1` nDCG@20
+    #:   goes 0.777 -> 0.696 (through its own 0.70 floor). Attributed by
+    #:   single-field mutants, not inferred: `popular.limit=0` restores GREEN,
+    #:   while `weights.in_network_bonus=0.0` and
+    #:   `exploration.max_author_age_days=0` each leave all 8 violations in
+    #:   place. Independently, turning the lane off raises `mean_rel@20` by
+    #:   **+0.1126 (+17.1%)** — against 0.0137 for the whole exploration lane,
+    #:   i.e. ~8x the cost of the newcomer seat for a target it misses by 69%.
+    #:
+    #: **WHAT WOULD MAKE IT SHIPPABLE is a scoring change, not a bigger quota:**
+    #: chain-wide popularity has to EARN top-10 positions through the composite
+    #: (a lane-aware treatment of the organic percentile, measured against
+    #: `mean_q@20`/`stack_capture_g`/`auc_own_m5`), at which point this flips to
+    #: 25 and `DiversityConfig.popular_per_page` stops being the load-bearing
+    #: part. Until then the honest report is the measured number.
+    limit: int = 0
+
+    #: How many posts the SQL prefilter returns for the selection step to
+    #: choose from. This is a RECALL budget, and the ratio to ``limit`` is the
+    #: lane's only defence against a farm displacing honest posts out of the
+    #: prefilter — see :mod:`recsys.core.popular`'s residual note. `_SQL_
+    #: POPULAR_POSTS` is not trust-weighted (SQL cannot see the weekly
+    #: graph-cred snapshot), so a funded-alt swarm CAN buy prefilter positions;
+    #: what it cannot do is survive `select_popular`'s budgeted re-scoring. 6x
+    #: `limit` means a farm must fill 150 slots, not out-rank one post.
+    #:
+    #: Not larger, because every prefiltered row is HYDRATED (votes, comments,
+    #: rebloggers) on the request path — see `recsys.io.hafsql`'s measured
+    #: hydration cost, which is dominated by total vote volume and is exactly
+    #: where this query's rows sit (the busiest posts on the chain).
+    source_limit: int = 150
+
+    def __post_init__(self) -> None:
+        if self.limit < 0:
+            raise ValueError(f"popular limit must be >= 0, got {self.limit}")
+        if self.source_limit < 0:
+            raise ValueError(
+                f"popular source_limit must be >= 0, got {self.source_limit}"
+            )
+        if self.limit and self.source_limit < self.limit:
+            raise ValueError(
+                "popular source_limit must be >= limit — a prefilter smaller "
+                "than the lane makes the credited-breadth selection step a "
+                "no-op and silently reinstates the untrusted SQL ordering as "
+                f"the lane's membership rule (got source_limit={self.source_limit}, "
+                f"limit={self.limit})"
+            )
+
+
+@dataclass(frozen=True)
 class Settings:
     """Root config object threaded through the pipeline."""
 
@@ -2370,6 +2651,7 @@ class Settings:
     diversity: DiversityConfig = field(default_factory=DiversityConfig)
     cold_start: ColdStartConfig = field(default_factory=ColdStartConfig)
     exploration: ExplorationConfig = field(default_factory=ExplorationConfig)
+    popular: PopularConfig = field(default_factory=PopularConfig)
     fallback: FallbackConfig = field(default_factory=FallbackConfig)
     real_graph: RealGraphWeights = field(default_factory=RealGraphWeights)
     graph_cred: GraphCredConfig = field(default_factory=GraphCredConfig)

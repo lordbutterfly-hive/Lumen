@@ -1,0 +1,16 @@
+# Globally banned authors — operator list, human-written and human-reviewed.
+#
+# One Hive account per line. `#` starts a comment. Names are lower-cased and a
+# leading `@` is stripped, so `@Name` and `name` are the same entry.
+#
+# An account here is dropped from EVERY viewer's candidate pool before any lane
+# or quota runs, AND its votes/comments/reblogs mint no breadth for anyone else.
+# See recsys/core/banned.py for why both halves are required.
+#
+# This list is never derived, never voted on, and never written by code. Adding
+# a name is an operator decision that takes effect on the next service restart.
+# `RECSYS_BANNED_AUTHORS` (comma-separated) is unioned with this file for an
+# urgent addition without a release.
+
+# 2026-08-08 — owner: persistent troll, banned from Lumen entirely.
+kgakakillerg

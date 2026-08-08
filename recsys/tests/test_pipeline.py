@@ -17,6 +17,7 @@ from recsys.config import (
     ALSConfig,
     ExplorationConfig,
     GraphCredConfig,
+    PopularConfig,
     Settings,
     VoteSignalConfig,
 )
@@ -63,6 +64,30 @@ NOW = EPOCH + timedelta(hours=1)
 # harness uses — so each one passes ``trust_policy=_PERMISSIVE`` explicitly.
 # The rationale lives here once; the opt-in is named at every call site.
 _PERMISSIVE = TrustPolicy.WARN
+
+# ★★★ 2026-08-08 — SCOPING THE FALLBACK TESTS TO THE FALLBACK.
+#
+# The across-Hive popularity lane (`PopularConfig`, `CandidateSource.
+# OON_POPULAR`) sources chain-wide top posts for EVERY viewer on EVERY request.
+# `FakeGateway(popular=...)` therefore now feeds two different mechanisms from
+# one fixture list, and the consequence is real rather than cosmetic: a starved
+# or tagless viewer's pool is no longer starved, so `_fallback_filler` does not
+# fire, and a healthy viewer's page now has genuine competition from the lane.
+#
+# The tests below are about the FALLBACK — "never an empty feed", "padding never
+# interleaves into the viewer's own posts", "served length is monotonic in the
+# follow graph". Every one of those invariants still holds and is still worth
+# pinning, so they are scoped to the mechanism they name instead of being
+# loosened to accommodate a different one. The lane's own behaviour — including
+# the fact that it DOES displace, which is the feature — is pinned separately in
+# `test_the_popularity_lane_*` below.
+_NO_POPULAR_LANE = Settings(popular=PopularConfig(limit=0))
+# ★ The across-Hive lane SHIPS OFF (`PopularConfig.limit = 0` — see that
+# field for the two measurements that decided it), so every test OF the lane
+# must enable it explicitly. A test that relied on the default would silently
+# stop testing the lane the moment the default moved, which is how a feature
+# becomes untested without anyone deleting a test.
+_POPULAR_LANE_ON = Settings(popular=PopularConfig(limit=25))
 
 
 def _norm() -> NormContext:
@@ -131,7 +156,8 @@ def test_tagless_viewer_falls_through_to_popular_fallback_with_a_warning(
     viewer = make_viewer("blank")  # no follows, no interest_tags: the R12 case
 
     with caplog.at_level(logging.WARNING, logger="recsys.pipeline"):
-        feed = rank_feed(viewer, gateway, _norm(), now=NOW, since=EPOCH, trust_policy=_PERMISSIVE)
+        feed = rank_feed(viewer, gateway, _norm(), now=NOW, since=EPOCH,
+                     trust_policy=_PERMISSIVE, settings=_NO_POPULAR_LANE)
 
     assert feed, "a tagless viewer must never be served an empty feed"
     assert all(sc.source is CandidateSource.POPULAR_FALLBACK for sc in feed)
@@ -510,17 +536,21 @@ def test_pooled_prior_sock_swarm_is_breadth_budgeted_not_farmed() -> None:
     # not a reciprocal ring, so they pass every §8.4 exclusion untouched --
     # farming an author's OTHER window posts must be capped at the SAME
     # VoterTrust budget own_base already applies, not counted one-for-one.
-    own_votes = [make_vote("h1", 50_000_000), make_vote("h2", 50_000_000)]
+    # ★ 2026-08-08: vote amounts raised above `_ORGANIC_VOTER_MIN_RSHARES`
+    # (3.184e9). At the old 5e7 every voter here — honest AND sock — mints
+    # zero organic breadth, so this stops being a test of the pooled prior
+    # and becomes a test of the floor.
+    own_votes = [make_vote("h1", 7_000_000_000), make_vote("h2", 7_000_000_000)]
     farm_p0 = make_post("farm", "p0", votes=own_votes)
     honest_q0 = make_post("honest", "q0", votes=own_votes)
 
     # farm's other 4 window posts: 20 distinct UNKNOWN-tier sock voters each.
     # None are lineage-tied or ring-flagged -- pre-H05 exclusion alone lets
     # every one of them count in full.
-    sock_votes = [make_vote(f"sock{i}", 50_000_000) for i in range(20)]
+    sock_votes = [make_vote(f"sock{i}", 7_000_000_000) for i in range(20)]
     farm_others = [make_post("farm", f"p{i}", votes=sock_votes) for i in range(1, 5)]
     # honest's other 4 posts: 2 genuinely VOUCHED voters each -- modest, real.
-    honest_votes = [make_vote("h3", 50_000_000), make_vote("h4", 50_000_000)]
+    honest_votes = [make_vote("h3", 7_000_000_000), make_vote("h4", 7_000_000_000)]
     honest_others = [make_post("honest", f"q{i}", votes=honest_votes) for i in range(1, 5)]
     window = [farm_p0, honest_q0, *farm_others, *honest_others]
 
@@ -572,7 +602,11 @@ def test_author_pooled_prior_outranks_one_lucky_post() -> None:
     # 4 other window posts that drew none. Per-post counts cannot tell them
     # apart (that is the ~5-voter Bernoulli problem); the author-pooled prior
     # can, and must rank the steady author higher.
-    votes = [make_vote("v1", 50_000_000), make_vote("v2", 50_000_000)]
+    # ★ 2026-08-08: vote amounts raised above `_ORGANIC_VOTER_MIN_RSHARES`
+    # (3.184e9). At the old 5e7 every voter here — honest AND sock — mints
+    # zero organic breadth, so this stops being a test of the pooled prior
+    # and becomes a test of the floor.
+    votes = [make_vote("v1", 7_000_000_000), make_vote("v2", 7_000_000_000)]
     steady = make_post("steady", "p1", votes=votes)
     lucky = make_post("lucky", "p1", votes=votes)
     own_base = post_base_engagement(steady, frozenset({"steady"}))
@@ -713,9 +747,14 @@ def test_established_viewer_with_dead_follows_is_never_served_an_empty_feed() ->
     viewer = make_viewer("returning", follows=frozenset({"ghost1", "ghost2", "ghost3"}))
     gateway = FakeGateway(in_network=[], popular=_popular())
     assert is_cold(viewer) is False
-    assert gather_candidates(viewer, gateway, EPOCH, 400, DEFAULT_SETTINGS) == []
+    # ★ 2026-08-08: the EMPTY-POOL precondition this regression is about only
+    # exists without the popularity lane — with it, this viewer's pool is no
+    # longer empty at all (which is a strict improvement for them, and is
+    # asserted as such in `test_the_popularity_lane_rescues_a_dead_follow_graph`).
+    assert gather_candidates(viewer, gateway, EPOCH, 400, _NO_POPULAR_LANE) == []
 
-    feed = rank_feed(viewer, gateway, _norm(), now=NOW, since=EPOCH, trust_policy=_PERMISSIVE)
+    feed = rank_feed(viewer, gateway, _norm(), now=NOW, since=EPOCH,
+                     trust_policy=_PERMISSIVE, settings=_NO_POPULAR_LANE)
 
     # ★ C6 (2026-08-04): the popular lane is no longer allowed to BE the whole
     # feed at full pool depth — `FallbackConfig.max_share_of_feed` (default
@@ -767,7 +806,8 @@ def test_feed_length_is_monotonic_in_the_follow_graph() -> None:
         viewer = make_viewer(
             "quiet", follows=frozenset({"live"}) if own_count else frozenset()
         )
-        feed = rank_feed(viewer, gateway, _norm(), now=NOW, since=EPOCH, trust_policy=_PERMISSIVE)
+        feed = rank_feed(viewer, gateway, _norm(), now=NOW, since=EPOCH,
+                     trust_policy=_PERMISSIVE, settings=_NO_POPULAR_LANE)
         own_in_feed = [sc for sc in feed if sc.post.author == "live"]
         assert len(own_in_feed) == own_count, "the viewer lost their own posts"
         assert feed[:own_count] == own_in_feed, "padding displaced the viewer's own posts"
@@ -799,12 +839,12 @@ def test_the_first_follow_does_not_truncate_the_feed() -> None:
     followless = rank_feed(
         make_viewer("new", follows=frozenset()),
         FakeGateway(popular=popular), _norm(), now=NOW, since=EPOCH,
-        trust_policy=_PERMISSIVE,
+        trust_policy=_PERMISSIVE, settings=_NO_POPULAR_LANE,
     )
     one_follow = rank_feed(
         make_viewer("new", follows=frozenset({"live"})),
         FakeGateway(in_network=[make_post("live", "l0")], popular=popular),
-        _norm(), now=NOW, since=EPOCH, trust_policy=_PERMISSIVE,
+        _norm(), now=NOW, since=EPOCH, trust_policy=_PERMISSIVE, settings=_NO_POPULAR_LANE,
     )
     assert len(followless) == DEFAULT_SETTINGS.fallback.min_feed_size
     assert len(one_follow) >= len(followless), (
@@ -827,7 +867,8 @@ def test_padding_never_outranks_the_viewers_own_posts() -> None:
     gateway = FakeGateway(in_network=own, popular=loud)
     viewer = make_viewer("quiet", follows=frozenset({"live"}))
 
-    feed = rank_feed(viewer, gateway, _norm(), now=NOW, since=EPOCH, trust_policy=_PERMISSIVE)
+    feed = rank_feed(viewer, gateway, _norm(), now=NOW, since=EPOCH,
+                     trust_policy=_PERMISSIVE, settings=_NO_POPULAR_LANE)
 
     # The three own posts are identical apart from permlink, so they TIE on
     # score. Their relative order is therefore decided by the tie-break, which
@@ -859,11 +900,11 @@ def test_a_healthy_feed_is_never_DILUTED_by_the_fallback() -> None:
     viewer = make_viewer("busy", follows=frozenset({"live"}))
     without = rank_feed(
         viewer, FakeGateway(in_network=own), _norm(), now=NOW, since=EPOCH,
-        trust_policy=_PERMISSIVE,
+        trust_policy=_PERMISSIVE, settings=_NO_POPULAR_LANE,
     )
     with_popular = rank_feed(
         viewer, FakeGateway(in_network=own, popular=_popular()), _norm(), now=NOW,
-        since=EPOCH, trust_policy=_PERMISSIVE,
+        since=EPOCH, trust_policy=_PERMISSIVE, settings=_NO_POPULAR_LANE,
     )
 
     assert len(without) == 40
@@ -2418,7 +2459,8 @@ def test_popular_fallback_share_is_bounded_when_the_pool_is_thin_but_nonzero() -
     gateway = FakeGateway(in_network=own, popular=popular)
     viewer = make_viewer("v", follows=frozenset({"live"}))
 
-    feed = rank_feed(viewer, gateway, _norm(), now=NOW, since=EPOCH, trust_policy=_PERMISSIVE)
+    feed = rank_feed(viewer, gateway, _norm(), now=NOW, since=EPOCH,
+                     trust_policy=_PERMISSIVE, settings=_NO_POPULAR_LANE)
 
     fallback_count = sum(1 for sc in feed if sc.source is CandidateSource.POPULAR_FALLBACK)
     share = fallback_count / len(feed)
@@ -2725,4 +2767,242 @@ def test_rank_feed_threads_ONE_counter_object_across_both_rerank_blocks() -> Non
     assert carried_args[0] is carried_args[1], (
         "the two blocks of one feed received DIFFERENT counter objects — "
         "author/topic spacing resets at the block boundary again"
+    )
+
+
+# ---------------------------------------------------------------------------
+# The across-Hive popularity lane (2026-08-08)
+# ---------------------------------------------------------------------------
+
+
+def test_the_popularity_lane_reaches_a_viewer_whose_pool_is_already_healthy() -> None:
+    """★ THE GAP THIS LANE CLOSES, pinned end to end. A viewer with a full
+    in-network pool never triggers `_fallback_filler`, so before this lane the
+    chain's biggest post was not merely out-ranked — it was NEVER A CANDIDATE,
+    and no weight, penalty or quota could reach it."""
+    own = [make_post("live", f"l{i}") for i in range(40)]
+    viewer = make_viewer("busy", follows=frozenset({"live"}))
+    gateway = FakeGateway(in_network=own, popular=_popular())
+
+    without = rank_feed(viewer, gateway, _norm(), now=NOW, since=EPOCH,
+                        trust_policy=_PERMISSIVE, settings=_NO_POPULAR_LANE)
+    with_lane = rank_feed(viewer, gateway, _norm(), now=NOW, since=EPOCH,
+                          trust_policy=_PERMISSIVE, settings=_POPULAR_LANE_ON)
+
+    assert not any(sc.source is CandidateSource.OON_POPULAR for sc in without)
+    assert any(sc.source is CandidateSource.OON_POPULAR for sc in with_lane), (
+        "a healthy viewer must still be reachable by chain-wide popularity"
+    )
+
+
+def test_the_popularity_lane_rescues_a_dead_follow_graph() -> None:
+    """The returning viewer whose every follow went quiet. Before, their pool
+    was EMPTY and only unvetted padding saved them; now the lane fills it with
+    author-floored candidates."""
+    viewer = make_viewer("returning", follows=frozenset({"ghost1", "ghost2"}))
+    gateway = FakeGateway(in_network=[], popular=_popular())
+    pool = gather_candidates(viewer, gateway, EPOCH, 400, _POPULAR_LANE_ON)
+    assert pool, "the lane must source for a viewer with no live follows"
+    assert all(c.source is CandidateSource.OON_POPULAR for c in pool)
+
+
+def test_the_popularity_lane_is_an_exact_no_op_at_limit_zero() -> None:
+    """The rollback path, and the reason every pre-2026-08-08 measurement still
+    reproduces: `PopularConfig.limit = 0` must be byte-identical to not having
+    the lane at all."""
+    own = [make_post("live", f"l{i}") for i in range(40)]
+    viewer = make_viewer("busy", follows=frozenset({"live"}))
+    # Asserted on the CANDIDATE POOL rather than the served feed, because the
+    # fallback filler also reads `popular_posts` and legitimately pads a short
+    # feed from it — that is a different mechanism and it is not what this
+    # switch turns off. At `limit = 0` the lane must contribute nothing, so the
+    # pool must be identical whether or not the gateway has popular posts at all.
+    with_fixture = FakeGateway(in_network=own, popular=_popular())
+    bare = FakeGateway(in_network=own)
+    off = gather_candidates(viewer, with_fixture, EPOCH, 400, _NO_POPULAR_LANE)
+    reference = gather_candidates(viewer, bare, EPOCH, 400, _NO_POPULAR_LANE)
+    assert off == reference
+    assert not any(c.source is CandidateSource.OON_POPULAR for c in off)
+    # and with the lane ON the same gateway does contribute — otherwise the
+    # assertion above would pass for a lane that is broken rather than off.
+    on = gather_candidates(viewer, with_fixture, EPOCH, 400, _POPULAR_LANE_ON)
+    assert any(c.source is CandidateSource.OON_POPULAR for c in on)
+
+
+def test_the_popularity_lane_is_selected_by_credited_breadth_not_vote_count() -> None:
+    """★ THE LANE'S ONE LOAD-BEARING PROPERTY. It is served to EVERY viewer, so
+    a membership rule a farm can manufacture is a platform-wide amplifier.
+
+    The gateway's SQL prefilter counts every identity equally; `select_popular`
+    re-scores with the request's `VoterTrust` budget, under which a swarm of
+    unknown-tier alts buys `unknown_free`, not one unit per alt. Here the
+    farmed post has FOUR TIMES the raw voters and must still lose.
+    """
+    from recsys.config import ScoreWeights
+    from recsys.core.popular import select_popular
+    from recsys.core.vote_signal import VoterTrust
+
+    farmed = make_post(
+        "farm", "f1",
+        votes=[make_vote(f"alt{i}", 7_000_000_000) for i in range(40)],
+    )
+    honest = make_post(
+        "honest", "h1",
+        votes=[make_vote(f"real{i}", 7_000_000_000) for i in range(10)],
+    )
+    trust = VoterTrust(
+        vouched=frozenset(f"real{i}" for i in range(10)),
+        unknown_free=1.0,
+        unknown_per_vouched=0.0,
+    )
+    picked = select_popular(
+        [farmed, honest],
+        excluded_for=lambda a: frozenset({a}),
+        trust=trust,
+        weights=ScoreWeights(),
+        limit=2,
+    )
+    assert [c.post.author for c in picked] == ["honest", "farm"]
+    # ... and with no trust snapshot at all the raw count wins, which is exactly
+    # why the snapshot is threaded rather than assumed.
+    untrusted = select_popular(
+        [farmed, honest],
+        excluded_for=lambda a: frozenset({a}),
+        trust=None,
+        weights=ScoreWeights(),
+        limit=2,
+    )
+    assert [c.post.author for c in untrusted] == ["farm", "honest"]
+
+
+def test_the_popularity_lane_still_refuses_a_proven_self_dealer() -> None:
+    """It is vouch-exempt (a chain-popular post has no in-network vouch by
+    construction) but NOT floor-exempt — see `CandidateSource.OON_POPULAR`."""
+    assert CandidateSource.OON_POPULAR.requires_second_degree is False
+    assert CandidateSource.OON_POPULAR.requires_author_floor is True
+    assert CandidateSource.OON_POPULAR.counts_toward_flooding_cap is True
+    assert CandidateSource.OON_POPULAR.is_viewer_chosen is False
+
+
+def test_a_popular_post_the_viewer_follows_is_labelled_in_network() -> None:
+    """Dedup priority: the four lanes must not double-count each other, or no
+    composition target means anything."""
+    shared = make_post("live", "l1")
+    viewer = make_viewer("busy", follows=frozenset({"live"}))
+    gateway = FakeGateway(in_network=[shared], popular=[shared])
+    pool = gather_candidates(viewer, gateway, EPOCH, 400, _POPULAR_LANE_ON)
+    assert [c.source for c in pool if c.post.key == shared.key] == [
+        CandidateSource.IN_NETWORK
+    ]
+
+
+# ---------------------------------------------------------------------------
+# ★★★ THE NEWNESS HORIZON MUST REACH THE GATEWAY (2026-08-08).
+#
+# `author_first_post` is fast only because it may stop looking once an author is
+# provably older than the horizon it is given, and it OMITS everyone older. That
+# makes the horizon part of the contract, not a hint: if `rank_feed` stopped
+# passing `settings.exploration.max_author_age_days` — or passed a different
+# number — the gateway would bound its scan to one horizon while
+# `eligible_for_exploration` tested against another, and the lane would refuse
+# authors the config says are eligible. Nothing about the SERVED page would look
+# wrong: the seat would just forfeit, exactly as it does when there is honestly
+# no newcomer. So the ask is asserted directly.
+# ---------------------------------------------------------------------------
+
+
+def test_rank_feed_passes_the_configured_newness_horizon_to_the_gateway() -> None:
+    gateway = FakeGateway(in_network=[make_post("alice", "a1")])
+    viewer = make_viewer("me", follows=frozenset({"alice"}))
+
+    for horizon in (30, 90):
+        settings = dataclasses.replace(
+            DEFAULT_SETTINGS,
+            exploration=dataclasses.replace(
+                DEFAULT_SETTINGS.exploration, max_author_age_days=horizon
+            ),
+        )
+        rank_feed(
+            viewer, gateway, _norm(), now=NOW, since=EPOCH,
+            trust_policy=_PERMISSIVE, settings=settings,
+        )
+        call = gateway.last_first_post_call
+        assert call is not None, "the newness lookup was never called"
+        assert call["horizon_days"] == horizon, (
+            f"gateway asked for horizon {call['horizon_days']!r} while the lane "
+            f"tests against {horizon} — the SQL bound and the predicate have "
+            "drifted apart, and the lane silently refuses eligible authors"
+        )
+        # The gateway derives its scan floor from `now`; letting it default to
+        # wall-clock while the predicate uses the request's `now` would reopen
+        # the same drift on any non-live clock (tests, replays, backfills).
+        assert call["now"] == NOW, (
+            "the gateway was not given the request's clock, so its scan floor "
+            "and the predicate's threshold are computed from different `now`s"
+        )
+
+
+def test_exploration_lane_names_the_reason_it_is_empty(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A dead lookup and a genuinely empty pool serve the SAME page.
+
+    The 2026-08-08 build reported the seat "correctly forfeits" for two real
+    viewers while the query behind it was taking 311 seconds. Fail-closed turns
+    a broken read into plausible-looking behaviour, so the only defence is that
+    an empty lane states its cause. `newness_unavailable` means OUTAGE;
+    `not_new` means the predicate worked.
+    """
+    old = NOW - timedelta(days=400)
+    gateway = FakeGateway(
+        in_network=[make_post("veteran", "v1")], first_post={"veteran": old}
+    )
+    viewer = make_viewer("me", follows=frozenset({"veteran"}))
+
+    with caplog.at_level(logging.WARNING, logger="recsys.exploration"):
+        rank_feed(viewer, gateway, _norm(), now=NOW, since=EPOCH, trust_policy=_PERMISSIVE)
+
+    empty = [r for r in caplog.records if "pool EMPTY" in r.getMessage()]
+    assert empty, "an empty exploration lane logged nothing at all"
+    message = empty[0].getMessage()
+    assert "not_new" in message, (
+        f"the lane did not report WHY it emptied: {message!r}. Without a "
+        "per-reason count, a 311s outage and 'no newcomer today' are "
+        "indistinguishable in the logs as well as in the output."
+    )
+    assert "newness_unavailable" not in message, (
+        "the lookup answered, so this must be reported as `not_new` (the "
+        "predicate working), never as an outage"
+    )
+
+
+def test_an_unavailable_newness_lookup_is_reported_as_an_OUTAGE_not_as_not_new(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The two refusal reasons must never be collapsed.
+
+    A gateway that cannot answer the newness question forfeits the seat on EVERY
+    request, forever, and the served page is identical to a day with no
+    newcomers. If that path were counted as `not_new`, the logs would report the
+    predicate working normally while the lane was structurally dead — which is
+    precisely how this project has shipped unreachable features before. Pin that
+    an outage is named an outage.
+    """
+
+    class GatewayWithoutNewness(FakeGateway):
+        author_first_post = None  # type: ignore[assignment]
+
+    gateway = GatewayWithoutNewness(in_network=[make_post("newbie", "n1")])
+    viewer = make_viewer("me", follows=frozenset({"newbie"}))
+
+    with caplog.at_level(logging.WARNING, logger="recsys.exploration"):
+        rank_feed(viewer, gateway, _norm(), now=NOW, since=EPOCH, trust_policy=_PERMISSIVE)
+
+    empty = [r for r in caplog.records if "pool EMPTY" in r.getMessage()]
+    assert empty, "the lane emptied on an unresolvable predicate and said nothing"
+    message = empty[0].getMessage()
+    assert "newness_unavailable" in message, (
+        f"an unavailable newness lookup was not reported as an outage: "
+        f"{message!r}. Counting it as `not_new` makes a dead lane read exactly "
+        "like a quiet day."
     )

@@ -128,12 +128,58 @@ EXPECTED_MISSES: dict[tuple[str, str], str] = {
         "rather than quietly re-pointed, because silently swapping a mutant is how a "
         "registry stops describing what it tests. Real exploration-lane coverage is "
         "q3_newauthor.py (CAUGHT) and attacks/exploration_capture.py.",
-    ("q11_follow_curve.py", "unchosen_source_floor=1.0"):
-        "★ THE ONE GENUINE GAP, recorded rather than papered over. NO panel catches "
-        "this mutant — disabling the unchosen-lane penalty FLOOR alone (leaving the "
-        "cap) does not move q11's accepted-curve check enough to trip it, and no other "
-        "panel measures it. This is a real hole in the evidence base, not a structural "
-        "impossibility. It needs a panel that measures lane composition directly.",
+    # ---- 2026-08-08 -------------------------------------------------------
+    ("q11_follow_curve.py", "in_network_bonus=0.0 (follow weight off)"):
+        "STRUCTURAL at the shipped weight. q11 gates on `ACCEPTED_CURVE` with a 0.015 "
+        "tolerance, and `in_network_bonus = 0.05` moves the follow curve by less than "
+        "that at every follow count (verified directly: with the lane off, both arms "
+        "clear the curve). This is a small deliberate nudge — the owner's words were "
+        "'not a lot but slightly more' — so a term sized to be below a panel's noise "
+        "floor cannot be caught by that panel's floor. REAL coverage is "
+        "`tests/test_scoring.py::test_the_follow_weight_*` (6 tests, including the "
+        "exact blend form and the earned/interest decomposition) plus the live "
+        "before/after pages. If this field is ever raised past ~0.1, re-check: the "
+        "measured live effect at 0.1 was +3 in_network slots of 20 for a thin-graph "
+        "viewer, which SHOULD move a curve.",
+    ("q12_lane_balance.py", "in_network_bonus=0.0 (follow weight off)"):
+        "Same term, same reason, different floor: q12's G1a bound is `in_network "
+        "mean/20 >= 6.0` and the measured value is 14.29, a margin of +8.29. A "
+        "composition gate that generous cannot resolve a term worth a fraction of a "
+        "slot. The bound is the OWNER'S TARGET, deliberately not tightened to the "
+        "measured value — tightening a bound so it catches your own change is the "
+        "move this harness exists to prevent.",
+    ("q12_lane_balance.py", "exploration.max_author_age_days=0 (newness predicate off)"):
+        "STRUCTURAL: q12 measures HOW MANY slots each lane holds and WHETHER they were "
+        "earned. The newness predicate changes WHO occupies the reserved seat, not how "
+        "many seats it takes — `G1c exploration mean/20` reads 1.00 either way, "
+        "correctly. Catching it needs a panel that reads author AGE, which no panel "
+        "does and simworld cannot express (its authors have no creation date; "
+        "`SimGateway.author_first_post` derives one from first post). REAL coverage is "
+        "`tests/test_exploration.py::test_the_newness_predicate_*` and the live "
+        "measurement that motivated it (5 viewers, 1 genuine debut).",
+    ("q3_newauthor.py", "exploration.max_author_age_days=0 (newness predicate off)"):
+        "Same structural reason, and sharper here: q3's fixture newcomer is a genuine "
+        "debut, so they pass the predicate whether it is on or off. A gate can only "
+        "catch a predicate that EXCLUDES something in its world, and q3's world "
+        "contains nothing the predicate excludes. The multi-author case is q12's, and "
+        "it is blind for the reason above.",
+    ("q3_newauthor.py", "exploration.seat_by_score=True"):
+        "STRUCTURAL and expected: q3 has exactly ONE eligible newcomer per feed, so "
+        "the seat's ORDERING rule has a one-member band to order and is a no-op by "
+        "construction — the same shape as this file's existing "
+        "`exploration.max_serves_per_author=0` declaration. The field ships OFF "
+        "anyway (see `ExplorationConfig.seat_by_score` for the rival-suppression "
+        "arithmetic that decided it); REAL coverage is "
+        "`tests/test_exploration.py::test_the_seat_goes_to_the_best_scoring_*` and "
+        "`measurement-harness/attacks/seat_freshness.py`.",
+    ("q12_lane_balance.py", "unchosen_min_per_page=0"):
+        "NOT structural — a real hole, recorded as one. q12 reports per-lane shares "
+        "and displacement, and dropping the unchosen FLOOR from 3 to 0 changes which "
+        "unchosen posts are placed without moving any bound this panel sets "
+        "(`in_network >= 6`, `exploration >= 1`). The gate that should catch it is a "
+        "bound on the UNCHOSEN group's share, which nothing here asserts. Closing it "
+        "means adding that bound to q12 — a deliberate act with an owner ruling behind "
+        "the number, not a value picked to make this row green.",
 }
 
 
@@ -151,6 +197,11 @@ MUTANTS: dict[str, list[Mutant]] = {
         # both are visible and it's obvious which is which.
         ("unchosen_max_per_page=0 (cap off, pre-B-03 field)",
          {"diversity.unchosen_max_per_page": 0}),
+        # ★ 2026-08-08: the follow weight is measured by q11 by construction —
+        # that panel IS the follow curve, so a term that prices a follow either
+        # moves it or does nothing.
+        ("in_network_bonus=0.0 (follow weight off)", {"weights.in_network_bonus": 0.0}),
+        ("popular.limit=25 (across-Hive lane ON)", {"popular.limit": 25}),
     ],
     "q3_newauthor.py": [
         ("emerging_per_page=0 [B-04, N/A at HEAD]", {"diversity.emerging_per_page": 0}),
@@ -165,6 +216,12 @@ MUTANTS: dict[str, list[Mutant]] = {
         ("exploration.max_serves_per_author=0", {"exploration.max_serves_per_author": 0}),
         ("exploration.slots_per_page=0", {"exploration.slots_per_page": 0}),
         ("organic_prior_shrinkage=0.0", {"weights.organic_prior_shrinkage": 0.0}),
+        # ★ 2026-08-08: the reserved seat's occupant rule and its position. q3 is
+        # the newcomer-reach panel, so it is the one panel that could perceive
+        # either.
+        ("exploration.seat_by_score=True", {"exploration.seat_by_score": True}),
+        ("exploration.max_author_age_days=0 (newness predicate off)",
+         {"exploration.max_author_age_days": 0}),
     ],
     "q8_author_prior_panel.py": [
         ("organic_prior_shrinkage=0.0", {"weights.organic_prior_shrinkage": 0.0}),
@@ -173,6 +230,23 @@ MUTANTS: dict[str, list[Mutant]] = {
     "q9_prior_shrinkage.py": [
         ("organic_prior_shrinkage=0.0", {"weights.organic_prior_shrinkage": 0.0}),
         ("organic_post_share=1.0", {"weights.organic_post_share": 1.0}),
+    ],
+    # ★★ 2026-08-08 — the three mechanisms added this day, registered so their
+    # coverage is a FACT rather than an assumption. A miss here becomes a
+    # DECLARED blind spot with a written reason (see EXPECTED_MISSES), which is
+    # the whole point of this file: silence fails, blindness does not.
+    # ★★★ q12 IS THE PANEL THAT MEASURES LANE COMPOSITION DIRECTLY — the
+    # instrument EXPECTED_MISSES has been asking for by name ("It needs a panel
+    # that measures lane composition directly"). Registered with the fields that
+    # decide composition, which had ZERO mutant coverage before 2026-08-08.
+    "q12_lane_balance.py": [
+        ("exploration.slots_per_page=0 (newcomer lane off)",
+         {"exploration.slots_per_page": 0}),
+        ("exploration.max_author_age_days=0 (newness predicate off)",
+         {"exploration.max_author_age_days": 0}),
+        ("in_network_bonus=0.0 (follow weight off)", {"weights.in_network_bonus": 0.0}),
+        ("popular.limit=25 (across-Hive lane ON)", {"popular.limit": 25}),
+        ("unchosen_min_per_page=0", {"diversity.unchosen_min_per_page": 0}),
     ],
     "q7_corrected_baseline.py": [
         # ★ organic_cf=0.0 CANNOT be a single-field mutant: `ScoreWeights.

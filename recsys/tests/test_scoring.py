@@ -12,6 +12,7 @@ from recsys.core.scoring import (
     pooled_author_base,
     score_candidate,
     score_candidates,
+    tag_rarity_weight,
 )
 from tests.fakes import make_candidate, make_post
 
@@ -21,6 +22,12 @@ NORM = NormContext(
     organic_samples=(0.0, 0.25, 0.5, 0.75, 1.0),
 )
 WEIGHTS = ScoreWeights()  # 0.10 / 0.10 / 0.80
+#: ★ 2026-08-08 — the shipped `in_network_bonus` is NON-ZERO and
+#: `make_candidate` defaults to `source=IN_NETWORK`, so any test asserting a
+#: STRUCTURAL identity of the 10/10/80 composite ("all weight on vote ->
+#: final == vote_norm") has to pin the follow weight off, or it is silently
+#: measuring the follow weight instead of the structure it names.
+NO_FOLLOW_WEIGHT = {"in_network_bonus": 0.0}
 
 
 def test_final_in_unit_interval() -> None:
@@ -73,7 +80,8 @@ def test_organic_component_monotonic() -> None:
 
 def test_all_organic_weight_final_equals_organic() -> None:
     candidate = make_candidate(post=make_post(author_reputation=30.0))
-    organic_only = ScoreWeights(vote=0.0, reputation=0.0, organic=1.0)
+    organic_only = ScoreWeights(vote=0.0, reputation=0.0, organic=1.0,
+                                **NO_FOLLOW_WEIGHT)
     result = score_candidate(
         candidate, vote_signal_raw=2.0, organic_raw=0.5, norm=NORM, weights=organic_only
     )
@@ -82,7 +90,8 @@ def test_all_organic_weight_final_equals_organic() -> None:
 
 def test_all_vote_weight_final_equals_vote_norm() -> None:
     candidate = make_candidate(post=make_post(author_reputation=30.0))
-    vote_only = ScoreWeights(vote=1.0, reputation=0.0, organic=0.0)
+    vote_only = ScoreWeights(vote=1.0, reputation=0.0, organic=0.0,
+                             **NO_FOLLOW_WEIGHT)
     result = score_candidate(
         candidate, vote_signal_raw=2.0, organic_raw=0.5, norm=NORM, weights=vote_only
     )
@@ -512,7 +521,11 @@ def test_shrinkage_is_wired_from_ScoreWeights_into_the_scorer() -> None:
 
     post = make_post(
         author="newcomer",
-        votes=[make_vote(f"v{i}", 50_000_000, minutes=i) for i in range(9)],
+        # ★ 2026-08-08: above `_ORGANIC_VOTER_MIN_RSHARES` (3.184e9). At the
+        # old 5e7 these nine voters mint ZERO breadth, `own_base` collapses to
+        # 0.0 and the shrinkage comparison inverts — the test would then be
+        # asserting something about the floor, not about the wiring.
+        votes=[make_vote(f"v{i}", 7_000_000_000, minutes=i) for i in range(9)],
     )
     now = EPOCH + timedelta(hours=1)
     prior = AuthorEngagement(posts=3, total_base=0.8195)  # 2 unengaged others
@@ -543,9 +556,21 @@ def test_negative_shrinkage_is_refused() -> None:
 
 
 def test_declared_interest_raw_full_and_partial_and_no_overlap() -> None:
+    # ★ REWRITTEN 2026-08-08 with the raw itself (see `declared_interest_raw`).
+    # It used to pin the SHARE form: ("photo","travel") against both tags was
+    # 1.0 and against one was 0.5 — i.e. the number the ranker consumed was
+    # decided by how many tags the AUTHOR chose to write, not by what the post
+    # was about. It is now the rarity of the rarest interest the post claims,
+    # so a match is worth the same whether or not the author also tagged it
+    # `travel`, and only a genuinely rarer match is worth more.
     post = make_post(tags=("photo", "travel"))
-    assert declared_interest_raw(post, frozenset({"photo", "travel"})) == pytest.approx(1.0)
-    assert declared_interest_raw(post, frozenset({"photo"})) == pytest.approx(0.5)
+    photo_only = declared_interest_raw(post, frozenset({"photo"}))
+    both = declared_interest_raw(post, frozenset({"photo", "travel"}))
+    assert 0.0 < photo_only <= 1.0
+    assert both == pytest.approx(
+        max(tag_rarity_weight("photo"), tag_rarity_weight("travel"))
+    )
+    assert both >= photo_only
     assert declared_interest_raw(post, frozenset({"cooking"})) == 0.0
 
 
@@ -557,22 +582,34 @@ def test_declared_interest_raw_empty_interests_or_empty_tags_is_zero_never_none(
     assert declared_interest_raw(untagged, frozenset()) == 0.0
 
 
-def test_declared_interest_raw_denominator_bounds_tag_stuffing() -> None:
-    # The farming ceiling stated in the docstring: padding MORE tags than
-    # truly apply can only shrink the achievable share, never lift it above
-    # 1.0. A post that stuffs every popular interest alongside its one real
-    # match scores LOWER than a post that carries only the matching tag.
+def test_declared_interest_raw_bounds_tag_stuffing() -> None:
+    # ★ REWRITTEN 2026-08-08. This test used to be named
+    # `..._denominator_bounds_tag_stuffing` and its own body showed the
+    # denominator did NOT bound the case that matters: `stuffed`, carrying five
+    # of the viewer's interests and nothing else, asserted at a PERFECT 1.0 —
+    # the maximum the scale can express — for spraying. All the denominator
+    # ever bounded was spraying with tags the viewer had NOT declared.
+    #
+    # The bound is now on the case that was open. Extra sprayed interests are
+    # worth exactly zero, so a five-interest spray scores what its single
+    # rarest tag scores and no more.
     focused = make_post(tags=("photo",))
     stuffed = make_post(tags=("photo", "dev", "food", "travel", "music"))
     interests = frozenset({"photo", "dev", "food", "travel", "music"})
-    assert declared_interest_raw(focused, interests) == pytest.approx(1.0)
-    assert declared_interest_raw(stuffed, interests) == pytest.approx(1.0)
-    # But stuffing with tags that do NOT match dilutes the share below what
-    # the single real match alone would earn.
+    best_single = max(tag_rarity_weight(t) for t in interests)
+    assert declared_interest_raw(stuffed, interests) == pytest.approx(best_single)
+    # ...and it never beats an honest post that simply carries that same tag.
+    rarest = max(interests, key=tag_rarity_weight)
+    honest = make_post(tags=(rarest, "some-other-tag", "and-another"))
+    assert declared_interest_raw(stuffed, interests) <= declared_interest_raw(
+        honest, interests
+    )
+    # The old dilution is deliberately GONE: padding with tags the viewer never
+    # declared no longer punishes the post for describing itself accurately.
     stuffed_off_topic = make_post(tags=("photo", "unrelated-1", "unrelated-2"))
-    diluted = declared_interest_raw(stuffed_off_topic, frozenset({"photo"}))
-    assert diluted == pytest.approx(1.0 / 3.0)
-    assert diluted < declared_interest_raw(focused, frozenset({"photo"}))
+    assert declared_interest_raw(stuffed_off_topic, frozenset({"photo"})) == pytest.approx(
+        declared_interest_raw(focused, frozenset({"photo"}))
+    )
 
 
 def test_interest_match_zero_is_byte_identical_to_the_pre_b02_score() -> None:
@@ -613,7 +650,7 @@ def test_interest_percentile_blends_the_COMPOSITE_not_just_the_organic_slice() -
     # composite, so vote/rep/quality are all diluted by the same factor and
     # the 10/10/80 balance among them survives every `interest_match` value.
     candidate = make_candidate(post=make_post(author_reputation=30.0))
-    weights = ScoreWeights(interest_match=0.4)
+    weights = ScoreWeights(interest_match=0.4, **NO_FOLLOW_WEIGHT)
     quality = 0.6  # organic_raw=0.5 against NORM.organic_samples, see the CF test above
     result = score_candidate(
         candidate, vote_signal_raw=2.0, organic_raw=0.5, norm=NORM, weights=weights,
@@ -657,6 +694,7 @@ def test_interest_blend_runs_on_the_composite_after_cf_and_viewer_own_affinity()
     candidate = make_candidate(post=make_post(author_reputation=30.0))
     weights = ScoreWeights(
         organic_quality=0.9, organic_cf=0.1, interest_match=0.5, organic_viewer=0.5,
+        **NO_FOLLOW_WEIGHT,
     )
     quality = 0.6
     after_cf = (1.0 - weights.organic_cf) * quality + weights.organic_cf * 0.8  # cf_percentile
@@ -745,10 +783,16 @@ def test_in_network_bonus_zero_is_byte_identical_to_the_pre_follow_weight_score(
         result = score_candidate(
             candidate, vote_signal_raw=2.0, organic_raw=0.5, norm=NORM, weights=off,
         )
-        reference = score_candidate(
-            candidate, vote_signal_raw=2.0, organic_raw=0.5, norm=NORM, weights=ScoreWeights(),
+        assert result.score.interest_bonus == 0.0
+        # The reference is the pre-2026-08-08 composite computed BY HAND, not
+        # `ScoreWeights()` — the shipped default now carries a non-zero follow
+        # weight, so a "default" reference would be comparing the term to itself.
+        expected = (
+            off.vote * result.score.vote_norm
+            + off.reputation * result.score.rep_norm
+            + off.organic * result.score.organic
         )
-        assert result == reference, source
+        assert result.score.final == pytest.approx(expected), source
 
 
 def test_the_follow_weight_lifts_in_network_and_nothing_else() -> None:

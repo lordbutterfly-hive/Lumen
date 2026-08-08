@@ -550,6 +550,46 @@ class SimGateway:
     def follow_graph(self, accounts: frozenset[str]) -> dict[str, frozenset[str]]:
         return {a: self.w.follows[a] for a in accounts if a in self.w.follows}
 
+    def author_first_post(
+        self, authors: frozenset[str], *, horizon_days: int, now: datetime | None = None
+    ) -> dict[str, datetime]:
+        """When each author first published, over the whole world (2026-08-08).
+
+        ★ WITHOUT THIS THE EXPLORATION LANE IS DEAD IN EVERY PANEL. The newness
+        predicate (`ExplorationConfig.max_author_age_days`) is FAIL-CLOSED by
+        design — an author whose first-post date is unknown is refused the lane
+        — so a gateway that cannot answer forfeits the reserved seat on every
+        request. Caught by `q12_lane_balance.py` on its first run: exploration
+        mean/20 read 0.00 and q3's newcomer reach went red.
+
+        The world has no notion of account creation, so first POST is the only
+        honest proxy available here, which is also what the production query
+        computes.
+
+        ★ `horizon_days` MIRRORS THE PRODUCTION CONTRACT (2026-08-08): only
+        authors newer than the horizon are returned, and older ones are OMITTED
+        rather than carrying a real timestamp. The sim world is small enough to
+        compute the true minimum either way, but answering a different SHAPE
+        than `HafsqlClient` does is how a panel goes green against behaviour the
+        service never has — so the omission is reproduced deliberately.
+        """
+        first: dict[str, datetime] = {}
+        for post in self.w.posts:
+            if post.author not in authors:
+                continue
+            current = first.get(post.author)
+            if current is None or post.created < current:
+                first[post.author] = post.created
+        if horizon_days <= 0:
+            return {}
+        if now is None:
+            # No clock, so no horizon can be applied honestly. Return the true
+            # minima rather than inventing a reference point — the caller's own
+            # predicate still filters them, so this is never fail-OPEN.
+            return first
+        floor = now - timedelta(days=horizon_days)
+        return {a: t for a, t in first.items() if t >= floor}
+
     def popular_posts(self, since: datetime, limit: int) -> list[Post]:
         # ★ C9 (2026-08-04). This used to sort by raw
         # `len(distinct voters) + p.children + p.reblog_count` — self-farmable

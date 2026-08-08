@@ -13,6 +13,7 @@ from dataclasses import replace
 
 from recsys.config import Thresholds
 from recsys.contracts import Candidate, CandidateSource, GraphCred, Post, ViewerProfile
+from recsys.core.banned import is_banned
 
 
 def passes_second_degree(
@@ -137,6 +138,14 @@ def filter_eligible(
         if post.is_nsfw and not show_nsfw:
             continue
         if post.author in viewer.mutes:
+            continue
+        # ★ GLOBAL BAN (2026-08-08) — an operator blocklist, not a viewer
+        # preference. It sits here, beside the mute check and OUTSIDE the
+        # `requires_second_degree` block, for the same reason a mute does: a
+        # ban that in-network or interest candidates could route around is not
+        # a ban. See recsys/core/banned.py; the other half (their engagement
+        # minting no breadth for anyone) is applied in `pipeline`.
+        if is_banned(post.author):
             continue
         # ★★ P1 (2026-08-05) — NEVER SHOW SOMEONE THEIR OWN POST IN DISCOVERY.
         #

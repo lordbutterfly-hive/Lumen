@@ -35,6 +35,7 @@ from recsys.contracts import (
 )
 from recsys.core.als import ALSModel, train_als, viewer_affinity_percentiles
 from recsys.core.als_guard import als_batch_drift
+from recsys.core.banned import banned_authors
 from recsys.core.candidates import merge_candidates, top_up
 from recsys.core.coldstart import (
     INTEREST_LANE_SOURCES,
@@ -51,6 +52,7 @@ from recsys.core.exploration import (
 )
 from recsys.core.flooding import cap_oon_flooding
 from recsys.core.graph_cred import compute_graph_cred
+from recsys.core.popular import select_popular
 from recsys.core.rerank import _FeedCounters, rerank
 from recsys.core.ring import detect_rings, ring_member_set
 from recsys.core.scoring import (
@@ -877,6 +879,43 @@ def gather_candidates(
                 ]
             )
 
+    # ★★★ THE ACROSS-HIVE POPULARITY LANE (2026-08-08). Sourced for EVERY
+    # viewer, unconditionally — that unconditionality IS the fix. Every other
+    # lane above needs a relationship to fire (a follow, a follow's engagement,
+    # a tag match, a trained CF row), so a genuinely huge post outside all four
+    # was never a CANDIDATE and no weight or quota downstream could reach it.
+    # `POPULAR_FALLBACK` does not cover this: `_fallback_filler` runs only when
+    # the realised pool is starved, so on a healthy feed the popular query is
+    # never executed at all.
+    #
+    # SELECTION IS CREDITED BREADTH. `popular_posts` is a RECALL prefilter whose
+    # SQL ordering counts every identity equally (it cannot see the weekly
+    # graph-cred snapshot); `select_popular` then re-scores those rows with the
+    # SAME `VoterTrust` budget and §8.4 exclusion set the 80% organic term uses,
+    # and keeps the top `limit`. Sourcing a lane served to everyone on a number
+    # a farm can manufacture would be a platform-wide amplifier — see
+    # `recsys.core.popular` for the residual (a farm can still crowd the
+    # prefilter, which is why `source_limit` carries headroom).
+    if settings.popular.limit > 0 and settings.popular.source_limit > 0:
+        trust = _voter_trust(snapshot, settings) if snapshot is not None else None
+
+        def _popular_excluded(author: str) -> frozenset[str]:
+            # §8.4 minus stake lineage, which is RETIRED and always empty
+            # (`_lineage_for`). Self plus ring co-members is the whole set.
+            if snapshot is None:
+                return frozenset({author})
+            return frozenset({author}) | _ring_exclusion(author, snapshot)
+
+        groups.append(
+            select_popular(
+                gateway.popular_posts(since, settings.popular.source_limit),
+                excluded_for=_popular_excluded,
+                trust=trust,
+                weights=settings.weights,
+                limit=settings.popular.limit,
+            )
+        )
+
     merged = merge_candidates(*groups)
     return cap_oon_flooding(merged, settings.flooding.max_oon_posts_per_author)
 
@@ -1345,7 +1384,15 @@ def _score(
         exclusions = VoteExclusions(
             author=candidate.post.author,
             lineage=lineage[candidate.post.author],
-            ring_members=_ring_exclusion(candidate.post.author, snap),
+            # ★ GLOBAL BAN, second half (2026-08-08). Dropping a banned account's
+            # POSTS (second_degree.filter_eligible) only stops them being read.
+            # Unless their votes/comments/reblogs are also excluded they keep
+            # minting breadth for whoever they choose to engage — an invisible
+            # promoter, which is a stronger position than they had before the
+            # ban. Unioned into `ring_members` because that set already means
+            # exactly "identities whose engagement does not count here" and
+            # `excluded()` is the one place every signal reads it from.
+            ring_members=_ring_exclusion(candidate.post.author, snap) | banned_authors(),
         )
         excluded = exclusions.excluded()
         vote_signal_raw = independent_vote_signal(candidate.post, exclusions, trust=trust)
@@ -1800,10 +1847,100 @@ def rank_feed(
         author: len(engagers)
         for author, engagers in engagement_received(candidates).items()
     }
+    # ★ ONE read of the serve log per request (2026-08-08), shared by the pool
+    # filter/ordering below and by `seat_order`. Two independently-taken
+    # snapshots of the same counter is the same "two computations that could
+    # disagree" hazard the `engagement_counts` note above exists for.
+    serve_counts = (
+        serve_log.counts(
+            now=now.timestamp(),
+            window_s=settings.exploration.serve_window_days * 86400.0,
+        )
+        if serve_log is not None
+        else None
+    )
+    # ★★★ THE NEWNESS LOOKUP (2026-08-08). One grouped MIN(created) over the
+    # candidate authors — the same shape `author_engagement` already runs, and
+    # bounded by the same author set.
+    #
+    # It is asked for ONLY when the predicate is on, so `max_author_age_days = 0`
+    # costs no round trip and reproduces the pre-2026-08-08 lane exactly. A
+    # gateway that does not implement the read at all degrades to `None`, which
+    # `eligible_for_exploration` treats as FAIL-CLOSED (the lane empties and the
+    # seat forfeits) rather than as "everyone is new" — the direction stated in
+    # `ExplorationConfig.max_author_age_days`.
+    author_first_post: dict[str, datetime] | None = None
+    if settings.exploration.max_author_age_days > 0:
+        lookup = getattr(gateway, "author_first_post", None)
+        if lookup is None:
+            logger.warning(
+                "exploration: gateway %s has no author_first_post; the newness "
+                "predicate cannot be evaluated so the reserved seat FORFEITS "
+                "this request. Set ExplorationConfig.max_author_age_days = 0 to "
+                "run the lane without it.",
+                type(gateway).__name__,
+            )
+        else:
+            # ★★★ A FAILED NEWNESS LOOKUP FORFEITS THE SEAT — IT DOES NOT TAKE
+            # DOWN THE FEED (2026-08-08, found by running it: the first version
+            # of `_SQL_AUTHOR_FIRST_POST` used a `depth` column this mirror does
+            # not have, and `build_feed` turned the psycopg error into a 503 for
+            # EVERY request). The reserved slot is 1 of 20; a lane-scoped read
+            # must never be able to fail a whole page. Fail-closed is already
+            # the predicate's documented direction, so the degrade is the one
+            # the config describes: `author_first_post` stays None, the lane
+            # empties, the slot returns to merit content.
+            #
+            # ★★★ THE HORIZON IS PASSED, NOT ASSUMED (2026-08-08). The gateway
+            # bounds its scan by it (`_SQL_AUTHOR_FIRST_POST` is fast ONLY
+            # because it can stop looking once an author is provably older), so
+            # the SQL bound and the threshold tested three lines into
+            # `eligible_for_exploration` are now the SAME NUMBER by
+            # construction. Deriving it twice is how a config change to
+            # `max_author_age_days` would silently start refusing exactly the
+            # authors it was raised to admit.
+            asked = frozenset(c.post.author for c in candidates)
+            try:
+                author_first_post = dict(
+                    lookup(
+                        asked,
+                        horizon_days=settings.exploration.max_author_age_days,
+                        now=now,
+                    )
+                )
+            except Exception:
+                logger.error(
+                    "exploration: author_first_post lookup FAILED; the newness "
+                    "predicate cannot be evaluated so the reserved seat "
+                    "FORFEITS this request. The rest of the feed is unaffected.",
+                    exc_info=True,
+                )
+            else:
+                # ★★★ SAY WHETHER THERE WERE ANY NEWCOMERS AT ALL.
+                #
+                # A lookup that is slow, failing, or returning nothing produces
+                # EXACTLY the same served output as "there is genuinely no new
+                # author today": an empty lane and a forfeited seat. Fail-closed
+                # turns a broken read into plausible-looking behaviour, and this
+                # project has already shipped an unreachable feature behind that
+                # exact ambiguity. The counts below are the only thing that can
+                # tell an operator which of the two happened, so they are logged
+                # at INFO on every request rather than kept for a debug session.
+                logger.info(
+                    "exploration: newness lookup resolved %d/%d candidate "
+                    "authors as newer than %d days (an author is omitted when "
+                    "they are provably older, so 0 here means NO NEWCOMER IN "
+                    "THE POOL, not a failed read — a failure logs an ERROR "
+                    "above instead).",
+                    len(author_first_post),
+                    len(asked),
+                    settings.exploration.max_author_age_days,
+                )
     explore_pool = eligible_for_exploration(
         candidates,
         viewer,
         now=now,
+        author_first_post=author_first_post,
         # ★ C4 (2026-08-04): PROVEN self-dealing (graph-cred == 0.0), not the
         # raw ring flag — see recsys/core/exploration.py's docstring for the
         # measured attack (ring-flag exclusion let a suppressor GAIN the seat
@@ -1813,14 +1950,7 @@ def rank_feed(
         show_nsfw=show_nsfw,
         config=settings.exploration,
         bucket=explore_bucket,
-        serves=(
-            serve_log.counts(
-                now=now.timestamp(),
-                window_s=settings.exploration.serve_window_days * 86400.0,
-            )
-            if serve_log is not None
-            else None
-        ),
+        serves=serve_counts,
     )
 
     # One stake-lineage memo for the whole request — see `_lineage_for`.
@@ -1948,9 +2078,18 @@ def rank_feed(
         # `engagement_counts` is the SAME map the serve log and the need bands
         # use — one definition of "has this author been heard", per the note at
         # its construction above.
+        #
+        # `serves` is passed ONLY while the budget is on. `eligible_for_
+        # exploration` gates BOTH halves of B1 (the cap and the ordering) on
+        # `max_serves_per_author > 0` because a half-revert — log still
+        # recording, ordering still flipping, cap off — is its own bug (round-3
+        # council). Gating it here keeps the two orderings agreeing.
         ordered = seat_order(
             [by_key[c.post.key] for c in explore_pool if c.post.key in by_key],
             engagement_counts,
+            serves=(
+                serve_counts if settings.exploration.max_serves_per_author > 0 else None
+            ),
             enabled=settings.exploration.seat_by_score,
         )
         # ★ C2c (2026-08-04). `insert_exploration` has accepted a `lineage`

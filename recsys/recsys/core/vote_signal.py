@@ -56,12 +56,29 @@ _DEFAULT_UNKNOWN_MAX = _VOTE_SIGNAL_DEFAULTS.unknown_max
 _ORGANIC_VOTER_WEIGHT = 0.5
 _ORGANIC_REBLOG_WEIGHT = 0.5
 _ORGANIC_REPLY_WEIGHT = 0.3
-# A vote whose |rshares| sits at or below log_compress's floor (== the §4
-# NormConfig.rshares_floor default) registers zero stake-weight on the vote
-# signal; such chain-dust votes carry no organic breadth either, so a
-# zero-stake throwaway's vote mints nothing. Any real vote from even a ~1 HP
-# account (~5e8 rshares) clears this by orders of magnitude.
-_ORGANIC_VOTER_MIN_RSHARES = 1e7
+# The bar a vote must clear to count as a PERSON in the organic breadth term.
+#
+# ★ RAISED 2026-08-08, 1e7 -> 3.184e9, i.e. 0.31 HP -> 100 HP (owner: "votes are
+# mostly botted... raise the dust floor to 100HP").
+#
+# The old value was set to log_compress's floor, which made it a zero-stake
+# check, not a bot check. MEASURED on the live chain the day it was raised: on a
+# 992-vote post it rejected THREE votes. 989 got through. The whole defence was
+# resting one layer up, on `VoterTrust.credited_breadth`.
+#
+# CONVERSION, measured not assumed: 60 live voters on a real post, pairing each
+# vote's rshares with the voter's own HP (vesting_shares + received - delegated,
+# at the chain's current 0.000619078 HIVE/VESTS), normalised by vote percent:
+#   median 3.184e7 rshares per HP, p25 3.063e7, p75 3.223e7 — a tight enough
+#   distribution to convert with. 100 HP therefore = 3.184e9.
+#
+# COST, measured on 8 real posts from a live feed (share of above-old-floor
+# voters that still clear the new one): 44.6% - 69.4%. The heaviest loss was the
+# post with 808 votes and ZERO comments — a vote count with no conversation
+# behind it, which is exactly the shape this floor exists to discount. Breadth
+# is a headcount of people whose attention costs something; below ~100 HP a vote
+# is close to free to manufacture, and free votes were being counted as people.
+_ORGANIC_VOTER_MIN_RSHARES = 3.184e9
 
 
 @dataclass(frozen=True)

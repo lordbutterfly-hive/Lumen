@@ -70,7 +70,7 @@ import os
 import threading
 import time
 from collections.abc import Callable, Iterable, Mapping
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from recsys.config import (
@@ -81,7 +81,32 @@ from recsys.config import (
 )
 from recsys.contracts import Candidate, CandidateSource, EngagementEdge, Post, Vote
 from recsys.core.scoring import AuthorEngagement
-from recsys.core.vote_signal import AttributedPost, VoterTrust
+from recsys.core.vote_signal import (
+    _ORGANIC_VOTER_MIN_RSHARES,
+    AttributedPost,
+    VoterTrust,
+)
+
+# ★★★ THE FLOOR IS IMPORTED, NOT RETYPED (2026-08-08). Both queries below
+# used to hardcode `10000000`, with a comment claiming they "mirror
+# recsys.core.vote_signal._ORGANIC_VOTER_MIN_RSHARES". They stopped
+# mirroring it the moment that constant moved 1e7 -> 3.184e9 (0.31 HP -> 100
+# HP) on 2026-08-08, and nothing anywhere cross-checked the two.
+#
+# WHY THAT IS NOT COSMETIC. `_SQL_AUTHOR_ENGAGEMENT` computes
+# `AuthorEngagement.total_base`, and `scoring.pooled_author_base` subtracts
+# the post's OWN base — computed in PYTHON, at the new floor — from it:
+# `loo = (total_base - own_base) / others`. With SQL counting voters above
+# 1e7 and Python counting voters above 3.184e9, `own_base` shrinks while
+# `total_base` does not, so the leave-one-out mean is inflated for every
+# author on every request — and `pooled_author_base`'s clamp only guards the
+# NEGATIVE direction, so nothing catches it. The author-pooled prior is the
+# quality percentile, which is 80% of the composite.
+#
+# Interpolated as an integer literal: Postgres would take `3.184e+09` as a
+# float and the comparison would still work, but a float literal in a
+# hot-path predicate invites a cast that defeats the index on `rshares`.
+_VOTER_MIN_RSHARES_SQL = f"{_ORGANIC_VOTER_MIN_RSHARES:.0f}"
 
 if TYPE_CHECKING:
     import psycopg
@@ -640,8 +665,9 @@ LIMIT %(limit)s
 
 # Popular-posts fallback (§13.5b): recent top-level posts ranked by the same
 # ATTRIBUTED distinct-identity signal the organic term scores (§6) — distinct
-# non-self voters above the chain-dust floor (1e7 rshares, mirroring
-# recsys.core.vote_signal._ORGANIC_VOTER_MIN_RSHARES), distinct non-self
+# non-self voters above the organic voter floor (now IMPORTED from
+# recsys.core.vote_signal._ORGANIC_VOTER_MIN_RSHARES rather than retyped —
+# see `_VOTER_MIN_RSHARES_SQL`), distinct non-self
 # commenters, and distinct non-self rebloggers, weighted 0.5/0.3/0.5 to match
 # the organic weights. Deliberately NOT payout/net_rshares (so the fallback
 # isn't "trending" reimplemented) and NEVER the raw self-farmable counters
@@ -660,18 +686,13 @@ LIMIT %(limit)s
 # posts are fetched; the snapshot-dependent lineage/ring exclusion decides
 # which survive. Both layers use identical weights and thresholds so the
 # pre-fetch never contradicts the authoritative pass, only widens it.
-_SQL_POPULAR_POSTS = f"""
-SELECT c.author, c.permlink, c.category, c.created, c.tags,
-       c.json_metadata->>'lumen_user_id'
-FROM hafsql.comments c
-WHERE {_top_level_or_lite("c")}
-  AND c.deleted = false
-  AND c.created >= %(since)s
-ORDER BY (
-    0.5 * (SELECT COUNT(DISTINCT v.voter)
+#: How many rows ONE author may occupy in the popularity RECALL set.
+_POPULAR_MAX_PER_AUTHOR = 2
+
+_POPULAR_ENGAGEMENT = f"""    0.5 * (SELECT COUNT(DISTINCT v.voter)
            FROM hafsql.operation_effective_comment_vote_view v
            WHERE v.author = c.author AND v.permlink = c.permlink
-             AND v.rshares > 10000000 AND v.voter <> c.author)
+             AND v.rshares > {_VOTER_MIN_RSHARES_SQL} AND v.voter <> c.author)
     + 0.3 * (SELECT COUNT(DISTINCT rc.author)
              FROM hafsql.operation_comment_view rc
              WHERE rc.parent_author = c.author AND rc.parent_permlink = c.permlink
@@ -679,10 +700,230 @@ ORDER BY (
     + 0.5 * (SELECT COUNT(DISTINCT r.account_name)
              FROM hafsql.reblogs r
              WHERE r.author = c.author AND r.permlink = c.permlink
-               AND r.account_name <> c.author)
-) DESC, c.created DESC
+               AND r.account_name <> c.author)"""
+
+# ★★★ PER-AUTHOR RECALL CAP (2026-08-08) — `%(per_author)s` rows per author,
+# applied BEFORE the LIMIT. Without it this recall set is capturable and no
+# amount of care in the selection step can save it.
+#
+# THE ATTACK, priced. `recsys.core.popular.select_popular` re-scores whatever
+# this query returns under the request's own `VoterTrust` budget, so a farm with
+# no vouched engagers is stuck near raw breadth ~1.3 against an honest
+# chain-topper's ~20 and CANNOT out-select it. But selection can only rank what
+# recall handed it. Hive allows a root post every 5 minutes — 864 per 3-day
+# window — so one author publishing enough posts that each clears the LAST place
+# in this ORDER BY evicts every honest post from the recall set, and the lane
+# then selects the best of a farm-only list. `cap_oon_flooding` does not help:
+# it runs on the MERGED candidate pool, i.e. after selection, so it trims what is
+# SERVED (3 per author) and never what is RECALLED — 2 authors would still fill
+# `DiversityConfig.popular_per_page`.
+#
+# `ROW_NUMBER() OVER (PARTITION BY identity ORDER BY <engagement> DESC)` bounds
+# each author's share of the recall set directly, so filling it requires
+# `source_limit / per_author` DISTINCT authors rather than one prolific account.
+# Partitioned on the RANKED identity (`_identity`), not the chain author, or a
+# shared Lumen publisher account would be capped as if it were one writer.
+_SQL_POPULAR_POSTS = f"""
+SELECT author, permlink, category, created, tags, lumen_user_id FROM (
+  SELECT c.author, c.permlink, c.category, c.created, c.tags,
+         c.json_metadata->>'lumen_user_id' AS lumen_user_id,
+         ROW_NUMBER() OVER (
+             PARTITION BY {_identity("c")}
+             ORDER BY ({_POPULAR_ENGAGEMENT}) DESC, c.created DESC
+         ) AS author_rank,
+         ({_POPULAR_ENGAGEMENT}) AS engagement
+  FROM hafsql.comments c
+  WHERE {_top_level_or_lite("c")}
+    AND c.deleted = false
+    AND c.created >= %(since)s
+) ranked
+WHERE author_rank <= %(per_author)s
+ORDER BY engagement DESC, created DESC
 LIMIT %(limit)s
 """
+
+# ★★★ AUTHOR FIRST-POST AGGREGATE (2026-08-08) — the NEWNESS predicate the
+# exploration lane never had. One grouped MIN over the same identity the ranker
+# uses, exactly the shape `_SQL_AUTHOR_ENGAGEMENT` already runs.
+#
+# WHY IT EXISTS. `eligible_for_exploration` bands authors on
+# `engagement_received` — the UNENGAGED — and reads no author age at all. Its
+# own docstring concedes the gap: "This does NOT make the lane new-author-only;
+# that needs an author-age or graph-cred-absence condition, which both councils
+# flagged as the real v1.0 gap." On Hive the unengaged are mostly DOWNVOTED
+# VETERANS, and measured across 5 real viewers the reserved seat went to
+# `tdvtv` (created 2020-12-17, 28,777 posts), `darkflame` (2016, 15,552 posts),
+# `sadcorp` (1,233 posts, reputation -40.8bn), `alexwo` (947 posts, reputation
+# -843bn) and `toluwanispecial` (768 posts) — exactly one genuine debut
+# (`liza-amin`, 3 posts) in the whole sample.
+#
+# ★★★ PERF — THE 280-SECOND REQUEST (2026-08-08, SAME DAY, live-measured).
+#
+# The version above shipped this morning as a bare grouped MIN with NO date
+# bound and the COALESCE identity on the left of `= ANY(...)`. Measured on the
+# real mirror with the 972-identity candidate set a live `/feed` actually
+# produces: **311 SECONDS**. It is the whole of the ~280s `/feed?viewer=
+# lordbutterfly` regression (30-45s -> 279.5s) — the frontend gives up at 15s,
+# so every cold viewer got the trending fallback instead of a ranked feed.
+#
+# `EXPLAIN (ANALYZE, BUFFERS)` named TWO independent, additive causes — the
+# exact pair `_SQL_AUTHOR_ENGAGEMENT` below already documents, re-made here:
+#
+#   1. NOT SARGABLE. `COALESCE(json_metadata->>'lumen_user_id', author) =
+#      ANY(%(authors)s)` cannot be answered by any index on `author`, so
+#      Postgres fell back to `hafsql_comments_table_parent_author_empty_
+#      deleted_id_idx` — i.e. EVERY TOP-LEVEL POST ON HIVE, ALL HISTORY:
+#      25,744,001 index rows, 75,058,034 removed by recheck, 25,030,577 removed
+#      by filter, 11,036,504 buffer reads — to keep 58,073. The cost is set by
+#      total chain volume and grows forever, no matter how few authors are asked
+#      about.
+#   2. NO DATE BOUND. `MIN(created)` over all history must touch every post an
+#      author ever made, and one candidate on this chain has 28,777. Fixing (1)
+#      ALONE still measured 191s: sargable is necessary and NOT sufficient.
+#
+# ★ THE TRAP IN THE OBVIOUS FIX, and why this query is shaped the way it is.
+# Simply adding `AND c.created >= <floor>` to the grouped MIN is FAST (0.8s) and
+# WRONG: inside a window, `MIN(created)` returns a veteran's first post OF THAT
+# MONTH, so every still-active 2016 account reports as a debut. Measured on the
+# same 972 identities: 505 authors classified NEW against a true 86. That is the
+# newness predicate inverted into a veterans-only lane — strictly worse than the
+# bug it was added to fix, and it would have looked like it was working.
+#
+# ★ WHAT IS ACTUALLY ASKED. The consumer
+# (`recsys.core.exploration.eligible_for_exploration`) only ever evaluates
+# `first_post >= now - max_author_age_days`. So the question is not "when did
+# this author first post" but "**does this author have any post older than the
+# threshold**" — and that flips an unbounded AGGREGATE into a bounded EXISTENCE
+# check, which can stop at the FIRST row it finds instead of reading a whole
+# history. That is the entire fix:
+#
+#   * `windowed`  — the bounded, sargable MIN over the last `%(floor)s` days,
+#     split into the same two SARGABLE branches `_SQL_AUTHOR_ENGAGEMENT` uses (an
+#     ORDINARY branch keyed on `c.author = ANY(...)`, disjoint via
+#     `lumen_user_id IS NULL`, and a LITE branch bounded by the tiny
+#     `%(lite_publishers)s` set). Every candidate author posted inside the
+#     sourcing window by construction, so this resolves all of them.
+#   * the two `NOT EXISTS` anti-joins — drop any identity with even one
+#     top-level post STRICTLY BEFORE the floor. `EXPLAIN` confirms these run as
+#     `Index Scan using hafsql_comments_table_author_created_idx` with
+#     `(author = <identity> AND created < floor)`, one early-terminating probe
+#     per identity.
+#
+# For every identity this query RETURNS, `first_post` is therefore the author's
+# TRUE first post, not a windowed artefact — by construction they have nothing
+# before the floor. An identity that IS old is simply absent, which the caller
+# already treats as "refuse the seat" (fail-closed), so the returned verdict is
+# byte-identical to the unbounded query's.
+#
+# ★ THE FLOOR MUST STAY STRICTLY OLDER THAN THE THRESHOLD, and it is passed in
+# (`%(floor)s`) rather than hardcoded here, derived by the caller from
+# `ExplorationConfig.max_author_age_days` + `_FIRST_POST_FLOOR_MARGIN_DAYS`. If
+# the floor ever equalled the threshold, authors sitting exactly on the boundary
+# would be decided by the floor instead of by their real first post, and raising
+# `max_author_age_days` in config without widening the scan would silently make
+# the lane refuse everyone it was just widened to admit — the SQL bound and the
+# predicate it serves must not be able to drift apart.
+#
+# MEASURED, same 972 identities, same mirror, same session:
+#     unbounded (as shipped)  311.4s / 159.1s      <- the regression
+#     naive date floor          0.8s   BUT 505 false debuts vs 86 true
+#     THIS QUERY                4.5s cold, 0.25s warm; 0.72s cold on a
+#                               56%-different author set
+# and the NEW-set is IDENTICAL to the exact unbounded reference: 88 vs 88, zero
+# false-new, zero false-old, zero timestamp mismatches (see
+# `test_author_first_post_is_bounded_and_sargable`, which pins the SHAPE so this
+# cannot regress to a full scan again without failing a test).
+_SQL_AUTHOR_FIRST_POST = """
+WITH windowed AS (
+    -- ORDINARY branch: sargable on `hafsql_comments_table_author_created_idx`
+    -- (author, created). MUST stay a direct `c.author = ANY(...)` equality —
+    -- a COALESCE expression here is what cost 311s. `lumen_user_id IS NULL`
+    -- keeps this branch disjoint from the LITE branch below.
+    SELECT c.author::text AS identity, c.created AS created
+    FROM hafsql.comments c
+    WHERE c.author = ANY(%(authors)s)
+      AND c.created >= %(floor)s
+      AND c.parent_author = ''
+      AND c.deleted = false
+      AND c.json_metadata->>'lumen_user_id' IS NULL
+    UNION ALL
+    -- LITE branch: same provenance check as `_LITE_POST` (both `author` AND
+    -- `parent_author` must be a configured publisher), so a lite writer keys on
+    -- their OWN first lite post and never inherits the shared publisher
+    -- account's history. `lite_publishers` is tiny, so this stays cheap.
+    SELECT c.json_metadata->>'lumen_user_id' AS identity, c.created AS created
+    FROM hafsql.comments c
+    WHERE c.author = ANY(%(lite_publishers)s)
+      AND c.parent_author = ANY(%(lite_publishers)s)
+      AND c.json_metadata->>'app' = %(lite_app)s
+      AND c.json_metadata->>'lumen_user_id' = ANY(%(authors)s)
+      AND c.created >= %(floor)s
+      AND c.deleted = false
+),
+first_in_window AS (
+    SELECT identity, MIN(created) AS first_post FROM windowed GROUP BY identity
+)
+SELECT f.identity, f.first_post
+FROM first_in_window f
+WHERE NOT EXISTS (
+        SELECT 1 FROM hafsql.comments o
+        WHERE o.author = f.identity
+          AND o.created < %(floor)s
+          AND o.parent_author = ''
+          AND o.deleted = false
+          AND o.json_metadata->>'lumen_user_id' IS NULL
+      )
+  AND NOT EXISTS (
+        SELECT 1 FROM hafsql.comments l
+        WHERE l.author = ANY(%(lite_publishers)s)
+          AND l.parent_author = ANY(%(lite_publishers)s)
+          AND l.json_metadata->>'app' = %(lite_app)s
+          AND l.json_metadata->>'lumen_user_id' = f.identity
+          AND l.created < %(floor)s
+          AND l.deleted = false
+      )
+"""
+
+#: How much OLDER than ``ExplorationConfig.max_author_age_days`` the SQL scan
+#: floor sits. The floor must be strictly older than the threshold the caller
+#: tests, so that an author sitting on the boundary is decided by their real
+#: first post and not by where the scan happened to stop. One day is enough and
+#: costs nothing — the scan is bounded by the anti-join, not by this width.
+_FIRST_POST_FLOOR_MARGIN_DAYS = 1
+
+#: Request-path bound for the newness read, in ms. NOT the global
+#: ``HAFSQL_STATEMENT_TIMEOUT_MS`` (900s in this deployment, and deliberately so:
+#: the trust/author-prior BATCH legitimately runs for minutes, and lowering the
+#: global is what makes the snapshot never get written — see `_fetch_via`).
+#: A batch may take minutes; a REQUEST may not, and before this the request path
+#: had no bound that could ever fire.
+#:
+#: 8s, chosen against measurements rather than taste: the query costs 0.25s warm
+#: and 4.5s on a cold mirror cache, so this is ~32x the steady-state cost and
+#: still clears the observed cold case; it is well inside the frontend's 15s
+#: patience, so the lane can forfeit and the PAGE STILL SERVES; and it is far
+#: below the mirror role's own 45s `statement_timeout`, so ours always fires
+#: first and we degrade on our own terms instead of being cancelled upstream.
+#: Exceeding it raises, `recsys.pipeline` catches, and the seat forfeits — the
+#: degrade this predicate already documents, now reached in bounded time instead
+#: of by hanging.
+#:
+#: ★ WHY ONLY THIS READ, AND NOT EVERY REQUEST-PATH QUERY — stated so the gap is
+#: a decision on the record rather than an oversight. A timeout is only an
+#: improvement where the caller has somewhere to go when it fires. This read
+#: does: `recsys.pipeline` wraps it, the seat forfeits, and the page still
+#: serves 20 items. The other request-path reads (`in_network_posts`,
+#: `tag_posts`, `engaged_oon_posts`, `second_degree_engagers`) have NO such
+#: degrade — a raise there propagates and `build_feed` turns it into a 503. On a
+#: cold mirror those legitimately run for seconds (`window_posts` alone is
+#: measured at ~8.8s), so bounding them at this value today would convert
+#: "slow page" into "no page", which is strictly worse for a launch.
+#:
+#: The right order is: give each sourcing read an explicit degrade (serve the
+#: lanes that answered, log the one that did not), THEN bound it. Until that
+#: exists they stay on the client-wide bound, and this constant is the mechanism
+#: (`_fetch(..., timeout_ms=)`) already in place to do it in one line each.
+_FIRST_POST_TIMEOUT_MS = 8000
 
 # Author-pooled engagement prior (§6): one grouped aggregate per candidate
 # author over the window. For each of an author's top-level window posts, the
@@ -892,7 +1133,7 @@ LIMIT %(limit)s
 # a caller passes a lite identity in `authors` (which this fix is what makes
 # useful), a suppressed lite post will NOT be excluded from that lite author's
 # pooled prior — see the build report.
-_SQL_AUTHOR_ENGAGEMENT = """
+_SQL_AUTHOR_ENGAGEMENT = f"""
 WITH candidate_posts AS (
     -- ORDINARY branch: sargable on `hafsql_comments_table_author_created_idx`
     -- (author, created) — see the PERF note above for why this must stay a
@@ -951,7 +1192,7 @@ SELECT cp.identity AS author,
                          AND ((o.body_binary::jsonb -> 'value') ->> 'author') = cp.author
                          AND ((o.body_binary::jsonb -> 'value') ->> 'permlink') = cp.permlink
                    ) v
-                   WHERE v.rshares > 10000000 AND v.voter <> cp.author
+                   WHERE v.rshares > {_VOTER_MIN_RSHARES_SQL} AND v.voter <> cp.author
                      AND NOT EXISTS (
                          SELECT 1 FROM unnest(%(excl_authors)s::text[],
                                               %(excl_accounts)s::text[]) AS e(author, account)
@@ -1585,13 +1826,25 @@ class HafsqlClient:
             "lite_app": self._lite.app_id,
         }
 
-    def _fetch_lite(self, sql: str, params: dict[str, Any]) -> list[tuple[Any, ...]]:
-        return self._fetch(sql, {**params, **self._lite_params()})
+    def _fetch_lite(
+        self, sql: str, params: dict[str, Any], *, timeout_ms: int | None = None
+    ) -> list[tuple[Any, ...]]:
+        return self._fetch(sql, {**params, **self._lite_params()}, timeout_ms=timeout_ms)
 
-    def _fetch(self, sql: str, params: dict[str, Any]) -> list[tuple[Any, ...]]:
+    def _fetch(
+        self, sql: str, params: dict[str, Any], *, timeout_ms: int | None = None
+    ) -> list[tuple[Any, ...]]:
         """Execute one parameterized, read-only query against the HAFSQL
-        mirror, on a pooled connection, and return all rows."""
-        return self._fetch_via(self._pool, sql, params)
+        mirror, on a pooled connection, and return all rows.
+
+        ``timeout_ms`` overrides the client-wide
+        ``HAFSQL_STATEMENT_TIMEOUT_MS`` FOR THIS QUERY ONLY. It exists because
+        one process runs two workloads with opposite deadlines: the trust /
+        author-prior BATCH may legitimately run for minutes (lowering the global
+        is what stops the snapshot ever being written), while a REQUEST-PATH
+        read must fail long before the frontend gives up. A per-call bound is
+        the only way to hold both without a second client."""
+        return self._fetch_via(self._pool, sql, params, timeout_ms=timeout_ms)
 
     def _fetch_recsys(self, sql: str, params: dict[str, Any]) -> list[tuple[Any, ...]]:
         """Execute one parameterized, read-only query against the recsys DB
@@ -1605,7 +1858,12 @@ class HafsqlClient:
         return self._fetch_via(self._recsys_pool, sql, params)
 
     def _fetch_via(
-        self, pool: _ConnPool, sql: str, params: dict[str, Any]
+        self,
+        pool: _ConnPool,
+        sql: str,
+        params: dict[str, Any],
+        *,
+        timeout_ms: int | None = None,
     ) -> list[tuple[Any, ...]]:
         import psycopg
 
@@ -1637,7 +1895,19 @@ class HafsqlClient:
                 # pooled upstream. Without it the setting is decorative: a batch
                 # that needs minutes silently gets 45 seconds and no trust
                 # snapshot is ever written, so /feed FAIL_CLOSEs forever.
-                cur.execute(f"SET statement_timeout = {int(self._statement_timeout_ms)}")
+                #
+                # ★ A PER-CALL `timeout_ms` OVERRIDES THE CLIENT-WIDE ONE, and
+                # must be applied HERE for the same reason the re-assert exists
+                # at all: the pooled upstream reverts whatever was set earlier,
+                # so a bound applied anywhere but immediately before the query
+                # is decorative. Connections are shared, so the override must
+                # never leak to the next borrower — it does not, because every
+                # query re-asserts its own value on the line below before it
+                # runs, and a connection is only reused through this same path.
+                effective_timeout_ms = (
+                    self._statement_timeout_ms if timeout_ms is None else timeout_ms
+                )
+                cur.execute(f"SET statement_timeout = {int(effective_timeout_ms)}")
                 cur.execute(sql, params)
                 return cur.fetchall()
         except psycopg.OperationalError:
@@ -1949,11 +2219,73 @@ class HafsqlClient:
             cached = self._popular_cache.get(key)
             if cached is not None and now - cached[0] < self._popular_cache_ttl_s:
                 return cached[1]
-        rows = self._fetch_lite(_SQL_POPULAR_POSTS, {"since": since, "limit": limit})
+        # ★ 2026-08-08: `per_author` bounds ONE author's share of the recall
+        # set — see `_SQL_POPULAR_POSTS`'s note. 2, so filling a 150-row recall
+        # needs 75 distinct authors rather than one account posting every five
+        # minutes. Not 1: a genuinely huge day for one author (a post and its
+        # follow-up) is real and should not be silently halved.
+        rows = self._fetch_lite(
+            _SQL_POPULAR_POSTS,
+            {"since": since, "limit": limit, "per_author": _POPULAR_MAX_PER_AUTHOR},
+        )
         posts = self._hydrate(rows)
         with self._popular_cache_lock:
             self._popular_cache[key] = (now, posts)
         return posts
+
+    def author_first_post(
+        self, authors: frozenset[str], *, horizon_days: int, now: datetime | None = None
+    ) -> dict[str, datetime]:
+        """First-post date for each of ``authors`` that is NEWER than
+        ``horizon_days`` — the NEWNESS predicate
+        (:data:`_SQL_AUTHOR_FIRST_POST`, 2026-08-08).
+
+        Keyed on the RANKED identity, like :meth:`author_engagement`, so a Lumen
+        Lite writer's ``lumen_user_id`` resolves to their first LITE post rather
+        than to the shared publisher account's history — otherwise every lite
+        newcomer would inherit the publisher's age and be refused the lane on
+        day one. That is why the query keeps two explicit branches instead of
+        one COALESCE: see :data:`_SQL_AUTHOR_FIRST_POST`.
+
+        ``horizon_days`` MUST be the caller's
+        :attr:`~recsys.config.ExplorationConfig.max_author_age_days`. The scan
+        floor is derived from it (plus
+        :data:`_FIRST_POST_FLOOR_MARGIN_DAYS`), so the SQL bound and the
+        predicate it feeds cannot drift apart — passing a smaller value here
+        than the caller tests against would silently refuse authors the config
+        says are eligible. ``<= 0`` means the predicate is off and there is
+        nothing to ask.
+
+        ★ RETURNS ONLY THE NEW. An author with any top-level post older than the
+        floor is deliberately ABSENT rather than carrying an old timestamp: the
+        query proves oldness with an early-terminating existence check instead
+        of aggregating a full history, which is what takes this from 311s to
+        0.25s. Absence already means "refuse the seat" to the caller
+        (fail-closed), so the served verdict is unchanged — live-verified
+        identical to the unbounded query on 972 real identities.
+
+        ★ BOUNDED IN TIME. Runs under :data:`_FIRST_POST_TIMEOUT_MS`, not the
+        900s client-wide batch bound, so a slow mirror forfeits ONE SLOT in
+        bounded time instead of hanging a whole page — see
+        :meth:`_fetch`.
+        """
+        if not authors or horizon_days <= 0:
+            return {}
+        floor = (now or datetime.now(UTC)) - timedelta(
+            days=horizon_days + _FIRST_POST_FLOOR_MARGIN_DAYS
+        )
+        # `_fetch_lite`, not `_fetch`: the query carries the
+        # `%(lite_publishers)s` / `%(lite_app)s` placeholders, so psycopg raises
+        # `query parameter missing` unless they are bound — the same trap
+        # `author_engagement` documents at its own call site.
+        rows = self._fetch_lite(
+            _SQL_AUTHOR_FIRST_POST,
+            {"authors": list(authors), "floor": floor},
+            timeout_ms=_FIRST_POST_TIMEOUT_MS,
+        )
+        return {
+            str(identity): _as_aware(first) for identity, first in rows if first is not None
+        }
 
     def author_engagement(
         self,

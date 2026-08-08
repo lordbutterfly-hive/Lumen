@@ -55,9 +55,34 @@ from recsys.contracts import EngagementEdge, Post
 def _decayed(edge: EngagementEdge, weights: RealGraphWeights, now: datetime) -> float:
     """The edge's weighted feature sum with the same half-life decay graph-cred
     uses, so "recent" means the same thing everywhere in the system."""
+    # ★★★ `reply_backs` IS DELIBERATELY ABSENT (2026-08-08). It is the ONE term
+    # on this edge the viewer does not control, and including it broke the
+    # invariant this module's own docstring states three paragraphs above.
+    #
+    # `io/hafsql.py:1874` populates it as `replies.get((dst, src))` — the
+    # AUTHOR's replies TO the viewer. `graph_cred.py` already documents that
+    # this field is the reverse direction and excludes it from the ring event
+    # count for exactly that reason; nobody carried the conclusion across to the
+    # weighted term. So with `reply_back = 15.0` — the heaviest weight in the
+    # system — a stranger could write themselves into a viewer's affinity by
+    # replying to them, needing only ONE forward act from the viewer to create
+    # the edge (upvoting a comment left on your own post is the most common
+    # courtesy on the chain).
+    #
+    # MEASURED the day it was removed. Across 2,116,047 real edges from 14,225
+    # sources the median top outgoing edge is 52.0, so `ceil(52/15)` = **4
+    # attacker replies** takes the top slot; `affinity_percentiles` ranks over
+    # DISTINCT VALUES, so the top edge gets exactly 1.0000 regardless of margin;
+    # and at `organic_viewer = 0.3` that is `0.68*0.8*0.3 = 0.1632` of `final`,
+    # which is 81.5% of a real page's measured 0.2002 earned band. The attacker
+    # also owns `last_interaction`, so they refresh the 30-day half-life alone.
+    # On the owner's own graph the term was carrying an edge from rank 2 (59.37)
+    # to outside the top 6 (6.47) once removed — i.e. it was mostly not his.
+    #
+    # What remains is only what the VIEWER did: their replies, upvotes, reblogs.
+    # That is the self-harm-only posture the module claims, actually enforced.
     raw = (
         edge.replies * weights.reply
-        + edge.reply_backs * weights.reply_back
         + edge.upvotes * weights.upvote
         + edge.reblogs * weights.reblog
         + edge.mentions * weights.mention

@@ -19,7 +19,11 @@ import pytest
 from recsys.config import HafsqlConfig, LiteConfig
 from recsys.contracts import HafsqlGateway, Vote
 from recsys.core.scoring import AuthorEngagement
-from recsys.core.vote_signal import AttributedPost, VoterTrust
+from recsys.core.vote_signal import (
+    _ORGANIC_VOTER_MIN_RSHARES,
+    AttributedPost,
+    VoterTrust,
+)
 from recsys.io import hafsql
 
 CLIENT: Final = hafsql.HafsqlClient(HafsqlConfig())
@@ -204,7 +208,11 @@ def test_popular_posts_ordering_is_attributed_and_self_excluded() -> None:
     assert "rc.author <> c.author" in sql  # self-comments neither
     assert "COUNT(DISTINCT r.account_name)" in sql
     assert "r.account_name <> c.author" in sql  # self-reblogs neither
-    assert "v.rshares > 10000000" in sql  # chain-dust votes neither
+    # ★ 2026-08-08: assert against the IMPORTED constant, not a retyped
+    # literal. This test passed while the SQL and
+    # `vote_signal._ORGANIC_VOTER_MIN_RSHARES` had silently diverged 318x
+    # (1e7 vs 3.184e9) — pinning the literal is what let the drift happen.
+    assert f"v.rshares > {_ORGANIC_VOTER_MIN_RSHARES:.0f}" in sql
 
 
 def test_vote_vouch_queries_ignore_downvotes() -> None:
@@ -233,7 +241,11 @@ def test_author_engagement_sql_applies_full_exclusion_and_attribution() -> None:
     assert "COUNT(DISTINCT v.voter)" in sql
     assert "COUNT(DISTINCT rc.author)" in sql
     assert "COUNT(DISTINCT r.account_name)" in sql
-    assert "v.rshares > 10000000" in sql  # chain-dust floor (mirrors organic)
+    # ★ 2026-08-08: the imported constant, for the reason above — and here it
+    # matters more: this aggregate is `total_base`, which
+    # `pooled_author_base` subtracts a PYTHON-computed `own_base` from, so a
+    # divergence inflates the leave-one-out prior for every author.
+    assert f"v.rshares > {_ORGANIC_VOTER_MIN_RSHARES:.0f}" in sql
     assert "v.voter <> cp.author" in sql  # self-vote buys no prior
     assert "rc.author <> cp.author" in sql  # self-comment neither
     assert "r.account_name <> cp.author" in sql  # self-reblog neither
@@ -308,7 +320,11 @@ def test_author_engagement_flattens_excluded_and_maps_rows(
     seen: list[tuple[str, dict[str, Any]]] = []
 
     def fake_fetch(
-        self: hafsql.HafsqlClient, sql: str, params: dict[str, Any]
+        self: hafsql.HafsqlClient,
+        sql: str,
+        params: dict[str, Any],
+        *,
+        timeout_ms: int | None = None,
     ) -> list[tuple[Any, ...]]:
         seen.append((sql, params))
         return [("farm", 5, 2.7092), ("steady", 5, 1.5051)]
@@ -346,7 +362,11 @@ def test_author_engagement_threads_the_voter_trust_budget(
     seen: list[dict[str, Any]] = []
 
     def fake_fetch(
-        self: hafsql.HafsqlClient, sql: str, params: dict[str, Any]
+        self: hafsql.HafsqlClient,
+        sql: str,
+        params: dict[str, Any],
+        *,
+        timeout_ms: int | None = None,
     ) -> list[tuple[Any, ...]]:
         seen.append(params)
         return [("farm", 5, 1.2)]
@@ -372,7 +392,11 @@ def test_author_engagement_no_exclusion_sends_empty_arrays(
     seen: list[dict[str, Any]] = []
 
     def fake_fetch(
-        self: hafsql.HafsqlClient, sql: str, params: dict[str, Any]
+        self: hafsql.HafsqlClient,
+        sql: str,
+        params: dict[str, Any],
+        *,
+        timeout_ms: int | None = None,
     ) -> list[tuple[Any, ...]]:
         seen.append(params)
         return [("solo", 3, 0.9)]
@@ -523,11 +547,23 @@ def test_in_network_posts_and_engaged_oon_posts_use_fetch_lite(
     ``_fetch_lite`` even with lite fully off."""
     calls: list[str] = []
 
-    def fake_fetch_lite(self: hafsql.HafsqlClient, sql: str, params: dict[str, Any]) -> list[Any]:
+    def fake_fetch_lite(
+        self: hafsql.HafsqlClient,
+        sql: str,
+        params: dict[str, Any],
+        *,
+        timeout_ms: int | None = None,
+    ) -> list[Any]:
         calls.append("lite")
         return []
 
-    def fail_fetch(self: hafsql.HafsqlClient, sql: str, params: dict[str, Any]) -> list[Any]:
+    def fail_fetch(
+        self: hafsql.HafsqlClient,
+        sql: str,
+        params: dict[str, Any],
+        *,
+        timeout_ms: int | None = None,
+    ) -> list[Any]:
         raise AssertionError("must call _fetch_lite (missing lite params otherwise)")
 
     monkeypatch.setattr(hafsql.HafsqlClient, "_fetch_lite", fake_fetch_lite)
@@ -578,7 +614,13 @@ def test_votes_for_posts_coerces_decimal_rshares_and_naive_timestamp(
     is also naive (break #8's cause) and must be coerced at the same
     boundary."""
 
-    def fake_fetch_lite(self: hafsql.HafsqlClient, sql: str, params: dict[str, Any]) -> list[Any]:
+    def fake_fetch_lite(
+        self: hafsql.HafsqlClient,
+        sql: str,
+        params: dict[str, Any],
+        *,
+        timeout_ms: int | None = None,
+    ) -> list[Any]:
         return [
             ("alice", "p1", "bob", Decimal("12345678900"), datetime(2026, 1, 1, 12, 0, 0)),
         ]
@@ -600,7 +642,13 @@ def test_edge_counts_coerces_naive_last_interaction_to_aware(
     naive on real rows): every consumer compares against a tz-aware ``now``
     and a naive/aware subtraction raises ``TypeError``."""
 
-    def fake_fetch(self: hafsql.HafsqlClient, sql: str, params: dict[str, Any]) -> list[Any]:
+    def fake_fetch(
+        self: hafsql.HafsqlClient,
+        sql: str,
+        params: dict[str, Any],
+        *,
+        timeout_ms: int | None = None,
+    ) -> list[Any]:
         return [("alice", "bob", 3, datetime(2026, 1, 1, 12, 0, 0))]
 
     monkeypatch.setattr(hafsql.HafsqlClient, "_fetch", fake_fetch)
@@ -617,7 +665,13 @@ def test_edge_counts_preserves_none_for_a_channel_with_no_interaction(
     """``None`` (no interaction of that kind between the pair) must stay
     ``None`` — only a PRESENT naive timestamp gets coerced."""
 
-    def fake_fetch(self: hafsql.HafsqlClient, sql: str, params: dict[str, Any]) -> list[Any]:
+    def fake_fetch(
+        self: hafsql.HafsqlClient,
+        sql: str,
+        params: dict[str, Any],
+        *,
+        timeout_ms: int | None = None,
+    ) -> list[Any]:
         return [("alice", "bob", 0, None)]
 
     monkeypatch.setattr(hafsql.HafsqlClient, "_fetch", fake_fetch)
@@ -675,7 +729,13 @@ def test_suppressed_keys_degrades_to_empty_without_a_recsys_dsn(
 ) -> None:
     monkeypatch.delenv("RECSYS_DATABASE_URL", raising=False)
 
-    def fail_fetch_recsys(self: hafsql.HafsqlClient, sql: str, params: dict[str, Any]) -> list[Any]:
+    def fail_fetch_recsys(
+        self: hafsql.HafsqlClient,
+        sql: str,
+        params: dict[str, Any],
+        *,
+        timeout_ms: int | None = None,
+    ) -> list[Any]:
         raise AssertionError("must not attempt a connection with no DSN configured")
 
     monkeypatch.setattr(hafsql.HafsqlClient, "_fetch_recsys", fail_fetch_recsys)
@@ -698,12 +758,22 @@ def test_suppressed_keys_queries_the_recsys_db_when_a_dsn_is_configured(
     seen: list[tuple[str, dict[str, Any]]] = []
 
     def fake_fetch_recsys(
-        self: hafsql.HafsqlClient, sql: str, params: dict[str, Any]
+        self: hafsql.HafsqlClient,
+        sql: str,
+        params: dict[str, Any],
+        *,
+        timeout_ms: int | None = None,
     ) -> list[Any]:
         seen.append((sql, params))
         return [("alice", "p1")]
 
-    def fail_fetch(self: hafsql.HafsqlClient, sql: str, params: dict[str, Any]) -> list[Any]:
+    def fail_fetch(
+        self: hafsql.HafsqlClient,
+        sql: str,
+        params: dict[str, Any],
+        *,
+        timeout_ms: int | None = None,
+    ) -> list[Any]:
         raise AssertionError("suppressed_keys must not query the HAFSQL mirror")
 
     monkeypatch.setattr(hafsql.HafsqlClient, "_fetch_recsys", fake_fetch_recsys)
@@ -726,12 +796,22 @@ def test_author_engagement_fetches_suppression_from_the_recsys_db_first(
     mirror_calls: list[dict[str, Any]] = []
 
     def fake_fetch_recsys(
-        self: hafsql.HafsqlClient, sql: str, params: dict[str, Any]
+        self: hafsql.HafsqlClient,
+        sql: str,
+        params: dict[str, Any],
+        *,
+        timeout_ms: int | None = None,
     ) -> list[Any]:
         recsys_calls.append((sql, params))
         return [("farm", "suppressed-post")]
 
-    def fake_fetch(self: hafsql.HafsqlClient, sql: str, params: dict[str, Any]) -> list[Any]:
+    def fake_fetch(
+        self: hafsql.HafsqlClient,
+        sql: str,
+        params: dict[str, Any],
+        *,
+        timeout_ms: int | None = None,
+    ) -> list[Any]:
         mirror_calls.append(params)
         return [("farm", 5, 2.7092)]
 
@@ -757,11 +837,23 @@ def test_author_engagement_degrades_suppression_to_empty_without_a_dsn(
     monkeypatch.delenv("RECSYS_DATABASE_URL", raising=False)
     mirror_calls: list[dict[str, Any]] = []
 
-    def fake_fetch(self: hafsql.HafsqlClient, sql: str, params: dict[str, Any]) -> list[Any]:
+    def fake_fetch(
+        self: hafsql.HafsqlClient,
+        sql: str,
+        params: dict[str, Any],
+        *,
+        timeout_ms: int | None = None,
+    ) -> list[Any]:
         mirror_calls.append(params)
         return [("solo", 3, 0.9)]
 
-    def fail_fetch_recsys(self: hafsql.HafsqlClient, sql: str, params: dict[str, Any]) -> list[Any]:
+    def fail_fetch_recsys(
+        self: hafsql.HafsqlClient,
+        sql: str,
+        params: dict[str, Any],
+        *,
+        timeout_ms: int | None = None,
+    ) -> list[Any]:
         raise AssertionError("must not attempt the recsys DB with no DSN configured")
 
     monkeypatch.setattr(hafsql.HafsqlClient, "_fetch", fake_fetch)
@@ -1031,7 +1123,13 @@ def test_stake_lineage_is_structurally_absent() -> None:
 def test_popular_posts_caches_within_the_bucket_and_ttl(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = {"n": 0}
 
-    def fake_fetch_lite(self: hafsql.HafsqlClient, sql: str, params: dict[str, Any]) -> list[Any]:
+    def fake_fetch_lite(
+        self: hafsql.HafsqlClient,
+        sql: str,
+        params: dict[str, Any],
+        *,
+        timeout_ms: int | None = None,
+    ) -> list[Any]:
         calls["n"] += 1
         return []
 
@@ -1051,7 +1149,13 @@ def test_popular_posts_cache_key_ignores_sub_bucket_jitter(
     practice — every real caller recomputes ``since`` per request."""
     calls = {"n": 0}
 
-    def fake_fetch_lite(self: hafsql.HafsqlClient, sql: str, params: dict[str, Any]) -> list[Any]:
+    def fake_fetch_lite(
+        self: hafsql.HafsqlClient,
+        sql: str,
+        params: dict[str, Any],
+        *,
+        timeout_ms: int | None = None,
+    ) -> list[Any]:
         calls["n"] += 1
         return []
 
@@ -1069,7 +1173,13 @@ def test_popular_posts_cache_misses_on_a_different_limit(
 ) -> None:
     calls = {"n": 0}
 
-    def fake_fetch_lite(self: hafsql.HafsqlClient, sql: str, params: dict[str, Any]) -> list[Any]:
+    def fake_fetch_lite(
+        self: hafsql.HafsqlClient,
+        sql: str,
+        params: dict[str, Any],
+        *,
+        timeout_ms: int | None = None,
+    ) -> list[Any]:
         calls["n"] += 1
         return []
 
@@ -1124,7 +1234,13 @@ def test_window_posts_calls_fetch_lite_with_since_and_limit(
 ) -> None:
     seen: list[tuple[str, dict[str, Any]]] = []
 
-    def fake_fetch_lite(self: hafsql.HafsqlClient, sql: str, params: dict[str, Any]) -> list[Any]:
+    def fake_fetch_lite(
+        self: hafsql.HafsqlClient,
+        sql: str,
+        params: dict[str, Any],
+        *,
+        timeout_ms: int | None = None,
+    ) -> list[Any]:
         seen.append((sql, params))
         return []
 
@@ -1140,13 +1256,25 @@ def test_window_posts_calls_fetch_lite_with_since_and_limit(
 def test_window_posts_hydrates_the_rows_it_fetches(monkeypatch: pytest.MonkeyPatch) -> None:
     row = ("alice", "p1", "photo", datetime(2026, 1, 1, tzinfo=UTC), ["photo"], None)
 
-    def fake_fetch_lite(self: hafsql.HafsqlClient, sql: str, params: dict[str, Any]) -> list[Any]:
+    def fake_fetch_lite(
+        self: hafsql.HafsqlClient,
+        sql: str,
+        params: dict[str, Any],
+        *,
+        timeout_ms: int | None = None,
+    ) -> list[Any]:
         # `_hydrate` fans out into more `_fetch_lite` calls of its own
         # (votes/comments/rebloggers/reputation) — only the window-posts query
         # itself should return the row; everything else stays empty.
         return [row] if sql is hafsql._SQL_WINDOW_POSTS else []
 
-    def fake_fetch(self: hafsql.HafsqlClient, sql: str, params: dict[str, Any]) -> list[Any]:
+    def fake_fetch(
+        self: hafsql.HafsqlClient,
+        sql: str,
+        params: dict[str, Any],
+        *,
+        timeout_ms: int | None = None,
+    ) -> list[Any]:
         return []
 
     monkeypatch.setattr(hafsql.HafsqlClient, "_fetch_lite", fake_fetch_lite)
@@ -1253,11 +1381,23 @@ def test_author_engagement_now_calls_fetch_lite(monkeypatch: pytest.MonkeyPatch)
     mirror round trip must go through `_fetch_lite`, not the bare `_fetch`."""
     seen: list[dict[str, Any]] = []
 
-    def fake_fetch_lite(self: hafsql.HafsqlClient, sql: str, params: dict[str, Any]) -> list[Any]:
+    def fake_fetch_lite(
+        self: hafsql.HafsqlClient,
+        sql: str,
+        params: dict[str, Any],
+        *,
+        timeout_ms: int | None = None,
+    ) -> list[Any]:
         seen.append(params)
         return [("farm", 5, 2.7092)]
 
-    def fail_fetch(self: hafsql.HafsqlClient, sql: str, params: dict[str, Any]) -> list[Any]:
+    def fail_fetch(
+        self: hafsql.HafsqlClient,
+        sql: str,
+        params: dict[str, Any],
+        *,
+        timeout_ms: int | None = None,
+    ) -> list[Any]:
         raise AssertionError(
             "author_engagement must call _fetch_lite (missing lite params otherwise)"
         )
@@ -1279,7 +1419,13 @@ def test_author_engagement_matches_a_lite_identity_end_to_end(
     return for a row whose `_identity(c)` evaluates to the lite identity."""
     seen: list[dict[str, Any]] = []
 
-    def fake_fetch_lite(self: hafsql.HafsqlClient, sql: str, params: dict[str, Any]) -> list[Any]:
+    def fake_fetch_lite(
+        self: hafsql.HafsqlClient,
+        sql: str,
+        params: dict[str, Any],
+        *,
+        timeout_ms: int | None = None,
+    ) -> list[Any]:
         seen.append(params)
         assert "u_7f3c9a" in params["authors"]
         return [("u_7f3c9a", 3, 1.2345)]
@@ -1377,7 +1523,13 @@ def test_second_degree_engagers_resolves_chain_authors_and_reverse_keys(
     seen: list[dict[str, Any]] = []
     lite_key = "@u_7f3c9a/re-lumen-c-01H-abc"
 
-    def fake_fetch(self: hafsql.HafsqlClient, sql: str, params: dict[str, Any]) -> list[Any]:
+    def fake_fetch(
+        self: hafsql.HafsqlClient,
+        sql: str,
+        params: dict[str, Any],
+        *,
+        timeout_ms: int | None = None,
+    ) -> list[Any]:
         seen.append(params)
         return [("lumen-publisher", "re-lumen-c-01H-abc", "bob")]
 
@@ -1398,7 +1550,13 @@ def test_second_degree_engagers_without_chain_authors_is_unaffected(
     pre-A12 behaviour — every existing caller is unaffected until it opts in."""
     seen: list[dict[str, Any]] = []
 
-    def fake_fetch(self: hafsql.HafsqlClient, sql: str, params: dict[str, Any]) -> list[Any]:
+    def fake_fetch(
+        self: hafsql.HafsqlClient,
+        sql: str,
+        params: dict[str, Any],
+        *,
+        timeout_ms: int | None = None,
+    ) -> list[Any]:
         seen.append(params)
         return [("alice", "p1", "bob")]
 
@@ -1415,7 +1573,11 @@ def test_suppressed_keys_resolves_chain_authors_and_reverse_keys(
     lite_key = "@u_7f3c9a/re-lumen-c-01H-abc"
 
     def fake_fetch_recsys(
-        self: hafsql.HafsqlClient, sql: str, params: dict[str, Any]
+        self: hafsql.HafsqlClient,
+        sql: str,
+        params: dict[str, Any],
+        *,
+        timeout_ms: int | None = None,
     ) -> list[Any]:
         seen.append(params)
         return [("lumen-publisher", "re-lumen-c-01H-abc")]
@@ -1433,7 +1595,11 @@ def test_suppressed_keys_without_chain_authors_is_unaffected(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def fake_fetch_recsys(
-        self: hafsql.HafsqlClient, sql: str, params: dict[str, Any]
+        self: hafsql.HafsqlClient,
+        sql: str,
+        params: dict[str, Any],
+        *,
+        timeout_ms: int | None = None,
     ) -> list[Any]:
         return [("alice", "p1")]
 
@@ -1929,3 +2095,261 @@ def test_every_lite_edge_query_enforces_the_publisher_boundary(
         "'01STOLEN' present = any account can redirect its engagement; "
         "'01WRONGAPP' present = the app-id gate is off."
     )
+
+
+# ---------------------------------------------------------------------------
+# ★★★ SQL EXECUTABILITY (2026-08-08). Both of these exist because
+# `_SQL_AUTHOR_FIRST_POST` shipped broken TWICE in one session, and `/health`
+# stayed green through both:
+#
+#   1. it referenced `c.depth`, which `hafsql.comments` does not have — every
+#      `/feed` became a 503;
+#   2. fixed to use `_top_level_or_lite("c")`, it was still called through
+#      `_fetch` rather than `_fetch_lite`, so the `%(lite_publishers)s` /
+#      `%(lite_app)s` placeholders that helper bakes in were never bound and
+#      psycopg raised `query parameter missing` — the reserved seat then
+#      forfeited on every request, silently, because the lane's own degrade is
+#      fail-closed.
+#
+# Neither is exotic and both are STRUCTURAL — they are visible in the module
+# without a database, which is the only reason a unit test can catch them.
+# ---------------------------------------------------------------------------
+
+
+def _sql_constants() -> dict[str, str]:
+    return {
+        name: value
+        for name, value in vars(hafsql).items()
+        if name.startswith("_SQL_") and isinstance(value, str)
+    }
+
+
+def test_every_sql_constant_only_names_columns_the_other_queries_use() -> None:
+    # A cheap structural stand-in for "does this parse against the real
+    # schema": every `<alias>.<column>` reference in a `hafsql.comments` query
+    # must be a column some OTHER, live-proven query already reads. `depth` was
+    # invented by one query and existed nowhere else, which is exactly the shape
+    # this catches.
+    import re
+
+    known: set[str] = set()
+    for sql in _sql_constants().values():
+        known.update(re.findall(r"\bc\.([a-z_]+)", sql))
+    # `depth` must not be among them: no shipped query reads it, because the
+    # column does not exist. Top-level-ness is `parent_author = ''`.
+    assert "depth" not in known, (
+        "a query references `c.depth`; hafsql.comments has no such column — "
+        "top-level posts are `parent_author = ''` (see `_top_level_or_lite`)"
+    )
+
+
+def test_a_query_carrying_lite_placeholders_is_never_fetched_without_binding_them() -> None:
+    # `_top_level_or_lite` / `_LITE_POST` bake `%(lite_publishers)s` and
+    # `%(lite_app)s` into the SQL at import time. A method that passes such a
+    # query to `_fetch` (rather than `_fetch_lite`, which binds them) raises
+    # `query parameter missing` at runtime and nowhere earlier.
+    import inspect
+
+    source = inspect.getsource(hafsql)
+    for name, sql in _sql_constants().items():
+        if "lite_publishers" not in sql and "lite_app" not in sql:
+            continue
+        for call in (f"self._fetch({name}", f"self._fetch({name},"):
+            assert call not in source, (
+                f"{name} carries the lite placeholders but is passed to "
+                f"`_fetch`; it must go through `_fetch_lite`, which binds them"
+            )
+
+
+# ---------------------------------------------------------------------------
+# ★★★ THE 280-SECOND REQUEST (2026-08-08). `_SQL_AUTHOR_FIRST_POST` shipped as
+# an unbounded `MIN(created)` keyed on a COALESCE identity and took **311s**
+# against the real mirror for one `/feed`, turning a 30-45s request into 279.5s.
+#
+# WHAT WOULD ACTUALLY HAVE CAUGHT IT. Not a functional test — the query returned
+# CORRECT answers, just 300 seconds late, so every assertion on its OUTPUT
+# passed. Not a timing test either: unit fixtures are tiny, and a full-history
+# scan over a 10-row fake is instant. The bug is only visible in the SQL's
+# SHAPE, where it is completely unambiguous, so that is what these pin.
+# ---------------------------------------------------------------------------
+
+
+def test_no_comments_query_can_scan_the_table_unbounded() -> None:
+    """Every `hafsql.comments` scan must be bounded by SOMETHING.
+
+    Two bounds are legitimate and both appear in this module: a DATE predicate
+    (`created >= %(since)s` and friends), or a keying on `%(lite_publishers)s`,
+    which is a tiny configured set (one account per network).
+
+    ★ THE PUBLISHER BOUND ONLY COUNTS WHEN IT IS CONJUNCTIVE, and getting that
+    wrong is how the first version of this very test passed against the 311s
+    query. `_top_level_or_lite` expands to `(parent_author = '' OR <lite...>)` —
+    the `lite_publishers` equality is present, but it sits inside an OR whose
+    OTHER disjunct, `parent_author = ''`, admits EVERY TOP-LEVEL POST EVER
+    WRITTEN with no author restriction at all. A bound one side of an OR is not
+    a bound. So: any query carrying that disjunct MUST also carry a date
+    predicate; only a query whose publisher equality is the real gate may rely
+    on it alone (the three `*_EDGES_WITH_LITE` queries).
+
+    Unbounded means cost set by total chain volume rather than by what the
+    caller asked for — it grows forever and no amount of asking for less helps.
+    Measured on the query this test now catches: 25,744,001 index rows and
+    11,036,504 buffer reads to return 972 identities, 311 seconds.
+    """
+    import re
+
+    unbounded = []
+    for name, sql in _sql_constants().items():
+        if "hafsql.comments" not in sql:
+            continue
+        date_bounded = re.search(r"\bcreated\s*(?:>=|<=|<|>)", sql) is not None
+        # The open disjunct: `parent_author = ''` admits the whole chain.
+        admits_all_top_level = re.search(r"parent_author\s*=\s*''", sql) is not None
+        publisher_bounded = (
+            re.search(r"author\s*=\s*ANY\(%\(lite_publishers\)s\)", sql) is not None
+            and not admits_all_top_level
+        )
+        if not (date_bounded or publisher_bounded):
+            unbounded.append(name)
+    assert not unbounded, (
+        f"{unbounded} scan hafsql.comments unbounded: no date predicate, and no "
+        "CONJUNCTIVE lite_publishers bound (a publisher term inside an OR with "
+        "`parent_author = ''` bounds nothing). Cost is then set by total chain "
+        "volume, not by the request — this is the shape that made /feed 279.5s."
+    )
+
+
+def test_author_first_post_is_sargable_on_the_author_column() -> None:
+    """The identity COALESCE must never be the thing matched against
+    `%(authors)s`.
+
+    `COALESCE(json_metadata->>'lumen_user_id', author) = ANY(%(authors)s)`
+    cannot be answered by any index on `author`, so Postgres abandons the
+    per-author index and bitmap-scans every top-level post on the chain. Live
+    `EXPLAIN`: `Bitmap Index Scan on
+    hafsql_comments_table_parent_author_empty_deleted_id_idx`, 75,058,034 rows
+    removed by recheck. The fix is two explicit sargable branches — an ORDINARY
+    one keyed on `c.author = ANY(...)` and a LITE one bounded by the publisher
+    set — which is the same rewrite `_SQL_AUTHOR_ENGAGEMENT` already carries.
+    """
+    import re
+
+    sql = hafsql._SQL_AUTHOR_FIRST_POST
+    assert not re.search(r"COALESCE\([^)]*\)\s*=\s*ANY\(%\(authors\)s\)", sql), (
+        "the ranked-identity COALESCE is matched against %(authors)s — not "
+        "sargable, so this scans the whole comments table (measured 311s)"
+    )
+    assert re.search(r"\bc\.author\s*=\s*ANY\(%\(authors\)s\)", sql), (
+        "no sargable ORDINARY branch: the query must key on `c.author = "
+        "ANY(%(authors)s)` so it can use hafsql_comments_table_author_created_idx"
+    )
+    # The lite branch must still resolve a lite writer to their OWN first lite
+    # post — dropping it would make every lite newcomer inherit the shared
+    # publisher account's age and be refused the lane on day one.
+    assert "json_metadata->>'lumen_user_id' = ANY(%(authors)s)" in sql, (
+        "no LITE branch keyed on the writer id: lite writers would resolve to "
+        "the publisher account's history instead of their own first post"
+    )
+
+
+def test_author_first_post_scan_floor_tracks_the_configured_horizon(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MUTATION PROOF THAT THE BOUND IS LOAD-BEARING.
+
+    The query is fast only because it may stop looking once an author is
+    provably older than the caller's threshold. If the floor were hardcoded
+    instead of derived from `horizon_days`, raising
+    `ExplorationConfig.max_author_age_days` would silently keep refusing
+    everyone the change was meant to admit — a config knob that reads as
+    working and does nothing. Pin that the floor MOVES, and that it stays
+    strictly OLDER than the horizon so boundary authors are decided by their
+    real first post rather than by where the scan stopped.
+    """
+    seen: list[dict[str, Any]] = []
+
+    def fake_fetch_lite(
+        self: hafsql.HafsqlClient,
+        sql: str,
+        params: dict[str, Any],
+        *,
+        timeout_ms: int | None = None,
+    ) -> list[Any]:
+        seen.append({**params, "timeout_ms": timeout_ms})
+        return []
+
+    monkeypatch.setattr(hafsql.HafsqlClient, "_fetch_lite", fake_fetch_lite)
+    client = hafsql.HafsqlClient(HafsqlConfig())
+    now = datetime(2026, 8, 8, tzinfo=UTC)
+
+    for horizon in (30, 60):
+        client.author_first_post(frozenset({"alice"}), horizon_days=horizon, now=now)
+
+    floors = [call["floor"] for call in seen]
+    assert floors[0] != floors[1], (
+        "the scan floor did not move when horizon_days changed — it is "
+        "hardcoded, so max_author_age_days is decorative"
+    )
+    for horizon, floor in zip((30, 60), floors, strict=True):
+        age_days = (now - floor).days
+        assert age_days > horizon, (
+            f"scan floor is {age_days}d for a {horizon}d horizon; it must be "
+            "STRICTLY older, or authors on the boundary are decided by the "
+            "scan's edge instead of by their real first post"
+        )
+
+
+def test_author_first_post_is_bounded_by_a_request_scoped_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The lane read must carry its OWN timeout, far below the client-wide one.
+
+    `HAFSQL_STATEMENT_TIMEOUT_MS` is 900_000 in this deployment and that is
+    deliberate — the trust/author-prior BATCH legitimately runs for minutes, and
+    lowering it globally is what stops the snapshot ever being written. But a
+    900s bound on a REQUEST is not a timeout at all: nothing cut the 311s query
+    off, and it was only found by raising a curl timeout until it completed.
+    This read is worth exactly one slot of twenty, so it gets a bound it can
+    actually hit, and exceeding it forfeits the seat while the page still
+    serves.
+    """
+    seen: list[int | None] = []
+
+    def fake_fetch_lite(
+        self: hafsql.HafsqlClient,
+        sql: str,
+        params: dict[str, Any],
+        *,
+        timeout_ms: int | None = None,
+    ) -> list[Any]:
+        seen.append(timeout_ms)
+        return []
+
+    monkeypatch.setattr(hafsql.HafsqlClient, "_fetch_lite", fake_fetch_lite)
+    client = hafsql.HafsqlClient(HafsqlConfig())
+    client.author_first_post(frozenset({"alice"}), horizon_days=30)
+
+    assert seen == [hafsql._FIRST_POST_TIMEOUT_MS], (
+        "the newness read did not pass its own timeout, so it inherits the "
+        "900s batch bound and can hang a request indefinitely"
+    )
+    assert client._statement_timeout_ms > hafsql._FIRST_POST_TIMEOUT_MS
+    # Must also fire before the frontend gives up (15s) — otherwise the page has
+    # already fallen back to trending by the time the guard trips.
+    assert hafsql._FIRST_POST_TIMEOUT_MS < 15_000
+
+
+def test_author_first_post_asks_nothing_when_the_predicate_is_off() -> None:
+    """`max_author_age_days = 0` must cost NO round trip.
+
+    It is the documented off-switch that reproduces the pre-2026-08-08 lane, and
+    it is also the A/B that isolated this regression. If it still queried, the
+    off-switch would not be an off-switch.
+    """
+
+    def fail(*_a: object, **_k: object) -> list[Any]:
+        raise AssertionError("no query may run when the newness predicate is off")
+
+    client = hafsql.HafsqlClient(HafsqlConfig())
+    object.__setattr__(client, "_fetch_lite", fail)
+    assert client.author_first_post(frozenset({"alice"}), horizon_days=0) == {}

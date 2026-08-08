@@ -33,7 +33,7 @@ from dataclasses import dataclass, field
 from hashlib import blake2b
 
 from recsys.config import DiversityConfig
-from recsys.contracts import Post, ScoredCandidate
+from recsys.contracts import CandidateSource, Post, ScoredCandidate
 
 
 @dataclass
@@ -342,6 +342,7 @@ def diversity_rerank(
     unchosen_displacement_ratio: float = 0.0,
     emerging_authors: frozenset[str] = frozenset(),
     emerging_per_page: int = 0,
+    popular_per_page: int = 0,
     page_size: int = 20,
     tie_break_seed: str = "",
     carried: _FeedCounters | None = None,
@@ -410,6 +411,7 @@ def diversity_rerank(
     topic_counts: dict[str, int] = counters.topic_counts
     unchosen_placed = counters.unchosen_placed
     emerging_placed = 0
+    popular_placed = 0
     result: list[ScoredCandidate] = []
     while remaining:
         # ★ SHARE-BASED QUOTA on lanes the viewer never asked for, PLUS a
@@ -486,6 +488,19 @@ def diversity_rerank(
         # candidate is popped per iteration, so it cannot go stale mid-scan.
         emerging_quota = _page_quota(len(result), page_size, emerging_per_page)
         emerging_room = emerging_placed < emerging_quota
+        # ★ THE POPULARITY LANE'S BUDGET (2026-08-08). Same shape, same
+        # running-prefix bound and the same "outside the unchosen share"
+        # property as the emerging budget directly above — see
+        # :data:`recsys.config.DiversityConfig.popular_per_page`.
+        #
+        # ★★ IT EXEMPTS, IT DOES NOT PLACE. Nothing below this line prefers a
+        # popular candidate: it is dropped from the `capped` filter and then
+        # competes on the identical diversity-discounted effective score as
+        # everything else, unchosen-lane penalty included. The lane earns its
+        # positions or it does not get them, which is exactly the constraint
+        # this budget was asked to satisfy without a reserved index.
+        popular_quota = _page_quota(len(result), page_size, popular_per_page)
+        popular_room = popular_placed < popular_quota
         best_index = 0
         best_rank: tuple[float, str] | None = None
         for index, candidate in enumerate(remaining):
@@ -494,7 +509,15 @@ def diversity_rerank(
                 and not candidate.source.is_in_network
                 and candidate.post.author in emerging_authors
             )
-            if capped and not candidate.source.is_viewer_chosen and not emerging_exempt:
+            popular_exempt = (
+                popular_room and candidate.source is CandidateSource.OON_POPULAR
+            )
+            if (
+                capped
+                and not candidate.source.is_viewer_chosen
+                and not emerging_exempt
+                and not popular_exempt
+            ):
                 continue
             author_placed = author_counts.get(candidate.post.author, 0)
             topic_key = _topic_key(candidate.post)
@@ -594,7 +617,17 @@ def diversity_rerank(
                 and not chosen.source.is_in_network
                 and chosen.post.author in emerging_authors
             )
-            if chosen_is_emerging:
+            # ★ 2026-08-08: a popular placement is charged to the POPULAR
+            # budget, never to `unchosen_placed` — a budget outside the share
+            # must not eat the reader's general protection, exactly as the
+            # emerging note above says. Checked BEFORE `chosen_is_emerging`
+            # because a chain-popular post's author can also be absent from
+            # `graph_creds` (a big post from an account nobody has engaged
+            # BACK), and charging one placement to two budgets would let the
+            # lane double-spend.
+            if popular_room and chosen.source is CandidateSource.OON_POPULAR:
+                popular_placed += 1
+            elif chosen_is_emerging:
                 emerging_placed += 1
             else:
                 unchosen_placed += 1
@@ -707,6 +740,7 @@ def rerank(
         ),
         emerging_authors=emerging_authors,
         emerging_per_page=diversity.emerging_per_page,
+        popular_per_page=diversity.popular_per_page,
         carried=carried,
         page_size=diversity.explore_window,
         tie_break_seed=tie_break_seed,

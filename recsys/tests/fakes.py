@@ -127,6 +127,7 @@ class FakeGateway:
         follow_graph: dict[str, frozenset[str]] | None = None,
         popular: Sequence[Post] = (),
         suppressed: frozenset[str] = frozenset(),
+        first_post: dict[str, datetime] | None = None,
     ) -> None:
         self._in_network = list(in_network)
         self._oon = list(oon)
@@ -137,6 +138,9 @@ class FakeGateway:
         self._follow_graph = dict(follow_graph or {})
         self._popular = list(popular)
         self._suppressed = frozenset(suppressed)
+        self._first_post = dict(first_post or {})
+        #: What the last `author_first_post` call ASKED for — see that method.
+        self.last_first_post_call: dict[str, object] | None = None
 
     def in_network_posts(
         self, follows: frozenset[str], since: datetime, limit: int
@@ -174,6 +178,35 @@ class FakeGateway:
 
     def popular_posts(self, since: datetime, limit: int) -> list[Post]:
         return self._popular[:limit]
+
+    def author_first_post(
+        self, authors: frozenset[str], *, horizon_days: int, now: datetime | None = None
+    ) -> dict[str, datetime]:
+        # ★ 2026-08-08: every author this fixture knows about is a DEBUT unless
+        # a test says otherwise (`first_post_overrides`). The newness predicate
+        # is fail-closed, so a fake that returned {} would silently empty the
+        # exploration lane in every pipeline test that is not about newness.
+        #
+        # ★ RECORDS WHAT IT WAS ASKED (2026-08-08). `horizon_days` is part of
+        # the contract — an implementation may omit authors older than it — so a
+        # caller passing the wrong horizon is a real bug that no assertion on
+        # the RESULT can see. `last_first_post_call` lets a test assert on the
+        # ASK, which is what pins pipeline -> gateway horizon plumbing.
+        self.last_first_post_call = {"horizon_days": horizon_days, "now": now}
+        if horizon_days <= 0:
+            return {}
+        out: dict[str, datetime] = {}
+        for post in (*self._in_network, *self._tag, *self._popular):
+            if post.author in authors:
+                out[post.author] = post.created
+        for cand in self._oon:
+            if cand.post.author in authors:
+                out[cand.post.author] = cand.post.created
+        out.update({a: t for a, t in self._first_post.items() if a in authors})
+        if now is not None:
+            floor = now - timedelta(days=horizon_days)
+            out = {a: t for a, t in out.items() if t >= floor}
+        return out
 
     def suppressed_keys(self, post_keys: frozenset[str]) -> frozenset[str]:
         return post_keys & self._suppressed

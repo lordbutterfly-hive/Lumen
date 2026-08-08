@@ -62,14 +62,30 @@ def _explore_pool(*cands: Candidate) -> list[ScoredCandidate]:
 
 
 def _eligible(cands, viewer=None, **kw):
+    # ★ 2026-08-08: every author is a debut unless a test says otherwise. The
+    # newness predicate (`ExplorationConfig.max_author_age_days`) is FAIL-CLOSED,
+    # so without this every test below would be measuring that one gate instead
+    # of the predicate it names. Tests that ARE about newness pass their own map.
+    first_post = kw.pop(
+        "author_first_post",
+        {c.post.author: NOW - timedelta(days=1) for c in cands},
+    )
     return eligible_for_exploration(
-        cands, viewer or _viewer(), now=NOW,
+        cands, viewer or _viewer(), now=NOW, author_first_post=first_post,
         graph_creds=kw.pop("graph_creds", {}),
         suppressed=kw.pop("suppressed", frozenset()),
         show_nsfw=kw.pop("show_nsfw", True),
         config=kw.pop("config", _cfg()),
         bucket=kw.pop("bucket", 0),
     )
+
+
+def _all_new(*authors: str) -> dict[str, object]:
+    """★ 2026-08-08 — `author_first_post` for tests that call
+    `eligible_for_exploration` DIRECTLY. The newness predicate is FAIL-CLOSED, so
+    a direct caller that omits it measures that one gate instead of the
+    mechanism the test names."""
+    return {a: NOW - timedelta(days=1) for a in authors}
 
 
 def test_a_fresh_interest_matched_post_is_eligible() -> None:
@@ -160,11 +176,78 @@ def test_nobody_can_eject_a_newcomer_from_the_lane() -> None:
     assert [c.post.author for c in got] == ["newcomer"]
 
 
-def test_content_the_viewer_never_asked_for_is_not_eligible() -> None:
-    """Interest-TARGETED: an unearned impression spent on content the viewer has
-    shown no interest in is how a fresh lane becomes the thing users complain
-    about."""
-    assert _eligible([_cand("a", "p1", category="crypto", tags=("crypto",))]) == []
+def test_an_interest_matched_newcomer_is_preferred_over_every_other_one() -> None:
+    """★ OPTION C, HALF ONE (2026-08-09). The interest match still decides WHO
+    gets the seat. The preference is ABSOLUTE — a non-matching newcomer is not
+    merely ranked lower, it is not in the pool at all — because a merged pool
+    would let `seat_order`'s score key hand the seat to a tag the viewer never
+    asked for, which is the pressure ruling R3 closed."""
+    got = _eligible(
+        [
+            _cand("offtopic", "p1", category="crypto", tags=("crypto",)),
+            _cand("ontopic", "p1"),
+            _cand("alsooff", "p1", category="skate", tags=("skate",)),
+        ]
+    )
+    assert [c.post.author for c in got] == ["ontopic"]
+
+
+def test_with_no_interest_match_the_seat_falls_back_instead_of_forfeiting() -> None:
+    """★ OPTION C, HALF TWO (2026-08-09) — the owner's explicit choice.
+
+    Measured live: 136 genuinely new authors posted in 3 days across 91 distinct
+    categories, and 91 of 91 fell outside three real viewers' interest sets
+    COMBINED. Requiring the match therefore forfeited the seat for everybody on
+    every request while the lane logged "correctly forfeits". An off-interest
+    newcomer is a worse seat than an on-interest one; an empty seat is worse
+    than both."""
+    got = _eligible([_cand("a", "p1", category="crypto", tags=("crypto",))])
+    assert [c.post.author for c in got] == ["a"]
+    assert got[0].source is CandidateSource.EXPLORATION
+
+
+def test_interest_fallback_off_restores_the_mandatory_match_exactly() -> None:
+    """The switch that reproduces the pre-2026-08-09 lane byte-for-byte, so every
+    measurement taken before that date is still reachable."""
+    cfg = _cfg(interest_fallback=False)
+    assert _eligible([_cand("a", "p1", category="crypto", tags=("crypto",))], config=cfg) == []
+
+
+def test_the_fallback_relaxes_the_interest_test_and_nothing_else() -> None:
+    """★ THE DEFENCES ARE SCAR TISSUE AND THE FALLBACK MUST NOT TOUCH THEM.
+
+    Each candidate here is off-interest (so the fallback bucket is the only way
+    in) AND fails exactly one other condition. None may reach the seat."""
+    viewer = make_viewer("v", interest_tags=frozenset({"photo"}), mutes=frozenset({"muted"}))
+    off = dict(category="crypto", tags=("crypto",))
+    cands = [
+        _cand("muted", "p1", **off),
+        _cand("v", "p1", **off),                      # the viewer's own post
+        _cand("nsfw", "p1", **off),
+        _cand("stale", "p1", days_old=9, **off),
+        _cand("selfdealt", "p1", **off),
+        _cand("zerocred", "p1", **off),
+        _cand("veteran", "p1", **off),
+    ]
+    nsfw_post = type(cands[2].post)(**{**cands[2].post.__dict__, "is_nsfw": True})
+    cands[2] = Candidate(post=nsfw_post, source=cands[2].source)
+    selfdealt = type(cands[4].post)(
+        **{**cands[4].post.__dict__,
+           "votes": (Vote(voter="selfdealt", rshares=10**9, timestamp=NOW),)}
+    )
+    cands[4] = Candidate(post=selfdealt, source=cands[4].source)
+
+    first_post = {c.post.author: NOW - timedelta(days=1) for c in cands}
+    first_post["veteran"] = NOW - timedelta(days=900)
+
+    got = _eligible(
+        cands,
+        viewer,
+        show_nsfw=False,
+        graph_creds={"zerocred": _cred("zerocred", 0.0)},
+        author_first_post=first_post,
+    )
+    assert got == []
 
 
 def test_per_author_epoch_budget_caps_one_author() -> None:
@@ -1161,13 +1244,34 @@ def test_c2b_a_full_tag_spray_no_longer_defeats_interest_targeting() -> None:
     post on ``"photo"`` alone — measured, one sock tagged with all 12 topics
     reached 60/60 viewers on page 1 under that rule. `post.category` is a
     scalar the author picks once per post and cannot multiply within one
-    post, which is the whole point of R3/C2b."""
+    post, which is the whole point of R3/C2b.
+
+    ★ RESTATED FOR OPTION C (2026-08-09), AND THE RESIDUAL STATED PLAINLY. The
+    assertion is now "the spray buys nothing AGAINST A REAL MATCH" rather than
+    "the sprayer is excluded outright": with the fallback on, a sprayer that is
+    otherwise an eligible newcomer can take an otherwise-EMPTY seat, exactly like
+    any other off-interest newcomer, and no more often. What the spray can never
+    do — the thing the attack was worth doing — is beat an honest on-interest
+    candidate for a seat that had one, because the pools are never merged. The
+    12 tags are still worth exactly zero here; `category` is still the only
+    thing read."""
     spray = (
         "crypto", "photo", "art", "tech", "gaming", "music", "travel",
         "food", "fashion", "sports", "finance", "politics",
     )
-    got = _eligible([_cand("sprayer", "p1", category="crypto", tags=spray)])
-    assert got == []
+    got = _eligible(
+        [
+            _cand("sprayer", "p1", category="crypto", tags=spray),
+            _cand("honest", "p1"),
+        ]
+    )
+    assert [c.post.author for c in got] == ["honest"]
+    # And with the fallback switched off, the pre-2026-08-09 assertion holds
+    # unchanged: the sprayer alone is excluded outright.
+    assert _eligible(
+        [_cand("sprayer", "p1", category="crypto", tags=spray)],
+        config=_cfg(interest_fallback=False),
+    ) == []
 
 
 def test_c2b_the_matching_primary_tag_still_works_alongside_a_tag_spray() -> None:
@@ -1551,9 +1655,15 @@ def test_an_author_already_on_page_one_does_not_also_take_the_reserved_slot() ->
     ranked[15] = _scored(_cand("newb", "already"), final=0.5)
     picks = [_scored(_cand("newb", "second")), _scored(_cand("unseen", "debut"))]
 
-    out = insert_exploration(ranked, picks, _cfg(max_slots_per_feed=3))
-    at13 = out[13].post.author
-    assert at13 == "unseen", f"slot 13 went to {at13!r}, not the unseen author"
+    # ★ 2026-08-08: read the slot from the CONFIG, not a hardcoded 13 —
+    # `ExplorationConfig.position` moved into the top ten and a test that pins
+    # the old index is asserting the old config, not the behaviour.
+    cfg = _cfg(max_slots_per_feed=3)
+    out = insert_exploration(ranked, picks, cfg)
+    at_slot = out[cfg.position].post.author
+    assert at_slot == "unseen", (
+        f"slot {cfg.position} went to {at_slot!r}, not the unseen author"
+    )
     newb_positions = [i for i, c in enumerate(out) if c.post.author == "newb"]
     assert len(newb_positions) == 1, (
         f"newb occupies {newb_positions} — an author already on page 1 drew a "
@@ -1566,11 +1676,12 @@ def test_a_pick_already_on_page_one_is_not_re_promoted_within_the_page() -> None
     and costs the lane a slot an unseen author could have had."""
     ranked = [_scored(_cand(f"est{i}", "p"), final=1.0 - i / 1000) for i in range(40)]
     ranked[15] = _scored(_cand("newb", "debut"), final=0.5)
+    cfg = _cfg(max_slots_per_feed=1)
     out = insert_exploration(
         ranked, [_scored(_cand("newb", "debut")), _scored(_cand("unseen", "debut"))],
-        _cfg(max_slots_per_feed=1),
+        cfg,
     )
-    assert out[13].post.author == "unseen"
+    assert out[cfg.position].post.author == "unseen"
     # Exactly one occurrence, and NOT the reserved slot. It sits at 16 rather
     # than 15 only because inserting `unseen` at 13 shifts everything below it
     # down by one — the post was not moved by the lane.
@@ -1585,10 +1696,9 @@ def test_a_buried_author_is_still_promoted_the_regression_this_must_not_cause() 
     ranked = [_scored(_cand(f"est{i}", "p"), final=1.0 - i / 1000) for i in range(120)]
     ranked[99] = _scored(_cand("newb", "a"), final=0.01)
     ranked[106] = _scored(_cand("newb", "b"), final=0.01)
-    out = insert_exploration(
-        ranked, [_scored(_cand("newb", "c"))], _cfg(max_slots_per_feed=3)
-    )
-    assert out[13].post.author == "newb", (
+    cfg = _cfg(max_slots_per_feed=3)
+    out = insert_exploration(ranked, [_scored(_cand("newb", "c"))], cfg)
+    assert out[cfg.position].post.author == "newb", (
         "a newcomer whose every post is buried at 99+ was NOT promoted — this is "
         "the whole-feed regression the page-scoped bound exists to avoid"
     )
@@ -1662,10 +1772,12 @@ def test_the_serving_log_retires_an_author_at_the_cap() -> None:
     fresh = eligible_for_exploration(
         [cand], _viewer(), now=NOW, graph_creds={}, suppressed=frozenset(),
         show_nsfw=False, config=cfg, serves={"spent": 0},
+        author_first_post=_all_new("spent"),
     )
     retired = eligible_for_exploration(
         [cand], _viewer(), now=NOW, graph_creds={}, suppressed=frozenset(),
         show_nsfw=False, config=cfg, serves={"spent": 3},
+        author_first_post=_all_new("spent"),
     )
     assert fresh, "an unserved author must be eligible"
     assert retired == [], "an author at the serve cap must leave the lane"
@@ -1678,6 +1790,7 @@ def test_the_serving_log_is_inert_when_no_caller_supplies_one() -> None:
     with_none = eligible_for_exploration(
         [cand], _viewer(), now=NOW, graph_creds={}, suppressed=frozenset(),
         show_nsfw=False, config=_cfg(), serves=None,
+        author_first_post=_all_new("nobody"),
     )
     assert with_none, "absent a serve log the lane must behave as before"
 
@@ -1689,7 +1802,7 @@ def test_serve_count_breaks_ties_within_a_need_tier() -> None:
     out = eligible_for_exploration(
         cands, _viewer(), now=NOW, graph_creds={}, suppressed=frozenset(),
         show_nsfw=False, config=_cfg(max_serves_per_author=5),
-        serves={"served": 2},
+        serves={"served": 2}, author_first_post=_all_new("served", "unserved"),
     )
     assert out, "both authors should still be eligible below the cap"
     assert out[0].post.author == "unserved", (
@@ -1808,6 +1921,7 @@ def test_disabling_the_serve_budget_also_disables_its_ordering() -> None:
     common = dict(
         now=NOW, graph_creds={}, suppressed=frozenset(), show_nsfw=False,
         config=_cfg(max_serves_per_author=0),
+        author_first_post=_all_new("served", "unserved"),
     )
     with_serves = [
         c.post.author for c in eligible_for_exploration(pool, _viewer(), **common,
@@ -1861,7 +1975,8 @@ def test_a_lite_like_never_reorders_the_new_writer_lane() -> None:
     )
     rival = _cand("rival", "p-rival")
     common = dict(
-        now=NOW, graph_creds={}, suppressed=frozenset(), show_nsfw=False, config=_cfg()
+        now=NOW, graph_creds={}, suppressed=frozenset(), show_nsfw=False,
+        config=_cfg(), author_first_post=_all_new("newcomer", "rival"),
     )
     def lane(pool: list[Candidate]) -> list[str]:
         return [c.post.author for c in eligible_for_exploration(pool, _viewer(), **common)]
@@ -2103,3 +2218,22 @@ def test_an_author_absent_from_the_engagement_map_is_treated_as_unheard() -> Non
     pool, _ = _seat_pool([("known-quiet", 0.9, 5), ("brand-new", 0.1, 0)])
     got = [sc.post.author for sc in seat_order(pool, {"known-quiet": 5})]
     assert got[0] == "brand-new"
+
+
+def test_an_already_served_author_sinks_below_an_unserved_one_at_equal_need() -> None:
+    # ★ B1's serve tie-break must sit ABOVE the score, or `seat_order` is a
+    # half-revert of it — the exact shape the round-3 council caught last time
+    # (log still recording, ordering no longer honouring it).
+    pool, counts = _seat_pool([("spent", 0.90, 0), ("unserved", 0.10, 0)])
+    got = [sc.post.author for sc in seat_order(pool, counts, serves={"spent": 3})]
+    assert got == ["unserved", "spent"]
+
+
+def test_the_serve_key_is_absent_when_the_budget_is_off() -> None:
+    # `max_serves_per_author = 0` means OFF in BOTH halves; the caller signals
+    # that by passing `serves=None`, and the score then decides outright.
+    pool, counts = _seat_pool([("spent", 0.90, 0), ("unserved", 0.10, 0)])
+    assert [sc.post.author for sc in seat_order(pool, counts, serves=None)] == [
+        "spent",
+        "unserved",
+    ]

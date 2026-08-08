@@ -123,6 +123,16 @@ def test_every_ungated_non_network_lane_has_cf_suppressed() -> None:
         CandidateSource.OON_INTEREST,   # opted-in + floored; CF via oon_scale
         CandidateSource.OON_ALS,        # floored; also emits nothing today
                                         # (`als_source_authors = 0`)
+        # ★ 2026-08-08 — the across-Hive popularity lane, classified here
+        # DELIBERATELY (this test exists to force that decision rather than let
+        # a new gate-exempt source default into the unsuppressed set). It sits
+        # in exactly the OON_INTEREST/OON_ALS class: vouch-exempt because a
+        # chain-wide popular post has no in-network vouch by construction, but
+        # it KEEPS `requires_author_floor`, so a poisoned co-engagement edge
+        # cannot lift a spam author through it, and its CF slice is already
+        # zeroed for every viewer by `organic_cf_oon_scale = 0.0` rather than
+        # only for the followless-established case H07's suppression set covers.
+        CandidateSource.OON_POPULAR,
     }
     # EXPLORATION is vouch- AND floor-exempt, so it must be IN the suppressed
     # set, not classified away from it.

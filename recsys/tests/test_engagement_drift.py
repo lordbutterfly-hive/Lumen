@@ -99,16 +99,24 @@ def test_a_stronger_weight_produces_a_stronger_response() -> None:
     assert strong >= weak
 
 
-def test_sustained_engagement_can_fully_capture_the_feed_at_w_0_3() -> None:
+def test_sustained_engagement_all_but_captures_the_feed_at_w_0_3() -> None:
     """★ HONEST CAVEAT, pinned deliberately rather than left as a surprise.
 
     At w=0.3 a viewer who only ever engages one topic ends up with a top-20 that
-    is entirely that topic. That is a filter bubble, and it is the cost side of
-    this channel: nothing here counteracts it, because the diversity re-ranker
-    shapes composition and there is still no exploration lane injecting anything
-    the viewer has not already shown interest in.
+    is that topic and nothing else but the reserved exploration seat. That is a
+    filter bubble, and it is the cost side of this channel: the diversity
+    re-ranker shapes composition and cannot introduce a subject the pool's
+    ranking has already buried.
 
-    This is recorded as a KNOWN PROPERTY so that whoever tunes `organic_viewer`
-    above 0 sees it, and so that adding exploration can be measured against it.
-    """
-    assert _beta_share(0.3, 30) == 1.0
+    ★★ MOVED 1.0 -> 0.95 BY OPTION C (2026-08-09), WHICH IS THE MEASUREMENT THIS
+    TEST WAS PINNED FOR. Its previous docstring said in as many words: "there is
+    still no exploration lane injecting anything the viewer has not already shown
+    interest in ... recorded as a KNOWN PROPERTY so that adding exploration can
+    be measured against it." This viewer declares NO interest tags at all, so
+    under the mandatory-match rule `_interest_match` refused every candidate and
+    the seat forfeited — total capture. With the fallback
+    (`ExplorationConfig.interest_fallback`) the seat fills from eligible
+    newcomers instead, and exactly ONE of twenty slots is now something the
+    viewer never engaged. One slot is the whole bound: `slots_per_page = 1`, so
+    this is the lane's designed size, not a leak."""
+    assert _beta_share(0.3, 30) == 0.95

@@ -19,6 +19,14 @@ SOURCE_PRIORITY: dict[CandidateSource, int] = {
     # order of the survivors must stay identical, so the numbers are not
     # renumbered densely.
     CandidateSource.OON_INTEREST: 3,
+    # ★ 2026-08-08: the across-Hive popularity lane takes the gap left by the
+    # retired OON_COMMUNITY. Every survivor's RELATIVE order is unchanged, which
+    # is the property the note above protects. It loses dedup to IN_NETWORK,
+    # OON_ENGAGED and OON_INTEREST deliberately: a post that is BOTH chain-
+    # popular and something the viewer asked for should be labelled by what the
+    # viewer asked for, or the four lanes double-count each other and no
+    # composition target means anything.
+    CandidateSource.OON_POPULAR: 4,
     CandidateSource.INTEREST_TAG: 5,
     CandidateSource.OON_ALS: 6,
     # Reserved new-author lane. Priority only matters for dedup labelling —

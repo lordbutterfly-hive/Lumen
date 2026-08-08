@@ -140,6 +140,7 @@ from __future__ import annotations
 import bisect
 import hashlib
 import logging
+from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime, timedelta
 
@@ -503,6 +504,14 @@ def _interest_match(post: Post, viewer: ViewerProfile) -> bool:
     spending it on content the viewer has shown no interest in is how a fresh
     lane becomes the thing users complain about.
 
+    ★★★ THIS IS NOW A PREFERENCE, NOT A GATE (2026-08-09). It still decides WHO
+    GETS THE SEAT whenever any newcomer matches; it no longer decides whether
+    the seat exists. Measured live, requiring it forfeited the slot for every
+    viewer on every request — 136 new authors / 3 days across 91 categories, 91
+    of 91 outside three real viewers' interest sets combined. See
+    :func:`eligible_for_exploration`'s split and
+    :attr:`~recsys.config.ExplorationConfig.interest_fallback`.
+
     ★ PRIMARY TAG ONLY, NOT a full tag intersection (2026-08-04, ruling R3) —
     a hard release dependency, not a style choice. This lane is the single most
     exposed surface in the system: it bypasses BOTH the second-degree vouch
@@ -619,6 +628,7 @@ def eligible_for_exploration(
     bucket: int = 0,
     need_bands: tuple[int, ...] = DEFAULT_NEED_BANDS,
     serves: Mapping[str, int] | None = None,
+    author_first_post: Mapping[str, datetime] | None = None,
 ) -> list[Candidate]:
     """The exploration pool: posts that could not get in on merit and should be
     given one bounded chance to.
@@ -648,11 +658,21 @@ def eligible_for_exploration(
     Every remaining condition is required: fresh enough, author not PROVEN
     self-dealt (``graph_creds[author].score <= 0.0``; see the C4 note below),
     not self-dealt on THIS post (:func:`_is_self_dealt`), viewer-safe
-    (mute/suppressed/NSFW), matches the viewer's declared interests, and
+    (mute/suppressed/NSFW), genuinely new (``config.max_author_age_days``), and
     inside the author's per-request post cap. Ordering is a deterministic
     round-robin over authors — least-heard first, newest-first within an
     author — so the scarce slot goes to whoever needs it most and the same
     inputs always yield the same order.
+
+    ★ THE INTEREST MATCH IS A PREFERENCE, NOT A REQUIREMENT (2026-08-09, option
+    C, owner's choice). Candidates matching the viewer's declared interests
+    (:func:`_interest_match`) are the pool whenever there is at least one; when
+    there is none, the pool is the remaining eligible newcomers rather than
+    nothing, because 91 of 91 live newcomer categories fell outside three real
+    viewers' interests combined and the seat was forfeiting for everybody. The
+    two sets are never merged — see the split in the loop below, and
+    :attr:`~recsys.config.ExplorationConfig.interest_fallback` for the switch
+    that restores the mandatory rule byte-for-byte.
 
     ★ ``graph_creds`` REPLACES raw ring-flag exclusion (C4, 2026-08-04). The
     lane used to drop any ``post.author in ring_members``, and that was
@@ -752,6 +772,19 @@ def eligible_for_exploration(
     # not measuring this lane) are deliberately unaffected.
     served_counts: Mapping[str, int] = serves or {}
     fresh: list[Candidate] = []
+    # ★ Option C's second bucket — eligible newcomers the viewer never named the
+    # topic of. Used ONLY if `fresh` ends up empty; see the split below.
+    off_interest: list[Candidate] = []
+    # ★★★ WHY THE LANE IS EMPTY, PER REASON (2026-08-08).
+    #
+    # Every `continue` below produces the same observable outcome — no pick, the
+    # seat forfeits, the page still serves 20 items — whether the cause is "no
+    # newcomer posted today" (correct) or "the newness lookup is down"
+    # (an outage). The 2026-08-08 build reported the seat "correctly forfeits"
+    # for two real viewers while the lookup behind it was taking 311 SECONDS,
+    # and nothing in the output could have distinguished the two. These counters
+    # are what make an empty lane state its own cause.
+    drops: Counter[str] = Counter()
     candidates = list(candidates)
     received = engagement_received(candidates)
     for candidate in candidates:
@@ -788,8 +821,10 @@ def eligible_for_exploration(
             config.max_serves_per_author > 0
             and served_counts.get(post.author, 0) >= config.max_serves_per_author
         ):
+            drops["served_out"] += 1
             continue
         if post.author in viewer.mutes:
+            drops["muted"] += 1
             continue
         # ★★ P1 (2026-08-05) — and the SELF-POST exclusion belongs here for
         # exactly the reason the mute check above does: this lane sources from
@@ -799,25 +834,140 @@ def eligible_for_exploration(
         # able to take the reserved seat at position 13 — the most prominent
         # slot on the page — which is a louder version of the same bug.
         if post.author == viewer.account:
+            drops["own_post"] += 1
             continue
         if post.key in suppressed:
+            drops["suppressed"] += 1
             continue
         if post.is_nsfw and not show_nsfw:
+            drops["nsfw"] += 1
             continue
         if post.created < cutoff:
+            drops["stale"] += 1
             continue
         # ★ C4 (2026-08-04): PROVEN self-dealing (graph-cred zeroed), not the
         # raw ring flag — see the docstring above for the measured attack this
         # replaces (`A5_suppression_compose.py`: 2 socks flag 100/100 victims
         # and gain the seat instead of merely griefing).
+        # ★★★ THE NEWNESS PREDICATE (2026-08-08) — the gap this module's own
+        # docstring has conceded since the lane shipped: "This does NOT make the
+        # lane new-author-only; that needs an author-age or graph-cred-absence
+        # condition, which both councils flagged as the real v1.0 gap."
+        #
+        # WHY IT IS NOT OPTIONAL ONCE THE SEAT IS PROMINENT. Every condition
+        # above selects for the UNENGAGED, and on Hive the unengaged are
+        # overwhelmingly DOWNVOTED VETERANS rather than debuts. Measured across
+        # 5 real viewers (2026-08-08) the reserved seat went to `tdvtv` (created
+        # 2020-12-17, 28,777 posts), `darkflame` (2016, 15,552 posts), `sadcorp`
+        # (1,233 posts, reputation -40.8bn), `alexwo` (947 posts, -843bn) and
+        # `toluwanispecial` (768 posts) — one genuine debut in the sample.
+        #
+        # FAIL-CLOSED: an author whose first-post date is unknown is refused.
+        # Fail-open would treat every author the lookup missed as a debut, which
+        # is exactly the state this predicate exists to detect. An empty lane
+        # then FORFEITS the seat (`insert_exploration` returns the feed
+        # unchanged), which returns the slot to merit content — the honest
+        # outcome when there is no newcomer to show.
+        #
+        # ★ THE TWO REFUSALS ARE COUNTED SEPARATELY (2026-08-08), because they
+        # mean opposite things and produce the identical served output.
+        # `newness_unavailable` is the lookup being absent or broken — an
+        # OUTAGE. `not_new` is the predicate doing its job on a real veteran.
+        # Collapsing them is what lets a dead lane read as "correctly forfeits".
+        if config.max_author_age_days > 0:
+            if author_first_post is None:
+                drops["newness_unavailable"] += 1
+                continue
+            first = author_first_post.get(post.author)
+            if first is None or first < now - timedelta(days=config.max_author_age_days):
+                drops["not_new"] += 1
+                continue
         cred = graph_creds.get(post.author)
         if cred is not None and cred.score <= 0.0:
+            drops["self_dealt_cred"] += 1
             continue
         if _is_self_dealt(post):
+            drops["self_dealt_post"] += 1
             continue
+        # ★★★ OPTION C (2026-08-09) — PREFER AN INTEREST MATCH, FALL BACK TO ANY
+        # ELIGIBLE NEWCOMER RATHER THAN FORFEIT THE SEAT.
+        #
+        # Every OTHER filter above has already run at this point, so `off_interest`
+        # holds candidates that are viewer-safe, fresh, genuinely new by
+        # `max_author_age_days`, not self-dealt, not served out — newcomers the
+        # viewer simply never named the topic of.
+        #
+        # WHY THE OLD RULE HAD TO CHANGE, measured on the live chain: 136
+        # genuinely new authors posted in 3 days across 91 distinct categories,
+        # and 91 of 91 fell outside all three test viewers' interest sets
+        # COMBINED. The gate was not targeting the seat, it was deleting it — for
+        # every viewer, on every request — while the lane's own logging reported
+        # "correctly forfeits", which is exactly the ambiguity the `drops`
+        # counters above were added to end.
+        #
+        # RE-MEASURED HERE, live, 2026-08-09, with the mandatory rule still on
+        # (`interest_fallback = False`), derived tags at k = 14: for `gtg` 13 of
+        # 653 candidates survived every filter above and 13 of 13 then failed
+        # this one; for `steevc`, 19 of 884 survived and 19 of 19 failed. Both
+        # seats forfeited. Neither number is a shortage of newcomers — it is the
+        # match rate being zero.
+        #
+        # ★ THE PREFERENCE IS ABSOLUTE (see `ExplorationConfig.interest_fallback`).
+        # `off_interest` is used ONLY when `fresh` is empty — never merged into
+        # it. A merged pool would let `seat_order`'s score key hand the seat to a
+        # non-matching post over a matching one, i.e. re-open the tag-breadth
+        # pressure ruling R3 closed by restricting `_interest_match` to the
+        # primary tag. Off-interest content competes only with other off-interest
+        # content, and only when the alternative is an empty seat.
         if not _interest_match(post, viewer):
+            drops["no_interest_match"] += 1
+            off_interest.append(candidate)
             continue
         fresh.append(candidate)
+
+    interest_matched = len(fresh)
+    if not fresh and off_interest and config.interest_fallback:
+        # ★ SAY WHICH KIND OF SEAT THIS IS, EVERY TIME. The served output is
+        # identical whether the occupant was interest-matched or a fallback, and
+        # the fallback RATE is the number that says whether J1/J2's wider interest
+        # vocabulary is working. INFO, not DEBUG: it is one line per request on a
+        # lane that is 1 of 20 slots, and it is the only place the distinction
+        # exists at all.
+        logger.info(
+            "exploration: NO interest-matched newcomer for %s (%d eligible "
+            "newcomers, all off-interest) — filling the reserved seat from them "
+            "rather than forfeiting it. Viewer declared %d interest tags.",
+            viewer.account,
+            len(off_interest),
+            len(viewer.interest_tags),
+        )
+        fresh = off_interest
+
+    # ★ AN EMPTY LANE MUST SAY WHY. WARNING, not DEBUG: the seat is 1 of 20
+    # slots and forfeiting it is a real (if bounded) loss of the newcomer
+    # on-ramp, so an operator should see the reason without turning anything on.
+    # `newness_unavailable` dominating means the lookup is broken and the lane
+    # is DEAD, which is an incident; `not_new` dominating means the predicate is
+    # working and the pool genuinely held no debut, which is not.
+    #
+    # ★ `no_interest_match` now means "counted, and offered as fallback" rather
+    # than "dropped" whenever `interest_fallback` is on and nothing matched — the
+    # counter still records how the pool was reached, which is what an operator
+    # reading this line needs.
+    if not fresh and candidates:
+        logger.warning(
+            "exploration: pool EMPTY after filtering %d candidates — the "
+            "reserved seat forfeits. Drops by reason: %s",
+            len(candidates),
+            dict(drops.most_common()) or "{}",
+        )
+    elif fresh and not interest_matched:
+        logger.debug(
+            "exploration: seat pool for %s is %d off-interest newcomer(s) "
+            "(fallback).",
+            viewer.account,
+            len(fresh),
+        )
 
     # Per-author epoch budget, then round-robin. Sorting by (author, -created)
     # first makes both steps deterministic regardless of input order.
@@ -1022,7 +1172,7 @@ def seat_order(
     zero-distinct-engager authors, so the winner is still by construction
     someone nobody has heard, only now the best of them.
 
-    Ordering key is ``(depth, need_tier, -final, original index)``:
+    Ordering key is ``(depth, need_tier, serves, -final, original index)``:
 
     * ``depth`` — which of that author's posts this is (0 = their newest). The
       pool from :func:`eligible_for_exploration` is depth-major so every author
@@ -1032,32 +1182,49 @@ def seat_order(
       :func:`eligible_for_exploration` already applies (:func:`_need_tier` over
       ``engagement_counts``, the SAME map ``rank_feed`` feeds the serve log, so
       there is only one definition of "has this author been heard" in play).
+    * ``serves`` — B1's serve-count tie-break, and it MUST sit ABOVE the score
+      or this function is a half-revert of B1. That mechanism's own comment in
+      :func:`eligible_for_exploration` says why in as many words: "two accounts
+      can be equally unheard while one has already had three page-one
+      placements", and leaving half of B1 live while overriding the other half
+      is the exact bug the round-3 council caught last time. ``None`` (the
+      caller's signal that ``max_serves_per_author`` is 0, i.e. the budget is
+      OFF) drops this key entirely — 0 means off in BOTH halves here too.
     * ``-final`` — the new key.
     * the original index — so the keyed-MAC order (:func:`_rotation_key`)
       survives as the TIE-BREAK, and the whole sort is total and deterministic.
 
-    ★★★ WHAT THIS COSTS, STATED PLAINLY RATHER THAN DISCOVERED LATER. The MAC
-    is still what orders the pool that arrives here, and it still decides exact
-    ties — but a continuous score rarely ties, so as a SEAT LOTTERY the MAC is
-    now largely inert, and the property it was bought for changes shape:
+    ★★★ WHAT THIS COSTS, MEASURED AND STATED PLAINLY RATHER THAN DISCOVERED
+    LATER. The MAC still orders the pool that arrives here and still decides
+    exact ties, but a continuous score rarely ties, so as a SEAT LOTTERY the MAC
+    is now largely inert. Two consequences, one benign and one real:
 
     * The name-grinding attack it closed (C1a: 6 accounts + ~92,546 offline
-      hashes held the seat in 85.1% of (bucket, viewer) cells) is *not* reopened
-      — grinding a name buys nothing when names no longer order the band. This
-      change removes the seat's dependence on the name entirely, which is
-      strictly stronger than keying it.
-    * What it DOES reopen is the lever the keyed shuffle was ALSO chosen to
-      retire: within band 0 every author has zero engagement by definition, so
-      ``final`` there is carried almost entirely by the additive freshness bonus
-      (``ScoreWeights.organic_recency``) plus reputation — i.e. **the freshest
-      post tends to win the seat**, which is the "a posting-hourly author beats
-      a quiet one at identical need" preference recorded in this module's own
-      docstring. What still bounds it is unchanged and is per-identity, not
-      per-post: ``max_posts_per_author_epoch`` (3 in the pool),
-      ``max_serves_per_author`` / ``serve_window_days`` (the refilling budget),
-      ``max_slots_per_feed``, and one promotion per author per feed. So posting
-      more often can win a GIVEN seat more often; it cannot win more seats per
-      account per week.
+      hashes held the seat in 85.1% of (bucket, viewer) cells) is *not*
+      reopened — grinding a name buys nothing when names no longer order the
+      band. This removes the seat's dependence on the name entirely, which is
+      strictly stronger than keying it. Measured on
+      ``attacks/exploration_capture.py``: every column is BYTE-IDENTICAL with
+      this on and off (farm share 70.0% at 20 socks, 100% at 100, distinct
+      honest reached 5.3 with no socks) — the farm owns the whole leading band
+      either way, so which member of it wins changes nothing.
+    * **THE SEAT STOPS ROTATING.** Within band 0 every author has zero
+      engagement by definition, so ``final`` there is carried almost entirely by
+      the additive freshness bonus (``ScoreWeights.organic_recency``) — the
+      freshest debut wins, and unlike a lottery it keeps winning. Measured
+      (``measurement-harness/attacks/seat_freshness.py``: 6 zero-engagement debuts aged 1-66h, 8
+      consecutive 6-hour buckets): the lottery spread the seat over 4 distinct
+      newcomers; score-ordering gave all 8 buckets to the 1-hour-old post. That
+      is the "a posting-hourly author beats a quiet one at identical need"
+      preference this module's docstring records, returning in a new place.
+      What bounds it is B1, which is why ``serves`` is a key above: an author is
+      sunk in this ordering as they are served and then leaves the lane at
+      ``max_serves_per_author`` (3) per ``serve_window_days`` (7). So the
+      freshest post holds the seat for THREE SERVES PLATFORM-WIDE, not for a
+      clock bucket — with the log wired the same probe gives 3 distinct
+      occupants over the same 8 buckets instead of 1. Posting more often can
+      win a GIVEN seat more often; it still cannot win more seats per account
+      per week.
 
     ``enabled=False`` returns the input order unchanged — byte-identical to the
     pre-2026-08-08 lane — which is what
@@ -1066,16 +1233,18 @@ def seat_order(
     """
     if not enabled:
         return list(pool)
+    served: Mapping[str, int] = serves or {}
     seen: dict[str, int] = {}
-    keyed: list[tuple[int, int, float, int, ScoredCandidate]] = []
+    keyed: list[tuple[int, int, int, float, int, ScoredCandidate]] = []
     for index, candidate in enumerate(pool):
         author = candidate.post.author
         depth = seen.get(author, 0)
         seen[author] = depth + 1
         tier = _need_tier(engagement_counts.get(author, 0), need_bands)
-        keyed.append((depth, tier, -candidate.score.final, index, candidate))
-    keyed.sort(key=lambda row: row[:4])
-    return [row[4] for row in keyed]
+        keyed.append((depth, tier, served.get(author, 0), -candidate.score.final,
+                      index, candidate))
+    keyed.sort(key=lambda row: row[:5])
+    return [row[5] for row in keyed]
 
 
 def insert_exploration(

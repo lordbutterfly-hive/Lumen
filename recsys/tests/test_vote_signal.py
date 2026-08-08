@@ -13,6 +13,7 @@ from recsys.config import DEFAULT_SETTINGS, VoteSignalConfig
 from recsys.contracts import GraphCred, VoteExclusions
 from recsys.core.normalize import log_compress
 from recsys.core.vote_signal import (
+    _ORGANIC_VOTER_MIN_RSHARES,
     AttributedPost,
     AttributionMissingError,
     VoterTrust,
@@ -20,6 +21,15 @@ from recsys.core.vote_signal import (
     independent_vote_signal,
 )
 from tests.fakes import make_post, make_vote
+
+#: ★ 2026-08-08 — a vote amount that is unambiguously ABOVE the organic voter
+#: floor, expressed RELATIVE to the constant instead of retyped. Every organic
+#: BREADTH test below is about counting distinct people, not about where the
+#: floor sits; hardcoded amounts (5e8 / 1e9, chosen when the floor was 1e7)
+#: silently fell below it when `_ORGANIC_VOTER_MIN_RSHARES` moved to 3.184e9
+#: (0.31 HP -> 100 HP) and turned nine breadth tests into assertions about the
+#: floor. The one test that IS about the floor keeps explicit literals.
+_ABOVE_FLOOR = int(_ORGANIC_VOTER_MIN_RSHARES * 2)
 
 
 def make_attributed_post(
@@ -170,7 +180,7 @@ def test_organic_engagement_sock_votes_no_longer_unlock_farmed_counts() -> None:
     # vote buys exactly its own 0.5 breadth unit — the farmed counters stay
     # worthless because there is no unattributed credit left to unlock.
     for socks in (1, 3, 10):
-        votes = [make_vote(voter=f"sock{i}", rshares=500_000_000) for i in range(socks)]
+        votes = [make_vote(voter=f"sock{i}", rshares=_ABOVE_FLOOR) for i in range(socks)]
         post = make_post(author="spammer", children=60, reblog_count=20, votes=votes)
         got = independent_organic_engagement(post, frozenset({"spammer"}))
         assert math.isclose(got, 0.5 * socks)
@@ -213,7 +223,7 @@ def test_organic_engagement_many_commenters_few_voters_full_credit() -> None:
         author="author",
         commenters=tuple(f"c{i}" for i in range(10)),
         comments_per_commenter=2,  # 20 comments total; multiplicity buys nothing
-        votes=[make_vote(voter="v0", rshares=1_000_000_000)],
+        votes=[make_vote(voter="v0", rshares=_ABOVE_FLOOR)],
     )
     got = independent_organic_engagement(post, frozenset({"author"}))
     assert math.isclose(got, 0.5 * 1 + 0.3 * 10)
@@ -222,7 +232,7 @@ def test_organic_engagement_many_commenters_few_voters_full_credit() -> None:
 def test_organic_engagement_honest_popular_post_counts_every_identity() -> None:
     # A genuinely popular post: every distinct independent voter, commenter
     # and reblogger counts, weighted 0.5 / 0.3 / 0.5.
-    voters = [make_vote(voter=f"v{i}", rshares=1_000_000_000) for i in range(20)]
+    voters = [make_vote(voter=f"v{i}", rshares=_ABOVE_FLOOR) for i in range(20)]
     post = make_attributed_post(
         author="author",
         commenters=tuple(f"c{i}" for i in range(8)),
@@ -244,13 +254,30 @@ def test_organic_engagement_duplicate_commenter_counts_once() -> None:
 
 
 def test_organic_engagement_chain_dust_votes_carry_no_breadth() -> None:
-    # A vote below the log-compress floor (1e7 rshares) registers zero stake
-    # weight on the vote signal; it vouches no organic breadth either, so a
-    # zero-stake throwaway's vote mints nothing.
+    # A vote below `_ORGANIC_VOTER_MIN_RSHARES` vouches no organic breadth, so a
+    # near-free throwaway's vote mints nothing.
+    #
+    # ★ 2026-08-08 — WHAT "DUST" MEANS HERE CHANGED, and it is a real widening,
+    # not a fixture tidy-up. The floor used to be 1e7 rshares (~0.31 HP), i.e.
+    # log_compress's own zero point: it rejected only a vote carrying literally
+    # no stake weight. It is now 3.184e9 (~100 HP), which is a JUDGEMENT about
+    # how much a vote must cost before it counts as a person, and it excludes
+    # accounts that are real but small. The old fixture's "one-hp" voter — 5e8
+    # rshares, ~1.5 HP — is BELOW the new floor and now mints nothing, which is
+    # the intended behaviour of the change and worth pinning explicitly rather
+    # than editing away.
     post = make_post(author="a", votes=[make_vote(voter="dust", rshares=1_000_000)])
     assert independent_organic_engagement(post, frozenset({"a"})) == 0.0
-    real = make_post(author="a", votes=[make_vote(voter="one-hp", rshares=500_000_000)])
+    small = make_post(author="a", votes=[make_vote(voter="one-hp", rshares=500_000_000)])
+    assert independent_organic_engagement(small, frozenset({"a"})) == 0.0
+    real = make_post(author="a", votes=[make_vote(voter="hundred-hp", rshares=_ABOVE_FLOOR)])
     assert independent_organic_engagement(real, frozenset({"a"})) == 0.5
+    # and the floor is EXCLUSIVE at its own value, so the boundary is pinned
+    exactly_at = make_post(
+        author="a",
+        votes=[make_vote(voter="at-floor", rshares=int(_ORGANIC_VOTER_MIN_RSHARES))],
+    )
+    assert independent_organic_engagement(exactly_at, frozenset({"a"})) == 0.0
 
 
 def test_organic_engagement_downvotes_do_not_vouch() -> None:
@@ -268,7 +295,7 @@ def test_organic_engagement_monotonic_in_independent_breadth() -> None:
     post_counts = {"children": 60, "reblog_count": 20}
     prev = -1.0
     for n in range(0, 12):
-        voters = [make_vote(voter=f"v{i}", rshares=1_000_000_000) for i in range(n)]
+        voters = [make_vote(voter=f"v{i}", rshares=_ABOVE_FLOOR) for i in range(n)]
         post = make_post(author="author", votes=voters, **post_counts)
         got = independent_organic_engagement(post, frozenset({"author"}))
         assert got > prev
@@ -471,7 +498,7 @@ def test_organic_engagement_trust_budgets_funded_alt_swarm() -> None:
         author="spammer",
         commenters=alts,
         rebloggers=alts,
-        votes=[make_vote(voter=a, rshares=500_000_000) for a in alts],  # 0.5 HP each
+        votes=[make_vote(voter=a, rshares=_ABOVE_FLOOR) for a in alts],  # 0.5 HP each
     )
     got = independent_organic_engagement(post, frozenset({"spammer"}), trust=_trust())
     assert got == pytest.approx((0.5 + 0.3 + 0.5) * FREE)
@@ -479,7 +506,7 @@ def test_organic_engagement_trust_budgets_funded_alt_swarm() -> None:
     alts3 = tuple(f"alt{i}" for i in range(3))
     post3 = make_attributed_post(
         author="spammer", commenters=alts3, rebloggers=alts3,
-        votes=[make_vote(voter=a, rshares=500_000_000) for a in alts3],
+        votes=[make_vote(voter=a, rshares=_ABOVE_FLOOR) for a in alts3],
     )
     assert independent_organic_engagement(post3, frozenset({"spammer"}), trust=_trust()) == got
 
@@ -490,7 +517,7 @@ def test_organic_engagement_trust_none_is_the_unweighted_count() -> None:
     alts = tuple(f"alt{i}" for i in range(10))
     post = make_attributed_post(
         author="spammer", commenters=alts, rebloggers=alts,
-        votes=[make_vote(voter=a, rshares=500_000_000) for a in alts],
+        votes=[make_vote(voter=a, rshares=_ABOVE_FLOOR) for a in alts],
     )
     assert independent_organic_engagement(post, frozenset({"spammer"})) == pytest.approx(
         0.5 * 10 + 0.3 * 10 + 0.5 * 10
@@ -500,7 +527,7 @@ def test_organic_engagement_trust_none_is_the_unweighted_count() -> None:
 def test_organic_engagement_trust_credits_vouched_voters_in_full() -> None:
     # A genuinely popular honest post: 12 vouched voters all count, no budget
     # binds — the fix does not punish real engagement.
-    voters = [make_vote(voter=f"v{i}", rshares=1_000_000_000) for i in range(12)]
+    voters = [make_vote(voter=f"v{i}", rshares=_ABOVE_FLOOR) for i in range(12)]
     post = make_post(author="author", votes=voters)
     trust = _trust(*[f"v{i}" for i in range(12)])
     assert independent_organic_engagement(post, frozenset({"author"}), trust=trust) == 0.5 * 12

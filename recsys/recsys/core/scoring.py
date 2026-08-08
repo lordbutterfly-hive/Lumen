@@ -200,38 +200,317 @@ def post_base_engagement(
     )
 
 
-def declared_interest_raw(post: Post, interest_tags: frozenset[str]) -> float:
-    """★ B-02 (2026-08-04). Share of the post's own tags the viewer explicitly
-    declared as an interest at signup — the raw the declared-interest term
+#: ★★★ TAG DOCUMENT FREQUENCY, MEASURED (2026-08-08) — the substrate of the
+#: rarity weight in :func:`declared_interest_raw`.
+#:
+#: Root posts (``parent_author = ''``, ``deleted = false``) created in the
+#: trailing 30 days on the live HAFSQL mainnet mirror, tag counts taken from
+#: the ``tags`` jsonb; N = 38,478 posts, 3,759 distinct tags after
+#: normalisation. The 500 most common are kept — see
+#: :data:`_TAG_DF_DEFAULT` for why truncating the tail is not merely safe but
+#: exactly correct.
+#:
+#: ★ WHY A BAKED TABLE AND NOT A LIVE QUERY, and what would be better. The
+#: honest source is the SAME rolling window
+#: :func:`recsys.norm_builder.build_window_norm` already draws the §4
+#: percentile sample from (``HafsqlGateway.window_posts``, recency-ordered,
+#: ~3.9k posts over the default 3-day horizon) — every one of those rows
+#: already carries ``tags``, so a document-frequency histogram is free there
+#: and costs the request path NOTHING (it would live on the same
+#: ``_TimerCache`` as the ``NormContext``). Wiring it needs a field on
+#: :class:`~recsys.contracts.NormContext` and one argument at
+#: ``pipeline._interest_lookup``'s call site — both files owned by another
+#: workstream this phase, so this module ships the measurement instead of the
+#: plumbing, and :func:`declared_interest_raw` takes ``tag_df``/``corpus_size``
+#: so that wiring is a pure call-site change with no logic to re-derive.
+#:
+#: ★★ AND THE SUBSTITUTION IS MEASURED, NOT ASSUMED. The same histogram was
+#: taken over BOTH horizons on 2026-08-08 and the tag *proportions* — the only
+#: thing the weight below reads — are stable to the third decimal. (Both
+#: columns are RAW per-horizon counts, before the case/whitespace merge the
+#: shipped table applies, so that the two horizons are compared like for like;
+#: the merge is why e.g. `hive` reads 4,064 in the table and 0.10219 here.)
+#:
+#:     tag           3-day p     30-day p
+#:     hive          0.10525     0.10219
+#:     photography   0.11319     0.10809
+#:     life          0.10166     0.10949
+#:     news          0.02663     0.02711
+#:     music         0.01588     0.01770
+#:     philosophy    0.00871     0.00826
+#:     family        0.01204     0.01232
+#:
+#: So the baked table is a CACHE of the live window sample, not a different
+#: quantity. It still goes stale eventually — a tag that becomes popular after
+#: this date is scored as rare — which is precisely why the live path exists as
+#: a parameter and why this constant is dated.
+_TAG_DF_RAW = """
+    neoxian:12073 pob:6665 waivio:5887 proofofbrain:5306 spanish:4907 cent:4678 sportstalk:4626
+    life:4273 photography:4180 hive:4064 ecency:4042 actifit:3799 pimp:3643 archon:3541
+    palnet:3324 hive-193552:3196 alive:3070 creativecoin:2946 waiv:2789 inleo:2548
+    hive-engine:2519 movetoearn:2407 move2earn:2371 oneup:2347 bbh:2344 nature:2254 blog:2154
+    leo:2072 vyb:2029 aliveandthriving:1984 splinterlands:1761 tribes:1759 pepe:1641 ctp:1599
+    ocd:1524 meme:1484 art:1459 lifestyle:1423 arcadecolony:1381 travel:1291 kr:1283 gaming:1220
+    sports:1086 gems:1067 news:1043 indiaunited:1025 qurator:1009 appreciator:988 leofinance:982
+    video:960 writing:906 hive-13323:858 play2earn:848 food:832 liketu:830 spt:813 lolz:794
+    health:788 cn:753 curangel:736 bro:734 fitness:718 hustler:714 crypto:689 photofeed:687
+    music:685 trip:683 ladiesofhive:672 deutsch:664 contest:642 hivecuba:623 hive-167922:603
+    review:601 community:578 hive-153850:560 stem:532 entropia:530 movies:524 hl-exclusive:514
+    ocdb:495 scrobblelife:491 ai:489 hiveph:489 enlace:486 family:486 polish:484 hive-125125:480
+    fun:479 bee:477 india:476 curation:466 diy:459 thgaming:456 lassecash:454 cn-reader:453
+    chessbrothers:436 photographylovers:426 story:425 hive-182074:418 photo:418
+    runningproject:416 hive-110713:415 slothbuzz:414 recipe:412 strava2hive:410 monomad:389
+    stemsocial:386 hivegaming:375 blackandwhite:370 hive-140217:370 hive-174301:370
+    skateboarding:370 mcgi:362 bible:359 skatehype:359 freewrite:354 skate:353 burnpost:346
+    hive-161155:343 technology:341 airhawk:339 hive-101690:338 hivebr:333 bilpcoin:330
+    venezuela:329 hive-181335:324 suseona:324 worldmappin:323 mcgicares:318 philosophy:318
+    fiction:314 ua:311 drawing:309 hive-197685:309 philippines:306 firstcontext:305
+    discovery-it:304 hive-191340:303 hive-thoughts:303 cch:298 creator-content:296
+    hive-163772:296 love:296 paranormal:295 curie:290 bitcoin:289 deportes:287 someeofficial:282
+    walking:281 football:280 ccc:279 church:278 hueso:273 web3:272 sps:269 history:261
+    hive-105017:260 politics:258 thealliance:257 english:254 dailyprompt:251 hive-124452:240
+    finance:236 hive-148441:232 scripture:232 obedience:231 education:228 thoughts:228
+    3speak:226 hispapro:226 steemmonsters:226 foodie:225 risingstar:225 hive-131951:224
+    blockchain:221 dailyblog:220 hive-185676:219 posh:219 vidapersonal:219 walk:215 running:212
+    hive-194913:210 hive-112787:208 games:200 street:200 tutorial:196 science:194 czfit:190
+    hive-111343:190 amazingnature:188 dclub:188 freewriters:188 nft:188 game:185 threespeak:185
+    foodies:184 hive-115814:184 poetry:182 people:181 cinetv:180 hivegames:180 pal:180 pizza:180
+    psychology:180 hive-179017:179 creative:174 hive-100067:174 cat:171 insect:171
+    screenshots:171 hiveartgallery:170 bpc:169 cross-post:167 hive-142159:165 bayanihive:163
+    summer:163 gardening:160 dog:159 token:158 tourism:158 foh:157 iucontest:157 soccer:157
+    garden:156 hive-130906:155 hivepostify:155 movie:152 programming:152 r2cornell:152
+    hive-165469:151 bienestar:150 eat:150 mindset:150 cuba:149 hivepakistan:149 hive-179291:148
+    opinion:148 literatura:147 painting:146 reflect:146 reflection:144 hivesuite:143
+    investing:143 journalism:143 motivation:143 sketch:141 aliento:140 blurt:139 flowers:139
+    work:139 activity:138 sketchbook:138 silverbloggers:137 hive-111030:135 diyhub:134
+    silvergoldstackers:133 hivesport:132 marlians:132 money:132 teamuk:132 humor:131 film:130
+    hive-141359:129 hivegc:129 handmade:126 natureobserver:126 argentina:125 blogging:125
+    hive-153349:125 steemstem:125 cycling:124 freewritehouse:124 hive-189157:124 hivefood:124
+    photos:123 sgslife:123 terracore:123 travelfeed:123 digitalart:122 daily:120 hivepizza:120
+    learning:120 wednesdaywalk:120 women:120 culture:119 wellness:119 gameplay:118
+    hive-187189:118 portrait:118 sportstalksocial:118 chess:116 flower:116 poliac:115
+    architecture:114 landscape:113 sport:113 tokens:113 videogames:113 diary:112
+    hive-daily-mix:112 hiveengine:112 loh:112 bdcommunity:111 hive-192162:111 mundo-virtual:111
+    needlework:111 viphueso:111 homesteading:110 streetphotography:110 aseanhive:109 friends:108
+    holozing:108 reflexion:108 rutablockchain:108 reflections:107 trading:107 hive-126152:105
+    literature:105 freedom:103 hive-158694:103 activism:102 hivediy:102 hiverun:102
+    originalcontent:102 faith:101 stats:101 tech:101 dao:100 2026:99 aroundtheworld:99
+    blocktrades:99 hivegarden:99 peakd:98 pets:98 silver:98 hive-121566:97 pgm:97 trending:97
+    hive-178265:96 onchainart:96 hbd:95 ita:95 photocircle:95 cesky:94 hive-170798:94
+    illustration:94 book:93 sportsblock:93 tvshow:92 evidence:91 hive-123450:91 pt:91 reason:91
+    scp:91 kresy:90 memories:90 naturalnews:90 wolnemedia:90 activistpost:89 animals:89
+    cooking:89 agriculture:88 cats:88 cine:88 hive-193816:88 iran:88 podcast:88 theinkwell:88
+    anime:87 phototalent:87 poem:87 gratitude:86 hive-166847:86 hive-190931:86 battle:85
+    pl-kbk:85 china:84 breakfast:83 adventure:81 ash:81 cervantes:81 conspiracy:81
+    expose-news:81 introduceyourself:81 powerup:81 usa:81 inspiration:79 medals:79 myanmar:79
+    sunset:79 wellbeing:79 wisdom:79 worldcup:79 youtube:79 antiwar:78 awareness:78 echo:78
+    indonesia:78 internet:78 oc:78 scifimultiverse:78 thepeoplesvoice:78 visualshots:78
+    colourblackandwhite:77 traveldigest:77 analysis:76 hive-155221:76 familia:75 hive-106444:75
+    hive-142376:75 hive-196387:75 shadows:75 birds:74 c-c-c:74 cryptocurrency:74 fr:74 gold:74
+    mentalhealth:74 blocktunes:73 crafts:73 hpud:73 map:73 btc:72 historia:72 japan:72
+    religion:72 arcange:71 beach:71 governance:71 macrophotography:71 percent:71 plants:71
+    snaps:71 waivo:71 creativity:70 dbuzz:70 hive-120586:70 percentmap:70 students:70 apx:69
+    consciencia:69 parenting:69 smash:69 war:69 children:68 hive-117778:68 hive-140635:68
+    hive-150329:68 hive-193084:68 stefanmolyneux:68 television:68 alienarthive:67
+    creativewriting:67 literatos:67 reclaimthenet:67 stories:67 comedy:66 hive-155530:66
+    hive-189641:66 acidyoscam:65 bbho:65 bdvoter:65 crochet:65 hivepets:65 spirituality:65
+    weekend:65 writingcommunity:65 concurso:64 hivecontests:64 inkwellprompt:64 math:64
+    mortezayousefi:64 hivenaija:63 hivepower:63 macro:63 wildlife:63 abundance:62 cuento:62
+    linux:62 photosoftheday:62 spain:62 theoldpath:62 animal:61 colmenacuba:61 hiveupme:61
+    innerblocks:61 sbt:61 teammalaysia:61 airdrop:60 breakaway:60 hive-109584:60 jompiy:60
+    monochrome:60 robotics:60 streetart:60 upfundme:60 upme:60 bookreview:59 curate:59
+    fineart:59
+"""
+
+#: Posts in the corpus :data:`_TAG_DF_RAW` was counted over. The weight below
+#: reads only ``df / N``, so this must move with the table or the scale lies.
+_TAG_DF_CORPUS = 38_478
+
+
+#: How many entries :data:`_TAG_DF_RAW` is asserted to hold. ★ THIS GUARD IS
+#: NOT DECORATIVE (2026-08-08): the first version of this table was line-wrapped
+#: with ``textwrap.wrap``'s default ``break_on_hyphens=True``, which split
+#: ``hive-daily-mix:112`` across a line as ``hive-daily-`` + ``mix:112``. The
+#: lenient parser then silently recorded a tag named ``mix`` with the WRONG
+#: frequency and lost the real one — with the entry COUNT still landing on 500,
+#: so a length check alone would have passed. Any re-wrap of the block above by
+#: an editor or formatter can reintroduce exactly that, so the parser refuses a
+#: token it cannot fully account for rather than doing its best with it.
+_TAG_DF_ENTRIES = 500
+
+
+def _parse_tag_df(raw: str) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for token in raw.split():
+        tag, sep, count = token.rpartition(":")
+        if not sep or not tag or not count.isdigit():
+            raise ValueError(
+                f"_TAG_DF_RAW is malformed at {token!r}: every token must be "
+                "'<tag>:<count>'. A line wrap that broke a hyphenated tag is the "
+                "expected cause — see _TAG_DF_ENTRIES."
+            )
+        out[tag] = int(count)
+    return out
+
+
+_TAG_DF: dict[str, int] = _parse_tag_df(_TAG_DF_RAW)
+if len(_TAG_DF) != _TAG_DF_ENTRIES:
+    raise ValueError(
+        f"_TAG_DF_RAW parsed to {len(_TAG_DF)} tags, expected {_TAG_DF_ENTRIES} "
+        "— the table was edited without updating _TAG_DF_ENTRIES, or a duplicate "
+        "tag was introduced."
+    )
+
+#: ★ THE TRUNCATION IS SOUND, not a guess. :data:`_TAG_DF_RAW` is exactly "the
+#: 500 most common tags", so a tag ABSENT from it is PROVEN to be rarer than
+#: every tag in it — its true document frequency is strictly below the smallest
+#: one recorded. Scoring an unmeasured tag AT that smallest recorded frequency
+#: therefore UNDERSTATES its rarity, never overstates it: the truncation can
+#: only ever be conservative, and no tag can gain weight by being missing.
+_TAG_DF_DEFAULT: int = min(_TAG_DF.values())
+
+
+def tag_rarity_weight(
+    tag: str,
+    *,
+    tag_df: Mapping[str, int] | None = None,
+    corpus_size: int | None = None,
+) -> float:
+    """How much one tag NARROWS the audience, in ``(0, 1]`` — inverse document
+    frequency, normalised so a tag carried by every post scores ~0 and a tag
+    carried by none scores 1::
+
+        w(t) = ln((N + 1) / (df(t) + 1)) / ln(N + 1)
+
+    ``tag_df``/``corpus_size`` accept a LIVE histogram (see
+    :data:`_TAG_DF_RAW`'s note on the rolling window); absent, the baked
+    measurement is used and an unrecorded tag is scored at
+    :data:`_TAG_DF_DEFAULT`. A live histogram is a FULL count of its window, so
+    a tag missing from it genuinely has ``df = 0`` there and correctly scores 1.
+
+    Lookup normalises whitespace and case (the live chain really does carry
+    ``"Spanish "`` alongside ``"spanish"``); MATCHING in
+    :func:`declared_interest_raw` deliberately does not, because both sides of
+    that intersection come from the same chain rows and must stay exact.
+    """
+    if tag_df is not None:
+        corpus = corpus_size if corpus_size is not None else sum(tag_df.values())
+        default = 0
+    else:
+        tag_df = _TAG_DF
+        corpus = _TAG_DF_CORPUS
+        default = _TAG_DF_DEFAULT
+    if corpus <= 0:
+        return 1.0
+    df = tag_df.get(tag.strip().lower(), default)
+    return math.log((corpus + 1) / (min(df, corpus) + 1)) / math.log(corpus + 1)
+
+
+def declared_interest_raw(
+    post: Post,
+    interest_tags: frozenset[str],
+    *,
+    tag_df: Mapping[str, int] | None = None,
+    corpus_size: int | None = None,
+) -> float:
+    """★ B-02 (2026-08-04). How well this post matches what the viewer is
+    interested in — the raw the declared-interest term
     (:data:`recsys.config.ScoreWeights.interest_match`) is built from.
 
-    ``0.0`` when the viewer declared nothing, or the post carries no tags —
-    never ``None``, never a made-up constant: an absence of signal is an
-    honest zero here, and the caller (:func:`score_candidate`, via the
-    percentile step) treats it as such rather than inventing one.
+    **The RARITY of the rarest interest the post actually claims**, and nothing
+    else::
+
+        raw = max over (post.tags & interest_tags) of tag_rarity_weight(tag)
+
+    ``0.0`` when the viewer declared nothing, the post carries no tags, or
+    nothing intersects — never ``None``, never a made-up constant: an absence
+    of signal is an honest zero here, and the caller
+    (:func:`score_candidate`, via the percentile step) treats it as such rather
+    than inventing one.
 
     ★ VIEWER-OWN, not cross-viewer: only the viewer's own ``interest_tags``
     choice moves this, so unlike CF no stranger can move it by engaging
     anything.
 
-    ★★ THE CEILING, STATED HONESTLY. ``post.tags`` is attacker-controlled free
-    text — any author may tag a post with every popular interest. The
-    ``len(post.tags)`` denominator is the only bound: spreading N genuinely
-    matching tags across M total tags caps the achievable share at N/M, so
-    padding with MORE tags than truly apply can only shrink the share, never
-    lift it above 1.0 — but a post with FEW tags, all of them popular, still
-    farms this cheaply. This is exactly why the gate-EXEMPT exploration lane
-    (``core/exploration.py::_interest_match``, BUILD-ADJUDICATION R3)
-    restricts itself to the post's PRIMARY tag only: that lane bypasses the
-    vouch gate and the author floor, so it needs the strict form. This
-    function backs a term that does NOT bypass those gates — it only
-    re-ranks candidates that already cleared ``filter_eligible`` — so the
-    full-intersection form here matches what R3 already permits for the
-    equivalent gated case (``second_degree._ungated_lane_for``).
+    ★★★ WHY THIS REPLACED ``|post.tags & interest_tags| / len(post.tags)``
+    (2026-08-08). That form was 32% of the final score and it was measuring two
+    things it should never have measured.
+
+    * **It could not tell a topic from a namespace.** ``hive`` is worn by
+      10.6% of every root post on the chain (:data:`_TAG_DF_RAW`, measured) and
+      almost exclusively by meta-content — Follow Friday, stats bots, curation
+      digests, product announcements. On the owner's own served 20-post page,
+      13 of 20 posts carried it and 16 of 20 matched on exactly ONE tag, so a
+      third of the score was, in practice, a ``hive``-detector. A single-tag
+      post ``[hive]`` scored a perfect 1.000.
+    * **It punished honest tagging, 8:1.** The denominator meant a post that
+      described itself with 8 accurate tags scored 0.125 for the same single
+      match a post tagged ``[hive]`` scored 1.000 for. Nothing about eight
+      honest tags is worse than one; the ranking said it was eight times worse.
+
+    Rarity fixes the first (``w(hive) = 0.213`` against ``w(philosophy) =
+    0.454``, ``w(hive-140169) = 0.612``); dropping the denominator fixes the
+    second. Note that the fix cannot be a rarity-weighted *sum* over the
+    matched tags — see the spray bound below.
+
+    ★★★ THE SPRAY BOUND, WHICH IS STRICTLY STRONGER THAN THE OLD DENOMINATOR.
+    ``post.tags`` is attacker-controlled free text: any author may tag a post
+    with every popular interest. The old denominator was the documented bound
+    against that, but it only ever bounded spraying with tags OUTSIDE the
+    viewer's interests — a post carrying the viewer's interests and NOTHING
+    else scored a perfect 1.000 however many it sprayed (the pre-existing
+    ``test_declared_interest_raw_denominator_bounds_tag_stuffing`` asserts
+    exactly that, at 1.0). ``max`` bounds the case the denominator missed:
+
+        **the 2nd..kth sprayed tag are worth exactly ZERO.**
+
+    A post claiming all six of a viewer's interests scores precisely what the
+    single rarest of them scores — no more — so it can never out-rank an honest
+    post that carries that same tag, and every additional sprayed tag has zero
+    marginal value. Adding tags still cannot raise the score above 1.0, and
+    removing the denominator cannot be farmed by tagging sparsely, because
+    tag COUNT no longer appears in the formula at all.
+
+    ★★ THE COST, STATED HONESTLY: ``max`` gives NO credit for breadth of match.
+    A post matching three of the viewer's interests scores the same as one
+    matching only the rarest of the three. That is deliberate and it is the
+    only form that survives the bound above — any function that pays for extra
+    matches (``min(sum, k)/k``, noisy-OR, decayed sums) lets a sprayer beat an
+    honest single-topic post, which is the exact failure being closed. It is
+    also the trade BUILD-ADJUDICATION R3 already made for the gate-exempt
+    exploration lane (``core/exploration.py::_interest_match``, primary-tag
+    only) for the same reason.
+
+    ★ NO TUNING CONSTANT — AND THIS IS PROVABLE, not a claim. The caller ranks
+    this raw into a PERCENTILE within the request's own pool
+    (``pipeline._interest_lookup`` -> ``viewer_affinity.affinity_percentiles``),
+    and ``max f(w) == f(max w)`` for monotone ``f``, so ANY monotone rescaling
+    of :func:`tag_rarity_weight` — a different log base, an exponent, a
+    different normalising constant — produces a BYTE-IDENTICAL served order.
+    There is therefore no exponent or sharpening factor here that could have
+    been fitted to a page, and none is needed. Only the ORDER of tags by
+    document frequency is load-bearing, and that order is measured.
+
+    ★ SEMANTICS ARE NOT THIS FUNCTION'S JOB. Rarity cannot tell a genuine niche
+    topic from a mechanical marker: ``hiveposh`` (df 9) is rare and means only
+    "this was cross-posted to Twitter", and this function would score it 0.612.
+    That is handled where it belongs — at DERIVATION
+    (:func:`recsys.viewer.derive_interest_tags`), which refuses to INFER a
+    non-topical tag as somebody's interest. It is deliberately NOT handled
+    here, because an interest a viewer picked EXPLICITLY is the viewer's own
+    word and must be honoured at whatever rarity it has; the signup picker
+    really does offer "Hive Community" (frontend
+    ``lib/lite/interests/taxonomy.ts``), and a reader who chooses it has asked
+    for exactly the meta-content this term would otherwise be zeroing.
     """
     if not interest_tags or not post.tags:
         return 0.0
-    return len(set(post.tags) & interest_tags) / len(post.tags)
+    matched = set(post.tags) & interest_tags
+    if not matched:
+        return 0.0
+    return max(
+        tag_rarity_weight(tag, tag_df=tag_df, corpus_size=corpus_size) for tag in matched
+    )
 
 
 def recency_bonus(post: Post, now: datetime, half_life_hours: float) -> float:
@@ -660,4 +939,5 @@ __all__ = [
     "recency_bonus",
     "score_candidate",
     "score_candidates",
+    "tag_rarity_weight",
 ]

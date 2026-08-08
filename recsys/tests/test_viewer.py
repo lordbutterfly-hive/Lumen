@@ -39,6 +39,7 @@ from recsys.contracts import CandidateSource
 from recsys.io import hafsql
 from recsys.pipeline import TrustPolicy, rank_feed
 from recsys.viewer import (
+    _VOTE_HISTORY_TIMEOUT_MS,
     DEFAULT_MAX_INTEREST_TAGS,
     build_viewer_profile,
     derive_interest_tags,
@@ -82,7 +83,9 @@ class _FakeFetchGateway:
         self._raise_on_tag_lookup = raise_on_tag_lookup
         self.calls: list[tuple[str, dict[str, Any]]] = []
 
-    def _fetch(self, sql: str, params: dict[str, Any]) -> list[tuple[Any, ...]]:
+    def _fetch(
+        self, sql: str, params: dict[str, Any], *, timeout_ms: int | None = None
+    ) -> list[tuple[Any, ...]]:
         if "FROM hafsql.follows" in sql:
             self.calls.append(("follows", params))
             return [(f,) for f in self._follows]
@@ -333,7 +336,18 @@ def test_a_tagless_profile_from_this_builder_still_gets_a_non_empty_feed(
         )
 
     assert feed, "a tagless ViewerProfile built by recsys.viewer must never reach an empty feed"
-    assert all(sc.source is CandidateSource.POPULAR_FALLBACK for sc in feed)
+    # ★ 2026-08-08: the invariant is "never empty, and served from a POPULARITY
+    # source". The across-Hive popularity lane (`CandidateSource.OON_POPULAR`)
+    # can also carry this feed when it is enabled — and when it does, it is a
+    # strict improvement for exactly this audience, since `OON_POPULAR` carries
+    # `requires_author_floor` and `POPULAR_FALLBACK` does not. It ships OFF
+    # (`PopularConfig.limit = 0`), so today the fallback is what answers; both
+    # are accepted here so this test pins the INVARIANT rather than the setting.
+    assert all(
+        sc.source
+        in (CandidateSource.POPULAR_FALLBACK, CandidateSource.OON_POPULAR)
+        for sc in feed
+    )
     assert "no interest_tags" in caplog.text
 
 
@@ -414,4 +428,66 @@ def test_never_voted_account_resolves_fast_not_at_the_statement_timeout(
         f"build_viewer_profile for a never-voted account took {elapsed:.1f}s — the "
         "_SQL_HAS_EVER_VOTED guard should have kept this well under the 15s "
         "statement timeout the un-guarded query hits"
+    )
+
+
+# ---------------------------------------------------------------------------
+# ★★★ THE VOTE-HISTORY READ MUST BE BOUNDED (2026-08-08).
+#
+# `_SQL_RECENT_VOTES_BY` has no usable index on `voter`, and the call site's own
+# comment shipped assuming `statement_timeout` would cut it off ("up to the full
+# 15s statement timeout"). This deployment runs
+# HAFSQL_STATEMENT_TIMEOUT_MS=900000 for the trust batch, so that cap never
+# existed for a request. Live-measured the day this was found: 27.21s for
+# lordbutterfly — from FIFTEEN rows — which alone was 1.8x the frontend's whole
+# 15s patience.
+# ---------------------------------------------------------------------------
+
+
+def test_the_vote_history_read_carries_its_own_request_scoped_timeout() -> None:
+    """Pinned on the ASK, because no assertion on the RESULT can see it.
+
+    A missing bound produces correct tags, just far too late — which is exactly
+    how it survived until someone timed a live request.
+    """
+    seen: list[tuple[str, int | None]] = []
+
+    class TimeoutRecordingGateway(_FakeFetchGateway):
+        def _fetch(
+            self, sql: str, params: dict[str, Any], *, timeout_ms: int | None = None
+        ) -> list[tuple[Any, ...]]:
+            if "operation_effective_comment_vote_view" in sql and "LIMIT 1" not in sql:
+                seen.append(("recent_votes", timeout_ms))
+            return super()._fetch(sql, params, timeout_ms=timeout_ms)
+
+    gateway = TimeoutRecordingGateway(
+        has_ever_voted=True,
+        vote_rows=[("alice", "p1")],
+        voted_tag_rows=[(None, "photography")],
+    )
+    derive_interest_tags(gateway, "someone", now=EPOCH + timedelta(days=1))
+
+    assert seen == [("recent_votes", _VOTE_HISTORY_TIMEOUT_MS)], (
+        "the unindexed vote-history query ran with no request-scoped bound; it "
+        "then inherits the 900s batch timeout and can hang a whole page"
+    )
+    # Must leave room for the rest of the page inside the frontend's patience.
+    assert _VOTE_HISTORY_TIMEOUT_MS < 15_000
+
+
+def test_a_timed_out_vote_history_still_yields_tags_from_own_posts() -> None:
+    """The bound is only safe because the degrade is REAL.
+
+    Timing out must cost personalisation, never the page: derivation falls back
+    to own-post tags (index-backed and reliably fast) and logs loudly.
+    """
+    gateway = _FakeFetchGateway(
+        own_post_rows=[(None, "photography"), (None, "photography")],
+        has_ever_voted=True,
+        raise_on_recent_votes=TimeoutError("statement timeout"),
+    )
+    tags = derive_interest_tags(gateway, "someone", now=EPOCH + timedelta(days=1))
+    assert "photography" in tags, (
+        "a timed-out vote-history read wiped the viewer's interests entirely; "
+        "it must degrade to own-post tags, not to nothing"
     )

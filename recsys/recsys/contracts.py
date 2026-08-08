@@ -32,6 +32,29 @@ class CandidateSource(StrEnum):
     OON_ENGAGED = "oon_engaged"
     OON_INTEREST = "oon_interest"  # tag/category discovery, established viewer — gated
     OON_ALS = "oon_als"
+    #: ★★★ THE ACROSS-HIVE POPULARITY LANE (2026-08-08, owner: "we need across
+    #: Hive popularity lane"). Chain-wide top posts, sourced for EVERY viewer
+    #: on every request — not only a starved one.
+    #:
+    #: WHY IT IS A LANE AND NOT ``POPULAR_FALLBACK``. The gap it closes is a
+    #: SOURCING gap, not a ranking one: a genuinely huge post outside the
+    #: viewer's follows and outside their tags never entered the candidate pool
+    #: at all, so no weight, penalty or quota could ever reach it.
+    #: ``POPULAR_FALLBACK`` is padding — ``_fallback_filler`` only runs when the
+    #: realised pool is under ``FallbackConfig.min_feed_size`` — so for a
+    #: healthy feed it is structurally absent. The two are kept as separate
+    #: members deliberately: ``POPULAR_FALLBACK``'s gate exemptions are
+    #: justified by "the viewer it serves has no follow graph for the gate to
+    #: use", and that justification does NOT extend to an always-on lane served
+    #: to established viewers. This one is gated like every other general
+    #: discovery lane (see :attr:`requires_author_floor`).
+    #:
+    #: SELECTION IS CREDITED BREADTH, NOT VOTE COUNT — see
+    #: :func:`recsys.core.popular.select_popular`. Raw vote counts are farmable
+    #: and largely trail-driven; the SQL is a recall PREFILTER only and the
+    #: lane's actual membership is decided by the same
+    #: ``VoterTrust``-budgeted, §8.4-excluded breadth the organic term scores.
+    OON_POPULAR = "oon_popular"
     # Cold-start exploration lane the viewer explicitly picked at signup (rev 2.2)
     # — exempt from the gate, since they have no follow graph for it to use.
     INTEREST_TAG = "interest_tag"
@@ -138,6 +161,14 @@ class CandidateSource(StrEnum):
             # still cannot ride it in, and it remains subject to the per-author
             # flooding cap (see core/flooding.py, which keys on that property).
             CandidateSource.OON_ALS,
+            # ★ OON_POPULAR — the same defect, for the same structural reason.
+            # A chain-wide popular post is by definition popular OUTSIDE the
+            # viewer's network; requiring that one of the viewer's own follows
+            # already engaged it makes the lane empty for exactly the viewers it
+            # exists to serve (the whole point is reach beyond your graph). It
+            # keeps `requires_author_floor`, so a proven self-dealer still
+            # cannot ride it in, and it keeps the per-author flooding cap.
+            CandidateSource.OON_POPULAR,
         )
 
     @property
@@ -514,6 +545,35 @@ class HafsqlGateway(Protocol):
 
     def follow_graph(self, accounts: frozenset[str]) -> dict[str, frozenset[str]]:
         """follower -> followees among ``accounts`` (§8.3), for graph-cred."""
+        ...
+
+    def author_first_post(
+        self, authors: frozenset[str], *, horizon_days: int, now: datetime | None = None
+    ) -> dict[str, datetime]:
+        """When each of ``authors`` FIRST published — the newness predicate the
+        exploration lane gates on (2026-08-08, ``ExplorationConfig.
+        max_author_age_days``).
+
+        Keyed on the RANKED identity, like every other author-keyed read here,
+        so a Lumen Lite writer resolves to their own first lite post rather than
+        to the shared publisher account's history.
+
+        ★ ``horizon_days`` IS PART OF THE CONTRACT, not a hint (2026-08-08). An
+        implementation is permitted to answer only for authors NEWER than the
+        horizon and omit the rest, because proving an author is OLD can stop at
+        the first old post while computing their true first-post date cannot —
+        that difference is 311s vs 0.25s on the real mirror. Callers MUST pass
+        the same ``max_author_age_days`` they then test against, or the bound
+        and the predicate drift apart and the lane silently refuses authors the
+        config says are eligible.
+
+        An author ABSENT from the result is therefore "old, or unknown" — either
+        way the lane refuses them (fail-closed). Fail-open would treat every
+        author the lookup missed as a debut, which is the exact state the
+        predicate exists to detect. Because absence is now overloaded, an
+        implementation that FAILS must raise rather than return a short dict:
+        a silent empty result is indistinguishable from "no newcomers today",
+        and that ambiguity is how this lane shipped unreachable once already."""
         ...
 
     def popular_posts(self, since: datetime, limit: int) -> list[Post]:
