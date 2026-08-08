@@ -440,7 +440,64 @@ class ScoreWeights:
     #: auc_own_m5) and require them flat-or-up. Own-topic share rising while
     #: mean_q falls is the documented REGRESSION signature and vetoes the change.
     #: Council C's stated target for a cold viewer is ~0.3.
-    organic_viewer: float = 0.0
+    #: ★ TURNED ON 2026-08-08 (owner: "wire the fucking social graph right
+    #: now"). 0.0 -> 0.3, Council C's stated cold-viewer target. Before this,
+    #: who you actually engage with contributed EXACTLY NOTHING to your rank:
+    #: measured final weights were organic 54.4% / interest-tag 32% / vote 6.8%
+    #: / reputation 6.8% / your own engagement history 0%. Costs no extra query
+    #: — the edges are already in the trust snapshot (`_viewer_affinity_lookup`).
+    organic_viewer: float = 0.3
+
+    #: ★★ THE FOLLOW WEIGHT (2026-08-08, owner: "follows need to do slightly
+    #: more. not a lot but slightly more"). How much a candidate is worth for
+    #: the single fact that the viewer FOLLOWS its author. Applied in
+    #: :func:`recsys.core.scoring.score_candidate` as
+    #: ``earned = blend(earned, 1.0, w)`` for ``IN_NETWORK`` candidates only —
+    #: i.e. it lifts a followed author's composite by ``w * (1 - earned)``.
+    #:
+    #: WHAT IT FIXES. Before this, following someone controlled POOL
+    #: MEMBERSHIP and nothing else: `IN_NETWORK` and every discovery lane were
+    #: scored by the identical viewer-blind formula. `organic_viewer` above is
+    #: NOT this signal — it is built from the viewer's OUTGOING ENGAGEMENT
+    #: EDGES (`viewer_author_affinity` reads `snap.edges`, not
+    #: `viewer.follows`), so a follow you have never upvoted or replied to
+    #: contributes exactly 0.0 through it. The two channels are disjoint by
+    #: construction, so this is not a double-count of the same evidence.
+    #:
+    #: VIEWER-OWN, so it carries the same self-harm-only safety posture as
+    #: `organic_viewer` and `interest_match`, NOT the poisonable cross-viewer
+    #: posture that caps `organic_cf` at 0.1: nobody but the viewer can put an
+    #: author into the viewer's own `IN_NETWORK` lane.
+    #:
+    #: ★ 0.0 IS BYTE-IDENTICAL to the pre-2026-08-08 score (`blend` returns its
+    #: input at weight <= 0.0, and the call is additionally guarded on
+    #: `> 0.0`), which is what keeps every panel pin and sweep table in this
+    #: file reproducible.
+    #:
+    #: SWEEP-PENDING — the shipped value and its live table are written here
+    #: once measured. Until then this field is 0.0 (off, byte-identical).
+    #:
+    #: WHAT IT IS NOT ALLOWED TO BE. This is a RANKING nudge, never an
+    #: eligibility change: it cannot admit a post the gates rejected, and it
+    #: never touches the exploration lane's reserved seat (that is spliced
+    #: after re-rank and does not compete on score at all). It is also NOT a
+    #: substitute for removing `OON_INTEREST` from `CandidateSource.
+    #: is_viewer_chosen` — that lever was measured to take the tag lane from 13
+    #: of 20 slots to ~3 and is a reversal, not a nudge.
+    #:
+    #: ★ HONEST SECOND-ORDER EFFECT, stated rather than discovered later. The
+    #: bonus lands in `earned`, and `rerank._topic_affinities` infers the
+    #: viewer's per-topic affinity from the pool's EARNED-score mass — so
+    #: topics the viewer's follows write in gain a slightly larger mass share
+    #: and their topic-diversity penalty is attenuated slightly more. This is
+    #: NOT the double-count that the 2026-08-05 fix removed for
+    #: `interest_match`: that term is a per-TOPIC constant, so it lifted one
+    #: topic's mass and then switched off that same topic's brake. This one is
+    #: per-AUTHOR-RELATIONSHIP and lands on whatever topics the viewer's
+    #: follows happen to write about, which is a genuine fact about the pool
+    #: rather than a restatement of the term itself. Measured on the panels at
+    #: the shipped value — see the 2026-08-08 run recorded below.
+    in_network_bonus: float = 0.0
 
     #: Weights on DISTINCT-PERSON breadth inside the organic term (§6): how much
     #: one more independent voter / commenter / reblogger is worth. Previously
@@ -596,6 +653,13 @@ class ScoreWeights:
             )
         if not 0.0 <= self.interest_match <= 1.0:
             raise ValueError(f"interest_match must be in [0, 1], got {self.interest_match}")
+        # Bounded like every other blend weight: `blend` clamps internally, but a
+        # value outside [0, 1] here means the operator meant something this field
+        # cannot express, and silently clamping it would hide that.
+        if not 0.0 <= self.in_network_bonus <= 1.0:
+            raise ValueError(
+                f"in_network_bonus must be in [0, 1], got {self.in_network_bonus}"
+            )
         if self.organic_recency < 0.0:
             raise ValueError(f"organic_recency must be >= 0, got {self.organic_recency}")
         if self.organic_half_life_hours <= 0.0:
@@ -1114,7 +1178,22 @@ class ExplorationConfig:
     slots_per_page: int = 1
     page_size: int = 20
     #: Deep enough not to displace the head, shallow enough to be seen.
+    #: POSITION-PENDING — measured before it moves.
     position: int = 13
+    #: ★★ SEAT OCCUPANT = THE BEST OF THE EQUALLY-UNHEARD (2026-08-08, owner:
+    #: "the highest ranked one has an assured top 10 slot"). See
+    #: :func:`recsys.core.exploration.seat_order` for the mechanism, the key it
+    #: sorts on, and the honest statement of what it costs (the keyed-MAC
+    #: lottery becomes a tie-break, and within band 0 freshness becomes the de
+    #: facto ordering signal).
+    #:
+    #: ``False`` restores the pre-2026-08-08 order byte-for-byte — the pool
+    #: arrives in need-band order with :func:`~recsys.core.exploration.
+    #: _rotation_key`'s keyed shuffle inside each band, and nothing re-sorts it.
+    #: Kept as a switch rather than hard-wired because this lane has produced a
+    #: regression from a majority of its recent changes and the rollback has to
+    #: be a config flip, not a revert.
+    seat_by_score: bool = False
     max_age_days: int = 7
     #: Per-author epoch budget. A farm cannot convert account count into slots
     #: because the rotation is round-robin over AUTHORS, but without this an

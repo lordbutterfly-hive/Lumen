@@ -21,6 +21,7 @@ from recsys.contracts import (
 from recsys.core.exploration import (
     eligible_for_exploration,
     insert_exploration,
+    seat_order,
 )
 from tests.fakes import EPOCH, make_post, make_viewer, make_vote
 
@@ -2013,3 +2014,92 @@ def test_the_refill_window_is_wired_into_the_served_pipeline() -> None:
         "the refill window is not threaded to BOTH counts() and record()"
     )
     assert "now=now.timestamp()" in source
+
+
+# ---------------------------------------------------------------------------
+# `seat_order` — the reserved seat goes to the BEST of the equally-unheard
+# (2026-08-08). See `ExplorationConfig.seat_by_score` and `seat_order`'s own
+# docstring for the mechanism and for what it costs.
+# ---------------------------------------------------------------------------
+
+
+def _seat_pool(rows):
+    """`[(author, final, n_engagers)]` -> (pool, engagement_counts) in the pool
+    order `eligible_for_exploration` would emit (need band, then whatever the
+    keyed shuffle produced — here, input order)."""
+    pool = []
+    counts = {}
+    for author, final, engagers in rows:
+        cand = _cand(author, "p")
+        pool.append(
+            ScoredCandidate(
+                post=cand.post,
+                source=CandidateSource.EXPLORATION,
+                score=ScoreBreakdown(vote_norm=0.0, rep_norm=0.0, organic=final, final=final),
+            )
+        )
+        counts[author] = engagers
+    return pool, counts
+
+
+def test_the_seat_goes_to_the_best_scoring_author_in_the_neediest_band() -> None:
+    # The owner's ask: the reserved slot is now inside the top ten, so it must
+    # carry the strongest of the unheard, not whichever one the lottery drew.
+    pool, counts = _seat_pool(
+        [("lottery-winner", 0.20, 0), ("best-newcomer", 0.44, 0), ("mid", 0.31, 0)]
+    )
+    got = [sc.post.author for sc in seat_order(pool, counts)]
+    assert got[0] == "best-newcomer"
+    assert got == ["best-newcomer", "mid", "lottery-winner"]
+
+
+def test_a_heard_author_never_overtakes_an_unheard_one_however_well_they_score() -> None:
+    # ★ THE LOAD-BEARING CONSTRAINT. Sorting the pool by score OUTRIGHT is a bug
+    # this lane has already shipped (see `seat_order`'s docstring): the pool
+    # contains established authors, and they outscore every debut by
+    # construction. The need band must stay the primary key.
+    pool, counts = _seat_pool(
+        [("unheard", 0.05, 0), ("well-read", 0.99, 12), ("somewhat-read", 0.80, 2)]
+    )
+    got = [sc.post.author for sc in seat_order(pool, counts)]
+    assert got[0] == "unheard"
+    assert got == ["unheard", "somewhat-read", "well-read"]
+
+
+def test_seat_by_score_off_is_byte_identical_to_the_pool_it_was_given() -> None:
+    # The rollback path: `ExplorationConfig.seat_by_score = False` must restore
+    # the keyed-shuffle order exactly, so a live regression is a config flip.
+    pool, counts = _seat_pool(
+        [("a", 0.10, 0), ("b", 0.90, 0), ("c", 0.50, 0)]
+    )
+    assert seat_order(pool, counts, enabled=False) == pool
+
+
+def test_the_seat_order_never_lets_a_second_post_precede_anyone_s_first() -> None:
+    # `eligible_for_exploration` emits depth-major so every author gets one shot
+    # before anyone gets a second; re-sorting must preserve that or one author's
+    # third post outranks another author's debut.
+    first_round, counts = _seat_pool([("quiet", 0.10, 0), ("prolific", 0.20, 0)])
+    extra = _scored(_cand("prolific", "p2"), final=0.95)
+    extra = ScoredCandidate(
+        post=extra.post, source=CandidateSource.EXPLORATION, score=extra.score
+    )
+    got = [sc.post.key for sc in seat_order([*first_round, extra], counts)]
+    assert got[2].endswith("/p2"), "an author's second post jumped the round-robin"
+
+
+def test_equal_scores_fall_back_to_the_keyed_shuffle_order() -> None:
+    # The MAC still decides exact ties — it is the last key, so the sort stays
+    # total and deterministic rather than depending on Python's list order by
+    # accident.
+    pool, counts = _seat_pool([("second-in-pool", 0.5, 0), ("first-in-pool", 0.5, 0)])
+    got = [sc.post.author for sc in seat_order(pool, counts)]
+    assert got == ["second-in-pool", "first-in-pool"]
+
+
+def test_an_author_absent_from_the_engagement_map_is_treated_as_unheard() -> None:
+    # Fail-open, the same posture every other absence in this lane takes: a
+    # brand-new author has no entry anywhere, and must not be sorted last for it.
+    pool, _ = _seat_pool([("known-quiet", 0.9, 5), ("brand-new", 0.1, 0)])
+    got = [sc.post.author for sc in seat_order(pool, {"known-quiet": 5})]
+    assert got[0] == "brand-new"

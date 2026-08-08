@@ -728,3 +728,112 @@ def test_score_candidates_interest_percentiles_default_is_a_no_op() -> None:
     default_call = score_candidates(items, NORM, weighted)
     explicit_none = score_candidates(items, NORM, weighted, interest_percentiles=None)
     assert default_call == explicit_none
+
+
+# ---------------------------------------------------------------------------
+# The follow weight (`ScoreWeights.in_network_bonus`, 2026-08-08)
+# ---------------------------------------------------------------------------
+
+
+def test_in_network_bonus_zero_is_byte_identical_to_the_pre_follow_weight_score() -> None:
+    # The mandatory safety net, same shape as the interest_match one above:
+    # 0.0 must reproduce the score EXACTLY for every source, so every panel pin
+    # and sweep table taken before 2026-08-08 still reproduces.
+    off = ScoreWeights(in_network_bonus=0.0)
+    for source in (CandidateSource.IN_NETWORK, CandidateSource.OON_INTEREST):
+        candidate = make_candidate(post=make_post(author_reputation=30.0), source=source)
+        result = score_candidate(
+            candidate, vote_signal_raw=2.0, organic_raw=0.5, norm=NORM, weights=off,
+        )
+        reference = score_candidate(
+            candidate, vote_signal_raw=2.0, organic_raw=0.5, norm=NORM, weights=ScoreWeights(),
+        )
+        assert result == reference, source
+
+
+def test_the_follow_weight_lifts_in_network_and_nothing_else() -> None:
+    weights = ScoreWeights(in_network_bonus=0.05)
+    off = ScoreWeights(in_network_bonus=0.0)
+    followed = make_candidate(
+        post=make_post(author_reputation=30.0), source=CandidateSource.IN_NETWORK
+    )
+    stranger = make_candidate(
+        post=make_post(author_reputation=30.0), source=CandidateSource.OON_INTEREST
+    )
+
+    def final(cand, w):
+        return score_candidate(
+            cand, vote_signal_raw=2.0, organic_raw=0.5, norm=NORM, weights=w
+        ).score.final
+
+    assert final(followed, weights) > final(followed, off)
+    # Every other lane is untouched — this is a follow weight, not a general
+    # re-scaling of the composite.
+    assert final(stranger, weights) == final(stranger, off)
+    # And the lift is exactly `w * (1 - earned)` — the documented blend form.
+    earned = final(followed, off)
+    assert final(followed, weights) == pytest.approx(earned + 0.05 * (1.0 - earned))
+
+
+def test_the_follow_weight_never_pushes_final_outside_the_unit_interval() -> None:
+    # `blend` toward 1.0 was chosen over a flat addend precisely so the service
+    # contract ("every score in [0, 1]") survives at any weight with no clamp.
+    candidate = make_candidate(
+        post=make_post(author_reputation=50.0), source=CandidateSource.IN_NETWORK
+    )
+    for w in (0.0, 0.03, 0.5, 1.0):
+        result = score_candidate(
+            candidate, vote_signal_raw=4.0, organic_raw=1.0, norm=NORM,
+            weights=ScoreWeights(in_network_bonus=w),
+        )
+        assert 0.0 <= result.score.final <= 1.0, w
+
+
+def test_the_follow_weight_keeps_finals_earned_interest_decomposition() -> None:
+    # `rerank._earned` (and therefore every diversity penalty AND
+    # `_topic_affinities`) reads `final - interest_bonus`. The follow weight
+    # must land on `earned` BEFORE the declared-interest blend or that stops
+    # decomposing — which would silently mis-scope three penalties at once.
+    weights = ScoreWeights(in_network_bonus=0.05, interest_match=0.4)
+    candidate = make_candidate(
+        post=make_post(author_reputation=30.0), source=CandidateSource.IN_NETWORK
+    )
+    result = score_candidate(
+        candidate, vote_signal_raw=2.0, organic_raw=0.5, norm=NORM, weights=weights,
+        interest_percentile=1.0,
+    )
+    w = weights.organic * weights.interest_match
+    plain_earned = (
+        weights.vote * result.score.vote_norm
+        + weights.reputation * result.score.rep_norm
+        + weights.organic * result.score.organic
+    )
+    boosted = plain_earned + weights.in_network_bonus * (1.0 - plain_earned)
+    assert result.score.interest_bonus == pytest.approx(w * 1.0)
+    assert result.score.final - result.score.interest_bonus == pytest.approx(
+        (1.0 - w) * boosted
+    )
+
+
+def test_the_follow_weight_never_reorders_follows_among_themselves() -> None:
+    # Order-preserving INSIDE the lane: it re-ranks follows against strangers,
+    # it must not re-rank one follow against another.
+    weights = ScoreWeights(in_network_bonus=0.05)
+    off = ScoreWeights(in_network_bonus=0.0)
+    cands = [
+        make_candidate(post=make_post(author_reputation=r), source=CandidateSource.IN_NETWORK)
+        for r in (15.0, 30.0, 45.0)
+    ]
+    items = [(c, 2.0, 0.5) for c in cands]
+    order_off = [sc.score.final for sc in score_candidates(items, NORM, off)]
+    order_on = [sc.score.final for sc in score_candidates(items, NORM, weights)]
+    assert sorted(range(3), key=lambda i: order_off[i]) == sorted(
+        range(3), key=lambda i: order_on[i]
+    )
+
+
+def test_the_follow_weight_is_rejected_outside_the_unit_interval() -> None:
+    with pytest.raises(ValueError, match="in_network_bonus"):
+        ScoreWeights(in_network_bonus=-0.1)
+    with pytest.raises(ValueError, match="in_network_bonus"):
+        ScoreWeights(in_network_bonus=1.5)

@@ -989,6 +989,95 @@ def eligible_for_exploration(
     return rotated
 
 
+def seat_order(
+    pool: Sequence[ScoredCandidate],
+    engagement_counts: Mapping[str, int],
+    *,
+    serves: Mapping[str, int] | None = None,
+    need_bands: tuple[int, ...] = DEFAULT_NEED_BANDS,
+    enabled: bool = True,
+) -> list[ScoredCandidate]:
+    """Re-order an already-need-ordered exploration pool so the RESERVED SEAT
+    goes to the BEST-SCORING candidate inside the neediest band, instead of to
+    whichever equally-needy author the keyed lottery happened to draw.
+
+    ★ WHY (2026-08-08, owner: "the highest ranked one has an assured top 10
+    slot — make sure that doesn't break the ranking"). The seat is now spliced
+    into the TOP TEN (``ExplorationConfig.position``), where it is far more
+    visible and far more expensive. Under the old ordering the occupant was
+    picked by need tier and then by :func:`_rotation_key`, i.e. uniformly at
+    random among equally-unheard authors — measured live, that put a 0.351 post
+    among 0.52-0.57 neighbours. Choosing the strongest member of the same band
+    costs the lane nothing (the band, not the score, is what makes this the
+    new-author lane) and is what makes a top-10 seat defensible.
+
+    ★★ THE NEED TIER STAYS THE PRIMARY KEY, AND THAT IS NOT NEGOTIABLE. Sorting
+    the pool by score OUTRIGHT is a bug this lane has already shipped once
+    (2026-08-04, recorded at the ``_score(explore_pool, ...)`` call site in
+    ``recsys.pipeline.rank_feed``): the pool contains ESTABLISHED authors too —
+    every condition in :func:`eligible_for_exploration` is satisfied by a
+    well-known author's quiet recent post — so "highest-scoring in the pool"
+    resolves to an incumbent and the newcomer sinks below sixty of them. Sorting
+    within the BAND is the opposite operation: band 0 is exactly the
+    zero-distinct-engager authors, so the winner is still by construction
+    someone nobody has heard, only now the best of them.
+
+    Ordering key is ``(depth, need_tier, -final, original index)``:
+
+    * ``depth`` — which of that author's posts this is (0 = their newest). The
+      pool from :func:`eligible_for_exploration` is depth-major so every author
+      gets one shot before anyone gets a second; re-sorting without this key
+      would let one author's third post outrank another author's first.
+    * ``need_tier`` — unchanged, and identical to the sort/rotation grouping
+      :func:`eligible_for_exploration` already applies (:func:`_need_tier` over
+      ``engagement_counts``, the SAME map ``rank_feed`` feeds the serve log, so
+      there is only one definition of "has this author been heard" in play).
+    * ``-final`` — the new key.
+    * the original index — so the keyed-MAC order (:func:`_rotation_key`)
+      survives as the TIE-BREAK, and the whole sort is total and deterministic.
+
+    ★★★ WHAT THIS COSTS, STATED PLAINLY RATHER THAN DISCOVERED LATER. The MAC
+    is still what orders the pool that arrives here, and it still decides exact
+    ties — but a continuous score rarely ties, so as a SEAT LOTTERY the MAC is
+    now largely inert, and the property it was bought for changes shape:
+
+    * The name-grinding attack it closed (C1a: 6 accounts + ~92,546 offline
+      hashes held the seat in 85.1% of (bucket, viewer) cells) is *not* reopened
+      — grinding a name buys nothing when names no longer order the band. This
+      change removes the seat's dependence on the name entirely, which is
+      strictly stronger than keying it.
+    * What it DOES reopen is the lever the keyed shuffle was ALSO chosen to
+      retire: within band 0 every author has zero engagement by definition, so
+      ``final`` there is carried almost entirely by the additive freshness bonus
+      (``ScoreWeights.organic_recency``) plus reputation — i.e. **the freshest
+      post tends to win the seat**, which is the "a posting-hourly author beats
+      a quiet one at identical need" preference recorded in this module's own
+      docstring. What still bounds it is unchanged and is per-identity, not
+      per-post: ``max_posts_per_author_epoch`` (3 in the pool),
+      ``max_serves_per_author`` / ``serve_window_days`` (the refilling budget),
+      ``max_slots_per_feed``, and one promotion per author per feed. So posting
+      more often can win a GIVEN seat more often; it cannot win more seats per
+      account per week.
+
+    ``enabled=False`` returns the input order unchanged — byte-identical to the
+    pre-2026-08-08 lane — which is what
+    :attr:`~recsys.config.ExplorationConfig.seat_by_score` switches, and what
+    every measurement taken before that date reproduces against.
+    """
+    if not enabled:
+        return list(pool)
+    seen: dict[str, int] = {}
+    keyed: list[tuple[int, int, float, int, ScoredCandidate]] = []
+    for index, candidate in enumerate(pool):
+        author = candidate.post.author
+        depth = seen.get(author, 0)
+        seen[author] = depth + 1
+        tier = _need_tier(engagement_counts.get(author, 0), need_bands)
+        keyed.append((depth, tier, -candidate.score.final, index, candidate))
+    keyed.sort(key=lambda row: row[:4])
+    return [row[4] for row in keyed]
+
+
 def insert_exploration(
     ranked: Sequence[ScoredCandidate],
     pool: Sequence[ScoredCandidate],
@@ -1229,4 +1318,9 @@ def insert_exploration(
     return out
 
 
-__all__ = ["eligible_for_exploration", "insert_exploration", "seat_secret_fingerprint"]
+__all__ = [
+    "eligible_for_exploration",
+    "insert_exploration",
+    "seat_order",
+    "seat_secret_fingerprint",
+]

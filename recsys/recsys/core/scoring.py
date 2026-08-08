@@ -524,6 +524,39 @@ def score_candidate(
     # the candidate — nothing here is a statement the viewer made about
     # themselves.
     earned = weights.vote * vote_norm + weights.reputation * rep_norm + weights.organic * organic
+    # ★★ THE FOLLOW WEIGHT (2026-08-08). Until this existed, following someone
+    # decided POOL MEMBERSHIP and nothing else: `IN_NETWORK` and every discovery
+    # lane were scored by the identical viewer-blind formula, so a followed
+    # author competed against a stranger on equal terms and lost whenever the
+    # stranger's post had more engagement. `organic_viewer` does NOT cover this
+    # — it is built from the viewer's OUTGOING ENGAGEMENT EDGES
+    # (`viewer_author_affinity`), so a follow you have never replied to or
+    # upvoted contributes exactly 0.0 through that channel. A follow is a
+    # separate, deliberate statement ("show me this person") and this is where
+    # it is finally priced.
+    #
+    # SAME SELF-HARM-ONLY POSTURE as `organic_viewer`/`interest_match` and NOT
+    # the CF posture: only the viewer's own follow list moves it, so the worst
+    # an attacker achieves by farming it is changing their own feed. That is why
+    # it can carry real weight where `organic_cf` (cross-viewer, poisonable) is
+    # capped at 0.1/0.0.
+    #
+    # WHY A BLEND TOWARD 1.0 AND NOT A FLAT ADDEND. `blend(earned, 1.0, w)` is
+    # the same primitive the two channels above already use, so `final` provably
+    # stays inside [0, 1] at every weight (the service contract in
+    # `recsys.service.app` states that bound) with no clamp to introduce ties at
+    # the top of the scale; it is strictly order-preserving INSIDE the lane, so
+    # it re-ranks follows against strangers without ever re-ordering follows
+    # among themselves; and it is an exact no-op at 0.0, which is what keeps
+    # every pre-2026-08-08 measurement reproducible.
+    #
+    # IT APPLIES TO `earned`, BEFORE THE DECLARED-INTEREST BLEND, deliberately:
+    # `final - interest_bonus` must remain `(1 - W) * earned` or
+    # `rerank._earned` — which the author/topic/unchosen penalties and
+    # `_topic_affinities` all read — would silently stop decomposing. Applying
+    # it after the blend would break that invariant.
+    if weights.in_network_bonus > 0.0 and candidate.source.is_in_network:
+        earned = viewer_blend(earned, 1.0, weights.in_network_bonus)
     # ★ DECLARED INTEREST (B-02 2026-08-04; re-based to the composite
     # 2026-08-05 — see this function's docstring for the measurement). It
     # blends against the EARNED score, so vote, reputation and quality are all

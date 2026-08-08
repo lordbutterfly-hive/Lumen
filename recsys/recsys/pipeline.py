@@ -47,6 +47,7 @@ from recsys.core.exploration import (
     eligible_for_exploration,
     engagement_received,
     insert_exploration,
+    seat_order,
 )
 from recsys.core.flooding import cap_oon_flooding
 from recsys.core.graph_cred import compute_graph_cred
@@ -1934,7 +1935,24 @@ def rank_feed(
                 len(explore_pool),
                 dropped[:20],
             )
-        ordered = [by_key[c.post.key] for c in explore_pool if c.post.key in by_key]
+        # ★★ SEAT ORDER (2026-08-08). `explore_pool`'s own order is the lane's
+        # NEED order (band, then the keyed-MAC shuffle) and restoring it here is
+        # what stops `_score`'s sort silently replacing the lane's selection
+        # policy — see the C3 note above, which is still the reason this
+        # re-ordering step exists at all. `seat_order` then re-orders WITHIN each
+        # need band by score, so the reserved seat (now inside the top ten) goes
+        # to the strongest of the equally-unheard rather than to whichever one
+        # the lottery drew. It keeps the band as the primary key precisely so
+        # this does NOT become the "sort the pool by score" bug C3 records.
+        #
+        # `engagement_counts` is the SAME map the serve log and the need bands
+        # use — one definition of "has this author been heard", per the note at
+        # its construction above.
+        ordered = seat_order(
+            [by_key[c.post.key] for c in explore_pool if c.post.key in by_key],
+            engagement_counts,
+            enabled=settings.exploration.seat_by_score,
+        )
         # ★ C2c (2026-08-04). `insert_exploration` has accepted a `lineage`
         # map since it shipped — see its own "PER-FARM LINEAGE BOUND"
         # docstring section and `tests/test_exploration.py`'s
