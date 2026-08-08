@@ -1,5 +1,6 @@
 'use client';
 
+import { isNsfwPost, useNsfwPreference } from '@/blog/lib/nsfw';
 import BasePathLink from '@/blog/components/base-path-link';
 import DialogLogin from '@/blog/components/dialog-login';
 import { useFollowListQuery } from '@/blog/components/hooks/use-follow-list';
@@ -43,6 +44,7 @@ import { getBasePath } from '@ui/lib/path-utils';
 import { useQuery } from '@tanstack/react-query';
 import { getCommunity, getDiscussion, getListCommunityRoles, getPost } from '@transaction/lib/bridge-api';
 import { fetchLiteEntryByPermlink } from '@/blog/lib/lite/client/lite-post-fetch';
+import { fetchLiteEngagement } from '@/blog/lib/lite/client/lite-engagement';
 import { Entry } from '@hive/common-hiveio-packages/wax';
 import { getActiveVotes } from '@transaction/lib/hive-api';
 import { getSimilarPostsByPost, getHiveSenseStatus, isPostStub } from '@transaction/lib/hivesense-api';
@@ -151,9 +153,37 @@ const PostContent = () => {
     // account), so fall back to resolving by permlink through our own API.
     queryFn: async () => {
       const fromChain = await getPost(author, permlink, observer).catch(() => null);
-      if (fromChain) return fromChain;
-      const lite = await fetchLiteEntryByPermlink(permlink);
-      return (lite as typeof fromChain) ?? fromChain;
+      const base = fromChain ?? ((await fetchLiteEntryByPermlink(permlink)) as typeof fromChain);
+      if (!base) return base;
+
+      // ★ COUNT THE LUMEN VOTES TOO (2026-08-08).
+      //
+      // A Lumen ("lite") vote never reaches the chain — many readers share one
+      // publisher account, so on-chain they would collapse into a single voter.
+      // The chain's `total_votes` therefore cannot include them, and this page
+      // showed the chain number alone: a reader upvoted, watched the count go up,
+      // reloaded, and watched their own vote disappear. The feed was taught to
+      // merge these; this page was not, so the two disagreed about the same post.
+      //
+      // Copied, never mutated: `getPost` results are shared cache objects, and
+      // adding to them in place made counts CLIMB on every reload (measured
+      // 2,2,2,2,4 before that was caught in the feed).
+      try {
+        const local = await fetchLiteEngagement(base.author, base.permlink);
+        if (local.voteCount > 0 || local.reblogCount > 0) {
+          return {
+            ...base,
+            reblogs: (base.reblogs ?? 0) + local.reblogCount,
+            stats: base.stats
+              ? { ...base.stats, total_votes: (base.stats.total_votes ?? 0) + local.voteCount }
+              : base.stats
+          };
+        }
+      } catch {
+        // A missing Lumen tally leaves the chain numbers standing — incomplete,
+        // never blank.
+      }
+      return base;
     },
     enabled: !!author && !!permlink,
     initialData: initialPostData ?? undefined,
@@ -179,6 +209,13 @@ const PostContent = () => {
     user.isLoggedIn && (postData?.author === user.username || litePost?.author === user.username)
   );
   const [mutedPost, setMutedPost] = useState<boolean>(postData?.stats?.gray || false);
+  // ★ NSFW gate for the post page itself (2026-08-09) — see post-body-section.tsx.
+  // Same detector and same preference the feed card uses, so one setting governs
+  // the card and the page it links to.
+  const nsfwPreference = useNsfwPreference();
+  const [nsfwRevealed, setNsfwRevealed] = useState(false);
+  const postIsNsfw = postData ? isNsfwPost(postData) : false;
+  const nsfwHidden = postIsNsfw && nsfwPreference !== 'show' && !nsfwRevealed;
   // Single reblog query shared by header and footer ReblogTrigger components
   // Same key as the reblog operation below (the real signer), or the button's state
   // would be read under one identity and written under another.
@@ -530,6 +567,10 @@ const PostContent = () => {
     setMutedPost(false);
   }, []);
 
+  const handleShowNsfwContent = useCallback(() => {
+    setNsfwRevealed(true);
+  }, []);
+
   const isPending = searchParams?.get('pending') === '1';
   if (userFromGDPR) return <NoDataError />;
   if (!postData && !postIsLoading) {
@@ -731,6 +772,8 @@ const PostContent = () => {
                     mutedPost={mutedPost}
                     mutedReasons={postData.stats?.muted_reasons}
                     onShowMutedContent={handleShowMutedContent}
+                    nsfwHidden={nsfwHidden}
+                    onShowNsfwContent={handleShowNsfwContent}
                   />
                 )}
                 {/* Tags Section */}
@@ -1089,7 +1132,13 @@ const PostContent = () => {
             )}
           </div>
           <div id="comments" className="flex" />
-          {!!postData && paginatedDiscussionState ? (
+          {/* ★ A gated NSFW post must not leak through its own comment thread
+              (2026-08-09). Measured before this: the body was correctly withheld
+              while the replies still fetched 3 images, because comment bodies
+              render through their own component with no NSFW awareness at all.
+              Hiding the thread until the reader reveals the post is the coherent
+              rule — "this post is marked NSFW" should mean the whole post. */}
+          {!!postData && paginatedDiscussionState && !nsfwHidden ? (
             <CommentsSection
               postData={postData}
               paginatedDiscussionState={paginatedDiscussionState}

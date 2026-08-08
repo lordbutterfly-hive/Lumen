@@ -1374,7 +1374,7 @@ class ExplorationConfig:
     #: seat back to whoever scored best across both sets, i.e. to tag-spray
     #: pressure, which ruling R3 (primary-tag-only matching) closed for good
     #: reason after one sock tagged 12 topics and reached 60/60 viewers.
-    interest_fallback: bool = False
+    interest_fallback: bool = True
     max_age_days: int = 7
     #: Per-author epoch budget. A farm cannot convert account count into slots
     #: because the rotation is round-robin over AUTHORS, but without this an

@@ -5,6 +5,7 @@ import { PostListSkeleton } from '@hive/ui';
 import { useTranslation } from '@/blog/i18n/client';
 import NoDataError from '@/blog/components/no-data-error';
 import MediumPostCard from '@/blog/features/discovery-feed/medium-post-card';
+import { useVisiblePosts } from '@/blog/lib/nsfw';
 import { useAccountEntries } from './hooks/use-account-entries';
 
 /**
@@ -25,8 +26,19 @@ export default function ProfilePostsList({
   lite?: boolean;
 }) {
   const { t } = useTranslation('common_blog');
-  const { entries, isError, isLoading, isFetching, isFetchingNextPage, hasNextPage, fetchNextPage, loadMoreRef } =
-    useAccountEntries(username, 'posts', observer, initialEntries, lite);
+  const {
+    entries: rawEntries,
+    isError,
+    isLoading,
+    isFetching,
+    isFetchingNextPage,
+    hasNextPage,
+    fetchNextPage,
+    loadMoreRef
+  } = useAccountEntries(username, 'posts', observer, initialEntries, lite);
+  // Same NSFW list-level filter as the feed (see lib/nsfw.ts): keeps
+  // entries.length meaning "posts you will actually see".
+  const entries = useVisiblePosts(rawEntries);
 
   // ★★★ AN ERROR ON PAGE 2 MUST NOT DELETE PAGE 1.
   //

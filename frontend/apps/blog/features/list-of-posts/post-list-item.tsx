@@ -28,6 +28,7 @@ import PostCardUpvotesTooltip from './post-card-upvotes-tooltip';
 import PostCardBlacklistMark from './post-card-blacklist-mark';
 import PostSummary from './summary';
 import { Preferences } from '@/blog/lib/utils';
+import { isNsfwPost } from '@/blog/lib/nsfw';
 import { useTranslation } from '@/blog/i18n/client';
 import VotesComponentWrapper from '@/blog/features/votes/votes-component-wrapper';
 
@@ -72,7 +73,10 @@ const PostListItem = memo(
   const { t } = useTranslation('common_blog');
   const { user } = useUserClient();
   const reblogMutation = useReblogMutation();
-  const tagExists = Array.isArray(post.json_metadata?.tags) && post.json_metadata.tags.includes('nsfw');
+  // ★ Shared with the redesigned MediumPostCard (2026-08-09). Was an exact-case
+  // `tags.includes('nsfw')`, which let an `NSFW`/`Nsfw` tag through and ignored
+  // the category — the field that puts a post in `/topics/nsfw`. See lib/nsfw.ts.
+  const tagExists = isNsfwPost(post);
   const [nsfw, setNSFW] = useState<Preferences['nsfw']>(tagExists ? 'warn' : 'show');
   const reblogCount = post.reblogs ?? 0;
 
@@ -132,7 +136,14 @@ const PostListItem = memo(
   return (
     <li data-testid="post-list-item" className={post.stats?.gray ? 'opacity-50 hover:opacity-100' : ''}>
       {nsfw === 'hide' ? null : (
-        <Card className="mb-0 rounded-none border-0 border-b border-border bg-background px-2 py-6 text-primary shadow-none">
+        <Card
+          // ★ SAME CARD AS THE FEED (owner direction, 2026-08-08). Profile,
+          // tag and search lists used a full-bleed row with only a bottom
+          // rule (`rounded-none border-0 border-b`), so the same post looked
+          // like two different products depending on which page you found it
+          // on. Borders only — nothing else about these rows changes.
+          className="mb-4 rounded-[18px] border border-[#ebebeb] bg-white px-[22px] py-[22px] text-primary shadow-[0_1px_2px_rgba(20,18,10,0.03)] transition-colors hover:bg-[#fdfcfb]"
+        >
           {post.original_entry ? (
             <div className="mt-2 rounded-sm bg-background-secondary px-2 py-1 text-sm" data-testid="cross-post-banner">
               <p className="flex items-center gap-1 text-xs md:text-sm">
@@ -208,7 +219,7 @@ const PostListItem = memo(
                       &nbsp;{t('cards.post_card.in')}&nbsp;
                       {displayCommunity ? (
                         <Link
-                          href={`/trending/${displayCommunity}`}
+                          href={`/topics/${displayCommunity}`}
                           className="hover:cursor-pointer hover:text-destructive"
                           data-testid="post-card-community"
                         >
@@ -216,7 +227,7 @@ const PostListItem = memo(
                         </Link>
                       ) : (
                         <Link
-                          href={`/trending/${displayCategory}`}
+                          href={`/topics/${displayCategory}`}
                           className="hover:cursor-pointer hover:text-destructive"
                           data-testid="post-card-category"
                         >

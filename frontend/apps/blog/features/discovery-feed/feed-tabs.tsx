@@ -13,7 +13,7 @@ import { cn } from '@ui/lib/utils';
 import NoDataError from '@/blog/components/no-data-error';
 import MarketTab from '@/blog/features/prediction-market/market-tab';
 import MediumPostCard from './medium-post-card';
-import LiteFeedStrip from './lite-feed-strip';
+import { useVisiblePosts } from '@/blog/lib/nsfw';
 import InterestPicker from '@/blog/features/lite-auth/interests/interest-picker';
 
 // TODO: move to i18n
@@ -68,7 +68,7 @@ interface ForYouResponse {
  * inventing one client-side would just re-sort a slice by recency and quietly
  * undo the ranking.
  */
-function ForYouFeed({ enabled }: { enabled: boolean }) {
+function ForYouFeed() {
   const { ref, inView } = useInView();
 
   // ★ INFINITE SCROLL (2026-08-07). This was a single `useQuery` for one page of
@@ -82,7 +82,17 @@ function ForYouFeed({ enabled }: { enabled: boolean }) {
   // underneath as well — the cursor is the only thing the client has to know.
   const { data, isLoading, isError, fetchNextPage, hasNextPage, isFetchingNextPage } =
     useInfiniteQuery<ForYouResponse>({
-      queryKey: ['forYouRanked', enabled],
+      // ★ NOT keyed on `enabled` (2026-08-08). `enabled` is `loggedIn`, which is
+      // false before hydration and true after — so the key changed mid-load and
+      // react-query threw away the page it had just fetched and ran the whole
+      // recsys ranking pipeline a SECOND time, on every signed-in pageview.
+      // Measured: two identical `?limit=30` requests ~800ms apart, byte-identical
+      // responses. Signed-out never showed it, because `loggedIn` is false at both
+      // moments — which is what gave the mechanism away.
+      //
+      // The server identifies the viewer from the session cookie, so the response
+      // is already per-user; the key does not need to encode login state.
+      queryKey: ['forYouRanked'],
       queryFn: async ({ pageParam }) => {
         const cursor = pageParam as { author?: string; permlink?: string } | undefined;
         const params = new URLSearchParams({ limit: String(FOR_YOU_LIMIT) });
@@ -117,7 +127,7 @@ function ForYouFeed({ enabled }: { enabled: boolean }) {
   // post the chain pages reach again later, and a feed that repeats itself reads
   // as broken.
   const seen = new Set<string>();
-  const entries = data.pages
+  const rawEntries = data.pages
     .flatMap((page) => page?.entries ?? [])
     .filter((e) => {
       const key = `${e.author}/${e.permlink}`;
@@ -125,6 +135,11 @@ function ForYouFeed({ enabled }: { enabled: boolean }) {
       seen.add(key);
       return true;
     });
+
+  // NSFW `hide` filtering happens at the LIST so entries.length means "posts you
+  // will actually see" — otherwise a fully-hidden page leaves a zero-height list
+  // and the scroll sentinel auto-fetches forever. See lib/nsfw.ts.
+  const entries = useVisiblePosts(rawEntries);
 
   // ★ BUG FOUND 2026-08-06 (owner report: "for you isnt populated... seems it
   // has mock posts"). Live-verified against the running dev server: an
@@ -146,18 +161,25 @@ function ForYouFeed({ enabled }: { enabled: boolean }) {
 
   return (
     <div>
-      {/* The lite strip is the ONLY place lite posts appear when the ranker is
-          not serving. Once it is, lite posts arrive ranked inline and showing
-          them twice is duplication, so the strip stands down.
-
-          ★ NEVER FOR A SIGNED-OUT VISITOR (2026-08-07). `ranked` is false for
-          EVERY anonymous request by definition — there is no viewer to rank for —
-          so this rendered on every logged-out visit. And the strip is not a feed:
-          `/api/lite/posts` is globally unscoped, returning the ten most recent
-          Lumen posts by ANYONE. On this box that is a wall of QA scratch posts,
-          which is precisely what a first-time visitor saw instead of Hive.
-          A logged-out visitor gets the real trending feed and nothing else. */}
-      {!ranked && enabled ? <LiteFeedStrip /> : null}
+      {/* ★ THE LITE STRIP IS GONE FROM HERE FOR GOOD, NOT JUST FOR SIGNED-OUT
+          VISITORS (2026-08-08, owner report: "For You shows test posts").
+          It used to render for a SIGNED-IN reader too, whenever the ranker
+          degraded (`!ranked`) — which recsys's own FAIL_CLOSED design means
+          WILL happen (cold start, stale trust snapshot). `/api/lite/posts`
+          behind it takes no session and no scoping at all: it is every
+          `feed_visibility='visible'` row in `lumen_post`, newest first,
+          author unfiltered. Called live against this box it returned QA
+          scratch content verbatim — "QA reproduction comment — logout hammer
+          test", "QA ranked-state check 1786143290815.", "Quick toast
+          verification post." — which is exactly the "mock posts" the owner
+          saw, served to a genuinely signed-in reader as a stand-in for their
+          personalised feed. The honest fallback for a degraded rank is the
+          real chain feed already below (trending/chain-page, live-verified as
+          genuine Hive content) plus the `degradedMessage` banner — never an
+          unscoped dump of anyone's unmoderated drafts. Fixing the leak at its
+          source (`/api/lite/posts` has no filter for this) is a different
+          file than the two this fix owns; standing the strip down here closes
+          the reachable path without touching ranking behaviour. */}
 
       {degradedMessage ? (
         <p className="mb-4 rounded-[9px] bg-[#fdf6e7] px-3 py-2 font-sans text-[12.5px] text-[#9a7b2e]">
@@ -168,9 +190,7 @@ function ForYouFeed({ enabled }: { enabled: boolean }) {
       {entries.length === 0 ? (
         <p className="py-12 text-center font-sans text-sm text-muted-foreground">{LABELS.empty}</p>
       ) : (
-        entries.map((entry) => (
-          <MediumPostCard key={`${entry.author}-${entry.permlink}`} post={entry} />
-        ))
+        entries.map((entry) => <MediumPostCard key={`${entry.author}-${entry.permlink}`} post={entry} />)
       )}
 
       {/* The sentinel: scrolling it into view fetches the next page. */}
@@ -236,26 +256,27 @@ const LITE_FOLLOWING_LIMIT = 30;
 
 function EntryFeed({ sort, observer, lite = false }: { sort: string; observer: string; lite?: boolean }) {
   const { ref, inView } = useInView();
-  const { data, isFetching, isFetchingNextPage, fetchNextPage, hasNextPage, isError, isLoading } = useInfiniteQuery({
-    queryKey: ['discoveryFeedEntries', sort, observer, lite],
-    queryFn: async ({ pageParam }) => {
-      if (lite) return await fetchLiteFollowing(LITE_FOLLOWING_LIMIT);
-      const { author, permlink } = (pageParam as { author?: string; permlink?: string }) || {};
-      const postsData = await getAccountPosts(sort, observer, observer, author ?? '', permlink ?? '');
-      return postsData ?? [];
-    },
-    getNextPageParam: (lastPage: Entry[]) => {
-      // The lite route returns one merged page today; paging it would have to
-      // page two stores at once, and offering a "load more" that silently
-      // repeats the same page is worse than not offering one.
-      if (lite) return undefined;
-      if (!Array.isArray(lastPage) || lastPage.length === 0) return undefined;
-      const last = lastPage[lastPage.length - 1] as { author?: string; permlink?: string };
-      if (!last?.author || !last?.permlink) return undefined;
-      return { author: last.author, permlink: last.permlink };
-    },
-    staleTime: StaleTime.MEDIUM
-  });
+  const { data, isFetching, isFetchingNextPage, fetchNextPage, hasNextPage, isError, isLoading } =
+    useInfiniteQuery({
+      queryKey: ['discoveryFeedEntries', sort, observer, lite],
+      queryFn: async ({ pageParam }) => {
+        if (lite) return await fetchLiteFollowing(LITE_FOLLOWING_LIMIT);
+        const { author, permlink } = (pageParam as { author?: string; permlink?: string }) || {};
+        const postsData = await getAccountPosts(sort, observer, observer, author ?? '', permlink ?? '');
+        return postsData ?? [];
+      },
+      getNextPageParam: (lastPage: Entry[]) => {
+        // The lite route returns one merged page today; paging it would have to
+        // page two stores at once, and offering a "load more" that silently
+        // repeats the same page is worse than not offering one.
+        if (lite) return undefined;
+        if (!Array.isArray(lastPage) || lastPage.length === 0) return undefined;
+        const last = lastPage[lastPage.length - 1] as { author?: string; permlink?: string };
+        if (!last?.author || !last?.permlink) return undefined;
+        return { author: last.author, permlink: last.permlink };
+      },
+      staleTime: StaleTime.MEDIUM
+    });
 
   useEffect(() => {
     if (inView && hasNextPage && !isFetching) {
@@ -271,7 +292,8 @@ function EntryFeed({ sort, observer, lite = false }: { sort: string; observer: s
     return <PostListSkeleton count={5} />;
   }
 
-  const entries = data?.pages.flat() ?? [];
+  // Same NSFW list-level filter as the ranked feed above (see lib/nsfw.ts).
+  const entries = useVisiblePosts(data?.pages.flat() ?? []);
 
   if (entries.length === 0) {
     return <p className="py-12 text-center font-sans text-sm text-muted-foreground">{LABELS.empty}</p>;
@@ -331,6 +353,8 @@ export default function FeedTabs() {
   const [activeTab, setActiveTab] = useState<TabKey>(() => toTabKey(searchParams?.get(TAB_PARAM) ?? null));
   const { user, isHydrated } = useUserClient();
   const loggedIn = isHydrated && user.isLoggedIn;
+  // Bumped by the "Tune your feed" control; the picker opens on any change.
+  const [interestsSignal, setInterestsSignal] = useState(0);
   // NOTE: the SSR observer resolution that used to live here went with the
   // trending For You feed. The ranked route resolves the viewer from the SESSION
   // server-side (a client-supplied viewer would let anyone request anyone else's
@@ -357,21 +381,29 @@ export default function FeedTabs() {
 
   return (
     <div>
-      {/* Post-login onboarding: renders only for a lite account that has never
-          been asked. Self-gating, so mounting it here costs a logged-out or
-          full-Hive visitor nothing. */}
-      <InterestPicker />
+      {/* Post-login onboarding for BOTH tiers — lite and Hive alike (2026-08-08;
+          it used to refuse Hive accounts outright). Self-gating: it asks the
+          server whether this reader is eligible, unasked, and has written
+          nothing yet, so mounting it here costs a logged-out visitor nothing.
+          `interestsSignal` is the manual door from the rail, for everyone the
+          automatic rule deliberately never interrupts. */}
+      <InterestPicker openSignal={interestsSignal} />
       <div
         role="tablist"
-        /* ★ At 390px the three labels are wider than the viewport, and every
-           ancestor had `overflow-x: visible`, so "Prediction Market" was simply
-           cut off at the screen edge with nothing to scroll — worse once
-           selected, because the active state is wider still. Measured by a
-           small-screen tester: tab bar right edge at 416px against a 390px
-           viewport. `max-w-full` + `overflow-x-auto` lets the row scroll
-           itself; `w-fit` keeps it hugging its content at every larger size,
-           where it already fit (820px: 674px against 820). */
-        className="mb-5 inline-flex w-fit max-w-full gap-1.5 overflow-x-auto rounded-[14px] border border-[#ebedf0] bg-[#f4f5f7] p-[5px] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        /* ★ WRAP, DON'T HIDE (2026-08-08). At 390px the three labels are wider
+           than the viewport. A previous pass contained that with
+           `overflow-x-auto` plus `[scrollbar-width:none]` and a hidden WebKit
+           scrollbar — which meant "Prediction Market" rendered as "Prediction
+           Mar…" with NOTHING on screen indicating there was more to reach: the
+           one affordance that would have said "this scrolls" had been styled
+           away, and the tab was the third of three, so nobody arriving on the
+           default tab had any reason to swipe.
+
+           Three tabs are few enough to simply fit on two lines, so they do.
+           `w-fit` + `max-w-full` still hug the content at every larger width,
+           where all three sit on one row exactly as before (820px: 674px of
+           tabs in 820px of viewport — no wrap, no visual change). */
+        className="mb-5 inline-flex w-fit max-w-full flex-wrap gap-1.5 rounded-[14px] border border-[#ebedf0] bg-[#f4f5f7] p-[5px]"
       >
         <TabButton isActive={activeTab === 'for-you'} onClick={() => selectTab('for-you')}>
           {LABELS.forYou}
@@ -384,6 +416,24 @@ export default function FeedTabs() {
         </TabButton>
       </div>
 
+      {/* ★ THE SECOND DOOR TO THE INTEREST PICKER (2026-08-08).
+          The picker itself introduces itself exactly once, to a reader who has
+          written nothing. That is right for onboarding and useless for everyone
+          else: without this, anyone who already posts here — every Hive account
+          with a history, and every lite reader past their first evening — had NO
+          WAY to tell Lumen what they are into, and no way to change their mind
+          later. Sits beside the tabs rather than in settings because it belongs
+          next to the thing it changes. */}
+      {loggedIn && activeTab === 'for-you' ? (
+        <button
+          type="button"
+          onClick={() => setInterestsSignal((n) => n + 1)}
+          className="mb-4 ml-1 font-sans text-[13px] font-semibold text-[#6b7280] underline-offset-4 transition-colors hover:text-[#c0392b] hover:underline"
+        >
+          Tune your feed
+        </button>
+      ) : null}
+
       {activeTab === 'predictions' ? (
         <MarketTab />
       ) : activeTab === 'feed' ? (
@@ -395,7 +445,7 @@ export default function FeedTabs() {
           </div>
         )
       ) : (
-        <ForYouFeed enabled={loggedIn} />
+        <ForYouFeed />
       )}
     </div>
   );

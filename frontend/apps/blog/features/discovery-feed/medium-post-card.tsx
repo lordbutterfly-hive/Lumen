@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { Link } from '@hive/ui';
 import { useTranslation } from '@/blog/i18n/client';
 import { useLiteOverlay } from '@/blog/lib/lite/client/use-lite-overlay';
@@ -19,13 +20,16 @@ import PostCardCommentTooltip from '@/blog/features/list-of-posts/post-card-comm
 import PostCardUpvotesTooltip from '@/blog/features/list-of-posts/post-card-upvotes-tooltip';
 import DetailsCardHover from '@/blog/features/list-of-posts/details-card-hover';
 import { Entry } from '@hive/common-hiveio-packages/wax';
-import { LeagueByline } from '@/blog/features/retention/components/league-byline';
-import { bylineTierFromReputation } from '@/blog/features/retention/lib/compute-league';
+import { isNsfwPost, useNsfwPreference } from '@/blog/lib/nsfw';
 
 // TODO: move to i18n
 const LABELS = {
   in: 'in',
-  reblog: 'Reblog'
+  reblog: 'Reblog',
+  nsfwBadge: 'NSFW',
+  nsfwNote: 'This post is marked NSFW.',
+  nsfwReveal: 'Show anyway',
+  nsfwHide: 'Hide again'
 };
 
 /**
@@ -47,6 +51,20 @@ export default function MediumPostCard({ post }: { post: Entry }) {
   const liteOverlay = useLiteOverlay(post);
   const displayAuthor = liteOverlay?.author ?? post.author;
   const displayTitle = liteOverlay?.title || post.title;
+
+  // ★ NSFW GATE (2026-08-09) — see lib/nsfw.ts for why this lives here at all.
+  // Every hook runs before the `hide` early-return below, so hook order stays
+  // stable across renders of the same list even as the preference changes.
+  const isNsfw = isNsfwPost(post);
+  const nsfwPreference = useNsfwPreference();
+  // Mirrors the classic card: the preference only ever applies to a post that
+  // is actually flagged, so an ordinary post is never gated by it.
+  const [revealed, setRevealed] = useState(false);
+  useEffect(() => {
+    // Collapse again if the reader tightens the preference while scrolling.
+    if (nsfwPreference !== 'show') setRevealed(false);
+  }, [nsfwPreference]);
+  const nsfwShown = !isNsfw || nsfwPreference === 'show' || revealed;
 
   const href = `/${post.category}/@${displayAuthor}/${post.permlink}`;
   const dek = getPostSummary(post.json_metadata, post.body);
@@ -77,8 +95,20 @@ export default function MediumPostCard({ post }: { post: Entry }) {
     if (dialogResponse) handleReblog();
   };
 
+  // 'hide' means the reader asked not to see these at all — the classic list
+  // renders nothing for them (`nsfw === 'hide' ? null : ...`) and so does this.
+  if (isNsfw && nsfwPreference === 'hide') return null;
+
   return (
-    <article className="mx-[-18px] rounded-2xl border-b border-[#ebebeb] p-[24px_18px] transition-colors hover:bg-[#faf9f6]">
+    <article
+      // ★ EACH POST IS ITS OWN CARD (owner direction, 2026-08-08). This was a
+      // full-bleed row with a single hairline UNDER it, so posts read as one
+      // continuous column. Now each sits in its own bordered, rounded box — the
+      // same `rounded-[18px] border-[#ebebeb]` card the rest of Lumen already
+      // uses, so this borrows the existing language rather than inventing a
+      // second one. Borders only: type, spacing and colour are untouched.
+      className="mb-4 rounded-[18px] border border-[#ebebeb] bg-white p-[22px] shadow-[0_1px_2px_rgba(20,18,10,0.03)] transition-colors hover:bg-[#fdfcfb]"
+    >
       {/* Reblog provenance line — only present when the underlying query supplies
           it. `EntryFeed` in feed-tabs.tsx fetches the Following tab via
           `bridge.get_account_posts({ sort: 'feed' })` specifically because that
@@ -119,7 +149,17 @@ export default function MediumPostCard({ post }: { post: Entry }) {
         >
           {displayAuthor}
         </Link>
-        <LeagueByline tier={bylineTierFromReputation(post.author_reputation)} className="ml-0.5" />
+        {/* ★ NO BYLINE EMBLEM HERE (owner ruling, 2026-08-08). This rendered
+            `bylineTierFromReputation(post.author_reputation)` — a DIFFERENT
+            function from the one behind the profile's rank — so the same person
+            carried two different ranks in the same session. Proven live:
+            @taskmaster4450 read Beacon in the feed and Torch on his profile;
+            @hivebuzz read Beacon in the feed and Candle on his profile. A rank
+            that contradicts itself is worse than no rank. Also note
+            lib/lite/render/db-post-to-entry.ts sets `author_reputation: 0`, so
+            every lite author was permanently emblem-less on that path anyway.
+            Do not re-add without routing it through the SAME source as the
+            profile (/api/streak/[user] → useRetention). */}
         {post.community && post.community_title ? (
           <>
             {/* ★ A COMMUNITY IS SHOWN AS A TAG (owner ruling, 2026-08-07).
@@ -153,15 +193,74 @@ export default function MediumPostCard({ post }: { post: Entry }) {
               <p className="line-clamp-2 font-serif text-[16.5px] leading-normal text-[#4b5563]">{dek}</p>
             </Link>
           ) : null}
+
+          {/* The flag and the way back out. Rendered in the text column rather
+              than over the thumbnail so it is still there for a flagged post
+              that has no image at all. */}
+          {isNsfw ? (
+            <div
+              className="mt-[10px] flex flex-wrap items-center gap-2 font-sans text-[13px] text-[#6b7280]"
+              data-testid="medium-card-nsfw-notice"
+            >
+              <span className="rounded-[6px] border border-[#c0392b] px-1.5 py-0.5 text-[11.5px] font-semibold uppercase tracking-wide text-[#c0392b]">
+                {LABELS.nsfwBadge}
+              </span>
+              {nsfwPreference === 'show' ? null : (
+                <>
+                  <span>{LABELS.nsfwNote}</span>
+                  <button
+                    type="button"
+                    onClick={() => setRevealed((value) => !value)}
+                    className="font-medium text-[#c0392b] underline-offset-2 hover:underline"
+                    data-testid="medium-card-nsfw-toggle"
+                  >
+                    {revealed ? LABELS.nsfwHide : LABELS.nsfwReveal}
+                  </button>
+                </>
+              )}
+            </div>
+          ) : null}
         </div>
 
-        {thumbnail ? (
+        {!nsfwShown ? (
+          // Deliberately not the `<img>` below: a flagged image must not be
+          // requested at all until the reader asks for it, or the picture has
+          // already been fetched and painted by the time any overlay mounts.
+          <div
+            className="flex h-[132px] w-[190px] items-center justify-center rounded-[14px] border border-dashed border-[#e0dcd4] bg-[#f4f5f7] font-sans text-[12px] font-medium uppercase tracking-wide text-[#9aa1ab]"
+            data-testid="medium-card-nsfw-thumbnail-hidden"
+          >
+            {LABELS.nsfwBadge}
+          </div>
+        ) : thumbnail ? (
           <Link href={href} className="shrink-0" data-testid="medium-card-thumbnail">
             <img
               src={thumbnail}
               alt=""
-              className="h-[132px] w-[190px] rounded-[14px] object-cover"
+              className="h-[132px] w-[190px] rounded-[14px] bg-[#f4f5f7] object-cover"
               loading="lazy"
+              decoding="async"
+              // ★ THE IMAGE PIPELINE IS HEALTHY — measured, 2026-08-08, after a
+              // report that "no post on the feed has an image". It does not hold:
+              // 20 of 20 sampled cards carry a real image (`json_metadata.image[0]`
+              // or the first markdown image), correctly proxied through
+              // images.hive.blog, every request 200 with valid bytes (curl- and
+              // DOM-verified via `naturalWidth`). 12 of 20 paint within 3s with no
+              // scrolling; 20 of 20 paint once actually scrolled near.
+              //
+              // Lazy loading stays. The cards below the fold that look empty are
+              // simply not fetched yet, which is what lazy loading IS — and this
+              // feed scrolls forever, so eager-loading every thumbnail would mean a
+              // reader who scrolls a while pulls down every image they passed. The
+              // apparent emptiness is mostly an OBSERVATION artifact: a full-page
+              // screenshot captures layout without dispatching the scroll events
+              // native lazy-loading waits for, so automation sees grey boxes a human
+              // never does. If a real reader still sees an imageless feed, look at
+              // WHICH posts are in it (QA/test posts genuinely have no image), not
+              // at this element.
+              onError={(e) => {
+                e.currentTarget.style.visibility = 'hidden';
+              }}
             />
           </Link>
         ) : (
@@ -180,7 +279,12 @@ export default function MediumPostCard({ post }: { post: Entry }) {
             lifted here (21px) rather than in the shared component — the classic
             feed keeps its own scale. The count's chevron is suppressed: next to a
             live up/down pair a third arrow glyph is noise, not information. */}
-        <div className="flex items-center gap-1 rounded-[11px] bg-[#f6f7f8] px-2.5 py-1.5 [&_svg]:h-[21px] [&_svg]:w-[21px]">
+        {/* ★ NO PILL INSIDE THE CARD (2026-08-08). The vote controls sat in their
+            own grey rounded box, which read as a card inside a card once each
+            post got its own border. The vote count keeps its weight from type,
+            not from a background. Hover still lights each control, matching the
+            comment and reblog buttons beside it. */}
+        <div className="flex items-center gap-1 rounded-[10px] px-1 py-1.5 [&_svg]:h-[21px] [&_svg]:w-[21px]">
           <VotesComponentWrapper post={post} type="post" />
           {post.stats ? (
             <span className="flex items-center pl-1 font-bold tabular-nums text-[#2a2822]">
@@ -228,7 +332,8 @@ export default function MediumPostCard({ post }: { post: Entry }) {
         <DetailsCardHover post={post} decline={payoutDeclined}>
           <span
             className={cn(
-              'ml-auto flex items-center rounded-[10px] bg-[#e9f5ee] px-[13px] py-[6px] text-sm font-bold text-[#2f7d4f] transition-colors hover:cursor-pointer',
+              // Plain green figure, no chip — same reasoning as the vote group above.
+              'ml-auto flex items-center rounded-[10px] px-[6px] py-[6px] text-sm font-bold text-[#2f7d4f] transition-colors hover:cursor-pointer',
               payoutDeclined && 'bg-transparent text-muted-foreground line-through'
             )}
             data-testid="medium-card-payout"

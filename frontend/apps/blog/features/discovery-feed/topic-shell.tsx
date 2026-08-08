@@ -6,6 +6,7 @@ import { useInView } from 'react-intersection-observer';
 import LeftRail from '@/blog/features/layouts/left-rail';
 import RightRail from '@/blog/features/layouts/right-rail';
 import MediumPostCard from './medium-post-card';
+import { useVisiblePosts } from '@/blog/lib/nsfw';
 import { PostListSkeleton } from '@hive/ui';
 import { Entry } from '@hive/common-hiveio-packages/wax';
 import { StaleTime } from '@/blog/lib/react-query';
@@ -66,7 +67,7 @@ export default function TopicShell({ tag }: { tag: string }) {
   }, [inView, hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   const seen = new Set<string>();
-  const entries = (data?.pages ?? [])
+  const rawEntries = (data?.pages ?? [])
     .flatMap((page) => page?.entries ?? [])
     .filter((e) => {
       const key = `${e.author}/${e.permlink}`;
@@ -74,6 +75,11 @@ export default function TopicShell({ tag }: { tag: string }) {
       seen.add(key);
       return true;
     });
+  // NSFW `hide` filtering happens at the LIST so entries.length means "posts you
+  // will actually see" — otherwise a fully-hidden page leaves a zero-height list
+  // and the scroll sentinel auto-fetches forever. See lib/nsfw.ts.
+  const entries = useVisiblePosts(rawEntries);
+
   const ranked = data?.pages?.[0]?.source === 'recsys';
 
   // ★ A COMMUNITY ID IS NOT A READABLE TOPIC (owner ruling, 2026-08-07).
@@ -103,9 +109,9 @@ export default function TopicShell({ tag }: { tag: string }) {
             #c0392b accent — because the whole point of this page is that a topic
             is the feed, not a second product. The only new idea is the oversized
             hairline "#", which anchors the eye without adding a colour or a font. */}
-        <header className="relative mb-7 overflow-hidden rounded-[20px] border border-[#efeae6] bg-[radial-gradient(120%_120%_at_0%_0%,#fdf1ee_0%,#fffdfc_58%)] px-7 pb-6 pt-7">
+        <header className="relative mb-7 overflow-hidden rounded-[20px] border border-[#eee2dc] bg-[radial-gradient(125%_130%_at_0%_0%,#f7c9bd_0%,#fbdfd6_30%,#fdefe9_58%,#fffdfc_85%)] px-7 pb-6 pt-7">
           <span
-            className="pointer-events-none absolute -right-3 -top-8 select-none font-serif text-[130px] leading-none text-[#c0392b]/[0.06]"
+            className="pointer-events-none absolute -right-2 -top-9 select-none font-serif text-[146px] leading-none text-[#c0392b]/[0.26]"
             aria-hidden
           >
             #
