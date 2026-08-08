@@ -1,5 +1,6 @@
 'use client';
 
+import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, Skeleton } from '@hive/ui';
 import { cn } from '@ui/lib/utils';
@@ -8,6 +9,8 @@ import { StaleTime } from '@/blog/lib/react-query';
 import { useTranslation } from '@/blog/i18n/client';
 
 const MAX_TOPICS = 9;
+// Sample from a wider slice so the card is not the same nine words every visit.
+const TOPIC_POOL = 40;
 // get_trending_tags can include the blank root tag and a handful of
 // moderation/system tags that aren't meaningful as a "browse by topic" link.
 const EXCLUDED_TAGS = new Set(['', 'nsfw', 'test']);
@@ -65,10 +68,25 @@ const Topics = () => {
     staleTime: StaleTime.LONG
   });
 
-  const topics = (tags ?? [])
-    .filter((tag) => isBrowsableTopic(tag.name))
-    .slice(0, MAX_TOPICS)
-    .map((tag) => tag.name);
+  // ★ RANDOMISED FROM A WIDE POOL (2026-08-07). Taking the top 9 of a trending
+  // list meant the same nine words sat there every visit, for every reader, for
+  // as long as those tags trended — a browse-by-topic card that never offers
+  // anything new is decoration. We now sample 9 out of the top ~40 browsable
+  // topics, so the card turns over between visits and surfaces the long tail
+  // instead of only the head.
+  //
+  // Seeded per mount rather than per render: re-shuffling on every re-render
+  // would make the tags jump under the reader's cursor.
+  const pool = (tags ?? []).filter((tag) => isBrowsableTopic(tag.name)).slice(0, TOPIC_POOL);
+  const topics = useMemo(() => {
+    const names = pool.map((tag) => tag.name);
+    for (let i = names.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [names[i], names[j]] = [names[j], names[i]];
+    }
+    return names.slice(0, MAX_TOPICS);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pool.length, pool[0]?.name]);
 
   return (
     <section data-testid="right-rail-topics">
@@ -92,11 +110,15 @@ const Topics = () => {
           {topics.map((topic) => (
             <li key={topic}>
               <Link
-                href={`/trending/${topic}`}
+                href={`/topics/${topic}`}
                 className={cn(
-                  'inline-flex items-center rounded-full border border-[#e4e6e9] px-3 py-1 text-xs capitalize text-[#4b5563] transition-colors hover:border-[#c0392b] hover:text-[#c0392b]'
+                  'inline-flex items-center gap-0.5 rounded-full border border-[#ececec] bg-[#faf9f7] px-[11px] py-[5px] text-[12.5px] font-medium capitalize text-[#4b5563] transition-colors',
+                  'hover:border-[#c0392b] hover:bg-[#fdf2f0] hover:text-[#c0392b]'
                 )}
               >
+                <span className="text-[#c0392b]/60" aria-hidden>
+                  #
+                </span>
                 {topic}
               </Link>
             </li>

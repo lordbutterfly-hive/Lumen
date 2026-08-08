@@ -410,9 +410,23 @@ const CreatorStudio: FC = () => {
         <div className="mx-auto max-w-[560px] pt-16 text-center">
           <h1 className="font-serif text-3xl font-semibold text-[#161511]">Creator studio</h1>
           <p className="mt-3 font-serif text-[15px] leading-[1.6] text-[#6b7280]">
-            This account can’t sign transactions yet, so it can’t run a creator token. Upgrade to a full
-            account first.
+            This account can’t sign transactions yet, so it can’t run a creator token.{' '}
+            <a href="/upgrade" className="font-semibold text-[#c0392b] hover:underline">
+              Upgrade to a full account
+            </a>{' '}
+            to launch one — you can look through the steps first.
           </p>
+          {/* ★ A signed-in lite account used to be worse off here than an anonymous
+              visitor: the signed-out branch below offers a working link to the
+              wizard, while this branch was a dead end with "upgrade" as plain
+              TEXT and no route out of the page (found in live QA, 2026-08-07).
+              Both exits are real links now, matching launch-wizard.tsx:179. */}
+          <a
+            href="/creators/launch"
+            className="mt-6 inline-block rounded-[13px] border border-[#ebebeb] px-6 py-3 text-[15px] font-bold text-[#161511] hover:bg-[#f7f7f5]"
+          >
+            Open the launch wizard
+          </a>
         </div>
       </TokenShell>
     );
@@ -598,6 +612,35 @@ const CreatorStudio: FC = () => {
               follows the market. A price can move at most 2× in any 7 days, and that limit follows the
               SERVICE NAME, so renaming or re-creating one won’t reset it.
             </p>
+            {/* ★ THE BASE PRICE, EDITABLE (2026-08-07).
+                `face` is the price of the default "Ask a question" service, and
+                with no named offerings it is the ONLY price a buyer ever sees —
+                yet the studio exposed every named price and never this one, so a
+                creator was permanently stuck with whatever they launched at. The
+                contract, the client and the tests all supported changing it; only
+                the screen did not. Same control and same 2x/7d band as the rows
+                below, so there is one way to price something, not two. */}
+            <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-[#e4e6e9] bg-[#fbfbfa] px-4 py-3">
+              <div className="min-w-0">
+                <div className="text-[14px] font-semibold text-[#161511]">Default ask price</div>
+                <div className="text-[12px] text-[#9ca3af]">
+                  {studio.offerings.length === 0
+                    ? 'Shown on your token page as “Ask a question”. This is the only price buyers see until you add a named service.'
+                    : 'Used for “Ask a question”, alongside the named services below.'}
+                </div>
+              </div>
+              <div className="flex flex-shrink-0 items-center rounded-[10px] border border-[#e4e6e9] px-3 py-2 focus-within:border-[#c0392b] focus-within:ring-1 focus-within:ring-[#c0392b]">
+                <span className="font-bold text-[#9ca3af]">$</span>
+                <PriceInput
+                  value={market.basePriceUsd}
+                  // Returns the promise (not a void wrapper) so PriceInput can
+                  // revert the field when the chain refuses — same contract the
+                  // named-offering rows below use.
+                  onCommit={(usd) => studio.setFace(usd)}
+                />
+              </div>
+            </div>
+
             <div className="flex flex-col gap-3">
               {studio.offerings.length === 0 ? (
                 <p className="rounded-xl border border-dashed border-[#e4e6e9] px-4 py-5 text-center text-[13px] text-[#9ca3af]">

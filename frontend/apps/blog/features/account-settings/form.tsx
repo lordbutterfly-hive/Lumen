@@ -246,7 +246,11 @@ const SettingsForm = ({ username }: { username: string }) => {
           <div>
             <Label htmlFor="about">{t('settings_page.profile_about')}</Label>
             <Input
-              type="email"
+              // ★ A BIO IS NOT AN EMAIL ADDRESS (2026-08-07). This was
+              // `type="email"`, so a normal sentence tripped the browser's own
+              // validity check ("Please include an '@'…") and phones offered an
+              // email keyboard for a free-text bio.
+              type="text"
               id="about"
               name="about"
               value={settings.about}

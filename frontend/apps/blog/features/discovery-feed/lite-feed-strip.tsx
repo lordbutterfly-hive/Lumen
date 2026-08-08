@@ -32,10 +32,20 @@ function LitePostCard({ entry }: { entry: Entry }) {
   const dek = getPostSummary(entry.json_metadata, entry.body);
   const image = typeof entry.json_metadata?.image === 'string' ? entry.json_metadata.image : '';
   const initial = (entry.author?.[0] ?? 'L').toUpperCase();
-  // A lite post gets a real Hive URL only once broadcast (permlink stops being the
-  // local `lite-<id>` placeholder). Link then; render non-interactive until then,
-  // so it's never a dead click target.
+  // ★ ALWAYS CLICKABLE (2026-08-07). This used to render a pending post as an
+  // inert block, on the theory that a not-yet-broadcast post has no destination.
+  // It does: `/blog/@<author>/<lite-permlink>` renders the post for ANY viewer —
+  // author or stranger, signed in or out — and says honestly "Saved and visible
+  // on Lumen. It will appear on Hive shortly." Verified live.
+  //
+  // So the guard was protecting against a problem that no longer exists, and its
+  // cost was severe: the owner opened the app, found a feed of posts that could
+  // not be clicked, and reasonably concluded the product was broken. A pending
+  // post now links to its own page like any other, and says it is pending.
   const published = !entry.permlink.startsWith('lite-');
+  const href = published
+    ? `/${entry.category}/@${entry.author}/${entry.permlink}`
+    : `/blog/@${entry.author}/${entry.permlink}`;
   const body = (
     <>
       <div className="mb-2 flex items-center gap-2 font-sans text-sm">
@@ -54,11 +64,16 @@ function LitePostCard({ entry }: { entry: Entry }) {
     </>
   );
   return published ? (
-    <Link href={`/${entry.category}/@${entry.author}/${entry.permlink}`} className="block border-b border-[#ececec] py-8 transition-colors hover:bg-[#faf9f7]">
+    <Link href={href} className="block border-b border-[#ececec] py-8 transition-colors hover:bg-[#faf9f7]">
       {body}
     </Link>
   ) : (
-    <article className="border-b border-[#ececec] py-8">{body}</article>
+    // Pending: still a real link, with the state said out loud rather than
+    // expressed as "nothing happens when you click".
+    <Link href={href} className="block border-b border-[#ececec] py-8 transition-colors hover:bg-[#faf9f7]">
+      {body}
+      <p className="mt-2 text-[12px] text-[#9a7b2e]">Publishing to Hive — visible on Lumen now.</p>
+    </Link>
   );
 }
 

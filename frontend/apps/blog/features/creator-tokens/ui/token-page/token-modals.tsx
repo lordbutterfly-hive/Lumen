@@ -148,8 +148,9 @@ const BuyModal: FC<{
           Includes a 10% trade fee (5% to @{m.handle}, 5% to Lumen).
         </div>
         <p className="mb-3.5 font-serif text-[12.5px] leading-[1.55] text-[#9ca3af]">
-          This token’s price floats. The floor ({usdPrice(m.floorUsd)}) is the least you’re guaranteed back;
-          sell soon after buying and an early-exit fee applies.
+          This token’s price floats and you can lose money. The floor ({usdPrice(m.floorUsd)}) is what the reserve would
+          pay out per token if the market wound down — not a price you can sell at on demand. Sell soon after buying and
+          an early-exit fee applies on top of the trade fee.
         </p>
         <button
           onClick={async () => {
@@ -615,7 +616,7 @@ const InterstitialModal: FC<{ handle: string; onClose: () => void }> = ({ onClos
         {[
           'This is a real token whose price goes up and down.',
           'If you buy from the market above the floor, you can get back less than you paid.',
-          'The floor is the least you’re guaranteed back, shown next to the price.',
+          'The floor, shown next to the price, is what the reserve would pay out per token if the market wound down — not a price you can always sell at.',
           'Selling soon after buying has an early-exit fee that fades to zero over 6 weeks.'
         ].map((line, i) => (
           <p key={i} className="font-serif text-[14px] leading-[1.55] text-[#3f4650]">

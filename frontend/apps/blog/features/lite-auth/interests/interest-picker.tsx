@@ -110,7 +110,24 @@ const InterestPicker: FC = () => {
     <Dialog open={open} onOpenChange={(v) => { if (!v && !saving) setOpen(false); }}>
       <DialogContentBare
         className="max-h-[88vh] w-[min(680px,94vw)] overflow-y-auto rounded-[16px] bg-white p-7 shadow-xl"
-        onInteractOutside={(e) => e.preventDefault()}
+        // ★ CLICKING AWAY MUST DISMISS IT (2026-08-07).
+        //
+        // This was `onInteractOutside={(e) => e.preventDefault()}` — a modal that
+        // could only be closed by finding its own button. A Radix modal also sets
+        // `pointer-events: none` on the whole page and lays a full-screen overlay
+        // over it, so until the reader found that button EVERY post, link and vote
+        // control in the app was dead to the touch.
+        //
+        // Measured: on first sign-in the overlay is up, `document.body` has
+        // pointer-events:none, and a click on any post is swallowed. The owner hit
+        // exactly this and reasonably concluded the product was broken. Several QA
+        // testers dismissed it as onboarding noise and never realised it was the
+        // cause of the "nothing is clickable" reports.
+        //
+        // The picker still matters — those choices feed the ranker — so it still
+        // appears. It just no longer holds the app hostage. Only an in-flight save
+        // blocks dismissal, because interrupting that would lose the answer.
+        onInteractOutside={(e) => { if (saving) e.preventDefault(); }}
         onEscapeKeyDown={(e) => { if (saving) e.preventDefault(); }}
       >
         {saving ? (

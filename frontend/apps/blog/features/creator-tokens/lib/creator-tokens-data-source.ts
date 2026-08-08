@@ -161,6 +161,13 @@ export interface CreatorTokensConfig {
   gqlUrl: string;
   indexerUrl?: string;
   rcLimit?: number;
+  /**
+   * The Hive L1 this feature's WRITES must be broadcast to. Set both, or
+   * neither — see lib/vsc/hive-chain.ts for why writes were previously landing
+   * on a different network from the one the contract lives on.
+   */
+  hiveApi?: string;
+  hiveChainId?: string;
 }
 
 function readEnv(key: string): string | undefined {
@@ -184,7 +191,9 @@ export function getCreatorTokensConfig(): CreatorTokensConfig | null {
     netId,
     gqlUrl: gqlUrl.replace(/\/+$/, ''),
     indexerUrl: readEnv('CREATOR_TOKENS_INDEXER_URL')?.replace(/\/+$/, ''),
-    rcLimit
+    rcLimit,
+    hiveApi: readEnv('CREATOR_TOKENS_HIVE_API')?.replace(/\/+$/, ''),
+    hiveChainId: readEnv('CREATOR_TOKENS_HIVE_CHAIN_ID')
   };
 }
 

@@ -42,6 +42,18 @@ function askReference(question: string): string {
   return `ask-${(h >>> 0).toString(36)}`;
 }
 
+/**
+ * Who has been shown the "before you trade" warning, for which market.
+ *
+ * ★ Keyed by VIEWER as well as handle (2026-08-07). It used to be handle-only,
+ * so after one account dismissed the warning, a genuinely different account
+ * signing in on the same tab never saw it at all — a risk disclosure silently
+ * inherited by someone who never read it.
+ */
+function interstitialKey(handle: string, viewer: string | null): string {
+  return `lumen-token-inter-${viewer ?? 'anon'}-${handle}`;
+}
+
 function avatarFill(handle: string): string {
   let h = 0;
   for (let i = 0; i < handle.length; i++) h = (h * 31 + handle.charCodeAt(i)) % 360;
@@ -51,7 +63,7 @@ function avatarFill(handle: string): string {
 const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
   const live = useLiveTokenMarket(handle);
   const { market, status } = live;
-  const { following, toggle: toggleFollow } = useCreatorFollow(handle);
+  const { following, busy: followBusy, available: followAvailable, toggle: toggleFollow } = useCreatorFollow(handle);
   const [dialog, setDialog] = useState<TokenDialog>(null);
   const [service, setService] = useState<Service | null>(null);
   const searchParams = useSearchParams();
@@ -65,6 +77,24 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
       ? 'This account has no Hive keys yet, so it can’t sign a transaction. Upgrade to a full account to trade.'
       : null;
   const writesBlocked = writeBlockedReason !== null;
+  // ★ The way OUT of the gate must be clickable (2026-08-07). This page told a
+  // lite reader "Upgrade to a full account to trade" as flat text, right where
+  // they had just formed the intent to trade — while Studio and Wallet both
+  // link to /upgrade. The only working route from here was an unrelated menu
+  // three clicks away, which a reader has no reason to go looking for.
+  const blockedNotice = writeBlockedReason ? (
+    live.isLite ? (
+      <>
+        This account has no Hive keys yet, so it can’t sign a transaction.{' '}
+        <a href="/upgrade" className="font-semibold text-[#c0392b] underline">
+          Upgrade to a full account
+        </a>{' '}
+        to trade.
+      </>
+    ) : (
+      writeBlockedReason
+    )
+  ) : null;
 
   // Set when the interstitial pre-empts a deep-linked action, so the action can
   // run once the reader dismisses it instead of being lost.
@@ -119,7 +149,13 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
   // load, or does not exist, is noise.
   useEffect(() => {
     if (typeof window === 'undefined' || !market) return;
-    const key = `lumen-token-inter-${handle}`;
+    // ★ Not for an account that cannot trade (2026-08-07). The interstitial
+    // explains price risk and the early-exit fee, then the page immediately
+    // tells a signed-out/lite reader they cannot trade at all — a modal to
+    // dismiss about a decision they are not being offered. It fires as soon
+    // as they can actually act (writesBlocked is in the dep list).
+    if (writesBlocked) return;
+    const key = interstitialKey(handle, live.viewer);
     if (!window.sessionStorage.getItem(key)) {
       // ★ DO NOT THROW AWAY WHAT THEY ASKED FOR.
       //
@@ -133,18 +169,29 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
         if (current && current !== 'inter') pendingAction.current = current;
         return 'inter';
       });
-      window.sessionStorage.setItem(key, '1');
+      // ★ NOT marked seen here (2026-08-07). This used to run in the same effect
+      // that OPENS the dialog, so the warning counted as read the instant it
+      // rendered: refreshing while it was still on screen retired it for the
+      // rest of the session, unread. It is marked when the reader dismisses it.
+
     }
     // `market` itself is deliberately NOT a dependency: it is a fresh object on
     // every 30s poll, and depending on it would re-open this dialog over and
     // over. hasMarket is the only thing that actually gates it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [handle, hasMarket]);
+  }, [handle, hasMarket, writesBlocked, live.viewer]);
 
   if (status === 'unavailable') return <MarketUnavailable />;
   if (status === 'loading') return <MarketLoading />;
-  if (status === 'error' || !market) return <MarketReadFailed onRetry={live.retry} />;
+  // ★ ORDER IS LOAD-BEARING (2026-08-07). `missing` MUST be tested before the
+  // `|| !market` guard: on a missing market `market` is null by construction,
+  // so an error-first check swallowed every unlaunched creator and told them
+  // "we couldn't reach the chain" — the exact empty-as-error lie
+  // live/market-states.tsx exists to prevent. Found live against the deployed
+  // testnet contract, where a correct read of an unregistered creator rendered
+  // as a node outage.
   if (status === 'missing') return <MarketMissing handle={handle} />;
+  if (status === 'error' || !market) return <MarketReadFailed onRetry={live.retry} />;
 
   const d = market.delivery;
   const supplyPct = market.cap > 0 ? Math.min(100, Math.round((market.supply / market.cap) * 100)) : 0;
@@ -226,7 +273,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
           {[
             'Buy the creator’s token — the price rises as more is bought.',
             'Spend tokens on their work — a question, a code review, a day of building — priced in dollars.',
-            'As more people buy in, the token can appreciate; the floor is the least you’re guaranteed back.'
+            'As more people buy in, the token can appreciate. The floor is what the reserve would pay out per token if the market wound down — selling on the curve is a separate thing, at the curve’s price.'
           ].map((line, i) => (
             <div key={i} className="flex gap-3">
               <span className="font-serif font-bold text-[#c0392b]">{i + 1}</span>
@@ -257,12 +304,19 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
               both from a fixture. Rendering a made-up one-liner under someone's
               name is the worst kind of fabrication — it reads as their words. */}
         </div>
-        <button
-          onClick={toggleFollow}
-          className={`rounded-[11px] border px-5 py-2.5 text-sm font-semibold ${following ? 'border-[#c0392b] bg-[#fef2f0] text-[#c0392b]' : 'border-[#e4e6e9] bg-white text-[#3f4650] hover:bg-[#f6f7f8]'}`}
-        >
-          {following ? 'Following' : 'Follow'}
-        </button>
+        {/* Only offered to someone who can actually follow, and disabled while the
+            real state is unknown — this button used to be pure browser memory and
+            reported success without doing anything. */}
+        {followAvailable ? (
+          <button
+            onClick={toggleFollow}
+            disabled={followBusy}
+            aria-busy={followBusy}
+            className={`rounded-[11px] border px-5 py-2.5 text-sm font-semibold disabled:opacity-50 ${following ? 'border-[#c0392b] bg-[#fef2f0] text-[#c0392b]' : 'border-[#e4e6e9] bg-white text-[#3f4650] hover:bg-[#f6f7f8]'}`}
+          >
+            {following ? 'Following' : 'Follow'}
+          </button>
+        ) : null}
       </div>
 
       {/* Wind-down banner (design brief ui-prompts/tokens/1-TOKEN-PAGE.md,
@@ -312,7 +366,11 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
           >
             ◆
           </span>
-          <span className="text-[15px] font-bold text-[#161511]">@{market.handle} token</span>
+          {/* ★ A real h1 (2026-08-07). This page had NO heading element at all —
+              every other page in the feature has exactly one — so a screen-reader
+              user navigating by headings had nothing to land on for the single
+              most important screen here. Styling unchanged; only the element is. */}
+          <h1 className="text-[15px] font-bold text-[#161511]">@{market.handle} token</h1>
         </div>
         <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
           <div>
@@ -339,8 +397,13 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
               <div>
                 <div className="mb-0.5 flex items-center gap-1.5 text-xs text-[#6b7280]">
                   Floor
+                  {/* Reachable and announced (2026-08-07): this explainer was a bare
+                      <span title>, so it existed for a mouse and for nobody else. */}
                   <span
-                    title="The least you'd get back if the market wound down — the reserve behind each token. Your honest downside."
+                    role="note"
+                    tabIndex={0}
+                    aria-label="What the floor means: what the reserve would pay out per token if the market wound down. It is not a price you can sell at on demand."
+                    title="What the reserve would pay out per token if the market wound down — not a price you can sell at on demand."
                     className="flex h-3.5 w-3.5 cursor-help items-center justify-center rounded-full bg-[#f1f3f5] text-[9px] text-[#9ca3af]"
                   >
                     ?
@@ -385,7 +448,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
               </button>
             </div>
             {writeBlockedReason ? (
-              <div className="mt-2.5 text-center text-[12.5px] text-[#6b7280]">{writeBlockedReason}</div>
+              <div className="mt-2.5 text-center text-[12.5px] text-[#6b7280]">{blockedNotice}</div>
             ) : null}
           </div>
           <div>
@@ -454,7 +517,16 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
                 {/* The TOKEN LEG only (88% of the posted price) — the other 12% is a
                     separate HBD commission (serviceQuote/ask.go splitFace, USER RULING
                     2026-07-27), never itself paid in tokens. */}
-                <div className="text-xs tabular-nums text-[#9ca3af]">≈ {tok(serviceQuote(sv.usd, market.priceUsd).tokens)} tokens</div>
+                {/* ★ Never render a paid service as costing "0.00 tokens"
+                    (2026-08-07). serviceQuote() returns tokens: 0 whenever it
+                    cannot price — so when the token price was briefly wrong,
+                    a real $25 service advertised itself as free-ish. A price we
+                    do not have must read as absent, never as zero. */}
+                {market.priceUsd > 0 ? (
+                  <div className="text-xs tabular-nums text-[#9ca3af]">≈ {tok(serviceQuote(sv.usd, market.priceUsd).tokens)} tokens</div>
+                ) : (
+                  <div className="text-xs text-[#9ca3af]">token cost unavailable</div>
+                )}
               </div>
               {market.windingDown ? (
                 // ask.go Ask -> RequireInflowOpen: closed for the whole wind-down, the same gate Buy is behind.
@@ -474,6 +546,13 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
             </div>
           ))}
         </div>
+        {/* ★ Visible, not title-only (2026-08-07). The services CTAs carried the
+            same disabled reason as Buy/Sell but ONLY in a `title` tooltip, which
+            never appears on touch and is not announced. Buy/Sell state it in
+            copy; this section now does too. */}
+        {writeBlockedReason ? (
+          <p className="text-[13px] font-semibold text-[#6b7280]">{blockedNotice}</p>
+        ) : null}
         <p className="font-serif text-[13px] leading-[1.55] text-[#6b7280]">
           Prices are set in dollars — the total you’ll pay. 12% goes to Lumen as a separate platform commission, paid in
           HBD; the rest is spent in tokens, and as the token’s price rises a service costs fewer of them.
@@ -517,8 +596,10 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
 
       {/* 6. Honest note */}
       <p className="font-serif text-[12.5px] leading-[1.6] text-[#9ca3af]">
-        This token’s price floats — it can go up or down. The floor above is the least you’re guaranteed back. If you sell
-        soon after buying, an early-exit fee applies (it fades to zero over 6 weeks).
+        This token’s price floats — it can go up or down, and you can lose money. Every trade pays a 10% fee (5% to the
+        creator, 5% to Lumen), and selling soon after buying adds an early-exit fee on top, which fades to zero over 6
+        weeks. The floor above is what the reserve would pay out per token if the market wound down — it is not a price
+        you can sell at on demand.
       </p>
 
       <TokenModals
@@ -539,6 +620,16 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
         }
         onTransfer={(to, tokens) => live.transfer(to, tokens)}
         onClose={() => {
+          // The risk warning counts as read only once it is dismissed — see the
+          // interstitial effect above for why it is not marked on render.
+          if (dialog === 'inter' && typeof window !== 'undefined') {
+            try {
+              window.sessionStorage.setItem(interstitialKey(handle, live.viewer), '1');
+            } catch {
+              // Storage blocked (private mode): showing the warning again is the
+              // safe failure, so swallow and carry on.
+            }
+          }
           // Hand back the action the interstitial interrupted, if any.
           const queued = pendingAction.current;
           pendingAction.current = null;

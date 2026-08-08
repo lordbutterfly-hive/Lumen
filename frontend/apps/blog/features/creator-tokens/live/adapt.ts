@@ -83,6 +83,16 @@ export interface LiveTokenMarket {
   /** Non-null = inflows are shut because the creator ignored too many asks. The UI must say so; a dead button with no reason reads as a broken page. */
   delinquentUntilBlock: number | null;
   phase: Market['phase'];
+  /**
+   * The creator's posted BASE price (market.go `face`), in dollars.
+   *
+   * This is the price used for the default "Ask a question" service whenever the
+   * creator has posted no named offerings — i.e. for a brand-new market it is
+   * the ONLY price a buyer ever sees. It was previously not surfaced anywhere in
+   * the studio, so a creator could change every named service's price but never
+   * the one their token launched with (2026-08-07).
+   */
+  basePriceUsd: number;
 }
 
 export interface LiveHolderPosition {
@@ -176,7 +186,7 @@ export function adaptOfferings(offerings: Offering[]): Service[] {
  */
 export function faceAsService(faceHbd: number): Service[] {
   if (!(faceHbd > 0)) return [];
-  return [{ key: '0', name: 'Ask a question', desc: 'One question, answered within your deadline — or your tokens back.', usd: usdFromHbd(faceHbd), status: 'live', cta: 'Ask' }];
+  return [{ key: '0', name: 'Ask a question', desc: 'One question, answered within your deadline. If it is not, you can reclaim your tokens yourself once the deadline and a short grace period have passed. The creator marks the job delivered — your protection afterwards is the rating you leave.', usd: usdFromHbd(faceHbd), status: 'live', cta: 'Ask' }];
 }
 
 /**
@@ -213,6 +223,7 @@ export function adaptMarket(input: {
   return {
     handle: creator,
     priceUsd: usdFromHbd(market.spotPriceHbd),
+    basePriceUsd: usdFromHbd(market.faceHbd),
     floorUsd: usdFromHbd(market.floorPriceHbd),
     marketCapUsd: usdFromHbd(market.spotPriceHbd * market.supplyTokens),
     reserveUsd: usdFromHbd(market.reserveHbd),

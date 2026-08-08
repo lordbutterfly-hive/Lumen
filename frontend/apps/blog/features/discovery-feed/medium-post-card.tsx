@@ -122,11 +122,13 @@ export default function MediumPostCard({ post }: { post: Entry }) {
         <LeagueByline tier={bylineTierFromReputation(post.author_reputation)} className="ml-0.5" />
         {post.community && post.community_title ? (
           <>
+            {/* ★ A COMMUNITY IS SHOWN AS A TAG (owner ruling, 2026-08-07).
+                Lumen has no community PAGES — no moderators, roles or subscribe —
+                so this must never link to the old community layout. But the name
+                is real provenance and a useful way to browse, so it links to that
+                community's TAG FEED: the same Lumen feed, filtered. */}
             <span>{LABELS.in}</span>
-            <Link
-              href={`/trending/${post.community}`}
-              className="font-semibold text-[#c0392b] hover:underline"
-            >
+            <Link href={`/topics/${post.community}`} className="font-semibold text-[#c0392b] hover:underline">
               {post.community_title}
             </Link>
           </>

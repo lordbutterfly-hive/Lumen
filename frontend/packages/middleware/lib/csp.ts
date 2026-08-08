@@ -243,8 +243,14 @@ export function buildCsp(config: CspConfig = {}): string {
     // Images: self + image proxy + data URIs + blob (for image processing/previews)
     // Wallet icons in the connect modal are served from Reown's asset API.
     reownEnabled()
-      ? `img-src 'self' ${imagesHost} data: blob: https://api.web3modal.org`
-      : `img-src 'self' ${imagesHost} data: blob:`,
+      // ★ YouTube thumbnails (2026-08-07). The renderer injects
+      // `<img src="https://img.youtube.com/vi/<id>/hqdefault.jpg">` into every
+      // post body containing a YouTube link, with no fallback — so every such
+      // embed rendered as a broken-image icon and the console filled with CSP
+      // refusals. img.youtube.com serves images only; allowing it here costs
+      // nothing and fixes every video preview in the app.
+      ? `img-src 'self' ${imagesHost} https://img.youtube.com https://i.ytimg.com data: blob: https://api.web3modal.org`
+      : `img-src 'self' ${imagesHost} https://img.youtube.com https://i.ytimg.com data: blob:`,
     // Fonts: self + data URIs (for inline fonts)
     // ★ `fonts.reown.com` — without it the connect modal's own typeface is
     //   blocked and it renders as an empty, unstyled shell.

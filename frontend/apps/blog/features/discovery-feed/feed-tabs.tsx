@@ -54,10 +54,12 @@ function toTabKey(raw: string | null): TabKey {
 
 interface ForYouResponse {
   entries: Entry[];
-  source: 'recsys' | 'trending-fallback';
+  source: 'recsys' | 'trending-fallback' | 'chain-page';
   degraded?: string;
   detail?: string;
   ranked?: number;
+  /** Where the next page starts. Null when Hive has nothing further. */
+  nextCursor?: { author: string; permlink: string } | null;
 }
 
 /**
@@ -67,21 +69,62 @@ interface ForYouResponse {
  * undo the ranking.
  */
 function ForYouFeed({ enabled }: { enabled: boolean }) {
-  const { data, isLoading, isError } = useQuery<ForYouResponse>({
-    queryKey: ['forYouRanked', enabled],
-    queryFn: async () => {
-      const res = await fetch(`/api/feed/for-you?limit=${FOR_YOU_LIMIT}`);
-      if (!res.ok) throw new Error(`for-you ${res.status}`);
-      return (await res.json()) as ForYouResponse;
-    },
-    staleTime: StaleTime.MEDIUM
-  });
+  const { ref, inView } = useInView();
+
+  // ★ INFINITE SCROLL (2026-08-07). This was a single `useQuery` for one page of
+  // 30, on the reasoning that a ranked feed is one scored ORDER with no cursor —
+  // true of recsys, but it left the reader at the end of the world after thirty
+  // posts while every other Hive frontend scrolls indefinitely.
+  //
+  // Page 1 is still the ranking. Every page after it continues down the CHAIN
+  // feed from the last post of the previous page, using the `nextCursor` the API
+  // now returns. Hive caps a single request at 20, so the server pages
+  // underneath as well — the cursor is the only thing the client has to know.
+  const { data, isLoading, isError, fetchNextPage, hasNextPage, isFetchingNextPage } =
+    useInfiniteQuery<ForYouResponse>({
+      queryKey: ['forYouRanked', enabled],
+      queryFn: async ({ pageParam }) => {
+        const cursor = pageParam as { author?: string; permlink?: string } | undefined;
+        const params = new URLSearchParams({ limit: String(FOR_YOU_LIMIT) });
+        if (cursor?.author && cursor?.permlink) {
+          params.set('startAuthor', cursor.author);
+          params.set('startPermlink', cursor.permlink);
+        }
+        const res = await fetch(`/api/feed/for-you?${params.toString()}`);
+        if (!res.ok) throw new Error(`for-you ${res.status}`);
+        return (await res.json()) as ForYouResponse;
+      },
+      getNextPageParam: (lastPage) => {
+        // No cursor, or a page that came back empty, means Hive has nothing
+        // further — stop asking rather than spinning forever at the bottom.
+        if (!lastPage?.nextCursor) return undefined;
+        if (!lastPage.entries || lastPage.entries.length === 0) return undefined;
+        return lastPage.nextCursor;
+      },
+      staleTime: StaleTime.MEDIUM
+    });
+
+  useEffect(() => {
+    if (inView && hasNextPage && !isFetchingNextPage) fetchNextPage();
+  }, [inView, hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   if (isLoading) return <PostListSkeleton count={5} />;
   if (isError || !data) return <NoDataError />;
 
-  const ranked = data.source === 'recsys';
-  const entries = data.entries ?? [];
+  const firstPage = data.pages[0];
+  const ranked = firstPage?.source === 'recsys';
+  // De-duplicate across pages: the ranked first page can legitimately contain a
+  // post the chain pages reach again later, and a feed that repeats itself reads
+  // as broken.
+  const seen = new Set<string>();
+  const entries = data.pages
+    .flatMap((page) => page?.entries ?? [])
+    .filter((e) => {
+      const key = `${e.author}/${e.permlink}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
 
   // ★ BUG FOUND 2026-08-06 (owner report: "for you isnt populated... seems it
   // has mock posts"). Live-verified against the running dev server: an
@@ -97,7 +140,7 @@ function ForYouFeed({ enabled }: { enabled: boolean }) {
   // login state, which can also be stale relative to the session cookie.
   const degradedMessage = ranked
     ? null
-    : data.degraded === 'anonymous'
+    : firstPage?.degraded === 'anonymous'
       ? LABELS.degradedAnonymous
       : LABELS.degraded;
 
@@ -105,8 +148,16 @@ function ForYouFeed({ enabled }: { enabled: boolean }) {
     <div>
       {/* The lite strip is the ONLY place lite posts appear when the ranker is
           not serving. Once it is, lite posts arrive ranked inline and showing
-          them twice is duplication, so the strip stands down. */}
-      {!ranked ? <LiteFeedStrip /> : null}
+          them twice is duplication, so the strip stands down.
+
+          ★ NEVER FOR A SIGNED-OUT VISITOR (2026-08-07). `ranked` is false for
+          EVERY anonymous request by definition — there is no viewer to rank for —
+          so this rendered on every logged-out visit. And the strip is not a feed:
+          `/api/lite/posts` is globally unscoped, returning the ten most recent
+          Lumen posts by ANYONE. On this box that is a wall of QA scratch posts,
+          which is precisely what a first-time visitor saw instead of Hive.
+          A logged-out visitor gets the real trending feed and nothing else. */}
+      {!ranked && enabled ? <LiteFeedStrip /> : null}
 
       {degradedMessage ? (
         <p className="mb-4 rounded-[9px] bg-[#fdf6e7] px-3 py-2 font-sans text-[12.5px] text-[#9a7b2e]">
@@ -121,6 +172,18 @@ function ForYouFeed({ enabled }: { enabled: boolean }) {
           <MediumPostCard key={`${entry.author}-${entry.permlink}`} post={entry} />
         ))
       )}
+
+      {/* The sentinel: scrolling it into view fetches the next page. */}
+      {entries.length > 0 && hasNextPage ? (
+        <div ref={ref} className="py-8 text-center font-sans text-[13px] text-muted-foreground">
+          {isFetchingNextPage ? 'Loading more…' : ''}
+        </div>
+      ) : null}
+      {entries.length > 0 && !hasNextPage ? (
+        <p className="py-8 text-center font-sans text-[13px] text-muted-foreground">
+          That’s everything for now.
+        </p>
+      ) : null}
     </div>
   );
 }

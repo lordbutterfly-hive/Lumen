@@ -1,4 +1,6 @@
 import { transactionService } from '@transaction/index';
+import { getCreatorTokensConfig } from '../creator-tokens-data-source';
+import { getCreatorTokensHiveChain } from './hive-chain';
 import { LoginType, KeyType } from '@smart-signer/types/common';
 import type { CustomJsonOp } from './op-builders';
 import type { Broadcaster } from '../vsc-data-source';
@@ -204,6 +206,41 @@ function assertCanSignWithActiveAuthority(op: CustomJsonOp): void {
 
 export const hiveTransactionBroadcaster: Broadcaster = async (op: CustomJsonOp) => {
   assertCanSignWithActiveAuthority(op);
+
+  // ★ WHICH HIVE CHAIN? (2026-08-07) — see lib/vsc/hive-chain.ts.
+  //
+  // The Magi network this contract lives on is fed by a specific Hive L1. When
+  // that is NOT the L1 the rest of Lumen uses (the deployed case today: contract
+  // on Magi testnet, Lumen's posts on Hive mainnet), a write built on the app's
+  // global chain is signed against the wrong chain id and broadcast to a node no
+  // Magi testnet witness reads — it is accepted by Hive and then silently
+  // ignored forever. Reads were fine, so nothing looked wrong.
+  const config = getCreatorTokensConfig();
+  const override =
+    config?.hiveApi || config?.hiveChainId
+      ? { apiEndpoint: config?.hiveApi ?? '', chainId: config?.hiveChainId ?? '' }
+      : null;
+
+  if (override) {
+    // Build, sign and broadcast on OUR chain. Deliberately not
+    // transactionService.processHiveAppOperation / .broadcastTransaction —
+    // both resolve the app's global chain internally, which is the whole
+    // problem. `signTransaction` is the one piece that IS reusable: it signs
+    // `txBuilder.sigDigest`, a digest this builder derived from this chain's
+    // own id, so the user's existing signer works untouched.
+    const chain = await getCreatorTokensHiveChain(override);
+    const txBuilder = await chain.createTransaction();
+    txBuilder.pushOperation({ custom_json_operation: op });
+    txBuilder.validate();
+    const signature = await transactionService.signTransaction(txBuilder, undefined, REQUIRED_KEY_TYPE);
+    txBuilder.addSignature(signature);
+    await chain.api.network_broadcast_api.broadcast_transaction({
+      max_block_age: -1,
+      trx: txBuilder.toApiJson()
+    });
+    return txBuilder.id;
+  }
+
   const result = await transactionService.processHiveAppOperation(
     (builder) => {
       builder.pushOperation({ custom_json_operation: op });

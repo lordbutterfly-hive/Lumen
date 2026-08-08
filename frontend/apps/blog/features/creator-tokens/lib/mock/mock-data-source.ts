@@ -59,6 +59,7 @@ import {
   reserveCoverageRatio,
   settlementRateBaseUnits,
   spotRateBaseUnits,
+  displayPricePerTokenBaseUnits,
   splitFaceBaseUnits,
   tradeFeeOn,
   type AskRateEstimate
@@ -287,7 +288,7 @@ export class MockCreatorTokensDataSource implements CreatorTokensDataSource {
       canAsk: canFlow,
       retiredAtBlock: seed.retiredAtBlock,
       floorPriceHbd: baseUnitsToHuman(floorPricePerTokenBaseUnits(seed.reserveBaseUnits, seed.supplyTokens)),
-      spotPriceHbd: baseUnitsToHuman(spotRateBaseUnits(seed.supplyTokens)),
+      spotPriceHbd: baseUnitsToHuman(displayPricePerTokenBaseUnits(seed.supplyTokens)),
       reserveCoverage: reserveCoverageRatio(seed.reserveBaseUnits, seed.supplyTokens)
     };
   }

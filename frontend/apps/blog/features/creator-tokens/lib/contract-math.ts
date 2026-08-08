@@ -301,6 +301,45 @@ export function spotRateBaseUnits(supplyTokens: number): number {
 }
 
 /**
+ * The price to SHOW a person: what one token costs them right now.
+ *
+ * ★ WHY THIS IS NOT spotRateBaseUnits (bug found live on testnet, 2026-08-07).
+ * `SpotRate` is an ORACLE input, not a shop price — curve.go's own comment says
+ * it returns 0 at S == 0 so that "an empty market records no observation rather
+ * than a synthetic one", and both of its real feed sites (Buy at S+n, Sell at
+ * pre-trade S) are structurally S >= 1. The token page wired that oracle feed
+ * straight to the headline price, so the one deployed market rendered **$0.00
+ * while a token demonstrably cost 1.000 HBD to buy** — and, downstream, a real
+ * $25 service quoted as "≈ 0.00 tokens".
+ *
+ * The buyer-facing price is the marginal cost of the next token,
+ * Area(S+1) − Area(S) — which is exactly what the Buy path charges, so the
+ * headline and the buy quote now agree BY CONSTRUCTION rather than by
+ * coincidence.
+ *
+ * Computed against the REAL curve.go formulas (Area(S) = base·S +
+ * floor((lin·T(S) + quad·P(S))/den), NOT a naive per-token summation — an
+ * earlier check of this fix used the wrong Area and drew the wrong conclusion):
+ *
+ *     S        buyCost(S,1)   SpotRate(S)   diff
+ *     0        1007           0             1007
+ *     1        1016           1007             9
+ *     10       1087           1079             8
+ *     1000     11513          11500           13
+ *
+ * So this is NOT merely an S == 0 patch: it sits one curve step above SpotRate
+ * at every supply (under 1%). That is deliberate and is the point — SpotRate(S)
+ * is the rate of the token ALREADY minted, while a price rendered above a Buy
+ * button must be the one the buyer is about to be charged.
+ *
+ * Anything that needs the contract's oracle rate (TWAP, settlement) must keep
+ * calling `spotRateBaseUnits` — do not "simplify" one into the other.
+ */
+export function displayPricePerTokenBaseUnits(supplyTokens: number): number {
+  return buyCostBaseUnits(supplyTokens, 1);
+}
+
+/**
  * exittax.go ExitTaxBpsAt: 0 once held >= 6 weeks, else
  * ceil(MaxExitTaxBps·(D−h)/D) — CEIL, and seller-adverse by at most 1 bps.
  */

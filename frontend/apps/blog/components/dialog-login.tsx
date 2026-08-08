@@ -5,7 +5,7 @@ import { Link } from '@hive/ui';
 import { ReactNode, useCallback } from 'react';
 import { Dialog, DialogContent, DialogTrigger, DialogTitle, DialogDescription } from '@ui/components/dialog';
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
-import KeychainSignin from '@/blog/features/lite-auth/login/keychain-signin';
+import LumenLogin from '@/blog/features/lite-auth/login/lumen-login';
 import { siteConfig } from '@ui/config/site';
 import { useTranslation } from '@/blog/i18n/client';
 
@@ -72,8 +72,11 @@ function DialogLogin({ children, redirectTo }: DialogLoginProps) {
             Keychain is inline because it is one field and one click. The three
             LITE methods need the name-pick, CAPTCHA and wallet-connect steps,
             which belong on the full page — the link below goes there. */}
-        <div className="px-6 pb-2 pt-6">
-          <KeychainSignin redirectTo={redirectTo} />
+        {/* ★ The SAME four methods as /login (2026-08-07). This used to render
+            Keychain alone, so the app's most-opened sign-in surface hid Google
+            and both wallet options behind a text link. */}
+        <div className="max-h-[70vh] overflow-y-auto px-6 pb-2 pt-6">
+          <LumenLogin embedded />
         </div>
         {/* THE SIGNUP DOOR. This dialog is opened from ~24 places — the home
             composer, every upvote and reply button, the left rail — and it asks

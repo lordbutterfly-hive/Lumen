@@ -7,6 +7,7 @@ import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { listFolloweesOf } from '@/blog/lib/lite/repositories/follow-repository';
 import { findUserById } from '@/blog/lib/lite/repositories/user-repository';
 import { tagsForInterests } from '@/blog/lib/lite/interests/taxonomy';
+import { getEngagementTotals } from '@/blog/lib/lite/repositories/engagement-repository';
 import { resolveRankedLiteBatch } from '@/blog/lib/lite/repositories/post-repository';
 import { liteConfig } from '@/blog/lib/lite/config';
 import { DEFAULT_OBSERVER } from '@/blog/lib/utils';
@@ -138,6 +139,23 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     ? Math.min(Math.max(Math.trunc(limitParam), 1), MAX_LIMIT)
     : DEFAULT_LIMIT;
 
+  // ★ CURSOR — how the feed scrolls past its first page (2026-08-07).
+  //
+  // The ranked feed is ONE scored order with no natural cursor, so page 1 is the
+  // ranking and every page after it continues down the chain feed from where the
+  // last page ended. That is honest — `source` says which you got — and it is the
+  // only way to keep scrolling: recsys has no page 2 to give.
+  const startAuthor = (req.nextUrl.searchParams.get('startAuthor') ?? '').trim();
+  const startPermlink = (req.nextUrl.searchParams.get('startPermlink') ?? '').trim();
+  const paging = Boolean(startAuthor && startPermlink);
+
+  // ★ TOPIC MODE. `?tag=photography` ranks that ONE subject with the same engine
+  // the main feed uses, so a topic page is the feed filtered — not a different,
+  // older-looking page with its own ordering.
+  const rawTag = (req.nextUrl.searchParams.get('tag') ?? '').trim().toLowerCase();
+  const topic = /^[a-z0-9-]{1,64}$/.test(rawTag) ? rawTag : '';
+
+
   // Identity comes from the SESSION COOKIE, never from a query parameter. A
   // caller-supplied `?viewer=` would let anyone request anyone else's
   // personalised feed — the exact exposure recsys's own bearer auth closed.
@@ -162,15 +180,40 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // this", and for a lite account the honest answer is the anonymous default.
   const chainObserver = viewer && !isLite ? viewer : DEFAULT_OBSERVER;
 
+  if (paging) {
+    // Continuation pages come straight from the chain, in order, from the cursor.
+    try {
+      const posts = await getRankedPaged(
+        topic ? 'created' : 'trending',
+        topic,
+        chainObserver,
+        limit,
+        startAuthor,
+        startPermlink
+      );
+      const onTopic = topic ? posts.filter((e) => hasTopic(e, topic)) : posts;
+      await mergeLumenEngagement(onTopic);
+      const last = onTopic[onTopic.length - 1];
+      return NextResponse.json({
+        entries: onTopic,
+        source: 'chain-page',
+        nextCursor: last ? { author: last.author, permlink: last.permlink } : null
+      });
+    } catch (error) {
+      logger.error(error, 'for-you: cursor page failed');
+      return NextResponse.json({ entries: [], source: 'chain-page', nextCursor: null });
+    }
+  }
+
   if (!getRecsysConfig()) {
-    return fallback(chainObserver, limit, 'unconfigured', 'RECSYS_FEED_URL is not set');
+    return fallback(chainObserver, limit, 'unconfigured', 'RECSYS_FEED_URL is not set', topic);
   }
   if (!viewer) {
     // Logged out: there is no viewer to personalise for, and recsys ranks
     // against a viewer by definition. Trending is the honest answer here, not a
     // degradation — say so distinctly so it does not pollute the alerting signal
     // for a genuinely broken ranker.
-    return fallback(chainObserver, limit, 'anonymous', 'no signed-in viewer to rank for');
+    return fallback(chainObserver, limit, 'anonymous', 'no signed-in viewer to rank for', topic);
   }
 
   // ---- CACHE DECISION, before any upstream work ----
@@ -178,13 +221,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // saving, because serving a viewer the generic feed they had BEFORE telling us
   // what they like would make the picker look broken.
   const forceRefresh = req.nextUrl.searchParams.get('refresh') === '1';
-  const cached = forceRefresh ? undefined : feedCache.get(viewer);
+  // The cache is keyed by viewer alone, so a topic feed must bypass it entirely
+  // — otherwise one topic request would poison the reader's personal feed.
+  const cached = forceRefresh || topic ? undefined : feedCache.get(viewer);
   const age = cached ? Date.now() - cached.at : Infinity;
 
   if (cached && age < FEED_FRESH_MS) {
     return NextResponse.json({
       entries: cached.entries, source: 'recsys', ranked: cached.ranked,
-      served: cached.entries.length, cache: 'fresh'
+      served: cached.entries.length, cache: 'fresh', nextCursor: cursorOf(cached.entries)
     });
   }
   if (cached && age < FEED_STALE_MS) {
@@ -199,18 +244,19 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     }
     return NextResponse.json({
       entries: cached.entries, source: 'recsys', ranked: cached.ranked,
-      served: cached.entries.length, cache: 'stale-revalidating'
+      served: cached.entries.length, cache: 'stale-revalidating', nextCursor: cursorOf(cached.entries)
     });
   }
 
-  const built = await buildFeed(viewer, isLite, limit, chainObserver);
+  const built = await buildFeed(viewer, isLite, limit, chainObserver, topic);
   if (!built) {
-    return fallback(chainObserver, limit, 'unavailable', 'recsys did not return a usable feed');
+    return fallback(chainObserver, limit, 'unavailable', 'recsys did not return a usable feed', topic);
   }
-  feedCachePut(viewer, built.entries, built.ranked);
+  if (!topic) feedCachePut(viewer, built.entries, built.ranked);
   return NextResponse.json({
     entries: built.entries, source: 'recsys', ranked: built.ranked,
-    served: built.entries.length, cache: 'miss'
+    served: built.entries.length, cache: 'miss',
+    nextCursor: cursorOf(built.entries)
   });
 }
 
@@ -222,7 +268,8 @@ async function buildFeed(
   viewer: string,
   isLite: boolean,
   limit: number,
-  chainObserver: string
+  chainObserver: string,
+  topic = ''
 ): Promise<{ entries: Entry[]; ranked: number } | null> {
   // A lite viewer's graph lives only in Lumen's Postgres — recsys cannot look up
   // a ULID on chain. Hand it over, or they are ranked as following nobody.
@@ -259,6 +306,11 @@ async function buildFeed(
   // contain moderated content would silently get a short feed. Worse: a flood
   // of content that is later taken down would shrink everyone's page. Ask for
   // headroom and cut back afterwards.
+  // ★ A TOPIC REQUEST RANKS WITHIN THAT TOPIC. The reader asked for one subject,
+  // so their standing interests must not dilute it — the topic replaces them
+  // rather than joining them.
+  if (topic) tags = [topic];
+
   const overFetch = Math.min(Math.ceil(limit * OVER_FETCH_RATIO), MAX_LIMIT * 2);
   const outcome = await fetchRankedFeed({ viewer, limit: overFetch, follows, tags });
   if (!outcome.ok) return null;
@@ -281,7 +333,32 @@ async function buildFeed(
     );
     hydrated.push(...topUp);
   }
-  const entries = hydrated.slice(0, limit);
+  // ★ TOPIC PAGES CONTAIN ONLY THAT TOPIC (2026-08-07). The ranker biases towards
+  // the tag but still returns other subjects, so keep only genuine members; if
+  // that leaves the page thin, top it up with the newest posts actually carrying
+  // the tag. Ranked-and-on-topic first, then chronological-and-on-topic.
+  let pool = hydrated;
+  if (topic) {
+    pool = hydrated.filter((entry) => hasTopic(entry, topic));
+    if (pool.length < limit) {
+      try {
+        const seen = new Set(pool.map((e) => `${e.author}/${e.permlink}`));
+        const recent = await getRankedPaged('created', topic, chainObserver, limit);
+        for (const post of recent ?? []) {
+          const key = `${post.author}/${post.permlink}`;
+          if (!seen.has(key) && hasTopic(post, topic)) {
+            seen.add(key);
+            pool.push(post);
+          }
+        }
+      } catch (error) {
+        logger.warn('for-you: topic top-up failed for #%s: %o', topic, error);
+      }
+    }
+  }
+
+  const entries = pool.slice(0, limit);
+  await mergeLumenEngagement(entries);
   if (hydrated.length === 0 && outcome.feed.posts.length > 0) {
     // Ranked results that ALL failed to hydrate is not an empty feed — it is a
     // broken one, and serving a blank page would look identical to "nothing new".
@@ -355,23 +432,158 @@ async function hydrate(posts: RecsysPost[], observer: string): Promise<Entry[]> 
   return settled.filter((e): e is Entry => e !== null);
 }
 
+/**
+ * Does this post actually carry the topic?
+ *
+ * ★ A HARD FILTER, NOT A HINT (owner report, 2026-08-07). recsys treats
+ * `explicit_interest_tags` as a ranking SIGNAL — it biases the order towards a
+ * subject but still returns other posts, which is right for a personal feed and
+ * wrong for a topic page. "#photography" must contain photography and nothing
+ * else, so the ranker decides the ORDER and this decides MEMBERSHIP.
+ *
+ * Checks the post's category (the first tag, which is where Hive puts the
+ * primary one) and the tag list in json_metadata.
+ */
+function hasTopic(entry: Entry, topic: string): boolean {
+  if (!topic) return true;
+  const category = String((entry as { category?: string }).category ?? '').toLowerCase();
+  if (category === topic) return true;
+  try {
+    const meta = entry.json_metadata as unknown;
+    const parsed = typeof meta === 'string' ? JSON.parse(meta) : meta;
+    const tags = (parsed as { tags?: unknown })?.tags;
+    if (Array.isArray(tags)) {
+      return tags.some((t) => String(t).toLowerCase() === topic);
+    }
+  } catch {
+    // Malformed metadata is not membership evidence — fall through to false.
+  }
+  return false;
+}
+
+/**
+ * Fetch `want` posts from Hive, paging past its per-request cap.
+ *
+ * ★ 20 IS A PER-REQUEST LIMIT, NOT A CEILING (2026-08-07). `bridge.get_ranked_posts`
+ * asserts `limit = N outside valid range [1:20]`, so a single call can never
+ * return more — but it takes `start_author`/`start_permlink`, which is how every
+ * other Hive frontend scrolls indefinitely. Clamping to 20 stopped the empty-feed
+ * bug and then quietly became its own bug: a reader could scroll for five posts
+ * and hit the end of the internet.
+ *
+ * Each page starts from the last post of the previous one. Hive REPEATS that
+ * boundary post as the first item of the next page, so it is dropped.
+ */
+const HIVE_RANKED_MAX = 20;
+
+async function getRankedPaged(
+  sort: string,
+  tag: string,
+  observer: string,
+  want: number,
+  fromAuthor = '',
+  fromPermlink = ''
+): Promise<Entry[]> {
+  const out: Entry[] = [];
+  let startAuthor = fromAuthor;
+  let startPermlink = fromPermlink;
+
+  while (out.length < want) {
+    const page = await getPostsRanked(
+      sort,
+      tag,
+      startAuthor,
+      startPermlink,
+      observer,
+      Math.min(want - out.length + (startAuthor ? 1 : 0), HIVE_RANKED_MAX)
+    );
+    if (!page || page.length === 0) break;
+    // The cursor post comes back again at the head of the next page.
+    const fresh = startAuthor ? page.slice(1) : page;
+    if (fresh.length === 0) break;
+    out.push(...fresh);
+    const last = page[page.length - 1];
+    if (!last) break;
+    startAuthor = last.author;
+    startPermlink = last.permlink;
+    if (page.length < HIVE_RANKED_MAX) break; // Hive had nothing more to give.
+  }
+  return out.slice(0, want);
+}
+
+/**
+ * Fold Lumen-local votes and reblogs into the counts a card displays.
+ *
+ * ★ The chain does not know about them and never will (a lite vote is
+ * Lumen-local by design), so the tallies a reader sees have to be the sum. This
+ * mutates the entry's own `stats.total_votes` / `reblogs` deliberately: every
+ * surface in the app already renders those two fields, so merging here fixes the
+ * feed, the profile and the post page at once instead of teaching each card about
+ * a second source of truth.
+ */
+async function mergeLumenEngagement(entries: Entry[]): Promise<void> {
+  if (entries.length === 0 || !liteConfig.enabled || !liteConfig.databaseUrl) return;
+  try {
+    const totals = await getEngagementTotals(
+      entries.map((e) => ({ author: e.author, permlink: e.permlink }))
+    );
+    if (totals.size === 0) return;
+    for (const entry of entries) {
+      const extra = totals.get(`${entry.author}/${entry.permlink}`);
+      if (!extra) continue;
+      if (extra.votes > 0 && entry.stats) {
+        entry.stats.total_votes = (entry.stats.total_votes ?? 0) + extra.votes;
+      }
+      if (extra.reblogs > 0) {
+        entry.reblogs = (entry.reblogs ?? 0) + extra.reblogs;
+      }
+    }
+  } catch (error) {
+    // A missing Lumen tally must never blank out a working feed — the chain
+    // numbers alone are still true, just incomplete.
+    logger.warn('for-you: could not merge Lumen engagement counts: %o', error);
+  }
+}
+
+/** The cursor a client uses to ask for the next page: the last post it was given. */
+function cursorOf(entries: Entry[]): { author: string; permlink: string } | null {
+  const last = entries[entries.length - 1];
+  return last ? { author: last.author, permlink: last.permlink } : null;
+}
+
 async function fallback(
   chainObserver: string,
   limit: number,
   reason: string,
-  detail: string
+  detail: string,
+  tag = ''
 ): Promise<NextResponse> {
   try {
     // `chainObserver`, never the raw viewer — see the note at its declaration.
-    const posts = await getPostsRanked('trending', '', '', '', chainObserver, limit);
+    //
+    // ★ For a TOPIC we fall back to `created` (newest first) rather than
+    // `trending`: a topic page that cannot be ranked should at least be current.
+    // Trending within one tag is dominated by a handful of old high-payout posts,
+    // which reads as a dead topic.
+    // ★ HIVE CAPS THIS AT 20 (2026-08-07). `bridge.get_ranked_posts` asserts
+    // `limit = N outside valid range [1:20]` and throws for anything larger —
+    // and the feed asks for 30. The throw was swallowed by the catch below into
+    // an empty 200, so a SIGNED-OUT visitor got "No posts yet" on the home page
+    // while the identical call worked everywhere else in the app (every other
+    // caller happens to ask for <= 20). Proven directly against api.hive.blog:
+    // limit=20 -> 20 posts, limit=30 -> assert_exception.
+    const posts = await getRankedPaged(tag ? 'created' : 'trending', tag, chainObserver, limit);
+    await mergeLumenEngagement(posts);
     return NextResponse.json({
       entries: posts ?? [],
       source: 'trending-fallback',
       degraded: reason,
-      detail
+      detail,
+      nextCursor: cursorOf(posts ?? [])
     });
   } catch (error) {
-    logger.error(error, 'for-you: fallback to trending also failed');
+    // Loud, because an empty feed and a broken feed look identical to a reader.
+    logger.error(error, 'for-you: fallback to trending also failed (limit=%d, tag=%s)', limit, tag || '(none)');
     return NextResponse.json(
       { entries: [], source: 'trending-fallback', degraded: reason, detail },
       { status: 200 }

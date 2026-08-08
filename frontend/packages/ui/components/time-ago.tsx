@@ -20,9 +20,22 @@ const TIME_INTERVALS: [number, Intl.RelativeTimeFormatUnit][] = [
 
 const getTimeAgoString = (date: Date, lang: string = 'en'): string => {
   try {
-    const now = new Date().toLocaleString('en-US', { timeZone: 'UTC' });
+    // ★ EVERY RELATIVE TIME IN THE APP WAS WRONG BY THE VIEWER'S UTC OFFSET
+    // (2026-08-07). The old code did:
+    //
+    //     new Date().toLocaleString('en-US', { timeZone: 'UTC' })
+    //
+    // which produces a NAIVE string like "8/7/2026, 6:31:23 PM" — no timezone
+    // marker at all — and then re-parsed it with `new Date(...)`, which
+    // interprets a naive string in the BROWSER'S LOCAL zone. So "now" was
+    // silently shifted by the local offset: at UTC+2, posts up to two hours old
+    // all rendered "now", and a 21-hour-old post read "19 hours ago".
+    //
+    // `Date.now()` is already an absolute instant. There is nothing to convert:
+    // a timezone only matters when FORMATTING a wall-clock time, never when
+    // subtracting two instants.
     const timestamp = new Date(date).getTime();
-    const diff = Math.floor((new Date(now).getTime() - timestamp) / 1000);
+    const diff = Math.floor((Date.now() - timestamp) / 1000);
 
     if (isNaN(diff)) {
       return 'Invalid date';

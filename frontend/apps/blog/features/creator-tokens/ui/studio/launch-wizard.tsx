@@ -1,11 +1,17 @@
 'use client';
 
-import { FC, useState } from 'react';
+import { FC, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Service } from '../../market/token-detail';
 import { useLiveStudio } from '../../live/use-live-studio';
 import { MarketUnavailable } from '../../live/market-states';
 import { buyQuote } from '../../market/curve';
+import {
+  MIN_FACE_BASE_UNITS,
+  MAX_FACE_BASE_UNITS,
+  MIN_CAP_CREDITS_BASE_UNITS,
+  MAX_CAP_CREDITS_BASE_UNITS
+} from '../../lib/contract-math';
 import { usdWhole } from '../../market/format';
 import TokenShell from '../token-shell';
 import { writeFailureMessage } from '../write-failure';
@@ -13,7 +19,7 @@ import { writeFailureMessage } from '../write-failure';
 const STEPS = ['Account', 'What you offer', 'Supply', 'Launch'];
 
 const SERVICE_TEMPLATE: { key: string; name: string; desc: string; cta: string }[] = [
-  { key: 'ask', name: 'Ask a question', desc: 'One private question, answered within your deadline — or your tokens back.', cta: 'Ask' },
+  { key: 'ask', name: 'Ask a question', desc: 'One question, answered within your deadline. If it is not, the buyer can reclaim their tokens once the deadline and a short grace period have passed.', cta: 'Ask' },
   { key: 'review', name: 'Review my work', desc: 'A written review of a repo, doc or plan.', cta: 'Request' }
 ];
 const CAP_PRESETS = [
@@ -39,7 +45,11 @@ const CAP_PRESETS = [
 function sanitizeMoneyInput(raw: string): string {
   const cleaned = (raw ?? '').replace(/[^\d.]/g, '');
   const [whole, ...rest] = cleaned.split('.');
-  return rest.length ? `${whole}.${rest.join('').slice(0, 2)}` : whole;
+  // ★ THREE decimals, not two (2026-08-07). HBD carries 3dp and the contract's
+  // own minimum posted price is 577 base units = $0.577 — at 2dp a creator
+  // could not type the legal minimum at all; `0.577` silently became `0.57`,
+  // which is BELOW the floor and would be rejected on chain after signing.
+  return rest.length ? `${whole}.${rest.join('').slice(0, 3)}` : whole;
 }
 
 const LaunchWizard: FC = () => {
@@ -58,6 +68,85 @@ const LaunchWizard: FC = () => {
   // buy with no signal anywhere. The launch itself still completed; we hold
   // here instead of navigating away so the creator sees that before leaving.
   const [firstBuySkipped, setFirstBuySkipped] = useState(false);
+
+  // ★ DRAFT PERSISTENCE (2026-08-07, found in live QA). Every field lived in
+  // plain useState with no history entry and no storage, so a refresh, a single
+  // browser Back (which leaves the wizard entirely — there is no per-step URL),
+  // or following the "upgrade to a full account" link and coming back silently
+  // threw away everything the creator had typed, with no warning. That last
+  // path is the cruel one: the wizard TELLS a lite account to go upgrade, and
+  // discards their work when they do.
+  //
+  // sessionStorage, not localStorage: a draft should not outlive the tab.
+  // ★ PER ACCOUNT (2026-08-07, second pass). A single global key meant a second
+  // account signing in on the same tab opened the wizard on the FIRST account's
+  // step, with their prices pre-filled and no indication whose they were. The
+  // interstitial was keyed per viewer in the same fix wave; this was missed.
+  const DRAFT_KEY = `lumen-launch-wizard-draft-${studio.creator ?? 'anon'}`;
+  const [restored, setRestored] = useState(false);
+  useEffect(() => {
+    try {
+      const raw = window.sessionStorage.getItem(DRAFT_KEY);
+      if (raw) {
+        const d = JSON.parse(raw) as { step?: number; prices?: Record<string, string>; cap?: number; firstBuy?: string };
+        if (typeof d.step === 'number') setStep(Math.min(3, Math.max(0, d.step)));
+        if (d.prices && typeof d.prices === 'object') setPrices(d.prices);
+        if (typeof d.cap === 'number') setCap(d.cap);
+        if (typeof d.firstBuy === 'string') setFirstBuy(d.firstBuy);
+      }
+    } catch {
+      // A corrupt or unreadable draft must never block the wizard — start fresh.
+    }
+    setRestored(true);
+    // Re-reads when the signed-in account changes, so a switch loads THAT
+    // account's draft (or a clean wizard) instead of keeping the previous one.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [DRAFT_KEY]);
+  useEffect(() => {
+    // Only write AFTER the restore pass, or the initial defaults would
+    // overwrite a real saved draft before it was ever read back.
+    if (!restored) return;
+    try {
+      window.sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ step, prices, cap, firstBuy }));
+    } catch {
+      // Storage full or blocked (private mode) — persistence is a convenience,
+      // never a precondition for launching.
+    }
+  }, [restored, step, prices, cap, firstBuy, DRAFT_KEY]);
+
+  // ★ RANGE VALIDATION (2026-08-07, found in live QA against the deployed
+  // contract). Before this, the wizard had NO upper bound and NO lower bound on
+  // either field: a supply cap of 50,000,000,000 (50x the contract maximum) was
+  // accepted and echoed back as "Up to 50,000,000,000 tokens", and an empty or
+  // $0 price kept Continue enabled. Both would be rejected on chain AFTER the
+  // creator had approved a signature — the worst possible moment to find out.
+  //
+  // Bounds come from contract-math.ts's mirrors of core/params.go, never from
+  // literals here, so they cannot drift from the contract.
+  const MIN_PRICE_USD = MIN_FACE_BASE_UNITS / 1000;
+  const MAX_PRICE_USD = MAX_FACE_BASE_UNITS / 1000;
+  const capError =
+    cap < MIN_CAP_CREDITS_BASE_UNITS || cap > MAX_CAP_CREDITS_BASE_UNITS
+      ? `Choose between ${MIN_CAP_CREDITS_BASE_UNITS.toLocaleString('en-US')} and ${MAX_CAP_CREDITS_BASE_UNITS.toLocaleString('en-US')} tokens.`
+      : null;
+  // A blank price means "I am not offering this one" and is allowed; a price
+  // that is present but outside the contract's band is not.
+  const priceError = SERVICE_TEMPLATE.some((t) => {
+    const raw = (prices[t.key] ?? '').trim();
+    if (raw === '' || raw === '.') return false;
+    const n = parseFloat(raw.replace(/,/g, ''));
+    return !Number.isFinite(n) || n <= 0 || n < MIN_PRICE_USD || n > MAX_PRICE_USD;
+  })
+    ? `Each price must be between $${MIN_PRICE_USD} and $${MAX_PRICE_USD.toLocaleString('en-US')}, or left blank.`
+    : null;
+  const stepError = step === 1 ? priceError : step === 2 ? capError : null;
+  // ★ NOT step-scoped (2026-08-07, second pass). `stepError` only guards the
+  // Continue button on the step that owns each field, so a restored draft could
+  // land straight on the final step carrying a cap the contract rejects — and the
+  // Launch button's own condition checked only account type, never validity. That
+  // is the exact failure this validation was added to prevent: a creator approving
+  // a signature for a transaction the chain was always going to refuse.
+  const formError = priceError ?? capError;
 
   /**
    * REGISTER, then post the services as SHOP OFFERINGS.
@@ -111,6 +200,14 @@ const LaunchWizard: FC = () => {
       // before it is painted into the DOM (see ../write-failure.ts).
       setFailed(writeFailureMessage(e, 'Launch didn’t go through.'));
       return;
+    }
+
+    // The token is launched either way past this point, so the saved draft is
+    // spent — leaving it would re-open a stale wizard over a live market.
+    try {
+      window.sessionStorage.removeItem(DRAFT_KEY);
+    } catch {
+      // Never let a storage failure swallow a successful launch.
     }
 
     if (skipped) {
@@ -203,7 +300,7 @@ const LaunchWizard: FC = () => {
           {step === 1 ? (
             <>
               <h1 className="font-serif text-2xl font-semibold text-[#161511]">What you offer</h1>
-              <p className="mt-1.5 text-[13.5px] text-[#6b7280]">Set each service’s price in dollars. Buyers pay this in your token at the live price.</p>
+              <p className="mt-1.5 text-[13.5px] text-[#6b7280]">Set each service’s price in dollars — that is the total the buyer pays. 88% of it is spent in your token at the live price; the other 12% goes to Lumen as a commission, paid in HBD.</p>
               <div className="mt-4 flex flex-col gap-3">
                 {SERVICE_TEMPLATE.map((t) => (
                   <div key={t.key} className="flex items-center justify-between gap-3 rounded-xl border border-[#e4e6e9] px-4 py-3">
@@ -212,6 +309,11 @@ const LaunchWizard: FC = () => {
                       <span className="font-bold text-[#9ca3af]">$</span>
                       <input
                         value={prices[t.key] ?? ''}
+                        // ★ Named for assistive tech (2026-08-07). Chromium's
+                        // accessibility tree reported every money field in this
+                        // wizard as name:"" — two adjacent, identical, blank
+                        // textboxes for two different service prices.
+                        aria-label={`${t.name} price in dollars`}
                         onChange={(e) => setPrices({ ...prices, [t.key]: sanitizeMoneyInput(e.target.value) })}
                         inputMode="decimal"
                         className="ml-1 w-[70px] border-0 text-[15px] font-bold tabular-nums text-[#161511] outline-none"
@@ -238,6 +340,8 @@ const LaunchWizard: FC = () => {
                   <button
                     key={p.label}
                     onClick={() => setCap(p.value)}
+                    // Which preset is chosen was conveyed by background colour alone.
+                    aria-pressed={cap === p.value}
                     className={`rounded-xl border px-3 py-3 text-left ${cap === p.value ? 'border-[#c0392b] bg-[#fefaf9]' : 'border-[#e4e6e9]'}`}
                   >
                     <div className="text-[13.5px] font-bold text-[#161511]">{p.label}</div>
@@ -250,13 +354,14 @@ const LaunchWizard: FC = () => {
                 <span className="text-[13px] text-[#6b7280]">Custom cap</span>
                 <input
                   value={String(cap)}
-                  onChange={(e) => setCap(Math.max(1, parseInt(e.target.value.replace(/[^\d]/g, ''), 10) || 0))}
+                  aria-label="Custom supply cap, in tokens"
+                  onChange={(e) => setCap(parseInt(e.target.value.replace(/[^\d]/g, ''), 10) || 0)}
                   inputMode="numeric"
                   className="w-[130px] rounded-[10px] border border-[#e4e6e9] px-3 py-2 text-[14px] font-semibold tabular-nums outline-none"
                 />
               </div>
               <p className="mt-4 font-serif text-[13px] leading-[1.55] text-[#6b7280]">
-                Up to {cap.toLocaleString('en-US')} tokens. Lower cap = more scarcity and price appreciation, fewer direct buyers; higher cap = more buyers, less scarcity. You can raise it any time; you can only lower it down to what’s already been bought.
+                Up to {cap.toLocaleString('en-US')} tokens (max {MAX_CAP_CREDITS_BASE_UNITS.toLocaleString('en-US')}). Lower cap = more scarcity and price appreciation, fewer direct buyers; higher cap = more buyers, less scarcity. You can raise it any time; you can only lower it down to what’s already been bought.
               </p>
             </>
           ) : null}
@@ -271,7 +376,7 @@ const LaunchWizard: FC = () => {
                 <label className="mb-1.5 block text-[12.5px] font-semibold text-[#6b7280]">Optional anti-snipe first buy</label>
                 <div className="flex items-center rounded-xl border border-[#e4e6e9] px-4 py-3">
                   <span className="text-[18px] font-bold text-[#161511]">$</span>
-                  <input value={firstBuy} onChange={(e) => setFirstBuy(sanitizeMoneyInput(e.target.value))} placeholder="0" inputMode="decimal" className="ml-1 flex-1 border-0 text-[18px] font-bold tabular-nums outline-none" />
+                  <input value={firstBuy} aria-label="Your own first buy, in dollars" onChange={(e) => setFirstBuy(sanitizeMoneyInput(e.target.value))} placeholder="0" inputMode="decimal" className="ml-1 flex-1 border-0 text-[18px] font-bold tabular-nums outline-none" />
                 </div>
                 <div className="mt-1.5 text-[11.5px] text-[#9ca3af]">Buy some of your own token at launch, at full price — this stops a bot grabbing the cheap first tokens ahead of you.</div>
               </div>
@@ -313,7 +418,17 @@ const LaunchWizard: FC = () => {
               ) : null}
               <button
                 onClick={firstBuySkipped ? () => router.push('/creators/studio') : launch}
-                disabled={launching || studio.isLite || !studio.loggedIn}
+                disabled={launching || studio.isLite || !studio.loggedIn || formError !== null}
+                // Every sibling control in this feature exposes its disabled
+                // reason to assistive tech via `title`; this one did not.
+                title={
+                  formError ??
+                  (!studio.loggedIn
+                    ? 'Sign in to launch a token.'
+                    : studio.isLite
+                      ? 'This account can’t sign transactions yet. Upgrade to a full account first.'
+                      : undefined)
+                }
                 className="mt-5 w-full rounded-[13px] bg-[#c0392b] py-[15px] text-[15px] font-bold text-white hover:bg-[#96271b] disabled:opacity-60"
               >
                 {firstBuySkipped
@@ -325,11 +440,30 @@ const LaunchWizard: FC = () => {
             </>
           ) : null}
 
+          {/* ★ The reason a control is disabled must be VISIBLE, not a hover-only
+              `title` — a tooltip never appears on touch and is not read out.
+              (Same defect was filed against the Ask button in the same QA round.) */}
+          {step < 3 && stepError ? (
+            <p className="mt-5 text-[13px] font-semibold text-[#c0392b]">{stepError}</p>
+          ) : null}
+          {step === 3 && formError ? (
+            <p className="mt-4 text-[13px] font-semibold text-[#c0392b]">
+              {formError} Go back and correct it before launching.
+            </p>
+          ) : null}
+
           {/* Nav */}
           {step < 3 ? (
             <div className="mt-6 flex items-center justify-between">
               <button onClick={() => setStep((s) => Math.max(0, s - 1))} disabled={step === 0} className="text-[13.5px] font-semibold text-[#6b7280] disabled:opacity-0">Back</button>
-              <button onClick={() => setStep((s) => Math.min(3, s + 1))} className="rounded-[11px] bg-[#161511] px-6 py-2.5 text-[14px] font-semibold text-white hover:bg-black">Continue</button>
+              <button
+                onClick={() => setStep((s) => Math.min(3, s + 1))}
+                disabled={stepError !== null}
+                title={stepError ?? undefined}
+                className="rounded-[11px] bg-[#161511] px-6 py-2.5 text-[14px] font-semibold text-white hover:bg-black disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Continue
+              </button>
             </div>
           ) : (
             <div className="mt-4 text-center">

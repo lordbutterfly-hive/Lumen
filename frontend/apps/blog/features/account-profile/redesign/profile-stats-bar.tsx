@@ -60,7 +60,12 @@ export default function ProfileStatsBar({
     // component instead of muting them.
     <div
       data-testid="profile-stats"
-      className="mt-5 flex flex-wrap items-center gap-8 rounded-2xl border border-[#ebebeb] bg-white p-[18px_22px]"
+      // ★ items-START, not items-center (2026-08-07). Only the HP tile carries a
+      // second line ("Tot:"), so centring made that one tile taller and shifted its
+      // value and label 6px UP relative to Followers/Posts/Following — measured, and
+      // exactly the "numbers arent properly in line" the owner reported. Top-aligning
+      // puts every value/label pair on one baseline and lets the extra line hang below.
+      className="mt-5 flex flex-wrap items-start gap-8 rounded-2xl border border-[#ebebeb] bg-white p-[18px_22px]"
     >
       {stats.map((stat) =>
         stat.href ? (
@@ -82,7 +87,7 @@ export default function ProfileStatsBar({
       {creatorTokensConfigured ? (
         <Link
           href={`/creators/${username}`}
-          className="ml-auto flex items-center gap-2 rounded-[11px] border border-[#e4e6e9] bg-[#f4f5f7] px-5 py-2.5 font-sans text-[14px] font-semibold text-[#3f4650] hover:bg-[#ebedf0]"
+          className="ml-auto self-center flex items-center gap-2 rounded-[11px] border border-[#e4e6e9] bg-[#f4f5f7] px-5 py-2.5 font-sans text-[14px] font-semibold text-[#3f4650] hover:bg-[#ebedf0]"
           data-testid="profile-creator-token-link"
         >
           <Coins className="h-[17px] w-[17px]" />
@@ -93,7 +98,9 @@ export default function ProfileStatsBar({
       <Link
         href="/wallet"
         className={cn(
-          'flex items-center gap-2 rounded-[11px] border border-[#e4e6e9] bg-[#f4f5f7] px-5 py-2.5 font-sans text-[14px] font-semibold text-[#3f4650] hover:bg-[#ebedf0]',
+          // self-center: the row is now items-start so the stat labels share a
+          // baseline; the buttons still belong on the row's vertical centre.
+          'flex items-center gap-2 self-center rounded-[11px] border border-[#e4e6e9] bg-[#f4f5f7] px-5 py-2.5 font-sans text-[14px] font-semibold text-[#3f4650] hover:bg-[#ebedf0]',
           !creatorTokensConfigured && 'ml-auto'
         )}
       >

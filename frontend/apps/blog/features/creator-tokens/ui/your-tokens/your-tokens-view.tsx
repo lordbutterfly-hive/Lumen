@@ -246,7 +246,7 @@ const YourTokensView: FC = () => {
               the honest one to lead with anyway. */}
           <div className="mt-4 flex flex-wrap items-end gap-x-6 gap-y-1">
             <div className="text-[38px] font-extrabold tabular-nums text-[#161511]">{p.holdingsUnavailable ? '—' : usdPrice(floorTotalUsd)}</div>
-            <div className="pb-1.5 text-[15px] tabular-nums text-[#6b7280]">Floor value — the least you’re guaranteed back</div>
+            <div className="pb-1.5 text-[15px] tabular-nums text-[#6b7280]">Floor value — what the reserve would pay out if the market wound down</div>
           </div>
           <p className="mt-1 text-[13.5px] text-[#6b7280]">
             {p.holdingsUnavailable ? 'Your holdings can’t be loaded right now.' : `You hold tokens from ${p.holdings.length} creators.`}
@@ -268,6 +268,7 @@ const YourTokensView: FC = () => {
               <button
                 key={t}
                 onClick={() => setTab(t)}
+                aria-pressed={tab === t}
                 className={`rounded-lg px-[18px] py-2 text-[13.5px] font-semibold capitalize ${
                   tab === t ? 'bg-white text-[#161511] shadow-[0_1px_2px_rgba(20,18,10,0.08)]' : 'text-[#6b7280]'
                 }`}
@@ -298,8 +299,10 @@ const YourTokensView: FC = () => {
                 )}
               </div>
               <p className="mt-4 font-serif text-[12.5px] leading-[1.55] text-[#9ca3af]">
-                Token prices float — the floor value is the least you’re guaranteed back. You can always exit: by
-                selling while a market is open, and by redeeming at the floor once it winds down.
+                Token prices float and you can lose money. You can exit two ways: sell on the curve while the market is
+                open — at the curve’s price, after a 10% trade fee and any early-exit fee — or, once a market winds down,
+                redeem at the floor. The floor value is what the reserve would pay out then; it is not a price you can
+                sell at while the market is running.
               </p>
             </>
           ) : (

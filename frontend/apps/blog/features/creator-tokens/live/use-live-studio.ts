@@ -64,6 +64,8 @@ export interface LiveStudio {
   decline: (input: { seq: number; deadlineBlock: number }) => Promise<void>;
   renew: (periods: number) => Promise<void>;
   setCap: (newCapTokens: number) => Promise<void>;
+  /** market.go SetFace — the posted base price, banded to at most 2x in any 7 days. */
+  setFace: (newPriceUsd: number) => Promise<void>;
   claimTradeFees: () => Promise<number>;
   sell: (tokens: number) => Promise<void>;
   retire: () => Promise<void>;
@@ -235,6 +237,15 @@ export function useLiveStudio(): LiveStudio {
       (newCapTokens: number) =>
         call(async ({ source, signer }) => {
           await source.setCap({ creator: signer, newCapTokens });
+        }),
+      [call]
+    ),
+    setFace: useCallback(
+      (newPriceUsd: number) =>
+        call(async ({ source, signer }) => {
+          // HBD is treated 1:1 with USD in this product (adapt.ts documents the
+          // single conversion point); setFace takes HBD.
+          await source.setFace({ creator: signer, newFaceHbd: newPriceUsd });
         }),
       [call]
     ),

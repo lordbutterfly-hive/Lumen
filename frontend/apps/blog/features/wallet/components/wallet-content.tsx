@@ -60,12 +60,26 @@ export default function WalletContent() {
           {t('wallet.lite_title')}
         </h1>
         <p className="max-w-prose text-[15px] text-[#6b7280]">{t('wallet.lite_body')}</p>
-        <Link
-          href="/upgrade"
-          className="rounded-[10px] bg-[#2f7d4f] px-5 py-2.5 text-[14px] font-semibold text-white hover:bg-[#256640]"
-        >
-          {t('wallet.lite_upgrade')}
-        </Link>
+        <div className="flex flex-wrap items-center gap-3">
+          <Link
+            href="/upgrade"
+            className="rounded-[10px] bg-[#2f7d4f] px-5 py-2.5 text-[14px] font-semibold text-white hover:bg-[#256640]"
+          >
+            {t('wallet.lite_upgrade')}
+          </Link>
+          {/* ★ A lite account has no HIVE wallet, but it CAN hold creator tokens —
+              /wallet/tokens is written for exactly this account type and says so.
+              This early return sat above the full-account branch that carries the
+              only "Your tokens" link in the app, so for lite users the page was
+              reachable by typed URL alone (found in live QA, 2026-08-07). */}
+          <Link
+            href="/wallet/tokens"
+            className="rounded-[10px] border border-[#e4e6e9] px-4 py-2 text-[13px] font-semibold text-[#3f4650] transition-colors hover:bg-[#f6f7f8]"
+            data-testid="wallet-your-tokens-link"
+          >
+            {t('wallet.your_tokens_link')} →
+          </Link>
+        </div>
       </div>
     );
   }

@@ -23,7 +23,7 @@ const COPY = {
   howTitle: 'How it works',
   how1: 'Hold a creator’s token.',
   how2: 'Spend it on a question or session.',
-  how3: 'The token can appreciate; the floor is your downside.'
+  how3: 'The token can appreciate. The floor is what the reserve would pay out per token if the market wound down — not a price you can sell at on demand.'
 };
 
 type Sort = 'reliable' | 'fastest' | 'new';
@@ -175,6 +175,7 @@ const CreatorsView: FC = () => {
               <button
                 key={s.id}
                 onClick={() => setSort(s.id)}
+                aria-pressed={on}
                 className={`rounded-lg px-[15px] py-2 text-[13.5px] font-semibold ${
                   on ? 'bg-white text-[#161511] shadow-[0_1px_2px_rgba(20,18,10,0.08)]' : 'text-[#6b7280]'
                 }`}

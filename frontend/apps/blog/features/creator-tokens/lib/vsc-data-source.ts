@@ -67,6 +67,7 @@ import {
   settlementRateBaseUnits,
   BLOCKS_PER_DAY,
   spotRateBaseUnits,
+  displayPricePerTokenBaseUnits,
   splitFaceBaseUnits,
   type AskRateEstimate
 } from './contract-math';
@@ -101,6 +102,7 @@ import {
 // op-builders.ts — importing it FROM op-builders.ts would be circular, since
 // this file imports the payload builders FROM op-builders.ts).
 import './vsc/payload-contract.selftest';
+import './vsc/price-display.selftest';
 import { MagiIndexerClient } from './vsc/hasura';
 import {
   CreatorTokensGqlClient,
@@ -346,7 +348,7 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
       delinquentUntilBlock: delinquent ? s.delinquentUntilBlock : null,
       retiredAtBlock: s.retiredAtBlock,
       floorPriceHbd: baseUnitsToHuman(floorPricePerTokenBaseUnits(s.reserveBaseUnits, s.supplyTokens)),
-      spotPriceHbd: baseUnitsToHuman(spotRateBaseUnits(s.supplyTokens)),
+      spotPriceHbd: baseUnitsToHuman(displayPricePerTokenBaseUnits(s.supplyTokens)),
       reserveCoverage: reserveCoverageRatio(s.reserveBaseUnits, s.supplyTokens)
     };
   }
@@ -1182,7 +1184,11 @@ export class VscCreatorTokensDataSource implements CreatorTokensDataSource {
   async readPriceHistory(creator: string, limit = 200): Promise<PricePoint[]> {
     if (!this.indexer) throw new Error('VscCreatorTokensDataSource: price history needs the Magi indexer (CREATOR_TOKENS_INDEXER_URL)');
     const points = await this.indexer.priceHistoryOf(creator, limit);
-    return points.map((p) => ({ block: p.block, priceHbd: baseUnitsToHuman(spotRateBaseUnits(p.supplyAfter)) }));
+    // ★ Same function the headline price uses (2026-08-07) — a chart drawn from
+    // the ORACLE rate would print 0 for a market that has been fully sold back
+    // to supply 0, while the header showed the real 1.000 HBD reset price.
+    // Identical for every supply >= 1; this only fixes that one point.
+    return points.map((p) => ({ block: p.block, priceHbd: baseUnitsToHuman(displayPricePerTokenBaseUnits(p.supplyAfter)) }));
   }
 
   async listOfferings(creator: string): Promise<Offering[]> {

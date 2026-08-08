@@ -104,3 +104,71 @@ export async function getEngagement(
     reblogCount: Number(row?.reblog_count ?? 0)
   };
 }
+
+/**
+ * Lumen-local vote and reblog totals for many posts at once.
+ *
+ * ★ WHY (owner report, 2026-08-07): a lite vote is Lumen-local by design — it
+ * never reaches the chain, because N lite readers all post through one shared
+ * Hive account and would collapse into a single voter. But every COUNT on screen
+ * came straight from the chain, so the moment a reader reloaded, their vote
+ * vanished from the tally (923 -> 922) and a reblog they had just made never
+ * appeared anywhere. The write landed; nothing ever read it back.
+ *
+ * `getEngagement` answers this for ONE post, which is right for a vote button and
+ * hopeless for a feed — thirty cards would mean thirty round trips. This answers
+ * for a whole page in one statement.
+ *
+ * Returns only posts that actually have Lumen engagement; callers treat a missing
+ * key as zero.
+ */
+export async function getEngagementTotals(
+  targets: { author: string; permlink: string }[]
+): Promise<Map<string, { votes: number; reblogs: number }>> {
+  const out = new Map<string, { votes: number; reblogs: number }>();
+  if (targets.length === 0) return out;
+
+  // Deduplicate — a feed can legitimately contain the same post twice (a reblog
+  // alongside the original).
+  const seen = new Set<string>();
+  const authors: string[] = [];
+  const permlinks: string[] = [];
+  for (const t of targets) {
+    const key = `${t.author}/${t.permlink}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    authors.push(t.author);
+    permlinks.push(t.permlink);
+  }
+
+  const { rows } = await query<{
+    target_author: string;
+    target_permlink: string;
+    vote_count: string;
+    reblog_count: string;
+  }>(
+    `WITH wanted AS (
+       SELECT * FROM unnest($1::text[], $2::text[]) AS t(target_author, target_permlink)
+     )
+     SELECT w.target_author,
+            w.target_permlink,
+            (SELECT count(*) FROM lumen_vote v
+              WHERE v.target_author = w.target_author
+                AND v.target_permlink = w.target_permlink
+                AND v.active)   AS vote_count,
+            (SELECT count(*) FROM lumen_reblog r
+              WHERE r.target_author = w.target_author
+                AND r.target_permlink = w.target_permlink
+                AND r.active)   AS reblog_count
+       FROM wanted w`,
+    [authors, permlinks]
+  );
+
+  for (const row of rows) {
+    const votes = Number(row.vote_count) || 0;
+    const reblogs = Number(row.reblog_count) || 0;
+    if (votes === 0 && reblogs === 0) continue;
+    out.set(`${row.target_author}/${row.target_permlink}`, { votes, reblogs });
+  }
+  return out;
+}

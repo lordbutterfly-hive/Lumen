@@ -43,8 +43,41 @@ const COPY = {
 
 type View = 'default' | 'name';
 
-const LumenLogin: FC = () => {
+/**
+ * `embedded` renders the same four ways in — Google, Bitcoin wallet, Ethereum
+ * wallet, Hive Keychain — without the standalone-page chrome, so the sign-in
+ * DIALOG can offer the identical set.
+ *
+ * ★ WHY (2026-08-07): the dialog opens from ~24 places (upvote, reply, composer,
+ * profile) and showed ONLY Hive Keychain, with a text link to /login for
+ * everything else. So the app's widest sign-in surface hid three of its four
+ * methods — including the two that need no keys, which are the whole point of a
+ * Lumen account. Reusing this component means the dialog can never drift from
+ * the page again.
+ */
+const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
+
   const router = useRouter();
+
+  // ★ AN ALREADY-SIGNED-IN VISITOR MUST NOT LAND ON A SIGN-IN FORM (2026-08-07).
+  //
+  // The header renders a real, clickable "Log in" link before hydration — on
+  // purpose, so crawlers and slow connections can see the front door (see
+  // app-header.tsx). For a SIGNED-IN reader that window was assumed to be one
+  // frame; measured on a cold cache over a slow connection it lasts 8-48s, and
+  // clicking it brought them here, to a full sign-in form that did not recognise
+  // their perfectly valid session. That is what "refreshing logs me out" looked
+  // like from the outside — the session was never lost, the reader was just
+  // stranded on the wrong page.
+  //
+  // Fixing it here rather than in the header keeps the SEO-visible link intact.
+  const { user: sessionUser, isHydrated: sessionHydrated } = useUserClient();
+  useEffect(() => {
+    if (embedded) return; // inside the dialog, signing in is the point
+    if (sessionHydrated && sessionUser?.isLoggedIn) {
+      router.replace('/');
+    }
+  }, [embedded, sessionHydrated, sessionUser?.isLoggedIn, router]);
   const { user } = useUserClient();
   const { nameStatus, checkName, createAccount, google, googleChallenge } = useLiteLogin();
 
@@ -144,20 +177,28 @@ const LumenLogin: FC = () => {
     // root layout renders <AppHeader/> on every route. Covering it here keeps the
     // change isolated to this feature; the clean long-term fix is a route-group
     // split (move AppHeader into a "(shell)" group, login outside it).
-    <div className="fixed inset-0 z-50 flex flex-col items-center overflow-y-auto bg-white px-5 pb-12 font-sans text-[#161511]">
-      <div className="fixed inset-x-0 top-0 h-[3px] bg-[linear-gradient(90deg,#c0392b,#e07b3e)]" />
+    <div
+      className={
+        embedded
+          ? 'flex w-full flex-col items-center bg-white font-sans text-[#161511]'
+          : 'fixed inset-0 z-50 flex flex-col items-center overflow-y-auto bg-white px-5 pb-12 font-sans text-[#161511]'
+      }
+    >
+      {embedded ? null : <div className="fixed inset-x-0 top-0 h-[3px] bg-[linear-gradient(90deg,#c0392b,#e07b3e)]" />}
 
       {/* Wordmark: Open Sans to match the app shell's committed identity
           (app-header design-handoff-v2: "no serif display face") — the login
           mockup's Lora wordmark was the stray outlier. */}
-      <div className="mb-8 mt-16 text-center">
-        <a href="/" className="font-sans text-[42px] font-bold leading-none tracking-[-0.025em] text-[#161511]">
-          Lumen
-        </a>
-        <p className="mt-2 font-serif text-base text-[#6b7280]">{COPY.tagline}</p>
-      </div>
+      {embedded ? null : (
+        <div className="mb-8 mt-16 text-center">
+          <a href="/" className="font-sans text-[42px] font-bold leading-none tracking-[-0.025em] text-[#161511]">
+            Lumen
+          </a>
+          <p className="mt-2 font-serif text-base text-[#6b7280]">{COPY.tagline}</p>
+        </div>
+      )}
 
-      <div className="flex w-[460px] max-w-full flex-col gap-[18px]">
+      <div className={embedded ? 'flex w-full max-w-full flex-col gap-[18px]' : 'flex w-[460px] max-w-full flex-col gap-[18px]'}>
         {view === 'default' ? (
           <>
             <div className="overflow-hidden rounded-[22px] border border-[#ebebeb] bg-white shadow-[0_12px_40px_rgba(192,57,43,0.07),0_1px_2px_rgba(20,18,10,0.04)]">
@@ -223,8 +264,15 @@ const LumenLogin: FC = () => {
                     onClick={() => setWalletOpen('btc')}
                     className="flex h-14 w-full cursor-pointer items-center gap-3 rounded-[14px] border border-[#e4e6e9] bg-white px-4 text-left hover:border-[#f7931a] hover:bg-[#fffaf3]"
                   >
-                    <span className="flex h-[34px] w-[34px] flex-shrink-0 items-center justify-center rounded-[9px] bg-[#f7931a] text-base font-extrabold text-white">
-                      ₿
+                    {/* ★ A REAL MARK, NOT A GLYPH (2026-08-07). This was the
+                        character "₿", which the app's font stack does not carry —
+                        it rendered as an empty orange square while Google,
+                        Ethereum and Keychain all showed proper marks. Drawn as
+                        SVG so it cannot depend on a font again. */}
+                    <span className="flex h-[34px] w-[34px] flex-shrink-0 items-center justify-center rounded-[9px] bg-[#f7931a] text-white">
+                      <svg width="19" height="19" viewBox="0 0 24 24" aria-hidden fill="currentColor">
+                        <path d="M15.9 10.6c.63-.42 1.03-1.1 1.03-2.1 0-1.66-1.2-2.63-3.02-2.94V3h-1.8v2.47h-1.2V3H9.1v2.53H6v1.9h1.2c.5 0 .68.2.68.63v7.88c0 .35-.2.56-.6.56H6V18.5h3.1V21h1.8v-2.47h1.2V21h1.8v-2.53c2.3-.2 3.9-1.28 3.9-3.4 0-1.6-.86-2.6-2.4-3.06l.5-.4zM10.7 7.6h2.05c1.06 0 1.7.45 1.7 1.36 0 .9-.64 1.4-1.7 1.4H10.7V7.6zm2.4 8.8H10.7v-3h2.4c1.26 0 1.98.55 1.98 1.5s-.72 1.5-1.98 1.5z" />
+                      </svg>
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block text-[15px] font-semibold text-[#161511]">{COPY.btcTitle}</span>

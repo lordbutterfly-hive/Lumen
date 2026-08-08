@@ -145,10 +145,16 @@ export interface Market {
    */
   floorPriceHbd: number;
   /**
-   * curve.go SpotRate(supply) — the marginal HBD price of the NEXT token to
-   * be minted; also the same rate Buy/Sell feed into the TWAP ring. 0 at
-   * supply === 0, deliberately (curve.go's own "no supply, no traded rate"
-   * convention).
+   * The HBD price a buyer pays for the NEXT token — contract-math.ts's
+   * `displayPricePerTokenBaseUnits` (= Area(S+1) − Area(S), exactly what the
+   * Buy path charges).
+   *
+   * ★ NOT curve.go's `SpotRate` (2026-08-07). SpotRate is the TWAP/settlement
+   * ORACLE feed and returns 0 at supply === 0 on purpose; this field used to be
+   * wired to it, which rendered the headline price of an untraded market as
+   * **$0.00** when a token really cost 1.000 HBD. The two are identical for
+   * every supply >= 1 — they diverge only on an empty market. Anything needing
+   * the oracle rate must call `spotRateBaseUnits` directly.
    */
   spotPriceHbd: number;
   /**
