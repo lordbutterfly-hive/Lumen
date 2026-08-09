@@ -49,6 +49,10 @@ from recsys.contracts import (
 )
 from recsys.core.normalize import build_norm_context
 from recsys.core.scoring import AuthorEngagement, post_base_engagement
+from recsys.io.hafsql import (
+    POPULAR_RECALL_COMMENT_WEIGHT,
+    POPULAR_RECALL_REBLOG_WEIGHT,
+)
 from recsys.core.vote_signal import (
     _ORGANIC_REBLOG_WEIGHT,
     _ORGANIC_REPLY_WEIGHT,
@@ -591,31 +595,32 @@ class SimGateway:
         return {a: t for a, t in first.items() if t >= floor}
 
     def popular_posts(self, since: datetime, limit: int) -> list[Post]:
-        # ★ C9 (2026-08-04). This used to sort by raw
-        # `len(distinct voters) + p.children + p.reblog_count` — self-farmable
-        # counters (children/reblog_count are display totals, not
-        # exclusion-filtered), so a self-liking ring could pad its own rank
-        # here for free. Production `_SQL_POPULAR_POSTS` (io/hafsql.py:298-320)
-        # orders by 0.5*distinct non-self voters + 0.3*distinct non-self
-        # commenters + 0.5*distinct non-self rebloggers, voters gated by the
-        # same chain-dust floor the organic scorer uses
-        # (`_ORGANIC_VOTER_MIN_RSHARES`). The sim was EASIER TO FARM than
-        # production, so every harness measurement of the fallback lane's
-        # Sybil resistance was measuring the wrong object. Mirrors production
-        # exactly, using the same weight/threshold constants so the two
-        # cannot drift apart silently. World posts are AttributedPost (built
-        # in build_world), so `.commenters`/`.rebloggers` carry real distinct
-        # identities, not just counts.
+        """Mirror of production `_SQL_POPULAR_POSTS` recall ordering.
+
+        ★★★ REBUILT 2026-08-09 — AND THIS IS THE SECOND TIME THIS DRIFTED.
+        The previous version scored `0.5*voters + 0.3*commenters +
+        0.5*rebloggers` under a comment asserting it "mirrors production
+        exactly... so the two cannot drift apart silently". Production moved to
+        conversation-only recall (voters removed; they were 38% of it) and this
+        did not follow, so recall overlap fell to 76/150 and every q11/q12
+        number taken on this lane described a pool production never produces.
+
+        The weights are now IMPORTED from `recsys.io.hafsql` rather than
+        retyped, and `test_sim_recall_matches_production_weights` fails if this
+        function stops reading them — which is what the old comment promised and
+        could not deliver.
+
+        Votes are deliberately absent: stake reaches this lane only through
+        `PopularConfig.payout_share` in `select_popular`, where it can be
+        normalised against the pool. SQL cannot normalise.
+        """
         posts = [p for p in self.w.posts if p.created >= since]
 
         def score(p: Post) -> float:
-            voters = {v.voter for v in p.votes
-                      if v.rshares > _ORGANIC_VOTER_MIN_RSHARES and v.voter != p.author}
             commenters = {c for c in getattr(p, "commenters", ()) if c != p.author}
             rebloggers = {r for r in getattr(p, "rebloggers", ()) if r != p.author}
-            return (_ORGANIC_VOTER_WEIGHT * len(voters)
-                    + _ORGANIC_REPLY_WEIGHT * len(commenters)
-                    + _ORGANIC_REBLOG_WEIGHT * len(rebloggers))
+            return (POPULAR_RECALL_COMMENT_WEIGHT * len(commenters)
+                    + POPULAR_RECALL_REBLOG_WEIGHT * len(rebloggers))
 
         # tie-break DESC by created, matching `ORDER BY (...) DESC, c.created DESC`
         posts.sort(key=lambda p: (-score(p), -p.created.timestamp()))

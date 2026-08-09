@@ -87,8 +87,30 @@ function isLocalStorageAvailable(): boolean {
  * // Store user preferences permanently
  * setStorageItem('user-preferences-alice', { theme: 'dark' }, StorageTTL.PERMANENT);
  */
-export function setStorageItem<T>(key: string, value: T, ttl: number | null = StorageTTL.DRAFT): void {
-  if (!isLocalStorageAvailable() || !key) return;
+/**
+ * ★★★ RETURNS WHETHER THE VALUE WAS ACTUALLY STORED (2026-08-09).
+ *
+ * This used to return `void` and swallow a failed write, and the caller in
+ * `useStorageWithTTL` even carried the comment "setStorageItem already handles
+ * errors internally". It did not handle them — it hid them. A `logger.error`
+ * into the console is not handling, because the one caller who must know is the
+ * person typing.
+ *
+ * That silence IS the draft-loss bug. The composer auto-saves the whole post
+ * body here every 500 ms; when a draft no longer fits in the origin's ~5 MB
+ * localStorage budget, both writes throw `QuotaExceededError`, the error is
+ * eaten, and the editor goes on looking exactly like a saved document. The
+ * writer only finds out when the tab is reloaded or crashes and their work is
+ * gone. Nobody loses a draft because a save failed; they lose it because a
+ * failed save looked identical to a successful one.
+ *
+ * Existing callers ignore the return value, which is unchanged behaviour for
+ * them — but a caller holding something a human typed can now tell the truth.
+ *
+ * @returns true if the value is in storage, false if it could not be written.
+ */
+export function setStorageItem<T>(key: string, value: T, ttl: number | null = StorageTTL.DRAFT): boolean {
+  if (!isLocalStorageAvailable() || !key) return false;
 
   const item: StorageItem<T> = {
     value,
@@ -98,14 +120,17 @@ export function setStorageItem<T>(key: string, value: T, ttl: number | null = St
 
   try {
     window.localStorage.setItem(key, JSON.stringify(item));
+    return true;
   } catch (error) {
     logger.error(error, 'Failed to save to localStorage');
     // If storage is full, try to cleanup expired items
     cleanupExpiredItems();
     try {
       window.localStorage.setItem(key, JSON.stringify(item));
+      return true;
     } catch {
       logger.error('localStorage is full even after cleanup');
+      return false;
     }
   }
 }

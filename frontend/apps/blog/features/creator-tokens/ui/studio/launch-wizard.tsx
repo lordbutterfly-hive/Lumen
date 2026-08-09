@@ -61,6 +61,9 @@ function sanitizeMoneyInput(raw: string): string {
 const LaunchWizard: FC = () => {
   const router = useRouter();
   const studio = useLiveStudio();
+  // A failed read is NOT "no market" — see the launch button below.
+  const cannotConfirmMarket = studio.status === 'error';
+  const alreadyHasMarket = Boolean(studio.market);
   const [step, setStep] = useState(0);
   const [failed, setFailed] = useState<string | null>(null);
   const [prices, setPrices] = useState<Record<string, string>>({ ask: '10', review: '80' });
@@ -413,9 +416,45 @@ const LaunchWizard: FC = () => {
                   and your choices here stay as you set them.
                 </div>
               ) : null}
+              {/* ★★★ DO NOT BROADCAST WHAT WE CANNOT CHECK (2026-08-09).
+                  `register` enforces one market per account on chain, so
+                  launching when the creator ALREADY has one costs a real signed
+                  transaction to buy a guaranteed on-chain failure. The wizard
+                  guarded `status === 'unavailable'` (line ~245) but not
+                  `'error'` — and a failed read is exactly the case where we do
+                  not know whether a market exists. The studio deliberately
+                  refuses to fall through to "you have no token" on a failed
+                  read; the wizard must refuse to act on that same uncertainty,
+                  or the two screens disagree about the same unknown. */}
+              {cannotConfirmMarket ? (
+                <div className="mt-4 rounded-[12px] border border-[#f6e2c4] bg-[#fdf6ec] px-4 py-3.5 text-[13.5px] text-[#b45309]">
+                  We can’t reach the chain to check whether you already have a token, so launching is held back —
+                  signing now could spend a transaction on a launch that cannot succeed. Nothing is wrong with your
+                  account.{' '}
+                  <button onClick={studio.retry} className="font-semibold text-[#c0392b] underline">
+                    Try again
+                  </button>
+                </div>
+              ) : null}
+              {alreadyHasMarket ? (
+                <div className="mt-4 rounded-[12px] border border-[#e4e6e9] bg-[#f6f7f8] px-4 py-3.5 text-[13.5px] text-[#6b7280]">
+                  You already have a live token — a creator can only have one.{' '}
+                  <a href="/creators/studio" className="font-semibold text-[#c0392b] hover:underline">
+                    Open your studio
+                  </a>{' '}
+                  to manage it.
+                </div>
+              ) : null}
               <button
                 onClick={firstBuySkipped ? () => router.push('/creators/studio') : launch}
-                disabled={launching || studio.isLite || !studio.loggedIn || formError !== null}
+                disabled={
+                  launching ||
+                  studio.isLite ||
+                  !studio.loggedIn ||
+                  formError !== null ||
+                  cannotConfirmMarket ||
+                  alreadyHasMarket
+                }
                 // Every sibling control in this feature exposes its disabled
                 // reason to assistive tech via `title`; this one did not.
                 title={
@@ -424,7 +463,11 @@ const LaunchWizard: FC = () => {
                     ? 'Sign in to launch a token.'
                     : studio.isLite
                       ? 'This account can’t sign transactions yet. Upgrade to a full account first.'
-                      : undefined)
+                      : cannotConfirmMarket
+                        ? 'We can’t check whether you already have a token right now.'
+                        : alreadyHasMarket
+                          ? 'You already have a token. A creator can only have one.'
+                          : undefined)
                 }
                 className="mt-5 w-full rounded-[13px] bg-[#c0392b] py-[15px] text-[15px] font-bold text-white hover:bg-[#96271b] disabled:opacity-60"
               >

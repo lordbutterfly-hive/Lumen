@@ -197,22 +197,32 @@ def test_attribution_queries_group_by_identity() -> None:
     assert "r.account_name" in hafsql._SQL_REBLOGGERS_FOR_POSTS
 
 
-def test_popular_posts_ordering_is_attributed_and_self_excluded() -> None:
-    """Cross-fix contradiction (council finding 4): the fallback pool must be
-    ordered by attributed distinct identity with self-engagement excluded —
-    never by the raw self-farmable counters scoring refuses to trust."""
+def test_popular_recall_is_conversation_and_self_excluded() -> None:
+    """Recall must be attributed distinct identity, self-excluded, and must NOT
+    contain a voter term.
+
+    ★ 2026-08-09: this used to assert `COUNT(DISTINCT v.voter)` was PRESENT.
+    Voters were 0.5 of the 1.3 total weight — 38% of what decided which posts
+    the lane could even see — against an owner cap of 10% on vote influence.
+    Stake now enters only in `select_popular`, at its 10% share, where it can be
+    normalised against the pool (SQL cannot normalise, so rshares here would let
+    one whale-voted post own recall).
+
+    The self-exclusion half is UNCHANGED and still the point: a post must not
+    buy a pool position with its author's own comments or reblogs.
+    """
     sql = hafsql._SQL_POPULAR_POSTS
-    assert "COUNT(DISTINCT v.voter)" in sql
-    assert "v.voter <> c.author" in sql  # self-votes buy no pool position
     assert "COUNT(DISTINCT rc.author)" in sql  # distinct commenters, not COUNT(*)
-    assert "rc.author <> c.author" in sql  # self-comments neither
+    assert "rc.author <> c.author" in sql  # self-comments buy no pool position
     assert "COUNT(DISTINCT r.account_name)" in sql
     assert "r.account_name <> c.author" in sql  # self-reblogs neither
-    # ★ 2026-08-08: assert against the IMPORTED constant, not a retyped
-    # literal. This test passed while the SQL and
-    # `vote_signal._ORGANIC_VOTER_MIN_RSHARES` had silently diverged 318x
-    # (1e7 vs 3.184e9) — pinning the literal is what let the drift happen.
-    assert f"v.rshares > {_ORGANIC_VOTER_MIN_RSHARES:.0f}" in sql
+    # ★ The regression this test exists to prevent: votes creeping back into
+    # recall. Asserted as ABSENCE, which is the only form that catches it.
+    assert "v.voter" not in hafsql._POPULAR_ENGAGEMENT, (
+        "votes must not decide popularity recall — they are capped at "
+        "PopularConfig.payout_share in select_popular"
+    )
+    assert "rshares" not in hafsql._POPULAR_ENGAGEMENT
 
 
 def test_vote_vouch_queries_ignore_downvotes() -> None:
@@ -2353,3 +2363,47 @@ def test_author_first_post_asks_nothing_when_the_predicate_is_off() -> None:
     client = hafsql.HafsqlClient(HafsqlConfig())
     object.__setattr__(client, "_fetch_lite", fail)
     assert client.author_first_post(frozenset({"alice"}), horizon_days=0) == {}
+
+
+def test_sim_recall_matches_production_weights() -> None:
+    """The simulator's recall ordering must READ production's weights.
+
+    ★ 2026-08-09. `measurement-harness/simworld.py::SimGateway.popular_posts`
+    reimplements `_SQL_POPULAR_POSTS`'s ordering in Python, and its comment
+    claimed the two "cannot drift apart silently". They drifted anyway: after
+    recall moved to conversation-only, the sim still scored
+    `0.5*voters + 0.3*comments + 0.5*reblogs`, recall overlap fell to 76/150,
+    and every q11/q12 measurement of this lane was taken on a pool production
+    never produces — including numbers that were written into config comments
+    as evidence.
+
+    A comment cannot enforce that. This can: both sides now read
+    `POPULAR_RECALL_{COMMENT,REBLOG}_WEIGHT`, and this test fails if the sim
+    stops importing them or production stops interpolating them.
+    """
+    import importlib.util
+    from pathlib import Path
+
+    from recsys.io.hafsql import (
+        POPULAR_RECALL_COMMENT_WEIGHT,
+        POPULAR_RECALL_REBLOG_WEIGHT,
+    )
+
+    # Production really interpolates the constants (not a retyped literal).
+    assert f"{POPULAR_RECALL_COMMENT_WEIGHT} *" in hafsql._POPULAR_ENGAGEMENT
+    assert f"{POPULAR_RECALL_REBLOG_WEIGHT} *" in hafsql._POPULAR_ENGAGEMENT
+    assert "{" not in hafsql._POPULAR_ENGAGEMENT, "unrendered placeholder in SQL"
+
+    # The sim imports them rather than hardcoding its own.
+    sim_src = Path(__file__).resolve().parents[1] / "measurement-harness" / "simworld.py"
+    src = sim_src.read_text()
+    assert "POPULAR_RECALL_COMMENT_WEIGHT" in src, "sim no longer reads production's weights"
+    assert "POPULAR_RECALL_REBLOG_WEIGHT" in src
+    # And it must not have re-grown a voter term.
+    scorer = src[src.index("def popular_posts") : src.index("def suppressed_keys")]
+    # Code-level markers, not prose: the docstring legitimately DISCUSSES the
+    # voter term it removed, and an assertion that trips on its own explanation
+    # is a test nobody can write an honest comment near.
+    assert "p.votes" not in scorer, "votes must not decide popularity recall"
+    assert "_ORGANIC_VOTER_WEIGHT" not in scorer
+    assert "rshares" not in scorer

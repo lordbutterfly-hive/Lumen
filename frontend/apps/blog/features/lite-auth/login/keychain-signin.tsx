@@ -45,7 +45,12 @@ const COPY = {
   notDetected: 'Not detected — install the Hive Keychain extension, then reload.',
   needUsername: 'Enter your Hive username.',
   failed: 'That sign-in did not complete. Please try again.',
-  cancelled: 'You cancelled — nothing was signed.'
+  cancelled: 'You cancelled — nothing was signed.',
+  // ★ Distinct from `failed` on purpose (2026-08-09). "Sign-in did not complete"
+  // reads as "your credentials are wrong" and sends the reader off to re-check a
+  // username that was never the problem. When the server tells us it could not
+  // reach Hive, say that, and say whose problem it is.
+  unreachable: 'Could not reach Hive to verify your sign-in. This is on our side, not your account — please try again in a moment.'
 };
 
 interface KeychainSigninProps {
@@ -57,7 +62,29 @@ interface KeychainSigninProps {
 
 const KeychainSignin: FC<KeychainSigninProps> = ({ redirectTo = '/' }) => {
   const router = useRouter();
-  const { signAuth, submitAuth } = useProcessAuth(false, false);
+  // ★★★ THE FIRST ARGUMENT IS `authenticateOnBackend`, AND IT MUST STAY TRUE
+  // (2026-08-09). It was hardcoded `false`, which routed `signIn()` down
+  // `verifyLogin()` — a function that builds a `{isLoggedIn: true}` object in
+  // the browser and contacts nobody. `POST /api/auth/login` is the only place a
+  // Hive session is ever saved, so with `false` the server was never told anyone
+  // signed in: no cookie existed, and `/api/users/me` — which the whole app asks
+  // on every mount — correctly answered "signed out" on every refresh and every
+  // navigation home. `/api/feed/for-you` saw no viewer and served
+  // `trending-fallback / degraded: anonymous`, which is why the feed looked
+  // identical signed in. One cause, both reported symptoms.
+  //
+  // Five earlier fixes all aimed downstream of this — when to refetch, whether a
+  // failed request counts as a logout, an epoch check, a log line. None could
+  // work: the client was asking an honest question and getting an honest answer.
+  //
+  // Do NOT make this configurable. `siteConfig.loginAuthenticateOnBackend` reads
+  // `LOGIN_AUTHENTICATE_ON_BACKEND`, which is absent from `apps/blog/.env.local`
+  // and `"no"` in `.env.blog`, so wiring it here would restore the bug quietly.
+  // Lumen has no working signed-out mode: every `/api/lite/*` route, the feed,
+  // moderation and notifications all read the session cookie server-side.
+  // Guarded by `qa/harness/real-login-session-proof.mjs`, which signs with a real
+  // key and fails if the browser ends up without a session.
+  const { signAuth, submitAuth } = useProcessAuth(true, false);
   const [open, setOpen] = useState(false);
   const [username, setUsername] = useState('');
   const [busy, setBusy] = useState(false);
@@ -87,7 +114,22 @@ const KeychainSignin: FC<KeychainSigninProps> = ({ redirectTo = '/' }) => {
       router.push(redirectTo);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      setError(/cancel|reject|denied/i.test(message) ? COPY.cancelled : COPY.failed);
+      // The server answers 503 with an exposed message when the chain was
+      // unreachable (see api-handlers/auth/login.ts). Prefer what it actually
+      // said; fall back to our own wording when the request never got an answer
+      // at all — an aborted or failed fetch is the same story from the reader's
+      // side, and it is NOT a credential problem either way.
+      const status = (err as { response?: Response })?.response?.status;
+      const serverMessage = (err as { data?: { error?: { message?: string } } })?.data?.error?.message;
+      if (status === 503) {
+        setError(serverMessage || COPY.unreachable);
+      } else if (status === undefined && /fetch|network|abort|timeout/i.test(message)) {
+        setError(COPY.unreachable);
+      } else if (/cancel|reject|denied/i.test(message)) {
+        setError(COPY.cancelled);
+      } else {
+        setError(COPY.failed);
+      }
     } finally {
       setBusy(false);
     }
@@ -101,9 +143,18 @@ const KeychainSignin: FC<KeychainSigninProps> = ({ redirectTo = '/' }) => {
         data-testid="keychain-row"
         className="flex h-14 w-full cursor-pointer items-center gap-3 rounded-[14px] border border-[#e4e6e9] bg-white px-4 text-left hover:border-[#c0392b] hover:bg-[#fefaf9]"
       >
-        <span className="flex h-[34px] w-[34px] flex-shrink-0 items-center justify-center rounded-[9px] bg-[#c0392b] text-[15px] font-extrabold text-white">
-          K
-        </span>
+        {/* ★ THE REAL HIVE KEYCHAIN MARK (2026-08-09, owner-supplied) — was the
+            letter "K" on a red plate. The official asset carries its own black
+            plate, so it is clipped to the same 9px radius the other rows use
+            rather than being placed on one. */}
+        <img
+          src="/logos/hive-keychain.png"
+          alt=""
+          aria-hidden
+          width={34}
+          height={34}
+          className="h-[34px] w-[34px] flex-shrink-0 rounded-[9px]"
+        />
         <span className="min-w-0 flex-1">
           <span className="block text-[15px] font-semibold text-[#161511]">{COPY.title}</span>
           <span className="block text-xs text-[#6b7280]">{COPY.sub}</span>

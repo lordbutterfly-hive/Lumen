@@ -100,63 +100,53 @@ def test_all_kinds_of_exclusion_combined_is_zero() -> None:
     assert independent_vote_signal(post, exclusions) == 0.0
 
 
-def test_more_distinct_voters_beats_equal_raw_sum() -> None:
-    exclusions = VoteExclusions(author="alice")
-    narrow = make_post(
-        author="alice",
-        permlink="narrow",
-        votes=[make_vote(voter="v1", rshares=2_000_000_000)],
+def test_equal_payout_scores_equal_however_many_voters_produced_it() -> None:
+    """Same payout, different voter counts, same score.
+
+    ★ 2026-08-09, and this test is the inversion of what it used to assert.
+    It previously required MORE distinct voters to beat the same raw sum — that
+    was the breadth multiplier, and it is exactly the "payout x vote number"
+    conflation the owner rejected. Head-count is measured in the organic term,
+    where it is graph-cred budgeted and dust-floored; here, 400 rshares is 400
+    rshares whether one account or four produced it.
+    """
+    few = make_post(votes=[make_vote("a", 4 * _ABOVE_FLOOR)])
+    many = make_post(
+        votes=[make_vote(n, _ABOVE_FLOOR) for n in ("a", "b", "c", "d")]
     )
-    wide = make_post(
-        author="alice",
-        permlink="wide",
-        votes=[
-            make_vote(voter="v1", rshares=1_000_000_000),
-            make_vote(voter="v2", rshares=1_000_000_000),
-        ],
+    ex = VoteExclusions(author="author")
+    assert independent_vote_signal(few, ex) > 0.0, "fixture below the floor asserts 0 == 0"
+    assert independent_vote_signal(few, ex) == pytest.approx(
+        independent_vote_signal(many, ex)
     )
-    assert independent_vote_signal(wide, exclusions) > independent_vote_signal(narrow, exclusions)
+
 
 
 def test_matches_formula_exactly() -> None:
-    post = make_post(
-        author="alice",
-        votes=[
-            make_vote(voter="v1", rshares=6_000_000_000),
-            make_vote(voter="v2", rshares=4_000_000_000),
-        ],
-    )
-    exclusions = VoteExclusions(author="alice")
-    expected = log_compress(10_000_000_000) * (1.0 + math.log10(1 + 2))
-    assert math.isclose(independent_vote_signal(post, exclusions), expected)
+    """The stake term is EXACTLY the log-compressed payout — no breadth factor.
+
+    ★ 2026-08-09: was `log_compress(raw) * (1 + log10(1 + breadth))`. The
+    multiplier was removed because this term's job is the payout amount, and
+    distinct-people is already the organic term's job (counting it here made it
+    count twice). Pinning the exact formula is deliberate: it is the one place
+    a breadth factor could silently creep back in.
+    """
+    post = make_post(votes=[make_vote("a", _ABOVE_FLOOR), make_vote("b", 3 * _ABOVE_FLOOR)])
+    result = independent_vote_signal(post, VoteExclusions(author="author"))
+    assert result == pytest.approx(log_compress(4 * _ABOVE_FLOOR))
+    assert result > 0.0, "fixture must be ABOVE the 1e7 log_compress floor, else this asserts 0 == 0"
 
 
-def test_duplicate_voter_counts_once_toward_breadth() -> None:
-    exclusions = VoteExclusions(author="alice")
-    post = make_post(
-        author="alice",
-        votes=[
-            make_vote(voter="v1", rshares=1_000_000_000, minutes=0),
-            make_vote(voter="v1", rshares=1_000_000_000, minutes=1),
-        ],
-    )
-    expected = log_compress(2_000_000_000) * (1.0 + math.log10(1 + 1))
-    assert math.isclose(independent_vote_signal(post, exclusions), expected)
 
+def test_payout_sums_all_kept_votes() -> None:
+    """★ 2026-08-09: was a breadth-dedup test. With breadth gone from this term
+    there is no head-count to dedup — what remains is that every kept vote's
+    rshares contribute to the payout, which is the property worth pinning."""
+    post = make_post(votes=[make_vote("a", _ABOVE_FLOOR), make_vote("b", 2 * _ABOVE_FLOOR)])
+    result = independent_vote_signal(post, VoteExclusions(author="author"))
+    assert result == pytest.approx(log_compress(3 * _ABOVE_FLOOR))
+    assert result > 0.0, "fixture must be ABOVE the 1e7 log_compress floor, else this asserts 0 == 0"
 
-# ---------------------------------------------------------------------------
-# independent_organic_engagement — attributed identity only (§6 rebuild).
-#
-# RULED-BEHAVIOR CHANGE (this fix round): the per-independent-voter cap on
-# unattributed counts is RETIRED — it was defeated by 1-3 sock-puppet upvotes
-# and clipped ~9% of honest posts. Comment/reblog engagement now counts ONLY
-# via attributed distinct identity (AttributedPost.commenters/.rebloggers)
-# passed through the same exclusion set as votes; the bare children /
-# reblog_count counters are display metadata and never score. The two
-# cap-formula tests below were UPDATED accordingly (not weakened: the new
-# assertions are strictly harder on the attacker — farmed counts now buy
-# zero, not "zero until a sock vote unlocks the cap").
-# ---------------------------------------------------------------------------
 
 
 def test_organic_engagement_self_farmed_counts_alone_are_worthless() -> None:
@@ -533,24 +523,29 @@ def test_organic_engagement_trust_credits_vouched_voters_in_full() -> None:
     assert independent_organic_engagement(post, frozenset({"author"}), trust=trust) == 0.5 * 12
 
 
-def test_vote_signal_trust_caps_sockpuppet_breadth_multiplier() -> None:
-    # The stake magnitude still counts (real 0.5 HP rshares), but the breadth
-    # MULTIPLIER is budgeted: 10 unknown alts give the same breadth as free=1.
-    alts = [make_vote(voter=f"alt{i}", rshares=500_000_000) for i in range(10)]
-    post = make_post(author="spammer", votes=alts)
-    excl = VoteExclusions(author="spammer")
-    raw = sum(v.rshares for v in alts)
-    trusted = independent_vote_signal(post, excl, trust=_trust())
-    assert trusted == pytest.approx(log_compress(raw) * (1.0 + math.log10(1 + FREE)))
-    # untrusted (norm-sample path) keeps the raw distinct-voter breadth of 10
-    untrusted = independent_vote_signal(post, excl)
-    assert untrusted == pytest.approx(log_compress(raw) * (1.0 + math.log10(1 + 10)))
-    assert trusted < untrusted
+def test_zero_stake_sockpuppets_cannot_inflate_the_payout_term() -> None:
+    """A swarm of alts adds nothing to payout, with or without a trust snapshot.
 
+    ★ 2026-08-09: this used to check that `VoterTrust` CAPPED the breadth
+    multiplier a sockpuppet swarm could buy. That defence is now structural
+    rather than budgeted — there is no multiplier left to inflate, so the swarm
+    can only move this term by spending real rshares, which is the one thing an
+    alt farm cannot fake for free. Asserted with trust BOTH absent and present
+    so the property cannot regress into depending on the snapshot again.
+    """
+    honest = make_post(votes=[make_vote("whale", 100 * _ABOVE_FLOOR)])
+    swarmed = make_post(
+        votes=[make_vote("whale", 100 * _ABOVE_FLOOR)]
+        + [make_vote(f"alt{i}", 1) for i in range(50)]
+    )
+    ex = VoteExclusions(author="author")
+    base = independent_vote_signal(honest, ex)
+    swarm = independent_vote_signal(swarmed, ex)
+    assert base > 0.0, "fixture below the floor would assert 0 == 0" 
+    assert swarm == pytest.approx(base, rel=1e-3), (
+        "50 dust alts moved the payout term by more than rounding"
+    )
 
-# ---------------------------------------------------------------------------
-# require_attribution — fail LOUD on a dropped-identity plumbing failure (§6).
-# ---------------------------------------------------------------------------
 
 
 def test_require_attribution_raises_on_plain_post() -> None:

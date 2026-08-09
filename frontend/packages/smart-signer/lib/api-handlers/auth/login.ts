@@ -16,6 +16,31 @@ import { getLogger } from '@hive/ui/lib/logging';
 import { siteConfig } from '@hive/ui/config/site';
 import { getChatAuthToken } from '@smart-signer/lib/rocket-chat';
 import { logLoginEvent, getClientIpFromApiRequest } from '@smart-signer/lib/event-logging';
+import { isHiveNetworkError, withHiveRetry } from '@smart-signer/lib/hive-network-error';
+
+/**
+ * ★ "COULD NOT REACH HIVE" IS NOT "YOUR SIGN-IN FAILED" (2026-08-09).
+ *
+ * Sign-in verifies the signature against the chain, so this handler cannot work
+ * when the node is unreachable — but the reader must be told WHICH of those
+ * happened. `apiHandler`'s fallback turns any unrecognised throw into a flat
+ * 500 `Internal Server Error`, so a transient connect stall reached the login
+ * screen as "That sign-in did not complete", which reads as "your credentials
+ * are wrong" and invites the reader to retype something that was never wrong.
+ *
+ * 503 is the honest code, and `expose: true` is load-bearing: `createHttpError`
+ * defaults `expose` to FALSE for every 5xx, and the error handler only forwards
+ * the message when `expose` is set — without it this would be a 500 again with
+ * the text stripped.
+ */
+function unreachableChainError(error: unknown) {
+  logger.error(error, 'login: Hive node unreachable while verifying sign-in');
+  return createHttpError(
+    503,
+    'Could not reach Hive to verify your sign-in. This is a problem on our side, not with your account — please try again in a moment.',
+    { expose: true }
+  );
+}
 
 const logger = getLogger('app');
 
@@ -30,7 +55,7 @@ export const loginUser: NextApiHandler<User> = async (req, res) => {
   let hiveUserProfile;
   let chainAccount;
   try {
-    chainAccount = await getAccount(username);
+    chainAccount = await withHiveRetry(() => getAccount(username), 'login getAccount');
     if (!chainAccount) {
       throw new Error(`Missing blockchain account "${username}"`);
     }
@@ -41,6 +66,9 @@ export const loginUser: NextApiHandler<User> = async (req, res) => {
         throw new createHttpError.NotFound(`Hive user ${username} not found`);
       }
     }
+    // A node we could not reach told us nothing about this account. Saying
+    // "user not found" here would be a lie with real consequences.
+    if (isHiveNetworkError(error)) throw unreachableChainError(error);
     throw error;
   }
 
@@ -67,12 +95,19 @@ export const loginUser: NextApiHandler<User> = async (req, res) => {
 
     // Verify signature — proves the client possesses the private key.
     try {
-      const chain = await getChain();
-      await chain.api.database_api.verify_authority({
-        trx: parsedTx,
-        pack: data.pack
-      });
+      await withHiveRetry(async () => {
+        const chain = await getChain();
+        return chain.api.database_api.verify_authority({
+          trx: parsedTx,
+          pack: data.pack
+        });
+      }, 'login verify_authority');
     } catch (verifyError) {
+      // ★ An unreachable node did NOT reject this signature. Reporting 401
+      // here accuses the reader of a bad credential on the strength of a
+      // network failure — the single most misleading thing this handler could
+      // say, and what it used to say.
+      if (isHiveNetworkError(verifyError)) throw unreachableChainError(verifyError);
       logger.error(verifyError, 'Signature verification failed for user %s', username);
       throw new createHttpError.Unauthorized('Signature verification failed');
     }

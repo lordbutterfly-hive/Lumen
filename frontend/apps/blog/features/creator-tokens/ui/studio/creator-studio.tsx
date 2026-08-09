@@ -459,12 +459,12 @@ const CreatorStudio: FC = () => {
       </TokenShell>
     );
   }
-  if (status === 'unavailable') return <MarketUnavailable />;
+  if (status === 'unavailable') return <MarketUnavailable launchHref="/creators/launch" />;
   if (status === 'loading') return <MarketLoading />;
   // A failed read must NOT fall through to the launch wizard: telling a creator
   // with a live market that they have no token, because the node blinked, is
   // exactly the "empty read rendered as real" failure this rewiring removes.
-  if (status === 'error') return <MarketReadFailed onRetry={studio.retry} />;
+  if (status === 'error') return <MarketReadFailed onRetry={studio.retry} launchHref="/creators/launch" />;
 
   // status === 'missing' -> genuinely no market yet (or signed out). The launch
   // wizard is the whole studio in that state.

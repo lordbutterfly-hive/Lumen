@@ -343,9 +343,25 @@ def test_a_tagless_profile_from_this_builder_still_gets_a_non_empty_feed(
     # `requires_author_floor` and `POPULAR_FALLBACK` does not. It ships OFF
     # (`PopularConfig.limit = 0`), so today the fallback is what answers; both
     # are accepted here so this test pins the INVARIANT rather than the setting.
+    # ★ 2026-08-09: `EXPLORATION` added when `PopularConfig.limit` went 0 -> 25.
+    # Measured on this exact fixture: 24 `OON_POPULAR` / 5 `POPULAR_FALLBACK` /
+    # 1 `EXPLORATION` in 30. The newcomer seat could not claim its slot before
+    # because the pool was starved and the fallback filled every position; a
+    # sourced popularity lane leaves room for it.
+    #
+    # The invariant this pins is NOT "popularity sources only" — it is that
+    # nothing requiring a RELATIONSHIP the viewer does not have may reach a
+    # tagless profile. `EXPLORATION` qualifies: it is the gate-exempt newcomer
+    # seat, keyed on nobody's follows or interests. `IN_NETWORK`,
+    # `OON_ENGAGED`, `OON_INTEREST` and `OON_ALS` all still fail this assertion,
+    # which is the part worth keeping strict.
     assert all(
         sc.source
-        in (CandidateSource.POPULAR_FALLBACK, CandidateSource.OON_POPULAR)
+        in (
+            CandidateSource.POPULAR_FALLBACK,
+            CandidateSource.OON_POPULAR,
+            CandidateSource.EXPLORATION,
+        )
         for sc in feed
     )
     assert "no interest_tags" in caplog.text

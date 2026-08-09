@@ -66,7 +66,10 @@ export function useStorageWithTTL<T>(
   key: string,
   initialValue: T,
   ttl: number | null = StorageTTL.DRAFT
-): [T, (value: SetValue<T>) => void, () => void] {
+  // ★ The setter reports whether the write landed (2026-08-09) — see
+  // `setStorageItem`. Callers holding content a person typed must check it;
+  // everyone else can keep ignoring it exactly as before.
+): [T, (value: SetValue<T>) => boolean, () => void] {
   // Store initial value in ref - only capture on first render to maintain stable reference
   // This is critical for object initialValues to prevent infinite re-renders
   const initialValueRef = useRef<T>(initialValue);
@@ -168,8 +171,8 @@ export function useStorageWithTTL<T>(
   // Memoized setter - writes to storage outside of React's render cycle
   // Note: We check key directly (not isDisabled) to handle dynamic key changes
   const setValue = useCallback(
-    (value: SetValue<T>) => {
-      if (!key || !isBrowser()) return;
+    (value: SetValue<T>): boolean => {
+      if (!key || !isBrowser()) return false;
 
       // Get current value for functional updates
       const currentValue = getStorageItem<T>(key) ?? initialValueRef.current;
@@ -178,9 +181,12 @@ export function useStorageWithTTL<T>(
       // Get old value for StorageEvent
       const oldValue = window.localStorage.getItem(key);
 
-      // Write to storage (this will trigger storage event for other tabs)
-      // Note: setStorageItem already handles errors internally
-      setStorageItem(key, newValue, ttlRef.current);
+      // Write to storage (this will trigger storage event for other tabs).
+      // ★ The note that used to sit here — "setStorageItem already handles
+      // errors internally" — was wrong, and is why a draft could vanish without
+      // a word. It reports success now; callers holding typed-in content are
+      // expected to act on `false` rather than assume the write landed.
+      const stored = setStorageItem(key, newValue, ttlRef.current);
 
       // Dispatch custom event to notify same-tab listeners with full context
       window.dispatchEvent(
@@ -191,6 +197,8 @@ export function useStorageWithTTL<T>(
           storageArea: window.localStorage
         })
       );
+
+      return stored;
     },
     [key]
   );

@@ -42,6 +42,15 @@ def test_final_in_unit_interval() -> None:
 
 
 def test_vote_component_monotonic() -> None:
+    """More stake must still rank higher — but only as a MINORITY of the score.
+
+    ★ 2026-08-09: the stake term is deliberately a small share (10% of `final`,
+    `ScoreWeights.vote`), because rshares are purchasable on Hive. It is not
+    zero: a post nobody backed is weaker evidence than one people put real
+    stake behind. This asserts the direction (more stake ranks higher) without
+    asserting the magnitude, so a future re-weighting inside the agreed minority
+    band does not have to edit this test.
+    """
     candidate = make_candidate(post=make_post(author_reputation=30.0))
     low = score_candidate(
         candidate, vote_signal_raw=1.0, organic_raw=0.5, norm=NORM, weights=WEIGHTS

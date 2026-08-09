@@ -69,7 +69,7 @@ import math
 import os
 import threading
 import time
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -689,15 +689,36 @@ LIMIT %(limit)s
 #: How many rows ONE author may occupy in the popularity RECALL set.
 _POPULAR_MAX_PER_AUTHOR = 2
 
-_POPULAR_ENGAGEMENT = f"""    0.5 * (SELECT COUNT(DISTINCT v.voter)
-           FROM hafsql.operation_effective_comment_vote_view v
-           WHERE v.author = c.author AND v.permlink = c.permlink
-             AND v.rshares > {_VOTER_MIN_RSHARES_SQL} AND v.voter <> c.author)
-    + 0.3 * (SELECT COUNT(DISTINCT rc.author)
-             FROM hafsql.operation_comment_view rc
-             WHERE rc.parent_author = c.author AND rc.parent_permlink = c.permlink
-               AND rc.author <> c.author)
-    + 0.5 * (SELECT COUNT(DISTINCT r.account_name)
+#: ★★★ THE RECALL WEIGHTS, EXPORTED (2026-08-09). These exist as named
+#: constants for ONE reason: `measurement-harness/simworld.py` reimplements this
+#: ordering in Python, its comment claimed it "mirrors production exactly...
+#: so the two cannot drift apart silently", and it drifted anyway — after the
+#: 2026-08-09 rebuild the sim still scored `0.5*voters + 0.3*comments +
+#: 0.5*reblogs` while production scored conversation only. Recall overlap fell
+#: to 76/150, so every harness measurement of this lane was taken on a pool
+#: production never produces. A shared constant plus
+#: `test_sim_recall_matches_production_weights` is what makes the claim true
+#: instead of aspirational.
+POPULAR_RECALL_COMMENT_WEIGHT = 0.6
+POPULAR_RECALL_REBLOG_WEIGHT = 0.4
+
+#: ★★★ RECALL IS THE CONVERSATION (2026-08-09, owner: "popular lane needs to
+#: come from comments and reblogs"). This was
+#: `0.5*voters + 0.3*commenters + 0.5*rebloggers` — voters were 0.5 of 1.3, i.e.
+#: 38% of what decided which posts the lane could even SEE, against an owner cap
+#: of 10% on vote influence. Stake now enters only in `select_popular`, at its
+#: 10% share, where it can be normalised against the pool; SQL cannot normalise,
+#: so putting rshares here would have let one whale-voted post dominate recall.
+#:
+#: 0.6/0.4 mirrors `PopularConfig.comment_share` so recall and selection agree
+#: about what "leading the conversation" means. Still distinct-identity counts,
+#: still self-excluded; the trust budget and reputation tilt are applied in
+#: Python, which is the only place they exist.
+_POPULAR_ENGAGEMENT = f"""    {POPULAR_RECALL_COMMENT_WEIGHT} * (SELECT COUNT(DISTINCT rc.author)
+           FROM hafsql.operation_comment_view rc
+           WHERE rc.parent_author = c.author AND rc.parent_permlink = c.permlink
+             AND rc.author <> c.author)
+    + {POPULAR_RECALL_REBLOG_WEIGHT} * (SELECT COUNT(DISTINCT r.account_name)
              FROM hafsql.reblogs r
              WHERE r.author = c.author AND r.permlink = c.permlink
                AND r.account_name <> c.author)"""
@@ -1964,6 +1985,33 @@ class HafsqlClient:
         for author, permlink, account in rows:
             grouped.setdefault((author, permlink), set()).add(account)
         return {key: tuple(sorted(accounts)) for key, accounts in grouped.items()}
+
+    def reputations_for(self, accounts: Sequence[str]) -> dict[str, float]:
+        """DISPLAY reputation (the 25-75 scale people see) for any identity set.
+
+        ★ 2026-08-09: the popularity lane weights each commenter/reblogger by
+        reputation (owner's ">=60 rep" rule), and those identities are not the
+        authors of the posts being scored, so `_reputations_for_authors` could
+        not answer for them.
+
+        ★★★ RETURNS DISPLAY, NOT RAW — and this is the whole reason the method
+        exists rather than the caller using `_reputations_for_authors` directly.
+        `hafsql.reputations.reputation` is the RAW integer, which runs to
+        billions; a caller comparing it against 60 would find EVERY account
+        above the bar, making the tilt a uniform constant that cancels out of a
+        relative score entirely. The owner's rule would have been decoration.
+        `_reputation_display` is the hivemind-equivalent transform, and the
+        number 60 only means anything on that scale.
+
+        Empty input short-circuits, so an unhydrated pool costs no round trip.
+        """
+        names = list({a for a in accounts if a})
+        if not names:
+            return {}
+        return {
+            name: _reputation_display(raw)
+            for name, raw in self._reputations_for_authors(names).items()
+        }
 
     def _reputations_for_authors(self, authors: list[str]) -> dict[str, int]:
         rows = self._fetch_lite(_SQL_REPUTATIONS_FOR_AUTHORS, {"authors": authors})

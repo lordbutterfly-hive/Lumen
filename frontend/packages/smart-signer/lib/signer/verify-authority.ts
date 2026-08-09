@@ -1,25 +1,12 @@
 import { TTransactionPackType, ApiTransaction } from '@hiveio/wax';
 import { getLogger } from '@hive/ui/lib/logging';
 import { getChain } from '@transaction/lib/chain';
+// ★ One shared definition of "Hive was unreachable" — this file used to keep a
+// private copy, and the server had none, so the same blip was reported two
+// different ways. See lib/hive-network-error.ts.
+import { isHiveNetworkError, withHiveRetry } from '@smart-signer/lib/hive-network-error';
 
 const logger = getLogger('app');
-
-/** Network/transient error patterns that should NOT be misreported as authority failures */
-const NETWORK_ERROR_PATTERNS = [
-  /ECONNREFUSED/i,
-  /ECONNRESET/i,
-  /ETIMEDOUT/i,
-  /ENOTFOUND/i,
-  /timeout/i,
-  /fetch failed/i,
-  /network\s+(error|failure|request|unavailable)/i,
-  /abort/i,
-  /socket hang up/i
-];
-
-function isNetworkError(message: string): boolean {
-  return NETWORK_ERROR_PATTERNS.some((pattern) => pattern.test(message));
-}
 
 /**
  * Verify authority of a signed transaction on chain.
@@ -38,16 +25,20 @@ export async function verifyAuthorityOrThrow(
   signerName: string
 ): Promise<void> {
   try {
-    await (await getChain()).api.database_api.verify_authority({
-      trx: txApiJson,
-      pack
-    });
+    await withHiveRetry(
+      async () =>
+        (await getChain()).api.database_api.verify_authority({
+          trx: txApiJson,
+          pack
+        }),
+      `${signerName} verify_authority`
+    );
   } catch (error) {
     logger.error('%s key authority verification failed: %s', signerName, error instanceof Error ? error.message : String(error));
     const msg = error instanceof Error ? error.message : String(error);
 
     // Re-throw network errors as-is — don't misattribute them as authority failures
-    if (isNetworkError(msg)) {
+    if (isHiveNetworkError(error)) {
       throw error;
     }
 

@@ -20,6 +20,25 @@ const COPY = {
   welcome: 'Welcome to Lumen',
   welcomeSub:
     'Publish to Hive without keys, wallets or setup. Start in seconds; upgrade to a full Hive account — and start earning on it — whenever you’re ready.',
+  /**
+   * ★★★ THE PROMISE HAS TO DEGRADE WITH THE THING THAT KEEPS IT (2026-08-08, UX
+   * tester on the new-user path).
+   *
+   * `welcomeSub` above says "without keys, wallets or setup", and exactly ONE of
+   * the four ways in delivers that: Google. The other three each require
+   * something the reader must already own — a Bitcoin wallet, an Ethereum wallet
+   * (which has no manual fallback at all), or the Hive Keychain extension. When
+   * Google is unavailable the headline kept promising key-free signup above four
+   * doors that all needed a key, which is the one failure mode a first-time
+   * visitor cannot diagnose: they assume they are missing something.
+   *
+   * This is NOT "signup is broken" — with a real client id configured the
+   * walletless path exists and the promise is true. The defect was that the
+   * sentence was static. So it is now conditional on `googleReady`, the same flag
+   * that decides whether the button underneath it works.
+   */
+  welcomeSubWalletsOnly:
+    'Every way in below needs something you already have — a Bitcoin or Ethereum wallet, or the Hive Keychain extension. The key-free option, Google, is being set up.',
   google: 'Continue with Google',
   orHive: 'or connect with Hive Keychain',
   keychainTitle: 'Sign in with Hive Keychain',
@@ -201,15 +220,40 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
       <div className={embedded ? 'flex w-full max-w-full flex-col gap-[18px]' : 'flex w-[460px] max-w-full flex-col gap-[18px]'}>
         {view === 'default' ? (
           <>
-            <div className="overflow-hidden rounded-[22px] border border-[#ebebeb] bg-white shadow-[0_12px_40px_rgba(192,57,43,0.07),0_1px_2px_rgba(20,18,10,0.04)]">
-              <div className="border-b border-[#f3ede9] bg-[radial-gradient(120%_100%_at_0%_0%,#fdf1ee_0%,#fff_62%)] px-[30px] pb-6 pt-8">
-                <h1 className="font-serif text-[30px] font-semibold leading-[1.12] tracking-[-0.01em] text-[#161511]">
+            {/* ★ NO DOUBLE FRAME IN THE DIALOG (2026-08-08). Embedded, this card
+                sat inside the popup's own frame and padding — two borders, two
+                paddings — which squeezed each method row until its label wrapped
+                outside the button. In the dialog the popup IS the card. */}
+            <div
+              className={
+                embedded
+                  ? 'overflow-hidden bg-white'
+                  : 'overflow-hidden rounded-[22px] border border-[#ebebeb] bg-white shadow-[0_12px_40px_rgba(192,57,43,0.07),0_1px_2px_rgba(20,18,10,0.04)]'
+              }
+            >
+              <div
+                className={
+                  embedded
+                    ? 'border-b border-[#f3ede9] px-0 pb-4 pt-0'
+                    : 'border-b border-[#f3ede9] bg-[radial-gradient(120%_100%_at_0%_0%,#fdf1ee_0%,#fff_62%)] px-[30px] pb-6 pt-8'
+                }
+              >
+                <h1 className={`font-serif font-semibold leading-[1.12] tracking-[-0.01em] text-[#161511] ${embedded ? 'text-[22px]' : 'text-[30px]'}`}>
                   {COPY.welcome}
                 </h1>
-                <p className="mt-2 text-[14.5px] leading-[1.55] text-[#4b5563]">{COPY.welcomeSub}</p>
+                {/* Google is the only walletless way in, so it is what makes the
+                    "without keys, wallets or setup" sentence true. Resolved on
+                    the client for the same reason the button is (see
+                    `googleReady`): the server render cannot see the client id, so
+                    it shows the conservative sentence and the browser corrects
+                    it. Erring that way round is deliberate — over-promising is
+                    the failure this fixes. */}
+                <p className="mt-2 text-[14.5px] leading-[1.55] text-[#4b5563]">
+                  {googleReady ? COPY.welcomeSub : COPY.welcomeSubWalletsOnly}
+                </p>
               </div>
 
-              <div className="p-6">
+              <div className={embedded ? 'py-5' : 'p-6'}>
                 {/* Primary: Google identity (Lumen Lite, no keys). The real Google
                     button renders when a client id is configured; otherwise the styled
                     fallback below explains the state instead of failing on click. */}
@@ -264,16 +308,22 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                     onClick={() => setWalletOpen('btc')}
                     className="flex h-14 w-full cursor-pointer items-center gap-3 rounded-[14px] border border-[#e4e6e9] bg-white px-4 text-left hover:border-[#f7931a] hover:bg-[#fffaf3]"
                   >
-                    {/* ★ A REAL MARK, NOT A GLYPH (2026-08-07). This was the
-                        character "₿", which the app's font stack does not carry —
-                        it rendered as an empty orange square while Google,
-                        Ethereum and Keychain all showed proper marks. Drawn as
-                        SVG so it cannot depend on a font again. */}
-                    <span className="flex h-[34px] w-[34px] flex-shrink-0 items-center justify-center rounded-[9px] bg-[#f7931a] text-white">
-                      <svg width="19" height="19" viewBox="0 0 24 24" aria-hidden fill="currentColor">
-                        <path d="M15.9 10.6c.63-.42 1.03-1.1 1.03-2.1 0-1.66-1.2-2.63-3.02-2.94V3h-1.8v2.47h-1.2V3H9.1v2.53H6v1.9h1.2c.5 0 .68.2.68.63v7.88c0 .35-.2.56-.6.56H6V18.5h3.1V21h1.8v-2.47h1.2V21h1.8v-2.53c2.3-.2 3.9-1.28 3.9-3.4 0-1.6-.86-2.6-2.4-3.06l.5-.4zM10.7 7.6h2.05c1.06 0 1.7.45 1.7 1.36 0 .9-.64 1.4-1.7 1.4H10.7V7.6zm2.4 8.8H10.7v-3h2.4c1.26 0 1.98.55 1.98 1.5s-.72 1.5-1.98 1.5z" />
-                      </svg>
-                    </span>
+                    {/* ★ THE REAL BITCOIN MARK (2026-08-09, owner-supplied).
+                        History worth keeping: this was the character "₿", which
+                        the app's font stack does not carry, so it rendered as an
+                        empty orange square; then a hand-drawn SVG. Both were
+                        stand-ins for the actual logo, which is what ships now.
+                        The asset is the official disc with its white plate made
+                        transparent and the stock caption cropped off, so it
+                        needs no coloured background behind it. */}
+                    <img
+                      src="/logos/bitcoin.png"
+                      alt=""
+                      aria-hidden
+                      width={34}
+                      height={34}
+                      className="h-[34px] w-[34px] flex-shrink-0"
+                    />
                     <span className="min-w-0 flex-1">
                       <span className="block text-[15px] font-semibold text-[#161511]">{COPY.btcTitle}</span>
                       <span className="block text-xs text-[#6b7280]">{COPY.btcSub}</span>
@@ -285,9 +335,19 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                     onClick={() => setWalletOpen('evm')}
                     className="flex h-14 w-full cursor-pointer items-center gap-3 rounded-[14px] border border-[#e4e6e9] bg-white px-4 text-left hover:border-[#627eea] hover:bg-[#f8f9ff]"
                   >
-                    <span className="flex h-[34px] w-[34px] flex-shrink-0 items-center justify-center rounded-[9px] bg-[#627eea] text-base font-extrabold text-white">
-                      ◈
-                    </span>
+                    {/* ★ THE METAMASK MARK (2026-08-09, owner-supplied). This
+                        was "◈" — the same font-dependency the Bitcoin glyph fell
+                        to above, one row apart. The row still accepts any EVM
+                        wallet; MetaMask is simply the one readers recognise, and
+                        the copy underneath says so. */}
+                    <img
+                      src="/logos/metamask.png"
+                      alt=""
+                      aria-hidden
+                      width={34}
+                      height={34}
+                      className="h-[34px] w-[34px] flex-shrink-0"
+                    />
                     <span className="min-w-0 flex-1">
                       <span className="block text-[15px] font-semibold text-[#161511]">{COPY.evmTitle}</span>
                       <span className="block text-xs text-[#6b7280]">{COPY.evmSub}</span>
@@ -387,7 +447,14 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
       <div className="my-9 flex gap-5 text-[13px] text-[#9ca3af]">
         <a href="/tos.html" className="text-[#9ca3af]">Terms</a>
         <a href="/privacy.html" className="text-[#9ca3af]">Privacy</a>
-        <a href="/faq.html" className="text-[#9ca3af]">Help</a>
+        {/* ★ HELP FOR THE PERSON ACTUALLY ON THIS SCREEN (2026-08-08, UX tester).
+            This pointed at /faq.html — the inherited "Hive.blog FAQ", which opens
+            on master passwords, owner keys, Resource Credits and MVESTs and refers
+            the reader to a third-party account-creation service. Handing that to
+            someone who was just promised "without keys, wallets or setup" is worse
+            than offering no help at all. /help.html is Lumen's own, and links on to
+            the Hive FAQ at the bottom for anyone who wants it. */}
+        <a href="/help.html" className="text-[#9ca3af]">Help</a>
       </div>
 
       {walletOpen ? (

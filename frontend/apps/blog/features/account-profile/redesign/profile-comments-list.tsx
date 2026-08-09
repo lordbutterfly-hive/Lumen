@@ -5,6 +5,7 @@ import { useTranslation } from '@/blog/i18n/client';
 import NoDataError from '@/blog/components/no-data-error';
 import ProfileCommentCard from './profile-comment-card';
 import { useAccountEntries } from './hooks/use-account-entries';
+import { filterVisiblePosts, useNsfwPreference } from '@/blog/lib/nsfw';
 
 /** Comments tab body — reply cards, no SSR-prefetched initial page (see use-account-entries TODO). */
 export default function ProfileCommentsList({
@@ -17,8 +18,25 @@ export default function ProfileCommentsList({
   lite?: boolean;
 }) {
   const { t } = useTranslation('common_blog');
-  const { entries, isError, isLoading, isFetching, isFetchingNextPage, hasNextPage, fetchNextPage, loadMoreRef } =
-    useAccountEntries(username, 'comments', observer, undefined, lite);
+  const {
+    entries: rawEntries,
+    isError,
+    isLoading,
+    isFetching,
+    isFetchingNextPage,
+    hasNextPage,
+    fetchNextPage,
+    loadMoreRef
+  } = useAccountEntries(username, 'comments', observer, undefined, lite);
+  // ★ THE SAME `hide` PROMISE AS THE POSTS TAB (2026-08-09). The Posts tab has
+  // filtered since the NSFW work landed and this one never did, so a reader on
+  // `hide` still saw the same author's replies under an `nsfw` category listed
+  // here. Lower stakes than the image surfaces — a comment card renders a
+  // text excerpt and no thumbnail — but it is the same setting, and a promise
+  // that holds on one tab and not its neighbour is the bug class this whole
+  // pass exists to close. Same hook, same function, no new machinery.
+  const nsfwPreference = useNsfwPreference();
+  const entries = filterVisiblePosts(rawEntries, nsfwPreference);
 
   // ★★★ AN ERROR ON PAGE 2 MUST NOT DELETE PAGE 1.
   //

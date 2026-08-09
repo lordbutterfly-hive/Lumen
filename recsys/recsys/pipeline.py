@@ -906,13 +906,34 @@ def gather_candidates(
                 return frozenset({author})
             return frozenset({author}) | _ring_exclusion(author, snapshot)
 
+        popular_pool = gateway.popular_posts(since, settings.popular.source_limit)
+        # ★ 2026-08-09: the lane weights each commenter/reblogger by on-chain
+        # reputation (owner's >=60 rule). Those identities are NOT the post
+        # authors, so nothing upstream has fetched them — one batched lookup
+        # over the pool's whole identity set, not one per post.
+        engagers: set[str] = set()
+        for _post in popular_pool:
+            engagers.update(getattr(_post, "commenters", ()) or ())
+            engagers.update(getattr(_post, "rebloggers", ()) or ())
+        # ★ FAIL-SOFT, and deliberately so. The reputation tilt is an
+        # ENHANCEMENT to the lane's ordering, not a correctness requirement: a
+        # gateway that cannot answer (a simulator, an older implementation, a
+        # degraded read) must give an unranked-by-reputation lane, never no feed
+        # at all. Missing reps make `_rep_tilt` return 1.0 uniformly, which is
+        # exactly "nobody gets a bonus" — the honest degradation.
+        _reps_for = getattr(gateway, "reputations_for", None)
+        popular_reps = (
+            _reps_for(sorted(engagers)) if engagers and callable(_reps_for) else {}
+        )
         groups.append(
             select_popular(
-                gateway.popular_posts(since, settings.popular.source_limit),
+                popular_pool,
                 excluded_for=_popular_excluded,
                 trust=trust,
                 weights=settings.weights,
                 limit=settings.popular.limit,
+                popular=settings.popular,
+                reputations=popular_reps,
             )
         )
 
@@ -1395,7 +1416,11 @@ def _score(
             ring_members=_ring_exclusion(candidate.post.author, snap) | banned_authors(),
         )
         excluded = exclusions.excluded()
-        vote_signal_raw = independent_vote_signal(candidate.post, exclusions, trust=trust)
+        # ★ Personal payout: the viewer's own follows decide whose rshares
+        # count in full. See `_PERSONAL_STRANGER_SCALE`.
+        vote_signal_raw = independent_vote_signal(
+            candidate.post, exclusions, trust=trust, personal_for=viewer.follows
+        )
         organic_raw = _organic_signal(
             candidate.post,
             viewer,

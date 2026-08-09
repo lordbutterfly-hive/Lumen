@@ -147,6 +147,7 @@ export default function PostForm({
     handleCancel,
     handleCancelConfirm,
     handleLoadTemplate,
+    draftSaveFailed,
   } = usePostFormActions({
     form,
     username,
@@ -255,6 +256,25 @@ export default function PostForm({
         data-testid="form-and-preview-container"
       >
         <Form {...form}>
+          {/* ★ NEVER LET A DRAFT DIE QUIETLY (2026-08-09). Auto-save writes the
+              whole body to localStorage every 500 ms; when it no longer fits,
+              the write throws and used to be swallowed, so the editor looked
+              identical to a saved document right up until the work was gone.
+              This is deliberately a persistent banner and not a toast: a toast
+              disappears, and the writer needs to see this for as long as it is
+              true. It also says what to DO, because the app cannot rescue the
+              text on the writer's behalf. */}
+          {draftSaveFailed ? (
+            <div
+              role="alert"
+              data-testid="draft-save-failed"
+              className="rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900 dark:border-red-800 dark:bg-red-950 dark:text-red-100"
+            >
+              <strong className="font-semibold">This draft is not being saved.</strong> It is too
+              large for your browser&apos;s storage, so it will be lost if you close or reload this
+              tab. Copy your text somewhere safe, or shorten the post.
+            </div>
+          ) : null}
           <form
             onSubmit={form.handleSubmit(onSubmit)}
             className={clsx("flex flex-col gap-6 lg:w-1/2", {

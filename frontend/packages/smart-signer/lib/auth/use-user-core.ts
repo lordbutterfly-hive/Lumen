@@ -43,54 +43,23 @@ export function useUserCore(
   const { data: user } = useQuery<User>({
     queryKey: [QUERY_KEY.user],
     queryFn: async (): Promise<User> => getUser(),
-    // ★★★ STALE-WHILE-REVALIDATE, NOT "TRUST LOCALSTORAGE FOREVER" (2026-08-06).
-    //
-    // THE BUG THIS FIXES, observed three separate times today: this hook
-    // reported LOGGED-OUT for a genuinely authenticated session. The header
-    // rendered "Log in" while `/api/users/me` on the very same page returned
-    // `{isLoggedIn: true, account_tier: "lite"}`.
-    //
-    // Cause: `initialData` seeds from localStorage, and with
-    // `refetchOnMount: false` React Query treats that seed as fresh and NEVER
-    // calls `getUser()`. So a browser whose local copy is empty or stale — a
-    // new browser, cleared storage, a session established in another tab, or a
-    // cookie that outlived the local copy — is pinned to `defaultUser`
-    // (logged out) for the whole page life, no matter what the server says.
-    //
-    // Consequences were not cosmetic: the signup interest picker silently never
-    // rendered, the short-form composer's post button did nothing, and the app
-    // looked "unpopulated" to a signed-in user.
-    //
-    // `initialDataUpdatedAt: 0` marks the seed as arbitrarily old, so it is used
-    // for the FIRST PAINT (no logged-out flash, which is why the seed exists)
-    // and is then immediately revalidated against the server, which is the only
-    // authority on whether the cookie is still good.
+    // Seed from localStorage for the first paint, then always revalidate:
+    // `initialDataUpdatedAt: 0` marks the seed as stale so a browser whose local
+    // copy is empty or out of date is not pinned to "logged out" for the page's
+    // life. The server is the only authority on whether the cookie is still good.
     refetchOnMount: true,
-    // ★ ON as of 2026-08-07. Browsers share ONE cookie jar across tabs, so signing
-    // in as someone else in tab 2 changes who tab 1 will act as — while tab 1's
-    // header keeps showing the old name until something re-asks. Found live: a
-    // click in a tab labelled "A" was recorded server-side as "B".
-    //
-    // You have to focus a tab to use it, so re-checking on focus closes the real
-    // window between "identity changed" and "user acts on it" — for the cost of
-    // one small request when you come back to a tab. Polling or cross-tab
-    // messaging would cost far more for the same outcome.
-    refetchOnWindowFocus: true,
-    refetchOnReconnect: true,
+    // Off since 2026-08-08: re-checking identity on every focus/reconnect was
+    // added for the multi-tab case (signing in as someone else in tab 2) but it
+    // propagated any transient wrong answer everywhere within seconds. Mount-only
+    // is the safer trade; the multi-tab case is much rarer.
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     initialData: storedUser,
     initialDataUpdatedAt: 0,
-    // ★ A FAILED REQUEST IS NOT A LOGOUT (2026-08-07).
-    //
-    // This wiped the stored user on ANY query error. That was survivable while
-    // the only refetch was on mount; now that focus and reconnect also refetch,
-    // one flaky request — a dropped wifi packet, a slow node, a reload that
-    // raced — would silently sign the person out and look like "refreshing logs
-    // me out". The server says who you are; a request that never reached it says
-    // nothing at all, and must leave the last known answer alone.
-    //
-    // Genuine sign-out still works: logout clears the cookie AND bumps the
-    // session epoch, so the next SUCCESSFUL response reports logged-out and that
-    // is what clears the stored user.
+    // A FAILED REQUEST IS NOT A LOGOUT. A request that never reached the server
+    // says nothing about who you are, so it must leave the last known answer
+    // alone. Real sign-out still works: it clears the cookie, and the next
+    // SUCCESSFUL response is what reports logged-out.
     retry: 2,
     onError: (error) => {
       logger.warn('users/me refetch failed; keeping the current session as-is: %o', error);

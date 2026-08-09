@@ -1,6 +1,6 @@
 "use client";
 
-import { Dispatch, MutableRefObject, RefObject, SetStateAction, useCallback, useEffect, useRef } from "react";
+import { Dispatch, MutableRefObject, RefObject, SetStateAction, useCallback, useEffect, useRef, useState } from "react";
 import { UseFormReturn } from "react-hook-form";
 import { useRouter } from "next/navigation";
 import { createAsset, createPermlink } from "@transaction/lib/utils";
@@ -28,7 +28,7 @@ interface UsePostFormActionsParams {
   defaultValues: AccountFormValues;
   watchedValues: AccountFormValues;
   storedPost: AccountFormValues;
-  storePost: (value: AccountFormValues) => void;
+  storePost: (value: AccountFormValues) => boolean;
   removePost: () => void;
   hasHydratedRef: MutableRefObject<boolean>;
   hasSubmittedRef: MutableRefObject<boolean>;
@@ -70,18 +70,31 @@ export function usePostFormActions({
   const latestPostAreaRef = useRef(storedPost.postArea || defaultValues.postArea);
   const postAreaSyncTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const storeTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  // True when the last auto-save could not be written (localStorage full / too
+  // large). Surfaced in the editor so the writer can rescue their work.
+  const [draftSaveFailed, setDraftSaveFailed] = useState(false);
 
   // Debounce form.setValue for postArea to avoid re-rendering entire PostForm on every keystroke.
   const handlePostAreaChange = useCallback(
     (value: string) => {
       latestPostAreaRef.current = value;
-      setPreviewContent(value);
+      // ★ THE PREVIEW IS WHAT FROZE THE TAB (2026-08-09). `setPreviewContent`
+      // ran on EVERY keystroke and on paste, synchronously handing the whole
+      // document to the markdown renderer (and to `contentHasExternalImage`,
+      // which regexes the entire body). At a few hundred KB that is slow; at the
+      // 4–5 MB paste a tester measured, the main thread never comes back, the
+      // tab is killed, and every unsaved keystroke dies with it. The draft loss
+      // was a SYMPTOM of the hang — the auto-save below never got a turn.
+      //
+      // Debounced to the same 300 ms as the form sync, so the preview is a beat
+      // behind instead of fighting the typist for the main thread.
       clearTimeout(postAreaSyncTimerRef.current);
       postAreaSyncTimerRef.current = setTimeout(() => {
         form.setValue("postArea", value);
+        setPreviewContent(value);
       }, 300);
     },
-    [form]
+    [form, setPreviewContent]
   );
 
   // Auto-save debounce
@@ -90,7 +103,17 @@ export function usePostFormActions({
     if (!hasHydratedRef.current) return;
     clearTimeout(storeTimerRef.current);
     storeTimerRef.current = setTimeout(() => {
-      storePost(watchedValues);
+      // ★ A FAILED AUTO-SAVE MUST BE VISIBLE (2026-08-09). `storePost` used to
+      // return nothing and swallow `QuotaExceededError`, so a draft too large
+      // for localStorage looked exactly like a saved one until the writer
+      // reloaded and found it gone. Now the write reports back and the editor
+      // says so, once per transition, instead of failing quietly forever.
+      const stored = storePost(watchedValues);
+      setDraftSaveFailed((was) => {
+        if (was === !stored) return was;
+        if (!stored) logger.error("Auto-save failed: the draft did not fit in localStorage");
+        return !stored;
+      });
     }, 500);
     return () => clearTimeout(storeTimerRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -151,21 +174,37 @@ export function usePostFormActions({
         // and 2.5 s after Submit — nothing on screen at any of them, while the
         // 201 sat in the network log. Publishing is the scariest thing a
         // newcomer does here; an unacknowledged one reads as a failure.
+        //
+        // ★★★ AND SAY A TRUE THING (2026-08-08, UX tester on the full new-user
+        // path). It said "already visible on Lumen", which sent a first-time
+        // poster to look for their post in the places a reader looks — and it is
+        // in none of them. Reproduced on a freshly created account: the post is
+        // absent from For You (`/api/feed/for-you`, 20 entries, source recsys),
+        // absent from Following (0 entries — you do not follow yourself), and
+        // absent from #lumen (`?tag=lumen`, 30 entries). All three read HIVE, and
+        // a lite post is not on Hive yet; when it does publish it goes out as a
+        // COMMENT under a rolling container root (publisher/container.ts), so a
+        // tag page will never list it at all.
+        //
+        // Where it IS, immediately and provably: the author's own profile
+        // (`/api/lite/posts?author=`) and its own permalink page. So the copy
+        // names that and the navigation goes there — a promise the next screen
+        // keeps, instead of one three other screens break.
         toast({
           title: editMode ? "Changes saved" : "Post published",
           description: editMode
             ? "Your post has been updated."
-            : "It is on its way to Hive and is already visible on Lumen.",
+            : "It's on your Lumen profile now, and queued to publish to Hive.",
           variant: "success"
         });
         // ★ An EDIT should return you to what you edited, not to the feed.
-        //   Creating a post has no page to go to yet (the lite post is not on
-        //   chain at the moment of writing), so the home feed is right there —
-        //   but after an edit the post exists and the reader was just looking
-        //   at it. Reported as "a minor UX surprise" by an adversarial pass;
-        //   it is also the only way to see that the edit took.
+        //   A NEW post now also has somewhere to go: the author's profile, which
+        //   is the one surface that has it the moment the 201 lands. It used to
+        //   push to "/" — the home feed — on the reasoning that a lite post has
+        //   no page yet; that is only true of its CHAIN page, and it dropped the
+        //   reader on the single screen the toast had just promised.
         await router.push(
-          withBasePath(editMode && post_s?.url ? post_s.url : "/"),
+          withBasePath(editMode && post_s?.url ? post_s.url : `/@${user.username}`),
           undefined
         );
       } else {
@@ -296,5 +335,6 @@ export function usePostFormActions({
     handleCancel,
     handleCancelConfirm,
     handleLoadTemplate,
+    draftSaveFailed,
   };
 }

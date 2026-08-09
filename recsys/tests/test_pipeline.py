@@ -2829,25 +2829,35 @@ def test_the_popularity_lane_is_an_exact_no_op_at_limit_zero() -> None:
     assert any(c.source is CandidateSource.OON_POPULAR for c in on)
 
 
-def test_the_popularity_lane_is_selected_by_credited_breadth_not_vote_count() -> None:
-    """★ THE LANE'S ONE LOAD-BEARING PROPERTY. It is served to EVERY viewer, so
-    a membership rule a farm can manufacture is a platform-wide amplifier.
+def test_the_popularity_lane_cannot_be_bought_with_votes() -> None:
+    """★ THE LANE'S ONE LOAD-BEARING PROPERTY, re-pinned for the 2026-08-09
+    rebuild. It is served to EVERY viewer, so a membership rule a farm can
+    manufacture is a platform-wide amplifier.
 
-    The gateway's SQL prefilter counts every identity equally; `select_popular`
-    re-scores with the request's `VoterTrust` budget, under which a swarm of
-    unknown-tier alts buys `unknown_free`, not one unit per alt. Here the
-    farmed post has FOUR TIMES the raw voters and must still lose.
+    What changed: selection used to be `credited_breadth`, dominated by distinct
+    VOTERS, so this test bought its farm with votes. The lane now scores
+    `0.9*(0.6*comments + 0.4*reblogs) + 0.1*payout` — votes reach it ONLY through
+    that 10% payout share — so the farm is bought the way it would now have to
+    be: MORE VOTES AND MORE RAW COMMENTERS, all of them unknown-tier alts.
+
+    The honest post has fewer commenters, but they are vouched. Under the same
+    `VoterTrust` budget the organic term uses, 40 alts draw `unknown_free`, not
+    one unit each — so the honest post must still win, and 4x the payout must
+    not be enough to overturn it at a 10% share.
     """
-    from recsys.config import ScoreWeights
+    from recsys.config import PopularConfig, ScoreWeights
     from recsys.core.popular import select_popular
     from recsys.core.vote_signal import VoterTrust
+    from tests.test_vote_signal import make_attributed_post
 
-    farmed = make_post(
-        "farm", "f1",
+    farmed = make_attributed_post(
+        author="farm", permlink="f1",
+        commenters=tuple(f"alt{i}" for i in range(40)),
         votes=[make_vote(f"alt{i}", 7_000_000_000) for i in range(40)],
     )
-    honest = make_post(
-        "honest", "h1",
+    honest = make_attributed_post(
+        author="honest", permlink="h1",
+        commenters=tuple(f"real{i}" for i in range(10)),
         votes=[make_vote(f"real{i}", 7_000_000_000) for i in range(10)],
     )
     trust = VoterTrust(
@@ -2861,19 +2871,28 @@ def test_the_popularity_lane_is_selected_by_credited_breadth_not_vote_count() ->
         trust=trust,
         weights=ScoreWeights(),
         limit=2,
+        popular=PopularConfig(limit=2),
     )
-    assert [c.post.author for c in picked] == ["honest", "farm"]
-    # ... and with no trust snapshot at all the raw count wins, which is exactly
-    # why the snapshot is threaded rather than assumed.
+    assert [c.post.author for c in picked] == ["honest", "farm"], (
+        "40 unknown-tier alts outranked 10 vouched commenters — the trust "
+        "budget is not reaching the popularity lane"
+    )
+
+    # ★ AND THE HONEST LIMIT OF THAT PROTECTION, stated rather than hidden:
+    # with no trust snapshot every identity counts equally, so the bigger farm
+    # wins. Production refuses to rank without a snapshot
+    # (`TrustPolicy.FAIL_CLOSED`, pipeline.py) — this asserts the dependency is
+    # real, so nobody "simplifies" the snapshot away believing the lane is safe
+    # without it.
     untrusted = select_popular(
         [farmed, honest],
         excluded_for=lambda a: frozenset({a}),
         trust=None,
         weights=ScoreWeights(),
         limit=2,
+        popular=PopularConfig(limit=2),
     )
     assert [c.post.author for c in untrusted] == ["farm", "honest"]
-
 
 def test_the_popularity_lane_still_refuses_a_proven_self_dealer() -> None:
     """It is vouch-exempt (a chain-popular post has no in-network vouch by

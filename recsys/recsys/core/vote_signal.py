@@ -24,7 +24,6 @@ the fix, not a tighter cap.)
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 
 from recsys.config import DEFAULT_SETTINGS, ScoreWeights, VoteSignalConfig
@@ -79,6 +78,25 @@ _ORGANIC_REPLY_WEIGHT = 0.3
 # is a headcount of people whose attention costs something; below ~100 HP a vote
 # is close to free to manufacture, and free votes were being counted as people.
 _ORGANIC_VOTER_MIN_RSHARES = 3.184e9
+
+#: How much a STRANGER's payout counts, relative to payout from someone the
+#: viewer follows (2026-08-09, owner: "make the payout personal").
+#:
+#: Payout is a chain-wide number that knows nothing about the reader, so every
+#: point of weight it carries pushes the SAME posts up for everybody — measured
+#: on `q11_follow_curve` as -0.0176 reader relevance at n=9 and n=20 when the
+#: term went to 10% of `final`. Scaling a stranger's rshares down turns "this
+#: post earned a lot" into "this post earned a lot FROM PEOPLE NEAR YOU", which
+#: is the same 10% without the flat push.
+#:
+#: 0.35 rather than 0: a big payout from outside your network is still real
+#: evidence, just weaker evidence, and zeroing it would make the term blind to
+#: everything beyond one hop.
+#:
+#: ★ A viewer with NO follows is unaffected by construction: every voter is a
+#: stranger, so every post is scaled by the same constant, and `log_compress`
+#: is monotone — the ORDER is identical. Cold start cannot regress here.
+_PERSONAL_STRANGER_SCALE = 0.35
 
 
 @dataclass(frozen=True)
@@ -202,7 +220,11 @@ class AttributedPost(Post):
 
 
 def independent_vote_signal(
-    post: Post, exclusions: VoteExclusions, *, trust: VoterTrust | None = None
+    post: Post,
+    exclusions: VoteExclusions,
+    *,
+    trust: VoterTrust | None = None,
+    personal_for: frozenset[str] | None = None,
 ) -> float:
     """Breadth-weighted independent vote signal (§4, §8.4).
 
@@ -242,10 +264,41 @@ def independent_vote_signal(
     ]
     if not kept:
         return 0.0
-    raw = sum(vote.rshares for vote in kept)
-    voters = frozenset(vote.voter for vote in kept)
-    breadth = len(voters) if trust is None else trust.credited_breadth(voters)
-    return log_compress(raw) * (1.0 + math.log10(1 + breadth))
+    # ★★★ PAYOUT AMOUNT, NOT PAYOUT x VOTE COUNT (2026-08-09, owner: "payout
+    # amount, not vote number, make sure thats the case").
+    #
+    # This returned `log_compress(raw) * (1 + log10(1 + breadth))` — the payout
+    # MULTIPLIED by how many distinct voters produced it. Two things were wrong
+    # with that:
+    #
+    #  1. It is not what this term is for. `raw` is the sum of rshares, which is
+    #     precisely how Hive computes a post's payout, so the term already had
+    #     the number it was supposed to carry. The multiplier turned "what did
+    #     this post earn" into "what did it earn, amplified by how many people
+    #     voted", which is the vote-count signal wearing the payout's name.
+    #  2. It DOUBLE-COUNTED breadth. Distinct-independent-people is the whole
+    #     job of the organic term (`organic_attributed_breadth`), where it is
+    #     already graph-cred budgeted, dust-floored at 100 HP, and ban/ring
+    #     excluded. Counting it a second time here — under a weight that is
+    #     supposed to be the minority stake share — quietly gave the same
+    #     evidence two votes in the composite.
+    #
+    # Now it is the payout and nothing else. `trust` is still accepted so every
+    # caller keeps compiling and the parameter stays available if a future
+    # payout-side exclusion needs it, but breadth no longer multiplies stake.
+    # ★ PERSONAL PAYOUT (2026-08-09). `personal_for` is the viewer's follow set;
+    # rshares from inside it count in full, rshares from strangers are scaled.
+    # `None` keeps the old chain-wide behaviour for callers with no viewer.
+    if personal_for is None:
+        raw = sum(vote.rshares for vote in kept)
+    else:
+        raw = sum(
+            vote.rshares
+            if vote.voter in personal_for
+            else vote.rshares * _PERSONAL_STRANGER_SCALE
+            for vote in kept
+        )
+    return log_compress(raw)
 
 
 class AttributionMissingError(TypeError):

@@ -109,9 +109,29 @@ class ScoreWeights:
     1.0, so the formula above is unchanged for them.
     """
 
-    vote: float = 0.10
+    #: ★★★ PAYOUT/STAKE = 10% OF THE FINAL SCORE (2026-08-09, owner: "make
+    #: payout amount something like 10% of overall ranking").
+    #:
+    #: This is the STAKE term — the rshares a post drew, i.e. its payout. It is
+    #: the most purchasable number on Hive (vote selling, trails, curation
+    #: bots), so it is deliberately a MINORITY signal — but not zero: a post
+    #: nobody paid anything for is still weaker evidence than one people put
+    #: real stake behind, and zeroing it threw that away entirely.
+    #:
+    #: ★ THE NUMBER IS 10% OF `final`, NOT 10% OF `earned` — they are different
+    #: and the difference is what made the old 0.10 misleading. `final =
+    #: (1 - W)*earned + W*interest_pct` where `W = organic * interest_match`
+    #: (scoring.py:846-847), so the old `vote = 0.10` was only 6.8% of what a
+    #: reader actually sees. Solved for the stake share of `final`:
+    #:     (1 - 0.7566*0.4) * 0.1434 = 0.1000
+    #: Re-derive these three if `interest_match` ever moves, or the 10% silently
+    #: drifts again.
+    vote: float = 0.1434
     reputation: float = 0.10
-    organic: float = 0.80
+    #: Distinct independent people who voted, commented or reblogged — graph-cred
+    #: budgeted, self/ring/banned excluded, and a voter must clear the 100 HP
+    #: dust floor to count as a person at all. Ten bots are worth nothing here.
+    organic: float = 0.7566
     # Inside the organic slice (candidate G_composite, measured 2026-07-21;
     # RE-SWEPT 2026-07-22, see organic_cf note below for the {0.0..0.3} table).
     organic_quality: float = 0.9
@@ -1143,7 +1163,16 @@ class DiversityConfig:
     #: 0 disables the budget (the lane, if sourced, then competes inside the
     #: shared unchosen quota) and is an exact no-op for every pre-2026-08-08
     #: measurement.
-    popular_per_page: int = 4
+    #: ★ 1, not 4 (2026-08-09, owner: "it doesnt have to dominate but it has to
+    #: show up at least once, we dont have to force 3").
+    #:
+    #: These slots are EXEMPT from the unchosen-lane penalty, so every one of
+    #: them is a post placed above what its own score earned — measured at
+    #: `q12` G2a as -2.860 ranks of displacement. Four such slots cost every
+    #: reader -0.1022 relevance at n=9 (`q11`); one costs -0.0523. Halving the
+    #: harm for a lane the owner wants PRESENT rather than DOMINANT is the whole
+    #: trade, and it is the owner's own framing.
+    popular_per_page: int = 1
     top_k: int = 200
 
     #: How many of the FIRST PAGE's slots are reserved for exploration
@@ -2606,7 +2635,46 @@ class PopularConfig:
     #: `mean_q@20`/`stack_capture_g`/`auc_own_m5`), at which point this flips to
     #: 25 and `DiversityConfig.popular_per_page` stops being the load-bearing
     #: part. Until then the honest report is the measured number.
-    limit: int = 0
+    #: ★ TURNED ON 2026-08-09 (owner: "turn it on"). It sat at 0, so the lane
+    #: was sourced by nobody and contributed exactly zero posts — measured live
+    #: across 12 viewers at limit 0: 0.00 `oon_popular` in the top 10 AND 0.00
+    #: anywhere in a 50-post feed. The earlier "it costs 17.1% reader
+    #: relevance" reading was taken BEFORE the interest term was repaired (the
+    #: tag-count denominator that was handing a third of the score to
+    #: single-tag `hive` meta-posts) and before stake-weighted votes were
+    #: removed above, so it was measuring a lane competing against a broken
+    #: composite. 25 is the value this field's own note names as correct once
+    #: the lane can earn its place; `DiversityConfig.popular_per_page` (4) is
+    #: the per-page budget that bounds it.
+    #: ★★★ HELD AT 0 AGAIN — 2026-08-09, and this time with the numbers.
+    #:
+    #: The owner said "turn it on", so it was turned on (25) and MEASURED, not
+    #: assumed. It fails this project's own two purpose-built gates, under the
+    #: repaired composite the 08-09 note below hoped would rescue it:
+    #:
+    #:   * `q11_follow_curve.py` — hard AssertionError, ALL 8 follow counts
+    #:     regressed below the accepted curve: n=0 -0.1024, n=3 -0.0710,
+    #:     n=5 -0.0798, n=20 -0.0370. Reverting ONLY this field (keeping
+    #:     `weights.vote = 0.0`) returns SELF-CHECK PASSED, so the popularity
+    #:     lane is the cause and the vote change is not implicated. Isolated by
+    #:     `LUMEN_SETTINGS_MUTANT='{"popular.limit": 0}'`.
+    #:   * `q12_lane_balance.py` — G1b: 0.469 of the required 3.0 slots in the
+    #:     top 10 (-84%). G2a: `oon_popular` lands a mean of 3.144 ranks ABOVE
+    #:     what its own score earns, against a -1.0 bound (-214%).
+    #:
+    #: G2a is the part that settles it. The lane is not losing a fair fight — it
+    #: is being PLACED, three ranks above merit, by the per-page exemption. So
+    #: switching it on does not deliver "popular posts earn their way in"; it
+    #: delivers a smaller, quieter version of the manual placement the owner
+    #: already ruled out, and charges every reader 3-10 points of relevance for
+    #: 16% of the target.
+    #:
+    #: NOT re-pinning ACCEPTED_CURVE to make this green — that file says so
+    #: itself, and it is right. What would actually earn the lane its slots is a
+    #: scoring change (chain-wide popularity competing inside the composite),
+    #: not a bigger quota. One line flips this to 25 the moment that lands, or
+    #: the moment the owner decides the relevance cost is worth paying.
+    limit: int = 25
 
     #: How many posts the SQL prefilter returns for the selection step to
     #: choose from. This is a RECALL budget, and the ratio to ``limit`` is the
@@ -2621,11 +2689,36 @@ class PopularConfig:
     #: rebloggers) on the request path — see `recsys.io.hafsql`'s measured
     #: hydration cost, which is dominated by total vote volume and is exactly
     #: where this query's rows sit (the busiest posts on the chain).
+    #: ★ Lane composition (2026-08-09, owner's numbers). `payout_share` is the
+    #: ONLY route stake takes into this lane — the owner capped it at 10%
+    #: because Hive votes are botted. `comment_share` splits the remaining 90%
+    #: between comments and reblogs.
+    payout_share: float = 0.10
+    comment_share: float = 0.60
+    #: On-chain DISPLAY reputation at or above this is "established".
+    rep_bonus_threshold: float = 60.0
+    #: What ONE established commenter/reblogger adds to a post's crowd weight.
+    #: Additive, not a multiplier — a multiplier scaled a saturated constant and
+    #: let 40 aged accounts outrank 200 real people. See `_weighted`.
+    rep_bonus: float = 0.5
+    #: Ceiling on what reputation ALONE can add. Reputation is stake-derived and
+    #: an aged account can hold it, so it must help without being buyable
+    #: without limit.
+    rep_max_credit: int = 10
+
     source_limit: int = 150
 
     def __post_init__(self) -> None:
         if self.limit < 0:
             raise ValueError(f"popular limit must be >= 0, got {self.limit}")
+        if not 0.0 <= self.payout_share <= 1.0:
+            raise ValueError(f"popular payout_share must be in [0,1], got {self.payout_share}")
+        if not 0.0 <= self.comment_share <= 1.0:
+            raise ValueError(f"popular comment_share must be in [0,1], got {self.comment_share}")
+        if self.rep_bonus < 0.0:
+            raise ValueError(f"popular rep_bonus must be >= 0, got {self.rep_bonus}")
+        if self.rep_max_credit < 0:
+            raise ValueError(f"popular rep_max_credit must be >= 0, got {self.rep_max_credit}")
         if self.source_limit < 0:
             raise ValueError(
                 f"popular source_limit must be >= 0, got {self.source_limit}"

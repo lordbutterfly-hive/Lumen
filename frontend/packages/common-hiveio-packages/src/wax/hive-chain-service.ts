@@ -8,6 +8,66 @@ export type HiveChain = TWaxExtended<ExtendedNodeApi, TWaxRestExtended<ExtendedR
 
 const logger = getLogger('wax');
 
+/**
+ * ★ THE BROWSER AND THE SERVER DO NOT WANT THE SAME TIMEOUT (2026-08-09).
+ *
+ * This was a single `apiTimeout: 5_000` with the comment "To be adjusted", used
+ * by both. Five seconds is right in a browser, where a stalled call blocks a
+ * widget the reader can ignore and a shorter wait means a faster retry.
+ *
+ * It is wrong on the server, where the calls that matter are the ones that
+ * cannot be skipped — verifying a sign-in signature against the chain. There a
+ * timeout is not a slow widget, it is a person being told their sign-in failed.
+ * Measured on this box: a login died on `AggregateError [ETIMEDOUT]` raised from
+ * node's `internalConnectMultiple` (a TCP connect stall, not a slow node) while
+ * a direct request to the same endpoint answered in 0.375 s.
+ *
+ * 8 s rather than something larger, deliberately: `fetchJson` aborts the
+ * browser's own request at 30 s, and a login makes two chain calls each of
+ * which may be retried once, so the server's worst case has to stay under that
+ * budget or the reader gets an aborted request instead of our honest 503.
+ *
+ * `HIVE_API_TIMEOUT_MS` overrides both. In a browser bundle `process.env` has no
+ * such key and this reads `undefined`, which falls through to the default — so
+ * the override is a server-side dial, which is the only place it is needed.
+ */
+const BROWSER_API_TIMEOUT_MS = 5_000;
+const SERVER_API_TIMEOUT_MS = 8_000;
+
+const getApiTimeout = (): number => {
+  const configured = Number(process.env.HIVE_API_TIMEOUT_MS);
+  if (Number.isFinite(configured) && configured > 0) return configured;
+  return typeof window === 'object' ? BROWSER_API_TIMEOUT_MS : SERVER_API_TIMEOUT_MS;
+};
+
+/**
+ * Hive nodes to fall back through, in order, when the current one cannot be
+ * reached. Same list the health checker already offers readers.
+ *
+ * `HIVE_API_ENDPOINTS` (comma-separated) overrides it. That name has no
+ * `REACT_APP_` prefix on purpose: it is a server-side dial, invisible to browser
+ * bundles, and it is also the seam the failover test injects a dead node through.
+ */
+const FALLBACK_ENDPOINTS = [
+  'https://api.hive.blog',
+  'https://api.openhive.network',
+  'https://anyx.io',
+  'https://api.deathwing.me',
+  'https://hive-api.arcange.eu',
+  'https://rpc.mahdiyari.info'
+];
+
+const getEndpointRotation = (): string[] => {
+  const configured = process.env.HIVE_API_ENDPOINTS;
+  if (configured) {
+    const list = configured.split(',').map((e) => e.trim()).filter(Boolean);
+    if (list.length) return list;
+  }
+  // Whatever the app is configured to use comes first; the rest follow it.
+  const primary = siteConfig.endpoint;
+  return [primary, ...FALLBACK_ENDPOINTS.filter((e) => e !== primary)];
+};
+
 const getDefaultClientOptions = (): IWaxOptionsChain => {
   // I don't think this logic should be here, but for now it is easier to keep it. We have dedicated MemoryMixin (?)
   let jsonRpcNode: string | undefined = undefined;
@@ -35,8 +95,13 @@ const getDefaultClientOptions = (): IWaxOptionsChain => {
 
   return {
     chainId: siteConfig.chainId,
-    apiEndpoint: jsonRpcNode || siteConfig.endpoint,
-    apiTimeout: 5_000, // To be adjusted
+    // ★ The rotation's FIRST entry is where we start. With no
+    // `HIVE_API_ENDPOINTS` set that is `siteConfig.endpoint`, i.e. unchanged —
+    // but when an operator lists nodes explicitly, "first in the list" has to
+    // mean "the one we use", or the list is only half honoured and a failover
+    // test can pass without ever touching the node it was told to start from.
+    apiEndpoint: jsonRpcNode || getEndpointRotation()[0] || siteConfig.endpoint,
+    apiTimeout: getApiTimeout(),
     restApiEndpoint: restNode || jsonRpcNode || siteConfig.endpoint,
   };
 };
@@ -89,6 +154,42 @@ export const resetChain = (): void => {
   logger.warn('Resetting WAX chain singleton due to WASM error - see wax#161');
   hiveChainPromise = undefined;
   hiveChain = undefined;
+};
+
+/**
+ * ★ FAIL OVER TO THE NEXT HIVE NODE (2026-08-09). SERVER ONLY.
+ *
+ * Retrying an unreachable node harder does not help when that node is simply
+ * down, and sign-in cannot be completed without SOME node — a signature can only
+ * be checked against the chain.
+ *
+ * Deliberately not done in the browser: a reader can pick their own node in the
+ * health checker, and that choice is stored. Silently moving them off it would
+ * override a setting they made on purpose. On the server there is no such
+ * preference to respect — only a job that has to get done.
+ *
+ * This mutates the process-wide chain, which is the honest trade: the chain is a
+ * singleton, so one request discovering a dead node moves every later request to
+ * a live one. It only ever advances on a real failure, so a healthy node is never
+ * abandoned.
+ *
+ * @returns the endpoint now in use, or undefined if nothing was changed.
+ */
+export const advanceToNextRpcEndpoint = (): string | undefined => {
+  if (typeof window === 'object') return undefined; // browser: respect the reader's node
+  if (!hiveChain) return undefined;
+
+  const rotation = getEndpointRotation();
+  if (rotation.length < 2) return undefined;
+
+  const current = hiveChain.api.endpointUrl;
+  const index = rotation.findIndex((e) => e === current);
+  const next = rotation[(index + 1) % rotation.length];
+  if (!next || next === current) return undefined;
+
+  logger.warn('Hive node %s unreachable — failing over to %s', current, next);
+  hiveChain.api.endpointUrl = next;
+  return next;
 };
 
 export const setRpcEndpoint = (newEndpoint: string): void => {

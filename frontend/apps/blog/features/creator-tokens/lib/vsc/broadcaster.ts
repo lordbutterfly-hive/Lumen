@@ -1,7 +1,7 @@
 import { transactionService } from '@transaction/index';
 import { getCreatorTokensConfig } from '../creator-tokens-data-source';
 import { getCreatorTokensHiveChain } from './hive-chain';
-import { LoginType, KeyType } from '@smart-signer/types/common';
+import { LoginType } from '@smart-signer/types/common';
 import type { CustomJsonOp } from './op-builders';
 import type { Broadcaster } from '../vsc-data-source';
 
@@ -100,12 +100,16 @@ import type { Broadcaster } from '../vsc-data-source';
 //       - `hivesigner`: declared in the LoginType enum but never registered
 //         in get-signer.ts's `registeredSigners`, so getSigner() throws
 //         'Invalid loginType'.
-//       - `wif`: SignerWif.signDigest takes `_requiredKeyType` and IGNORES it
-//         (signer-wif.ts:47-48, 78 — it always signs with `this.keyType`), so
-//         step 1 above silently does nothing for this login type. A WIF
-//         session can therefore only sign active if it LOGGED IN with the
-//         active key. That is why `wif` is admitted conditionally rather than
-//         listed with the rest.
+//       - `wif`: REFUSED OUTRIGHT as of 2026-08-09. It used to be admitted
+//         when the session had logged in with the active key, because
+//         SignerWif.signDigest ignores `_requiredKeyType` and always signs with
+//         `this.keyType`. But that is precisely the configuration in which the
+//         creator's RAW ACTIVE KEY lives inside the page — SignerWif reads it
+//         from `window.localStorage`, where "Store key" wrote it unencrypted —
+//         and an active key is total control of the account. Keychain, the only
+//         Hive login Lumen offers, already signs inside the extension and never
+//         hands the key over, so this path bought nothing. See the refusal
+//         below.
 //     Everything else honours `requiredKeyType` and is admitted.
 //
 // These are refusals, never fallbacks. There is deliberately no path here
@@ -184,12 +188,29 @@ function assertCanSignWithActiveAuthority(op: CustomJsonOp): void {
   if (ACTIVE_CAPABLE_LOGIN_TYPES.has(loginType)) return;
 
   if (loginType === LoginType.wif) {
-    // SignerWif ignores requiredKeyType entirely and signs with the session's
-    // own key type, so this is the one login type where the SESSION key must
-    // already be active.
-    if (signerOptions.keyType === KeyType.active) return;
+    // ★★★ A RAW ACTIVE KEY MUST NEVER REACH THIS APP'S JAVASCRIPT (2026-08-09).
+    //
+    // This branch used to ACCEPT a wif session whose key type was already
+    // active. That is the one configuration in which the creator's ACTIVE key
+    // exists as a string inside the page: `SignerWif.signDigest` reads it from
+    // `window.localStorage` and `password-form.tsx`'s "Store key" writes it
+    // there UNENCRYPTED and PERSISTENT. An active key is total control of the
+    // account — funds, authorities, everything — and localStorage is readable
+    // by any XSS, any extension with page access, and anyone who dumps the
+    // profile directory. Sentry's `WIF_PATTERN` scrubber does not help: it
+    // filters error payloads, not a deliberate storage write.
+    //
+    // The owner's requirement is that the active key used to launch a token is
+    // never visible anywhere in the client, and Keychain — the only Hive login
+    // Lumen offers — already satisfies it by keeping the key inside the
+    // extension and returning only a signature. So this path buys nothing and
+    // risks everything: refuse it outright rather than leaving it one mounted
+    // route away from being live.
+    //
+    // Note this is a REFUSAL, not a downgrade: it fails closed, and the message
+    // names the two ways in that never expose the key.
     throw new Error(
-      'CREATOR_TOKENS_ACTIVE_KEY_REQUIRED: you are signed in with a posting private key. Creator-token money operations need your ACTIVE key. Sign out and sign back in with your active key, or use Hive Keychain / PeakVault, which can request it for a single transaction.'
+      'CREATOR_TOKENS_KEY_IN_BROWSER_REFUSED: signing a creator-token operation with a private key held in this browser is not allowed — an active key pasted here would be stored in the browser in clear text. Use Hive Keychain or PeakVault, which sign inside the extension and never hand the key to this page.'
     );
   }
 

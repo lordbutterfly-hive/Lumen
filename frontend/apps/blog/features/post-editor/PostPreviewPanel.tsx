@@ -1,6 +1,6 @@
 "use client";
 
-import { Dispatch, RefObject, SetStateAction } from "react";
+import { Dispatch, RefObject, SetStateAction, useState } from "react";
 import clsx from "clsx";
 import { Link } from "@hive/ui";
 import { Button } from "@hive/ui/components/button";
@@ -9,6 +9,15 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@ui/co
 import { useTranslation } from "@/blog/i18n/client";
 import RendererContainer from "@/blog/features/post-rendering/rendererContainer";
 import { postClassName } from "@/blog/features/post-editor/lib/utils";
+
+/**
+ * Above this many characters the live preview stops rendering automatically.
+ * A long-form Hive post is a few tens of thousands of characters, so this sits
+ * far above any real article and only catches the pathological paste that
+ * freezes the tab. It is a character count rather than bytes because that is
+ * what the renderer actually walks.
+ */
+const LIVE_PREVIEW_MAX_CHARS = 200_000;
 
 interface PostPreviewPanelProps {
   preview: boolean;
@@ -30,6 +39,8 @@ export function PostPreviewPanel({
   proxyAuthToken,
 }: PostPreviewPanelProps) {
   const { t } = useTranslation("common_blog");
+  // Opt-in escape hatch for a draft over the size limit — see the panel below.
+  const [renderHugePreview, setRenderHugePreview] = useState(false);
 
   return (
     <div
@@ -95,7 +106,34 @@ export function PostPreviewPanel({
         data-testid="preview-scroller"
         className="flex h-full overflow-y-auto overscroll-contain rounded-b-lg border border-border"
       >
-        {previewContent ? (
+        {previewContent && previewContent.length > LIVE_PREVIEW_MAX_CHARS && !renderHugePreview ? (
+          /* ★★★ THE FREEZE, STOPPED AT ITS SOURCE (2026-08-09).
+             Debouncing the preview keeps typing responsive, but it does not help
+             a single huge PASTE: 300 ms later the whole document still goes to
+             the markdown renderer in one synchronous pass. At the 4-5 MB a
+             tester measured, the main thread never comes back — the tab is
+             killed and the unsaved work goes with it. Debounce fixes repetition;
+             only a size limit fixes magnitude, and both were needed.
+
+             Above the limit the preview becomes opt-in instead of automatic. The
+             EDITOR stays fully live — nothing about writing or auto-saving is
+             degraded — and the reader is told plainly why, with the button to
+             render it anyway if they accept the wait. */
+          <div
+            className="flex w-full flex-col items-center justify-center gap-3 p-8 text-center text-muted-foreground"
+            data-testid="preview-too-large"
+          >
+            <Icons.eye className="h-8 w-8 opacity-20" />
+            <span className="text-sm">
+              Live preview is paused — this draft is {Math.round(previewContent.length / 1000)}k
+              characters, and rendering it on every change would freeze the tab. Your text is safe
+              and still saving.
+            </span>
+            <Button type="button" variant="outlineRed" onClick={() => setRenderHugePreview(true)}>
+              Render preview anyway
+            </Button>
+          </div>
+        ) : previewContent ? (
           <RendererContainer
             body={previewContent}
             author=""
