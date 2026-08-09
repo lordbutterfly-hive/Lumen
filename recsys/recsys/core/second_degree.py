@@ -11,9 +11,10 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from dataclasses import replace
 
-from recsys.config import Thresholds
+from recsys.config import Thresholds, PopularConfig
 from recsys.contracts import Candidate, CandidateSource, GraphCred, Post, ViewerProfile
 from recsys.core.banned import is_banned
+from recsys.core.popular import is_container_post
 
 
 def passes_second_degree(
@@ -103,6 +104,8 @@ def filter_eligible(
     *,
     suppressed: frozenset[str] = frozenset(),
     show_nsfw: bool = False,
+    popular: PopularConfig | None = None,
+    lite_publishers: frozenset[str] = frozenset(),
 ) -> list[Candidate]:
     """Apply suppression, NSFW, mute, the second-degree gate (§8.1, §8.2), and
     the author graph-cred floor (§8.3) to a candidate pool.
@@ -146,6 +149,27 @@ def filter_eligible(
         # a ban. See recsys/core/banned.py; the other half (their engagement
         # minting no breadth for anyone) is applied in `pipeline`.
         if is_banned(post.author):
+            continue
+        # ★★★ CONTAINER ROOTS ARE NEVER SHOWN, ANYWHERE (2026-08-09, owner:
+        # "containers should not even be shown").
+        #
+        # A container is the rolling post other frontends file short-form
+        # content INTO — `peak.snaps/snap-container-…`, `ecency.waves/waves-…`,
+        # `leothreads/leothread-…` (InLeo), and our own `lumen-c-…`. As a post
+        # it is an empty shell; its whole body is other people's comments. It
+        # was found winning the popularity lane outright (112 commenters, the
+        # most-discussed post on the chain that day), but the problem is not
+        # lane-specific — it should not appear in ANY lane, so the exclusion
+        # lives here with the ban and the mute rather than in `select_popular`.
+        #
+        # ★ WHAT IS DELIBERATELY *NOT* EXCLUDED: the posts INSIDE our own
+        # containers. Every Lumen Lite post is a depth-1 comment under a
+        # `lumen-c-…` root, so "hide anything inside a container" taken
+        # literally would delete the entire lite product. Third-party container
+        # children need no rule at all — `_top_level_or_lite` admits only
+        # `parent_author = ''` OR our own lite posts, so a peak.snaps snap is
+        # never sourced in the first place. Verified, not assumed.
+        if popular is not None and is_container_post(post, popular, lite_publishers):
             continue
         # ★★ P1 (2026-08-05) — NEVER SHOW SOMEONE THEIR OWN POST IN DISCOVERY.
         #

@@ -38,7 +38,7 @@ import math
 from collections.abc import Callable, Mapping, Sequence
 
 from recsys.config import PopularConfig, ScoreWeights
-from recsys.contracts import Candidate, CandidateSource, Post
+from recsys.contracts import Candidate, CandidateSource, Post, ScoredCandidate
 from recsys.core.normalize import log_compress
 from recsys.core.scoring import post_base_engagement
 from recsys.core.vote_signal import VoterTrust
@@ -67,6 +67,28 @@ def credited_breadth(
     flag makes on the request's own candidate pool.
     """
     return post_base_engagement(post, excluded, trust=trust, weights=weights)
+
+
+def is_container_post(
+    post: Post, popular: PopularConfig, lite_publishers: frozenset[str] = frozenset()
+) -> bool:
+    """True for a rolling CONTAINER post that other content is filed into.
+
+    See `PopularConfig.container_markers` for why these cannot be allowed to win
+    a conversation-ranked lane: they collect commenters structurally, so they
+    beat every real post without being about anything.
+
+    Author AND prefix must both match — `peak.snaps` may publish a genuine post,
+    and a stranger may name a post `waves-something`.
+    """
+    for author, prefix in popular.container_markers:
+        if post.author == author and post.permlink.startswith(prefix):
+            return True
+    return bool(
+        lite_publishers
+        and post.author in lite_publishers
+        and post.permlink.startswith(popular.lumen_container_prefix)
+    )
 
 
 def _high_rep(
@@ -133,8 +155,29 @@ def _weighted(
     budget = float(len(identities)) if trust is None else trust.credited_breadth(identities)
     spread = math.log10(1.0 + len(identities))
     established = _high_rep(identities, reputations, popular.rep_bonus_threshold)
-    credit = popular.rep_bonus * min(established, popular.rep_max_credit)
-    return budget + spread + credit
+    # ★★★ REPUTATION LIFTS THE CROWD, IT DOES NOT REPLACE IT (2026-08-09, third
+    # pass). The previous form added `rep_bonus * min(established, cap)` — up to
+    # 5.0, against a trust budget capped at 1.0 and a log spread worth only 2.30
+    # at 200 commenters. Measured: 40 aged rep-65 accounts scored 7.61 and BEAT
+    # 200 genuine commenters at 3.30. That is the original defect in additive
+    # clothing, and it is worse than it looks, because Hive reputation IS stake
+    # (display 60 ≈ one full upvote from ~243k HP) — so a 5.0-weight lever
+    # bought with stake walked straight around the owner's 10% cap on stake.
+    #
+    # Now it MULTIPLIES the crowd term and is bounded to `1 + rep_lift`. A small
+    # established crowd can be lifted, but it cannot out-score a crowd several
+    # times larger: at the shipped 0.4 the most reputation can do is 1.4x, while
+    # 200 commenters carry 1.43x the spread of 40 — so genuine breadth wins,
+    # which is the property the whole lane exists to express.
+    #
+    # It also stops silently excluding Lumen Lite writers, who have no chain
+    # reputation at all and could never earn the additive credit.
+    lift = 1.0 + popular.rep_lift * (
+        min(established, popular.rep_max_credit) / popular.rep_max_credit
+        if popular.rep_max_credit > 0
+        else 0.0
+    )
+    return budget + spread * lift
 
 
 def select_popular(
@@ -146,6 +189,7 @@ def select_popular(
     limit: int,
     popular: PopularConfig,
     reputations: Mapping[str, float] | None = None,
+    lite_publishers: frozenset[str] = frozenset(),
 ) -> list[Candidate]:
     """The lane: the ``limit`` posts leading the CONVERSATION, as
     :data:`~recsys.contracts.CandidateSource.OON_POPULAR`.
@@ -185,6 +229,13 @@ def select_popular(
     ``limit <= 0`` disables the lane and returns ``[]``.
     """
     if limit <= 0 or not posts:
+        return []
+    # ★ Containers are removed BEFORE scoring, not penalised after: a post that
+    # cannot legitimately win should never be in the pool competing for the
+    # pool-relative maxima either, or it would still deflate everyone else's
+    # comment_rel by holding the ceiling.
+    posts = [p for p in posts if not is_container_post(p, popular, lite_publishers)]
+    if not posts:
         return []
     reps: Mapping[str, float] = reputations or {}
 
@@ -234,4 +285,96 @@ def select_popular(
     ]
 
 
-__all__ = ["credited_breadth", "select_popular"]
+def insert_popular(
+    ranked: Sequence[ScoredCandidate],
+    config: PopularConfig,
+) -> list[ScoredCandidate]:
+    """Guarantee exactly one popular post at a reserved position in the feed.
+
+    ★★★ WHY THIS EXISTS (2026-08-09). The lane reached only 40% of feeds, and
+    that figure did NOT move at `popular_per_page` 1, 2 or 3 — a cap governs how
+    many popular posts appear where the lane already won and cannot produce one
+    where it lost. The owner accepted the relevance cost and asked for the post
+    to be locked in. A reserved position is the only mechanism that delivers
+    that, and it is the one the newcomer lane has used since 2026-08-04
+    (`insert_exploration`), so this deliberately mirrors its shape rather than
+    inventing a second placement concept.
+
+    THE THREE RULES, each enforced structurally rather than by convention:
+
+    * **Never above the head.** `reserved_position` is 1-indexed and validated
+      to be 0 or greater than 5, so positions 1-5 are whatever the reader
+      earned. The reservation is visible, not dominant.
+    * **Never twice.** The feed is scanned for an existing `OON_POPULAR` post
+      first. If one is already at or above the slot, NOTHING happens — a lane
+      that won on merit is never given a second copy. If one sits deeper, it is
+      MOVED, not copied. Only when the feed has none is one taken from the tail.
+    * **Never more than `max_reserved_per_feed`.** One promotion per feed, full
+      stop.
+
+    ★ PROMOTION, NOT INSERTION — the lesson `insert_exploration` learned the
+    hard way. Its first version skipped any pick already present, which made the
+    lane a no-op in its central case: the post was "already there" at position
+    99, which a reader cannot tell from absent. Moving the existing post keeps
+    the feed length identical and cannot duplicate anything.
+
+    Nothing is ever dropped: items shift by one, so the feed only reorders.
+    """
+    slot = config.reserved_position
+    if slot <= 0 or config.max_reserved_per_feed <= 0 or not ranked:
+        return list(ranked)
+
+    feed = list(ranked)
+    index = slot - 1  # 1-indexed position -> list index
+    if index >= len(feed):
+        return feed  # feed shorter than the slot; nothing to reserve
+
+    existing = [i for i, c in enumerate(feed) if c.source == CandidateSource.OON_POPULAR]
+
+    # ★★★ ONE PER FEED, ENFORCED HERE (2026-08-09, owner: "cap it at 1 popular
+    # post per feed"). Measured before this: 11% of feeds served two popular
+    # posts in the top 10 and 2% served three.
+    #
+    # `DiversityConfig.popular_per_page` could never do this — it is an EXEMPTION
+    # budget, not a cap: it lets a popular candidate skip the unchosen-lane
+    # penalty, and a second one can still place on the ordinary unchosen budget.
+    # Nothing downstream counted them. This is the only place that does.
+    #
+    # The surplus is moved to the TAIL, not deleted. Deleting was tried first and
+    # it broke the feed's length contract: `limit` posts were requested and fewer
+    # came back (`test_limit_parameter_truncates_the_payload_and_count_agrees`).
+    # A tail move is length-neutral, so every downstream count still holds, and
+    # the surplus lands past the served window rather than in the reader's page.
+    if len(existing) > config.max_reserved_per_feed:
+        surplus = set(existing[config.max_reserved_per_feed :])
+        kept = [c for i, c in enumerate(feed) if i not in surplus]
+        moved = [c for i, c in enumerate(feed) if i in surplus]
+        feed = kept + moved
+        existing = [i for i, c in enumerate(feed) if c.source == CandidateSource.OON_POPULAR]
+
+    if existing and existing[0] == index:
+        return feed  # already exactly where it belongs
+
+    # ★ A POPULAR POST THAT RANKS INTO THE HEAD IS MOVED DOWN, NOT LEFT THERE
+    # (2026-08-09, third pass). The first version returned unchanged whenever one
+    # sat at or above the slot, reasoning that a lane winning on merit should
+    # keep its place. Measured, that left popular posts served at positions 4 and
+    # 5 in 7 of 96 feeds — the owner's rule is that positions 1-5 are the
+    # reader's own, whether the popular post got there by placement or by score.
+    # Config validation only ever constrained the SETTING; this constrains the
+    # SERVED FEED, which is the thing the rule was about.
+
+    take_from = existing[0] if existing else None
+    if take_from is None:
+        # No popular post in the feed at all: there is nothing to promote and
+        # this function does not invent candidates. An empty lane stays empty —
+        # honest, and it keeps `select_popular` the only place membership is
+        # decided.
+        return feed
+
+    picked = feed.pop(take_from)
+    feed.insert(index, picked)
+    return feed
+
+
+__all__ = ["credited_breadth", "insert_popular", "is_container_post", "select_popular"]

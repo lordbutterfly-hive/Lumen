@@ -2697,10 +2697,64 @@ class PopularConfig:
     comment_share: float = 0.60
     #: On-chain DISPLAY reputation at or above this is "established".
     rep_bonus_threshold: float = 60.0
-    #: What ONE established commenter/reblogger adds to a post's crowd weight.
-    #: Additive, not a multiplier — a multiplier scaled a saturated constant and
-    #: let 40 aged accounts outrank 200 real people. See `_weighted`.
-    rep_bonus: float = 0.5
+    #: Maximum LIFT reputation can give a crowd, as a fraction. 0.4 = at most
+    #: 1.4x. Deliberately below the ratio between a large and a small genuine
+    #: crowd (200 commenters carry 1.43x the log spread of 40), so reputation
+    #: can never let a small established group out-score a much larger real one.
+    #: An earlier ADDITIVE form worth up to 5.0 did exactly that. See `_weighted`.
+    rep_lift: float = 0.4
+    #: ★★★ CONTAINER POSTS CAN NEVER WIN THIS LANE (2026-08-09).
+    #:
+    #: `peak.snaps`, `ecency.waves` and `leothreads` publish ROLLING CONTAINER
+    #: posts that other frontends file short-form content into as comments —
+    #: the same mechanism Lumen uses for `lumen-c-<ulid>`. They accumulate
+    #: hundreds of commenters because that is their JOB, not because anyone
+    #: found them interesting, so on a conversation-ranked lane they win by
+    #: construction. Measured live on a 60-post chain-wide pool: the top THREE
+    #: picks were `peak.snaps/snap-container-…` (112 commenters, 100% of the
+    #: most-discussed), a second `peak.snaps` container (106), and
+    #: `ecency.waves/waves-…` (68). A reader would have been served an empty
+    #: shell whose comments are other people's snaps.
+    #:
+    #: This is the same shape as the `hive` TAG defect the interest term had —
+    #: a namespace marker scoring as if it were content — one level up.
+    #:
+    #: Matched on author AND permlink prefix together. Author alone would
+    #: exclude a genuine post by those accounts; prefix alone would exclude
+    #: anyone who happens to name a post that way.
+    container_markers: tuple[tuple[str, str], ...] = (
+        ("peak.snaps", "snap-container-"),
+        ("ecency.waves", "waves-"),
+        ("leothreads", "leothread-"),
+    )
+    #: Our own containers, matched against `LiteConfig.publisher_accounts` so a
+    #: new publisher account is covered the day it is configured, with no second
+    #: list to keep in sync.
+    lumen_container_prefix: str = "lumen-c-"
+
+    #: ★★★ THE RESERVED SLOT (2026-08-09, owner: "lock in 1 popular post inside
+    #: top 10, force it in, make sure it cant show up twice, always sub 5 spot").
+    #:
+    #: 1-indexed position in the served feed. 6 satisfies "sub 5": positions 1-5
+    #: are never touched, so the head of the feed stays whatever the reader
+    #: earned, and the popular post sits immediately below it where it is still
+    #: plainly visible.
+    #:
+    #: WHY A RESERVED SLOT AND NOT A BIGGER QUOTA. Measured across 96 feeds, the
+    #: lane appeared in 40% of them and that number was IDENTICAL at
+    #: `DiversityConfig.popular_per_page` of 1, 2 and 3 — the cap governs how
+    #: many appear where the lane already won, and cannot create presence where
+    #: it lost. Only a reserved position can, which is exactly how the newcomer
+    #: lane has always worked (`ExplorationConfig.position`).
+    #:
+    #: 0 disables the reservation and returns the lane to earning its slots.
+    reserved_position: int = 6
+    #: Hard ceiling on popular posts in ONE feed. Enforced in `insert_popular`,
+    #: which drops the surplus — a review found this field was previously read
+    #: only as `<= 0` and was otherwise decorative, while 11% of feeds served two
+    #: popular posts and 2% served three. `DiversityConfig.popular_per_page`
+    #: cannot do this job: it is an exemption budget, not a cap.
+    max_reserved_per_feed: int = 1
     #: Ceiling on what reputation ALONE can add. Reputation is stake-derived and
     #: an aged account can hold it, so it must help without being buyable
     #: without limit.
@@ -2715,8 +2769,19 @@ class PopularConfig:
             raise ValueError(f"popular payout_share must be in [0,1], got {self.payout_share}")
         if not 0.0 <= self.comment_share <= 1.0:
             raise ValueError(f"popular comment_share must be in [0,1], got {self.comment_share}")
-        if self.rep_bonus < 0.0:
-            raise ValueError(f"popular rep_bonus must be >= 0, got {self.rep_bonus}")
+        if not 0.0 <= self.rep_lift <= 1.0:
+            raise ValueError(f"popular rep_lift must be in [0,1], got {self.rep_lift}")
+        if self.reserved_position < 0:
+            raise ValueError(f"popular reserved_position must be >= 0, got {self.reserved_position}")
+        if 0 < self.reserved_position <= 5:
+            raise ValueError(
+                "popular reserved_position must be 0 (off) or > 5 — the owner's rule is that "
+                f"the head of the feed is never displaced, got {self.reserved_position}"
+            )
+        if self.max_reserved_per_feed < 0:
+            raise ValueError(
+                f"popular max_reserved_per_feed must be >= 0, got {self.max_reserved_per_feed}"
+            )
         if self.rep_max_credit < 0:
             raise ValueError(f"popular rep_max_credit must be >= 0, got {self.rep_max_credit}")
         if self.source_limit < 0:

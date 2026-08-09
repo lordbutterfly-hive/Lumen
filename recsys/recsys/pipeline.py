@@ -36,6 +36,7 @@ from recsys.contracts import (
 from recsys.core.als import ALSModel, train_als, viewer_affinity_percentiles
 from recsys.core.als_guard import als_batch_drift
 from recsys.core.banned import banned_authors
+from recsys.core.curators import curator_accounts
 from recsys.core.candidates import merge_candidates, top_up
 from recsys.core.coldstart import (
     INTEREST_LANE_SOURCES,
@@ -52,7 +53,7 @@ from recsys.core.exploration import (
 )
 from recsys.core.flooding import cap_oon_flooding
 from recsys.core.graph_cred import compute_graph_cred
-from recsys.core.popular import select_popular
+from recsys.core.popular import insert_popular, select_popular
 from recsys.core.rerank import _FeedCounters, rerank
 from recsys.core.ring import detect_rings, ring_member_set
 from recsys.core.scoring import (
@@ -900,11 +901,14 @@ def gather_candidates(
         trust = _voter_trust(snapshot, settings) if snapshot is not None else None
 
         def _popular_excluded(author: str) -> frozenset[str]:
+            # Curators excluded here too: the popularity lane is ranked on
+            # commenters and rebloggers, which is exactly the signal a curation
+            # trail manufactures at scale.
             # §8.4 minus stake lineage, which is RETIRED and always empty
             # (`_lineage_for`). Self plus ring co-members is the whole set.
             if snapshot is None:
                 return frozenset({author})
-            return frozenset({author}) | _ring_exclusion(author, snapshot)
+            return frozenset({author}) | _ring_exclusion(author, snapshot) | curator_accounts()
 
         popular_pool = gateway.popular_posts(since, settings.popular.source_limit)
         # ★ 2026-08-09: the lane weights each commenter/reblogger by on-chain
@@ -934,6 +938,7 @@ def gather_candidates(
                 limit=settings.popular.limit,
                 popular=settings.popular,
                 reputations=popular_reps,
+                lite_publishers=settings.lite.publisher_accounts,
             )
         )
 
@@ -1043,6 +1048,8 @@ def _fallback_filler(
         settings.thresholds,
         suppressed=_suppressed(gateway, fallback),
         show_nsfw=show_nsfw,
+        popular=settings.popular,
+        lite_publishers=settings.lite.publisher_accounts,
     )
     # ★ PROVEN SELF-DEALERS ARE DROPPED FROM PADDING, NOT MERELY RE-ORDERED
     # (2026-08-03). The re-order below fixes WHICH admissible post wins a slot;
@@ -1413,7 +1420,17 @@ def _score(
             # ban. Unioned into `ring_members` because that set already means
             # exactly "identities whose engagement does not count here" and
             # `excluded()` is the one place every signal reads it from.
-            ring_members=_ring_exclusion(candidate.post.author, snap) | banned_authors(),
+            # ★ CURATORS TOO (2026-08-09). Same union, deliberately different
+            # list from `banned_authors()`: a ban also hides the account's
+            # posts, which would be wrong for a curation bot whose own
+            # compilation is a real post people read. This half — "your
+            # engagement mints no breadth for anyone" — is the only half a
+            # curator gets. See recsys/core/curators.py.
+            ring_members=(
+                _ring_exclusion(candidate.post.author, snap)
+                | banned_authors()
+                | curator_accounts()
+            ),
         )
         excluded = exclusions.excluded()
         # ★ Personal payout: the viewer's own follows decide whose rshares
@@ -1818,6 +1835,8 @@ def rank_feed(
         settings.thresholds,
         suppressed=suppressed,
         show_nsfw=show_nsfw,
+        popular=settings.popular,
+        lite_publishers=settings.lite.publisher_accounts,
     )
 
     # ★★ EXPLORATION POOL (cold-start spec §4.3, item B12). GRADUATION IS
@@ -2195,4 +2214,16 @@ def rank_feed(
     if serve_log is not None:
         for author in serve_log.graduated(engagement_counts):
             serve_log.clear(author)
+    # ★★★ THE RESERVED POPULAR SLOT — AT TOP LEVEL, DELIBERATELY (2026-08-09).
+    #
+    # This first shipped INSIDE the `if explore_pool:` block above, which made it
+    # a silent no-op for every viewer whose candidate pool contained no newcomer.
+    # It measured 96/96 feeds only because simworld always generates one; with an
+    # empty explore pool the same run gives 38/96 — exactly the number the
+    # reservation was built to fix. A guarantee that depends on an unrelated
+    # lane having content is not a guarantee.
+    #
+    # It runs after exploration (so the two never claim the same index) and
+    # before truncation (so the promoted post is inside the served window).
+    ranked = insert_popular(ranked, settings.popular)
     return ranked[: settings.diversity.top_k]

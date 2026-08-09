@@ -3025,3 +3025,327 @@ def test_an_unavailable_newness_lookup_is_reported_as_an_OUTAGE_not_as_not_new(
         f"{message!r}. Counting it as `not_new` makes a dead lane read exactly "
         "like a quiet day."
     )
+
+
+def test_the_reserved_popular_slot_holds_its_four_rules() -> None:
+    """★ WRITTEN 2026-08-09 because `insert_popular` shipped with ZERO tests and
+    two of its four rules were broken in ways 933 green tests could not see.
+
+    The rules, and the defect each one pins:
+
+    1. RUNS FOR EVERY VIEWER — the call was nested inside `if explore_pool:`, so
+       it did nothing whenever the pool held no newcomer. It measured 96/96 only
+       because the simulator always generates one; with an empty explore pool the
+       same run gave 38/96, the exact number the reservation exists to fix.
+    2. NEVER ABOVE POSITION 5 — a popular post that RANKED into the head used to
+       be left there (served at 4 and 5 in 7 of 96 feeds). Config validation
+       constrained the setting, never the served feed.
+    3. NEVER DUPLICATED — promote by moving, never copying.
+    4. NEVER INVENTS — a feed with no popular post is returned untouched.
+    """
+    from recsys.config import PopularConfig
+    from recsys.contracts import CandidateSource, ScoreBreakdown, ScoredCandidate
+    from recsys.core.popular import insert_popular
+
+    def sc(name: str, source: CandidateSource) -> ScoredCandidate:
+        return ScoredCandidate(
+            post=make_post(name, name),
+            source=source,
+            score=ScoreBreakdown(
+                vote_norm=0.0, rep_norm=0.0, organic=0.0, final=0.0, interest_bonus=0.0
+            ),
+        )
+
+    cfg = PopularConfig(limit=25)
+    IN, POP = CandidateSource.IN_NETWORK, CandidateSource.OON_POPULAR
+    slot = cfg.reserved_position  # 1-indexed
+
+    def popular_positions(feed: list[ScoredCandidate]) -> list[int]:
+        return [i + 1 for i, c in enumerate(feed) if c.source == POP]
+
+    # Rule 2 — a popular post ranking in the HEAD is moved down to the slot.
+    head = [sc(f"h{i}", IN) for i in range(20)]
+    head[2] = sc("pop", POP)  # position 3, inside the reader's own head
+    out_head = insert_popular(head, cfg)
+    assert popular_positions(out_head) == [slot], "a popular post must not sit in positions 1-5"
+
+    # Rule 2 again — deep post promoted UP to the slot, not further.
+    deep = [sc(f"d{i}", IN) for i in range(20)]
+    deep[14] = sc("pop", POP)
+    out_deep = insert_popular(deep, cfg)
+    assert popular_positions(out_deep) == [slot]
+
+    # Rule 3 — length and membership are preserved: moved, never copied.
+    assert len(out_deep) == len(deep)
+    assert sorted(c.post.permlink for c in out_deep) == sorted(c.post.permlink for c in deep)
+
+    # Rule 4 — nothing invented when the lane produced nothing.
+    none = [sc(f"n{i}", IN) for i in range(20)]
+    assert insert_popular(none, cfg) == none
+
+    # Rule 1 is a PIPELINE property: the call must not be nested under the
+    # exploration branch. Asserted on the source, because the bug was structural
+    # — the function itself was always correct.
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parents[1] / "recsys" / "pipeline.py"
+    call_lines = [
+        line
+        for line in src.read_text().splitlines()
+        if "ranked = insert_popular(" in line
+    ]
+    assert len(call_lines) == 1, f"expected exactly one call site, found {len(call_lines)}"
+    # INDENTATION is the signal, not byte offset: a call sitting after the
+    # exploration branch closes is still positionally "between" the `if` and the
+    # function's return, so only nesting depth distinguishes correct from
+    # broken. 4 spaces == function body; deeper == inside some branch.
+    indent = len(call_lines[0]) - len(call_lines[0].lstrip())
+    assert indent == 4, (
+        f"insert_popular is indented {indent} spaces, i.e. nested inside a branch. "
+        "It must run at the top level of rank_feed for EVERY viewer — nested "
+        "under `if explore_pool:` it was a no-op whenever the pool had no newcomer."
+    )
+
+
+def test_a_container_post_can_never_win_the_popularity_lane() -> None:
+    """★ THE CONTAINER DEFECT, pinned (2026-08-09).
+
+    `peak.snaps`, `ecency.waves` and `leothreads` publish rolling CONTAINER
+    posts that other frontends file short-form content into as comments — the
+    same mechanism Lumen uses for `lumen-c-<ulid>`. They collect commenters
+    structurally, so on a conversation-ranked lane they win by construction
+    without being about anything.
+
+    Found by printing the lane's actual picks against live chain data: the top
+    THREE were `peak.snaps/snap-container-…` (112 commenters, 100% of the
+    most-discussed post), a second `peak.snaps` container (106), and
+    `ecency.waves/waves-…` (68). A reader would have been served an empty shell.
+
+    The fixture is deliberately rigged FOR the containers — each has far more
+    commenters and rebloggers than the real post. If the filter were removed
+    they would take every slot, so this test cannot pass by accident.
+    """
+    from recsys.config import DEFAULT_SETTINGS, PopularConfig
+    from recsys.core.popular import is_container_post, select_popular
+    from tests.test_vote_signal import make_attributed_post
+
+    cfg = PopularConfig(limit=5)
+    publishers = frozenset({"hbd-temp"})
+
+    def crowd(n: int, tag: str) -> tuple[str, ...]:
+        return tuple(f"{tag}{i}" for i in range(n))
+
+    peak = make_attributed_post(
+        author="peak.snaps", permlink="snap-container-1786203360",
+        commenters=crowd(112, "a"), rebloggers=crowd(20, "ra"),
+    )
+    waves = make_attributed_post(
+        author="ecency.waves", permlink="waves-20260808a0o6q6",
+        commenters=crowd(68, "b"), rebloggers=crowd(18, "rb"),
+    )
+    leo = make_attributed_post(
+        author="leothreads", permlink="leothread-2026-08-09-1200",
+        commenters=crowd(90, "c"), rebloggers=crowd(19, "rc"),
+    )
+    ours = make_attributed_post(
+        author="hbd-temp", permlink="lumen-c-01kzj8284fmc7tp1f549mc7zef",
+        commenters=crowd(100, "d"), rebloggers=crowd(17, "rd"),
+    )
+    # The only genuine post, and the WEAKEST on every raw number.
+    real = make_attributed_post(
+        author="tarazkp", permlink="a-real-post",
+        commenters=crowd(9, "e"), rebloggers=crowd(2, "re"),
+    )
+
+    pool = [peak, waves, leo, ours, real]
+    picked = select_popular(
+        pool,
+        excluded_for=lambda a: frozenset({a}),
+        trust=None,
+        weights=DEFAULT_SETTINGS.weights,
+        limit=5,
+        popular=cfg,
+        lite_publishers=publishers,
+    )
+    authors = [c.post.author for c in picked]
+    assert authors == ["tarazkp"], (
+        f"a container won the lane: {authors}. The genuine post has the FEWEST "
+        "commenters in this fixture, so anything other than ['tarazkp'] means "
+        "containers are competing."
+    )
+
+    # Each marker individually, so removing one line from the table fails here.
+    for post, why in (
+        (peak, "peak.snaps snap-container"),
+        (waves, "ecency.waves waves-"),
+        (leo, "leothreads leothread-"),
+        (ours, "our own lumen-c- container"),
+    ):
+        assert is_container_post(post, cfg, publishers), f"{why} not detected"
+
+    # And the converse: author alone must NOT condemn a genuine post, or a real
+    # article by one of those accounts would be silently unrankable.
+    genuine_by_a_container_account = make_attributed_post(
+        author="peak.snaps", permlink="announcing-something-real", commenters=crowd(5, "f")
+    )
+    assert not is_container_post(genuine_by_a_container_account, cfg, publishers)
+    assert not is_container_post(real, cfg, publishers)
+    # A stranger who names a post `waves-…` is not a container either.
+    impostor = make_attributed_post(author="nobody", permlink="waves-of-the-sea")
+    assert not is_container_post(impostor, cfg, publishers)
+
+
+def test_container_roots_are_hidden_feed_wide_but_lite_posts_survive() -> None:
+    """★ Containers gone from EVERY lane — and the lite product still shipping.
+
+    Owner, 2026-08-09: "containers should not even be shown, or anything inside
+    the containers... i think inleo has one as well, just ban them or hide them."
+
+    THE TRAP THIS PINS. Taken literally, "hide anything inside a container"
+    deletes Lumen itself: every Lite post is a depth-1 comment under a
+    `lumen-c-<ulid>` root, so a rule that hides container contents hides the
+    entire lite product. The correct split, asserted below:
+
+      * container ROOTS (peak.snaps, ecency.waves, leothreads/InLeo, and ours)
+        are dropped in `filter_eligible`, so they cannot appear in ANY lane;
+      * third-party container CHILDREN need no rule — `_top_level_or_lite`
+        admits only `parent_author = ''` or our own lite posts, so a snap is
+        never sourced (pinned in `test_hafsql.py`);
+      * OUR container children — the lite posts — must still rank.
+    """
+    from recsys.config import DEFAULT_SETTINGS
+    from recsys.config import Thresholds
+    from recsys.contracts import Candidate, CandidateSource, ViewerProfile
+    from recsys.core.second_degree import filter_eligible
+    from tests.test_vote_signal import make_attributed_post
+
+    cfg = DEFAULT_SETTINGS.popular
+    publishers = frozenset({"hbd-temp"})
+    viewer = ViewerProfile(account="reader")
+
+    def cand(post: object) -> Candidate:
+        return Candidate(post=post, source=CandidateSource.IN_NETWORK)
+
+    roots = [
+        make_attributed_post(author="peak.snaps", permlink="snap-container-1786203360"),
+        make_attributed_post(author="ecency.waves", permlink="waves-20260808a0o6q6"),
+        make_attributed_post(author="leothreads", permlink="leothread-2026-08-09-1200"),
+        make_attributed_post(author="hbd-temp", permlink="lumen-c-01kzj8284fmc7tp1f549mc7zef"),
+    ]
+    # A Lumen LITE post: published by the same account, but it is a lumen-<ulid>
+    # post, not a lumen-c-<ulid> container.
+    lite_post = make_attributed_post(
+        author="hbd-temp", permlink="lumen-01kzj8284fmc7tp1f549mc7zef"
+    )
+    genuine = make_attributed_post(author="tarazkp", permlink="a-real-post")
+
+    out = filter_eligible(
+        [cand(p) for p in [*roots, lite_post, genuine]],
+        viewer,
+        {},
+        {},
+        Thresholds(),
+        popular=cfg,
+        lite_publishers=publishers,
+    )
+    served = {c.post.permlink for c in out}
+
+    for root in roots:
+        assert root.permlink not in served, f"container root served: {root.author}/{root.permlink}"
+    assert lite_post.permlink in served, (
+        "a Lumen Lite post was dropped — the container rule must never delete "
+        "the lite product, only the empty shell it hangs under"
+    )
+    assert genuine.permlink in served
+
+
+def test_curator_engagement_is_invisible_but_their_posts_still_rank() -> None:
+    """★ CURATORS ARE MUTED AS ENGAGERS, NOT BANNED AS AUTHORS (2026-08-09).
+
+    Owner: "eliminate those from weights fully... their comments and reblogs
+    should be completely invisible to the algo. Their posts can matter. Dont ban
+    them like trolls, only ban them from the ranker."
+
+    That is a DIFFERENT operation from `banned.py`, which also hides the
+    account's posts. Applying a ban here would have been wrong on the evidence:
+    `@curangel`'s curation compilation was the #1 post in the popularity lane
+    when this was measured, and `@indiaunited`'s contest post was #2 — real
+    posts people read, published by accounts whose *comments* are boilerplate.
+
+    Both halves are asserted, because getting either one backwards is a silent
+    product change: engagement ignored, authorship untouched.
+    """
+    from recsys.config import DEFAULT_SETTINGS, Thresholds
+    from recsys.contracts import Candidate, CandidateSource, ViewerProfile
+    from recsys.core.curators import curator_accounts, is_curator
+    from recsys.core.second_degree import filter_eligible
+    from recsys.core.vote_signal import VoteExclusions, independent_organic_engagement
+    from tests.test_vote_signal import make_attributed_post
+
+    curators = curator_accounts()
+    assert {"worldmappin", "qurator", "la-colmena", "discovery-it", "curie"} <= curators
+
+    # HALF ONE — their engagement mints nothing.
+    bots = tuple(sorted(curators)[:6])
+    humans = tuple(f"human{i}" for i in range(6))
+    by_bots = make_attributed_post(author="writer", permlink="p1", commenters=bots)
+    by_humans = make_attributed_post(author="writer", permlink="p2", commenters=humans)
+    excl = VoteExclusions(author="writer", ring_members=curators)
+
+    bot_breadth = independent_organic_engagement(
+        by_bots, excl.excluded(), weights=DEFAULT_SETTINGS.weights
+    )
+    human_breadth = independent_organic_engagement(
+        by_humans, excl.excluded(), weights=DEFAULT_SETTINGS.weights
+    )
+    assert bot_breadth == 0.0, (
+        f"six curator comments minted {bot_breadth} breadth — they must mint nothing"
+    )
+    assert human_breadth > 0.0, "six humans must still count, or the test proves nothing"
+
+    # HALF TWO — a curator's own post is still eligible. This is what makes the
+    # rule different from a ban, and it is the half most likely to be broken by
+    # someone 'tidying up' by reusing `is_banned`.
+    curator_post = make_attributed_post(author="qurator", permlink="a-real-compilation")
+    out = filter_eligible(
+        [Candidate(post=curator_post, source=CandidateSource.IN_NETWORK)],
+        ViewerProfile(account="reader"),
+        {},
+        {},
+        Thresholds(),
+        popular=DEFAULT_SETTINGS.popular,
+    )
+    assert [c.post.permlink for c in out] == ["a-real-compilation"], (
+        "a curator's own post was hidden — that is a BAN, not the engagement "
+        "exclusion the owner asked for"
+    )
+    assert is_curator("QURATOR"), "matching must be case-insensitive"
+
+
+def test_the_pipeline_actually_excludes_curators_from_every_engagement_signal() -> None:
+    """★ THE WIRING, not the mechanism (2026-08-09).
+
+    `test_curator_engagement_is_invisible_but_their_posts_still_rank` builds its
+    own `VoteExclusions(ring_members=curators)` and proves the exclusion WORKS.
+    It does not prove the pipeline SUPPLIES it — verified by mutation: deleting
+    `| curator_accounts()` from `pipeline.py` left that test green.
+
+    Both engagement paths must union the curator set:
+      * the per-candidate `VoteExclusions` every score reads, and
+      * `_popular_excluded`, the popularity lane's own exclusion.
+    """
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parents[1] / "recsys" / "pipeline.py").read_text()
+    assert "from recsys.core.curators import curator_accounts" in src
+    # Both call sites, counted rather than merely present: one of the two going
+    # missing is exactly the regression this pins.
+    assert src.count("curator_accounts()") >= 2, (
+        "curator_accounts() must be unioned into BOTH the per-candidate "
+        "VoteExclusions and the popularity lane's _popular_excluded"
+    )
+    ring = src[src.index("ring_members=(") : src.index("ring_members=(") + 300]
+    assert "curator_accounts()" in ring, (
+        "curators are not in the ring_members union — their votes, comments and "
+        "reblogs would mint breadth again"
+    )

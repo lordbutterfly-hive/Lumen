@@ -185,6 +185,9 @@ def _e2e_on_interest(follows: frozenset[str]) -> tuple[int, int]:
     return sum(1 for sc in top if sc.post.category == "photography"), len(top)
 
 
+_RESERVED_POPULAR_SLOT = DEFAULT_SETTINGS.popular.reserved_position > 0
+
+
 def test_the_first_follow_does_not_empty_the_feed_of_interest_content() -> None:
     """★ THE REGRESSION, measured where the user experiences it.
 
@@ -193,7 +196,22 @@ def test_the_first_follow_does_not_empty_the_feed_of_interest_content() -> None:
     """
     cold_hits, cold_n = _e2e_on_interest(frozenset())
     warm_hits, warm_n = _e2e_on_interest(frozenset({"friend"}))
-    assert cold_hits == cold_n, "a followless viewer should see their interests"
+    # ★ 2026-08-09: was `cold_hits == cold_n` (20 of 20). The reserved popular
+    # slot (`PopularConfig.reserved_position`) moves ONE chain-wide post into
+    # position 6 of every feed that has one, and a reserved slot has to come
+    # from somewhere — so a followless viewer now sees 19 on-interest posts in
+    # the top 20 plus that one. The owner asked for exactly this and accepted
+    # the cost explicitly.
+    #
+    # The invariant worth keeping is the one this test was written for: the
+    # follow cliff, where a viewer saw ZERO of their interests. Allowing exactly
+    # one reserved slot keeps that guard tight — at 2 it would stop catching a
+    # real regression.
+    reserved = 1 if _RESERVED_POPULAR_SLOT else 0
+    assert cold_hits >= cold_n - reserved, (
+        f"a followless viewer should see their interests: {cold_hits}/{cold_n} "
+        f"on-interest, at most {reserved} reserved slot allowed"
+    )
     assert warm_hits > 0, "the first follow emptied the feed of interest content again"
     assert warm_hits >= warm_n // 2, (
         f"only {warm_hits}/{warm_n} on-interest after one follow — the lane is "

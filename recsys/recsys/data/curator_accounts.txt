@@ -1,0 +1,58 @@
+# CURATOR / BOT ACCOUNTS — THEIR ENGAGEMENT IS INVISIBLE TO THE RANKER.
+#
+# These are NOT banned. Their own posts rank normally. What is excluded is their
+# ENGAGEMENT: a vote, comment or reblog from an account in this list mints no
+# breadth for anybody, in any lane.
+#
+# WHY. Curation bots comment on hundreds of posts a day by design — worldmappin
+# alone hit 44 distinct authors in 36 hours, pizzabot 104. Counting them as
+# "people who engaged" makes the ranker measure which posts a bot happened to
+# find, not which posts humans talked about. They are also trivially gameable:
+# getting curated is a service you can solicit.
+#
+# THIS IS NOT THE BAN LIST (`banned_authors.txt`). A ban hides the account's
+# posts too, which would be wrong here — a curation compilation is a real post
+# people read, and one of them ranked #1 in the popularity lane on 2026-08-09.
+#
+# Seeded from the owner's list plus accounts measured commenting across 40+
+# distinct authors in a 36h window. Add one per line; `RECSYS_CURATOR_ACCOUNTS`
+# (comma-separated) extends it without editing this file.
+
+# --- curation trails / communities (owner-named) ---
+worldmappin
+curie
+visualshots
+la-colmena
+qurator
+discovery-it
+discovery-ot
+
+# --- measured high-fanout automated commenters ---
+hivebuzz
+pizzabot
+actifit
+splinterboost
+bpcvoter1
+curamax
+ladytoken
+hscr-isrc
+
+# --- well-known service bots ---
+poshtoken
+hiveposh
+dustsweeper
+ecency
+
+# --- found by the owner's own signal: "they post the exact same text every
+# time". Measured over 36h — comments / distinct texts / distinct authors:
+#   bpcvoter1     125 /  1 (1%)  / 72
+#   ladytoken      97 /  2 (2%)  / 44
+#   splinterboost  51 /  1 (2%)  / 44
+#   qurator        38 /  1 (3%)  / 36
+#   discovery-it   29 /  2 (7%)  / 27
+#   indiaunited    44 /  3 (7%)  / 38
+#   bilpcoinbpc    25 /  1 (4%)  / 17
+# Repeated text across many authors is a far better bot detector than raw
+# comment volume, which flags prolific HUMANS (melinda010100, wiseagent).
+bilpcoinbpc
+indiaunited
