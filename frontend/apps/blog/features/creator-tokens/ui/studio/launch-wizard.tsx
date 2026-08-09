@@ -16,17 +16,23 @@ import { usdWhole } from '../../market/format';
 import TokenShell from '../token-shell';
 import { writeFailureMessage } from '../write-failure';
 
-const STEPS = ['Account', 'What you offer', 'Supply', 'Launch'];
+const STEPS = ['Account', 'What you offer', 'Launch'];
 
 const SERVICE_TEMPLATE: { key: string; name: string; desc: string; cta: string }[] = [
   { key: 'ask', name: 'Ask a question', desc: 'One question, answered within your deadline. If it is not, the buyer can reclaim their tokens once the deadline and a short grace period have passed.', cta: 'Ask' },
   { key: 'review', name: 'Review my work', desc: 'A written review of a repo, doc or plan.', cta: 'Request' }
 ];
-const CAP_PRESETS = [
-  { label: 'Tight', value: 5000, note: 'more scarcity' },
-  { label: 'Balanced', value: 20000, note: 'a middle ground' },
-  { label: 'Generous', value: 100000, note: 'more buyers' }
-];
+/**
+ * ★ ONE SUPPLY FOR EVERY TOKEN (owner ruling, 2026-08-08).
+ *
+ * The wizard used to make a creator choose between Tight / Balanced / Generous
+ * (5,000 / 20,000 / 100,000) on a step of its own. That is a genuinely hard
+ * question — it sets how fast the price climbs — asked of someone who has not yet
+ * sold anything, and it bought nothing: the cap can be RAISED at any time from the
+ * Studio, so a low start is strictly the safer default. The step is gone and every
+ * token launches at the smallest of the three.
+ */
+const STANDARD_CAP = 5000;
 
 /**
  * ★ A PRICE FIELD THAT ACCEPTS "banana".
@@ -58,7 +64,7 @@ const LaunchWizard: FC = () => {
   const [step, setStep] = useState(0);
   const [failed, setFailed] = useState<string | null>(null);
   const [prices, setPrices] = useState<Record<string, string>>({ ask: '10', review: '80' });
-  const [cap, setCap] = useState(20000);
+  const [cap] = useState(STANDARD_CAP);
   const [firstBuy, setFirstBuy] = useState('');
   const [launching, setLaunching] = useState(false);
   // True once launchToken() reports the requested anti-snipe first buy was
@@ -89,9 +95,8 @@ const LaunchWizard: FC = () => {
       const raw = window.sessionStorage.getItem(DRAFT_KEY);
       if (raw) {
         const d = JSON.parse(raw) as { step?: number; prices?: Record<string, string>; cap?: number; firstBuy?: string };
-        if (typeof d.step === 'number') setStep(Math.min(3, Math.max(0, d.step)));
+        if (typeof d.step === 'number') setStep(Math.min(2, Math.max(0, d.step)));
         if (d.prices && typeof d.prices === 'object') setPrices(d.prices);
-        if (typeof d.cap === 'number') setCap(d.cap);
         if (typeof d.firstBuy === 'string') setFirstBuy(d.firstBuy);
       }
     } catch {
@@ -139,14 +144,30 @@ const LaunchWizard: FC = () => {
   })
     ? `Each price must be between $${MIN_PRICE_USD} and $${MAX_PRICE_USD.toLocaleString('en-US')}, or left blank.`
     : null;
-  const stepError = step === 1 ? priceError : step === 2 ? capError : null;
+  // ★ THE ANTI-SNIPE FIRST BUY HAD NO CEILING (2026-08-09, tester CT-CREATOR-04).
+  // `sanitizeMoneyInput` strips letters and minus signs, so the field looked
+  // guarded — but `99999999` was accepted and the primary button relabelled
+  // itself to "Launch my token · first buy $99,999,999" and stayed ENABLED.
+  // Its sibling price fields two steps earlier enforce $0.577–$10,000; this one,
+  // which spends REAL money at launch, enforced nothing at all. Bounded to the
+  // same ceiling, for the same reason, with the same wording.
+  const firstBuyRaw = firstBuy.trim();
+  const firstBuyNum = parseFloat(firstBuyRaw.replace(/,/g, ''));
+  const firstBuyError =
+    firstBuyRaw !== '' && firstBuyRaw !== '.' && (!Number.isFinite(firstBuyNum) || firstBuyNum > MAX_PRICE_USD)
+      ? `Your first buy can be at most $${MAX_PRICE_USD.toLocaleString('en-US')}, or left blank.`
+      : null;
+  const stepError = step === 1 ? priceError : null;
   // ★ NOT step-scoped (2026-08-07, second pass). `stepError` only guards the
   // Continue button on the step that owns each field, so a restored draft could
   // land straight on the final step carrying a cap the contract rejects — and the
   // Launch button's own condition checked only account type, never validity. That
   // is the exact failure this validation was added to prevent: a creator approving
   // a signature for a transaction the chain was always going to refuse.
-  const formError = priceError ?? capError;
+  // firstBuyError joins the LAUNCH gate (not the per-step Continue gate) for the
+  // reason the comment above gives: this button is the one that asks for a
+  // signature, so every field the chain can reject must be checked here.
+  const formError = priceError ?? capError ?? firstBuyError;
 
   /**
    * REGISTER, then post the services as SHOP OFFERINGS.
@@ -333,44 +354,20 @@ const LaunchWizard: FC = () => {
 
           {step === 2 ? (
             <>
-              <h1 className="font-serif text-2xl font-semibold text-[#161511]">Supply</h1>
-              <p className="mt-1.5 text-[13.5px] text-[#6b7280]">How many tokens can ever exist?</p>
-              <div className="mt-4 grid grid-cols-3 gap-2.5">
-                {CAP_PRESETS.map((p) => (
-                  <button
-                    key={p.label}
-                    onClick={() => setCap(p.value)}
-                    // Which preset is chosen was conveyed by background colour alone.
-                    aria-pressed={cap === p.value}
-                    className={`rounded-xl border px-3 py-3 text-left ${cap === p.value ? 'border-[#c0392b] bg-[#fefaf9]' : 'border-[#e4e6e9]'}`}
-                  >
-                    <div className="text-[13.5px] font-bold text-[#161511]">{p.label}</div>
-                    <div className="text-[12px] tabular-nums text-[#6b7280]">{p.value.toLocaleString('en-US')}</div>
-                    <div className="text-[11px] text-[#9ca3af]">{p.note}</div>
-                  </button>
-                ))}
-              </div>
-              <div className="mt-4 flex items-center gap-2">
-                <span className="text-[13px] text-[#6b7280]">Custom cap</span>
-                <input
-                  value={String(cap)}
-                  aria-label="Custom supply cap, in tokens"
-                  onChange={(e) => setCap(parseInt(e.target.value.replace(/[^\d]/g, ''), 10) || 0)}
-                  inputMode="numeric"
-                  className="w-[130px] rounded-[10px] border border-[#e4e6e9] px-3 py-2 text-[14px] font-semibold tabular-nums outline-none"
-                />
-              </div>
-              <p className="mt-4 font-serif text-[13px] leading-[1.55] text-[#6b7280]">
-                Up to {cap.toLocaleString('en-US')} tokens (max {MAX_CAP_CREDITS_BASE_UNITS.toLocaleString('en-US')}). Lower cap = more scarcity and price appreciation, fewer direct buyers; higher cap = more buyers, less scarcity. You can raise it any time; you can only lower it down to what’s already been bought.
-              </p>
-            </>
-          ) : null}
-
-          {step === 3 ? (
-            <>
               <h1 className="font-serif text-2xl font-semibold text-[#161511]">Launch</h1>
+              {/* ★ STATE THE CAP, DON'T ASK FOR IT (2026-08-08).
+                  Choosing a supply was deliberately removed as a step — it is a
+                  hard question to put to someone who has not launched anything
+                  yet, and the number is raisable later anyway. But removing the
+                  QUESTION is not the same as hiding the ANSWER: a tester walked
+                  this whole wizard and was never told a cap existed at all,
+                  then met it for the first time in the Studio after launching.
+                  One sentence, no extra step, no decision to make. */}
               <div className="mt-4 rounded-xl bg-[#f6f7f8] px-4 py-3.5 text-[13.5px] leading-[1.6] text-[#4b5563]">
                 <strong>Launching is free.</strong> Staying listed is <strong>~$10/month</strong> — first month included.
+                <br />
+                Your token starts capped at <strong>{STANDARD_CAP.toLocaleString()} tokens</strong>, the standard for
+                every new creator. You can raise it later from your Studio.
               </div>
               <div className="mt-4">
                 <label className="mb-1.5 block text-[12.5px] font-semibold text-[#6b7280]">Optional anti-snipe first buy</label>
@@ -443,21 +440,21 @@ const LaunchWizard: FC = () => {
           {/* ★ The reason a control is disabled must be VISIBLE, not a hover-only
               `title` — a tooltip never appears on touch and is not read out.
               (Same defect was filed against the Ask button in the same QA round.) */}
-          {step < 3 && stepError ? (
+          {step < 2 && stepError ? (
             <p className="mt-5 text-[13px] font-semibold text-[#c0392b]">{stepError}</p>
           ) : null}
-          {step === 3 && formError ? (
+          {step === 2 && formError ? (
             <p className="mt-4 text-[13px] font-semibold text-[#c0392b]">
               {formError} Go back and correct it before launching.
             </p>
           ) : null}
 
           {/* Nav */}
-          {step < 3 ? (
+          {step < 2 ? (
             <div className="mt-6 flex items-center justify-between">
               <button onClick={() => setStep((s) => Math.max(0, s - 1))} disabled={step === 0} className="text-[13.5px] font-semibold text-[#6b7280] disabled:opacity-0">Back</button>
               <button
-                onClick={() => setStep((s) => Math.min(3, s + 1))}
+                onClick={() => setStep((s) => Math.min(2, s + 1))}
                 disabled={stepError !== null}
                 title={stepError ?? undefined}
                 className="rounded-[11px] bg-[#161511] px-6 py-2.5 text-[14px] font-semibold text-white hover:bg-black disabled:cursor-not-allowed disabled:opacity-40"
@@ -467,7 +464,7 @@ const LaunchWizard: FC = () => {
             </div>
           ) : (
             <div className="mt-4 text-center">
-              <button onClick={() => setStep(2)} className="text-[13.5px] font-semibold text-[#6b7280]">Back</button>
+              <button onClick={() => setStep(1)} className="text-[13.5px] font-semibold text-[#6b7280]">Back</button>
             </div>
           )}
         </div>

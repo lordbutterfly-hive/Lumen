@@ -2,15 +2,35 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
 import { Entry } from '@hive/common-hiveio-packages/wax';
 import { getPost, getPostsRanked } from '@transaction/lib/bridge-api';
-import { fetchRankedFeed, getRecsysConfig, RecsysPost } from '@/blog/lib/recsys/feed-client';
+import {
+  fetchRankedFeed,
+  getRecsysConfig,
+  RecsysOutcome,
+  RecsysPost
+} from '@/blog/lib/recsys/feed-client';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { listFolloweesOf } from '@/blog/lib/lite/repositories/follow-repository';
 import { findUserById } from '@/blog/lib/lite/repositories/user-repository';
+import { findHiveReaderPrefs } from '@/blog/lib/lite/repositories/hive-reader-prefs-repository';
 import { tagsForInterests } from '@/blog/lib/lite/interests/taxonomy';
 import { getEngagementTotals } from '@/blog/lib/lite/repositories/engagement-repository';
 import { resolveRankedLiteBatch } from '@/blog/lib/lite/repositories/post-repository';
 import { liteConfig } from '@/blog/lib/lite/config';
+import { filterBannedEntries } from '@/blog/lib/moderation/banned-authors';
 import { DEFAULT_OBSERVER } from '@/blog/lib/utils';
+import {
+  FEED_FRESH_MS,
+  type FeedLane,
+  buildOnce,
+  feedVersion,
+  inFailureCooldown,
+  isRebuilding,
+  noteBuildFailure,
+  readViewerFeed,
+  recordFeedServe,
+  viewerGeneration,
+  writeViewerFeed
+} from '@/blog/lib/feed/feed-cache';
 
 const logger = getLogger('app');
 
@@ -34,58 +54,89 @@ const OVER_FETCH_RATIO = 1.5;
  * lookup, for every viewer after the first.
  */
 /**
- * ★★★ PER-VIEWER FEED CACHE — the 14 seconds happens ONCE, not every login.
+ * ★★★ PER-VIEWER FEED STORE — the wait happens ONCE, EVER. (2026-08-08)
  *
- * MEASURED 2026-08-06: a viewer whose recsys profile is cold costs ~9.6s inside
- * recsys plus first-time post hydration — ~14s end to end. recsys's own viewer
- * cache TTL is 300s, so a reader who comes back tomorrow is cold AGAIN. Paying
- * that on every login is not a product.
+ * MEASURED TODAY through this route, cold, per viewer:
+ *   steevc 7.2s | melinda010100 9.3s | gtg 13.2s | lordbutterfly 16.3s
  *
- * So the assembled feed is cached per viewer and served STALE-WHILE-REVALIDATE:
+ * Two things were wrong with that, and only one of them is "slow".
  *
- *   < FRESH  serve straight from cache, no upstream work at all
- *   < STALE  serve the cached feed INSTANTLY and rebuild in the background, so
- *            the reader waits for nothing and the next view is current
- *   older    rebuild synchronously (the genuine first-ever view)
+ * 1. THE FIRST BUILD ABORTED AND KEPT NOTHING. `RECSYS_FEED_TIMEOUT_MS=15000`,
+ *    so `lordbutterfly` died at 15s, cached nothing, and was served Hive
+ *    trending marked `degraded: "unavailable"`. Reload: identical. There was no
+ *    number of retries that got that reader a ranked feed — a PERMANENT TRAP,
+ *    and the thing the owner actually noticed ("my logged-in feed is identical
+ *    to the logged-out one"). Raising the timeout would not have fixed it; it
+ *    would have moved the wall and made every cold reader wait longer at it.
+ *    What fixes it is separating the BUILD from the REQUEST: the build is
+ *    started, single-flighted per viewer, and runs to completion on its own —
+ *    the request merely watches it for as long as a reader will plausibly wait
+ *    (FEED_FIRST_BUILD_PATIENCE_MS, default 12s). If it finishes in time the
+ *    reader gets their ranked feed; if it does not, they get trending ONCE,
+ *    labelled `degraded: "building"`, while the build keeps going and stores its
+ *    result. The next load is ranked and instant. The trap is gone either way.
  *
- * That makes the expensive build a ONE-TIME onboarding cost — paid behind the
- * interest picker's spinner, where the reader has been told their feed is being
- * built — and every subsequent login instant.
+ * 2. THE CACHE DIED ON EVERY RESTART. It was an in-process Map, and recsys's own
+ *    viewer cache expires after 300s, so a reader returning later paid the full
+ *    cold cost again. The assembled feed is now written to Postgres
+ *    (`lumen_feed_store`, migration 0026) with memory in front of it.
  *
- * Deliberately in-process and bounded. A shared cache (Redis) would survive
- * restarts and is the right end state; it is also infrastructure this does not
- * have yet, and an in-process one already removes the per-login cost that makes
- * the product unusable.
+ * THE SERVING RULE, which is the owner's sentence turned into code: once a
+ * viewer has ANY stored feed they are NEVER made to wait again. Fresh is served
+ * as-is; anything else is served INSTANTLY and rebuilt behind the reader. There
+ * is no age at which this route goes back to blocking — the old 24h
+ * `FEED_STALE_MS` cliff, which sent yesterday's reader back to a 16-second
+ * spinner, is deleted. Only a viewer with nothing stored at all waits, and that
+ * is the one spinner in the product.
+ *
+ * `cache` on the response says exactly which of those happened, and a copy that
+ * came off disk never claims the freshness of one that did not.
  */
-const FEED_FRESH_MS = 5 * 60_000;
-const FEED_STALE_MS = 24 * 60 * 60_000;
-const FEED_MAX_VIEWERS = 5_000;
-
-interface CachedFeed {
-  entries: Entry[];
-  ranked: number;
-  at: number;
-}
-const feedCache = new Map<string, CachedFeed>();
-const rebuilding = new Set<string>();
-
-function feedCachePut(viewer: string, entries: Entry[], ranked: number): void {
-  if (feedCache.size >= FEED_MAX_VIEWERS) {
-    const oldest = feedCache.keys().next().value;
-    if (oldest !== undefined) feedCache.delete(oldest);
-  }
-  feedCache.set(viewer, { entries, ranked, at: Date.now() });
-}
-
-// NOTE: no exported invalidator here — Next allows a route file to export ONLY
-// route handlers, and exporting anything else is a build-time type error. A
-// viewer whose interests just changed is handled by the picker itself, which
-// re-requests the feed with `?refresh=1` (see GET) rather than by reaching into
-// this module's cache from outside.
 
 const HYDRATION_TTL_MS = 60_000;
 const HYDRATION_MAX_ENTRIES = 1_000;
 const hydrationCache = new Map<string, { entry: Entry; at: number }>();
+
+/**
+ * Topic-feed cache and single-flight, keyed by `viewer|topic`.
+ *
+ * Deliberately in-memory and small: a topic page is a browsing detour, not the
+ * reader's home, so it does not deserve a durable per-viewer row the way the
+ * personal feed does — it just must not rebuild from scratch on every single
+ * visit. See the long comment at the `if (topic)` branch for the measurements
+ * that made this necessary.
+ */
+const TOPIC_CACHE_MS = 120_000;
+const TOPIC_CACHE_MAX = 200;
+const topicFeedCache = new Map<string, { entries: Entry[]; ranked: number; at: number }>();
+const topicInflight = new Map<string, Promise<BuiltFeed | null>>();
+
+function rememberTopicFeed(key: string, entries: Entry[], ranked: number): void {
+  // Bounded so a crawler walking every tag cannot grow this without limit.
+  // Map preserves insertion order, so the oldest key is the first one.
+  if (topicFeedCache.size >= TOPIC_CACHE_MAX) {
+    const oldest = topicFeedCache.keys().next().value;
+    if (oldest !== undefined) topicFeedCache.delete(oldest);
+  }
+  topicFeedCache.set(key, { entries, ranked, at: Date.now() });
+}
+
+/**
+ * One build per `viewer|topic` at a time. Unlike `buildOnce` this does NOT
+ * detach: a topic page has no persistent store to write into, so a build nobody
+ * is awaiting would burn a recsys round trip and throw the result away.
+ */
+function buildTopicOnce(key: string, build: () => Promise<BuiltFeed | null>): Promise<BuiltFeed | null> {
+  const existing = topicInflight.get(key);
+  if (existing) return existing;
+  const running = build().finally(() => {
+    if (topicInflight.get(key) === running) topicInflight.delete(key);
+  });
+  topicInflight.set(key, running);
+  // A rejection still reaches real awaiters; this only stops an unhandled one.
+  void running.catch(() => undefined);
+  return running;
+}
 
 function cacheGet(key: string): Entry | null {
   const hit = hydrationCache.get(key);
@@ -159,12 +210,20 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // Identity comes from the SESSION COOKIE, never from a query parameter. A
   // caller-supplied `?viewer=` would let anyone request anyone else's
   // personalised feed — the exact exposure recsys's own bearer auth closed.
+  //
+  // ★ READ ONCE, HERE. `buildFeed` used to call `getLiteSession()` again from
+  // inside itself. That is now impossible: a build outlives the request that
+  // started it, and `getLiteSession` reads `next/headers` cookies — request
+  // scope. Everything the ranker needs about the viewer is resolved from these
+  // three values instead, so the background path never touches a request object.
   let viewer = '';
   let isLite = false;
+  let userId = '';
   try {
     const session = await getLiteSession();
     viewer = session.user?.username ?? '';
     isLite = session.user?.account_tier === 'lite';
+    userId = session.user?.userId ?? '';
   } catch {
     viewer = '';
   }
@@ -192,10 +251,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         startPermlink
       );
       const onTopic = topic ? posts.filter((e) => hasTopic(e, topic)) : posts;
-      await mergeLumenEngagement(onTopic);
-      const last = onTopic[onTopic.length - 1];
+      const merged = await mergeLumenEngagement(onTopic);
+      const last = merged[merged.length - 1];
       return NextResponse.json({
-        entries: onTopic,
+        entries: merged,
         source: 'chain-page',
         nextCursor: last ? { author: last.author, permlink: last.permlink } : null
       });
@@ -216,89 +275,396 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return fallback(chainObserver, limit, 'anonymous', 'no signed-in viewer to rank for', topic);
   }
 
-  // ---- CACHE DECISION, before any upstream work ----
+  // ★ A TOPIC FEED IS NOT THE READER'S FEED, and the store is keyed by viewer
+  // alone — so a topic request neither reads nor writes it, and is deliberately
+  // NOT single-flighted either (single-flight is keyed by viewer too, and a
+  // `#photography` build must never be handed to whoever asked for their
+  // personal feed a moment later). Topic pages are also cheap by comparison and
+  // navigated to deliberately, so a synchronous build is the honest shape.
+  if (topic) {
+    // ★★ "TOPIC PAGES ARE CHEAP BY COMPARISON" WAS WRONG — MEASURED 2026-08-09.
+    //
+    // The comment above reasoned that a synchronous, uncached build is "the
+    // honest shape" because topic pages are cheap and deliberately navigated to.
+    // A tester timed it instead: signed OUT, first card in 654–1882ms (5 trials);
+    // signed IN, 8.5–10.0s on `/topics/nsfw` (5 trials) and 11.6–24.6s on
+    // `/topics/photography` (3 trials) — behind a bare skeleton with no progress
+    // copy, on EVERY visit, because nothing here reads or writes any cache.
+    //
+    // That is the same cold-build cost this file's own history records for the
+    // personal feed (7.2s–16.3s) — the cost the persistent store exists to pay
+    // once. Topic feeds simply never got an equivalent.
+    //
+    // They cannot share the viewer store or `buildOnce`: both are keyed by
+    // viewer alone, and handing a `#photography` build to someone who asked for
+    // their personal feed is exactly the bug the original comment guards against.
+    // So this is a small cache and single-flight keyed by BOTH — `viewer|topic`.
+    // Same viewer, same topic joins one build; different topic never does.
+    const topicKey = `${viewer}|${topic}`;
+    const cached = topicFeedCache.get(topicKey);
+    if (cached && Date.now() - cached.at < TOPIC_CACHE_MS) {
+      return NextResponse.json({
+        entries: cached.entries, source: 'recsys', ranked: cached.ranked,
+        served: cached.entries.length, cache: 'topic-cached', nextCursor: cursorOf(cached.entries)
+      });
+    }
+
+    const built = await buildTopicOnce(topicKey, async () => {
+      const state = await collectViewerState(viewer, isLite, userId);
+      return assembleFeed({ viewer, limit, chainObserver, topic, ...state });
+    });
+    if (!built) {
+      return fallback(chainObserver, limit, 'unavailable', 'recsys did not return a usable feed', topic);
+    }
+    rememberTopicFeed(topicKey, built.entries, built.ranked);
+    // ★ NOT RECORDED IN THE SERVED LOG, DELIBERATELY. The log's domain is the
+    // PERSONAL ranked page — the thing the demotion will act on and the thing
+    // §7's slot budgets are written about. `lumen_feed_served` has no topic
+    // column (the requested shape is `viewer, post_key, served_at, position,
+    // source`), so mixing #photography rows in would make "their last served
+    // page" ambiguous: the newest rows for a viewer might be a topic page they
+    // visited once. Excluded on purpose, and named here so a consumer knows the
+    // log's boundary rather than discovering it as a gap. Same reason the
+    // trending fallback and the chain continuation pages are not recorded.
+    return NextResponse.json({
+      entries: built.entries, source: 'recsys', ranked: built.ranked,
+      served: built.entries.length, cache: 'topic', nextCursor: cursorOf(built.entries)
+    });
+  }
+
   // `?refresh=1` forces a rebuild: the interest picker calls it right after
   // saving, because serving a viewer the generic feed they had BEFORE telling us
   // what they like would make the picker look broken.
   const forceRefresh = req.nextUrl.searchParams.get('refresh') === '1';
-  // The cache is keyed by viewer alone, so a topic feed must bypass it entirely
-  // — otherwise one topic request would poison the reader's personal feed.
-  const cached = forceRefresh || topic ? undefined : feedCache.get(viewer);
-  const age = cached ? Date.now() - cached.at : Infinity;
 
-  if (cached && age < FEED_FRESH_MS) {
-    return NextResponse.json({
-      entries: cached.entries, source: 'recsys', ranked: cached.ranked,
-      served: cached.entries.length, cache: 'fresh', nextCursor: cursorOf(cached.entries)
+  /**
+   * Start (or join) this viewer's rebuild. The returned promise belongs to the
+   * VIEWER, not to this request — see `buildOnce`. It resolves the viewer's
+   * ranking inputs itself, so nothing in here reaches for request scope, and it
+   * stores its own result so a caller who stops waiting still gets the benefit.
+   */
+  const startBuild = (): Promise<BuiltFeed | null> =>
+    buildOnce(viewer, async () => {
+      // Stamped BEFORE any work: if the reader changes their interests while
+      // this runs, the write is refused rather than resurrecting the feed they
+      // just replaced.
+      const era = viewerGeneration(viewer);
+      const state = await collectViewerState(viewer, isLite, userId);
+      const built = await assembleFeed({ viewer, limit, chainObserver, ...state });
+      if (built) {
+        await writeViewerFeed({
+          viewer,
+          entries: built.entries,
+          ranked: built.ranked,
+          builtLimit: limit,
+          lanes: built.lanes,
+          startedAtGeneration: era
+        });
+      } else {
+        noteBuildFailure(viewer);
+      }
+      return built;
     });
-  }
-  if (cached && age < FEED_STALE_MS) {
-    // Serve NOW, refresh behind the reader. `rebuilding` stops a burst of
-    // requests each kicking off its own expensive rebuild.
-    if (!rebuilding.has(viewer)) {
-      rebuilding.add(viewer);
-      void buildFeed(viewer, isLite, limit, chainObserver)
-        .then((b) => { if (b) feedCachePut(viewer, b.entries, b.ranked); })
-        .catch((e) => logger.warn('for-you: background refresh failed: %o', e))
-        .finally(() => rebuilding.delete(viewer));
+
+  // ---- SERVE DECISION ----
+  const stored = forceRefresh ? undefined : await readViewerFeed(viewer);
+
+  if (stored) {
+    // ★ ANYTHING STORED IS SERVED IMMEDIATELY. Not "if recent enough" — the
+    // reader has waited for this feed once already and does not get asked twice.
+    const age = Date.now() - stored.at;
+    // Three separate ways a stored copy can be behind, and all three are
+    // repaired the same way: serve it now, fix it behind them.
+    //   age       the ordinary case — the world moved on.
+    //   version   the ranking WEIGHTS changed (viewer-affinity), so the content
+    //             is stale even though the timestamp is not. Soft by design:
+    //             the owner asked for weight updates to be INVISIBLE.
+    //   limit     this copy was assembled for a smaller page than the one being
+    //             asked for. Self-heals after exactly one rebuild.
+    const fresh =
+      age < FEED_FRESH_MS && stored.version === feedVersion() && stored.builtLimit >= limit;
+
+    if (!fresh && !isRebuilding(viewer) && !inFailureCooldown(viewer)) {
+      void startBuild().catch((e) => logger.warn('for-you: background refresh failed: %o', e));
     }
+
+    // ★ THE STORED FEED IS THE ONE PLACE A BAN CAN BE OUTRUN.
+    //
+    // Everything else in this route reaches the chain through `getPost` /
+    // `getPostsRanked`, which drop banned authors at the source. This branch does
+    // not: it serves `lumen_feed_store` rows that were ASSEMBLED EARLIER — before
+    // the ban existed — straight to the reader. Without this filter the troll
+    // would keep appearing in the For You feed of every viewer whose feed was
+    // built before he was listed, for as long as that row survived, and no
+    // amount of correct filtering anywhere else would have shown it.
+    //
+    // Filtering on read (rather than purging the table) also means the ban takes
+    // effect on the next request, with no migration and no rebuild.
+    const entries = filterBannedEntries(stored.entries).slice(0, limit);
+
+    // ★★★ THE COMMON CASE, AND THEREFORE THE ONE THAT MATTERS MOST TO RECORD
+    // (2026-08-08, ruling §7). Almost every delivery of the For You page comes
+    // out of this branch — `fresh`, `stale-revalidating`, and both of their
+    // `stored-` variants. Hooking the served log to the BUILD instead would have
+    // recorded a handful of cold assemblies and missed essentially every actual
+    // reading, i.e. it would undercount precisely the readers who come back most
+    // often — the readers the 19-20/20 repetition is being measured on.
+    //
+    // Note what is recorded: `entries`, AFTER the ban filter and AFTER the slice.
+    // A post the reader never received is not an impression, and its position is
+    // its position on the page as delivered, not its rank in the build.
+    recordFeedServe(viewer, entries, stored.lanes);
+
     return NextResponse.json({
-      entries: cached.entries, source: 'recsys', ranked: cached.ranked,
-      served: cached.entries.length, cache: 'stale-revalidating', nextCursor: cursorOf(cached.entries)
+      entries,
+      source: 'recsys',
+      ranked: stored.ranked,
+      served: entries.length,
+      // Honest on both axes: how fresh, and which tier it came off. A feed
+      // served from disk after a restart must not read as a warm-cache hit.
+      cache: `${stored.origin === 'store' ? 'stored-' : ''}${fresh ? 'fresh' : 'stale-revalidating'}`,
+      builtAt: new Date(stored.at).toISOString(),
+      nextCursor: cursorOf(entries)
     });
   }
 
-  const built = await buildFeed(viewer, isLite, limit, chainObserver, topic);
-  if (!built) {
+  // ---- NOTHING STORED: the one spinner a reader is ever allowed to see ----
+
+  // A build that just failed will fail again; do not queue another doomed
+  // 3-attempt run behind every reload. `?refresh=1` is a deliberate user action
+  // and bypasses it.
+  if (!forceRefresh && inFailureCooldown(viewer)) {
+    return fallback(
+      chainObserver, limit, 'unavailable',
+      'the last ranked build failed; retrying shortly', topic
+    );
+  }
+
+  const outcome = await awaitWithPatience(startBuild(), firstBuildPatienceMs());
+
+  if (outcome.settled && outcome.value) {
+    // The cold path: this reader waited for the build and is being handed it.
+    // Recorded HERE and not inside the build, because the same build also runs
+    // to completion for a reader who stopped waiting (see `awaitWithPatience`) —
+    // and a page nobody was shown is not an impression.
+    recordFeedServe(viewer, outcome.value.entries, outcome.value.lanes);
+    return NextResponse.json({
+      entries: outcome.value.entries, source: 'recsys', ranked: outcome.value.ranked,
+      served: outcome.value.entries.length, cache: 'miss',
+      nextCursor: cursorOf(outcome.value.entries)
+    });
+  }
+  if (outcome.settled) {
     return fallback(chainObserver, limit, 'unavailable', 'recsys did not return a usable feed', topic);
   }
-  if (!topic) feedCachePut(viewer, built.entries, built.ranked);
-  return NextResponse.json({
-    entries: built.entries, source: 'recsys', ranked: built.ranked,
-    served: built.entries.length, cache: 'miss',
-    nextCursor: cursorOf(built.entries)
+
+  // ★ THE FIX FOR THE PERMANENT TRAP. We stopped WAITING; the build did not
+  // stop. It runs to completion on its own and writes to `lumen_feed_store`, so
+  // this reader's next load is ranked and instant instead of being another
+  // 15-second abort that keeps nothing. `degraded` is honest — these are
+  // trending posts, and the client already has copy for it.
+  logger.info(
+    'for-you: first build for %s exceeded %dms of patience — serving trending, build continues',
+    viewer,
+    firstBuildPatienceMs()
+  );
+  return fallback(
+    chainObserver, limit, 'building',
+    'the first ranked build is still running; it will be stored and served instantly on the next load',
+    topic
+  );
+}
+
+/** What an assembled feed is, everywhere below. */
+interface BuiltFeed {
+  entries: Entry[];
+  ranked: number;
+  /**
+   * ★ THE LANE LABEL, NO LONGER THROWN AWAY (2026-08-08, ruling §7). recsys
+   * tells us WHICH LANE surfaced each post (`in_network`, `oon_interest`,
+   * `oon_engaged`, `exploration`, `popular_fallback`, …) and what it scored, and
+   * until tonight both died with the HTTP response: every stored row matched
+   * `has_in_network = f`, `has_oon_interest = f`, `has_exploration = f`. Nobody
+   * could say what a feed had CONTAINED, so the weekly balance probe had to
+   * re-request eight live feeds (8-35s each) to rediscover what one SQL query
+   * should already know. It rides with the entries from here to storage.
+   */
+  lanes: FeedLane[];
+}
+
+/**
+ * How long a request will WATCH a first build before answering with trending.
+ *
+ * ★ WHY 12s AND NOT "RAISE THE TIMEOUT". Against today's measurements (7.2s,
+ * 9.3s, 13.2s, 16.3s) this serves `steevc` and `melinda010100` their ranked feed
+ * synchronously on the very first request, and hands `gtg` and `lordbutterfly`
+ * trending exactly once before they are ranked and instant forever. Raising
+ * `RECSYS_FEED_TIMEOUT_MS` instead would have made every cold reader sit longer
+ * and still left a wall for whoever is slower than the new number — the wall is
+ * the problem, not its height. This number only decides how long a reader stares
+ * at a spinner; it can no longer decide whether they EVER get a ranked feed.
+ */
+function firstBuildPatienceMs(): number {
+  const raw = Number(process.env.FEED_FIRST_BUILD_PATIENCE_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : 12_000;
+}
+
+type Patience =
+  | { settled: true; value: BuiltFeed | null }
+  | { settled: false };
+
+/**
+ * Watch a build for `ms`, then give up WATCHING — never give up BUILDING.
+ *
+ * The timer is always cleared: a pending 12s timer per fast request would keep
+ * handles alive for no reason, and under load that is a real leak.
+ */
+async function awaitWithPatience(build: Promise<BuiltFeed | null>, ms: number): Promise<Patience> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const patience = new Promise<'expired'>((resolve) => {
+    timer = setTimeout(() => resolve('expired'), ms);
   });
+  try {
+    const raced = await Promise.race([
+      build.then((value): Patience => ({ settled: true, value })),
+      patience
+    ]);
+    return raced === 'expired' ? { settled: false } : raced;
+  } catch (error) {
+    // The build threw rather than returning null. Same outcome for the reader.
+    logger.warn('for-you: ranked build threw: %o', error);
+    return { settled: true, value: null };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
+ * Everything the ranker needs to know about this viewer, resolved from session
+ * VALUES rather than the session itself.
+ *
+ * ★ THIS USED TO LIVE INSIDE `buildFeed` AND CALL `getLiteSession()`. It cannot
+ * any more: builds now outlive their request, and `getLiteSession` reads
+ * `next/headers`. Splitting it out is not tidying — it is what makes a
+ * background build safe to run after the response has been sent.
+ */
+async function collectViewerState(
+  viewer: string,
+  isLite: boolean,
+  userId: string
+): Promise<{ follows?: string[]; tags?: string[] }> {
+  if (!liteConfig.enabled || !liteConfig.databaseUrl) return {};
+  try {
+    // ★★ A HIVE READER HAS INTERESTS TOO (2026-08-08). This whole block used to
+    // be gated on `isLite`, so a reader signed in with their existing Hive
+    // account was ranked with NO interest tags — the picker never even appeared
+    // for them (see /api/lite/interests). Their follows come from the chain,
+    // which recsys reads via `viewer`, but their PICKS live here and were simply
+    // never passed along.
+    if (!isLite) {
+      const prefs = await findHiveReaderPrefs(viewer);
+      const hivePicks = prefs?.interests ?? [];
+      // Follows stay empty on purpose: a Hive reader's follow graph is on chain,
+      // and recsys reads it from `viewer` itself. `listFolloweesOf` only knows
+      // Lumen-local follows, which this reader has none of.
+      return { tags: hivePicks.length > 0 ? tagsForInterests(hivePicks) : undefined };
+    }
+
+    const follows = userId ? await listFolloweesOf({ userId }) : [];
+    // ★★★ THE SIGNUP INTEREST PICKS, FINALLY REACHING THE RANKER.
+    //
+    // recsys has accepted `explicit_interest_tags` since it was written and
+    // nothing ever supplied them. Without these a fresh lite account arrives
+    // with no follows, no interests and no history, and recsys correctly serves
+    // the cold-start popular lane — measured 2026-08-06: every result came back
+    // `popular_fallback`, identically for every new reader.
+    //
+    // Ids are mapped to real Hive tags here rather than stored as tags, so the
+    // taxonomy can be re-tuned (a tag dies, a better one appears) without a
+    // migration and without rewriting what readers already chose.
+    const user = userId ? await findUserById(userId) : null;
+    const picks = user?.interests ?? [];
+    return { follows, tags: picks.length > 0 ? tagsForInterests(picks) : undefined };
+  } catch (error) {
+    logger.warn('for-you: could not read lite viewer state, ranking without it: %o', error);
+    return { follows: [] };
+  }
+}
+
+/**
+ * Ask recsys, retrying ONLY a timeout/transport failure.
+ *
+ * ★ WHY RETRY AT ALL. `RECSYS_FEED_TIMEOUT_MS` is 15s and a cold viewer was
+ * measured at 16.3s end-to-end today, so the first attempt for the slowest
+ * readers aborts. The abort is not wasted: recsys keeps a per-viewer profile
+ * cache (TTL 300s), so the work the first attempt provoked makes the second one
+ * cheap. This is the difference between "sometimes slow" and "never ranked".
+ *
+ * ★ AND WHY NOT ALWAYS. A `refused` is recsys's deliberate FAIL_CLOSED 503 — its
+ * weekly trust snapshot is stale and it will still be stale in 750ms, so
+ * retrying would just be three times the load and three times the latency on the
+ * one path that is already known-degraded. `unconfigured` is not an error at all.
+ * Only `unavailable` is worth a second look.
+ */
+const RECSYS_ATTEMPTS = 3;
+const RECSYS_RETRY_DELAY_MS = 750;
+
+async function fetchRankedWithRetry(opts: {
+  viewer: string;
+  limit: number;
+  follows?: string[];
+  tags?: string[];
+}): Promise<RecsysOutcome> {
+  let outcome: RecsysOutcome = {
+    ok: false,
+    reason: 'unavailable',
+    detail: 'no attempt was made'
+  };
+  for (let attempt = 1; attempt <= RECSYS_ATTEMPTS; attempt++) {
+    outcome = await fetchRankedFeed(opts);
+    if (outcome.ok) {
+      if (attempt > 1) {
+        logger.info('for-you: recsys answered for %s on attempt %d', opts.viewer, attempt);
+      }
+      return outcome;
+    }
+    if (outcome.reason !== 'unavailable') return outcome;
+    logger.warn(
+      'for-you: recsys attempt %d/%d for %s failed (%s: %s)',
+      attempt, RECSYS_ATTEMPTS, opts.viewer, outcome.reason, outcome.detail
+    );
+    if (attempt < RECSYS_ATTEMPTS) {
+      await new Promise((resolve) => setTimeout(resolve, RECSYS_RETRY_DELAY_MS));
+    }
+  }
+  return outcome;
+}
+
+interface AssembleArgs {
+  viewer: string;
+  limit: number;
+  chainObserver: string;
+  topic?: string;
+  /** A lite viewer's graph lives only in Lumen's Postgres — recsys cannot look
+   *  up a ULID on chain, so it is handed over, or they rank as following nobody. */
+  follows?: string[];
+  tags?: string[];
 }
 
 /**
  * Assemble one viewer's ranked feed: recsys -> hydrate -> order preserved.
  * Returns null when recsys cannot serve, so the caller falls back.
+ *
+ * ★ TAKES NO SESSION AND TOUCHES NO REQUEST. That is a hard requirement now,
+ * not a style preference: this runs on after the response has been sent (see
+ * `buildOnce`), and anything reading `next/headers` from there is reading a
+ * scope that may no longer exist.
  */
-async function buildFeed(
-  viewer: string,
-  isLite: boolean,
-  limit: number,
-  chainObserver: string,
-  topic = ''
-): Promise<{ entries: Entry[]; ranked: number } | null> {
-  // A lite viewer's graph lives only in Lumen's Postgres — recsys cannot look up
-  // a ULID on chain. Hand it over, or they are ranked as following nobody.
-  let follows: string[] | undefined;
-  let tags: string[] | undefined;
-  if (isLite && liteConfig.enabled && liteConfig.databaseUrl) {
-    try {
-      const session = await getLiteSession();
-      const userId = session.user?.userId;
-      follows = userId ? await listFolloweesOf({ userId }) : [];
-      // ★★★ THE SIGNUP INTEREST PICKS, FINALLY REACHING THE RANKER.
-      //
-      // recsys has accepted `explicit_interest_tags` since it was written and
-      // nothing ever supplied them. Without these a fresh lite account arrives
-      // with no follows, no interests and no history, and recsys correctly
-      // serves the cold-start popular lane — measured 2026-08-06: every result
-      // came back `popular_fallback`, identically for every new reader.
-      //
-      // Ids are mapped to real Hive tags here rather than stored as tags, so the
-      // taxonomy can be re-tuned (a tag dies, a better one appears) without a
-      // migration and without rewriting what readers already chose.
-      const user = userId ? await findUserById(userId) : null;
-      const picks = user?.interests ?? [];
-      tags = picks.length > 0 ? tagsForInterests(picks) : undefined;
-    } catch (error) {
-      logger.warn('for-you: could not read lite viewer state, ranking without it: %o', error);
-      follows = [];
-    }
-  }
+async function assembleFeed(args: AssembleArgs): Promise<BuiltFeed | null> {
+  const { viewer, limit, chainObserver } = args;
+  const topic = args.topic ?? '';
+  const follows = args.follows;
+  let tags = args.tags;
 
   // ★ OVER-FETCH, then trim. `hydrate` DROPS anything hidden, deleted, or no
   // longer fetchable from Hive, so asking recsys for exactly `limit` posts
@@ -312,7 +678,7 @@ async function buildFeed(
   if (topic) tags = [topic];
 
   const overFetch = Math.min(Math.ceil(limit * OVER_FETCH_RATIO), MAX_LIMIT * 2);
-  const outcome = await fetchRankedFeed({ viewer, limit: overFetch, follows, tags });
+  const outcome = await fetchRankedWithRetry({ viewer, limit: overFetch, follows, tags });
   if (!outcome.ok) return null;
 
   // ★ HYDRATE ONLY WHAT WE WILL SERVE, then top up if some dropped.
@@ -324,14 +690,22 @@ async function buildFeed(
   // removed something makes the common case cost `limit`, and the bad case no
   // worse than before.
   const ranked = outcome.feed.posts;
-  const hydrated = await hydrate(ranked.slice(0, limit), chainObserver);
+  const first = await hydrate(ranked.slice(0, limit), chainObserver);
+  const hydrated = first.entries;
+  // ★ KEYED BY THE SERVED IDENTITY, WHICH IS NOT ALWAYS THE RANKED ONE. A lite
+  // post is ranked under its ULID, lives on chain under the shared publisher
+  // account, and is DISPLAYED under its writer's name — `hydrate` is the only
+  // place that sees all three at once, so the lane lookup is built there and
+  // handed back rather than reconstructed from `RecsysPost` afterwards.
+  const postByKey = first.postByKey;
   if (hydrated.length < limit && ranked.length > limit) {
     const shortfall = limit - hydrated.length;
     const topUp = await hydrate(
       ranked.slice(limit, limit + Math.ceil(shortfall * OVER_FETCH_RATIO)),
       chainObserver
     );
-    hydrated.push(...topUp);
+    hydrated.push(...topUp.entries);
+    for (const [key, post] of topUp.postByKey) postByKey.set(key, post);
   }
   // ★ TOPIC PAGES CONTAIN ONLY THAT TOPIC (2026-08-07). The ranker biases towards
   // the tag but still returns other subjects, so keep only genuine members; if
@@ -342,6 +716,9 @@ async function buildFeed(
     pool = hydrated.filter((entry) => hasTopic(entry, topic));
     if (pool.length < limit) {
       try {
+        // These come off the chain, not the ranker, so they have NO lane — and
+        // they are recorded as such (`source: null`) rather than being given a
+        // borrowed label. Topic pages are not written to the feed store anyway.
         const seen = new Set(pool.map((e) => `${e.author}/${e.permlink}`));
         const recent = await getRankedPaged('created', topic, chainObserver, limit);
         for (const post of recent ?? []) {
@@ -357,23 +734,57 @@ async function buildFeed(
     }
   }
 
-  const entries = pool.slice(0, limit);
-  await mergeLumenEngagement(entries);
+  const entries = await mergeLumenEngagement(pool.slice(0, limit));
   if (hydrated.length === 0 && outcome.feed.posts.length > 0) {
     // Ranked results that ALL failed to hydrate is not an empty feed — it is a
     // broken one, and serving a blank page would look identical to "nothing new".
     logger.warn('for-you: %d ranked posts but 0 hydrated', outcome.feed.posts.length);
     return null;
   }
-  return { entries, ranked: outcome.feed.count };
+
+  // ★ BUILT FROM THE FINAL ARRAY, not from the ranker's output. Between recsys
+  // and here, posts are dropped by moderation, by a failed chain fetch and by
+  // the topic membership filter, and lite posts are re-attributed to their
+  // display name. Deriving lanes from `outcome.feed.posts` would therefore
+  // produce an array that does not line up with the page anybody sees. A post
+  // with no matching `RecsysPost` (a chain top-up on a topic page) records a
+  // NULL lane, which is the truth, rather than inheriting its neighbour's.
+  const lanes: FeedLane[] = entries.map((entry, index) => {
+    const key = `${entry.author}/${entry.permlink}`;
+    const post = postByKey.get(key);
+    return {
+      key,
+      source: post?.source || null,
+      score: Number(post?.score?.final) || 0,
+      rank: index
+    };
+  });
+
+  return { entries, ranked: outcome.feed.count, lanes };
+}
+
+/**
+ * What `hydrate` gives back: the posts, and the ranker's own record of each one.
+ *
+ * ★ THE MAP IS KEYED BY THE SERVED IDENTITY (`author/permlink` as it appears on
+ * the card), not the ranked one. For a lite post those differ three ways —
+ * ranked as a ULID, stored on chain under the shared publisher account,
+ * displayed under the writer's name — and `hydrate` is the only place that holds
+ * all three at once. Handing the map back from here is what lets the lane label
+ * survive to storage without anyone downstream having to re-derive an identity
+ * mapping it does not have.
+ */
+interface Hydrated {
+  entries: Entry[];
+  postByKey: Map<string, RecsysPost>;
 }
 
 /**
  * recsys returns identity + scores, not content. Fetch the posts and put them
  * back in the ORDER RECSYS CHOSE — that order is the entire product.
  */
-async function hydrate(posts: RecsysPost[], observer: string): Promise<Entry[]> {
-  if (posts.length === 0) return [];
+async function hydrate(posts: RecsysPost[], observer: string): Promise<Hydrated> {
+  if (posts.length === 0) return { entries: [], postByKey: new Map() };
 
   // A lite post lives on chain under the shared publisher account, so it must be
   // FETCHED as the publisher and DISPLAYED as its real writer. One batched query
@@ -400,8 +811,9 @@ async function hydrate(posts: RecsysPost[], observer: string): Promise<Entry[]> 
     }
   }
 
+  type Pair = { entry: Entry; post: RecsysPost };
   const settled = await Promise.all(
-    posts.map(async (p) => {
+    posts.map(async (p): Promise<Pair | null> => {
       const fetchAuthor = p.chain_author ?? p.author;
       const lite = p.chain_author ? liteByKey.get(`${p.chain_author}/${p.permlink}`) : undefined;
 
@@ -414,22 +826,44 @@ async function hydrate(posts: RecsysPost[], observer: string): Promise<Entry[]> 
       const cacheKey = `${fetchAuthor}/${p.permlink}/${observer}`;
       const cached = cacheGet(cacheKey);
       if (cached) {
-        return lite?.displayName ? ({ ...cached, author: lite.displayName } as Entry) : cached;
+        const entry = lite?.displayName
+          ? ({ ...cached, author: lite.displayName } as Entry)
+          : cached;
+        return { entry, post: p };
       }
       try {
-        const entry = await getPost(fetchAuthor, p.permlink, observer);
-        if (!entry) return null;
-        cachePut(cacheKey, entry);
+        const fetched = await getPost(fetchAuthor, p.permlink, observer);
+        if (!fetched) return null;
+        cachePut(cacheKey, fetched);
         // Re-attribute to the ranked identity so a lite writer is credited in
         // the UI, matching how they were ranked.
-        return lite?.displayName ? ({ ...entry, author: lite.displayName } as Entry) : entry;
+        const entry = lite?.displayName
+          ? ({ ...fetched, author: lite.displayName } as Entry)
+          : fetched;
+        return { entry, post: p };
       } catch {
         return null;
       }
     })
   );
 
-  return settled.filter((e): e is Entry => e !== null);
+  const pairs = settled.filter((p): p is Pair => p !== null);
+  const postByKey = new Map<string, RecsysPost>();
+  for (const { entry, post } of pairs) {
+    postByKey.set(`${entry.author}/${entry.permlink}`, post);
+  }
+
+  // ★ THE RANKER IS NOT THE MODERATOR. recsys scores from HAFSQL and will
+  // happily rank a banned account's post — it has no idea Lumen refuses to show
+  // him. `getPost` already returns null for a banned author, so in practice
+  // nothing survives to here; this is the second lock, and it is the one that
+  // also keeps him out of what gets WRITTEN to `lumen_feed_store`, so a stored
+  // feed can never be built carrying him in the first place.
+  //
+  // A banned author's key is left in `postByKey`; that is harmless, because the
+  // lane array is built by walking the ENTRIES, so a lane can only exist for a
+  // post that survived to the page.
+  return { entries: filterBannedEntries(pairs.map((p) => p.entry)), postByKey };
 }
 
 /**
@@ -521,27 +955,38 @@ async function getRankedPaged(
  * feed, the profile and the post page at once instead of teaching each card about
  * a second source of truth.
  */
-async function mergeLumenEngagement(entries: Entry[]): Promise<void> {
-  if (entries.length === 0 || !liteConfig.enabled || !liteConfig.databaseUrl) return;
+async function mergeLumenEngagement(entries: Entry[]): Promise<Entry[]> {
+  if (entries.length === 0 || !liteConfig.enabled || !liteConfig.databaseUrl) return entries;
   try {
     const totals = await getEngagementTotals(
       entries.map((e) => ({ author: e.author, permlink: e.permlink }))
     );
-    if (totals.size === 0) return;
-    for (const entry of entries) {
+    if (totals.size === 0) return entries;
+    return entries.map((entry) => {
       const extra = totals.get(`${entry.author}/${entry.permlink}`);
-      if (!extra) continue;
-      if (extra.votes > 0 && entry.stats) {
-        entry.stats.total_votes = (entry.stats.total_votes ?? 0) + extra.votes;
-      }
-      if (extra.reblogs > 0) {
-        entry.reblogs = (entry.reblogs ?? 0) + extra.reblogs;
-      }
-    }
+      if (!extra) return entry;
+      // ★ COPY, NEVER MUTATE (2026-08-08). The first version of this wrote the
+      // merged totals straight onto `entry.stats.total_votes` / `entry.reblogs`.
+      // Those post objects do NOT belong to this request — they come out of
+      // shared caches (the feed cache here, and the Hive post cache underneath),
+      // so every request re-applied the same Lumen votes to the same object and
+      // the count CLIMBED on each reload with nobody voting: measured 2, 2, 2, 2,
+      // 4, then 4, 4, 4… while the engagement API sat correctly at 1 the whole
+      // time. A count that grows when you refresh is worse than one that is
+      // merely wrong, because it looks alive.
+      return {
+        ...entry,
+        reblogs: (entry.reblogs ?? 0) + extra.reblogs,
+        stats: entry.stats
+          ? { ...entry.stats, total_votes: (entry.stats.total_votes ?? 0) + extra.votes }
+          : entry.stats
+      };
+    });
   } catch (error) {
     // A missing Lumen tally must never blank out a working feed — the chain
     // numbers alone are still true, just incomplete.
     logger.warn('for-you: could not merge Lumen engagement counts: %o', error);
+    return entries;
   }
 }
 
@@ -573,13 +1018,13 @@ async function fallback(
     // caller happens to ask for <= 20). Proven directly against api.hive.blog:
     // limit=20 -> 20 posts, limit=30 -> assert_exception.
     const posts = await getRankedPaged(tag ? 'created' : 'trending', tag, chainObserver, limit);
-    await mergeLumenEngagement(posts);
+    const merged = await mergeLumenEngagement(posts);
     return NextResponse.json({
-      entries: posts ?? [],
+      entries: merged,
       source: 'trending-fallback',
       degraded: reason,
       detail,
-      nextCursor: cursorOf(posts ?? [])
+      nextCursor: cursorOf(merged)
     });
   } catch (error) {
     // Loud, because an empty feed and a broken feed look identical to a reader.

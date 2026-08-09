@@ -62,6 +62,13 @@ const PopoverCardData = ({ author, blacklist, authorReputation, liteName }: Popo
           dynamicData.total_vesting_fund_hive
         )
       : Big(0);
+  // ★ QUALIFIED, 2026-08-09 (tester CONTRADICT-02). This rendered a bare "HP",
+  // while the redesigned profile's headline "HP" is a DIFFERENT number: the
+  // headline is raw Hive Power and this is the delegation-adjusted figure
+  // (`vesting_hive - delegated_hive`). Measured on @hbd-temp: the profile said
+  // 0 and this said 30. Both are correct and they answer different questions,
+  // which is exactly why the label has to say which one it is — the redesign
+  // already spells its own out in a caption.
   const hp = vesting_hive.minus(delegated_hive);
   const legalBlockedUser = userIllegalContent.some((e) => e === account?.name);
 
@@ -166,7 +173,7 @@ const PopoverCardData = ({ author, blacklist, authorReputation, liteName }: Popo
                 </div>
                 <div className="flex flex-col items-center" data-testid="user-hp">
                   <span className="text-lg font-semibold text-foreground">{numberWithCommas(hp.toFixed(0))}</span>
-                  <span className="text-xs text-muted-foreground">HP</span>
+                  <span className="text-xs text-muted-foreground" title="Hive Power after delegations">HP</span>
                 </div>
               </div>
 

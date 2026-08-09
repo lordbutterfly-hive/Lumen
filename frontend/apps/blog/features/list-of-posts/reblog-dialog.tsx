@@ -65,7 +65,11 @@ export function ReblogDialog({
           <AlertDialogDescription data-testid="reblog-dialog-description">
             {isReblogged
               ? t('alert_dialog_reblog.already_reblogged')
-              : t('alert_dialog_reblog.description')}
+              : /* A lite reblog never reaches Hive, so "shared with your
+                   followers" would overstate its reach (2026-08-09). */
+                user.account_tier === 'lite'
+                ? t('alert_dialog_reblog.description_lite')
+                : t('alert_dialog_reblog.description')}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter className="gap-2 sm:flex-row-reverse">

@@ -62,7 +62,34 @@ export const VSC_CALL_ID = 'vsc.call';
  *
  * WIRING-VERIFY (deploy): still unmeasured against a live node.
  */
-export const DEFAULT_RC_LIMIT = 1_000;
+/**
+ * ★★★ MEASURED AGAINST THE LIVE NODE, 2026-08-09 — AND 1_000 WAS TOO LOW.
+ *
+ * The old value was `1_000` with the note "still unmeasured against a live
+ * node". It has now been measured, by broadcasting real `createOffering` calls
+ * to the live testnet contract from `qa/harness/ct-broadcast.mjs`:
+ *
+ *   rc_limit  1_000   → INCLUDED, then FAILED: {"err":"gas_limit_hit",
+ *                        "errMsg":"cost limit exceeded","ok":false}
+ *   rc_limit 10_000   → ok:true, offeringId 1 created (block 5,519,330)
+ *   rc_limit 100_000  → ok:true, offeringId 2 created (block 5,519,350)
+ *
+ * This mattered more than a tuning constant usually does: the transaction is
+ * accepted by Hive, costs the user real resource credits, and is included in a
+ * block — and only THEN does the contract refuse it. Nothing surfaces client
+ * side, because the broadcast genuinely succeeded. So every creator-token write
+ * from the UI would have appeared to work and silently done nothing.
+ *
+ * Set to the higher proven value rather than just above the floor. `rc_limit` is
+ * a CEILING on what the call may spend, not an amount charged, so headroom is
+ * close to free — and the only entrypoint measured here is `createOffering`.
+ * `buy`/`sell` run the curve and may well cost more; they are still UNMEASURED,
+ * and picking a value that only just clears the cheapest write would reintroduce
+ * exactly this failure on the expensive ones.
+ *
+ * Override with `REACT_APP_CREATOR_TOKENS_RC_LIMIT` rather than editing this.
+ */
+export const DEFAULT_RC_LIMIT = 100_000;
 
 export function buildOp(opts: {
   netId: string;

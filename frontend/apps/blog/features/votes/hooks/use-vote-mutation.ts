@@ -173,14 +173,26 @@ export function useVoteMutation() {
     onSuccess: async (data) => {
       const { voter, author, permlink, weight } = data;
       const isLiteVote = user.account_tier === 'lite';
+      // ★ SAY WHERE THE VOTE WENT (2026-08-09). This read "You have
+      // successfully upvoted." for everyone — including a lite account, whose
+      // vote is Lumen-local and never reaches Hive (see the comment below for
+      // why it cannot). So the one class of user who most needs to know their
+      // vote carries no curation reward and does not exist on chain was told
+      // the same thing as a Hive voter whose vote does.
+      //
+      // The app already sets this standard for itself elsewhere: publishing a
+      // lite post says "It's on your Lumen profile now, and queued to publish
+      // to Hive." A vote should be equally plain about its own reach.
+      const action = weight > 0 ? 'upvoted' : weight < 0 ? 'downvoted' : null;
       toast({
-        title: 'Vote successful',
-        description:
-          weight > 0
-            ? 'You have successfully upvoted.'
-            : weight < 0
-              ? 'You have successfully downvoted.'
-              : 'Your vote has been removed.',
+        title: isLiteVote ? (action ? 'Vote counted on Lumen' : 'Vote removed') : 'Vote successful',
+        description: isLiteVote
+          ? action
+            ? `You ${action} this on Lumen. Votes from a keyless account stay on Lumen — they don't reach Hive, so there's no curation reward.`
+            : 'Your vote has been removed.'
+          : action
+            ? `You have successfully ${action}.`
+            : 'Your vote has been removed.',
         variant: 'success'
       });
 

@@ -33,15 +33,45 @@ import {
   type AffordabilityReason,
   type MagiSpendingPower
 } from '@/blog/lib/lite/wallet/magi-balance';
-import { DEFAULT_RC_LIMIT } from '../lib/vsc/op-builders';
 import { getCreatorTokensConfig } from '../lib/creator-tokens-data-source';
 
 /**
- * Resource credits needed for one creator-token call, in HBD base units. Read from
- * the op builder rather than restated, so the two can never drift — if the declared
- * rc_limit changes, this threshold moves with it.
+ * Resource credits needed for one creator-token call, in HBD base units.
+ *
+ * ★ DECOUPLED FROM `DEFAULT_RC_LIMIT`, 2026-08-09. This used to BE that constant,
+ * on the reasoning that the two must never drift. They are not the same quantity:
+ *
+ *   - `rc_limit` is a CEILING we declare on a call. Over-declaring is safe and
+ *     nearly free, and it must clear the most expensive entrypoint.
+ *   - this is the MINIMUM BALANCE a reader must hold before the UI will let them
+ *     try. Over-stating it turns people away who could in fact transact.
+ *
+ * While they were one constant, raising the ceiling to 100,000 (because
+ * `rc_limit: 1_000` was measured failing on chain with `gas_limit_hit`) silently
+ * told every reader they needed 100 HBD to buy anything.
+ *
+ * ★ THE NUMBER, MEASURED on the live testnet contract 2026-08-09 (real
+ * `createOffering` broadcasts, `qa/harness/ct-broadcast.mjs`):
+ *   rc_limit  1_000 → gas_limit_hit
+ *   rc_limit 10_000 → ok
+ * So one call costs somewhere in (1_000, 10_000]. 10_000 is the smallest value
+ * proven sufficient.
+ *
+ * ★ THE FREE BASELINE IS HIVE-ONLY — corrected 2026-08-09 after I overclaimed it.
+ * I first measured `max_rcs - hbd == 10_000` on three accounts and wrote "every
+ * account checked"; all three were `hive:` accounts. A real EVM identity on the
+ * same chain measures `hbd=0, max_rcs=0` — diff ZERO. So:
+ *
+ *   hive: account, no HBD  → 10_000 RC — roughly one call, then stuck
+ *   BTC/EVM identity, no HBD → 0 RC — cannot transact AT ALL, from the start
+ *
+ * For a wallet user the funding route is therefore not a convenience, it is the
+ * only way in, and `cannotTransact` is their opening state rather than an edge
+ * case. Narrow this only by measuring again, never by guessing downward.
+ *
+ * Narrow it only by measuring again, never by guessing downward.
  */
-export const MAGI_MIN_RC_FOR_A_CALL = DEFAULT_RC_LIMIT;
+export const MAGI_MIN_RC_FOR_A_CALL = 10_000;
 
 const STALE_MS = 20_000;
 const REFETCH_MS = 45_000;

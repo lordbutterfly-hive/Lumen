@@ -39,9 +39,16 @@ export function useReblogMutation() {
 
     onSuccess: (data) => {
       const { author, permlink, username } = data;
+      // ★ Same disclosure as the vote toast (2026-08-09): a lite reblog is
+      // Lumen-local and never reaches Hive, so "shared with your followers"
+      // means Lumen followers only. Saying so is the difference between an
+      // honest confirmation and one that overstates its reach.
+      const isLiteReblog = user.account_tier === 'lite';
       toast({
-        title: 'Reblog successful',
-        description: `You have successfully reblogged the post.`,
+        title: isLiteReblog ? 'Reblogged on Lumen' : 'Reblog successful',
+        description: isLiteReblog
+          ? "This is on your Lumen blog now. Reblogs from a keyless account stay on Lumen — they don't reach Hive."
+          : `You have successfully reblogged the post.`,
         variant: 'success'
       });
       setTimeout(() => {

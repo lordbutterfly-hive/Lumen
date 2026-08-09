@@ -73,9 +73,22 @@ export function isNsfwPost(post: Pick<Entry, 'json_metadata' | 'category'>): boo
  * the list's existing empty state and its `entries.length > 0` sentinel guard
  * both start telling the truth, with no new control flow. The card keeps its
  * own early return as defence in depth for any caller that does not filter.
+ *
+ * ★ SPLIT INTO A HOOK AND A PLAIN FUNCTION (2026-08-09) — this was a single
+ * hook, and every caller needed it AFTER its `if (isLoading) return …` guards,
+ * because the list it filters does not exist until then. A hook after an early
+ * return is a CONDITIONAL hook: React threw #310 ("rendered more hooks than
+ * during the previous render") and the home page died on hydration — it
+ * server-rendered perfectly and then blanked to "Something went wrong".
+ *
+ * So the preference is read unconditionally at the top of the component with
+ * `useNsfwPreference()`, and the filtering — which needs no hook at all — is
+ * done by `filterVisiblePosts` wherever the data is ready.
  */
-export function useVisiblePosts<T extends Pick<Entry, 'json_metadata' | 'category'>>(entries: T[]): T[] {
-  const preference = useNsfwPreference();
+export function filterVisiblePosts<T extends Pick<Entry, 'json_metadata' | 'category'>>(
+  entries: T[],
+  preference: Preferences['nsfw']
+): T[] {
   if (preference !== 'hide') return entries;
   return entries.filter((entry) => !isNsfwPost(entry));
 }

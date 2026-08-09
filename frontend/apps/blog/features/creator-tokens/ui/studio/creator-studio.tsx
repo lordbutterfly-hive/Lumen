@@ -49,7 +49,16 @@ const Stat: FC<{ label: string; value: string; sub?: string; green?: boolean }> 
 // refusal (an invalid amount, or an unknown service key) reverts the field
 // exactly like a locally-invalid entry does, rather than leaving it showing
 // an unconfirmed number the store silently ignored.
-const PriceInput: FC<{ value: number; onCommit: (usd: number) => Promise<void> }> = ({ value, onCommit }) => {
+// ★ REVERTING IS NOT REPORTING (2026-08-09). Every refusal here — a bad
+// amount, or the chain declining via the 2x/7d anti-rug band — snapped the
+// field back with NO message, so a creator who typed a legitimate new price saw
+// it silently undone and could not tell that apart from a broken control.
+// `onFailure` lets the parent say why in the banner it already renders.
+const PriceInput: FC<{
+  value: number;
+  onCommit: (usd: number) => Promise<void>;
+  onFailure?: (message: string) => void;
+}> = ({ value, onCommit, onFailure }) => {
   const [txt, setTxt] = useState(String(value));
   useEffect(() => setTxt(String(value)), [value]);
   return (
@@ -59,17 +68,27 @@ const PriceInput: FC<{ value: number; onCommit: (usd: number) => Promise<void> }
       onChange={(e) => setTxt(e.target.value)}
       onBlur={async () => {
         const n = parseFloat(txt.replace(/,/g, ''));
+        if (txt.trim() === String(value)) return;
         if (!Number.isFinite(n) || n <= 0) {
           setTxt(String(value));
+          onFailure?.('Enter a price in dollars, greater than zero.');
           return;
         }
+        onFailure?.('');
         // The commit is a signed broadcast now, and it can be REFUSED — most
         // often by the offering's own 2x/7d anti-rug band. Revert the field on
         // rejection so it never displays a price the chain did not accept.
         try {
           await onCommit(n);
-        } catch {
+        } catch (error) {
           setTxt(String(value));
+          onFailure?.(
+            `The price stayed at $${value}. ${
+              error instanceof Error && error.message
+                ? error.message
+                : 'The chain refused the change — a price may only move 2x per 7 days.'
+            }`
+          );
         }
       }}
       className="ml-1 w-[70px] border-0 text-[15px] font-bold tabular-nums text-[#161511] outline-none"
@@ -89,11 +108,12 @@ const PriceInput: FC<{ value: number; onCommit: (usd: number) => Promise<void> }
  * (the title band, a control byte, a duplicate of another live offering) and the
  * field must never show a name the contract did not accept.
  */
-const TitleInput: FC<{ value: string; onCommit: (title: string) => Promise<void>; disabled?: boolean }> = ({
-  value,
-  onCommit,
-  disabled
-}) => {
+const TitleInput: FC<{
+  value: string;
+  onCommit: (title: string) => Promise<void>;
+  disabled?: boolean;
+  onFailure?: (message: string) => void;
+}> = ({ value, onCommit, disabled, onFailure }) => {
   const [txt, setTxt] = useState(value);
   useEffect(() => setTxt(value), [value]);
   return (
@@ -111,10 +131,18 @@ const TitleInput: FC<{ value: string; onCommit: (title: string) => Promise<void>
           setTxt(value);
           return;
         }
+        onFailure?.('');
         try {
           await onCommit(next);
-        } catch {
+        } catch (error) {
           setTxt(value);
+          onFailure?.(
+            `The name stayed "${value}". ${
+              error instanceof Error && error.message
+                ? error.message
+                : 'The chain refused the rename.'
+            }`
+          );
         }
       }}
       className="w-full truncate border-0 bg-transparent text-[14px] font-semibold text-[#161511] outline-none focus:underline disabled:opacity-60"
@@ -637,6 +665,7 @@ const CreatorStudio: FC = () => {
                   // revert the field when the chain refuses — same contract the
                   // named-offering rows below use.
                   onCommit={(usd) => studio.setFace(usd)}
+                  onFailure={(m) => setActionFailure(m || null)}
                 />
               </div>
             </div>
@@ -657,6 +686,7 @@ const CreatorStudio: FC = () => {
                         value={o.title}
                         disabled={studio.isBusy}
                         onCommit={(title) => studio.setOfferingTitle({ offeringId: o.offeringId, title })}
+                        onFailure={(m) => setActionFailure(m || null)}
                       />
                       <div className="text-[12px] text-[#9ca3af]">
                         {market.priceUsd > 0
@@ -672,6 +702,7 @@ const CreatorStudio: FC = () => {
                           onCommit={(usd) =>
                             studio.setOfferingPrice({ offeringId: o.offeringId, priceUsd: usd })
                           }
+                          onFailure={(m) => setActionFailure(m || null)}
                         />
                       </div>
                       <button
@@ -728,19 +759,48 @@ const CreatorStudio: FC = () => {
               />
               <button
                 onClick={async () => {
-                  const v = parseInt(capInput.replace(/[^\d]/g, ''), 10);
-                  // The local `v >= issued` check is only a fast path; the
-                  // CHAIN decides, and its view of issued supply may have moved
-                  // since this render. Revert the field on any refusal so it
-                  // never shows a cap the contract did not accept.
-                  if (!Number.isFinite(v) || v < Math.ceil(market.supply)) {
+                  // ★ THIS FAILED 100% SILENTLY (2026-08-09). Every refusal —
+                  // and every SUCCESS-that-wasn't — reverted the field with no
+                  // toast, no inline text, no console error. A tester probed 8
+                  // values including a perfectly valid one and could not tell
+                  // any of them apart from a dead button. The `catch {}` below
+                  // was swallowing the chain's actual reason.
+                  //
+                  // The reverting field stays (it must never show a cap the
+                  // contract did not accept) — what changes is that the reader
+                  // is now told WHY, using the same `actionFailure` banner the
+                  // rest of this screen already uses.
+                  setActionFailure(null);
+                  const digits = capInput.replace(/[^\d]/g, '');
+                  const v = parseInt(digits, 10);
+                  const issued = Math.ceil(market.supply);
+                  if (!digits || !Number.isFinite(v)) {
                     setCapInput(String(market.cap));
+                    setActionFailure('Enter a whole number of tokens for the new cap.');
+                    return;
+                  }
+                  if (v < issued) {
+                    setCapInput(String(market.cap));
+                    setActionFailure(
+                      `The cap cannot go below the ${issued.toLocaleString('en-US')} tokens already issued.`
+                    );
+                    return;
+                  }
+                  if (v === market.cap) {
+                    setActionFailure(`The cap is already ${market.cap.toLocaleString('en-US')}.`);
                     return;
                   }
                   try {
                     await studio.setCap(v);
-                  } catch {
+                  } catch (error) {
                     setCapInput(String(market.cap));
+                    setActionFailure(
+                      `The cap was not changed. ${
+                        error instanceof Error && error.message
+                          ? error.message
+                          : 'The chain refused the change.'
+                      }`
+                    );
                   }
                 }}
                 className="rounded-[10px] bg-[#161511] px-4 py-2 text-[13px] font-semibold text-white"

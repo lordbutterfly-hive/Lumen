@@ -6,7 +6,7 @@ import { useInView } from 'react-intersection-observer';
 import LeftRail from '@/blog/features/layouts/left-rail';
 import RightRail from '@/blog/features/layouts/right-rail';
 import MediumPostCard from './medium-post-card';
-import { useVisiblePosts } from '@/blog/lib/nsfw';
+import { filterVisiblePosts, useNsfwPreference } from '@/blog/lib/nsfw';
 import { PostListSkeleton } from '@hive/ui';
 import { Entry } from '@hive/common-hiveio-packages/wax';
 import { StaleTime } from '@/blog/lib/react-query';
@@ -67,6 +67,7 @@ export default function TopicShell({ tag }: { tag: string }) {
   }, [inView, hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   const seen = new Set<string>();
+  const nsfwPreference = useNsfwPreference();
   const rawEntries = (data?.pages ?? [])
     .flatMap((page) => page?.entries ?? [])
     .filter((e) => {
@@ -78,7 +79,7 @@ export default function TopicShell({ tag }: { tag: string }) {
   // NSFW `hide` filtering happens at the LIST so entries.length means "posts you
   // will actually see" — otherwise a fully-hidden page leaves a zero-height list
   // and the scroll sentinel auto-fetches forever. See lib/nsfw.ts.
-  const entries = useVisiblePosts(rawEntries);
+  const entries = filterVisiblePosts(rawEntries, nsfwPreference);
 
   const ranked = data?.pages?.[0]?.source === 'recsys';
 

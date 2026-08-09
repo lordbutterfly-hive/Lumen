@@ -166,6 +166,13 @@ const ProfileLayout = ({ children }: { children: ReactNode }) => {
     dynamicGlobalData.total_vesting_shares,
     dynamicGlobalData.total_vesting_fund_hive
   );
+  // ★ QUALIFIED, 2026-08-09 (tester CONTRADICT-02). This rendered a bare "HP",
+  // while the redesigned profile's headline "HP" is a DIFFERENT number: the
+  // headline is raw Hive Power and this is the delegation-adjusted figure
+  // (`vesting_hive - delegated_hive`). Measured on @hbd-temp: the profile said
+  // 0 and this said 30. Both are correct and they answer different questions,
+  // which is exactly why the label has to say which one it is — the redesign
+  // already spells its own out in a caption.
   const hp = vesting_hive.minus(delegated_hive);
 
   // Calculate user level from raw VESTS (not HP)
@@ -317,7 +324,7 @@ const ProfileLayout = ({ children }: { children: ReactNode }) => {
                       <span className="text-lg font-semibold sm:text-xl">
                         {numberWithCommas(hp.toFixed(0))}
                       </span>
-                      <span className="text-xs text-white/70 sm:text-sm">HP</span>
+                      <span className="text-xs text-white/70 sm:text-sm" title="Hive Power after delegations">HP</span>
                     </div>
                   </div>
 

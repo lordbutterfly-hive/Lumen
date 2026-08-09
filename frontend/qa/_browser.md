@@ -131,3 +131,120 @@ any of them come BACK, that is a high-value finding:
   have them.
 
 Anything else is fair game.
+
+---
+
+# Sign in as a REAL account — do this before you test anything
+
+**★ Added 2026-08-08, on the owner's instruction, after five rounds of testers
+returned "clean" on pages the owner broke in seconds.**
+
+## The reason you have been finding nothing
+
+Every previous tester signed up a brand-new lite account and browsed as a person
+with no history — no follows, no feed, no posts, no wallet balance, no
+notifications, no tokens. **Nearly every screen they judged was an empty state.**
+An empty state looks fine no matter how broken the populated one is. A feed with
+nothing in it cannot show you a broken card, a wrong vote count, a duplicated
+sidebar, a misaligned pill, or a payout that renders as `NaN`.
+
+Real examples from this codebase, each of which several testers walked straight
+past while reporting the surrounding page as clean:
+
+- The profile Posts tab was seeded by a DIFFERENT query than the one it
+  refetched with — invisible unless the account has posts.
+- Trending/Hot/Created rendered their sidebar **twice**. Nobody noticed, because
+  nobody looked at a page they had no reason to visit.
+- `/api/lite/posts` served every post on the platform to anyone. It reads as a
+  normal feed unless you ask who is allowed to see it.
+- The feed reported "log in to see recommendations" to signed-in readers — only
+  reachable when the ranker degrades, which never happens on a fresh account.
+
+So: **an empty screen is not a passing screen.** If a page has nothing on it,
+your first job is to get content onto it, and only then judge it. If you cannot,
+say the page was UNTESTED for lack of data — never "clean".
+
+## How to sign in
+
+```js
+import pw from '<repo>/node_modules/.pnpm/playwright@1.49.1/node_modules/playwright/index.js';
+const { chromium } = pw;
+const { signedInStorageState } = await import('<repo>/qa/harness/session.mjs');
+
+const storageState = await signedInStorageState();          // hbd-temp, full tier
+const browser = await chromium.launch();
+const ctx = await browser.newContext({ ignoreHTTPSErrors: true, storageState });
+```
+
+Confirm it took before you judge anything:
+
+```js
+await page.goto('https://localhost:3443/');
+const me = await page.evaluate(() => fetch('/api/users/me', { credentials: 'include' }).then(r => r.json()));
+// expect: { isLoggedIn: true, username: 'hbd-temp', account_tier: 'full' }
+```
+
+If `isLoggedIn` is false, **stop** — everything you test after that is the
+signed-out product, and reporting it as the signed-in one is how a whole round
+gets wasted.
+
+## What this account can and cannot do
+
+`hbd-temp` is Lumen's own shared frontend account. It is a real, full-tier Hive
+account, so you get the real signed-in product: your profile, the wallet, the
+ranked feed, settings, notifications, creator tokens, and every Lumen-local
+action (votes, follows, reblogs) and lite write that goes through the publisher.
+
+It **cannot sign a Hive transaction in the browser.** Chain signing needs a key
+in the Keychain extension, which no headless browser has, and this session
+deliberately carries no key. If a flow stops and asks for Keychain, that is the
+boundary of what you can test — **report it as UNTESTABLE, never as broken.**
+
+Two more things to know, so you do not mis-file them:
+
+- **`hbd-temp` follows 20 real accounts on chain** (blocktrades, theycallmedan,
+  ecency and others), so its Following tab shows a real 20-post chain feed.
+  ★ This paragraph previously said the opposite — "follows nobody, so its
+  Following tab is legitimately empty" — which would have led a tester to file a
+  working feed as a bug, or to accept an empty one as correct. Corrected
+  2026-08-09 after a tester checked it against
+  `condenser_api.get_following` rather than trusting this file. Verify account
+  facts against the chain; this doc is not authoritative about them.
+- Anything you do lands in the shared database under this one account, and other
+  testers are using it too. Namespace what you create (put your run id in
+  titles), and never assume a row you find is yours.
+
+## ★ WRITES THAT GO TO THE HIVE CHAIN DO NOT WORK IN THIS SESSION — and the errors are the harness's fault, not the product's
+
+Added 2026-08-08 after a tester spent an evening filing this as a High.
+
+`hbd-temp` signs in here through a **forged session cookie**. That is enough for
+the server to know who you are, so every READ is real. It is NOT enough for the
+BROWSER to sign anything: the real login flow also populates a client-side signer
+that this shortcut never touches.
+
+So **upvote, comment, reblog and follow-on-a-Hive-profile all fail**, and they
+fail ugly — you will see raw strings like `WaxProtocolAssertionError ... Account
+name '' is too short`, `TypeError: Cannot read properties of undefined (reading
+'username')`, or `Invalid loginType`. All three mean the same thing: the signer
+was never set up, because you did not log in the normal way.
+
+**Do not file these. They are an artifact of how you signed in.** A real reader
+who signed in with Keychain has the extension and a populated signer.
+
+What you CAN still test on the write side:
+- **Lumen-local actions on lite content** — these go through the server, not a
+  chain signature, and are genuinely exercised.
+- **Everything up to the wall**: does the button exist, is it enabled, is it in
+  the right place, does the form validate, does it tell you what will happen.
+- **What the UI does WHEN a write fails** — that IS fair game and worth reporting
+  as a UX finding, as long as you describe it as "the failure path looks like X",
+  not "voting is broken."
+
+If you need to prove a write end to end, say so in your report as UNTESTABLE and
+name what you would have checked. Do not guess, and do not report the harness's
+own limitation as a product defect.
+
+You may still create your own lite account when you specifically need a
+first-time-user view — signup, onboarding, the interest picker. For everything
+else, use the account with content in it.

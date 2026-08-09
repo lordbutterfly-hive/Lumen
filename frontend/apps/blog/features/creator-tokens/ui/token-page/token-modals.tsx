@@ -142,7 +142,7 @@ const BuyModal: FC<{
           </div>
         ) : null}
         {/* What you can actually spend, and whether you can send anything at all. */}
-        <MagiFuelGauge state={spending} costBaseUnits={costBaseUnits} className="mb-3" />
+        <MagiFuelGauge state={spending} costBaseUnits={costBaseUnits} kind={payer?.kind} className="mb-3" />
         {blockedBySpending && payer ? <MagiFundingHelp kind={payer.kind} className="mb-3" /> : null}
         <div className="mb-3 rounded-[10px] bg-[#f6f7f8] px-3.5 py-3 text-[12.5px] leading-[1.5] text-[#6b7280]">
           Includes a 10% trade fee (5% to @{m.handle}, 5% to Lumen).

@@ -13,7 +13,7 @@ import { cn } from '@ui/lib/utils';
 import NoDataError from '@/blog/components/no-data-error';
 import MarketTab from '@/blog/features/prediction-market/market-tab';
 import MediumPostCard from './medium-post-card';
-import { useVisiblePosts } from '@/blog/lib/nsfw';
+import { filterVisiblePosts, useNsfwPreference } from '@/blog/lib/nsfw';
 import InterestPicker from '@/blog/features/lite-auth/interests/interest-picker';
 
 // TODO: move to i18n
@@ -118,6 +118,8 @@ function ForYouFeed() {
     if (inView && hasNextPage && !isFetchingNextPage) fetchNextPage();
   }, [inView, hasNextPage, isFetchingNextPage, fetchNextPage]);
 
+  // Hook must run unconditionally, above every early return (see lib/nsfw.ts).
+  const nsfwPreference = useNsfwPreference();
   if (isLoading) return <PostListSkeleton count={5} />;
   if (isError || !data) return <NoDataError />;
 
@@ -139,7 +141,7 @@ function ForYouFeed() {
   // NSFW `hide` filtering happens at the LIST so entries.length means "posts you
   // will actually see" — otherwise a fully-hidden page leaves a zero-height list
   // and the scroll sentinel auto-fetches forever. See lib/nsfw.ts.
-  const entries = useVisiblePosts(rawEntries);
+  const entries = filterVisiblePosts(rawEntries, nsfwPreference);
 
   // ★ BUG FOUND 2026-08-06 (owner report: "for you isnt populated... seems it
   // has mock posts"). Live-verified against the running dev server: an
@@ -284,6 +286,9 @@ function EntryFeed({ sort, observer, lite = false }: { sort: string; observer: s
     }
   }, [inView, hasNextPage, isFetching, fetchNextPage]);
 
+  // Hook must run unconditionally, above every early return (see lib/nsfw.ts).
+  const nsfwPreference = useNsfwPreference();
+
   if (isError) {
     return <NoDataError />;
   }
@@ -293,7 +298,7 @@ function EntryFeed({ sort, observer, lite = false }: { sort: string; observer: s
   }
 
   // Same NSFW list-level filter as the ranked feed above (see lib/nsfw.ts).
-  const entries = useVisiblePosts(data?.pages.flat() ?? []);
+  const entries = filterVisiblePosts(data?.pages.flat() ?? [], nsfwPreference);
 
   if (entries.length === 0) {
     return <p className="py-12 text-center font-sans text-sm text-muted-foreground">{LABELS.empty}</p>;

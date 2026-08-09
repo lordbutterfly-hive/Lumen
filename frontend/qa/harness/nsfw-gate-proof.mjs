@@ -24,6 +24,36 @@ function check(name, pass, detail) {
 
 const browser = await chromium.launch();
 const context = await browser.newContext({ ignoreHTTPSErrors: true });
+
+// ── THE HOME PAGE MUST SURVIVE HYDRATION ────────────────────────────────────
+// Added 2026-08-09 because this suite passed 9/9 while `/` was BLANK.
+//
+// The NSFW list filter was added after each list's `if (isLoading) return …`
+// guards, which makes it a CONDITIONAL hook. React threw #310 and the home page
+// server-rendered perfectly, then replaced itself with "Something went wrong"
+// the moment it hydrated. Three builds shipped that way — reported as proven —
+// because every check here drove `/topics/nsfw` and a post page and never once
+// loaded the page every reader starts on.
+//
+// So this runs FIRST, and it asserts on the hydrated DOM, not the HTML: a
+// `curl` of `/` returned 200 with the right markup throughout the outage. The
+// feed-card count is the load-bearing part — an error boundary renders a
+// perfectly valid page with zero posts in it, which no HTTP status can tell you.
+{
+  const home = await context.newPage();
+  const homeErrors = [];
+  home.on('pageerror', (e) => homeErrors.push(String(e).slice(0, 160)));
+  await home.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await home.waitForTimeout(6000);
+  const text = await home.locator('body').innerText();
+  const homeCards = await home.locator('[data-testid="medium-card-title"]').count();
+
+  check('/ throws no client-side error (hydration survived)', homeErrors.length === 0, homeErrors[0] ?? 'none');
+  check('/ is not showing the error boundary', !/Something went wrong/i.test(text), 'no "Something went wrong"');
+  check('/ rendered feed cards (an error boundary renders a valid page with none)', homeCards > 0, `${homeCards} cards`);
+  await home.close();
+}
+
 const page = await context.newPage();
 
 // Every image the page actually asks the network for.
