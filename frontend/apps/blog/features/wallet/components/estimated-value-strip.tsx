@@ -15,7 +15,10 @@ export default function EstimatedValueStrip({ figures }: { figures: WalletFigure
   const { t } = useTranslation('common_blog');
   const { data: prices, isLoading, isError } = useHiveMarketPrices();
 
-  const totalHive = figures.liquidHive.plus(figures.savingsHive).plus(figures.netHp);
+  // ★ OWN stake only (2026-08-09). This used `netHp`, which adds HP delegated IN
+  // — so an account holding 0.000 HP of its own showed 93% of its "Estimated
+  // Account Value" as somebody else's stake, revocable at any moment.
+  const totalHive = figures.liquidHive.plus(figures.savingsHive).plus(figures.movableHp);
   const totalHbd = figures.liquidHbd.plus(figures.savingsHbd);
 
   const hasPrices = !isLoading && !isError && !!prices;

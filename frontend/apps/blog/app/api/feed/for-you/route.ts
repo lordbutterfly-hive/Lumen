@@ -785,6 +785,8 @@ interface Hydrated {
  */
 async function hydrate(posts: RecsysPost[], observer: string): Promise<Hydrated> {
   if (posts.length === 0) return { entries: [], postByKey: new Map() };
+  // Posts lost to a node error rather than deliberately withheld. See the catch below.
+  let fetchFailures = 0;
 
   // A lite post lives on chain under the shared publisher account, so it must be
   // FETCHED as the publisher and DISPLAYED as its real writer. One batched query
@@ -832,7 +834,16 @@ async function hydrate(posts: RecsysPost[], observer: string): Promise<Hydrated>
         return { entry, post: p };
       }
       try {
-        const fetched = await getPost(fetchAuthor, p.permlink, observer);
+        // ONE retry, short backoff. These ~30 calls go out together against a
+        // public node, so failures arrive in clusters and are almost always
+        // transient (rate limit, blip). Retrying once turns a lost post back
+        // into a rendered one; retrying more would turn a real outage into a
+        // slow one, which is why it stops at one.
+        let fetched = await getPost(fetchAuthor, p.permlink, observer).catch(() => null);
+        if (!fetched) {
+          await new Promise((r) => setTimeout(r, 250));
+          fetched = await getPost(fetchAuthor, p.permlink, observer);
+        }
         if (!fetched) return null;
         cachePut(cacheKey, fetched);
         // Re-attribute to the ranked identity so a lite writer is credited in
@@ -842,12 +853,35 @@ async function hydrate(posts: RecsysPost[], observer: string): Promise<Hydrated>
           : fetched;
         return { entry, post: p };
       } catch {
+        // ★★ A FETCH FAILURE IS NOT A TAKEDOWN (2026-08-09).
+        //
+        // This returned the same bare `null` as the moderation drop above, so
+        // "Lumen refuses to show this" and "the Hive node did not answer just
+        // now" were indistinguishable — and both silently shrank the page.
+        //
+        // Every ranked post costs one `getPost` against a PUBLIC node, ~30 of
+        // them fired at once per page. When that node rate-limits or blips, a
+        // whole cluster fails together and the reader gets a feed with a handful
+        // of posts in it, no error, nothing in the console. Measured by a tester:
+        // 2 of 16 fresh loads rendered 3 of 30 cards while a manual re-fetch
+        // moments later returned all 30 — the signature of exactly this.
+        //
+        // Counted so the caller can tell a thin page from a censored one.
+        fetchFailures += 1;
         return null;
       }
     })
   );
 
   const pairs = settled.filter((p): p is Pair => p !== null);
+  if (fetchFailures > 0) {
+    logger.warn(
+      'feed hydrate: %d of %d posts failed to fetch from the Hive node and were dropped — ' +
+        'the served page is short by that much. Transient node failure, not moderation.',
+      fetchFailures,
+      posts.length
+    );
+  }
   const postByKey = new Map<string, RecsysPost>();
   for (const { entry, post } of pairs) {
     postByKey.set(`${entry.author}/${entry.permlink}`, post);

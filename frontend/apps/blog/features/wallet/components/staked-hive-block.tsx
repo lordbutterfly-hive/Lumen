@@ -26,7 +26,7 @@ export default function StakedHiveBlock({
   chain: Chain | null;
 }) {
   const { t } = useTranslation('common_blog');
-  const { vestingHp, netHp, delegatedOutHp, hpApr, powerDown } = figures;
+  const { vestingHp, netHp, movableHp, delegatedOutHp, hpApr, powerDown } = figures;
 
   return (
     <div className="mt-5 flex flex-col gap-5 border-l-2 border-[#f1f3f5] pl-4">
@@ -97,7 +97,12 @@ export default function StakedHiveBlock({
             />
             <PowerDownDialog
               username={username}
-              netHp={netHp}
+              // ★ MOVABLE, not effective (2026-08-09). These dialogs SPEND stake, and
+              // `netHp` includes HP delegated IN, which cannot be powered down or
+              // re-delegated. Passing it let the Unstake dialog accept 30.030 HP on an
+              // account that owned 0.000 — a transaction the chain was always going to
+              // refuse, configured with no warning.
+              netHp={movableHp}
               trigger={
                 <button
                   type="button"

@@ -116,22 +116,53 @@ export async function readMagiSpendingPower(gqlUrl: string, account: string): Pr
   const balanceNode = prop(data, 'getAccountBalance');
   const rcNode = prop(data, 'getAccountRC');
 
-  // A null record means the node has no record of this account. That is NOT a zero
-  // balance — it is "unknown" — so it throws rather than inventing a figure. An
-  // account that has genuinely never been funded also lands here, and the caller's
-  // message for both is the same thing: fund it.
-  if (balanceNode === null || balanceNode === undefined) {
-    throw new Error(`Magi balance read: the node has no balance record for ${account}`);
+  // ★★ A MISSING BALANCE ROW BESIDE A PRESENT RC ROW IS A ZERO, NOT AN UNKNOWN
+  // (2026-08-09, tester MONEY-08b).
+  //
+  // This threw whenever `getAccountBalance` was null, on the reasoning that a
+  // null record is "unknown" and that "the caller's message for both is the same
+  // thing: fund it." The second half was simply false, and the tester proved it
+  // on a real Hive account: the throw lands in the gauge's `failed` branch,
+  // which renders **"Couldn't check your Magi balance just now — nothing is
+  // wrong with your funds"** and leaves `blockedBySpending` FALSE — so the Buy
+  // button stays ENABLED and `MagiFundingHelp` (the @vsc.gateway panel that
+  // exists precisely for this person) never renders at all.
+  //
+  // Net effect: an account that has simply never funded Magi — the DEFAULT state
+  // for every user of a brand-new feature — was reassured that nothing was wrong
+  // and invited to sign a transaction that cannot succeed, burning real resource
+  // credits, with the one piece of help they needed suppressed.
+  //
+  // The node answered. `getAccountRC` came back with a record for this same
+  // account in the same response, so this is not a failed read: it is the node
+  // saying it holds no balance row, which for a ledger means zero. Measured on
+  // the live testnet: `hbd-temp` returns `getAccountBalance: null` beside
+  // `getAccountRC {amount: 10000, max_rcs: 10000}` — and 10,000 is exactly the
+  // free baseline a hive: account gets on top of its HBD, so the balance is
+  // demonstrably 0.
+  //
+  // BOTH null is still a genuine unknown and still throws — that is a node that
+  // told us nothing, which must never be rendered as "you have no money".
+  if (
+    (balanceNode === null || balanceNode === undefined) &&
+    (rcNode === null || rcNode === undefined)
+  ) {
+    throw new Error(`Magi balance read: the node has no record at all for ${account}`);
   }
   if (rcNode === null || rcNode === undefined) {
     throw new Error(`Magi balance read: the node has no resource-credit record for ${account}`);
   }
 
-  const balance: MagiBalance = {
-    account,
-    hbdBaseUnits: asNumber(prop(balanceNode, 'hbd'), 'hbd'),
-    blockHeight: asNumber(prop(balanceNode, 'block_height'), 'block_height')
-  };
+  // An absent balance row is a real, reportable zero (see above). `blockHeight`
+  // is unknown in that case and is reported as 0 rather than guessed.
+  const balance: MagiBalance =
+    balanceNode === null || balanceNode === undefined
+      ? { account, hbdBaseUnits: 0, blockHeight: 0 }
+      : {
+          account,
+          hbdBaseUnits: asNumber(prop(balanceNode, 'hbd'), 'hbd'),
+          blockHeight: asNumber(prop(balanceNode, 'block_height'), 'block_height')
+        };
   const rc: MagiResourceCredits = {
     account,
     amount: asNumber(prop(rcNode, 'amount'), 'amount'),

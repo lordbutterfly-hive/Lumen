@@ -1,5 +1,26 @@
 import { query } from '../db/pool';
 import { FollowActor, actorKey, sameActor } from '../social/follow-actor';
+import { bannedAuthorList, isBannedAuthor } from '@/blog/lib/moderation/banned-authors';
+
+/**
+ * ★ A BANNED CHAIN ACCOUNT MUST NOT MOVE A NUMBER IN THIS TABLE.
+ *
+ * `lumen_follow` is the one graph a banned HIVE account can still write to
+ * through Lumen: a full Hive account signing in here is stored as `follower_hive`
+ * (an `h:<name>` node), so nothing about being banned stops him pressing Follow.
+ * Left alone, his edges would keep counting toward other people's follower
+ * totals, keep him listed on their Followers page, and — via `listFolloweesOf`
+ * — keep feeding the ranker a follow edge that shapes what a reader is shown.
+ *
+ * Every read below therefore excludes rows whose Hive side is a banned name. The
+ * edges are LEFT IN PLACE rather than deleted: unbanning is then a config change,
+ * not a data-recovery problem, and nothing is lost if a name is added by mistake.
+ */
+const bannedHiveNames = (): string[] => bannedAuthorList();
+
+/** SQL fragment: `<column>` is not one of the banned Hive names in `$n`. */
+const notBannedHive = (column: string, param: number): string =>
+  `(${column} IS NULL OR NOT (lower(${column}::text) = ANY($${param}::text[])))`;
 
 /**
  * Lumen's own follow graph (spec §E.4).
@@ -70,17 +91,22 @@ export async function isFollowing(follower: FollowActor, followee: FollowActor):
 }
 
 export async function countFollowers(actor: FollowActor): Promise<number> {
+  // A banned account has no audience of its own to report.
+  if (isBannedAuthor(actor.hive)) return 0;
   const { rows } = await query<{ c: string }>(
-    `SELECT count(*)::text AS c FROM lumen_follow WHERE followee_key = $1 AND active`,
-    [actorKey(actor)]
+    `SELECT count(*)::text AS c FROM lumen_follow
+       WHERE followee_key = $1 AND active AND ${notBannedHive('follower_hive', 2)}`,
+    [actorKey(actor), bannedHiveNames()]
   );
   return Number(rows[0]?.c ?? 0);
 }
 
 export async function countFollowing(actor: FollowActor): Promise<number> {
+  if (isBannedAuthor(actor.hive)) return 0;
   const { rows } = await query<{ c: string }>(
-    `SELECT count(*)::text AS c FROM lumen_follow WHERE follower_key = $1 AND active`,
-    [actorKey(actor)]
+    `SELECT count(*)::text AS c FROM lumen_follow
+       WHERE follower_key = $1 AND active AND ${notBannedHive('followee_hive', 2)}`,
+    [actorKey(actor), bannedHiveNames()]
   );
   return Number(rows[0]?.c ?? 0);
 }
@@ -136,7 +162,12 @@ export async function listFolloweesOf(actor: FollowActor, limit = 2000): Promise
       LIMIT $2`,
     [actorKey(actor), limit]
   );
-  return rows.map((r) => r.followee).filter((f): f is string => Boolean(f));
+  // This list is handed to the RANKER as `?follows=`. A banned author in it would
+  // shape what the reader is shown even though not one of his posts can be
+  // rendered — the ban has to reach the ranking inputs, not just the output.
+  return rows
+    .map((r) => r.followee)
+    .filter((f): f is string => Boolean(f) && !isBannedAuthor(f));
 }
 
 /**
@@ -169,7 +200,9 @@ export async function listFollowingPeers(
       ORDER BY seq DESC LIMIT $3`,
     [actorKey(actor), opts.before ?? null, opts.limit]
   );
-  return rows.map((r) => ({ userId: r.followee_user_id, hive: r.followee_hive }));
+  return rows
+    .filter((r) => !isBannedAuthor(r.followee_hive))
+    .map((r) => ({ userId: r.followee_user_id, hive: r.followee_hive }));
 }
 
 export async function listFollowerPeers(
@@ -184,7 +217,46 @@ export async function listFollowerPeers(
       ORDER BY seq DESC LIMIT $3`,
     [actorKey(actor), opts.before ?? null, opts.limit]
   );
-  return rows.map((r) => ({ userId: r.follower_user_id, hive: r.follower_hive }));
+  return rows
+    .filter((r) => !isBannedAuthor(r.follower_hive))
+    .map((r) => ({ userId: r.follower_user_id, hive: r.follower_hive }));
+}
+
+/**
+ * Recent followers of an actor, WITH their timestamps — the raw material for a
+ * "someone followed you" notification.
+ *
+ * ★ WHY (2026-08-09, tester BASELINE-03). Nobody is ever told when they gain a
+ * follower. The bell asks `bridge.account_notifications` — the CHAIN — and a
+ * Lumen follow is never written there, so a real social action produced silence
+ * for the follower AND the followed. That holds for a full Hive account too: a
+ * lite reader following @alice is invisible to @alice, because the bell has
+ * exactly one data source and it cannot see Lumen at all.
+ *
+ * Derived from `lumen_follow` rather than a new notifications table on purpose:
+ * the row already carries who, whom and when, so a follow notification is a
+ * QUERY, not a second copy of the truth that can drift from it. Unfollow then
+ * needs no compensating delete — the edge goes `active = false` and the
+ * notification stops existing, which is the correct behaviour and is free.
+ */
+export async function listRecentFollowersWithTime(
+  actor: FollowActor,
+  opts: { limit: number } = { limit: 30 }
+): Promise<{ userId: string | null; hive: string | null; at: string }[]> {
+  const { rows } = await query<{
+    follower_user_id: string | null;
+    follower_hive: string | null;
+    created_at: string;
+  }>(
+    `SELECT follower_user_id, follower_hive::text AS follower_hive, created_at
+       FROM lumen_follow
+      WHERE followee_key = $1 AND active = true
+      ORDER BY seq DESC LIMIT $2`,
+    [actorKey(actor), opts.limit]
+  );
+  return rows
+    .filter((r) => !isBannedAuthor(r.follower_hive))
+    .map((r) => ({ userId: r.follower_user_id, hive: r.follower_hive, at: r.created_at }));
 }
 
 export async function absorbHiveActor(userId: string, hiveName: string): Promise<void> {
@@ -248,10 +320,22 @@ export async function listEdges(afterSeq: number, limit: number): Promise<Follow
        FROM lumen_follow WHERE seq > $1 ORDER BY seq ASC LIMIT $2`,
     [afterSeq, limit]
   );
-  return rows.map((r) => ({
-    follower: r.follower_key,
-    followee: r.followee_key,
-    seq: Number(r.seq),
-    active: r.active
-  }));
+  return rows
+    // ★ THE RANKER'S TRUST/BREADTH GRAPH IS BUILT FROM THIS FEED. A banned
+    // account's edges are withheld from it, so he is not a node recsys can
+    // propagate trust through and cannot vouch anything into anyone's feed.
+    // Node keys are `u:<userId>` (a Lumen account, never banned by this list)
+    // or `h:<hive name>` — only the latter can name a banned chain account.
+    .filter((r) => !isBannedFollowKey(r.follower_key) && !isBannedFollowKey(r.followee_key))
+    .map((r) => ({
+      follower: r.follower_key,
+      followee: r.followee_key,
+      seq: Number(r.seq),
+      active: r.active
+    }));
+}
+
+/** `h:<name>` -> is `<name>` banned? Anything else is a Lumen id and never is. */
+function isBannedFollowKey(key: string): boolean {
+  return key.startsWith('h:') && isBannedAuthor(key.slice(2));
 }

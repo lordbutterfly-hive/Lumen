@@ -22,11 +22,43 @@ const LIMITS = {
   cover_image: 500
 } as const;
 
+/**
+ * ★★ INVISIBLE AND DIRECTION-REVERSING CHARACTERS ARE NOT TEXT (2026-08-09).
+ *
+ * This stripped C0/C1 controls and the line separators, which stops a one-line
+ * field impersonating several. It did NOT strip two other classes that a QA
+ * tester drove all the way to the rendered public profile:
+ *
+ *  - **U+200B zero-width space.** It survives `trim()` (JS trim does not treat
+ *    it as whitespace), so it passed the non-empty check and saved. The profile
+ *    header then rendered COMPLETELY BLANK — a nameless account, no explanation.
+ *  - **U+202E RIGHT-TO-LEFT OVERRIDE.** Saved verbatim, and the browser honours
+ *    it: a stored name of `evilname-RTL` rendered as "LTR-emanlive". That is the
+ *    Trojan-Source/bidi username-spoofing shape — a name can be chosen to
+ *    display as somebody else's, and nothing on the page hints it happened.
+ *
+ * Both are impersonation primitives on a social product, so they are REMOVED
+ * rather than escaped: no legitimate display name needs a zero-width space or an
+ * explicit direction override to render correctly. Ordinary right-to-left names
+ * are unaffected — Arabic and Hebrew letters carry their own strong
+ * directionality and are not in these ranges.
+ *
+ * Removed (not replaced by a space — these are zero-width by definition):
+ *   U+200B-U+200F  zero-width space/NJ/J, LRM, RLM
+ *   U+202A-U+202E  LRE/RLE/PDF/LRO/RLO   explicit bidi embedding + override
+ *   U+2066-U+2069  LRI/RLI/FSI/PDI       bidi isolates (modern equivalents)
+ *   U+FEFF         zero-width no-break space / BOM
+ */
+const INVISIBLE_OR_BIDI = /[\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g;
+
 function text(value: unknown, max: number): string {
   if (typeof value !== 'string') return '';
   // Strip control characters (including the line separators that let a one-line
   // field impersonate several) and collapse the rest.
-  const cleaned = value.replace(/[\u0000-\u001f\u007f\u2028\u2029]/g, ' ').trim();
+  const cleaned = value
+    .replace(/[\u0000-\u001f\u007f\u2028\u2029]/g, ' ')
+    .replace(INVISIBLE_OR_BIDI, '')
+    .trim();
   return cleaned.slice(0, max);
 }
 

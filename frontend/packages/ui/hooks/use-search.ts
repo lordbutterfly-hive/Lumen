@@ -75,10 +75,20 @@ export function useSearch() {
       setMode('ai');
       setInputValue(inputValue.slice(1));
     }
-    if (inputValue.startsWith('$')) {
-      setMode('classic');
-      setInputValue(inputValue.slice(1));
-    }
+    // ★ `$` REMOVED AS A MODE PREFIX (2026-08-09, tester HOSTILE-09).
+    //
+    // The other four prefixes select a mode you can SEE: `@` account, `#` tag,
+    // `/` user-topic, `%` AI. `$` selected `classic`, which is already the
+    // default — so on the common path it changed nothing visible and simply ATE
+    // the character. Typing `$HIVE` left `HIVE` in the box, with no chip, no
+    // placeholder change, no tooltip. Reproduced with `.fill()`, real
+    // keystrokes, and a paste.
+    //
+    // On a Hive-adjacent product `$HIVE` / `$HBD` / `$BTC` is exactly what a
+    // real person types, and this silently searched for something else. The
+    // other four prefixes are kept: each is unambiguous and each visibly
+    // changes the mode, so the consumed character is explained by what happens
+    // next. `$` was the only one that collided with ordinary query text.
     if (inputValue.startsWith('@')) {
       setMode('account');
       setInputValue(inputValue.slice(1));

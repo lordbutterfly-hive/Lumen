@@ -3,14 +3,13 @@
 import { useState } from 'react';
 import Big from 'big.js';
 import { ChevronDown, ChevronUp, Repeat } from 'lucide-react';
+import { Link, getUserAvatarUrl } from '@hive/ui';
 import { useTranslation } from '@/blog/i18n/client';
 import { useDelegations } from '../hooks/use-delegations';
 import { getDelegationsUrl } from '../lib/wallet-endpoint';
 import { formatTokenAmount } from '../lib/format-amount';
 import { GetDynamicGlobalPropertiesResponse } from '@hiveio/wax';
 import { Chain } from '@transaction/lib/chain';
-
-const AVATAR_COLORS = ['#2f7d4f', '#3182ce', '#805ad5', '#c0392b', '#e0b24d'];
 
 /**
  * "Delegated out" expandable bar + delegatee list. Mirrors the design's
@@ -46,7 +45,11 @@ export default function DelegatedOutPanel({
         </span>
         <span className="flex items-center gap-2.5">
           <span className="font-sans text-[15px] font-bold tabular-nums text-[#c0392b]">
-            -{formatTokenAmount(delegatedOutHp)} HP
+            {/* ★ No sign at zero (2026-08-09). The minus was unconditional, so an
+                account delegating nothing read "-0.000 HP" — a negative-looking
+                figure for the absence of a thing. */}
+            {delegatedOutHp.gt(0) ? '-' : ''}
+            {formatTokenAmount(delegatedOutHp)} HP
           </span>
           {delegatedOpen ? (
             <ChevronUp className="h-3.5 w-3.5 text-[#9ca3af]" />
@@ -74,19 +77,24 @@ export default function DelegatedOutPanel({
           </div>
           {delegatees && delegatees.length > 0 ? (
             <div className="flex flex-col gap-0.5">
-              {delegatees.map((d, i) => (
+              {delegatees.map((d) => (
                 <div
                   key={d.name}
-                  className="flex items-center justify-between border-t border-[#f1f3f5] py-1.5 first:border-t-0"
+                  className="flex items-center justify-between gap-2.5 border-t border-[#f1f3f5] py-1.5 first:border-t-0"
                 >
-                  <span className="flex items-center gap-2.5 text-[13.5px] text-[#2a2822]">
-                    <span
-                      className="h-6 w-6 rounded-full"
-                      style={{ background: AVATAR_COLORS[i % AVATAR_COLORS.length] }}
+                  <Link
+                    href={`/@${d.name}`}
+                    className="flex min-w-0 items-center gap-2.5 text-[13.5px] text-[#2a2822] hover:text-[#c0392b]"
+                    data-testid="wallet-delegated-out-account"
+                  >
+                    <img
+                      src={getUserAvatarUrl(d.name, 'small')}
+                      alt=""
+                      className="h-6 w-6 shrink-0 rounded-full object-cover"
                     />
-                    @{d.name}
-                  </span>
-                  <span className="font-sans text-[13.5px] font-semibold tabular-nums text-[#3f4650]">
+                    <span className="truncate">@{d.name}</span>
+                  </Link>
+                  <span className="shrink-0 font-sans text-[13.5px] font-semibold tabular-nums text-[#3f4650]">
                     {d.hp} HP
                   </span>
                 </div>

@@ -184,6 +184,42 @@ export async function listByUsers(
   return rows.map(mapPost);
 }
 
+/**
+ * Visible lite replies whose parent is a given post — the ones a reader should
+ * see in that post's comment thread.
+ *
+ * ★ WHY THIS EXISTS (2026-08-09, tester NEWCOMER-06). A lite reply was saved,
+ * confirmed with "It will appear in this thread once it reaches Hive", and then
+ * was NOT in the thread — while being fully visible on the author's own profile
+ * Comments tab. The thread is built from `bridge.get_discussion`, i.e. the
+ * CHAIN, and a lite reply is not on chain until the publisher drains. So the one
+ * place the author would naturally look was the one place it could not appear,
+ * and top-level posts had no such gap because they render locally in both places.
+ *
+ * That gap widens to "forever" whenever the publisher is stalled — which it is
+ * right now, on resource credits.
+ *
+ * Keyed on `publish_parent_*` (the chain identity of the parent) rather than
+ * `parent_ref`, because the thread we are merging into is addressed by chain
+ * author/permlink.
+ */
+export async function listRepliesToChainPost(
+  parentAuthor: string,
+  parentPermlink: string,
+  opts: { limit: number } = { limit: 200 }
+): Promise<LumenPost[]> {
+  const { rows } = await query<PostRow>(
+    `SELECT * FROM lumen_post
+       WHERE publish_parent_author = $1
+         AND publish_parent_permlink = $2
+         AND deleted_locally = false
+         AND feed_visibility = 'visible'
+     ORDER BY post_id ASC LIMIT $3`,
+    [parentAuthor, parentPermlink, opts.limit]
+  );
+  return rows.map(mapPost);
+}
+
 export async function listRecent(opts: { limit: number; before?: string }): Promise<LumenPost[]> {
   const { rows } = await query<PostRow>(
     `SELECT * FROM lumen_post
@@ -536,21 +572,37 @@ export async function countPublishedByUser(userId: string): Promise<number> {
   return Number(res.rows[0]?.n ?? 0);
 }
 
-/** Total non-deleted posts by this user — the one profile figure we can state truly. */
 /**
- * The post count shown on a PUBLIC profile.
+ * The number printed under the word "Posts" on a PUBLIC profile.
  *
- * ★ Must exclude moderation-hidden rows, and this was measured wrong: an account
- * with three posts, one of them taken down, advertised "3 Posts" above a list of
- * two. A count that disagrees with the list it labels reads as a bug in the list
- * — and worse, it silently tells the world that something was removed. The
- * visibility rule here is deliberately the same one `getUserPosts` and
- * `listRecent` apply, so all three can only ever agree.
+ * ★ ROOT POSTS ONLY — `parent_ref IS NULL` (2026-08-08). Without that clause this
+ * counted replies too, so an account with one post and one comment advertised
+ * "2 Posts" above a list of one. Verified end to end on a freshly created
+ * account: `/api/lite/posts?author=X&kind=posts` returned 1 entry while the
+ * profile's SSR payload carried `post_count: 2` and the tab chip read "Posts 2".
+ * The list was right and the label was wrong — a Lumen reply is a row in this
+ * same table carrying a `parent_ref`, exactly as `getUserPosts(kind:'posts')`
+ * defines it, so the count now uses that same definition and the two cannot
+ * disagree.
+ *
+ * ★ Must also exclude moderation-hidden rows, and this was measured wrong once
+ * before: an account with three posts, one of them taken down, advertised
+ * "3 Posts" above a list of two. A count that disagrees with the list it labels
+ * reads as a bug in the list — and worse, it silently tells the world that
+ * something was removed. The visibility rule here is deliberately the same one
+ * `getUserPosts` and `listRecent` apply, so all three can only ever agree.
+ *
+ * ★ NOT a general "how much has this person written" counter. `countAuthoredByUser`
+ * below is that, deliberately, and answers a different question for a different
+ * caller — see its own note. If a future caller wants posts+comments, it gets its
+ * own function rather than loosening this one, because this one's correctness is
+ * defined by the label above it.
  */
-export async function countByUser(userId: string): Promise<number> {
+export async function countRootPostsByUser(userId: string): Promise<number> {
   const res = await query<{ n: string }>(
     `SELECT count(*)::text AS n FROM lumen_post
-      WHERE user_id = $1 AND deleted_locally = false AND feed_visibility = 'visible'`,
+      WHERE user_id = $1 AND deleted_locally = false AND feed_visibility = 'visible'
+        AND parent_ref IS NULL`,
     [userId]
   );
   return Number(res.rows[0]?.n ?? 0);
@@ -589,4 +641,26 @@ export async function setFeedVisibilityForUser(
     [userId, visibility]
   );
   return res.rowCount ?? 0;
+}
+
+/**
+ * Has this person ever written ANYTHING here — post or comment, visible or not?
+ *
+ * ★ Deliberately ignores `feed_visibility` and `deleted_locally`, unlike
+ * `countRootPostsByUser` above (which also counts ROOT posts only, because it is
+ * printed under the word "Posts"). This answers "is this a blank-slate reader?", which the
+ * interest picker uses to decide whether to introduce itself
+ * (owner rule, 2026-08-08: the picker fires only for an account with zero posts
+ * and zero comments, and only if it has not fired before).
+ *
+ * Counting only VISIBLE rows would be a trap: hiding a batch of posts — which a
+ * moderator action or a QA cleanup does routinely — would make established
+ * authors look like new readers and re-prompt them. Someone who wrote and then
+ * deleted is still not a blank slate.
+ */
+export async function countAuthoredByUser(userId: string): Promise<number> {
+  const res = await query<{ n: string }>(`SELECT count(*)::text AS n FROM lumen_post WHERE user_id = $1`, [
+    userId
+  ]);
+  return Number(res.rows[0]?.n ?? 0);
 }

@@ -28,6 +28,15 @@ export interface WalletFigures {
   receivedHp: Big;
   /** Effective HP: own stake, minus what you delegated out, plus what you received. */
   netHp: Big;
+  /**
+   * ★ WHAT THIS ACCOUNT CAN ACTUALLY MOVE (2026-08-09, tester MONEY-08b).
+   * `netHp` is EFFECTIVE Hive Power — it adds HP delegated IN, which is right
+   * for voting weight and wrong for anything that spends stake. Received HP
+   * cannot be powered down or re-delegated: it belongs to the delegator and
+   * vanishes the moment they revoke it. Every control that MOVES stake must use
+   * this, never `netHp`.
+   */
+  movableHp: Big;
   hpApr: Big;
   powerDown: WalletPowerDown;
   rewardHive: Big;
@@ -49,6 +58,8 @@ export function deriveWalletFigures(
   const delegatedOutHp = toHp(convertStringToBig(account.delegated_vesting_shares));
   const receivedHp = toHp(convertStringToBig(account.received_vesting_shares));
   const netHp = vestingHp.minus(delegatedOutHp).plus(receivedHp);
+  // Own stake, less what is already delegated away. Excludes received HP.
+  const movableHp = vestingHp.minus(delegatedOutHp);
 
   const toWithdraw = typeof account.to_withdraw === 'number' ? account.to_withdraw : parseFloat(String(account.to_withdraw));
   const withdrawn = typeof account.withdrawn === 'number' ? account.withdrawn : parseFloat(String(account.withdrawn));
@@ -86,6 +97,7 @@ export function deriveWalletFigures(
     delegatedOutHp,
     receivedHp,
     netHp,
+    movableHp,
     hpApr: getCurrentHpApr(dynamicData),
     powerDown,
     rewardHive,

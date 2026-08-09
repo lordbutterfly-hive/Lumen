@@ -6,6 +6,8 @@ import { CircleSpinner } from 'react-spinners-kit';
 import { Popover, PopoverContent, PopoverTrigger } from '@ui/components/popover';
 import { getAccountNotifications } from '@transaction/lib/bridge-api';
 import NotificationList from '@/blog/features/activity-log/list';
+import BasePathLink from '@/blog/components/base-path-link';
+import TimeAgo from '@ui/components/time-ago';
 import { useTranslation } from '@/blog/i18n/client';
 
 /**
@@ -63,6 +65,24 @@ const NotificationsMenu = ({
     queryFn: () => getAccountNotifications(username),
     enabled
   });
+
+  // ★★ LUMEN-NATIVE NOTIFICATIONS (2026-08-09, tester BASELINE-03). Following
+  // someone on Lumen never reached the person followed: this bell had ONE data
+  // source, the chain, and a Lumen follow is never written there. So a real
+  // social action was silent for everyone — including a full Hive account
+  // followed by a lite reader. Fetched for BOTH tiers for exactly that reason;
+  // `chainAccount` gates only the CHAIN half.
+  const { data: liteNotifications } = useQuery({
+    queryKey: ['LumenNotifications', username],
+    queryFn: async (): Promise<{ msg: string; url: string; date: string }[]> => {
+      const res = await fetch(`/api/lite/notifications?hive=${encodeURIComponent(username)}`);
+      if (!res.ok) return [];
+      const body = (await res.json()) as { notifications?: { msg: string; url: string; date: string }[] };
+      return body.notifications ?? [];
+    },
+    enabled: open && !!username
+  });
+  const lumenItems = liteNotifications ?? [];
   // ★ A DISABLED React Query still reports `isLoading: true` — status is
   //   'loading' whenever there is no data, whether or not it will ever fetch.
   //   Rendering the spinner off that alone left a lite reader's bell spinning
@@ -78,6 +98,27 @@ const NotificationsMenu = ({
           {t('navigation.user_menu.notifications')}
         </div>
         <div className="max-h-[420px] overflow-y-auto">
+          {/* Lumen's own events first: they are the ones this reader can act on
+              inside Lumen, and for a lite account they are the ONLY ones there
+              will ever be. Rendered as their own rows rather than coerced into
+              the chain notification type, which carries chain-only fields. */}
+          {lumenItems.length > 0 ? (
+            <ul data-testid="lumen-notifications">
+              {lumenItems.map((n) => (
+                <li key={`${n.url}-${n.date}`} className="border-b border-border last:border-0">
+                  <BasePathLink
+                    href={`/${n.url}`}
+                    className="flex flex-col gap-0.5 px-4 py-3 text-sm hover:bg-accent"
+                  >
+                    <span className="text-foreground">{n.msg}</span>
+                    <span className="text-xs text-gray-500">
+                      <TimeAgo date={n.date} />
+                    </span>
+                  </BasePathLink>
+                </li>
+              ))}
+            </ul>
+          ) : null}
           {showSpinner ? (
             <div className="flex items-center justify-center gap-2 py-10 text-sm text-gray-500">
               <CircleSpinner loading size={16} color="#71717a" />
@@ -85,7 +126,7 @@ const NotificationsMenu = ({
             </div>
           ) : notifications && notifications.length > 0 ? (
             <NotificationList data={notifications} lastRead={lastRead} />
-          ) : (
+          ) : lumenItems.length > 0 ? null : (
             <div
               className="flex flex-col items-center justify-center px-4 py-10 text-center text-sm text-gray-500"
               data-testid="notifications-popover-empty"

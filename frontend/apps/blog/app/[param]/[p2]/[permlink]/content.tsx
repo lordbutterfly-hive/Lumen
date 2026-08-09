@@ -343,13 +343,45 @@ const PostContent = () => {
       handleError(error, { method: 'getDiscussion', params: { author, permlink, observer } });
     }
   });
+  // ★★ LITE REPLIES DO NOT EXIST ON CHAIN YET (2026-08-09, tester NEWCOMER-06).
+  //
+  // `getDiscussion` is the chain's view, and a lite reply lives in `lumen_post`
+  // until the publisher broadcasts it — so a lite reader was told "it will
+  // appear in this thread" and then could not find it here, while seeing it
+  // perfectly on their own profile. Merged in below so the thread shows what
+  // Lumen actually knows, immediately, regardless of the publisher's state
+  // (which is stalled on resource credits as this is written).
+  const { data: liteReplies } = useQuery({
+    queryKey: ['liteReplies', author, permlink],
+    queryFn: async (): Promise<Entry[]> => {
+      const res = await fetch(
+        `/api/lite/posts/replies?author=${encodeURIComponent(author)}&permlink=${encodeURIComponent(permlink)}`
+      );
+      if (!res.ok) return [];
+      const body = (await res.json()) as { entries?: Entry[] };
+      return body.entries ?? [];
+    },
+    staleTime: StaleTime.MEDIUM,
+    // A thread must not break because this optional merge failed.
+    onError: () => undefined
+  });
+
   const discussionState = useMemo(() => {
     if (!discussionData) return undefined;
     const list = [...Object.keys(discussionData).map((key) => discussionData[key])];
+    // Union, chain-first: once the publisher lands a reply it arrives from BOTH
+    // sources, and the chain copy is the canonical one (it carries real votes
+    // and payout). Keyed on author/permlink, which is stable across the move.
+    if (liteReplies && liteReplies.length > 0) {
+      const seen = new Set(list.map((c) => `${c.author}/${c.permlink}`));
+      for (const reply of liteReplies) {
+        if (!seen.has(`${reply.author}/${reply.permlink}`)) list.push(reply);
+      }
+    }
     const sortType = commentSort as SortOrder;
     sorter(list, sortType);
     return list;
-  }, [discussionData, commentSort]);
+  }, [discussionData, commentSort, liteReplies]);
 
   const paginatedDiscussionState = useMemo(() => {
     if (!discussionState || !postData) return undefined;
