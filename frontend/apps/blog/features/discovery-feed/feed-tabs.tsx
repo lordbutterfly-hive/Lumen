@@ -18,6 +18,7 @@ import MediumPostCard from './medium-post-card';
 import { useRankMarks } from '@/blog/features/retention/hooks/use-rank-marks';
 import { filterVisiblePosts, useNsfwPreference } from '@/blog/lib/nsfw';
 import InterestPicker from '@/blog/features/lite-auth/interests/interest-picker';
+import DialogLogin from '@/blog/components/dialog-login';
 
 // TODO: move to i18n
 const LABELS = {
@@ -30,7 +31,8 @@ const LABELS = {
   empty: 'No posts yet.',
   degraded: 'Personalised ranking is warming up. Showing popular posts meanwhile.',
   degradedAnonymous: 'Showing trending. Log in for your own feed.',
-  loginPrompt: 'Log in to see your Feed'
+  loginPrompt: 'Following shows the people you follow.',
+  loginCta: 'Log in'
 };
 
 type TabKey = 'for-you' | 'feed' | 'predictions';
@@ -399,8 +401,6 @@ export default function FeedTabs() {
   const [activeTab, setActiveTab] = useState<TabKey>(() => toTabKey(searchParams?.get(TAB_PARAM) ?? null));
   const { user, isHydrated } = useUserClient();
   const loggedIn = isHydrated && user.isLoggedIn;
-  // Bumped by the "Tune your feed" control; the picker opens on any change.
-  const [interestsSignal, setInterestsSignal] = useState(0);
   // NOTE: the SSR observer resolution that used to live here went with the
   // trending For You feed. The ranked route resolves the viewer from the SESSION
   // server-side (a client-supplied viewer would let anyone request anyone else's
@@ -427,13 +427,12 @@ export default function FeedTabs() {
 
   return (
     <div>
-      {/* Post-login onboarding for BOTH tiers — lite and Hive alike (2026-08-08;
-          it used to refuse Hive accounts outright). Self-gating: it asks the
-          server whether this reader is eligible, unasked, and has written
-          nothing yet, so mounting it here costs a logged-out visitor nothing.
-          `interestsSignal` is the manual door from the rail, for everyone the
-          automatic rule deliberately never interrupts. */}
-      <InterestPicker openSignal={interestsSignal} />
+      {/* Cold-start onboarding, self-gating. It asks the server whether this
+          reader is eligible (a lite account, or a Hive account inside its first
+          week), unasked, and has written nothing yet, so mounting it here costs a
+          logged-out visitor nothing and an established account nothing. There is no
+          manual door any more: see the ruling further down this file. */}
+      <InterestPicker />
       <div
         role="tablist"
         /* ★ WRAP, DON'T HIDE (2026-08-08). At 390px the three labels are wider
@@ -470,15 +469,20 @@ export default function FeedTabs() {
           WAY to tell Lumen what they are into, and no way to change their mind
           later. Sits beside the tabs rather than in settings because it belongs
           next to the thing it changes. */}
-      {loggedIn && activeTab === 'for-you' ? (
-        <button
-          type="button"
-          onClick={() => setInterestsSignal((n) => n + 1)}
-          className="mb-4 ml-1 font-sans text-[13px] font-semibold text-[#6b7280] underline-offset-4 transition-colors hover:text-[#c0392b] hover:underline"
-        >
-          Tune your feed
-        </button>
-      ) : null}
+      {/* ★★★ "Tune your feed" IS GONE (owner ruling 2026-08-10).
+          The reasoning above is sound onboarding theory and wrong for this product.
+          The interests picker is a COLD-START SEED, offered once to an account that
+          has no history for the ranker to read: a lite account on its first visit,
+          or a Hive account inside its first week. It is not a settings panel and it
+          is not a feed control, and leaving it one click from every For You tab made
+          it exactly that.
+          What it cost: the owner clicked it on his own fourteen-year account, picked
+          five interests, and the feed re-tuned around them, resurfacing container
+          posts. A permanently reachable re-tune button also competes with the thing
+          that should own this job, which is the feed learning from what the reader
+          actually does over time.
+          The picker keeps its `openSignal` prop, so a deliberate "edit interests"
+          entry point in settings can be wired later. Nothing renders one today. */}
 
       {activeTab === 'predictions' ? (
         <MarketTab />
@@ -486,8 +490,19 @@ export default function FeedTabs() {
         loggedIn ? (
           <EntryFeed sort={FEED_SORT} observer={user.username} lite={user.account_tier === 'lite'} />
         ) : (
-          <div className="flex items-center justify-center py-16 font-sans text-sm text-muted-foreground">
-            {LABELS.loginPrompt}
+          /* v8: this was a dead end. One grey sentence, a stray capital F mid-line,
+             and nothing to click, on the one tab a signed-out reader is most likely
+             to try. It now says what the tab is for and offers the door. */
+          <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
+            <p className="font-sans text-sm text-[#6b7280]">{LABELS.loginPrompt}</p>
+            <DialogLogin>
+              <button
+                type="button"
+                className="rounded-[13px] bg-[#c0392b] px-5 py-2.5 font-sans text-[14px] font-semibold text-white hover:bg-[#a5301f]"
+              >
+                {LABELS.loginCta}
+              </button>
+            </DialogLogin>
           </div>
         )
       ) : (

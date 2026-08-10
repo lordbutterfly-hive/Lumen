@@ -1,5 +1,6 @@
 'use client';
 
+import PageMasthead from '@/blog/features/layouts/page-masthead';
 import { FC, useMemo, useState } from 'react';
 import { Link } from '@hive/ui';
 import { useLiveDiscovery } from '../../live/use-live-discovery';
@@ -11,11 +12,11 @@ import TokenShell from '../token-shell';
 // TODO i18n — staged copy; move to locales/*/common_blog.json once final.
 const COPY = {
   title: 'Discover creators',
-  sub: 'People who offer their time and expertise. Hold their token, spend it on their work — a question, a review, a day of building. Ranked by how reliably they deliver.',
+  sub: 'People who offer their time and expertise. Hold their token, spend it on their work: a question, a review, a day of building. Ranked by how reliably they deliver.',
   answers: 'Answers',
   newHere: 'New here',
-  newHereSub: 'Just launched — not ranked by reliability yet.',
-  newNothing: 'New — nothing completed yet.',
+  newHereSub: 'Just launched, so not ranked by reliability yet.',
+  newNothing: 'New, nothing completed yet.',
   recordUnavailable: 'Delivery record unavailable',
   launchTitle: 'Launch your creator token',
   launchSub: 'Let people hold your token and pay you for your time.',
@@ -23,7 +24,17 @@ const COPY = {
   howTitle: 'How it works',
   how1: 'Hold a creator’s token.',
   how2: 'Spend it on a question or session.',
-  how3: 'The token can appreciate. The floor is what the reserve would pay out per token if the market wound down — not a price you can sell at on demand.'
+  /**
+   * ★ D-4, the wording pass the list asked for. The old line opened with "The token
+   * can appreciate", which is a forward-looking statement about price and the first
+   * thing a regulator, or a disappointed holder, would quote back. It also called the
+   * reserve figure a "floor", a word that promises a level the holder cannot actually
+   * sell at, then took the promise back in the same sentence.
+   *
+   * What is left describes only what the contract does. No projection, no floor, and
+   * the illiquidity said plainly rather than as an aside after a dash.
+   */
+  how3: 'A token is redeemable against the creator’s reserve, and the redemption value moves with it. It is not a price you can sell at on demand, and it is not an investment return.'
 };
 
 type Sort = 'reliable' | 'fastest' | 'new';
@@ -164,8 +175,12 @@ const CreatorsView: FC = () => {
 
   return (
     <TokenShell rightRail={rightRail}>
-      <h1 className="font-serif text-[32px] font-semibold tracking-[-0.015em] text-[#161511]">{COPY.title}</h1>
-      <p className="mt-2 max-w-[660px] text-[14.5px] leading-[1.55] text-[#6b7280]">{COPY.sub}</p>
+      {/* X-1 / P0-3: /creators was a fourth page-header treatment, bare text with no
+          shell. Same masthead as home, topics, witnesses and proposals now. No mark:
+          /creators has no assigned glyph and R5 forbids inventing one. */}
+      <PageMasthead title={COPY.title}>
+        <p className="max-w-[660px] text-[13px] leading-[1.55] text-[#6b7280]">{COPY.sub}</p>
+      </PageMasthead>
 
       <div className="my-5 flex flex-wrap items-center justify-between gap-4">
         <div className="flex gap-1.5 rounded-xl border border-[#ebedf0] bg-[#f4f5f7] p-[5px]">
@@ -236,7 +251,7 @@ const CreatorsView: FC = () => {
         // empty market. It is the same unavailable-vs-empty rule the wallet and
         // delivery reads follow.
         <div className="rounded-[14px] border border-dashed border-[#e4e6e9] px-5 py-8 text-center text-[13.5px] leading-[1.6] text-[#9ca3af]">
-          We can’t load the creator list right now — the index that ranks creators by their delivery record is
+          We can’t load the creator list right now. The index that ranks creators by their delivery record is
           unreachable. If you already know a creator, their token page still works: /creators/their-name.
         </div>
       ) : creators.length === 0 ? (

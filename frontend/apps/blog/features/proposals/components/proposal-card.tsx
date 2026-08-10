@@ -87,7 +87,7 @@ export default function ProposalCard({ vm, isSupported, votesUnavailable }: Prop
               {t(`proposals.status.${proposal.status}`, proposal.status)}
             </span>
             <span>{formatDateRange(proposal.start_date, proposal.end_date)}</span>
-            <Link href={postHref} className="text-[#3182ce] hover:underline" data-testid="proposal-card-permlink">
+            <Link href={postHref} className="text-[#c0392b] hover:underline" data-testid="proposal-card-permlink">
               @{proposal.creator}/{proposal.permlink}
             </Link>
           </div>
@@ -97,6 +97,7 @@ export default function ProposalCard({ vm, isSupported, votesUnavailable }: Prop
       </div>
 
       <ProposalSupportFooter
+        isExpired={proposal.status === 'expired'}
         isLoggedIn={user.isLoggedIn}
         isSupported={isSupported}
         votesUnavailable={votesUnavailable}

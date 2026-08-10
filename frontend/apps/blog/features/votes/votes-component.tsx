@@ -137,7 +137,7 @@ const VotesComponent = ({ post, type }: { post: Entry; type: 'comment' | 'post' 
             >
               <Icons.arrowUpCircle
                 className={clsx(
-                  'h-5 w-5 rounded-xl text-destructive hover:bg-destructive-icon hover:text-white',
+                  'h-5 w-5 rounded-xl text-destructive transition-colors hover:bg-[#fdf2f0] hover:text-[#96271b]',
                   { 'bg-destructive-icon text-white': userVote && userVote.vote_percent > 0 }
                 )}
               />
@@ -173,7 +173,7 @@ const VotesComponent = ({ post, type }: { post: Entry; type: 'comment' | 'post' 
                   }}
                 >
                   <Icons.arrowUpCircle
-                    className="h-[24px] w-[24px] cursor-pointer rounded-xl text-destructive hover:bg-destructive-icon hover:text-white sm:mr-1"
+                    className="h-[24px] w-[24px] cursor-pointer rounded-xl text-destructive transition-colors hover:bg-[#fdf2f0] hover:text-[#96271b] sm:mr-1"
                   />
                 </button>
               </TooltipContainer>
@@ -232,7 +232,7 @@ const VotesComponent = ({ post, type }: { post: Entry; type: 'comment' | 'post' 
               submitVote(10000);
             }}
           >
-            <Icons.arrowUpCircle className="h-5 w-5 rounded-xl text-destructive hover:bg-destructive-icon hover:text-white" />
+            <Icons.arrowUpCircle className="h-5 w-5 rounded-xl text-destructive transition-colors hover:bg-[#fdf2f0] hover:text-[#96271b]" />
           </button>
         </TooltipContainer>
       ) : (
@@ -244,7 +244,7 @@ const VotesComponent = ({ post, type }: { post: Entry; type: 'comment' | 'post' 
               dataTestId="upvote-button"
               afterPayout={pastPayout && !vote_upvoted}
             >
-              <Icons.arrowUpCircle className="h-5 w-5 rounded-xl text-destructive hover:bg-destructive-icon hover:text-white" />
+              <Icons.arrowUpCircle className="h-5 w-5 rounded-xl text-destructive transition-colors hover:bg-[#fdf2f0] hover:text-[#96271b]" />
             </TooltipContainer>
           </div>
         </DialogLogin>

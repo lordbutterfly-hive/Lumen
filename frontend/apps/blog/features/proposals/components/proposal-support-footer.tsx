@@ -10,6 +10,13 @@ import HeartIcon from './heart-icon';
 
 interface Props {
   isLoggedIn: boolean;
+  /**
+   * ★ AN EXPIRED PROPOSAL CANNOT BE SUPPORTED (2026-08-10, v8 section 5). The toggle
+   * rendered live and clickable on proposals whose funding window has closed, so the
+   * card offered an action the chain will not accept. Voting on an expired proposal is
+   * not an error the user should have to discover by trying it.
+   */
+  isExpired: boolean;
   isSupported: boolean;
   /** The viewer's own votes couldn't be loaded — the toggle's state is unknown, not "not supported". */
   votesUnavailable: boolean;
@@ -25,6 +32,7 @@ interface Props {
  */
 export default function ProposalSupportFooter({
   isLoggedIn,
+  isExpired,
   isSupported,
   votesUnavailable,
   isPending,
@@ -46,7 +54,7 @@ export default function ProposalSupportFooter({
   const button = (
     <button
       type="button"
-      disabled={isPending || isLiteBlocked}
+      disabled={isPending || isLiteBlocked || isExpired}
       onClick={isLoggedIn && !isLiteBlocked ? onToggle : undefined}
       data-testid="proposal-support-toggle"
       aria-pressed={isSupported}

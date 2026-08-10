@@ -2,6 +2,7 @@
 
 import { isNsfwPost, useNsfwPreference } from '@/blog/lib/nsfw';
 import BasePathLink from '@/blog/components/base-path-link';
+import LeftRail from '@/blog/features/layouts/left-rail';
 import DialogLogin from '@/blog/components/dialog-login';
 import { useFollowListQuery } from '@/blog/components/hooks/use-follow-list';
 import { usePinMutation, useUnpinMutation } from '@/blog/components/hooks/use-pin-mutations';
@@ -629,6 +630,17 @@ const PostContent = () => {
     setNsfwRevealed(true);
   }, []);
 
+  /**
+   * ★ LAND AT THE TOP OF THE POST (v8, post detail). Next's App Router keeps the
+   * previous scroll offset across a client navigation, so opening a post from halfway
+   * down the feed dropped the reader into the middle of the article, with no signal
+   * that anything above it existed. Keyed on the permlink, so it fires per post and
+   * not on every re-render of the same one.
+   */
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [author, permlink]);
+
   const isPending = searchParams?.get('pending') === '1';
   if (userFromGDPR) return <NoDataError />;
   if (!postData && !postIsLoading) {
@@ -639,7 +651,16 @@ const PostContent = () => {
   return (
     <>
       <div className="grid grid-cols-1 md:grid-cols-12">
+        {/* ★ THE POST PAGE HAD NO NAVIGATION (v8, post detail). Opening a post dropped
+            the reader out of the app shell: no left rail, so no Home, Profile, Wallet,
+            Creators, Witnesses or Proposals, and the only way back was the browser
+            button. The column was already here and already the right width, holding
+            only the suggestion list. LeftRail goes above it, sticky like every other
+            route, and the suggestions keep the space underneath. */}
         <div className="col-span-2 hidden md:block">
+          <div className="sticky top-24">
+            <LeftRail />
+          </div>
           {suggestionData ? <AnimatedList suggestions={suggestionData} /> : null}
         </div>
         <div className="w-full min-w-0 py-8 md:col-span-8 md:mx-auto md:flex md:flex-col">

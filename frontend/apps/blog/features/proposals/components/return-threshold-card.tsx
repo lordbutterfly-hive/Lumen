@@ -18,7 +18,7 @@ export default function ReturnThresholdCard({ thresholdHp }: { thresholdHp: numb
       <div className="flex items-center justify-between rounded-[11px] border border-dashed border-[#d5d8dd] p-[12px_14px] font-sans text-[13px]">
         <span className="font-semibold text-[#3f4650]">{t('proposals.return_card.label')}</span>
         <span className="tabular-nums font-bold text-[#c0392b]" data-testid="return-threshold-value">
-          {thresholdHp === undefined ? '—' : formatHpCompact(thresholdHp)}
+          {thresholdHp === undefined ? t('global.loading') : formatHpCompact(thresholdHp)}
         </span>
       </div>
     </div>

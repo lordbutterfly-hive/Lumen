@@ -2,7 +2,7 @@
 
 import { Link } from '@hive/ui';
 
-import { ReactNode, useCallback } from 'react';
+import { forwardRef, ReactNode, useCallback } from 'react';
 import { Dialog, DialogContent, DialogTrigger, DialogTitle, DialogDescription } from '@ui/components/dialog';
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
 import LumenLogin from '@/blog/features/lite-auth/login/lumen-login';
@@ -17,7 +17,28 @@ interface DialogLoginProps {
   redirectTo?: string;
 }
 
-function DialogLogin({ children, redirectTo }: DialogLoginProps) {
+/**
+ * ★★★ THE COMPONENT ITSELF WAS BEING GIVEN A REF (2026-08-10, P0-4).
+ *
+ * React warned "Function components cannot be given refs. Check the render method of
+ * `SlotClone`", pointing here. The audit read that as "wrap the CHILD in forwardRef",
+ * and the children were a red herring: they are plain `<button>` elements and a
+ * `FlagTooltip` that already forwarded.
+ *
+ * The stack says otherwise. `at DialogLogin` means DIALOGLOGIN is the component the
+ * ref was aimed at, because it gets used inside somebody else's `asChild` slot. Radix
+ * clones the child and hands it a ref, this was a plain function, and the ref went
+ * nowhere. Every symptom followed from that: the trigger it should have measured was
+ * never registered, which is why icons inside the modal raced and failed on a second
+ * open.
+ *
+ * Forwarding to `DialogTrigger` puts the ref back on the real DOM node, whether this
+ * is used standalone or nested in another slot.
+ */
+const DialogLogin = forwardRef<HTMLButtonElement, DialogLoginProps>(function DialogLogin(
+  { children, redirectTo },
+  ref
+) {
   const { t } = useTranslation('common_blog');
 
 
@@ -44,11 +65,12 @@ function DialogLogin({ children, redirectTo }: DialogLoginProps) {
         if (open) loadGoogleScript();
       }}
     >
-      <DialogTrigger asChild>{children}</DialogTrigger>
+      <DialogTrigger asChild ref={ref}>
+        {children}
+      </DialogTrigger>
       <DialogContent
         className="mt-16 max-w-[92vw] rounded-md p-0 sm:mt-auto sm:max-w-[480px] sm:px-0"
         data-testid="login-dialog"
-        onInteractOutside={(e) => e.preventDefault()}
       >
         <VisuallyHidden>
           <DialogTitle>Sign In</DialogTitle>
@@ -75,7 +97,10 @@ function DialogLogin({ children, redirectTo }: DialogLoginProps) {
         {/* ★ The SAME four methods as /login (2026-08-07). This used to render
             Keychain alone, so the app's most-opened sign-in surface hid Google
             and both wallet options behind a text link. */}
-        <div className="max-h-[76vh] overflow-y-auto px-5 pb-2 pt-5">
+        {/* v8: this had its own `overflow-y-auto` inside a dialog that also scrolls,
+            so a long card produced TWO scrollbars side by side. One scroll container,
+            and it is the dialog. */}
+        <div className="max-h-[76vh] px-5 pb-2 pt-5">
           <LumenLogin embedded />
         </div>
         {/* THE SIGNUP DOOR. This dialog is opened from ~24 places — the home
@@ -90,14 +115,15 @@ function DialogLogin({ children, redirectTo }: DialogLoginProps) {
         <div className="border-t border-border px-6 py-4 text-center">
           <p className="text-sm text-muted-foreground">
             <span className="font-semibold text-foreground">{t('login_dialog.new_here')}</span>{' '}
-            <Link href="/login" className="text-destructive underline hover:no-underline">
+            <Link href="/login" className="font-semibold text-destructive underline hover:no-underline">
               {t('login_dialog.signup_link')}
-            </Link>
+            </Link>{' '}
+            {t('login_dialog.signup_explainer')}
           </p>
         </div>
       </DialogContent>
     </Dialog>
   );
-}
+});
 
 export default DialogLogin;

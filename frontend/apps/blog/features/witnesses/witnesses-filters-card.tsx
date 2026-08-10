@@ -8,7 +8,7 @@ import { UseWitnessFiltersResult } from './hooks/use-witness-filters';
 const CHECKBOX_CLASS =
   'h-[18px] w-[18px] rounded-[6px] border-[1.5px] border-[#d5d8dd] data-[state=checked]:border-[#c0392b] data-[state=checked]:bg-[#c0392b] data-[state=checked]:text-white';
 
-type FilterKey = 'active' | 'disabledOrStale' | 'top20' | 'approved';
+type FilterKey = 'active' | 'disabled' | 'stale' | 'top20' | 'approved';
 
 /**
  * Right-rail Filters card: Active / Disabled-Stale / Top 20 / Approved
@@ -26,7 +26,8 @@ export default function WitnessesFiltersCard({
 
   const checkboxRows: { key: FilterKey; label: string }[] = [
     { key: 'active', label: t('witnesses.filters.active') },
-    { key: 'disabledOrStale', label: t('witnesses.filters.disabled_stale') },
+    { key: 'disabled', label: t('witnesses.filters.disabled') },
+    { key: 'stale', label: t('witnesses.filters.stale') },
     { key: 'top20', label: t('witnesses.filters.top20') },
     { key: 'approved', label: t('witnesses.filters.approved') }
   ];
@@ -74,7 +75,15 @@ export default function WitnessesFiltersCard({
         value={filters.version}
         onChange={(e) => setFilter('version', e.target.value)}
         data-testid="witnesses-filter-version"
-        className="w-full rounded-[10px] border border-[#e4e6e9] px-3 py-[9px] font-sans text-[13.5px] text-[#161511] outline-none"
+        /* W-13 / X-6: this was a native select with the OS chrome on it, the only
+           control on the page not drawn in the house style. `appearance-none` plus an
+           inline chevron gives it the same border, radius and focus behaviour as
+           every other control, without pulling in the Radix select for one field. */
+        className="w-full appearance-none rounded-[10px] border border-[#e4e6e9] bg-white bg-[length:11px] bg-[right_12px_center] bg-no-repeat px-3 py-[9px] pr-9 font-sans text-[13.5px] text-[#161511] outline-none focus-visible:border-[#c0392b]"
+        style={{
+          backgroundImage:
+            "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8' fill='none'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%236b7280' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E\")"
+        }}
       >
         <option value="any">{t('witnesses.filters.any_version')}</option>
         {availableVersions.map((version) => (

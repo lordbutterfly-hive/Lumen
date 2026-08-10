@@ -112,12 +112,17 @@ export function selectNudge(facts: NudgeFacts): Nudge | null {
   //    walk stopped before the streak did, so the number is a floor — congratulating
   //    somebody on day 30 when we only know it is "at least 30" is a guess with
   //    confetti on it.
-  if (!facts.streakIsLowerBound && STREAK_MILESTONES.includes(facts.streakDays)) {
-    return {
-      kind: 'milestone',
-      vars: { days: facts.streakDays, month: facts.streakDays >= MONTH_MILESTONE ? 1 : 0 }
-    };
-  }
+  // ★★★ THE MILESTONE NUDGE IS GONE (owner ruling, 2026-08-10).
+  //
+  // It rendered "Day 3. Nobody made you do it." on the feed. Two things wrong with
+  // that, and the owner named both by calling it nonsense: three days is not a
+  // milestone, it is Wednesday, and congratulating somebody for volunteering to use
+  // the product reads as the app talking to itself. The retention layer is supposed
+  // to reflect something the reader did, not applaud them for existing.
+  //
+  // The branch is removed rather than reworded because there was no version of this
+  // that earned a line in the feed. `STREAK_MILESTONES` and `MONTH_MILESTONE` stay
+  // referenced by the streak display, which is a fact, not a compliment.
 
   // 4. REACH. A fact about where the work went, which is the thing creators on Hive
   //    have never been able to see.

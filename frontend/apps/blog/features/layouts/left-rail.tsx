@@ -18,8 +18,8 @@ const LABELS = {
   profile: 'Profile',
   wallet: 'Wallet',
   creators: 'Creators',
-  voteWitness: 'Vote Witness',
-  voteProposals: 'Vote Proposals',
+  voteWitness: 'Witnesses',
+  voteProposals: 'Proposals',
   settings: 'Settings'
 };
 

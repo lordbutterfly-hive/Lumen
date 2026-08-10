@@ -130,21 +130,56 @@ async function resolveReader(): Promise<Eligibility> {
   const hiveAccount = reader.hiveAccount;
   const prefs = await findHiveReaderPrefs(hiveAccount).catch(() => null);
 
+  /**
+   * ★★★ AN ESTABLISHED ACCOUNT IS NOT ELIGIBLE, FULL STOP (owner ruling 2026-08-10).
+   *
+   * This returned `eligible: true` for EVERY Hive reader and leaned entirely on
+   * `asked` and `blankSlate` downstream to decide whether to show anything. That is
+   * the wrong shape: eligibility is a property of the ACCOUNT, and a fourteen-year
+   * Hive account with thousands of posts is never a candidate for an onboarding
+   * interests picker, whatever those two flags happen to say on the day.
+   *
+   * It bit exactly as you would expect. The owner opened the picker on his own
+   * account, set five interests, and his feed was re-tuned around them, because
+   * nothing in this function had an opinion about who he was.
+   *
+   * The rule now matches the product: the picker is a COLD-START seed, so it is
+   * offered to accounts that are actually cold. Lite accounts (Google, BTC, EVM)
+   * are new by construction. A Hive account qualifies only inside its first week.
+   * After that the feed learns from what the reader actually does, which is the
+   * mechanism that should own this job anyway.
+   *
+   * On a failed chain read we return NOT eligible. The old comment below argued the
+   * opposite for `blankSlate`, and it was right about the cost of interrupting an
+   * established author; that argument is stronger here, because this flag decides
+   * whether the question exists at all.
+   */
+  const NEW_ACCOUNT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
   // Hive's own `post_count` is posts AND comments combined, which is exactly
   // the rule's "zero posts and zero comments". If the chain call fails we assume
   // NOT a blank slate: the cost of wrongly staying quiet is a reader who can
   // still set interests from settings; the cost of wrongly interrupting is a
   // modal in the face of an established author every time Hive rate-limits us.
   let blankSlate = false;
+  let withinFirstWeek = false;
   try {
     const account = await getAccountFull(hiveAccount);
     blankSlate = (account?.post_count ?? 1) === 0;
+    // `created` is the chain's account-creation timestamp, UTC and without a zone
+    // marker, so it is read as UTC explicitly rather than as local time.
+    const createdRaw = account?.created;
+    if (createdRaw) {
+      const created = new Date(/(?:Z|[+-]\d{2}:?\d{2})$/.test(createdRaw) ? createdRaw : `${createdRaw}Z`);
+      const age = Date.now() - created.getTime();
+      withinFirstWeek = Number.isFinite(age) && age >= 0 && age < NEW_ACCOUNT_MAX_AGE_MS;
+    }
   } catch (error) {
-    logger.warn('interests: could not read Hive post_count for %s, assuming not a new reader: %o', hiveAccount, error);
+    logger.warn('interests: could not read the Hive account for %s, treating as established: %o', hiveAccount, error);
   }
 
   return {
-    eligible: true,
+    eligible: withinFirstWeek,
     asked: prefs?.interestsSetAt != null,
     selected: prefs?.interests ?? [],
     blankSlate

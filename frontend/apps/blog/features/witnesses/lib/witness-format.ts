@@ -12,7 +12,7 @@ export function formatHpVotes(hp: Big): string {
 
 /** Formats a witness's HBD price feed as `$0.048`. */
 export function formatPriceFeed(usd: number): string {
-  if (!Number.isFinite(usd) || usd <= 0) return '—';
+  if (!Number.isFinite(usd) || usd <= 0) return 'No feed';
   return `$${usd.toFixed(3)}`;
 }
 
@@ -45,7 +45,7 @@ export function parsePriceFeedUsd(base: { amount: string; precision: number } | 
 
 /** Formats a NaiAsset (e.g. account_creation_fee) as `0.001 HIVE`. */
 export function formatNaiAsset(asset: { amount: string; precision: number } | undefined, symbol: string): string {
-  if (!asset) return '—';
+  if (!asset) return 'Not set';
   const amount = Number(asset.amount);
   if (!Number.isFinite(amount)) return '—';
   return `${(amount / 10 ** asset.precision).toFixed(3)} ${symbol}`;

@@ -247,7 +247,15 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
             {LABELS.nsfwBadge}
           </div>
         ) : thumbnail ? (
-          <Link href={href} className="shrink-0" data-testid="medium-card-thumbnail">
+          // X-7: this link wrapped an image with an empty alt and nothing else, so it
+          // announced itself as an unnamed link. The image stays decorative (the
+          // headline beside it is the real label) and the LINK carries the name.
+          <Link
+            href={href}
+            className="shrink-0"
+            data-testid="medium-card-thumbnail"
+            aria-label={displayTitle}
+          >
             <img
               src={thumbnail}
               alt=""

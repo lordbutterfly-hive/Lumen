@@ -27,7 +27,7 @@
  * files.
  */
 import { withBasePath } from '@ui/lib/path-utils';
-import MastheadGlyph from '@/blog/features/layouts/masthead-glyph';
+import PageMasthead from '@/blog/features/layouts/page-masthead';
 
 /**
  * ★ THE PROMISE MUST MATCH WHAT THE NEXT PAGE CAN ACTUALLY DO (2026-08-09).
@@ -103,48 +103,20 @@ const COPY = {
 
 export default function HomeIntro() {
   return (
-    // Same shell as `features/discovery-feed/topic-shell.tsx`'s masthead, to the
-    // pixel: radius 20, #eee2dc hairline, the warm radial wash, overflow-hidden so
-    // the oversized glyph bleeds off the corner instead of widening the card.
-    // ★ THE RED RULER (owner design, 2026-08-10). A 3px #c0392b edge down the left
-    // of the card, curving with the 20px radius. It is the one piece of brand ink
-    // that survives at a glance, it marks where the column starts, and it is the
-    // shared signature across every masthead: the topic header carries the same
-    // rule, so the two read as one system rather than two cards that happen to be
-    // warm. The hairline stays on the other three sides.
-    <section className="relative mb-7 overflow-hidden rounded-[20px] border border-[#eee2dc] border-l-[3px] border-l-[#c0392b] bg-[radial-gradient(125%_130%_at_0%_0%,#f7c9bd_0%,#fbdfd6_30%,#fdefe9_58%,#fffdfc_85%)] px-7 pb-5 pt-7">
-      {/* The pilcrow is the home mark, as the hash is the topic mark. Positioned by
-          MastheadGlyph, which places both by their measured INK box rather than by a
-          shared offset — see that file for why copying the hash's offset cropped
-          this one three times over. */}
-      <MastheadGlyph mark="pilcrow" />
-
-      <p className="relative z-10 mb-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#c0392b]/70">
-        {COPY.eyebrow}
-      </p>
-
-      <h1 className="relative z-10 font-serif text-[34px] font-semibold leading-[1.08] tracking-[-0.015em] text-[#161511]">
-        {COPY.heading}
-      </h1>
-
-      <div className="relative z-10 mt-3.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[13px] text-[#6b7280]">
-        <span>{COPY.claim}</span>
-        <span className="text-[#dcd7d2]" aria-hidden="true">
-          ·
-        </span>
-        <a
-          href={withBasePath('/login')}
-          className="rounded-[11px] bg-[#c0392b] px-3.5 py-1.5 font-sans text-[12.5px] font-semibold text-white hover:bg-[#a5301f]"
-        >
-          {googleReady ? COPY.startFree : COPY.startWallet}
-        </a>
-        <a
-          href={withBasePath('/help.html')}
-          className="font-sans text-[12.5px] font-semibold text-[#6b7280] underline-offset-4 hover:text-[#161511] hover:underline"
-        >
-          {COPY.learn}
-        </a>
-      </div>
-    </section>
+    <PageMasthead eyebrow={COPY.eyebrow} title={COPY.heading} mark="pilcrow">
+      <span>{COPY.claim}</span>
+      <a
+        href={withBasePath('/login')}
+        className="rounded-[11px] bg-[#c0392b] px-3.5 py-1.5 font-sans text-[12.5px] font-semibold text-white hover:bg-[#a5301f]"
+      >
+        {googleReady ? COPY.startFree : COPY.startWallet}
+      </a>
+      <a
+        href={withBasePath('/help.html')}
+        className="font-sans text-[12.5px] font-semibold text-[#6b7280] underline-offset-4 hover:text-[#161511] hover:underline"
+      >
+        {COPY.learn}
+      </a>
+    </PageMasthead>
   );
 }

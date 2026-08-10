@@ -2,7 +2,7 @@ import { Metadata } from 'next';
 import WitnessesShell from '@/blog/features/witnesses/witnesses-shell';
 
 export const metadata: Metadata = {
-  title: 'Vote Witness'
+  title: 'Witnesses'
 };
 
 export default function WitnessesPage() {

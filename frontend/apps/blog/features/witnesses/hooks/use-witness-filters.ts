@@ -7,7 +7,7 @@ import { DEFAULT_WITNESS_FILTERS, WitnessFilterState, WitnessRow } from '../lib/
 export interface UseWitnessFiltersResult {
   filters: WitnessFilterState;
   setFilter: <K extends keyof WitnessFilterState>(key: K, value: WitnessFilterState[K]) => void;
-  toggleFilter: (key: 'active' | 'disabledOrStale' | 'top20' | 'approved') => void;
+  toggleFilter: (key: 'active' | 'disabled' | 'stale' | 'top20' | 'approved') => void;
   filteredRows: WitnessRow[];
   availableVersions: string[];
 }
@@ -24,7 +24,7 @@ export function useWitnessFilters(rows: WitnessRow[]): UseWitnessFiltersResult {
     setFilters((prev) => ({ ...prev, [key]: value }));
   };
 
-  const toggleFilter = (key: 'active' | 'disabledOrStale' | 'top20' | 'approved') => {
+  const toggleFilter = (key: 'active' | 'disabled' | 'stale' | 'top20' | 'approved') => {
     setFilters((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
@@ -37,7 +37,8 @@ export function useWitnessFilters(rows: WitnessRow[]): UseWitnessFiltersResult {
     const search = filters.search.trim().toLowerCase();
     return rows.filter((row) => {
       if (filters.active && (row.isDisabled || row.isStale)) return false;
-      if (filters.disabledOrStale && !(row.isDisabled || row.isStale)) return false;
+      if (filters.disabled && !row.isDisabled) return false;
+      if (filters.stale && !row.isStale) return false;
       if (filters.top20 && row.rank > TOP_WITNESS_RANK) return false;
       if (filters.approved && !row.isVoted) return false;
       if (filters.version !== 'any' && row.running_version !== filters.version) return false;

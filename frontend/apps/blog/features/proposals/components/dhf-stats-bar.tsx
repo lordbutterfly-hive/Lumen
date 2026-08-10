@@ -34,7 +34,7 @@ export default function DhfStatsBar({ stats }: { stats: DhfStats | undefined }) 
       <span>
         {t('proposals.stats.hbd_stabilizer')}{' '}
         <strong className="tabular-nums text-[#c0392b]" data-testid="dhf-stats-stabilizer">
-          {stats.hbdStabilizerHbd === null ? '—' : formatHbd(stats.hbdStabilizerHbd)}
+          {stats.hbdStabilizerHbd === null ? t('global.loading') : formatHbd(stats.hbdStabilizerHbd)}
         </strong>
       </span>
       <span>

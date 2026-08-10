@@ -31,7 +31,16 @@ export interface WitnessRow extends IWitness {
 
 export interface WitnessFilterState {
   active: boolean;
-  disabledOrStale: boolean;
+  /**
+   * ★ SPLIT FROM ONE CHECKBOX (2026-08-10, W-8). "Disabled / Stale" bundled two
+   * different failure modes behind one box and one ambiguous visual: a witness with
+   * the all-1s disabled signing key, and a witness still holding a key but whose
+   * price feed and blocks have gone quiet. The row treatment only ever reflected
+   * `isDisabled`, which is why one 12-hour-old witness was greyed out while a
+   * 263-day-old one was not. They are separate questions, so they are separate boxes.
+   */
+  disabled: boolean;
+  stale: boolean;
   top20: boolean;
   approved: boolean;
   search: string;
@@ -40,7 +49,8 @@ export interface WitnessFilterState {
 
 export const DEFAULT_WITNESS_FILTERS: WitnessFilterState = {
   active: false,
-  disabledOrStale: false,
+  disabled: false,
+  stale: false,
   top20: false,
   approved: false,
   search: '',

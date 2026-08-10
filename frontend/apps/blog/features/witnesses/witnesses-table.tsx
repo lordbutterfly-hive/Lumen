@@ -1,5 +1,7 @@
 'use client';
 
+import { useEffect, useMemo, useState } from 'react';
+import { useInView } from 'react-intersection-observer';
 import { useTranslation } from '@/blog/i18n/client';
 import WitnessTableRow from './witness-table-row';
 import {
@@ -26,6 +28,27 @@ interface WitnessesTableProps {
   hpAprPercent: number | null;
 }
 
+/**
+ * ★★★ 250 ROWS IN ONE PAINT FROZE THE RENDERER (2026-08-10, fuckery list P0-5).
+ *
+ * Every witness rendered at once, each row a CSS grid with two sticky columns, an
+ * avatar, a tooltip provider and a vote toggle. Measured: the page took 19s to serve
+ * and the renderer stopped responding for 45s+, with navigation silently failing to
+ * commit. The audit called for virtualisation.
+ *
+ * This renders INCREMENTALLY instead, and the distinction matters. True windowing
+ * (absolute positioning inside a fixed-height scroller) is what react-window would
+ * give us, and it would fight two things this table depends on: the sticky rank and
+ * identity columns, which need normal flow to stick, and the horizontal scroll the
+ * narrow layouts rely on. It would also mean a new dependency for one page.
+ *
+ * A first page of 60 rows cuts the initial DOM by ~76% and removes the freeze, and
+ * the sentinel below extends it as the reader scrolls. Nobody scrolls 250 witnesses
+ * without meaning to, and anyone who does gets them.
+ */
+const FIRST_PAGE = 60;
+const PAGE_STEP = 60;
+
 const HEADER_CLASS =
   'grid items-center gap-3 px-3.5 py-3 font-sans text-[11px] font-bold uppercase tracking-[0.04em] text-[#9ca3af]';
 
@@ -41,6 +64,22 @@ export default function WitnessesTable({
   hpAprPercent
 }: WitnessesTableProps) {
   const { t } = useTranslation('common_blog');
+  const [visibleCount, setVisibleCount] = useState(FIRST_PAGE);
+  const { ref: moreRef, inView: moreInView } = useInView();
+
+  // Any change to the row SET (a filter toggle, a search, a tab switch) starts the
+  // window again. Without this, filtering down to 12 rows would leave the previous
+  // scroll-extended count in place and the next filter would paint everything.
+  const rowsKey = `${viewMode}:${rows.length}:${rows[0]?.id ?? ''}`;
+  useEffect(() => {
+    setVisibleCount(FIRST_PAGE);
+  }, [rowsKey]);
+
+  useEffect(() => {
+    if (moreInView) setVisibleCount((n) => (n >= rows.length ? n : n + PAGE_STEP));
+  }, [moreInView, rows.length]);
+
+  const visibleRows = useMemo(() => rows.slice(0, visibleCount), [rows, visibleCount]);
   const gridTemplate = viewMode === 'general' ? GENERAL_GRID_TEMPLATE : PARAMS_GRID_TEMPLATE;
   const minWidthClass = viewMode === 'general' ? GENERAL_MIN_WIDTH_CLASS : PARAMS_MIN_WIDTH_CLASS;
   // Below lg the table scrolls inside itself, and a touch device shows no
@@ -89,6 +128,7 @@ export default function WitnessesTable({
                 <span className="text-right">{t('witnesses.columns.max_block_size')}</span>
                 <span className="text-right">{t('witnesses.columns.subsidy_budget')}</span>
                 <span className="text-right">{t('witnesses.columns.price')}</span>
+                <span className="text-right">{t('witnesses.columns.hbd_apr')}</span>
               </>
             )}
             <span className="text-center">{t('witnesses.columns.vote')}</span>
@@ -97,10 +137,17 @@ export default function WitnessesTable({
           <div className="flex flex-col">
             {isLoading ? (
               <div
-                className="px-3.5 py-10 text-center font-sans text-sm text-[#9ca3af]"
+                className="px-3.5 py-6"
                 data-testid="witnesses-loading"
               >
-                {t('global.loading')}
+                {/* X-4: one loading language. The home feed uses skeleton blocks, this
+                    page used a bare centred word, and the stats bar used em-dashes.
+                    All three are skeletons now. */}
+                <div className="flex flex-col gap-2" aria-label={t('global.loading')} role="status">
+                  {Array.from({ length: 8 }).map((_, i) => (
+                    <div key={i} className="h-[52px] animate-pulse rounded-[10px] bg-[#f1f3f5]" />
+                  ))}
+                </div>
               </div>
             ) : isError ? (
               <div
@@ -128,7 +175,7 @@ export default function WitnessesTable({
                 {t('witnesses.no_results')}
               </div>
             ) : (
-              rows.map((row) => (
+              visibleRows.map((row) => (
                 <WitnessTableRow
                   key={row.id}
                   row={row}
@@ -140,6 +187,13 @@ export default function WitnessesTable({
                 />
               ))
             )}
+            {/* Scroll sentinel. Renders only while rows remain, so it cannot spin at
+                the bottom of a fully-rendered table. */}
+            {visibleRows.length < rows.length ? (
+              <div ref={moreRef} className="py-6 text-center font-sans text-[12.5px] text-[#9ca3af]" data-testid="witnesses-more">
+                {t('witnesses.showing_count', { shown: visibleRows.length, total: rows.length })}
+              </div>
+            ) : null}
           </div>
         </div>
       </div>

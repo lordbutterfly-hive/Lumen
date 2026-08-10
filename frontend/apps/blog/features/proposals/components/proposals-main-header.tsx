@@ -1,6 +1,7 @@
 'use client';
 
 import { Icons } from '@ui/components/icons';
+import PageMasthead from '@/blog/features/layouts/page-masthead';
 import TooltipContainer from '@ui/components/tooltip-container';
 import { useTranslation } from '@/blog/i18n/client';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
@@ -21,7 +22,7 @@ export default function ProposalsMainHeader() {
     <button
       type="button"
       disabled={isLiteBlocked}
-      className="flex shrink-0 items-center gap-1.5 rounded-[11px] bg-[#1a1a17] px-[18px] py-[11px] font-sans text-sm font-semibold text-white transition-colors hover:bg-black disabled:cursor-not-allowed disabled:opacity-50"
+      className="flex shrink-0 items-center gap-1.5 rounded-[11px] bg-[#c0392b] px-[18px] py-[11px] font-sans text-sm font-semibold text-white transition-colors hover:bg-[#a5301f] disabled:cursor-not-allowed disabled:opacity-50"
       data-testid="new-proposal-open"
     >
       <Icons.add className="h-[15px] w-[15px]" />
@@ -38,24 +39,30 @@ export default function ProposalsMainHeader() {
     // button now drops to its own line at that width and nothing else moves;
     // at every width where both fit on one row (820px onwards) the row is
     // unchanged, because wrapping only happens when it must.
-    <div className="flex flex-wrap items-start justify-between gap-4">
-      <div>
-        <h1 className="font-sans text-[32px] font-bold tracking-[-0.02em] text-[#161511]">
-          {t('proposals.header.title')}
-        </h1>
-        <p className="mt-2 max-w-[620px] font-serif text-sm leading-[1.55] text-[#6b7280]">
-          {t('proposals.header.intro')}{' '}
-          <a href="/faq.html" className="text-[#c0392b] hover:underline">
-            {t('proposals.header.faq_link')}
-          </a>
-          .
-        </p>
-      </div>
-      {isLiteBlocked ? (
-        <TooltipContainer title={t('proposals.lite_cannot_vote')}>{trigger}</TooltipContainer>
-      ) : (
-        <NewProposalDialog>{trigger}</NewProposalDialog>
-      )}
-    </div>
+    /* X-1: proposals had a third page-header treatment of its own. Same masthead as
+       home, topics and witnesses now. No mark: /proposals has no assigned glyph (R5). */
+    <PageMasthead
+      title={
+        <>
+          {t('proposals.header.title')}{' '}
+          <span className="font-normal italic text-[#9ca3af]">{t('proposals.header.subtitle')}</span>
+        </>
+      }
+      actions={
+        isLiteBlocked ? (
+          <TooltipContainer title={t('proposals.lite_cannot_vote')}>{trigger}</TooltipContainer>
+        ) : (
+          <NewProposalDialog>{trigger}</NewProposalDialog>
+        )
+      }
+    >
+      <p className="max-w-[620px] font-serif text-[13px] leading-[1.55] text-[#6b7280]">
+        {t('proposals.header.intro')}{' '}
+        <a href="/faq.html" className="text-[#c0392b] hover:underline">
+          {t('proposals.header.faq_link')}
+        </a>
+        .
+      </p>
+    </PageMasthead>
   );
 }

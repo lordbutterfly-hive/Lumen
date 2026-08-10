@@ -15,7 +15,8 @@
  * parameters (real per-witness data from `list_witnesses().props`).
  */
 export const GENERAL_GRID_TEMPLATE = '32px minmax(0,1fr) 92px 100px 68px 92px 60px 76px';
-export const PARAMS_GRID_TEMPLATE = '32px minmax(0,1fr) 128px 116px 136px 92px 76px';
+// One more numeric column since 2026-08-10: HBD APR joined the parameters tab (W-2).
+export const PARAMS_GRID_TEMPLATE = '32px minmax(0,1fr) 128px 116px 136px 92px 76px 76px';
 
 /**
  * The width each layout needs before its columns start colliding, enforced

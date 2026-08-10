@@ -1,6 +1,7 @@
 'use client';
 
 import { useTranslation } from '@/blog/i18n/client';
+import PageMasthead from '@/blog/features/layouts/page-masthead';
 import { WitnessViewMode } from './lib/types';
 
 const TOGGLE_WRAP_CLASS =
@@ -23,39 +24,42 @@ export default function WitnessesHeader({ viewMode, onViewModeChange }: Witnesse
   const { t } = useTranslation('common_blog');
 
   return (
-    <div className="flex items-start justify-between gap-4">
-      <div>
-        <h1 className="font-sans text-[32px] font-bold tracking-[-0.02em] text-[#161511]">
+    /* ★ W-4: this was bare text on the page background. The container was already
+       the hero width, so the shell had simply never been applied. No mark: witnesses
+       has no assigned glyph and inventing one here would violate R5. */
+    <PageMasthead
+      title={
+        <>
           {t('witnesses.title')}{' '}
           <span className="font-normal italic text-[#9ca3af]">{t('witnesses.subtitle')}</span>
-        </h1>
-        <p className="mt-2 max-w-[620px] font-serif text-sm leading-[1.55] text-[#6b7280]">
-          {t('witnesses.intro')}
-        </p>
-      </div>
-
-      <div className={TOGGLE_WRAP_CLASS} role="tablist" aria-label={t('witnesses.view_toggle.aria_label')}>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={viewMode === 'general'}
-          data-testid="witnesses-view-general"
-          className={`${TOGGLE_BTN_BASE} ${viewMode === 'general' ? TOGGLE_BTN_ACTIVE : TOGGLE_BTN_INACTIVE}`}
-          onClick={() => onViewModeChange('general')}
-        >
-          {t('witnesses.view_toggle.general')}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={viewMode === 'params'}
-          data-testid="witnesses-view-params"
-          className={`${TOGGLE_BTN_BASE} ${viewMode === 'params' ? TOGGLE_BTN_ACTIVE : TOGGLE_BTN_INACTIVE}`}
-          onClick={() => onViewModeChange('params')}
-        >
-          {t('witnesses.view_toggle.params')}
-        </button>
-      </div>
-    </div>
+        </>
+      }
+      actions={
+        <div className={TOGGLE_WRAP_CLASS} role="tablist" aria-label={t('witnesses.view_toggle.aria_label')}>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={viewMode === 'general'}
+            data-testid="witnesses-view-general"
+            className={`${TOGGLE_BTN_BASE} ${viewMode === 'general' ? TOGGLE_BTN_ACTIVE : TOGGLE_BTN_INACTIVE}`}
+            onClick={() => onViewModeChange('general')}
+          >
+            {t('witnesses.view_toggle.general')}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={viewMode === 'params'}
+            data-testid="witnesses-view-params"
+            className={`${TOGGLE_BTN_BASE} ${viewMode === 'params' ? TOGGLE_BTN_ACTIVE : TOGGLE_BTN_INACTIVE}`}
+            onClick={() => onViewModeChange('params')}
+          >
+            {t('witnesses.view_toggle.params')}
+          </button>
+        </div>
+      }
+    >
+      <p className="max-w-[620px] font-serif text-[13px] leading-[1.55] text-[#6b7280]">{t('witnesses.intro')}</p>
+    </PageMasthead>
   );
 }

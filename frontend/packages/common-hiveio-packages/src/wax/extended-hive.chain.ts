@@ -224,6 +224,16 @@ export interface IWitness {
     account_creation_fee: NaiAsset;
     account_subsidy_budget: number;
     maximum_block_size: number;
+    /**
+     * The HBD savings interest rate this witness votes for, in basis points
+     * (1000 = 10.00%). Verified live against `condenser_api.get_witnesses_by_vote`:
+     * gtg 1000, ocd-witness 1200, stoodkev 1000. The network applies the MEDIAN of
+     * the top 20, which is the figure `median_props.hbd_interest_rate` carries.
+     *
+     * Optional because the chain omits it on witnesses that have never published a
+     * price feed or set their props.
+     */
+    hbd_interest_rate?: number;
   };
   hbd_exchange_rate: {
     base: NaiAsset;

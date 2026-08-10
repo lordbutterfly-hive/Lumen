@@ -39,9 +39,20 @@ import { Link } from '@hive/ui';
  */
 const COPY = {
   tagline: 'A calmer place to read and write.',
-  welcome: 'Your keys stay with you.',
+  /**
+   * ★★★ THE FIRST LINE SELLS THE PLACE, NOT THE SAFETY (v8, owner).
+   *
+   * "Your keys stay with you." answered a question nobody has yet. Somebody who has
+   * not decided what this is does not open a login screen worrying about custody;
+   * they worry about whether it is worth an account. Security reassurance is real
+   * and it stays, one line down, where a reader who HAS decided will look for it.
+   *
+   * It reuses the home hero's angle on purpose. A stranger who clicked "Start free"
+   * should land on the same promise they clicked, not a different pitch.
+   */
+  welcome: 'Get found without a following.',
   welcomeSub:
-    'Lumen never sees a private key. Keychain signs inside your browser, a wallet signs a message, and nothing here can move anything you own.',
+    'The feed is built from reading, not from your follower count. Lumen never sees a private key.',
   /**
    * ★★★ THE PROMISE HAS TO DEGRADE WITH THE THING THAT KEEPS IT (2026-08-08, UX
    * tester on the new-user path).
@@ -231,7 +242,7 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
       className={
         embedded
           ? 'flex w-full flex-col items-center bg-white font-sans text-[#161511]'
-          : 'fixed inset-0 z-50 flex flex-col items-center overflow-y-auto bg-white px-5 pb-12 font-sans text-[#161511]'
+          : 'fixed inset-0 z-50 flex flex-col items-center overflow-y-auto bg-white px-5 pb-12 font-sans text-[#161511] [scrollbar-gutter:stable_both-edges]'
       }
     >
       {embedded ? null : <div className="fixed inset-x-0 top-0 h-[3px] bg-[linear-gradient(90deg,#c0392b,#e07b3e)]" />}
@@ -269,7 +280,7 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                     : 'border-b border-[#f3ede9] bg-[radial-gradient(120%_100%_at_0%_0%,#fdf1ee_0%,#fff_62%)] px-[30px] pb-6 pt-8'
                 }
               >
-                <h1 className={`font-serif font-semibold leading-[1.12] tracking-[-0.01em] text-[#161511] ${embedded ? 'text-[22px]' : 'text-[30px]'}`}>
+                <h1 className={`font-serif font-semibold leading-[1.12] tracking-[-0.01em] text-[#161511] ${embedded ? 'text-[22px]' : 'text-center text-[30px]'}`}>
                   {COPY.welcome}
                 </h1>
                 {/* Google is the only walletless way in, so it is what makes the
@@ -279,7 +290,7 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                     it shows the conservative sentence and the browser corrects
                     it. Erring that way round is deliberate — over-promising is
                     the failure this fixes. */}
-                <p className="mt-2 text-[14.5px] leading-[1.55] text-[#4b5563]">
+                <p className={`mt-2 text-[14.5px] leading-[1.55] text-[#4b5563] ${embedded ? '' : 'text-center'}`}>
                   {googleReady ? COPY.welcomeSub : COPY.welcomeSubWalletsOnly}
                 </p>
               </div>
@@ -397,19 +408,24 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                         Anyone without MetaMask reads that icon as "not for me" and
                         stops. A neutral mark keeps the door as wide as the code
                         actually opens it, and the subtitle names the popular ones. */}
+                    {/* ★ THE ETHEREUM MARK, not MetaMask and not a generic wallet
+                        (owner call, 2026-08-10). v1 flagged the MetaMask fox as a lie
+                        because the path underneath is WalletConnect and accepts
+                        Rainbow, Coinbase Wallet and the rest; v8 then flagged the
+                        generic wallet glyph as too vague to recognise. Both were
+                        right about the other one. The network's own mark names what
+                        the row actually is: an Ethereum wallet, any of them. */}
                     <span
                       aria-hidden
                       className="flex h-[34px] w-[34px] flex-shrink-0 items-center justify-center rounded-[10px] bg-[#eef1fd]"
                     >
-                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
-                        <path
-                          d="M3 7.5A2.5 2.5 0 0 1 5.5 5H18a2 2 0 0 1 2 2v1"
-                          stroke="#4959c9"
-                          strokeWidth="1.8"
-                          strokeLinecap="round"
-                        />
-                        <rect x="3" y="7.5" width="18" height="12" rx="2.5" stroke="#4959c9" strokeWidth="1.8" />
-                        <circle cx="16.5" cy="13.5" r="1.5" fill="#4959c9" />
+                      <svg width="20" height="20" viewBox="0 0 256 417" aria-hidden>
+                        <path fill="#343434" d="M127.96 0l-2.8 9.5v275.7l2.8 2.8 127.96-75.6z" />
+                        <path fill="#8C8C8C" d="M127.96 0L0 212.4l127.96 75.6V154.2z" />
+                        <path fill="#3C3C3B" d="M127.96 312.19l-1.58 1.92v98.2l1.58 4.6L256 236.59z" />
+                        <path fill="#8C8C8C" d="M127.96 416.9v-104.7L0 236.6z" />
+                        <path fill="#141414" d="M127.96 287.96l127.96-75.6-127.96-58.16z" />
+                        <path fill="#393939" d="M0 212.36l127.96 75.6V154.2z" />
                       </svg>
                     </span>
                     <span className="min-w-0 flex-1">
@@ -514,7 +530,10 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
           the one that has to stay: it is attached to the action it describes, which
           is the whole point of saying it. So this row keeps only Help, which is the
           one thing the card does not offer. */}
-      <div className="my-9 flex gap-5 text-[13px] text-[#9ca3af]">
+      {/* v8: this footer belongs to the standalone PAGE. Rendered inside the dialog it
+          became a single orphaned "Help" link under the card, with no context and no
+          sibling. The page keeps it; the dialog does not. */}
+      <div className={`my-9 flex gap-5 text-[13px] text-[#9ca3af] ${embedded ? 'hidden' : ''}`}>
         {/* ★ HELP FOR THE PERSON ACTUALLY ON THIS SCREEN (2026-08-08, UX tester).
             This pointed at /faq.html — the inherited "Hive.blog FAQ", which opens
             on master passwords, owner keys, Resource Credits and MVESTs and refers

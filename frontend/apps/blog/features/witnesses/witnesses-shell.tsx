@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import LeftRail from '@/blog/features/layouts/left-rail';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useTranslation } from '@/blog/i18n/client';
@@ -24,7 +25,54 @@ export default function WitnessesShell() {
   const { user } = useUserClient();
   const data = useWitnessesData();
   const filtersState = useWitnessFilters(data.rows);
-  const [viewMode, setViewMode] = useState<WitnessViewMode>('general');
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  /**
+   * ★ THE VIEW LIVES IN THE URL (2026-08-10, fuckery list W-9).
+   *
+   * Switching to Params and toggling every filter left the address bar at a bare
+   * `/witnesses`, so no filtered view could be shared, bookmarked or restored by the
+   * back button. The home feed tabs already write `?tab=`, which made this page
+   * inconsistent with the app as well as unhelpful.
+   *
+   * `?view=params` is the tab. Filters follow the same rule and only appear when they
+   * are ON, so the default view keeps a clean URL. `router.replace` with
+   * `scroll: false`, so toggling a checkbox does not push history entries or jump the
+   * page to the top.
+   */
+  const viewMode: WitnessViewMode = searchParams?.get('view') === 'params' ? 'params' : 'general';
+
+  const setViewMode = (mode: WitnessViewMode) => {
+    const params = new URLSearchParams(searchParams?.toString() ?? '');
+    if (mode === 'general') params.delete('view');
+    else params.set('view', mode);
+    const query = params.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname ?? '/witnesses', { scroll: false });
+  };
+
+  // Mirror the filter state into the query string whenever it changes.
+  const filterSignature = JSON.stringify(filtersState.filters);
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams?.toString() ?? '');
+    const f = filtersState.filters;
+    for (const key of ['active', 'disabled', 'stale', 'top20', 'approved'] as const) {
+      if (f[key]) params.set(key, '1');
+      else params.delete(key);
+    }
+    if (f.version && f.version !== 'any') params.set('version', f.version);
+    else params.delete('version');
+    if (f.search.trim()) params.set('q', f.search.trim());
+    else params.delete('q');
+    const next = params.toString();
+    const current = searchParams?.toString() ?? '';
+    if (next === current) return;
+    router.replace(next ? `${pathname}?${next}` : pathname ?? '/witnesses', { scroll: false });
+    // `filterSignature` is the real dependency; the router objects are stable enough
+    // and including them re-runs this on every navigation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterSignature]);
 
   return (
     <div className="relative mx-auto grid max-w-[1720px] grid-cols-1 gap-11 px-6 pb-20 pt-[26px] md:grid-cols-[200px_minmax(0,1fr)] md:px-11 xl:grid-cols-[200px_minmax(0,1fr)_312px]">
@@ -40,10 +88,14 @@ export default function WitnessesShell() {
       <main className="min-w-0" data-testid="witnesses-main">
         <WitnessesHeader viewMode={viewMode} onViewModeChange={setViewMode} />
 
+        {/* W-5: `witnessCount` was the UNFILTERED total, so toggling Disabled/Stale
+            left 163 rows on screen under a counter still reading 250. It now reports
+            what is actually in the table, with the total alongside it. */}
         <WitnessesStatsBar
           hpAprPercent={data.hpAprPercent}
           hbdInterestRatePercent={data.hbdInterestRatePercent}
-          witnessCount={data.witnessCount}
+          witnessCount={filtersState.filteredRows.length}
+          totalWitnessCount={data.witnessCount}
           votesLeft={data.votesLeft}
           isLoggedIn={user.isLoggedIn}
           hasProxy={data.hasProxy}

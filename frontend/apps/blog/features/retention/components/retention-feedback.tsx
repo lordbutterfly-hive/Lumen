@@ -32,15 +32,9 @@ export function RetentionFeedback() {
         });
         return;
       }
-      // A longer run than day two. One line, one number, no exclamation mark, and
-      // nothing asked of the reader.
-      if (moment.key === 'milestone') {
-        toast({
-          title: t('retention.moment.milestone.title', { count: moment.streakDays }),
-          description: t('retention.moment.milestone.body')
-        });
-        return;
-      }
+      // The milestone toast is gone with the milestone nudge (owner ruling,
+      // 2026-08-10): its body was "Nobody made you do it.", which is the app
+      // congratulating a reader for choosing to be there. See lib/nudge.ts.
       // The daily goal, met. This is the moment the ring exists for, and it is the one
       // that should feel like a full stop rather than a prompt: "nothing else needed
       // today" is the opposite of what a streak app usually says here.

@@ -361,3 +361,23 @@ summary {
   text-align: right;
   cursor: pointer;
 }
+
+/**
+ * ★ ONE FOCUS RING, IN THE BRAND (2026-08-10, fuckery list X-5).
+ *
+ * There was no custom focus style anywhere in the app, so every keyboard user got
+ * whatever the browser draws by default: a thin blue-black hairline in Chrome, a
+ * dotted line in Firefox, invisible against several of our own surfaces. On a
+ * product whose entire accent language is one red, that is both an accessibility
+ * gap and an inconsistency.
+ *
+ * `:focus-visible` only, never `:focus` — a mouse click must not leave a ring
+ * behind, which is the reason the rule was dropped from most codebases in the
+ * first place. Components that already define their own focus treatment keep it;
+ * this is the floor, not a ceiling.
+ */
+:focus-visible {
+  outline: 2px solid #c0392b;
+  outline-offset: 2px;
+  border-radius: 2px;
+}

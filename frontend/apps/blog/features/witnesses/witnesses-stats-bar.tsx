@@ -7,11 +7,25 @@ interface WitnessesStatsBarProps {
   hpAprPercent: number | null;
   hbdInterestRatePercent: number | null;
   witnessCount: number;
+  /** Unfiltered total, so the bar can say "X of Y" when a filter is on. */
+  totalWitnessCount: number;
   /** null while the viewer's own votes are loading or unavailable — rendered as '—', never a false 30. */
   votesLeft: number | null;
   isLoggedIn: boolean;
   hasProxy: boolean;
   proxyAccount: string;
+}
+
+/**
+ * ★ A DASH IS NOT A LOADING STATE (2026-08-10, fuckery list W-6). Three of these
+ * stats rendered a bare em-dash while their chain call was in flight, so every cold
+ * load of this page showed "HP staking APR —" for a second or two. That breaks the
+ * no-dashes rule in the one place it is guaranteed to be seen, and it reads as "this
+ * value is unavailable" rather than "this value is coming". A short skeleton bar says
+ * "loading" without asserting anything.
+ */
+function StatSkeleton() {
+  return <span className="inline-block h-[13px] w-[46px] animate-pulse rounded bg-[#ececec] align-middle" aria-hidden="true" />;
 }
 
 const STAT_VALUE_CLASS = 'font-sans tabular-nums';
@@ -32,6 +46,7 @@ export default function WitnessesStatsBar({
   hpAprPercent,
   hbdInterestRatePercent,
   witnessCount,
+  totalWitnessCount,
   votesLeft,
   isLoggedIn,
   hasProxy,
@@ -47,18 +62,26 @@ export default function WitnessesStatsBar({
       <span>
         {t('witnesses.stats.hp_apr')}{' '}
         <strong className={`${STAT_VALUE_CLASS} text-[#2f7d4f]`}>
-          {hpAprPercent !== null ? `${hpAprPercent.toFixed(2)}%` : '—'}
+          {hpAprPercent !== null ? `${hpAprPercent.toFixed(2)}%` : <StatSkeleton />}
         </strong>
       </span>
       <span>
         {t('witnesses.stats.hbd_rate')}{' '}
         <strong className={`${STAT_VALUE_CLASS} text-[#161511]`}>
-          {hbdInterestRatePercent !== null ? `${hbdInterestRatePercent.toFixed(2)}%` : '—'}
+          {hbdInterestRatePercent !== null ? `${hbdInterestRatePercent.toFixed(2)}%` : <StatSkeleton />}
         </strong>
       </span>
       <span>
         {t('witnesses.stats.witness_count')}{' '}
-        <strong className={`${STAT_VALUE_CLASS} text-[#161511]`}>{witnessCount || '—'}</strong>
+        <strong className={`${STAT_VALUE_CLASS} text-[#161511]`}>
+          {!totalWitnessCount ? (
+            <StatSkeleton />
+          ) : witnessCount === totalWitnessCount ? (
+            witnessCount
+          ) : (
+            `${witnessCount} of ${totalWitnessCount}`
+          )}
+        </strong>
       </span>
 
       {!isLoggedIn ? (
@@ -80,7 +103,7 @@ export default function WitnessesStatsBar({
           className={`ml-auto font-semibold text-[#9ca3af] ${STAT_VALUE_CLASS}`}
           data-testid="witnesses-stats-votes-left-unavailable"
         >
-          —
+          <StatSkeleton />
         </span>
       )}
     </div>

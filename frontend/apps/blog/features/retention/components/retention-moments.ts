@@ -219,7 +219,7 @@ export function weekTally(now: Date = new Date()): WeekTally {
  * priority order in `recordRetentionAct` decides which one wins, and it prefers the
  * rarer event, because a rare event is the only kind worth a toast.
  */
-export type RetentionMomentKey = 'first-act' | 'streak-2' | 'goal-hit' | 'milestone';
+export type RetentionMomentKey = 'first-act' | 'streak-2' | 'goal-hit';
 
 /**
  * Streak lengths worth a toast. Mirrors `lib/nudge.ts`'s STREAK_MILESTONES minus day
@@ -322,9 +322,10 @@ function recordAct(kind: RetentionActKind): void {
   // goal, which beats "you did a thing". Reversing any pair would spend the one
   // available toast on the less interesting event.
   let key: RetentionMomentKey | null = null;
-  if (TOAST_MILESTONES.includes(streakDays) && toasts.milestoneDay !== today) {
-    key = 'milestone';
-  } else if (streakDays === 2 && toasts.day2Day !== today) {
+  // The 'milestone' toast carried the same "Nobody made you do it." line the feed
+  // nudge did, and it is gone for the same reason (owner ruling 2026-08-10). Day 2
+  // survives: "you came back" is an observation about the reader, not applause.
+  if (streakDays === 2 && toasts.day2Day !== today) {
     key = 'streak-2';
   } else if (goalTarget > 0 && countToday(ledger, today) === goalTarget && toasts.goalDay !== today) {
     // EXACTLY the target, not >=, so this fires on the act that MET the goal and not
@@ -341,8 +342,7 @@ function recordAct(kind: RetentionActKind): void {
 
   toasts.lastAt = nowMs;
   toasts.windowCount += 1;
-  if (key === 'milestone') toasts.milestoneDay = today;
-  else if (key === 'streak-2') toasts.day2Day = today;
+  if (key === 'streak-2') toasts.day2Day = today;
   else if (key === 'goal-hit') toasts.goalDay = today;
   else toasts.firstActDay = today;
   writeToastLedger(toasts);

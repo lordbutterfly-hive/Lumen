@@ -5,7 +5,7 @@
     "publishing": "Publishing...",
     "confirmed_indexing": "Confirmed on blockchain. Waiting for indexing...",
     "indexing_slow": "Indexing is taking longer than usual. This is normal during high traffic.",
-    "indexing_timeout": "Post indexing timed out. Your post may still appear shortly — try reloading the page.",
+    "indexing_timeout": "Post indexing timed out. Your post may still appear shortly. Try reloading the page.",
     "reload_page": "Reload page",
     "something_went_wrong": "Something went wrong",
     "unavailable_for_legal_reasons": "Unavailable For Legal Reasons",
@@ -253,7 +253,7 @@
     "action": "OK",
     "cancel": "Cancel",
     "description": "This post will be added to your blog and shared with your followers.",
-    "description_lite": "This post will be added to your Lumen blog. Reblogs from a keyless account stay on Lumen — they don't reach Hive.",
+    "description_lite": "This post will be added to your Lumen blog. Reblogs from a keyless account stay on Lumen. They don't reach Hive.",
     "already_reblogged": "You have already reblogged this post.",
     "title": "Reblog This Post"
   },
@@ -404,7 +404,7 @@
       "mentioned_you_and_others": "@{{username}} mentioned you and {{others}} others",
       "subscribed_to": "@{{username}} subscribed to {{community}}"
     },
-    "load_failed_retry": "Couldn't load more — tap to try again",
+    "load_failed_retry": "Couldn't load more. Tap to try again",
     "reputation_title": "Reputation {{value}}. A stake-weighted total of the votes @{{username}} has received. Lumen does not use it for anything.",
     "reputation_label": "Hive reputation",
     "reputation_short": "rep"
@@ -703,8 +703,8 @@
       "template_name_is_taken": "Template name is taken",
       "save": "Save",
       "delete_template": "Delete Template",
-      "template_save_failed": "Your settings were applied, but the template could not be saved — your browser has no room for it.",
-      "template_delete_failed": "The template could not be deleted — your browser refused the change."
+      "template_save_failed": "Your settings were applied, but the template could not be saved. Your browser has no room for it.",
+      "template_delete_failed": "The template could not be deleted. Your browser refused the change."
     },
     "category_selector": {
       "required": "Required when post to My Blog",
@@ -730,7 +730,7 @@
     "placeholder": "Search",
     "no_results": "Nothing was found.",
     "error": "There was an error",
-    "start_prompt": "Search Hive for posts, topics or people — type above to begin.",
+    "start_prompt": "Search Hive for posts, topics or people. Type above to begin.",
     "newest_too_broad": "Sorting by newest is too much work for the search index on a broad term like this, so it timed out.",
     "try_relevance": "Search this by relevance instead",
     "no_results_for": "No results for “{{query}}”. Try different or fewer words."
@@ -1229,11 +1229,11 @@
         "pending": "{{count}} claimed account token(s) available",
         "pending_none": "No claimed account tokens available yet.",
         "new_account": "New account name",
-        "todo_notice": "Claiming a new account here isn't available yet — it needs generating and safely backing up a fresh keypair for the new account, which Lumen doesn't support yet. Your claimed-account tokens aren't going anywhere in the meantime."
+        "todo_notice": "Claiming a new account here isn't available yet. It needs generating and safely backing up a fresh keypair for the new account, which Lumen doesn't support yet. Your claimed-account tokens aren't going anywhere in the meantime."
       }
     },
     "lite_title": "No wallet yet",
-    "lite_body": "A Lumen account has no Hive wallet of its own. Upgrade to a full Hive account to get one — your posts, followers and history all come with you on Lumen.",
+    "lite_body": "A Lumen account has no Hive wallet of its own. Upgrade to a full Hive account to get one. Your posts, followers and history all come with you on Lumen.",
     "lite_upgrade": "Upgrade my account"
   },
   "profile": {
@@ -1262,7 +1262,7 @@
     }
   },
   "witnesses": {
-    "title": "Hive Witnesses",
+    "title": "Witnesses",
     "subtitle": "Block Producers",
     "intro": "Witnesses run consensus nodes and secure the chain, and make governance decisions for Hive's future. Each account can vote for up to 30 witnesses, weighted by Hive Power.",
     "unknown_version": "unknown",
@@ -1270,7 +1270,7 @@
     "no_results": "No witnesses match your filters.",
     "scroll_hint": "Swipe the table sideways for votes, price and APR. The rank and name stay put.",
     "error": {
-      "description": "We couldn't load the witness list — this is a connection problem, not an empty list.",
+      "description": "We couldn't load the witness list. This is a connection problem, not an empty list.",
       "retry": "Retry"
     },
     "own_data_error": {
@@ -1278,7 +1278,7 @@
       "retry": "Retry"
     },
     "announcement_link_aria": "Open {{witness}}'s witness announcement",
-    "apr_tooltip": "Current network HP staking APR — the same for every witness, since it reflects what your staked HP earns, not the witness itself.",
+    "apr_tooltip": "The HBD savings interest rate this witness votes for. Witnesses disagree, and the network uses the median of the top 20.",
     "view_toggle": {
       "aria_label": "Table view",
       "general": "General",
@@ -1290,7 +1290,8 @@
       "witness_count": "Witnesses tracked",
       "votes_left": "{{count}} votes left",
       "proxy_active": "Voting via proxy @{{proxy}}",
-      "log_in_to_vote": "Log in to vote for witnesses"
+      "log_in_to_vote": "Log in to vote for witnesses",
+      "witness_count_filtered": "Witnesses tracked {{shown}} of {{total}}"
     },
     "columns": {
       "rank": "#",
@@ -1299,11 +1300,12 @@
       "last_block": "Last block",
       "miss": "Miss",
       "price": "Price",
-      "apr": "APR",
+      "apr": "HBD APR",
       "creation_fee": "Creation fee",
       "max_block_size": "Max block size",
       "subsidy_budget": "Subsidy budget",
-      "vote": "Vote"
+      "vote": "Vote",
+      "hbd_apr": "HBD APR"
     },
     "block_age": {
       "never": "never",
@@ -1318,7 +1320,7 @@
       "remove_aria": "Remove vote for witness {{witness}}",
       "login_required_aria": "Log in to vote for witnesses",
       "proxy_blocks_voting": "You have an active witness proxy. Clear it in the Set a proxy card before voting for witnesses directly.",
-      "votes_unavailable": "Couldn't load your vote status — refresh to see whether you've voted for this witness."
+      "votes_unavailable": "Couldn't load your vote status. Refresh to see whether you've voted for this witness."
     },
     "filters": {
       "title": "Filters",
@@ -1328,9 +1330,10 @@
       "search_placeholder": "Search witnesses…",
       "any_version": "Any version",
       "active": "Active",
-      "disabled_stale": "Disabled / Stale",
       "top20": "Top 20",
-      "approved": "Approved"
+      "approved": "Approved",
+      "disabled": "Disabled key",
+      "stale": "Stale feed"
     },
     "proxy_card": {
       "title": "Set a proxy",
@@ -1346,7 +1349,7 @@
       "clear_description": "This clears your proxy (currently @{{proxy}}) so you can vote for witnesses directly again.",
       "account_placeholder": "Proxy account name",
       "invalid_account": "That account couldn't be found on Hive.",
-      "verify_error": "Couldn't verify that account — please try again.",
+      "verify_error": "Couldn't verify that account. Please try again.",
       "set_confirm": "Set proxy",
       "clear_confirm": "Clear proxy",
       "submitting": "Submitting…"
@@ -1357,14 +1360,19 @@
       "proxy_set": "Your witness votes are now delegated to @{{proxy}}.",
       "proxy_cleared": "Your witness proxy was cleared."
     },
-    "lite_cannot_vote": "Voting for witnesses needs a full Hive account. Upgrade to vote."
+    "lite_cannot_vote": "Voting for witnesses needs a full Hive account. Upgrade to vote.",
+    "apr_stale": "Not signing",
+    "showing_count": "Showing {{shown}} of {{total}}",
+    "stale_marker": "Feed stale",
+    "profile_link_aria": "{{witness}} profile"
   },
   "proposals": {
     "header": {
-      "title": "Decentralized Hive Fund",
+      "title": "Proposals",
       "intro": "An on-chain system where anyone can submit funding proposals and stakeholders vote on which get funded. Read more in the",
       "faq_link": "FAQ",
-      "new_proposal": "New proposal"
+      "new_proposal": "New proposal",
+      "subtitle": "Decentralized Hive Fund"
     },
     "stats": {
       "daily_funded": "Daily funded",
@@ -1397,7 +1405,7 @@
       "empty": "No proposals match this filter."
     },
     "error": {
-      "description": "We couldn't load the proposals — this is a connection problem, not an empty fund.",
+      "description": "We couldn't load the proposals. This is a connection problem, not an empty fund.",
       "retry": "Retry"
     },
     "card": {
@@ -1435,7 +1443,7 @@
     },
     "proxy_dialog": {
       "title": "Set a proposal proxy",
-      "description": "Enter the account you want to vote on proposals on your behalf. This also delegates your witness votes — a proxy always covers both.",
+      "description": "Enter the account you want to vote on proposals on your behalf. This also delegates your witness votes. A proxy always covers both.",
       "current": "Currently delegated to @{{proxy}}.",
       "input_label": "Proxy account",
       "input_placeholder": "Account name",
@@ -1446,7 +1454,7 @@
         "invalid_format": "That's not a valid Hive account name.",
         "self_proxy": "You can't set yourself as your own proxy.",
         "not_found": "@{{proxy}} couldn't be found on Hive.",
-        "verify_failed": "Couldn't verify that account — please try again."
+        "verify_failed": "Couldn't verify that account. Please try again."
       }
     },
     "proxy_toast": {
@@ -1474,7 +1482,7 @@
         "description": "Your proposal has been broadcast to the chain."
       },
       "errors": {
-        "post_not_found": "No post found at @{{creator}}/{{permlink}} — create the post first, then link it here."
+        "post_not_found": "No post found at @{{creator}}/{{permlink}}. Create the post first, then link it here."
       }
     },
     "lite_cannot_vote": "Voting on proposals needs a full Hive account. Upgrade to vote."
@@ -1508,13 +1516,13 @@
     "total_staked": "Total staked",
     "claim": "Claim",
     "claimed": "Claimed",
-    "no_payout": "This round is settled — your position didn't win a payout.",
-    "no_round": "No market is open right now — check back next week.",
-    "unavailable": "The prediction market isn't available yet — check back soon.",
+    "no_payout": "This round is settled. Your position didn't win a payout.",
+    "no_round": "No market is open right now. Check back next week.",
+    "unavailable": "No market has opened yet. When one does, you back a weekly call on the HIVE price and the pool splits between everyone who got it right.",
     "unavailable_widget": "Prediction market isn't available yet.",
     "load_error": "Couldn't load the market.",
     "retry": "Retry",
-    "locked": "Betting closed — settling soon.",
+    "locked": "Betting closed. Settling soon.",
     "status": {
       "live": "LIVE",
       "locked": "LOCKED",
@@ -1522,14 +1530,14 @@
       "void": "VOID"
     },
     "void_reason": {
-      "underfunded": "fewer than two buckets got bets — everyone refunded",
-      "zero_winner": "no one bet on the bucket that won — everyone refunded",
+      "underfunded": "fewer than two buckets got bets. Everyone refunded",
+      "zero_winner": "no one bet on the bucket that won. Everyone refunded",
       "window_lapsed": "nobody settled the round in time",
       "stale_feed": "the price feed was down too long",
       "tick_window_missed": "the price feed did not update in time to settle fairly",
       "default": "refunded"
     },
-    "round_voided": "Round voided — {{reason}}.",
+    "round_voided": "Round voided. {{reason}}.",
     "settled_at": "Settled at {{price}} {{asset}}/HIVE.",
     "countdown": {
       "days_hours": "{{days}}d {{hours}}h",
@@ -1537,13 +1545,14 @@
       "minutes": "{{minutes}}m"
     },
     "reclaim": "Get my stake back",
-    "reclaim_explain": "This round is past its deadline and was never settled. You can void it yourself and take your full stake back — no one else needs to act.",
+    "reclaim_explain": "This round is past its deadline and was never settled. You can void it yourself and take your full stake back. No one else needs to act.",
     "upgrade_to_claim": "Upgrade to a full account to claim",
     "upgrade_to_reclaim": "Upgrade to a full account to reclaim"
   },
   "login_dialog": {
     "new_here": "New to Lumen?",
-    "signup_link": "Create an account with Google or a crypto wallet — no keys to manage."
+    "signup_link": "Create a free account",
+    "signup_explainer": "with Google or a crypto wallet. No keys to manage."
   },
   "right_rail": {
     "communities": {

@@ -199,8 +199,15 @@ const CommentListItem = memo(function CommentListItem({
             />
             <Accordion type="single" collapsible value={openState} className="w-full min-w-0">
               <AccordionItem className="w-full min-w-0" value="item-1">
+                {/* ★ THE COMMENT SUBTREE WAS AN UNMIGRATED VISUAL SYSTEM (v8, post detail).
+                    Measured on a real thread: 181 bordered boxes at border-radius 0 with
+                    border rgb(241,245,249), plus stray 6px, 8px and 12px radii, while the
+                    rest of the app is 14/18/20/22px on #ebebeb / #eee2dc. Card's own
+                    default (`rounded-md`, themed `border`) is what produced most of it.
+                    Pinned to the house tokens here: white surface, #ebebeb hairline,
+                    14px radius, which is the radius the design system assigns to rows. */}
                 <Card
-                  className={cn(`mb-4 w-full min-w-0 overflow-hidden bg-background text-primary depth-${comment.depth}`, {
+                  className={cn(`mb-4 w-full min-w-0 overflow-hidden rounded-[14px] border-[#ebebeb] bg-white text-primary depth-${comment.depth}`, {
                     'opacity-50 hover:opacity-100': hiddenComment || tempraryHidden,
                     'border border-destructive': comment._temporary,
                     'border border-blue-400/50': comment._optimistic
