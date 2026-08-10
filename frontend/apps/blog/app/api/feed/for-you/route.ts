@@ -226,6 +226,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     logger.warn('for-you: block list unavailable, serving unfiltered: %o', error);
     blockedKeys = new Set();
   }
+  // ★ NOTHING BELOW CAN CHANGE THIS READER'S PAGE, so do not pay for it. Parsing
+  // and re-serialising the body is real work on a ~300KB response, on the route
+  // this file's three longest comments are about — and a reader who has blocked
+  // nobody cannot have a block missed. (`withIdentifiableAuthors` therefore also
+  // runs only for readers it can protect; see its note.)
+  if (blockedKeys.size === 0) return response;
 
   try {
     const body = (await response.clone().json()) as
@@ -233,8 +239,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       | null;
     if (!body?.entries || body.entries.length === 0) return response;
     const identified = withIdentifiableAuthors(body.entries);
-    const entries =
-      blockedKeys.size > 0 ? await filterBlockedForViewer(identified, blockedKeys) : identified;
+    const entries = await filterBlockedForViewer(identified, blockedKeys);
     if (entries.length === body.entries.length) return response;
     return NextResponse.json(
       {
@@ -273,6 +278,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
  * rebuilt behind the reader on the same request, and every rebuilt page carries
  * `_lite`. It is also a standing guard — a seventh serving branch that forgets
  * identity loses its lite posts loudly instead of quietly serving a blocked author.
+ *
+ * ★ SCOPE, STATED PLAINLY. This runs only for a reader who has blocked somebody,
+ * because it sits behind the same early return the block filter does. A reader with
+ * an empty block list can still be served one such stale page — they will see the
+ * container's title on those cards until the rebuild lands, which is a cosmetic
+ * defect with no one to protect them from. Paying a JSON round trip on every feed
+ * request to fix a title for one page is the wrong trade; missing a block is not.
  */
 function withIdentifiableAuthors<T extends Entry>(entries: T[]): T[] {
   const kept = entries.filter((entry) => !isLumenPermlink(entry.permlink ?? '') || entry._lite);
