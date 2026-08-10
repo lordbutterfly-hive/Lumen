@@ -19,6 +19,7 @@ import DialogLogin from '@/blog/components/dialog-login';
 import { useFollowMutation, useUnfollowMutation } from '@/blog/features/mute-follow/hooks/use-follow-mutations';
 import { useMuteMutation, useUnmuteMutation } from '@/blog/features/mute-follow/hooks/use-mute-mutations';
 import { useLumenFollow } from '@/blog/lib/lite/client/use-lumen-follow';
+import { useLumenBlock } from '@/blog/lib/lite/client/use-lumen-block';
 import { useFollowingInfiniteQuery } from '@/blog/features/account-lists/hooks/use-following-infinitequery';
 
 /**
@@ -56,6 +57,17 @@ export default function ProfileActions({
   const lumen = useLumenFollow(
     username,
     user.isLoggedIn && username !== user.username && (user.account_tier === 'lite' || liteTarget)
+  );
+  // ★ BLOCK, FOR BOTH TIERS. Unlike Mute below — which is a chain operation and so is
+  // hidden whenever either side is keyless — a block is always Lumen's own record and
+  // is therefore always offered. It is also the stronger of the two: it hides this
+  // person from the viewer's feeds AND stops their replies under the viewer's posts
+  // being served to anyone. Called before the early returns; hooks cannot be
+  // conditional.
+  const block = useLumenBlock(
+    username,
+    liteTarget ? 'lumen' : 'hive',
+    user.isLoggedIn && username !== user.username
   );
 
   if (!user.isLoggedIn) {
@@ -103,6 +115,16 @@ export default function ProfileActions({
     }
   };
 
+  const handleBlockClick = async () => {
+    const failure = await block.toggle();
+    if (failure) {
+      handleError(new Error(failure), {
+        method: block.isBlocking ? 'lumen-unblock' : 'lumen-block',
+        params: { username }
+      });
+    }
+  };
+
   const handleMuteClick = async () => {
     try {
       if (isMute) await unmuteMutation.mutateAsync({ username });
@@ -140,6 +162,20 @@ export default function ProfileActions({
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-52">
+          {/* Block is Lumen's own and works for every combination of the two tiers, so
+              unlike Mute it is never hidden. It is also the item a reader actually
+              wants from this menu: it removes this person from their feeds AND stops
+              that person's replies under their posts reaching any other reader. */}
+          {block.available ? (
+            <DropdownMenuItem
+              onClick={handleBlockClick}
+              disabled={block.busy}
+              className="cursor-pointer text-destructive focus:text-destructive"
+              data-testid="profile-block-menu-item"
+            >
+              {block.isBlocking ? t('user_profile.unblock_button') : t('user_profile.block_button')}
+            </DropdownMenuItem>
+          ) : null}
           {/* Mute is a chain operation, so it is hidden whenever either side is a lite
               account: a keyless viewer cannot sign one, and a lite profile is not an
               account that can be muted. Better absent than broken. */}

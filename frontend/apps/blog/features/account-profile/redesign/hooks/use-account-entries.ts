@@ -6,11 +6,28 @@ import { useInView } from 'react-intersection-observer';
 import { getAccountPosts } from '@transaction/lib/bridge-api';
 import { Entry } from '@hive/common-hiveio-packages/wax';
 import { StaleTime } from '@/blog/lib/react-query';
+import { isBlockedEntry, useLumenBlockList } from '@/blog/lib/lite/client/use-lumen-block';
 
-// 'posts' (author-only, via bridge.get_account_posts sort='posts') — NOT
-// 'blog', which also includes reblogs. The profile's Posts tab must show
-// only what this account itself wrote (issue: reblogs were leaking in).
+// Lumen's own label for a profile tab — a query-key and a lite-path `kind`.
+// It is NOT the value Hive's bridge receives; see BRIDGE_SORT_FOR_QUERY.
 export type AccountEntryQuery = 'posts' | 'comments';
+
+/**
+ * ★ A PROFILE SHOWS WHAT THAT PERSON WROTE (owner ruling, 2026-08-08).
+ *
+ * Hive's `sort: 'blog'` returns own posts PLUS reblogs; `sort: 'posts'` is
+ * author-only. Lumen wants author-only here — **reblogs surface in the
+ * Following feed on the home page instead**, which is where someone looks to
+ * see what the people they follow are passing along.
+ *
+ * This was briefly switched to 'blog' and reverted the same day. It is not an
+ * oversight; do not "fix" it. The seed in
+ * `app/[param]/(user-profile)/page.tsx` must match whatever this says.
+ */
+const BRIDGE_SORT_FOR_QUERY: Record<AccountEntryQuery, string> = {
+  posts: 'posts',
+  comments: 'comments'
+};
 
 interface PageParam {
   author?: string;
@@ -76,7 +93,13 @@ export function useAccountEntries(
     queryFn: async ({ pageParam }: { pageParam?: PageParam }) =>
       lite
         ? await fetchLiteAuthorEntries(username, query, pageParam?.permlink)
-        : (await getAccountPosts(query, username, observer, pageParam?.author ?? '', pageParam?.permlink ?? '')) ?? [],
+        : (await getAccountPosts(
+            BRIDGE_SORT_FOR_QUERY[query],
+            username,
+            observer,
+            pageParam?.author ?? '',
+            pageParam?.permlink ?? ''
+          )) ?? [],
     getNextPageParam: (lastPage) => {
       if (!Array.isArray(lastPage) || lastPage.length === 0) return undefined;
       const last = lastPage[lastPage.length - 1];
@@ -112,6 +135,17 @@ export function useAccountEntries(
     }
   }, [inView, hasNextPage, isFetching, isError, fetchNextPage]);
 
-  const entries = result.data?.pages.flat() ?? [];
+  // ★ EFFECT (A) ON A LIST THE BROWSER FETCHES ITSELF.
+  //
+  // `getAccountPosts` goes straight from this browser to a Hive node, so no Lumen
+  // server ever sees this response and there is nowhere else to apply the reader's
+  // own block list. Client-side is honest HERE and only here: the sole person who
+  // could defeat it is the reader, and all they would win is seeing something they
+  // asked not to see. The OTHER half of blocking — a post owner hiding somebody's
+  // replies from OTHER readers — is never enforced this way, because there the
+  // person running the filter would be the person it exists to constrain.
+  const blockList = useLumenBlockList(Boolean(username));
+  const raw = result.data?.pages.flat() ?? [];
+  const entries = blockList.loaded ? raw.filter((entry) => !isBlockedEntry(entry, blockList)) : raw;
   return { ...result, entries, loadMoreRef: ref };
 }

@@ -78,14 +78,64 @@ export async function enforceUpgradeRate(userId: string): Promise<boolean> {
 }
 
 /**
- * Per-IP cap on cheap read lookups — currently the name-availability check.
+ * Per-IP cap on cheap read lookups — the SIGNUP-FUNNEL reads: name availability,
+ * name suggestions, follow state.
  *
- * That endpoint was completely uncapped and fans out to TWO Hive API calls per
- * request, so it was free ammunition against Hive as well as an enumeration
+ * Those endpoints were completely uncapped and fan out to Hive API calls per
+ * request, so they were free ammunition against Hive as well as an enumeration
  * surface. Generous, because a real person typing a name triggers it repeatedly.
+ *
+ * ★ DO NOT ADD NEW CALLERS TO THIS BUCKET WITHOUT READING enforceStreakRate BELOW.
+ * A shared bucket means the noisiest caller decides whether the quietest one is
+ * allowed to run — see the streak-route incident recorded there.
  */
 export async function enforceLookupRate(ip: string): Promise<boolean> {
   return rateRepo.checkAndConsume(`ip:${ip}`, 'lookup', liteConfig.lookupPerIpPerDay, dayKey());
+}
+
+/**
+ * Per-IP daily cap on the chain-derived retention lookup (`/api/streak/[user]`).
+ *
+ * ★ WHY THIS IS NOT `enforceLookupRate`. It used to be, and that was a
+ * self-inflicted outage waiting for traffic. The `lookup` bucket is the
+ * SIGNUP-FUNNEL budget (name check, name suggest, follow state), default 300 per
+ * IP per day. The retention card fires on essentially every logged-in page load,
+ * which is one to two orders of magnitude more traffic than the whole signup
+ * funnel — so the streak route would spend the entire shared budget and then
+ * 429 the site's own name-availability check. New users could not pick a
+ * username because existing users were reading their profiles. Two endpoints
+ * with completely different call rates must never share one counter; this is the
+ * same fault as F-L14 (vote/reblog draining the `follow` budget), one layer up.
+ *
+ * SIZING. After the cache/limiter reorder in the streak route, this meters only
+ * cache MISSES — the path that actually fans ~50 upstream Hive calls (bounded by
+ * a 6s per-call timeout and a 20s whole-route budget). Warm reads are free and
+ * unmetered, so the honest browsing rate barely touches this; the ceiling exists
+ * to bound a script, and to keep one NAT'd office or mobile-carrier egress IP
+ * from being locked out by its own neighbours.
+ *
+ * CONFIG NOTE: read straight from the environment rather than from `liteConfig`
+ * only because `lib/lite/config.ts` is owned by another lane right now. It
+ * belongs beside `lookupPerIpPerDay` and should move there when that file is
+ * free — same name, same default, no behaviour change.
+ */
+const STREAK_PER_IP_PER_DAY = envPositiveInt('LITE_STREAK_PER_IP_PER_DAY', 1000);
+
+export async function enforceStreakRate(ip: string): Promise<boolean> {
+  return rateRepo.checkAndConsume(`ip:${ip}`, 'streak', STREAK_PER_IP_PER_DAY, dayKey());
+}
+
+/**
+ * Read a positive integer from the environment, falling back on anything that is
+ * not one. The empty string matters here: `.env` files ship these keys PRESENT
+ * AND EMPTY as documentation, and `Number('')` is 0 — which `checkAndConsume`
+ * treats as "deny everything". An unset limit must mean "use the default", never
+ * "429 every caller".
+ */
+function envPositiveInt(name: string, fallback: number): number {
+  const raw = process.env[name];
+  const parsed = raw ? Number(raw) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
 }
 
 /** Per-IP signup cap — an independent limiter from the per-account caps (§H). */
@@ -194,6 +244,28 @@ export async function enforceReblogRate(userId: string): Promise<boolean> {
   if (!user) return false;
   const caps = getUserCaps(user.trustScore, ageDays(user.createdAt));
   return rateRepo.checkAndConsume(`user:${userId}`, 'reblog', caps.likesPerDay, dayKey());
+}
+
+/**
+ * Blocking gets its OWN daily bucket — not the follow one.
+ *
+ * F-L14's lesson, applied before it can bite again: vote and reblog once shared the
+ * `follow` key, so casting votes silently exhausted an unrelated budget. A block is
+ * far more consequential than a follow (it removes other people's comments from a
+ * page), so a user must never find they cannot block because they spent the day
+ * following. Capped all the same: every block writes a row and re-draws a sequence,
+ * and unblock is capped for the same reason follows are — churn is the abuse shape.
+ */
+export async function enforceBlockRate(userId: string): Promise<boolean> {
+  const user = await users.findUserById(userId);
+  if (!user) return false;
+  const caps = getUserCaps(user.trustScore, ageDays(user.createdAt));
+  return rateRepo.checkAndConsume(`user:${userId}`, 'block', caps.likesPerDay, dayKey());
+}
+
+/** As above, for a full Hive account: no Lumen row to score, so a flat cap. */
+export async function enforceHiveBlockRate(hiveName: string): Promise<boolean> {
+  return rateRepo.checkAndConsume(`hive:${hiveName}`, 'block', liteConfig.hiveFollowsPerDay, dayKey());
 }
 
 /**

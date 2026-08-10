@@ -44,6 +44,18 @@ const MdEditor = dynamic(() => import('./md-editor'), {
 
 const logger = getLogger('app');
 
+/**
+ * The Resource Credits gauge, in words. Kept beside the component in the same
+ * convention the other Lumen surfaces use (`PostPublishingSection`,
+ * `user-menu`): newcomer copy lives next to what it describes until the whole
+ * lite vocabulary is translated in one pass, rather than half-populating nine
+ * locale files. Same two strings as the submit page on purpose — one gauge, one
+ * explanation, so the two editors cannot describe it differently.
+ */
+const RC_LABEL = 'Resource Credits';
+const RC_EXPLAINER =
+  'Your Hive account’s free allowance for posting, commenting and voting. It refills on its own over time — you only have to wait if it runs low.';
+
 export function ReplyTextbox({
   onSetReply,
   username,
@@ -67,7 +79,14 @@ export function ReplyTextbox({
   discussionPermlink: string;
   observer: string;
 }) {
-  const { user } = useUserClient();
+  const { user, isHydrated } = useUserClient();
+  /**
+   * Whether to show the Resource Credits gauge at all — see the note beside it.
+   * Gated on `isHydrated` as well as the tier because before hydration `user` is
+   * still the SSR default, and guessing wrong here means showing a Lumen account
+   * the one number this fix exists to stop showing them.
+   */
+  const showResourceCredits = isHydrated && user.account_tier !== 'lite';
   // Use empty string when user is not logged in to disable storage
   // Different storage keys for reply vs edit mode
   const replyStorageKey = useMemo(
@@ -150,6 +169,30 @@ export function ReplyTextbox({
     }
   }, [user.username, username, permlink, editMode]);
 
+  // ★★★ A FAILED AUTO-SAVE MUST BE VISIBLE HERE TOO (2026-08-10).
+  //
+  // `setStorageItem` was taught to report whether the write landed on 2026-08-09,
+  // and the composer grew a persistent banner for it (post-form.tsx). This — its
+  // sibling, the box every reply and every comment edit is typed into — kept
+  // throwing the answer away. Under a full quota or in private browsing the write
+  // fails, the box looks exactly like a saved draft, and the reply is gone on
+  // reload. Nobody loses a draft because a save failed; they lose it because a
+  // failed save looked identical to a successful one.
+  //
+  // Same treatment as the composer: state, not a toast, because a toast disappears
+  // and this stays true until the writer does something about it.
+  const [draftSaveFailed, setDraftSaveFailed] = useState(false);
+
+  // Reported once per transition rather than on every 500 ms tick, so a long
+  // over-quota session logs one line instead of thousands.
+  const reportSave = useCallback((stored: boolean) => {
+    setDraftSaveFailed((was) => {
+      if (was === !stored) return was;
+      if (!stored) logger.error('Reply auto-save failed: the draft did not fit in localStorage');
+      return !stored;
+    });
+  }, []);
+
   // Debounced save to localStorage (works for both reply and edit modes)
   const saveToStorage = useCallback(
     (value: string) => {
@@ -162,21 +205,25 @@ export function ReplyTextbox({
         // In reply mode, save any non-empty value
         if (editMode) {
           if (value && value !== commentBody) {
-            setStoredDraft(value);
+            reportSave(setStoredDraft(value));
           } else {
             // If same as original or empty, remove draft
             removeStoredDraft();
+            // Nothing is pending, so nothing can be unsaved — clearing the banner
+            // here is what stops it outliving the text it was about.
+            reportSave(true);
           }
         } else {
           if (value) {
-            setStoredDraft(value);
+            reportSave(setStoredDraft(value));
           } else {
             removeStoredDraft();
+            reportSave(true);
           }
         }
       }, 500);
     },
-    [storageKey, editMode, commentBody, setStoredDraft, removeStoredDraft]
+    [storageKey, editMode, commentBody, setStoredDraft, removeStoredDraft, reportSave]
   );
 
   // Cleanup timer on unmount
@@ -192,6 +239,10 @@ export function ReplyTextbox({
     if (storageKey) {
       removeStoredDraft();
     }
+    // The draft is gone on purpose now (sent, or discarded), so a warning about it
+    // not being saved is no longer true. The composer had the mirror-image bug —
+    // a banner that outlived its subject — and it is not worth reproducing.
+    setDraftSaveFailed(false);
   }, [storageKey, removeStoredDraft]);
 
   const handleCancel = () => {
@@ -354,6 +405,18 @@ export function ReplyTextbox({
           </div>
         )}
 
+        {draftSaveFailed ? (
+          <div
+            role="alert"
+            data-testid="reply-draft-save-failed"
+            className="rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900 dark:border-red-800 dark:bg-red-950 dark:text-red-100"
+          >
+            <strong className="font-semibold">This reply is not being saved.</strong> Your browser
+            has no room to store it, so it will be lost if you close or reload this tab. Post it
+            now, or copy your text somewhere safe.
+          </div>
+        ) : null}
+
         <div>
           <MdEditor
             windowheight={200}
@@ -415,21 +478,53 @@ export function ReplyTextbox({
             </Button>
           </div>
 
-          <div className="flex items-center gap-3">
-            <Progress
-              value={manabarsData?.rc.percentageValue ?? 0}
-              className="h-2 w-20"
-              indicatorClassName="bg-[#0088FE]"
-            />
-            <span className="text-xs tabular-nums text-muted-foreground">
-              {manabarsData?.rc.percentageValue ?? 0}% RC
-              {manabarsData?.rc.percentageValue !== 100 && manabarsData?.rc.cooldown ? (
-                <span className="ml-1 text-muted-foreground/60">
-                  ({hoursAndMinutes(manabarsData.rc.cooldown, t)})
-                </span>
-              ) : null}
-            </span>
-          </div>
+          {/* ★★★ NOT SHOWN TO A LUMEN ACCOUNT, AND NAMED FOR EVERYONE ELSE
+              (2026-08-08, UX tester on the new-user path).
+
+              A lite account has no Hive account, so `manabarsData` is undefined
+              for it and this rendered a full-width "0% RC" gauge, pinned at
+              zero, directly beside the Reply button — the first thing a
+              newcomer meets when they try to answer someone. It is not merely
+              unexplained: it is a zero about a chain account they do not have,
+              and it reads as "you have no capacity to post" at the exact moment
+              they are deciding whether this place works. Their replies do not
+              spend their RC at all; the publisher account's RC is what pays,
+              and that is not theirs to see or act on.
+
+              For a Hive-keyed account the number IS theirs and does gate
+              replying, so it stays — but "RC" alone is Hive jargon, so the
+              label spells it out and the tooltip says what it means in one
+              sentence. `title` as well as the tooltip, so it is not
+              mouse-only. */}
+          {showResourceCredits ? (
+            <div className="flex items-center gap-3">
+              <Progress
+                value={manabarsData?.rc.percentageValue ?? 0}
+                className="h-2 w-20"
+                indicatorClassName="bg-[#0088FE]"
+              />
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span
+                      className="cursor-help text-xs text-muted-foreground"
+                      title={RC_EXPLAINER}
+                      data-testid="reply-resource-credits"
+                    >
+                      <span className="tabular-nums">{manabarsData?.rc.percentageValue ?? 0}%</span>{' '}
+                      {RC_LABEL}
+                      {manabarsData?.rc.percentageValue !== 100 && manabarsData?.rc.cooldown ? (
+                        <span className="ml-1 text-muted-foreground/60">
+                          ({hoursAndMinutes(manabarsData.rc.cooldown, t)})
+                        </span>
+                      ) : null}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-[260px] text-xs">{RC_EXPLAINER}</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
+          ) : null}
         </div>
       </div>
 

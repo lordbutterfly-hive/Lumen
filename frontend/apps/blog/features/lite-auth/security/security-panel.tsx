@@ -1,7 +1,9 @@
 'use client';
 
 import { FC, useCallback, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSignOut } from '@smart-signer/lib/auth/use-sign-out';
 import {
   bindGoogle,
   bindWallet,
@@ -31,6 +33,13 @@ import GoogleSignIn, { googleConfigured } from '../login/google-signin';
  *
  * Linking is a step-up: a single-use, user-bound nonce, then a fresh proof of the NEW
  * credential. The nonce is requested per attempt and never reused (SEQ-1/XC-2).
+ *
+ * ★★★ AND IT IS WHERE "SIGN OUT EVERYWHERE" LIVES (2026-08-10). `logout-all` has
+ * existed since F-L3 and had NO caller anywhere in the product — the only thing that
+ * ever advanced the account-wide session epoch was the ordinary per-device sign-out
+ * button, doing it by accident. Now that sign-out correctly revokes one device, the
+ * account-wide lever needs a real home, and this is the screen a user reaches when
+ * they think something is wrong with their account.
  */
 
 const COPY = {
@@ -53,6 +62,14 @@ const COPY = {
   stepUpFailed: 'Could not start linking — please try again.',
   taproot: 'Taproot addresses aren’t supported yet — use a SegWit (bc1q…) or legacy (1…) address.',
   loading: 'Loading…',
+  signOutAllTitle: 'Signed in somewhere else?',
+  signOutAllBody:
+    'Signing out normally only signs out the device you are using. If you think someone else has access to your account, this ends every session everywhere — including this one.',
+  signOutAll: 'Sign out on all devices',
+  signOutAllConfirm: 'Yes, sign out everywhere',
+  signOutAllCancel: 'Cancel',
+  signOutAllBusy: 'Signing out…',
+  signOutAllFailed: 'Could not sign out everywhere just now. Please try again.',
   // This page's whole job is to tell someone they have only one way back into
   // their account. Failing silently to "Loading…" forever meant that warning
   // never arrived — the one outcome this screen exists to prevent.
@@ -112,6 +129,10 @@ const MethodRow: FC<{ method: LiteAuthMethod }> = ({ method }) => {
 
 const SecurityPanel: FC = () => {
   const { user } = useUserClient();
+  const router = useRouter();
+  const signOutMutation = useSignOut();
+  const [confirmSignOutAll, setConfirmSignOutAll] = useState(false);
+  const [signOutAllError, setSignOutAllError] = useState<string | null>(null);
   const [methods, setMethods] = useState<LiteAuthMethod[] | null>(null);
   const [atRisk, setAtRisk] = useState(false);
   const [busy, setBusy] = useState<'btc' | 'evm' | 'google' | null>(null);
@@ -195,6 +216,22 @@ const SecurityPanel: FC = () => {
     } finally {
       setBusy(null);
     }
+  };
+
+  const signOutEverywhere = async () => {
+    setSignOutAllError(null);
+    try {
+      // `everywhere` is the whole point: the default (false) is the per-device
+      // sign-out every other control uses.
+      await signOutMutation.mutateAsync({ user, everywhere: true });
+    } catch {
+      // Say so rather than navigating away as if it worked — this is the control a
+      // user reaches for when they believe their account is compromised, and a
+      // silent failure here is the worst possible lie.
+      setSignOutAllError(COPY.signOutAllFailed);
+      return;
+    }
+    router.push('/');
   };
 
   const linkGoogle = async (idToken: string) => {
@@ -301,6 +338,44 @@ const SecurityPanel: FC = () => {
           <p className="text-[12.5px] text-[#9ca3af]">{COPY.googleMissing}</p>
         )}
       </div>
+
+      <h2 className="mt-8 text-[13px] font-semibold uppercase tracking-wide text-[#9ca3af]">
+        {COPY.signOutAllTitle}
+      </h2>
+      <p className="mt-2 text-[14px] leading-[1.55] text-[#4b5563]">{COPY.signOutAllBody}</p>
+      {confirmSignOutAll ? (
+        <div className="mt-2 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => void signOutEverywhere()}
+            disabled={signOutMutation.isLoading}
+            data-testid="sign-out-everywhere-confirm"
+            className="rounded-[10px] border-[1.5px] border-[#b91c1c] bg-white px-4 py-2 text-[14px] font-semibold text-[#b91c1c] hover:bg-[#fdf2f0] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {signOutMutation.isLoading ? COPY.signOutAllBusy : COPY.signOutAllConfirm}
+          </button>
+          <button
+            type="button"
+            onClick={() => setConfirmSignOutAll(false)}
+            disabled={signOutMutation.isLoading}
+            className="rounded-[10px] border border-[#e2e4e7] bg-white px-4 py-2 text-[14px] font-semibold text-[#161511] hover:border-[#161511] disabled:opacity-50"
+          >
+            {COPY.signOutAllCancel}
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setConfirmSignOutAll(true)}
+          data-testid="sign-out-everywhere"
+          className="mt-2 rounded-[10px] border border-[#e2e4e7] bg-white px-4 py-2 text-[14px] font-semibold text-[#161511] hover:border-[#161511]"
+        >
+          {COPY.signOutAll}
+        </button>
+      )}
+      {signOutAllError ? (
+        <p className="mt-2 text-[13px] text-destructive">{signOutAllError}</p>
+      ) : null}
 
       {busy === 'google' ? <p className="mt-3 text-[13px] text-[#4b5563]">{COPY.linking}</p> : null}
       {done ? <p className="mt-3 text-[13px] font-medium text-[#1f6340]">{COPY.linkedOk}</p> : null}

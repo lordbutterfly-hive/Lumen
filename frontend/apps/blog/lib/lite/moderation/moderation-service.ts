@@ -4,7 +4,7 @@ import * as users from '../repositories/user-repository';
 import * as posts from '../repositories/post-repository';
 import * as publishJobs from '../repositories/publish-job-repository';
 import * as log from '../repositories/moderation-repository';
-import { requeuePublish, takeDownPost } from '../content/post-service';
+import { revivePublish, takeDownPost } from '../content/post-service';
 
 const logger = getLogger('app');
 
@@ -31,6 +31,8 @@ export interface ModerateUserResult {
   /** Posts whose Lumen visibility changed, when `hideContent` was asked for. */
   postsHidden: number;
   postsRestored: number;
+  /** On reinstate: unpublished posts put back on the road to Hive. */
+  postsRequeued: number;
   /** Posts of theirs already on Hive. Hiding locally does NOT remove these. */
   postsOnChain: number;
 }
@@ -69,6 +71,28 @@ export async function moderateUser(input: {
     }
   }
 
+  // ★★★ REINSTATING MUST ALSO PUT THE UNPUBLISHED WORK BACK ON THE ROAD (2026-08-10).
+  //
+  // `releaseHeldForUser` above only touches jobs still 'holding'. It does NOT reach a
+  // post whose job was CANCELLED by a hide, nor one whose job has already died — and
+  // those are the posts a ban leaves behind, because the drain kept running while the
+  // account was down. So the account came back, its posts were visible again, and
+  // every one of them was permanently off-chain with nothing queued: the exact
+  // stranded state found on the live queue, arrived at through the front door.
+  //
+  // Done AFTER the visibility restore above, so `revivePublish` sees the final state.
+  let postsRequeued = 0;
+  if (reinstating) {
+    for (const post of await posts.getUserPosts(input.userId, {
+      limit: 200,
+      visibleOnly: true,
+      kind: 'all'
+    })) {
+      if (post.hivePermlink) continue;
+      if (await revivePublish(post)) postsRequeued++;
+    }
+  }
+
   const postsOnChain = await posts.countPublishedByUser(input.userId);
 
   await log.recordAction({
@@ -77,11 +101,11 @@ export async function moderateUser(input: {
     targetId: input.userId,
     action: input.action,
     reason: input.reason ?? null,
-    detail: { jobsHeld, jobsReleased, postsHidden, postsRestored, postsOnChain }
+    detail: { jobsHeld, jobsReleased, postsHidden, postsRestored, postsRequeued, postsOnChain }
   });
 
   logger.info(
-    'Moderation: %s %s by %s (jobs held %d / released %d, posts hidden %d / restored %d, %d already on chain)',
+    'Moderation: %s %s by %s (jobs held %d / released %d, posts hidden %d / restored %d / re-queued %d, %d already on chain)',
     input.action,
     input.userId,
     input.actor,
@@ -89,10 +113,11 @@ export async function moderateUser(input: {
     jobsReleased,
     postsHidden,
     postsRestored,
+    postsRequeued,
     postsOnChain
   );
 
-  return { user, jobsHeld, jobsReleased, postsHidden, postsRestored, postsOnChain };
+  return { user, jobsHeld, jobsReleased, postsHidden, postsRestored, postsRequeued, postsOnChain };
 }
 
 export interface ModeratePostResult {
@@ -142,9 +167,13 @@ export async function moderatePost(input: {
   // 'publishing', and the orphan sweep skips any post that has a job row at all. So a
   // hide-then-restore left the post visible in Lumen and permanently unable to reach
   // Hive — silent, and unrecoverable without hand-written SQL.
+  // ★ `revivePublish`, not `requeuePublish` (2026-08-10): a hide can now leave the
+  // job PARKED ('holding') rather than cancelled, and minting a second create job
+  // alongside a parked one would race two broadcasts at the same permlink. Release
+  // what exists; mint only when nothing is left alive.
   const requeued =
     !post.hivePermlink && input.visibility === 'visible'
-      ? await requeuePublish(post)
+      ? await revivePublish(post)
       : false;
   const result = wantsTakedown
     ? await takeDownPost(input.postId)

@@ -48,6 +48,19 @@ note above for the identical situation), is read straight from the
 environment as a fallback when ``HafsqlClient`` is constructed with no
 explicit ``lite=`` — see ``_lite_config_from_env``.
 
+★★★ G5 (2026-08-10) — SELF-EXCLUSION RESOLVES THE COMMENTER, NOT JUST THE
+POSTER. ``_POPULAR_ENGAGEMENT`` and ``_SQL_COMMENTS_FOR_POSTS`` excluded
+self-engagement on the CHAIN identity (``rc.author <> c.author``). Every lite
+writer publishes through one shared publisher account, so a lite post and every
+lite reply to it are all ``hbd-temp``: the rule read them as one person talking
+to themselves and discarded them, and a post popular purely inside Lumen could
+not reach the popularity lane at all. Both queries now resolve the commenter
+through :func:`_engager_identity` — the same substitution :func:`_identity`
+already made on the POST side, under the same ``publisher_accounts`` trust gate
+— and compare resolved identity against resolved identity. Rebloggers are
+deliberately untouched: ``hafsql.reblogs`` carries no ``json_metadata``, so
+there is no attribution to resolve (see ``_POPULAR_ENGAGEMENT``'s note).
+
 ★★★ PERF — ``author_engagement`` (``_SQL_AUTHOR_ENGAGEMENT``) is
 ``pipeline._author_priors``'s hot path (every request, 80% of the composite
 score). Live-measured to time out (>15s, up to 58s containerised) against a
@@ -78,6 +91,7 @@ from recsys.config import (
     LITE_PUBLISHER_ACCOUNTS_ENV,
     HafsqlConfig,
     LiteConfig,
+    PopularConfig,
 )
 from recsys.contracts import Candidate, CandidateSource, EngagementEdge, Post, Vote
 from recsys.core.scoring import AuthorEngagement
@@ -250,10 +264,151 @@ def _top_level_or_lite(alias: str = "") -> str:
 
 def _identity(alias: str = "") -> str:
     """The author identity RANKING uses: the lite writer where present, else the
-    chain author. Hydration still keys on the chain author (votes and comments
-    are recorded against it); only the ranked identity is substituted."""
+    chain author.
+
+    ★ THE ROW LOOKUP still keys on the chain author — votes, comments and
+    reblogs are all stored on chain against the publisher account + permlink, so
+    `(author, permlink)` is what any hydration query must join on. What is
+    substituted is every IDENTITY the ranker compares or counts: the post's
+    author here, and (G5, 2026-08-10) the COMMENTER on the other side of a
+    self-exclusion — see :func:`_engager_identity`. The pre-G5 wording of this
+    docstring ("hydration still keys on the chain author") was read as "so
+    hydration never resolves an identity", which is how the self-exclusion below
+    ended up comparing a lite writer against the shared publisher account."""
     t = f"{alias}." if alias else ""
     return f"COALESCE({t}json_metadata->>'lumen_user_id', {t}author)"
+
+
+#: ★★★ G1 — A LITE IDENTITY MAY NOT LOOK LIKE A HIVE ACCOUNT (2026-08-10).
+#:
+#: THE RISK. `_engager_identity` substitutes a string taken out of
+#: `json_metadata` for an account name, and that string then keys engagement.
+#: If it could equal a REAL Hive account's name, engagement would pool into that
+#: account — someone else's `total_base`, someone else's ranked identity, spam
+#: filed under `@blocktrades/…`. Nothing downstream can tell the two apart.
+#:
+#: WHAT THE FRONTEND ACTUALLY DOES, checked before writing this rather than
+#: assumed (`frontend/apps/blog/lib/lite/`):
+#:   * `publisher/footer.ts:23` writes `lumen_user_id: p.userId`, and `userId`
+#:     is the row's `lumen_user.user_id` — a server-minted ULID from `ids.ts`
+#:     (26 chars, UPPERCASE Crockford base32, `crypto.randomBytes` entropy). It
+#:     is NEVER user-chosen, so the name a signup picks does not reach this key
+#:     at all. Verified against 210 live rows: every one matches that shape.
+#:   * The chosen DISPLAY name is separately checked against Hive's namespace at
+#:     signup completion — `auth/auth-service.ts:221-235` refuses `exists` and
+#:     FAILS CLOSED on `api_error` — plus format/reserved-term vetting in
+#:     `names/vetting.ts`.
+#: So the collision is not reachable through the signup flow today.
+#:
+#: WHY THE CHECK IS HERE ANYWAY. "Not reachable today" is a property of another
+#: repo's code that recsys does not verify and cannot see change. This turns it
+#: into an invariant recsys enforces itself, and it costs one regex over a
+#: publisher-authored row. It also bounds the damage of a compromised publisher
+#: key: that key can still publish, but it cannot make its output rank as
+#: someone else's account.
+#:
+#: THE ENVELOPE, not the exact grammar. Every valid Hive account name is 3-16
+#: characters of lowercase letters/digits/dots/dashes starting with a letter, so
+#: this pattern matches a SUPERSET of the Hive namespace. Rejecting a superset is
+#: the safe direction — some strings that are not valid Hive names are refused
+#: too, and refusal means "fall back to the chain author", i.e. the pre-G5
+#: behaviour, never a spoof. A 26-character uppercase ULID cannot match.
+_HIVE_NAME_ENVELOPE = "^[a-z][a-z0-9.-]{2,15}$"
+
+
+def _engager_identity(alias: str = "") -> str:
+    """The identity of whoever ENGAGED (commented), resolved the same way
+    :func:`_identity` resolves the identity of whoever POSTED.
+
+    ★★★ G5 (2026-08-10, owner's rule: *"every lite post AND every lite comment
+    carries its author's attribution inside the post itself — you rank off
+    that, that is your separator"*).
+
+    THE DEFECT THIS CLOSES. Self-engagement was excluded with a bare
+    `rc.author <> c.author`, i.e. on CHAIN identity. Every lite writer publishes
+    through ONE shared publisher account, so a lite post and every lite reply to
+    it are all `hbd-temp` and the rule read them as one person talking to
+    themselves. Measured against the real mirror before the fix, on real
+    mainnet rows: `hbd-temp/lumen-01kzcp8a6p9eyaa5h0qp9vxf4y` (writer
+    `01KZCNA1SFDK4VZ8MZNTK190Z9`) carries one on-chain reply from a DIFFERENT
+    lite writer (`01KZCNB1W1VHCJ6W1NGJMGHHFW`) and `_POPULAR_ENGAGEMENT`
+    returned **0.0**; `_SQL_COMMENTS_FOR_POSTS` returned **zero rows**. A post
+    popular purely inside Lumen could not reach the popularity lane at all.
+
+    ★★★ THE TRUST GATE IS KEPT, AND IT IS NOT THE SAME PREDICATE AS
+    `_LITE_POST`. `json_metadata` is attacker-controlled, so the embedded claim
+    is honoured ONLY when the chain author is a configured publisher account
+    (`LiteConfig`'s boundary, `recsys/config.py`) — this is STRICTLY NARROWER
+    than :func:`_identity`'s bare COALESCE, never wider. What it deliberately
+    does NOT require is `parent_author` also being a publisher, which
+    `_LITE_POST` does: that condition identifies a lite POST (a child of one of
+    our own containers), and a lite COMMENT's parent is whatever it replied to —
+    a real Hive post more often than not (15 of the 17 lite replies on mainnet
+    today). Requiring it would leave the resolution inert in exactly the case
+    lite users engage with Hive content. The gate that matters is unchanged:
+    only OUR account can author a row whose `author` is OUR account.
+
+    ★★★ AND THE NAMESPACE CHECK (G1's other half — see
+    :data:`_HIVE_NAME_ENVELOPE`). A claimed identity that COULD be a real Hive
+    account name is refused and the row falls back to its chain author.
+
+    With no publishers configured (`lite_publishers = '{}'`), `= ANY('{}')` is
+    false for every row, the CASE always falls through to `{t}author`, and this
+    is byte-for-byte the pre-G5 chain identity."""
+    t = f"{alias}." if alias else ""
+    return f"""CASE WHEN {t}author = ANY(%(lite_publishers)s)
+                     AND {t}json_metadata->>'app' = %(lite_app)s
+                     AND {t}json_metadata->>'lumen_user_id' IS NOT NULL
+                     AND {t}json_metadata->>'lumen_user_id' !~ '{_HIVE_NAME_ENVELOPE}'
+                THEN {t}json_metadata->>'lumen_user_id'
+                ELSE {t}author END"""
+
+#: The permlink prefix of one of OUR OWN rolling containers. Imported from
+#: `PopularConfig` rather than retyped, so the SQL that identifies a container
+#: child and `recsys.core.popular.is_container_post` (which drops containers
+#: from the lane) can never disagree about what a container is —
+#: `test_container_prefix_is_the_one_popular_config_declares` fails if they
+#: drift. Read off the DEFAULT instance deliberately: `HafsqlClient` is not
+#: given a `PopularConfig` (threading a whole config through for one string is a
+#: larger interface change than the drift it would prevent), and the prefix is a
+#: fact about what the publisher writes on chain (`publisher/permlink.ts`,
+#: `publisher/container.ts`), not a per-deploy tunable.
+_LITE_CONTAINER_PREFIX = PopularConfig().lumen_container_prefix
+
+# ★★★ A LITE POST IS NOT A COMMENT ON ITS CONTAINER (G4/G5, 2026-08-10).
+#
+# A lite post is stored on chain as a depth-1 comment under one of our rolling
+# containers, so a naive comment count credits the whole Lite tier's output to
+# the container. This predicate is what identifies such a row, and it is defined
+# ONCE and used TWICE — `_SQL_COMMENTS_FOR_POSTS` (hydration) and
+# `_POPULAR_ENGAGEMENT` (recall) — because those two layers disagreeing about
+# what counts as a comment is precisely the class of defect this module keeps
+# hitting.
+#
+# ★ THE CONTAINER-PREFIX TEST IS LOAD-BEARING, AND IS NEW (2026-08-10). Before
+# G5 this predicate stopped at "author AND parent_author are both publishers",
+# which is ALSO true of a lite reply to a lite post — both sides are the shared
+# publisher account. So every cross-lite reply was discarded as if it were a
+# lite post being miscounted as a comment: on the real mirror,
+# `_SQL_COMMENTS_FOR_POSTS` returned ZERO rows for
+# `hbd-temp/lumen-01kzcp8a6p9eyaa5h0qp9vxf4y`, which has exactly one such reply.
+# The parent's permlink is what separates the two: a lite POST's parent is a
+# container (`lumen-c-<ulid>`), a lite REPLY's parent is a post
+# (`lumen-<ulid>`). Verified on chain 2026-08-10: 74 container children, 2
+# cross-lite replies, 15 replies to ordinary Hive posts.
+#
+# COALESCE is load-bearing for a reason unrelated to any of the above:
+# `json_metadata` is NULL on plenty of ordinary comments, `NULL->>'app'` is
+# NULL, and `NOT NULL` is NULL — which Postgres treats as not-true and FILTERS
+# THE ROW OUT. Without it, enabling lite would silently drop a publisher's own
+# metadata-less comments from every comment count. Three-valued logic, failing
+# toward data loss.
+_LITE_CONTAINER_CHILD = """COALESCE(
+    {t}author = ANY(%(lite_publishers)s)
+    AND {t}parent_author = ANY(%(lite_publishers)s)
+    AND {t}json_metadata->>'app' = %(lite_app)s
+    AND starts_with({t}parent_permlink, %(lite_container_prefix)s)
+  , false)"""
 
 # H05: with no trust snapshot, the breadth budget in _SQL_AUTHOR_ENGAGEMENT
 # must never bind — an effectively-infinite unknown_free reproduces the
@@ -338,30 +493,39 @@ WHERE (v.author, v.permlink) IN (
 """
 
 # Per-commenter attribution (§6): WHO commented and how many times — not a
-# bare count. ``rc.author`` is the identity the organic term filters through
+# bare count. The commenter identity is the one the organic term filters through
 # the same exclusion set as votes; summing the per-commenter counts recovers
 # the display comment total, so one grouped query serves both.
-_SQL_COMMENTS_FOR_POSTS = """
-SELECT rc.parent_author, rc.parent_permlink, rc.author, COUNT(*)
-FROM hafsql.operation_comment_view rc
-WHERE rc.parent_author <> ''
-  -- ★ A lite post is a POST that happens to be stored as a comment. Counting it
-  -- here credited every lite writer's work to the container's owner, inflating
-  -- the publisher account's organic score with the whole Lite tier's output.
-  -- COALESCE is load-bearing: `json_metadata` is NULL on plenty of ordinary
-  -- comments, `NULL->>'app'` is NULL, and `NOT NULL` is NULL — which Postgres
-  -- treats as not-true and FILTERS THE ROW OUT. Without it, enabling lite would
-  -- silently drop a publisher's own metadata-less comments from every comment
-  -- count. Three-valued logic, failing toward data loss.
-  AND NOT COALESCE(
-    rc.author = ANY(%(lite_publishers)s)
-    AND rc.parent_author = ANY(%(lite_publishers)s)
-    AND rc.json_metadata->>'app' = %(lite_app)s
-  , false)
-  AND (rc.parent_author, rc.parent_permlink) IN (
-    SELECT * FROM unnest(%(authors)s::text[], %(permlinks)s::text[])
-  )
-GROUP BY rc.parent_author, rc.parent_permlink, rc.author
+#
+# ★★★ G5 (2026-08-10): the commenter is the RESOLVED identity
+# (`_engager_identity`) — the lite writer named inside the comment where the
+# chain author is one of our publishers, else the chain author, byte-identical
+# to the old `rc.author` for every ordinary Hive comment and whenever no
+# publisher is configured. Before this, every lite writer's comment arrived as
+# the single name `hbd-temp`, so five lite users discussing a post hydrated as
+# ONE commenter and `select_popular`'s crowd terms (`credited_breadth` and the
+# log spread) both saw a crowd of one.
+#
+# The inner SELECT exists only so the resolution is written once instead of
+# being repeated verbatim in the GROUP BY; Postgres flattens it.
+_SQL_COMMENTS_FOR_POSTS = f"""
+SELECT parent_author, parent_permlink, commenter, COUNT(*)
+FROM (
+  SELECT rc.parent_author, rc.parent_permlink,
+         {_engager_identity("rc")} AS commenter
+  FROM hafsql.operation_comment_view rc
+  WHERE rc.parent_author <> ''
+    -- A lite post is a POST that happens to be stored as a comment; counting it
+    -- here credited every lite writer's work to the container's owner. A lite
+    -- REPLY is not that and must survive — see `_LITE_CONTAINER_CHILD` for why
+    -- the container-prefix test is what separates them, and for why the
+    -- COALESCE is load-bearing.
+    AND NOT {_LITE_CONTAINER_CHILD.format(t="rc.")}
+    AND (rc.parent_author, rc.parent_permlink) IN (
+      SELECT * FROM unnest(%(authors)s::text[], %(permlinks)s::text[])
+    )
+) attributed
+GROUP BY parent_author, parent_permlink, commenter
 """
 
 # Per-reblogger attribution (§6): DISTINCT identities, same rationale.
@@ -714,10 +878,61 @@ POPULAR_RECALL_REBLOG_WEIGHT = 0.4
 #: about what "leading the conversation" means. Still distinct-identity counts,
 #: still self-excluded; the trust budget and reputation tilt are applied in
 #: Python, which is the only place they exist.
-_POPULAR_ENGAGEMENT = f"""    {POPULAR_RECALL_COMMENT_WEIGHT} * (SELECT COUNT(DISTINCT rc.author)
+#: ★★★ G5 — RECALL RESOLVES THE COMMENTER, AND IT HAS TO BE HERE (2026-08-10).
+#:
+#: This expression IS the recall ordering: `_SQL_POPULAR_POSTS` cuts the pool to
+#: `%(limit)s` rows (150 in production) by it, in SQL, before a single row is
+#: hydrated. Lite engagement otherwise enters only in `_merge_lite_engagement`,
+#: i.e. AFTER hydration — so a post popular purely inside Lumen was filtered out
+#: before anything downstream could score it. Resolving anywhere but here fixes
+#: nothing for this lane.
+#:
+#: TWO CHANGES, both on the comment term:
+#:   1. `COUNT(DISTINCT rc.author)` -> `COUNT(DISTINCT <resolved>)`: five lite
+#:      writers are five commenters, not one publisher account counted once.
+#:   2. `rc.author <> c.author` -> resolved-vs-resolved: a lite writer is still
+#:      excluded from their own post (measured: the self-reply on
+#:      `lumen-01kzj5nrawppr44wrhj49zfsh8` stays excluded), while a reply from a
+#:      DIFFERENT lite writer now counts.
+#:
+#: ★ BOTH SIDES USE THE GATED `_engager_identity`, NOT `_identity`, AND THE
+#: DIFFERENCE IS A HOLE THIS NEARLY OPENED (caught by measurement, 2026-08-10).
+#: `_identity` is a BARE COALESCE with no provenance check — `_SQL_POPULAR_POSTS`
+#: partitions on it and `_build_post` ranks on it, a looseness this module
+#: already flags as out of scope. Using it on the POST side of a self-exclusion
+#: is different in kind: any account could put a `lumen_user_id` in its own
+#: post's `json_metadata`, and the comparison `rc.author <> COALESCE(claim, ...)`
+#: would then be true for the author's OWN comments — self-engagement counted,
+#: no publisher, no lite deploy required. Measured with `lite_publishers='{}'`
+#: (lite fully OFF) the loose form scored a lumen-shaped post 0.6 where the
+#: pre-G5 query scored 0.0. Gated on both sides, a non-publisher post resolves
+#: to `c.author` on both sides and the predicate is byte-for-byte the old one.
+#: Plus the container-child exclusion the hydration query already had. That is
+#: NOT optional here: `rc.author <> c.author` used to exclude a container's own
+#: children incidentally (both sides are the publisher), and resolving the
+#: commenter removes that accident — without the explicit predicate a rolling
+#: container would count every lite post filed into it as a distinct commenter
+#: and top the recall ordering outright.
+#:
+#: ★ THE REBLOG TERM IS DELIBERATELY UNCHANGED, and this is a finding, not an
+#: omission. `hafsql.reblogs` has no `json_metadata` column at all (columns:
+#: account_id, account_name, post_id, author, permlink, block_num, created_at),
+#: so a reblogger carries no embedded attribution and there is nothing to
+#: resolve — `r.account_name` can only ever hold a real Hive account. Lite
+#: reblogs are not on chain: they live in the Lumen app's own Postgres and enter
+#: through `_merge_lite_engagement` as `lite_rebloggers`, kept structurally
+#: apart from chain rebloggers on purpose (`AttributedPost.lite_rebloggers`).
+#: Resolving `r.account_name` against `_identity(c)` would therefore be a no-op
+#: for lite posts (a Hive account name can never equal a ULID) while WEAKENING
+#: the real guard it replaces — the publisher self-reblogging its own container
+#: child would stop being excluded. So it stays on the chain identity, which for
+#: this column is the resolved identity.
+_POPULAR_ENGAGEMENT = f"""    {POPULAR_RECALL_COMMENT_WEIGHT} * (
+           SELECT COUNT(DISTINCT {_engager_identity("rc")})
            FROM hafsql.operation_comment_view rc
            WHERE rc.parent_author = c.author AND rc.parent_permlink = c.permlink
-             AND rc.author <> c.author)
+             AND {_engager_identity("rc")} <> {_engager_identity("c")}
+             AND NOT {_LITE_CONTAINER_CHILD.format(t="rc.")})
     + {POPULAR_RECALL_REBLOG_WEIGHT} * (SELECT COUNT(DISTINCT r.account_name)
              FROM hafsql.reblogs r
              WHERE r.author = c.author AND r.permlink = c.permlink
@@ -1398,9 +1613,13 @@ def _build_post(
     attribution maps (total comments, distinct rebloggers), so the display
     counters and the scored identities can never disagree."""
     author, permlink, category, created, tags, lite_author = row
-    # Hydration keys on the CHAIN identity — votes, comments and reblogs are all
-    # recorded against the publisher account + permlink on chain. Only the
-    # ranked identity is substituted.
+    # Hydration LOOKS UP by the CHAIN identity — votes, comments and reblogs are
+    # all recorded against the publisher account + permlink on chain, so
+    # `(author, permlink)` is the only key that matches a row. The IDENTITIES
+    # inside those rows are a separate question: the post's own author is
+    # substituted below, and (G5) `comments_by_key`'s commenter keys already
+    # arrive resolved from `_SQL_COMMENTS_FOR_POSTS`, so `commenters` names lite
+    # writers individually rather than the one publisher account they share.
     key = (author, permlink)
     community = category if category.startswith("hive-") else None
     tag_tuple = tuple(tags or ())
@@ -1840,11 +2059,14 @@ class HafsqlClient:
     def _lite_params(self) -> dict[str, Any]:
         """Bound into EVERY query, including the ones that do not source lite
         content — `_SQL_COMMENTS_FOR_POSTS` needs them to EXCLUDE lite posts
-        from a container's comment count, and psycopg raises on an unbound
-        placeholder rather than ignoring it."""
+        from a container's comment count and (G5) to RESOLVE lite commenters,
+        and psycopg raises on an unbound placeholder rather than ignoring it.
+        A key no query references is simply not consumed, which is why this can
+        stay one dict for all of them."""
         return {
             "lite_publishers": sorted(self._lite.publisher_accounts),
             "lite_app": self._lite.app_id,
+            "lite_container_prefix": _LITE_CONTAINER_PREFIX,
         }
 
     def _fetch_lite(
@@ -1965,7 +2187,13 @@ class HafsqlClient:
     def _comments_for_posts(
         self, authors: list[str], permlinks: list[str]
     ) -> dict[tuple[str, str], dict[str, int]]:
-        """Per-post commenter attribution: ``{key: {commenter: comment_count}}``."""
+        """Per-post commenter attribution: ``{key: {commenter: comment_count}}``.
+
+        ★ G5: ``commenter`` is the RESOLVED identity — a lite writer's
+        ``lumen_user_id`` when the comment was published through a configured
+        publisher account, else the chain author. The dict KEY is still the
+        chain ``(author, permlink)``, which is what the rows are stored under.
+        """
         rows = self._fetch_lite(
             _SQL_COMMENTS_FOR_POSTS, {"authors": authors, "permlinks": permlinks}
         )

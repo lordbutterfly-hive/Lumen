@@ -9,15 +9,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@ui/co
 import { useTranslation } from "@/blog/i18n/client";
 import RendererContainer from "@/blog/features/post-rendering/rendererContainer";
 import { postClassName } from "@/blog/features/post-editor/lib/utils";
-
-/**
- * Above this many characters the live preview stops rendering automatically.
- * A long-form Hive post is a few tens of thousands of characters, so this sits
- * far above any real article and only catches the pathological paste that
- * freezes the tab. It is a character count rather than bytes because that is
- * what the renderer actually walks.
- */
-const LIVE_PREVIEW_MAX_CHARS = 200_000;
+import { previewGateHolds } from "@/blog/features/post-editor/lib/preview-gate";
 
 interface PostPreviewPanelProps {
   preview: boolean;
@@ -39,8 +31,27 @@ export function PostPreviewPanel({
   proxyAuthToken,
 }: PostPreviewPanelProps) {
   const { t } = useTranslation("common_blog");
-  // Opt-in escape hatch for a draft over the size limit — see the panel below.
-  const [renderHugePreview, setRenderHugePreview] = useState(false);
+  /**
+   * ★★★ THE ESCAPE HATCH USED TO BE PERMANENT, WHICH DISARMED THE GUARD (2026-08-10).
+   *
+   * "Render preview anyway" set a plain boolean that nothing ever reset, so one
+   * click at 250k characters left the 200k gate off for the rest of the session —
+   * and the next paste, at any size, went straight to the renderer. The feature
+   * whose entire job is to stop a multi-MB paste freezing the tab could be turned
+   * off by a click at a size that was never dangerous, and the freeze it exists to
+   * prevent came back on the following paste.
+   *
+   * So the opt-in is stored as a SIZE, not a flag: the number of characters the
+   * writer accepted the wait for. Rendering stays allowed while the document is
+   * within one more gate's worth of that — ordinary typing never covers 200,000
+   * characters, so it never re-arms mid-sentence, while a multi-MB paste blows
+   * straight past it and the gate closes again. Cost is what the guard actually
+   * cares about: main-thread time is proportional to size, and this is a budget on
+   * size.
+   */
+  const [approvedChars, setApprovedChars] = useState<number | null>(null);
+  const previewChars = previewContent?.length ?? 0;
+  const previewBlocked = previewGateHolds(previewChars, approvedChars);
 
   return (
     <div
@@ -106,7 +117,7 @@ export function PostPreviewPanel({
         data-testid="preview-scroller"
         className="flex h-full overflow-y-auto overscroll-contain rounded-b-lg border border-border"
       >
-        {previewContent && previewContent.length > LIVE_PREVIEW_MAX_CHARS && !renderHugePreview ? (
+        {previewContent && previewBlocked ? (
           /* ★★★ THE FREEZE, STOPPED AT ITS SOURCE (2026-08-09).
              Debouncing the preview keeps typing responsive, but it does not help
              a single huge PASTE: 300 ms later the whole document still goes to
@@ -118,7 +129,11 @@ export function PostPreviewPanel({
              Above the limit the preview becomes opt-in instead of automatic. The
              EDITOR stays fully live — nothing about writing or auto-saving is
              degraded — and the reader is told plainly why, with the button to
-             render it anyway if they accept the wait. */
+             render it anyway if they accept the wait.
+
+             ★ And the opt-in is bounded by SIZE, so accepting the wait for this
+             document does not silently accept it for a 5 MB one pasted later. See
+             `approvedChars` above. */
           <div
             className="flex w-full flex-col items-center justify-center gap-3 p-8 text-center text-muted-foreground"
             data-testid="preview-too-large"
@@ -129,7 +144,12 @@ export function PostPreviewPanel({
               characters, and rendering it on every change would freeze the tab. Your text is safe
               and still saving.
             </span>
-            <Button type="button" variant="outlineRed" onClick={() => setRenderHugePreview(true)}>
+            <Button
+              type="button"
+              variant="outlineRed"
+              onClick={() => setApprovedChars(previewChars)}
+              data-testid="render-huge-preview"
+            >
               Render preview anyway
             </Button>
           </div>

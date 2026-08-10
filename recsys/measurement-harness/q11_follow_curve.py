@@ -148,7 +148,6 @@ def world_for(seed: int) -> tuple[World, SimGateway, NormContext, TrustSnapshot]
     if seed not in _WORLDS:
         world = build_world(seed=seed)
         gw = SimGateway(world)
-        norm = build_norm(world)
         curated: set[str] = set()
         for t in {a.topic for a in world.authors()}:
             tops = sorted([a for a in world.authors() if a.topic == t],
@@ -157,6 +156,13 @@ def world_for(seed: int) -> tuple[World, SimGateway, NormContext, TrustSnapshot]
         snap = build_trust_snapshot(gw, BASE, since=EPOCH, now=NOW,
                                     trusted_seeds=frozenset(curated),
                                     production=False)  # C5/R2: synthetic seeds
+        # ★ SNAPSHOT FIRST, THEN THE NORM (2026-08-10, PRUNED N1). The §4 sample
+        # has to be built from the same call the scorer makes, and two of the
+        # scorer's inputs — the graph-cred breadth budget and the ring exclusion
+        # — live on the snapshot. Built the other way round (as this did) the
+        # sample cannot carry them and every percentile on this panel is taken
+        # against a distribution `rank_feed` never produces.
+        norm = build_norm(world, gateway=gw, snapshot=snap, settings=BASE)
         _WORLDS[seed] = (world, gw, norm, snap)
     return _WORLDS[seed]
 

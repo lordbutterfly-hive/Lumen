@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
 import { guardWrite, guardRead } from '@/blog/lib/lite/http/guard';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
-import { createLitePost, getLiteFeed, getLiteUserPosts, CreatePostRequest } from '@/blog/lib/lite/content/post-service';
+import { createLitePost, getLiteUserPosts, CreatePostRequest } from '@/blog/lib/lite/content/post-service';
 import { findUserByDisplayName } from '@/blog/lib/lite/repositories/user-repository';
 import { dbPostToEntry } from '@/blog/lib/lite/render/db-post-to-entry';
 import { resolvePublicNames } from '@/blog/lib/lite/render/current-name';
@@ -112,7 +112,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   };
 
   try {
-    const result = await createLitePost(session.user, request, session.sessionEpoch);
+    const result = await createLitePost(session.user, request, session);
     if (result.status === 'error') {
       return NextResponse.json(result, { status: httpStatusFor(result.code) });
     }
@@ -126,49 +126,66 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 }
 
-/** GET /api/lite/posts?before=&limit= — DB-sourced feed as bridge Entries (§E.1). */
+/**
+ * GET /api/lite/posts?author=<name>&before=&limit=&kind= — ONE lite account's
+ * own posts, as bridge Entries (§E.1). For their public profile.
+ *
+ * Without `author` this route used to fall through to `getLiteFeed`/
+ * `listRecent` and hand back every `feed_visibility='visible'` row in
+ * `lumen_post`, newest first, from every author on the platform — no session,
+ * no scoping, reachable by a bare unauthenticated `curl`. That branch had
+ * exactly one caller, `features/discovery-feed/lite-feed-strip.tsx`
+ * ("Lumen-native posts shown ABOVE the Hive discovery feed"), which has since
+ * been unwired from `feed-tabs.tsx` and — as of this fix — is imported
+ * NOWHERE in the app (`grep -rln lite-feed-strip apps/blog` outside `.next`
+ * build output returns nothing). There is therefore no product surface left
+ * for a global dump to serve, and the honest fix for a leak with zero
+ * remaining legitimate callers is to delete the branch, not to bolt a filter
+ * onto a route nothing calls. `author` is now REQUIRED: this endpoint answers
+ * "what has this one named account written", never "what has everyone
+ * written".
+ *
+ * Deliberately still no session requirement on the `author=` path — it is
+ * asked about every profile a reader opens (`features/account-profile/
+ * redesign/hooks/use-account-entries.ts`, keyed on the route's `[param]`
+ * segment, i.e. ANY username, not just the signed-in caller's own), the same
+ * way `bridge.get_account_posts` answers for an ordinary Hive account with no
+ * auth at all. A lite account's public profile is exactly that: public.
+ * `getLiteUserPosts(..., visibleOnly: true)` is the scope — it can only ever
+ * return that ONE account's own already-visible, non-deleted posts, never
+ * another author's and never anything moderation has hidden.
+ */
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const blocked = guardRead();
   if (blocked) return blocked;
 
+  const author = req.nextUrl.searchParams.get('author');
+  if (!author) {
+    return NextResponse.json(
+      { error: 'author_required', message: 'GET /api/lite/posts requires ?author=<username>.' },
+      { status: 400 }
+    );
+  }
+
   const before = req.nextUrl.searchParams.get('before') ?? undefined;
   const limitParam = req.nextUrl.searchParams.get('limit');
   const limit = limitParam && Number.isFinite(Number(limitParam)) ? Number(limitParam) : 20;
-
-  // ★ `?author=` — ONE lite account's own posts, for their profile.
-  //
-  // Without this the profile's Posts tab asked Hive for the posts of a name that
-  // has no Hive account and got `Account <name> does not exist`, so a lite author
-  // could never see their own writing on their own profile. Their posts live in
-  // this database (and on chain under the publisher account), not under their
-  // handle. `kind` separates the Posts tab from the Comments tab.
-  const author = req.nextUrl.searchParams.get('author');
-  if (author) {
-    const kindParam = req.nextUrl.searchParams.get('kind');
-    const kind = kindParam === 'comments' ? 'comments' : kindParam === 'all' ? 'all' : 'posts';
-    try {
-      const user = await findUserByDisplayName(author.toLowerCase());
-      // Not a Lumen account: an empty list, not a 404. This route is asked about
-      // every profile the reader opens, most of which are ordinary Hive accounts.
-      if (!user) return NextResponse.json({ entries: [] });
-      const list = await getLiteUserPosts(user.userId, { limit, before, kind, visibleOnly: true });
-      const names = await resolvePublicNames(list);
-      return NextResponse.json({ entries: list.map((post) => dbPostToEntry(post, names.get(post.postId))) });
-    } catch (error) {
-      logger.error(error, 'Lite author posts failed');
-      return NextResponse.json({ error: 'server_error' }, { status: 500 });
-    }
-  }
+  const kindParam = req.nextUrl.searchParams.get('kind');
+  const kind = kindParam === 'comments' ? 'comments' : kindParam === 'all' ? 'all' : 'posts';
 
   try {
-    const list = await getLiteFeed({ limit, before });
+    const user = await findUserByDisplayName(author.toLowerCase());
+    // Not a Lumen account: an empty list, not a 404. This route is asked about
+    // every profile the reader opens, most of which are ordinary Hive accounts.
+    if (!user) return NextResponse.json({ entries: [] });
+    const list = await getLiteUserPosts(user.userId, { limit, before, kind, visibleOnly: true });
     // ONE user query for the page, not one per post. Names are resolved live rather
     // than read off the row so an upgraded author's back catalogue shows their new
     // Hive name (see render/current-name.ts).
     const names = await resolvePublicNames(list);
     return NextResponse.json({ entries: list.map((post) => dbPostToEntry(post, names.get(post.postId))) });
   } catch (error) {
-    logger.error(error, 'Lite feed failed');
+    logger.error(error, 'Lite author posts failed');
     return NextResponse.json({ error: 'server_error' }, { status: 500 });
   }
 }

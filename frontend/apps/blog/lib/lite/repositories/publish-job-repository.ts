@@ -291,12 +291,29 @@ export async function cancelPending(postId: string, reason: string): Promise<num
  *
  * A job already 'publishing' is left alone: it may be mid-broadcast, and stealing it
  * would only produce a job the worker no longer owns.
+ *
+ * ★★★ A `delete` JOB IS NEVER PARKED (2026-08-10).
+ *
+ * THE BUG THIS FIXES, proven end to end: a moderator takes a post down (a `delete`
+ * job is queued, the tool reports `takedownQueued: true`) and then does the obvious
+ * next thing — bans the author. This statement had no `job_type` filter, so it
+ * flipped that freshly-queued takedown from 'pending' to 'holding'. `claimNext`
+ * reads only 'pending', and the only thing that frees a held job is REINSTATING the
+ * user. So the content stayed on the public chain permanently, the moderation log
+ * said it had been removed, and the one action that would finally delete it was
+ * un-banning the person who posted it.
+ *
+ * Holding a `create` is the whole point of suspension — don't publish a suspended
+ * account's new material. A `delete` is the opposite operation: it REMOVES content.
+ * There is no state of an account in which "we owe the world a removal" should be
+ * paused, least of all a ban.
  */
 export async function holdPendingForUser(userId: string, reason: string): Promise<number> {
   const { rowCount } = await query(
     `UPDATE publish_job j SET status = 'holding', last_error = $2
        FROM lumen_post p
-      WHERE p.post_id = j.post_id AND p.user_id = $1 AND j.status = 'pending'`,
+      WHERE p.post_id = j.post_id AND p.user_id = $1 AND j.status = 'pending'
+        AND j.job_type <> 'delete'`,
     [userId, reason]
   );
   return rowCount ?? 0;
@@ -309,6 +326,78 @@ export async function releaseHeldForUser(userId: string): Promise<number> {
        FROM lumen_post p
       WHERE p.post_id = j.post_id AND p.user_id = $1 AND j.status = 'holding'`,
     [userId]
+  );
+  return rowCount ?? 0;
+}
+
+/**
+ * Park ONE job without spending its retry budget or ending its life.
+ *
+ * ★★★ WHY A HIDDEN POST MUST NOT BE 'rejected' (2026-08-10).
+ *
+ * The worker used to call `markTerminal(..., 'rejected')` the moment it found a post
+ * that was not visible — "moderated before publishing". That is a TERMINAL status,
+ * and nothing in the system revives one. Worse, `listOrphaned` treats a terminal job
+ * as "no job", so the orphan sweep re-enqueued the same post on the very next drain,
+ * the worker rejected it again a minute later, and three generations were spent in
+ * three minutes against a condition retrying could never fix. Past the ceiling the
+ * sweep stops seeing the post FOREVER — so a visibility change that lasted an hour
+ * cost the post its entire publish life.
+ *
+ * Measured on the live queue: 38 posts × exactly 3 generations = 114 jobs, all
+ * `rejected` as "moderated before publishing", every one of those posts visible
+ * again now and none of them ever reaching Hive.
+ *
+ * 'holding' is the status this situation already had a name for: parked, undoable,
+ * non-terminal — so the orphan sweep leaves it alone instead of burning generations,
+ * and `queueHealth` counts it.
+ */
+export async function hold(jobId: string, reason: string): Promise<void> {
+  await query(`UPDATE publish_job SET status = 'holding', last_error = $2 WHERE job_id = $1`, [
+    jobId,
+    reason.slice(0, 2000)
+  ]);
+}
+
+/** Release the parked jobs of ONE post (a moderator restoring it). */
+export async function releaseHeldForPost(postId: string): Promise<number> {
+  const { rowCount } = await query(
+    `UPDATE publish_job SET status = 'pending', last_error = NULL, next_attempt_at = now()
+      WHERE post_id = $1 AND status = 'holding'`,
+    [postId]
+  );
+  return rowCount ?? 0;
+}
+
+/**
+ * Release every parked job whose reason to be parked has gone away.
+ *
+ * ★ RECONCILIATION, NOT A CALLBACK. The reason the live queue stranded ~a third of
+ * its content is that the release depended on the code path that caused the hold
+ * calling back — and the 38 stranded posts were hidden by something that never did.
+ * Whatever hid them, the state is what it is now: the post is visible, undeleted,
+ * and its author is in good standing. That is a publishable post, and this sweep
+ * says so without needing to know who hid it.
+ *
+ * The author's status is part of the predicate on purpose: `holdPendingForUser`
+ * writes the SAME 'holding' status for a suspension, and un-holding a suspended
+ * account's queue would quietly undo the suspension.
+ */
+export async function releaseHeldForPublishable(limit: number): Promise<number> {
+  const { rowCount } = await query(
+    `UPDATE publish_job j SET status = 'pending', last_error = NULL, next_attempt_at = now()
+      WHERE j.job_id IN (
+        SELECT j2.job_id
+          FROM publish_job j2
+          JOIN lumen_post p ON p.post_id = j2.post_id
+          JOIN lumen_user u ON u.user_id = p.user_id
+         WHERE j2.status = 'holding'
+           AND p.deleted_locally = false
+           AND p.feed_visibility = 'visible'
+           AND u.status = 'active'
+         LIMIT $1
+      )`,
+    [limit]
   );
   return rowCount ?? 0;
 }
@@ -339,6 +428,27 @@ export interface QueueHealth {
   secondsSinceLastPublish: number | null;
   /** Jobs a dead worker left mid-flight; reapStuck() recovers these. */
   stuckPublishing: number;
+  /**
+   * ★★★ THE NUMBER THIS INTERFACE WAS MISSING (2026-08-10).
+   *
+   * Posts being SERVED to readers that are not on Hive and have nothing working on
+   * them: no pending job, no held job, nothing in flight. Every count above is a
+   * count of JOBS, and a job that died is not a job — so a queue with a third of its
+   * content permanently stranded reported `pending: 0, oldestPendingAge: null`,
+   * which is indistinguishable from "all caught up". It read GREEN for two days
+   * while 38 posts sat off-chain.
+   *
+   * A queue's health is not the state of its rows, it is whether the work got done.
+   */
+  strandedPosts: number;
+  /**
+   * Terminally-failed EDITS and TAKEDOWNS on posts that ARE on chain.
+   *
+   * `listPermanentlyFailed` only looks at posts with `hive_permlink IS NULL`, so a
+   * takedown that Hive refused — content a moderator believes is gone, still public
+   * — was invisible to every surface. This is that surface.
+   */
+  failedOperations: number;
 }
 
 export async function queueHealth(stuckAfterSeconds = 300): Promise<QueueHealth> {
@@ -369,6 +479,26 @@ export async function queueHealth(stuckAfterSeconds = 300): Promise<QueueHealth>
      FROM publish_job`,
     [stuckAfterSeconds]
   );
+  // Deliberately a SECOND query over `lumen_post`: the counts above answer "what is
+  // in the queue", and the queue is exactly the thing that cannot see content it has
+  // already given up on. These two answer "did the work actually happen".
+  const outcome = await query<{ stranded: string; failed_ops: string }>(
+    `SELECT
+       (SELECT count(*) FROM lumen_post p
+         WHERE p.deleted_locally = false
+           AND p.feed_visibility = 'visible'
+           AND p.hive_permlink IS NULL
+           AND NOT EXISTS (
+                 SELECT 1 FROM publish_job j
+                  WHERE j.post_id = p.post_id
+                    AND j.status IN ('pending','holding','publishing')
+               ))::text AS stranded,
+       (SELECT count(*) FROM publish_job j
+          JOIN lumen_post p ON p.post_id = j.post_id
+         WHERE j.job_type IN ('update','delete')
+           AND j.status IN ('failed','rejected')
+           AND p.hive_permlink IS NOT NULL)::text AS failed_ops`
+  );
   const r = rows[0];
   const num = (v: string | null | undefined) => Number(v ?? 0);
   const age = (v: string | null | undefined) => (v === null || v === undefined ? null : Math.round(Number(v)));
@@ -381,6 +511,8 @@ export async function queueHealth(stuckAfterSeconds = 300): Promise<QueueHealth>
     rejected: num(r?.rejected),
     oldestPendingAgeSeconds: age(r?.oldest_pending_age),
     secondsSinceLastPublish: age(r?.seconds_since_last_publish),
-    stuckPublishing: num(r?.stuck_publishing)
+    stuckPublishing: num(r?.stuck_publishing),
+    strandedPosts: num(outcome.rows[0]?.stranded),
+    failedOperations: num(outcome.rows[0]?.failed_ops)
   };
 }

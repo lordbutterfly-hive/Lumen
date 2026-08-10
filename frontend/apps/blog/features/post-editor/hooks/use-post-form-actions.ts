@@ -119,6 +119,35 @@ export function usePostFormActions({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [...Object.values(watchedValues)]);
 
+  /**
+   * ★★★ CALL THIS THE INSTANT A PUBLISH SUCCEEDS, BEFORE `removePost()`.
+   *
+   * Two defects, both from the auto-save effect outliving the submit:
+   *
+   *  (1) DRAFT RESURRECTION. The 500 ms debounce timer was never cleared on
+   *      submit. A keystroke a moment before Submit schedules a write; the
+   *      publish resolves, `removePost()` deletes the draft, and then the
+   *      already-scheduled timer fires with the pre-reset `watchedValues` closed
+   *      over and writes the just-published post straight back into
+   *      localStorage. The user returns to the composer and finds the thing they
+   *      published sitting there as an unsaved draft. The effect's cleanup does
+   *      run — but only once React commits the reset render, and `await
+   *      router.push` yields to the event loop first, so the timer can win.
+   *
+   *  (2) A BANNER THAT COULD NEVER GO AWAY. `draftSaveFailed` is only ever
+   *      cleared inside that same effect, which early-returns forever once
+   *      `hasSubmittedRef` is set. So a warning that was true at submit time
+   *      stayed on screen above the now-empty published form, telling the writer
+   *      their (already published) draft was not being saved.
+   *
+   * Clearing the timer and the flag together, at the one moment both stop being
+   * true, fixes both.
+   */
+  function stopAutoSave() {
+    clearTimeout(storeTimerRef.current);
+    setDraftSaveFailed(false);
+  }
+
   async function onSubmit(data: AccountFormValues) {
     // Flush pending debounce - use the latest editor value which may not have synced to form yet
     clearTimeout(postAreaSyncTimerRef.current);
@@ -162,6 +191,7 @@ export function usePostFormActions({
       setIsSubmitting(false);
       if (result.status === "ok") {
         hasSubmittedRef.current = true;
+        stopAutoSave();
         removePost();
         latestPostAreaRef.current = defaultValues.postArea;
         form.reset(defaultValues);
@@ -274,6 +304,7 @@ export function usePostFormActions({
       }
 
       hasSubmittedRef.current = true;
+      stopAutoSave();
       removePost();
       latestPostAreaRef.current = defaultValues.postArea;
       form.reset(defaultValues);
@@ -305,6 +336,10 @@ export function usePostFormActions({
 
   const handleCancelConfirm = () => {
     clearTimeout(postAreaSyncTimerRef.current);
+    // Same race as on submit, minus the publish: a pending auto-save would write
+    // the discarded draft back moments after `removePost()` deleted it.
+    clearTimeout(storeTimerRef.current);
+    setDraftSaveFailed(false);
     latestPostAreaRef.current = defaultValues.postArea;
     form.reset(defaultValues);
     removePost();

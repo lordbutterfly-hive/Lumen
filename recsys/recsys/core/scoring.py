@@ -19,8 +19,10 @@ the 10% vote term (stake-driven), the 10% reputation term and re-ranker
 tie-breaks. Concretely: viewer ``v-dev-01`` was served a quality-0.312 post
 (organic 0.996) while three quality-0.870 posts sat outside the feed.
 
-The rebuild is two changes, both inside this 80% slice — the 10/10/80 outer
-weights are untouched:
+The rebuild is two changes, both inside this 80% slice — the outer weights are
+untouched (they were the literal 10/10/80 then; since 2026-08-10 the stake
+weight is solved per candidate path from ``ScoreWeights.vote_share_of_final``
+and the other two take the remainder in ratio — see :func:`_earned_weights`):
 
 1. **Joint normalization.** ``organic`` is now a convex blend of two values
    that are ALREADY percentiles, so neither can push the other off the top of
@@ -674,6 +676,52 @@ def organic_quality_raw(
     )
 
 
+def _earned_weights(
+    weights: ScoreWeights,
+    *,
+    in_network_bonus: float,
+    interest_weight: float,
+) -> tuple[float, float, float]:
+    """The ``(vote, reputation, organic)`` weights ``earned`` must use so that
+    the stake term lands at exactly ``weights.vote_share_of_final`` of ``final``
+    ON THIS CANDIDATE'S PATH (§0, PRUNED R4 2026-08-10).
+
+    ``final`` is ``earned`` put through up to two blends::
+
+        earned' = (1 - b) * earned + b * 1.0          # b = in_network_bonus, IN_NETWORK only
+        final   = (1 - W) * earned' + W * interest_pct  # W = interest_weight, tagged viewers only
+
+    Both are affine in ``earned``, so ``d final / d vote_norm`` is
+    ``vote_weight * (1 - b) * (1 - W)``. Neither blend fires unconditionally:
+    ``b`` is zero for every non-``IN_NETWORK`` source and ``W`` is zero for a
+    viewer who declared no interest tags (``pipeline._interest_lookup`` returns
+    ``None``). A single stored ``vote`` weight therefore CANNOT hold the owner's
+    10% — it holds on the one path it was solved for and drifts up to +43% on
+    the others. This divides the target by the scaling that path actually
+    applies, so the derivative is the target on all four.
+
+    The remaining mass ``1 - vote_weight`` goes to reputation and organic in
+    their configured RATIO, which is what keeps the shipped path byte-stable:
+    at ``b = 0``, ``W = 0.7566*0.4`` the three come out
+    ``0.14339796 / 0.10000204 / 0.75660180`` against the hand-solved literals
+    ``0.1434 / 0.10 / 0.7566`` — a 2.04e-6 gap, the old literal's rounding.
+
+    ``scale <= 0`` cannot happen through :class:`ScoreWeights` — its
+    ``__post_init__`` refuses a config whose worst path cannot reach the target
+    — but it is answered rather than divided by, because a caller may build the
+    dataclass some other way.
+    """
+    scale = (1.0 - in_network_bonus) * (1.0 - interest_weight)
+    if scale <= 0.0:
+        return 1.0, 0.0, 0.0
+    vote_w = min(weights.vote_share_of_final / scale, 1.0)
+    rest = 1.0 - vote_w
+    denom = weights.reputation + weights.organic
+    if denom <= 0.0:
+        return vote_w, 0.0, rest
+    return vote_w, rest * weights.reputation / denom, rest * weights.organic / denom
+
+
 def score_candidate(
     candidate: Candidate,
     *,
@@ -726,12 +774,12 @@ def score_candidate(
 
     So the blend now happens at the composite, against the earned score::
 
-        earned = 0.1*vote + 0.1*rep + 0.8*organic        # organic: CF + viewer-own
+        earned = wv*vote + wr*rep + wo*organic           # organic: CF + viewer-own
         final  = (1 - W)*earned + W*interest_pct
         W      = weights.organic * weights.interest_match
 
-    All three earned signals are scaled by the same ``1 - W``, so the 10/10/80
-    balance among them is preserved at EVERY ``interest_match`` value.
+    All three earned signals are scaled by the same ``1 - W``, so their relative
+    balance is preserved at EVERY ``interest_match`` value.
 
     ``W = weights.organic * weights.interest_match`` IS THE SLOPE-PRESERVING
     CHOICE, deliberately: under the old form the term's contribution to
@@ -739,6 +787,19 @@ def score_candidate(
     gap this term opens between an on-interest and an off-interest candidate is
     therefore BYTE-IDENTICAL to the old form — this is a re-basing of what the
     term takes its weight FROM, not a strengthening or weakening of the term.
+
+    ★★★ ``wv``/``wr``/``wo`` ARE PER-PATH, NOT CONSTANTS (2026-08-10, PRUNED
+    R4). ``(1 - W)`` above is not applied to every candidate — it fires only for
+    a viewer who declared interest tags — and the in-network blend below is
+    applied only to ``IN_NETWORK`` sources. Two conditional scalings between
+    ``earned`` and ``final`` mean one stored ``vote`` weight cannot express "the
+    stake term is 10% of ``final``": the shipped ``0.1434`` was hand-solved for
+    the tagged/out-of-network path and measured 0.14340 (+43%) for an untagged
+    viewer and 0.09500 for IN_NETWORK. :func:`_earned_weights` now solves it per
+    candidate from :attr:`ScoreWeights.vote_share_of_final`, so the derivative
+    ``d final / d vote_norm`` is that target on all four paths. Reputation and
+    organic take the remaining mass in their configured ratio; on the path the
+    old literals were solved for the result is the same to 2.04e-6.
 
     ``interest_match = 0.0``, and ``interest_percentile = None`` at any weight,
     both still reproduce the pre-B02 score exactly (``W = 0`` /
@@ -786,7 +847,7 @@ def score_candidate(
         )
         organic = (1.0 - cf_w) * quality + cf_w * cf_percentile
     # ★ VIEWER-OWN AFFINITY (2026-08-01). Trades against the blended quality
-    # value only; `organic_cf` and the 10/10/80 outer split are untouched.
+    # value only; `organic_cf` and the outer split are untouched.
     #
     # This is the channel that makes engagement move a feed at all — measured
     # before it existed, 30 rounds of consistent topic engagement shifted a
@@ -798,11 +859,34 @@ def score_candidate(
     # `organic` unchanged, so a viewer with nothing to personalise on is scored
     # exactly as before rather than being blended toward zero.
     organic = viewer_blend(organic, viewer_percentile, weights.organic_viewer)
+    # ★ THE TWO BLENDS BELOW ARE RESOLVED FIRST, BECAUSE THE OUTER SPLIT DEPENDS
+    # ON THEM (2026-08-10, PRUNED R4). `earned`'s weights are solved so the stake
+    # term is `weights.vote_share_of_final` of `final` on THIS path — and which
+    # path this is, is exactly "does the in-network bonus fire" and "does the
+    # declared-interest blend fire". See `_earned_weights`.
+    in_network_bonus = (
+        weights.in_network_bonus
+        if weights.in_network_bonus > 0.0 and candidate.source.is_in_network
+        else 0.0
+    )
+    # `interest_weight` is `organic * interest_match` — the CONFIGURED organic
+    # weight, deliberately not the per-path effective one, so this term's
+    # contribution to `final` is unchanged by the R4 fix on every path.
+    interest_weight = weights.organic * weights.interest_match
+    # `viewer_blend` is the identity when the percentile is None or the weight is
+    # <= 0, so the split must treat those the same way or it would solve for a
+    # scaling that never happens.
+    interest_applied = (
+        interest_weight if interest_percentile is not None and interest_weight > 0.0 else 0.0
+    )
+    vote_w, rep_w, organic_w = _earned_weights(
+        weights, in_network_bonus=in_network_bonus, interest_weight=interest_applied
+    )
     # The EARNED score: what this post and this author actually did, at the §0
     # outer split. Every term in it is something someone else can observe about
     # the candidate — nothing here is a statement the viewer made about
     # themselves.
-    earned = weights.vote * vote_norm + weights.reputation * rep_norm + weights.organic * organic
+    earned = vote_w * vote_norm + rep_w * rep_norm + organic_w * organic
     # ★★ THE FOLLOW WEIGHT (2026-08-08). Until this existed, following someone
     # decided POOL MEMBERSHIP and nothing else: `IN_NETWORK` and every discovery
     # lane were scored by the identical viewer-blind formula, so a followed
@@ -834,16 +918,15 @@ def score_candidate(
     # `rerank._earned` — which the author/topic/unchosen penalties and
     # `_topic_affinities` all read — would silently stop decomposing. Applying
     # it after the blend would break that invariant.
-    if weights.in_network_bonus > 0.0 and candidate.source.is_in_network:
-        earned = viewer_blend(earned, 1.0, weights.in_network_bonus)
+    if in_network_bonus > 0.0:
+        earned = viewer_blend(earned, 1.0, in_network_bonus)
     # ★ DECLARED INTEREST (B-02 2026-08-04; re-based to the composite
     # 2026-08-05 — see this function's docstring for the measurement). It
     # blends against the EARNED score, so vote, reputation and quality are all
-    # scaled by the same `1 - interest_weight` and their 10/10/80 balance
+    # scaled by the same `1 - interest_weight` and their relative balance
     # survives every `interest_match` value. `interest_weight` is
     # `organic * interest_match`, which keeps this term's contribution to
     # `final` byte-identical to the pre-2026-08-05 form.
-    interest_weight = weights.organic * weights.interest_match
     final = viewer_blend(earned, interest_percentile, interest_weight)
     interest_bonus = (
         0.0

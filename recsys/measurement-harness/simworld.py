@@ -31,7 +31,7 @@ import json
 import math
 import os
 import random
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -45,24 +45,14 @@ from recsys.contracts import (
     Post,
     ViewerProfile,
     Vote,
-    VoteExclusions,
 )
 from recsys.core.normalize import build_norm_context
 from recsys.core.scoring import AuthorEngagement, post_base_engagement
+from recsys.core.vote_signal import AttributedPost, VoterTrust
 from recsys.io.hafsql import (
     POPULAR_RECALL_COMMENT_WEIGHT,
     POPULAR_RECALL_REBLOG_WEIGHT,
 )
-from recsys.core.vote_signal import (
-    _ORGANIC_REBLOG_WEIGHT,
-    _ORGANIC_REPLY_WEIGHT,
-    _ORGANIC_VOTER_MIN_RSHARES,
-    _ORGANIC_VOTER_WEIGHT,
-    AttributedPost,
-    VoterTrust,
-    independent_vote_signal,
-)
-from recsys.pipeline import _organic_signal
 
 EPOCH = datetime(2026, 1, 1, tzinfo=UTC)
 DAYS = 7
@@ -594,6 +584,30 @@ class SimGateway:
         floor = now - timedelta(days=horizon_days)
         return {a: t for a, t in first.items() if t >= floor}
 
+    def reputations_for(self, accounts: Sequence[str]) -> dict[str, float]:
+        """Display reputation for the sim's own accounts.
+
+        ★ Added 2026-08-09. Without it `pipeline`'s fail-soft `getattr` returned
+        `{}` and the popularity lane's reputation term was inert in EVERY panel
+        — the feature was unmeasurable, and every q11/q12 figure quoted for that
+        lane was taken with it off.
+
+        The world does not model reputation, so it is DERIVED from something it
+        does model: an author's accumulated engagement. Deterministic, seeded by
+        the world, and spread across the 25-75 display band so a `>= 60`
+        threshold actually partitions the population instead of matching all or
+        none of it.
+        """
+        out: dict[str, float] = {}
+        for name in accounts:
+            if not name:
+                continue
+            # Stable per-account value in [25, 75): hash the name with the
+            # world's seed so a rerun of the same world gives the same answer.
+            h = abs(hash((self.w.seed, name))) if hasattr(self.w, "seed") else abs(hash(name))
+            out[name] = 25.0 + (h % 5000) / 100.0
+        return out
+
     def popular_posts(self, since: datetime, limit: int) -> list[Post]:
         """Mirror of production `_SQL_POPULAR_POSTS` recall ordering.
 
@@ -714,14 +728,50 @@ class PriorlessSimGateway(SimGateway):
 
 DUMMY_VIEWER = ViewerProfile(account="__norm__")
 
-def build_norm(world: World, now: datetime = NOW) -> NormContext:
-    """A realistic NormContext producer: raw signals of every window post,
-    viewer-independent (cf=0), author-only vote exclusion."""
-    vote_sig, reps, organics = [], [], []
-    for p in world.posts:
-        vote_sig.append(independent_vote_signal(p, VoteExclusions(author=p.author)))
-        reps.append(p.author_reputation)
-        organics.append(_organic_signal(p, DUMMY_VIEWER, now, frozenset({p.author}), None, 0.0))
+
+def build_norm(
+    world: World,
+    now: datetime = NOW,
+    *,
+    gateway: "SimGateway | None" = None,
+    snapshot=None,
+    settings=None,
+) -> NormContext:
+    """A realistic NormContext producer for the simulated world.
+
+    ★★★ THIS NOW CALLS THE PRODUCTION BUILDER (2026-08-10, PRUNED N1). It used
+    to re-implement `recsys.norm_builder._norm_inputs` by hand — three lines
+    that had to be kept in step with `pipeline._score` by two people
+    remembering to agree. They stopped agreeing: the harness (and production)
+    sampled `prior=None, trust=None, excluded={author}` while the scorer used
+    the pooled prior, the graph-cred breadth budget and the
+    `ring | banned | curators` set, so every panel measured a percentile
+    against a distribution the scorer could not produce. Re-implementation is
+    exactly the drift class that already bit `popular_posts` twice, so the copy
+    is gone: this is a thin wrapper over `_norm_inputs`, and
+    `test_sim_build_norm_uses_the_production_builder` fails if it stops being
+    one.
+
+    `gateway` + `snapshot` are what let the sample carry the scorer's inputs.
+    Omitting them keeps the pre-2026-08-10 sample (no budget, no ring, no
+    prior) — kept as the default ONLY so panels that have not been reordered to
+    build their trust snapshot first still run; those panels are measuring the
+    degraded sample and say so in the build report. `q11_follow_curve` and
+    `q12_lane_balance` pass both.
+    """
+    from recsys.config import Settings
+    from recsys.norm_builder import _norm_inputs
+    from recsys.pipeline import _author_priors
+
+    resolved = settings if settings is not None else Settings()
+    priors = None
+    if gateway is not None and snapshot is not None:
+        priors = _author_priors(
+            gateway, frozenset(p.author for p in world.posts), EPOCH, snapshot, resolved
+        )
+    vote_sig, reps, organics = _norm_inputs(
+        world.posts, now, settings=resolved, snapshot=snapshot, priors=priors
+    )
     return build_norm_context(vote_sig, reps, organics)
 
 

@@ -684,11 +684,6 @@ class ServiceState:
         resolved_dsn = recsys_dsn if recsys_dsn is not None else os.environ.get(_RECSYS_DSN_ENV)
         resolved_hafsql_config = hafsql_config or HafsqlConfig.from_env()
         gateway = HafsqlClient(resolved_hafsql_config, lite_config, recsys_dsn=resolved_dsn)
-        norm_cache: _TimerCache[NormContext] = _TimerCache(
-            "norm_context",
-            lambda: build_window_norm(gateway, settings, now=datetime.now(UTC)),
-            cfg.norm_refresh_s,
-        )
         snapshot_cache: _TimerCache[TrustSnapshot | None] = _TimerCache(
             "trust_snapshot",
             lambda: _load_snapshot_fixed(resolved_dsn),
@@ -713,6 +708,35 @@ class ServiceState:
             ),
             cfg.author_prior_refresh_s,
         )
+        # ★★★ THE NORM CACHE IS BUILT LAST, AND IT READS THE OTHER TWO
+        # (2026-08-10, PRUNED N1). The §4 percentile sample must be drawn from
+        # the SAME quantity `pipeline._score` ranks against it, and two of that
+        # quantity's inputs — the graph-cred breadth budget and the per-author
+        # ring exclusion — live on the TrustSnapshot, while the third (the
+        # author-pooled prior) lives on the warm prior cache. Built without
+        # them, as this was, the sample is a different formula from the scorer's
+        # and the organic percentile loses 21% of its realised spread with the
+        # top of its own scale unreachable (measured: live 3-day window, mean
+        # 0.5001 -> 0.4258, max 1.0000 -> 0.9487, sd 0.2887 -> 0.2163).
+        #
+        # It closes over the LOCAL caches (not `self`/`state`, which does not
+        # exist yet here) for the same reason `author_prior_cache` above does,
+        # and reads `.value` at REBUILD time so each 30-minute rebuild picks up
+        # whatever snapshot/priors the request path is currently using. Passing
+        # the cache's own `get` — rather than letting `build_window_norm` run
+        # the grouped query itself — is what keeps the sample's prior coverage
+        # identical to the scorer's, misses included.
+        norm_cache: _TimerCache[NormContext] = _TimerCache(
+            "norm_context",
+            lambda: build_window_norm(
+                gateway,
+                settings,
+                now=datetime.now(UTC),
+                snapshot=snapshot_cache.value,
+                author_prior_cache=author_prior_cache.get,
+            ),
+            cfg.norm_refresh_s,
+        )
         viewer_cache = _ViewerProfileCache(cfg.viewer_cache_ttl_s, cfg.viewer_cache_max_entries)
         return cls(
             config=cfg,
@@ -728,12 +752,15 @@ class ServiceState:
     def warm(self) -> None:
         """Blocking. Call once, before the server starts accepting
         connections — see `_TimerCache.warm`'s own docstring for why the norm
-        build is fatal-on-failure and the snapshot build is not."""
-        logger.info(
-            "service: warming NormContext cache (blocking — window_posts is a few "
-            "seconds at the default window)..."
-        )
-        self.norm_cache.warm(guard=False)
+        build is fatal-on-failure and the snapshot build is not.
+
+        ★ ORDER IS LOAD-BEARING (2026-08-10, PRUNED N1): snapshot and priors
+        first, THEN the norm. The §4 sample is drawn from the scorer's own
+        quantity, and that quantity reads both — see `build()`. Warming the
+        norm first (as this did) would bake a sample built with neither, then
+        keep it for a full `norm_refresh_s` while every request scored against
+        it. The two feeders stay `guard=True`: a snapshot failure must not kill
+        boot, and `build_window_norm` logs loudly when it has to fall back."""
         logger.info("service: warming TrustSnapshot cache (blocking)...")
         self.snapshot_cache.warm(guard=True)
         logger.info(
@@ -742,6 +769,12 @@ class ServiceState:
             "recsys.author_prior_cache's module docstring for measured cost)..."
         )
         self.author_prior_cache.warm(guard=True)
+        logger.info(
+            "service: warming NormContext cache (blocking — window_posts is a few "
+            "seconds at the default window; drawn from the snapshot + priors "
+            "warmed above)..."
+        )
+        self.norm_cache.warm(guard=False)
 
     def start_background_refresh(self) -> None:
         self.norm_cache.start_background_refresh()

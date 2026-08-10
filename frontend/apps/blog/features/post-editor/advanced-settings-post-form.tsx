@@ -161,7 +161,17 @@ export function AdvancedSettingsPostForm({
   };
 
   function deleteTemplate(templateName: string) {
-    storeTemplates(storedTemplates.filter((e) => e.templateTitle !== templateName));
+    // ★ `storeTemplates` reports whether the write landed (2026-08-09). Throwing
+    //   that away meant a full localStorage silently kept the template: the row
+    //   disappeared from the list, and came back on the next page load.
+    const stored = storeTemplates(storedTemplates.filter((e) => e.templateTitle !== templateName));
+    if (!stored) {
+      toast({
+        title: t('submit_page.advanced_settings_dialog.template_delete_failed'),
+        variant: 'destructive'
+      });
+      return;
+    }
     setSelectTemplate('/');
   }
 
@@ -208,8 +218,16 @@ export function AdvancedSettingsPostForm({
     });
   }
   function onSave() {
+    // ★★ SAVE TEMPLATE IGNORED ITS OWN RESULT (2026-08-10). Both writes below
+    //    discarded the boolean and the function then toasted "changes saved"
+    //    unconditionally, so a template that did not fit in localStorage was
+    //    reported as saved and was simply gone next time. The settings half of
+    //    this dialog always succeeds (it is in-memory form state); only the
+    //    template half can fail, so the message below distinguishes them rather
+    //    than claiming everything failed.
+    let templateStored = true;
     if (selectTemplate !== '/') {
-      storeTemplates(
+      templateStored = storeTemplates(
         storedTemplates.map((stored) =>
           stored.templateTitle !== selectTemplate
             ? stored
@@ -231,7 +249,10 @@ export function AdvancedSettingsPostForm({
 
     if (templateTitle !== '') {
       setTemplateTitle('');
-      storeTemplates([
+      // `&&` not `=`: the two branches are mutually exclusive today (picking a
+      // template clears the new-name field and vice versa) but nothing enforces
+      // that, and a second write must not be able to erase the first one's answer.
+      templateStored = storeTemplates([
         ...storedTemplates,
         {
           title: data.title,
@@ -245,7 +266,7 @@ export function AdvancedSettingsPostForm({
           maxAcceptedPayout: maxAcceptedPayout(customValue, maxPayout),
           payoutType: rewards
         }
-      ]);
+      ]) && templateStored;
     }
     updateForm({
       ...data,
@@ -256,8 +277,10 @@ export function AdvancedSettingsPostForm({
     setSelectTemplate('/');
     setOpen(false);
     toast({
-      title: t('submit_page.advanced_settings_dialog.changes_saved'),
-      variant: 'success'
+      title: templateStored
+        ? t('submit_page.advanced_settings_dialog.changes_saved')
+        : t('submit_page.advanced_settings_dialog.template_save_failed'),
+      variant: templateStored ? 'success' : 'destructive'
     });
   }
 

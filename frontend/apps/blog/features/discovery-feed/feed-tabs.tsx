@@ -2,17 +2,20 @@
 
 import { useEffect, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery } from '@tanstack/react-query';
 import { useInView } from 'react-intersection-observer';
 import { getAccountPosts } from '@transaction/lib/bridge-api';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { StaleTime } from '@/blog/lib/react-query';
+import { isBlockedEntry, useLumenBlockList } from '@/blog/lib/lite/client/use-lumen-block';
 import { Entry } from '@hive/common-hiveio-packages/wax';
 import { PostListSkeleton } from '@hive/ui';
 import { cn } from '@ui/lib/utils';
 import NoDataError from '@/blog/components/no-data-error';
 import MarketTab from '@/blog/features/prediction-market/market-tab';
 import MediumPostCard from './medium-post-card';
+// ONE batched request per list, never one per card — see use-rank-marks.ts.
+import { useRankMarks } from '@/blog/features/retention/hooks/use-rank-marks';
 import { filterVisiblePosts, useNsfwPreference } from '@/blog/lib/nsfw';
 import InterestPicker from '@/blog/features/lite-auth/interests/interest-picker';
 
@@ -120,6 +123,16 @@ function ForYouFeed() {
 
   // Hook must run unconditionally, above every early return (see lib/nsfw.ts).
   const nsfwPreference = useNsfwPreference();
+  // ★ ABOVE THE GUARDS. `useRankMarks` is a hook and must run in the same order on every
+  // render; `rawEntries` is computed after these two early returns, so deriving the hook's
+  // input from it called the hook conditionally. Read the query data directly instead —
+  // undefined while loading, which the hook handles by requesting nothing.
+  const marks = useRankMarks(
+    // Each page is a ForYouResponse, not a flat entry list — `.entries` is where the
+    // posts are, mirroring how `rawEntries` below unwraps it.
+    (data?.pages ?? []).flatMap((page) => page.entries ?? []).map((e) => e.author)
+  );
+
   if (isLoading) return <PostListSkeleton count={5} />;
   if (isError || !data) return <NoDataError />;
 
@@ -192,7 +205,13 @@ function ForYouFeed() {
       {entries.length === 0 ? (
         <p className="py-12 text-center font-sans text-sm text-muted-foreground">{LABELS.empty}</p>
       ) : (
-        entries.map((entry) => <MediumPostCard key={`${entry.author}-${entry.permlink}`} post={entry} />)
+        entries.map((entry) => (
+          <MediumPostCard
+            key={`${entry.author}-${entry.permlink}`}
+            post={entry}
+            mark={marks.get(entry.author?.toLowerCase() ?? '')}
+          />
+        ))
       )}
 
       {/* The sentinel: scrolling it into view fetches the next page. */}
@@ -289,6 +308,21 @@ function EntryFeed({ sort, observer, lite = false }: { sort: string; observer: s
   // Hook must run unconditionally, above every early return (see lib/nsfw.ts).
   const nsfwPreference = useNsfwPreference();
 
+  // ★ EFFECT (A) ON THE FOLLOWING TAB. The Hive branch of this query goes straight
+  // from the browser to a chain node, so the reader's own block list can only be
+  // applied here — no Lumen server sees that response. (The lite branch reads
+  // `/api/lite/feed/following`, a Lumen route; one query key serves both, so the
+  // filter lives at the shared end.) Reader-side only: the owner-side half of
+  // blocking is never enforced in a browser, for the reason spelled out in
+  // `lib/lite/client/use-lumen-block.ts`.
+  const blockList = useLumenBlockList(true);
+
+  // ★ ABOVE THE EARLY RETURNS. `useRankMarks` is a hook, so it must run on every render
+  // in the same order — calling it after `if (isError) return` breaks that the moment the
+  // query flips state. Derived from the raw pages rather than the NSFW-filtered list
+  // below: hiding a post is a display decision and must not change hook behaviour.
+  const marks = useRankMarks((data?.pages.flat() ?? []).map((e) => e.author));
+
   if (isError) {
     return <NoDataError />;
   }
@@ -298,7 +332,10 @@ function EntryFeed({ sort, observer, lite = false }: { sort: string; observer: s
   }
 
   // Same NSFW list-level filter as the ranked feed above (see lib/nsfw.ts).
-  const entries = filterVisiblePosts(data?.pages.flat() ?? [], nsfwPreference);
+  const entries = filterVisiblePosts(
+    (data?.pages.flat() ?? []).filter((entry) => !isBlockedEntry(entry, blockList)),
+    nsfwPreference
+  );
 
   if (entries.length === 0) {
     return <p className="py-12 text-center font-sans text-sm text-muted-foreground">{LABELS.empty}</p>;
@@ -307,7 +344,11 @@ function EntryFeed({ sort, observer, lite = false }: { sort: string; observer: s
   return (
     <div>
       {entries.map((entry) => (
-        <MediumPostCard key={`${entry.author}-${entry.permlink}`} post={entry} />
+        <MediumPostCard
+          key={`${entry.author}-${entry.permlink}`}
+          post={entry}
+          mark={marks.get(entry.author?.toLowerCase() ?? '')}
+        />
       ))}
       <div className="flex justify-center py-6">
         <button

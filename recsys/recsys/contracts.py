@@ -16,7 +16,7 @@ Design rules:
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
@@ -491,6 +491,21 @@ class HafsqlGateway(Protocol):
     implementation (``recsys.io.hafsql``) talks to HAFSQL/Postgres; tests
     provide an in-memory fake. Kept a Protocol so the pure core never imports
     a database driver."""
+
+    def reputations_for(self, accounts: Sequence[str]) -> dict[str, float]:
+        """DISPLAY reputation (the 25-75 scale) for any identity set.
+
+        ★★★ ON THE PROTOCOL DELIBERATELY (2026-08-09). This existed only on the
+        concrete `HafsqlClient`, so `pipeline` reached it through
+        `getattr(gateway, "reputations_for", None)` and fell back to `{}`. The
+        fallback is a reasonable RUNTIME posture, but it meant every simulator
+        panel and every unit test ran with the popularity lane's reputation
+        term silently switched OFF — so the owner's ">=60 reputation counts
+        louder" rule was measured by nothing, and an adversarial review found
+        exactly that. Declaring it here makes a gateway that cannot answer a
+        type error at the boundary instead of an invisible zero at runtime.
+        """
+        ...
 
     def in_network_posts(
         self, follows: frozenset[str], since: datetime, limit: int

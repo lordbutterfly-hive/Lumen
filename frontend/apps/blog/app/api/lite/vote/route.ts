@@ -30,7 +30,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   // Weight 0 clears an existing vote — a withdrawal, so a suspended account may
   // still do it (see http/actor.ts). Casting a vote is an addition and may not.
-  const actor = weight === 0 ? await requireLiteUser(session.user, session.sessionEpoch) : await requireActiveLiteUser(session.user, session.sessionEpoch);
+  const actor = weight === 0 ? await requireLiteUser(session.user, session) : await requireActiveLiteUser(session.user, session);
   if (!actor.ok) return actor.response;
   const user = actor.user;
 

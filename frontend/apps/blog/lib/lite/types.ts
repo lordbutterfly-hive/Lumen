@@ -4,6 +4,26 @@
  * fixed by LUMEN-LITE-ACCOUNTS-SPEC §4 — do not introduce naming variants.
  */
 
+/**
+ * Everything the auth layer needs to know about a caller's COOKIE, in one value:
+ * which revocation generation it was issued in, and which device it is.
+ *
+ * ★ Passed as a unit on purpose. The epoch used to be threaded as a loose
+ * `sessionEpoch?: number` argument and the two worst holes in this subsystem were
+ * both a call site that did not pass it — `requireLiteUser` could not even accept
+ * one, and a cookie carrying no stamp skipped the comparison entirely. Bundling
+ * it makes "I forgot to pass the session" a compile error rather than a silent
+ * exemption, and adding the next field to it costs no call sites at all.
+ *
+ * An iron session satisfies this structurally, so routes pass `session` directly.
+ */
+export interface SessionRef {
+  /** Stamped at issue; compared against `lumen_user.session_epoch` (F-L3). */
+  sessionEpoch?: number;
+  /** Per-device id; absent on cookies issued before per-device revocation existed. */
+  sessionId?: string;
+}
+
 export type AccountTier = 'lite' | 'full';
 export type AuthMethod = 'google_passkey' | 'btc_wallet' | 'evm_wallet';
 export type ChallengePurpose = 'login' | 'post_attestation' | 'stepup';

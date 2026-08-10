@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { User } from '@smart-signer/types/common';
-import { LumenUser } from '../types';
-import { checkLiteActor } from '../auth/account-status';
+import { LumenUser, SessionRef } from '../types';
+import { checkLiteActor, checkSessionValidity } from '../auth/account-status';
 import { findUserById } from '../repositories/user-repository';
 
 /**
@@ -36,17 +36,30 @@ import { findUserById } from '../repositories/user-repository';
  * `POST /api/lite/vote {weight:0}` and `POST /api/lite/reblog {undo:true}` — and
  * the unfollow really mutated the database (`lumen_follow.active` true -> false).
  *
- * Withdrawal routes therefore now pass `session.sessionEpoch` and a stale cookie
- * is refused with `session_revoked`, exactly as the adding routes already were.
+ * Withdrawal routes therefore now pass the caller's session and a stale cookie is
+ * refused with `session_revoked`, exactly as the adding routes already were.
+ *
+ * ★★★ 2026-08-10 — AND THE SECOND ARGUMENT IS NOW THE WHOLE SESSION, NOT ONE FIELD.
+ *
+ * Every hole this subsystem has shipped was a caller that failed to pass one loose
+ * field: `requireLiteUser` could not accept `sessionEpoch` at all, and a cookie
+ * carrying no stamp was exempted by an `!== undefined` guard. Per-device sign-out
+ * adds a second such field (`sessionId`), and threading it as another optional
+ * positional would have set the same trap a third time — a route that forgot it
+ * would compile, run, and silently exempt itself from revocation.
+ *
+ * Taking `SessionRef` means routes pass `session` (an iron session satisfies the
+ * shape), a forgotten argument is a TYPE ERROR, and the next field added to a
+ * session costs zero call sites.
  */
 
 export type ActorResult = { ok: true; user: LumenUser } | { ok: false; response: NextResponse };
 
 export async function requireActiveLiteUser(
   sessionUser: User | undefined,
-  sessionEpoch?: number
+  session: SessionRef
 ): Promise<ActorResult> {
-  const check = await checkLiteActor(sessionUser, sessionEpoch);
+  const check = await checkLiteActor(sessionUser, session);
   if (check.ok) return { ok: true, user: check.user };
   return {
     ok: false,
@@ -56,7 +69,7 @@ export async function requireActiveLiteUser(
 
 export async function requireLiteUser(
   sessionUser: User | undefined,
-  sessionEpoch?: number
+  session: SessionRef
 ): Promise<ActorResult> {
   if (!sessionUser?.userId || sessionUser.account_tier !== 'lite') {
     return { ok: false, response: NextResponse.json({ error: 'unauthorized' }, { status: 401 }) };
@@ -66,13 +79,16 @@ export async function requireLiteUser(
     return { ok: false, response: NextResponse.json({ error: 'unauthorized' }, { status: 401 }) };
   }
   // ★ Session revocation applies to withdrawals too — see the block comment
-  // above. Status is deliberately NOT checked here; the epoch is.
-  if (sessionEpoch !== undefined && user.sessionEpoch !== sessionEpoch) {
+  // above. Status is deliberately NOT checked here; revocation is. Both kinds:
+  // the account-wide epoch AND this device's own sign-out, in the one shared
+  // implementation so the two entry points cannot drift apart.
+  const revoked = await checkSessionValidity(user, session);
+  if (revoked) {
     return {
       ok: false,
       response: NextResponse.json(
-        { error: 'session_revoked', message: 'This session has been signed out.' },
-        { status: 401 }
+        { error: revoked.code, message: 'This session has been signed out.' },
+        { status: revoked.status }
       )
     };
   }

@@ -285,6 +285,8 @@
   "user_profile": {
     "reputation": "السمعة",
     "mute_button": "كتم الصوت",
+    "block_button": "حظر",
+    "unblock_button": "إلغاء الحظر",
     "unmute_button": "إلغاء كتم الصوت",
     "unfollow_button": "إلغاء المتابعة",
     "follow_button": "متابعة",
@@ -625,7 +627,9 @@
       "name_of_a_new_template": "اسم القالب الجديد",
       "template_name_is_taken": "اسم القالب مستخدم بالفعل",
       "save": "حفظ",
-      "delete_template": "حذف القالب"
+      "delete_template": "حذف القالب",
+      "template_save_failed": "Your settings were applied, but the template could not be saved — your browser has no room for it.",
+      "template_delete_failed": "The template could not be deleted — your browser refused the change."
     },
     "category_selector": {
       "required": "مطلوب عند النشر على مدونتي",

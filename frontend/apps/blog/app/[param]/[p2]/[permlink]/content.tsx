@@ -42,7 +42,9 @@ import sorter, { SortOrder } from '@/blog/lib/sorter';
 import { DEFAULT_OBSERVER, chainObserver } from '@/blog/lib/utils';
 import { getBasePath } from '@ui/lib/path-utils';
 import { useQuery } from '@tanstack/react-query';
-import { getCommunity, getDiscussion, getListCommunityRoles, getPost } from '@transaction/lib/bridge-api';
+import { getCommunity, getListCommunityRoles, getPost } from '@transaction/lib/bridge-api';
+import { fetchDiscussion } from '@/blog/lib/lite/client/discussion-fetch';
+import { isBlockedEntry, useLumenBlockList } from '@/blog/lib/lite/client/use-lumen-block';
 import { fetchLiteEntryByPermlink } from '@/blog/lib/lite/client/lite-post-fetch';
 import { fetchLiteEngagement } from '@/blog/lib/lite/client/lite-engagement';
 import { Entry } from '@hive/common-hiveio-packages/wax';
@@ -334,7 +336,12 @@ const PostContent = () => {
 
   const { data: discussionData } = useQuery({
     queryKey: ['discussionData', author, permlink, observer],
-    queryFn: () => getDiscussion(author, permlink, observer),
+    // ★★★ THROUGH OUR SERVER, NOT STRAIGHT TO A HIVE NODE (block effect B).
+    // This used to call `getDiscussion` in the browser, so the server-rendered
+    // thread could honour a post owner's block and this refetch would put every
+    // hidden comment straight back a moment later. `/api/discussion` returns the
+    // same map, already filtered. See lib/lite/client/discussion-fetch.ts.
+    queryFn: () => fetchDiscussion(author, permlink, observer),
     enabled: isOnChain,
     initialData: initialDiscussion ?? undefined,
     initialDataUpdatedAt: initialDiscussion ? Date.now() : undefined,
@@ -366,22 +373,41 @@ const PostContent = () => {
     onError: () => undefined
   });
 
+  // ★ EFFECT (A) IN THE THREAD — "if I block them I never see them", comments
+  // included.
+  //
+  // This is the READER'S OWN half and it is the only half that can live here.
+  // `/api/discussion` is deliberately session-less: what it serves is a property of
+  // the POST (its owner's blocks), identical for everybody, which is what makes the
+  // owner-side promise enforceable and the response cacheable. A reader's personal
+  // list is not the post's business and must not change the shared answer — so it is
+  // applied on top, here, for this one browser.
+  //
+  // Removing the entry rather than collapsing it (which is what a chain MUTE does a
+  // few lines down in `comment-list-item`) is the difference the owner asked for:
+  // blocked means gone, not "click to reveal". Children come off with it for free —
+  // `CommentList` descends from rendered parents, so a comment whose parent is not in
+  // the list is never reached.
+  const viewerBlocks = useLumenBlockList(user.isLoggedIn);
+
   const discussionState = useMemo(() => {
     if (!discussionData) return undefined;
-    const list = [...Object.keys(discussionData).map((key) => discussionData[key])];
+    const list = [...Object.keys(discussionData).map((key) => discussionData[key])]
+      .filter((entry) => !isBlockedEntry(entry, viewerBlocks));
     // Union, chain-first: once the publisher lands a reply it arrives from BOTH
     // sources, and the chain copy is the canonical one (it carries real votes
     // and payout). Keyed on author/permlink, which is stable across the move.
     if (liteReplies && liteReplies.length > 0) {
       const seen = new Set(list.map((c) => `${c.author}/${c.permlink}`));
       for (const reply of liteReplies) {
+        if (isBlockedEntry(reply, viewerBlocks)) continue;
         if (!seen.has(`${reply.author}/${reply.permlink}`)) list.push(reply);
       }
     }
     const sortType = commentSort as SortOrder;
     sorter(list, sortType);
     return list;
-  }, [discussionData, commentSort, liteReplies]);
+  }, [discussionData, commentSort, liteReplies, viewerBlocks]);
 
   const paginatedDiscussionState = useMemo(() => {
     if (!discussionState || !postData) return undefined;

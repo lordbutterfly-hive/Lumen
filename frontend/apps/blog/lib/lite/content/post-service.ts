@@ -1,7 +1,7 @@
 import { User } from '@smart-signer/types/common';
 import { getLogger } from '@ui/lib/logging';
 import { liteConfig } from '../config';
-import { BeneficiaryRoute, LumenPost, ParentRef, PostTier, PublishPayload } from '../types';
+import { BeneficiaryRoute, LumenPost, ParentRef, PostTier, PublishPayload, SessionRef } from '../types';
 import * as posts from '../repositories/post-repository';
 import * as publishJobs from '../repositories/publish-job-repository';
 import * as rateLimit from '../antispam/rate-limit';
@@ -12,6 +12,7 @@ import * as containers from '../repositories/container-repository';
 import { ulid } from '../ids';
 import { preScreen } from './pre-screen';
 import { shortPostTitle } from '@/blog/lib/short-post-title';
+import { publishTagsForInterests } from '../interests/taxonomy';
 
 const logger = getLogger('app');
 
@@ -22,6 +23,57 @@ const logger = getLogger('app');
  */
 
 const NORMAL_TAG = 'lumen';
+
+/**
+ * ★★★ A NORMAL-TIER POST CARRIES THE AUTHOR'S DECLARED INTERESTS (2026-08-08,
+ * owner: "authors declared interests carry into ranker for post").
+ *
+ * THE DEFECT THIS CLOSES. Every normal-tier post used to publish with tags
+ * hardcoded to `['lumen']` — 99 of 112 posts in the database. The ranker's
+ * interest lane matches a post's tags against the reader's DERIVED interests
+ * (mined from their own posting and voting history), and no Hive reader will
+ * ever derive `lumen`. So a lite post could not enter the tag lane, could not
+ * enter the newcomer lane (which reads the primary tag), and was invisible to
+ * the ranking engine in every direction. The tier the product exists for was
+ * structurally unrankable, by a constant.
+ *
+ * WHY THE INTEREST TAG GOES FIRST. `tags[0]` is the primary tag, and the
+ * newcomer lane keys on it (`exploration._interest_match`, restricted to the
+ * primary tag by ruling R3 after one sock tagged 12 topics and reached 60/60
+ * viewers). Leading with `lumen` would leave that lane just as shut. `lumen`
+ * stays in the list, last, so a lite post is still identifiable on chain.
+ *
+ * WHY IT IS CAPPED. Tags are attacker-chosen free text everywhere else on this
+ * chain; a cap keeps an honest post honest and stops this becoming a spray
+ * vector. The scoring side is already bounded — the declared-interest raw is a
+ * rarity-weighted MAX, so the 2nd..kth matching tag is worth exactly zero — but
+ * sourcing is not: every extra tag is another lane a post can enter. Four plus
+ * `lumen` is a real post describing itself, not a net.
+ *
+ * An author who declared nothing still gets `['lumen']`, exactly as before.
+ *
+ * ★★★ ONE TAG PER INTEREST, NOT THE FIRST FOUR OF THE FLATTENED LIST
+ * (2026-08-09). `tagsForInterests` is the ranker's SOURCING vocabulary — wide on
+ * purpose, and it carries community ids (`hive-13323`), photo-challenge tags
+ * (`monomad`) and app tags (`liketu`) that are excellent evidence of subject and
+ * are lies when written onto a post. Slicing it also drew all four tags from the
+ * reader's FIRST pick, because every interest holds four or more: Photography +
+ * Chess + Food published `[photography, photofeed, photographylovers, photo]` —
+ * one interest, four spellings, no chess, no food.
+ *
+ * `publishTagsForInterests` returns each picked interest's ONE canonical topic
+ * word, in the reader's pick order, so the cap now spends its four slots on four
+ * different interests and every tag is a word a person could have typed. See
+ * that function for the invariant that keeps a community id out of `tags[0]` —
+ * which on Hive is the post's CATEGORY.
+ */
+const MAX_INTEREST_TAGS = 4;
+
+function normalTierTags(interests: readonly string[] | null | undefined): string[] {
+  const mapped = publishTagsForInterests(interests ?? []);
+  if (mapped.length === 0) return [NORMAL_TAG];
+  return [...mapped.slice(0, MAX_INTEREST_TAGS), NORMAL_TAG];
+}
 
 export interface CreatePostRequest {
   tier: PostTier;
@@ -179,12 +231,13 @@ function buildPayload(post: LumenPost, parent: OnChainParent | null): PublishPay
 export async function createLitePost(
   sessionUser: User | undefined,
   req: CreatePostRequest,
-  sessionEpoch?: number
+  session: SessionRef
 ): Promise<CreatePostResult> {
   // Status comes from the DB, not the cookie: a session issued before a suspension
   // would otherwise keep posting until it expired (see auth/account-status.ts).
-  // F-L3: sessionEpoch carries the cookie stamp so a revoked session cannot post.
-  const actor = await checkLiteActor(sessionUser, sessionEpoch);
+  // F-L3: the caller's session carries the cookie stamp AND its per-device id, so
+  // neither an account-wide revocation nor a single device's sign-out can post.
+  const actor = await checkLiteActor(sessionUser, session);
   if (!actor.ok) {
     return { status: 'error', code: actor.code, message: actor.message };
   }
@@ -207,7 +260,12 @@ export async function createLitePost(
   }
   const feedVisibility = screen.feedVisibility;
 
-  const tags = req.tier === 'normal' ? [NORMAL_TAG] : req.tags?.length ? req.tags : [NORMAL_TAG];
+  const tags =
+    req.tier === 'normal'
+      ? normalTierTags(actor.user.interests)
+      : req.tags?.length
+        ? req.tags
+        : [NORMAL_TAG];
 
   // Edit fork — update the original row instead of creating a duplicate (§C.3).
   if (req.editOfPostId) {
@@ -395,7 +453,48 @@ export async function requeuePublish(post: LumenPost): Promise<boolean> {
   }
 }
 
+/**
+ * Put an unpublished post back on the road to Hive, whatever stopped it.
+ *
+ * There are now two ways a post can be off the road and they need opposite repairs,
+ * which is why the restore path cannot just call `requeuePublish`:
+ *  - its job was CANCELLED ('rejected' by a hide) — nothing revives that, so mint a
+ *    new one with a fresh idempotency key;
+ *  - its job was PARKED ('holding' by a hide the worker caught, or by a suspension)
+ *    — the job is intact and only needs releasing. Queueing a second one here would
+ *    leave two create jobs racing for the same permlink.
+ *
+ * Release first, and only mint when there is genuinely nothing left alive.
+ */
+export async function revivePublish(post: LumenPost): Promise<boolean> {
+  if (post.hivePermlink || post.deletedLocally) return false;
+  if ((await publishJobs.releaseHeldForPost(post.postId)) > 0) return true;
+  // Something is already on its way; a second job would only duplicate it.
+  if (await publishJobs.hasLiveCreateJob(post.postId)) return true;
+  return requeuePublish(post);
+}
+
 export async function reconcileOrphans(limit = 25): Promise<number> {
+  // ★★★ RELEASE FIRST, AND WITHOUT A CALLBACK (2026-08-10).
+  //
+  // A job parked because its post was hidden is released by whoever un-hides it —
+  // provided they call back. The 38 posts stranded on the live queue are the proof
+  // that something hid them and never did. So the sweep reconciles the STATE instead
+  // of trusting the mutator: a post that is visible, undeleted, and written by an
+  // account in good standing is publishable, no matter what parked it or when.
+  //
+  // The author's status is part of that predicate inside `releaseHeldForPublishable`
+  // — a suspension writes the same 'holding' status, and un-parking a suspended
+  // account's queue would quietly undo the suspension.
+  try {
+    const released = await publishJobs.releaseHeldForPublishable(limit);
+    if (released > 0) {
+      logger.warn('reconcileOrphans: released %d parked publish job(s) whose post is visible again', released);
+    }
+  } catch (error) {
+    logger.error({ err: error }, 'reconcileOrphans: could not release parked jobs');
+  }
+
   // ★ B7: posts past their retry budget are NOT silently forgotten. They are
   // still being served to readers with `hive_permlink: null`, so an operator has
   // to know they exist — this is the surface the old code had none of.
@@ -446,6 +545,75 @@ export async function reconcileOrphans(limit = 25): Promise<number> {
     }
   }
   return repaired;
+}
+
+export interface RecoveryReport {
+  /** Posts that are served but off-chain with nothing working on them. */
+  stranded: number;
+  /** How many of those now have a live publish job again. */
+  requeued: number;
+  /** Already-published replies whose recorded parent was the local placeholder. */
+  parentsRepaired: number;
+  postIds: string[];
+}
+
+/**
+ * ★★★ THE DELIBERATE, OPERATOR-DRIVEN REPAIR (2026-08-10).
+ *
+ * `reconcileOrphans` is the automatic sweep and it is BOUNDED on purpose — a post
+ * Hive keeps refusing must stop being retried, or it spins every drain for the life
+ * of the deployment. This is the other half: the human decision to try again anyway,
+ * for the posts the bounded sweep has permanently written off.
+ *
+ * It is therefore NOT wired into the drain. Running it is a choice, made by someone
+ * who has looked at `strandedPosts` on the health endpoint and decided those posts
+ * should go to Hive after all. It mints a fresh idempotency key per post (a distinct
+ * `:recover:` generation), so it can insert where the sweep's key would be swallowed
+ * by ON CONFLICT DO NOTHING.
+ *
+ * Safe to run twice: a post that already has a live job is skipped, so a second run
+ * is a no-op rather than a duplicate broadcast.
+ */
+export async function recoverStranded(limit = 100): Promise<RecoveryReport> {
+  // Repair the recorded parent of already-published replies FIRST: it is what makes
+  // a later edit or takedown of those rows possible at all, and it is what puts them
+  // back in their own comment threads.
+  let parentsRepaired = 0;
+  try {
+    parentsRepaired = await posts.repairPlaceholderPublishParent(limit);
+    if (parentsRepaired > 0) {
+      logger.warn(
+        'recoverStranded: repaired the recorded on-chain parent of %d published lite reply/replies',
+        parentsRepaired
+      );
+    }
+  } catch (error) {
+    logger.error({ err: error }, 'recoverStranded: could not repair placeholder parents');
+  }
+
+  const stranded = await posts.listStranded(limit);
+  let requeued = 0;
+  for (const post of stranded) {
+    try {
+      const parent = await publishParentFor(post);
+      const generation = await publishJobs.countJobsForPost(post.postId);
+      const job = await publishJobs.enqueue({
+        postId: post.postId,
+        jobType: 'create',
+        idempotencyKey: `${post.postId}:create:recover:${generation}`,
+        payload: buildPayload(post, parent)
+      });
+      if (job) requeued++;
+    } catch (error) {
+      logger.error({ err: error, postId: post.postId }, 'recoverStranded: could not re-queue a post');
+    }
+  }
+  logger.warn(
+    'recoverStranded: %d stranded post(s) found, %d re-queued for publishing',
+    stranded.length,
+    requeued
+  );
+  return { stranded: stranded.length, requeued, parentsRepaired, postIds: stranded.map((p) => p.postId) };
 }
 
 export type DeletePostResult =

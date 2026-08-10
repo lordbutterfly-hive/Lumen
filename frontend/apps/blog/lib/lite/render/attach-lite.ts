@@ -68,7 +68,12 @@ export async function attachLiteIdentities<T extends Entry>(entries: T[]): Promi
           // lite post is a comment on chain, so the chain entry's title is useless.
           // Our row kept the real one — only the body is pruned after publish.
           title: row.title || entry.title,
-          chainAuthor: row.hiveAuthor
+          chainAuthor: row.hiveAuthor,
+          // The exact writer. Carried because the two names either side of it are
+          // both ambiguous for identity purposes — `author` is a handle, and
+          // `chainAuthor` is the SHARED publishing account that signs for everybody.
+          // Without this the block filters would have to guess.
+          userId: row.userId
         };
       }
     }

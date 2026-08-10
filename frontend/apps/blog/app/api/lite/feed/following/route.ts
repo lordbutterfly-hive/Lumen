@@ -81,7 +81,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   let userId: string;
   try {
     const session = await getLiteSession();
-    const actor = await requireActiveLiteUser(session.user, session.sessionEpoch);
+    const actor = await requireActiveLiteUser(session.user, session);
     if (!actor.ok) return NextResponse.json({ error: 'not_a_lite_session' }, { status: 401 });
     userId = actor.user.userId;
   } catch {

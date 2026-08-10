@@ -25,7 +25,79 @@ const BACKOFF_SECONDS = [30, 120, 600, 3600];
 /** A claim older than this with no outcome means the worker died holding it. */
 const STUCK_JOB_SECONDS = 300;
 
+/**
+ * A Lumen post has TWO names, and a reply captured the wrong one.
+ *
+ * ★ THE BUG THIS FIXES (found 2026-08-08, replies never reached their threads).
+ * A post is written locally under a placeholder permlink `lite-<ulid>` — that is
+ * what Lumen's own URLs use before the post reaches Hive. The publisher then
+ * broadcasts it under a DIFFERENT, deterministic name: `lumen-<ulid>`
+ * (`buildPermlink`). A reply written against the post captured the placeholder,
+ * so at broadcast time it asked Hive to comment on `hbd-temp/lite-<ulid>` — a
+ * post that has never existed under that name. Hive threw `get_comment`
+ * assert_exception, the job retried four times and died. Permanently: no amount
+ * of resource credits or waiting could ever have fixed it, because the parent it
+ * names does not exist and never will.
+ *
+ * Verified in the live queue: the reply's parent read
+ * `hbd-temp/lite-01kzcnhwpw64xwbzf8jqa60e5p` while the parent post had genuinely
+ * published as `hbd-temp/lumen-01kzcnhwpw64xwbzf8jqa60e5p`.
+ *
+ * So resolve the parent at BROADCAST time from our own records, rather than
+ * trusting a name captured when the reply was typed:
+ *   - parent published  -> use the real hive_author/hive_permlink
+ *   - parent still queued -> WAIT (and do not spend an attempt on it)
+ *   - parent gone       -> stop, with a reason a human can read
+ */
+type ParentResolution =
+  | { kind: 'ready'; author: string; permlink: string }
+  | { kind: 'wait'; why: string }
+  | { kind: 'gone'; why: string };
+
+const LOCAL_PERMLINK = /^lite-([0-9a-z]+)$/i;
+
+/**
+ * @param requireParentLive  Whether the parent still being visible is a PRECONDITION.
+ *
+ * ★ TRUE ONLY FOR A CREATE (2026-08-10). "Has the post I am replying to been taken
+ * down?" is a question about whether a NEW reply should appear in that thread — for
+ * a create it is exactly right to stop. For an edit or a takedown of a reply that is
+ * ALREADY on chain it is the wrong question and a damaging answer: the parent's
+ * chain identity is a fixed historical fact that Hive will demand verbatim
+ * ("The parent of a comment cannot change"), and refusing to resolve it because the
+ * parent was later hidden means the takedown of the CHILD can never execute. That is
+ * how a moderator's removal of a lite reply became permanently impossible.
+ */
+async function resolveParentOnChain(
+  parentAuthor: string,
+  parentPermlink: string,
+  { requireParentLive }: { requireParentLive: boolean }
+): Promise<ParentResolution> {
+  const local = LOCAL_PERMLINK.exec(parentPermlink);
+  if (!local) return { kind: 'ready', author: parentAuthor, permlink: parentPermlink };
+
+  const parentId = local[1];
+  const parent = await posts.getPostById(parentId.toUpperCase());
+  const asWritten: ParentResolution = { kind: 'ready', author: parentAuthor, permlink: parentPermlink };
+  if (!parent) {
+    // Best effort for an existing on-chain comment: the snapshot is all we have, and
+    // it is strictly better than refusing to act on content that is public right now.
+    if (!requireParentLive) return asWritten;
+    return { kind: 'gone', why: `the post being replied to (${parentPermlink}) no longer exists` };
+  }
+  if (requireParentLive && (parent.deletedLocally || parent.feedVisibility !== 'visible')) {
+    return { kind: 'gone', why: 'the post being replied to was deleted or removed' };
+  }
+  if (!parent.hiveAuthor || !parent.hivePermlink) {
+    if (!requireParentLive) return asWritten;
+    return { kind: 'wait', why: 'the post being replied to has not reached Hive yet' };
+  }
+  return { kind: 'ready', author: parent.hiveAuthor, permlink: parent.hivePermlink };
+}
+
 function buildCommentOp(job: PublishJob): CommentOp {
+
+
   const p: PublishPayload = job.payloadSnapshot;
   const deleting = job.jobType === 'delete';
   // Soft delete (§D.6): used when Hive refuses a real delete_comment. Blank the
@@ -170,6 +242,42 @@ export async function runPublisherOnce(workerId: string): Promise<ProcessOutcome
     // re-creating the object on chain.
     const already = await broadcaster.postExists(author, permlink);
 
+    // ★★★ THE PARENT IS RESOLVED FOR *EVERY* JOB TYPE, BEFORE ANY OP IS BUILT
+    // (2026-08-10). It used to be resolved only inside the `!already` branch, which a
+    // `delete` returns before ever reaching — so a takedown of a lite REPLY built its
+    // soft-delete op from the placeholder parent the row still carried, Hive answered
+    // "The parent of a comment cannot change.", `isRetriable` (correctly) called that
+    // terminal, and the job died. No retry, no operator surface, and the reply stayed
+    // public forever. Proven on a real row.
+    const { parentAuthor, parentPermlink } = job.payloadSnapshot;
+    if (parentAuthor && parentPermlink) {
+      // See resolveParentOnChain for why "is the parent still live?" is a create-only
+      // precondition. An edit or a takedown acts on something already on chain.
+      const parent = await resolveParentOnChain(parentAuthor, parentPermlink, {
+        requireParentLive: job.jobType === 'create'
+      });
+      if (parent.kind === 'gone') {
+        await jobs.markTerminal(job.jobId, parent.why, 'rejected');
+        return 'failed';
+      }
+      if (parent.kind === 'wait') {
+        // Deliberately NOT an attempt: waiting on a parent that is merely slow
+        // must not burn the reply's five tries. That is how a reply to a
+        // still-queued post became permanently undeliverable.
+        await jobs.reschedule(job.jobId, parent.why, 60);
+        return 'failed';
+      }
+      if (parent.permlink !== parentPermlink || parent.author !== parentAuthor) {
+        job.payloadSnapshot.parentAuthor = parent.author;
+        job.payloadSnapshot.parentPermlink = parent.permlink;
+        // ★ AND WRITE IT DOWN. Mutating the in-memory payload made THIS broadcast
+        // correct and left the row's record of the parent wrong, so every later job
+        // for the post rebuilt the placeholder again. A no-op once the post is on
+        // chain (the pin is a fact by then) — see posts.setPublishParent.
+        await posts.setPublishParent(job.postId, parent.author, parent.permlink);
+      }
+    }
+
     // ★★★ DELETE IS HANDLED HERE, OUTSIDE THE `!already` GUARD (2026-08-06).
     //
     // THE BUG THIS FIXES, found by taking down a real post on mainnet: every
@@ -211,12 +319,33 @@ export async function runPublisherOnce(workerId: string): Promise<ProcessOutcome
       return 'processed';
     }
 
-    if (!already) {
+    // ★★★ `!already` IS A *CREATE* GUARD. IT ATE EVERY EDIT (2026-08-10).
+    //
+    // THE BUG THIS FIXES — the same shape as the DELETE one fixed on 2026-08-06, left
+    // behind on the UPDATE path. The guard exists so a create that crashed after its
+    // broadcast does not publish the post twice. For an `update` the post is on chain
+    // BY DEFINITION, so `already` is always true, the whole block was skipped, and
+    // control fell straight through to `markPublished` + `markPostPublished(...,
+    // pruneBody: true)` — which sets `body = ''`.
+    //
+    // So every edit of a published lite post: never broadcast, and the edited text
+    // ERASED from the only place it still existed. The job reported `published`,
+    // queue health stayed green, and the post silently reverted to its pre-edit chain
+    // text on every surface. Reproduced end to end: chain kept "ORIGINAL BODY", the
+    // row's body was left empty, and the drain returned 'processed'.
+    //
+    // Hive's comment op is an UPSERT — re-broadcasting the same permlink with new
+    // content IS the edit — so an update must ALWAYS broadcast. `delete` returned
+    // above, so this is narrowed to 'create' | 'update'.
+    const skipBroadcast = job.jobType === 'create' && already;
+    if (!skipBroadcast) {
       // A child can only be broadcast once its container root exists on chain —
       // otherwise the node rejects it ("Comment ... not found"). The container root
       // is itself a root post, so opening one can be blocked by the 5-minute rule;
-      // that just reschedules this child.
+      // that just reschedules this child. (Parent resolution already happened above,
+      // for every job type; these are the resolved values.)
       const { parentAuthor, parentPermlink } = job.payloadSnapshot;
+
       if (parentAuthor === author && isContainerPermlink(parentPermlink)) {
         const ready = await ensureContainerPublished(broadcaster, parentAuthor, parentPermlink);
         if (!ready) {
@@ -249,12 +378,31 @@ export async function runPublisherOnce(workerId: string): Promise<ProcessOutcome
         await jobs.markTerminal(job.jobId, 'the post no longer exists', 'rejected');
         return 'failed';
       }
-      if (live.deletedLocally || live.feedVisibility !== 'visible') {
-        await jobs.markTerminal(
-          job.jobId,
-          live.deletedLocally ? 'deleted before publishing' : 'moderated before publishing',
-          'rejected'
-        );
+      // A deletion is not undoable here — `deleted_at` refuses every later edit — so
+      // ending the job is the honest outcome.
+      if (live.deletedLocally) {
+        await jobs.markTerminal(job.jobId, 'deleted before publishing', 'rejected');
+        return 'failed';
+      }
+      // ★★★ A HIDE IS PARKED, NOT KILLED (2026-08-10).
+      //
+      // This used to be `markTerminal(..., 'moderated before publishing', 'rejected')`
+      // — a TERMINAL status for a REVERSIBLE condition, and the single largest cause
+      // of content loss in this system. `listOrphaned` treats a terminal job as no
+      // job, so the sweep re-enqueued the post on the very next drain and the worker
+      // rejected it again a minute later; three generations were spent in three
+      // minutes, after which the sweep could never see the post again. Restoring
+      // visibility an hour later changed nothing, forever.
+      //
+      // Measured on the live queue: 38 posts × exactly 3 generations = 114 rejected
+      // jobs, every one of those posts visible again today and none of them on Hive,
+      // while `queueHealth` reported `pending: 0`.
+      //
+      // 'holding' is non-terminal, so the sweep leaves it alone (no generations
+      // burned), `queueHealth` counts it, and `releaseHeldForPublishable` picks it up
+      // the moment the post is visible again — without needing to know who hid it.
+      if (live.feedVisibility !== 'visible') {
+        await jobs.hold(job.jobId, `held: the post is ${live.feedVisibility}, not visible`);
         return 'failed';
       }
 

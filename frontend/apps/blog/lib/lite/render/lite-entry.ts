@@ -73,7 +73,9 @@ export async function liteEntryForPost(
     _lite: {
       author: publicName,
       title: post.title || chainEntry.title,
-      chainAuthor: post.hiveAuthor
+      chainAuthor: post.hiveAuthor,
+      // See LiteIdentity.userId — the identity the block filters key on.
+      userId: post.userId
     },
     // The identity a reader should see. The permlink stays real, so links resolve.
     author: publicName,

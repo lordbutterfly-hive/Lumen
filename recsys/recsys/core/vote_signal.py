@@ -226,22 +226,36 @@ def independent_vote_signal(
     trust: VoterTrust | None = None,
     personal_for: frozenset[str] | None = None,
 ) -> float:
-    """Breadth-weighted independent vote signal (§4, §8.4).
+    """The independent PAYOUT signal (§4, §8.4) — log-compressed rshares.
 
-    Keeps only positive-``rshares`` votes whose voter is not in
-    ``exclusions.excluded()`` (self-vote, stake-lineage, ring). Rewards the
-    number of distinct kept voters on top of raw log-compressed magnitude, so
-    many small independent voters outrank one large non-independent stake.
-    Returns ``0.0`` when no votes survive the exclusion.
+    Keeps only positive-``rshares`` non-lite votes whose voter is not in
+    ``exclusions.excluded()`` (self-vote, stake-lineage, ring), sums their
+    rshares, and log-compresses the total. Returns ``0.0`` when no votes
+    survive the exclusion.
 
-    ``trust`` graph-cred-weights the breadth term (:class:`VoterTrust`): funded
-    sock-puppet alts are distinct voters that slip all three exclusions, so an
-    un-weighted distinct-voter count is bought one-for-one. With ``trust``, the
-    breadth is ``vouched + budgeted(unknown)`` instead of the raw distinct
-    count. ``None`` (default) is the pre-hardening raw count — the behaviour the
-    frozen §4 norm sample is built on. The stake magnitude (``raw``) is
-    untouched: a real 0.5 HP vote still contributes its real, log-compressed
-    rshares; only the *breadth multiplier*, the Sybil lever, is budgeted.
+    ★★★ ``trust`` IS INERT HERE, AND THE DOCSTRING USED TO SAY OTHERWISE
+    (corrected 2026-08-10, PRUNED N8). Until 2026-08-09 this returned
+    ``log_compress(raw) * (1 + log10(1 + breadth))`` and ``trust`` budgeted
+    that breadth multiplier. The multiplier was then removed — see the "PAYOUT
+    AMOUNT, NOT PAYOUT x VOTE COUNT" note in the body — and with it the only
+    thing ``trust`` touched, but this paragraph kept asserting a Sybil budget
+    the function no longer applies. Verified by execution: a tight budget and
+    ``trust=None`` return the identical value.
+
+    The parameter is KEPT rather than deleted so every caller still compiles
+    and so a future payout-side exclusion has a place to land; it is also what
+    ``recsys.norm_builder._norm_inputs`` passes, so that if it ever becomes
+    live the §4 sample stays in lockstep with the scorer by construction rather
+    than by someone remembering. **Distinct-independent-people is the ORGANIC
+    term's job** (:func:`independent_organic_engagement`), where the budget IS
+    applied — counting it here as well double-counted the same evidence under
+    the minority stake weight.
+
+    ``personal_for`` is the viewer's follow set: rshares from inside it count
+    in full, rshares from strangers are scaled by
+    :data:`_PERSONAL_STRANGER_SCALE`. ``None`` is the chain-wide value, which
+    is what the §4 sample is built from — see ``_norm_inputs``' docstring for
+    why that one asymmetry is deliberate and what it costs.
     """
     excluded = exclusions.excluded()
     # ★★★ L2 (2026-08-05) — LITE VOTES ARE EXCLUDED FROM THIS TERM ENTIRELY, in
@@ -289,6 +303,12 @@ def independent_vote_signal(
     # ★ PERSONAL PAYOUT (2026-08-09). `personal_for` is the viewer's follow set;
     # rshares from inside it count in full, rshares from strangers are scaled.
     # `None` keeps the old chain-wide behaviour for callers with no viewer.
+    # ★ Annotated `float`, not inferred (2026-08-10). Without it mypy fixes
+    # `raw` as `int` from the first branch, then reads the personal-scaled
+    # branch as an incompatible `int | float` and reports it against `sum`'s
+    # bool overload — `mypy recsys` has been red on exactly this line since the
+    # personal-payout change landed (PRUNED N7).
+    raw: float
     if personal_for is None:
         raw = sum(vote.rshares for vote in kept)
     else:

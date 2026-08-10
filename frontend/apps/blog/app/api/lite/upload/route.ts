@@ -23,7 +23,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (blocked) return blocked;
 
   const session = await getLiteSession();
-  const actor = await requireActiveLiteUser(session.user, session.sessionEpoch);
+  const actor = await requireActiveLiteUser(session.user, session);
   if (!actor.ok) return actor.response;
   const user = actor.user;
 

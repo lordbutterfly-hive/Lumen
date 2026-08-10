@@ -34,7 +34,6 @@ possibly belong", selection asks "which of them earned it".
 from __future__ import annotations
 
 import math
-
 from collections.abc import Callable, Mapping, Sequence
 
 from recsys.config import PopularConfig, ScoreWeights

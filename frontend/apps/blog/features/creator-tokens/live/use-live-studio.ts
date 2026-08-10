@@ -24,6 +24,7 @@ import type { Ask, Market, Offering } from '../types';
 import { adaptAsk, adaptMarket, blocksToDays, usdFromHbd, type LiveTokenMarket } from './adapt';
 import type { PortfolioAsk } from '../market/portfolio';
 import type { LiveMarketStatus } from './use-live-token-market';
+import { collapseRead } from './collapse-read';
 
 const marketKey = (creator: string) => ['creatorTokens', 'live', 'market', creator];
 const asksKey = (creator: string) => ['creatorTokens', 'live', 'creatorAsks', creator];
@@ -46,10 +47,24 @@ export interface LiveStudio {
   inbox: PortfolioAsk[];
   /** The raw escrows behind `inbox` — answer/decline need seq + deadlineBlock, which the portfolio row does not carry. */
   rawInbox: Ask[];
-  offerings: Offering[];
+  /**
+   * NULL when the shop could not be read — NOT an empty shop.
+   *
+   * ★ These two used to collapse a REJECTED chain read into a confident zero
+   * (`offeringsQuery.data ?? []`, `usdFromHbd(feeQuery.data ?? 0)`), because both
+   * gate their loading state on the MARKET query's success rather than their own.
+   * A transient node failure on either read therefore rendered as fact: "You
+   * haven't posted any services yet" to a creator whose services are live, and a
+   * claimable balance of $0 with the Claim button reading "Claimed" and disabled
+   * — real earnings, hidden behind a disabled control, with nothing on screen
+   * saying a read had failed. `null` forces the caller to say "unavailable", the
+   * way `commissionEarnedUsd` already does.
+   */
+  offerings: Offering[] | null;
   /** Whole days until the subscription lapses; negative once overdue. */
   subDaysLeft: number;
-  tradeFeeClaimableUsd: number;
+  /** NULL when the fee balance could not be read — NOT a zero balance. See `offerings`. */
+  tradeFeeClaimableUsd: number | null;
   /**
    * NULL, always, until the indexer serves HTTP. Lifetime commission is a
    * replay of past `answered` events and cannot be derived from current state.
@@ -155,6 +170,8 @@ export function useLiveStudio(): LiveStudio {
           // studio's own-token panel uses supply/reserve, and fetching a
           // position we do not render would be a read for nothing.
           position: null,
+          // The market VIEW still needs a concrete list; a failed read shows no
+          // rows there, and the studio's own shop section reports the failure.
           offerings: offeringsQuery.data ?? [],
           delivery: deliveryQuery.data ?? null
         })
@@ -200,9 +217,9 @@ export function useLiveStudio(): LiveStudio {
     market,
     inbox,
     rawInbox,
-    offerings: offeringsQuery.data ?? [],
+    offerings: collapseRead(offeringsQuery),
     subDaysLeft,
-    tradeFeeClaimableUsd: usdFromHbd(feeQuery.data ?? 0),
+    tradeFeeClaimableUsd: ((hbd) => (hbd === null ? null : usdFromHbd(hbd)))(collapseRead(feeQuery)),
     commissionEarnedUsd: null,
 
     register: useCallback(

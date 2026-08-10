@@ -139,6 +139,24 @@ export async function findUsersByHiveAccountNames(names: string[]): Promise<Lume
 }
 
 /**
+ * Batch map CURRENT LUMEN HANDLES -> lite user.
+ *
+ * Deliberately a separate function from {@link findUsersByHiveAccountNames} rather
+ * than one "find by any name" query, because the two namespaces are not
+ * interchangeable and collapsing them misidentifies people. A lite handle is by
+ * construction a name that was FREE on Hive at signup, so `@alice` the Lumen handle
+ * and `@alice` the Hive account can be two different human beings. A caller that
+ * knows which namespace it is holding — a chain-signed entry's author is a Hive
+ * account; a Lumen-rendered entry's author is a handle — must be able to say so.
+ * Used by the block filters, where guessing wrong hides the wrong person's words.
+ */
+export async function findUsersByDisplayNames(names: string[]): Promise<LumenUser[]> {
+  if (names.length === 0) return [];
+  const { rows } = await query<UserRow>(`${SELECT} WHERE display_name = ANY($1::citext[])`, [names]);
+  return rows.map(mapUser);
+}
+
+/**
  * Which of these names are already spoken for inside Lumen — as a current handle OR
  * as an upgraded account's Hive name. One query.
  *

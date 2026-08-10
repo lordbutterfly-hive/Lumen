@@ -267,6 +267,8 @@
     "reputation": "Reputacja",
     "follow_button": "Obserwuj",
     "mute_button": "Blokuj",
+    "block_button": "Zablokuj",
+    "unblock_button": "Odblokuj",
     "unmute_button": "Odblokuj",
     "unfollow_button": "Przestań obserwować",
     "hive_buzz_badge_title": "To poziom odznaki użytkownika {{username}} zdobytą z programu Hivebuzz",
@@ -583,7 +585,9 @@
       "name_of_a_new_template": "Nazwa nowego szablonu",
       "template_name_is_taken": "Nazwa szablonu jest już zajęta",
       "save": "Zapisz",
-      "delete_template": "Usuń szablon"
+      "delete_template": "Usuń szablon",
+      "template_save_failed": "Your settings were applied, but the template could not be saved — your browser has no room for it.",
+      "template_delete_failed": "The template could not be deleted — your browser refused the change."
     },
     "category_selector": {
       "required": "Wymagane przy publikowaniu na Moim Blogu",

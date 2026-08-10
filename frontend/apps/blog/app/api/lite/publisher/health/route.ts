@@ -48,12 +48,37 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // seconds, so a burst legitimately takes minutes to clear. What is NOT normal is
     // the oldest job ageing past the stall window — that means nothing is draining.
     const stalled = health.oldestPendingAgeSeconds !== null && health.oldestPendingAgeSeconds > stallSeconds;
-    const ok = !stalled && health.stuckPublishing === 0;
+    // ★★★ STRANDED CONTENT IS A FAILURE, NOT A STATISTIC (2026-08-10).
+    //
+    // Every signal above is derived from the QUEUE, and the queue's blind spot is the
+    // work it has already given up on: a job that died terminally stops being pending,
+    // stops being stuck, and stops ageing. So the worst possible state of this system
+    // — a third of all lite content permanently off-chain while still being served —
+    // presented here as `{"ok":true,"pending":0,"oldestPendingAgeSeconds":null}` and
+    // paged nobody for two days. `strandedPosts` and `failedOperations` are counted
+    // from the CONTENT rather than the queue, precisely so they survive that.
+    const ok =
+      !stalled &&
+      health.stuckPublishing === 0 &&
+      health.strandedPosts === 0 &&
+      health.failedOperations === 0;
 
     if (stalled) {
       logger.error(
         { oldestPendingAgeSeconds: health.oldestPendingAgeSeconds, pending: health.pending },
         'Lite publisher queue is stalled — posts are queued but nothing is draining'
+      );
+    }
+    if (health.strandedPosts > 0) {
+      logger.error(
+        { strandedPosts: health.strandedPosts },
+        'Lite posts are being SERVED but are not on Hive and nothing is working on them — run recoverStranded'
+      );
+    }
+    if (health.failedOperations > 0) {
+      logger.error(
+        { failedOperations: health.failedOperations },
+        'Edits or TAKEDOWNS of on-chain lite posts have failed terminally — content a moderator removed may still be public'
       );
     }
 

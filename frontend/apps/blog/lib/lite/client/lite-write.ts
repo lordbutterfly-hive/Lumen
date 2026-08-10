@@ -1,6 +1,7 @@
 'use client';
 
 import { csrfHeaderName } from '@smart-signer/lib/csrf-protection';
+import { recordRetentionAct } from '@/blog/features/retention/components/retention-moments';
 
 /**
  * Client-side write/interaction calls for LITE-tier sessions. A lite account has
@@ -18,6 +19,7 @@ const JSON_POST: HeadersInit = { 'Content-Type': 'application/json', [csrfHeader
 
 export type LiteWriteResult = { status: 'ok'; postId?: string } | { status: 'error'; message: string };
 export type LiteFollowResult = { status: 'ok'; following: boolean } | { status: 'error'; message: string };
+export type LiteBlockResult = { status: 'ok'; blocking: boolean } | { status: 'error'; message: string };
 
 function friendly(status: number, code?: string, message?: string): string {
   // The server's own message wins when it has one. It is written for the user and is
@@ -30,6 +32,7 @@ function friendly(status: number, code?: string, message?: string): string {
   if (status === 503) return 'Lumen accounts aren’t available right now.';
   if (code === 'not_found') return 'That account isn’t on Lumen.';
   if (code === 'cannot_follow_self') return 'You can’t follow yourself.';
+  if (code === 'cannot_block_self') return 'You can’t block yourself.';
   return 'Something went wrong — please try again.';
 }
 
@@ -77,6 +80,8 @@ export async function createLitePost(input: LitePostInput): Promise<LiteWriteRes
         }
       | null;
     if (res.status === 201 && b?.status === 'ok') {
+      // Only on a server-CONFIRMED write — never optimistically.
+      if (!input.editOfPostId) recordRetentionAct(input.parentRef ? 'reply' : 'post');
       return { status: 'ok', postId: b.post?.id ?? b.post?.postId };
     }
     return { status: 'error', message: friendly(res.status, b?.code || b?.error, b?.message) };
@@ -94,7 +99,10 @@ export async function liteVote(author: string, permlink: string, weight: number)
       body: JSON.stringify({ author, permlink, weight })
     });
     const b = (await res.json().catch(() => null)) as { ok?: boolean; error?: string; message?: string } | null;
-    if (res.ok && b?.ok) return { status: 'ok' };
+    if (res.ok && b?.ok) {
+      if (weight !== 0) recordRetentionAct('vote');
+      return { status: 'ok' };
+    }
     return { status: 'error', message: friendly(res.status, b?.error, b?.message) };
   } catch {
     return { status: 'error', message: 'Network error — please try again.' };
@@ -110,7 +118,10 @@ export async function liteReblog(author: string, permlink: string, undo = false)
       body: JSON.stringify({ author, permlink, undo })
     });
     const b = (await res.json().catch(() => null)) as { ok?: boolean; error?: string; message?: string } | null;
-    if (res.ok && b?.ok) return { status: 'ok' };
+    if (res.ok && b?.ok) {
+      if (!undo) recordRetentionAct('reblog');
+      return { status: 'ok' };
+    }
     return { status: 'error', message: friendly(res.status, b?.error, b?.message) };
   } catch {
     return { status: 'error', message: 'Network error — please try again.' };
@@ -128,7 +139,48 @@ export async function liteFollow(followeeName: string, unfollow = false): Promis
     const b = (await res.json().catch(() => null)) as
       | { ok?: boolean; following?: boolean; error?: string; message?: string }
       | null;
-    if (res.ok && b?.ok) return { status: 'ok', following: !!b.following };
+    if (res.ok && b?.ok) {
+      if (!unfollow) recordRetentionAct('follow');
+      return { status: 'ok', following: !!b.following };
+    }
+    return { status: 'error', message: friendly(res.status, b?.error, b?.message) };
+  } catch {
+    return { status: 'error', message: 'Network error — please try again.' };
+  }
+}
+
+/**
+ * Block / unblock somebody on Lumen.
+ *
+ * `targetKind` says which NAME-SPACE the name came from — `'hive'` for a chain-signed
+ * byline, `'lumen'` for a Lumen handle. It is not optional in practice: a Lumen handle
+ * is by construction a name that was free on Hive, so the same spelling can be two
+ * different people, and a block has effects on third parties (a blocked account's
+ * comments vanish from the blocker's posts for every reader). Getting the wrong one
+ * would delete an innocent person's words from a page.
+ *
+ * ★ NOT A CHAIN OPERATION FOR EITHER TIER. A full Hive account's block is recorded on
+ * Lumen exactly like a lite account's — no `ignore` custom_json is broadcast. The
+ * reasoning is in `lib/lite/social/block-service.ts`; the short version is that an
+ * on-chain mute cannot express "hide their replies under my post from everyone", so
+ * broadcasting one would promise less than the button does. The existing on-chain
+ * Mute control is untouched for anyone who wants the chain-wide version.
+ */
+export async function liteBlock(
+  targetName: string,
+  targetKind: 'hive' | 'lumen' | 'auto',
+  unblock = false
+): Promise<LiteBlockResult> {
+  try {
+    const res = await fetch(`/api/lite/${unblock ? 'unblock' : 'block'}`, {
+      method: 'POST',
+      headers: JSON_POST,
+      body: JSON.stringify({ targetName, targetKind })
+    });
+    const b = (await res.json().catch(() => null)) as
+      | { ok?: boolean; blocking?: boolean; error?: string; message?: string }
+      | null;
+    if (res.ok && b?.ok) return { status: 'ok', blocking: !!b.blocking };
     return { status: 'error', message: friendly(res.status, b?.error, b?.message) };
   } catch {
     return { status: 'error', message: 'Network error — please try again.' };

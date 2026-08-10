@@ -20,6 +20,17 @@ declare module '@smart-signer/types/common' {
   // eslint-disable-next-line @typescript-eslint/consistent-type-definitions
   interface IronSessionData {
     sessionEpoch?: number;
+    /**
+     * WHICH DEVICE this cookie is, so a sign-out can revoke one session instead of
+     * the account. Random per issue, stamped alongside the epoch and never read as
+     * input from anywhere but the cookie itself; a listed id is refused
+     * (repositories/session-revocation-repository.ts).
+     *
+     * Optional forever: cookies issued before this existed carry none, and for
+     * those the epoch check stands alone exactly as it did — deploying per-device
+     * revocation must not sign anybody out.
+     */
+    sessionId?: string;
   }
 }
 

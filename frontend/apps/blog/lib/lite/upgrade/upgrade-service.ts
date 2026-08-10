@@ -8,6 +8,7 @@ import * as users from '../repositories/user-repository';
 import * as names from '../repositories/name-reservation-repository';
 import * as upgradeEvents from '../repositories/upgrade-event-repository';
 import * as follows from '../repositories/follow-repository';
+import * as blocks from '../repositories/block-repository';
 import { LITE_HANDLE_REUSE_MESSAGE, isOwnLiteHandle } from '../names/upgrade-name';
 import { enforceActSpend } from '../antispam/rate-limit';
 import { AccountPublicKeys, getAccountCreator, hasAccountCreator } from './account-creator';
@@ -272,6 +273,16 @@ async function completeBookkeeping(
     // the NAME they just took is folded into their account, so they cannot end up as
     // two people in the follow graph.
     await follows.absorbHiveActor(userId, newName);
+    // ★ AND THE BLOCK GRAPH, WHICH IS NOT A FORMALITY THE WAY THE FOLLOW ONE IS.
+    //
+    // For follows there is nothing to move: the Hive account is brand new, so nobody
+    // can have followed it. Blocks are different — somebody may well have blocked
+    // this NAME before it belonged to a Lumen user (they were two separate nodes
+    // until this moment). Leaving the `h:<name>` edge behind would release that block
+    // the instant the upgrade landed, i.e. upgrading would be a way out of everyone's
+    // block list. Re-pointing it onto the stable `user_id` keeps it binding, in both
+    // directions.
+    await blocks.absorbHiveActor(userId, newName);
     // No earnings settlement: lite accounts hold NO balance (rewards are rejected at
     // publish, decision 2026-07-23), so upgrade only creates the on-chain account.
     await upgradeEvents.markCreated(eventId, trxId);

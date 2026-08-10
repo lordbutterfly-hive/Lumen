@@ -8,6 +8,7 @@ from recsys.config import ScoreWeights
 from recsys.contracts import CandidateSource, NormContext
 from recsys.core.scoring import (
     AuthorEngagement,
+    _earned_weights,
     declared_interest_raw,
     pooled_author_base,
     score_candidate,
@@ -21,10 +22,10 @@ NORM = NormContext(
     reputation_samples=(10.0, 20.0, 30.0, 40.0, 50.0),
     organic_samples=(0.0, 0.25, 0.5, 0.75, 1.0),
 )
-WEIGHTS = ScoreWeights()  # 0.10 / 0.10 / 0.80
+WEIGHTS = ScoreWeights()  # stake capped at `vote_share_of_final` of `final`
 #: ★ 2026-08-08 — the shipped `in_network_bonus` is NON-ZERO and
 #: `make_candidate` defaults to `source=IN_NETWORK`, so any test asserting a
-#: STRUCTURAL identity of the 10/10/80 composite ("all weight on vote ->
+#: STRUCTURAL identity of the composite ("all weight on vote ->
 #: final == vote_norm") has to pin the follow weight off, or it is silently
 #: measuring the follow weight instead of the structure it names.
 NO_FOLLOW_WEIGHT = {"in_network_bonus": 0.0}
@@ -89,7 +90,7 @@ def test_organic_component_monotonic() -> None:
 
 def test_all_organic_weight_final_equals_organic() -> None:
     candidate = make_candidate(post=make_post(author_reputation=30.0))
-    organic_only = ScoreWeights(vote=0.0, reputation=0.0, organic=1.0,
+    organic_only = ScoreWeights(vote_share_of_final=0.0, reputation=0.0, organic=1.0,
                                 **NO_FOLLOW_WEIGHT)
     result = score_candidate(
         candidate, vote_signal_raw=2.0, organic_raw=0.5, norm=NORM, weights=organic_only
@@ -99,7 +100,7 @@ def test_all_organic_weight_final_equals_organic() -> None:
 
 def test_all_vote_weight_final_equals_vote_norm() -> None:
     candidate = make_candidate(post=make_post(author_reputation=30.0))
-    vote_only = ScoreWeights(vote=1.0, reputation=0.0, organic=0.0,
+    vote_only = ScoreWeights(vote_share_of_final=1.0, reputation=0.0, organic=0.0,
                              **NO_FOLLOW_WEIGHT)
     result = score_candidate(
         candidate, vote_signal_raw=2.0, organic_raw=0.5, norm=NORM, weights=vote_only
@@ -657,7 +658,7 @@ def test_interest_percentile_none_leaves_organic_unchanged_at_any_weight() -> No
 def test_interest_percentile_blends_the_COMPOSITE_not_just_the_organic_slice() -> None:
     # ★ 2026-08-05: the declared-interest term blends against the EARNED
     # composite, so vote/rep/quality are all diluted by the same factor and
-    # the 10/10/80 balance among them survives every `interest_match` value.
+    # their relative balance survives every `interest_match` value.
     candidate = make_candidate(post=make_post(author_reputation=30.0))
     weights = ScoreWeights(interest_match=0.4, **NO_FOLLOW_WEIGHT)
     quality = 0.6  # organic_raw=0.5 against NORM.organic_samples, see the CF test above
@@ -667,10 +668,13 @@ def test_interest_percentile_blends_the_COMPOSITE_not_just_the_organic_slice() -
     )
     # organic is now the EARNED organic only — the interest term is not in it.
     assert result.score.organic == pytest.approx(quality)
+    vote_w, rep_w, organic_w = _earned_weights(
+        weights, in_network_bonus=0.0, interest_weight=weights.organic * weights.interest_match
+    )
     earned = (
-        weights.vote * result.score.vote_norm
-        + weights.reputation * result.score.rep_norm
-        + weights.organic * quality
+        vote_w * result.score.vote_norm
+        + rep_w * result.score.rep_norm
+        + organic_w * quality
     )
     w = weights.organic * weights.interest_match
     assert result.score.final == pytest.approx((1.0 - w) * earned + w * 1.0)
@@ -713,10 +717,13 @@ def test_interest_blend_runs_on_the_composite_after_cf_and_viewer_own_affinity()
         cf_percentile=0.8, interest_percentile=1.0, viewer_percentile=0.2,
     )
     assert result.score.organic == pytest.approx(expected_organic)
+    vote_w, rep_w, organic_w = _earned_weights(
+        weights, in_network_bonus=0.0, interest_weight=weights.organic * weights.interest_match
+    )
     earned = (
-        weights.vote * result.score.vote_norm
-        + weights.reputation * result.score.rep_norm
-        + weights.organic * expected_organic
+        vote_w * result.score.vote_norm
+        + rep_w * result.score.rep_norm
+        + organic_w * expected_organic
     )
     w = weights.organic * weights.interest_match
     assert result.score.final == pytest.approx((1.0 - w) * earned + w * 1.0)
@@ -796,10 +803,13 @@ def test_in_network_bonus_zero_is_byte_identical_to_the_pre_follow_weight_score(
         # The reference is the pre-2026-08-08 composite computed BY HAND, not
         # `ScoreWeights()` — the shipped default now carries a non-zero follow
         # weight, so a "default" reference would be comparing the term to itself.
+        vote_w, rep_w, organic_w = _earned_weights(
+            off, in_network_bonus=0.0, interest_weight=0.0
+        )
         expected = (
-            off.vote * result.score.vote_norm
-            + off.reputation * result.score.rep_norm
-            + off.organic * result.score.organic
+            vote_w * result.score.vote_norm
+            + rep_w * result.score.rep_norm
+            + organic_w * result.score.organic
         )
         assert result.score.final == pytest.approx(expected), source
 
@@ -856,10 +866,13 @@ def test_the_follow_weight_keeps_finals_earned_interest_decomposition() -> None:
         interest_percentile=1.0,
     )
     w = weights.organic * weights.interest_match
+    vote_w, rep_w, organic_w = _earned_weights(
+        weights, in_network_bonus=weights.in_network_bonus, interest_weight=w
+    )
     plain_earned = (
-        weights.vote * result.score.vote_norm
-        + weights.reputation * result.score.rep_norm
-        + weights.organic * result.score.organic
+        vote_w * result.score.vote_norm
+        + rep_w * result.score.rep_norm
+        + organic_w * result.score.organic
     )
     boosted = plain_earned + weights.in_network_bonus * (1.0 - plain_earned)
     assert result.score.interest_bonus == pytest.approx(w * 1.0)
@@ -890,3 +903,129 @@ def test_the_follow_weight_is_rejected_outside_the_unit_interval() -> None:
         ScoreWeights(in_network_bonus=-0.1)
     with pytest.raises(ValueError, match="in_network_bonus"):
         ScoreWeights(in_network_bonus=1.5)
+
+
+# ---------------------------------------------------------------------------
+# PRUNED R4 — the owner's stake cap must hold on EVERY path, not one of four
+# ---------------------------------------------------------------------------
+
+
+def _stake_share_of_final(
+    weights: ScoreWeights, *, source: CandidateSource, interest_percentile: float | None
+) -> float:
+    """d final / d vote_norm, measured by finite difference on the REAL scorer.
+
+    Deliberately not computed from the weights: this is the number the owner
+    capped, and reading it off `final` is what makes the test independent of
+    how `score_candidate` chooses to arrive at it. `NORM.vote_signal_samples`
+    is `(0, 1, 2, 3, 4)`, so raws of 0.5 and 3.5 give vote percentiles 0.2 and
+    0.8 — a clean 0.6 of the term's range, with everything else held fixed.
+    """
+    candidate = make_candidate(post=make_post(author_reputation=30.0), source=source)
+    lo, hi = (
+        score_candidate(
+            candidate, vote_signal_raw=raw, organic_raw=0.5, norm=NORM,
+            weights=weights, interest_percentile=interest_percentile,
+        )
+        for raw in (0.5, 3.5)
+    )
+    d_vote = hi.score.vote_norm - lo.score.vote_norm
+    assert d_vote == pytest.approx(0.6), d_vote  # the probe must actually move
+    return (hi.score.final - lo.score.final) / d_vote
+
+
+def test_stake_is_the_configured_share_of_final_on_every_path() -> None:
+    """★★★ PRUNED R4. `final` is `earned` put through up to two CONDITIONAL
+    blends — the in-network bonus (IN_NETWORK sources only) and the
+    declared-interest blend (viewers with interest tags only) — so a single
+    stored `vote` weight cannot be 10% of `final` on more than one of the four
+    combinations. Measured at HEAD before this fix:
+
+        interest + OON         0.10000  (the one path the literal was solved for)
+        interest + IN_NETWORK  0.09500
+        no tags  + OON         0.14340  (+43% over the owner's cap)
+        no tags  + IN_NETWORK  0.13623
+
+    All four must now read `vote_share_of_final`.
+    """
+    weights = ScoreWeights()
+    assert weights.in_network_bonus > 0.0 and weights.interest_match > 0.0, (
+        "this test is only meaningful while both conditional blends are ON — "
+        "with either at 0 two of the four paths collapse into the other two"
+    )
+    for source in (CandidateSource.IN_NETWORK, CandidateSource.OON_ENGAGED):
+        for interest_percentile in (0.7, None):
+            share = _stake_share_of_final(
+                weights, source=source, interest_percentile=interest_percentile
+            )
+            assert share == pytest.approx(weights.vote_share_of_final, abs=1e-9), (
+                f"stake is {share:.5f} of `final` for source={source.value} "
+                f"interest={'Y' if interest_percentile is not None else 'n'}, "
+                f"against the configured cap {weights.vote_share_of_final}"
+            )
+
+
+def test_stake_share_holds_when_the_interest_weight_moves() -> None:
+    """The old literal was hand-solved against `interest_match = 0.4`, so any
+    move of that field silently drifted the stake share. The solve is now
+    re-derived per request; moving the field must not move the cap."""
+    for interest_match in (0.0, 0.2, 0.4, 0.6):
+        weights = ScoreWeights(interest_match=interest_match)
+        for source in (CandidateSource.IN_NETWORK, CandidateSource.OON_ENGAGED):
+            share = _stake_share_of_final(
+                weights, source=source, interest_percentile=0.7
+            )
+            assert share == pytest.approx(weights.vote_share_of_final, abs=1e-9), (
+                f"interest_match={interest_match} source={source.value}: {share}"
+            )
+
+
+def test_earned_weights_reproduce_the_pre_r4_literals_on_the_solved_path() -> None:
+    """The path the shipped `vote = 0.1434 / 0.10 / 0.7566` literals WERE
+    solved for must be unchanged, or this fix quietly re-tunes the ranking
+    instead of only repairing the three broken paths. The derived vote weight is
+    0.14339796 against the hand-rounded 0.1434 — a 2.04e-6 gap, which is the
+    rounding error in the old literal, corrected."""
+    weights = ScoreWeights()
+    vote_w, rep_w, organic_w = _earned_weights(
+        weights,
+        in_network_bonus=0.0,
+        interest_weight=weights.organic * weights.interest_match,
+    )
+    assert (vote_w, rep_w, organic_w) == pytest.approx((0.1434, 0.10, 0.7566), abs=3e-6)
+    assert vote_w + rep_w + organic_w == pytest.approx(1.0)
+
+
+def test_earned_weights_keep_the_reputation_to_organic_ratio_on_every_path() -> None:
+    """The stake weight is what moves per path; reputation and organic must
+    take the remainder in their CONFIGURED ratio, never drift against each
+    other. Otherwise the fix would silently re-weight quality vs reputation."""
+    weights = ScoreWeights()
+    configured = weights.reputation / weights.organic
+    for bonus in (0.0, weights.in_network_bonus):
+        for blend_w in (0.0, weights.organic * weights.interest_match):
+            _, rep_w, organic_w = _earned_weights(
+                weights, in_network_bonus=bonus, interest_weight=blend_w
+            )
+            assert rep_w / organic_w == pytest.approx(configured)
+
+
+def test_a_stake_target_the_worst_path_cannot_reach_is_refused() -> None:
+    """Silently clamping an unreachable target would re-introduce exactly the
+    per-path drift this replaced, so the config refuses instead."""
+    with pytest.raises(ValueError, match="unreachable on the most-discounted"):
+        ScoreWeights(vote_share_of_final=0.9, interest_match=1.0, in_network_bonus=0.5)
+
+
+def test_a_fully_replacing_in_network_bonus_is_still_accepted() -> None:
+    """`in_network_bonus = 1.0` discards `earned` outright for in-network
+    candidates, so stake carries 0% there — UNDER the owner's cap, not over
+    it, and therefore not a violation. The config must not refuse it, and
+    `final` must stay in [0, 1]."""
+    weights = ScoreWeights(in_network_bonus=1.0)
+    result = score_candidate(
+        make_candidate(post=make_post(author_reputation=30.0),
+                       source=CandidateSource.IN_NETWORK),
+        vote_signal_raw=2.0, organic_raw=0.5, norm=NORM, weights=weights,
+    )
+    assert 0.0 <= result.score.final <= 1.0

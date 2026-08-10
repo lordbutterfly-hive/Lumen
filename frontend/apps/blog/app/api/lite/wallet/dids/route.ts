@@ -28,7 +28,7 @@ export async function GET(_req: NextRequest): Promise<NextResponse> {
   // F-L2/F-L17: this exposes the account's full cross-wallet linkage (every bound
   // DID) — a banned/suspended/revoked session must be refused, so gate on the DB
   // status + F-L3 epoch, not a bare cookie presence check.
-  const actor = await requireActiveLiteUser(session.user, session.sessionEpoch);
+  const actor = await requireActiveLiteUser(session.user, session);
   if (!actor.ok) return actor.response;
   const user = actor.user;
 

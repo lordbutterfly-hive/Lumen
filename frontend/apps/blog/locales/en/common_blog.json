@@ -253,7 +253,7 @@
     "action": "OK",
     "cancel": "Cancel",
     "description": "This post will be added to your blog and shared with your followers.",
-    "description_lite": "This post will be added to your Lumen blog. Reblogs from a keyless account stay on Lumen \u2014 they don't reach Hive.",
+    "description_lite": "This post will be added to your Lumen blog. Reblogs from a keyless account stay on Lumen — they don't reach Hive.",
     "already_reblogged": "You have already reblogged this post.",
     "title": "Reblog This Post"
   },
@@ -307,6 +307,8 @@
   "user_profile": {
     "reputation": "Reputation",
     "mute_button": "Mute",
+    "block_button": "Block",
+    "unblock_button": "Unblock",
     "unmute_button": "Unmute",
     "unfollow_button": "Unfollow",
     "follow_button": "Follow",
@@ -402,7 +404,10 @@
       "mentioned_you_and_others": "@{{username}} mentioned you and {{others}} others",
       "subscribed_to": "@{{username}} subscribed to {{community}}"
     },
-    "load_failed_retry": "Couldn't load more — tap to try again"
+    "load_failed_retry": "Couldn't load more — tap to try again",
+    "reputation_title": "Reputation {{value}}. A stake-weighted total of the votes @{{username}} has received. Lumen does not use it for anything.",
+    "reputation_label": "Hive reputation",
+    "reputation_short": "rep"
   },
   "communities": {
     "set_title_for_user": "Set Title for @{{username}}",
@@ -697,7 +702,9 @@
       "name_of_a_new_template": "Name of a new template",
       "template_name_is_taken": "Template name is taken",
       "save": "Save",
-      "delete_template": "Delete Template"
+      "delete_template": "Delete Template",
+      "template_save_failed": "Your settings were applied, but the template could not be saved — your browser has no room for it.",
+      "template_delete_failed": "The template could not be deleted — your browser refused the change."
     },
     "category_selector": {
       "required": "Required when post to My Blog",
@@ -794,218 +801,264 @@
   },
   "retention": {
     "tier": {
-      "void": "Void",
-      "abyss": "Abyss",
-      "smoke": "Smoke",
-      "ash": "Ash",
+      "unranked": "Unranked",
+      "spark": "Spark",
       "ember": "Ember",
+      "candle": "Candle",
+      "lantern": "Lantern",
       "torch": "Torch",
       "beacon": "Beacon",
+      "halo": "Halo",
       "aurora": "Aurora",
       "lumen": "Lumen"
     },
     "tier_blurb": {
-      "void": "Nothing yet. Not bad — nothing. Every single person you admire on here started exactly where you are.",
-      "abyss": "You said something and the room stayed quiet. This is the single most normal experience on the internet.",
-      "smoke": "Something is burning down there. Nobody can see it yet, but they can smell it.",
-      "ash": "The turn. Everything below this was cold. Ash means something actually burned.",
-      "ember": "First real light. Small, easy to miss, and unmistakably yours.",
-      "torch": "Light you can carry. People start bringing you into conversations you weren’t standing in.",
-      "beacon": "A fixed light other people navigate by — including people who have never met you.",
-      "aurora": "Completely unnecessary at this scale, and everybody looks up anyway.",
-      "lumen": "The top. Nothing above it. Yes, we named it after the app; we’re a little embarrassed too.",
-      "void_their": "Nothing yet. Not bad — nothing. Everybody on here started exactly here.",
-      "abyss_their": "They said something and the room stayed quiet. This is the single most normal experience on the internet.",
-      "smoke_their": "Something is burning down there. Nobody can see it yet, but they can smell it.",
-      "ash_their": "The turn. Everything below this was cold. Ash means something actually burned.",
-      "ember_their": "First real light. Small, easy to miss, and unmistakably theirs.",
-      "torch_their": "Light you can carry. People start bringing them into conversations they weren’t standing in.",
-      "beacon_their": "A fixed light other people navigate by — including people who have never met them.",
-      "aurora_their": "Completely unnecessary at this scale, and everybody looks up anyway.",
-      "lumen_their": "The top. Nothing above it. Yes, we named it after the app; we’re a little embarrassed too."
-    },
-    "rank": {
-      "void": {
-        "escape": "Post one thing. Literally one. The bar is on the floor and we lowered it further on purpose."
-      },
-      "abyss": {
-        "escape": "Reply to three people who aren’t you. Conversations climb out of here. Monologues don’t."
-      },
-      "smoke": {
-        "escape": "Come back next week, and the week after. Smoke that stops was just a rumour."
-      },
-      "ash": {
-        "escape": "Get read by people who don’t already know you. Different humans — not the same one twice."
-      },
-      "ember": {
-        "escape": "Stay lit. Embers go out quietly if you disappear for a month, and nobody will warn you."
-      },
-      "torch": {
-        "escape": "Keep the months stacking. This stretch is mostly stubbornness, and stubbornness counts."
-      },
-      "beacon": {
-        "escape": "Breadth and time, together. There is no shortcut left — this one is paid in calendar."
-      },
-      "aurora": {
-        "escape": "Nothing to do. Keep being the reason somebody opens the app on a bad day."
-      },
-      "lumen": {
-        "escape": "You’re here. The only remaining challenge is not being insufferable about it."
-      }
+      "unranked": "Nothing measured yet. One post or comment starts it.",
+      "spark": "You showed up. That is the whole of rank one.",
+      "ember": "A week of showing up. It is holding.",
+      "candle": "Three weeks in. It stopped being an accident.",
+      "lantern": "Six weeks. A habit now, not a visit.",
+      "torch": "Three months of showing up. The mark starts here.",
+      "beacon": "Five months. People could set a watch by you.",
+      "halo": "Seven months. Part of the furniture, in the good way.",
+      "aurora": "Nine months of turning up. Almost a year.",
+      "lumen": "A year of showing up. Nothing above it.",
+      "unranked_their": "Nothing measured yet.",
+      "spark_their": "They showed up. That is the whole of rank one.",
+      "ember_their": "A week of showing up. It is holding.",
+      "candle_their": "Three weeks in. It stopped being an accident.",
+      "lantern_their": "Six weeks. A habit now, not a visit.",
+      "torch_their": "Three months of showing up. The mark starts here.",
+      "beacon_their": "Five months. People could set a watch by them.",
+      "halo_their": "Seven months. Part of the furniture, in the good way.",
+      "aurora_their": "Nine months of turning up. Almost a year.",
+      "lumen_their": "A year of showing up. Nothing above it."
     },
     "scale": "rank {{position}} of {{total}}",
     "rank_of": "Rank {{n}} of {{total}}",
-    "gate": {
-      "engagement": "People engaging with you",
-      "tenure": "Time on Hive",
-      "active_weeks": "Weeks you showed up",
-      "tenure_lumen": "Time on Lumen",
-      "active_days": "Days you showed up",
-      "engagement_their": "People engaging with them",
-      "active_weeks_their": "Weeks they showed up",
-      "active_days_their": "Days they showed up"
+    "byline_title": "{{tier}}, {{scale}}",
+    "distance": {
+      "days": "{{count}} more active days",
+      "days_one": "1 more active day",
+      "days_other": "{{count}} more active days"
     },
-    "gate_title": "What’s actually holding you here",
-    "gate_title_their": "What’s actually holding this rank",
-    "way_out": {
-      "engagement": "Different people need to read you — it is breadth that moves this, not volume. The same friend upvoting you twice still counts once.",
-      "tenure": "Time, and only time. This one is paid in calendar and there is no way to hurry it.",
-      "activeWeeks": "Show up in more weeks. Any single act makes a week count, and forty posts in one week still counts as one.",
-      "dormant": "Come back. One post or one comment puts a week back on the board, and the count starts again.",
-      "engagement_their": "Not enough different people have read them yet. It is breadth that moves this, not volume.",
-      "tenure_their": "Time on the platform, and nothing else. This one is paid in calendar.",
-      "activeWeeks_their": "Weeks with any activity at all. It is weeks that count here, not posts.",
-      "dormant_their": "Presence. The last {{total}} weeks are empty, and that is the only thing pinning this rank.",
-      "blank_their": "Nothing published yet, so there is nothing for the ladder to read."
-    },
+    "to_next": "to {{tier}}",
+    "at_top": "Top of the ladder. Nothing above it.",
+    "blank": "Nothing published yet, so nothing to measure.",
+    "blank_their": "Nothing published yet, so nothing to measure.",
     "dormant": {
-      "meaning": "Here since {{year}}, and nothing in the last {{total}} weeks. That is dormant, not new — this rung is the reading of an account nobody has heard from lately, not of a beginner."
+      "meaning": "Here since {{year}}. Nothing in the last {{total}} weeks.",
+      "meaning_their": "Here since {{year}}. Nothing in the last {{total}} weeks."
+    },
+    "weekday": {
+      "0": "Sundays",
+      "1": "Mondays",
+      "2": "Tuesdays",
+      "3": "Wednesdays",
+      "4": "Thursdays",
+      "5": "Fridays",
+      "6": "Saturdays"
+    },
+    "stats": {
+      "people": "{{people}} people voted on your last {{count}} posts.",
+      "people_one": "{{people}} people voted on your last post.",
+      "people_other": "{{people}} people voted on your last {{count}} posts.",
+      "people_their": "{{people}} people voted on their last {{count}} posts.",
+      "people_their_one": "{{people}} people voted on their last post.",
+      "people_their_other": "{{people}} people voted on their last {{count}} posts.",
+      "people_solo": "1 person voted on your last {{count}} posts.",
+      "people_solo_one": "1 person voted on your last post.",
+      "people_solo_other": "1 person voted on your last {{count}} posts.",
+      "people_solo_their": "1 person voted on their last {{count}} posts.",
+      "people_solo_their_one": "1 person voted on their last post.",
+      "people_solo_their_other": "1 person voted on their last {{count}} posts.",
+      "new_people": "{{count}} of them for the first time this week.",
+      "new_people_one": "1 of them for the first time this week.",
+      "new_people_other": "{{count}} of them for the first time this week.",
+      "feeds": "Landed in {{count}} feeds this week.",
+      "feeds_one": "Landed in 1 feed this week.",
+      "feeds_other": "Landed in {{count}} feeds this week.",
+      "feeds_delta_up": "{{count}} more than last week.",
+      "feeds_delta_up_one": "1 more than last week.",
+      "feeds_delta_up_other": "{{count}} more than last week.",
+      "feeds_delta_down": "{{count}} fewer than last week.",
+      "feeds_delta_down_one": "1 fewer than last week.",
+      "feeds_delta_down_other": "{{count}} fewer than last week.",
+      "weekday": "You show up most on {{day}}.",
+      "weekday_their": "Shows up most on {{day}}.",
+      "longest": "Longest streak: {{count}} days.",
+      "longest_floor": "Longest streak: {{count}}+ days.",
+      "weeks": "Active {{weeks}} of the last {{total}} weeks.",
+      "weeks_at_least": "Active at least {{weeks}} of the last {{total}} weeks.",
+      "since": "On Hive since {{year}}.",
+      "since_lumen": "On Lumen since {{year}}.",
+      "footnote": "Counted across the last {{count}} posts.",
+      "footnote_one": "Counted across the most recent post.",
+      "footnote_other": "Counted across the last {{count}} posts.",
+      "footnote_all": "Counted across all {{count}} posts.",
+      "footnote_all_one": "Counted across the only post.",
+      "footnote_all_other": "Counted across all {{count}} posts.",
+      "credited": "{{count}} of them count toward the rank.",
+      "credited_one": "1 of them counts toward the rank.",
+      "credited_other": "{{count}} of them count toward the rank.",
+      "credited_why": "Votes from accounts with no stake count a few at a time. Otherwise a swarm could buy a rung.",
+      "longest_one": "Longest streak: 1 day.",
+      "longest_other": "Longest streak: {{count}} days.",
+      "longest_floor_one": "Longest streak: 1+ days.",
+      "longest_floor_other": "Longest streak: {{count}}+ days.",
+      "bots_excluded": "Curation bots and blacklisted accounts excluded.",
+      "replier": "Replies {{count}}x for every post.",
+      "replier_one": "Posts and replies about equally.",
+      "replier_other": "Replies {{count}}x for every post.",
+      "poster": "Posts {{count}}x for every reply.",
+      "poster_one": "Posts and replies about equally.",
+      "poster_other": "Posts {{count}}x for every reply.",
+      "active_days": "Shown up on {{count}} days.",
+      "active_days_one": "Shown up on 1 day.",
+      "active_days_other": "Shown up on {{count}} days.",
+      "active_days_floor": "Shown up on {{count}}+ days.",
+      "active_days_floor_one": "Shown up on 1+ days.",
+      "active_days_floor_other": "Shown up on {{count}}+ days.",
+      "quiet": "Longest quiet spell: {{count}} days.",
+      "quiet_one": "Longest quiet spell: 1 day.",
+      "quiet_other": "Longest quiet spell: {{count}} days."
     },
     "day_streak": "{{days}}-day streak",
+    "day_streak_at_least": "{{days}}+ day streak",
+    "day_streak_floor_hint": "At least this many. Older history unread.",
     "member_since": "Member since {{year}}",
-    "facts": {
-      "givers": "{{count}} people have engaged with your posts",
-      "active_weeks": "Active {{weeks}} of the last {{total}} weeks",
-      "active_weeks_at_least": "Active at least {{weeks}} of the last {{total}} weeks",
-      "since": "On Hive since {{year}}",
-      "footnote": "Engagement counted across your last {{count}} posts.",
-      "since_lumen": "On Lumen since {{year}}",
-      "footnote_all": "Engagement counted across all {{count}} of your posts.",
-      "givers_one": "1 person has engaged with your posts",
-      "givers_other": "{{count}} people have engaged with your posts",
-      "footnote_one": "Engagement counted across your most recent post.",
-      "footnote_other": "Engagement counted across your last {{count}} posts.",
-      "footnote_all_one": "Engagement counted across your only post.",
-      "footnote_all_other": "Engagement counted across all {{count}} of your posts.",
-      "givers_their": "{{count}} people have engaged with their posts",
-      "givers_their_one": "1 person has engaged with their posts",
-      "givers_their_other": "{{count}} people have engaged with their posts",
-      "givers_counted": "{{count}} of them count toward your rank — votes from accounts with little stake behind them are credited only a few at a time, or a swarm of new accounts could buy a rung.",
-      "givers_counted_one": "1 of them counts toward your rank — votes from accounts with little stake behind them are credited only a few at a time, or a swarm of new accounts could buy a rung.",
-      "givers_counted_other": "{{count}} of them count toward your rank — votes from accounts with little stake behind them are credited only a few at a time, or a swarm of new accounts could buy a rung.",
-      "givers_counted_their": "{{count}} of them count toward their rank — votes from accounts with little stake behind them are credited only a few at a time, or a swarm of new accounts could buy a rung.",
-      "givers_counted_their_one": "1 of them counts toward their rank — votes from accounts with little stake behind them are credited only a few at a time, or a swarm of new accounts could buy a rung.",
-      "givers_counted_their_other": "{{count}} of them count toward their rank — votes from accounts with little stake behind them are credited only a few at a time, or a swarm of new accounts could buy a rung.",
-      "footnote_their": "Engagement counted across their last {{count}} posts.",
-      "footnote_their_one": "Engagement counted across their most recent post.",
-      "footnote_their_other": "Engagement counted across their last {{count}} posts.",
-      "footnote_all_their": "Engagement counted across all {{count}} of their posts.",
-      "footnote_all_their_one": "Engagement counted across their only post.",
-      "footnote_all_their_other": "Engagement counted across all {{count}} of their posts."
+    "today": {
+      "title": "Today",
+      "progress": "{{done}} of {{goal}}",
+      "done": "Done for today.",
+      "holds": "Day {{days}} lands if you post or comment today.",
+      "holds_goal": "Day {{days}} needs {{goal}} today.",
+      "start": "One post or comment starts a streak.",
+      "start_goal": "{{goal}} posts or comments starts a streak.",
+      "deadline": "You have until {{time}}.",
+      "deadline_midnight": "You have until midnight.",
+      "freeze": "{{count}} freezes banked. Each covers a missed day.",
+      "freeze_one": "1 freeze banked. It covers a missed day.",
+      "freeze_other": "{{count}} freezes banked. Each covers a missed day.",
+      "freeze_used": "A freeze covered yesterday. The streak held.",
+      "goal_title": "Daily goal",
+      "goal_hint": "One post or comment counts. A Hive vote never reaches Lumen.",
+      "goal": {
+        "casual": "Casual",
+        "casual_sub": "1 a day",
+        "regular": "Regular",
+        "regular_sub": "2 a day",
+        "serious": "Serious",
+        "serious_sub": "4 a day"
+      }
+    },
+    "nudge": {
+      "new_giver": "@{{name}} voted on you for the first time. That is {{count}} in all.",
+      "unanswered": "@{{name}} replied {{ago}} and nobody has answered.",
+      "milestone": "Day {{days}}. Nobody made you do it.",
+      "milestone_month": "Day {{days}}. That is a month of showing up.",
+      "reach": "Your last post landed in {{count}} feeds.",
+      "weekday_today": "You post most on {{day}}. It is {{day_short}}.",
+      "new_people_week": "{{count}} people found you this week. None of them follow you.",
+      "streak_holds": "Day {{days}} lands if you post or comment today.",
+      "dismiss": "Dismiss",
+      "ago_recent": "just now",
+      "ago_hours": "{{count}}h ago",
+      "ago_hours_one": "an hour ago",
+      "ago_hours_other": "{{count}}h ago",
+      "ago_days": "{{count}}d ago",
+      "ago_days_one": "yesterday",
+      "ago_days_other": "{{count}}d ago",
+      "open": "Open",
+      "new_giver_one": "@{{name}} voted on you for the first time. That is 1 in all.",
+      "new_giver_other": "@{{name}} voted on you for the first time. That is {{count}} in all.",
+      "reach_one": "Your last post landed in 1 feed.",
+      "reach_other": "Your last post landed in {{count}} feeds.",
+      "new_people_week_one": "1 person found you this week. They do not follow you.",
+      "new_people_week_other": "{{count}} people found you this week. None of them follow you."
     },
     "moment": {
       "first_act": {
         "post": {
-          "title": "That’s a post.",
-          "body": "It’s out there now. Nothing left to do but pretend you’re not refreshing."
+          "title": "That is a post.",
+          "body": "It is out there. The algorithm takes it from here."
         },
         "reply": {
-          "title": "You replied.",
-          "body": "Replies are how people find you. Monologues are how they don’t."
+          "title": "Replied.",
+          "body": "Replies are how people find you."
         },
         "vote": {
           "title": "Vote counted.",
-          "body": "Someone’s day just got marginally better and they will never know it was you."
+          "body": "Somebody's day got marginally better."
         },
         "reblog": {
           "title": "Reblogged.",
-          "body": "You just spent your own feed on someone else’s post. That is the entire idea."
+          "body": "You spent your feed on someone else's post."
         },
         "follow": {
           "title": "Followed.",
-          "body": "Your feed is now slightly more your own fault. That’s the good kind of fault."
+          "body": "Your feed is now more your own fault."
         },
         "generic": {
           "title": "Noted.",
           "body": "That one counts."
         }
       },
+      "goal_hit": {
+        "title": "Goal met. Day {{days}}.",
+        "body": "Nothing else needed today."
+      },
       "streak_2": {
-        "title": "2-day streak. That’s the hard one.",
-        "body": "Day 3 is downhill. Day 30 is a personality."
+        "title": "Two days. That is the hard one.",
+        "body": "Day three is downhill."
+      },
+      "milestone": {
+        "title": "{{count}} days.",
+        "body": "Nobody made you do it.",
+        "title_one": "1 day.",
+        "title_other": "{{count}} days."
       }
     },
     "recap": {
-      "title": "Your week",
+      "title": "Last week",
       "posts": "{{count}} posts",
-      "replies": "{{count}} replies",
-      "engaged": "{{count}} people engaged",
-      "active_days": "active {{days}} of {{total}} days",
-      "note": "No trophy, no streak-saver to buy, no guilt. Just what happened.",
-      "link": "Where that puts you →",
-      "dismiss": "Dismiss this week’s recap",
       "posts_one": "1 post",
       "posts_other": "{{count}} posts",
+      "replies": "{{count}} replies",
       "replies_one": "1 reply",
       "replies_other": "{{count}} replies",
-      "engaged_one": "1 person engaged",
-      "engaged_other": "{{count}} people engaged"
+      "people": "{{count}} people voted on you",
+      "people_one": "1 person voted on you",
+      "people_other": "{{count}} people voted on you",
+      "feeds": "{{count}} feeds reached",
+      "active_days": "active {{days}} of {{total}} days",
+      "link": "Where that puts you",
+      "dismiss": "Dismiss",
+      "feeds_one": "1 feed reached",
+      "feeds_other": "{{count}} feeds reached"
     },
     "ranks": {
-      "title": "{{total}} ranks. Everybody starts in the dark.",
-      "subtitle": "This is the whole ladder — no hidden rungs, no XP shop, nothing you can buy. Where you sit is decided by other people reading you, which is annoying, and exactly the point.",
-      "your_position": "Where you are",
+      "title": "Nine ranks. Nobody buys any of them.",
+      "subtitle": "Your rank is one number: days you showed up here, in the last year. Not votes, not followers, not how long you have had a Hive account.",
+      "your_position": "You",
       "you_are_here": "You are here",
-      "signed_out": "Sign in and this page will tell you exactly where you’re standing.",
-      "way_out": "Way out:",
-      "holding": "What’s holding it:",
-      "see_all": "See the whole ladder →",
-      "how_title": "How you actually move",
-      "how_intro": "Three things, and only three. Your rank is the WEAKEST of them — you cannot out-post a missing one, which is why posting 40 times a day gets you nowhere.",
-      "how": {
-        "read": {
-          "title": "People read you",
-          "body": "Different people. One friend upvoting you 400 times moves nothing; forty strangers moves everything. This is the arm that stops bot farms dead."
-        },
-        "time": {
-          "title": "Time passes",
-          "body": "Some of this is just calendar. You can’t rush it — and neither can whoever registered 500 accounts this morning."
-        },
-        "showing_up": {
-          "title": "You keep showing up",
-          "body": "Weeks you were active, out of the last 26. Missing a week is nothing. Missing three months is something.",
-          "body_lumen": "Days you were active, out of the last {{days}}. Missing a day is nothing. Missing a month is something."
-        }
-      },
-      "wont_title": "What does not move you. At all.",
-      "wont_body": "Posting more. Buying anything. Voting for yourself. Being loud. Streaks and daily habits are for you, not for your rank — they are deliberately worthless here, and that is precisely why nobody can farm them.",
-      "ladder_title": "All {{total}} rungs, bottom to top",
-      "down_title": "Can it go down?",
-      "down_body": "Yes — if you disappear for a long time. It happens quietly: no notification, no badge, nobody else is told, and we will never send you a message about it, because that would be a genuinely awful thing to receive. Come back and it comes back.",
-      "unavailable": "We could not work out where you are standing just now. Nothing has changed about your rank — try again in a moment.",
-      "loading": "Working out where you are standing…"
+      "signed_out": "Sign in to see where you stand.",
+      "see_all": "How ranks work",
+      "wont": "Votes do nothing. Followers do nothing. Years on Hive do nothing. Ten posts in one day count as one day.",
+      "down_title": "It goes down on its own.",
+      "down_body": "A day stops counting a year after it happened. Go quiet and the number falls. No notification, nobody else told.",
+      "unavailable": "Could not work this out just now. Your rank has not changed.",
+      "loading": "Working it out"
     },
-    "ceiling": {
-      "badge": "Not awarded yet",
-      "top": "Top rank currently awarded: {{tier}}.",
-      "reason": "Ranks for Hive accounts are worked out from your reputation, and that measure stops short of the rungs above — so we do not hand them out rather than pretend it reaches. Nothing you do is failing.",
-      "reason_their": "Ranks for Hive accounts are worked out from reputation, and that measure stops short of the rungs above — so we do not hand them out rather than pretend it reaches. Nothing about this account is failing.",
-      "ladder_note": "Top rank currently awarded: {{tier}} — rank {{rank}} of {{total}}.",
-      "ladder_reason": "A Hive account’s rank is worked out from reputation, and that measure stops short of the top {{rungs}} rungs — so we do not hand them out rather than pretend it reaches. Nobody is failing to reach them; nothing does. A Lumen account is measured directly instead of through reputation, so this cap is not on it.",
-      "row": "Not reachable from a Hive account today, so there is nothing to tell you to do."
-    },
-    "day_streak_at_least": "{{days}}+ day streak",
-    "day_streak_floor_hint": "At least this many — we stopped reading your history before the streak ended, so it may be longer."
+    "weekday_one": {
+      "0": "Sunday",
+      "1": "Monday",
+      "2": "Tuesday",
+      "3": "Wednesday",
+      "4": "Thursday",
+      "5": "Friday",
+      "6": "Saturday"
+    }
   },
   "wallet": {
     "page_title": "Wallet",

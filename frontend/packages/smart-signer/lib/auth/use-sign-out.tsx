@@ -26,9 +26,24 @@ async function signOutBackend(): Promise<User> {
  * real session cookie stayed valid — the user looked signed out, and anything
  * reading the cookie server-side still saw them signed in. The endpoint that
  * fixes it already existed and had no callers.
+ *
+ * ★★★ TWO DIFFERENT ACTIONS, AND THIS IS WHERE THEY WERE CONFLATED (2026-08-10).
+ *
+ * Sign-out in this product is per-DEVICE — it is the item in the user menu of the
+ * tab you are looking at. Every lite sign-out was routed to `/api/lite/auth/logout`,
+ * which advanced the ACCOUNT-wide `session_epoch`, so clicking it in one tab
+ * silently signed the user out of every other tab, phone and laptop. That is the
+ * long-standing "epoch drift" (17 of 209 accounts sit above epoch 0), and it is why
+ * an earlier attempt to enforce the epoch on `/api/users/me` had to be reverted with
+ * users being signed out "on almost every action".
+ *
+ * `logout-all` — the endpoint that is SUPPOSED to do the account-wide thing — had
+ * no callers anywhere in the product, so the destructive behaviour was reachable
+ * only by accident and the deliberate one was not reachable at all. Both are now
+ * addressable, and which one runs is the caller's explicit choice.
  */
-async function signOutLite(): Promise<User> {
-  await fetchJson('/api/lite/auth/logout', {
+async function signOutLite(everywhere: boolean): Promise<User> {
+  await fetchJson(everywhere ? '/api/lite/auth/logout-all' : '/api/lite/auth/logout', {
     method: 'POST',
     headers: [
       ['content-type', 'application/json'],
@@ -38,12 +53,12 @@ async function signOutLite(): Promise<User> {
   return defaultUser;
 }
 
-async function signOut(user: User): Promise<User> {
+async function signOut(user: User, everywhere: boolean): Promise<User> {
   const { authenticateOnBackend } = user;
   // Checked BEFORE authenticateOnBackend: a lite session must always reach its
   // own destroy route, whatever else is configured.
   if (user.account_tier === 'lite') {
-    return signOutLite();
+    return signOutLite(everywhere);
   }
   if (authenticateOnBackend) {
     return signOutBackend();
@@ -52,12 +67,18 @@ async function signOut(user: User): Promise<User> {
   }
 }
 
+/**
+ * @param params.everywhere  Revoke EVERY session for the account, not just this
+ *   device. Defaults to false — the plain sign-out control means "this device",
+ *   and defaulting the other way is the bug described above. Lite accounts only:
+ *   a full Hive session has no per-device server state either way.
+ */
 export function useSignOut() {
   const queryClient = useQueryClient();
   const signOutMutation = useMutation({
-    mutationFn: (params: { user: User }) => {
-      const { user } = params;
-      return signOut(user);
+    mutationFn: (params: { user: User; everywhere?: boolean }) => {
+      const { user, everywhere } = params;
+      return signOut(user, everywhere === true);
     },
     onMutate: () => {
       // Clear observer cookie immediately — SSR stops personalizing

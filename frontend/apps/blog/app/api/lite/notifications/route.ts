@@ -44,7 +44,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   let actor: { userId?: string; hive?: string } | null = null;
   try {
     const session = await getLiteSession();
-    const checked = await requireActiveLiteUser(session.user, session.sessionEpoch);
+    const checked = await requireActiveLiteUser(session.user, session);
     if (checked.ok) actor = { userId: checked.user.userId };
     else if (hiveParam && session.user?.username === hiveParam) actor = { hive: hiveParam };
   } catch {

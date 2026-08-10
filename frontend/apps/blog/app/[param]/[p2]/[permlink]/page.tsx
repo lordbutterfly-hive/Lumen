@@ -2,6 +2,7 @@ import PostContent from './content';
 import { getPostCached } from '@/blog/lib/cached-api';
 import { liteChainCoordinates, liteRecordExists } from '@/blog/lib/lite/render/lite-entry';
 import { attachLiteIdentities, attachLiteIdentitiesToDiscussion } from '@/blog/lib/lite/render/attach-lite';
+import { applyOwnerBlocksToDiscussion } from '@/blog/lib/lite/social/block-filter';
 import { liteEntryForPermlinkCached } from '@/blog/lib/lite/render/lite-entry-cached';
 import { isLumenPermlink } from '@/blog/lib/lite/render/lite-post-id';
 import { getCommunity, getDiscussion, getFollowList } from '@transaction/lib/bridge-api';
@@ -120,6 +121,20 @@ const PostPage = async ({
     // the client corrects each comment individually. Resolve the whole thread here,
     // in two queries, before it is serialised.
     discussionData = await attachLiteIdentitiesToDiscussion(discussionData);
+
+    // ★★★ EFFECT (B) — A BLOCKED ACCOUNT'S REPLIES UNDER THIS THREAD ARE NOT SERVED
+    // TO ANYBODY, and that includes the server-rendered HTML.
+    //
+    // Applied AFTER `attachLiteIdentities` on purpose: that is what puts the real
+    // writer's `_lite.userId` on each entry, and without it a Lumen reply looks
+    // authored by the shared publishing account — so the filter would either miss
+    // every lite commenter or hide all of them at once.
+    //
+    // The same filter runs again in `/api/discussion`, which is what the browser
+    // re-fetches this thread through. Both are needed: this one decides the first
+    // paint (and what a crawler or a JS-less reader gets), that one decides every
+    // subsequent read.
+    discussionData = await applyOwnerBlocksToDiscussion(discussionData);
     if (isLoggedIn) {
       mutedListData = mutedListResult.status === 'fulfilled' ? (mutedListResult.value ?? null) : null;
       if (mutedListResult.status === 'rejected') {

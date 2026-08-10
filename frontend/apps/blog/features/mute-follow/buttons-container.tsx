@@ -3,6 +3,7 @@
 import { IFollow } from '@hive/common-hiveio-packages/wax';
 import FollowButton from './follow-button';
 import MuteButton from './mute-button';
+import BlockButton from './block-button';
 import { User } from '@smart-signer/types/common';
 import { UseInfiniteQueryResult } from '@tanstack/react-query';
 import { useMuteMutation, useUnmuteMutation } from './hooks/use-mute-mutations';
@@ -12,6 +13,7 @@ import DialogLogin from '@/blog/components/dialog-login';
 import { handleError } from '@ui/lib/handle-error';
 import { useTranslation } from '@/blog/i18n/client';
 import { useLumenFollow } from '@/blog/lib/lite/client/use-lumen-follow';
+import { useLumenBlock } from '@/blog/lib/lite/client/use-lumen-block';
 
 const ButtonsContainer = ({
   username,
@@ -74,6 +76,33 @@ const ButtonsContainer = ({
   // The query only runs when one side is keyless, so an ordinary Hive-to-Hive button
   // is unchanged and costs nothing.
   const lumen = useLumenFollow(username, user.isLoggedIn && (user.account_tier === 'lite' || liteTarget));
+
+  // ★ BLOCK IS OFFERED TO EVERYONE, ON EVERY BYLINE — the one control here with no
+  // tier condition. Mute is chain-only, so it is hidden from a lite viewer and from a
+  // lite target; following splits between the chain and Lumen depending on the pair.
+  // A block is always Lumen's, always available, and always means the same thing:
+  // this person disappears from my feeds, and their replies under my posts stop being
+  // served to anybody.
+  //
+  // `targetKind` says which name-space `username` is from. `liteTarget` is exactly
+  // that distinction, and it matters here more than anywhere else: a Lumen handle and
+  // a Hive account can share a spelling, and blocking the wrong one would erase an
+  // innocent person's comments from other readers' screens.
+  const block = useLumenBlock(
+    username,
+    liteTarget ? 'lumen' : 'hive',
+    user.isLoggedIn && username !== user.username
+  );
+
+  const handlerBlock = async () => {
+    const failure = await block.toggle();
+    if (failure) {
+      handleError(new Error(failure), {
+        method: block.isBlocking ? 'lumen-unblock' : 'lumen-block',
+        params: { username }
+      });
+    }
+  };
 
   const isFollow = lumen.applies
     ? lumen.isFollowing
@@ -179,6 +208,14 @@ const ButtonsContainer = ({
               disabled={temporaryDisabled}
             />
           )}
+          {block.available ? (
+            <BlockButton
+              loading={block.busy}
+              variant={variant}
+              isBlocking={block.isBlocking}
+              onClick={handlerBlock}
+            />
+          ) : null}
         </>
       ) : (
         <DialogLogin>

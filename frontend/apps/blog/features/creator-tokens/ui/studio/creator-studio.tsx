@@ -576,11 +576,20 @@ const CreatorStudio: FC = () => {
               />
             </Card>
             <Card>
+              {/* ★ A FAILED READ IS NOT A ZERO BALANCE (2026-08-10). This read
+                  `usdWhole(tradeFeeClaimableUsd)` on a value that collapsed a
+                  rejected chain read into 0, so a node blip told a creator they
+                  had earned nothing. Same treatment as `commissionEarnedUsd`
+                  below: say we do not know. */}
               <Stat
                 label="Trade-fee share (claimable)"
-                value={usdWhole(tradeFeeClaimableUsd)}
+                value={tradeFeeClaimableUsd === null ? '—' : usdWhole(tradeFeeClaimableUsd)}
                 green
-                sub="Your 5% of the token’s trades"
+                sub={
+                  tradeFeeClaimableUsd === null
+                    ? 'Could not be read just now'
+                    : 'Your 5% of the token’s trades'
+                }
               />
             </Card>
             <Card>
@@ -652,9 +661,11 @@ const CreatorStudio: FC = () => {
               <div className="min-w-0">
                 <div className="text-[14px] font-semibold text-[#161511]">Default ask price</div>
                 <div className="text-[12px] text-[#9ca3af]">
-                  {studio.offerings.length === 0
-                    ? 'Shown on your token page as “Ask a question”. This is the only price buyers see until you add a named service.'
-                    : 'Used for “Ask a question”, alongside the named services below.'}
+                  {studio.offerings === null
+                    ? 'Shown on your token page as “Ask a question”.'
+                    : studio.offerings.length === 0
+                      ? 'Shown on your token page as “Ask a question”. This is the only price buyers see until you add a named service.'
+                      : 'Used for “Ask a question”, alongside the named services below.'}
                 </div>
               </div>
               <div className="flex flex-shrink-0 items-center rounded-[10px] border border-[#e4e6e9] px-3 py-2 focus-within:border-[#c0392b] focus-within:ring-1 focus-within:ring-[#c0392b]">
@@ -671,7 +682,22 @@ const CreatorStudio: FC = () => {
             </div>
 
             <div className="flex flex-col gap-3">
-              {studio.offerings.length === 0 ? (
+              {/* ★ "You haven't posted any services yet" was shown to creators
+                  whose services exist and simply could not be read — the list
+                  collapsed a rejected read into an empty array. Retry, do not
+                  reassure. */}
+              {studio.offerings === null ? (
+                <div className="rounded-xl border border-dashed border-[#f6c6c0] px-4 py-5 text-center text-[13px] text-[#8c2b1e]">
+                  <p>Your services couldn’t be loaded just now — this is not an empty shop.</p>
+                  <button
+                    type="button"
+                    onClick={() => studio.retry()}
+                    className="mt-2 rounded-[10px] border border-[#e2e4e7] bg-white px-3 py-1.5 text-[13px] font-semibold text-[#161511] hover:border-[#161511]"
+                  >
+                    Try again
+                  </button>
+                </div>
+              ) : studio.offerings.length === 0 ? (
                 <p className="rounded-xl border border-dashed border-[#e4e6e9] px-4 py-5 text-center text-[13px] text-[#9ca3af]">
                   You haven’t posted any services yet. Add one below and it appears on your token page.
                 </p>
@@ -861,22 +887,41 @@ const CreatorStudio: FC = () => {
               <div className="flex items-center justify-between">
                 <Stat
                   label="Trade-fee share"
-                  value={usdWhole(tradeFeeClaimableUsd)}
+                  value={tradeFeeClaimableUsd === null ? '—' : usdWhole(tradeFeeClaimableUsd)}
                   green
-                  sub="Your 5% of your token’s trades"
-                />
-                <button
-                  onClick={() =>
-                    void runStudioAction(
-                      () => studio.claimTradeFees(),
-                      'Claiming your trade fees didn’t go through.'
-                    )
+                  sub={
+                    tradeFeeClaimableUsd === null
+                      ? 'Could not be read just now — this is not a zero balance'
+                      : 'Your 5% of your token’s trades'
                   }
-                  disabled={tradeFeeClaimableUsd <= 0 || studio.isBusy}
-                  className="rounded-[11px] bg-[#2f7d4f] px-5 py-2.5 text-[14px] font-semibold text-white hover:bg-[#276b43] disabled:opacity-50"
-                >
-                  {tradeFeeClaimableUsd <= 0 ? 'Claimed' : 'Claim'}
-                </button>
+                />
+                {/* ★ The button used to read "Claimed" and sit disabled whenever
+                    the balance came back 0 — including when it came back 0 only
+                    because the read had FAILED. A creator with real unclaimed
+                    fees was shown a disabled control telling them there was
+                    nothing to claim. Unknown is now its own state, and it offers
+                    the retry rather than a verdict. */}
+                {tradeFeeClaimableUsd === null ? (
+                  <button
+                    onClick={() => studio.retry()}
+                    className="rounded-[11px] border border-[#e2e4e7] bg-white px-5 py-2.5 text-[14px] font-semibold text-[#161511] hover:border-[#161511]"
+                  >
+                    Try again
+                  </button>
+                ) : (
+                  <button
+                    onClick={() =>
+                      void runStudioAction(
+                        () => studio.claimTradeFees(),
+                        'Claiming your trade fees didn’t go through.'
+                      )
+                    }
+                    disabled={tradeFeeClaimableUsd <= 0 || studio.isBusy}
+                    className="rounded-[11px] bg-[#2f7d4f] px-5 py-2.5 text-[14px] font-semibold text-white hover:bg-[#276b43] disabled:opacity-50"
+                  >
+                    {tradeFeeClaimableUsd <= 0 ? 'Claimed' : 'Claim'}
+                  </button>
+                )}
               </div>
             </Card>
             {/* Lifetime commission is a REPLAY of past answered events, not

@@ -25,7 +25,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const session = await getLiteSession();
   // F-L2: DB status gate (+ F-L3 epoch) — a suspended/banned/revoked session cannot
   // mint a step-up challenge (the precondition for binding a new credential).
-  const actor = await requireActiveLiteUser(session.user, session.sessionEpoch);
+  const actor = await requireActiveLiteUser(session.user, session);
   if (!actor.ok) return actor.response;
   const user = actor.user;
 

@@ -296,6 +296,12 @@ export async function resolveByHive(
  * Record the on-chain mapping after a successful publish. With `pruneBody`, the
  * stored body is dropped — Hive becomes the source of truth and the DB keeps only
  * the mapping (hybrid model). Without it, the body is kept as a rebuildable cache.
+ *
+ * ★ `published_at` is FIRST-WRITE-WINS. This runs again after every successful edit
+ * (an `update` job ends here too), and `= now()` made a post's publication date jump
+ * to the moment of its latest edit — the same COALESCE the container publisher has
+ * always used. Nothing outside the row mapper reads the column today, which is
+ * exactly why it was free to be wrong.
  */
 export async function markPostPublished(
   postId: string,
@@ -306,7 +312,7 @@ export async function markPostPublished(
   const prune = opts.pruneBody ? ", body = ''" : '';
   await query(
     `UPDATE lumen_post
-       SET hive_author = $2, hive_permlink = $3, published_at = now()${prune}
+       SET hive_author = $2, hive_permlink = $3, published_at = COALESCE(published_at, now())${prune}
      WHERE post_id = $1`,
     [postId, hiveAuthor, hivePermlink]
   );
@@ -442,6 +448,44 @@ export async function unpinPublishParent(postId: string): Promise<boolean> {
   return (rowCount ?? 0) > 0;
 }
 
+/**
+ * ★★★ RECORD THE PARENT THE POST IS ACTUALLY BEING BROADCAST UNDER (2026-08-10).
+ *
+ * THE BUG THIS FIXES. A reply is written against the parent's LOCAL placeholder name
+ * (`lite-<ulid>` — what Lumen's own URLs use before a post reaches Hive), and that
+ * placeholder is what gets pinned at intake. The publisher then resolves it to the
+ * parent's REAL on-chain name (`lumen-<ulid>`) at broadcast time and publishes under
+ * that — but only in the payload it holds in memory. The row kept the placeholder,
+ * so the database's record of "what parent did this publish under" was WRONG for
+ * every lite reply, with two live consequences:
+ *
+ *   1. Every later operation on that reply — an edit, a takedown — rebuilds its op
+ *      from the pin, names the placeholder, and Hive refuses it permanently:
+ *      "The parent of a comment cannot change." (hive_evaluator_social.cpp:294/302).
+ *      A moderator's takedown of a lite reply could not succeed, ever.
+ *   2. `listRepliesToChainPost` — the comment thread — keys on exactly these two
+ *      columns, so the reply never merged into the thread it was written in.
+ *
+ * Guarded on `hive_permlink IS NULL` for the same reason {@link pinPublishParent} is
+ * first-write-wins: once a post is on chain its parent is a fact, and rewriting the
+ * record of a fact is how you lose the ability to operate on it. This runs in the
+ * window before the broadcast, which is the only window in which the value is still
+ * being decided.
+ */
+export async function setPublishParent(
+  postId: string,
+  author: string,
+  permlink: string
+): Promise<boolean> {
+  const { rowCount } = await query(
+    `UPDATE lumen_post
+        SET publish_parent_author = $2, publish_parent_permlink = $3
+      WHERE post_id = $1 AND hive_permlink IS NULL`,
+    [postId, author, permlink]
+  );
+  return (rowCount ?? 0) > 0;
+}
+
 export async function pinPublishParent(
   postId: string,
   author: string,
@@ -532,6 +576,69 @@ export async function listPermanentlyFailed(
     [limit, maxGenerations]
   );
   return res.rows.map(mapPost);
+}
+
+/**
+ * ★★★ POSTS THAT ARE BEING SERVED BUT WILL NEVER REACH HIVE (2026-08-10).
+ *
+ * Distinct from {@link listPermanentlyFailed}, which asks "did this post exhaust its
+ * generation budget?" — a question about the retry machinery. This asks the only
+ * question a reader's experience depends on: is this post on chain, and is anything
+ * at all still working on it? A post with three dead jobs and a post with zero jobs
+ * are the same post to whoever is reading it.
+ *
+ * Deliberately UNBOUNDED by generation count, so it can see exactly the rows the
+ * repair sweep has given up on — that is its entire purpose.
+ */
+export async function listStranded(limit: number): Promise<LumenPost[]> {
+  const res = await query<PostRow>(
+    `SELECT p.* FROM lumen_post p
+      WHERE p.deleted_locally = false
+        AND p.feed_visibility = 'visible'
+        AND p.hive_permlink IS NULL
+        AND NOT EXISTS (
+              SELECT 1 FROM publish_job j
+               WHERE j.post_id = p.post_id
+                 AND j.status IN ('pending','holding','publishing')
+            )
+      ORDER BY p.post_id
+      LIMIT $1`,
+    [limit]
+  );
+  return res.rows.map(mapPost);
+}
+
+/**
+ * Repair the parent record of an ALREADY-PUBLISHED reply that was pinned to the
+ * parent's placeholder name.
+ *
+ * The rows this fixes were published before {@link setPublishParent} existed: the
+ * broadcast named the parent's real permlink, the row kept `lite-<ulid>`. Since the
+ * post is on chain, `setPublishParent` (rightly) refuses to touch it — so this is a
+ * deliberate, narrow backfill, and it only ever writes the value the chain already
+ * has: it requires the referenced parent to exist and to be published under the
+ * `lumen-` name derived from the very id the placeholder names. It cannot invent a
+ * parent, and it cannot change one that is already correct.
+ */
+export async function repairPlaceholderPublishParent(limit: number): Promise<number> {
+  const { rowCount } = await query(
+    `UPDATE lumen_post p
+        SET publish_parent_author = parent.hive_author,
+            publish_parent_permlink = parent.hive_permlink
+       FROM lumen_post parent
+      WHERE p.post_id IN (
+              SELECT p2.post_id FROM lumen_post p2
+               WHERE p2.publish_parent_permlink LIKE 'lite-%'
+                 AND p2.hive_permlink IS NOT NULL
+               ORDER BY p2.post_id
+               LIMIT $1
+            )
+        AND parent.post_id = upper(substring(p.publish_parent_permlink from 6))
+        AND parent.hive_permlink = 'lumen-' || lower(parent.post_id)
+        AND parent.hive_author IS NOT NULL`,
+    [limit]
+  );
+  return rowCount ?? 0;
 }
 
 /** Bump and return the post's edit counter — drives per-edit idempotency keys. */

@@ -189,7 +189,8 @@ print("\nSELF-CHECK — the feed must be measurably personalized, not merely pri
 # 0.754 (min 0.740). Two independent mutations that gut personalization both
 # collapse this well below the baseline range on every one of the same 4
 # seeds: `weights.interest_match=0.0` (disable the declared-interest term)
-# -> 0.619-0.631; `weights.vote=1.0, reputation=0.0, organic=0.0` (collapse
+# -> 0.619-0.631; `weights.vote_share_of_final=1.0, reputation=0.0,
+# organic=0.0` (collapse
 # to a raw per-pool-vote-count ranking, organic term OFF entirely) ->
 # 0.589-0.606. 0.70 sits ~0.04 below the baseline min and >=0.08 above the
 # higher of the two mutant maxima -- comfortable margin on both sides.

@@ -1,6 +1,6 @@
-import type { LumenUser } from '@/blog/lib/lite/types';
-import { liteConfig } from '@/blog/lib/lite/config';
-import { resolveByHive } from '@/blog/lib/lite/repositories/post-repository';
+import type { LumenPost, LumenUser } from '@/blog/lib/lite/types';
+import { getPostById } from '@/blog/lib/lite/repositories/post-repository';
+import { litePostIdOf } from '@/blog/lib/lite/render/lite-post-id';
 
 /**
  * F-L34 — validation for a Lumen-local engagement target (`castVote`, `reblog`).
@@ -41,6 +41,39 @@ export type TargetCheck = { ok: true } | { ok: false; code: string; status: numb
 const LITE_PERMLINK_RE = /^lumen-[0-9a-hjkmnp-tv-z]{26}$/;
 
 /**
+ * ★★★ THE POST AT THESE COORDINATES, RESOLVED FROM THE PERMLINK ALONE — TAKES NO
+ * AUTHOR ON PURPOSE (2026-08-10).
+ *
+ * Both guards below used to open with `author === liteConfig.frontendAccount`,
+ * i.e. they only looked up a row when the caller addressed the post by the shared
+ * PUBLISHING account. That is not how the app addresses its own posts: every
+ * surface re-attributes a lite post to its writer's handle before it reaches the
+ * browser, so the coordinates a card hands back are `<handle>/lumen-<id>` — and
+ * on that spelling the author test failed, the lookup never happened, and a
+ * taken-down post kept serving live counts and accepting votes. Proven over HTTP:
+ * the same hidden post answered 404 through `@<publisher>/…` and 200 (plus a
+ * written `lumen_vote` row) through `@<handle>/…`.
+ *
+ * The permlink is the right key and always was — it is the identifier a Lumen post
+ * carries, which is why `render/lite-post-id.ts` recovers the row id straight out
+ * of it and why `resolvePostOwnerActor` lets it decide before the author segment.
+ * A row is only accepted when it is PUBLISHED at exactly this permlink, so a
+ * native Hive post can only be caught by minting a permlink that collides with a
+ * real Lumen post id — 26 Crockford characters of it.
+ *
+ * Returns null for anything that is not one of ours; callers treat that as
+ * "not our business to gate", which is the rule this module's header protects.
+ */
+async function resolveLiteTarget(permlink: string): Promise<LumenPost | null> {
+  if (!LITE_PERMLINK_RE.test(permlink)) return null;
+  const postId = litePostIdOf({ permlink });
+  if (!postId) return null;
+  const row = await getPostById(postId);
+  if (!row?.hivePermlink || row.hivePermlink.toLowerCase() !== permlink) return null;
+  return row;
+}
+
+/**
  * ★ B5 (2026-08-06). Whether a target that is ONE OF OUR OWN lite posts may
  * still be engaged with or reported on. `true` for everything else — a native
  * Hive post is not ours to gate, and requiring a `lumen_post` row in general
@@ -51,14 +84,14 @@ const LITE_PERMLINK_RE = /^lumen-[0-9a-hjkmnp-tv-z]{26}$/;
  * `posts/:id` 404'd a hidden post while `engagement` happily served its live,
  * still-incrementable counts. Two call sites, one predicate, so they cannot
  * drift apart again.
+ *
+ * Takes only the permlink: see `resolveLiteTarget` for why the author segment is
+ * not allowed to decide.
  */
-export async function liteTargetServable(author: string, permlink: string): Promise<boolean> {
-  const a = author.trim().toLowerCase();
+export async function liteTargetServable(permlink: string): Promise<boolean> {
   const p = permlink.trim().toLowerCase();
-  const frontend = liteConfig.frontendAccount.toLowerCase();
-  if (!frontend || a !== frontend || !LITE_PERMLINK_RE.test(p)) return true;
   try {
-    const target = await resolveByHive(liteConfig.frontendAccount, p);
+    const target = await resolveLiteTarget(p);
     if (!target) return true; // not one of ours after all
     return target.feedVisibility === 'visible' && !target.deletedLocally;
   } catch {
@@ -102,11 +135,15 @@ export async function checkEngagementTarget(
   // The comment below still stands for TARGETS THAT ARE NOT OURS: we must not
   // require a lumen_post row in general, because a lite user legitimately votes
   // on native Hive posts. The fix is to resolve ONLY when the target looks like
-  // one of ours — same author, and the exact permlink shape we mint — so this
-  // costs one indexed lookup on that narrow shape and nothing at all otherwise.
-  const frontend = liteConfig.frontendAccount.toLowerCase();
-  if (frontend && a === frontend && LITE_PERMLINK_RE.test(p)) {
-    const target = await resolveByHive(liteConfig.frontendAccount, p);
+  // one of ours — the exact permlink shape we mint — so this costs one indexed
+  // lookup on that narrow shape and nothing at all otherwise.
+  //
+  // ★ AND THE AUTHOR SEGMENT NO LONGER GATES THAT LOOKUP (2026-08-10). It used to
+  // require `author === frontendAccount`, which is the ONE spelling the app never
+  // hands the client — every card shows a lite post under its writer's handle. See
+  // `resolveLiteTarget`.
+  {
+    const target = await resolveLiteTarget(p);
     if (target && target.userId === user.userId) {
       return { ok: false, code: 'self_engagement', status: 400 };
     }

@@ -39,7 +39,7 @@ export async function GET(): Promise<NextResponse> {
   // endpoint enumerates the account's linked sign-in methods (a surveillance surface,
   // F-L17). requireActiveLiteUser (NOT requireLiteUser, which lets suspended through)
   // gates on the DB status + the F-L3 epoch.
-  const actor = await requireActiveLiteUser(session.user, session.sessionEpoch);
+  const actor = await requireActiveLiteUser(session.user, session);
   if (!actor.ok) return actor.response;
   const user = actor.user;
 
@@ -78,7 +78,7 @@ export async function DELETE(req: NextRequest): Promise<NextResponse> {
   if (blocked) return blocked;
 
   const session = await getLiteSession();
-  const actor = await requireActiveLiteUser(session.user, session.sessionEpoch);
+  const actor = await requireActiveLiteUser(session.user, session);
   if (!actor.ok) return actor.response;
   const user = actor.user;
 

@@ -2,7 +2,12 @@ import { useRef } from 'react';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { transactionService } from '@transaction/index';
-import { getDiscussion } from '@transaction/lib/bridge-api';
+// ★ THE THREAD IS READ THROUGH OUR OWN SERVER, NEVER STRAIGHT FROM A HIVE NODE.
+// A post owner's block removes a commenter's replies for EVERY reader (effect B),
+// and only the server can apply that. These post-mutation refetches write straight
+// into the ['discussionData', ...] cache the thread renders from, so a bridge call
+// here would put every blocked comment back the moment somebody replied.
+import { fetchDiscussion } from '@/blog/lib/lite/client/discussion-fetch';
 import { Preferences, Entry } from '@hive/common-hiveio-packages/wax';
 import { toast } from '@ui/components/hooks/use-toast';
 import { getLogger } from '@ui/lib/logging';
@@ -11,6 +16,7 @@ import { scheduleInvalidations, scheduleValidatedRefetch } from '@/blog/lib/reac
 import { setStorageItem, removeStorageItem, StorageTTL } from '@ui/lib/storage-with-ttl';
 import { litePostIdOf } from '@/blog/lib/lite/render/lite-post-id';
 import { deleteLitePost, editLitePost } from '@/blog/lib/lite/client/lite-write';
+import { recordRetentionAct } from '@/blog/features/retention/components/retention-moments';
 
 const logger = getLogger('app');
 
@@ -174,6 +180,11 @@ export function useCommentMutation() {
         description: 'Your comment has been posted successfully.',
         variant: 'success'
       });
+      // Chain replies, for the streak and the daily goal. Lite replies are recorded by
+      // lite-write; the tier guard keeps the two paths from double-counting. This is
+      // the CREATE mutation — the update mutation below deliberately records nothing,
+      // because an edit is not a new act.
+      if (user?.account_tier !== 'lite') recordRetentionAct('reply');
 
       // Discussion data has optimistic comment - use validated refetch to avoid
       // overwriting optimistic data with stale API responses from Hivemind
@@ -188,7 +199,7 @@ export function useCommentMutation() {
       cleanupRef.current = scheduleValidatedRefetch(
         queryClient,
         queryKey,
-        () => getDiscussion(discussionAuthor, discussionPermlink, observer),
+        () => fetchDiscussion(discussionAuthor, discussionPermlink, observer),
         (freshData) => {
           if (!freshData) return false;
           const realComments = Object.values(freshData).filter(
@@ -330,7 +341,7 @@ export function useUpdateCommentMutation() {
       cleanupRef.current = scheduleValidatedRefetch(
         queryClient,
         ['discussionData', discussionAuthor, discussionPermlink, observer],
-        () => getDiscussion(discussionAuthor, discussionPermlink, observer),
+        () => fetchDiscussion(discussionAuthor, discussionPermlink, observer),
         (freshData) => {
           if (!freshData) return false;
           const comment = Object.values(freshData).find(
@@ -441,7 +452,7 @@ export function useDeleteCommentMutation() {
       cleanupRef.current = scheduleValidatedRefetch(
         queryClient,
         ['discussionData', discussionAuthor, discussionPermlink, observer],
-        () => getDiscussion(discussionAuthor, discussionPermlink, observer),
+        () => fetchDiscussion(discussionAuthor, discussionPermlink, observer),
         (freshData) => {
           if (!freshData) return false;
           return !Object.values(freshData).some((e) => e.permlink === permlink);

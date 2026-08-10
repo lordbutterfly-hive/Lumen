@@ -1,9 +1,11 @@
 import { User } from '@smart-signer/types/common';
 import { enforceFollowRate, enforceHiveFollowRate } from '../antispam/rate-limit';
-import { checkLiteActorById } from '../auth/account-status';
+import { checkLiteActorById, checkSessionValidity } from '../auth/account-status';
 import * as follows from '../repositories/follow-repository';
 import * as users from '../repositories/user-repository';
 import { FollowActor, resolveFollowTarget, sameActor, sessionActor } from './follow-actor';
+import { SessionRef } from '../types';
+import { isBannedAuthor } from '@/blog/lib/moderation/banned-authors';
 
 /**
  * Following on Lumen, for whichever tier the two people are.
@@ -62,7 +64,7 @@ function allowFollowAction(actor: FollowActor): Promise<boolean> {
 async function actorFor(
   sessionUser: User | undefined,
   requireActive: boolean,
-  sessionEpoch?: number
+  session: SessionRef
 ): Promise<{ ok: true; actor: FollowActor } | { ok: false; status: number; error: string }> {
   const actor = await sessionActor(sessionUser);
   if (!actor) return { ok: false, status: 401, error: 'unauthorized' };
@@ -79,11 +81,16 @@ async function actorFor(
   // The STATUS exemption below is deliberate and unchanged — a suspended user
   // may still withdraw. Revocation is a different thing: the user said "stop
   // this session", so it must stop, withdrawal or not.
-  if (sessionEpoch !== undefined) {
+  // ★★ 2026-08-08: the `!== undefined` guard was itself a bypass — a cookie with
+  // no stamp skipped revocation altogether, which is exactly what a revoked
+  // pre-stamping session presents. The shared `checkSessionValidity` now owns
+  // both revocation kinds (account epoch + this device's own sign-out), so this
+  // path and `http/actor.ts` cannot drift apart again.
+  {
     const row = await users.findUserById(actor.userId);
-    if (!row || row.sessionEpoch !== sessionEpoch) {
-      return { ok: false, status: 401, error: 'session_revoked' };
-    }
+    if (!row) return { ok: false, status: 401, error: 'session_revoked' };
+    const revoked = await checkSessionValidity(row, session);
+    if (revoked) return { ok: false, status: revoked.status, error: revoked.code };
   }
   if (!requireActive) return { ok: true, actor };
   // Checked by USER ID, not by the cookie's tier. An upgraded user signs in with their
@@ -92,7 +99,7 @@ async function actorFor(
   // `allowUpgraded`: an upgraded user still needs this path, because a lite account has
   // no on-chain identity to follow — there is no keyed alternative for them to use.
   // F-L3: carry the cookie epoch so a revoked session cannot follow either.
-  const check = await checkLiteActorById(actor.userId, { allowUpgraded: true, sessionEpoch });
+  const check = await checkLiteActorById(actor.userId, { allowUpgraded: true, ...session });
   if (!check.ok) return { ok: false, status: check.status, error: check.code };
   return { ok: true, actor };
 }
@@ -100,10 +107,28 @@ async function actorFor(
 export async function followByName(
   sessionUser: User | undefined,
   targetName: string,
-  sessionEpoch?: number
+  session: SessionRef
 ): Promise<FollowOutcome> {
-  const from = await actorFor(sessionUser, true, sessionEpoch);
+  const from = await actorFor(sessionUser, true, session);
   if (!from.ok) return from;
+
+  // ★ A GLOBALLY BANNED CHAIN ACCOUNT WRITES NOTHING INTO LUMEN'S GRAPH.
+  //
+  // Signing in with a real Hive account is not something Lumen can prevent — the
+  // keys are his. What Lumen can refuse is to record his edges. Reads already
+  // exclude them (see `follow-repository`), so this only stops the table growing
+  // rows nobody will ever be shown; both halves are needed, because a ban that
+  // merely hides the row still lets him consume rate-limit budget, `seq` space
+  // and the recsys cursor feed's attention.
+  //
+  // Refused in BOTH directions: he may not follow, and he may not be followed —
+  // a follow button on an account nobody can see is a dead control.
+  if (isBannedAuthor(from.actor.hive)) {
+    return { ok: false, status: 403, error: 'account_banned' };
+  }
+  if (isBannedAuthor(targetName)) {
+    return { ok: false, status: 404, error: 'not_found' };
+  }
 
   // Charged BEFORE the target is resolved, because resolving hits a Hive API node for
   // any name we do not already know. Limiting afterwards meant a loop of nonsense names
@@ -129,9 +154,9 @@ export async function followByName(
 export async function unfollowByName(
   sessionUser: User | undefined,
   targetName: string,
-  sessionEpoch?: number
+  session: SessionRef
 ): Promise<FollowOutcome> {
-  const from = await actorFor(sessionUser, false, sessionEpoch);
+  const from = await actorFor(sessionUser, false, session);
   if (!from.ok) return from;
 
   // FOLLOW-RECSYS-1: unfollow is capped too — it was not, so follow/unfollow churn

@@ -41,7 +41,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // F-L2: gate on the DB row's status (checkLiteActorById), not the cookie tier — a
   // suspended/banned/revoked session must not be able to bind a new recovery method.
   // Carries the F-L3 epoch check too.
-  const actor = await requireActiveLiteUser(session.user, session.sessionEpoch);
+  const actor = await requireActiveLiteUser(session.user, session);
   if (!actor.ok) return actor.response;
   const user = actor.user;
 

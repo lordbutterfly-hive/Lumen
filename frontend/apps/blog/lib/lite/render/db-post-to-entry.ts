@@ -35,7 +35,13 @@ export function dbPostToEntry(post: LumenPost, publicName?: string): Entry {
     // The account that signed it — or, before publishing, the one that WILL. Never the
     // empty string: consumers use this as the target of chain operations, and '' is a
     // value `??` cannot catch, so it silently became "no author" at every call site.
-    _lite: { author, title: post.title, chainAuthor: post.hiveAuthor || liteConfig.frontendAccount },
+    _lite: {
+      author,
+      title: post.title,
+      chainAuthor: post.hiveAuthor || liteConfig.frontendAccount,
+      // See LiteIdentity.userId — the identity the block filters key on.
+      userId: post.userId
+    },
     active_votes: [],
     author,
     author_payout_value: '0.000 HBD',

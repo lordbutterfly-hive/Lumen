@@ -36,7 +36,6 @@ from recsys.contracts import (
 from recsys.core.als import ALSModel, train_als, viewer_affinity_percentiles
 from recsys.core.als_guard import als_batch_drift
 from recsys.core.banned import banned_authors
-from recsys.core.curators import curator_accounts
 from recsys.core.candidates import merge_candidates, top_up
 from recsys.core.coldstart import (
     INTEREST_LANE_SOURCES,
@@ -45,6 +44,7 @@ from recsys.core.coldstart import (
     is_established_followless,
     popular_fallback,
 )
+from recsys.core.curators import curator_accounts
 from recsys.core.exploration import (
     eligible_for_exploration,
     engagement_received,

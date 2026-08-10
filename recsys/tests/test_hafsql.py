@@ -7,6 +7,7 @@ No connection is opened and no query is executed.
 
 from __future__ import annotations
 
+import re
 import threading
 import time
 from collections.abc import Mapping
@@ -188,9 +189,19 @@ def test_build_post_without_engagement_has_empty_attribution() -> None:
 
 
 def test_attribution_queries_group_by_identity() -> None:
-    """The hydration queries must return WHO engaged, not bare counts."""
-    assert "rc.author" in hafsql._SQL_COMMENTS_FOR_POSTS
-    assert "GROUP BY rc.parent_author, rc.parent_permlink, rc.author" in (
+    """The hydration queries must return WHO engaged, not bare counts.
+
+    ★ 2026-08-10 (G5): the commenter grouped on is the RESOLVED identity, so
+    this no longer pins `GROUP BY ... rc.author`. It pins that the query groups
+    on the column the resolution produces — see
+    `test_commenter_identity_is_resolved_the_same_way_the_poster_is` for the
+    resolution itself and `tests/test_hafsql_sql.py` for the executed proof.
+    """
+    # The column grouped on must BE the resolved identity, not merely be called
+    # `commenter`: asserting the alias alone stays green when the expression
+    # behind it is reverted to `rc.author`, which is the whole G5 bug.
+    assert f'{hafsql._engager_identity("rc")} AS commenter' in hafsql._SQL_COMMENTS_FOR_POSTS
+    assert "GROUP BY parent_author, parent_permlink, commenter" in (
         hafsql._SQL_COMMENTS_FOR_POSTS
     )
     assert "DISTINCT" in hafsql._SQL_REBLOGGERS_FOR_POSTS
@@ -208,12 +219,26 @@ def test_popular_recall_is_conversation_and_self_excluded() -> None:
     normalised against the pool (SQL cannot normalise, so rshares here would let
     one whale-voted post own recall).
 
-    The self-exclusion half is UNCHANGED and still the point: a post must not
-    buy a pool position with its author's own comments or reblogs.
+    The self-exclusion half is UNCHANGED IN INTENT and still the point: a post
+    must not buy a pool position with its author's own comments or reblogs.
+
+    ★ 2026-08-10 (G5): it is no longer spelled `rc.author <> c.author`. That
+    form compared CHAIN identities, and every lite writer shares one chain
+    account, so it discarded the whole Lite tier's conversation as self-talk.
+    Both sides now resolve through `_engager_identity` first. The assertion is
+    written as "the resolved form is present AND the bare chain form is gone",
+    because presence alone would still pass if someone re-added the old
+    comparison alongside the new one — which would restore the bug.
     """
     sql = hafsql._SQL_POPULAR_POSTS
-    assert "COUNT(DISTINCT rc.author)" in sql  # distinct commenters, not COUNT(*)
-    assert "rc.author <> c.author" in sql  # self-comments buy no pool position
+    resolved = hafsql._engager_identity("rc")
+    assert f"COUNT(DISTINCT {resolved})" in sql  # distinct IDENTITIES, not COUNT(*)
+    # self-comments buy no pool position — resolved identity vs resolved identity
+    assert f"{resolved} <> {hafsql._engager_identity('c')}" in sql
+    assert "rc.author <> c.author" not in sql, (
+        "the chain-identity self-exclusion is the G5 bug: it reads every lite "
+        "writer as the shared publisher account"
+    )
     assert "COUNT(DISTINCT r.account_name)" in sql
     assert "r.account_name <> c.author" in sql  # self-reblogs neither
     # ★ The regression this test exists to prevent: votes creeping back into
@@ -533,12 +558,27 @@ def test_the_trust_boundary_requires_BOTH_author_and_parent_to_be_publishers() -
 
 def test_a_lite_post_is_not_counted_as_a_comment_on_its_container() -> None:
     """It is a POST that happens to be stored as a comment. Counting it credited
-    the whole Lite tier's output to the container owner's organic score."""
+    the whole Lite tier's output to the container owner's organic score.
+
+    ★★★ THIS TEST WAS VACUOUS UNTIL 2026-08-10 (ledger finding G4). It asserted
+    three substrings — `AND NOT COALESCE(`, `, false)`, and the app-id clause —
+    every one of which survives a mutation that makes the guard permanently
+    inert (`false AND ...`). Mutating it left the suite BYTE-IDENTICAL. It now
+    pins the WHOLE rendered predicate, so any change to what the guard tests
+    changes this string; and the behavioural proof — the guard actually applied
+    to rows, in a database — is
+    `tests/test_hafsql_sql.py::test_a_lite_post_is_not_counted_as_a_comment_on_its_container`.
+    """
+    predicate = hafsql._LITE_CONTAINER_CHILD.format(t="rc.")
+    assert f"AND NOT {predicate}" in hafsql._SQL_COMMENTS_FOR_POSTS
     # COALESCE(..., false) matters as much as the NOT: json_metadata is NULL on
     # ordinary comments, and NOT NULL is NULL, which Postgres filters out.
-    assert "AND NOT COALESCE(" in hafsql._SQL_COMMENTS_FOR_POSTS
-    assert ", false)" in hafsql._SQL_COMMENTS_FOR_POSTS
-    assert "rc.json_metadata->>'app' = %(lite_app)s" in hafsql._SQL_COMMENTS_FOR_POSTS
+    assert predicate.startswith("COALESCE(") and predicate.endswith(", false)")
+    # The container-prefix test is what separates a lite POST from a lite REPLY.
+    assert "starts_with(rc.parent_permlink, %(lite_container_prefix)s)" in predicate
+    # ...and one definition serves both layers, so recall and hydration cannot
+    # disagree about what a comment is.
+    assert f"AND NOT {predicate}" in hafsql._POPULAR_ENGAGEMENT
 
 
 # ---------------------------------------------------------------------------
@@ -2392,7 +2432,16 @@ def test_sim_recall_matches_production_weights() -> None:
     # Production really interpolates the constants (not a retyped literal).
     assert f"{POPULAR_RECALL_COMMENT_WEIGHT} *" in hafsql._POPULAR_ENGAGEMENT
     assert f"{POPULAR_RECALL_REBLOG_WEIGHT} *" in hafsql._POPULAR_ENGAGEMENT
-    assert "{" not in hafsql._POPULAR_ENGAGEMENT, "unrendered placeholder in SQL"
+    # ★ 2026-08-10: this used to be `"{" not in ...`. G5's namespace guard
+    # embeds a real regex quantifier (`{2,15}` in `_HIVE_NAME_ENVELOPE`), so a
+    # bare brace is no longer evidence of anything. The invariant that was
+    # actually meant is "no UNRENDERED f-string placeholder", and a placeholder
+    # is a brace followed by an identifier — `{POPULAR_RECALL_...}`, `{t}` — never
+    # by a digit. Checked that way it still catches the real regression and stops
+    # tripping over legitimate SQL.
+    assert not re.search(r"\{[A-Za-z_]", hafsql._POPULAR_ENGAGEMENT), (
+        "unrendered placeholder in SQL"
+    )
 
     # The sim imports them rather than hardcoding its own.
     sim_src = Path(__file__).resolve().parents[1] / "measurement-harness" / "simworld.py"

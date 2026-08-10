@@ -71,7 +71,18 @@ def _load_trusted_seeds() -> frozenset[str]:
 
 @dataclass(frozen=True)
 class ScoreWeights:
-    """The fixed 10 / 10 / 80 composition (§0). Must sum to 1.0.
+    """The §0 outer composition: a stake term capped at
+    ``vote_share_of_final`` of ``final``, and the remaining mass split between
+    reputation and organic in the ``reputation : organic`` ratio.
+
+    ★ IT IS NO LONGER "10 / 10 / 80, must sum to 1.0" (2026-08-10, PRUNED R4).
+    Those three literals were the weights ``earned`` applied, and ``earned`` is
+    not ``final`` — two conditional blends sit between them, so a fixed triple
+    could only hold the owner's stake cap on one of four candidate paths (see
+    :attr:`vote_share_of_final`). ``score_candidate`` now solves the triple per
+    path; ``reputation`` and ``organic`` set the ratio it splits the remainder
+    in, and ``organic`` additionally keeps its absolute meaning as the base of
+    ``interest_weight``.
 
     The ``organic_*`` fields govern what the 80% organic slice IS — not its
     weight (that ruling stands). Rebuilt 2026-07-21 after the saturation
@@ -98,7 +109,7 @@ class ScoreWeights:
       carries the full organic weight.
 
     ``organic_quality + organic_cf`` must sum to 1.0 so ``organic`` stays in
-    [0, 1] and the 10/10/80 outer blend keeps its meaning.
+    [0, 1] and the outer blend keeps its meaning.
 
     ``organic_cf_oon_scale`` (§H06, PRUNED audit 2026-07-22) additionally
     scales ``organic_cf`` DOWN for every candidate source that is not
@@ -119,14 +130,52 @@ class ScoreWeights:
     #: real stake behind, and zeroing it threw that away entirely.
     #:
     #: ★ THE NUMBER IS 10% OF `final`, NOT 10% OF `earned` — they are different
-    #: and the difference is what made the old 0.10 misleading. `final =
+    #: and the difference is what made a bare `vote = 0.10` misleading. `final =
     #: (1 - W)*earned + W*interest_pct` where `W = organic * interest_match`
-    #: (scoring.py:846-847), so the old `vote = 0.10` was only 6.8% of what a
-    #: reader actually sees. Solved for the stake share of `final`:
-    #:     (1 - 0.7566*0.4) * 0.1434 = 0.1000
-    #: Re-derive these three if `interest_match` ever moves, or the 10% silently
-    #: drifts again.
-    vote: float = 0.1434
+    #: (scoring.py), so a `0.10` weight inside `earned` was only 6.8% of what a
+    #: reader actually sees.
+    #:
+    #: ★★★ IT IS NOW THE TARGET ITSELF, NOT A PRE-SOLVED WEIGHT (2026-08-10,
+    #: PRUNED R4). This field used to be the weight `earned` applies, hand-solved
+    #: to `0.1434` so that `(1 - 0.7566*0.4) * 0.1434 = 0.1000` on ONE path. The
+    #: solve was correct for that path and wrong for the other three, because
+    #: both scalings between `earned` and `final` are CONDITIONAL:
+    #:
+    #:     interest blend   skipped when `pipeline._interest_lookup` returns None
+    #:                      — i.e. for any viewer who declared no interest tags
+    #:     in-network blend applied only to `CandidateSource.IN_NETWORK`
+    #:
+    #: so the realised stake share of `final` was, measured:
+    #:
+    #:     interest tags + OON        0.1434 * 0.69736          = 0.10000  ✔
+    #:     interest tags + IN_NETWORK 0.1434 * 0.95 * 0.69736   = 0.09500
+    #:     no tags       + OON        0.1434                    = 0.14340  (+43%)
+    #:     no tags       + IN_NETWORK 0.1434 * 0.95             = 0.13623
+    #:
+    #: A viewer who skips the interest picker therefore got 43% more of the most
+    #: purchasable number on Hive than the owner capped it at — the opposite of
+    #: what this field exists to enforce.
+    #:
+    #: So the field now states the OWNER'S NUMBER and `score_candidate` solves
+    #: for the `earned` weight per candidate path (`_earned_weights`): it divides
+    #: this target by whatever scaling that path actually applies, and hands the
+    #: remaining mass to reputation and organic in their configured ratio. The
+    #: solve is re-derived per request from the live config, so `interest_match`
+    #: or `in_network_bonus` moving can no longer silently drift the 10% — the
+    #: invariant `__post_init__` checks is that the WORST path is still solvable.
+    #:
+    #: On the one path the old constant was right for, the derived weight is
+    #: 0.14339796 against the hand-rounded 0.1434 — a 2.04e-6 difference, which
+    #: is the rounding error in the old literal, corrected.
+    vote_share_of_final: float = 0.10
+    #: ★ `reputation` and `organic` are the RATIO in which the non-stake mass of
+    #: `earned` is split (2026-08-10). They no longer have to sum to 1.0 with the
+    #: stake weight, because the stake weight is now path-dependent. `organic`
+    #: keeps its ABSOLUTE meaning as well: `interest_weight = organic *
+    #: interest_match` (see `interest_match`), which is deliberately left reading
+    #: the CONFIGURED value rather than the per-path effective one, so the
+    #: declared-interest term's contribution to `final` is byte-identical to what
+    #: it was before this change on every path.
     reputation: float = 0.10
     #: Distinct independent people who voted, commented or reblogged — graph-cred
     #: budgeted, self/ring/banned excluded, and a voter must clear the 100 HP
@@ -222,7 +271,7 @@ class ScoreWeights:
     #: reputation silently amplified 1.67x, paid for entirely by the quality
     #: percentile, which is where the author-pooled prior lives. Blending
     #: against the composite scales all three earned signals identically, so
-    #: the 10/10/80 balance among them now survives every value of this field.
+    #: the balance among them now survives every value of this field.
     #: This is a re-basing of what the term takes its weight FROM; it is not a
     #: change in the term's strength (the gap it opens between an on-interest
     #: and an off-interest candidate is unchanged, pinned by
@@ -471,8 +520,8 @@ class ScoreWeights:
 
     #: Weight of the VIEWER-OWN affinity percentile inside the organic slice
     #: (2026-08-01). Applied as `organic = blend(quality_pct, viewer_pct, w)`,
-    #: i.e. it trades against the quality percentile only — the 10/10/80 outer
-    #: split and `organic_cf` are untouched.
+    #: i.e. it trades against the quality percentile only — the outer split and
+    #: `organic_cf` are untouched.
     #:
     #: WHY THIS IS NOT "just raise organic_cf". CF is a CROSS-VIEWER signal
     #: (other people's co-engagement decides what you see), which is exactly why
@@ -679,9 +728,47 @@ class ScoreWeights:
     organic_half_life_hours: float = 48.0
 
     def __post_init__(self) -> None:
-        total = self.vote + self.reputation + self.organic
-        if abs(total - 1.0) > 1e-9:
-            raise ValueError(f"score weights must sum to 1.0, got {total}")
+        if not 0.0 <= self.vote_share_of_final <= 1.0:
+            raise ValueError(
+                "vote_share_of_final must be in [0, 1], got "
+                f"{self.vote_share_of_final}"
+            )
+        if self.reputation < 0.0 or self.organic < 0.0:
+            raise ValueError(
+                f"reputation/organic must be >= 0, got {self.reputation}/{self.organic}"
+            )
+        if self.vote_share_of_final < 1.0 and self.reputation + self.organic <= 0.0:
+            raise ValueError(
+                "reputation + organic must be > 0 — they are the ratio the non-stake "
+                "mass of `earned` is split in, and a zero total leaves it undefined. "
+                "(Exempt at vote_share_of_final == 1.0, where there is no such mass.)"
+            )
+        # ★ THE TARGET MUST BE REACHABLE ON THE WORST *REACHABLE* PATH.
+        # `score_candidate` solves `vote_weight = vote_share_of_final / scale`,
+        # where `scale` is the product of the two conditional blends that stand
+        # between `earned` and `final` for that candidate — the in-network bonus
+        # and the declared-interest blend. There are four combinations; the
+        # binding one is the smallest POSITIVE scale, because a scale of exactly
+        # zero means `earned` is discarded outright on that path (e.g.
+        # `in_network_bonus == 1.0`, "a followed post always scores 1.0") and
+        # the stake term then carries 0% — under the owner's cap, not over it,
+        # so it is not a violation. Anything else that cannot be solved WOULD
+        # have to clamp, silently re-introducing the per-path drift this
+        # replaced. Refuse that config instead of clamping it.
+        scales = {
+            (1.0 - bonus) * (1.0 - blend_w)
+            for bonus in (0.0, self.in_network_bonus)
+            for blend_w in (0.0, self.organic * self.interest_match)
+        }
+        positive = {s for s in scales if s > 0.0}
+        if positive and self.vote_share_of_final > min(positive):
+            raise ValueError(
+                f"vote_share_of_final={self.vote_share_of_final} is unreachable on the "
+                f"most-discounted candidate path (smallest positive scale "
+                f"{min(positive):.6f}, from in_network_bonus={self.in_network_bonus} "
+                f"and organic*interest_match={self.organic * self.interest_match:.6f}). "
+                "Lower the stake target, or lower interest_match/in_network_bonus."
+            )
         inner = self.organic_quality + self.organic_cf
         if abs(inner - 1.0) > 1e-9:
             raise ValueError(
@@ -2655,9 +2742,14 @@ class PopularConfig:
     #:   * `q11_follow_curve.py` — hard AssertionError, ALL 8 follow counts
     #:     regressed below the accepted curve: n=0 -0.1024, n=3 -0.0710,
     #:     n=5 -0.0798, n=20 -0.0370. Reverting ONLY this field (keeping
-    #:     `weights.vote = 0.0`) returns SELF-CHECK PASSED, so the popularity
+    #:     the vote change) returns SELF-CHECK PASSED, so the popularity
     #:     lane is the cause and the vote change is not implicated. Isolated by
     #:     `LUMEN_SETTINGS_MUTANT='{"popular.limit": 0}'`.
+    #:     ★ THAT DIAGNOSTIC CONCLUSION IS FALSE (PRUNED H1b, re-measured
+    #:     2026-08-10): reverting only this field leaves q11 RED at 2 of 8
+    #:     follow counts, so a second, unattributed regression exists. The
+    #:     field is still shipped at 25 here, against the ruling three lines
+    #:     above; that contradiction is NOT resolved by this build.
     #:   * `q12_lane_balance.py` — G1b: 0.469 of the required 3.0 slots in the
     #:     top 10 (-84%). G2a: `oon_popular` lands a mean of 3.144 ranks ABOVE
     #:     what its own score earns, against a -1.0 bound (-214%).
@@ -2772,7 +2864,9 @@ class PopularConfig:
         if not 0.0 <= self.rep_lift <= 1.0:
             raise ValueError(f"popular rep_lift must be in [0,1], got {self.rep_lift}")
         if self.reserved_position < 0:
-            raise ValueError(f"popular reserved_position must be >= 0, got {self.reserved_position}")
+            raise ValueError(
+                f"popular reserved_position must be >= 0, got {self.reserved_position}"
+            )
         if 0 < self.reserved_position <= 5:
             raise ValueError(
                 "popular reserved_position must be 0 (off) or > 5 — the owner's rule is that "

@@ -107,6 +107,19 @@ export interface LiteIdentity {
   title: string;
   /** The shared publishing account that signed this on chain. Use this to ACT. */
   chainAuthor: string;
+  /**
+   * The Lumen account id behind this post — the one identifier that survives a
+   * handle change AND an upgrade to a real Hive account.
+   *
+   * Set only where the server has PROVED the entry is that post (the row records
+   * which account signed it; an entry signed by anyone else is left untouched). It
+   * exists because `author` above is a handle and handles are ambiguous: a Lumen
+   * handle is by construction a name that was free on Hive, so the same spelling can
+   * be a different person's chain account. Anything that must identify the writer
+   * exactly — the block filters — reads this and falls back to a name only when it
+   * is absent. See `lib/lite/social/block-actor.ts`.
+   */
+  userId?: string;
 }
 
 export interface JsonMetadata {

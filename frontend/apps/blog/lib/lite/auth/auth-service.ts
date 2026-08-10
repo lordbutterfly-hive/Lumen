@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { cookies } from 'next/headers';
 import { User } from '@smart-signer/types/common';
 import { checkAccountExists } from '@transaction/lib/validation/existence/account';
@@ -53,6 +54,14 @@ async function issueSession(u: LumenUser): Promise<User> {
   // the row's epoch and refuses a mismatch, so bumping it (upgrade/suspend/ban/
   // logout-all) instantly invalidates every cookie issued before the bump.
   session.sessionEpoch = u.sessionEpoch ?? 0;
+  // ...and stamp WHICH DEVICE this is, so an ordinary sign-out can revoke this one
+  // cookie instead of the account. Without it the only lever was the account-wide
+  // epoch, and since the product's sign-out is per-device, signing out on a phone
+  // signed out the laptop too (0034_session_revocation.sql).
+  //
+  // 128 bits of CSPRNG. It is never accepted as input — only ever read back out of
+  // a cookie we sealed — so it identifies, it does not authenticate.
+  session.sessionId = randomUUID();
   session.liteSignup = undefined;
   await session.save();
   // Analytics parity with the Hive login path (spec §A.5): a lightweight,

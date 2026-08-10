@@ -4,6 +4,10 @@ import { guardRead } from '@/blog/lib/lite/http/guard';
 import * as posts from '@/blog/lib/lite/repositories/post-repository';
 import { dbPostToEntry } from '@/blog/lib/lite/render/db-post-to-entry';
 import { resolvePublicNames } from '@/blog/lib/lite/render/current-name';
+import {
+  applyOwnerBlocksToReplies,
+  resolvePostOwnerActor
+} from '@/blog/lib/lite/social/block-filter';
 import type { Entry } from '@hive/common-hiveio-packages/wax';
 
 const logger = getLogger('app');
@@ -67,7 +71,22 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       parent_permlink: permlink,
       depth: 1
     }));
-    return NextResponse.json({ entries });
+
+    // ★★★ EFFECT (B) — SERVER-SIDE, AND THIS ROUTE IS PUBLIC.
+    //
+    // This is the second of the two sources the comment thread is assembled from
+    // (the other is `/api/discussion`), and it is deliberately session-less: a lite
+    // reply is public content. That is exactly why the block has to be applied HERE
+    // rather than in the browser. The post owner has said these replies are not to
+    // be served, and "not to be served" cannot be a preference the recipient
+    // enforces on themselves.
+    //
+    // The owner is resolved from the PERMLINK first: a Lumen post's chain author is
+    // the shared publishing account, so reading the author segment would make one
+    // system account the blocker-of-record for everybody's posts.
+    const owner = await resolvePostOwnerActor(author, permlink);
+    const visible = await applyOwnerBlocksToReplies(entries, owner);
+    return NextResponse.json({ entries: visible });
   } catch (error) {
     // A failure here must not take the thread down with it — the chain replies
     // are the bulk of it and are already loaded. Answer empty and say so in the

@@ -786,3 +786,80 @@ def test_lite_edge_queries_execute_and_do_not_disturb_non_lite_edges() -> None:
         f"more than live drift explains. only_in_plain="
         f"{sorted(set(a) - set(b))[:5]} only_in_lite={sorted(set(b) - set(a))[:5]}"
     )
+
+
+# ---------------------------------------------------------------------------
+# G5 (2026-08-10) — self-exclusion resolves the COMMENTER, executed against the
+# real mirror. `tests/test_hafsql_sql.py` proves the semantics on rows it
+# controls; this proves the SQL runs against the REAL schema, which is a
+# separate and historically expensive question — eight I/O breaks in this module
+# were bad column names, a missing operator or a missing cast, all invisible
+# until execution. Three constructs here are new and none of them existed in
+# this file before: `starts_with(...)` on `parent_permlink`, `!~` against a
+# `jsonb ->> text` result, and a `CASE` inside `COUNT(DISTINCT ...)`.
+# ---------------------------------------------------------------------------
+
+_LITE_PUBLISHER = "hbd-temp"
+
+
+def _lite_client() -> hafsql.HafsqlClient:
+    return hafsql.HafsqlClient(
+        HafsqlConfig(), LiteConfig(publisher_accounts=frozenset({_LITE_PUBLISHER}))
+    )
+
+
+def test_g5_resolved_commenter_queries_execute_against_the_real_schema() -> None:
+    """Both G5 queries run, with lite ON, on the real mirror."""
+    client = _lite_client()
+    posts = client.popular_posts(datetime.now(UTC) - timedelta(days=1), 25)
+    assert isinstance(posts, list)
+    # Hydration is what carries `_SQL_COMMENTS_FOR_POSTS`; popular_posts already
+    # hydrates, so a returning list is the execution proof for both.
+    assert all(isinstance(p.author, str) and p.author for p in posts)
+
+
+def test_g5_a_lite_writer_is_not_read_as_the_publisher_talking_to_itself() -> None:
+    """THE FINDING, on real mainnet rows.
+
+    `hbd-temp/lumen-01kzcp8a6p9eyaa5h0qp9vxf4y` is a lite post by writer
+    `01KZCNA1SFDK4VZ8MZNTK190Z9` carrying one on-chain reply from a DIFFERENT
+    lite writer. Before G5 the reply was discarded (both are `hbd-temp`) and the
+    post's recall engagement was 0.0.
+
+    ★★★ IT SKIPS ONLY WHEN THE CHAIN ROWS THEMSELVES ARE GONE, and that
+    distinction is the test. The first version skipped whenever
+    `_comments_for_posts` came back EMPTY — which is precisely the bug's
+    signature, so reverting the container-prefix guard made this test SKIP
+    instead of FAIL (measured: mutation M5 survived it). A check with nothing to
+    inspect must fail, not pass quietly. The fixture's existence is therefore
+    established independently, against the raw table, before anything is
+    demanded of the query under test. The deterministic version of these
+    assertions lives in `tests/test_hafsql_sql.py`.
+    """
+    client = _lite_client()
+    key = (_LITE_PUBLISHER, "lumen-01kzcp8a6p9eyaa5h0qp9vxf4y")
+    # FIXTURE PROBE — not the code under test. Does the chain still hold the post
+    # and at least one reply to it?
+    fixture = client._fetch(
+        """
+        SELECT count(*) FROM hafsql.operation_comment_view rc
+        WHERE rc.parent_author = %(author)s AND rc.parent_permlink = %(permlink)s
+        """,
+        {"author": key[0], "permlink": key[1]},
+    )
+    if not fixture or not fixture[0][0]:
+        pytest.skip("the mainnet fixture rows are no longer present on the mirror")
+
+    got = client._comments_for_posts([key[0]], [key[1]])
+    assert got, (
+        "the chain holds replies to this lite post but the query returned none — "
+        "the container guard is swallowing cross-lite replies again (G5)"
+    )
+    commenters = set(got[key])
+    assert _LITE_PUBLISHER not in commenters, (
+        "the shared publisher account must never be the credited commenter — "
+        "that is the identity collapse G5 closes"
+    )
+    assert commenters, "the cross-lite reply must survive the container guard"
+    for name in commenters:
+        assert name != "01KZCNA1SFDK4VZ8MZNTK190Z9", "the post's own writer, not excluded"

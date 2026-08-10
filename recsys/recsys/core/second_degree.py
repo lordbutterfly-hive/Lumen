@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from dataclasses import replace
 
-from recsys.config import Thresholds, PopularConfig
+from recsys.config import PopularConfig, Thresholds
 from recsys.contracts import Candidate, CandidateSource, GraphCred, Post, ViewerProfile
 from recsys.core.banned import is_banned
 from recsys.core.popular import is_container_post

@@ -10,7 +10,12 @@ import {
 } from '@/blog/lib/recsys/feed-client';
 import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { listFolloweesOf } from '@/blog/lib/lite/repositories/follow-repository';
-import { findUserById } from '@/blog/lib/lite/repositories/user-repository';
+import { listBlockedIdentitiesOf, listBlockedKeysOf } from '@/blog/lib/lite/repositories/block-repository';
+import { filterBlockedForViewer } from '@/blog/lib/lite/social/block-filter';
+import type { FollowActor } from '@/blog/lib/lite/social/follow-actor';
+import { findUserById, findUserByHiveAccountName } from '@/blog/lib/lite/repositories/user-repository';
+import { attachLiteIdentities } from '@/blog/lib/lite/render/attach-lite';
+import { isLumenPermlink } from '@/blog/lib/lite/render/lite-post-id';
 import { findHiveReaderPrefs } from '@/blog/lib/lite/repositories/hive-reader-prefs-repository';
 import { tagsForInterests } from '@/blog/lib/lite/interests/taxonomy';
 import { getEngagementTotals } from '@/blog/lib/lite/repositories/engagement-repository';
@@ -184,7 +189,121 @@ function cachePut(key: string, entry: Entry): void {
  * feed, and `source` says which one they got — the degradation is reported, not
  * hidden, so an operator can alert on it instead of discovering it from a user.
  */
+
+/**
+ * ★★★ GET — the real export, and the ONE place a blocked author is removed from
+ * whatever this route decided to serve (block effect A: "I never see them again").
+ *
+ * WHY A WRAPPER RATHER THAN A FILTER AT EACH RETURN. `serveForYou` answers from six
+ * different places — stored feed, cold build, topic cache, topic build, chain
+ * continuation page, and the trending fallback (which is a separate function that
+ * takes none of the viewer's state). Six is already more than anyone reliably
+ * remembers, and a seventh will be added by someone who has not read this file. A
+ * branch that forgets the filter does not fail loudly; it quietly serves a reader
+ * the person they blocked, which is precisely the failure this feature exists to
+ * prevent. Filtering the assembled response instead makes forgetting impossible.
+ *
+ * The ranker is ALSO told (`mutes`, see `collectViewerState`), so blocked authors do
+ * not consume ranked slots. That is an optimisation; this is the guarantee. Neither
+ * replaces the other: recsys can be unavailable, the stored feed can predate the
+ * block, and the fallback path never involves recsys at all.
+ *
+ * Effect (B) is not served from here — it lives in the thread paths, where it can be
+ * enforced against readers other than the blocker.
+ */
 export async function GET(req: NextRequest): Promise<NextResponse> {
+  const response = await serveForYou(req);
+
+  let blockedKeys: Set<string>;
+  try {
+    const session = await getLiteSession();
+    const actor = await viewerBlockActor(session.user?.userId ?? '', session.user?.username ?? '');
+    blockedKeys = actor ? new Set(await listBlockedKeysOf(actor)) : new Set();
+  } catch (error) {
+    // A reader whose block list cannot be read gets an unfiltered feed rather than
+    // no feed. Logged, because silently ignoring a block is exactly the shape of
+    // bug that gets reported as "blocking does not work".
+    logger.warn('for-you: block list unavailable, serving unfiltered: %o', error);
+    blockedKeys = new Set();
+  }
+
+  try {
+    const body = (await response.clone().json()) as
+      | { entries?: Entry[]; nextCursor?: { author: string; permlink: string } | null }
+      | null;
+    if (!body?.entries || body.entries.length === 0) return response;
+    const identified = withIdentifiableAuthors(body.entries);
+    const entries =
+      blockedKeys.size > 0 ? await filterBlockedForViewer(identified, blockedKeys) : identified;
+    if (entries.length === body.entries.length) return response;
+    return NextResponse.json(
+      {
+        ...body,
+        entries,
+        // The cursor is the LAST ENTRY THE READER WAS GIVEN. Recomputing it here
+        // keeps that true after a removal — otherwise a page whose last post was
+        // filtered would hand back a cursor for a post that is not on it, and for
+        // a lite post that cursor is in the wrong name-space entirely (`cursorOf`).
+        // An emptied page keeps whatever the branch decided, so filtering everything
+        // out does not silently end the reader's scroll.
+        nextCursor: entries.length > 0 ? cursorOf(entries) : body.nextCursor
+      },
+      { status: response.status }
+    );
+  } catch (error) {
+    logger.warn('for-you: could not apply block filter to the response: %o', error);
+    return response;
+  }
+}
+
+/**
+ * ★ AN AUTHOR WE CANNOT NAME IS NOT SERVED HERE. Companion to the block filter
+ * above, and deliberately in the same wrapper for the same reason.
+ *
+ * Blocking on this surface resolves a lite entry through `_lite.userId`. An entry
+ * that IS a lite post (its permlink is in Lumen's own namespace) but carries no
+ * `_lite` therefore cannot be block-filtered at all: `block-actor.ts` reads it as a
+ * Hive account and computes a key that can never match a `u:<ULID>` edge. That is
+ * the bug this file was fixed for, and `hydrate` no longer produces such entries —
+ * but `lumen_feed_store` still holds pages ASSEMBLED BEFORE the fix, and they are
+ * served straight to the reader (see the stored branch), so the hole outlives the
+ * code change by exactly as long as those rows do.
+ *
+ * Withholding them is the fail-closed answer and it self-erases: the stale copy is
+ * rebuilt behind the reader on the same request, and every rebuilt page carries
+ * `_lite`. It is also a standing guard — a seventh serving branch that forgets
+ * identity loses its lite posts loudly instead of quietly serving a blocked author.
+ */
+function withIdentifiableAuthors<T extends Entry>(entries: T[]): T[] {
+  const kept = entries.filter((entry) => !isLumenPermlink(entry.permlink ?? '') || entry._lite);
+  if (kept.length !== entries.length) {
+    logger.warn(
+      'for-you: withheld %d lite post(s) served without a Lumen identity — a page ' +
+        'assembled before the identity fix. It is being rebuilt behind this reader.',
+      entries.length - kept.length
+    );
+  }
+  return kept;
+}
+
+/**
+ * The block-graph node for whoever is signed in, resolved WITHOUT `sessionActor`
+ * (which needs a `User` object this route does not keep).
+ *
+ * An upgraded account is the case that makes this more than one line: they sign in
+ * with their own Hive keys, so their session carries a NAME and no `userId`, while
+ * every block they have ever written or received is keyed on `u:<user_id>`. Reading
+ * the name as a Hive node would hand them an empty block list the day they upgrade.
+ */
+async function viewerBlockActor(userId: string, username: string): Promise<FollowActor | null> {
+  if (userId) return { userId };
+  const name = (username || '').toLowerCase();
+  if (!name) return null;
+  const upgraded = await findUserByHiveAccountName(name).catch(() => null);
+  return upgraded ? { userId: upgraded.userId } : { hive: name };
+}
+
+async function serveForYou(req: NextRequest): Promise<NextResponse> {
   const limitParam = Number(req.nextUrl.searchParams.get('limit'));
   const limit = Number.isFinite(limitParam)
     ? Math.min(Math.max(Math.trunc(limitParam), 1), MAX_LIMIT)
@@ -252,11 +371,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       );
       const onTopic = topic ? posts.filter((e) => hasTopic(e, topic)) : posts;
       const merged = await mergeLumenEngagement(onTopic);
-      const last = merged[merged.length - 1];
       return NextResponse.json({
         entries: merged,
         source: 'chain-page',
-        nextCursor: last ? { author: last.author, permlink: last.permlink } : null
+        // Through `cursorOf` like every other branch, so the chain-coordinate
+        // rule lives in exactly one place and a sixth return cannot forget it.
+        nextCursor: cursorOf(merged)
       });
     } catch (error) {
       logger.error(error, 'for-you: cursor page failed');
@@ -552,7 +672,7 @@ async function collectViewerState(
   viewer: string,
   isLite: boolean,
   userId: string
-): Promise<{ follows?: string[]; tags?: string[] }> {
+): Promise<{ follows?: string[]; tags?: string[]; mutes?: string[] }> {
   if (!liteConfig.enabled || !liteConfig.databaseUrl) return {};
   try {
     // ★★ A HIVE READER HAS INTERESTS TOO (2026-08-08). This whole block used to
@@ -567,10 +687,27 @@ async function collectViewerState(
       // Follows stay empty on purpose: a Hive reader's follow graph is on chain,
       // and recsys reads it from `viewer` itself. `listFolloweesOf` only knows
       // Lumen-local follows, which this reader has none of.
+      //
+      // ★ AND `mutes` IS OMITTED FOR THE SAME REASON, DELIBERATELY. recsys reads a
+      // present-but-empty `mutes=` as "this viewer mutes nobody" and an ABSENT one
+      // as "derive it from the chain" (see `recsys/feed-client.ts`). A Hive reader
+      // has a real on-chain ignore list; sending them our Lumen block list instead
+      // would ERASE it from the ranking. Their blocks are still enforced — by the
+      // response filter in `GET`, which needs no cooperation from the ranker.
       return { tags: hivePicks.length > 0 ? tagsForInterests(hivePicks) : undefined };
     }
 
     const follows = userId ? await listFolloweesOf({ userId }) : [];
+    // ★ A LITE VIEWER'S BLOCKS, REACHING THE RANKER. Safe to send here — and only
+    // here — because a lite account has no chain identity and therefore no on-chain
+    // mute list to overwrite: the Lumen list IS the whole truth for them. Sent even
+    // when empty, exactly like `follows`, so recsys does not go looking on chain for
+    // a ULID it cannot resolve.
+    //
+    // This is a RANKING input, not the enforcement point: it stops blocked authors
+    // consuming slots in the page recsys builds. Enforcement is the response filter
+    // in `GET`, which also covers the stored feed, the fallback and topic pages.
+    const mutes = userId ? await listBlockedIdentitiesOf({ userId }) : [];
     // ★★★ THE SIGNUP INTEREST PICKS, FINALLY REACHING THE RANKER.
     //
     // recsys has accepted `explicit_interest_tags` since it was written and
@@ -584,7 +721,7 @@ async function collectViewerState(
     // migration and without rewriting what readers already chose.
     const user = userId ? await findUserById(userId) : null;
     const picks = user?.interests ?? [];
-    return { follows, tags: picks.length > 0 ? tagsForInterests(picks) : undefined };
+    return { follows, mutes, tags: picks.length > 0 ? tagsForInterests(picks) : undefined };
   } catch (error) {
     logger.warn('for-you: could not read lite viewer state, ranking without it: %o', error);
     return { follows: [] };
@@ -613,6 +750,7 @@ async function fetchRankedWithRetry(opts: {
   viewer: string;
   limit: number;
   follows?: string[];
+  mutes?: string[];
   tags?: string[];
 }): Promise<RecsysOutcome> {
   let outcome: RecsysOutcome = {
@@ -648,6 +786,9 @@ interface AssembleArgs {
   /** A lite viewer's graph lives only in Lumen's Postgres — recsys cannot look
    *  up a ULID on chain, so it is handed over, or they rank as following nobody. */
   follows?: string[];
+  /** Same, for the block list — see the note in `collectViewerState` for why this
+   *  is sent for a lite viewer and deliberately withheld for a Hive one. */
+  mutes?: string[];
   tags?: string[];
 }
 
@@ -664,6 +805,7 @@ async function assembleFeed(args: AssembleArgs): Promise<BuiltFeed | null> {
   const { viewer, limit, chainObserver } = args;
   const topic = args.topic ?? '';
   const follows = args.follows;
+  const mutes = args.mutes;
   let tags = args.tags;
 
   // ★ OVER-FETCH, then trim. `hydrate` DROPS anything hidden, deleted, or no
@@ -678,7 +820,7 @@ async function assembleFeed(args: AssembleArgs): Promise<BuiltFeed | null> {
   if (topic) tags = [topic];
 
   const overFetch = Math.min(Math.ceil(limit * OVER_FETCH_RATIO), MAX_LIMIT * 2);
-  const outcome = await fetchRankedWithRetry({ viewer, limit: overFetch, follows, tags });
+  const outcome = await fetchRankedWithRetry({ viewer, limit: overFetch, follows, mutes, tags });
   if (!outcome.ok) return null;
 
   // ★ HYDRATE ONLY WHAT WE WILL SERVE, then top up if some dropped.
@@ -789,10 +931,11 @@ async function hydrate(posts: RecsysPost[], observer: string): Promise<Hydrated>
   let fetchFailures = 0;
 
   // A lite post lives on chain under the shared publisher account, so it must be
-  // FETCHED as the publisher and DISPLAYED as its real writer. One batched query
-  // resolves both the display name and whether Lumen still permits serving it.
+  // FETCHED as the publisher and DISPLAYED as its real writer. This query answers
+  // only the first half — whether Lumen still permits serving it. WHO wrote it is
+  // attached further down by `attachLiteIdentities`.
   const litePosts = posts.filter((p) => p.chain_author);
-  const liteByKey = new Map<string, { displayName: string; servable: boolean }>();
+  const servableByKey = new Map<string, boolean>();
   if (litePosts.length > 0 && liteConfig.enabled && liteConfig.databaseUrl) {
     try {
       const mappings = await resolveRankedLiteBatch(
@@ -800,10 +943,7 @@ async function hydrate(posts: RecsysPost[], observer: string): Promise<Hydrated>
         litePosts.map((p) => p.permlink)
       );
       for (const m of mappings) {
-        liteByKey.set(`${m.hiveAuthor}/${m.hivePermlink}`, {
-          displayName: m.displayName,
-          servable: m.servable
-        });
+        servableByKey.set(`${m.hiveAuthor}/${m.hivePermlink}`, m.servable);
       }
     } catch (error) {
       // Cannot prove a lite post is still servable => do not serve it. Failing
@@ -817,22 +957,23 @@ async function hydrate(posts: RecsysPost[], observer: string): Promise<Hydrated>
   const settled = await Promise.all(
     posts.map(async (p): Promise<Pair | null> => {
       const fetchAuthor = p.chain_author ?? p.author;
-      const lite = p.chain_author ? liteByKey.get(`${p.chain_author}/${p.permlink}`) : undefined;
 
       // ★ MODERATION HOLDS HERE. recsys ranks from HAFSQL and has no idea what
       // Lumen has hidden — it will happily rank a post taken down an hour ago,
       // because on chain it is still there. Unknown lite post (no row) is also
       // dropped: it is not something we can vouch for.
-      if (p.chain_author && (!lite || !lite.servable)) return null;
+      if (p.chain_author && servableByKey.get(`${p.chain_author}/${p.permlink}`) !== true) {
+        return null;
+      }
 
       const cacheKey = `${fetchAuthor}/${p.permlink}/${observer}`;
       const cached = cacheGet(cacheKey);
-      if (cached) {
-        const entry = lite?.displayName
-          ? ({ ...cached, author: lite.displayName } as Entry)
-          : cached;
-        return { entry, post: p };
-      }
+      // ★ RETURNED AS THE CHAIN PRESENTED IT, re-attribution deliberately DEFERRED.
+      // `attachLiteIdentities` proves an entry is a given Lumen post by comparing
+      // its author against the account the row says signed it — so an entry whose
+      // author has already been rewritten can never be identified again. Rewriting
+      // here is exactly what stripped every lite post of its identity.
+      if (cached) return { entry: cached, post: p };
       try {
         // ONE retry, short backoff. These ~30 calls go out together against a
         // public node, so failures arrive in clusters and are almost always
@@ -846,12 +987,7 @@ async function hydrate(posts: RecsysPost[], observer: string): Promise<Hydrated>
         }
         if (!fetched) return null;
         cachePut(cacheKey, fetched);
-        // Re-attribute to the ranked identity so a lite writer is credited in
-        // the UI, matching how they were ranked.
-        const entry = lite?.displayName
-          ? ({ ...fetched, author: lite.displayName } as Entry)
-          : fetched;
-        return { entry, post: p };
+        return { entry: fetched, post: p };
       } catch {
         // ★★ A FETCH FAILURE IS NOT A TAKEDOWN (2026-08-09).
         //
@@ -882,8 +1018,75 @@ async function hydrate(posts: RecsysPost[], observer: string): Promise<Hydrated>
       posts.length
     );
   }
-  const postByKey = new Map<string, RecsysPost>();
+
+  // ★★★ WHO WROTE THIS — THE STEP THIS ROUTE USED TO SKIP ENTIRELY (2026-08-10).
+  //
+  // Hivemind reports every lite post as authored by the one shared publishing
+  // account, so this route rewrote `author` to the writer's handle and stopped
+  // there: `_lite` was never set, in this file, ever. A handle is not an identity
+  // — a Lumen handle is BY CONSTRUCTION a name that was free on Hive — so
+  // everything downstream that needed to know "this is a lite post, by this
+  // person" had only an ambiguous string to work from, and four things broke on
+  // the product's most visible surface at once:
+  //
+  //   * BLOCKING. `block-actor.ts` reads an entry with no `_lite` as a HIVE
+  //     account and computes `h:<handle>`; the block edge is `u:<ULID>`. They can
+  //     never match, so a blocked lite author kept being served — on For You,
+  //     the one surface the feature exists for. Its own docstring forbids exactly
+  //     this shape.
+  //   * TITLE. Hivemind synthesises "RE: <parent title>" for every comment and
+  //     every lite post is a container child, so all of them displayed as
+  //     "RE: Lumen posts — <date>". The real title is on our row.
+  //   * URL. The chain entry's `url` points at the CONTAINER under the publishing
+  //     account (`/lumen/@<publisher>/lumen-c-…`), not at the writer's post.
+  //   * CURSOR. See `cursorOf`.
+  //
+  // `attachLiteIdentities` is the helper the post page, the discussion route and
+  // the reply lists all already use; this is not a new mechanism, it is the one
+  // that was missing a caller. It runs HERE — after the fetch, before any
+  // re-attribution — because it authenticates an entry by comparing its author
+  // against the account our row says signed it, and that comparison is only
+  // possible while the entry still carries the chain author.
+  await attachLiteIdentities(pairs.map((p) => p.entry));
+
+  const served: Pair[] = [];
   for (const { entry, post } of pairs) {
+    if (!post.chain_author) {
+      served.push({ entry, post });
+      continue;
+    }
+    const lite = entry._lite;
+    if (!lite?.userId) {
+      // ★ FAIL CLOSED, same posture as the servability check above. A lite post we
+      // cannot attribute cannot be block-filtered either, so serving it would put
+      // an unidentifiable author on the surface where blocking is enforced.
+      logger.warn(
+        'for-you: dropping lite post %s/%s — its Lumen identity could not be resolved',
+        post.chain_author,
+        post.permlink
+      );
+      continue;
+    }
+    // A COPY. `attachLiteIdentities` mutates in place (adding `_lite` is
+    // idempotent and true of the post wherever it is cached), but the DISPLAY
+    // fields must not be written onto an object the hydration cache and the Hive
+    // post cache both hand to other requests.
+    const displayed: Entry = {
+      ...entry,
+      author: lite.author,
+      title: lite.title,
+      // Mirrors `render/lite-entry.ts`: the permlink is real, so the link
+      // resolves; only the author segment becomes the person a reader sees.
+      url: `/${entry.category}/@${lite.author}/${entry.permlink}`
+    };
+    served.push({
+      entry: displayed,
+      post
+    });
+  }
+
+  const postByKey = new Map<string, RecsysPost>();
+  for (const { entry, post } of served) {
     postByKey.set(`${entry.author}/${entry.permlink}`, post);
   }
 
@@ -897,7 +1100,7 @@ async function hydrate(posts: RecsysPost[], observer: string): Promise<Hydrated>
   // A banned author's key is left in `postByKey`; that is harmless, because the
   // lane array is built by walking the ENTRIES, so a lane can only exist for a
   // post that survived to the page.
-  return { entries: filterBannedEntries(pairs.map((p) => p.entry)), postByKey };
+  return { entries: filterBannedEntries(served.map((p) => p.entry)), postByKey };
 }
 
 /**
@@ -1024,10 +1227,26 @@ async function mergeLumenEngagement(entries: Entry[]): Promise<Entry[]> {
   }
 }
 
-/** The cursor a client uses to ask for the next page: the last post it was given. */
+/**
+ * The cursor a client uses to ask for the next page: the last post it was given.
+ *
+ * ★ IN CHAIN COORDINATES, ALWAYS (2026-08-10). Every page after the first
+ * continues down Hive's own feed from this post, so the cursor has to be
+ * something HIVE can find. A lite post's displayed author is a Lumen handle,
+ * which is not a chain account at all: `bridge.get_ranked_posts` answers
+ * `assert_exception — Post <handle>/<permlink> does not exist`, `getRankedPaged`
+ * throws, the paging branch swallows it into `{entries: [], nextCursor: null}`,
+ * and the reader's infinite scroll simply stops. Verified live against
+ * api.hive.blog: `@<handle>/lumen-…` asserts, `@<publisher>/lumen-…` returns a
+ * normal page of 20.
+ *
+ * `_lite.chainAuthor` is the account that actually signed the post — the one
+ * identifier on a re-attributed entry that Hive has ever heard of.
+ */
 function cursorOf(entries: Entry[]): { author: string; permlink: string } | null {
   const last = entries[entries.length - 1];
-  return last ? { author: last.author, permlink: last.permlink } : null;
+  if (!last) return null;
+  return { author: last._lite?.chainAuthor || last.author, permlink: last.permlink };
 }
 
 async function fallback(

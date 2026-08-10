@@ -39,7 +39,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // ★ B5 — a taken-down post must not keep reporting live counts. QA found
     // `posts/:id` 404ing while THIS endpoint served incrementable numbers for
     // the same post; same predicate as the write path, one helper.
-    if (!(await liteTargetServable(author, permlink))) {
+    //
+    // ★ THE PERMLINK IS THE WHOLE KEY (2026-08-10). `author` is deliberately not
+    // passed: a lite post reaches the browser under its WRITER'S HANDLE, so
+    // gating the lookup on the publishing account meant the guard never ran on
+    // the spelling the client actually sends. See `resolveLiteTarget`.
+    if (!(await liteTargetServable(permlink))) {
       return NextResponse.json({ error: 'target_unavailable' }, { status: 404 });
     }
     const engagement = await getEngagement(userId, author, permlink);

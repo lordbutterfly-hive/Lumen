@@ -29,7 +29,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   // Undoing a reblog is a withdrawal, so a suspended account may still do it; adding
   // one is participation and may not (see http/actor.ts).
-  const actor = undo ? await requireLiteUser(session.user, session.sessionEpoch) : await requireActiveLiteUser(session.user, session.sessionEpoch);
+  const actor = undo ? await requireLiteUser(session.user, session) : await requireActiveLiteUser(session.user, session);
   if (!actor.ok) return actor.response;
   const user = actor.user;
 

@@ -72,10 +72,13 @@ HEAD = 10
 def run_world(seed, settings):
     world = build_world(seed=seed)
     gw = SimGateway(world)
-    norm = build_norm(world)
+    # ★ SNAPSHOT FIRST, THEN THE NORM (2026-08-10, PRUNED N1) — the §4 sample
+    # carries the scorer's breadth budget and ring exclusion, which live on the
+    # snapshot. See `simworld.build_norm`.
     snap = build_trust_snapshot(
         gw, settings, since=EPOCH, now=NOW, trusted_seeds=frozenset(), production=False
     )
+    norm = build_norm(world, gateway=gw, snapshot=snap, settings=settings)
     names = [f"v-{t}-{j:02d}" for t in TOPICS for j in range(4)]
     out = []
     for name in names:
