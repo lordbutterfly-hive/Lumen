@@ -9,6 +9,7 @@ import { handleError } from '@ui/lib/handle-error';
 import { scheduleInvalidations, scheduleValidatedRefetch } from '@/blog/lib/react-query';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { liteVote } from '@/blog/lib/lite/client/lite-write';
+import { recordRetentionAct } from '@/blog/features/retention/components/retention-moments';
 
 const logger = getLogger('app');
 
@@ -173,6 +174,15 @@ export function useVoteMutation() {
     onSuccess: async (data) => {
       const { voter, author, permlink, weight } = data;
       const isLiteVote = user.account_tier === 'lite';
+      // Chain upvotes, for the act ledger. POSITIVE direction only: an undo-shaped call
+      // is not an act, and a downvote is engagement in the literal sense and the
+      // opposite of it in every sense that matters. A lite vote is recorded by
+      // lite-write, so the tier guard keeps the two paths complementary.
+      //
+      // Note this feeds the toasts and the recap, NOT the daily goal — GOAL_KINDS in
+      // retention-moments.ts counts posts and replies only, because a Hive vote never
+      // reaches this server and a goal only one tier can fill is not a goal.
+      if (!isLiteVote && weight > 0) recordRetentionAct('vote');
       // ★ SAY WHERE THE VOTE WENT (2026-08-09). This read "You have
       // successfully upvoted." for everyone — including a lite account, whose
       // vote is Lumen-local and never reaches Hive (see the comment below for

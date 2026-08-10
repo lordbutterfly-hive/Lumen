@@ -13,6 +13,7 @@ import { GetDynamicGlobalPropertiesResponse } from '@hiveio/wax';
 import { getChain } from './chain';
 import { ApiAccount, IManabarData } from '@hiveio/wax';
 import { DATA_LIMIT } from './bridge-api';
+import { isBannedAuthor, withoutBannedAuthors } from '@ui/config/lists/banned-authors';
 
 interface ISingleManabar {
   max: string;
@@ -277,7 +278,10 @@ export const getFollowCount = async (username: string): Promise<AccountFollowSta
  * @returns
  */
 export const getRebloggedBy = async (author: string, permlink: string): Promise<string[]> => {
-  return (await getChain()).api.condenser_api.get_reblogged_by([ author, permlink ]);
+  const rebloggers = await (await getChain()).api.condenser_api.get_reblogged_by([ author, permlink ]);
+  // A banned account is not credited with amplifying anybody's post, and does not
+  // appear in the "reblogged by" attribution list.
+  return withoutBannedAuthors(rebloggers, (name) => name);
 };
 
 export const getFeedHistory = async (): Promise<IFeedHistory> => {
@@ -320,12 +324,16 @@ export const getFollowing = async (params?: Partial<IGetFollowParams>): Promise<
     const type = params?.type || DEFAULT_PARAMS_FOR_FOLLOW.type;
     const limit = params?.limit || DEFAULT_PARAMS_FOR_FOLLOW.limit;
 
-    return (await getChain()).api.condenser_api.get_following([
+    const following = await (await getChain()).api.condenser_api.get_following([
       account,
       start,
       type,
       limit
     ]);
+    // A banned account is nobody's "following" entry, and the account itself has
+    // no following list to browse.
+    if (isBannedAuthor(account)) return [];
+    return withoutBannedAuthors(following, (edge) => edge.following);
   } catch (error) {
     console.error('Error:', error);
     throw error;
@@ -358,12 +366,16 @@ export const getFollowers = async (params?: Partial<IGetFollowParams>): Promise<
     const type = params?.type || DEFAULT_PARAMS_FOR_FOLLOW.type;
     const limit = params?.limit || DEFAULT_PARAMS_FOR_FOLLOW.limit;
 
-    return (await getChain()).api.condenser_api.get_followers([
+    const followers = await (await getChain()).api.condenser_api.get_followers([
       account,
       start,
       type,
       limit
     ]);
+    if (isBannedAuthor(account)) return [];
+    // He can still follow you on chain — nothing Lumen does can stop that. What
+    // Lumen can do is never show him in your followers list.
+    return withoutBannedAuthors(followers, (edge) => edge.follower);
   } catch (error) {
     console.error('Error:', error);
     throw error;
@@ -420,7 +432,11 @@ export const getByText = async ({
   // Nothing searchable left (e.g. the reader typed only punctuation). Asking
   // anyway returns a parse error the reader cannot act on.
   if (safePattern.length === 0) return [];
-  return (await getChain()).api['search-api'].find_text({
+  // `?author=troll` — searching a banned account by name returns nothing rather
+  // than his whole catalogue, which is the first thing anyone looking for him
+  // will try.
+  if (isBannedAuthor(author)) return [];
+  const results = await (await getChain()).api['search-api'].find_text({
     pattern: safePattern,
     sort,
     author,
@@ -429,6 +445,7 @@ export const getByText = async ({
     start_author,
     start_permlink
   });
+  return withoutBannedAuthors(results, (entry) => entry.author);
 };
 
 export const getActiveVotes = async (author: string, permlink: string): Promise<IVote[]> => {
@@ -452,8 +469,19 @@ export const getActiveVotes = async (author: string, permlink: string): Promise<
     lastVoter = postVotes[postVotes.length - 1].voter;
   }
 
+  // ★ HE MUST NOT AFFECT ANY NUMBER LUMEN COMPUTES.
+  //
+  // This list is not only the voters popover. It is also the input to the
+  // retention system's credited-giver breadth count (`app/api/streak/[user]`,
+  // `creditedGivers`), which decides how far a real author can climb. Leaving a
+  // banned account in here would let him inflate — or, by being counted as a
+  // low-value "unknown" giver against a budget, dilute — other people's standing.
+  // Dropping him at the source means every downstream tally is computed as if he
+  // had never voted, with no arithmetic anywhere else needing to know he exists.
+  const countedVotes = withoutBannedAuthors(allVotes, (vote) => vote.voter);
+
   // Transform to IVote format
-  return allVotes.map((vote) => ({
+  return countedVotes.map((vote) => ({
     voter: vote.voter,
     percent: vote.vote_percent,
     rshares: vote.rshares,

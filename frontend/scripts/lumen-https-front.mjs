@@ -25,6 +25,39 @@
  *
  * `x-forwarded-proto: https` is set because that is what a real reverse proxy
  * sends and what the app must see to treat the request as secure.
+ *
+ * ★★ IT ALSO HAS TO BEHAVE LIKE A REAL PROXY ON X-FORWARDED-FOR.
+ *
+ * This process stands exactly where the production edge stands, so anything it
+ * gets wrong about client identity is wrong in QA in the same shape it would be
+ * wrong in production. It previously forwarded `...req.headers` untouched, which
+ * was wrong twice over:
+ *
+ *   1. It NEVER APPENDED the address it actually saw. `getClientIp`
+ *      (apps/blog/lib/lite/http/ip.ts) reads the X-Forwarded-For entry
+ *      `LITE_TRUSTED_PROXY_COUNT` hops from the RIGHT — the value our own
+ *      infrastructure added — and with nothing appended there was nothing to
+ *      read. Every client behind this front collapsed into the single
+ *      `unattributed` bucket, so ONE caller could exhaust a per-IP budget for
+ *      everybody, and no per-IP limit was really per-IP at all.
+ *
+ *   2. It PASSED A CLIENT-SUPPLIED X-Forwarded-For STRAIGHT THROUGH. A caller
+ *      could send its own chain and have it arrive looking like ours, minting a
+ *      fresh rate-limit bucket per request — the exact forgery proven exploitable
+ *      on 2026-07-28 and fixed inside ip.ts, reintroduced here at the edge.
+ *      Same for `x-real-ip`, which ip.ts trusts precisely because "our own edge
+ *      sets it" — so it must be SET here, never relayed.
+ *
+ * The fix is ordinary correct proxy behaviour: APPEND the real socket peer to
+ * whatever chain arrived, and overwrite `x-real-ip` with that same peer. Reading
+ * from the right then lands on our entry no matter what a client prefixes, so a
+ * forged chain is inert rather than authoritative. We do not normalise the
+ * address here (IPv4-mapped IPv6, /64 bucketing) — `ipBucket` in ip.ts already
+ * owns that, and duplicating it is how the two drift apart.
+ *
+ * ONE HOP, SO `LITE_TRUSTED_PROXY_COUNT=1` (the default) IS CORRECT BEHIND THIS
+ * FRONT. If you put anything else in front of it, that number must grow to match
+ * the real number of hops or the boundary moves to the wrong entry.
  */
 import https from 'https';
 import http from 'http';
@@ -53,6 +86,34 @@ try {
   process.exit(1);
 }
 
+/**
+ * Build the upstream headers, fixing client identity at the trust boundary.
+ *
+ * `peer` is the address of the socket this request actually arrived on — the one
+ * thing here a client cannot lie about. Appending it makes the rightmost entry
+ * ours; overwriting `x-real-ip` with it stops a relayed forgery.
+ *
+ * If the peer is somehow unknown (a torn-down socket), we DROP both headers
+ * rather than forward the inbound ones. That costs attribution — the request
+ * lands in ip.ts's shared `unattributed` bucket — which is the safe failure. The
+ * unsafe one would be relaying a chain we cannot vouch for, because then the
+ * request gets a bucket of the caller's own choosing.
+ */
+function forwardHeaders(req) {
+  const headers = { ...req.headers, 'x-forwarded-proto': 'https', host: `localhost:${LISTEN_PORT}` };
+  const peer = req.socket?.remoteAddress;
+  if (!peer) {
+    delete headers['x-forwarded-for'];
+    delete headers['x-real-ip'];
+    return headers;
+  }
+  const inbound = req.headers['x-forwarded-for'];
+  const chain = Array.isArray(inbound) ? inbound.join(', ') : inbound;
+  headers['x-forwarded-for'] = chain ? `${chain}, ${peer}` : peer;
+  headers['x-real-ip'] = peer;
+  return headers;
+}
+
 https
   .createServer(opts, (req, res) => {
     const proxy = http.request(
@@ -61,11 +122,7 @@ https
         port: UPSTREAM_PORT,
         path: req.url,
         method: req.method,
-        headers: {
-          ...req.headers,
-          'x-forwarded-proto': 'https',
-          host: `localhost:${LISTEN_PORT}`
-        }
+        headers: forwardHeaders(req)
       },
       (up) => {
         res.writeHead(up.statusCode, up.headers);

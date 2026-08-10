@@ -31,7 +31,7 @@ export default function ProfileCommentCard({ post }: { post: Entry }) {
   const payoutDeclined = parseFloat(post.max_accepted_payout) === 0;
 
   return (
-    <article className="rounded-2xl border border-[#ebebeb] bg-white p-[20px_22px] transition-colors hover:border-[#e0ddd6]">
+    <article className="rounded-[18px] border border-[#ebebeb] bg-white p-[22px] transition-colors hover:border-[#e0ddd6]">
       {/* "replying to @x in community" header */}
       <div className="mb-2.5 flex flex-wrap items-center gap-1.5 font-sans text-[13px] text-[#9ca3af]">
         <Icons.arrowBigUp className="h-[14px] w-[14px] -rotate-90 text-[#c8ccd2]" aria-hidden="true" />
@@ -46,7 +46,7 @@ export default function ProfileCommentCard({ post }: { post: Entry }) {
         {post.community && post.community_title ? (
           <>
             <span>{t('profile.comment.in_community_prefix')}</span>
-            <Link href={`/trending/${post.community}`} className="font-semibold hover:underline">
+            <Link href={`/topics/${post.community}`} className="font-semibold hover:underline">
               {post.community_title}
             </Link>
           </>
@@ -71,7 +71,13 @@ export default function ProfileCommentCard({ post }: { post: Entry }) {
 
       {/* Footer — same control grammar as MediumPostCard's action bar, minus reblog. */}
       <div className="mt-3.5 flex items-center gap-2 font-sans text-[13.5px]">
-        <div className="flex items-center gap-1 rounded-[11px] bg-[#f6f7f8] px-2 py-1.5 [&_svg]:h-[16px] [&_svg]:w-[16px]">
+        {/* ★ NO PILL INSIDE THE CARD (2026-08-08). Same fix the feed card got:
+            a grey capsule sitting on a white card reads as a second, nested
+            surface — the owner's words were "a grey pill inside the window", and
+            it looked weird. The count keeps its weight from type, not from a
+            background. This variant was missed the first time round, so the
+            Comments tab kept the pill everywhere else had lost it. */}
+        <div className="flex items-center gap-1 py-1.5 [&_svg]:h-[16px] [&_svg]:w-[16px]">
           <VotesComponentWrapper post={post} type="comment" />
           {post.stats ? (
             <span className="flex items-center pl-1 font-bold tabular-nums text-[#2a2822]">
@@ -87,7 +93,8 @@ export default function ProfileCommentCard({ post }: { post: Entry }) {
         <DetailsCardHover post={post} decline={payoutDeclined}>
           <span
             className={cn(
-              'ml-auto flex items-center rounded-[10px] bg-[#f4f5f7] px-[13px] py-[6px] text-[13.5px] font-bold tabular-nums text-[#6b7280] transition-colors hover:cursor-pointer',
+              // Payout is flat too — same reason as the vote group above.
+              'ml-auto flex items-center px-[3px] py-[6px] text-[13.5px] font-bold tabular-nums text-[#6b7280] transition-colors hover:cursor-pointer hover:text-[#2a2822]',
               payoutDeclined && 'bg-transparent text-muted-foreground line-through'
             )}
           >

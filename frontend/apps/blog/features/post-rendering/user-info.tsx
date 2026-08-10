@@ -78,7 +78,7 @@ function UserInfo({
       )}
       <span className="text-muted-foreground">{t('post_content.in')}</span>
       <Link
-        href={`/trending/${community_title ? community : category}`}
+        href={`/topics/${community_title ? community : category}`}
         className="font-medium text-destructive hover:cursor-pointer hover:underline"
         data-testid={community_title ? 'comment-community-title' : 'comment-category-title'}
         translate="no"

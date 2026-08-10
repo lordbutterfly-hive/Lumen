@@ -36,7 +36,10 @@ export async function liteAccountAsProfile(displayName: string): Promise<FullAcc
   // and will have succeeded before we were ever called.
   if (user.accountTier === 'full' || user.hiveAccountName) return null;
 
-  const postCount = await posts.countByUser(user.userId);
+  // ROOT posts only — this becomes `post_count`, which the profile prints under
+  // the word "Posts" and the Posts tab repeats in its chip, above a list that has
+  // always been root-only. See countRootPostsByUser.
+  const postCount = await posts.countRootPostsByUser(user.userId);
   const created = user.createdAt.toISOString().slice(0, 19);
   // Real numbers, from our own graph. A lite account's follows cannot be on chain, so
   // these are the only true counts that exist for it — the zeros this used to render

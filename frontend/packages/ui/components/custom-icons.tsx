@@ -44,11 +44,17 @@ export const PATHS: Record<string, string> = {
 
   // ── nav / people ─────────────────────────────────────────────────────────
   search: '<circle cx="11" cy="11" r="6.5"/><path d="M15.8 15.8L20 20"/>',
+  // The universal "menu" glyph, drawn on this set's grid (three 16-unit rules,
+  // 5 units apart, round caps). `sidebarOpen` reads as "expand the panel" next
+  // to a panel; on a phone, where there is no visible panel to expand, only the
+  // three bars are understood without being taught.
+  menu: '<path d="M4 7h16"/><path d="M4 12h16"/><path d="M4 17h16"/>',
   bell: '<path d="M18 8.5a6 6 0 0 0-12 0c0 5-2 6.5-2 6.5h16s-2-1.5-2-6.5z"/><path d="M10.4 18.5a1.9 1.9 0 0 0 3.2 0"/>',
   user: '<circle cx="12" cy="8.5" r="3.75"/><path d="M5.5 19.5a6.5 6.5 0 0 1 13 0"/>',
   userPlus:
     '<circle cx="9.5" cy="8.5" r="3.5"/><path d="M3.5 19.5a6 6 0 0 1 12 0"/><path d="M18.5 7.5v5"/><path d="M16 10h5"/>',
-  atSign: '<circle cx="12" cy="12" r="3.75"/><path d="M15.75 8.5v4.75a2.5 2.5 0 0 0 5 0V12a9 9 0 1 0-3.4 7"/>',
+  atSign:
+    '<circle cx="12" cy="12" r="3.75"/><path d="M15.75 8.5v4.75a2.5 2.5 0 0 0 5 0V12a9 9 0 1 0-3.4 7"/>',
   settings:
     '<path d="M4 7h9"/><path d="M17 7h3"/><circle cx="15" cy="7" r="2"/><path d="M4 12h3"/><path d="M11 12h9"/><circle cx="9" cy="12" r="2"/><path d="M4 17h9"/><path d="M17 17h3"/><circle cx="15" cy="17" r="2"/>',
   doorOpen: '<path d="M4 20h5V4l7 1.6V20h4"/><path d="M11.5 12h.01"/>',
@@ -111,14 +117,18 @@ export const PATHS: Record<string, string> = {
     '<rect x="6" y="4.5" width="12" height="16" rx="2"/><path d="M9 4.5V4a1.5 1.5 0 0 1 1.5-1.5h3A1.5 1.5 0 0 1 15 4v.5"/><path d="M9 12.5l2 2 4-4"/>',
   trash:
     '<path d="M5 7h14"/><path d="M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7"/><path d="M6.5 7l1 11.5A1.5 1.5 0 0 0 9 20h6a1.5 1.5 0 0 0 1.5-1.5L17.5 7"/><path d="M10 11v5"/><path d="M14 11v5"/>',
-  pizza: '<path d="M12 4l8.5 4.2L12 21 3.5 8.2z"/><path d="M9 8.5h.01"/><path d="M12 12.5h.01"/><path d="M14.5 9h.01"/>',
+  pizza:
+    '<path d="M12 4l8.5 4.2L12 21 3.5 8.2z"/><path d="M9 8.5h.01"/><path d="M12 12.5h.01"/><path d="M14.5 9h.01"/>',
 
   // ── layout / sidebar ─────────────────────────────────────────────────────
-  layoutList: '<rect x="4" y="5" width="16" height="6" rx="1.5"/><rect x="4" y="13" width="16" height="6" rx="1.5"/>',
+  layoutList:
+    '<rect x="4" y="5" width="16" height="6" rx="1.5"/><rect x="4" y="13" width="16" height="6" rx="1.5"/>',
   layoutGrid:
     '<rect x="4" y="5" width="7" height="7" rx="1.5"/><rect x="13" y="5" width="7" height="7" rx="1.5"/><rect x="4" y="14" width="7" height="5.5" rx="1.5"/><rect x="13" y="14" width="7" height="5.5" rx="1.5"/>',
-  sidebarOpen: '<rect x="4" y="5" width="16" height="14" rx="2"/><path d="M10 5v14"/><path d="M13.5 10l2.5 2-2.5 2"/>',
-  sidebarClose: '<rect x="4" y="5" width="16" height="14" rx="2"/><path d="M10 5v14"/><path d="M16.5 10L14 12l2.5 2"/>',
+  sidebarOpen:
+    '<rect x="4" y="5" width="16" height="14" rx="2"/><path d="M10 5v14"/><path d="M13.5 10l2.5 2-2.5 2"/>',
+  sidebarClose:
+    '<rect x="4" y="5" width="16" height="14" rx="2"/><path d="M10 5v14"/><path d="M16.5 10L14 12l2.5 2"/>',
 
   // ── links ────────────────────────────────────────────────────────────────
   externalLink:
@@ -163,7 +173,8 @@ export const PATHS: Record<string, string> = {
   pencil: '<path d="M16.4 4.4l3.2 3.2L9 18.2l-4.2 1 1-4.2z"/><path d="M14.3 6.5l3.2 3.2"/>',
 
   // ── home ─────────────────────────────────────────────────────────────────
-  house: '<path d="M4 11L12 4l8 7"/><path d="M6 9.8V19a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V9.8"/><path d="M9.75 20v-5a1 1 0 0 1 1-1h2.5a1 1 0 0 1 1 1v5"/>'
+  house:
+    '<path d="M4 11L12 4l8 7"/><path d="M6 9.8V19a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V9.8"/><path d="M9.75 20v-5a1 1 0 0 1 1-1h2.5a1 1 0 0 1 1 1v5"/>'
 };
 
 const make = (name: string) => {
@@ -247,6 +258,7 @@ export const layoutList = make('layoutList');
 export const layoutGrid = make('layoutGrid');
 export const sidebarOpen = make('sidebarOpen');
 export const sidebarClose = make('sidebarClose');
+export const menu = make('menu');
 export const externalLink = make('externalLink');
 export const link = make('link');
 export const link2 = make('link2');

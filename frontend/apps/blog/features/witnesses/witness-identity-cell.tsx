@@ -1,11 +1,19 @@
 import { Link, getUserAvatarUrl } from '@hive/ui';
 import { Icons } from '@ui/components/icons';
+import { cn } from '@ui/lib/utils';
 import { useTranslation } from '@/blog/i18n/client';
 import { toSafeExternalUrl } from './lib/safe-external-url';
 import { WitnessRow } from './lib/types';
 
 interface WitnessIdentityCellProps {
   row: WitnessRow;
+  /**
+   * Extra classes for the cell's own box. The row uses it to pin this cell to
+   * the left edge of the table's scroller — merged onto the existing element
+   * rather than added as a wrapper, so the grid item stays exactly the one the
+   * desktop layout was measured against.
+   */
+  className?: string;
 }
 
 /**
@@ -14,12 +22,12 @@ interface WitnessIdentityCellProps {
  * witness published a valid https announcement URL) an external-link
  * icon linking out to it.
  */
-export default function WitnessIdentityCell({ row }: WitnessIdentityCellProps) {
+export default function WitnessIdentityCell({ row, className }: WitnessIdentityCellProps) {
   const { t } = useTranslation('common_blog');
   const externalUrl = toSafeExternalUrl(row.url);
 
   return (
-    <div className="flex min-w-0 items-center gap-3">
+    <div className={cn('flex min-w-0 items-center gap-3', className)}>
       <Link href={`/@${row.owner}`} className="shrink-0">
         <img
           src={getUserAvatarUrl(row.owner, 'medium')}

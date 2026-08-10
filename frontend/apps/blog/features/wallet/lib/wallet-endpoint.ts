@@ -23,3 +23,15 @@ export function getMarketStatsUrl(): string {
   const host = getWalletHost();
   return host ? `${host}/market` : '#';
 }
+
+/**
+ * Full account-history / transfers page on the standalone wallet app
+ * (apps/wallet's `app/[param]/transfers`). The Lumen wallet's own "Recent
+ * activity" card only ever shows the most recent page — this is where
+ * "View full history" sends someone who wants everything, same pattern as
+ * `getDelegationsUrl` above.
+ */
+export function getTransfersUrl(username: string): string {
+  const host = getWalletHost();
+  return host ? `${host}/@${username}/transfers` : '#';
+}

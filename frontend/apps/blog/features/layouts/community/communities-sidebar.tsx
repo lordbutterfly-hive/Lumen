@@ -54,7 +54,7 @@ const CommunitiesSidebar: FC = () => {
           {data?.slice(0, 12).map((community) => (
             <li key={community.id}>
               <Link
-                href={`/trending/${community.name}`}
+                href={`/topics/${community.name}`}
                 className="w-full text-sm font-light hover:text-destructive"
               >
                 {community.title}

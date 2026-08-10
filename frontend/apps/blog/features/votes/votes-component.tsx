@@ -417,7 +417,18 @@ const TooltipContainer = ({
             post announced as "button, button". Same string, now also the
             accessible name. */}
         <TooltipTrigger data-testid={dataTestId} disabled={loading} asChild>
-          <span className="cursor-pointer" role="button" aria-label={text} tabIndex={0}>
+          {/* ★ THUMB-SIZED TAP TARGET (2026-08-08). The icon is 20px, so the
+              clickable box was 21x21 with only ~6px between upvote and
+              downvote — measured on a 390px viewport. On a phone that is a
+              coin-flip between agreeing and disagreeing with someone. The
+              padding grows the target to ~36px AND pushes the two apart,
+              without changing the icon. */}
+          <span
+            className="inline-flex cursor-pointer items-center justify-center p-2"
+            role="button"
+            aria-label={text}
+            tabIndex={0}
+          >
             {children}
           </span>
         </TooltipTrigger>

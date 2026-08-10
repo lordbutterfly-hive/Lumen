@@ -1,6 +1,7 @@
 import { Coins } from 'lucide-react';
 import { Link } from '@hive/ui';
 import { Icons } from '@ui/components/icons';
+import TooltipContainer from '@ui/components/tooltip-container';
 import { cn, numberWithCommas } from '@ui/lib/utils';
 import { useTranslation } from '@/blog/i18n/client';
 import { getCreatorTokensConfig } from '@/blog/features/creator-tokens/lib/creator-tokens-data-source';
@@ -9,8 +10,10 @@ interface Stat {
   value: string;
   label: string;
   href?: string;
-  /** Optional second line under the value — used for HP's "Tot:" figure. */
+  /** Optional second line under the value — the HP tile's delegation-adjusted figure. */
   sub?: string;
+  /** Longer explanation for `sub`, on hover and on keyboard focus. */
+  subTooltip?: string;
 }
 
 /** Followers / Posts / Following / HP stat row + grey Wallet button (design-handoff-v2, Profile.dc.html). */
@@ -38,16 +41,51 @@ export default function ProfileStatsBar({
   const creatorTokensConfigured = getCreatorTokensConfig() !== null;
 
   const stats: Stat[] = [
-    { value: numberWithCommas(String(followerCount)), label: t('user_profile.lists.followers_label'), href: `/@${username}/followers` },
-    { value: numberWithCommas(String(postCount)), label: t('user_profile.lists.posts_label') },
-    { value: numberWithCommas(String(followingCount)), label: t('user_profile.lists.following_label'), href: `/@${username}/followed` },
+    {
+      value: numberWithCommas(String(followerCount)),
+      // ★ "1 / Followers" (2026-08-08). The label was a fixed plural, so an
+      // account with exactly one follower read as a typo on a page about that
+      // person. Every other counted noun on this site already carries i18next
+      // plural forms; this row was the miss. `count` selects
+      // `followers_label_one` / `_other`; the base key is untouched, so the
+      // legacy profile chrome that passes no count still renders "Followers".
+      label: t('user_profile.lists.followers_label', { count: followerCount }),
+      href: `/@${username}/followers`
+    },
+    {
+      value: numberWithCommas(String(postCount)),
+      // Same defect, same row, one tile across: "1 / Posts".
+      label: t('user_profile.lists.posts_label', { count: postCount })
+    },
+    // "Following" is a gerund, not a countable noun — "1 Following" is correct.
+    {
+      value: numberWithCommas(String(followingCount)),
+      label: t('user_profile.lists.following_label'),
+      href: `/@${username}/followed`
+    },
     {
       value: numberWithCommas(hp),
       label: t('profile.stats.hp'),
-      // Hive shows the delegation-adjusted total beneath the headline as
-      // "Tot:". Omitted entirely when it equals the headline (no delegations
-      // either way) — a redundant second number is noise.
-      sub: hpEffective && hpEffective !== hp ? `Tot: ${numberWithCommas(hpEffective)}` : undefined
+      // ★ THE "Tot:" CAPTION WAS NOT A TOTAL (2026-08-08).
+      //
+      // It is `vesting_shares - (delegated_out - received)` — the account's
+      // EFFECTIVE Hive Power, what its vote actually weighs. Labelling that
+      // "Tot" put a number smaller than the one directly above it under the
+      // word "Total" (@oflyhigh: 262,804 headline, 231,860 caption), with no
+      // unit and no tooltip, on a page showing someone's real token holdings.
+      // It read as an unfinished placeholder or a bug, and the one reading it
+      // could not tell which of the two numbers to believe.
+      //
+      // Both numbers are right; they answer different questions. The caption
+      // now says which question it answers, in full, without needing the
+      // tooltip — the tooltip is the long version for anyone who wants it.
+      // Still omitted when the two are equal (no delegations either way): a
+      // second identical number is noise.
+      sub:
+        hpEffective && hpEffective !== hp
+          ? t('profile.stats.hp_effective', { value: numberWithCommas(hpEffective) })
+          : undefined,
+      subTooltip: t('profile.stats.hp_effective_tooltip')
     }
   ];
 
@@ -77,9 +115,7 @@ export default function ProfileStatsBar({
           <div key={stat.label} className="flex flex-col gap-0.5">
             <StatValue value={stat.value} />
             <StatLabel label={stat.label} />
-            {stat.sub ? (
-              <span className="font-sans text-[11.5px] leading-none text-[#9ca3af]">{stat.sub}</span>
-            ) : null}
+            {stat.sub ? <StatSub sub={stat.sub} tooltip={stat.subTooltip} /> : null}
           </div>
         )
       )}
@@ -87,7 +123,7 @@ export default function ProfileStatsBar({
       {creatorTokensConfigured ? (
         <Link
           href={`/creators/${username}`}
-          className="ml-auto self-center flex items-center gap-2 rounded-[11px] border border-[#e4e6e9] bg-[#f4f5f7] px-5 py-2.5 font-sans text-[14px] font-semibold text-[#3f4650] hover:bg-[#ebedf0]"
+          className="ml-auto flex items-center gap-2 self-center rounded-[11px] border border-[#e4e6e9] bg-[#f4f5f7] px-5 py-2.5 font-sans text-[14px] font-semibold text-[#3f4650] hover:bg-[#ebedf0]"
           data-testid="profile-creator-token-link"
         >
           <Coins className="h-[17px] w-[17px]" />
@@ -113,10 +149,34 @@ export default function ProfileStatsBar({
 
 function StatValue({ value }: { value: string }) {
   return (
-    <span className="font-sans text-[23px] font-bold tabular-nums tracking-[-0.02em] text-[#161511]">{value}</span>
+    <span className="font-sans text-[23px] font-bold tabular-nums tracking-[-0.02em] text-[#161511]">
+      {value}
+    </span>
   );
 }
 
 function StatLabel({ label }: { label: string }) {
   return <span className="font-sans text-[13px] font-medium text-[#6b7280]">{label}</span>;
+}
+
+/**
+ * The HP tile's second line. `tabIndex={0}` is deliberate: a tooltip that only
+ * opens on hover is unreachable by keyboard, and this one carries the only
+ * explanation of why the two numbers differ. The caption itself is written to
+ * stand alone, because a tooltip never opens on a touch screen at all.
+ */
+function StatSub({ sub, tooltip }: { sub: string; tooltip?: string }) {
+  const text = (
+    <span
+      className={cn(
+        'font-sans text-[11.5px] leading-[1.35] text-[#9ca3af]',
+        tooltip && 'cursor-help decoration-dotted underline-offset-2 hover:underline focus:underline'
+      )}
+      tabIndex={tooltip ? 0 : undefined}
+      data-testid="profile-hp-effective"
+    >
+      {sub}
+    </span>
+  );
+  return tooltip ? <TooltipContainer title={tooltip}>{text}</TooltipContainer> : text;
 }

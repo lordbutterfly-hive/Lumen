@@ -139,6 +139,10 @@ export default function ProfileMain() {
           created={profileData.created}
           lastVoteTime={profileData.last_vote_time}
           lastPost={profileData.last_post}
+          // Already on this object: `getAccountFull` attaches it from
+          // `bridge.get_profile` (packages/transaction/lib/hive-api.ts). Zero extra
+          // requests for the badge.
+          reputation={profileData.reputation}
         />
         {/* `_temporary` is how a Lumen lite account's stand-in profile is marked: no
             Hive account exists behind it, so a follow of this person can only live on

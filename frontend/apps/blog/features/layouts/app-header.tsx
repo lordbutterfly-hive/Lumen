@@ -18,6 +18,7 @@ import UserMenu from '@/blog/features/layouts/site-header/user-menu';
 import NotificationsMenu from '@/blog/features/layouts/site-header/notifications-menu';
 import { ManabarRing } from '@/blog/features/layouts/site-header/manabar-ring';
 import SearchButton from '@/blog/features/layouts/site-header/search-button';
+import MobileNav from '@/blog/features/layouts/mobile-nav';
 import { ModeSwitchInput } from '@ui/components/mode-switch-input';
 
 // TODO i18n - move into locales/*/common_blog.json once copy is final
@@ -69,13 +70,34 @@ const AppHeader: FC = () => {
       className="sticky top-0 z-40 w-full border-b border-[#ebebeb] bg-white/90 font-sans backdrop-blur-md"
       translate="no"
     >
-      <div className="mx-auto grid max-w-[1720px] grid-cols-[1fr_auto] items-center gap-11 px-6 py-[14px] md:grid-cols-[200px_minmax(0,1fr)] md:px-11 xl:grid-cols-[200px_minmax(0,1fr)_312px]">
+      {/* ★ gap-3 BELOW md, not gap-11 (2026-08-08). 44px is the desktop grid's
+          GUTTER — the distance between the nav column and the content column —
+          and it was being applied between the wordmark and the icon cluster on a
+          phone too. Measured at 390px: wordmark 111 + gutter 44 + cluster 187 =
+          342, which is exactly the 342px of content box available inside px-6.
+          Zero slack: the header could not accept one more control at any width
+          below 768px. The gutter has nothing to line up with here (the nav
+          column does not exist below md), so it is just spent space. */}
+      {/* ★ THREE CHILDREN, THREE COLUMNS AT md (2026-08-08). The md track list
+          declared only TWO (`[200px_minmax(0,1fr)]`) while the header renders
+          three visible children between 768px and 1279px — wordmark, search,
+          action cluster — so the cluster was pushed onto an implicit SECOND ROW:
+          at 820px the header rendered as "Lumen | Search…" over "✏ Log in",
+          doubling its height and leaving Log in floating under the wordmark.
+          Verified pre-existing (screenshotted at 820px before any change here).
+          `auto` sizes the third column to the cluster; xl's explicit 312px
+          right-rail column takes over unchanged above 1280px. */}
+      <div className="mx-auto grid max-w-[1720px] grid-cols-[1fr_auto] items-center gap-3 px-6 py-[14px] md:grid-cols-[200px_minmax(0,1fr)_auto] md:gap-11 md:px-11 xl:grid-cols-[200px_minmax(0,1fr)_312px]">
         {/* col 1 — Open Sans wordmark over the nav column (design-handoff-v2: no
             serif display face). The 14px inset matches the left-rail rows' own
             px-[14px], so the wordmark's left edge lands on the nav icons' left
             edge instead of sitting 14px proud of the column. */}
         <Link href="/" aria-label={LABELS.homeAriaLabel} className="flex items-center md:pl-[14px]">
-          <span className="font-sans text-[28px] font-bold leading-none tracking-[-0.025em] text-[#161511] lg:text-[34px]">
+          {/* One extra responsive step below sm. The size ladder was already
+              28 -> 34; a phone is the one width where the wordmark competes with
+              the controls for room, and 24px buys 16 of the ~48 needed for the
+              menu button. Unchanged at every width the design was drawn for. */}
+          <span className="font-sans text-[24px] font-bold leading-none tracking-[-0.025em] text-[#161511] sm:text-[28px] lg:text-[34px]">
             Lumen
           </span>
         </Link>
@@ -86,7 +108,7 @@ const AppHeader: FC = () => {
         </div>
 
         {/* col 3 — action cluster over the right rail */}
-        <div className="flex items-center justify-end gap-3.5">
+        <div className="flex items-center justify-end gap-2 md:gap-3.5">
           <SearchButton aiTag={false} className="md:hidden" />
 
           <TooltipContainer title={LABELS.write}>
@@ -280,6 +302,11 @@ const AppHeader: FC = () => {
               </Button>
             </Link>
           )}
+
+          {/* Last in the cluster, the same slot upstream denser gives its own
+              Sheet trigger (main-bar.tsx renders <Sidebar/> as the final child
+              of the header nav). Below md only — see mobile-nav.tsx. */}
+          <MobileNav />
         </div>
       </div>
     </header>

@@ -19,6 +19,8 @@ import { useReblogMutation } from '@/blog/features/list-of-posts/hooks/use-reblo
 import PostCardCommentTooltip from '@/blog/features/list-of-posts/post-card-comment-tooltip';
 import PostCardUpvotesTooltip from '@/blog/features/list-of-posts/post-card-upvotes-tooltip';
 import DetailsCardHover from '@/blog/features/list-of-posts/details-card-hover';
+import { LeagueByline } from '@/blog/features/retention/components/league-byline';
+import type { RankMark } from '@/blog/features/retention/hooks/use-rank-marks';
 import { Entry } from '@hive/common-hiveio-packages/wax';
 import { isNsfwPost, useNsfwPreference } from '@/blog/lib/nsfw';
 
@@ -41,7 +43,7 @@ const LABELS = {
  * components (`VotesComponentWrapper`, `ReblogDialog`, the card tooltips) so
  * voting/reblog behaviour stays identical to the classic feed.
  */
-export default function MediumPostCard({ post }: { post: Entry }) {
+export default function MediumPostCard({ post, mark }: { post: Entry; mark?: RankMark }) {
   const { t } = useTranslation('common_blog');
   const { user } = useUserClient();
   const reblogMutation = useReblogMutation();
@@ -101,6 +103,14 @@ export default function MediumPostCard({ post }: { post: Entry }) {
 
   return (
     <article
+      // ★ THE ROOT TESTID THE TEST SUITE NEEDS (2026-08-09). The card had testids on
+      // every child and none on itself, so nothing could count posts or scope a
+      // locator to "the first post". `playwright/tests/support/pages/homePage.ts`
+      // asked for `li[data-testid="post-list-item"]` — the CLASSIC card, which Lumen
+      // replaced with this one — and that single missing selector failed 51 of 57
+      // tests in `mainTimeline.spec.ts` in a `beforeEach`, before a single assertion
+      // ran. Every child testid here is `medium-card-*`, so the root follows suit.
+      data-testid="medium-card"
       // ★ EACH POST IS ITS OWN CARD (owner direction, 2026-08-08). This was a
       // full-bleed row with a single hairline UNDER it, so posts read as one
       // continuous column. Now each sits in its own bordered, rounded box — the
@@ -149,17 +159,21 @@ export default function MediumPostCard({ post }: { post: Entry }) {
         >
           {displayAuthor}
         </Link>
-        {/* ★ NO BYLINE EMBLEM HERE (owner ruling, 2026-08-08). This rendered
-            `bylineTierFromReputation(post.author_reputation)` — a DIFFERENT
-            function from the one behind the profile's rank — so the same person
-            carried two different ranks in the same session. Proven live:
-            @taskmaster4450 read Beacon in the feed and Torch on his profile;
-            @hivebuzz read Beacon in the feed and Candle on his profile. A rank
-            that contradicts itself is worse than no rank. Also note
-            lib/lite/render/db-post-to-entry.ts sets `author_reputation: 0`, so
-            every lite author was permanently emblem-less on that path anyway.
-            Do not re-add without routing it through the SAME source as the
-            profile (/api/streak/[user] → useRetention). */}
+        {/* ★★ THE BYLINE MARK, MOUNTED AT LAST (owner instruction, 2026-08-09).
+            It was removed on 2026-08-08 because it rendered
+            `bylineTierFromReputation(post.author_reputation)` — a DIFFERENT function
+            from the profile's — so one person carried two contradicting ranks in one
+            session (@taskmaster4450: Beacon in the feed, Torch on his profile).
+            It is safe now for a specific reason, not because the ruling changed: the
+            rank arrives from `lumen_hive_rank`, a SNAPSHOT of the very computation the
+            profile runs, batched into one request per page by `useRankMarks` and never
+            derived from the post payload. So a mark can differ from a profile only by
+            being older, never by being computed differently — and the server's TTL
+            drops it before that matters.
+            `mark` is undefined for an author nobody has looked up yet, and
+            `LeagueByline` renders nothing below Torch, so this is silent by default
+            rather than noisy. */}
+        {mark ? <LeagueByline tier={mark.tier} rankNumber={mark.rankNumber} /> : null}
         {post.community && post.community_title ? (
           <>
             {/* ★ A COMMUNITY IS SHOWN AS A TAG (owner ruling, 2026-08-07).

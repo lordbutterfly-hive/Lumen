@@ -64,13 +64,13 @@ function LitePostCard({ entry }: { entry: Entry }) {
     </>
   );
   return published ? (
-    <Link href={href} className="block border-b border-[#ececec] py-8 transition-colors hover:bg-[#faf9f7]">
+    <Link href={href} className="mb-4 block rounded-[18px] border border-[#ebebeb] bg-white p-[22px] shadow-[0_1px_2px_rgba(20,18,10,0.03)] transition-colors hover:bg-[#fdfcfb]">
       {body}
     </Link>
   ) : (
     // Pending: still a real link, with the state said out loud rather than
     // expressed as "nothing happens when you click".
-    <Link href={href} className="block border-b border-[#ececec] py-8 transition-colors hover:bg-[#faf9f7]">
+    <Link href={href} className="mb-4 block rounded-[18px] border border-[#ebebeb] bg-white p-[22px] shadow-[0_1px_2px_rgba(20,18,10,0.03)] transition-colors hover:bg-[#fdfcfb]">
       {body}
       <p className="mt-2 text-[12px] text-[#9a7b2e]">Publishing to Hive — visible on Lumen now.</p>
     </Link>

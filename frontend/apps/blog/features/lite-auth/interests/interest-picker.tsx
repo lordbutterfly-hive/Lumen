@@ -38,10 +38,52 @@ interface InterestOption {
   id: string;
   label: string;
   icon: string;
+  /**
+   * Section heading. Optional so a server that predates the grouped taxonomy
+   * (or a cached response from one) still renders — those options fall into a
+   * single unlabelled section rather than disappearing.
+   */
+  group?: string;
   tags: string[];
 }
 
-const InterestPicker: FC = () => {
+/**
+ * Group the options into sections, IN THE ORDER THE SERVER SENT THEM.
+ *
+ * ★ WHY SECTIONS (2026-08-09). The taxonomy went from 23 topics to 48, built
+ * from the measured tag frequencies of 38,478 real root posts, because six
+ * interests cannot describe what a person reads. A flat wrap of 48 pills is a
+ * worse thing to choose from than 23 was — the reader scans a wall and picks
+ * from the first row. Sections keep the coverage and give the eye somewhere to
+ * land.
+ *
+ * Order comes from the array, not from a second list: the taxonomy keeps each
+ * group's entries contiguous, so first-appearance order IS the intended order
+ * and there is nothing here that can fall out of sync with it.
+ */
+function sectionsOf(options: InterestOption[]): { group: string; items: InterestOption[] }[] {
+  const sections: { group: string; items: InterestOption[] }[] = [];
+  for (const option of options) {
+    const group = option.group ?? '';
+    const last = sections.find((s) => s.group === group);
+    if (last) last.items.push(option);
+    else sections.push({ group, items: [option] });
+  }
+  return sections;
+}
+
+/**
+ * `openSignal` lets something OUTSIDE onboarding open this — the "Edit
+ * interests" control in the right rail. Bumping the number opens the dialog
+ * with the reader's current picks preselected.
+ *
+ * ★ WHY IT IS NEEDED. The automatic rule fires only for a reader with zero
+ * posts and zero comments, once, ever. Without a manual way in, everyone who
+ * already writes here — including every Hive account with a history — could
+ * NEVER tell Lumen what they are interested in, and their ranked feed had no
+ * way to improve. A one-shot modal with no second door is a dead end.
+ */
+const InterestPicker: FC<{ openSignal?: number }> = ({ openSignal = 0 }) => {
   const [open, setOpen] = useState(false);
   const [options, setOptions] = useState<InterestOption[]>([]);
   const [picked, setPicked] = useState<string[]>([]);
@@ -66,9 +108,18 @@ const InterestPicker: FC = () => {
         setPicked(body.selected ?? []);
         setMax(body.max ?? 20);
         setMin(body.min ?? 3);
-        // `eligible` gates on a real lite session; `asked` (never "selected is
-        // empty") stops re-prompting anyone who deliberately skipped.
-        if (body.eligible && !body.asked) setOpen(true);
+        // ★ WHEN THE PICKER FIRES (owner rule, 2026-08-08). Three conditions,
+        // all of them the server's answer, never the client's guess:
+        //   `eligible`   — a real signed-in reader, LITE OR HIVE, whose picks
+        //                  we have somewhere to store.
+        //   `!asked`     — we have never asked. Not "selected is empty": that
+        //                  would re-prompt forever anyone who deliberately
+        //                  skipped.
+        //   `blankSlate` — zero posts and zero comments. Someone who has
+        //                  already written here has shown us what they are
+        //                  into; interrupting them with a questionnaire is
+        //                  noise.
+        if (body.eligible && !body.asked && body.blankSlate) setOpen(true);
       } catch {
         /* the picker is an enhancement to onboarding, never a blocker */
       }
@@ -77,6 +128,13 @@ const InterestPicker: FC = () => {
       cancelled = true;
     };
   }, []);
+
+  // Opened deliberately from the rail. Skips every gate above on purpose: the
+  // reader asked for it, so "already asked" and "has written before" are not
+  // reasons to refuse them.
+  useEffect(() => {
+    if (openSignal > 0) setOpen(true);
+  }, [openSignal]);
 
   const toggle = (id: string) => {
     setPicked((prev) =>
@@ -107,7 +165,24 @@ const InterestPicker: FC = () => {
   if (!open) return null;
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { if (!v && !saving) setOpen(false); }}>
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        if (v || saving) return;
+        // ★ DISMISSING IS A DECISION, AND IT HAS TO STICK (2026-08-08).
+        //
+        // Making this closeable by clicking away fixed the app being held hostage,
+        // but only "Skip for now" recorded the choice — so clicking away closed it
+        // and it came straight back on the NEXT page load, and the one after that,
+        // blocking the page each time. That is arguably worse than the original
+        // trap: it looks like the app is broken rather than busy.
+        //
+        // Closing it any way at all now records the same "asked, declined" state
+        // the Skip button records, so it is asked once and never again.
+        setOpen(false);
+        void save([]);
+      }}
+    >
       <DialogContentBare
         className="max-h-[88vh] w-[min(680px,94vw)] overflow-y-auto rounded-[16px] bg-white p-7 shadow-xl"
         // ★ CLICKING AWAY MUST DISMISS IT (2026-08-07).
@@ -153,31 +228,40 @@ const InterestPicker: FC = () => {
               {COPY.subtitle}
             </DialogDescription>
 
-            <div className="mt-5 flex flex-wrap gap-2">
-              {options.map((o) => {
-                const on = picked.includes(o.id);
-                const full = !on && picked.length >= max;
-                return (
-                  <button
-                    key={o.id}
-                    type="button"
-                    aria-pressed={on}
-                    disabled={full}
-                    onClick={() => toggle(o.id)}
-                    className={cn(
-                      'flex items-center gap-2 rounded-full border px-4 py-2.5 font-sans text-[14px] transition-colors',
-                      on
-                        ? 'border-[#161511] bg-[#161511] text-white'
-                        : 'border-[#e4e6e9] bg-white text-[#161511] hover:border-[#161511]',
-                      full && 'cursor-not-allowed opacity-40'
-                    )}
-                  >
-                    <span aria-hidden>{o.icon}</span>
-                    {o.label}
-                  </button>
-                );
-              })}
-            </div>
+            {sectionsOf(options).map((section) => (
+              <div key={section.group || 'all'} className="mt-5">
+                {section.group ? (
+                  <h3 className="mb-2 font-sans text-[11.5px] font-semibold uppercase tracking-[0.08em] text-[#9ca3af]">
+                    {section.group}
+                  </h3>
+                ) : null}
+                <div className="flex flex-wrap gap-2">
+                  {section.items.map((o) => {
+                    const on = picked.includes(o.id);
+                    const full = !on && picked.length >= max;
+                    return (
+                      <button
+                        key={o.id}
+                        type="button"
+                        aria-pressed={on}
+                        disabled={full}
+                        onClick={() => toggle(o.id)}
+                        className={cn(
+                          'flex items-center gap-2 rounded-full border px-4 py-2.5 font-sans text-[14px] transition-colors',
+                          on
+                            ? 'border-[#161511] bg-[#161511] text-white'
+                            : 'border-[#e4e6e9] bg-white text-[#161511] hover:border-[#161511]',
+                          full && 'cursor-not-allowed opacity-40'
+                        )}
+                      >
+                        <span aria-hidden>{o.icon}</span>
+                        {o.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
 
             <div className="mt-7 flex items-center justify-between gap-4">
               <button

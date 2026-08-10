@@ -1,101 +1,94 @@
-import type { LeagueInputs } from './compute-league';
+import { ACTIVITY_SATURATION_DAYS, ACTIVITY_WINDOW_DAYS, type LeagueInputs } from './compute-league';
 
 // Pure derivation of the league keystone inputs from raw chain facts. Kept out of
 // the API route so every mapping here is unit-testable without a network call.
 //
-// HONESTY NOTE (this file is the place where "chain fact" becomes "score", so the
+// HONESTY NOTE (this file is where "chain fact" becomes "ladder input", so the
 // approximations live here and nowhere else):
 //   - ageDays and activeWeeks are EXACT — account creation date and authored-act
-//     days both come straight off chain.
-//   - receivedEngagement is a PROXY. The true keystone is stake-weighted received
-//     engagement per unit of output, which would require walking every vote on
-//     every post. We approximate it with formatted reputation (itself a
-//     stake-weighted running total of received approval) blended with observed
-//     per-post vote breadth. Documented as a proxy in the API response so no
-//     consumer mistakes it for a measured quantity.
-//   - distinctGivers is EXACT but SAMPLED — distinct voters over the most recent
-//     N posts, not over all history.
-
-export const REP_FLOOR = 25; // a fresh account starts here
-
-/**
- * Top of the reputation band, calibrated against a real sample pulled from
- * api.hive.blog on 2026-07-20 rather than guessed:
- *
- *   taskmaster4450 85.87 · acidyo 84.30 · theycallmedan 79.91 · blocktrades 79.79
- *   lordbutterfly  79.77 · arcange   79.06 · ocdb           77.37 · gtg        76.10
- *   hivebuzz       74.23 · smooth    73.52 · starkerz       72.54 · ned        69.78
- *   techcoderx     67.21
- *
- * The first version used 72, which put every established account at a saturated
- * 1.0 — @lordbutterfly came out at the Lumen apex, which is supposed to be rare.
- * A scale that saturates is a scale that has stopped measuring.
- */
-export const REP_CEILING = 88;
-
-/**
- * The apex (Halo / Aurora / Lumen) is NOT reachable from this proxy, by design.
- *
- * Reputation is a stake-weighted running total of received approval — a decent
- * proxy for the engagement keystone, but not a measurement of it. The Celestial
- * band is meant to be population-capped and to require the real per-account
- * signal, so the proxy's output is compressed into the bands below it and tops
- * out inside Beacon. This mirrors the same cap already applied to the byline
- * tier in compute-league.ts, and it is the honest behaviour: a layer that cannot
- * resolve the apex must decline to award it rather than fake the precision.
- */
-export const PROXY_BAND_CEILING = 0.79; // just under the Halo threshold (0.8)
-
-/**
- * Formatted Hive reputation (~25 new … ~86 top) → 0..PROXY_BAND_CEILING.
- * Monotonic, saturating, and never negative for the sub-25 accounts that exist
- * after heavy downvoting.
- */
-export function engagementFromReputation(formattedRep: number): number {
-  const span = REP_CEILING - REP_FLOOR;
-  return clamp01((formattedRep - REP_FLOOR) / span) * PROXY_BAND_CEILING;
-}
+//     days both come straight off chain. `activeWeeks` is exact only as far as the
+//     walk actually READ; the route flags a truncated walk as
+//     `coverage.activeWeeksIsLowerBound` and the client must render it as a floor.
+//   - creditedGivers is MEASURED and SAMPLED — distinct voters over the recent
+//     posts the route sampled, after the stake floors and the unknown-tier budget
+//     in credited-givers.ts. Sampled, so it is a floor on lifetime breadth; never
+//     extrapolated upward.
+//
+// ★ THERE IS NO PROXY IN THIS FILE ANY MORE (2026-08-09).
+//
+// It used to own `engagementFromReputation`, REP_FLOOR, REP_CEILING,
+// PROXY_BAND_CEILING and the whole MAX_AWARDABLE_* / UNAWARDABLE_TIERS /
+// isCeilingLimited apparatus. That apparatus existed for exactly one reason — the
+// reputation proxy saturated below the top of the ladder, so three rungs could not
+// be awarded to anybody and the UI had to explain why. The proxy is gone
+// (compute-league.ts says why at length), so the explanation is gone with it, and
+// with it the last thing on this ladder that was not a measurement.
 
 export interface ChainFacts {
-  createdISO: string; // account creation timestamp
-  formattedReputation: number;
-  actDaysUTC: string[]; // days with an authored act (posts + comments)
-  activeWeeks: number; // from computeStreak, trailing 26 weeks
-  distinctGivers: number; // distinct voters sampled over recent posts
-  sampledPosts: number; // how many posts the sample covered
-  totalVotesOnSample: number;
+  /**
+   * Every UTC act-day the route knows about — stored history union this walk's findings.
+   * Unfiltered; the observation gate below is applied HERE and only here.
+   */
+  actDaysUTC: string[];
+  /**
+   * The UTC day Lumen first started watching this account
+   * (`lumen_hive_walk_cursor.first_built_at`), or '' when it has never been recorded.
+   */
+  firstObservedDayUTC: string;
   nowMs: number; // injected so this stays pure and testable
 }
 
+/**
+ * Chain facts → the one ladder input.
+ *
+ * ★★ TWO FILTERS, AND BOTH ARE THE POINT.
+ *
+ * 1. AT OR AFTER `firstObservedDayUTC`. The route walks up to 26 weeks of Hive history and
+ *    stores every act-day it finds, so the raw set hands a long-standing account ~180 days on
+ *    its very first request. Counting those is exactly how @gtg, @tarazkp and @lordbutterfly all
+ *    measured **Aurora, rank 8 of 9** before doing anything on Lumen. Days before we were
+ *    watching happened, and they are shown as stats ("On Hive since 2016", "Shown up on 94+
+ *    days") — they just do not buy rank here.
+ *
+ *    ★ AND AN EMPTY `firstObservedDayUTC` COUNTS NOTHING, rather than counting everything. A
+ *    missing cursor means we have no idea when we started watching, and the permissive default
+ *    would silently restore the imported-history bug for exactly the accounts whose records are
+ *    incomplete. Fail closed: rank 0 until the cursor exists, which the first successful walk
+ *    writes.
+ *
+ * 2. INSIDE THE TRAILING WINDOW. This is the decay, and it needs no separate mechanism: a day
+ *    stops counting once it is older than ACTIVITY_WINDOW_DAYS, so going quiet lowers the number
+ *    on its own with no penalty event and nothing to notify.
+ */
 export function deriveLeagueInputs(f: ChainFacts): LeagueInputs {
-  const created = Date.parse(
-    // Hive timestamps come back without a zone; they are UTC.
-    /[zZ]|[+-]\d{2}:\d{2}$/.test(f.createdISO) ? f.createdISO : `${f.createdISO}Z`
-  );
-  const ageDays = Number.isFinite(created) ? Math.max(0, Math.floor((f.nowMs - created) / 86_400_000)) : 0;
+  const cutoffMs = f.nowMs - ACTIVITY_WINDOW_DAYS * 86_400_000;
+  const firstMs = f.firstObservedDayUTC ? Date.parse(`${f.firstObservedDayUTC}T00:00:00Z`) : Number.NaN;
+  // No cursor means no observation window, which means nothing observed. See (1) above.
+  if (!Number.isFinite(firstMs)) return { observedActDays: 0 };
 
-  // Reputation ALONE is the engagement signal here. An earlier version blended in
-  // observed vote breadth, which double-counted: compute-league already gates the
-  // raw signal by distinct-giver breadth (`e * (0.4 + 0.6 * breadth)`), so adding
-  // breadth here inflated every established account into the apex. One signal,
-  // gated once, in the place that owns the gating.
-  const receivedEngagement = engagementFromReputation(f.formattedReputation);
-
-  return {
-    receivedEngagement,
-    distinctGivers: Math.max(0, Math.floor(f.distinctGivers)),
-    ageDays,
-    activeWeeks: Math.max(0, Math.floor(f.activeWeeks))
-  };
+  const seen = new Set<string>();
+  for (const day of f.actDaysUTC) {
+    if (!day) continue;
+    const ms = Date.parse(`${day}T00:00:00Z`);
+    if (!Number.isFinite(ms)) continue;
+    if (ms < firstMs) continue;
+    if (ms < cutoffMs) continue;
+    seen.add(day);
+  }
+  return { observedActDays: seen.size };
 }
 
-/** The honest "what's gating your next promotion" meters, each 0..1. */
-export function deriveGate(inp: LeagueInputs): { engagement: number; tenure: number; activeWeeks: number } {
-  return {
-    engagement: clamp01(inp.receivedEngagement),
-    tenure: clamp01(inp.ageDays / 730), // 2y saturates, matching tenureBandIdx's apex
-    activeWeeks: clamp01(inp.activeWeeks / 26)
-  };
+/**
+ * The arm as a 0..1 fraction of saturation. ONE meter now, because there is one arm.
+ *
+ * It used to return three (`engagement`, `tenure`, `activeWeeks`) and the profile card rendered
+ * all three as percentage bars under "What's actually holding you here" — a wall of abstraction,
+ * and the engagement meter was measurably wrong besides. The card has drawn a single bar off
+ * `rank.progressToNext` since 2026-08-09, so nothing consumed the other two except dormancy,
+ * which now reads the Hive tenure year directly instead of borrowing an arm.
+ */
+export function deriveGate(inp: LeagueInputs): { activity: number } {
+  return { activity: clamp01(inp.observedActDays / ACTIVITY_SATURATION_DAYS) };
 }
 
 /** 'YYYY-MM-DD' in UTC from a Hive timestamp string. */
@@ -106,6 +99,6 @@ export function utcDay(ts: string): string {
 }
 
 function clamp01(x: number): number {
-  if (!Number.isFinite(x)) return 0;
+  if (Number.isNaN(x)) return 0;
   return Math.max(0, Math.min(1, x));
 }

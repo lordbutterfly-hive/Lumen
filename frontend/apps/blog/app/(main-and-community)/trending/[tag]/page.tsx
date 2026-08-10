@@ -5,15 +5,11 @@ interface PageProps {
 }
 
 /**
- * ★ NO COMMUNITY PAGES (owner ruling, 2026-08-07).
+ * ★ A TAG IS STILL A REAL PAGE — the chain-sort SHELL around it is not.
  *
- * Lumen dropped communities as a section — there are no moderator tools, roles
- * or subscribe flows to host. A community is simply shown as a TAG: the same
- * Lumen feed, filtered to it. So every tag, community id or plain topic alike,
- * redirects to `/topics/<tag>`.
- *
- * This route only still exists because links to it are everywhere — in old
- * posts, in bookmarks, and in Hive content we render.
+ * The parent feed (trending/hot/created/muted/payout) is retired per the
+ * 2026-08-08 owner ruling, but a link to a specific tag should still take a
+ * reader somewhere useful, so it lands on Lumen's own topic page.
  */
 const Page = ({ params }: PageProps) => {
   redirect(`/topics/${encodeURIComponent(params.tag.toLowerCase())}`);

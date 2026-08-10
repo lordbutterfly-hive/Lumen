@@ -7,7 +7,7 @@ const SubscriptionListItem = ({ community }: { community: string[] }) => {
   return (
     <li data-testid="author-community-subscribed-list-item">
       <Link
-        href={`/trending/${community[0]}`}
+        href={`/topics/${community[0]}`}
         className="mr-2 text-destructive hover:underline"
         data-testid="author-community-subscribed-link"
       >

@@ -1,6 +1,7 @@
 'use client';
 
 import MarketWidget from '@/blog/features/prediction-market/market-widget';
+import { TodayCard } from '@/blog/features/retention/components/today-card';
 import Topics from './right-rail/topics';
 
 const CARD_CLASS =
@@ -12,6 +13,10 @@ const CARD_CLASS =
 export default function RightRail() {
   return (
     <aside className="flex w-full flex-col gap-5 font-sans text-foreground" data-testid="right-rail">
+      {/* Top of the rail, and it brings its own card chrome — it renders nothing at
+          all for a signed-out reader or a server that predates the daily loop, and an
+          empty bordered box would be worse than an absent one. */}
+      <TodayCard />
       <div className={CARD_CLASS}>
         <MarketWidget />
       </div>

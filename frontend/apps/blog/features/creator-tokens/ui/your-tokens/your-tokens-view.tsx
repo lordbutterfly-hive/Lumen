@@ -214,6 +214,16 @@ const YourTokensView: FC = () => {
             wrong with your tokens — reload in a moment.
           </Unavailable>
         </div>
+      ) : p.accountsLoading ? (
+        // ★ STILL LOOKING (2026-08-07). Without this branch, the "Google only"
+        // verdict below fired while the wallet lookup was merely IN FLIGHT — an
+        // EVM-wallet account was told for ~9 seconds that it signs in with Google
+        // and cannot hold tokens. `canHold` defaults to false before the answer
+        // arrives, which is indistinguishable from a real "no wallet" verdict
+        // unless loading is checked first.
+        <div className="mt-5">
+          <Unavailable>Checking which wallets are linked to this account…</Unavailable>
+        </div>
       ) : p.isLite && !p.canHold ? (
         // ONLY a Google-only lite account genuinely cannot hold: there is no
         // keypair behind it, so Magi has no account to key a balance to.

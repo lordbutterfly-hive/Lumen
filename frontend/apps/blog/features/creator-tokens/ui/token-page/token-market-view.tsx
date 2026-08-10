@@ -506,13 +506,21 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
         <div className="mb-3.5 text-xs font-bold uppercase tracking-[0.05em] text-[#9ca3af]">What you can do with the token</div>
         <div className="mb-3.5 flex flex-col gap-2.5">
           {market.services.map((sv) => (
-            <div key={sv.key} className="flex items-center gap-3.5 rounded-[14px] border border-[#ebebeb] px-[18px] py-4">
+            <div
+              // ★ STACKS ON A PHONE (2026-08-08). At 390px this row kept all four
+              // children side by side, so the description column was squeezed to
+              // 30px wide and 848px tall — one word per line — burying the price
+              // and the Ask button. Measured on a real 390x844 viewport. Below
+              // `sm` it stacks; from `sm` up the original row is unchanged.
+              key={sv.key}
+              className="flex flex-col gap-3 rounded-[14px] border border-[#ebebeb] px-[18px] py-4 sm:flex-row sm:items-center sm:gap-3.5"
+            >
               <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[11px] bg-[#f4f5f7] text-[#c0392b]">◆</span>
               <div className="min-w-0 flex-1">
                 <div className="text-[15px] font-bold text-[#161511]">{sv.name}</div>
                 <div className="text-[13px] text-[#6b7280]">{sv.desc}</div>
               </div>
-              <div className="flex-shrink-0 text-right">
+              <div className="flex-shrink-0 text-left sm:text-right">
                 <div className="text-[15px] font-bold tabular-nums text-[#161511]">{usdWhole(sv.usd)}</div>
                 {/* The TOKEN LEG only (88% of the posted price) — the other 12% is a
                     separate HBD commission (serviceQuote/ask.go splitFace, USER RULING

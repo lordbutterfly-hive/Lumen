@@ -46,7 +46,7 @@ function DialogLogin({ children, redirectTo }: DialogLoginProps) {
     >
       <DialogTrigger asChild>{children}</DialogTrigger>
       <DialogContent
-        className="mt-32 max-w-[380px] rounded-md p-0 sm:mt-auto sm:max-w-[450px] sm:px-0"
+        className="mt-16 max-w-[92vw] rounded-md p-0 sm:mt-auto sm:max-w-[480px] sm:px-0"
         data-testid="login-dialog"
         onInteractOutside={(e) => e.preventDefault()}
       >
@@ -75,7 +75,7 @@ function DialogLogin({ children, redirectTo }: DialogLoginProps) {
         {/* ★ The SAME four methods as /login (2026-08-07). This used to render
             Keychain alone, so the app's most-opened sign-in surface hid Google
             and both wallet options behind a text link. */}
-        <div className="max-h-[70vh] overflow-y-auto px-6 pb-2 pt-6">
+        <div className="max-h-[76vh] overflow-y-auto px-5 pb-2 pt-5">
           <LumenLogin embedded />
         </div>
         {/* THE SIGNUP DOOR. This dialog is opened from ~24 places — the home

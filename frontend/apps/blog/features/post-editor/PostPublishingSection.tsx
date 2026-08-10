@@ -33,6 +33,17 @@ import { AccountFormValues } from "@/blog/features/post-editor/types";
 const LITE_REWARDS_NOTE =
   'Lumen posts decline rewards. Upgrade to a Hive account to start earning on what you write.';
 
+/**
+ * The Resource Credits gauge, in words. Same convention as LITE_REWARDS_NOTE
+ * above — Lumen/newcomer copy lives beside its component until the whole
+ * vocabulary is translated in one pass. `submit_page.account_stats` ("Account
+ * stats:") is deliberately no longer used here: it labelled the bar without ever
+ * saying what the bar measured.
+ */
+const RC_LABEL = 'Resource Credits';
+const RC_EXPLAINER =
+  'Your Hive account’s free allowance for posting, commenting and voting. It refills on its own over time — you only have to wait if it runs low.';
+
 interface PostPublishingSectionProps {
   form: UseFormReturn<AccountFormValues>;
   username: string;
@@ -203,9 +214,18 @@ export function PostPublishingSection({
         </div>
       )}
 
+      {/* ★ NAME THE GAUGE, DON'T JUST NUMBER IT (2026-08-08, UX tester).
+          This was a bare bar under "Account stats:" with "42% RC" beside it.
+          "RC" is a Hive-native abbreviation a newcomer has never met, and a
+          percentage with no unit and no explanation is not information — the
+          tester read it as an unexplained meter next to the Publish button.
+          Spelling out "Resource Credits" and saying in one line what they are
+          costs two rows in a column that has room for them. Still hidden for a
+          Lumen account, which has no Hive account and therefore no RC of its
+          own — see LITE_REWARDS_NOTE for the same reasoning about rewards. */}
       {isLite ? null : (
         <div className="flex flex-col gap-2">
-          <span className="text-sm font-medium">{t("submit_page.account_stats")}</span>
+          <span className="text-sm font-medium">{RC_LABEL}</span>
           <div className="flex items-center gap-3">
             <Progress
               value={manabarsData?.rc.percentageValue ?? 0}
@@ -216,9 +236,10 @@ export function PostPublishingSection({
               className="text-xs tabular-nums text-muted-foreground"
               data-testid="resource-credits-description"
             >
-              {manabarsData?.rc.percentageValue ?? 0}% RC
+              {manabarsData?.rc.percentageValue ?? 0}%
             </span>
           </div>
+          <span className="text-xs text-muted-foreground">{RC_EXPLAINER}</span>
         </div>
       )}
 

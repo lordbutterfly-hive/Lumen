@@ -27,3 +27,38 @@ export const middleware = createMiddleware({
     reportUri: '/api/csp-report'
   }
 });
+
+/**
+ * ★★ STATIC ASSETS MUST NOT ENTER MIDDLEWARE — IT TRUNCATES THEM (2026-08-09).
+ *
+ * Without a `matcher`, Next runs middleware on EVERY request, including
+ * `/_next/static/**`. `createMiddleware` then calls `NextResponse.next()` and mutates
+ * headers on the asset's response, and the Edge runtime buffers it — so any chunk
+ * larger than ~9 MiB is delivered truncated while still advertising its full length.
+ *
+ * Measured, not theorised:
+ *
+ *   GET /_next/static/chunks/app/%5Bparam%5D/(user-profile)/page.js
+ *     Content-Length: 20601288      (matches the file on disk)
+ *     bytes delivered:  9437184     (exactly 9 MiB)
+ *     browser:          net::ERR_CONTENT_LENGTH_MISMATCH
+ *
+ * The consequence is not subtle: that chunk is the profile page, so `/@user` served a
+ * 200, rendered its SSR HTML, and then **never hydrated** — it sat on
+ * `profile-main-skeleton` forever. Same for `app/layout.js`. It is also a large share
+ * of why the Playwright e2e suite fails: a client-rendered assertion cannot pass on a
+ * page whose JavaScript never arrived.
+ *
+ * `common.ts` clearly INTENDED to skip these — it carries the exact same negative
+ * lookahead inline — but as `pathname.match(<string>)` it is unanchored and matches
+ * anywhere, so it excluded nothing. Here it is in the one place Next anchors it.
+ *
+ * ★ `/api` IS DELIBERATELY STILL IN SCOPE. The documented Next example also excludes
+ * it, and the inline guard named it too, but middleware sets the login-challenge
+ * cookies and `session_uid` on every request — dropping API routes out of middleware
+ * would change auth-cookie behaviour, which is not what this fix is for. Only static
+ * assets are excluded: the smallest change that stops the truncation.
+ */
+export const config = {
+  matcher: ['/((?!_next/static|_next/image|favicon\\.ico).*)']
+};

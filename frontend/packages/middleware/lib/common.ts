@@ -80,7 +80,22 @@ export function createMiddleware(config: MiddlewareConfig = {}) {
       }
     }
 
-    if (pathname.match('/((?!api|_next/static|_next/image|favicon.ico).*)')) {
+    // ★ THIS GUARD NEVER EXCLUDED ANYTHING (fixed 2026-08-09).
+    //
+    // It was `pathname.match('/((?!api|_next/static|_next/image|favicon.ico).*)')`.
+    // `String.prototype.match` compiles a string argument as an UNANCHORED regex, so
+    // the negative lookahead only had to fail at ONE position for the match to
+    // succeed somewhere else in the path. `/_next/static/chunks/app/page.js` matches
+    // at `/chunks/...`; `/api/users/me` matches at `/users/me`. Every asset request
+    // and every API call was therefore logged as a page visit.
+    //
+    // A negative lookahead like that is a Next `config.matcher` pattern, where Next
+    // anchors it — it is not a substring test. The app's own middleware.ts now carries
+    // it as a real matcher (which is also what stops middleware truncating >9 MiB
+    // static chunks), and the intent is expressed here as an explicit prefix check.
+    const isAsset =
+      pathname.startsWith('/_next/') || pathname === '/favicon.ico' || pathname.startsWith('/api/');
+    if (!isAsset) {
       const isPrefetch =
         request.headers.get('x-middleware-prefetch') === '1' ||
         request.headers.get('purpose') === 'prefetch' ||

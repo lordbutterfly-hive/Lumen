@@ -10,6 +10,7 @@ import HiveTokenCard from './hive-token-card';
 import HbdTokenCard from './hbd-token-card';
 import SavingsVault from './savings-vault';
 import EstimatedValueStrip from './estimated-value-strip';
+import AccountHistoryList from './account-history-list';
 
 /**
  * Center column: fetches the logged-in user's real balances (see
@@ -140,6 +141,8 @@ export default function WalletContent() {
       />
 
       <EstimatedValueStrip figures={figures} />
+
+      <AccountHistoryList username={user.username} chain={chain} dynamicGlobal={dynamicGlobal} />
     </div>
   );
 }

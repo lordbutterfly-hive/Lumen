@@ -75,7 +75,11 @@ test.describe('Home page tests', () => {
     // console.log("Post payout: ", await postPayout)
 
     expect(homePage.getFirstPostAuthor).toHaveText(postAuthor);
-    expect(homePage.getFirstPostAuthorReputation).toContainText('(' + Math.floor(postAuthorReputation) + ')');
+    // ROUND, not floor (2026-08-09). `accountReputation` floored until then, which was
+    // one too low against hive.blog for every account whose fractional part was >= .5.
+    // The formatter now rounds everywhere; this assertion has to follow it or it pins
+    // the bug it used to describe.
+    expect(homePage.getFirstPostAuthorReputation).toContainText('(' + Math.round(postAuthorReputation) + ')');
     expect(homePage.getFirstPostTitle).toHaveText(postTitle);
     expect(homePage.getFirstPostPayout).toHaveText(`$${postPayout}`);
 
@@ -183,7 +187,11 @@ test.describe('Home page tests', () => {
     // console.log("Post payout: ", await postPayout)
 
     expect(homePage.getFirstPostAuthor).toHaveText(postAuthor);
-    expect(homePage.getFirstPostAuthorReputation).toContainText('(' + Math.floor(postAuthorReputation) + ')');
+    // ROUND, not floor (2026-08-09). `accountReputation` floored until then, which was
+    // one too low against hive.blog for every account whose fractional part was >= .5.
+    // The formatter now rounds everywhere; this assertion has to follow it or it pins
+    // the bug it used to describe.
+    expect(homePage.getFirstPostAuthorReputation).toContainText('(' + Math.round(postAuthorReputation) + ')');
     expect(homePage.getFirstPostTitle).toHaveText(postTitle);
     expect(homePage.getFirstPostPayout).toHaveText(`$${postPayout}`);
 

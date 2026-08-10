@@ -12,6 +12,7 @@ import { formatNaiAsset } from '@ui/lib/helpers';
 import { scheduleInvalidations, scheduleValidatedRefetch } from '@/blog/lib/react-query';
 import { getPost } from '@transaction/lib/bridge-api';
 import { setStorageItem, removeStorageItem, StorageTTL } from '@ui/lib/storage-with-ttl';
+import { recordRetentionAct } from '@/blog/features/retention/components/retention-moments';
 
 const logger = getLogger('app');
 
@@ -217,6 +218,16 @@ export function usePostMutation() {
         description: 'Your post has been submitted',
         variant: 'success'
       });
+      // ★ THE RETENTION LEDGER, FOR CHAIN ACCOUNTS. `recordRetentionAct` used to be
+      // called from `lib/lite/client/lite-write.ts` and nowhere else, so the streak
+      // toasts and the weekly recap were dark for every Hive user. Guarded on the tier
+      // because a lite write already records itself in lite-write — the two paths are
+      // exact complements, not overlapping.
+      //
+      // `!editMode` matters: an edit is not a new act, and counting it would let one
+      // post tick a daily goal repeatedly. Same rule lite-write already applies
+      // (`if (!input.editOfPostId)`).
+      if (user?.account_tier !== 'lite' && !data.editMode) recordRetentionAct('post');
       // Use validated refetch for post data to avoid overwriting optimistic cache
       // with stale Hivemind responses (Hivemind may not have indexed the post yet)
       scheduleValidatedRefetch(

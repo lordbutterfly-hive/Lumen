@@ -130,14 +130,33 @@ export default function ShortFormComposer() {
       // and the composer is the one on the home page, so it is where most posts
       // are written. The text vanishing from the box is not confirmation; it is
       // exactly what a silent failure would also look like.
+      // ★ 2026-08-08: "already visible on Lumen" WAS NOT TRUE, and this is the
+      // composer most posts are written from. A UX tester published here, then
+      // looked in the three obvious places — the home feed they had just used,
+      // the Following tab, and the #lumen tag page — immediately and again 15
+      // minutes later. It was in none of them. It was only on their own profile.
+      //
+      // It is not just early, it is partly unreachable: a lite post publishes as
+      // a COMMENT under a rolling container root (`lib/lite/publisher/container.ts`),
+      // and a tag page lists root posts, so it can never appear there at all.
+      // The same false line was fixed in the full editor; this was its twin.
       toast({
         title: 'Post published',
-        description: 'It is on its way to Hive and is already visible on Lumen.',
+        description: isLite
+          ? "It's on your Lumen profile now, and queued to publish to Hive."
+          : 'It is on its way to Hive.',
         variant: 'success'
       });
-      // Refresh the feed so the new post can appear. The toast is queued first
-      // and survives it — measured visible for ~3.6 s afterwards.
-      router.refresh();
+      // A lite author is sent to the one place the post actually is, for the
+      // same reason: `router.refresh()` left them staring at a feed that does
+      // not contain it, which is what made "published" feel like a lie.
+      if (isLite && user.username) {
+        router.push(`/@${user.username}`);
+      } else {
+        // Refresh the feed so the new post can appear. The toast is queued first
+        // and survives it — measured visible for ~3.6 s afterwards.
+        router.refresh();
+      }
     } catch (e) {
       // usePostMutation already reports through handleError/toast; this keeps the
       // failure visible in the composer itself so the text is not silently lost.

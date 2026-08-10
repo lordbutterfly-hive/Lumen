@@ -3,9 +3,20 @@ import TooltipContainer from '@ui/components/tooltip-container';
 import { useTranslation } from '@/blog/i18n/client';
 import WitnessIdentityCell from './witness-identity-cell';
 import WitnessVoteToggle from './witness-vote-toggle';
-import { GENERAL_GRID_TEMPLATE, PARAMS_GRID_TEMPLATE } from './lib/table-grid';
+import {
+  GENERAL_GRID_TEMPLATE,
+  PARAMS_GRID_TEMPLATE,
+  STICKY_IDENTITY_CLASS,
+  STICKY_RANK_CLASS
+} from './lib/table-grid';
 import { WitnessRow, WitnessViewMode } from './lib/types';
-import { formatBlockAge, formatHpVotes, formatInteger, formatNaiAsset, formatPriceFeed } from './lib/witness-format';
+import {
+  formatBlockAge,
+  formatHpVotes,
+  formatInteger,
+  formatNaiAsset,
+  formatPriceFeed
+} from './lib/witness-format';
 
 interface WitnessTableRowProps {
   row: WitnessRow;
@@ -32,14 +43,19 @@ export default function WitnessTableRow({
 
   return (
     <div
-      className="grid items-center gap-3 border-t border-[#f1f3f5] px-3.5 py-3.5 hover:bg-[#faf9f6]"
+      // `group` so the two pinned cells, which need their own opaque background
+      // to hide the columns scrolling underneath them, can still follow the
+      // row's hover tint instead of staying flat while the rest of the row lifts.
+      className="group grid items-center gap-3 border-t border-[#f1f3f5] px-3.5 py-3.5 hover:bg-[#faf9f6]"
       style={{ gridTemplateColumns: gridTemplate }}
       data-testid="witness-row"
       data-witness={row.owner}
     >
-      <span className="font-sans text-[16px] font-bold tabular-nums text-[#9ca3af]">{row.rank}</span>
+      <span className={STICKY_RANK_CLASS}>
+        <span className="font-sans text-[16px] font-bold tabular-nums text-[#9ca3af]">{row.rank}</span>
+      </span>
 
-      <WitnessIdentityCell row={row} />
+      <WitnessIdentityCell row={row} className={STICKY_IDENTITY_CLASS} />
 
       {viewMode === 'general' ? (
         <>

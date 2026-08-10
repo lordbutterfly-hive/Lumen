@@ -63,6 +63,8 @@ export interface LivePortfolio {
   canSign: boolean;
   /** The wallet lookup itself failed — NOT "no wallets". Never render an empty portfolio here. */
   accountsFailed: boolean;
+  /** The wallet-link lookup has not answered yet. Distinct from 'answered: no wallet'. */
+  accountsLoading: boolean;
   /** ask.go Reclaim — permissionless once the window is open, but this always pays the escrow's own asker, never the caller. */
   reclaim: (input: { creator: string; seq: number; deadlineBlock: number }) => Promise<void>;
   isReclaiming: boolean;
@@ -183,6 +185,7 @@ export function useLivePortfolio(): LivePortfolio {
     canHold: tokenAccounts.canHold,
     canSign: tokenAccounts.canSign,
     accountsFailed: tokenAccounts.failed,
+    accountsLoading: tokenAccounts.isLoading,
     reclaim: useCallback((input: { creator: string; seq: number; deadlineBlock: number }) => reclaimMutation.mutateAsync(input), [reclaimMutation]),
     isReclaiming: reclaimMutation.isLoading,
     rate: useCallback((input: { creator: string; seq: number; score: number }) => rateMutation.mutateAsync(input), [rateMutation]),

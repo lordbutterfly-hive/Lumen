@@ -1,6 +1,7 @@
 import { logger } from '@ui/lib/logger';
 import { Entry, MixedPostsResponse, PostStub } from '@hive/common-hiveio-packages/wax';
 import { getChain } from './chain';
+import { isBannedAuthor, withoutBannedAuthors } from '@ui/config/lists/banned-authors';
 
 const logStandarizedError = (methodName: string, error: unknown): null => {
   logger.error(error, `Error in ${methodName}`);
@@ -58,7 +59,10 @@ export const searchPosts = async ({
       full_posts,
       observer
     });
-    return response;
+    // AI search is a SEPARATE upstream from `search-api.find_text`, so the ban
+    // applied there does not reach it. `/search?ai=…` is a real, linked surface —
+    // it needs its own application of the same predicate.
+    return withoutBannedAuthors(response, (post) => (post as { author?: string })?.author);
   } catch (error) {
     return logStandarizedError('searchPosts', error);
   }
@@ -81,8 +85,11 @@ export const getSimilarPostsByPost = async ({
 }): Promise<MixedPostsResponse | null> => {
   try {
         const chain = await getChain();
+    if (isBannedAuthor(author)) return [];
     const response = await chain.restApi['hivesense-api'].posts.author.permlink.similar({author, permlink, truncate, result_limit, full_posts, observer})
-    return response;
+    // "More like this" is a recommendation rail — precisely a place a banned
+    // author must not be surfaced from someone else's post.
+    return withoutBannedAuthors(response, (post) => (post as { author?: string })?.author);
   } catch (error) {
     return logStandarizedError('getSimilarPostsByPost', error);
   }
@@ -106,7 +113,10 @@ export const getPostsByIds = async ({
     })
 
     if (Array.isArray(response)) {
-      return response.filter(post => post && (post as Entry).post_id);
+      return withoutBannedAuthors(
+        response.filter(post => post && (post as Entry).post_id),
+        (post) => (post as Entry)?.author
+      );
     }
     return response;
   } catch (error) {

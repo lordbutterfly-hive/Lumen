@@ -18,8 +18,31 @@ const USER_CANCELLED_PATTERNS = [
   'user cancelled'
 ];
 
-/** Pattern for auth storage desync (IndexedDB cleared while session cookie remains) */
-const AUTH_STORAGE_DESYNC_PATTERN = /Auth for user .+ not found|AuthStorageMissingError/i;
+/**
+ * Pattern for auth storage desync (IndexedDB cleared while session cookie remains).
+ *
+ * ★ NARROWED 2026-08-08. This used to match on the bare phrase "Auth for user .+ not
+ * found" OR the bare string "AuthStorageMissingError" anywhere in an error's message —
+ * matched via a plain substring/regex test, with no check on WHERE the error came
+ * from. `handleError` is the shared catch-all for every mutation in the app, including
+ * follow/unfollow/mute (see buttons-container.tsx, profile-actions.tsx,
+ * use-follow-mutations.ts) — so ANY error whose message happened to contain that text,
+ * from any of those unrelated call sites, would take this branch and call
+ * `performDesyncLogout()`: an UNCONDITIONAL client wipe + a real POST to
+ * `/api/auth/logout` that destroys the server session too. Confirmed live: mocking a
+ * follow-endpoint failure with `message: "AuthStorageMissingError"` signed the account
+ * out for real (`/api/users/me` went from isLoggedIn:true to false) even though nothing
+ * about that account's key storage was actually involved.
+ *
+ * The `name === 'AuthStorageMissingError'` check above already catches a genuine
+ * `AuthStorageMissingError` instance (own-property `name` survives a JSON round trip).
+ * This regex is only the FALLBACK for a message that lost its class identity (e.g.
+ * re-wrapped in a plain `Error`) — so it is anchored to the error's exact, full
+ * message shape (`auth-error.ts`'s `` `Auth for user ${username} not found. Hint: add
+ * ${keyType} key to safe storage.` ``) instead of a loose fragment any unrelated error
+ * could coincidentally contain.
+ */
+const AUTH_STORAGE_DESYNC_PATTERN = /Auth for user .+ not found\.\s*Hint: add .+ key to safe storage\./i;
 
 function isUserCancelled(error: unknown): boolean {
   const msg = error instanceof Error ? error.message : String(error);

@@ -37,7 +37,7 @@ const CommunitiesMyBar = ({ data }: { data: string[][] }) => {
           <ul>
             {data.map((e) => (
               <li key={e[0]}>
-                <Link href={`/trending/${e[0]}`} className="w-full text-sm font-light hover:text-destructive">
+                <Link href={`/topics/${e[0]}`} className="w-full text-sm font-light hover:text-destructive">
                   {e[1]}
                 </Link>
               </li>

@@ -96,7 +96,7 @@ const CommunityLayout = ({ children, community }: { children: ReactNode; communi
             <div className="my-4 flex w-full items-center justify-between" translate="no">
               <div className="mr-2 flex w-[320px] flex-col">
                 {isRolesPage ? (
-                  <BasePathLink href={`/trending/${community}`}>
+                  <BasePathLink href={`/topics/${community}`}>
                     <span className="text-md ml-10 font-medium text-destructive" data-testid="community-name">
                       {isCommunity && isCommunityLoading ? (
                         <Skeleton className="inline-block h-6 w-48" />

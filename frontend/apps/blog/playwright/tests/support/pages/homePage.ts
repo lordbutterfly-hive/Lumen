@@ -136,6 +136,29 @@ export class HomePage {
   // for logged in user
   readonly profileAvatarButton: Locator;
 
+  /**
+   * Where Lumen's signed-out post timeline lives. See `goto()` for why it is not `/`.
+   */
+  static readonly HOME_TIMELINE_PATH = '/trending';
+
+  /**
+   * ★ THE LUMEN CARD *OR* THE CLASSIC ONE, AND BOTH ARE LOAD-BEARING (2026-08-09).
+   *
+   * Lumen replaced the feed card: `/trending` and the discovery feed render
+   * `features/discovery-feed/medium-post-card.tsx` (`medium-card*` testids). But the
+   * CLASSIC `post-list-item` card is still live on profile post tabs, search results
+   * and tag pages (`features/list-of-posts/post-list-item.tsx` via
+   * `account-profile/posts-content`, `search/*`, `tags-pages/list-of-posts`).
+   *
+   * So this page object cannot simply be repointed — it has to match either card, or
+   * it breaks whichever half it does not name. A comma selector is exactly that, and
+   * it keeps one page object working across both, which is why the remapped locators
+   * below are all built from these two constants rather than from a literal.
+   */
+  static readonly CARD_ANY = '[data-testid="medium-card"], li[data-testid="post-list-item"]';
+  /** Lumen's card only, for assertions about markup the classic card does not have. */
+  static readonly CARD_LUMEN = '[data-testid="medium-card"]';
+
   constructor(page: Page) {
     this.page = page;
     this.postPage = new PostPage(page);
@@ -176,18 +199,47 @@ export class HomePage {
     this.getNavWitnessesLink = page.locator('[data-testid="nav-witnesses-link"]');
     this.getNavOurdAppsLink = page.locator('[data-testid="nav-our-dapps-link"]');
     this.getHeaderAllCommunities = page.locator('[data-testid="card-trending-comunities"]');
-    this.getMainTimeLineOfPosts = page.locator('li[data-testid="post-list-item"]');
-    this.getFirstPostListItem = this.getMainTimeLineOfPosts.nth(0).locator('div').first();
-    this.getFirstPostListItemReblogButton = this.getFirstPostListItem.getByTestId('post-card-reblog');
-    this.getPostCardAvatar = page.locator('[data-testid="post-card-avatar"]');
+    // Either card — Lumen's on the feed/trending, the classic one on profile tabs,
+    // search and tag pages. See HomePage.CARD_ANY.
+    this.getMainTimeLineOfPosts = page.locator(HomePage.CARD_ANY);
+    // `.locator('div').first()` on the classic card reached its inner wrapper. The
+    // Lumen card's own root IS the item, so scope to the card and let callers drill in.
+    this.getFirstPostListItem = this.getMainTimeLineOfPosts.first();
+    this.getFirstPostListItemReblogButton = this.getFirstPostListItem
+      .locator('[data-testid="medium-card-reblog"], [data-testid="post-card-reblog"]')
+      .first();
+    this.getPostCardAvatar = page.locator('[data-testid="medium-card-avatar"], [data-testid="post-card-avatar"]');
     this.getFirstPostCardAvatar = this.getPostCardAvatar.first();
-    this.getFirstPostAuthor = page.locator('[data-testid="post-author"]').first();
+    this.getFirstPostAuthor = page
+      .locator('[data-testid="medium-card-author"], [data-testid="post-author"]')
+      .first();
+    // ★ LUMEN'S FEED CARD SHOWS NO REPUTATION, AND THIS SELECTOR CANNOT FIX THAT.
+    //
+    // `post-author-reputation` exists in exactly one component —
+    // `features/list-of-posts/post-list-item.tsx` — which is the CLASSIC card, still
+    // live on profile post tabs, search results and tag pages. Lumen's
+    // `medium-post-card.tsx` deliberately renders no reputation and no rank at all, so
+    // on `/trending` (where `goto()` now lands) this locator resolves to nothing and
+    // the two `mainTimeline` tests asserting "styles of the reputation in the post card
+    // header" are asserting markup the fork removed. That is a product decision to
+    // revisit, not a selector to repoint — pointing it at the hover popover would make
+    // the tests pass while testing a different element.
+    //
+    // Where reputation IS rendered: the author hover popover
+    // (`user-popover-card.tsx`, `author-reputation`), the redesigned profile
+    // (`profile-reputation`), and the classic card above.
     this.getFirstPostAuthorReputation = page.locator('[data-testid="post-author-reputation"]').first();
     this.getFirstPostCardCommunityLink = page.locator('[data-testid="post-card-community"]').first();
     this.getFirstPostCardCategoryLink = page.locator('[data-testid="post-card-category"]').first();
     this.getFirstPostCardTimestampLink = page.locator('[data-testid="post-card-timestamp"]').first();
-    this.getFirstPostTitle = page.locator('li[data-testid="post-list-item"] h3 a').first();
-    this.getFirstPostPayout = page.locator('[data-testid="post-payout"]').first();
+    // Lumen's card exposes the title as its own testid; the classic one only had an
+    // `h3 a`, so keep both rather than depend on a heading level that already differs.
+    this.getFirstPostTitle = page
+      .locator('[data-testid="medium-card-title"], li[data-testid="post-list-item"] h3 a')
+      .first();
+    this.getFirstPostPayout = page
+      .locator('[data-testid="medium-card-payout"], [data-testid="post-payout"]')
+      .first();
     this.getFirstPostPayoutTooltip = page.locator('[data-testid="payout-post-card-tooltip"]').first();
     this.getFirstPostVotes = page.locator('[data-testid="post-total-votes"]').first();
     this.getFirstPostVotesTooltip = page.locator('[data-testid="post-card-votes-tooltip"]').first();
@@ -198,7 +250,7 @@ export class HomePage {
     this.getFirstPostChildernCommentNumber = this.getFirstPostChildren.locator('a:nth-of-type(2)');
     this.getFirstPostChildernTooltip = page.locator('[data-testid="post-card-responses"]');
     this.getPostChildren = page.locator('[data-testid="post-children"]');
-    this.getPostCardFooter = page.locator('[data-testid="post-card-footer"]');
+    this.getPostCardFooter = page.locator('[data-testid="medium-card-footer"], [data-testid="post-card-footer"]');
     this.getUpvoteButton = page.locator('[data-testid="upvote-button"]');
     this.getFirstPostUpvoteButton = this.getUpvoteButton.first();
     this.getFirstPostUpvoteButtonIcon = this.getFirstPostUpvoteButton.locator('svg');
@@ -225,7 +277,9 @@ export class HomePage {
     this.getDownvoteButtonTooltip = page.locator('[data-testid="downvote-button-tooltip"]');
     this.getFirstPostDownvoteButtonTooltip = this.getDownvoteButtonTooltip.first();
     // Reblog button on list pages (interactive - opens confirmation dialog)
-    this.getReblogCountDisplay = page.locator('[data-testid="post-card-reblog-count"]');
+    this.getReblogCountDisplay = page.locator(
+      '[data-testid="medium-card-reblog-count"], [data-testid="post-card-reblog-count"]'
+    );
     this.getFirstPostReblogCountDisplay = this.getReblogCountDisplay.first();
     this.getFirstPostReblogCountTooltip = page.locator('[data-testid="post-card-reblog-count-tooltip"]').first();
     this.getSecondPostReblogCountDisplay = this.getReblogCountDisplay.nth(1);
@@ -293,10 +347,30 @@ export class HomePage {
     this.profileAvatarButton = page.locator('[data-testid="profile-avatar-button"]');
   }
 
+  /**
+   * ★ LANDS ON THE PAGE THAT ACTUALLY LISTS POSTS (2026-08-09).
+   *
+   * This used to `goto('/')` and then wait for the post timeline. On Lumen that can
+   * never succeed for the signed-out visitor these tests are: `/` is
+   * `features/discovery-feed/home-shell.tsx`, and signed out it renders a landing
+   * page ("A calmer place to read and write on Hive" + a Log in prompt) with zero
+   * post cards. Verified in a real browser: `/` exposes 0 `data-testid` nodes at all,
+   * `/trending` exposes 29 and renders 30 cards.
+   *
+   * So the timeline this page object models lives at `/trending`, and that is where
+   * `goto()` goes. `HOME_TIMELINE_PATH` is a named constant because it IS the
+   * assumption: if Lumen ever gives `/` a signed-out feed again, this one line is the
+   * only edit.
+   *
+   * Fifty-seven callers across twelve specs sat behind the old line and failed in
+   * `beforeEach`, so none of their assertions ever ran.
+   */
   async goto() {
-    await this.page.goto('/');
+    await this.page.goto(HomePage.HOME_TIMELINE_PATH);
     await this.page.waitForLoadState('domcontentloaded');
-    await this.page.waitForSelector(this.getMainTimeLineOfPosts['_selector']);
+    // The cards are client-rendered from a React Query fetch, so the selector has to
+    // be awaited rather than asserted — `domcontentloaded` fires long before it.
+    await this.getMainTimeLineOfPosts.first().waitFor({ state: 'visible' });
   }
 
   async gotoSpecificUrl(url: string) {

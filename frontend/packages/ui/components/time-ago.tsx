@@ -56,6 +56,26 @@ const getTimeAgoString = (date: Date, lang: string = 'en'): string => {
   }
 };
 
+/**
+ * Parse a Hive timestamp as UTC.
+ *
+ * ★ THE OTHER HALF OF THE TIMESTAMP BUG (2026-08-08). Earlier today the "now"
+ * side of the subtraction was fixed; this is the "then" side, and it was still
+ * wrong. Hive returns `created` as `"2026-08-07T09:22:12"` — a date-TIME string
+ * with NO timezone marker — and per the ECMAScript spec such a string is parsed
+ * as LOCAL time, not UTC. On a UTC+2 box that made every post look two hours
+ * older than it is: a 13.1-hour-old post rendered "15 hours ago", measured
+ * against Hive's own chain clock across a full 20-post sample.
+ *
+ * Appending `Z` when the string carries no zone forces the correct instant. A
+ * string that already declares one (`Z` or `+02:00`) is left alone.
+ */
+const parseHiveDate = (value: Date | string | number): Date => {
+  if (typeof value !== 'string') return new Date(value);
+  const hasZone = /(?:Z|[+-]\d{2}:?\d{2})$/.test(value);
+  return new Date(hasZone ? value : `${value}Z`);
+};
+
 const TimeAgo: FC<TimeAgoProps> = ({ date, lang }) => {
   const [timeAgo, setTimeAgo] = useState<string>('');
   // Use provided lang prop, fall back to cookie or 'en'
@@ -63,7 +83,7 @@ const TimeAgo: FC<TimeAgoProps> = ({ date, lang }) => {
 
   useEffect(() => {
     const updateTimeAgo = () => {
-      setTimeAgo(getTimeAgoString(new Date(date), userLang));
+      setTimeAgo(getTimeAgoString(parseHiveDate(date), userLang));
     };
 
     updateTimeAgo();
@@ -72,7 +92,7 @@ const TimeAgo: FC<TimeAgoProps> = ({ date, lang }) => {
     return () => clearInterval(interval);
   }, [date, userLang]);
 
-  return <span title={new Date(date).toLocaleString(userLang)}>{timeAgo}</span>;
+  return <span title={parseHiveDate(date).toLocaleString(userLang)}>{timeAgo}</span>;
 };
 
 export default TimeAgo;

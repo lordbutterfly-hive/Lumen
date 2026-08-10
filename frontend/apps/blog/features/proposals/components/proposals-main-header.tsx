@@ -30,7 +30,15 @@ export default function ProposalsMainHeader() {
   );
 
   return (
-    <div className="flex items-start justify-between gap-4">
+    // ★ flex-wrap (2026-08-08). At 390px the heading's own min-content plus the
+    // 153px "New proposal" button came to more than the 342px of content box
+    // available, and neither child could shrink further — the button is
+    // `shrink-0` and the h1 is a 32px word. Measured: page scrollWidth 399
+    // against a 390 viewport, with the button's right edge past the screen. The
+    // button now drops to its own line at that width and nothing else moves;
+    // at every width where both fit on one row (820px onwards) the row is
+    // unchanged, because wrapping only happens when it must.
+    <div className="flex flex-wrap items-start justify-between gap-4">
       <div>
         <h1 className="font-sans text-[32px] font-bold tracking-[-0.02em] text-[#161511]">
           {t('proposals.header.title')}

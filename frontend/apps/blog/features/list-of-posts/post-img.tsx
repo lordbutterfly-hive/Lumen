@@ -123,10 +123,14 @@ export default function PostImage({ post }: { post: Entry }) {
                 media="(min-width: 1000px)"
                 onError={() => setImage(getDefaultImageUrl())}
               />
+              {/* Not `loading="lazy"` — see medium-post-card.tsx's thumbnail for
+                  why: a lazy image's "not fetched yet" state and a genuine "no
+                  image" placeholder are visually identical, so a card below the
+                  fold reads as imageless until scrolled near. Same fix, same
+                  reasoning, applied to this card's own thumbnail. */}
               <img
                 srcSet={image}
                 alt="Post image"
-                loading="lazy"
                 className="w-full"
                 onError={() => setImage(getDefaultImageUrl())}
               />

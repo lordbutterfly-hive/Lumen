@@ -1,0 +1,22 @@
+-- 0032_drop_daily_poll.sql — the question of the day is gone (owner, 2026-08-09).
+--
+-- 0031 added `lumen_daily_poll_vote` for a community poll: everybody gets the same question on
+-- the same UTC day, one vote each, and the payload was the aggregate ("Yesterday 68% of Lumen
+-- said Never"). It worked — rotation, tally, tie handling, one-vote-per-day enforced by the
+-- primary key, both the below-floor and above-floor render paths verified live.
+--
+-- ★ IT WAS KILLED ON JUDGEMENT, NOT ON A DEFECT: "kill the questions. completely geet rid of
+-- it. its too unserious." Pineapple on pizza, a fight with a goose and toilet-roll orientation
+-- are the shape that goes viral on X, and that is exactly the register the owner did not want
+-- attached to a product whose whole argument is that its numbers are honest.
+--
+-- FORWARD-ONLY: 0031 stays in history because it was applied, and this drops what it created.
+-- Nothing else in the schema referenced the table, so there is no fallout — and no data worth
+-- keeping, since the only rows ever written were a test account's and twelve seeded probes that
+-- were already deleted.
+--
+-- If a poll ever returns, write a new migration rather than resurrecting 0031: the ids in a
+-- vote row are meaningless without the question catalogue that produced them, and that
+-- catalogue is deleted too.
+
+DROP TABLE IF EXISTS lumen_daily_poll_vote;

@@ -1,19 +1,32 @@
 'use client';
 
 import { ReactNode } from 'react';
-import CommunitiesMyBar from './communities-my-bar';
-import CommunitiesSidebar from './community/communities-sidebar';
-import ExploreHive from '@/blog/features/layouts/explore-hive';
-import { useTranslation } from '@/blog/i18n/client';
+import LeftRail from './left-rail';
+import RightRail from './right-rail';
 import { CommunitiesSelect } from '@/blog/features/layouts/communities-select';
 import PostSelectFilter from '@/blog/features/layouts/post-select-filter';
-import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
-import { getSubscriptions } from '@transaction/lib/bridge-api';
-import { useQuery } from '@tanstack/react-query';
-import { DEFAULT_OBSERVER, chainObserver } from '@/blog/lib/utils';
-import { StaleTime } from '@/blog/lib/react-query';
-import { useSSRObserver, useInitialSubscriptions } from '@/blog/components/observer-provider';
+import { useTranslation } from '@/blog/i18n/client';
 
+/**
+ * ★ THE LUMEN SHELL, NOT THE INHERITED DENSE GRID (owner report, 2026-08-08).
+ *
+ * This was a bootstrap-style `grid-cols-12` with a "Trending Communities"
+ * sidebar on the LEFT (`renderCommunitiesSidebar`) and, for a logged-in
+ * reader, the SAME sidebar rendered a second time on the right (the xl slot
+ * fell back to `CommunitiesSidebar` whenever `user.isLoggedIn`) — visible as
+ * two identical "All posts / Trending Communities" panels on `/trending`,
+ * `/hot` and `/created`. There was also no `LeftRail` at all, so every page
+ * that goes through this layout still read as the old product.
+ *
+ * Same fixed 3-column grid as `HomeShell` / `TopicShell` / `ProfileGrid`:
+ * `LeftRail`, content, `RightRail` (whose Topics card is the Lumen
+ * replacement for the old "Trending Communities" list). The header row (list
+ * name + sort dropdown) and the subscriptions-driven mobile community picker
+ * are UNCHANGED in behaviour — only the chrome around them moved. This layout
+ * is shared by `/trending`, `/hot`, `/created`, `/muted`, `/payout`, their
+ * `/my` variants, `/@username/feed` and `/communities`
+ * (`hidePostsHeader={true}`), so all of them pick this up at once.
+ */
 const MainPageLayout = ({
   children,
   tag = '',
@@ -23,65 +36,51 @@ const MainPageLayout = ({
   tag?: string;
   hidePostsHeader?: boolean;
 }) => {
-  const ssrObserver = useSSRObserver();
-  const initialSubscriptions = useInitialSubscriptions();
-  const { user, isHydrated } = useUserClient();
   const { t } = useTranslation('common_blog');
-  const clientObserver = chainObserver(user);
-  const observer = isHydrated ? clientObserver : ssrObserver;
-  const { data } = useQuery({
-    queryKey: ['subscriptions', observer],
-    queryFn: () => getSubscriptions(observer),
-    enabled: observer !== DEFAULT_OBSERVER,
-    initialData: initialSubscriptions ?? undefined,
-    initialDataUpdatedAt: initialSubscriptions ? Date.now() : undefined,
-    staleTime: StaleTime.LONG
-  });
-
-  const renderCommunitiesSidebar = () => {
-    // Show user's subscribed communities when loaded, otherwise show
-    // trending communities sidebar (which has SSR data from context)
-    if (data) return <CommunitiesMyBar data={data} />;
-    return <CommunitiesSidebar />;
-  };
 
   const renderListName = () => {
-    if (tag === 'feed') return t('navigation.communities_nav.my_friends')
+    if (tag === 'feed') return t('navigation.communities_nav.my_friends');
     return t('navigation.communities_nav.all_posts');
-  }
+  };
 
   return (
-    <div className="container mx-auto max-w-screen-2xl flex-grow px-4 pb-2">
-      <div className="grid grid-cols-12 md:gap-4">
-        <div className="hidden md:col-span-3 md:flex xl:col-span-2">
-          {renderCommunitiesSidebar()}
-        </div>
-        <div className="col-span-12 md:col-span-9 xl:col-span-8">
-          <div className="col-span-12 mb-5 flex flex-col md:col-span-10 lg:col-span-8">
-            {hidePostsHeader ? null : (
-              <div className="my-4 flex w-full items-center justify-between" translate="no">
-                <div className="mr-2 flex w-[320px] flex-col">
-                  <span className="text-md hidden font-medium md:block" data-testid="community-name">
-                    {renderListName()}
-                  </span>
-                  <span className="md:hidden">
-                    <CommunitiesSelect title={t('navigation.communities_nav.all_posts')} />
-                  </span>
-                </div>
-                {tag !== 'feed' && 
-                  <div className="w-[180px]">
-                    <PostSelectFilter param={tag} />
-                  </div>
-                }
+    <div className="relative mx-auto grid max-w-[1720px] grid-cols-1 gap-11 px-6 pb-20 pt-[26px] md:grid-cols-[200px_minmax(0,1fr)] md:px-11 xl:grid-cols-[200px_minmax(0,1fr)_312px]">
+      <div
+        className="pointer-events-none absolute bottom-20 left-[244px] top-[26px] hidden w-px bg-[#ececec] md:block"
+        aria-hidden
+      />
+
+      <aside className="sticky top-24 hidden h-fit md:block">
+        <LeftRail />
+      </aside>
+
+      <main className="min-w-0">
+        {hidePostsHeader ? null : (
+          <div className="mb-5 flex w-full items-center justify-between" translate="no">
+            <div className="mr-2 flex w-[320px] flex-col">
+              <span
+                className="hidden font-sans text-[15px] font-semibold text-[#161511] md:block"
+                data-testid="community-name"
+              >
+                {renderListName()}
+              </span>
+              <span className="md:hidden">
+                <CommunitiesSelect title={t('navigation.communities_nav.all_posts')} />
+              </span>
+            </div>
+            {tag !== 'feed' && (
+              <div className="w-[180px]">
+                <PostSelectFilter param={tag} />
               </div>
             )}
-            {children}
           </div>
-        </div>
-        <div data-testid="card-explore-hive-desktop" className="hidden xl:col-span-2 xl:flex">
-          {!!user.isLoggedIn ? <CommunitiesSidebar /> : <ExploreHive />}
-        </div>
-      </div>
+        )}
+        {children}
+      </main>
+
+      <aside className="sticky top-24 hidden h-fit xl:block">
+        <RightRail />
+      </aside>
     </div>
   );
 };
