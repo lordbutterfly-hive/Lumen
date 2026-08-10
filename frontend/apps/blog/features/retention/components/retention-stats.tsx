@@ -273,8 +273,16 @@ export function useRetentionStatLines(
   // count was a lower bound on real history. This is not a claim about history: it is a count of
   // days we OBSERVED, and we either observed a day or we did not. Printing "0+" would hedge a
   // number that has nothing to hedge.
+  //
+  // ★ AND IT IS VOICED, LIKE EVERY OTHER LINE ON THE CARD (2026-08-10). It was the ONE stat line
+  // that called `t()` on the raw key, so a stranger's profile read "Lumen has seen YOU show up on
+  // 1 day." directly under "1827 people voted on THEIR last 8 posts." — the same mail-merge bug
+  // `voiced` exists to kill, on 5 of 5 accounts a UX round sampled.
   if (typeof stats?.activeDaysTotal === 'number' && stats.activeDaysTotal > 0) {
-    lines.push({ id: 'active-days', text: t('retention.stats.active_days', { count: stats.activeDaysTotal }) });
+    lines.push({
+      id: 'active-days',
+      text: t(voiced('retention.stats.active_days', voice), { count: stats.activeDaysTotal })
+    });
   }
 
   // The longest silence. Published by the route only when the history is complete, because a

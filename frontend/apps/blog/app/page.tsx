@@ -4,7 +4,6 @@ import { sessionOptions } from '@smart-signer/lib/session';
 import type { IronSessionData } from '@smart-signer/types/common';
 import { getLogger } from '@ui/lib/logging';
 import HomeShell from '@/blog/features/discovery-feed/home-shell';
-import HomeIntro from '@/blog/components/home-intro';
 
 const logger = getLogger('app');
 
@@ -39,10 +38,8 @@ async function hasSession(): Promise<boolean> {
 
 export default async function HomePage() {
   const signedIn = await hasSession();
-  return (
-    <>
-      {signedIn ? null : <HomeIntro />}
-      <HomeShell />
-    </>
-  );
+  // The intro is passed DOWN rather than rendered beside the shell: it belongs
+  // inside the feed column, aligned with the composer and the cards, and the shell
+  // is what owns that column (fuckery list E1).
+  return <HomeShell showIntro={!signedIn} />;
 }

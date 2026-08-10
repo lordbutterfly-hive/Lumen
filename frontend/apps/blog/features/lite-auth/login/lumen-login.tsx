@@ -8,6 +8,7 @@ import WalletConnectDialog from './wallet-connect-dialog';
 import TurnstileWidget, { turnstileSiteKey } from './turnstile-widget';
 import GoogleSignIn, { googleConfigured } from './google-signin';
 import KeychainSignin from './keychain-signin';
+import { Link } from '@hive/ui';
 
 // TODO i18n — staged copy while the redesign lands (mirrors app-header's LABELS
 // precedent); move to locales/*/common_blog.json once final.
@@ -15,11 +16,32 @@ import KeychainSignin from './keychain-signin';
 // earning starts on your own Hive account, after upgrading. Promising payment on the
 // signup screen would be a straight lie to the person reading it, so the copy sells
 // the thing that is actually true: publishing to Hive with nothing to set up.
+/**
+ * ★★ COPY PASS (2026-08-10, fuckery list A1-A4).
+ *
+ * Four rules, all owner calls:
+ *
+ *  1. **No em-dashes or en-dashes.** They were the loudest AI tell on the screen,
+ *     six of them on one card. Full stops do the same work and sound like a person.
+ *  2. **Say what we are, do not swing at anyone.**
+ *  3. **The heading and intro do not say Hive.** A stranger has not heard of it and
+ *     the word makes a promise sound like plumbing. It stays in the rows that name
+ *     a real thing the reader must recognise (Keychain, an existing account),
+ *     because renaming those would be a lie rather than a style choice.
+ *  4. **The intro answers "why should I trust this with my account", not "what
+ *     features does it have".** `Welcome to Lumen` answered neither: it is the
+ *     default heading of every template ever shipped, and the paragraph under it
+ *     listed three things at once. One claim, and make it the one that matters at
+ *     the moment somebody is deciding whether to hand over a key.
+ *
+ * `tagline` now lives ONLY here (A4). The home hero used to carry the same
+ * sentence, so the product's one line appeared twice in two different roles.
+ */
 const COPY = {
-  tagline: 'A calmer place to read and write on Hive.',
-  welcome: 'Welcome to Lumen',
+  tagline: 'A calmer place to read and write.',
+  welcome: 'Your keys stay with you.',
   welcomeSub:
-    'Publish to Hive without keys, wallets or setup. Start in seconds; upgrade to a full Hive account — and start earning on it — whenever you’re ready.',
+    'Lumen never sees a private key. Keychain signs inside your browser, a wallet signs a message, and nothing here can move anything you own.',
   /**
    * ★★★ THE PROMISE HAS TO DEGRADE WITH THE THING THAT KEEPS IT (2026-08-08, UX
    * tester on the new-user path).
@@ -38,25 +60,34 @@ const COPY = {
    * that decides whether the button underneath it works.
    */
   welcomeSubWalletsOnly:
-    'Every way in below needs something you already have — a Bitcoin or Ethereum wallet, or the Hive Keychain extension. The key-free option, Google, is being set up.',
+    'Every way in below needs something you already own: a Bitcoin or Ethereum wallet, or the Keychain extension. The walletless option, Google, is not set up yet.',
   google: 'Continue with Google',
-  orHive: 'or connect with Hive Keychain',
+  orGoogle: 'or use an account you already have',
+  orHive: 'or sign in with an existing Hive account',
   keychainTitle: 'Sign in with Hive Keychain',
-  keychainSub: 'Your existing Hive account — keys stay on your device.',
+  keychainSub: 'Your keys, your content.',
   btcTitle: 'Continue with a Bitcoin wallet',
-  btcSub: 'Sign a message to prove ownership — no payment, no gas.',
+  btcSub: 'Sign a message to prove ownership. No payment, no gas.',
+  /**
+   * ★ THE ICON PROMISED ONE WALLET AND THE COPY PROMISED THREE (A2). The row showed
+   * a bare MetaMask fox under the words "MetaMask, Rainbow, any EVM wallet". The
+   * path underneath genuinely is WalletConnect (`../wallet/appkit`), so the broad
+   * claim was true and the ICON was the thing lying. Fixed on the icon side rather
+   * than by narrowing the copy: naming one wallet would have shut the door on the
+   * others for no reason. See the row markup for the generic mark.
+   */
   evmTitle: 'Continue with an Ethereum wallet',
-  evmSub: 'MetaMask, Rainbow, any EVM wallet — a signature, not a transaction.',
+  evmSub: 'A signature, not a transaction.',
   namePick: 'Pick your Lumen name',
   namePickSub: 'This is how you’ll appear across Lumen. You can’t change it later, so choose well.',
-  nameRules: 'Lowercase letters, numbers and dashes. 3–16 characters.',
+  nameRules: 'Lowercase letters, numbers and dashes. 3 to 16 characters.',
   create: 'Create my Lumen account',
   createReassure:
-    'Free. No keys to save. Your posts publish through Lumen with a small “via Lumen” mark and don’t collect rewards — upgrade to a full Hive account whenever you want, and your posting history comes with you.',
+    'Free. No keys to save. Your posts publish through Lumen with a small “via Lumen” mark and do not collect rewards. Upgrade to a full Hive account whenever you want, and your posting history comes with you.',
   back: 'Back',
   checking: 'Checking…',
   googleSeam:
-    'Google sign-in is being set up — for now, use a Bitcoin or Ethereum wallet, or a Hive account below.',
+    'Google sign-in is being set up. For now, use a Bitcoin or Ethereum wallet, or a Hive account below.',
   captchaNeeded: 'Please complete the “I’m human” check first.'
 };
 
@@ -153,7 +184,7 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
   /** Google returned an ID token — hand it to the (already built) backend. */
   const handleGoogleToken = async (idToken: string) => {
     if (!googleNonce) {
-      setError('Google sign-in isn’t ready yet — please try again in a moment.');
+      setError('Google sign-in is not ready yet. Please try again in a moment.');
       return;
     }
     setError(null);
@@ -210,9 +241,9 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
           mockup's Lora wordmark was the stray outlier. */}
       {embedded ? null : (
         <div className="mb-8 mt-16 text-center">
-          <a href="/" className="font-sans text-[42px] font-bold leading-none tracking-[-0.025em] text-[#161511]">
+          <Link href="/" className="font-sans text-[42px] font-bold leading-none tracking-[-0.025em] text-[#161511]">
             Lumen
-          </a>
+          </Link>
           <p className="mt-2 font-serif text-base text-[#6b7280]">{COPY.tagline}</p>
         </div>
       )}
@@ -271,7 +302,7 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                     <button
                       type="button"
                       disabled
-                      className="flex h-[52px] w-full items-center justify-center gap-[11px] rounded-[14px] border border-[#e4e6e9] bg-white text-[15.5px] font-semibold text-[#161511] opacity-60"
+                      className="flex h-[65px] w-full items-center justify-center gap-[11px] rounded-[14px] border border-[#e4e6e9] bg-white text-[15.5px] font-semibold text-[#161511] opacity-60"
                     >
                       {COPY.google}
                     </button>
@@ -286,7 +317,7 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                       type="button"
                       disabled
                       aria-disabled="true"
-                      className="flex h-[52px] w-full cursor-not-allowed items-center justify-center gap-[11px] rounded-[14px] border border-[#e4e6e9] bg-white text-[15.5px] font-semibold text-[#161511] opacity-60"
+                      className="flex h-[65px] w-full cursor-not-allowed items-center justify-center gap-[11px] rounded-[14px] border border-[#e4e6e9] bg-white text-[15.5px] font-semibold text-[#161511] opacity-60"
                     >
                       <svg width="20" height="20" viewBox="0 0 48 48" aria-hidden>
                         <path fill="#4285F4" d="M45.1 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h11.8c-.5 2.7-2 5-4.4 6.6v5.5h7.1c4.1-3.8 6.6-9.4 6.6-16.1z" />
@@ -300,13 +331,32 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                   </div>
                 )}
 
-                <div className="mt-2.5" />
+                {/* ★ GOOGLE IS NOT A CRYPTO WALLET AND THE PAGE SAID IT WAS (C7).
+                    There was one divider on this card, "or connect with Hive
+                    Keychain", sitting above the Keychain row. Everything above that
+                    line therefore read as one group, so Google was filed silently
+                    beside Bitcoin and Ethereum. For the reader this method exists
+                    FOR, that grouping is the whole message: it says "this is the
+                    crypto section" to somebody who came here precisely because they
+                    do not have a wallet. Its own divider separates them. */}
+                <div className="mx-0.5 my-4 flex items-center gap-3">
+                  <div className="h-px flex-1 bg-[#ececec]" />
+                  <span className="text-xs font-semibold text-[#9ca3af]">{COPY.orGoogle}</span>
+                  <div className="h-px flex-1 bg-[#ececec]" />
+                </div>
                 <div className="flex flex-col gap-2.5">
 
                   {/* Bitcoin wallet — Lumen Lite, no keys. */}
+                  {/* ★ HEIGHT IS AUTO, NOT FIXED (C4). These were `h-14` with a
+                      two-line subtitle inside, so the copy crowded and in places
+                      overflowed its own border, and the rows ended up visually
+                      unequal. Padding sets the height now, so a row grows with its
+                      content instead of clipping it. The A1 rewrites shorten the
+                      copy enough that they land on one line anyway, but a row that
+                      only fits when the copy is short is a row waiting to break. */}
                   <button
                     onClick={() => setWalletOpen('btc')}
-                    className="flex h-14 w-full cursor-pointer items-center gap-3 rounded-[14px] border border-[#e4e6e9] bg-white px-4 text-left hover:border-[#f7931a] hover:bg-[#fffaf3]"
+                    className="flex w-full cursor-pointer items-center gap-3 rounded-[14px] border border-[#e4e6e9] bg-white px-4 py-3 text-left hover:border-[#f7931a] hover:bg-[#fffaf3]"
                   >
                     {/* ★ THE REAL BITCOIN MARK (2026-08-09, owner-supplied).
                         History worth keeping: this was the character "₿", which
@@ -316,13 +366,18 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                         The asset is the official disc with its white plate made
                         transparent and the stock caption cropped off, so it
                         needs no coloured background behind it. */}
+                    {/* ★ ONE MARK BOX FOR EVERY ROW (C5). The three marks were a
+                        bare orange disc, a bare fox and a black rounded square, at
+                        three different visual weights. The artwork stays as each
+                        brand ships it; what is shared is the 34px box and the 10px
+                        radius, so the column of icons lines up. */}
                     <img
                       src="/logos/bitcoin.png"
                       alt=""
                       aria-hidden
                       width={34}
                       height={34}
-                      className="h-[34px] w-[34px] flex-shrink-0"
+                      className="h-[34px] w-[34px] flex-shrink-0 rounded-[10px]"
                     />
                     <span className="min-w-0 flex-1">
                       <span className="block text-[15px] font-semibold text-[#161511]">{COPY.btcTitle}</span>
@@ -333,21 +388,30 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                   {/* EVM wallet — Lumen Lite, no keys. Same proof shape as BTC. */}
                   <button
                     onClick={() => setWalletOpen('evm')}
-                    className="flex h-14 w-full cursor-pointer items-center gap-3 rounded-[14px] border border-[#e4e6e9] bg-white px-4 text-left hover:border-[#627eea] hover:bg-[#f8f9ff]"
+                    className="flex w-full cursor-pointer items-center gap-3 rounded-[14px] border border-[#e4e6e9] bg-white px-4 py-3 text-left hover:border-[#627eea] hover:bg-[#f8f9ff]"
                   >
-                    {/* ★ THE METAMASK MARK (2026-08-09, owner-supplied). This
-                        was "◈" — the same font-dependency the Bitcoin glyph fell
-                        to above, one row apart. The row still accepts any EVM
-                        wallet; MetaMask is simply the one readers recognise, and
-                        the copy underneath says so. */}
-                    <img
-                      src="/logos/metamask.png"
-                      alt=""
+                    {/* ★ A GENERIC WALLET MARK, NOT THE METAMASK FOX (2026-08-10, A2).
+                        The row opens WalletConnect and genuinely accepts Rainbow,
+                        Coinbase Wallet and the rest, but the fox told the reader
+                        otherwise: show one brand and you have promised one brand.
+                        Anyone without MetaMask reads that icon as "not for me" and
+                        stops. A neutral mark keeps the door as wide as the code
+                        actually opens it, and the subtitle names the popular ones. */}
+                    <span
                       aria-hidden
-                      width={34}
-                      height={34}
-                      className="h-[34px] w-[34px] flex-shrink-0"
-                    />
+                      className="flex h-[34px] w-[34px] flex-shrink-0 items-center justify-center rounded-[10px] bg-[#eef1fd]"
+                    >
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
+                        <path
+                          d="M3 7.5A2.5 2.5 0 0 1 5.5 5H18a2 2 0 0 1 2 2v1"
+                          stroke="#4959c9"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                        />
+                        <rect x="3" y="7.5" width="18" height="12" rx="2.5" stroke="#4959c9" strokeWidth="1.8" />
+                        <circle cx="16.5" cy="13.5" r="1.5" fill="#4959c9" />
+                      </svg>
+                    </span>
                     <span className="min-w-0 flex-1">
                       <span className="block text-[15px] font-semibold text-[#161511]">{COPY.evmTitle}</span>
                       <span className="block text-xs text-[#6b7280]">{COPY.evmSub}</span>
@@ -373,8 +437,8 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                 {error ? <p className="mt-4 text-center text-[13px] leading-[1.5] text-[#b45309]">{error}</p> : null}
 
                 <p className="mt-[18px] text-center text-xs leading-[1.5] text-[#9ca3af]">
-                  By continuing you agree to Lumen’s <a href="/tos.html">Terms</a> and{' '}
-                  <a href="/privacy.html">Privacy Policy</a>.
+                  By continuing you agree to Lumen’s <Link href="/tos.html">Terms</Link> and{' '}
+                  <Link href="/privacy.html">Privacy Policy</Link>.
                 </p>
               </div>
             </div>
@@ -444,9 +508,13 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
         )}
       </div>
 
+      {/* ★ THE SAME TWO LINKS WERE OFFERED TWICE, 20px APART (C8). The card ends
+          with "By continuing you agree to Lumen's Terms and Privacy Policy", and
+          this row repeated Terms and Privacy directly beneath it. The sentence is
+          the one that has to stay: it is attached to the action it describes, which
+          is the whole point of saying it. So this row keeps only Help, which is the
+          one thing the card does not offer. */}
       <div className="my-9 flex gap-5 text-[13px] text-[#9ca3af]">
-        <a href="/tos.html" className="text-[#9ca3af]">Terms</a>
-        <a href="/privacy.html" className="text-[#9ca3af]">Privacy</a>
         {/* ★ HELP FOR THE PERSON ACTUALLY ON THIS SCREEN (2026-08-08, UX tester).
             This pointed at /faq.html — the inherited "Hive.blog FAQ", which opens
             on master passwords, owner keys, Resource Credits and MVESTs and refers
@@ -454,7 +522,7 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
             someone who was just promised "without keys, wallets or setup" is worse
             than offering no help at all. /help.html is Lumen's own, and links on to
             the Hive FAQ at the bottom for anyone who wants it. */}
-        <a href="/help.html" className="text-[#9ca3af]">Help</a>
+        <Link href="/help.html" className="text-[#9ca3af]">Help</Link>
       </div>
 
       {walletOpen ? (

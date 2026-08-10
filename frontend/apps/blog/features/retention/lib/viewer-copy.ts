@@ -46,9 +46,13 @@ export type RetentionVoice = 'own' | 'other';
 
 /**
  * The suffix that makes a key third-person. i18next appends its plural suffix
- * AFTER whatever key it is handed, so `voiced('retention.facts.givers','other')`
- * resolves through `retention.facts.givers_their_one` / `_their_other` — which is
+ * AFTER whatever key it is handed, so `voiced('retention.stats.people','other')`
+ * resolves through `retention.stats.people_their_one` / `_their_other` — which is
  * why the third-person plural forms carry the suffix in that order.
+ *
+ * (The example used to name `retention.facts.givers`, a key deleted with the giver arm.
+ * A doc comment naming a key that no longer exists is how a reader learns the wrong
+ * shape, and the call-site scan in ladder.test.ts tripped over it.)
  */
 const THIRD_PERSON = '_their';
 

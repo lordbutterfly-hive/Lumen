@@ -1,6 +1,7 @@
 'use client';
 
 import { FC, useEffect, useState } from 'react';
+import { usePathname } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { Link, getUserAvatarUrl } from '@hive/ui';
 import { Avatar, AvatarFallback, AvatarImage } from '@ui/components';
@@ -38,6 +39,7 @@ const AppHeader: FC = () => {
   const { t } = useTranslation('common_blog');
   const { user } = useUserClient();
   const [isClient, setIsClient] = useState(false);
+  const pathname = usePathname();
 
   useEffect(() => {
     setIsClient(true);
@@ -64,6 +66,30 @@ const AppHeader: FC = () => {
   // Same fallback the deleted notifications page used: if nothing's been
   // read yet, treat "now" as the cutoff so nothing is retroactively unread.
   const lastRead = data?.lastread ? new Date(data.lastread) : new Date();
+
+  /**
+   * ★★★ NOT ON /login, AND NOT MERELY HIDDEN (2026-08-10, fuckery list C1/C2/C3).
+   *
+   * `/login` is a standalone screen: `LumenLogin` covers the viewport with a
+   * `fixed inset-0 z-50` layer, and this header is `z-40`, so it was painted over
+   * completely. Invisible, still mounted, and that is worse than either state on
+   * its own:
+   *
+   *   * Its TEN controls stayed tab-focusable behind the overlay. The first Tab on
+   *     the login page moved focus into a search box nobody could see, and a
+   *     keyboard or screen-reader user had to walk the entire header before
+   *     reaching the sign-in form.
+   *   * It contributed 71px of dead height above the overlay, pushing the card down
+   *     for nothing.
+   *   * It added a SECOND link to `/` (the wordmark) and a second "Log in" control
+   *     on the one page where both are noise.
+   *
+   * Covering something is not removing it. The clean long-term fix is the route
+   * group split the login component's own comment describes (move the header into a
+   * `(shell)` group and leave `/login` outside it); this is the same outcome with a
+   * one-line blast radius, and it deletes the reason that overlay exists at all.
+   */
+  if (pathname === '/login') return null;
 
   return (
     <header

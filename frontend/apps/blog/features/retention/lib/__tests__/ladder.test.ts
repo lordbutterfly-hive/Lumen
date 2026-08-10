@@ -887,6 +887,16 @@ function hasKey(dotted: string): boolean {
 /** i18next resolves a `count` key through its plural forms, so both must exist. */
 const hasPlural = (dotted: string) => hasKey(`${dotted}_one`) && hasKey(`${dotted}_other`);
 
+/** The string itself, for assertions about what a key SAYS rather than that it exists. */
+function lookup(dotted: string): string | undefined {
+  let node: unknown = EN;
+  for (const part of dotted.split('.')) {
+    if (typeof node !== 'object' || node === null || !(part in (node as Record<string, unknown>))) return undefined;
+    node = (node as Record<string, unknown>)[part];
+  }
+  return typeof node === 'string' ? node : undefined;
+}
+
 const VOICES: RetentionVoice[] = ['own', 'other'];
 
 for (const voice of VOICES) {
@@ -898,7 +908,7 @@ for (const voice of VOICES) {
   // this week" has no person in it, its `_their` copies were byte-identical to the base,
   // and the call site was voicing it out of symmetry rather than need. Three duplicate
   // strings deleted, and the check follows the call site rather than leading it.
-  for (const base of ['retention.stats.people']) {
+  for (const base of ['retention.stats.people', 'retention.stats.active_days']) {
     const k = voiced(base, voice);
     check(`plural forms exist: ${base} (${voice})`, hasPlural(k), k);
   }
@@ -914,6 +924,121 @@ for (const voice of VOICES) {
   check(`plural forms exist: ${k} (voiceless)`, hasPlural(k), k);
   check('new_people has no voiced twin', !hasKey(`${k}_their`), `${k}_their`);
 }
+
+// ════ EVERY LITERAL `voiced()` CALL SITE, FOUND BY READING THE SOURCE ════
+//
+// ★ THE LIST ABOVE IS HAND-MAINTAINED, AND THAT IS EXACTLY HOW THE LAST VOICE BUG SHIPPED
+// (2026-08-10). `retention.stats.active_days` was rendered with a bare `t()` instead of
+// `voiced()`, so a stranger's profile read "Lumen has seen YOU show up on 1 day." one line
+// under "1827 people voted on THEIR last 8 posts." — on 5 of 5 accounts a UX round sampled.
+// Every assertion above passed throughout, because a hand-written list can only guard the
+// keys somebody remembered to add to it.
+//
+// So this walks the component and lib sources, pulls every `voiced('...')` literal out of
+// them, and asserts each one really has a third-person form. It cannot be forgotten: adding
+// a call site IS adding the check.
+//
+// KNOWN LIMIT, stated rather than papered over: it only sees LITERAL first arguments. The
+// `people`/`people_solo` sites pass a computed `base`, so they stay covered by the explicit
+// list above. A new dynamic call site would still slip past this, and the honest answer is
+// that it would need the same treatment by hand.
+{
+  const { readFileSync, readdirSync } = require('fs') as typeof import('fs');
+  const { join } = require('path') as typeof import('path');
+  const roots = ['../../components', '../../emblems', '..'].map((r) => join(__dirname, r));
+
+  const sources: string[] = [];
+  for (const root of roots) {
+    for (const name of readdirSync(root, { withFileTypes: true })) {
+      if (!name.isFile() || !/\.tsx?$/.test(name.name)) continue;
+      sources.push(readFileSync(join(root, name.name), 'utf8'));
+    }
+  }
+  check('voiced call-site scan read some source', sources.length > 0, `${sources.length} files`);
+
+  // Comments are stripped first. The first run of this scan failed on
+  // `retention.facts.givers`, which is not a call site and not even a live key — it is a
+  // worked example inside viewer-copy.ts's own doc block, naming a key deleted with the
+  // giver arm. A guard that fires on prose would be turned off within a week.
+  // Block comments and whole-line `//` only, so a `https://` inside a string is untouched.
+  const code = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+
+  const bases = new Set<string>();
+  for (const src of sources) {
+    for (const m of code(src).matchAll(/\bvoiced\(\s*'([^']+)'/g)) bases.add(m[1]);
+  }
+  // A scan that finds nothing would pass every assertion below while proving nothing.
+  check('voiced call-site scan found literal keys', bases.size >= 3, `${bases.size} keys`);
+
+  for (const base of [...bases].sort()) {
+    const third = `${base}_their`;
+    check(
+      `literal voiced() site has a third-person form: ${base}`,
+      hasKey(third) || hasPlural(third),
+      third
+    );
+  }
+
+  // ★ AND THE THIRD DOOR: UNWRAPPING A CALL SITE BACK TO A BARE `t()`.
+  //
+  // With the twin present and the call site voiced, both checks above go green. Change
+  // `t(voiced('retention.stats.active_days', voice), …)` back to
+  // `t('retention.stats.active_days', …)` and they STAY green while the pronoun bug returns
+  // in full — the twin still exists, it is simply never asked for. That is precisely the
+  // shape of the original defect, so it gets its own assertion.
+  //
+  // The rule is one-directional and cheap to state: a key that HAS a `_their` twin exists in
+  // two voices on purpose, so no source file may name it in a bare `t()`.
+  const stats = ((EN as Record<string, unknown>).retention as Record<string, unknown>).stats as Record<string, unknown>;
+  const twinned = Object.keys(stats)
+    .filter((k) => k.endsWith('_their'))
+    .map((k) => `retention.stats.${k.replace(/_their$/, '')}`);
+  check('found twinned stat keys to police', twinned.length >= 2, `${twinned.length} keys`);
+  for (const key of [...new Set(twinned)].sort()) {
+    const bare = sources.some((src) => code(src).includes(`t('${key}'`));
+    check(`voiced-only key is never called bare: ${key}`, !bare, `t('${key}'`);
+  }
+}
+// ════ EVERY RUNG BLURB STATES THE UNIT THE LADDER ACTUALLY MEASURES ════
+//
+// ★ THE BLURBS USED TO BE WRITTEN IN CALENDAR TIME AND THE LADDER COUNTS ACTIVE DAYS
+// (owner ruling, 2026-08-10: "restate them in active days").
+//
+// Ember said "A week of showing up." while its threshold is FIVE active days, so a reader
+// doing the obvious arithmetic — "1 day now, 4 more to Ember" — got 5 and was told 7. The
+// two only ever agreed through an UNVALIDATED assumption of ~5 active days a week, which is
+// itself flagged as a design guess awaiting calibration. A stated unit that is not the
+// measured unit is the same defect class as the "in the last year" window that the gate
+// never measured, and it was sitting in nine strings at once.
+//
+// So the blurbs now lead with the threshold itself, and this pins each printed number to
+// `ACTIVITY_ARM`. Change the curve without changing the copy and the suite fails here
+// rather than a reader finding it. This is the guard that makes the numbers-in-prose safe:
+// hardcoding them in the locale is only acceptable BECAUSE the arm is the authority and the
+// test enforces it.
+{
+  const thresholdForRank = (r: number) => ACTIVITY_ARM.find((s) => s.index === r)?.min;
+  let checkedRungs = 0;
+  for (const tier of TIER_ORDER) {
+    const r = rankNumber(tier);
+    if (r < 1) continue; // rank 0 makes no numeric claim, by design
+    const want = thresholdForRank(r);
+    for (const voice of VOICES) {
+      const key = voiced(TIERS[tier].blurbKey, voice);
+      const text = lookup(key);
+      const lead = typeof text === 'string' ? text.match(/^(\d+)\b/) : null;
+      check(
+        `blurb leads with its arm threshold: ${tier} (${voice})`,
+        lead !== null && want !== undefined && Number(lead[1]) === want,
+        `${key} -> ${JSON.stringify(text)} expected to start with ${want}`
+      );
+    }
+    checkedRungs += 1;
+  }
+  // Nine rungs carry a number. A loop that silently checked none would pass.
+  check('every numbered rung was checked', checkedRungs === 9, `${checkedRungs} rungs`);
+}
+
 for (const t of TIER_ORDER) check(`rung name exists: ${t}`, hasKey(TIERS[t].labelKey));
 // The countable's three units, each with plural forms — this is what replaced nine
 // paragraphs of advice, and a missing plural renders "1 more people".
@@ -1008,6 +1133,41 @@ for (const gone of ['retention.ceiling', 'retention.way_out', 'retention.gate', 
   // Third-person copy must not address the reader.
   const leaked = strings.filter(([p, s]) => p.includes('_their') && /\b(your|you['’]?re)\b/i.test(s));
   check('no third-person string addresses the reader as "you"', leaked.length === 0, leaked.map(([p]) => p).join(', '));
+
+  // ════ AND THE INVERSE, WHICH IS THE ONE THAT ACTUALLY BIT (2026-08-10) ════
+  //
+  // The check above catches "your" leaking INTO a third-person string. It cannot catch a
+  // second-person string that has NO third-person form at all — and that is what shipped:
+  // `retention.stats.active_days` said "Lumen has seen YOU show up on 1 day." with no
+  // `_their` sibling, so a stranger's profile rendered it verbatim at whoever was looking.
+  //
+  // Note this is deliberately a LOCALE-side rule, not a call-site rule. The call-site scan
+  // further up only sees keys somebody already wrapped in `voiced()`; the bug was FORGETTING
+  // to wrap one, which leaves no call-site trace to find. What does leave a trace is a
+  // second-person string sitting on a surface that renders on other people's pages with no
+  // third-person twin — so that is what gets asserted.
+  //
+  // Scoped to the four namespaces that appear on someone else's profile card. The daily
+  // card, the goal picker and the nudge are owner-only surfaces and SHOULD address the
+  // reader directly, so they are not in scope and must not be.
+  const OTHER_PROFILE_NS = ['retention.stats.', 'retention.tier_blurb.', 'retention.blank', 'retention.dormant.'];
+  const PLURAL_SUFFIX = /_(zero|one|two|few|many|other)$/;
+  const needsTwin = new Set<string>();
+  for (const [p, s] of strings) {
+    if (!OTHER_PROFILE_NS.some((ns) => p.startsWith(ns))) continue;
+    if (p.includes('_their')) continue;
+    if (!/\b(you|your|you['’]?re)\b/i.test(s)) continue;
+    needsTwin.add(p.replace(PLURAL_SUFFIX, ''));
+  }
+  // Prove the filter selected something. A typo in a namespace prefix would empty this set
+  // and the loop below would assert nothing while reporting a pass.
+  check('second-person scan selected keys to check', needsTwin.size >= 3, `${needsTwin.size} keys`);
+  const orphans = [...needsTwin].filter((base) => !hasKey(`${base}_their`) && !hasPlural(`${base}_their`));
+  check(
+    'every second-person string on a shared surface has a third-person twin',
+    orphans.length === 0,
+    orphans.join(', ')
+  );
 
   // ★ EVERY `{{count}}` STRING NEEDS BOTH PLURAL FORMS (2026-08-09).
   //

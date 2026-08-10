@@ -47,19 +47,19 @@ const COPY = {
     symbolBg: '#627eea'
   },
   shared: {
-    connectHelp: 'You’ll approve a signature — it’s free, moves no funds and authorizes no transaction.',
+    connectHelp: 'You’ll approve a signature. It’s free, moves no funds and authorizes no transaction.',
     manualToggle: 'Sign manually instead',
     connectToggle: 'Use a connected wallet instead',
     getMessage: 'Get sign-in message',
     signHeading: 'Sign to prove ownership',
     signHelp:
-      'Sign this message in your wallet — it’s free and moves no funds. Then paste the signature below.',
+      'Sign this message in your wallet. It’s free and moves no funds. Then paste the signature below.',
     sigPlaceholder: 'Paste the signature from your wallet',
     verify: 'Verify & sign in',
     working: 'Working…',
     connecting: 'Waiting for your wallet…',
     cancel: 'Cancel',
-    taproot: 'Taproot addresses aren’t supported yet — use a SegWit (bc1q…) or legacy (1…) address.',
+    taproot: 'Taproot addresses aren’t supported yet. Use a SegWit (bc1q…) or legacy (1…) address.',
     unconfigured: 'One-click wallet connect isn’t set up on this deployment yet.'
   }
 };

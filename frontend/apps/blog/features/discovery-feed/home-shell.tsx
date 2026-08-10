@@ -5,6 +5,7 @@ import FeedTabs from '@/blog/features/discovery-feed/feed-tabs';
 import { WeeklyRecapCard } from '@/blog/features/retention/components/weekly-recap-card';
 import { RetentionNudge } from '@/blog/features/retention/components/retention-nudge';
 import { TodayCard } from '@/blog/features/retention/components/today-card';
+import HomeIntro from '@/blog/components/home-intro';
 
 /**
  * Home shell — the redesign's fixed 3-column grid (200 / 1fr / 312, gap 44,
@@ -13,7 +14,7 @@ import { TodayCard } from '@/blog/features/retention/components/today-card';
  * the retention league showcase atop it), center = composer + tabs, right = rail.
  * Responsive: nav collapses below md, right rail below xl.
  */
-export default function HomeShell() {
+export default function HomeShell({ showIntro = false }: { showIntro?: boolean }) {
   return (
     <div className="relative mx-auto grid max-w-[1720px] grid-cols-1 gap-11 px-6 pb-20 pt-[26px] md:grid-cols-[200px_minmax(0,1fr)] md:px-11 xl:grid-cols-[200px_minmax(0,1fr)_312px]">
       {/* 1px vertical divider at the nav's right edge — equal 44px gutter each side */}
@@ -45,6 +46,11 @@ export default function HomeShell() {
         {/* `surface="inline"` scopes this copy's testids — both mounts are in the DOM at
             once, only one is visible, and sharing ids made every selector match two
             elements. See TodaySurface in today-card.tsx. */}
+        {/* Signed-out orientation hero. FIRST in the column so it reads as the
+            page's masthead, exactly as the topic header does on /topics/*, and it
+            is absent entirely for a signed-in reader (decided server-side in
+            app/page.tsx, so it is either in the first paint or not in the DOM). */}
+        {showIntro ? <HomeIntro /> : null}
         <TodayCard className="mb-4 xl:hidden" surface="inline" />
         <RetentionNudge className="mb-4" />
         <WeeklyRecapCard className="mb-6" />

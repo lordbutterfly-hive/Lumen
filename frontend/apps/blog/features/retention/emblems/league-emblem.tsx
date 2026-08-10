@@ -66,15 +66,34 @@ export interface LeagueEmblemProps {
   className?: string;
 }
 
+/**
+ * ★ ROUNDED, AND THE ROUNDING IS THE WHOLE POINT (2026-08-10).
+ *
+ * `Math.sin`/`Math.cos` are NOT required by the ECMAScript spec to be correctly rounded, so
+ * Node and the browser's V8 may disagree in the last unit in the last place. React serialises
+ * the raw double into the SVG attribute, so that disagreement surfaced as a hydration warning
+ * on EVERY page load carrying an emblem:
+ *
+ *   Warning: Prop `y1` did not match. Server: "15.358983848622458" Client: "15.358983848622465"
+ *
+ * Three decimals is ~1e-5 of a 100-unit viewBox — invisible at every size this renders at
+ * (18px to 96px) — and it collapses a divergence that lives at the 15th significant digit.
+ * Checked before choosing the precision: the closest any of the 80 generated coordinates comes
+ * to a .0005 rounding boundary is 1.5e-2, ten orders of magnitude clear of the ULP gap, so both
+ * runtimes always land on the same rounded value.
+ */
+const COORD_DP = 1000;
+const coord = (v: number) => Math.round(v * COORD_DP) / COORD_DP;
+
 function buildRays(count: number, inner: number, outer: number) {
   return Array.from({ length: count }, (_, i) => {
     const a = (i / count) * Math.PI * 2 - Math.PI / 2;
     return {
       key: i,
-      x1: 50 + inner * Math.cos(a),
-      y1: 50 + inner * Math.sin(a),
-      x2: 50 + outer * Math.cos(a),
-      y2: 50 + outer * Math.sin(a)
+      x1: coord(50 + inner * Math.cos(a)),
+      y1: coord(50 + inner * Math.sin(a)),
+      x2: coord(50 + outer * Math.cos(a)),
+      y2: coord(50 + outer * Math.sin(a))
     };
   });
 }

@@ -5,6 +5,7 @@ import { useInfiniteQuery } from '@tanstack/react-query';
 import { useInView } from 'react-intersection-observer';
 import LeftRail from '@/blog/features/layouts/left-rail';
 import RightRail from '@/blog/features/layouts/right-rail';
+import MastheadGlyph from '@/blog/features/layouts/masthead-glyph';
 import MediumPostCard from './medium-post-card';
 import { filterVisiblePosts, useNsfwPreference } from '@/blog/lib/nsfw';
 import { PostListSkeleton } from '@hive/ui';
@@ -110,21 +111,21 @@ export default function TopicShell({ tag }: { tag: string }) {
             #c0392b accent — because the whole point of this page is that a topic
             is the feed, not a second product. The only new idea is the oversized
             hairline "#", which anchors the eye without adding a colour or a font. */}
-        <header className="relative mb-7 overflow-hidden rounded-[20px] border border-[#eee2dc] bg-[radial-gradient(125%_130%_at_0%_0%,#f7c9bd_0%,#fbdfd6_30%,#fdefe9_58%,#fffdfc_85%)] px-7 pb-6 pt-7">
-          <span
-            className="pointer-events-none absolute -right-2 -top-9 select-none font-serif text-[146px] leading-none text-[#c0392b]/[0.26]"
-            aria-hidden
-          >
-            #
-          </span>
+        {/* ★ THE RED RULER (owner design, 2026-08-10) — the 3px #c0392b left edge is
+            the signature every Lumen masthead carries, home and topic alike, so the
+            two read as one system. The mark is placed by the shared MastheadGlyph. */}
+        <header className="relative mb-7 overflow-hidden rounded-[20px] border border-[#eee2dc] border-l-[3px] border-l-[#c0392b] bg-[radial-gradient(125%_130%_at_0%_0%,#f7c9bd_0%,#fbdfd6_30%,#fdefe9_58%,#fffdfc_85%)] px-7 pb-6 pt-7">
+          <MastheadGlyph mark="hash" />
 
-          <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#c0392b]/70">Topic</p>
+          <p className="relative z-10 mb-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#c0392b]/70">
+            Topic
+          </p>
 
-          <h1 className="font-serif text-[34px] font-semibold leading-[1.08] tracking-[-0.015em] text-[#161511]">
+          <h1 className="relative z-10 font-serif text-[34px] font-semibold leading-[1.08] tracking-[-0.015em] text-[#161511]">
             {displayName}
           </h1>
 
-          <div className="mt-3.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[13px] text-[#6b7280]">
+          <div className="relative z-10 mt-3.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[13px] text-[#6b7280]">
             <span className="inline-flex items-center gap-1.5">
               <span
                 className={`h-[6px] w-[6px] rounded-full ${ranked ? 'bg-[#2f7d4f]' : 'bg-[#c9a227]'}`}

@@ -36,21 +36,21 @@ import { KeyType, LoginType } from '@smart-signer/types/common';
 
 const COPY = {
   title: 'Sign in with Hive Keychain',
-  sub: 'Your existing Hive account — keys stay on your device.',
+  sub: 'Your keys, your content.',
   detected: 'Detected',
   usernameLabel: 'Hive username',
   placeholder: 'yourname',
   submit: 'Sign in with Keychain',
   working: 'Waiting for Keychain…',
-  notDetected: 'Not detected — install the Hive Keychain extension, then reload.',
+  notDetected: 'Not detected. Install the Hive Keychain extension, then reload.',
   needUsername: 'Enter your Hive username.',
   failed: 'That sign-in did not complete. Please try again.',
-  cancelled: 'You cancelled — nothing was signed.',
+  cancelled: 'You cancelled. Nothing was signed.',
   // ★ Distinct from `failed` on purpose (2026-08-09). "Sign-in did not complete"
   // reads as "your credentials are wrong" and sends the reader off to re-check a
   // username that was never the problem. When the server tells us it could not
   // reach Hive, say that, and say whose problem it is.
-  unreachable: 'Could not reach Hive to verify your sign-in. This is on our side, not your account — please try again in a moment.'
+  unreachable: 'Could not reach Hive to verify your sign-in. This is on our side, not your account. Please try again in a moment.'
 };
 
 interface KeychainSigninProps {
@@ -141,7 +141,8 @@ const KeychainSignin: FC<KeychainSigninProps> = ({ redirectTo = '/' }) => {
         type="button"
         onClick={() => setOpen((v) => !v)}
         data-testid="keychain-row"
-        className="flex h-14 w-full cursor-pointer items-center gap-3 rounded-[14px] border border-[#e4e6e9] bg-white px-4 text-left hover:border-[#c0392b] hover:bg-[#fefaf9]"
+        // Auto height with padding, matching the wallet rows above (fuckery list C4).
+        className="flex w-full cursor-pointer items-center gap-3 rounded-[14px] border border-[#e4e6e9] bg-white px-4 py-3 text-left hover:border-[#c0392b] hover:bg-[#fefaf9]"
       >
         {/* ★ THE REAL HIVE KEYCHAIN MARK (2026-08-09, owner-supplied) — was the
             letter "K" on a red plate. The official asset carries its own black
@@ -153,14 +154,18 @@ const KeychainSignin: FC<KeychainSigninProps> = ({ redirectTo = '/' }) => {
           aria-hidden
           width={34}
           height={34}
-          className="h-[34px] w-[34px] flex-shrink-0 rounded-[9px]"
+          className="h-[34px] w-[34px] flex-shrink-0 rounded-[10px]"
         />
         <span className="min-w-0 flex-1">
           <span className="block text-[15px] font-semibold text-[#161511]">{COPY.title}</span>
           <span className="block text-xs text-[#6b7280]">{COPY.sub}</span>
         </span>
+        {/* ★ TOP-ALIGNED, NOT CENTRED (fuckery list C6). Centring a one-line chip
+            against a two-line text block floated it between the title and the
+            subtitle, so it read as a label for the subtitle. It describes the
+            METHOD, so it sits level with the method's name. */}
         {detected ? (
-          <span className="flex-shrink-0 rounded-full bg-[#eef7f1] px-2.5 py-1 text-[11px] font-semibold text-[#2f7d4f]">
+          <span className="mt-0.5 flex-shrink-0 self-start rounded-full bg-[#eef7f1] px-2.5 py-1 text-[11px] font-semibold text-[#2f7d4f]">
             {COPY.detected}
           </span>
         ) : null}

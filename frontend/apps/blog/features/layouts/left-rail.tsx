@@ -25,8 +25,25 @@ const LABELS = {
 
 type NavIcon = ComponentType<LucideProps>;
 
+/**
+ * ★ HOVER IS WARM, AND IT IS THE SAME WARM AS EVERYWHERE ELSE (2026-08-10, owner).
+ *
+ * These rows highlighted to `#f1f3f5`, a neutral grey, while the topic pills in the
+ * right rail highlight to `#fdf2f0` with `#c0392b` text. Two hover languages on one
+ * screen, six inches apart: the grey read as system chrome and the warm one as the
+ * product, so the nav felt like something the page was wearing rather than part of
+ * it. Now both rails answer the cursor the same way, which is also the ink the red
+ * ruler and the masthead marks are drawn in.
+ *
+ * The icons pick this up for free: lucide draws in `currentColor`, so the glyph and
+ * the label warm together instead of the label moving alone.
+ *
+ * ACTIVE stays neutral grey on purpose. Hover is a question ("this one?") and active
+ * is a statement ("you are here"); if both are warm, the row under your cursor and
+ * the page you are on look identical, and the rail stops telling you where you are.
+ */
 const ROW_CLASS =
-  'flex items-center gap-[14px] rounded-xl px-[14px] py-[11px] font-sans text-[15px] text-[#4b5563] transition-colors hover:bg-[#f1f3f5] hover:text-[#161511]';
+  'flex items-center gap-[14px] rounded-xl px-[14px] py-[11px] font-sans text-[15px] text-[#4b5563] transition-colors hover:bg-[#fdf2f0] hover:text-[#c0392b]';
 const ROW_ACTIVE_CLASS = 'bg-[#f1f3f5] font-medium text-[#161511]';
 
 const NavRowContent = ({ icon, label, isActive }: { icon: NavIcon; label: string; isActive: boolean }) => {

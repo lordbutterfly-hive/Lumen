@@ -18,7 +18,7 @@ import { shortPostTitle } from '@/blog/lib/short-post-title';
 const LABELS = {
   placeholder: "What's on your mind?",
   postButton: 'Post',
-  loginPrompt: 'Start writing — log in to post'
+  loginPrompt: 'Start writing. Log in to post.'
 };
 
 /**
@@ -160,7 +160,7 @@ export default function ShortFormComposer() {
     } catch (e) {
       // usePostMutation already reports through handleError/toast; this keeps the
       // failure visible in the composer itself so the text is not silently lost.
-      setError(e instanceof Error ? e.message : 'Could not post — please try again.');
+      setError(e instanceof Error ? e.message : 'Could not post. Please try again.');
     } finally {
       setSubmitting(false);
     }

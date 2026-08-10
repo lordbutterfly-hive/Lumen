@@ -28,8 +28,8 @@ const LABELS = {
   loadMore: 'Load more',
   nothingMore: "You're all caught up",
   empty: 'No posts yet.',
-  degraded: 'Personalised ranking is warming up — showing popular posts meanwhile.',
-  degradedAnonymous: 'Log in to see posts picked for you — showing trending posts for now.',
+  degraded: 'Personalised ranking is warming up. Showing popular posts meanwhile.',
+  degradedAnonymous: 'Showing trending. Log in for your own feed.',
   loginPrompt: 'Log in to see your Feed'
 };
 
