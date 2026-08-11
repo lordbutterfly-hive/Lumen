@@ -124,6 +124,25 @@ export function usePostFormState({ username, editMode, post_s, categoryParam }: 
     }
   }, [username, editMode]);
 
+  /**
+   * ★★★ A SILENT RESTORE IS INDISTINGUISHABLE FROM A BUG (2026-08-10, C-1).
+   *
+   * The composer auto-saves every 500 ms and hydrates from that draft on the
+   * next visit. Measured live: it opened with a title and a full body already in
+   * it, out of `postData-new-<username>`, and said NOTHING. There was no way to
+   * tell, from the screen, whether you were looking at work you had abandoned
+   * weeks ago, a half-typed post you meant to throw away, or a bug that had
+   * pre-filled somebody else's text into your editor — and the only route out
+   * was a button labelled "Clean", which is not a word anyone reads as "discard
+   * the draft you did not know you had".
+   *
+   * So: record whether this session's form was populated from storage, and let
+   * the composer say so. The flag is set once, at hydration, and only for a NEW
+   * post — an EDIT is expected to arrive pre-filled, and there the existing
+   * `hasDraftChanges` logic already distinguishes the saved post from the draft.
+   */
+  const [restoredFromDraft, setRestoredFromDraft] = useState(false);
+
   // Hydrate form from localStorage after initial render
   useEffect(() => {
     if (hasHydratedRef.current) return;
@@ -132,6 +151,7 @@ export function usePostFormState({ username, editMode, post_s, categoryParam }: 
     const shouldHydrate = editMode ? hasDraftChanges : hasStoredData;
 
     if (shouldHydrate) {
+      if (!editMode) setRestoredFromDraft(true);
       form.reset({
         ...entryValues,
         title: storedPost.title || entryValues.title,
@@ -203,6 +223,8 @@ export function usePostFormState({ username, editMode, post_s, categoryParam }: 
     watchedValues,
     previewContent,
     setPreviewContent,
+    restoredFromDraft,
+    setRestoredFromDraft,
     shadowDraftRecovery,
     setShadowDraftRecovery,
     removeShadowDraft: (key: string) => {

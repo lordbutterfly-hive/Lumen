@@ -29,6 +29,7 @@ import { convertHiveUrlsInText, parseHiveBlogUrl } from './lib/hive-url-converte
 import { getToolbarButtons } from './lib/toolbar-config';
 import { useCodemirror } from './hooks/use-codemirror';
 import EditorToolbar from './EditorToolbar';
+import EditorOptionsBar from './EditorOptionsBar';
 
 interface MdEditorProps {
   onChange: (value: string) => void;
@@ -350,8 +351,13 @@ const MdEditor: FC<MdEditorProps> = ({ onChange, persistedValue = '', placeholde
   }, [viewRef]);
 
   const editorBody = (
+    // ★ The editor is now the TOP of a three-part stack: editor, then the
+    //   persistent-settings strip (EditorOptionsBar), then the caller's
+    //   "insert images by dragging" hint, which already carries `rounded-b-md
+    //   border-x border-b`. So this piece drops its own bottom border and
+    //   bottom radius; the strip's top border becomes the divider between them.
     <div
-      className={cn('relative cursor-text overflow-hidden rounded-md border border-border', {
+      className={cn('relative cursor-text overflow-hidden rounded-t-md border-x border-t border-border', {
         '!bg-red-400/20': isDrag
       })}
       onClick={focusEditor}
@@ -363,10 +369,6 @@ const MdEditor: FC<MdEditorProps> = ({ onChange, persistedValue = '', placeholde
       <EditorToolbar
         toolbarButtons={toolbarButtons}
         isBlockedUser={isBlockedUser}
-        convertHiveLinks={convertHiveLinks}
-        setConvertHiveLinks={setConvertHiveLinks}
-        optimizeImages={optimizeImages}
-        setOptimizeImages={setOptimizeImages}
         onToolbarClick={handleToolbarClick}
         onSpoilerClick={handleSpoiler}
         inputRef={inputRef}
@@ -423,6 +425,14 @@ const MdEditor: FC<MdEditorProps> = ({ onChange, persistedValue = '', placeholde
         />
       )}
       {editorBody}
+      <EditorOptionsBar
+        isBlockedUser={isBlockedUser}
+        convertHiveLinks={convertHiveLinks}
+        setConvertHiveLinks={setConvertHiveLinks}
+        optimizeImages={optimizeImages}
+        setOptimizeImages={setOptimizeImages}
+        t={t}
+      />
     </div>
   );
 };

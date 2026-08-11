@@ -374,19 +374,12 @@ test.describe('Home page tests', () => {
     await expect(homePage.getNavSearchClassicInput).toBeVisible();
   });
 
-  test('move to the test trending page for searching by tags', async ({ page }) => {
-    await homePage.goto();
-    await page.getByRole('banner').getByRole('combobox').click();
-    await page.getByRole('option').last().click();
-    await expect(homePage.getNavSearchTagsInput).toBeVisible();
-    // Type test and press Enter
-    await homePage.getNavSearchTagsInput.fill('test');
-    await homePage.page.keyboard.press('Enter');
-    // Wait for URL to change instead of fixed timeout
-    await expect(homePage.page).toHaveURL('/trending/test', { timeout: 15000 });
-    // validate the first post card
-    // await expect(homePage.getFirstPostListItem).toBeVisible();
-  });
+  // DELETED 2026-08-10: 'move to the test trending page for searching by
+  // tags' drove the scope dropdown (`getByRole('combobox')` in the header)
+  // to reach tag mode, then typed into a "Search tags..." box. Both the
+  // dropdown and every mode but plain post search were removed by owner
+  // ruling — see packages/ui/hooks/use-search.ts. A tag is now reached by
+  // clicking any topic link in the product, not by searching for one.
 
   test('navigation Login link is visible', async ({ page }) => {
     await homePage.goto();

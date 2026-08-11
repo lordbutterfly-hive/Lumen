@@ -82,13 +82,17 @@ export default function SavingsVault({
         </div>
 
         <div className="flex flex-col gap-3">
+          {/* ★ W-6: the chip used to read "3-day unlock", which was the same rule
+              the panel description states above and the row description stated
+              again below. The chip now carries the fact this row does NOT share
+              with the HBD row beneath it — that HIVE savings pay no interest —
+              which is the exact counterpart of the HBD row's APR chip. */}
           <SavingsSlotCard
             testId="wallet-hive-savings"
             currency="HIVE"
             title={t('wallet.savings.hive_title')}
-            chip={t('wallet.savings.hive_unlock_badge')}
+            chip={t('wallet.savings.hive_no_interest_badge')}
             chipTone="neutral"
-            description={t('wallet.savings.hive_description')}
             balance={savingsHive}
             username={username}
             liquidBalance={liquidHive}
@@ -124,7 +128,7 @@ export default function SavingsVault({
                   type="button"
                   onClick={handleClaim}
                   disabled={!hasClaimableRewards || isClaiming}
-                  className="rounded-[10px] bg-[#1a1a17] px-4 py-2 text-[13px] font-semibold text-white hover:bg-black disabled:cursor-not-allowed disabled:opacity-40"
+                  className="rounded-[14px] bg-[#1a1a17] px-4 py-2 text-[13px] font-semibold text-white transition-colors hover:bg-black disabled:cursor-not-allowed disabled:opacity-40"
                   data-testid="wallet-claim-now-button"
                 >
                   {t('wallet.savings.claim_now')}

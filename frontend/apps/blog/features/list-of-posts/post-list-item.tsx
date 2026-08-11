@@ -128,6 +128,10 @@ const PostListItem = memo(
   // mutation, the blacklist/DMCA/GDPR checks above — keeps using `post.author`,
   // which is the account that actually signed the post.
   const displayAuthor = liteOverlay?.author ?? identityEntry.author;
+  // Same convention as MediumPostCard's `displayTitle` — used only to build
+  // accessible names below (the comment-count link), never rendered as the
+  // visible headline, which stays owned by `summary.tsx`.
+  const displayTitle = liteOverlay?.title || post.title;
   const displayReputation = post.original_entry?.author_reputation ?? post.author_reputation;
   const displayCommunity = post.original_entry?.community ?? post.community;
   const displayCommunityTitle = post.original_entry?.community_title ?? post.community_title;
@@ -180,7 +184,15 @@ const PostListItem = memo(
           <CardHeader className="px-0 py-1">
             <div className="md:text-md flex items-center text-sm">
               {nsfw === 'show' && post.blacklists.length < 1 && !blacklistCheck ? (
-                <Link href={`/@${displayAuthor}`} data-testid="post-card-avatar">
+                // The avatar is a CSS background-image on a plain <div> — unlike
+                // MediumPostCard's avatar, there is no <img alt> here for the link to
+                // pick up as its name, so without this it was announced as an
+                // unnamed link.
+                <Link
+                  href={`/@${displayAuthor}`}
+                  data-testid="post-card-avatar"
+                  aria-label={t('cards.post_card.author_profile', { author: displayAuthor })}
+                >
                   <div
                     className="mr-3 h-[24px] w-[24px] rounded-3xl bg-cover bg-no-repeat"
                     style={{
@@ -199,6 +211,7 @@ const PostListItem = memo(
                 </Link>{' '}
                 <span
                   title={t('post_content.reputation_title')}
+                  aria-label={`${t('post_content.reputation_title')} ${accountReputation(displayReputation)}`}
                   className="mr-1 block font-normal"
                   data-testid="post-author-reputation"
                 >
@@ -249,8 +262,11 @@ const PostListItem = memo(
                       <TooltipProvider>
                         <Tooltip>
                           <TooltipTrigger data-testid="powered-up-100-trigger">
-                            <Link href={`/${post.category}/@${displayAuthor}/${post.permlink}`}>
-                              <Icons.hive className="h-4 w-4" />
+                            <Link
+                              href={`/${post.category}/@${displayAuthor}/${post.permlink}`}
+                              aria-label={t('cards.post_card.powered_up_100')}
+                            >
+                              <Icons.hive className="h-4 w-4" aria-hidden="true" />
                             </Link>
                           </TooltipTrigger>
                           <TooltipContent data-testid="powered-up-100-tooltip">
@@ -317,6 +333,7 @@ const PostListItem = memo(
                   <PostCardCommentTooltip
                     comments={post.children}
                     url={`/${post.category}/@${displayAuthor}/${post.permlink}/#comments`}
+                    postTitle={displayTitle}
                   />
                   <Separator orientation="vertical" />
                   {!post.title.includes('RE: ') ? (
@@ -333,8 +350,9 @@ const PostListItem = memo(
                                     { 'cursor-not-allowed opacity-50': reblogMutation.isLoading }
                                   )}
                                   data-testid="post-card-reblog-count"
+                                  aria-label={`${t('cards.post_card.reblog')} ${displayTitle}`}
                                 >
-                                  <Icons.forward className="h-4 w-4 sm:mr-1" />
+                                  <Icons.forward className="h-4 w-4 sm:mr-1" aria-hidden="true" />
                                   {reblogCount}
                                 </button>
                               </ReblogDialog>

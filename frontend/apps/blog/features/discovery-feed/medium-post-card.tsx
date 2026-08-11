@@ -7,7 +7,7 @@ import { useLiteOverlay } from '@/blog/lib/lite/client/use-lite-overlay';
 import { Icons } from '@ui/components/icons';
 import TimeAgo from '@ui/components/time-ago';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@ui/components/tooltip';
-import { getUserAvatarUrl } from '@ui/lib/avatar-utils';
+import { getUserAvatarDirectUrl, getUserAvatarUrl } from '@ui/lib/avatar-utils';
 import { cn } from '@ui/lib/utils';
 import { handleError } from '@ui/lib/handle-error';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
@@ -146,10 +146,26 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
       {/* Byline row */}
       <div className="flex flex-wrap items-center gap-2 font-sans text-[13.5px] text-[#6b7280]">
         <Link href={`/@${displayAuthor}`} className="shrink-0" data-testid="medium-card-avatar">
+          {/* ★ STRAIGHT TO THE IMAGE HOST (2026-08-10). This one line was 29 requests
+              to our own `/api/avatar` per feed page, 6.0-6.3s each on a warm server,
+              19 of them still unreturned 45s in — see the long note on
+              `getUserAvatarDirectUrl`. The proxy stays as the error path, which is
+              what keeps lite accounts and dead profile images working. */}
           <img
-            src={getUserAvatarUrl(displayAuthor, 'small')}
+            src={getUserAvatarDirectUrl(displayAuthor, 'small')}
             alt={displayAuthor}
             className="h-[26px] w-[26px] rounded-full object-cover"
+            loading="lazy"
+            decoding="async"
+            onError={(e) => {
+              // A flag, not a src comparison: `img.src` reads back ABSOLUTE, and the
+              // proxy URL is relative, so comparing them would never match and the
+              // failing proxy would re-trigger this handler forever.
+              const img = e.currentTarget;
+              if (img.dataset.fellBack === '1') return;
+              img.dataset.fellBack = '1';
+              img.src = getUserAvatarUrl(displayAuthor, 'small');
+            }}
           />
         </Link>
         <Link
@@ -193,8 +209,23 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
         <TimeAgo date={post.created} />
       </div>
 
-      {/* Body grid — text column + fixed thumbnail column */}
-      <div className="mt-[13px] grid grid-cols-[1fr_190px] items-start gap-[26px]">
+      {/* Body grid — text column, plus a fixed thumbnail column ONLY when there
+          is something to put in it.
+
+          ★ P-2: the grid was unconditionally `1fr 190px`, and a post with no
+          image filled the second track with an empty grey box. On a profile
+          that is most of the page — measured on /@hbd-temp before this change,
+          8 of 10 cards were grey rectangles — and the box carried no
+          information at all: it was not a failed image, there was simply never
+          an image. So the track only exists when it has content, and an
+          imageless post gets the full width for its headline and dek instead of
+          a 190px hole beside it. */}
+      <div
+        className={cn(
+          'mt-[13px] grid items-start gap-[26px]',
+          !nsfwShown || thumbnail ? 'grid-cols-[1fr_190px]' : 'grid-cols-1'
+        )}
+      >
         <div className="min-w-0">
           <Link href={href} className="block" data-testid="medium-card-title">
             <h2 className="line-clamp-2 font-sans text-[26px] font-semibold leading-[1.22] tracking-[-0.015em] text-[#161511]">
@@ -285,13 +316,7 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
               }}
             />
           </Link>
-        ) : (
-          <div
-            className="h-[132px] w-[190px] rounded-[14px] bg-[#f4f5f7]"
-            aria-hidden="true"
-            data-testid="medium-card-thumbnail-placeholder"
-          />
-        )}
+        ) : null}
       </div>
 
       {/* Action bar — denser's own vote/reblog controls, restyled to the redesign.
@@ -321,6 +346,7 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
             comments={post.children}
             url={`${href}/#comments`}
             iconClassName="h-[20px] w-[20px]"
+            postTitle={displayTitle}
           />
         </span>
 
@@ -338,8 +364,9 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
                         { 'cursor-not-allowed opacity-50': reblogMutation.isLoading }
                       )}
                       data-testid="medium-card-reblog-count"
+                      aria-label={`${LABELS.reblog} ${displayTitle}`}
                     >
-                      <Icons.reblog className="h-[20px] w-[20px]" />
+                      <Icons.reblog className="h-[20px] w-[20px]" aria-hidden="true" />
                       {reblogCount}
                     </button>
                   </ReblogDialog>

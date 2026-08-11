@@ -22,7 +22,9 @@ test.describe('Profile page of @gtg', () => {
     await profilePage.gotoProfilePage('@gtg');
     // Validate URL of page is "http://.../@gtg"
     await expect(profilePage.page).toHaveURL(/ *.\/@gtg$/);
-    await profilePage.profileBlogTabIsSelected();
+    // profileBlogTabIsSelected() was removed 2026-08-10 — there is no
+    // separate Blog tab any more; Posts is the default view at this URL.
+    await expect(profilePage.postBlogItem.first()).toBeVisible();
   });
 
   test('if a post item is reblogged then compare profile owner with the post author', async ({ page }) => {
@@ -69,7 +71,8 @@ test.describe('Profile page of @gtg', () => {
     // Click avatar of the first comment card
     await profilePage.postAvatar.first().click();
     await expect(profilePage.profileStats).toBeVisible({ timeout: 15000 });
-    await profilePage.moveToPostsTab();
+    // moveToPostsTab() was removed 2026-08-10 — Posts is the default view at
+    // `/@username` now, no separate tab to move to.
     const profilePagePostAuthor: any = await profilePage.postsPostAuthor.first().textContent();
     // Validate the post author name is the same as autor post in the profile page in posts tab
     await expect(await firstPostNickName).toContain(await profilePagePostAuthor);
@@ -83,7 +86,8 @@ test.describe('Profile page of @gtg', () => {
     // Click nickname of the first comment card
     await profilePage.postsPostAuthor.first().click();
     await expect(profilePage.profileStats).toBeVisible({ timeout: 15000 });
-    await profilePage.moveToPostsTab();
+    // moveToPostsTab() was removed 2026-08-10 — Posts is the default view at
+    // `/@username` now, no separate tab to move to.
     const profilePagePostAuthor: any = await profilePage.postsPostAuthor.first().textContent();
     // Validate the post author name is the same as autor post in the profile page in posts tab
     await expect(await firstPostNickName).toContain(await profilePagePostAuthor);
@@ -114,7 +118,9 @@ test.describe('Profile page of @gtg', () => {
     let communityPage = new CommunitiesPage(page);
 
     await profilePage.gotoProfilePage('@gtg');
-    await profilePage.profileBlogTabIsSelected();
+    // profileBlogTabIsSelected() was removed 2026-08-10 — Posts is the
+    // default view at this URL, nothing to select.
+    await expect(profilePage.postBlogItem.first()).toBeVisible();
 
     const firstPostItem: Locator = await profilePage.postBlogItem.first();
     const postCommunityLink: Locator = await profilePage.postCommunityLink;
@@ -351,7 +357,10 @@ test.describe('Profile page of @polish.hive - cross-post author', () => {
   });
 
   test('cross-post original link author matches the displayed post author', async () => {
-    await profilePage.gotoPostsProfilePage('@polish.hive');
+    // gotoPostsProfilePage (`/posts`) was removed 2026-08-10 — the route is
+    // deleted; `/@polish.hive` shows the same author-only Posts list by
+    // default now.
+    await profilePage.gotoProfilePage('@polish.hive');
     await expect(profilePage.postBlogItem.first()).toBeVisible();
 
     const crossPostedItems = profilePage.postBlogItem

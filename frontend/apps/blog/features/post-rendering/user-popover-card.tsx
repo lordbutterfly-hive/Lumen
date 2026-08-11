@@ -42,6 +42,7 @@ export function UserPopoverCard({
           <span className="font-semibold text-foreground hover:text-destructive">{shownName}</span>
           <span
             title={t('post_content.reputation_title')}
+            aria-label={`${t('post_content.reputation_title')} ${accountReputation(author_reputation)}`}
             className="text-muted-foreground"
             data-testid="author-reputation"
           >

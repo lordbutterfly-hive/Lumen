@@ -10,6 +10,10 @@ import SendDialog from './dialogs/send-dialog';
 import StakedHiveBlock from './staked-hive-block';
 
 const CARD_CLASS = 'mb-[18px] rounded-[18px] border border-[#ebebeb] bg-white p-6';
+// W-2/W-3: was rounded-[11px] bg-[#2f7d4f] — the success green used as an
+// action colour, at a radius no other control on the page shared.
+const SEND_BUTTON_CLASS =
+  'flex items-center gap-1.5 rounded-[14px] bg-[#c0392b] px-[18px] py-2.5 text-[13.5px] font-semibold text-white transition-colors hover:bg-[#96271b]';
 
 export default function HiveTokenCard({
   username,
@@ -48,7 +52,7 @@ export default function HiveTokenCard({
             trigger={
               <button
                 type="button"
-                className="flex items-center gap-1.5 rounded-[11px] bg-[#2f7d4f] px-[18px] py-2.5 text-[13.5px] font-semibold text-white hover:bg-[#256640]"
+                className={SEND_BUTTON_CLASS}
                 data-testid="wallet-send-hive-button"
               >
                 {t('wallet.hive_card.send')}

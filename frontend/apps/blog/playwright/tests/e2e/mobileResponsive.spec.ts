@@ -131,8 +131,9 @@ test.describe('Mobile Responsive tests', () => {
     await expect(profilePage.profileName).toBeVisible({ timeout: 15000 });
     await expect(profilePage.profileInfo).toBeVisible();
 
-    // Navigation tabs should be visible on mobile
-    await expect(profilePage.profileBlogLink).toBeVisible();
-    await expect(profilePage.profilePostsLink).toBeVisible();
+    // REMOVED 2026-08-10: the "navigation tabs" (profileBlogLink/
+    // profilePostsLink) checked here targeted `[data-testid="profile-navigation"]`,
+    // which no longer exists — the redesigned profile has no separate Blog/Posts
+    // tab bar, Posts renders by default (see profilePage.ts's class doc comment).
   });
 });

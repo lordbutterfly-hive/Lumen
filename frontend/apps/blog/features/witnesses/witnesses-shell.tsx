@@ -11,7 +11,6 @@ import WitnessesHeader from './witnesses-header';
 import WitnessesStatsBar from './witnesses-stats-bar';
 import WitnessesTable from './witnesses-table';
 import WitnessesRightRail from './witnesses-right-rail';
-import { WitnessViewMode } from './lib/types';
 
 /**
  * /witnesses page shell — mirrors HomeShell's fixed 3-column grid (200 /
@@ -30,27 +29,11 @@ export default function WitnessesShell() {
   const searchParams = useSearchParams();
 
   /**
-   * ★ THE VIEW LIVES IN THE URL (2026-08-10, fuckery list W-9).
-   *
-   * Switching to Params and toggling every filter left the address bar at a bare
-   * `/witnesses`, so no filtered view could be shared, bookmarked or restored by the
-   * back button. The home feed tabs already write `?tab=`, which made this page
-   * inconsistent with the app as well as unhelpful.
-   *
-   * `?view=params` is the tab. Filters follow the same rule and only appear when they
-   * are ON, so the default view keeps a clean URL. `router.replace` with
-   * `scroll: false`, so toggling a checkbox does not push history entries or jump the
-   * page to the top.
+   * ★ FILTER STATE LIVES IN THE URL (W-9). The General/Params toggle went with the
+   * Params view (owner ruling 2026-08-10), so there is no `?view=` to carry and no
+   * second column set to build. Filters still round-trip, so a filtered list stays
+   * shareable and restorable.
    */
-  const viewMode: WitnessViewMode = searchParams?.get('view') === 'params' ? 'params' : 'general';
-
-  const setViewMode = (mode: WitnessViewMode) => {
-    const params = new URLSearchParams(searchParams?.toString() ?? '');
-    if (mode === 'general') params.delete('view');
-    else params.set('view', mode);
-    const query = params.toString();
-    router.replace(query ? `${pathname}?${query}` : pathname ?? '/witnesses', { scroll: false });
-  };
 
   // Mirror the filter state into the query string whenever it changes.
   const filterSignature = JSON.stringify(filtersState.filters);
@@ -86,7 +69,7 @@ export default function WitnessesShell() {
       </aside>
 
       <main className="min-w-0" data-testid="witnesses-main">
-        <WitnessesHeader viewMode={viewMode} onViewModeChange={setViewMode} />
+        <WitnessesHeader />
 
         {/* W-5: `witnessCount` was the UNFILTERED total, so toggling Disabled/Stale
             left 163 rows on screen under a counter still reading 250. It now reports
@@ -122,7 +105,6 @@ export default function WitnessesShell() {
 
         <WitnessesTable
           rows={filtersState.filteredRows}
-          viewMode={viewMode}
           isLoading={data.isLoading}
           isError={data.isError}
           onRetry={data.refetch}

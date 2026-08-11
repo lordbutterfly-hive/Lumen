@@ -3,146 +3,55 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { useNavigationProgress } from '@ui/components/navigation-progress';
 
-export type SearchMode = 'ai' | 'classic' | 'account' | 'userTopic' | 'tag';
 export type SearchSort = 'created' | 'relevance';
 
 /**
- * ★ AN APOSTROPHE IS LEGAL IN A URL AND ILLEGAL IN A HIVE NAME.
+ * ★★★ SEARCH IS ONE THING NOW: POSTS (owner ruling, 2026-08-10).
  *
- * Account and tag search navigate to a PATH (`/@name`, `/trending/tag`) rather
- * than a query string, and `encodeURIComponent` leaves `'` untouched — so
- * searching for `o'brien` asked for `/@o'brien`, a well-formed request for an
- * account that cannot exist, and the reader got the generic "404 Page Not
- * Found" with no hint that their search was the problem.
+ * This hook used to carry five MODES — `ai`, `classic`, `account`, `userTopic`,
+ * `tag` — selected by a dropdown of five unlabelled icons and by four invisible
+ * prefix characters (`@`, `#`, `/`, `%`) typed into the box. The dropdown was
+ * removed on 2026-08-09 as unusable (no text content, no accessible name,
+ * `aria-expanded` never left "false"), which left the modes reachable only by
+ * prefixes nothing on screen ever mentioned. A mode you cannot see is not a
+ * feature, it is a way for the box to silently search for something other than
+ * what was typed — the exact failure that got `$` removed as a prefix.
  *
- * Found by an adversarial regression pass 2026-08-06 looking for exactly this:
- * general search was taught to survive an apostrophe that morning, and these
- * two neighbouring modes were not, because they build a path instead of a query.
+ * So: one field, one destination, `/search?q=…&s=…`. Account and tag lookups
+ * were never searches at all, they were redirects to `/@name` and `/topics/tag`,
+ * both of which are reachable by clicking any byline or topic in the product.
  *
- * Hive names are `[a-z0-9.-]` and tags `[a-z0-9-]`, so anything else the reader
- * typed cannot be part of the thing they are looking for. Strip it and search
- * for the plausible name rather than guaranteeing a 404.
+ * `SearchSort` stays: a sort is a property of one result list, not a second
+ * scope, and the search page still offers it.
  */
-const toHiveName = (value: string): string =>
-  value.trim().toLowerCase().replace(/[^a-z0-9.-]/g, '');
-
-const toTag = (value: string): string =>
-  value.trim().toLowerCase().replace(/[^a-z0-9-]/g, '');
-
-const getMode = (
-  query: string | undefined,
-  aiQuery: string | undefined,
-  userTopicQuery: string | undefined
-) => {
-  if (!!aiQuery) return 'ai';
-  if (!!query) return 'classic';
-  if (!!userTopicQuery) return 'userTopic';
-};
-
 export function useSearch() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const { startNavigation } = useNavigationProgress();
 
   const query = searchParams?.get('q') ?? undefined;
-  const aiQuery = searchParams?.get('ai') ?? undefined;
-  const userTopicQuery = searchParams?.get('a') ?? undefined;
-  const topicQuery = searchParams?.get('p') ?? undefined;
   const sortQuery = searchParams?.get('s') ?? undefined;
 
-  const currentMode = getMode(query, aiQuery, userTopicQuery);
-  const [inputValue, setInputValue] = useState(query ?? aiQuery ?? topicQuery ?? '');
-  const [mode, setMode] = useState<SearchMode>(currentMode ?? 'classic');
-  const [secondInputValue, setSecondInputValue] = useState(userTopicQuery ?? '');
+  const [inputValue, setInputValue] = useState(query ?? '');
 
-  // Sync state with URL params (e.g., when navigating back)
+  // Sync state with URL params (e.g. when navigating back, or when a search is
+  // launched from one page and lands on another).
   useEffect(() => {
-    const newMode = getMode(query, aiQuery, userTopicQuery);
-    if (newMode) {
-      setMode(newMode);
-    }
-    // Always sync with URL - use empty string as fallback for reset
-    setInputValue(aiQuery ?? query ?? topicQuery ?? '');
-    setSecondInputValue(userTopicQuery ?? '');
-  }, [query, aiQuery, userTopicQuery, topicQuery]);
+    setInputValue(query ?? '');
+  }, [query]);
 
-  useEffect(() => {
-    if (inputValue.startsWith('/')) {
-      setMode('userTopic');
-      setInputValue(inputValue.slice(1));
-    }
-    if (inputValue.startsWith('%')) {
-      setMode('ai');
-      setInputValue(inputValue.slice(1));
-    }
-    // ★ `$` REMOVED AS A MODE PREFIX (2026-08-09, tester HOSTILE-09).
-    //
-    // The other four prefixes select a mode you can SEE: `@` account, `#` tag,
-    // `/` user-topic, `%` AI. `$` selected `classic`, which is already the
-    // default — so on the common path it changed nothing visible and simply ATE
-    // the character. Typing `$HIVE` left `HIVE` in the box, with no chip, no
-    // placeholder change, no tooltip. Reproduced with `.fill()`, real
-    // keystrokes, and a paste.
-    //
-    // On a Hive-adjacent product `$HIVE` / `$HBD` / `$BTC` is exactly what a
-    // real person types, and this silently searched for something else. The
-    // other four prefixes are kept: each is unambiguous and each visibly
-    // changes the mode, so the consumed character is explained by what happens
-    // next. `$` was the only one that collided with ordinary query text.
-    if (inputValue.startsWith('@')) {
-      setMode('account');
-      setInputValue(inputValue.slice(1));
-    }
-    if (inputValue.startsWith('#')) {
-      setMode('tag');
-      setInputValue(inputValue.slice(1));
-    }
-  }, [inputValue]);
-
-  const handleSearch = (
-    value: string,
-    currentMode: SearchMode,
-    secondValue?: string,
-    currenySort?: SearchSort
-  ) => {
-    if (!value) return;
+  const handleSearch = (value: string, currentSort?: SearchSort) => {
+    const trimmed = value.trim();
+    if (!trimmed) return;
     startNavigation();
-    switch (currentMode) {
-      case 'account': {
-        const name = toHiveName(value);
-        // Nothing usable left (the reader typed only punctuation): navigating
-        // to `/@` is a guaranteed 404 and tells them nothing.
-        if (!name) break;
-        router.push(`/@${encodeURIComponent(name)}`);
-        break;
-      }
-      case 'ai':
-        router.push(`/search?ai=${encodeURIComponent(value)}`);
-        break;
-      case 'tag': {
-        const tag = toTag(value);
-        if (!tag) break;
-        router.push(`/trending/${encodeURIComponent(tag)}`);
-        break;
-      }
-      case 'userTopic':
-        router.push(
-          `/search?a=${encodeURIComponent(value)}&p=${encodeURIComponent(secondValue ?? '')}&s=${currenySort ?? sortQuery ?? 'relevance'}`
-        );
-        break;
-      case 'classic':
-        router.push(`/search?q=${encodeURIComponent(value)}&s=${currenySort ?? sortQuery ?? 'relevance'}`);
-        break;
-    }
+    router.push(
+      `/search?q=${encodeURIComponent(trimmed)}&s=${currentSort ?? sortQuery ?? 'relevance'}`
+    );
   };
 
   return {
     inputValue,
     setInputValue,
-    mode,
-    setMode,
-    secondInputValue,
-    setSecondInputValue,
     handleSearch,
     sortQuery
   };

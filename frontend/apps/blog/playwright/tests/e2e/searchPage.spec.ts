@@ -25,31 +25,14 @@ test.describe('Search page tests', () => {
 
     // Verify page loaded
     await expect(page).toHaveURL('/search');
-    await expect(searchPage.modeSelectTrigger).toBeVisible();
     await expect(searchPage.searchInput).toBeVisible();
     await expect(searchPage.searchButton).toBeVisible();
   });
 
-  test('search page mode selector is functional', async ({ page, browserName }) => {
-    test.skip(browserName === 'firefox', 'Mode selector has timing issues on Firefox');
-    test.skip(isProductionEnvironment(), PRODUCTION_DROPDOWN_BUG);
-    await searchPage.goto();
-
-    // Verify mode menu can be opened
-    await searchPage.modeSelectTrigger.click();
-    await expect(page.locator('[role="option"]').first()).toBeVisible();
-
-    // Select classic mode
-    await searchPage.modeClassic.click();
-
-    // Verify input is enabled
-    const isEnabled = await searchPage.isInputEnabled();
-    expect(isEnabled).toBe(true);
-
-    // Verify placeholder
-    const placeholder = await searchPage.getInputPlaceholder();
-    expect(placeholder).toBe('Search...');
-  });
+  // DELETED 2026-08-10: 'search page mode selector is functional' tested the
+  // scope dropdown (role="combobox", classic/ai/account/userTopic/tag), which
+  // was removed by owner ruling — see packages/ui/hooks/use-search.ts. There
+  // is one field now; 'search page is loaded correctly' above covers it.
 
   /**
    * CLASSIC SEARCH TESTS - using URL with parameters to bypass disabled input issue
@@ -141,86 +124,17 @@ test.describe('Search page tests', () => {
     expect(resultsCount).toBe(0);
   });
 
-  /**
-   * AI SEARCH (HiveSense) TESTS
-   */
-
-  test('AI search mode option exists', async ({ page }) => {
-    test.skip(isProductionEnvironment(), PRODUCTION_DROPDOWN_BUG);
-    await searchPage.goto();
-
-    // Open mode menu
-    await searchPage.modeSelectTrigger.click();
-    await page.waitForSelector('[role="option"]', { timeout: TIMEOUTS.ELEMENT_VISIBLE });
-
-    // Verify there are 5 options (classic, ai, account, userTopic, tag)
-    const optionsCount = await page.locator('[role="option"]').count();
-    expect(optionsCount).toBe(5);
-
-    // Verify AI option (second) exists
-    await expect(searchPage.modeAi).toBeVisible();
-  });
-
-  test('AI search returns results when available', async ({ page }) => {
-    // Try to load page with AI search
-    await searchPage.gotoWithAiQuery('What is Hive blockchain?');
-
-    // Wait for results with explicit state handling
-    const searchState = await searchPage.waitForSearchResults(TIMEOUTS.SEARCH_RESULTS);
-
-    // Check state - may have results or error (HiveSense may be unavailable)
-    const resultsCount = await searchPage.getResultsCount();
-
-    // If HiveSense works, there should be results
-    // If not, test still passes (graceful degradation)
-    if (resultsCount > 0) {
-      await expect(searchPage.firstPostItem).toBeVisible();
-    } else {
-      test.info().annotations.push({
-        type: 'note',
-        description: `AI search returned no results (state: ${searchState}) - HiveSense may be unavailable`
-      });
-    }
-  });
-
-  /**
-   * ACCOUNT MODE TEST - redirects to profile
-   */
-
-  test('account mode redirects to user profile', async ({ page, browserName }) => {
-    test.skip(browserName === 'webkit', 'Mode switching timing issues on WebKit');
-    test.skip(isProductionEnvironment(), PRODUCTION_DROPDOWN_BUG);
-    await searchPage.goto();
-
-    // Switch to account mode
-    await searchPage.switchToMode('classic'); // first classic so input is enabled
-    await searchPage.switchToMode('account');
-
-    // Enter username and search
-    await searchPage.performSearch('gtg');
-
-    // Should redirect to profile
-    await expect(page).toHaveURL(/@gtg/);
-  });
-
-  /**
-   * TAG MODE TEST - redirects to /trending/tag
-   */
-
-  test('tag mode redirects to trending tag page', async ({ page }) => {
-    test.skip(isProductionEnvironment(), PRODUCTION_DROPDOWN_BUG);
-    await searchPage.goto();
-
-    // Switch to tag mode
-    await searchPage.switchToMode('classic');
-    await searchPage.switchToMode('tag');
-
-    // Enter tag and search
-    await searchPage.performSearch('hive');
-
-    // Should redirect to /trending/hive
-    await expect(page).toHaveURL(/\/trending\/hive/);
-  });
+  // DELETED 2026-08-10: 'AI search mode option exists' and 'AI search returns
+  // results when available' tested the ai/HiveSense mode via the scope
+  // dropdown and `?ai=` query param. Both the dropdown and server-side `ai`
+  // param handling are gone (app/search/page.tsx now reads only `q`/`s` via
+  // parseSearchParams) — see packages/ui/hooks/use-search.ts.
+  //
+  // DELETED 2026-08-10: 'account mode redirects to user profile' and 'tag
+  // mode redirects to trending tag page' tested the account/tag prefix modes
+  // reached via the same removed dropdown. Account and tag lookups are no
+  // longer searches at all — they're reachable by clicking any byline or
+  // topic in the product, per the owner ruling in use-search.ts.
 
   /**
    * STYLES TESTS
@@ -312,8 +226,10 @@ test.describe('Search page tests', () => {
       // Click first result author
       await searchPage.clickFirstResultAuthor();
 
-      // Verify we're on the profile page
-      await expect(page.locator('[data-testid="profile-name"]')).toBeVisible();
+      // Verify we're on the profile page. The redesigned profile carries no
+      // "profile-name" testid (2026-08-10 redesign); profile-stats is the
+      // stable element every profile view still renders.
+      await expect(page.locator('[data-testid="profile-stats"]')).toBeVisible();
     }
   });
 });

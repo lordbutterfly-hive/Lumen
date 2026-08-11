@@ -11,31 +11,61 @@ interface PostCardCommentTooltipProps {
   url: string;
   /** Icon sizing override — the redesign's feed card runs larger glyphs than the classic list. */
   iconClassName?: string;
+  /**
+   * The post's title, so the accessible name says what the count belongs to
+   * ("12 responses on <title>") instead of a screen reader announcing a bare
+   * icon-only "link" and then a second link with no context beyond a digit.
+   * Optional only for the rare caller with no title in scope, where the count
+   * alone is still better than silence.
+   */
+  postTitle?: string;
 }
 
 const PostCardCommentTooltip = ({
   comments,
   url,
-  iconClassName = 'h-4 w-4'
+  iconClassName = 'h-4 w-4',
+  postTitle
 }: PostCardCommentTooltipProps) => {
   const { t } = useTranslation('common_blog');
+  // Unchanged from before — still exactly what the tooltip shows on hover.
+  const commentsLabel =
+    comments === 0
+      ? t('cards.post_card.no_responses')
+      : comments === 1
+        ? t('cards.post_card.response')
+        : t('cards.post_card.responses', { responses: comments });
+  // ★ A11Y FIX: both links below used to expose no accessible name at all (the
+  // icon-only one) or just a bare digit (the count-only one), so a screen
+  // reader announced "link" and then "12, link" with no idea what the 12 was
+  // counting. Same value on both, so either one a reader lands on says the
+  // whole thing.
+  const accessibleLabel = postTitle
+    ? comments === 0
+      ? t('cards.post_card.no_responses_on', { title: postTitle })
+      : comments === 1
+        ? t('cards.post_card.response_on', { title: postTitle })
+        : t('cards.post_card.responses_on', { responses: comments, title: postTitle })
+    : commentsLabel.trim();
+
   return (
     <div className="flex items-center" data-testid="post-children">
       <TooltipProvider>
         <Tooltip>
           <TooltipTrigger className="flex items-center">
             <>
-              <Link href={url} className="flex cursor-pointer items-center">
+              <Link href={url} className="flex cursor-pointer items-center" aria-label={accessibleLabel}>
                 {comments > 1 ? (
-                  <Icons.messagesSquare className={cn(iconClassName, 'sm:mr-1')} />
+                  <Icons.messagesSquare className={cn(iconClassName, 'sm:mr-1')} aria-hidden="true" />
                 ) : (
-                  <Icons.comment className={cn(iconClassName, 'sm:mr-1')} />
+                  <Icons.comment className={cn(iconClassName, 'sm:mr-1')} aria-hidden="true" />
                 )}
               </Link>
               <Link
                 href={url}
                 className="flex cursor-pointer items-center pl-1 hover:text-destructive"
                 data-testid="post-card-response-link"
+                aria-label={accessibleLabel}
               >
                 {comments}
               </Link>
@@ -43,13 +73,7 @@ const PostCardCommentTooltip = ({
           </TooltipTrigger>
           <TooltipContent data-testid="post-card-responses">
             <p>
-              {`${
-                comments === 0
-                  ? t('cards.post_card.no_responses')
-                  : comments === 1
-                    ? t('cards.post_card.response')
-                    : t('cards.post_card.responses', { responses: comments })
-              }`}
+              {commentsLabel}
               {t('cards.post_card.click_to_respond')}
             </p>
           </TooltipContent>

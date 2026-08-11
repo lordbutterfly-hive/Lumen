@@ -36,7 +36,9 @@ export default function DelegatedOutPanel({
       <button
         type="button"
         onClick={() => setDelegatedOpen((prev) => !prev)}
-        className="flex w-full items-center justify-between rounded-xl border border-[#ebebeb] bg-white px-3.5 py-2.5 transition-colors hover:bg-[#f6f7f8]"
+        // W-3: `rounded-xl` is 12px, a third radius on a page that also had 10px
+        // and 11px controls. The system radius for a row is 14px.
+        className="flex w-full items-center justify-between rounded-[14px] border border-[#ebebeb] bg-white px-3.5 py-2.5 transition-colors hover:bg-[#f6f7f8]"
         data-testid="wallet-delegated-out-toggle"
       >
         <span className="flex items-center gap-2.5 text-[13.5px] font-semibold text-[#3f4650]">
@@ -60,7 +62,7 @@ export default function DelegatedOutPanel({
       </button>
 
       {delegatedOpen ? (
-        <div className="rounded-xl border border-[#ebebeb] bg-[#fbfbfa] px-4 py-3.5" data-testid="wallet-delegated-out-list">
+        <div className="rounded-[14px] border border-[#ebebeb] bg-[#fbfbfa] px-4 py-3.5" data-testid="wallet-delegated-out-list">
           <div className="mb-2.5 flex items-center justify-between">
             <span className="text-[13px] font-bold text-[#2a2822]">
               {t('wallet.delegated.accounts_count', { count: delegatees?.length ?? 0 })}

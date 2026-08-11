@@ -7,11 +7,22 @@ import TokenIcon from './token-icon';
 import SavingsDepositDialog from './dialogs/savings-deposit-dialog';
 import SavingsWithdrawDialog from './dialogs/savings-withdraw-dialog';
 
+// W-2/W-3: Deposit was bg-[#2f7d4f] and both were rounded-[10px].
+const DEPOSIT_BUTTON_CLASS =
+  'rounded-[14px] bg-[#c0392b] px-[15px] py-2 text-[13px] font-semibold text-white transition-colors hover:bg-[#96271b]';
+const WITHDRAW_BUTTON_CLASS =
+  'rounded-[14px] border border-[#e4e6e9] bg-white px-[15px] py-2 text-[13px] font-semibold text-[#3f4650] transition-colors hover:bg-[#f6f7f8]';
+
 /**
  * One HIVE or HBD row inside the Savings Vault panel. Generic over currency
- * so both slots (HIVE: 3-day-unlock chip, no APR; HBD: APR chip + claimable
- * + Claim now) share the same markup — `chip` and `extra` are the only bits
- * that differ.
+ * so both slots (HIVE: no APR; HBD: APR chip + claimable + Claim now) share the
+ * same markup — `chip` and `extra` are the only bits that differ.
+ *
+ * ★ `description` is OPTIONAL (W-6). The 3-day withdrawal rule was stated three
+ * times inside this one card: on the HIVE chip, in the panel's description and
+ * again in this row's description. It is now stated once, at panel level, where
+ * it is true of both currencies — which leaves the HIVE row with nothing of its
+ * own to say, so it says nothing rather than repeating the panel above it.
  */
 export default function SavingsSlotCard({
   currency,
@@ -31,7 +42,7 @@ export default function SavingsSlotCard({
   title: string;
   chip: string;
   chipTone: 'neutral' | 'green';
-  description: string;
+  description?: string;
   balance: Big;
   username: string;
   liquidBalance: Big;
@@ -54,7 +65,7 @@ export default function SavingsSlotCard({
             {chip}
           </span>
         </div>
-        <p className="font-serif text-[13px] text-[#6b7280]">{description}</p>
+        {description ? <p className="font-serif text-[13px] text-[#6b7280]">{description}</p> : null}
       </div>
       <div className="flex shrink-0 items-center gap-3.5">
         <span className="font-sans text-[19px] font-bold tabular-nums text-[#161511]">
@@ -67,7 +78,7 @@ export default function SavingsSlotCard({
           trigger={
             <button
               type="button"
-              className="rounded-[10px] bg-[#2f7d4f] px-[15px] py-2 text-[13px] font-semibold text-white hover:bg-[#256640]"
+              className={DEPOSIT_BUTTON_CLASS}
               data-testid={`${testId}-deposit`}
             >
               {depositLabel}
@@ -81,7 +92,7 @@ export default function SavingsSlotCard({
           trigger={
             <button
               type="button"
-              className="rounded-[10px] border border-[#e4e6e9] bg-white px-[15px] py-2 text-[13px] font-semibold text-[#3f4650] hover:bg-[#f6f7f8]"
+              className={WITHDRAW_BUTTON_CLASS}
               data-testid={`${testId}-withdraw`}
             >
               {withdrawLabel}

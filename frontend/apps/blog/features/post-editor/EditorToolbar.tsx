@@ -9,27 +9,39 @@ import {
 import { Icons } from "@ui/components/icons";
 import type { ToolbarButton } from "./lib/toolbar-config";
 import { ICON_CLASS } from "./lib/toolbar-config";
+import { FORMATTING_TOOLBAR_LABEL, SPOILER_LABEL } from "./lib/composer-copy";
 
 interface EditorToolbarProps {
   toolbarButtons: ToolbarButton[];
   isBlockedUser: boolean;
-  convertHiveLinks: boolean;
-  setConvertHiveLinks: (value: boolean) => void;
-  optimizeImages: boolean;
-  setOptimizeImages: (value: boolean) => void;
   onToolbarClick: (action: (view: EditorView) => void) => void;
   onSpoilerClick: () => void;
   inputRef: RefObject<HTMLInputElement | null>;
   t: (key: string) => string;
 }
 
+/**
+ * ★ NAME EVERY GLYPH (2026-08-10, fuckery list C-10 / A-3).
+ *
+ * Measured before this change: sixteen icon-only buttons, and exactly ONE of
+ * them ("Select image") carried an accessible name. The rest had no
+ * `aria-label`, no `title` and no text — a screen reader announced them as
+ * "button", and the Radix tooltip that holds the real name only appears on
+ * hover, which a keyboard or touch reader never triggers. The name already
+ * exists in `toolbar-config.tsx` (`btn.title`); it simply was not being handed
+ * to the accessibility tree. It is now, keyboard shortcut included, so the
+ * spoken name matches the tooltip exactly.
+ *
+ * ★ AND THIS BAR NO LONGER HOLDS SETTINGS (C-5). "Optimize images" and "Convert
+ * Hive links" were two native OS checkboxes (measured `appearance: auto`, no
+ * `aria-label`) parked at the right-hand end of a FORMATTING toolbar. They are
+ * neither formatting nor per-click actions: they are persistent preferences
+ * stored in localStorage that change what happens on paste and on upload. They
+ * now live in their own strip under the editor — see `EditorOptionsBar`.
+ */
 const EditorToolbar: FC<EditorToolbarProps> = ({
   toolbarButtons,
   isBlockedUser,
-  convertHiveLinks,
-  setConvertHiveLinks,
-  optimizeImages,
-  setOptimizeImages,
   onToolbarClick,
   onSpoilerClick,
   inputRef,
@@ -40,9 +52,11 @@ const EditorToolbar: FC<EditorToolbarProps> = ({
       className="flex flex-wrap items-center gap-0.5 border-b border-border bg-background-secondary/50 px-1 py-1"
       data-testid="editor-toolbar"
       role="toolbar"
+      aria-label={FORMATTING_TOOLBAR_LABEL}
     >
       {toolbarButtons.map((btn) => {
         if (btn.name === "image" && isBlockedUser) return null;
+        const label = btn.shortcut ? `${btn.title} (${btn.shortcut})` : btn.title;
         return (
           <TooltipProvider key={btn.name}>
             <Tooltip>
@@ -51,16 +65,14 @@ const EditorToolbar: FC<EditorToolbarProps> = ({
                   type="button"
                   data-name={btn.name}
                   tabIndex={-1}
+                  aria-label={label}
                   className="flex h-7 w-7 items-center justify-center rounded text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
                   onClick={() => onToolbarClick(btn.action)}
                 >
                   {btn.icon}
                 </button>
               </TooltipTrigger>
-              <TooltipContent>
-                {btn.title}
-                {btn.shortcut ? ` (${btn.shortcut})` : ""}
-              </TooltipContent>
+              <TooltipContent>{label}</TooltipContent>
             </Tooltip>
           </TooltipProvider>
         );
@@ -100,59 +112,16 @@ const EditorToolbar: FC<EditorToolbarProps> = ({
               type="button"
               data-name="spoiler"
               tabIndex={-1}
+              aria-label={SPOILER_LABEL}
               className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
               onClick={onSpoilerClick}
             >
               <Icons.eyeOff className={ICON_CLASS} />
             </button>
           </TooltipTrigger>
-          <TooltipContent>Spoiler</TooltipContent>
+          <TooltipContent>{SPOILER_LABEL}</TooltipContent>
         </Tooltip>
       </TooltipProvider>
-
-      <div className="ml-auto" />
-
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <label className="flex cursor-pointer select-none items-center gap-1 px-2 text-xs text-muted-foreground">
-              <input
-                type="checkbox"
-                checked={convertHiveLinks}
-                onChange={(e) => setConvertHiveLinks(e.target.checked)}
-                className="cursor-pointer"
-                tabIndex={-1}
-              />
-              {t("submit_page.convert_hive_links")}
-            </label>
-          </TooltipTrigger>
-          <TooltipContent>
-            {t("submit_page.convert_hive_links_tooltip")}
-          </TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
-
-      {!isBlockedUser && (
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <label className="flex cursor-pointer select-none items-center gap-1 px-2 text-xs text-muted-foreground">
-                <input
-                  type="checkbox"
-                  checked={optimizeImages}
-                  onChange={(e) => setOptimizeImages(e.target.checked)}
-                  className="cursor-pointer"
-                  tabIndex={-1}
-                />
-                {t("submit_page.optimize_images")}
-              </label>
-            </TooltipTrigger>
-            <TooltipContent>
-              {t("submit_page.optimize_images_tooltip")}
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-      )}
     </div>
   );
 };

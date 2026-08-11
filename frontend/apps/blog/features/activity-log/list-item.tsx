@@ -60,8 +60,25 @@ const NotificationListItem = ({
   score,
   type,
   url,
-  lastRead
-}: IAccountNotification & { lastRead: Date }) => {
+  lastRead,
+  isOwner: isOwnerProp
+}: IAccountNotification & {
+  lastRead: Date;
+  /**
+   * ★ THE READ/UNREAD STATE CANNOT BE READ OFF THE URL (2026-08-10, owner
+   * item Q-3).
+   *
+   * This component was written for a route shaped like `/@{username}/
+   * notifications`, so it decided "are these MY notifications" by comparing the
+   * logged-in name against the first path segment. That route is deleted. The
+   * only surface left is the header bell, which renders on EVERY page — so
+   * `pathname.split('/')[1]` was `topics`, `trending`, `''` … and never the
+   * viewer's name, `isOwner` was therefore false on every page, and NO row was
+   * ever marked unread even when the bell's own badge said there were unread
+   * ones. A caller that knows whose list this is says so.
+   */
+  isOwner?: boolean;
+}) => {
   const { t } = useTranslation('common_blog');
   const pathname = usePathname();
   const username = pathname?.split('/')[1].replace('@', '') || '';
@@ -73,7 +90,7 @@ const NotificationListItem = ({
   const imageHosterUrl = configuredImagesEndpoint;
   const fixedUrl = url.startsWith('c') ? url.replace('c', 'trending') : url;
   const errorMessage = type === 'error';
-  const isOwner = user.isLoggedIn && user.username === username;
+  const isOwner = isOwnerProp ?? (user.isLoggedIn && user.username === username);
   const isUnread = isOwner && notificationDate > lastRead;
 
   // Get the first mentioned user for avatar display
@@ -140,19 +157,34 @@ const NotificationListItem = ({
         </Link>
         <span className="flex items-center gap-2 text-xs text-gray-500" data-testid="notification-timestamp">
           <span className={color}>{icon}</span>
-          <TimeAgo date={date} />
+          {/* One format for the whole list — see TimeAgo's `numeric` prop. */}
+          <TimeAgo date={date} numeric="always" />
         </span>
       </div>
 
-      {/* Reputation badge */}
+      {/* ★ THIS NUMBER IS A REPUTATION, AND IT NOW SAYS SO (2026-08-10, owner
+          item Q-2). It rendered as a bare figure in a filled pill on the right
+          edge of every row — the exact shape and position of an unread counter —
+          so a list of 50 notifications showed 50 unexplained badges reading 25,
+          43, 50, 67, 70. Its only explanation was a hover tooltip, which a
+          touch device never sees and a screen reader was never offered: the
+          element carried no `aria-label` and no `title`, so it announced as the
+          digits alone. Now it is labelled text, not a count-shaped chip. */}
       <TooltipProvider>
         <Tooltip>
           <TooltipTrigger asChild>
             <div
-              className="flex shrink-0 items-center justify-center rounded-full bg-background-tertiary px-2 py-0.5 text-xs text-foreground/70"
+              className="flex shrink-0 items-center gap-1 font-sans text-[11px] text-[#6b7280]"
               data-testid="notification-reputation-badge"
+              title={t('navigation.profile_notifications_tab_navbar.reputation_at_time')}
+              aria-label={`${t('navigation.profile_notifications_tab_navbar.reputation_label')} ${score}`}
             >
-              {score}
+              <span aria-hidden className="uppercase tracking-wide">
+                {t('navigation.profile_notifications_tab_navbar.reputation_label')}
+              </span>
+              <span aria-hidden className="font-semibold tabular-nums text-[#161511]">
+                {score}
+              </span>
             </div>
           </TooltipTrigger>
           <TooltipContent side="left">

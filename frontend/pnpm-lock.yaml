@@ -678,6 +678,9 @@ importers:
       '@hiveio/wax-signers-peakvault':
         specifier: catalog:hiveio-toolset
         version: 1.28.6-rc10-stable.260326112051
+      '@hookform/resolvers':
+        specifier: ^3.10.0
+        version: 3.10.0(react-hook-form@7.54.2(react@18.3.0))
       '@tanstack/react-query':
         specifier: ^4.36.1
         version: 4.41.0(react-dom@18.3.0(react@18.3.0))(react@18.3.0)
@@ -711,6 +714,9 @@ importers:
       react-dom:
         specifier: 18.3.0
         version: 18.3.0(react@18.3.0)
+      react-hook-form:
+        specifier: ^7.49.2
+        version: 7.54.2(react@18.3.0)
       react-modal-promise:
         specifier: ^1.0.2
         version: 1.0.2(react-dom@18.3.0(react@18.3.0))(react@18.3.0)

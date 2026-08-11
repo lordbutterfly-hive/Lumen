@@ -468,12 +468,16 @@ test.describe('Creating post tests with POM and fixture users', () => {
     await postEditorPage.getPostTitleInput.fill(postTitle);
     await postEditorPage.getEditorContentTextarea.fill(postContentText);
     await postEditorPage.getEnterYourTagsInput.fill(postTag);
-    // Set wrong name of the author
+    // Set wrong name of the author. ★ Since 2026-08-10 (C-3) this field lives
+    // in the Advanced settings dialog rather than in the open metadata card,
+    // and the dialog refuses to save an invalid value, so the error is asserted
+    // there instead of on the form after a submit attempt.
+    await postEditorPage.openAdvancedSettings();
     await postEditorPage.getAuthorInput.fill(wrongAuthorCharacter);
-    await expect(postEditorPage.getSubmitPostButton).toBeVisible();
-    await postEditorPage.getSubmitPostButton.click();
-    // Check expected error message is visible
-    await expect(postEditorPage.getFormContainer).toContainText(errorMessage);
+    await expect(postEditorPage.getAuthorErrorMessage).toContainText(errorMessage);
+    await expect(
+      denserAutoTest0Page.page.locator('[data-testid="advanced-settings-save-button"]')
+    ).toBeDisabled();
   });
 
   test('After creating post by clicking New Post button in the community, user is moved to the specific community post list page', async ({

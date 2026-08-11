@@ -138,7 +138,11 @@ const PopoverCardData = ({ author, blacklist, authorReputation, liteName }: Popo
                 >
                   @{author}
                 </BasePathLink>
-                <span className="text-sm text-muted-foreground" data-testid="popover-card-user-reputation">
+                <span
+                  className="text-sm text-muted-foreground"
+                  data-testid="popover-card-user-reputation"
+                  aria-label={`${t('post_content.reputation_title')} ${accountReputation(authorReputation)}`}
+                >
                   ({accountReputation(authorReputation)})
                 </span>
               </div>

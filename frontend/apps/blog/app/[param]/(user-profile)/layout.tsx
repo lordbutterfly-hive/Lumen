@@ -1,4 +1,3 @@
-import ProfileChromeSwitch from '@/blog/features/account-profile/redesign/profile-chrome-switch';
 import { ReactNode } from 'react';
 import { Metadata } from 'next';
 import { dehydrate, Hydrate } from '@tanstack/react-query';
@@ -180,11 +179,26 @@ const Layout = async ({ children, params }: { children: ReactNode; params: { par
   }
   const dehydratedState = dehydrate(queryClient);
   queryClient.clear();
-  return (
-    <Hydrate state={dehydratedState}>
-      <ProfileChromeSwitch>{children}</ProfileChromeSwitch>
-    </Hydrate>
-  );
+
+  // ★★★ NO CHROME HERE, AND THAT IS THE FIX (2026-08-10, fuckery list L-3).
+  //
+  // This layout used to wrap every child in `ProfileChromeSwitch`, which read
+  // `usePathname()` and rendered the legacy `ProfileLayout` — dark-navy cover,
+  // translucent card, slate "Blog / Social" tab bar, four moderation links next
+  // to the follower stats — on every path EXCEPT the exact string `/@username`.
+  // The result was two complete profile implementations living in one URL space:
+  // the redesigned Lumen profile at `/@username`, the old product one route
+  // sideways at `/@username/settings` (or /followers, /communities, any list),
+  // still calling itself the profile and still carrying a "Blog" tab that took
+  // you back to the other one.
+  //
+  // The chrome now belongs to the ROUTE, not to a client-side string comparison:
+  // `/@username` renders the redesigned profile (page.tsx -> ProfileGrid, which
+  // brings its own shell) and each sub-route mounts
+  // `features/layouts/user-profile/profile-subpage-shell` from its own
+  // layout.tsx. A route can no longer render a chrome that is not its own, and
+  // there is no second profile left to reach.
+  return <Hydrate state={dehydratedState}>{children}</Hydrate>;
 };
 
 export default Layout;

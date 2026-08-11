@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Entry } from '@hive/common-hiveio-packages/wax';
-import { cn, numberWithCommas } from '@ui/lib/utils';
+import { cn } from '@ui/lib/utils';
 import { useTranslation } from '@/blog/i18n/client';
 import ProfilePostsList from './profile-posts-list';
 import ProfileCommentsList from './profile-comments-list';
@@ -18,24 +18,27 @@ function toTabKey(raw: string | null): TabKey {
 
 /**
  * Underline Posts/Comments tab control (design-handoff-v2, Profile.dc.html):
- * active tab = red underline + filled count chip. `?tab=` sync mirrors the
- * homepage's FeedTabs so the tab survives back/forward and is linkable.
+ * active tab = red underline. `?tab=` sync mirrors the homepage's FeedTabs so
+ * the tab survives back/forward and is linkable.
  *
- * `postsCount` is the account's total `post_count` (posts+comments
- * combined — Hive doesn't split them account-side). The Comments tab has no
- * equivalent real total available without a dedicated count query, so its
- * chip is omitted rather than showing a fabricated number.
+ * ★ P-3: NEITHER TAB CARRIES A COUNT NOW. "Posts" had a red count chip and
+ * "Comments" had nothing beside it, so the pair read as one finished control
+ * and one unfinished one. There is no honest number to give Comments — Hive
+ * exposes no account-side comment total, and the alternative was to invent one.
+ * And the number Posts was showing was not the posts count either: `post_count`
+ * on a Hive account is posts AND comments together, so the chip labelled a
+ * combined total as one half of itself. The stats bar three rows up already
+ * shows that same figure, correctly labelled, so nothing is lost by dropping
+ * the chip and the two tabs become symmetric.
  */
 export default function ProfileTabs({
   username,
   observer,
-  postsCount,
   initialPosts,
   lite = false
 }: {
   username: string;
   observer: string;
-  postsCount?: number;
   initialPosts?: Entry[] | null;
   /** True for a Lumen lite account: its posts live in Lumen's own store, not on
    *  Hive under this handle. Decides which source both tabs read from. */
@@ -71,7 +74,6 @@ export default function ProfileTabs({
           isActive={activeTab === 'posts'}
           onClick={() => selectTab('posts')}
           label={t('user_profile.lists.posts_label')}
-          count={postsCount}
         />
         <TabButton
           isActive={activeTab === 'comments'}
@@ -89,17 +91,7 @@ export default function ProfileTabs({
   );
 }
 
-function TabButton({
-  isActive,
-  onClick,
-  label,
-  count
-}: {
-  isActive: boolean;
-  onClick: () => void;
-  label: string;
-  count?: number;
-}) {
+function TabButton({ isActive, onClick, label }: { isActive: boolean; onClick: () => void; label: string }) {
   return (
     <button
       type="button"
@@ -112,16 +104,6 @@ function TabButton({
       )}
     >
       {label}
-      {typeof count === 'number' ? (
-        <span
-          className={cn(
-            'rounded-full px-2.5 py-0.5 text-[12.5px] font-bold tabular-nums',
-            isActive ? 'bg-[#fdecea] text-[#c0392b]' : 'bg-[#f1f3f5] text-[#9ca3af]'
-          )}
-        >
-          {numberWithCommas(String(count))}
-        </span>
-      ) : null}
     </button>
   );
 }

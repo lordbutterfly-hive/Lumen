@@ -95,7 +95,14 @@ export class PostEditorPage {
         this.getSelectImageButtonInEditorToolbar = this.getEditorToolbar.locator('[data-name="text2image"]');
         this.getPostSummaryInput = page.locator('[name="postSummary"]');
         this.getEnterYourTagsInput = page.locator('[name="tags"]');
-        this.getAuthorInput = page.locator('[name="author"]');
+        // ★ The alternative-author field MOVED into the Advanced settings
+        // dialog (2026-08-10, fuckery list C-3): it used to be a bare,
+        // unlabelled `[name="author"]` input sitting in the open metadata card,
+        // shown to every first-time writer. Call `openAdvancedSettings()`
+        // before touching this locator; it does not exist until the dialog is
+        // open. It is a plain controlled input, not a react-hook-form field, so
+        // it is addressed by testid rather than by `name`.
+        this.getAuthorInput = page.locator('[data-testid="alternative-author-input"]');
         this.getAuthorRewardsDescription = page.locator('[data-testid="author-rewards-description"]');
         this.getMaximumAcceptedPayoutDescription = page.getByText('Maximum Accepted Payout');
         this.getAdvancedSettingsButton = page.locator('[data-testid="advanced-settings-button"]');
@@ -143,12 +150,9 @@ export class PostEditorPage {
                 ':scope > div[class~="text-destructive"], :scope > div[class~="text-red-500"]'
             )
             .first();
+        // Inside the Advanced settings dialog, next to the input itself.
         this.getAuthorErrorMessage = page
-            .locator('input[name="author"]')
-            .locator('xpath=ancestor::*[contains(@class,"space-y-2")][1]')
-            .locator(
-                ':scope > div[class~="text-destructive"], :scope > div[class~="text-red-500"]'
-            )
+            .locator('[data-testid="alternative-author-box"] div[class~="text-destructive"]')
             .first();
         this.getSubmitRequirementsHint = page.getByTestId('submit-requirements-hint');
         // Sibling span of the summary input: shows "<len>/140", turns red >140.
@@ -177,7 +181,10 @@ export class PostEditorPage {
         expect(this.getFormContainer).toBeVisible();
         expect(this.getPreviewContainer).toBeVisible();
         expect(this.getEditorContent).toBeVisible();
-        expect(this.getPostSummaryInput).toHaveAttribute('placeholder', 'Post summary(for posts & SEO, max 140 chars)');
+        expect(this.getPostSummaryInput).toHaveAttribute(
+            'placeholder',
+            'Post summary (shown in feeds and search results)'
+        );
         expect(this.getEnterYourTagsInput).toHaveAttribute('placeholder', 'Enter your tags separated by a space');
         expect(this.getAdvancedSettingsButton).toBeVisible();
         expect(this.getPostingToListTrigger).toBeVisible();
@@ -189,11 +196,30 @@ export class PostEditorPage {
         expect(this.getFormContainer).toBeVisible();
         expect(this.getPreviewContainer).toBeVisible();
         expect(this.getEditorContent).toBeVisible();
-        expect(this.getPostSummaryInput).toHaveAttribute('placeholder', 'Post summary(for posts & SEO, max 140 chars)');
+        expect(this.getPostSummaryInput).toHaveAttribute(
+            'placeholder',
+            'Post summary (shown in feeds and search results)'
+        );
         expect(this.getEnterYourTagsInput).toHaveAttribute('placeholder', 'Enter your tags separated by a space');
         expect(this.getAdvancedSettingsButton).toBeVisible();
         expect(this.getPostingToListTrigger).toContainText(communityName);
         expect(this.getSubmitPostButton).toBeVisible();
+    }
+
+    /**
+     * Open the Advanced settings dialog. Since 2026-08-10 this is where the
+     * alternative-author field lives (C-3), alongside max payout,
+     * beneficiaries and post templates.
+     */
+    async openAdvancedSettings() {
+        await this.getAdvancedSettingsButton.click();
+        await expect(this.page.locator('[data-testid="advanced-settings-title"]')).toBeVisible();
+    }
+
+    /** Save and close the Advanced settings dialog. */
+    async saveAdvancedSettings() {
+        await this.page.locator('[data-testid="advanced-settings-save-button"]').click();
+        await expect(this.page.locator('[data-testid="advanced-settings-title"]')).toBeHidden();
     }
 
     async validateThePostEditorOfSpecificPostIsLoaded(postTitle: string, postContent: string, postSummary: string, postTags: string){

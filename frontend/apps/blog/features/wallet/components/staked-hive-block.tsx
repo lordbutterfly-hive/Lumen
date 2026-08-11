@@ -12,6 +12,12 @@ import PowerDownDialog from './dialogs/power-down-dialog';
 import StopPowerDownAlert from './dialogs/stop-power-down-alert';
 import DelegatedOutPanel from './delegated-out-panel';
 
+// W-2/W-3: both were rounded-[10px], and Stake was bg-[#2f7d4f].
+const STAKE_BUTTON_CLASS =
+  'flex items-center gap-1.5 rounded-[14px] bg-[#c0392b] px-[15px] py-2 text-[13px] font-semibold text-white transition-colors hover:bg-[#96271b]';
+const UNSTAKE_BUTTON_CLASS =
+  'flex items-center gap-1.5 rounded-[14px] border border-[#e4e6e9] bg-white px-[15px] py-2 text-[13px] font-semibold text-[#3f4650] transition-colors hover:bg-[#f6f7f8]';
+
 export default function StakedHiveBlock({
   username,
   figures,
@@ -45,7 +51,8 @@ export default function StakedHiveBlock({
 
           {powerDown.isActive ? (
             <div
-              className="mt-2.5 flex items-center gap-2.5 rounded-[10px] border border-[#f6e2c4] bg-[#fef6ec] px-3 py-2.5 text-[12.5px] text-[#8a5a20]"
+              // W-3: was rounded-[10px]. A notice is a row; rows are 14px.
+              className="mt-2.5 flex items-center gap-2.5 rounded-[14px] border border-[#f6e2c4] bg-[#fef6ec] px-3 py-2.5 text-[12.5px] text-[#8a5a20]"
               data-testid="wallet-power-down-notice"
             >
               <AlertCircle className="h-[15px] w-[15px] shrink-0 text-[#c98a2b]" />
@@ -77,8 +84,16 @@ export default function StakedHiveBlock({
             <div className="font-sans text-[20px] font-bold tabular-nums text-[#161511]" data-testid="wallet-hp-balance">
               {formatTokenAmount(vestingHp)}
             </div>
-            <div className="text-[12px] tabular-nums text-[#9ca3af]">
-              {t('wallet.staked.total_label', { amount: formatTokenAmount(netHp) })}
+            {/* ★ W-11: ONE LABEL, ONE FORMAT, ON BOTH PAGES.
+                This read "Total 69,519.353 HP" while the profile's own tile read
+                "69,519 HP after delegations" for the same account and the same
+                figure — two labels and two precisions for one number, and "Total"
+                was the wrong word for it besides (it is smaller than the headline
+                above, because it subtracts delegated-out HP). Both surfaces now
+                use `profile.stats.hp_effective` and the wallet's 3-decimal token
+                format. See features/account-profile/redesign/profile-stats-bar.tsx. */}
+            <div className="text-[12px] tabular-nums text-[#9ca3af]" data-testid="wallet-hp-effective">
+              {t('profile.stats.hp_effective', { value: formatTokenAmount(netHp) })}
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -88,7 +103,7 @@ export default function StakedHiveBlock({
               trigger={
                 <button
                   type="button"
-                  className="flex items-center gap-1.5 rounded-[10px] bg-[#2f7d4f] px-[15px] py-2 text-[13px] font-semibold text-white hover:bg-[#256640]"
+                  className={STAKE_BUTTON_CLASS}
                   data-testid="wallet-stake-button"
                 >
                   {t('wallet.staked.stake')}
@@ -106,7 +121,7 @@ export default function StakedHiveBlock({
               trigger={
                 <button
                   type="button"
-                  className="flex items-center gap-1.5 rounded-[10px] border border-[#e4e6e9] bg-white px-[15px] py-2 text-[13px] font-semibold text-[#3f4650] hover:bg-[#f6f7f8]"
+                  className={UNSTAKE_BUTTON_CLASS}
                   data-testid="wallet-unstake-button"
                 >
                   {t('wallet.staked.unstake')}

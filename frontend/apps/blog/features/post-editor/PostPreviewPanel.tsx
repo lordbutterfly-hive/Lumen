@@ -10,6 +10,7 @@ import { useTranslation } from "@/blog/i18n/client";
 import RendererContainer from "@/blog/features/post-rendering/rendererContainer";
 import { postClassName } from "@/blog/features/post-editor/lib/utils";
 import { previewGateHolds } from "@/blog/features/post-editor/lib/preview-gate";
+import { SYNC_SCROLL_OFF, SYNC_SCROLL_ON } from "@/blog/features/post-editor/lib/composer-copy";
 
 interface PostPreviewPanelProps {
   preview: boolean;
@@ -54,68 +55,96 @@ export function PostPreviewPanel({
   const previewBlocked = previewGateHolds(previewChars, approvedChars);
 
   return (
+    /* ★★★ THE RIGHT HALF OF THE PAGE WAS DEAD BELOW THE FOLD (2026-08-10, C-12).
+       Measured: the form column ran 1519px tall while this panel was a fixed
+       `h-[80vh]` block at the top of the row. Scroll past the first screen and
+       the preview had scrolled away with it, leaving the entire right half of
+       the composer as empty white for the rest of the page. A preview you cannot
+       see while you write is not a preview.
+
+       `self-start` + `sticky` pins the panel to the viewport as the form scrolls
+       underneath it, so it stays beside whatever you are editing. `self-start`
+       is not optional: this is a flex row, and a stretched item is as tall as
+       the row, which leaves sticky nothing to travel in. Its own inner scroller
+       is unchanged, so the sync-scroll pairing still works. */
     <div
       className={clsx("relative flex flex-col lg:w-1/2", {
         hidden: !preview,
         "lg:w-full": !sideBySide,
-        "h-[80vh]": sideBySide,
+        "h-[80vh] lg:sticky lg:top-24 lg:h-[calc(100vh-8rem)] lg:self-start": sideBySide,
       })}
       data-testid="preview-container"
     >
-      {/* Floating sync scroll button */}
-      {sideBySide && (
-        <div
-          className="group absolute left-[-7px] top-1/2 z-10 hidden -translate-x-1/2 -translate-y-1/2 lg:block"
-          data-testid="sync-scroll-container"
-        >
-          <div className="flex h-[150px] items-center justify-center">
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-10 w-10 rounded-full border-border bg-background p-0 opacity-20 shadow-lg transition-opacity duration-200 hover:bg-background-secondary group-hover:opacity-100"
-                    onClick={() => setSyncScroll((prev) => !prev)}
-                    data-testid="sync-scroll-toggle"
-                    tabIndex={-1}
-                  >
-                    {syncScroll ? (
-                      <Icons.link2 className="h-5 w-5 text-foreground" />
-                    ) : (
-                      <Icons.link2Off className="h-5 w-5 text-muted-foreground" />
-                    )}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  {syncScroll
-                    ? t("submit_page.disable_sync_scroll")
-                    : t("submit_page.enable_sync_scroll")}
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          </div>
-        </div>
-      )}
-      <div className="flex items-center justify-between rounded-t-lg border border-b-0 border-border bg-background-secondary/50 px-4 py-2">
-        <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-t-[14px] border border-b-0 border-[#ebebeb] bg-white px-4 py-2">
+        {/* Same section-label treatment as the metadata and publishing cards (C-14). */}
+        <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#c0392b]/70">
           {t("submit_page.preview")}
         </span>
-        <Link
-          target="_blank"
-          href="https://docs.github.com/en/get-started/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax"
-          tabIndex={-1}
-        >
-          <span className="text-xs text-muted-foreground hover:text-destructive transition-colors">
+
+        <div className="flex items-center gap-2">
+          {/* ★★★ AN UNLABELLED ICON FLOATING IN THE GUTTER (2026-08-10, C-13).
+              The scroll-sync toggle used to be a 40px round button parked in the
+              7px gap between the two panes, at `opacity: 0.2`, holding a link
+              icon and NOTHING else: no `aria-label`, no visible text, and a
+              tooltip that only a mouse hover could ever summon. Measured at
+              x=701 between the columns. Nobody who did not already know what it
+              did could find out.
+
+              It is now a labelled control in the preview header, where the thing
+              it governs lives, and it says which state it is in rather than
+              which state it would move to. Both `data-testid`s are kept on the
+              same elements so `playwright/tests/e2e/syncScroll.spec.ts` (which
+              hovers the container, then clicks the toggle) still addresses it. */}
+          {sideBySide && (
+            <div data-testid="sync-scroll-container">
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1.5 rounded-[14px] border border-[#ebebeb] bg-white px-3 py-1.5 text-xs font-medium text-[#6b7280] transition-colors hover:border-[#c0392b] hover:text-[#c0392b] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c0392b]/40"
+                      onClick={() => setSyncScroll((prev) => !prev)}
+                      data-testid="sync-scroll-toggle"
+                      aria-pressed={syncScroll}
+                    >
+                      {syncScroll ? (
+                        <Icons.link2 className="h-3.5 w-3.5" aria-hidden />
+                      ) : (
+                        <Icons.link2Off className="h-3.5 w-3.5" aria-hidden />
+                      )}
+                      {syncScroll ? SYNC_SCROLL_ON : SYNC_SCROLL_OFF}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {syncScroll
+                      ? t("submit_page.disable_sync_scroll")
+                      : t("submit_page.enable_sync_scroll")}
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
+          )}
+
+          {/* ★ A LINK THAT LOOKED LIKE A CAPTION (C-11). Measured
+              `text-decoration: none`, muted grey, `tabIndex={-1}`: an
+              off-site help link with no link affordance and no way to reach it
+              from the keyboard. Underlined, given the external-link glyph, and
+              put back in the tab order. */}
+          <Link
+            target="_blank"
+            rel="noreferrer"
+            href="https://docs.github.com/en/get-started/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax"
+            className="inline-flex items-center gap-1 text-xs text-[#6b7280] underline underline-offset-2 transition-colors hover:text-[#c0392b] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c0392b]/40"
+          >
             {t("submit_page.markdown_styling_guide")}
-          </span>
-        </Link>
+            <Icons.externalLink className="h-3 w-3" aria-hidden />
+          </Link>
+        </div>
       </div>
       <div
         ref={previewContainerRef}
         data-testid="preview-scroller"
-        className="flex h-full overflow-y-auto overscroll-contain rounded-b-lg border border-border"
+        className="flex h-full overflow-y-auto overscroll-contain rounded-b-[14px] border border-[#ebebeb] bg-white"
       >
         {previewContent && previewBlocked ? (
           /* ★★★ THE FREEZE, STOPPED AT ITS SOURCE (2026-08-09).
@@ -140,7 +169,7 @@ export function PostPreviewPanel({
           >
             <Icons.eye className="h-8 w-8 opacity-20" />
             <span className="text-sm">
-              Live preview is paused — this draft is {Math.round(previewContent.length / 1000)}k
+              Live preview is paused. This draft is {Math.round(previewContent.length / 1000)}k
               characters, and rendering it on every change would freeze the tab. Your text is safe
               and still saving.
             </span>

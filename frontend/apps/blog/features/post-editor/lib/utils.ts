@@ -9,6 +9,7 @@ import { Dispatch, SetStateAction } from 'react';
 import { uploadLiteImage } from '@/blog/lib/lite/client/lite-profile';
 import { processImageForUpload } from './image-processing';
 import type { BatchFileItem, FileProcessingStatus, ProcessingOptions } from './image-processing-types';
+import { TAGS_REQUIRED } from './composer-copy';
 
 const logger = getLogger('app');
 
@@ -33,7 +34,10 @@ export function parseTags(value: string): string[] {
 }
 
 export function validateTagInput(value: string, required: boolean, t: TFunction<'common_blog', undefined>) {
-  if (!value || value.trim() === '') return required ? t('submit_page.category_selector.required') : null;
+  // ★ C-2: `submit_page.category_selector.required` reads "Required when post to
+  // My Blog", which is not a sentence. See lib/composer-copy.ts for why the
+  // replacement is a constant rather than a new key in nine locale files.
+  if (!value || value.trim() === '') return required ? TAGS_REQUIRED : null;
   const tags = parseTags(value);
   return tags.length > MAX_TAGS
     ? t('submit_page.category_selector.use_limited_amount_of_categories', {

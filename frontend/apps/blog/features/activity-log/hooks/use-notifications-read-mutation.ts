@@ -21,8 +21,17 @@ export function useMarkAllNotificationsAsReadMutation() {
       return response;
     },
     onSettled: (data) => {
+      // ★ THE FIELD IS `lastread`, NOT `lastRead` (2026-08-10). This optimistic
+      // write invented a key nothing reads: `bridge.unread_notifications`
+      // returns `{ unread, lastread }`, and both consumers — the header bell
+      // (app-header.tsx) and the notifications panel — read `data.lastread`.
+      // Writing `lastRead` left the cached entry with NO lastread at all, so
+      // every consumer fell back to `new Date()` between the broadcast and the
+      // refetch 6s later. Harmless-looking, and exactly the sort of thing that
+      // makes "mark all as read" appear to work while the read cursor is
+      // guessed rather than known.
       queryClient.setQueryData(['unreadNotifications', user.username], {
-        lastRead: data?.date || new Date().toISOString(),
+        lastread: data?.date || new Date().toISOString(),
         unread: 0
       });
     },

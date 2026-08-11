@@ -315,6 +315,95 @@ async function viewerBlockActor(userId: string, username: string): Promise<Follo
   return upgraded ? { userId: upgraded.userId } : { hive: name };
 }
 
+/* ------------------------------------------------------------------ */
+/* What a feed card actually needs                                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * ★★★ 772 KB TO RENDER THIRTY TWO-LINE EXCERPTS — MEASURED 2026-08-10.
+ *
+ * One `?limit=30` response off this route weighed 958,585 bytes, ~32 KB per post.
+ * Broken down by field, across the real thirty:
+ *
+ *   active_votes   684 KB   73.0%     <- up to 1000 voter records per post
+ *   body           189 KB   20.2%     <- full post text, for a two-line dek
+ *   json_metadata   37 KB    4.0%
+ *   everything else  ~9 KB    0.9%
+ *
+ * Neither of the top two is rendered. `active_votes` has exactly ONE consumer in
+ * the card — `votes-component.tsx` does `post.active_votes.find(e => e.voter ===
+ * voter)` to decide whether the signed-in reader has already voted — so every
+ * vote by anyone else is shipped to be discarded. Keeping only the reader's own
+ * vote is byte-for-byte identical from that component's point of view.
+ *
+ * `body` has two consumers, both of which read only the start of it:
+ * `getPostSummary` -> `extractBodySummary` renders the body, strips it to text and
+ * keeps THE FIRST LINE capped at 200 characters; `find_first_img` prefers
+ * `json_metadata.image` (27 of the 30 sampled posts resolve there) and only scans
+ * the body as a fallback. Measured against those same thirty, a 4000-character
+ * head loses ZERO first images and still cuts the field from 190,645 to 95,040
+ * bytes — and the head is padded with the first image markup found further down
+ * whenever the cut would have dropped it, so a long post cannot lose its
+ * thumbnail either.
+ *
+ * Projected on the measured response: 958,585 -> 161,368 bytes, an 83% cut, with
+ * no change to a single pixel. The client wins twice, because `extractBodySummary`
+ * renders whatever markdown it is handed — a smaller body is also less work in
+ * the browser, on every card, on every render.
+ */
+const FEED_BODY_CHARS = 4000;
+/** Markdown image, HTML image, and bare image URL — the forms `find_first_img` looks for. */
+const BODY_IMAGE_PATTERNS = [
+  /!\[[^\]]*\]\([^)\s]+\)/,
+  /<img\s+[^>]*src="[^"]+"[^>]*>/i,
+  /https?:\/\/\S+\.(?:png|jpe?g|webp|gif)/i
+];
+
+function trimFeedBody(body: string): string {
+  if (body.length <= FEED_BODY_CHARS) return body;
+  const head = body.slice(0, FEED_BODY_CHARS);
+  const rescued: string[] = [];
+  for (const pattern of BODY_IMAGE_PATTERNS) {
+    if (pattern.test(head)) continue;
+    const found = body.match(pattern);
+    if (found) rescued.push(found[0]);
+  }
+  return rescued.length > 0 ? `${head}\n\n${rescued.join('\n')}` : head;
+}
+
+/**
+ * Strip a feed page down to what its cards read. See the note above for the
+ * measurements and for why each field is safe to drop.
+ *
+ * `viewer` is whose vote to keep. Empty (signed out) keeps none, which is right:
+ * there is nobody for the card to highlight the arrows for.
+ */
+function trimFeedEntries(entries: Entry[], viewer: string): Entry[] {
+  const me = (viewer || '').toLowerCase();
+  return entries.map((entry) => {
+    const votes = Array.isArray(entry.active_votes) ? entry.active_votes : [];
+    return {
+      ...entry,
+      active_votes: me ? votes.filter((vote) => (vote.voter ?? '').toLowerCase() === me) : [],
+      body: trimFeedBody(entry.body ?? '')
+    };
+  });
+}
+
+/**
+ * ★ EVERY BRANCH ANSWERS THROUGH HERE, for the same reason the block filter sits in
+ * a wrapper: this route already returns from eight places and the ninth will be
+ * added by someone who has not read this file. A branch that forgets to trim does
+ * not fail loudly — it just quietly ships a megabyte again.
+ */
+function feedJson(
+  body: Record<string, unknown> & { entries: Entry[] },
+  viewer: string,
+  init?: { status?: number }
+): NextResponse {
+  return NextResponse.json({ ...body, entries: trimFeedEntries(body.entries, viewer) }, init);
+}
+
 async function serveForYou(req: NextRequest): Promise<NextResponse> {
   const limitParam = Number(req.nextUrl.searchParams.get('limit'));
   const limit = Number.isFinite(limitParam)
@@ -383,28 +472,36 @@ async function serveForYou(req: NextRequest): Promise<NextResponse> {
       );
       const onTopic = topic ? posts.filter((e) => hasTopic(e, topic)) : posts;
       const merged = await mergeLumenEngagement(onTopic);
-      return NextResponse.json({
+      return feedJson({
         entries: merged,
         source: 'chain-page',
         // Through `cursorOf` like every other branch, so the chain-coordinate
         // rule lives in exactly one place and a sixth return cannot forget it.
         nextCursor: cursorOf(merged)
-      });
+      }, viewer);
     } catch (error) {
       logger.error(error, 'for-you: cursor page failed');
-      return NextResponse.json({ entries: [], source: 'chain-page', nextCursor: null });
+      // ★ 502, NOT AN EMPTY 200 (2026-08-10). A continuation page that failed is a
+      // FAILURE, and saying so is what lets the reader's client keep the pages it
+      // already has. Answering `{entries: []}` with a 200 told react-query the
+      // request succeeded and Hive simply had nothing more — which ends the
+      // infinite scroll permanently on one transient node error.
+      return NextResponse.json(
+        { entries: [], source: 'chain-page', nextCursor: null, error: 'cursor page failed' },
+        { status: 502 }
+      );
     }
   }
 
   if (!getRecsysConfig()) {
-    return fallback(chainObserver, limit, 'unconfigured', 'RECSYS_FEED_URL is not set', topic);
+    return fallback(chainObserver, limit, 'unconfigured', 'RECSYS_FEED_URL is not set', topic, viewer);
   }
   if (!viewer) {
     // Logged out: there is no viewer to personalise for, and recsys ranks
     // against a viewer by definition. Trending is the honest answer here, not a
     // degradation — say so distinctly so it does not pollute the alerting signal
     // for a genuinely broken ranker.
-    return fallback(chainObserver, limit, 'anonymous', 'no signed-in viewer to rank for', topic);
+    return fallback(chainObserver, limit, 'anonymous', 'no signed-in viewer to rank for', topic, viewer);
   }
 
   // ★ A TOPIC FEED IS NOT THE READER'S FEED, and the store is keyed by viewer
@@ -435,10 +532,10 @@ async function serveForYou(req: NextRequest): Promise<NextResponse> {
     const topicKey = `${viewer}|${topic}`;
     const cached = topicFeedCache.get(topicKey);
     if (cached && Date.now() - cached.at < TOPIC_CACHE_MS) {
-      return NextResponse.json({
+      return feedJson({
         entries: cached.entries, source: 'recsys', ranked: cached.ranked,
         served: cached.entries.length, cache: 'topic-cached', nextCursor: cursorOf(cached.entries)
-      });
+      }, viewer);
     }
 
     const built = await buildTopicOnce(topicKey, async () => {
@@ -446,7 +543,7 @@ async function serveForYou(req: NextRequest): Promise<NextResponse> {
       return assembleFeed({ viewer, limit, chainObserver, topic, ...state });
     });
     if (!built) {
-      return fallback(chainObserver, limit, 'unavailable', 'recsys did not return a usable feed', topic);
+      return fallback(chainObserver, limit, 'unavailable', 'recsys did not return a usable feed', topic, viewer);
     }
     rememberTopicFeed(topicKey, built.entries, built.ranked);
     // ★ NOT RECORDED IN THE SERVED LOG, DELIBERATELY. The log's domain is the
@@ -458,10 +555,10 @@ async function serveForYou(req: NextRequest): Promise<NextResponse> {
     // visited once. Excluded on purpose, and named here so a consumer knows the
     // log's boundary rather than discovering it as a gap. Same reason the
     // trending fallback and the chain continuation pages are not recorded.
-    return NextResponse.json({
+    return feedJson({
       entries: built.entries, source: 'recsys', ranked: built.ranked,
       served: built.entries.length, cache: 'topic', nextCursor: cursorOf(built.entries)
-    });
+    }, viewer);
   }
 
   // `?refresh=1` forces a rebuild: the interest picker calls it right after
@@ -547,7 +644,7 @@ async function serveForYou(req: NextRequest): Promise<NextResponse> {
     // its position on the page as delivered, not its rank in the build.
     recordFeedServe(viewer, entries, stored.lanes);
 
-    return NextResponse.json({
+    return feedJson({
       entries,
       source: 'recsys',
       ranked: stored.ranked,
@@ -557,7 +654,7 @@ async function serveForYou(req: NextRequest): Promise<NextResponse> {
       cache: `${stored.origin === 'store' ? 'stored-' : ''}${fresh ? 'fresh' : 'stale-revalidating'}`,
       builtAt: new Date(stored.at).toISOString(),
       nextCursor: cursorOf(entries)
-    });
+    }, viewer);
   }
 
   // ---- NOTHING STORED: the one spinner a reader is ever allowed to see ----
@@ -568,7 +665,7 @@ async function serveForYou(req: NextRequest): Promise<NextResponse> {
   if (!forceRefresh && inFailureCooldown(viewer)) {
     return fallback(
       chainObserver, limit, 'unavailable',
-      'the last ranked build failed; retrying shortly', topic
+      'the last ranked build failed; retrying shortly', topic, viewer
     );
   }
 
@@ -580,14 +677,14 @@ async function serveForYou(req: NextRequest): Promise<NextResponse> {
     // to completion for a reader who stopped waiting (see `awaitWithPatience`) —
     // and a page nobody was shown is not an impression.
     recordFeedServe(viewer, outcome.value.entries, outcome.value.lanes);
-    return NextResponse.json({
+    return feedJson({
       entries: outcome.value.entries, source: 'recsys', ranked: outcome.value.ranked,
       served: outcome.value.entries.length, cache: 'miss',
       nextCursor: cursorOf(outcome.value.entries)
-    });
+    }, viewer);
   }
   if (outcome.settled) {
-    return fallback(chainObserver, limit, 'unavailable', 'recsys did not return a usable feed', topic);
+    return fallback(chainObserver, limit, 'unavailable', 'recsys did not return a usable feed', topic, viewer);
   }
 
   // ★ THE FIX FOR THE PERMANENT TRAP. We stopped WAITING; the build did not
@@ -603,7 +700,7 @@ async function serveForYou(req: NextRequest): Promise<NextResponse> {
   return fallback(
     chainObserver, limit, 'building',
     'the first ranked build is still running; it will be stored and served instantly on the next load',
-    topic
+    topic, viewer
   );
 }
 
@@ -1172,14 +1269,48 @@ async function getRankedPaged(
   let startPermlink = fromPermlink;
 
   while (out.length < want) {
-    const page = await getPostsRanked(
-      sort,
-      tag,
-      startAuthor,
-      startPermlink,
-      observer,
-      Math.min(want - out.length + (startAuthor ? 1 : 0), HIVE_RANKED_MAX)
-    );
+    /**
+     * ★★★ A SECOND PAGE THAT FAILS MUST NOT DESTROY THE FIRST (2026-08-10) —
+     * CAUGHT IN THE SERVER LOG, NOT REASONED ABOUT.
+     *
+     * The feed asks for 30 and Hive caps a request at 20, so this loop always runs
+     * twice: 20 posts, then 11. When the SECOND call timed out — wax's own
+     * `apiTimeout` is 8000ms and api.hive.blog does miss it — the throw propagated
+     * out of here, past `fallback`, into its catch, and the reader was handed an
+     * empty feed. Twenty perfectly good posts, already in `out`, thrown away
+     * because the top-up was late. Verbatim from this box:
+     *
+     *   WaxRequestTimeoutError: Request timed out: "POST https://api.hive.blog"
+     *     bridge.get_ranked_posts { sort: trending, start_author: "riverflows",
+     *                               limit: 11 }
+     *   msg: "for-you: fallback to trending also failed (limit=30, tag=(none))"
+     *
+     * That is the whole mechanism behind the 109-byte empty response, and it is
+     * why the empty page looked random: it needed one slow call out of two.
+     *
+     * A short page is a fine answer; no page is not. So a failure with posts
+     * already in hand ends the loop and returns them, and only a failure on the
+     * FIRST call — where there is genuinely nothing to serve — still throws.
+     */
+    let page: Entry[] | null;
+    try {
+      page = await getPostsRanked(
+        sort,
+        tag,
+        startAuthor,
+        startPermlink,
+        observer,
+        Math.min(want - out.length + (startAuthor ? 1 : 0), HIVE_RANKED_MAX)
+      );
+    } catch (error) {
+      if (out.length === 0) throw error;
+      logger.warn(
+        'for-you: top-up page failed after %d posts; serving the short page: %o',
+        out.length,
+        error
+      );
+      break;
+    }
     if (!page || page.length === 0) break;
     // The cursor post comes back again at the head of the next page.
     const fresh = startAuthor ? page.slice(1) : page;
@@ -1261,13 +1392,73 @@ function cursorOf(entries: Entry[]): { author: string; permlink: string } | null
   return { author: last._lite?.chainAuthor || last.author, permlink: last.permlink };
 }
 
+/**
+ * ★★★ THE SIGNED-OUT FEED HAD NO CACHE AT ALL (2026-08-10) — MEASURED.
+ *
+ * Every branch above this one caches: the personal feed has a durable per-viewer
+ * store, topics have `topicFeedCache`, hydration has `hydrationCache`. The
+ * fallback — which is what EVERY LOGGED-OUT VISITOR gets, on the home page, and
+ * what every signed-in reader gets while their first build runs — cached nothing.
+ * Each of those requests made two live `bridge.get_ranked_posts` calls (Hive caps
+ * a page at 20, the feed asks for 30) with wax's 8000ms timeout on each.
+ *
+ * Measured on this box: a warm anonymous request took 5.4-6.5s, and under the
+ * ordinary contention of a page load those calls TIMED OUT and the reader got a
+ * 109-byte empty feed. Three sequential requests, one after another: 503, then 30
+ * posts, then 30 posts. The reader's feed was a coin toss on the health of a
+ * public node, thirty seconds at a time, for a list that is identical for every
+ * signed-out visitor on the site.
+ *
+ * Trending is the most cacheable thing in the product — one global list, the same
+ * bytes for everyone, and no reader can tell a sixty-second-old trending page from
+ * a live one. Keyed by observer as well, because Hive scopes what it returns to
+ * that observer, so one reader's copy is never handed to another.
+ */
+const FALLBACK_CACHE_MS = 60_000;
+const FALLBACK_CACHE_MAX = 50;
+const fallbackCache = new Map<string, { entries: Entry[]; at: number }>();
+const fallbackInflight = new Map<string, Promise<Entry[]>>();
+
+function rememberFallback(key: string, entries: Entry[]): void {
+  if (fallbackCache.size >= FALLBACK_CACHE_MAX) {
+    const oldest = fallbackCache.keys().next().value;
+    if (oldest !== undefined) fallbackCache.delete(oldest);
+  }
+  fallbackCache.set(key, { entries, at: Date.now() });
+}
+
+/** One upstream fetch per key at a time — a burst of visitors joins one call. */
+function fetchFallbackOnce(key: string, load: () => Promise<Entry[]>): Promise<Entry[]> {
+  const running = fallbackInflight.get(key);
+  if (running) return running;
+  const started = load().finally(() => fallbackInflight.delete(key));
+  fallbackInflight.set(key, started);
+  return started;
+}
+
 async function fallback(
   chainObserver: string,
   limit: number,
   reason: string,
   detail: string,
-  tag = ''
+  tag = '',
+  /** Whose own vote to keep in `active_votes` — see `trimFeedEntries`. */
+  viewer = ''
 ): Promise<NextResponse> {
+  const sort = tag ? 'created' : 'trending';
+  const cacheKey = `${sort}|${tag}|${chainObserver}|${limit}`;
+  const cached = fallbackCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < FALLBACK_CACHE_MS) {
+    return feedJson({
+      entries: cached.entries,
+      source: 'trending-fallback',
+      degraded: reason,
+      detail,
+      cache: 'fallback-cached',
+      nextCursor: cursorOf(cached.entries)
+    }, viewer);
+  }
+
   try {
     // `chainObserver`, never the raw viewer — see the note at its declaration.
     //
@@ -1282,21 +1473,54 @@ async function fallback(
     // while the identical call worked everywhere else in the app (every other
     // caller happens to ask for <= 20). Proven directly against api.hive.blog:
     // limit=20 -> 20 posts, limit=30 -> assert_exception.
-    const posts = await getRankedPaged(tag ? 'created' : 'trending', tag, chainObserver, limit);
-    const merged = await mergeLumenEngagement(posts);
-    return NextResponse.json({
+    const merged = await fetchFallbackOnce(cacheKey, async () => {
+      const posts = await getRankedPaged(sort, tag, chainObserver, limit);
+      return mergeLumenEngagement(posts);
+    });
+    if (merged.length > 0) rememberFallback(cacheKey, merged);
+    return feedJson({
       entries: merged,
       source: 'trending-fallback',
       degraded: reason,
       detail,
+      cache: 'fallback',
       nextCursor: cursorOf(merged)
-    });
+    }, viewer);
   } catch (error) {
     // Loud, because an empty feed and a broken feed look identical to a reader.
     logger.error(error, 'for-you: fallback to trending also failed (limit=%d, tag=%s)', limit, tag || '(none)');
+
+    // ★ A STALE PAGE BEATS NO PAGE. If we ever had this list, serve it rather than
+    // erroring: it is trending, it is the same for everyone, and being a few
+    // minutes old is invisible next to being blank. Only a reader who arrives
+    // while we have never had a copy sees the failure.
+    const stale = fallbackCache.get(cacheKey);
+    if (stale && stale.entries.length > 0) {
+      logger.warn('for-you: serving a stale trending page (%dms old) after an upstream failure', Date.now() - stale.at);
+      return feedJson({
+        entries: stale.entries,
+        source: 'trending-fallback',
+        degraded: reason,
+        detail,
+        cache: 'fallback-stale',
+        nextCursor: cursorOf(stale.entries)
+      }, viewer);
+    }
+    // ★★★ THIS USED TO BE A 200, AND THAT IS HOW A READER'S FEED GOT WIPED
+    // (2026-08-10). Reproduced on this box: three sequential requests to
+    // `?limit=30`, no cookie, no interaction — 958,497 bytes / 30 posts, then
+    // 958,585 / 30, then 109 bytes and ZERO. The third was this catch: Hive did
+    // not answer in time, and we reported that as a perfectly successful page
+    // that happens to contain no posts. A client cannot tell those apart, so
+    // react-query replaced thirty rendered cards with "No posts yet."
+    //
+    // 503 is the honest answer and it is also the one that protects the reader:
+    // an errored refetch leaves the previous data in place, which is exactly the
+    // behaviour we want when the upstream blinks. The body keeps its shape so
+    // any consumer that reads `degraded`/`detail` still can.
     return NextResponse.json(
       { entries: [], source: 'trending-fallback', degraded: reason, detail },
-      { status: 200 }
+      { status: 503 }
     );
   }
 }

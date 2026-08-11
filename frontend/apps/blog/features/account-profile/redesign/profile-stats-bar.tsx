@@ -16,6 +16,11 @@ interface Stat {
   subTooltip?: string;
 }
 
+// The row's two grey link-buttons. 14px, the system radius for a button; these
+// were 11px, one of the several radii the pages carried side by side.
+const ROW_BUTTON_CLASS =
+  'flex items-center gap-2 rounded-[14px] border border-[#e4e6e9] bg-[#f4f5f7] px-5 py-2.5 font-sans text-[14px] font-semibold text-[#3f4650] transition-colors hover:bg-[#ebedf0]';
+
 /** Followers / Posts / Following / HP stat row + grey Wallet button (design-handoff-v2, Profile.dc.html). */
 export default function ProfileStatsBar({
   username,
@@ -120,29 +125,33 @@ export default function ProfileStatsBar({
         )
       )}
 
-      {creatorTokensConfigured ? (
-        <Link
-          href={`/creators/${username}`}
-          className="ml-auto flex items-center gap-2 self-center rounded-[11px] border border-[#e4e6e9] bg-[#f4f5f7] px-5 py-2.5 font-sans text-[14px] font-semibold text-[#3f4650] hover:bg-[#ebedf0]"
-          data-testid="profile-creator-token-link"
-        >
-          <Coins className="h-[17px] w-[17px]" />
-          {t('profile.creator_token')}
-        </Link>
-      ) : null}
+      {/* ★ P-4: the first button said "Token", a bare noun sitting beside another
+          bare noun ("Wallet") with no clue what pressing it would do — an amount?
+          a balance? a thing to mint? The label now names the action; the
+          destination (/creators/<name>, this account's creator-token page) is
+          unchanged. See locales/en/common_blog.json, profile.creator_token.
 
-      <Link
-        href="/wallet"
-        className={cn(
-          // self-center: the row is now items-start so the stat labels share a
-          // baseline; the buttons still belong on the row's vertical centre.
-          'flex items-center gap-2 self-center rounded-[11px] border border-[#e4e6e9] bg-[#f4f5f7] px-5 py-2.5 font-sans text-[14px] font-semibold text-[#3f4650] hover:bg-[#ebedf0]',
-          !creatorTokensConfigured && 'ml-auto'
-        )}
-      >
-        <Icons.wallet className="h-[17px] w-[17px]" />
-        {t('profile.wallet')}
-      </Link>
+          ★ AND THE PAIR WRAPS AS A PAIR. That longer label plus the
+          three-decimal HP figure (W-11) is more than one line of this row can
+          hold on a 752px column, and with `ml-auto` on the first button only,
+          the second broke away onto a line of its own while the first stayed up
+          beside the stats. Grouping them means the row either holds both or
+          moves both. `self-center`: the row is items-start so the stat labels
+          share a baseline, but the buttons belong on the group's vertical
+          centre. */}
+      <div className="ml-auto flex flex-wrap items-center gap-2.5 self-center">
+        {creatorTokensConfigured ? (
+          <Link href={`/creators/${username}`} className={ROW_BUTTON_CLASS} data-testid="profile-creator-token-link">
+            <Coins className="h-[17px] w-[17px]" />
+            {t('profile.creator_token')}
+          </Link>
+        ) : null}
+
+        <Link href="/wallet" className={ROW_BUTTON_CLASS}>
+          <Icons.wallet className="h-[17px] w-[17px]" />
+          {t('profile.wallet')}
+        </Link>
+      </div>
     </div>
   );
 }

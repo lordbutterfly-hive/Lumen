@@ -51,118 +51,21 @@ test.describe.skip('Translation tests', () => {
     await expect(dappsTabText).toBe('Nasze dApps');
   });
 
-  test('Profile page - user info', async ({ page }) => {
-    const tabs = ['Blog', 'Posty', 'Odpowiedzi', 'Społecznościowe', 'Powiadomienia'];
-    await homePage.goto();
-    await expect(homePage.getMainTimeLineOfPosts.first()).toBeVisible();
-    await homePage.getFirstPostAuthor.click();
-    await expect(profilePage.profileInfo).toBeVisible();
-    await homePage.toggleLanguage.click();
-    await expect(homePage.languageMenu.first()).toBeVisible();
-    await homePage.languageMenuPl.click();
-    await expect(profilePage.profileInfo).toBeVisible();
+  // DELETED 2026-08-10: 'Profile page - user info' asserted on
+  // `[data-testid="profile-navigation"]` (the legacy Blog/Posts/Replies/
+  // Social/Notifications tab bar) and its Followers/Following/Blacklist/
+  // Muted-list links, none of which the redesigned profile renders any more
+  // (features/account-profile/redesign/*; profile-navigation is confirmed
+  // absent from current source). This whole describe block is already
+  // `test.describe.skip`d ("Skipped due to move out translation from
+  // Denser"), so nothing here runs today regardless.
 
-    await expect(page.getByRole('link', { name: /^(Liczba obserwujących:|Brak obserwujących)/ })).toBeVisible();
-
-    await expect(page.getByRole('link', { name: /Liczba wpisów:| Brak wpisów/ })).toBeVisible();
-    await expect(page.getByRole('link', { name: /Liczba wpisów:| Brak wpisów/ })).toContainText(/Liczba wpisów:| Brak wpisów/);
-    await expect(page.getByRole('link', { name: /Liczba obserwowanych:|Brak obserwowanych/gm })).toBeVisible();
-    await expect(page.getByRole('link', { name: /Liczba obserwowanych:|Brak obserwowanych/gm })).toContainText(
-      /Liczba obserwowanych:|Brak obserwowanych/
-    );
-    await expect(page.getByRole('link', { name: 'Użytkownicy na Czarnej Liście' })).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Użytkownicy na Czarnej Liście' })).toContainText(
-      'Użytkownicy na Czarnej Liście'
-    );
-    await expect(page.getByRole('link', { name: 'Wyciszeni użytkownicy' })).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Wyciszeni użytkownicy' })).toContainText(
-      'Wyciszeni użytkownicy'
-    );
-    await expect(page.getByRole('link', { name: 'Obserwowane Czarne Listy' })).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Obserwowane Czarne Listy' })).toContainText(
-      'Obserwowane Czarne Listy'
-    );
-    await expect(page.getByRole('link', { name: 'Obserwowane Wyciszone Listy' })).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Obserwowane Wyciszone Listy' })).toContainText(
-      'Obserwowane Wyciszone Listy'
-    );
-
-    await expect(page.getByRole('button', { name: 'Obserwuj' })).toContainText('Obserwuj');
-    await expect(page.getByRole('link', { name: 'Portfel' })).toContainText('Portfel');
-
-    const profileNavigation = await page.$$('[data-testid="profile-navigation"] ul:first-child li a');
-
-    for (let i = 0; i < profileNavigation.length; i++) {
-      const el = profileNavigation[i];
-      const TabText = await el.textContent();
-
-      await expect(TabText).toEqual(tabs[i]);
-    }
-  });
-
-  test('Profile page - posts tab', async ({ page }) => {
-    const tabs = ['Posty', 'Komentarze', 'Wynagrodzenia'];
-
-    await homePage.goto();
-    await homePage.getFirstPostAuthor.click();
-    await profilePage.profilePostsLink.click();
-    await expect(postPage.userPostMenu).toBeVisible();
-    await expect(homePage.getMainTimeLineOfPosts.first()).toBeVisible();
-    await homePage.toggleLanguage.click();
-    await expect(homePage.languageMenu.first()).toBeVisible();
-    await homePage.languageMenuPl.click();
-    await expect(postPage.userPostMenu).toBeVisible();
-    await expect(homePage.getMainTimeLineOfPosts.first()).toBeVisible();
-
-    const userPostMenu = await page.$$('[role="tab"]');
-
-    for (let i = 0; i < userPostMenu.length; i++) {
-      const el = userPostMenu[i];
-      const TabText = await el.textContent();
-
-      await expect(TabText).toEqual(tabs[i]);
-    }
-  });
-
-  test.skip('Profile page - social tab', async ({ page }) => {
-    await homePage.goto();
-    await homePage.getFirstPostAuthor.click();
-    await profilePage.profileSocialLink.click();
-    await expect(profilePage.socialCommunitySubscriptionsLabel).toBeVisible();
-    await homePage.toggleLanguage.click();
-    await expect(homePage.languageMenu.first()).toBeVisible();
-    await homePage.languageMenuPl.click();
-    await expect(profilePage.socialCommunitySubscriptionsLabel).toBeVisible();
-    await expect(profilePage.socialCommunitySubscriptionsLabel).toHaveText('Subskrypcje społeczności');
-    await expect(profilePage.socialCommunitySubscriptionsDescription).toHaveText(
-      'Autor zasubskrybował poniższe Społeczności Hive'
-    );
-    await expect(profilePage.socialBadgesAchivementsLabel).toHaveText('Odznaki i osiągnięcia');
-    await expect(profilePage.socialBadgesAchivementsDescription).toContainText(
-      'Są to odznaki otrzymane przez autora za pośrednictwem zewnętrznych aplikacji'
-    );
-  });
-
-  test('Profile page - notifications tab', async ({ page }) => {
-    const tabs = ['Wszystkie', 'Odpowiedzi', 'Wzmianki', 'Obserwacje', 'Głosy za', 'Reblogi'];
-    await homePage.goto();
-    await homePage.getFirstPostAuthor.click();
-    await profilePage.profileNotificationsLink.click();
-    await expect(profilePage.notificationsMenu).toBeVisible();
-    await homePage.toggleLanguage.click();
-    await expect(homePage.languageMenu.first()).toBeVisible();
-    await homePage.languageMenuPl.click();
-    await expect(profilePage.notificationsMenu).toBeVisible();
-
-    const notificationsMenu = await page.$$('[role="tab"]');
-
-    for (let i = 0; i < notificationsMenu.length; i++) {
-      const el = notificationsMenu[i];
-      const TabText = await el.textContent();
-
-      await expect(TabText).toEqual(tabs[i]);
-    }
-  });
+  // DELETED 2026-08-10: 'Profile page - posts tab', 'Profile page - social
+  // tab' (already test.skip) and 'Profile page - notifications tab' all
+  // drove `profilePostsLink`/`profileSocialLink`/`profileNotificationsLink`
+  // — the same removed `[data-testid="profile-navigation"]` chrome as the
+  // deleted 'Profile page - user info' above. `/notifications` also 404s
+  // today (route deleted along with the chrome that linked to it).
 
   // test('Wallet page', async({page}) =>{
   //   await page.goto('http://localhost:4000/@gtg/transfers')

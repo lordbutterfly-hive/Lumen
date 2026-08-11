@@ -5,11 +5,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { getAccountFull } from '@transaction/lib/hive-api';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { fetchLiteProfile, saveLiteProfile } from '@/blog/lib/lite/client/lite-profile';
-import { Input } from '@ui/components/input';
-import { Label } from '@ui/components/label';
-import { MutableRefObject, useEffect, useRef, useState } from 'react';
+import { MutableRefObject, ReactNode, useEffect, useRef, useState } from 'react';
 import { DEFAULT_SETTINGS, Settings, processAndUploadImg, validation } from './lib/utils';
-import { Button } from '@ui/components/button';
 import { toast } from '@ui/components/hooks/use-toast';
 import { handleError } from '@ui/lib/handle-error';
 import { useUpdateProfileMutation } from './hooks/use-update-profile-mutation';
@@ -27,6 +24,41 @@ import { DEFAULT_PREFERENCES, Preferences } from '@/blog/lib/utils';
 import { CircleSpinner } from 'react-spinners-kit';
 import { Signer } from '@smart-signer/lib/signer/signer';
 import { useSignerContext } from '@smart-signer/components/signer-provider';
+import {
+  SETTINGS_CARD,
+  SETTINGS_CARD_HINT,
+  SETTINGS_CARD_TITLE,
+  SETTINGS_INPUT,
+  SETTINGS_LABEL
+} from './lib/card';
+
+/** Radix select drawn in the house style — same border, radius and focus ink as
+ *  the text fields beside it, so the two controls read as one form. */
+const SELECT_TRIGGER =
+  'h-10 w-full rounded-[10px] border border-[#e4e6e9] bg-white px-3 font-sans text-[13.5px] text-[#161511] focus:ring-0 focus:ring-offset-0 focus-visible:border-[#c0392b] [&>svg]:opacity-100 [&>svg]:text-[#6b7280]';
+const SELECT_CONTENT = 'rounded-[12px] border border-[#e4e6e9] bg-white p-1 shadow-[0_8px_24px_rgba(20,18,10,0.10)]';
+const SELECT_ITEM =
+  'cursor-pointer rounded-[9px] py-2 font-sans text-[13.5px] text-[#161511] focus:bg-[#fdf2f0] focus:text-[#c0392b]';
+
+const Field = ({
+  htmlFor,
+  label,
+  error,
+  children
+}: {
+  htmlFor: string;
+  label: string;
+  error?: string | null;
+  children: ReactNode;
+}) => (
+  <div>
+    <label className={SETTINGS_LABEL} htmlFor={htmlFor}>
+      {label}
+    </label>
+    {children}
+    {error ? <p className="mt-1.5 text-[12px] text-[#c0392b]">{error}</p> : null}
+  </div>
+);
 
 const SettingsForm = ({ username }: { username: string }) => {
   const { t } = useTranslation('common_blog');
@@ -159,93 +191,103 @@ const SettingsForm = ({ username }: { username: string }) => {
     }
   };
 
+  // ★ SEED WHEN THE PROFILE ARRIVES, NOT WHEN THE COMPONENT MOUNTS (2026-08-10).
+  //
+  // This was `useEffect(..., [])`, which copies whatever the profile query holds
+  // at mount — and on a client-side navigation into settings that is nothing at
+  // all. Every field then rendered EMPTY over a profile that has a name, a bio
+  // and a location, and because `settings` no longer matched the loaded profile
+  // the Update button lit up offering to save that emptiness. Seeding is still
+  // one-shot, so a refetch can never overwrite something being typed.
+  const seeded = useRef(false);
+  const source = isLite ? liteProfile : data;
   useEffect(() => {
+    if (seeded.current || !source) return;
+    seeded.current = true;
     setSettings(profileSettings);
+    // `profileSettings` is derived from `source` and would change identity on
+    // every render; `source` is the real trigger.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [source]);
+
+  const busy = updateProfileMutation.isPending || savingLite;
 
   return (
     <>
-      <div className="py-8">
-        <h2 className="py-4 text-lg font-semibold leading-5">{t('settings_page.public_profile_settings')}</h2>
-        <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
-          <div>
-            <Label htmlFor="profileImage">{t('settings_page.profile_image_url')}</Label>
-            <Input
+      <section className={SETTINGS_CARD} data-testid="settings-public-profile">
+        <h2 className={SETTINGS_CARD_TITLE}>{t('settings_page.public_profile_settings')}</h2>
+        <p className={SETTINGS_CARD_HINT}>{t('settings_page.settings_intro')}</p>
+
+        <div className="mt-5 grid grid-cols-1 gap-5 md:grid-cols-2">
+          <Field htmlFor="profileImage" label={t('settings_page.profile_image_url')} error={validationCheck.profile_image}>
+            <input
               type="text"
               id="profileImage"
               name="profileImage"
+              className={SETTINGS_INPUT}
               value={settings.profile_image}
               onChange={(e) => setSettings((prev) => ({ ...prev, profile_image: e.target.value }))}
             />
-            <span>
-              <Label
-                className="text-sm font-normal text-destructive hover:cursor-pointer"
-                htmlFor="profilePicture"
-              >
-                {t('settings_page.upload_image')}
-              </Label>
-              <Input
-                id="profilePicture"
-                type="file"
-                className="hidden"
-                ref={inputProfileRef}
-                accept=".jpg,.png,.jpeg,.jfif,.gif,.webp,.heic,.heif"
-                name="avatar"
-                value={insertImg}
-                //@ts-expect-error
-                onChange={inputProfileHandler}
-              />
-            </span>
-            <span className="pt-2 text-xs text-destructive">{validationCheck.profile_image}</span>
-          </div>
+            <label
+              className="mt-1.5 inline-block cursor-pointer text-[12.5px] font-semibold text-[#c0392b] hover:text-[#96271b]"
+              htmlFor="profilePicture"
+            >
+              {t('settings_page.upload_image')}
+            </label>
+            <input
+              id="profilePicture"
+              type="file"
+              className="hidden"
+              ref={inputProfileRef}
+              accept=".jpg,.png,.jpeg,.jfif,.gif,.webp,.heic,.heif"
+              name="avatar"
+              value={insertImg}
+              //@ts-expect-error the handler narrows `files` to a non-null FileList
+              onChange={inputProfileHandler}
+            />
+          </Field>
 
-          <div>
-            <Label htmlFor="coverImage">{t('settings_page.cover_image_url')}</Label>
-            <Input
+          <Field htmlFor="coverImage" label={t('settings_page.cover_image_url')} error={validationCheck.cover_image}>
+            <input
               type="text"
               id="coverImage"
               name="coverImage"
+              className={SETTINGS_INPUT}
               value={settings.cover_image}
               onChange={(e) => setSettings((prev) => ({ ...prev, cover_image: e.target.value }))}
             />
-            <span>
-              <Label
-                className="text-sm font-normal text-destructive hover:cursor-pointer"
-                htmlFor="coverPicture"
-              >
-                {t('settings_page.upload_image')}
-              </Label>
-              <Input
-                id="coverPicture"
-                type="file"
-                className="hidden"
-                ref={inputCoverRef}
-                accept=".jpg,.png,.jpeg,.jfif,.gif,.webp,.heic,.heif"
-                name="avatar"
-                value={insertImg}
-                //@ts-expect-error
-                onChange={inputCoverHandler}
-              />
-            </span>
-            <span className="pt-2 text-xs text-destructive">{validationCheck.cover_image}</span>
-          </div>
+            <label
+              className="mt-1.5 inline-block cursor-pointer text-[12.5px] font-semibold text-[#c0392b] hover:text-[#96271b]"
+              htmlFor="coverPicture"
+            >
+              {t('settings_page.upload_image')}
+            </label>
+            <input
+              id="coverPicture"
+              type="file"
+              className="hidden"
+              ref={inputCoverRef}
+              accept=".jpg,.png,.jpeg,.jfif,.gif,.webp,.heic,.heif"
+              name="avatar"
+              value={insertImg}
+              //@ts-expect-error the handler narrows `files` to a non-null FileList
+              onChange={inputCoverHandler}
+            />
+          </Field>
 
-          <div>
-            <Label htmlFor="name">{t('settings_page.profile_name')}</Label>
-            <Input
+          <Field htmlFor="name" label={t('settings_page.profile_name')} error={validationCheck.name}>
+            <input
               type="text"
               id="name"
               name="name"
+              className={SETTINGS_INPUT}
               value={settings.name}
               onChange={(e) => setSettings((prev) => ({ ...prev, name: e.target.value }))}
             />
-            <span className="pt-2 text-xs text-destructive">{validationCheck.name}</span>
-          </div>
+          </Field>
 
-          <div>
-            <Label htmlFor="about">{t('settings_page.profile_about')}</Label>
-            <Input
+          <Field htmlFor="about" label={t('settings_page.profile_about')} error={validationCheck.about}>
+            <input
               // ★ A BIO IS NOT AN EMAIL ADDRESS (2026-08-07). This was
               // `type="email"`, so a normal sentence tripped the browser's own
               // validity check ("Please include an '@'…") and phones offered an
@@ -253,35 +295,33 @@ const SettingsForm = ({ username }: { username: string }) => {
               type="text"
               id="about"
               name="about"
+              className={SETTINGS_INPUT}
               value={settings.about}
               onChange={(e) => setSettings((prev) => ({ ...prev, about: e.target.value }))}
             />
-            <span className="pt-2 text-xs text-destructive">{validationCheck.about}</span>
-          </div>
+          </Field>
 
-          <div>
-            <Label htmlFor="location">{t('settings_page.profile_location')}</Label>
-            <Input
+          <Field htmlFor="location" label={t('settings_page.profile_location')} error={validationCheck.location}>
+            <input
               type="text"
               id="location"
               name="location"
+              className={SETTINGS_INPUT}
               value={settings.location}
               onChange={(e) => setSettings((prev) => ({ ...prev, location: e.target.value }))}
             />
-            <span className="pt-2 text-xs text-destructive">{validationCheck.location}</span>
-          </div>
+          </Field>
 
-          <div>
-            <Label htmlFor="website">{t('settings_page.profile_website')}</Label>
-            <Input
+          <Field htmlFor="website" label={t('settings_page.profile_website')} error={validationCheck.website}>
+            <input
               type="text"
               id="website"
               name="website"
+              className={SETTINGS_INPUT}
               value={settings.website}
               onChange={(e) => setSettings((prev) => ({ ...prev, website: e.target.value }))}
             />
-            <span className="pt-2 text-xs text-destructive">{validationCheck.website}</span>
-          </div>
+          </Field>
 
           {/*
             Blacklists and mute lists are on-chain follow lists published by an
@@ -290,49 +330,55 @@ const SettingsForm = ({ username }: { username: string }) => {
           */}
           {isLite ? null : (
             <>
-              <div>
-                <Label htmlFor="blacklistDescription">{t('settings_page.blacklist_description')}</Label>
-                <Input
+              <Field
+                htmlFor="blacklistDescription"
+                label={t('settings_page.blacklist_description')}
+                error={validationCheck.blacklist_description}
+              >
+                <input
                   type="text"
                   id="blacklistDescription"
                   name="blacklistDescription"
+                  className={SETTINGS_INPUT}
                   value={settings.blacklist_description}
                   onChange={(e) =>
                     setSettings((prev) => ({ ...prev, blacklist_description: e.target.value }))
                   }
                 />
-                <span className="pt-2 text-xs text-destructive">
-                  {validationCheck.blacklist_description}
-                </span>
-              </div>
+              </Field>
 
-              <div>
-                <Label htmlFor="mutedListDescription">{t('settings_page.mute_list_description')}</Label>
-                <Input
+              <Field
+                htmlFor="mutedListDescription"
+                label={t('settings_page.mute_list_description')}
+                error={validationCheck.muted_list_description}
+              >
+                <input
                   type="text"
                   id="mutedListDescription"
                   name="mutedListDescription"
+                  className={SETTINGS_INPUT}
                   value={settings.muted_list_description}
                   onChange={(e) =>
                     setSettings((prev) => ({ ...prev, muted_list_description: e.target.value }))
                   }
                 />
-                <span className="pt-2 text-xs text-destructive">
-                  {validationCheck.muted_list_description}
-                </span>
-              </div>
+              </Field>
             </>
           )}
         </div>
-        <Button
+
+        {/* House button: brand red, 14px radius, bold Open Sans. Still disabled
+            when there is nothing to save — but it now looks like the product's
+            own button doing that, not a dead grey pill. */}
+        <button
+          type="button"
           onClick={() => onSubmit()}
-          className="my-4 w-44"
           data-testid="pps-update-button"
+          className="mt-6 inline-flex h-11 min-w-[176px] items-center justify-center rounded-[14px] bg-[#c0392b] px-6 text-[14px] font-bold text-white transition-colors hover:bg-[#96271b] disabled:cursor-not-allowed disabled:bg-[#e6e2df] disabled:text-[#9ca3af]"
           disabled={
             sameData ||
             disabledBtn ||
-            updateProfileMutation.isPending ||
-            savingLite ||
+            busy ||
             // `_temporary` marks a stand-in account object (an unconfirmed chain
             // write). It never applies to the lite path, which does not read chain
             // data at all — leaving it in would permanently disable this button for
@@ -340,27 +386,18 @@ const SettingsForm = ({ username }: { username: string }) => {
             (!isLite && data?._temporary)
           }
         >
-          {updateProfileMutation.isPending || savingLite ? (
-            <span className="flex items-center justify-center">
-              <CircleSpinner
-                loading={updateProfileMutation.isPending || savingLite}
-                size={18}
-                color="#dc2626"
-              />
-            </span>
-          ) : (
-            t('settings_page.update')
-          )}
-        </Button>
-      </div>
-      <div className="py-8" data-testid="settings-preferences">
-        <h2 className="py-4 text-lg font-semibold leading-5">{t('settings_page.preferences')}</h2>
+          {busy ? <CircleSpinner loading size={18} color="#ffffff" /> : t('settings_page.update')}
+        </button>
+      </section>
 
-        <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
+      <section className={SETTINGS_CARD} data-testid="settings-preferences">
+        <h2 className={SETTINGS_CARD_TITLE}>{t('settings_page.preferences')}</h2>
+
+        <div className="mt-5 grid grid-cols-1 gap-5 md:grid-cols-2">
           <div data-testid="not-safe-for-work-content">
-            <Label htmlFor="not-safe-for-work-content">
+            <label className={SETTINGS_LABEL} htmlFor="not-safe-for-work-content">
               {t('settings_page.not_safe_for_work_nsfw_content')}
-            </Label>
+            </label>
             <Select
               value={preferences.nsfw}
               onValueChange={(e: 'hide' | 'warn' | 'show') =>
@@ -368,21 +405,29 @@ const SettingsForm = ({ username }: { username: string }) => {
               }
               name="not-safe-for-work-content"
             >
-              <SelectTrigger>
-                <SelectValue placeholder="Not safe for work (NSFW) content" />
+              <SelectTrigger className={SELECT_TRIGGER}>
+                <SelectValue placeholder={t('settings_page.not_safe_for_work_nsfw_content')} />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className={SELECT_CONTENT}>
                 <SelectGroup>
-                  <SelectItem value="hide">{t('settings_page.always_hide')}</SelectItem>
-                  <SelectItem value="warn">{t('settings_page.always_warn')}</SelectItem>
-                  <SelectItem value="show">{t('settings_page.always_show')}</SelectItem>
+                  <SelectItem className={SELECT_ITEM} value="hide">
+                    {t('settings_page.always_hide')}
+                  </SelectItem>
+                  <SelectItem className={SELECT_ITEM} value="warn">
+                    {t('settings_page.always_warn')}
+                  </SelectItem>
+                  <SelectItem className={SELECT_ITEM} value="show">
+                    {t('settings_page.always_show')}
+                  </SelectItem>
                 </SelectGroup>
               </SelectContent>
             </Select>
           </div>
 
           <div data-testid="blog-post-rewards">
-            <Label htmlFor="blog-post-rewards">{t('settings_page.choose_default_blog_payout')}</Label>
+            <label className={SETTINGS_LABEL} htmlFor="blog-post-rewards">
+              {t('settings_page.choose_default_blog_payout')}
+            </label>
             <Select
               value={preferences.blog_rewards}
               onValueChange={(e: '0%' | '50%' | '100%') =>
@@ -390,21 +435,29 @@ const SettingsForm = ({ username }: { username: string }) => {
               }
               name="blog-post-rewards"
             >
-              <SelectTrigger>
+              <SelectTrigger className={SELECT_TRIGGER}>
                 <SelectValue placeholder={t('settings_page.choose_default_blog_payout')} />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className={SELECT_CONTENT}>
                 <SelectGroup>
-                  <SelectItem value="0%">{t('settings_page.decline_payout')}</SelectItem>
-                  <SelectItem value="50%">{'50% HBD / 50% HP'}</SelectItem>
-                  <SelectItem value="100%">{t('settings_page.power_up')}</SelectItem>
+                  <SelectItem className={SELECT_ITEM} value="0%">
+                    {t('settings_page.decline_payout')}
+                  </SelectItem>
+                  <SelectItem className={SELECT_ITEM} value="50%">
+                    {'50% HBD / 50% HP'}
+                  </SelectItem>
+                  <SelectItem className={SELECT_ITEM} value="100%">
+                    {t('settings_page.power_up')}
+                  </SelectItem>
                 </SelectGroup>
               </SelectContent>
             </Select>
           </div>
 
           <div data-testid="comment-post-rewards">
-            <Label htmlFor="comment-post-rewards">{t('settings_page.choose_default_comment_payout')}</Label>
+            <label className={SETTINGS_LABEL} htmlFor="comment-post-rewards">
+              {t('settings_page.choose_default_comment_payout')}
+            </label>
             <Select
               name="comment-post-rewards"
               value={preferences.comment_rewards}
@@ -412,21 +465,29 @@ const SettingsForm = ({ username }: { username: string }) => {
                 setPreferences((prev) => ({ ...prev, comment_rewards: e }))
               }
             >
-              <SelectTrigger>
+              <SelectTrigger className={SELECT_TRIGGER}>
                 <SelectValue placeholder={t('settings_page.choose_default_comment_payout')} />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className={SELECT_CONTENT}>
                 <SelectGroup>
-                  <SelectItem value="0%">{t('settings_page.decline_payout')}</SelectItem>
-                  <SelectItem value="50%">{'50% HBD / 50% HP'}</SelectItem>
-                  <SelectItem value="100%">{t('settings_page.power_up')}</SelectItem>
+                  <SelectItem className={SELECT_ITEM} value="0%">
+                    {t('settings_page.decline_payout')}
+                  </SelectItem>
+                  <SelectItem className={SELECT_ITEM} value="50%">
+                    {'50% HBD / 50% HP'}
+                  </SelectItem>
+                  <SelectItem className={SELECT_ITEM} value="100%">
+                    {t('settings_page.power_up')}
+                  </SelectItem>
                 </SelectGroup>
               </SelectContent>
             </Select>
           </div>
 
           <div data-testid="referral-system">
-            <Label htmlFor="referral-system">{t('settings_page.default_beneficiaries')}</Label>
+            <label className={SETTINGS_LABEL} htmlFor="referral-system">
+              {t('settings_page.default_beneficiaries')}
+            </label>
             <Select
               name="referral-system"
               value={preferences.referral_system}
@@ -434,13 +495,15 @@ const SettingsForm = ({ username }: { username: string }) => {
                 setPreferences((prev) => ({ ...prev, referral_system: e }))
               }
             >
-              <SelectTrigger>
-                <SelectValue placeholder="Referral System" />
+              <SelectTrigger className={SELECT_TRIGGER}>
+                <SelectValue placeholder={t('settings_page.default_beneficiaries')} />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className={SELECT_CONTENT}>
                 <SelectGroup>
-                  <SelectItem value="enabled">{t('settings_page.default_beneficiaries_enabled')}</SelectItem>
-                  <SelectItem value="disabled">
+                  <SelectItem className={SELECT_ITEM} value="enabled">
+                    {t('settings_page.default_beneficiaries_enabled')}
+                  </SelectItem>
+                  <SelectItem className={SELECT_ITEM} value="disabled">
                     {t('settings_page.default_beneficiaries_disabled')}
                   </SelectItem>
                 </SelectGroup>
@@ -448,7 +511,7 @@ const SettingsForm = ({ username }: { username: string }) => {
             </Select>
           </div>
         </div>
-      </div>
+      </section>
     </>
   );
 };

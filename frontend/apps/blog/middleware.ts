@@ -60,5 +60,19 @@ export const middleware = createMiddleware({
  * assets are excluded: the smallest change that stops the truncation.
  */
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon\\.ico).*)']
+  /**
+   * ★ /api/avatar IS EXCLUDED, AND THIS IS A SECURITY FIX, NOT A PERF ONE (2026-08-11).
+   *
+   * This middleware mints fresh `session_uid` / `app_login_challenge` cookies on any
+   * request that arrives without them, so a `Set-Cookie` rode along on every avatar
+   * response. That was inert while the route sent `no-store`. It stopped being inert
+   * the moment the route was given `public, max-age=60` for caching: a shared cache
+   * or CDN in front of production can store a response WITH its Set-Cookie and replay
+   * one visitor's session cookie to the next visitor inside the TTL.
+   *
+   * The avatar proxy needs nothing this middleware provides: it is keyed entirely on
+   * the username/size query params and never reads a cookie or a session. Excluding
+   * it keeps the cache win and removes the header that made caching unsafe.
+   */
+  matcher: ['/((?!_next/static|_next/image|favicon\\.ico|api/avatar).*)']
 };

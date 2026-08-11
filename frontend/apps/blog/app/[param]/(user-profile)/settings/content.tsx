@@ -2,14 +2,25 @@
 
 import SettingsForm from '@/blog/features/account-settings/form';
 import MutedList from '@/blog/features/account-settings/muted-list';
+import ModerationLists from '@/blog/features/account-settings/moderation-lists';
+import { SETTINGS_CARD, SETTINGS_CARD_HINT, SETTINGS_CARD_TITLE } from '@/blog/features/account-settings/lib/card';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 
+/**
+ * ★ THIS PAGE WAS THE LAST UNMIGRATED FRONT DOOR (2026-08-10, fuckery list L-2).
+ *
+ * It is linked from the primary left rail AND the account menu, and it rendered
+ * with no rails, no page shell, no card chrome and no house type: a bare form on
+ * a white background under the legacy profile banner. It now sits in the same
+ * 3-column frame as Home and Witnesses (mounted by this route's layout.tsx) and
+ * is built from the same cards as the rest of the product.
+ */
 const SettingsContent = ({ username }: { username: string }) => {
   const { user, isHydrated } = useUserClient();
   const isOwner = Boolean(user?.isLoggedIn && user?.username === username);
 
   return (
-    <div className="flex flex-col" data-testid="public-profile-settings">
+    <div className="flex flex-col gap-5" data-testid="public-profile-settings">
       {isOwner ? <SettingsForm username={user.username} /> : null}
 
       {/* ★ NEVER A BLANK PAGE (2026-08-08). When the viewer was not the owner —
@@ -20,24 +31,25 @@ const SettingsContent = ({ username }: { username: string }) => {
           kind of thing. Waits for hydration first, so a signed-in owner never
           sees a "log in" flash on their own page. */}
       {isHydrated && !isOwner ? (
-        <div className="rounded-2xl border border-[#ebebeb] bg-white px-6 py-10 text-center">
-          <p className="mb-1 font-serif text-[17px] font-semibold text-[#161511]">
+        <section className={`${SETTINGS_CARD} text-center`}>
+          <h2 className={SETTINGS_CARD_TITLE}>
             {user?.isLoggedIn ? 'These aren’t your settings' : 'Log in to change your settings'}
-          </p>
-          <p className="mx-auto mb-5 max-w-[46ch] text-[13.5px] leading-[1.6] text-[#6b7280]">
+          </h2>
+          <p className={`${SETTINGS_CARD_HINT} mx-auto max-w-[46ch]`}>
             {user?.isLoggedIn
               ? `You’re signed in as @${user.username}, so you can only change your own settings.`
               : 'Your settings live on your own account. Sign in and you’ll land back here.'}
           </p>
           <a
             href={user?.isLoggedIn ? `/@${user.username}/settings` : '/login'}
-            className="inline-block rounded-[13px] bg-[#c0392b] px-5 py-2.5 text-[14px] font-bold text-white hover:bg-[#96271b]"
+            className="mt-5 inline-block rounded-[14px] bg-[#c0392b] px-5 py-2.5 text-[14px] font-bold text-white transition-colors hover:bg-[#96271b]"
           >
             {user?.isLoggedIn ? 'Go to my settings' : 'Log in'}
           </a>
-        </div>
+        </section>
       ) : null}
 
+      <ModerationLists username={username} />
       <MutedList username={username} />
     </div>
   );

@@ -10,7 +10,11 @@ const SearchButton = ({ aiTag, className }: { aiTag: boolean; className?: string
   const label = `${aiTag ? 'AI ' : ''}Search`;
   return (
     <TooltipContainer title={label}>
-      <Link href="/search" data-testid="navbar-search-link">
+      {/* The Button below already carries `aria-label`, but it does not propagate
+          to this wrapping anchor — each element's accessible name is computed on
+          its own, so the outer link was announced as an unnamed "link" before a
+          screen reader even reached the button inside it. */}
+      <Link href="/search" data-testid="navbar-search-link" aria-label={label}>
         <Button
           variant="ghost"
           size="sm"

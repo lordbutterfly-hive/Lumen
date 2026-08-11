@@ -1,4 +1,10 @@
-import { isHiveAccountNameValid } from '@hive/transaction';
+// ★ Direct submodule import, not the `@hive/transaction` barrel — see the
+// comment in app/api/avatar/route.ts. This file is imported by Server
+// Components and Route Handlers all over `app/`, so pulling the barrel's
+// `getSigner` (and the react-hook-form-using password UI it statically
+// imports for hbauth/google-drive/wif) into every one of those is exactly
+// the same problem, at far larger scale.
+import { isHiveAccountNameValid } from '@transaction/lib/validate-hive-account';
 
 export function isPermlinkValid(permlink: string): boolean {
   if (typeof permlink !== 'string') return false;

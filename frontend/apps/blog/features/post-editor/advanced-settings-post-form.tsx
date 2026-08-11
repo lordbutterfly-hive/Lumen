@@ -21,7 +21,12 @@ import badActorList from '@ui/config/lists/bad-actor-list';
 import clsx from 'clsx';
 import { useTranslation } from '@/blog/i18n/client';
 import { Beneficiary } from './beneficiary-item';
-import { maxAcceptedPayout } from './lib/utils';
+import { maxAcceptedPayout, validateAltUsernameInput } from './lib/utils';
+import {
+  ALTERNATIVE_AUTHOR_DESCRIPTION,
+  ALTERNATIVE_AUTHOR_LABEL,
+  ALTERNATIVE_AUTHOR_PLACEHOLDER
+} from './lib/composer-copy';
 
 type AccountFormValues = {
   title: string;
@@ -91,6 +96,20 @@ export function AdvancedSettingsPostForm({
     data.maxAcceptedPayout !== 1000000 ? data.maxAcceptedPayout : '100'
   );
   const [open, setOpen] = useState(false);
+  /**
+   * ★ THE ALTERNATIVE AUTHOR LIVES HERE NOW (2026-08-10, C-3). It used to be a
+   * bare, unlabelled input in the main metadata card, seen by every writer. It
+   * is a Condenser-era field that only writes `json_metadata.alternativeAuthor`
+   * — it does not change who signs the post or who is paid — so it belongs with
+   * the other settings a normal post never touches.
+   *
+   * Held as local dialog state, like every other control in here, and only
+   * pushed into the form on Save. The value is re-seeded from the form each
+   * time the dialog opens (see the `open` effect below) so Cancel really means
+   * cancel.
+   */
+  const [altAuthor, setAltAuthor] = useState(data.author);
+  const altAuthorError = validateAltUsernameInput(altAuthor, t);
   // Templates are permanent user data
   const [storedTemplates, storeTemplates] = useStorageWithTTL<Template[]>(
     `hivePostTemplates-${username}`,
@@ -132,6 +151,10 @@ export function AdvancedSettingsPostForm({
     setMaxPayout(maxPayout);
     setBeneficiaries(beneficiaries);
     setCustomValue(customValue);
+    // Re-seed from the form every time the dialog opens or closes, so closing
+    // without saving leaves the post exactly as it was.
+    setAltAuthor(data.author);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   useEffect(() => {
@@ -236,7 +259,7 @@ export function AdvancedSettingsPostForm({
                 postArea: data.postArea,
                 postSummary: data.postSummary,
                 tags: data.tags,
-                author: data.author,
+                author: altAuthor,
                 category: data.category,
                 templateTitle: selectTemplate,
                 beneficiaries: beneficiaries,
@@ -259,7 +282,7 @@ export function AdvancedSettingsPostForm({
           postArea: data.postArea,
           postSummary: data.postSummary,
           tags: data.tags,
-          author: data.author,
+          author: altAuthor,
           category: data.category,
           templateTitle: templateTitle,
           beneficiaries: beneficiaries,
@@ -270,6 +293,7 @@ export function AdvancedSettingsPostForm({
     }
     updateForm({
       ...data,
+      author: altAuthor,
       beneficiaries: beneficiaries,
       maxAcceptedPayout: maxAcceptedPayout(customValue, maxPayout),
       payoutType: rewards
@@ -438,6 +462,20 @@ export function AdvancedSettingsPostForm({
               </Button>
             ) : null}
           </div>
+          <div className="flex flex-col gap-3" data-testid="alternative-author-box">
+            <span className="text-lg font-bold">{ALTERNATIVE_AUTHOR_LABEL}</span>
+            <span>{ALTERNATIVE_AUTHOR_DESCRIPTION}</span>
+            <Input
+              value={altAuthor}
+              placeholder={ALTERNATIVE_AUTHOR_PLACEHOLDER}
+              onChange={(e) => setAltAuthor(e.target.value)}
+              className={clsx({ 'border-red-500 focus-visible:ring-red-500': altAuthorError })}
+              aria-label={ALTERNATIVE_AUTHOR_LABEL}
+              aria-invalid={Boolean(altAuthorError)}
+              data-testid="alternative-author-input"
+            />
+            {altAuthorError ? <div className="text-destructive">{altAuthorError}</div> : null}
+          </div>
           <div className="flex flex-col gap-3" data-testid="post-templates-box">
             <span className="text-lg font-bold">
               {t('submit_page.advanced_settings_dialog.post_templates')}
@@ -499,7 +537,8 @@ export function AdvancedSettingsPostForm({
               beneficiariesNames ||
               selfBeneficiary ||
               Boolean(smallWeight) ||
-              badActor
+              badActor ||
+              Boolean(altAuthorError)
             }
             data-testid="advanced-settings-save-button"
           >

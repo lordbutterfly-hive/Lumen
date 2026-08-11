@@ -15,7 +15,6 @@ interface ProfileIdentityProps {
   /** False for a Lumen lite account: it has no chain tenure to look up. */
   chainAccount?: boolean;
 
-  displayName: string;
   profile?: AccountProfile;
   created: string;
   lastVoteTime: string;
@@ -28,7 +27,17 @@ interface ProfileIdentityProps {
 }
 
 /**
- * The name, the Hive reputation, and the Lumen rank chip.
+ * The handle, the Hive reputation, the bio and the tenure line.
+ *
+ * ★ THE DISPLAY NAME MOVED OUT (P-1, 2026-08-10). This file used to own the
+ * `<h1>`, which is why the profile was the one page with no masthead: its title
+ * was buried three components deep. The name is now the shared masthead's
+ * `title` slot in profile-main.tsx and this component is the meta that hangs
+ * under it. The rank chip came down with it, from beside the name to beside the
+ * handle, so that the h1 is the person's name and only that — inside the
+ * masthead's title the chip would have been read out as part of the heading.
+ * It is still directly next to the reputation badge, which is the pairing the
+ * note below is about.
  *
  * ★ THE REPUTATION BADGE IS BACK (owner ruling, 2026-08-09). This file used to carry
  * the comment "Small league chip pairing the real emblem + tier name — replaces the
@@ -53,7 +62,6 @@ interface ProfileIdentityProps {
 
 export default function ProfileIdentity({
   username,
-  displayName,
   profile,
   created,
   lastVoteTime,
@@ -72,15 +80,9 @@ export default function ProfileIdentity({
 
   return (
     <div className="min-w-0">
-      <div className="flex flex-wrap items-center gap-3">
-        <h1 className="font-sans text-[32px] font-bold leading-tight tracking-[-0.02em] text-[#161511]">
-          {displayName}
-        </h1>
-        <ProfileLeagueChip username={username} chainAccount={chainAccount} />
-      </div>
-
-      <div className="mt-1 flex flex-wrap items-center gap-2 font-sans text-[14.5px] text-[#6b7280]">
+      <div className="flex flex-wrap items-center gap-2 font-sans text-[14.5px] text-[#6b7280]">
         <span className="font-semibold text-[#3f4650]">@{username}</span>
+        <ProfileLeagueChip username={username} chainAccount={chainAccount} />
         {showReputation ? (
           <button
             type="button"

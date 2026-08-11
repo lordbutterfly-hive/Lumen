@@ -53,8 +53,8 @@ test.describe('Profile page of @gtg', () => {
 
     await page.waitForSelector(profilePage.profileName['_selector']);
     expect(await profilePage.profileName).toBeVisible();
-    await profilePage.profilePostsLink.click();
-    await page.waitForSelector(profilePage.page.locator('[data-testid="user-post-menu"]')['_selector']);
+    // profilePostsLink was removed 2026-08-10 — Posts is the default view at
+    // this URL already, no separate tab to click into.
     await expect(profilePage.page.locator('[data-testid="post-author"]').first()).toContainText(
       profileNameApi
     );
@@ -83,80 +83,53 @@ test.describe('Profile page of @gtg', () => {
     await expect(profilePage.profileFollowing).toContainText(String(followingCount));
   });
 
-  test('profile navigation of @gtg is loaded', async ({ page }) => {
-    await profilePage.gotoProfilePage('@gtg');
-    await profilePage.profileNavigationIsVisible();
-  });
-
-  test('profile Blog tab of @gtg is loaded', async ({ page }) => {
-    await profilePage.gotoProfilePage('@gtg');
-    await profilePage.profileBlogTabIsSelected();
-  });
-
-  test('move to Posts Tab', async ({ page }) => {
-    await profilePage.gotoProfilePage('@gtg');
-    await profilePage.profilePostsTabIsNotSelected();
-    await profilePage.moveToPostsTab();
-  });
-
-  test('move to Replies Tab', async ({ page }) => {
-    await profilePage.gotoProfilePage('@gtg');
-    await profilePage.profileRepliesTabIsNotSelected();
-    await profilePage.moveToRepliesTab();
-  });
-
-  test('move to Social Tab', async ({ page }) => {
-    await profilePage.gotoProfilePage('@gtg');
-    await profilePage.profileSocialTabIsNotSelected();
-    await profilePage.moveToSocialTab();
-  });
+  // DELETED 2026-08-10: 'profile navigation of @gtg is loaded', 'profile
+  // Blog tab of @gtg is loaded', 'move to Posts Tab', 'move to Replies Tab'
+  // and 'move to Social Tab' all asserted on `[data-testid="profile-navigation"]`
+  // (via profileNavigationIsVisible/profileBlogTabIsSelected/moveToPostsTab/
+  // moveToRepliesTab/moveToSocialTab), the legacy tab bar that shipped with
+  // `ProfileLayout`. It's gone — confirmed by grep (zero occurrences of
+  // "profile-navigation" under features/app/components) and live
+  // (`/@gtg/replies` 302s to `/404`). See profilePage.ts's class doc comment.
+  //
+  // DELETED 2026-08-10: 'move to Wallet Page' (was already test.skip) drove
+  // the same removed nav to reach Wallet. `/wallet` is a real, live,
+  // auth-gated top-level route now (app/wallet/page.tsx, see the
+  // auth-gate change in this same pass) — reach it with `page.goto('/wallet')`
+  // directly, not via a profile nav click.
 
   test('move to Peakd by link in Social Tab', async ({ page }) => {
-    await profilePage.gotoProfilePage('@gtg');
-    await profilePage.profileSocialTabIsNotSelected();
-    await profilePage.moveToSocialTab();
+    // gotoSocialProfilePage navigates to `/gtg/communities` directly — the
+    // removed profileSocialLink used to reach the same page via a nav click.
+    await profilePage.gotoSocialProfilePage('gtg');
     await profilePage.moveToPeakdByLinkInSocialTab();
   });
 
   test('validate Hivebuzz link in Social Tab', async ({ page }) => {
-    await profilePage.gotoProfilePage('@gtg');
-    await profilePage.profileSocialTabIsNotSelected();
-    await profilePage.moveToSocialTab();
+    await profilePage.gotoSocialProfilePage('gtg');
     // URL varies based on REACT_APP_ENABLE_THIRD_PARTY_API flag
     await expect(await profilePage.thirdPartyAppHivebuzzLink.getAttribute('href')).toContain('hivebuzz.me');
     // await profilePage.moveToHivebuzzByLinkInSocialTab();
   });
 
-  test('move to Notifications Tab', async ({ page }) => {
-    await profilePage.gotoProfilePage('@gtg');
-    await profilePage.profileNotificationsTabIsNotSelected();
-    await profilePage.moveToNotificationsTab();
-  });
-
-  test.skip('move to Wallet Page', async ({ page,context }) => {
-    await profilePage.gotoProfilePage('@gtg');
-    // await profilePage.moveToWalletPage();
-    const [newWindow] = await Promise.all([
-      context.waitForEvent('page'),
-      await page.locator('[data-testid="profile-navigation"] ul:last-child').getByText('Wallet').click()
-    ])
-    await newWindow.waitForLoadState()
-    expect(newWindow.url()).toContain(`/transfers`)
-
-  });
-
   // Skipped - Settings Tab is unavailable
   test.skip('move to Settings Tab', async ({ page }) => {
-    await profilePage.gotoProfilePage('@gtg');
-    await profilePage.profileSettingsTabIsNotSelected();
-    await profilePage.moveToSettingsTab();
+    // profileSettingsTabIsNotSelected()/moveToSettingsTab() were removed
+    // 2026-08-10 (drove the deleted profile-navigation chrome); navigate to
+    // the still-live `/settings` route directly. Already test.skip'd above
+    // for an unrelated, pre-existing reason ("Settings Tab is unavailable").
+    await page.goto('/@gtg/settings');
+    await page.waitForLoadState('domcontentloaded');
   });
 
   // Skipped - Settings Tab is unavailable
   test.skip('move to Settings Tab and validate public profile settings form is visible', async ({ page }) => {
-    await profilePage.gotoProfilePage('@gtg');
-    await profilePage.profileSettingsTabIsNotSelected();
-    await profilePage.moveToSettingsTab();
+    // profileSettingsTabIsNotSelected()/moveToSettingsTab() were removed
+    // 2026-08-10 (drove the deleted profile-navigation chrome); navigate to
+    // the still-live `/settings` route directly. Already test.skip'd above
+    // for an unrelated, pre-existing reason ("Settings Tab is unavailable").
+    await page.goto('/@gtg/settings');
+    await page.waitForLoadState('domcontentloaded');
 
     await expect(profilePage.publicProfileSettingsHeader).toHaveText('Public Profile Settings');
     await expect(profilePage.ppsProfilePictureUrlLabel).toHaveText('Profile picture url');
@@ -181,9 +154,12 @@ test.describe('Profile page of @gtg', () => {
 
   // Skipped - Settings Tab is unavailable
   test.skip('move to Settings Tab and validate preferences settings form is visible', async ({ page }) => {
-    await profilePage.gotoProfilePage('@gtg');
-    await profilePage.profileSettingsTabIsNotSelected();
-    await profilePage.moveToSettingsTab();
+    // profileSettingsTabIsNotSelected()/moveToSettingsTab() were removed
+    // 2026-08-10 (drove the deleted profile-navigation chrome); navigate to
+    // the still-live `/settings` route directly. Already test.skip'd above
+    // for an unrelated, pre-existing reason ("Settings Tab is unavailable").
+    await page.goto('/@gtg/settings');
+    await page.waitForLoadState('domcontentloaded');
 
     await expect(profilePage.preferencesSettings).toBeVisible();
     await expect(profilePage.preferencesSettingsChooseLanguage).toBeVisible();
@@ -195,9 +171,12 @@ test.describe('Profile page of @gtg', () => {
 
   // Skipped - Settings Tab is unavailable
   test.skip('move to Settings Tab and validate advanced settings form is visible', async ({ page }) => {
-    await profilePage.gotoProfilePage('@gtg');
-    await profilePage.profileSettingsTabIsNotSelected();
-    await profilePage.moveToSettingsTab();
+    // profileSettingsTabIsNotSelected()/moveToSettingsTab() were removed
+    // 2026-08-10 (drove the deleted profile-navigation chrome); navigate to
+    // the still-live `/settings` route directly. Already test.skip'd above
+    // for an unrelated, pre-existing reason ("Settings Tab is unavailable").
+    await page.goto('/@gtg/settings');
+    await page.waitForLoadState('domcontentloaded');
 
     await expect(profilePage.advancedProfileSettingsHeader).toBeVisible();
     await expect(profilePage.advancedSettingsApiEndpointRadioGroup).toBeVisible();
@@ -238,32 +217,17 @@ test.describe('Profile page of @gtg', () => {
 
     await loginDialog.validateDefaultLoginFormIsLoaded();
     await loginDialog.closeLoginForm();
-    await profilePage.profileNavigationIsVisible();
+    // profileNavigationIsVisible() was removed 2026-08-10 — profile-stats is
+    // the stable "we're back on a normal profile page" check now.
+    await expect(profilePage.profileStats).toBeVisible();
   });
 
-  test('Move to the login modal after clicking the Follow button in the notifications tab', async ({ page }) => {
-    const loginDialog = new LoginForm(page);
-    await profilePage.gotoProfilePage('@gtg');
-    await profilePage.moveToNotificationsTab();
-    await profilePage.profileNotificationsTabIsSelected();
-    await profilePage.followButton.click();
-
-    await loginDialog.validateDefaultLoginFormIsLoaded();
-    await loginDialog.closeLoginForm();
-    await profilePage.profileNavigationIsVisible();
-  });
-
-  test('Move to the login modal after clicking the Follow button in the replies tab', async ({ page }) => {
-    const loginDialog = new LoginForm(page);
-    await profilePage.gotoProfilePage('@gtg');
-    await profilePage.moveToRepliesTab();
-    await profilePage.profileRepliesTabIsSelected();
-    await profilePage.followButton.click();
-
-    await loginDialog.validateDefaultLoginFormIsLoaded();
-    await loginDialog.closeLoginForm();
-    await profilePage.profileNavigationIsVisible();
-  });
+  // DELETED 2026-08-10: 'Move to the login modal after clicking the Follow
+  // button in the notifications tab' and '...in the replies tab' both
+  // navigated via moveToNotificationsTab()/moveToRepliesTab() to
+  // `/notifications` and `/replies`, which are deleted routes (confirmed:
+  // both 302 to `/404` on the live dev server). The Follow-button-opens-
+  // login-modal behavior itself is still covered by the test above.
 
   test('The Follow button changes color when you hover over it (Light theme)', async ({ page }) => {
     await profilePage.gotoProfilePage('@gtg');

@@ -9,6 +9,7 @@ import TurnstileWidget, { turnstileSiteKey } from './turnstile-widget';
 import GoogleSignIn, { googleConfigured } from './google-signin';
 import KeychainSignin from './keychain-signin';
 import { Link } from '@hive/ui';
+import { isInternalPath } from '@ui/lib/sanitize-url';
 
 // TODO i18n — staged copy while the redesign lands (mirrors app-header's LABELS
 // precedent); move to locales/*/common_blog.json once final.
@@ -105,6 +106,33 @@ const COPY = {
 type View = 'default' | 'name';
 
 /**
+ * ★★★ `?next=` WAS WRITTEN BUT NEVER READ (2026-08-10).
+ *
+ * `/profile` has redirected signed-out readers to `/login?next=/profile` since it
+ * was built, and `/wallet` and `/wallet/tokens` now do the same. Nothing on this
+ * page ever looked at the parameter: all three `router.replace('/')` calls below
+ * sent everyone to the feed, so "sign in and we will take you back" was a promise
+ * the product did not keep, and the reader had to remember for themselves what
+ * they had been trying to open.
+ *
+ * ★ `isInternalPath` IS THE GATE, AND IT IS NOT OPTIONAL. Without it this is an
+ * open redirect: anyone can hand a victim `/login?next=https://evil.example` and
+ * the sign-in page would send them there the moment their session was minted.
+ * Only a plain in-app path (leading `/`, not `//`, no `javascript:`) is accepted;
+ * anything else falls back to the feed.
+ *
+ * ★ WHY IT READS `window.location` AND NOT `useSearchParams()`. That hook forces
+ * the page that uses it to be client-rendered or wrapped in `<Suspense>`, and
+ * this value is never rendered — it is only read at the moment a redirect
+ * happens. A plain function keeps the login page's rendering unchanged.
+ */
+function loginDestination(): string {
+  if (typeof window === 'undefined') return '/';
+  const next = new URLSearchParams(window.location.search).get('next') ?? '';
+  return next && isInternalPath(next) ? next : '/';
+}
+
+/**
  * `embedded` renders the same four ways in — Google, Bitcoin wallet, Ethereum
  * wallet, Hive Keychain — without the standalone-page chrome, so the sign-in
  * DIALOG can offer the identical set.
@@ -136,7 +164,7 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
   useEffect(() => {
     if (embedded) return; // inside the dialog, signing in is the point
     if (sessionHydrated && sessionUser?.isLoggedIn) {
-      router.replace('/');
+      router.replace(loginDestination());
     }
   }, [embedded, sessionHydrated, sessionUser?.isLoggedIn, router]);
   const { user } = useUserClient();
@@ -184,11 +212,13 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
 
   // Already signed in → leave the pre-auth page.
   useEffect(() => {
-    if (user?.isLoggedIn) router.replace('/');
+    if (user?.isLoggedIn) router.replace(loginDestination());
   }, [user?.isLoggedIn, router]);
 
+  // Named for what it did before `?next=` was honoured: the destination is the
+  // feed unless the reader was sent here from a page that needs an account.
   const goHome = () => {
-    router.replace('/');
+    router.replace(loginDestination());
     router.refresh();
   };
 

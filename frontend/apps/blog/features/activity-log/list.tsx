@@ -5,10 +5,16 @@ import { IAccountNotification } from '@hive/common-hiveio-packages/wax';
 
 const NotificationList = ({
   data,
-  lastRead
+  lastRead,
+  isOwner
 }: {
   data: IAccountNotification[] | null | undefined;
   lastRead: Date;
+  /**
+   * Whose list this is. Passed straight through to the row, which cannot work
+   * it out for itself any more — see the note on `NotificationListItem`.
+   */
+  isOwner?: boolean;
 }) => {
   return (
     <div className="flex flex-col divide-y divide-border-secondary">
@@ -21,6 +27,7 @@ const NotificationList = ({
           type={notification.type}
           url={notification.url}
           lastRead={lastRead}
+          isOwner={isOwner}
         />
       ))}
     </div>

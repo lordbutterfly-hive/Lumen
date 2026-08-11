@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { useInfiniteQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useInView } from 'react-intersection-observer';
 import { getAccountPosts } from '@transaction/lib/bridge-api';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
@@ -32,7 +32,9 @@ const LABELS = {
   degraded: 'Personalised ranking is warming up. Showing popular posts meanwhile.',
   degradedAnonymous: 'Showing trending. Log in for your own feed.',
   loginPrompt: 'Following shows the people you follow.',
-  loginCta: 'Log in'
+  loginCta: 'Log in',
+  newPost: 'Show 1 new post',
+  newPosts: (count: number) => `Show ${count} new posts`
 };
 
 type TabKey = 'for-you' | 'feed' | 'predictions';
@@ -73,6 +75,26 @@ interface ForYouResponse {
  * inventing one client-side would just re-sort a slice by recency and quietly
  * undo the ranking.
  */
+const FOR_YOU_KEY = ['forYouRanked'];
+const FOR_YOU_INCOMING_KEY = ['forYouIncoming'];
+/** How often the silent poll below looks for posts the reader has not been shown. */
+const FEED_POLL_MS = 3 * 60_000;
+
+function entryKey(entry: Entry): string {
+  return `${entry.author}/${entry.permlink}`;
+}
+
+async function fetchForYou(cursor?: { author?: string; permlink?: string }): Promise<ForYouResponse> {
+  const params = new URLSearchParams({ limit: String(FOR_YOU_LIMIT) });
+  if (cursor?.author && cursor?.permlink) {
+    params.set('startAuthor', cursor.author);
+    params.set('startPermlink', cursor.permlink);
+  }
+  const res = await fetch(`/api/feed/for-you?${params.toString()}`);
+  if (!res.ok) throw new Error(`for-you ${res.status}`);
+  return (await res.json()) as ForYouResponse;
+}
+
 function ForYouFeed() {
   const { ref, inView } = useInView();
 
@@ -85,7 +107,7 @@ function ForYouFeed() {
   // feed from the last post of the previous page, using the `nextCursor` the API
   // now returns. Hive caps a single request at 20, so the server pages
   // underneath as well — the cursor is the only thing the client has to know.
-  const { data, isLoading, isError, fetchNextPage, hasNextPage, isFetchingNextPage } =
+  const { data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage } =
     useInfiniteQuery<ForYouResponse>({
       // ★ NOT keyed on `enabled` (2026-08-08). `enabled` is `loggedIn`, which is
       // false before hydration and true after — so the key changed mid-load and
@@ -97,18 +119,8 @@ function ForYouFeed() {
       //
       // The server identifies the viewer from the session cookie, so the response
       // is already per-user; the key does not need to encode login state.
-      queryKey: ['forYouRanked'],
-      queryFn: async ({ pageParam }) => {
-        const cursor = pageParam as { author?: string; permlink?: string } | undefined;
-        const params = new URLSearchParams({ limit: String(FOR_YOU_LIMIT) });
-        if (cursor?.author && cursor?.permlink) {
-          params.set('startAuthor', cursor.author);
-          params.set('startPermlink', cursor.permlink);
-        }
-        const res = await fetch(`/api/feed/for-you?${params.toString()}`);
-        if (!res.ok) throw new Error(`for-you ${res.status}`);
-        return (await res.json()) as ForYouResponse;
-      },
+      queryKey: FOR_YOU_KEY,
+      queryFn: async ({ pageParam }) => fetchForYou(pageParam as { author?: string; permlink?: string }),
       getNextPageParam: (lastPage) => {
         // No cursor, or a page that came back empty, means Hive has nothing
         // further — stop asking rather than spinning forever at the bottom.
@@ -116,8 +128,53 @@ function ForYouFeed() {
         if (!lastPage.entries || lastPage.entries.length === 0) return undefined;
         return lastPage.nextCursor;
       },
-      staleTime: StaleTime.MEDIUM
+      // ★★★ THE FEED NEVER CHANGES UNDER A READER (2026-08-10) — MEASURED FIRST.
+      //
+      // This carried `staleTime: StaleTime.MEDIUM` (2 minutes) and nothing else,
+      // which meant every react-query refetch trigger — window focus, reconnect,
+      // a remount on navigating back home — was free to fire the moment the data
+      // aged past two minutes, and each one REPLACED the rendered list wholesale.
+      // Observed on this route in one sitting: 30 posts, then 30 DIFFERENT posts
+      // ~195s later, then a 173-byte empty page that wiped the feed entirely.
+      // Card keys are `author-permlink`, so a swap is not a re-render, it is a
+      // full unmount and remount: the reader's scroll position, their expanded
+      // NSFW reveals and the post they were halfway through all go at once.
+      //
+      // A ranked feed has no business refreshing itself. It is an ORDER computed
+      // for this reader, not a ticker, and there is nothing time-critical about
+      // position 14 changing. So every automatic trigger is off, and new posts
+      // arrive through the silent poll below as an offer the reader accepts.
+      staleTime: Infinity,
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
+      refetchOnMount: false,
+      // The route is expensive; one retry, not react-query's default three.
+      retry: 1
     });
+
+  /**
+   * ★ POSTS THE READER HAS NOT BEEN SHOWN, COUNTED — NEVER SWAPPED IN.
+   *
+   * A separate query on its own key, so nothing it returns can reach the rendered
+   * list on its own. It only ever answers "how many new ones are there", which
+   * becomes the button above the feed. `refetchIntervalInBackground` stays at its
+   * default of false, so a tab left open in another window is not polling.
+   */
+  const { data: incoming } = useQuery<ForYouResponse>({
+    queryKey: FOR_YOU_INCOMING_KEY,
+    queryFn: () => fetchForYou(),
+    refetchInterval: FEED_POLL_MS,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    refetchOnMount: false,
+    staleTime: FEED_POLL_MS,
+    retry: 0,
+    // Nothing to compare against until the reader has a first page.
+    enabled: (data?.pages?.length ?? 0) > 0
+  });
+
+  /** New posts the reader accepted, kept above the pages they were already reading. */
+  const [accepted, setAccepted] = useState<Entry[]>([]);
 
   useEffect(() => {
     if (inView && hasNextPage && !isFetchingNextPage) fetchNextPage();
@@ -125,38 +182,71 @@ function ForYouFeed() {
 
   // Hook must run unconditionally, above every early return (see lib/nsfw.ts).
   const nsfwPreference = useNsfwPreference();
-  // ★ ABOVE THE GUARDS. `useRankMarks` is a hook and must run in the same order on every
-  // render; `rawEntries` is computed after these two early returns, so deriving the hook's
-  // input from it called the hook conditionally. Read the query data directly instead —
-  // undefined while loading, which the hook handles by requesting nothing.
-  const marks = useRankMarks(
-    // Each page is a ForYouResponse, not a flat entry list — `.entries` is where the
-    // posts are, mirroring how `rawEntries` below unwraps it.
-    (data?.pages ?? []).flatMap((page) => page.entries ?? []).map((e) => e.author)
-  );
 
-  if (isLoading) return <PostListSkeleton count={5} />;
-  if (isError || !data) return <NoDataError />;
-
-  const firstPage = data.pages[0];
+  // ★ EVERY DERIVED LIST IS BUILT ABOVE THE GUARDS, because the two hooks below read
+  // it and a hook may never run conditionally. `data` is undefined while the first
+  // page loads, which the `?? []` here covers.
+  const pages = data?.pages ?? [];
+  const firstPage = pages[0];
   const ranked = firstPage?.source === 'recsys';
   // De-duplicate across pages: the ranked first page can legitimately contain a
   // post the chain pages reach again later, and a feed that repeats itself reads
-  // as broken.
+  // as broken. Accepted posts go first — the reader asked for them, so they belong
+  // at the top, and the dedupe keeps a later page from repeating one.
   const seen = new Set<string>();
-  const rawEntries = data.pages
-    .flatMap((page) => page?.entries ?? [])
-    .filter((e) => {
-      const key = `${e.author}/${e.permlink}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
+  const rawEntries = [...accepted, ...pages.flatMap((page) => page?.entries ?? [])].filter((e) => {
+    const key = entryKey(e);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 
   // NSFW `hide` filtering happens at the LIST so entries.length means "posts you
   // will actually see" — otherwise a fully-hidden page leaves a zero-height list
   // and the scroll sentinel auto-fetches forever. See lib/nsfw.ts.
   const entries = filterVisiblePosts(rawEntries, nsfwPreference);
+
+  // ★★★ AN EMPTY ANSWER NEVER PAINTS OVER A FULL PAGE (2026-08-10).
+  //
+  // The route can return `{entries: []}` with a 200 — it did, measured, 109 bytes
+  // after two healthy 30-post responses — and anything that invalidates this query
+  // (blocking someone, for instance) re-runs it. Whatever the reason, replacing a
+  // page the reader is reading with "No posts yet." is never the right answer:
+  // nothing about a feed becomes true because one request came back thin. Holding
+  // the last list we actually rendered means the worst case is stale, not blank.
+  //
+  // Written during render on purpose. This is the standard previous-value ref and
+  // it is idempotent: it only ever stores what this very render is about to show.
+  const lastRendered = useRef<Entry[]>([]);
+  if (entries.length > 0) lastRendered.current = entries;
+  const shown = entries.length > 0 ? entries : lastRendered.current;
+
+  // ★ ABOVE THE GUARDS. `useRankMarks` is a hook and must run in the same order on
+  // every render, so it reads the list computed above rather than being derived
+  // after an early return.
+  const marks = useRankMarks(shown.map((e) => e.author));
+
+  // Posts the silent poll found that are not on the reader's page yet. Filtered the
+  // same way the list is, so the button can never offer posts that would render as
+  // nothing.
+  const shownKeys = new Set(shown.map(entryKey));
+  const offered = filterVisiblePosts(
+    (incoming?.entries ?? []).filter((e) => !shownKeys.has(entryKey(e))),
+    nsfwPreference
+  );
+
+  const acceptNew = () => {
+    // Capped so a tab left open all day cannot grow this without bound.
+    setAccepted((prev) => [...offered, ...prev].slice(0, FOR_YOU_LIMIT * 4));
+    if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  if (isLoading) return <PostListSkeleton count={5} />;
+  // ★ `isError` IS NO LONGER PART OF THIS GUARD. It is true for a failed REFETCH as
+  // well as a failed first load, so an error on the poll-driven path used to throw
+  // away a perfectly good page. Only "we have nothing at all to show" is an error
+  // state; with data in hand, a failure is something to ride out silently.
+  if (!data && shown.length === 0) return <NoDataError />;
 
   // ★ BUG FOUND 2026-08-06 (owner report: "for you isnt populated... seems it
   // has mock posts"). Live-verified against the running dev server: an
@@ -198,16 +288,35 @@ function ForYouFeed() {
           file than the two this fix owns; standing the strip down here closes
           the reachable path without touching ranking behaviour. */}
 
-      {degradedMessage ? (
+      {/* ★ NEVER ABOVE AN EMPTY LIST (2026-08-10). This banner rendered on
+          `!ranked` alone, so "Personalised ranking is warming up. Showing popular
+          posts meanwhile." sat directly on top of "No posts yet." — one line
+          promising posts and the next saying there are none. When there is
+          nothing to show, the empty state is the only honest message on screen. */}
+      {degradedMessage && shown.length > 0 ? (
         <p className="mb-4 rounded-[9px] bg-[#fdf6e7] px-3 py-2 font-sans text-[12.5px] text-[#9a7b2e]">
           {degradedMessage}
         </p>
       ) : null}
 
-      {entries.length === 0 ? (
+      {/* The offer, never the swap: the poll found these, the reader decides. */}
+      {offered.length > 0 ? (
+        <div className="mb-4 flex justify-center">
+          <button
+            type="button"
+            onClick={acceptNew}
+            data-testid="for-you-new-posts"
+            className="rounded-full bg-[#c0392b] px-4 py-2 font-sans text-[13.5px] font-semibold text-white shadow-[0_1px_3px_rgba(20,18,10,0.12)] transition-colors hover:bg-[#a5301f]"
+          >
+            {offered.length === 1 ? LABELS.newPost : LABELS.newPosts(offered.length)}
+          </button>
+        </div>
+      ) : null}
+
+      {shown.length === 0 ? (
         <p className="py-12 text-center font-sans text-sm text-muted-foreground">{LABELS.empty}</p>
       ) : (
-        entries.map((entry) => (
+        shown.map((entry) => (
           <MediumPostCard
             key={`${entry.author}-${entry.permlink}`}
             post={entry}
@@ -217,12 +326,12 @@ function ForYouFeed() {
       )}
 
       {/* The sentinel: scrolling it into view fetches the next page. */}
-      {entries.length > 0 && hasNextPage ? (
+      {shown.length > 0 && hasNextPage ? (
         <div ref={ref} className="py-8 text-center font-sans text-[13px] text-muted-foreground">
           {isFetchingNextPage ? 'Loading more…' : ''}
         </div>
       ) : null}
-      {entries.length > 0 && !hasNextPage ? (
+      {shown.length > 0 && !hasNextPage ? (
         <p className="py-8 text-center font-sans text-[13px] text-muted-foreground">
           That’s everything for now.
         </p>

@@ -12,6 +12,15 @@ interface BasePathLinkProps {
   className?: string;
   'data-testid'?: string;
   prefetch?: boolean;
+  'aria-current'?: 'page' | undefined;
+  'aria-busy'?: boolean | undefined;
+  /**
+   * Fired only for a click that is really going to navigate THIS tab: not a
+   * blocked href, not cmd/ctrl/middle-click (which opens a new tab and leaves
+   * this page exactly where it is). Callers use it to show that a slow
+   * navigation has started — see left-rail.tsx.
+   */
+  onNavigate?: () => void;
 }
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH || '';
 
@@ -28,7 +37,10 @@ const BasePathLink = ({
   children,
   className,
   'data-testid': dataTestId,
-  prefetch = false
+  prefetch = false,
+  'aria-current': ariaCurrent,
+  'aria-busy': ariaBusy,
+  onNavigate
 }: BasePathLinkProps) => {
   const handleClick = (e: MouseEvent<HTMLAnchorElement>) => {
     // Security: Validate that href is an internal path before navigation
@@ -37,6 +49,9 @@ const BasePathLink = ({
       e.preventDefault();
       return;
     }
+
+    const opensElsewhere = e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0;
+    if (!opensElsewhere) onNavigate?.();
 
     // Force full page reload for certain link types when using basePath
     // This ensures getServerSideProps runs and the correct page component is rendered
@@ -66,6 +81,8 @@ const BasePathLink = ({
       className={className}
       data-testid={dataTestId}
       prefetch={prefetch}
+      aria-current={ariaCurrent}
+      aria-busy={ariaBusy}
       onClick={handleClick}
     >
       {children}

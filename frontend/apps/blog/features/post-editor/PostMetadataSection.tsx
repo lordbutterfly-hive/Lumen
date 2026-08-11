@@ -10,10 +10,10 @@ import { useTranslation } from "@/blog/i18n/client";
 import {
   validateTagInput,
   validateSummaryInput,
-  validateAltUsernameInput,
   parseTags,
   MAX_TAGS,
 } from "@/blog/features/post-editor/lib/utils";
+import { POST_SUMMARY_PLACEHOLDER } from "@/blog/features/post-editor/lib/composer-copy";
 import SelectImageList from "@/blog/features/post-editor/select-image-list";
 import { AccountFormValues } from "@/blog/features/post-editor/types";
 
@@ -41,11 +41,16 @@ export function PostMetadataSection({
   const tagsRequired = !categoryParam && watchedValues.category === "blog";
   const tagsCheck = validateTagInput(watchedValues.tags, tagsRequired, t);
   const summaryCheck = validateSummaryInput(watchedValues.postSummary, t);
-  const altUsernameCheck = validateAltUsernameInput(watchedValues.author, t);
 
   return (
-    <div className="flex flex-col gap-4 rounded-lg border border-border bg-background-secondary/30 p-4">
-      <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+    <div className="flex flex-col gap-4 rounded-[14px] border border-[#ebebeb] bg-white p-4">
+      {/* ★ ONE SECTION-LABEL TREATMENT, NOT A FIFTH ONE (2026-08-10, C-14).
+          "METADATA" and "PUBLISHING" were 12px/500 uppercase at 0.6px tracking
+          in slate — a heading style that appears nowhere else in Lumen. These
+          now reuse the masthead's eyebrow exactly (11px/600 uppercase, 0.14em,
+          #c0392b at 70%), see features/layouts/page-masthead.tsx, so the page
+          has one small-label style rather than one per component. */}
+      <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#c0392b]/70">
         {t("submit_page.metadata_section")}
       </span>
 
@@ -57,7 +62,7 @@ export function PostMetadataSection({
             <FormControl>
               <div className="relative">
                 <Input
-                  placeholder={t("submit_page.post_summary")}
+                  placeholder={POST_SUMMARY_PLACEHOLDER}
                   className={clsx("pr-16 bg-background", {
                     "border-red-500 focus-visible:ring-red-500": summaryCheck,
                   })}
@@ -79,19 +84,35 @@ export function PostMetadataSection({
         )}
       />
 
+      {/* ★★★ NEVER FAIL-STATE AN UNTOUCHED FORM (2026-08-10, C-2).
+          Measured on first open, before a single keystroke: the tags input had
+          `border-color rgb(239,68,68)` and the words "Required when post to My
+          Blog" under it in red. The composer greeted every writer by telling
+          them they had already got something wrong. An empty field the reader
+          has not visited is not an error, it is an empty field.
+
+          The requirement itself has NOT been relaxed — Submit is still disabled
+          and the hint under it still says which field is missing (see
+          post-form.tsx). What changed is WHEN the red appears: only once the
+          reader has actually been in the field (`fieldState.isTouched`) or has
+          typed something we can judge. `showTagsError` gates both the border
+          and the message, so the two can never disagree. */}
       <FormField
         control={form.control}
         name="tags"
-        render={({ field }) => (
+        render={({ field, fieldState }) => {
+          const showTagsError = Boolean(tagsCheck) && (fieldState.isTouched || field.value.trim() !== "");
+          return (
           <FormItem>
             <FormControl>
               <div className="relative">
                 <Input
                   placeholder={t("submit_page.enter_your_tags")}
                   className={clsx("pr-12 bg-background", {
-                    "border-red-500 focus-visible:ring-red-500": tagsCheck,
+                    "border-red-500 focus-visible:ring-red-500": showTagsError,
                   })}
                   {...field}
+                  aria-invalid={showTagsError}
                   onChange={(e) => {
                     const normalized = e.target.value.replace(/,/g, " ");
                     field.onChange(normalized);
@@ -128,31 +149,22 @@ export function PostMetadataSection({
                 ))}
               </div>
             )}
-            <div className="text-xs text-destructive">{tagsCheck}</div>
+            <div className="text-xs text-destructive">{showTagsError ? tagsCheck : null}</div>
             <FormMessage />
           </FormItem>
-        )}
+          );
+        }}
       />
 
-      <FormField
-        control={form.control}
-        name="author"
-        render={({ field }) => (
-          <FormItem>
-            <FormControl>
-              <Input
-                placeholder={t("submit_page.author_if_different")}
-                className={clsx("bg-background", {
-                  "border-red-500 focus-visible:ring-red-500": altUsernameCheck,
-                })}
-                {...field}
-              />
-            </FormControl>
-            <div className="text-xs text-red-500">{altUsernameCheck}</div>
-            <FormMessage />
-          </FormItem>
-        )}
-      />
+      {/* ★ THE ALTERNATIVE-AUTHOR FIELD IS GONE FROM HERE (2026-08-10, C-3).
+          It sat in the open as a bare input placeholdered "Author(if different
+          from current account)" — a Condenser developer field, offered to every
+          first-time writer between their summary and their cover image, with no
+          label and no explanation of what it does (it writes
+          `json_metadata.alternativeAuthor`; it does NOT change who signs or who
+          is paid). It now lives inside the Advanced settings dialog, next to
+          the other post-level settings a normal post never touches. See
+          advanced-settings-post-form.tsx. */}
 
       <SelectImageList
         content={postArea}

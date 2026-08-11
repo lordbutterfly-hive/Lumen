@@ -1,11 +1,10 @@
 'use client';
 
-import { FC, useEffect, useState } from 'react';
+import { FC } from 'react';
 import { usePathname } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { Link, getUserAvatarUrl } from '@hive/ui';
-import { Avatar, AvatarFallback, AvatarImage } from '@ui/components';
-import { Button } from '@ui/components/button';
+import { Button, buttonVariants } from '@ui/components/button';
 import { Icons } from '@ui/components/icons';
 import TooltipContainer from '@ui/components/tooltip-container';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@ui/components/tooltip';
@@ -20,15 +19,52 @@ import NotificationsMenu from '@/blog/features/layouts/site-header/notifications
 import { ManabarRing } from '@/blog/features/layouts/site-header/manabar-ring';
 import SearchButton from '@/blog/features/layouts/site-header/search-button';
 import MobileNav from '@/blog/features/layouts/mobile-nav';
-import { ModeSwitchInput } from '@ui/components/mode-switch-input';
+import { SearchInput } from '@/blog/features/search/search-input';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 
 // TODO i18n - move into locales/*/common_blog.json once copy is final
 const LABELS = {
   homeAriaLabel: 'Lumen home',
   write: 'Write',
   notifications: 'Notifications',
-  login: 'Log in'
+  login: 'Log in',
+  yourProfile: 'Your profile'
 };
+
+/**
+ * ★★★ AN EMPTY BLUE RING IS NOT A FALLBACK (2026-08-10, N-4).
+ *
+ * This was a Radix `<Avatar>` whose `<AvatarFallback>` rendered AN `<img>` WITH
+ * THE SAME `src` the `<AvatarImage>` had just failed on. So when the picture did
+ * not load, the fallback loaded the identical broken URL: the reader got a hole
+ * in the middle of the manabar ring, which reads as an account that is somehow
+ * empty rather than as a picture that did not arrive. That is the whole header's
+ * only piece of identity.
+ *
+ * Same shape as `features/witnesses/witness-identity-cell.tsx`: the monogram sits
+ * UNDER the image and the image removes itself on error, so there is always a
+ * letter and never a broken glyph. `alt=""` plus `aria-hidden` because the
+ * control around it already carries the name ("Account menu" / "Your profile") —
+ * an alt here would make screen readers say it twice.
+ */
+const HeaderAvatar: FC<{ username: string }> = ({ username }) => (
+  <span
+    aria-hidden="true"
+    className="relative z-30 flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#f1f3f5] font-sans text-[14px] font-bold uppercase leading-none text-[#6b7280]"
+  >
+    {username.slice(0, 1)}
+    <img
+      src={getUserAvatarUrl(username || '', 'small')}
+      alt=""
+      width={36}
+      height={36}
+      onError={(e) => {
+        e.currentTarget.style.display = 'none';
+      }}
+      className="absolute inset-0 h-9 w-9 rounded-full object-cover"
+    />
+  </span>
+);
 
 /**
  * Minimal, Medium-style top header: wordmark far-left, a small icon
@@ -38,12 +74,30 @@ const LABELS = {
 const AppHeader: FC = () => {
   const { t } = useTranslation('common_blog');
   const { user } = useUserClient();
-  const [isClient, setIsClient] = useState(false);
   const pathname = usePathname();
 
-  useEffect(() => {
-    setIsClient(true);
-  }, []);
+  /**
+   * ★★★ NEVER SHOW A SIGNED-IN READER A SIGNED-OUT HEADER (2026-08-10, N-3).
+   *
+   * `user` here cannot answer during SSR and answers "signed out" on the client
+   * until React has mounted, localStorage has been read and `/api/users/me` has
+   * returned. Measured on this box with a real session: on `/search` the header
+   * still said "Log in" 4.6 seconds after the page appeared, with no avatar and
+   * no bell, and the left rail still had no Settings row; on the home page the
+   * avatar arrived between t=3s and t=8s, while a fetch of `/api/users/me` made
+   * from the same page at t=3s already answered `isLoggedIn: true`. The answer
+   * existed; the chrome was not using it.
+   *
+   * `identity` prefers the client the moment it has really answered and falls
+   * back to the session the SERVER read from the cookie before then, so the
+   * first paint is already correct and signing out still takes effect at once.
+   *
+   * ★ THE SEO INTENT BELOW IS UNCHANGED. A crawler carries no session cookie, so
+   * `identity` is signed-out for it, and the real `<a href="/login">` is still in
+   * the server-rendered HTML exactly as before. What is gone is showing that same
+   * link to somebody who is already signed in.
+   */
+  const identity = useSessionIdentity();
 
   const { manabarsData } = useLoggedUserContext();
   // ★ A LITE ACCOUNT HAS NO CHAIN NOTIFICATIONS, BECAUSE IT HAS NO CHAIN ACCOUNT.
@@ -128,9 +182,11 @@ const AppHeader: FC = () => {
           </span>
         </Link>
 
-        {/* col 2 — search spans the center column (desktop) */}
+        {/* col 2 — search spans the center column (desktop). The ONLY search
+            field in the product: /search has no box of its own any more, it
+            reads the URL this one writes. */}
         <div className="hidden md:block">
-          <ModeSwitchInput aiAvailable={false} />
+          <SearchInput />
         </div>
 
         {/* col 3 — action cluster over the right rail */}
@@ -138,17 +194,36 @@ const AppHeader: FC = () => {
           <SearchButton aiTag={false} className="md:hidden" />
 
           <TooltipContainer title={LABELS.write}>
-            {user?.isLoggedIn ? (
-              <Link href="/submit.html">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-10 w-10 px-0"
-                  aria-label={LABELS.write}
-                  data-testid="nav-pencil"
-                >
+            {identity.isLoggedIn ? (
+              /* ★★★ A <button> INSIDE AN <a href> IS INVALID HTML (2026-08-10, A-2).
+                 Interactive content may not nest: the parser is free to
+                 re-arrange it, the accessibility tree gets two focusable
+                 controls where the reader sees one, and which of the two a
+                 click or an Enter press lands on is not something the markup
+                 decides. This is now ONE control — an anchor wearing the ghost
+                 icon-button's classes, via `buttonVariants`, so it is pixel-wise
+                 the same button it was. `data-testid="nav-pencil"` stays on an
+                 element INSIDE the anchor on purpose:
+                 playwright/tests/fixture/postCreateViaPencilIcon.spec.ts locates
+                 `a[href="/submit.html"]` and filters it by `has:` that testid,
+                 and `has:` matches descendants only — moving the testid onto the
+                 anchor itself would silently stop that fixture finding the
+                 pencil at all. A click on the span still lands on the anchor.
+
+                 The href still points at `/submit.html`. That is the real route
+                 (`app/submit.html/page.tsx`), not a dead legacy alias, and
+                 renaming it is a routing change across the header, the
+                 community new-post button, the editor's own `router.replace`
+                 and a dozen Playwright specs — deliberately not bundled into a
+                 composer-defects pass. */
+              <Link
+                href="/submit.html"
+                aria-label={LABELS.write}
+                className={buttonVariants({ variant: 'ghost', size: 'sm', className: 'h-10 w-10 px-0' })}
+              >
+                <span data-testid="nav-pencil" className="flex items-center justify-center">
                   <Icons.pencil className="h-5 w-5" />
-                </Button>
+                </span>
               </Link>
             ) : (
               <DialogLogin redirectTo="/submit.html">
@@ -165,13 +240,18 @@ const AppHeader: FC = () => {
             )}
           </TooltipContainer>
 
-          {user?.isLoggedIn ? (
+          {identity.isLoggedIn ? (
             /* Item 12: the bell used to be a Link to /@{user}/notifications
                (now a deleted route). It's a NotificationsMenu popover
                trigger instead — notifications render inline, right here,
                nothing to navigate to. Badge behaviour is unchanged. */
             <TooltipContainer title={LABELS.notifications}>
-              <NotificationsMenu username={user.username} lastRead={lastRead} chainAccount={isChainAccount}>
+              <NotificationsMenu
+                username={identity.username}
+                lastRead={lastRead}
+                chainAccount={isChainAccount}
+                unreadCount={data?.unread ?? 0}
+              >
                 <Button
                   variant="ghost"
                   size="sm"
@@ -206,13 +286,13 @@ const AppHeader: FC = () => {
               which is the overwhelming majority of first visits. A logged-IN
               user sees it for the single frame before hydration swaps in their
               avatar — a far cheaper trade than an unreachable front door. */}
-          {!isClient ? (
-            <Link href="/login" data-testid="login-link">
-              <Button variant="ghost" className="whitespace-nowrap text-base hover:text-destructive">
-                {LABELS.login}
-              </Button>
-            </Link>
-          ) : user?.isLoggedIn ? (
+          {/* ★ ORDER MATTERS. The full menu needs the CLIENT's `user` object (it
+              carries the tier, the avatar url and everything Logout needs), so it
+              renders only once the client really knows who you are. Between the
+              first paint and that moment, `identity` still knows from the cookie
+              the server read, and draws the same avatar as a plain link to the
+              reader's own profile rather than a "Log in" button that is a lie. */}
+          {user?.isLoggedIn ? (
             <TooltipProvider>
               <Tooltip>
                 {/* ★★★ THE MENU TRIGGER MUST BE THE FOCUSABLE ELEMENT.
@@ -269,20 +349,7 @@ const AppHeader: FC = () => {
                         thickness={3.5}
                         className="invisible absolute group-hover:visible group-hover:delay-300 group-hover:duration-300 group-hover:animate-in group-hover:zoom-in-50"
                       />
-                      <Avatar className="z-30 flex h-9 w-9 items-center justify-center overflow-hidden rounded-full">
-                        <AvatarImage
-                          className="h-full w-full object-cover"
-                          src={getUserAvatarUrl(user?.username || '', 'small')}
-                          alt="Profile picture"
-                        />
-                        <AvatarFallback>
-                          <img
-                            className="h-full w-full object-cover"
-                            src={getUserAvatarUrl(user?.username || '', 'small')}
-                            alt="Profile picture"
-                          />
-                        </AvatarFallback>
-                      </Avatar>
+                      <HeaderAvatar username={user?.username || ''} />
                     </div>
                   </TooltipTrigger>
                 </UserMenu>
@@ -311,6 +378,20 @@ const AppHeader: FC = () => {
                 )}
               </Tooltip>
             </TooltipProvider>
+          ) : identity.isLoggedIn ? (
+            /* The cookie the server read says this reader is signed in and the
+               client has not caught up yet. Same avatar in the same slot, so
+               nothing moves when the real menu takes over, and it is a live link
+               to their own profile rather than a control that does nothing while
+               it waits. */
+            <Link
+              href={`/@${identity.username}`}
+              aria-label={LABELS.yourProfile}
+              data-testid="header-avatar-pending"
+              className="inline-flex items-center justify-center"
+            >
+              <HeaderAvatar username={identity.username} />
+            </Link>
           ) : (
             /* /login is the ONE entry point, and it carries all four ways in:
                Google, Hive Keychain, a Bitcoin wallet and an EVM wallet.

@@ -5,11 +5,10 @@ import WitnessIdentityCell from './witness-identity-cell';
 import WitnessVoteToggle from './witness-vote-toggle';
 import {
   GENERAL_GRID_TEMPLATE,
-  PARAMS_GRID_TEMPLATE,
   STICKY_IDENTITY_CLASS,
   STICKY_RANK_CLASS
 } from './lib/table-grid';
-import { WitnessRow, WitnessViewMode } from './lib/types';
+import { WitnessRow } from './lib/types';
 import {
   formatBlockAge,
   formatHpVotes,
@@ -20,7 +19,6 @@ import {
 
 interface WitnessTableRowProps {
   row: WitnessRow;
-  viewMode: WitnessViewMode;
   isLoggedIn: boolean;
   hasProxy: boolean;
   /** The viewer's own votes failed to load — render the toggle indeterminate, not a confident "not voted". */
@@ -74,14 +72,13 @@ function renderHbdApr(row: WitnessRow, t: (key: string) => string): string {
 
 export default function WitnessTableRow({
   row,
-  viewMode,
   isLoggedIn,
   hasProxy,
   ownVotesUnavailable,
   hpAprPercent
 }: WitnessTableRowProps) {
   const { t } = useTranslation('common_blog');
-  const gridTemplate = viewMode === 'general' ? GENERAL_GRID_TEMPLATE : PARAMS_GRID_TEMPLATE;
+  const gridTemplate = GENERAL_GRID_TEMPLATE;
 
   return (
     <div
@@ -99,7 +96,6 @@ export default function WitnessTableRow({
 
       <WitnessIdentityCell row={row} className={STICKY_IDENTITY_CLASS} />
 
-      {viewMode === 'general' ? (
         <>
           <span className={`${CELL_NUM_CLASS} font-bold text-[#161511]`} data-testid="witness-votes">
             {formatHpVotes(row.hpVotes)}
@@ -133,28 +129,6 @@ export default function WitnessTableRow({
             <span className={CELL_NUM_CLASS}>{renderHbdApr(row, t)}</span>
           </TooltipContainer>
         </>
-      ) : (
-        <>
-          <span className={CELL_NUM_CLASS}>{formatNaiAsset(row.props?.account_creation_fee, 'HIVE')}</span>
-          <span className={CELL_NUM_CLASS}>{formatInteger(row.props?.maximum_block_size)}</span>
-          <span className={CELL_NUM_CLASS}>{formatInteger(row.props?.account_subsidy_budget)}</span>
-          <span
-            className={
-              row.isStale
-                ? 'text-right font-sans text-[12.5px] tabular-nums text-[#c4c4c4] line-through'
-                : CELL_NUM_CLASS
-            }
-            title={row.isStale ? t('witnesses.stale_marker') : undefined}
-          >
-            {formatPriceFeed(row.priceFeedUsd)}
-          </span>
-          {/* W-2: `hbd_interest_rate` is a published witness parameter and was the one
-              missing from the parameters tab, which is exactly where it belongs
-              beside the creation fee, block size and subsidy budget. */}
-          <span className={CELL_NUM_CLASS}>{renderHbdApr(row, t)}</span>
-        </>
-      )}
-
       <div className="flex justify-center">
         <WitnessVoteToggle
           witness={row.owner}

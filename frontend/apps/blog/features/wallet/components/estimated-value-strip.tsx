@@ -35,7 +35,11 @@ export default function EstimatedValueStrip({ figures }: { figures: WalletFigure
         <div className="text-[20px] font-semibold text-[#161511]">{t('wallet.estimated_value.title')}</div>
         <div className="mt-0.5 text-[13.5px] text-[#6b7280]">{t('wallet.estimated_value.description')}</div>
       </div>
-      <span className="font-sans text-[30px] font-bold tabular-nums text-[#2f7d4f]">
+      {/* ★ W-4: this figure was #2f7d4f. A balance is a neutral fact, not good
+          news — the same $5,147.82 renders identically whether it went up or
+          down today. Green is reserved for a DELTA (the price card's 24h change
+          chip, a credit in the activity ledger); a holding is body colour. */}
+      <span className="font-sans text-[30px] font-bold tabular-nums text-[#161511]">
         {valueUsd === null ? '—' : formatUsd(valueUsd)}
       </span>
     </div>

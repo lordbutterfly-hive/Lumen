@@ -290,6 +290,7 @@ const CommentListItem = memo(function CommentListItem({
                                     className="p-1 sm:p-2"
                                     href={`/${comment.category}/@${displayAuthor}/${comment.permlink}`}
                                     data-testid="comment-page-link"
+                                    aria-label={`Open ${displayAuthor}'s reply on its own page`}
                                   >
                                     <Icons.link className="h-3 w-3" />
                                   </Link>
@@ -316,6 +317,7 @@ const CommentListItem = memo(function CommentListItem({
                               ) : null}
                               <AccordionTrigger
                                 className="pb-0 pt-1 !no-underline sm:hidden"
+                                aria-label={openState === 'item-1' ? 'Collapse this reply' : 'Expand this reply'}
                                 onClick={() => setOpenState((prev) => (prev === 'item-1' ? '' : 'item-1'))}
                               />
                             </div>
@@ -394,6 +396,7 @@ const CommentListItem = memo(function CommentListItem({
                       {!hiddenComment ? (
                         <AccordionTrigger
                           className="mr-2 hidden pb-0 pt-1 !no-underline sm:block"
+                          aria-label={openState === 'item-1' ? 'Collapse this reply' : 'Expand this reply'}
                           onClick={() => setOpenState((prev) => (prev === 'item-1' ? '' : 'item-1'))}
                         />
                       ) : null}

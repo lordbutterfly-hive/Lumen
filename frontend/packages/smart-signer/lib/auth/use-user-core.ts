@@ -54,6 +54,23 @@ export function useUserCore(
     // is the safer trade; the multi-tab case is much rarer.
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
+    // ★ ONE SESSION CHECK PER PAGE, NOT ONE PER MOUNTING COMPONENT (2026-08-10).
+    //
+    // `initialDataUpdatedAt: 0` marks the localStorage seed stale so the FIRST
+    // mount always revalidates — that part is deliberate and stays. But the query
+    // client's default staleness is 60s, and this hook is called from a dozen
+    // components that mount at different moments (header, rails, cards, dialogs),
+    // so anything mounting more than a minute into a page triggered another
+    // `/api/users/me`. Measured on one home page load: three of them, the second
+    // and third taking 30.0s and 18.6s because they were queued behind the feed on
+    // the same single-threaded server.
+    //
+    // Five minutes is safe precisely because nothing here depends on polling to
+    // learn about a session change: sign-in, sign-out, lite login, consent and the
+    // desync listener all write `[QUERY_KEY.user]` with `setQueryData` directly, so
+    // the change is instant and this window only governs how often we RE-ASK about
+    // a session nobody has touched.
+    staleTime: 5 * 60 * 1000,
     initialData: storedUser,
     initialDataUpdatedAt: 0,
     // A FAILED REQUEST IS NOT A LOGOUT. A request that never reached the server

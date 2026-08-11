@@ -7,16 +7,13 @@ import WitnessTableRow from './witness-table-row';
 import {
   GENERAL_GRID_TEMPLATE,
   GENERAL_MIN_WIDTH_CLASS,
-  PARAMS_GRID_TEMPLATE,
-  PARAMS_MIN_WIDTH_CLASS,
   STICKY_IDENTITY_HEADER_CLASS,
   STICKY_RANK_CLASS
 } from './lib/table-grid';
-import { WitnessRow, WitnessViewMode } from './lib/types';
+import { WitnessRow } from './lib/types';
 
 interface WitnessesTableProps {
   rows: WitnessRow[];
-  viewMode: WitnessViewMode;
   isLoading: boolean;
   /** True when the witness list failed to load — render an error state, NOT "no results". */
   isError: boolean;
@@ -54,7 +51,6 @@ const HEADER_CLASS =
 
 export default function WitnessesTable({
   rows,
-  viewMode,
   isLoading,
   isError,
   onRetry,
@@ -67,10 +63,10 @@ export default function WitnessesTable({
   const [visibleCount, setVisibleCount] = useState(FIRST_PAGE);
   const { ref: moreRef, inView: moreInView } = useInView();
 
-  // Any change to the row SET (a filter toggle, a search, a tab switch) starts the
+  // Any change to the row SET (a filter toggle or a search) starts the
   // window again. Without this, filtering down to 12 rows would leave the previous
   // scroll-extended count in place and the next filter would paint everything.
-  const rowsKey = `${viewMode}:${rows.length}:${rows[0]?.id ?? ''}`;
+  const rowsKey = `${rows.length}:${rows[0]?.id ?? ''}`;
   useEffect(() => {
     setVisibleCount(FIRST_PAGE);
   }, [rowsKey]);
@@ -80,8 +76,8 @@ export default function WitnessesTable({
   }, [moreInView, rows.length]);
 
   const visibleRows = useMemo(() => rows.slice(0, visibleCount), [rows, visibleCount]);
-  const gridTemplate = viewMode === 'general' ? GENERAL_GRID_TEMPLATE : PARAMS_GRID_TEMPLATE;
-  const minWidthClass = viewMode === 'general' ? GENERAL_MIN_WIDTH_CLASS : PARAMS_MIN_WIDTH_CLASS;
+  const gridTemplate = GENERAL_GRID_TEMPLATE;
+  const minWidthClass = GENERAL_MIN_WIDTH_CLASS;
   // Below lg the table scrolls inside itself, and a touch device shows no
   // scrollbar until you are already scrolling — so nothing on the page said the
   // remaining columns existed. One line, only where it is true, only when there
@@ -114,7 +110,6 @@ export default function WitnessesTable({
           <div className={HEADER_CLASS} style={{ gridTemplateColumns: gridTemplate }} role="row">
             <span className={STICKY_RANK_CLASS}>{t('witnesses.columns.rank')}</span>
             <span className={STICKY_IDENTITY_HEADER_CLASS}>{t('witnesses.columns.witness')}</span>
-            {viewMode === 'general' ? (
               <>
                 <span className="text-right">{t('witnesses.columns.votes')}</span>
                 <span className="text-right">{t('witnesses.columns.last_block')}</span>
@@ -122,15 +117,6 @@ export default function WitnessesTable({
                 <span className="text-right">{t('witnesses.columns.price')}</span>
                 <span className="text-right">{t('witnesses.columns.apr')}</span>
               </>
-            ) : (
-              <>
-                <span className="text-right">{t('witnesses.columns.creation_fee')}</span>
-                <span className="text-right">{t('witnesses.columns.max_block_size')}</span>
-                <span className="text-right">{t('witnesses.columns.subsidy_budget')}</span>
-                <span className="text-right">{t('witnesses.columns.price')}</span>
-                <span className="text-right">{t('witnesses.columns.hbd_apr')}</span>
-              </>
-            )}
             <span className="text-center">{t('witnesses.columns.vote')}</span>
           </div>
 
@@ -179,7 +165,6 @@ export default function WitnessesTable({
                 <WitnessTableRow
                   key={row.id}
                   row={row}
-                  viewMode={viewMode}
                   isLoggedIn={isLoggedIn}
                   hasProxy={hasProxy}
                   ownVotesUnavailable={ownVotesUnavailable}

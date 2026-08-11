@@ -300,8 +300,16 @@ export class HomePage {
     // this.getNavSearchInput = page.locator('header div nav input[type="search"]'); // old one
     this.getNavSearchInput = page.locator('input[type="search"]');
     this.getNavSearchLink = page.locator('[data-testid="navbar-search-link"]');
+    // ★ 2026-08-10: the mode dropdown, the AI/tag/account modes and their
+    // placeholders ("AI Search", "Search tags...") are gone — one field now,
+    // placeholder "Search posts", testid header-search-input (see
+    // features/search/search-input.tsx and searchPage.ts's class doc
+    // comment). getNavSearchAIInput/getNavSearchTagsInput are left defined
+    // but unused: no live element matches them any more and nothing in this
+    // suite calls them after the dropdown-dependent tests that did were
+    // deleted.
     this.getNavSearchAIInput = page.getByPlaceholder('AI Search', { exact: true });
-    this.getNavSearchClassicInput = page.getByPlaceholder('Search...', { exact: true });
+    this.getNavSearchClassicInput = page.getByTestId('header-search-input');
     this.getNavSearchTagsInput = page.getByPlaceholder('Search tags...');
     this.getNavUserAvatar = page.locator('[data-testid="profile-menu"]');
     this.getNavProfileMenuContent = page.locator('[data-testid="profile-menu-content"]');
@@ -404,11 +412,13 @@ export class HomePage {
     // Click the post's author name link
     await this.getFirstPostAuthor.click();
 
-    // Validate that you moved to the clicked post author profile page
+    // Validate that you moved to the clicked post author profile page.
+    // Posts is the DEFAULT view at `/@username` now (no separate Posts tab
+    // to click into, no `user-post-menu` there — that testid lives only on
+    // `/comments`, see profilePage.ts's class doc comment), so no extra
+    // navigation step is needed once the profile has loaded.
     await this.page.waitForSelector(profilePage.profileName['_selector']);
     expect(await profilePage.profileName).toBeVisible();
-    await profilePage.profilePostsLink.click();
-    await this.page.waitForSelector(profilePage.page.locator('[data-testid="user-post-menu"]')['_selector']);
     const firstPostAuthorNameProfilePage = await this.page.locator('[data-testid="post-author"]').first();
     await expect('@' + firstPostAuthorNick).toMatch(await firstPostAuthorNameProfilePage.innerText());
   }
@@ -419,11 +429,11 @@ export class HomePage {
     // Click the post's author avatar link
     await this.getFirstPostCardAvatar.click();
 
-    // Validate that you moved to the clicked post author profile page
+    // Validate that you moved to the clicked post author profile page. See
+    // moveToFirstPostAuthorProfilePage above: Posts is the default view now,
+    // no Posts-tab click needed.
     await this.page.waitForSelector(profilePage.profileName['_selector']);
     expect(await profilePage.profileName).toBeVisible();
-    await profilePage.profilePostsLink.click();
-    await this.page.waitForSelector(profilePage.page.locator('[data-testid="user-post-menu"]')['_selector']);
     const firstPostAuthorNameProfilePage = await this.page.locator('[data-testid="post-author"]').first();
     await expect('@' + firstPostAuthorNick).toMatch(await firstPostAuthorNameProfilePage.innerText());
   }

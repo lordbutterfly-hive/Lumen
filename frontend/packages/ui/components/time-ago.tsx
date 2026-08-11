@@ -5,6 +5,22 @@ interface TimeAgoProps {
   date: string | number | Date;
   /** Optional language code. Falls back to NEXT_LOCALE cookie or 'en' */
   lang?: string;
+  /**
+   * ★ OPT-IN, BECAUSE ONE MIXED LIST IS THE PROBLEM, NOT THE WORD "yesterday"
+   * (2026-08-10, owner item Q-4).
+   *
+   * `Intl.RelativeTimeFormat` with `numeric: 'auto'` swaps in idiomatic words
+   * at the edges — so a notifications list that spans a few days reads
+   * "yesterday" on one row and "2 days ago" on the next, two formats for the
+   * same kind of fact, one above the other. `'always'` keeps every row in one
+   * shape ("1 day ago", "2 days ago").
+   *
+   * Left as a prop rather than changed globally: every post card, comment and
+   * profile timestamp in the app renders through here, and the warmer wording
+   * is fine where a timestamp appears once per card. It is the DENSE list that
+   * needs one format.
+   */
+  numeric?: 'auto' | 'always';
 }
 
 // Move intervals outside the function to avoid recreation
@@ -18,7 +34,11 @@ const TIME_INTERVALS: [number, Intl.RelativeTimeFormatUnit][] = [
   [1, 'second']
 ];
 
-const getTimeAgoString = (date: Date, lang: string = 'en'): string => {
+const getTimeAgoString = (
+  date: Date,
+  lang: string = 'en',
+  numeric: 'auto' | 'always' = 'auto'
+): string => {
   try {
     // ★ EVERY RELATIVE TIME IN THE APP WAS WRONG BY THE VIEWER'S UTC OFFSET
     // (2026-08-07). The old code did:
@@ -41,7 +61,7 @@ const getTimeAgoString = (date: Date, lang: string = 'en'): string => {
       return 'Invalid date';
     }
 
-    const rtf = new Intl.RelativeTimeFormat(lang, { numeric: 'auto' });
+    const rtf = new Intl.RelativeTimeFormat(lang, { numeric });
 
     for (const [secondsInUnit, unit] of TIME_INTERVALS) {
       const value = Math.floor(diff / secondsInUnit);
@@ -76,21 +96,21 @@ const parseHiveDate = (value: Date | string | number): Date => {
   return new Date(hasZone ? value : `${value}Z`);
 };
 
-const TimeAgo: FC<TimeAgoProps> = ({ date, lang }) => {
+const TimeAgo: FC<TimeAgoProps> = ({ date, lang, numeric = 'auto' }) => {
   const [timeAgo, setTimeAgo] = useState<string>('');
   // Use provided lang prop, fall back to cookie or 'en'
   const userLang = lang || getCookie('NEXT_LOCALE') || 'en';
 
   useEffect(() => {
     const updateTimeAgo = () => {
-      setTimeAgo(getTimeAgoString(parseHiveDate(date), userLang));
+      setTimeAgo(getTimeAgoString(parseHiveDate(date), userLang, numeric));
     };
 
     updateTimeAgo();
     const interval = setInterval(updateTimeAgo, 60000); // Update every minute
 
     return () => clearInterval(interval);
-  }, [date, userLang]);
+  }, [date, userLang, numeric]);
 
   return <span title={parseHiveDate(date).toLocaleString(userLang)}>{timeAgo}</span>;
 };

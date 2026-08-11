@@ -1,12 +1,48 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { configuredImagesEndpoint } from '@hive/ui/config/public-vars';
-import { isHiveAccountNameValid } from '@hive/transaction';
+// ★ Deliberately NOT `from '@hive/transaction'`. That barrel's index.ts also
+// pulls in `getSigner`, whose module graph statically imports the password
+// dialog/form components for the hbauth, google-drive and wif signers (real
+// UI, needed so a browser can prompt for a key). This route is a pure Node
+// Route Handler with no React tree, so none of that is reachable at runtime
+// here — but Next's SERVER webpack build still resolves `react-hook-form`
+// from inside that graph under the `react-server` export condition, which
+// only exposes `{ appendErrors, get, set }` (see the package's
+// `dist/react-server.esm.mjs`), not `useForm`. That produced a build-time
+// "'useForm' is not exported from 'react-hook-form'" warning with an import
+// trace running straight through this file. Importing the validator
+// directly from its own submodule (already an established pattern — see
+// `@transaction/lib/chain` in packages/smart-signer/lib/signer/*.ts) skips
+// the barrel, and with it the signer/UI stack this route never needed.
+import { isHiveAccountNameValid } from '@transaction/lib/validate-hive-account';
 import { liteAvatar } from '@/blog/lib/lite/render/lite-identity';
 
 /**
- * Proxy endpoint for user avatars that prevents caching
+ * Proxy endpoint for user avatars.
  * Usage: /api/avatar?username=USERNAME&size=small|medium|large
  *        /api/avatar?username=USERNAME&width=WIDTH&height=HEIGHT
+ *
+ * ★★★ CACHED NOW (2026-08-11). The response is a pure function of the query
+ * params — `username` (+ `size`/`width`/`height`) resolve to the SAME image
+ * for every visitor; nothing here reads a cookie, session or the requester's
+ * identity (liteAvatar() looks up the NAMED account from the DB, not the
+ * caller). `no-store` was previously blanket-applied with no route-specific
+ * reasoning in the comment it replaced ("prevents caching"), and it was
+ * costing real time: measured 29 avatar requests per page load on comment
+ * threads/profiles/witnesses/proposals/wallet at 6.0-6.3s each under load,
+ * vs ~300ms direct. A short public TTL lets the same avatar survive
+ * client-side navigation instead of re-fetching every time.
+ *
+ * One caveat for whoever owns this next: `middleware.ts` sets fresh,
+ * per-request `session_uid`/`app_login_challenge` cookies on EVERY request
+ * that reaches this route (measured — two cookie-less curls 2s apart got two
+ * different UUIDs), and those `Set-Cookie` headers ride along on this
+ * response today. That is harmless for the browser's own cache (a visitor's
+ * cache never serves another visitor), but if this ever sits behind a
+ * SHARED cache (a CDN, a reverse proxy) in production, a cached response
+ * could in principle replay one visitor's session cookie to another within
+ * the 60s window. Not a reason to keep `no-store` — this deployment is
+ * origin-only today — but worth knowing before putting a CDN in front of it.
  */
 export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
@@ -62,9 +98,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
               status: 200,
               headers: new Headers({
                 'Content-Type': picture.headers.get('content-type') || 'image/png',
-                'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0',
-                Pragma: 'no-cache',
-                Expires: '0',
+                'Cache-Control': 'public, max-age=60, stale-while-revalidate=300',
                 'X-Content-Type-Options': 'nosniff'
               })
             });
@@ -89,9 +123,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // Prepare headers, copying content-type from the origin
     const headers = new Headers({
       'Content-Type': response.headers.get('content-type') || 'image/png',
-      'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0',
-      'Pragma': 'no-cache',
-      'Expires': '0',
+      'Cache-Control': 'public, max-age=60, stale-while-revalidate=300',
       'X-Content-Type-Options': 'nosniff',
     });
 

@@ -53,8 +53,12 @@ const logger = getLogger('app');
  * explanation, so the two editors cannot describe it differently.
  */
 const RC_LABEL = 'Resource Credits';
+// ★ Kept byte-identical to the composer's copy in PostPublishingSection.tsx,
+//   including the 2026-08-10 dash removal (C-7): the comment above promises
+//   "one gauge, one explanation", and a fix applied to only one of the two
+//   copies would quietly break that promise.
 const RC_EXPLAINER =
-  'Your Hive account’s free allowance for posting, commenting and voting. It refills on its own over time — you only have to wait if it runs low.';
+  'Your Hive account’s free allowance for posting, commenting and voting. It refills on its own over time, so you only have to wait if it runs low.';
 
 export function ReplyTextbox({
   onSetReply,
@@ -498,10 +502,16 @@ export function ReplyTextbox({
               mouse-only. */}
           {showResourceCredits ? (
             <div className="flex items-center gap-3">
+              {/* ★ The SECOND copy of the same off-palette bar (2026-08-10, C-6).
+                  The composer's Resource Credits gauge was `bg-[#0088FE]`,
+                  measured rgb(0,136,254), and blue appears nowhere else in
+                  Lumen. Fixing only the composer would have left the identical
+                  bar blue two clicks away, so both move to brand red on a
+                  neutral track together. */}
               <Progress
                 value={manabarsData?.rc.percentageValue ?? 0}
-                className="h-2 w-20"
-                indicatorClassName="bg-[#0088FE]"
+                className="h-2 w-20 bg-[#ebebeb]"
+                indicatorClassName="bg-[#c0392b]"
               />
               <TooltipProvider>
                 <Tooltip>

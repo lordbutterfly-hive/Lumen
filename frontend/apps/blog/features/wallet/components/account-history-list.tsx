@@ -64,7 +64,9 @@ export default function AccountHistoryList({
           </p>
         ) : (
           <>
-            <div className="flex flex-col" data-testid="wallet-history-rows">
+            {/* Rows are discrete 14px blocks now (see account-history-row.tsx),
+                so they need a gap rather than the hairline they used to share. */}
+            <div className="flex flex-col gap-2" data-testid="wallet-history-rows">
               {entries.map((entry) => (
                 <AccountHistoryRow key={entry.key} entry={entry} />
               ))}

@@ -1,14 +1,19 @@
-import { Skeleton, PostListSkeleton } from '@hive/ui';
+import { PostListSkeleton } from '@hive/ui';
 
+/**
+ * ★ NO SKELETON FOR A SEARCH BOX THAT IS NOT ON THIS PAGE (2026-08-10). This
+ * used to open with a full-width rounded bar, which was the placeholder for
+ * /search's own search field — the second, duplicate field that was removed.
+ * Leaving it here would flash a box that never arrives. The header's field is
+ * outside this boundary and is already on screen.
+ */
 export default function Loading() {
   return (
-    <div className="m-auto flex max-w-4xl flex-col gap-12 px-4 py-8">
-      <div className="flex flex-col gap-4">
-        <div className="w-full">
-          <Skeleton className="h-12 w-full rounded-lg" />
-        </div>
-      </div>
-      <PostListSkeleton count={5} />
+    <div className="relative mx-auto grid max-w-[1720px] grid-cols-1 gap-11 px-6 pb-20 pt-[26px] md:grid-cols-[200px_minmax(0,1fr)] md:px-11 xl:grid-cols-[200px_minmax(0,1fr)_312px]">
+      <div className="hidden md:block" />
+      <main className="flex min-w-0 flex-col gap-6">
+        <PostListSkeleton count={5} />
+      </main>
     </div>
   );
 }

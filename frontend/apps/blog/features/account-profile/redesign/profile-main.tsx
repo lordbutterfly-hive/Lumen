@@ -13,6 +13,7 @@ import { useSSRObserver, useInitialPosts } from '@/blog/components/observer-prov
 import { useFollowingInfiniteQuery } from '@/blog/features/account-lists/hooks/use-following-infinitequery';
 import NoDataError from '@/blog/components/no-data-error';
 import { ProfileLeagueCard } from '@/blog/features/retention/components/profile-league-card';
+import PageMasthead from '@/blog/features/layouts/page-masthead';
 import ProfileMainSkeleton from './profile-main-skeleton';
 import ProfileCover from './profile-cover';
 import ProfileIdentity from './profile-identity';
@@ -130,28 +131,52 @@ export default function ProfileMain() {
     <div data-testid="profile-redesign-main">
       <ProfileCover username={username} coverImageUrl={getCoverImageUrl(profileData.profile)} />
 
-      <div className="mt-[58px] flex flex-wrap items-start justify-between gap-5 pl-1.5">
-        <ProfileIdentity
-          username={username}
-          chainAccount={!profileData._temporary}
-          displayName={profileData.profile?.name || profileData.name}
-          profile={profileData.profile}
-          created={profileData.created}
-          lastVoteTime={profileData.last_vote_time}
-          lastPost={profileData.last_post}
-          // Already on this object: `getAccountFull` attaches it from
-          // `bridge.get_profile` (packages/transaction/lib/hive-api.ts). Zero extra
-          // requests for the badge.
-          reputation={profileData.reputation}
-        />
-        {/* `_temporary` is how a Lumen lite account's stand-in profile is marked: no
-            Hive account exists behind it, so a follow of this person can only live on
-            Lumen. It is a hint, not a decision — the server confirms it. */}
-        <ProfileActions
-          username={username}
-          following={following}
-          liteTarget={Boolean(profileData._temporary)}
-        />
+      {/* ★ P-1: THE SHELL, AND THE SIX PIXELS.
+          The identity block was bare text on the page background — the same "no
+          shell at all" shape /witnesses carried before it was fixed — and it sat
+          in a `pl-1.5` container, so the h1 landed at x=294 while the cover
+          directly above it started at x=288. Six pixels is enough to see and
+          there was no reason for it. The padding is gone and the block is in the
+          shared masthead, which owns the shell and the grid position for every
+          page. No `mark`: a profile has no assigned glyph and R5 forbids
+          inventing one. */}
+      <div className="mt-[58px]">
+        {/* The h1 is the person's NAME and nothing else. The rank chip used to sit
+            inside the heading; through the masthead's `title` slot that would have
+            made the page's h1 read "hbd-temp Unranked·rank 0 of 9" to a screen
+            reader and to a search engine. It moved one line down, into the meta
+            row beside the reputation pill, which is where the other badge about
+            this person already lives. */}
+        <PageMasthead title={profileData.profile?.name || profileData.name}>
+          {/* Identity and Follow go into the masthead's meta slot as ONE row
+              rather than through its `actions` prop: that slot is vertically
+              centred, and this meta block is tall (handle, reputation, bio,
+              tenure), so the Follow button would float to the middle of it. The
+              row below is the exact `items-start justify-between gap-5` pairing
+              the page already had; only the shell around it is new. */}
+          <div className="flex w-full flex-wrap items-start justify-between gap-5">
+            <ProfileIdentity
+              username={username}
+              chainAccount={!profileData._temporary}
+              profile={profileData.profile}
+              created={profileData.created}
+              lastVoteTime={profileData.last_vote_time}
+              lastPost={profileData.last_post}
+              // Already on this object: `getAccountFull` attaches it from
+              // `bridge.get_profile` (packages/transaction/lib/hive-api.ts). Zero extra
+              // requests for the badge.
+              reputation={profileData.reputation}
+            />
+            {/* `_temporary` is how a Lumen lite account's stand-in profile is marked:
+                no Hive account exists behind it, so a follow of this person can only
+                live on Lumen. It is a hint, not a decision — the server confirms it. */}
+            <ProfileActions
+              username={username}
+              following={following}
+              liteTarget={Boolean(profileData._temporary)}
+            />
+          </div>
+        </PageMasthead>
       </div>
 
       <ProfileStatsBar
@@ -159,8 +184,13 @@ export default function ProfileMain() {
         followerCount={profileData.follow_stats?.follower_count ?? 0}
         postCount={profileData.post_count ?? 0}
         followingCount={followingCount}
-        hp={hp.toFixed(0)}
-        hpEffective={hpEffective.toFixed(0)}
+        // ★ W-11: three decimals, the same precision the wallet prints, because
+        // the two pages showed the same account's HP as "74,868" here and
+        // "74,867.553" there and left the reader to work out whether that was
+        // two numbers or one. ProfileStatsBar still does the comma grouping, so
+        // what goes in is an ungrouped fixed-point string, as it always was.
+        hp={hp.toFixed(3)}
+        hpEffective={hpEffective.toFixed(3)}
       />
 
       <ProfileLeagueCard username={username} className="mt-5" chainAccount={!profileData._temporary} />
@@ -169,7 +199,6 @@ export default function ProfileMain() {
         <ProfileTabs
           username={username}
           observer={observer}
-          postsCount={profileData.post_count}
           initialPosts={initialPosts}
           lite={Boolean(profileData._temporary)}
         />

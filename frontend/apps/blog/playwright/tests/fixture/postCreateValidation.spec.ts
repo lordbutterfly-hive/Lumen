@@ -135,18 +135,31 @@ test.describe('Post creation — validation (§2.2)', () => {
     // category is the default "blog" (not a community) — see post-form.tsx
     // `tagsRequired = !categoryParam && watchedValues.category === "blog"`.
 
-    await expect(editor.getTagsErrorMessage).toHaveText(
-      'Required when post to My Blog'
-    );
-    // PostMetadataSection.tsx:91 attaches `border-red-500` whenever
-    // `tagsCheck` is truthy. Pair every inline-error assertion with the
-    // visual cue so a styling refactor that drops one but keeps the
-    // other surfaces here.
-    await expect(editor.getEnterYourTagsInput).toHaveClass(/border-red-500/);
+    // ★ THE ERROR IS NO LONGER SHOWN ON AN UNTOUCHED FIELD (2026-08-10, C-2).
+    // This test used to assert the opposite, and the opposite was the defect:
+    // the composer opened with the tags input already red and already
+    // accusing the writer, before a single keystroke. `showTagsError` in
+    // PostMetadataSection now gates both the border and the message on
+    // `fieldState.isTouched || value !== ''`.
+    //
+    // The REQUIREMENT is unchanged and still asserted below: Submit is
+    // disabled and the hint under it names the missing field. That is the
+    // part a user needs; the red field they never touched is not.
+    await expect(editor.getEnterYourTagsInput).not.toHaveClass(/border-red-500/);
     await expect(editor.getSubmitPostButton).toBeDisabled();
     await expect(editor.getSubmitRequirementsHint).toHaveText(
       'Enter at least one tag to submit'
     );
+
+    // …and once the writer has actually been in the field and left it empty,
+    // the inline error DOES appear. Without this half, the assertion above
+    // would also pass if the error had simply been deleted.
+    await editor.getEnterYourTagsInput.click();
+    await editor.getPostTitleInput.click();
+    await expect(editor.getTagsErrorMessage).toHaveText(
+      'Add at least one tag when you post to My blog'
+    );
+    await expect(editor.getEnterYourTagsInput).toHaveClass(/border-red-500/);
 
     await expectNoBroadcast(page, broadcast);
   });
@@ -336,13 +349,23 @@ test.describe('Post creation — validation (§2.2)', () => {
     // emits the "must contain only letters and numbers" string and the
     // gate flips disabled. Note the displayed message is intentionally
     // narrower than the underlying regex (which also accepts `.` / `-`).
+    // ★ The field moved into Advanced settings (2026-08-10, C-3).
+    await editor.openAdvancedSettings();
     await editor.getAuthorInput.fill('not!a!user');
 
     await expect(editor.getAuthorErrorMessage).toHaveText(
       'Must contain only letters and numbers'
     );
     await expect(editor.getAuthorInput).toHaveClass(/border-red-500/);
-    await expect(editor.getSubmitPostButton).toBeDisabled();
+    // ★ The gate moved WITH the field, and got stricter: an invalid author can
+    // no longer be pushed into the post at all, because Save refuses it. The
+    // old assertion (main Submit disabled) described a value that had already
+    // reached the form. `post-form.tsx` still gates Submit on
+    // `validateAltUsernameInput` as a fallback for a value arriving from a
+    // stored template or an old draft.
+    await expect(
+      page.locator('[data-testid="advanced-settings-save-button"]')
+    ).toBeDisabled();
 
     await expectNoBroadcast(page, broadcast);
   });
@@ -372,13 +395,17 @@ test.describe('Post creation — validation (§2.2)', () => {
     await editor.getPostTitleInput.fill(VALID_TITLE);
     await fillPostBody(page, VALID_BODY);
     await editor.getEnterYourTagsInput.fill(VALID_TAG);
+    // ★ The field moved into Advanced settings (2026-08-10, C-3).
+    await editor.openAdvancedSettings();
     await editor.getAuthorInput.fill('someoneelse');
 
-    await expect(editor.getAuthorErrorMessage).toHaveText('');
+    // No inline error element is rendered at all when the value is valid.
+    await expect(editor.getAuthorErrorMessage).toHaveCount(0);
     // Same negative-form assertion as V04: client validator returned
     // null, so no red border should be on the field. Documents the
     // "no client-side block" contract visually as well as textually.
     await expect(editor.getAuthorInput).not.toHaveClass(/border-red-500/);
+    await editor.saveAdvancedSettings();
     await expect(editor.getSubmitPostButton).toBeEnabled();
 
     await expectNoBroadcast(page, broadcast);

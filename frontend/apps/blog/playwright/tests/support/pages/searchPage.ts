@@ -1,71 +1,59 @@
 import { type Locator, type Page } from '@playwright/test';
 
+/**
+ * ★★★ REBUILT FOR THE SINGLE-FIELD SEARCH (owner ruling, 2026-08-10).
+ *
+ * The scope dropdown (`role="combobox"`, `search-mode-*` options), the second
+ * "Topic..." box, and the `@`/`#`/`/`/`%` prefix modes are all gone — see
+ * `packages/ui/hooks/use-search.ts` and `features/search/search-input.tsx`.
+ * Search is one field (`header-search-input`, in the site header, present on
+ * every page — `/search` itself renders no field of its own) driving
+ * `/search?q=...&s=...`. Results render `MediumPostCard`
+ * (`data-testid="medium-card"`), the feed's own card, not the classic
+ * `post-list-item`. The sort control survives as a native `<select
+ * data-testid="search-sort-by-dropdown-list">` (`features/search/sort-select.tsx`),
+ * not a Radix trigger with `[role="option"]` children.
+ */
 export class SearchPage {
   readonly page: Page;
 
-  // Search input and controls
-  readonly modeSelectTrigger: Locator;
+  // Search input and control — the one header search field.
   readonly searchInput: Locator;
   readonly searchButton: Locator;
-  readonly secondInput: Locator; // For userTopic mode
 
-  // Mode select items (by value attribute)
-  readonly modeClassic: Locator;
-  readonly modeAi: Locator;
-  readonly modeAccount: Locator;
-  readonly modeUserTopic: Locator;
-  readonly modeTag: Locator;
-
-  // Sort select (classic/userTopic only)
+  // Sort select (native <select>, not a Radix combobox).
   readonly sortSelectTrigger: Locator;
-  readonly sortRelevance: Locator;
-  readonly sortCreated: Locator;
 
-  // Search results - using standard data-testid
+  // Search results — MediumPostCard.
   readonly postListItems: Locator;
   readonly firstPostItem: Locator;
   readonly firstPostTitle: Locator;
   readonly firstPostAuthor: Locator;
 
   // Loading and empty states
-  readonly loadingSpinner: Locator;
   readonly noResultsMessage: Locator;
 
   constructor(page: Page) {
     this.page = page;
 
-    // Mode select trigger - first button[role="combobox"]
-    this.modeSelectTrigger = page.locator('button[role="combobox"]').first();
+    // The only search field left (header-mounted; see features/search/search-input.tsx).
+    this.searchInput = page.getByTestId('header-search-input');
+    // No testid on the submit button; it is the input's sibling in the same
+    // pill, so this holds regardless of the (translated) aria-label text.
+    this.searchButton = this.searchInput.locator('xpath=following-sibling::button');
 
-    // Search input - main text input
-    this.searchInput = page.locator('input[type="text"]').first();
-    this.secondInput = page.locator('input[placeholder="Topic..."]');
-
-    // Search button
-    this.searchButton = page.locator('button[aria-label="Search"]');
-
-    // Mode options - using data-testid for robust selection
-    this.modeClassic = page.getByTestId('search-mode-classic');
-    this.modeAi = page.getByTestId('search-mode-ai');
-    this.modeAccount = page.getByTestId('search-mode-account');
-    this.modeUserTopic = page.getByTestId('search-mode-user-topic');
-    this.modeTag = page.getByTestId('search-mode-tag');
-
-    // Sort select - addressed by its testid (robust vs. relying on the
-    // combobox render order, which the mode select also matches).
+    // Sort select — id unchanged across the Radix -> native swap.
     this.sortSelectTrigger = page.getByTestId('search-sort-by-dropdown-list');
-    this.sortRelevance = page.getByRole('option', { name: 'Relevance' });
-    this.sortCreated = page.getByRole('option', { name: 'Newest' });
 
-    // Search results - standard post-list-item
-    this.postListItems = page.locator('[data-testid="post-list-item"]');
+    // Search results — MediumPostCard (features/discovery-feed/medium-post-card.tsx).
+    this.postListItems = page.locator('[data-testid="medium-card"]');
     this.firstPostItem = this.postListItems.first();
-    this.firstPostTitle = page.locator('[data-testid="post-list-item"]').first().locator('h3 a');
-    this.firstPostAuthor = page.locator('[data-testid="post-author"]').first();
+    this.firstPostTitle = this.firstPostItem.locator('[data-testid="medium-card-title"]');
+    this.firstPostAuthor = this.firstPostItem.locator('[data-testid="medium-card-author"]');
 
-    // States
-    this.loadingSpinner = page.locator('[data-testid="loading-spinner"]');
-    this.noResultsMessage = page.getByText(/no results|nothing found|no data/i);
+    // Actual copy (locales/en/common_blog.json, search_page.no_results_for):
+    // `No results for "{{query}}". Try different or fewer words.`
+    this.noResultsMessage = page.getByText(/no results/i);
   }
 
   async goto() {
@@ -76,37 +64,6 @@ export class SearchPage {
   async gotoWithClassicQuery(query: string, sort: 'relevance' | 'created' = 'relevance') {
     await this.page.goto(`/search?q=${encodeURIComponent(query)}&s=${sort}`);
     await this.page.waitForLoadState('domcontentloaded');
-  }
-
-  async gotoWithAiQuery(query: string) {
-    await this.page.goto(`/search?ai=${encodeURIComponent(query)}`);
-    await this.page.waitForLoadState('domcontentloaded');
-  }
-
-  async switchToMode(mode: 'classic' | 'ai' | 'account' | 'userTopic' | 'tag') {
-    await this.modeSelectTrigger.click();
-    // Wait for menu to appear
-    await this.page.waitForSelector('[role="option"]', { timeout: 5000 });
-
-    switch (mode) {
-      case 'classic':
-        await this.modeClassic.click();
-        break;
-      case 'ai':
-        await this.modeAi.click();
-        break;
-      case 'account':
-        await this.modeAccount.click();
-        break;
-      case 'userTopic':
-        await this.modeUserTopic.click();
-        break;
-      case 'tag':
-        await this.modeTag.click();
-        break;
-    }
-    // Wait for menu to close by checking options are no longer visible
-    await this.page.locator('[role="option"]').first().waitFor({ state: 'hidden', timeout: 5000 });
   }
 
   async performSearch(query: string) {
@@ -121,15 +78,9 @@ export class SearchPage {
     await this.page.waitForLoadState('domcontentloaded');
   }
 
+  /** Native <select> — use selectOption, there is no floating listbox to click through. */
   async selectSort(sort: 'relevance' | 'created') {
-    await this.sortSelectTrigger.click();
-    await this.page.waitForSelector('[role="option"]', { timeout: 5000 });
-
-    if (sort === 'relevance') {
-      await this.sortRelevance.click();
-    } else {
-      await this.sortCreated.click();
-    }
+    await this.sortSelectTrigger.selectOption(sort);
     await this.page.waitForLoadState('domcontentloaded');
   }
 
@@ -164,7 +115,10 @@ export class SearchPage {
 
   async clickFirstResultAuthor() {
     await this.firstPostAuthor.click();
-    await this.page.waitForSelector('[data-testid="profile-name"]', { timeout: 15000 });
+    // The redesigned profile carries no "profile-name" testid (2026-08-10
+    // redesign, features/account-profile/redesign/*) — profile-stats is the
+    // stable element every profile view still renders.
+    await this.page.waitForSelector('[data-testid="profile-stats"]', { timeout: 15000 });
   }
 
   async scrollToLoadMore() {
@@ -173,7 +127,7 @@ export class SearchPage {
     // Wait for new items to load or network to settle
     try {
       await this.page.waitForFunction(
-        (initial) => document.querySelectorAll('[data-testid="post-list-item"]').length > initial,
+        (initial) => document.querySelectorAll('[data-testid="medium-card"]').length > initial,
         initialCount,
         { timeout: 10000 }
       );

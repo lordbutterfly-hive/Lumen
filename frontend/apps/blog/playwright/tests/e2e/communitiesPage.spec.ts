@@ -161,19 +161,16 @@ test.describe('Communities page tests', () => {
 
     for (let i = 0; i < leadershipLinkLists.length; i++) {
       await leadershipLinkLists[i].click();
+      // Posts is the default view at `/@username` now — no separate Posts
+      // tab to click into (see profilePage.ts's class doc comment).
       await page.waitForSelector(profilePage.profileName['_selector']);
       expect(await profilePage.profileName).toBeVisible();
-      await profilePage.profilePostsLink.click();
-      await page.waitForSelector(
-        await profilePage.page.locator('[data-testid="user-post-menu"]')['_selector']
-      );
 
       if ((await profilePage.page.locator('[data-testid="post-author"]').count()) > 0) {
         expect(await leadershipLinkNickNamesLists[i]).toContain(
           await profilePage.page.locator('[data-testid="post-author"]').first().textContent()
         );
       }
-      await page.goBack();
       await page.goBack();
       await communitiesPage.quickValidataCommunitiesPageIsLoaded('LeoFinance');
     }
@@ -445,10 +442,10 @@ test.describe('Communities page tests', () => {
     for (let i = 0; i < leadershipLinkLists.length; i++) {
       if (i < 3) {
         await leadershipLinkLists[i].click();
+        // Posts is the default view at `/@username` now — no separate Posts
+        // tab to click into (see profilePage.ts's class doc comment).
         await page.waitForSelector(profilePage.profileName['_selector']);
         expect(await profilePage.profileName).toBeVisible();
-        await profilePage.profilePostsLink.click();
-        await page.waitForSelector(profilePage.page.locator('[data-testid="user-post-menu"]')['_selector']);
 
         if ((await profilePage.page.locator('[data-testid="post-author"]').count()) > 0) {
           expect(await leadershipLinkNickNamesLists[i]).toContain(
@@ -456,7 +453,6 @@ test.describe('Communities page tests', () => {
           );
         }
 
-        await page.goBack();
         await page.goBack();
         await communitiesPage.quickValidataCommunitiesPageIsLoaded('Worldmappin');
       }

@@ -2,7 +2,16 @@
  * Small bar sparkline for the HIVE price card. Renders real 7-day CoinGecko
  * closes when available (see hooks/use-hive-market-prices.ts); the caller is
  * responsible for not rendering this when data hasn't loaded.
+ *
+ * ★ W-5: the bars were #e0b24d — amber, the colour family already rejected for
+ * the hero, and a fifth accent on a page that only has one. They are the brand
+ * red at half strength: quiet enough not to compete with the price figure above
+ * them, and unmistakably the same palette as the rest of Lumen. Half strength
+ * also keeps it clear of the card's own +/- change chip, which is the element
+ * that carries direction; these seven bars carry shape, not good or bad news.
  */
+const BAR_FILL = '#c0392b';
+const BAR_OPACITY = 0.5;
 export default function Sparkline({ values }: { values: number[] }) {
   if (values.length < 2) return null;
 
@@ -28,7 +37,8 @@ export default function Sparkline({ values }: { values: number[] }) {
             width={barWidth}
             height={barHeight}
             rx={1.5}
-            fill="#e0b24d"
+            fill={BAR_FILL}
+            fillOpacity={BAR_OPACITY}
           />
         );
       })}

@@ -1,5 +1,39 @@
 import { Locator, Page, expect } from '@playwright/test';
 
+/**
+ * ★★★ `[data-testid="profile-navigation"]` IS GONE (2026-08-10).
+ *
+ * The legacy `ProfileLayout` — dark-navy cover, translucent card, a slate
+ * "Blog / Social" tab bar and its Posts/Replies/Social/Notifications/Wallet/
+ * Settings links — was replaced by the redesigned profile
+ * (features/account-profile/redesign/*) and its sub-page shell
+ * (features/layouts/user-profile/profile-subpage-shell.tsx). Confirmed by
+ * grep (zero occurrences of "profile-navigation" anywhere under
+ * features/app/components) and live: `/@user/posts`, `/@user/payout`,
+ * `/@user/replies` and `/@user/notifications` all 302 to `/404` today —
+ * those routes were deleted along with the chrome that linked to them
+ * (`/comments`, `/communities`, `/settings`, `/followers`, `/followed`
+ * still resolve). Every locator and helper that targeted that chrome has
+ * been removed below rather than left pointing at nothing.
+ *
+ * ★ NOT FIXED, AND STILL STALE (out of scope for this pass — flagging
+ * rather than guessing): `profileInfo`/`profile-info`, `profileName`/
+ * `profile-name`, `profileAbout`/`profile-about`, `profileNickName`/
+ * `profile-nickname`, `profileJoined`/`user-joined`,
+ * `profileLastTimeActive`/`user-last-time-active`, `profileLocation`/
+ * `user-location`, `userLinks`/`user-links`, `userBannerLevelLink`/
+ * `userBannerLevelImg`/`profile-level-link`/`profile-level-image`,
+ * `userBannerTwitterBadgeLink`/`profile-twitter-badge`, and
+ * `profileBlogPostsList`/`post-list-profile-blog-list` are ALSO confirmed
+ * absent from current source (same grep). The display name is now a bare
+ * `<h1>` inside `PageMasthead` with no testid at all
+ * (features/layouts/page-masthead.tsx). `gotoProfilePage()` below still
+ * waits on the dead `profileInfo` selector and will time out — fixing that
+ * needs new, verified locators for the redesigned identity block, which is
+ * a bigger job than the profile-navigation removal this pass covers.
+ * `profile-stats` and `profile-follow-button` ARE confirmed alive and safe
+ * to use as substitutes where a "we're on a profile page" check is needed.
+ */
 export class ProfilePage {
   readonly page: Page;
   readonly profileNickName: any;
@@ -14,15 +48,6 @@ export class ProfilePage {
   readonly muteButton: Locator;
   readonly userLinks: Locator;
   readonly profileBlogPostsList: Locator;
-
-  readonly profileNav: Locator;
-  readonly profileBlogLink: Locator;
-  readonly profilePostsLink: Locator;
-  readonly profileRepliesLink: Locator;
-  readonly profileSocialLink: Locator;
-  readonly profileNotificationsLink: Locator;
-  readonly profileWalletLink: Locator;
-  readonly profileSettingsLink: Locator;
 
   readonly postBlogItem: any;
   readonly postsMenu: Locator;
@@ -212,9 +237,7 @@ export class ProfilePage {
   readonly followedFollowersList: Locator;
   readonly followedFollowersListItems: Locator;
 
-  readonly profileNavLinks: Locator;
   readonly postsMenuActiveTab: Locator;
-  readonly profileNavActiveLink: Locator;
 
   constructor(page: Page) {
     this.page = page;
@@ -238,36 +261,6 @@ export class ProfilePage {
     this.muteButton = page.locator('[data-testid="profile-mute-button"]');
     this.userLinks = page.locator('[data-testid="user-links"]');
     this.profileBlogPostsList = page.getByTestId('post-list-profile-blog-list');
-
-    this.profileNav = page.locator('[data-testid="profile-navigation"]');
-    this.profileBlogLink = page
-      .locator('[data-testid="profile-navigation"] ul:first-child li a')
-      .getByText('Blog');
-    this.profilePostsLink = page
-      .locator('[data-testid="profile-navigation"] ul:first-child')
-      .getByText('Posts');
-    this.profileRepliesLink = page
-      .locator('[data-testid="profile-navigation"] ul:first-child')
-      .getByText('Replies');
-    this.profileSocialLink = page
-      .locator('[data-testid="profile-navigation"] ul:first-child')
-      .getByText('Social');
-    this.profileNotificationsLink = page
-      .locator('[data-testid="profile-navigation"] ul:first-child')
-      .getByText('Notifications');
-    this.profileWalletLink = page
-      .locator('[data-testid="profile-navigation"] ul:last-child')
-      .getByText('Wallet');
-    // Match by `href$="/settings"` scoped to the profile-navigation
-    // container — `ul:last-child` stopped matching after the mobile
-    // dropdown `<div>` was appended after the secondary `<ul>` in
-    // `profile-layout.tsx`. The desktop secondary `<ul>` is no longer
-    // the last child of the flex row. Href-based matching also matches
-    // exactly the Settings link regardless of which `<ul>` it lives in.
-    this.profileSettingsLink = page
-      .locator('[data-testid="profile-navigation"]')
-      .locator('a[href$="/settings"]')
-      .first();
 
     this.postBlogItem = page.locator('[data-testid="post-list-item"]');
     this.postsMenu = page.locator('[data-testid="user-post-menu"]');
@@ -473,9 +466,7 @@ export class ProfilePage {
     this.followedFollowersList = page.locator('main main ul').first();
     this.followedFollowersListItems = this.followedFollowersList.locator('li');
 
-    this.profileNavLinks = this.profileNav.locator('ul:first-child li a');
     this.postsMenuActiveTab = this.postsMenu.locator('[data-state="active"]');
-    this.profileNavActiveLink = this.profileNav.locator('ul:first-child li a.active');
   }
 
   async gotoProfilePage(nickName: string) {
@@ -484,40 +475,16 @@ export class ProfilePage {
     await this.page.waitForSelector(this.profileInfo['_selector']);
   }
 
-  async gotoPostsProfilePage(nickName: string) {
-    await this.page.goto(`/${nickName}/posts`);
-    await this.page.waitForLoadState('domcontentloaded');
-    await this.page.waitForSelector(this.profileInfo['_selector']);
-    await this.page.waitForSelector(this.profileBlogPostsList['_selector']);
-  }
+  // REMOVED 2026-08-10: gotoPostsProfilePage (`/posts`), gotoPostsPayoutsProfilePage
+  // (`/payout`), gotoRepliesProfilePage (`/replies`), gotoNotificationsProfilePage
+  // (`/notifications`) — all four routes are deleted; each 302s to `/404` on the
+  // live dev server today. `/comments` survives (gotoPostsCommentsProfilePage below).
 
   async gotoPostsCommentsProfilePage(nickName: string) {
     await this.page.goto(`/${nickName}/comments`);
     await this.page.waitForLoadState('domcontentloaded');
     await this.page.waitForSelector(this.profileInfo['_selector']);
     await this.page.waitForSelector(this.profileBlogPostsList['_selector']);
-  }
-
-  async gotoPostsPayoutsProfilePage(nickName: string) {
-    await this.page.goto(`/${nickName}/payout`);
-    await this.page.waitForLoadState('domcontentloaded');
-    await this.page.waitForSelector(this.profileInfo['_selector']);
-    // Wait for either the posts list OR the "no payouts" message to appear
-    await this.profileBlogPostsList.or(this.userHasNotStartedBloggingYetMsg).waitFor();
-  }
-
-  async gotoRepliesProfilePage(nickName: string) {
-    await this.page.goto(`/${nickName}/replies`);
-    await this.page.waitForLoadState('domcontentloaded');
-    await this.page.waitForSelector(this.profileInfo['_selector']);
-    await this.page.waitForSelector(this.profileBlogPostsList['_selector']);
-  }
-
-  async gotoNotificationsProfilePage(nickName: string) {
-    await this.page.goto(`/${nickName}/notifications`);
-    await this.page.waitForLoadState('domcontentloaded');
-    await this.page.waitForTimeout(3000);
-    await this.page.waitForSelector(this.profileInfo['_selector']);
   }
 
   async gotoSocialProfilePage(nickName: string) {
@@ -576,20 +543,6 @@ export class ProfilePage {
   }
 
   /**
-   * Settings link pinned to a specific username's settings route. Use
-   * when you need to assert that the Settings tab is gated on
-   * observer-vs-username identity (own-profile differential), not just
-   * on "any settings link is visible". `profileSettingsLink` is the
-   * generic locator and is enough for tab-selection assertions on the
-   * observer's own profile.
-   */
-  profileSettingsLinkFor(username: string): Locator {
-    return this.page
-      .locator('[data-testid="profile-navigation"]')
-      .locator(`a[href="/@${username}/settings"]`);
-  }
-
-  /**
    * Website link in the metadata row of the profile header. The website
    * value is rendered as the link's visible text (no dedicated testid,
    * see `profile-layout.tsx:357-363`), so we match by accessible name.
@@ -616,10 +569,6 @@ export class ProfilePage {
     await expect(this.profileStats).toBeVisible();
     // await expect(this.followButton).toBeVisible();
     // await expect(this.userLinks).toBeVisible();
-  }
-
-  async profileNavigationIsVisible() {
-    await expect(this.profileNav).toBeVisible();
   }
 
   async getElementCssPropertyValue(element: Locator, cssProperty: string) {
@@ -709,33 +658,11 @@ export class ProfilePage {
     await expect(contentPanel).toBeVisible();
   }
 
-  async profileBlogTabIsSelected() {
-    await this.page.waitForSelector(this.page.locator('main')['_selector']);
-    await expect(this.profileBlogLink).toBeVisible();
-  }
-
-  async profilePostsTabIsSelected() {
-    await this.page.waitForSelector(this.page.locator('main')['_selector']);
-    // await expect(this.postBlogItem).toHaveCount(20);
-    await expect(this.page).toHaveURL(/.*posts/)
-    await expect(this.postsMenu).toBeVisible();
-  }
-
-  async profilePostsTabIsNotSelected() {
-    await this.page.waitForSelector(this.postBlogItem['_selector']);
-    await expect(this.page).not.toHaveURL(/.*posts/)
-    await expect(this.postsMenu).not.toBeVisible();
-  }
-
-  async profileRepliesTabIsSelected() {
-    const repliesPageListLocator = this.userHasNotStartedBloggingYetMsg.or(this.profileBlogPostsList);
-    await repliesPageListLocator.waitFor({state: 'visible'});
-    await expect(this.page).toHaveURL(/.*replies/);
-  }
-
-  async profileRepliesTabIsNotSelected() {
-    await expect(this.page).not.toHaveURL(/.*replies/)
-  }
+  // REMOVED 2026-08-10: profileBlogTabIsSelected/profilePostsTabIsSelected/
+  // profilePostsTabIsNotSelected/profileRepliesTabIsSelected/
+  // profileRepliesTabIsNotSelected — the Blog/Posts/Replies nav tabs and the
+  // `/posts` and `/replies` routes they checked no longer exist (see the class
+  // doc comment above).
 
   async profileSocialTabIsSelected() {
     await this.page.waitForSelector(this.communitySubscriptionHeader['_selector']);
@@ -753,68 +680,15 @@ export class ProfilePage {
     await expect(this.page).not.toHaveURL(/.*replies/)
   }
 
-  async profileNotificationsTabIsSelected() {
-    await this.page.waitForSelector(this.page.locator('main')['_selector']);
-    await expect(await this.page).toHaveURL(/.*notifications/);
-    // await expect(await this.notificationsMenu).toBeVisible();
-    // await expect(await this.notificationsMenu.locator('button')).toHaveCount(6);
-    // await expect(await this.notificationsMenuAllContent).toBeVisible();
-  }
-
-  async profileNotificationsTabIsNotSelected() {
-    await expect(this.page).not.toHaveURL(/.*notifications/);
-  }
-
-  async profileSettingsTabIsSelected() {
-    await this.page.waitForSelector(this.publicProfileSettings['_selector']);
-    expect(await this.page.getByText('Public Profile Settings'));
-    expect(await this.page.getByText('Preferences'));
-    expect(await this.page.getByText('API Endpoint Options'));
-    expect(await this.getElementCssPropertyValue(this.profileSettingsLink, 'color')).toBe('rgb(218, 43, 43)');
-  }
-
-  async profileSettingsTabIsNotSelected() {
-    expect(await this.getElementCssPropertyValue(this.profileSettingsLink, 'color')).toBe('rgb(15, 23, 42)');
-    expect(await this.getElementCssPropertyValue(this.profileSettingsLink, 'background-color')).toBe(
-      'rgba(0, 0, 0, 0)'
-    );
-  }
-
-  async moveToPostsTab() {
-    await this.profilePostsLink.click();
-    await this.profilePostsTabIsSelected();
-  }
-
-  async moveToRepliesTab() {
-    await this.profileRepliesLink.click();
-    await this.profileRepliesTabIsSelected();
-  }
-
-  async moveToSocialTab() {
-    await this.page.waitForTimeout(3000);
-    await this.profileSocialLink.click();
-    await this.profileSocialTabIsSelected();
-  }
-
-  async moveToNotificationsTab() {
-    await this.profileNotificationsLink.click();
-    await this.profileNotificationsTabIsSelected();
-  }
-
-  async moveToWalletPage() {
-    const pagePromise = this.page.context().waitForEvent('page');
-    await this.profileWalletLink.click();
-    const newPage = await pagePromise;
-    await expect(newPage).toHaveURL(/.*transfers/);
-
-    await newPage.waitForTimeout(1000);
-    await expect(newPage).toHaveTitle('Gandalf the Grey (@gtg) — Hive');
-  }
-
-  async moveToSettingsTab() {
-    await this.profileSettingsLink.click();
-    await this.profileSettingsTabIsSelected();
-  }
+  // REMOVED 2026-08-10: profileNotificationsTabIsSelected/
+  // profileNotificationsTabIsNotSelected/profileSettingsTabIsSelected/
+  // profileSettingsTabIsNotSelected/moveToPostsTab/moveToRepliesTab/
+  // moveToSocialTab/moveToNotificationsTab/moveToWalletPage/moveToSettingsTab
+  // — all clicked or checked the removed profile-navigation chrome, and
+  // `/notifications` no longer resolves (see the class doc comment above).
+  // `/wallet` is a real, live, auth-gated top-level route now
+  // (app/wallet/page.tsx) — reach it with `page.goto('/wallet')`, not via a
+  // profile nav click.
 
   async moveToPeakdByLinkInSocialTab() {
     const pagePromise = this.page.context().waitForEvent('page');

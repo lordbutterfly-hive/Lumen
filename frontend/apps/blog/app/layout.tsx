@@ -5,7 +5,10 @@ import { Metadata } from 'next';
 import { cookies } from 'next/headers';
 import AppHeader from '../features/layouts/app-header';
 import ClientEffects from '../features/layouts/site-header/client-effects';
+import ScrollReset from '../features/layouts/scroll-reset';
+import { ServerSessionProvider } from '../features/layouts/server-session';
 import { Providers } from '../features/layouts/providers';
+import { getServerSessionUser } from '../lib/server-session';
 import { StorageCleanup } from '@hive/ui';
 import CondenserMigration from '../components/condenser-migration';
 import { getEnvVersion } from '../lib/env-version';
@@ -101,6 +104,13 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   // Only changes when REACT_APP_* env variables change
   const envVersion = getEnvVersion();
 
+  // ★ The header and the left rail used to learn who you are only after React
+  // mounted and `/api/users/me` came back, which on this app is 5-20s — so a
+  // signed-in reader was served signed-out chrome for that whole window. This
+  // request already carries the session cookie; read it once here and hand the
+  // answer down. See features/layouts/server-session.tsx.
+  const serverSession = await getServerSessionUser();
+
   return (
     <html lang={locale} dir={isRTL ? 'rtl' : 'ltr'} className={`${openSans.variable} ${lora.variable}`}>
       <head>
@@ -110,12 +120,14 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
       <body className="bg-background-secondary font-sans">
         <div className="min-h-screen">
           <Providers>
-            <>
+            <ServerSessionProvider value={serverSession}>
               <StorageCleanup />
               <CondenserMigration />
+              {/* Every route lands at the top of its own page. See scroll-reset.tsx. */}
+              <ScrollReset />
               <AppHeader />
               <main className="mx-auto">{children}</main>
-            </>
+            </ServerSessionProvider>
           </Providers>
         </div>
         <ClientEffects />

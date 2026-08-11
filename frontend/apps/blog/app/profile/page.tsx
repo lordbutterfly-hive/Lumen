@@ -1,11 +1,5 @@
-import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { getIronSession } from 'iron-session';
-import { sessionOptions } from '@smart-signer/lib/session';
-import type { IronSessionData } from '@smart-signer/types/common';
-import { getLogger } from '@ui/lib/logging';
-
-const logger = getLogger('app');
+import { getServerSessionUser, loginRedirectFor } from '@/blog/lib/server-session';
 
 /**
  * `/profile` did not exist, so the sidebar's own Profile link 404'd for a signed-out
@@ -23,14 +17,8 @@ const logger = getLogger('app');
  * Server-side on the session cookie, so there is no flash of the wrong destination.
  */
 export default async function ProfileIndexPage() {
-  let username: string | undefined;
-  try {
-    const session = await getIronSession<IronSessionData>(cookies(), sessionOptions);
-    if (session.user?.isLoggedIn) username = session.user.username;
-  } catch (error) {
-    // A malformed cookie means "not signed in" here, never an error page.
-    logger.warn('profile: could not read session, treating as signed out: %o', error);
-  }
-
-  redirect(username ? `/@${username}` : '/login?next=/profile');
+  // Reading the cookie (and treating a malformed one as signed out rather than as
+  // an error page) is now shared with /wallet and the root layout.
+  const session = await getServerSessionUser();
+  redirect(session.isLoggedIn ? `/@${session.username}` : loginRedirectFor('/profile'));
 }

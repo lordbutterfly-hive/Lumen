@@ -6,11 +6,15 @@ import { useHiveMarketPrices } from '../hooks/use-hive-market-prices';
 const CARD_CLASS = 'rounded-[18px] border border-[#ebebeb] bg-white p-5';
 
 /**
- * HBD's "real" price on the wallet page is $1.000 — the internal Hive market
- * peg, which is how the design describes this card ("HBD price in the
- * Internal Hive Market"). The CoinGecko spot price (which can drift from the
- * peg on thin external exchanges) is shown underneath as the secondary line,
- * same split the design specifies.
+ * HBD's "real" price on the wallet page is $1.000: the internal Hive market
+ * peg, which is what conversions on this page actually pay out at. The
+ * CoinGecko spot price (which drifts from the peg on thin external exchanges)
+ * sits underneath as the secondary line.
+ *
+ * ★ W-10: the card showed both numbers and explained neither, so it read as one
+ * price contradicting itself ("$1.000 ... exchanges report 0.965"). Nothing
+ * about the numbers changed; the two lines now say which is which and why they
+ * differ, because a reader who cannot tell them apart cannot use either.
  */
 export default function PriceCardHbd() {
   const { t } = useTranslation('common_blog');

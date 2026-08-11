@@ -137,7 +137,9 @@
       "reblogs": "Reblogs",
       "end_of_notifications": "End of notifications",
       "notifications_90_day_limit": "Notifications are only available for the last 90 days.",
-      "reputation_at_time": "Reputation at time of notification"
+      "reputation_at_time": "Reputation at time of notification",
+      "reputation_label": "Rep",
+      "unread_count": "({{count}} unread)"
     },
     "user_menu": {
       "profile": "Profile",
@@ -216,7 +218,11 @@
       "no_responses": "No responses. ",
       "response": "1 response. ",
       "responses": "{{responses}} responses. ",
+      "no_responses_on": "No responses on {{title}}",
+      "response_on": "1 response on {{title}}",
+      "responses_on": "{{responses}} responses on {{title}}",
       "click_to_respond": "Click to respond",
+      "author_profile": "{{author}} profile",
       "reblog": "Reblog",
       "you_reblogged": "You reblogged",
       "no_reblogs": "no reblogs",
@@ -730,10 +736,21 @@
     "placeholder": "Search",
     "no_results": "Nothing was found.",
     "error": "There was an error",
-    "start_prompt": "Search Hive for posts, topics or people. Type above to begin.",
+    "start_prompt": "Search Hive posts. Type in the field at the top and press Enter.",
     "newest_too_broad": "Sorting by newest is too much work for the search index on a broad term like this, so it timed out.",
     "try_relevance": "Search this by relevance instead",
-    "no_results_for": "No results for “{{query}}”. Try different or fewer words."
+    "no_results_for": "No results for “{{query}}”. Try different or fewer words.",
+    "searching_for": "Searching for “{{query}}”",
+    "result_count_one": "{{count}} result for “{{query}}”",
+    "result_count_other": "{{count}} results for “{{query}}”",
+    "result_count_partial_one": "Showing {{count}} result for “{{query}}”",
+    "result_count_partial_other": "Showing {{count}} results for “{{query}}”",
+    "loading_more": "Loading more…",
+    "end_of_results": "That’s every match.",
+    "sort_by": "Sort by",
+    "sort_relevance": "Relevance",
+    "sort_newest": "Newest",
+    "input_placeholder": "Search posts"
   },
   "settings_page": {
     "invalid_url": "Invalid URL",
@@ -788,7 +805,14 @@
     "error_already_exists": "This endpoint is already in the list",
     "error_cant_remove_active": "You can't remove the current preferred endpoint. Please select a new preferred endpoint first",
     "error_cant_remove_all": "You must have at least one endpoint in the list",
-    "changes_saved": "Changes saved"
+    "changes_saved": "Changes saved",
+    "settings_intro": "How your account looks to other people, and how Lumen behaves for you.",
+    "moderation_lists": "Moderation lists",
+    "moderation_lists_hint": "Your own blacklist and mute list, and the lists you follow from other accounts.",
+    "muted_users_hint": "People whose posts and comments are hidden from you.",
+    "muted_users_empty": "You have not muted anyone.",
+    "unmute_button": "Unmute",
+    "unmute_locked": "Only @{{username}} can change this list."
   },
   "four_oh_four": {
     "this_page_does_not_exist": "Sorry! This page does not exist.",
@@ -1055,6 +1079,7 @@
   },
   "wallet": {
     "page_title": "Wallet",
+    "masthead_meta": "Balances, transfers and savings for @{{username}}.",
     "your_tokens_link": "Your creator tokens",
     "loading": "Loading wallet…",
     "login_required": "Log in to see your Hive wallet.",
@@ -1071,7 +1096,6 @@
       "description": "Also known as HP or Hive Power. Powers governance, voting and rewards.",
       "power_down_notice": "Power down scheduled in {{days}} days (~{{amount}} HIVE, {{weeks}} weeks left)",
       "stop": "STOP",
-      "total_label": "Total {{amount}} HP",
       "stake": "Stake",
       "unstake": "Unstake"
     },
@@ -1105,7 +1129,8 @@
         "market_trade": "Market trade",
         "author_reward": "Author reward",
         "other": "{{type}}"
-      }
+      },
+      "no_amount": "No funds moved"
     },
     "hbd_card": {
       "name": "HBD",
@@ -1115,18 +1140,17 @@
     "savings": {
       "label": "Savings Vault",
       "heading": "Savings Vault",
-      "description": "Held separately from your spendable balances. Withdrawals unlock after a 3-day security delay.",
+      "description": "Held apart from your spendable balances. Withdrawals clear after a 3-day delay.",
       "hive_title": "HIVE Savings",
-      "hive_unlock_badge": "3-day unlock",
-      "hive_description": "Time-locked HIVE. Withdrawals take 3 days to clear. No interest.",
       "hbd_title": "HBD Savings",
       "hbd_apr_badge": "{{apr}}% APR",
-      "hbd_description": "Earns interest while held. Last payment: {{date}}",
-      "hbd_description_never": "Earns interest while held. No interest paid yet.",
+      "hbd_description": "Earns interest while held. Hive pays it out only when your savings balance changes, so this date can be old. Last paid {{date}}.",
+      "hbd_description_never": "Earns interest while held. Hive pays it out only when your savings balance changes. Nothing paid out yet.",
       "claimable": "{{amount}} claimable",
       "deposit": "Deposit",
       "withdraw": "Withdraw",
-      "claim_now": "Claim now"
+      "claim_now": "Claim now",
+      "hive_no_interest_badge": "No interest"
     },
     "estimated_value": {
       "title": "Estimated Account Value",
@@ -1135,8 +1159,8 @@
     "market": {
       "hive_via": "1 HIVE ≈ {{btc}} BTC",
       "hive_source": "HIVE / BTC via CoinGecko",
-      "hbd_price_label": "HBD price in the Internal Hive Market.",
-      "hbd_source": "Low-volume exchanges report {{price}} USD via CoinGecko.",
+      "hbd_price_label": "The rate Hive itself uses for HBD, and what a conversion here pays out at.",
+      "hbd_source": "Outside exchanges trade HBD at {{price}} USD (CoinGecko). Those markets are thin, so they drift from the Hive rate above.",
       "view_more": "View more market stats →",
       "unavailable": "Price unavailable"
     },
@@ -1239,7 +1263,11 @@
   "profile": {
     "following": "Following",
     "wallet": "Wallet",
-    "creator_token": "Token",
+    "subpage": {
+      "back_to_profile": "Back to profile",
+      "lists_title": "Lists"
+    },
+    "creator_token": "View creator token",
     "overflow_menu_label": "More options",
     "overflow": {
       "view_on_explorer": "View on chain explorer"

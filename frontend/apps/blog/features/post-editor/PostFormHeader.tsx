@@ -1,7 +1,7 @@
 "use client";
 
 import { Dispatch, SetStateAction } from "react";
-import { Button } from "@hive/ui/components/button";
+import { Icons } from "@ui/components/icons";
 import { useTranslation } from "@/blog/i18n/client";
 
 interface PostFormHeaderProps {
@@ -11,31 +11,57 @@ interface PostFormHeaderProps {
   setPreview: Dispatch<SetStateAction<boolean>>;
 }
 
+/**
+ * ★ TWO CONTROLS THAT DID NOT LOOK LIKE CONTROLS (2026-08-10, fuckery list C-11).
+ *
+ * Measured live before this change: both were `variant="ghost"` buttons rendering
+ * at `background rgba(0,0,0,0)`, `border-width 0px`, `color rgb(100,116,139)` —
+ * i.e. plain grey sentences sitting on a grey strip. Nothing said "click me": no
+ * border, no fill, no underline, and `tabIndex={-1}` also kept them out of the
+ * keyboard order, so a keyboard reader could not reach them at all. Two of the
+ * three layout switches in the composer were effectively invisible affordances.
+ *
+ * They are now bordered pills on the house radius (14px rows/buttons) with an
+ * icon that states which way the switch is pointing, and they are focusable.
+ * The `data-testid`s are unchanged — `playwright/tests/support/pages/
+ * postEditorPage.ts` addresses both by testid.
+ */
+const TOGGLE_CLASS =
+  "inline-flex items-center gap-1.5 rounded-[14px] border border-[#ebebeb] bg-white px-3 py-1.5 text-xs font-medium text-[#6b7280] transition-colors hover:border-[#c0392b] hover:text-[#c0392b] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c0392b]/40";
+
 export function PostFormHeader({ sideBySide, setSideBySide, preview, setPreview }: PostFormHeaderProps) {
   const { t } = useTranslation("common_blog");
 
   return (
-    <div className="flex items-center justify-between rounded-md bg-background-secondary px-3 py-2">
-      <Button
+    <div className="flex flex-wrap items-center gap-2">
+      <button
         type="button"
-        variant="ghost"
-        className="h-auto px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+        className={TOGGLE_CLASS}
         onClick={() => setSideBySide((prev) => !prev)}
         data-testid="enable-disable-side-by-side-editor"
-        tabIndex={-1}
+        aria-pressed={sideBySide}
       >
+        {sideBySide ? (
+          <Icons.layoutList className="h-3.5 w-3.5" aria-hidden />
+        ) : (
+          <Icons.layoutGrid className="h-3.5 w-3.5" aria-hidden />
+        )}
         {sideBySide ? t("submit_page.disable_side") : t("submit_page.enable_side")}
-      </Button>
-      <Button
+      </button>
+      <button
         type="button"
         onClick={() => setPreview((prev) => !prev)}
-        variant="ghost"
-        className="h-auto px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+        className={TOGGLE_CLASS}
         data-testid="hide-show-preview"
-        tabIndex={-1}
+        aria-pressed={preview}
       >
+        {preview ? (
+          <Icons.eyeOff className="h-3.5 w-3.5" aria-hidden />
+        ) : (
+          <Icons.eye className="h-3.5 w-3.5" aria-hidden />
+        )}
         {preview ? t("submit_page.hide_preview") : t("submit_page.show_preview")}
-      </Button>
+      </button>
     </div>
   );
 }

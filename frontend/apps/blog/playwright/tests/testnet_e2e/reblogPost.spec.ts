@@ -91,7 +91,9 @@ test.describe('Reblog a post', () => {
       const profilePage = new ProfilePage(denserAutoTest4Page.page);
 
       await profilePage.gotoProfilePage('@' + users.denserautotest4.username);
-      await profilePage.profileBlogTabIsSelected();
+      // profileBlogTabIsSelected() was removed 2026-08-10 — the Blog tab it
+      // checked (`[data-testid="profile-navigation"]`) no longer exists;
+      // Posts (formerly "Blog") is the default view at `/@username` now.
 
       // Validate the reblog is visible in the profile page
       expect(await profilePage.firstPostRebloggedLabel.textContent()).toContain(users.denserautotest4.username + ' reblogged');

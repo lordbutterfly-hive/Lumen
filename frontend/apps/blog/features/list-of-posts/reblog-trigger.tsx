@@ -100,10 +100,15 @@ const ReblogTrigger = ({
     );
   }
 
+  // Same string the tooltip below already shows on hover — used here as the
+  // accessible name because the trigger's only visible content is an icon (or a
+  // spinner while loading), so without it the control was an unnamed button.
+  const triggerLabel = isReblogged ? t('cards.post_card.you_reblogged') : t('cards.post_card.reblog');
+
   return (
     <TooltipProvider>
       <Tooltip>
-        <TooltipTrigger disabled={isReblogged || reblogMutation.isLoading}>
+        <TooltipTrigger disabled={isReblogged || reblogMutation.isLoading} aria-label={triggerLabel}>
           <ReblogDialog author={author} permlink={permlink} action={dialogAction} isReblogged={isReblogged}>
             {reblogMutation.isLoading ? (
               <CircleSpinner loading={reblogMutation.isLoading} size={18} color="#dc2626" />

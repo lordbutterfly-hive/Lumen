@@ -5,6 +5,7 @@ import { Link } from '@hive/ui';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useTranslation } from '@/blog/i18n/client';
 import DialogLogin from '@/blog/components/dialog-login';
+import PageMasthead from '@/blog/features/layouts/page-masthead';
 import { useWalletAccount } from '../hooks/use-wallet-account';
 import HiveTokenCard from './hive-token-card';
 import HbdTokenCard from './hbd-token-card';
@@ -13,10 +14,30 @@ import EstimatedValueStrip from './estimated-value-strip';
 import AccountHistoryList from './account-history-list';
 
 /**
+ * The wallet's two button shapes, defined once (W-2 / W-3). Every action button
+ * on this page used to carry its own radius — 10px, 11px and 12px all rendered
+ * side by side — and the primary ones were #2f7d4f, the SUCCESS colour doing
+ * duty as an action colour, which gave the app a third primary-button colour.
+ * The system radius for a row or a button is 14px and the action colour is the
+ * brand red.
+ */
+const PRIMARY_BUTTON_CLASS =
+  'rounded-[14px] bg-[#c0392b] px-5 py-2.5 text-[14px] font-semibold text-white transition-colors hover:bg-[#96271b]';
+const SECONDARY_BUTTON_CLASS =
+  'rounded-[14px] border border-[#e4e6e9] px-4 py-2 text-[13px] font-semibold text-[#3f4650] transition-colors hover:bg-[#f6f7f8]';
+
+/**
  * Center column: fetches the logged-in user's real balances (see
  * hooks/use-wallet-account.ts) and renders the HIVE / HBD token cards,
  * Savings Vault and the estimated-value strip. Handles the logged-out,
  * loading and error states the design didn't need to cover.
+ *
+ * ★ W-1: every branch below opens with the SHARED masthead
+ * (features/layouts/page-masthead.tsx), not a bare <h1>. Measured before the
+ * fix: the h1's own wrapper was borderRadius 0, background transparent,
+ * padding 0 — the exact "no shell at all" shape /witnesses was already
+ * corrected for. No `mark` prop: the wallet has no assigned glyph and R5
+ * forbids inventing one.
  */
 export default function WalletContent() {
   const { t } = useTranslation('common_blog');
@@ -34,16 +55,14 @@ export default function WalletContent() {
 
   if (!user.isLoggedIn) {
     return (
-      <div className="flex flex-col items-start gap-3 py-10">
-        <h1 className="font-sans text-[32px] font-bold tracking-[-0.02em] text-[#161511]">
-          {t('wallet.page_title')}
-        </h1>
-        <p className="text-[15px] text-[#6b7280]">{t('wallet.login_required')}</p>
+      <div data-testid="wallet-content-logged-out">
+        <PageMasthead title={t('wallet.page_title')}>
+          <p className="max-w-[620px] font-serif text-[13px] leading-[1.55] text-[#6b7280]">
+            {t('wallet.login_required')}
+          </p>
+        </PageMasthead>
         <DialogLogin>
-          <button
-            type="button"
-            className="rounded-[10px] bg-[#2f7d4f] px-5 py-2.5 text-[14px] font-semibold text-white hover:bg-[#256640]"
-          >
+          <button type="button" className={PRIMARY_BUTTON_CLASS}>
             {t('wallet.login_button')}
           </button>
         </DialogLogin>
@@ -56,16 +75,14 @@ export default function WalletContent() {
   // logged-out branch above already depends on.
   if (isLite) {
     return (
-      <div className="flex flex-col items-start gap-3 py-10">
-        <h1 className="font-sans text-[32px] font-bold tracking-[-0.02em] text-[#161511]">
-          {t('wallet.lite_title')}
-        </h1>
-        <p className="max-w-prose text-[15px] text-[#6b7280]">{t('wallet.lite_body')}</p>
+      <div data-testid="wallet-content-lite">
+        <PageMasthead title={t('wallet.lite_title')}>
+          <p className="max-w-[620px] font-serif text-[13px] leading-[1.55] text-[#6b7280]">
+            {t('wallet.lite_body')}
+          </p>
+        </PageMasthead>
         <div className="flex flex-wrap items-center gap-3">
-          <Link
-            href="/upgrade"
-            className="rounded-[10px] bg-[#2f7d4f] px-5 py-2.5 text-[14px] font-semibold text-white hover:bg-[#256640]"
-          >
+          <Link href="/upgrade" className={PRIMARY_BUTTON_CLASS}>
             {t('wallet.lite_upgrade')}
           </Link>
           {/* ★ A lite account has no HIVE wallet, but it CAN hold creator tokens —
@@ -75,7 +92,7 @@ export default function WalletContent() {
               reachable by typed URL alone (found in live QA, 2026-08-07). */}
           <Link
             href="/wallet/tokens"
-            className="rounded-[10px] border border-[#e4e6e9] px-4 py-2 text-[13px] font-semibold text-[#3f4650] transition-colors hover:bg-[#f6f7f8]"
+            className={SECONDARY_BUTTON_CLASS}
             data-testid="wallet-your-tokens-link"
           >
             {t('wallet.your_tokens_link')} →
@@ -87,43 +104,42 @@ export default function WalletContent() {
 
   if (isError) {
     return (
-      <div className="py-10">
-        <h1 className="mb-2 font-sans text-[32px] font-bold tracking-[-0.02em] text-[#161511]">
-          {t('wallet.page_title')}
-        </h1>
-        <p className="text-[15px] text-destructive">{t('global.something_went_wrong')}</p>
+      <div data-testid="wallet-content-error">
+        <PageMasthead title={t('wallet.page_title')}>
+          <p className="text-[13px] text-destructive">{t('global.something_went_wrong')}</p>
+        </PageMasthead>
       </div>
     );
   }
 
   if (isLoading || !account || !figures) {
     return (
-      <div className="py-10">
-        <h1 className="mb-2 font-sans text-[32px] font-bold tracking-[-0.02em] text-[#161511]">
-          {t('wallet.page_title')}
-        </h1>
-        <p className="text-[15px] text-[#6b7280]">{t('wallet.loading')}</p>
+      <div data-testid="wallet-content-loading">
+        <PageMasthead title={t('wallet.page_title')}>
+          <p className="text-[13px] text-[#6b7280]">{t('wallet.loading')}</p>
+        </PageMasthead>
       </div>
     );
   }
 
   return (
-    <div className="pt-[26px]" data-testid="wallet-content">
-      <div className="mb-[22px] flex flex-wrap items-center justify-between gap-3">
-        <h1 className="font-sans text-[32px] font-bold tracking-[-0.02em] text-[#161511]">
-          {t('wallet.page_title')}
-        </h1>
-        {/* /wallet/tokens (Your Tokens — creator-token portfolio) had zero inbound
-            links anywhere in the app despite rendering real, wallet-identity-aware
-            content. This is its entry point. */}
-        <Link
-          href="/wallet/tokens"
-          className="rounded-[10px] border border-[#e4e6e9] px-4 py-2 text-[13px] font-semibold text-[#3f4650] transition-colors hover:bg-[#f6f7f8]"
-          data-testid="wallet-your-tokens-link"
-        >
-          {t('wallet.your_tokens_link')} →
-        </Link>
-      </div>
+    <div data-testid="wallet-content">
+      <PageMasthead
+        title={t('wallet.page_title')}
+        // /wallet/tokens (the creator-token portfolio) had zero inbound links
+        // anywhere in the app despite rendering real, wallet-identity-aware
+        // content. It is still this page's entry point to it; it now rides the
+        // masthead's own actions slot instead of a hand-built header row.
+        actions={
+          <Link href="/wallet/tokens" className={SECONDARY_BUTTON_CLASS} data-testid="wallet-your-tokens-link">
+            {t('wallet.your_tokens_link')} →
+          </Link>
+        }
+      >
+        <p className="max-w-[620px] font-serif text-[13px] leading-[1.55] text-[#6b7280]">
+          {t('wallet.masthead_meta', { username: user.username })}
+        </p>
+      </PageMasthead>
 
       <HiveTokenCard username={user.username} figures={figures} dynamicGlobal={dynamicGlobal} chain={chain} />
       <HbdTokenCard username={user.username} liquidHbd={figures.liquidHbd} />

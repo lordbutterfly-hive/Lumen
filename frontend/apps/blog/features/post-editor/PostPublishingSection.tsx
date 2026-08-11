@@ -13,6 +13,7 @@ import {
 } from "@hive/ui/components/select";
 import { FormControl, FormField, FormItem } from "@hive/ui/components/form";
 import { Progress } from "@ui/components/progress";
+import { Icons } from "@ui/components/icons";
 import { withBasePath } from "@ui/lib/path-utils";
 import { isCommunity } from "@ui/lib/utils";
 import { DEFAULT_OBSERVER } from "@/blog/lib/utils";
@@ -41,8 +42,13 @@ const LITE_REWARDS_NOTE =
  * saying what the bar measured.
  */
 const RC_LABEL = 'Resource Credits';
+/**
+ * ★ NO DASHES IN LUMEN COPY (2026-08-10, C-7). This sentence carried an em dash,
+ * which the house style does not use anywhere. Split into two sentences, which
+ * also reads better out loud. Same words, same promise.
+ */
 const RC_EXPLAINER =
-  'Your Hive account’s free allowance for posting, commenting and voting. It refills on its own over time — you only have to wait if it runs low.';
+  'Your Hive account’s free allowance for posting, commenting and voting. It refills on its own over time, so you only have to wait if it runs low.';
 
 interface PostPublishingSectionProps {
   form: UseFormReturn<AccountFormValues>;
@@ -98,8 +104,10 @@ export function PostPublishingSection({
       : undefined;
 
   return (
-    <div className="flex flex-col gap-4 rounded-lg border border-border bg-background-secondary/30 p-4">
-      <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+    <div className="flex flex-col gap-4 rounded-[14px] border border-[#ebebeb] bg-white p-4">
+      {/* Same one section-label treatment as the metadata card, which is the
+          masthead eyebrow. See PostMetadataSection.tsx for the reasoning (C-14). */}
+      <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#c0392b]/70">
         {t("submit_page.publishing_section")}
       </span>
 
@@ -142,13 +150,21 @@ export function PostPublishingSection({
             updateForm={(e) => handleLoadTemplate(e)}
             data={watchedValues}
           >
-            <span
-              className="w-fit cursor-pointer text-xs text-destructive hover:underline"
+            {/* ★ A THIRD PLAIN-TEXT CONTROL (2026-08-10, alongside C-11). This
+                was a bare <span>: not a button, not focusable, and inside a
+                <form>, so nothing but the cursor said it could be clicked. It
+                is now a real button on the house 14px radius. `type="button"`
+                matters: it lives inside the post form and a default-type button
+                would submit it. */}
+            <button
+              type="button"
+              className="inline-flex w-fit items-center gap-1.5 rounded-[14px] border border-[#ebebeb] bg-white px-3 py-1.5 text-xs font-medium text-[#6b7280] transition-colors hover:border-[#c0392b] hover:text-[#c0392b] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c0392b]/40"
               title={t("submit_page.advanced_tooltip")}
               data-testid="advanced-settings-button"
             >
+              <Icons.settings className="h-3.5 w-3.5" aria-hidden />
               {t("submit_page.advanced_settings")}
-            </span>
+            </button>
           </AdvancedSettingsPostForm>
         </div>
       ) : (
@@ -227,10 +243,17 @@ export function PostPublishingSection({
         <div className="flex flex-col gap-2">
           <span className="text-sm font-medium">{RC_LABEL}</span>
           <div className="flex items-center gap-3">
+            {/* ★ THE ONE BLUE THING IN LUMEN (2026-08-10, C-6). This bar was
+                `bg-[#0088FE]`, measured live as rgb(0,136,254) — a chart blue
+                inherited from somewhere else entirely. Blue appears nowhere
+                else in the product, so a gauge next to the Publish button was
+                the single loudest off-palette element on the page. Brand red
+                #c0392b for the fill, #ebebeb for the track, which is the same
+                pair every other bordered surface here uses. */}
             <Progress
               value={manabarsData?.rc.percentageValue ?? 0}
-              className="h-2 flex-1"
-              indicatorClassName="bg-[#0088FE]"
+              className="h-2 flex-1 bg-[#ebebeb]"
+              indicatorClassName="bg-[#c0392b]"
             />
             <span
               className="text-xs tabular-nums text-muted-foreground"

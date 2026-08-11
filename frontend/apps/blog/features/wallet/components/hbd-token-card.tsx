@@ -7,6 +7,9 @@ import TokenIcon from './token-icon';
 import SendDialog from './dialogs/send-dialog';
 
 const CARD_CLASS = 'mb-[18px] rounded-[18px] border border-[#ebebeb] bg-white p-6';
+// Same button as the HIVE card's Send — see hive-token-card.tsx (W-2/W-3).
+const SEND_BUTTON_CLASS =
+  'flex items-center gap-1.5 rounded-[14px] bg-[#c0392b] px-[18px] py-2.5 text-[13.5px] font-semibold text-white transition-colors hover:bg-[#96271b]';
 
 export default function HbdTokenCard({ username, liquidHbd }: { username: string; liquidHbd: Big }) {
   const { t } = useTranslation('common_blog');
@@ -32,7 +35,7 @@ export default function HbdTokenCard({ username, liquidHbd }: { username: string
             trigger={
               <button
                 type="button"
-                className="flex items-center gap-1.5 rounded-[11px] bg-[#2f7d4f] px-[18px] py-2.5 text-[13.5px] font-semibold text-white hover:bg-[#256640]"
+                className={SEND_BUTTON_CLASS}
                 data-testid="wallet-send-hbd-button"
               >
                 {t('wallet.hbd_card.send')}
