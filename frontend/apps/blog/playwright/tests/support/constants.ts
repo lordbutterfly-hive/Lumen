@@ -38,7 +38,16 @@ export const TIMEOUTS = {
   NETWORK_IDLE: 10000,
   HYDRATION: 30000, // Longer timeout for React hydration on production
   IMAGE_LOAD: 15000,
-  TWITTER_PLUGIN_SETTLE: 15000
+  TWITTER_PLUGIN_SETTLE: 15000,
+  /**
+   * How long a Radix overlay (Dialog / Sheet / Select popper) may take to mount
+   * after its trigger is activated. Purely client-side — no network — so this is
+   * generous, not lenient. Named so that a11y specs assert on overlay opening
+   * instead of falling back to `test.skip(true, 'dialog did not open')`, which
+   * reported broken overlays as green. Measured 2026-08-11: share dialog opens
+   * well under 1s.
+   */
+  DIALOG_OPEN: 5000
 } as const;
 
 /**

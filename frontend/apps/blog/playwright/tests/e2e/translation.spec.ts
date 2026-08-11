@@ -9,7 +9,39 @@ import { WitnessPage } from '../support/pages/witnessesPage';
 import { WalletPage } from '../../../../wallet/playwright/tests/support/pages/walletPage';
 import { LoginToVoteDialog } from '../support/pages/loginToVoteDialog';
 
-// Skipped due to move out translation from Denser
+/**
+ * ★ STILL SKIPPED 2026-08-11 — but the old reason was FALSE and is replaced.
+ *
+ * Old reason: "Skipped due to move out translation from Denser". Translation did
+ * not move out. i18n is fully live: i18next + next-i18next are dependencies
+ * (package.json:95-100), `i18n/settings.ts:2` ships NINE locales
+ * (ar, en, es, fr, it, ja, pl, ru, zh) with populated
+ * `locales/<code>/common_blog.json`, and the switcher component
+ * (`features/layouts/lang-toggle.tsx:49,60`) still renders exactly the
+ * `toggle-language` and per-locale `pl` testids this file drives.
+ *
+ * THE REAL BLOCKER — REQUIRES AN AUTHENTICATED SESSION:
+ * `LangToggle` is mounted in exactly ONE place, and it is behind login:
+ * `features/layouts/site-header/user-menu.tsx:158` (`<LangToggle logged={true} />`),
+ * inside the account dropdown that only renders when `user?.isLoggedIn`
+ * (app-header.tsx:370-386). An anonymous visitor gets `login-link` instead
+ * (app-header.tsx:481). Confirmed live 2026-08-11: `toggle-language` has ZERO
+ * occurrences in the HTML of `/`. Every one of the 13 tests below opens with
+ * `homePage.toggleLanguage.click()`, so all 13 are blocked by that one fact —
+ * nothing to do with Denser, or with the specs' own subjects.
+ *
+ * TO ENABLE: seed a session with support/fixture-auth/seeder.ts, open the account
+ * menu (`profile-avatar-button` -> `user-profile-menu-content`), then click
+ * `toggle-language` from inside it. Each test's own remaining staleness is noted
+ * on it individually below.
+ *
+ * ★ SEPARATE i18n DEFECT FOUND WHILE TRIAGING THIS (reported, not fixed here):
+ * the primary navigation is HARD-CODED ENGLISH and never translated —
+ * `features/layouts/left-rail.tsx:14-27` is a plain `LABELS` object carrying its
+ * own `// TODO: move to i18n (t('...'))`. So switching to Polish leaves Home /
+ * Profile / Wallet / Creator Tokens / Witnesses / Proposals / Settings in English.
+ * That is precisely the regression the first test below was written to catch.
+ */
 test.describe.skip('Translation tests', () => {
   let homePage: HomePage;
   let postPage: PostPage;
@@ -31,6 +63,15 @@ test.describe.skip('Translation tests', () => {
     test.skip(browserName === 'webkit', 'Automatic test works well on chromium');
   });
 
+  /*
+   * ★ ALSO STALE INDEPENDENTLY (bucket B). It reads the four old top-nav tabs —
+   * `nav-posts-link` / `nav-proposals-link` / `nav-witnesses-link` /
+   * `nav-our-dapps-link` — and expects 'Posty' / 'Propozycje' / 'Delegaci' /
+   * 'Nasze dApps'. All four testids have 0 hits in product source; that tab bar was
+   * replaced by `LeftRail`. And per the file header, LeftRail's labels are not
+   * translated at all, so the Polish assertions could not pass even against the new
+   * testids. Rewriting this needs a genuinely translated surface to assert on.
+   */
   test('Check if user can change language', async ({ page }) => {
     await homePage.goto();
     await expect(homePage.toggleLanguage).toBeVisible();
@@ -81,6 +122,11 @@ test.describe.skip('Translation tests', () => {
   //   await expect(page.getByTestId('wallet-account-history-description')).toContainText('Uważaj na spam i linki phishingowe w notatkach transakcji. Nie otwieraj linków od użytkowników, którym nie ufasz. Nie udostępniaj swoich kluczy prywatnych żadnym stronom internetowym osób trzecich. Transakcje nie zostaną wyświetlone, dopóki nie zostaną potwierdzone w blockchain, co może zająć kilka minut.')
   // })
 
+  // ★ SUBJECT IS SOUND (bucket B). Verified 2026-08-11: `community-name`,
+  // `community-name-unmoderated`, `community-subscribe-button` and
+  // `community-new-post-button` all still exist, and the PL strings it asserts are
+  // still correct in locales/pl/common_blog.json ('Społeczność', 'Subskrybuj',
+  // 'Nowy post'). Blocked only by the file-level login precondition above.
   test.skip('Community page', async ({ page }) => {
     await homePage.goto();
     await homePage.getLeoFinanceCommunitiesLink.click();
@@ -144,6 +190,12 @@ test.describe.skip('Translation tests', () => {
   // })
 
   // Skipped due to new login form
+  // ★ MOSTLY SOUND, ONE COPY DELTA (bucket B). `comment-reply`, `comment-respons`,
+  // `reply-editor` and `article-title` all still exist and the PL strings hold, BUT
+  // it does getByText('Wstaw obrazy, przeciągając i upuszczając, wklejając ze
+  // schowka lub za pomocą wyb') and the `insert_images` key was shortened — it now
+  // ends '...lub za pomocą' (locales/pl/common_blog.json:466), so that substring no
+  // longer matches. Fix that line when lifting the login precondition above.
   test.skip('Post page', async ({ page }) => {
     await homePage.goto();
     await homePage.getFirstPostTitle.click();
@@ -213,6 +265,10 @@ test.describe.skip('Translation tests', () => {
   });
 
   // Skipped due to failing only on CI
+  // ★ SUBJECT IS SOUND (bucket B). PL strings all still present — 'Obserwuj'
+  // (locales/pl:269/414), 'Obserwujący' (:415), 'Obserwowani' (:416). The old
+  // per-test reason was "failing only on CI"; the real blocker is the file-level
+  // login precondition above.
   test.skip('User hover card', async ({ page }) => {
     await homePage.goto();
     await homePage.toggleLanguage.click();
@@ -229,6 +285,12 @@ test.describe.skip('Translation tests', () => {
   });
 
   // Skipped due to new login form
+  // ★ DOUBLY STALE (bucket B, largest of the set). The community-sidebar PL strings
+  // it asserts are intact, but it also drives (a) `theme-mode` light/dark/system
+  // strings — the app is light-only now and has no theme control at all
+  // (features/layouts/providers.tsx:27-38) — and (b) `login-btn` / `signup-btn`,
+  // neither of which exists in the current header (app-header.tsx:481 renders
+  // `login-link`). Both of those sections must be dropped, not just re-selectored.
   test.skip('Home page', async ({ page }) => {
     await page.waitForTimeout(3000);
     loginDialogEnglish = new LoginToVoteDialog(page);
@@ -367,44 +429,16 @@ test.describe.skip('Translation tests', () => {
   });
 
   // Skipped due to new login form
-  test.skip('Navigation - right side', async ({ page, browserName }) => {
-    test.skip(browserName === 'webkit', 'Automatic test works well on chromium');
-    test.skip(browserName === 'firefox', 'Automatic test works well on chromium');
-    const menuElements = [
-      'Zaloguj się',
-      'Zapisz się',
-      'HBauth',
-      'Witaj',
-      'FAQ',
-      'Block Explorer',
-      'Odzyskiwanie skradzionego konta',
-      'Zmiana hasła konta',
-      'Głosuj na delegatów',
-      'Hive, Propozycje',
-      'OpenHive Czat ',
-      'Dokumentacja Hive API ',
-      'Oficjalna księga Hive ',
-      'Polityka prywatności',
-      'Warunki korzystania z usługi'
-    ];
-    await homePage.goto();
-    await expect(homePage.getFirstPostTitle).toBeVisible();
-    await homePage.toggleLanguage.click();
-    await expect(homePage.languageMenu.first()).toBeVisible();
-    await homePage.languageMenuPl.click();
-    // Wait for sidebar menu to be visible after language change
-    await expect(homePage.getNavSidebarMenu).toBeVisible();
-    await homePage.getNavSidebarMenu.click();
-    await homePage.page.waitForSelector(homePage.getNavSidebarMenuContent['_selector']);
-    await expect(homePage.getNavSidebarMenuContent).toBeVisible();
-    // li.text-foreground
-    const menuItems = await page.$$('li.text-foreground');
-
-    for (let i = 0; i < menuItems.length; i++) {
-      const el = menuItems[i];
-      const TabText = await el.textContent();
-
-      await expect(TabText).toEqual(menuElements[i]);
-    }
-  });
+  /*
+   * ★ 'Navigation - right side' DELETED 2026-08-11 — FEATURE GONE (bucket A).
+   *
+   * It opened `nav-sidebar-menu-button`, waited for `nav-sidebar-menu-content` and
+   * asserted a fixed ordered list of `li.text-foreground` entries including
+   * 'HBauth', 'FAQ', 'Block Explorer', 'Odzyskiwanie skradzionego konta' and
+   * 'Zmiana hasła konta'. Both testids have 0 hits in product source, and the
+   * static link list they belonged to no longer exists: the hamburger is now
+   * `mobile-nav-trigger` -> `mobile-nav-content` rendering the SAME `LeftRail` as
+   * desktop, deliberately (features/layouts/mobile-nav.tsx:14-28 documents the
+   * decision). There is no list of those links anywhere to re-point this at.
+   */
 });

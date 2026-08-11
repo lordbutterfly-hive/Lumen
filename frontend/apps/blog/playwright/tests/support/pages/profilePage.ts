@@ -38,6 +38,7 @@ export class ProfilePage {
   readonly page: Page;
   readonly profileNickName: any;
   readonly profileInfo: any;
+  readonly profileSubpageMain: any;
   readonly profileName: Locator;
   readonly profileAbout: Locator;
   readonly profileLastTimeActive: Locator;
@@ -243,6 +244,14 @@ export class ProfilePage {
     this.page = page;
     this.followBtn = '[data-testid="profile-follow-button"]'
     this.profileInfo = page.locator('[data-testid="profile-info"]');
+    /**
+     * ★ The live "we are on a profile SUBPAGE" anchor (added 2026-08-11):
+     * `features/layouts/user-profile/profile-subpage-shell.tsx:87`. Server-rendered,
+     * so it is a safe wait target. Use this instead of the dead `profileInfo`
+     * (`profile-info` — 0 occurrences in product source; see the class doc above)
+     * on /communities, /followers, /followed, /settings and friends.
+     */
+    this.profileSubpageMain = page.locator('[data-testid="profile-subpage-main"]');
     this.profileName = page.locator('[data-testid="profile-name"]');
     this.profileNameString = '[data-testid="profile-name"]';
     this.profileNickName = page.locator('[data-testid="profile-nickname"]');
@@ -487,12 +496,37 @@ export class ProfilePage {
     await this.page.waitForSelector(this.profileBlogPostsList['_selector']);
   }
 
+  /**
+   * ★ NO LONGER WAITS FOR THE BADGE MENU (2026-08-11).
+   *
+   * This used to end with `waitForSelector('[data-testid="badges-activity-menu"]')`.
+   * That element only renders when third-party APIs are ENABLED: `SocialActivities`
+   * (features/account-social/social-activities.tsx:38-41) is mounted from the
+   * `isThirdPartyApiEnabled()` branch of
+   * app/[param]/(user-profile)/communities/content.tsx:61-96, and
+   * `isThirdPartyApiEnabled()` (packages/transaction/lib/custom-api.ts:14-17)
+   * defaults to FALSE and is explicitly `false` in every env file in this repo
+   * (.env.testing:30, .env.mirrornet-testing:30) — "CSP blocks these domains
+   * anyway". With it off, the page renders a plain sentence with static links to
+   * peakd.com / hivebuzz.me and the badge menu never mounts.
+   *
+   * So this helper hung for the full selector timeout on EVERY call, in the
+   * default configuration, forever. That took down the whole of
+   * profileSocialPage.spec.ts (which was blamed on "PeakD 500 errors") AND two
+   * still-ACTIVE tests in profilePage.spec.ts ('move to Peakd by link in Social
+   * Tab', 'validate Hivebuzz link in Social Tab').
+   *
+   * It now waits for what the page renders in BOTH configurations. Tests that
+   * genuinely need the badge widget must assert on it themselves — and require
+   * REACT_APP_ENABLE_THIRD_PARTY_API=true.
+   */
   async gotoSocialProfilePage(nickName: string) {
     await this.page.goto(`/${nickName}/communities`);
     await this.page.waitForLoadState('domcontentloaded');
-    await this.page.waitForTimeout(1000);
-    await this.page.waitForSelector(this.profileInfo['_selector']);
-    await this.page.waitForSelector(this.socialBadgesAchievemntsMenuBar['_selector']);
+    // `profile-info` is dead (0 hits in product source — see the class doc); the
+    // subpage shell's own wrapper is the live equivalent and is server-rendered.
+    await this.page.waitForSelector(this.profileSubpageMain['_selector']);
+    await this.page.waitForSelector(this.socialBadgesAchivementsLabel['_selector']);
   }
 
   async gotoCommunitiesProfilePage(nickName: string) {

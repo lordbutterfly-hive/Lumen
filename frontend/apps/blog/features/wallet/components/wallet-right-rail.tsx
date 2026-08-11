@@ -2,6 +2,7 @@
 
 import Big from 'big.js';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { useTranslation } from '@/blog/i18n/client';
 import { useWalletAccount } from '../hooks/use-wallet-account';
 import { getMarketStatsUrl } from '../lib/wallet-endpoint';
@@ -20,6 +21,17 @@ const ZERO = new Big(0);
 export default function WalletRightRail() {
   const { t } = useTranslation('common_blog');
   const { user } = useUserClient();
+  /**
+   * ★ SAME DEFECT AS /witnesses (2026-08-11, class sweep). `/wallet` (app/wallet/
+   * page.tsx) already redirects to /login server-side before this ever mounts, so
+   * every reader who reaches this rail IS logged in — but `user.isLoggedIn` still
+   * cannot answer during SSR and reports "signed out" on the client until
+   * `/api/users/me` returns, so the Advanced Tools card (power up/down, delegate,
+   * claim account tokens) was hidden from its guaranteed-signed-in owner for up to
+   * several seconds on every visit. `identity` resolves correctly on first paint
+   * from the same session cookie the page-level redirect already trusted.
+   */
+  const identity = useSessionIdentity();
   // Same guard as wallet-content.tsx, and it is NOT redundant: this rail fetches
   // its own copy, so guarding only the centre column left the page still
   // crashing. `getAccountFull` on a name that does not exist on chain resolves to
@@ -66,8 +78,24 @@ export default function WalletRightRail() {
           card, including "Claim account tokens", rendered enabled). Lite is
           additionally hidden because with the account queries disabled above
           its figures would all be ZERO — a card reading "0.000 HP" is a claim
-          about a balance, not an absence of one. */}
-      {user.isLoggedIn && !isLite && (
+          about a balance, not an absence of one.
+
+          ★ `identity.clientAnswered` GATES THIS TOO (2026-08-11, follow-through
+          fix). `isLite` and `username` below both read the raw `useUserClient()`
+          object, which `useSessionIdentity` does NOT carry (it only exposes
+          isLoggedIn/username sourced from the cookie). On a cold tab with a
+          session cookie and no localStorage seed, `identity.isLoggedIn` answers
+          true immediately while `user.account_tier` is still `undefined` and
+          `user.username` is still `''` — so `isLite` false-negatives to "not
+          lite" and this card rendered with an empty username and every figure
+          at ZERO (see advanced-tools-card.tsx's own comment on why that's
+          unacceptable). `account_tier` and `username` only become trustworthy
+          together, in the same render, once `clientAnswered` flips true (same
+          fetch, same response) — same reasoning list-variant.tsx already
+          applies to its write gate. So the safe default here is "treat as lite
+          until proven otherwise": wait for `clientAnswered` before showing the
+          card at all, rather than showing one full of zeros. */}
+      {identity.isLoggedIn && identity.clientAnswered && !isLite && (
         <AdvancedToolsCard
           username={user.username}
           netHp={figures?.netHp ?? ZERO}

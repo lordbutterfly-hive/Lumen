@@ -100,7 +100,18 @@ export class CommunitiesPage {
     this.subscribersNotificationContent = page.locator('[data-testid="notifications-content-all"]');
     this.subscribersNotificationLocalMenu = page.locator('[data-testid="notifications-local-menu"]');
     this.subscriberName = page.locator('[data-testid="subscriber-name"]');
-    this.subscriberRow = this.subscribersNotificationContent.locator('tr');
+    /*
+      ★ NOT `tr` (2026-08-11). The activity-log list is not a table — every row is
+      `<div data-testid="notification-list-item">` (features/activity-log/list-item.tsx:98-104),
+      so `.locator('tr')` resolved to ZERO elements and every count assertion built
+      on it compared 0 against 0 or against an API length. Note the two sibling
+      locators directly below already used the real testid, which is what gave this
+      away. This is why 'validate load more button in the community subscribers
+      list' "worked locally but not in CI" — it never measured anything.
+    */
+    this.subscriberRow = this.subscribersNotificationContent.locator(
+      '[data-testid="notification-list-item"]'
+    );
     this.subscribersRowsEven = this.subscribersNotificationContent.locator('[data-testid="notification-list-item"]:nth-of-type(even)');
     this.subscribersRowsOdd =  this.subscribersNotificationContent.locator('[data-testid="notification-list-item"]:nth-of-type(odd)');
     this.subscribersLoadMoreButton = this.subscribersNotificationContent.getByText('Load more');

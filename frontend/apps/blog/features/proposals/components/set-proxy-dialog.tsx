@@ -15,6 +15,7 @@ import {
 import TooltipContainer from '@ui/components/tooltip-container';
 import { useTranslation } from '@/blog/i18n/client';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import DialogLogin from '@/blog/components/dialog-login';
 import { isHiveAccountNameValid } from '@transaction/lib/validate-hive-account';
 import { getAccount } from '@transaction/lib/hive-api';
@@ -33,13 +34,22 @@ interface Props {
 export default function SetProxyDialog({ children, currentProxy }: Props) {
   const { t } = useTranslation('common_blog');
   const { user } = useUserClient();
+  /**
+   * ★ SAME DEFECT AS /witnesses (2026-08-11, class sweep). This branched render on
+   * raw `user.isLoggedIn`, which cannot answer during SSR and reports "signed out"
+   * on the client until `/api/users/me` returns — so a signed-in reader's trigger
+   * button was wrapped in `DialogLogin` (opens the login modal instead of the real
+   * proxy dialog) for up to several seconds after every page load. See
+   * features/layouts/server-session.tsx.
+   */
+  const identity = useSessionIdentity();
   const mutation = useProxyMutation(user.username);
   const [open, setOpen] = useState(false);
   const [proxy, setProxy] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isChecking, setIsChecking] = useState(false);
 
-  if (!user.isLoggedIn) {
+  if (!identity.isLoggedIn) {
     return <DialogLogin>{children}</DialogLogin>;
   }
 
@@ -47,7 +57,19 @@ export default function SetProxyDialog({ children, currentProxy }: Props) {
   // trigger (real `disabled` + reason there). `children` has no click handler of
   // its own outside `DialogTrigger`, so not wrapping it in one already makes it
   // inert if this dialog is ever mounted for a lite account some other way.
-  if (user.account_tier === 'lite') {
+  //
+  // ★ FOLLOW-THROUGH FIX (2026-08-11). This used to read only `user.account_tier`,
+  // which `useSessionIdentity` does not carry — on a cold tab with a session
+  // cookie and no localStorage seed, `identity.isLoggedIn` (checked above)
+  // answers true immediately while `user.account_tier` is still `undefined`, so
+  // this check false-negatived to "not lite" and let a lite account reach the
+  // real dialog below, submit, and hit a raw signer error instead of the
+  // friendly "lite accounts cannot vote" message. `account_tier` only becomes
+  // trustworthy once `identity.clientAnswered` is true (same fetch that answers
+  // `user.username` below), so the safe default is to treat the account as lite
+  // — i.e. keep showing this blocked state — until the client has genuinely
+  // answered, matching list-variant.tsx's write-gate precedent.
+  if (!identity.clientAnswered || user.account_tier === 'lite') {
     return <TooltipContainer title={t('proposals.lite_cannot_vote')}>{children}</TooltipContainer>;
   }
 

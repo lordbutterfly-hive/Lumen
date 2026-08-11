@@ -262,6 +262,15 @@ export function useRetention(
     // On a failed chain read we deliberately do NOT substitute anything: the
     // consumers all render null without data, so the block disappears rather
     // than showing a fabricated tier. A wrong status is worse than no status.
-    retry: 1
+    //
+    // ★ retry 1 → 0 (2026-08-11). The route's own cache never stores a failure (FAIL
+    // LOUD — see the route's docs), so a retry on a 502 does not "try again cheaply", it
+    // re-pays the ENTIRE upstream fan-out a second time against upstream that measurably
+    // 502s and runs 1-6s per call. That doubled exactly the cost of the requests that were
+    // already struggling, for a widget that renders nothing differently whether the first
+    // or the second attempt is the one that eventually fails. The route's own
+    // stale-while-revalidate layer (streak-cache.ts) is what should absorb a transient
+    // upstream miss, not a client-side retry against the same flaky call.
+    retry: 0
   });
 }

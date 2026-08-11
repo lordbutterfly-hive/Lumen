@@ -926,8 +926,17 @@ test.describe('Communities page tests', () => {
     ).toBe('rgba(0, 0, 0, 0)');
   });
 
-  // Temporary skipped it works localy but there are some problems in CI
-  test.skip('validate load more button in the community subscribers list', async ({ page }) => {
+  /*
+   * ★ UNSKIPPED 2026-08-11. The old reason ("works locally but there are some
+   * problems in CI") was a symptom, not a cause: `communitiesPage.subscriberRow`
+   * was `.locator('tr')` and the activity log renders `<div
+   * data-testid="notification-list-item">` rows, never a table
+   * (features/activity-log/list-item.tsx:98-104). So every `subscriberRow` count
+   * here was measuring an empty list. Locator fixed in
+   * support/pages/communitiesPage.ts; the Load more button and its feature are
+   * both live (features/activity-log/load-more-button.tsx).
+   */
+  test('validate load more button in the community subscribers list', async ({ page }) => {
     const leoFinanceCommunityAccount: string = 'hive-167922';
 
     await homePage.moveToLeoFinanceCommunities();

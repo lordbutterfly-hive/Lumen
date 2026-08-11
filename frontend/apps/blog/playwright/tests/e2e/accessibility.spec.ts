@@ -1,4 +1,4 @@
-import { expect, Locator, Page, test } from '@playwright/test';
+import { expect, Locator, test } from '@playwright/test';
 import { HomePage } from '../support/pages/homePage';
 import { PostPage } from '../support/pages/postPage';
 import { ACCESSIBILITY, TIMEOUTS } from '../support/constants';
@@ -41,18 +41,13 @@ async function countAccessibleElements(
   return { accessible: accessibleCount, total: checkedCount };
 }
 
-/**
- * Helper to wait for dialog to appear and return its locator.
+/*
+ * `waitForDialog()` removed 2026-08-11. It swallowed the timeout and returned
+ * null, and every caller turned that null into `test.skip(true, 'dialog did not
+ * open')` — so the one signal it produced (an overlay that never mounted) was
+ * converted into a green skip. Callers now assert on `[role="dialog"]` directly
+ * with TIMEOUTS.DIALOG_OPEN, which fails loudly instead.
  */
-async function waitForDialog(page: Page): Promise<Locator | null> {
-  const dialog = page.locator('[role="dialog"]');
-  try {
-    await dialog.waitFor({ state: 'visible', timeout: 3000 });
-    return dialog;
-  } catch {
-    return null;
-  }
-}
 
 test.describe('Accessibility tests', () => {
   let homePage: HomePage;
@@ -135,22 +130,29 @@ test.describe('Accessibility tests', () => {
     await homePage.getFirstPostTitle.click();
     await expect(postPage.articleTitle).toBeVisible({ timeout: TIMEOUTS.SEARCH_RESULTS });
 
-    // Check if share button exists and is visible
+    /*
+      ★ NO ESCAPE HATCHES HERE (2026-08-11). This used to be
+        test.skip(!shareVisible, 'Share button not available on this page');
+        ...
+        if (!dialog) { test.skip(true, 'Share dialog did not open'); return; }
+      which meant a genuinely broken share dialog reported as SKIPPED, i.e. as
+      green. Both conditions are product guarantees, not environment facts:
+      `share-post` is rendered unconditionally in the post footer
+      (app/[param]/[p2]/[permlink]/content.tsx:1233) and `SharePost`
+      (features/post-rendering/share-post-dialog.tsx:12-16) is a Radix Dialog, so
+      role="dialog" MUST appear on click. Verified against the running app
+      2026-08-11: button visible on the home -> first-card -> post path, dialog
+      opens, Escape closes it. If any of that stops being true it is a defect and
+      this test now says so.
+    */
     const shareBtn = postPage.sharePostBtn;
-    const shareVisible = await shareBtn.isVisible().catch(() => false);
-
-    // Skip test if share button is not available
-    test.skip(!shareVisible, 'Share button not available on this page');
+    await expect(shareBtn).toBeVisible({ timeout: TIMEOUTS.SEARCH_RESULTS });
 
     // Open share dialog
     await shareBtn.click();
 
-    // Wait for dialog to appear
-    const dialog = await waitForDialog(page);
-    if (!dialog) {
-      test.skip(true, 'Share dialog did not open');
-      return;
-    }
+    const dialog = page.locator('[role="dialog"]');
+    await expect(dialog).toBeVisible({ timeout: TIMEOUTS.DIALOG_OPEN });
 
     // Press Escape to close
     await page.keyboard.press('Escape');
@@ -206,20 +208,18 @@ test.describe('Accessibility tests', () => {
     await homePage.getFirstPostTitle.click();
     await expect(postPage.articleTitle).toBeVisible({ timeout: TIMEOUTS.SEARCH_RESULTS });
 
-    // Check if share button is available
+    // ★ Escape hatches removed 2026-08-11 — see the note in 'Escape key closes
+    // dialogs and dropdowns' above. A dialog that fails to open is a DEFECT, and
+    // a focus trap that is never entered is exactly the a11y bug this test exists
+    // to catch; skipping on either turned that into a green run. Measured against
+    // the running app 2026-08-11: 10/10 tabs stayed inside the dialog.
     const shareBtn = postPage.sharePostBtn;
-    const shareVisible = await shareBtn.isVisible().catch(() => false);
-
-    test.skip(!shareVisible, 'Share button not available on this page');
+    await expect(shareBtn).toBeVisible({ timeout: TIMEOUTS.SEARCH_RESULTS });
 
     await shareBtn.click();
 
-    // Wait for dialog
-    const dialog = await waitForDialog(page);
-    if (!dialog) {
-      test.skip(true, 'Share dialog did not open');
-      return;
-    }
+    const dialog = page.locator('[role="dialog"]');
+    await expect(dialog).toBeVisible({ timeout: TIMEOUTS.DIALOG_OPEN });
 
     // Tab through elements - focus should stay within dialog
     const focusedElementsInDialog: boolean[] = [];
@@ -437,15 +437,35 @@ test.describe('Accessibility tests', () => {
    * INTERACTIVE ELEMENTS
    */
 
+  /**
+   * ★ RETARGETED AND DEEP-LINKED (2026-08-11).
+   *
+   * This test used to load the home feed and look for
+   * `[data-testid="select-filter-dropdown-trigger"]`. That testid does not exist
+   * anywhere in product source (0 hits outside playwright/), so
+   * `test.skip(!dropdownVisible, …)` fired on EVERY run — the test had been
+   * reporting as "skipped" rather than "failed" for as long as the testid has
+   * been dead, which is why nobody noticed. Its second hatch,
+   * `test.skip(true, 'Dropdown did not open with Enter key')`, was therefore
+   * unreachable dead code guarding a case that could never be observed.
+   *
+   * The successor sort dropdown, `posts-filter`
+   * (features/layouts/post-select-filter.tsx:37), is NOT a valid retarget: it is
+   * currently rendered by no reachable route (verified 2026-08-11 — 0 occurrences
+   * on /, /communities, /topics/<tag>, /roles/<tag>, /search). Reported separately
+   * as an orphaned-component finding.
+   *
+   * `communities-filter` (features/communities-list/communities-select-filter.tsx:41)
+   * is the same Radix Select primitive, it is really rendered on /communities, and
+   * /communities is a direct deep link — so this test no longer pays the home-feed
+   * latency toll either.
+   */
   test('dropdown menus are keyboard accessible', async ({ page }) => {
-    await homePage.goto();
-    await page.waitForLoadState('networkidle');
+    await page.goto('/communities');
+    await page.waitForLoadState('domcontentloaded');
 
-    // Find dropdown trigger (e.g., feed selector)
-    const dropdownTrigger = page.locator('[data-testid="select-filter-dropdown-trigger"]').first();
-    const dropdownVisible = await dropdownTrigger.isVisible().catch(() => false);
-
-    test.skip(!dropdownVisible, 'Dropdown trigger not available on this page');
+    const dropdownTrigger = page.locator('[data-testid="communities-filter"]').first();
+    await expect(dropdownTrigger).toBeVisible({ timeout: TIMEOUTS.PAGE_LOAD });
 
     // Focus on dropdown trigger
     await dropdownTrigger.focus();
@@ -453,16 +473,9 @@ test.describe('Accessibility tests', () => {
     // Press Enter to open
     await page.keyboard.press('Enter');
 
-    // Check if dropdown content is visible
+    // Radix Select renders its content with role="listbox".
     const dropdownContent = page.locator('[role="listbox"], [role="menu"]').first();
-
-    try {
-      await dropdownContent.waitFor({ state: 'visible', timeout: 2000 });
-    } catch {
-      // Dropdown might not have opened - skip
-      test.skip(true, 'Dropdown did not open with Enter key');
-      return;
-    }
+    await expect(dropdownContent).toBeVisible({ timeout: TIMEOUTS.DIALOG_OPEN });
 
     // Arrow down should be possible (we just verify dropdown is open and keyboard works)
     await page.keyboard.press('ArrowDown');
@@ -472,50 +485,20 @@ test.describe('Accessibility tests', () => {
     await expect(dropdownContent).not.toBeVisible();
   });
 
-  test('theme toggle is keyboard accessible', async ({ page }) => {
-    await homePage.goto();
-    await page.waitForLoadState('networkidle');
-
-    // Find theme toggle button
-    const themeToggle = page.locator('[data-testid="mode-switch"]').first();
-    const themeToggleVisible = await themeToggle.isVisible().catch(() => false);
-
-    test.skip(!themeToggleVisible, 'Theme toggle not available on this page');
-
-    // Focus on theme toggle
-    await themeToggle.focus();
-
-    // Verify it receives focus
-    const isFocused = await page.evaluate(() => {
-      const toggle = document.querySelector('[data-testid="mode-switch"]');
-      return document.activeElement === toggle;
-    });
-    expect(isFocused).toBe(true);
-
-    // Get initial theme state
-    const initialIsDark = await page.evaluate(() =>
-      document.documentElement.classList.contains('dark')
-    );
-
-    // Press Enter to toggle
-    await page.keyboard.press('Enter');
-
-    // Wait for theme change animation/transition
-    await page.waitForFunction(
-      (wasDark) => {
-        const isDark = document.documentElement.classList.contains('dark');
-        // Theme dropdown might open instead of directly toggling
-        // Check if either theme changed OR a menu appeared
-        const menuVisible = document.querySelector('[role="menu"]') !== null;
-        return isDark !== wasDark || menuVisible;
-      },
-      initialIsDark,
-      { timeout: 2000 }
-    ).catch(() => {
-      // Theme might work differently - that's OK as long as it's keyboard accessible
-    });
-
-    // Verify the toggle is still functional (didn't break the page)
-    await expect(page.locator('body')).toBeVisible();
-  });
+  /*
+   * ★ 'theme toggle is keyboard accessible' DELETED (2026-08-11) — FEATURE GONE.
+   *
+   * It looked for `[data-testid="mode-switch"]`, then
+   * `test.skip(!themeToggleVisible, 'Theme toggle not available on this page')`.
+   * There is no theme toggle to be accessible: the blog app dropped next-themes
+   * and every `dark:` variant, and is now light-only by owner ruling — see
+   * features/layouts/providers.tsx:27-38 ("Dark mode was never reachable — no
+   * toggle existed anywhere in the product"). `mode-switch` has 0 hits in product
+   * source; confirmed 0 nodes on a live page load 2026-08-11.
+   *
+   * Kept as a note rather than a skipped test so the removal is auditable: if a
+   * toggle ever returns, write a new test against its real testid.
+   * (apps/wallet keeps its own next-themes toggle; that is a different app and is
+   * covered by that app's specs, not this file.)
+   */
 });

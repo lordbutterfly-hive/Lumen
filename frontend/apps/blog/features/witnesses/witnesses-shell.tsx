@@ -69,6 +69,23 @@ export default function WitnessesShell() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterSignature]);
 
+  /**
+   * ★ THE `xl` RIGHT RAIL AND THE TABLE'S OWN FLOOR ARE COUPLED (2026-08-11).
+   * This grid's `xl:grid-cols-[200px_minmax(0,1fr)_312px]` decides how much width
+   * `<main>` — and therefore `WitnessesTable`'s `minmax(0,1fr)` witness column —
+   * actually gets: `vw - 332` from `lg` up to just under `xl`, then it CLIFFS to
+   * `vw - 688` the instant this rail appears at `xl` (1280px), because two more
+   * 44px gaps and 312px of rail arrive in the same breakpoint step. At vw=1280
+   * that is 592px against the table's 632px hard minimum — a zero-width witness
+   * column, found by un-skipping `witnessesPage.spec.ts`. The fix lives in
+   * `lib/table-grid.tsx` (`GENERAL_MIN_WIDTH_CLASS` + the three `STICKY_*`
+   * classes) and `witnesses-table.tsx` (the scroller), which now hold that floor
+   * until `2xl` instead of releasing it at `lg`, 256px before this rail even
+   * shows up. If this grid's column widths, gaps, or breakpoint ever change,
+   * redo that arithmetic — table-grid.tsx's comment has it in full — rather than
+   * assuming "nothing about the desktop table changes" the way the old comment
+   * there wrongly did.
+   */
   return (
     <div className="relative mx-auto grid max-w-[1720px] grid-cols-1 gap-11 px-6 pb-20 pt-[26px] md:grid-cols-[200px_minmax(0,1fr)] md:px-11 xl:grid-cols-[200px_minmax(0,1fr)_312px]">
       <div

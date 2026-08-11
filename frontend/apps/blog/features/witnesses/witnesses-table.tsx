@@ -104,8 +104,17 @@ export default function WitnessesTable({
           820px (906 against 820).
 
           The scroller lives here, one element outside the rows, so the overflow
-          is contained and the identifying columns can pin to its left edge. */}
-      <div className="overflow-x-auto lg:overflow-visible" data-testid="witnesses-table">
+          is contained and the identifying columns can pin to its left edge.
+
+          ★ RELEASED AT `2xl`, NOT `lg` (2026-08-11 fix). This scroller and
+          `GENERAL_MIN_WIDTH_CLASS` in `table-grid.tsx` are one mechanism split
+          across two files and MUST release at the same breakpoint — that file's
+          comment has the arithmetic for why `2xl` is the first point the shell
+          (with its `xl` right rail) actually has room. Releasing this one earlier
+          than the min-width floor removes the fallback scrollbar while the floor
+          is still forcing an 820px-wide row, which is exactly the "whole page
+          scrolled sideways" bug above, just triggered from the other side. */}
+      <div className="overflow-x-auto 2xl:overflow-visible" data-testid="witnesses-table">
         <div className={minWidthClass}>
           <div className={HEADER_CLASS} style={{ gridTemplateColumns: gridTemplate }} role="row">
             <span className={STICKY_RANK_CLASS}>{t('witnesses.columns.rank')}</span>

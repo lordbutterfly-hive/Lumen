@@ -22,6 +22,7 @@ import { IFollowList, Entry } from '@hive/common-hiveio-packages/wax';
 import clsx from 'clsx';
 import { Badge } from '@ui/components/badge';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import DialogLogin from '../../components/dialog-login';
 import { useStorageWithTTL } from '@ui/hooks/useStorageWithTTL';
 import { StorageTTL } from '@ui/lib/storage-with-ttl';
@@ -88,6 +89,31 @@ const CommentListItem = memo(function CommentListItem({
 }: CommentListProps) {
   const { t } = useTranslation('common_blog');
   const { user } = useUserClient();
+  /**
+   * ★ SAME BUG CLASS AS app-header.tsx ("NEVER SHOW A SIGNED-IN READER A
+   * SIGNED-OUT HEADER", 2026-08-10, N-3). `user.isLoggedIn`/`user.username`
+   * cannot answer during SSR and report signed-out/empty on the client until
+   * `/api/users/me` returns, so any RENDER gate read straight off `user`
+   * flickers a signed-in reader into the signed-out variant for that window.
+   * `identity` prefers the client's real answer once it has landed and falls
+   * back to the cookie the server already read before then.
+   *
+   * Fixed on this pass (2026-08-11): both AlertDialogFlag triggers, the
+   * footer Reply/DialogLogin branch, the Edit button's ownership check, the
+   * comment PostDeleteDialog's outer ownership+visibility gate, and the
+   * "manage list" link (including the `hiddenReasonListHref` it points at,
+   * below — its href was still built from the raw, stale `user.username`).
+   * `replyStorageId`/`editStorageId` further down are intentionally left on
+   * raw `user` — they key a localStorage draft, not a render, and a stale
+   * key for one extra render just means the draft briefly keys under '' and
+   * self-corrects, never a wrong-user collision. `PostDeleteDialog`'s own
+   * internal `user.isLoggedIn` check is a separate file/hook call, still
+   * raw — same accepted residual as the AlertDialogFlag dialogs above: in
+   * the narrow window where the SSR-cookie fallback says logged-in but the
+   * raw query hasn't answered, the dialog can mount with its own confirm
+   * button briefly absent, self-healing the moment the client answer lands.
+   */
+  const identity = useSessionIdentity();
   const ref = useRef<HTMLTableRowElement>(null);
 
   // Every Lumen post and reply is published on chain by ONE shared account, so a
@@ -120,11 +146,11 @@ const CommentListItem = memo(function CommentListItem({
   // reputation hide or a plain downvote have no list to route back to; the reason
   // text next to "Reveal Comment" already names those, unchanged.
   const hiddenReasonListHref = isMutedByViewer
-    ? `/@${user.username}/lists/muted`
+    ? `/@${identity.username}/lists/muted`
     : blacklistReason === 'own'
-      ? `/@${user.username}/lists/blacklisted`
+      ? `/@${identity.username}/lists/blacklisted`
       : blacklistReason === 'followed'
-        ? `/@${user.username}/lists/followed_blacklists`
+        ? `/@${identity.username}/lists/followed_blacklists`
         : null;
   // ★ E2 (BUILDMAP-FUCKERY-V2, G3) — the comment overflow menu. Acts on
   // `comment.author`, same reasoning as the UserPopoverCard passed `author` two
@@ -358,11 +384,11 @@ const CommentListItem = memo(function CommentListItem({
                           {comment._temporary && !comment._optimistic ? null : !hiddenComment ? (
                             <div className="flex items-center">
                               {/* Only show flag here for non-originally-hidden comments; originally hidden ones show flag in the reveal/hide section */}
-                              {!isOriginallyHidden && flagText && comment.community && !user.isLoggedIn ? (
+                              {!isOriginallyHidden && flagText && comment.community && !identity.isLoggedIn ? (
                                 <DialogLogin>
                                   <FlagTooltip onClick={() => {}} />
                                 </DialogLogin>
-                              ) : !isOriginallyHidden && flagText && comment.community && user.isLoggedIn ? (
+                              ) : !isOriginallyHidden && flagText && comment.community && identity.isLoggedIn ? (
                                 <AlertDialogFlag
                                   community={comment.community}
                                   username={comment.author}
@@ -421,7 +447,7 @@ const CommentListItem = memo(function CommentListItem({
                                   Deliberately OUTSIDE the AccordionTrigger button above:
                                   an anchor nested inside a button is invalid HTML, so the
                                   link lives in this sibling row instead. */}
-                              {hiddenComment && hiddenReasonListHref && user.isLoggedIn ? (
+                              {hiddenComment && hiddenReasonListHref && identity.isLoggedIn ? (
                                 <Link
                                   href={hiddenReasonListHref}
                                   className="whitespace-nowrap text-xs text-muted-foreground underline-offset-2 hover:text-destructive hover:underline sm:text-sm"
@@ -430,11 +456,11 @@ const CommentListItem = memo(function CommentListItem({
                                   {t('cards.comment_card.manage_list_link')}
                                 </Link>
                               ) : null}
-                              {flagText && comment.community && !user.isLoggedIn ? (
+                              {flagText && comment.community && !identity.isLoggedIn ? (
                                 <DialogLogin>
                                   <FlagTooltip onClick={() => {}} />
                                 </DialogLogin>
-                              ) : flagText && comment.community && user.isLoggedIn ? (
+                              ) : flagText && comment.community && identity.isLoggedIn ? (
                                 <AlertDialogFlag
                                   community={comment.community}
                                   username={comment.author}
@@ -573,7 +599,7 @@ const CommentListItem = memo(function CommentListItem({
                               reply editor's own Cancel button (reply-textbox.tsx), the
                               nearest sibling component in this same feature, rather than
                               inventing a new de-emphasised-text convention here. */}
-                          {user.isLoggedIn ? (
+                          {identity.isLoggedIn ? (
                             <button
                               disabled={deleteCommentMutation.isLoading}
                               onClick={() => setReply(!reply)}
@@ -592,7 +618,7 @@ const CommentListItem = memo(function CommentListItem({
                               </button>
                             </DialogLogin>
                           )}
-                          {user && user.isLoggedIn && comment.author === user.username ? (
+                          {identity.isLoggedIn && comment.author === identity.username ? (
                             <button
                               disabled={deleteCommentMutation.isLoading}
                               onClick={() => {
@@ -605,8 +631,8 @@ const CommentListItem = memo(function CommentListItem({
                             </button>
                           ) : null}
                           {comment.replies.length === 0 &&
-                          user.isLoggedIn &&
-                          comment.author === user.username &&
+                          identity.isLoggedIn &&
+                          comment.author === identity.username &&
                           new Date() < new Date(`${comment.payout_at}Z`) ? (
                             <PostDeleteDialog
                               permlink={comment.permlink}

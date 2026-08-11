@@ -69,3 +69,8 @@ qa/harness/g[0-9]-*.mjs
 apps/blog/follow20.tmp.mjs
 apps/blog/probe-readmarket.ts
 apps/blog/qa-profile-settings-proof.mjs
+
+# Playwright's generated HTML report. Regenerated on every run; never committed.
+# Caught by a sync dry-run on 2026-08-11 queued alongside real source changes.
+apps/blog/playwright-report/
+playwright-report/

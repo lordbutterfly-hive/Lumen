@@ -6,6 +6,7 @@ import { NaiAsset } from '@hiveio/wax';
 import LeftRail from '@/blog/features/layouts/left-rail';
 import { useTranslation } from '@/blog/i18n/client';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { useLoggedUserContext } from '@/blog/features/votes/hooks/use-logged-user';
 import { useProposalsData } from '../hooks/use-proposals-data';
 import { useUserProposalVotes } from '../hooks/use-user-proposal-votes';
@@ -37,6 +38,12 @@ export default function ProposalsContent({
 }: Props) {
   const { t } = useTranslation('common_blog');
   const { user } = useUserClient();
+  // ★ Defense-in-depth (2026-08-11, class sweep): the underlying vote data is
+  // already SSR-seeded via getObserver()/initialVotedProposalIds so this cannot
+  // currently produce a visible flash, but `identity` is the correct source for
+  // "is this reader logged in" everywhere in the app — using the raw, SSR-blind
+  // `user.isLoggedIn` here is a latent footgun if that seeding logic ever changes.
+  const identity = useSessionIdentity();
   const { loggedUser } = useLoggedUserContext();
   const [tab, setTab] = useState<ProposalTab>('all');
   const [sort, setSort] = useState<ProposalSort>('votes');
@@ -58,7 +65,7 @@ export default function ProposalsContent({
   const showError = isError && !hasData;
   // Logged-in viewer whose own votes couldn't be loaded: the Support toggle's state is unknown,
   // so render it indeterminate rather than a confident (possibly wrong) "not supported".
-  const votesUnavailable = user.isLoggedIn && !hasVotesData && (votesError || votesLoading);
+  const votesUnavailable = identity.isLoggedIn && !hasVotesData && (votesError || votesLoading);
 
   return (
     <div className="relative mx-auto grid max-w-[1720px] grid-cols-1 gap-11 px-6 pb-20 pt-[26px] md:grid-cols-[200px_minmax(0,1fr)] md:px-11 xl:grid-cols-[200px_minmax(0,1fr)_312px]">

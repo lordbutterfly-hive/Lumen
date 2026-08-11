@@ -16,12 +16,23 @@ import { withBasePath } from '@ui/lib/path-utils';
 import { getCommunities, getSubscriptions } from '@transaction/lib/bridge-api';
 import { useRouter } from 'next/navigation';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { DEFAULT_OBSERVER, chainObserver } from '@/blog/lib/utils';
 import { StaleTime } from '@/blog/lib/react-query';
 import { useSSRObserver, useInitialCommunities, useInitialSubscriptions } from '@/blog/components/observer-provider';
 
 export function CommunitiesSelect({ title }: { title: string }) {
   const { user, isHydrated } = useUserClient();
+  /**
+   * ★ SAME DEFECT AS /witnesses (2026-08-11, class sweep). This dropdown renders on
+   * every main/community feed page (main-page-layout.tsx, community-layout.tsx),
+   * public surfaces with no auth boundary. `user.isLoggedIn` cannot answer during
+   * SSR and reports "signed out" on the client until `/api/users/me` returns, so
+   * the "My friends" / "My communities" rows — and the personalized trending list
+   * below them — were missing from a signed-in reader's dropdown for up to several
+   * seconds after every page load. See features/layouts/server-session.tsx.
+   */
+  const identity = useSessionIdentity();
   const router = useRouter();
   const { t } = useTranslation('common_blog');
   const ssrObserver = useSSRObserver();
@@ -64,7 +75,12 @@ export function CommunitiesSelect({ title }: { title: string }) {
         }
       }}
     >
-      <SelectTrigger className="bg-white">
+      {/* Same class as post-select-filter.tsx: role="combobox" does not get an
+          accessible name from content, so the visible current value/title left
+          this nameless (verified via the a11y tree). `title` itself is not a
+          safe aria-label — it is the CURRENT selection/community, not the
+          control's stable purpose — so this names the control generically. */}
+      <SelectTrigger className="bg-white" aria-label={t('communities.communities')}>
         <SelectValue placeholder={title} />
       </SelectTrigger>
       <SelectContent
@@ -79,9 +95,9 @@ export function CommunitiesSelect({ title }: { title: string }) {
         <SelectGroup>
           <SelectItem value="/trending">{t('navigation.communities_nav.all_posts')}</SelectItem>
         </SelectGroup>
-        {user.isLoggedIn && (
+        {identity.isLoggedIn && (
           <SelectGroup>
-            <SelectItem value={`/@${user.username}/feed`}>My friends</SelectItem>
+            <SelectItem value={`/@${identity.username}/feed`}>My friends</SelectItem>
             <SelectItem value="/trending/my">My communities</SelectItem>
             {mySubsData && mySubsData.length > 0 ? (
               <SelectItem disabled value="my-communities" className="text-slate-400">
@@ -101,7 +117,7 @@ export function CommunitiesSelect({ title }: { title: string }) {
           <SelectItem disabled value="trending-communities" className="text-slate-400">
             {t('navigation.communities_nav.trending_communities')}
           </SelectItem>
-          {user && user.isLoggedIn
+          {identity.isLoggedIn
             ? filteredCommunity?.slice(0, 12).map((community) => (
                 <SelectItem key={community.id} value={community.name}>
                   {community.title}

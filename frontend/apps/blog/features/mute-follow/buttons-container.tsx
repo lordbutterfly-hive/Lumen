@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import { IFollow } from '@hive/common-hiveio-packages/wax';
 import FollowButton from './follow-button';
 import MuteButton from './mute-button';
@@ -61,8 +62,60 @@ const ButtonsContainer = ({
   const followMutation = useFollowMutation();
   const unfollowMutation = useUnfollowMutation();
 
+  // Same class as use-moderation-status.ts: `get_following` caps a single page at
+  // 1000 entries, and `mute`/`follow` here are the VIEWER's own ignore/blog lists
+  // (every caller constructs them with `useFollowingInfiniteQuery(user.username, 1000, ...)`).
+  // For a viewer following/muting more than 1000 accounts, whoever landed past the
+  // first page used to read as not-followed/not-muted below (`isMute`, `isFollow`) —
+  // offering "Follow" to someone already followed, or "Mute" to someone already
+  // muted. Keep fetching while more pages exist; react-query dedupes this per query
+  // key across every card sharing it, so this does not add a fetch per card.
+  const {
+    hasNextPage: muteHasNextPage,
+    isFetchingNextPage: muteIsFetchingNextPage,
+    fetchNextPage: fetchNextMutePage
+  } = mute;
+  const {
+    hasNextPage: followHasNextPage,
+    isFetchingNextPage: followIsFetchingNextPage,
+    fetchNextPage: fetchNextFollowPage
+  } = follow;
+
+  // ★ `cancelRefetch: false` IS LOAD-BEARING, NOT A STYLE CHOICE (2026-08-11).
+  // `follow`/`mute` are the SAME useInfiniteQuery result, passed down as props
+  // to every ButtonsContainer on the page (followers/content.tsx and
+  // followed/content.tsx both render one per row). React flushes every mounted
+  // instance's effects before any of their state updates lands, so all of them
+  // observe `hasNextPage && !isFetchingNextPage` at once and all call
+  // `fetchNextPage()` in the same tick. React Query v4's `fetchNextPage`
+  // defaults `cancelRefetch` to `true`, which does not merge those calls — the
+  // 2nd..Nth cancel the 1st's promise and start a fresh one each. Measured on a
+  // 20-row followers page with the viewer's own list forced past 1000 entries
+  // (has-next-page): 20 distinct outbound `get_following` requests per page
+  // turn, not 1. Worse, `getFollowing` (packages/transaction/lib/hive-api.ts)
+  // never wires the query's abort signal into the chain call, so a "cancelled"
+  // fetch keeps running upstream anyway — cancelling client-side state buys
+  // nothing and the wasted request still lands on the Hive node.
+  // `cancelRefetch: false` makes every re-entrant call while a fetch is already
+  // in flight return that SAME promise instead of restarting
+  // (query-core's `Query.fetch`: `else if (this.promise) return this.promise`).
+  // Verified this collapses the 20-per-turn storm to exactly 1 real request.
+  useEffect(() => {
+    if (muteHasNextPage && !muteIsFetchingNextPage) {
+      fetchNextMutePage({ cancelRefetch: false });
+    }
+  }, [muteHasNextPage, muteIsFetchingNextPage, fetchNextMutePage]);
+
+  useEffect(() => {
+    if (followHasNextPage && !followIsFetchingNextPage) {
+      fetchNextFollowPage({ cancelRefetch: false });
+    }
+  }, [followHasNextPage, followIsFetchingNextPage, fetchNextFollowPage]);
+
   const isMute = Boolean(
-    mute.data?.pages[0].some((f) => f.follower === user.username && f.following === username)
+    mute.data?.pages.some((page) =>
+      page.some((f) => f.follower === user.username && f.following === username)
+    )
   );
   const temporaryDisabled =
     mute.data?.pages[0].some(
@@ -107,9 +160,11 @@ const ButtonsContainer = ({
   const isFollow = lumen.applies
     ? lumen.isFollowing
     : Boolean(
-        follow.data?.pages[0].some(
-          (f: { follower: string; following: string }) =>
-            f.follower === user.username && f.following === username
+        follow.data?.pages.some((page) =>
+          page.some(
+            (f: { follower: string; following: string }) =>
+              f.follower === user.username && f.following === username
+          )
         )
       );
   // `hideMute` above covers a lite TARGET (you cannot mute a handle that is not a

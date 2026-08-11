@@ -84,15 +84,15 @@ export function useMuteMutation() {
       if (!!prevIgnoredData) {
         const newItem = { follower: username, following: otherUsername, what: ['blog'], _temporary: true };
         const newData = {
-          ...prevBlogData,
-          pages: [[newItem, ...prevIgnoredData.pages[0]]]
+          ...prevIgnoredData,
+          pages: [[newItem, ...prevIgnoredData.pages[0]], ...prevIgnoredData.pages.slice(1)]
         };
         queryClient.setQueryData(['followingData', username, 'ignore'], newData);
       }
       if (!!prevBlogData) {
         const newData = {
-          ...prevIgnoredData,
-          pages: [prevBlogData.pages[0].filter((e) => e.following !== otherUsername)]
+          ...prevBlogData,
+          pages: prevBlogData.pages.map((page) => page.filter((e) => e.following !== otherUsername))
         };
         queryClient.setQueryData(['followingData', username, 'blog'], newData);
       }
@@ -100,7 +100,7 @@ export function useMuteMutation() {
         const newItem = { follower: username, following: otherUsername, what: ['blog'], _temporary: true };
         const newData = {
           ...prevFollowersData,
-          pages: [[newItem, ...prevFollowersData.pages[0]]]
+          pages: [[newItem, ...prevFollowersData.pages[0]], ...prevFollowersData.pages.slice(1)]
         };
         queryClient.setQueryData(['followersData', otherUsername], newData);
       }
@@ -171,10 +171,9 @@ export function useUnmuteMutation() {
         queryClient.setQueryData(['muted', username], () => newMutedList);
       }
       if (prevFollowingData) {
-        const newFollowingData = prevFollowingData.pages[0].filter((e) => e.following !== otherUsername);
         queryClient.setQueryData(['followingData', username, 'ignore'], () => ({
           ...prevFollowingData,
-          pages: [newFollowingData]
+          pages: prevFollowingData.pages.map((page) => page.filter((e) => e.following !== otherUsername))
         }));
       }
     },

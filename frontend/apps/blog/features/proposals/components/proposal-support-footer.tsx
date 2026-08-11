@@ -4,6 +4,7 @@ import { cn } from '@ui/lib/utils';
 import TooltipContainer from '@ui/components/tooltip-container';
 import { useTranslation } from '@/blog/i18n/client';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import DialogLogin from '@/blog/components/dialog-login';
 import { formatHp } from '../lib/proposals-format';
 import HeartIcon from './heart-icon';
@@ -41,11 +42,27 @@ export default function ProposalSupportFooter({
 }: Props) {
   const { t } = useTranslation('common_blog');
   const { user } = useUserClient();
+  const identity = useSessionIdentity();
   // A lite account has no Hive keys — the mutation backstop already refuses this
   // (use-proposal-vote-mutation.ts -> refuseIfLite), but the toggle used to render
   // fully enabled until clicked, with a brief optimistic "supported" flash before
   // the rollback (see that hook's onMutate for the corresponding fix).
-  const isLiteBlocked = isLoggedIn && user.account_tier === 'lite';
+  //
+  // ★ MIXED SOURCES WERE THE BUG (2026-08-11). `isLoggedIn` arrives as a prop
+  // derived from `useSessionIdentity()`, which answers instantly from the server
+  // cookie. `user.account_tier` comes from the client query, which does not — it
+  // is `undefined` until `/api/users/me` returns. So the gate opened while the
+  // tier was still unknown, `isLiteBlocked` computed false, and a lite account
+  // got a fully enabled Support button for that window. That is the same
+  // follow-through error found in wallet-right-rail, set-proxy-dialog and
+  // new-proposal-dialog today: the gate was moved to `identity`, the fields it
+  // depends on were left behind.
+  //
+  // `!identity.clientAnswered` treats the account as blocked until the client
+  // genuinely answers — the safe direction, because the cost of being wrong is a
+  // briefly-disabled button rather than a lite user clicking a vote they cannot
+  // sign. Same precedent as account-lists/list-variant.tsx's write gate.
+  const isLiteBlocked = isLoggedIn && (!identity.clientAnswered || user.account_tier === 'lite');
 
   // Vote state unknown for a logged-in viewer: don't render a confident (possibly wrong)
   // "Support"/"Un-support" toggle — surface an honest "couldn't load your votes" note instead.

@@ -5,7 +5,7 @@ import PageMasthead from '@/blog/features/layouts/page-masthead';
 import PostForm from '@/blog/features/post-editor/post-form';
 import PostingLoader from '@/blog/features/post-editor/posting-loader';
 import { useTranslation } from '@/blog/i18n/client';
-import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { useState } from 'react';
 
 /**
@@ -33,7 +33,19 @@ const MASTHEAD_META = 'Saved as you type. Nothing goes out until you press Submi
 
 const SubmitContent = () => {
   const { t } = useTranslation('common_blog');
-  const { user } = useUserClient();
+  /**
+   * ★ SAME BUG CLASS AS app-header.tsx ("NEVER SHOW A SIGNED-IN READER A
+   * SIGNED-OUT HEADER", 2026-08-10, N-3). The raw client user object cannot
+   * answer during SSR and is empty on the client until `/api/users/me`
+   * returns (measured up to 4.6s on this box), so a signed-in author hitting
+   * the composer saw "log in to post" for that whole window. `identity`
+   * (which wraps `useUserClient` itself) prefers the client's real answer the
+   * moment it has landed and falls back to the cookie the server already read
+   * before then, so the very first paint is correct. `identity.username` is
+   * used directly below rather than a separate `useUserClient()` call, since
+   * it is guaranteed non-empty whenever `identity.isLoggedIn` is true.
+   */
+  const identity = useSessionIdentity();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Draft is saved automatically by PostForm via useStorageWithTTL
@@ -56,9 +68,9 @@ const SubmitContent = () => {
         <main className="min-w-0">
           <PageMasthead title={MASTHEAD_TITLE}>{MASTHEAD_META}</PageMasthead>
 
-          {user?.username ? (
+          {identity.isLoggedIn ? (
             <PostForm
-              username={user.username}
+              username={identity.username}
               editMode={false}
               sideBySidePreview={true}
               setIsSubmitting={setIsSubmitting}

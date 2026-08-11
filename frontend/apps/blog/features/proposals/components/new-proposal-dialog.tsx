@@ -16,6 +16,7 @@ import {
 import TooltipContainer from '@ui/components/tooltip-container';
 import { useTranslation } from '@/blog/i18n/client';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import DialogLogin from '@/blog/components/dialog-login';
 import { useCreateProposalMutation } from '../hooks/use-create-proposal-mutation';
 
@@ -26,6 +27,15 @@ const MIN_START_DATE = dayjs().add(1, 'day').format('YYYY-MM-DD');
 export default function NewProposalDialog({ children }: { children: ReactNode }) {
   const { t } = useTranslation('common_blog');
   const { user } = useUserClient();
+  /**
+   * ★ SAME DEFECT AS /witnesses (2026-08-11, class sweep). This branched render on
+   * raw `user.isLoggedIn`, which cannot answer during SSR and reports "signed out"
+   * on the client until `/api/users/me` returns — so a signed-in reader's trigger
+   * button was wrapped in `DialogLogin` (opens the login modal instead of the real
+   * new-proposal form) for up to several seconds after every page load. See
+   * features/layouts/server-session.tsx.
+   */
+  const identity = useSessionIdentity();
   const mutation = useCreateProposalMutation();
   const [open, setOpen] = useState(false);
   const [receiver, setReceiver] = useState('');
@@ -35,7 +45,7 @@ export default function NewProposalDialog({ children }: { children: ReactNode })
   const [startDate, setStartDate] = useState(MIN_START_DATE);
   const [endDate, setEndDate] = useState(dayjs(MIN_START_DATE).add(60, 'day').format('YYYY-MM-DD'));
 
-  if (!user.isLoggedIn) {
+  if (!identity.isLoggedIn) {
     return <DialogLogin>{children}</DialogLogin>;
   }
 
@@ -45,7 +55,20 @@ export default function NewProposalDialog({ children }: { children: ReactNode })
   // form render fillable and client-side "valid" before refusing on Submit —
   // `children` has no click handler of its own outside `DialogTrigger`, so
   // simply not wrapping it in one already makes it inert.
-  if (user.account_tier === 'lite') {
+  //
+  // ★ FOLLOW-THROUGH FIX (2026-08-11). This used to read only `user.account_tier`,
+  // which `useSessionIdentity` does not carry — on a cold tab with a session
+  // cookie and no localStorage seed, `identity.isLoggedIn` (checked above)
+  // answers true immediately while `user.account_tier` is still `undefined`, so
+  // this check false-negatived to "not lite" and let a lite account reach the
+  // real form below, fill it out, and hit a raw signer error on submit instead
+  // of the friendly "lite accounts cannot vote" message. `account_tier` only
+  // becomes trustworthy once `identity.clientAnswered` is true (same fetch that
+  // answers `user.username` used throughout this form), so the safe default is
+  // to treat the account as lite — i.e. keep showing this blocked state — until
+  // the client has genuinely answered, matching list-variant.tsx's write-gate
+  // precedent.
+  if (!identity.clientAnswered || user.account_tier === 'lite') {
     return <TooltipContainer title={t('proposals.lite_cannot_vote')}>{children}</TooltipContainer>;
   }
 

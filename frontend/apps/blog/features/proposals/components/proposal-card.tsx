@@ -3,7 +3,7 @@
 import { Link, UserAvatarImg } from '@hive/ui';
 import { cn } from '@ui/lib/utils';
 import { useTranslation } from '@/blog/i18n/client';
-import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { formatDateRange, parseChainDate } from '../lib/proposals-format';
 import { ProposalViewModel } from '../lib/proposals-types';
 import { useProposalVoteMutation } from '../hooks/use-proposal-vote-mutation';
@@ -30,14 +30,35 @@ interface Props {
  */
 export default function ProposalCard({ vm, isSupported, votesUnavailable }: Props) {
   const { t } = useTranslation('common_blog');
-  const { user } = useUserClient();
+  /**
+   * ★ SAME DEFECT AS /witnesses (2026-08-11, class sweep). `user.isLoggedIn` cannot
+   * answer during SSR and reports "signed out" on the client until `/api/users/me`
+   * returns, so a signed-in reader's Support button rendered wrapped in
+   * `DialogLogin` (opens the login modal on click instead of casting the vote) for
+   * up to several seconds after every page load. `identity` prefers the client's
+   * answer once it has genuinely arrived and falls back to the session the SERVER
+   * read from the cookie until then — see features/layouts/server-session.tsx.
+   */
+  const identity = useSessionIdentity();
   const voteMutation = useProposalVoteMutation();
   const { proposal, id, voteValueHp } = vm;
   const postHref = `/proposals/@${proposal.creator}/${proposal.permlink}`;
   const statusClass = STATUS_STYLES[proposal.status] ?? STATUS_STYLES.inactive;
 
   const handleToggle = () => {
-    voteMutation.mutate({ voter: user.username, proposalId: id, approve: !isSupported });
+    // ★ FOLLOW-THROUGH FIX (2026-08-11). The Support button below is enabled
+    // from `identity.isLoggedIn` (via ProposalSupportFooter's `isLoggedIn`
+    // prop), so the voter this click reports must come from that SAME object —
+    // not from the raw `useUserClient()` user, which can still read `username:
+    // ''` in the exact window where `identity.isLoggedIn` is already true (cold
+    // tab, session cookie, no localStorage seed). `identity.username` is always
+    // populated in lockstep with `identity.isLoggedIn` (see server-session.tsx:
+    // every branch of useSessionIdentity returns isLoggedIn/username from one
+    // atomic source). Using the raw user here previously let a click send
+    // `voter: ''`, which optimistically updated the wrong react-query cache key
+    // (`['proposalVotes', '']`) while the broadcast still went out for the real
+    // signed-in account.
+    voteMutation.mutate({ voter: identity.username, proposalId: id, approve: !isSupported });
   };
 
   return (
@@ -98,7 +119,7 @@ export default function ProposalCard({ vm, isSupported, votesUnavailable }: Prop
 
       <ProposalSupportFooter
         isExpired={proposal.status === 'expired'}
-        isLoggedIn={user.isLoggedIn}
+        isLoggedIn={identity.isLoggedIn}
         isSupported={isSupported}
         votesUnavailable={votesUnavailable}
         isPending={voteMutation.isLoading}

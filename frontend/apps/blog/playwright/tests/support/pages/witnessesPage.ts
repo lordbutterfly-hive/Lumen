@@ -1,174 +1,91 @@
 import { Locator, Page, expect } from '@playwright/test';
 
+/**
+ * ★ REWRITTEN 2026-08-11 against the CURRENT /witnesses page.
+ *
+ * The previous version of this class modelled the OLD external witnesses view
+ * (`wallet.openhive.network/~witnesses`): a `witness-header` / `witness-table-head`
+ * / `witness-list-item-info` structure, a freeform "type an account name and press
+ * VOTE" box, a "Set proxy" box, and a four-column Rank / Witness / Votes received /
+ * Price feed table. Every one of those testids and copy strings has zero
+ * occurrences in current product source.
+ *
+ * The witnesses feature was not removed — it was rebuilt as a first-class in-app
+ * page (`app/witnesses/page.tsx` -> `features/witnesses/*`, ~15 components) with a
+ * different structure, an eight-column table, per-row vote toggles, a filters card
+ * and a real proxy dialog. That is what this class now models.
+ *
+ * Everything here is reachable ANONYMOUSLY at `/witnesses` — no home feed, no
+ * login, no new tab. Voting and proxy MUTATIONS are not modelled: they broadcast
+ * `account_witness_vote` / `account_witness_proxy` and need a signed session.
+ */
 export class WitnessPage {
   readonly page: Page;
-  readonly witnessHeaderTitle: Locator;
-  readonly witnessHeaderVote: Locator;
-  readonly witnessHeaderVoteRemaining: Locator;
-  readonly witnessHeaderDescription: Locator;
-  readonly witnessesTableHead: Locator;
-  readonly witnessesTableBody: Locator;
-  readonly witnessesListMembers: Locator;
-  readonly witnessesListItemInfo: Locator;
-  readonly witnessesExternalSiteLink: Locator;
-  readonly witnessesVoteBox: Locator;
-  readonly witnessesVoteBoxParagraf: Locator;
-  readonly witnessesVoteBoxAtIcon: Locator;
-  readonly witnessesVoteBoxInput: Locator;
-  readonly witnessesVoteBoxButton: Locator;
-  readonly witnessesSetProxyBox: Locator;
-  readonly witnessesSetProxyBoxParagraf: Locator;
-  readonly witnessesSetProxyBoxAtIcon: Locator;
-  readonly witnessesSetProxyBoxInput: Locator;
-  readonly witnessesSetProxyBoxButton: Locator;
-  readonly firstWitnessNameLink: Locator;
-  readonly firstWitnessLastBlockNumberLink: Locator;
-  readonly firstWitnessRunningVersion: Locator;
-  readonly firstWitnessPriceFeed: Locator;
-  readonly witnessHighLightLinks: Locator;
-  readonly firstWitnessHighLightLink: Locator;
-  readonly firstWitnessListMemberRow: Locator;
-  readonly witnessesVotesReceived: Locator;
-  readonly firstWitnessVotesReceived: Locator;
+
+  /** `/witnesses` — an in-app route. NOT the old external `/~witnesses`. */
+  static readonly URL = '/witnesses';
+
+  readonly witnessesMain: Locator;
+  readonly witnessesTable: Locator;
+  readonly witnessRows: Locator;
+  readonly witnessNameLinks: Locator;
+  readonly witnessVotes: Locator;
+  readonly witnessLastBlock: Locator;
+  readonly witnessesLoading: Locator;
+  readonly witnessesError: Locator;
+  readonly witnessesEmpty: Locator;
+
+  readonly statsBar: Locator;
+  readonly filtersCard: Locator;
+  readonly filterSearch: Locator;
+  readonly filterVersion: Locator;
+  readonly filterTop20: Locator;
+  readonly filterActive: Locator;
+
+  readonly proxyCard: Locator;
+  readonly proxyLoginCta: Locator;
+  readonly rightRail: Locator;
 
   constructor(page: Page) {
     this.page = page;
-    this.witnessHeaderTitle = page.locator('[data-testid="witness-header"]');
-    this.witnessHeaderVote = page.locator('[data-testid="witness-header-vote"]');
-    this.witnessHeaderVoteRemaining = page.locator('[data-testid="witness-header-vote-remaining"]');
-    this.witnessHeaderDescription = page.locator('[data-testid="witness-header-description"]');
-    this.witnessesTableHead = page.locator('[data-testid="witness-table-head"]');
-    this.witnessesTableBody = page.locator('[data-testid="witness-table-body"]');
-    this.witnessesListMembers = this.witnessesTableBody.locator('tr');
-    this.witnessesListItemInfo = this.witnessesListMembers.locator('[data-testid="witness-list-item-info"]');
-    this.witnessesExternalSiteLink = page.locator('[data-testid="witness-external-site-link"] a');
-    this.witnessesVoteBox = page.locator('[data-testid="witnesses-vote-box"]');
-    this.witnessesVoteBoxParagraf = this.witnessesVoteBox.locator('p');
-    this.witnessesVoteBoxAtIcon = this.witnessesVoteBox.locator('div span');
-    this.witnessesVoteBoxInput = this.witnessesVoteBox.locator('input');
-    this.witnessesVoteBoxButton = this.witnessesVoteBox.locator('button');
-    this.witnessesSetProxyBox = page.locator('[data-testid="witnesses-set-proxy-box"]');
-    this.witnessesSetProxyBoxParagraf = this.witnessesSetProxyBox.locator('p');
-    this.witnessesSetProxyBoxAtIcon = this.witnessesSetProxyBox.locator('div span');
-    this.witnessesSetProxyBoxInput = this.witnessesSetProxyBox.locator('input');
-    this.witnessesSetProxyBoxButton = this.witnessesSetProxyBox.locator('button');
-    this.firstWitnessListMemberRow = this.witnessesListMembers.first();
-    this.firstWitnessNameLink = this.witnessesListItemInfo
-      .locator('[data-testid="witness-name-link"]')
-      .first();
-    this.firstWitnessLastBlockNumberLink = this.witnessesListItemInfo
-      .locator('[data-testid="last-block-number"]')
-      .first();
-    this.firstWitnessRunningVersion = this.firstWitnessLastBlockNumberLink.locator('..');
-    this.firstWitnessPriceFeed = page.locator('[data-testid="witness-price-feed"]').first();
-    this.witnessHighLightLinks = page.locator('[data-testid="witness-highlight-link"]');
-    this.firstWitnessHighLightLink = this.witnessHighLightLinks.first();
-    this.witnessesVotesReceived = page.locator('[data-testid="witness-votes-received"]');
-    this.firstWitnessVotesReceived = this.witnessesVotesReceived.first();
+
+    this.witnessesMain = page.locator('[data-testid="witnesses-main"]');
+    this.witnessesTable = page.locator('[data-testid="witnesses-table"]');
+    this.witnessRows = page.locator('[data-testid="witness-row"]');
+    this.witnessNameLinks = page.locator('[data-testid="witness-name-link"]');
+    this.witnessVotes = page.locator('[data-testid="witness-votes"]');
+    this.witnessLastBlock = page.locator('[data-testid="witness-last-block"]');
+    this.witnessesLoading = page.locator('[data-testid="witnesses-loading"]');
+    this.witnessesError = page.locator('[data-testid="witnesses-error"]');
+    this.witnessesEmpty = page.locator('[data-testid="witnesses-empty"]');
+
+    this.statsBar = page.locator('[data-testid="witnesses-stats-bar"]');
+    this.filtersCard = page.locator('[data-testid="witnesses-filters-card"]');
+    this.filterSearch = page.locator('[data-testid="witnesses-filter-search"]');
+    this.filterVersion = page.locator('[data-testid="witnesses-filter-version"]');
+    this.filterTop20 = page.locator('[data-testid="witnesses-filter-top20"]');
+    this.filterActive = page.locator('[data-testid="witnesses-filter-active"]');
+
+    this.proxyCard = page.locator('[data-testid="witnesses-proxy-card"]');
+    this.proxyLoginCta = page.locator('[data-testid="witnesses-proxy-login-cta"]');
+    this.rightRail = page.locator('[data-testid="witnesses-right-rail"]');
   }
 
-  async getElementCssPropertyValue(element: Locator, cssProperty: string) {
-    const bcg = await element.evaluate((ele, css) => {
-      return window.getComputedStyle(ele).getPropertyValue(css);
-    }, cssProperty);
-    // return value of element's css property
-    return bcg;
+  /** Per-row vote toggle: `witness-vote-<account>` (witness-vote-toggle.tsx:51). */
+  voteToggleFor(witness: string): Locator {
+    return this.page.locator(`[data-testid="witness-vote-${witness}"]`);
   }
 
-  async validateWitnessHighlightToggle() {
-    // Click the highlight link - row should get highlight class
-    await this.firstWitnessHighLightLink.click();
-    await expect(this.firstWitnessListMemberRow).toHaveClass(/bg-rose-200|bg-red-200/);
-    // Validate witness name is typed into vote input
-    const witnessName = await this.firstWitnessNameLink.textContent();
-    await expect(this.witnessesVoteBoxInput).toHaveValue(witnessName || '');
-    // Click again to unhighlight
-    await this.firstWitnessHighLightLink.click();
-    await expect(this.firstWitnessListMemberRow).not.toHaveClass(/bg-rose-200|bg-red-200/);
-    await expect(this.witnessesVoteBoxInput).toHaveValue('');
-  }
-
-  async waitForWitnessListItemsLoaded() {
-    await this.page.waitForSelector(this.witnessesListItemInfo['_selector']);
-  }
-
-  async validateWitnessHeaderTitle() {
-    await expect(this.witnessHeaderTitle).toHaveText('Witness Voting');
-  }
-
-  async validateWitnessHeaderVote() {
-    const witnessHeaderVoteRemainingStyle = await this.getElementCssPropertyValue(
-      this.witnessHeaderVoteRemaining,
-      'font-weight'
-    );
-
-    await expect(this.witnessHeaderVote).toHaveText(
-      'You have 30 votes remaining. You can vote for a maximum of 30 witnesses.'
-    );
-    await expect(witnessHeaderVoteRemainingStyle).toBe('700');
-  }
-
-  async validateWitnessHeaderDescription() {
-    await expect(this.witnessHeaderDescription).toContainText(
-      'the first 100 witnesses are unfiltered, this includes active and inactive witnesses.'
-    );
-    await expect(this.witnessHeaderDescription).toContainText(
-      'if they have not produced any block for the last 30 days.'
-    );
-  }
-
-  async validateWitnessListMembers() {
-    await this.waitForWitnessListItemsLoaded();
-    expect(await this.witnessesListMembers.all()).toHaveLength(120);
-  }
-
-  async validateWitnessVotingBoxStyleText() {
-    // Paragrafe of the voting box
-    await expect(this.witnessesVoteBoxParagraf).toHaveText(
-      'If you would like to vote for a witness outside of the top 200, enter the account name below to cast a vote.'
-    );
-    // @ icone of the voting box
-    await expect(this.witnessesVoteBoxAtIcon).toHaveCSS('background-color', 'rgb(203, 213, 225)');
-    await expect(this.witnessesVoteBoxAtIcon).toHaveCSS('border-width', '1px');
-    await expect(this.witnessesVoteBoxAtIcon).toHaveCSS('border-color', 'rgb(0, 0, 0)');
-    // input of the voting box
-    await expect(this.witnessesVoteBoxInput).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
-    await expect(this.witnessesVoteBoxInput).toHaveCSS('border-width', '1px');
-    await expect(this.witnessesVoteBoxInput).toHaveCSS('border-color', 'rgb(226, 232, 240)');
-    await expect(this.witnessesVoteBoxInput).toHaveCSS('placeholder', '');
-    // button of the voting box
-    await expect(this.witnessesVoteBoxButton).toHaveText('VOTE');
-    await expect(this.witnessesVoteBoxButton).toHaveCSS('background-color', 'rgb(218, 43, 43)');
-    await expect(this.witnessesVoteBoxButton).toHaveCSS('color', 'rgb(248, 250, 252)');
-  }
-
-  async validateWitnessSetProxyBoxStyleText() {
-    // Paragrafe of set proxy box
-    await expect(this.witnessesSetProxyBoxParagraf).toHaveText(
-      'You can also choose a proxy that will vote for witnesses for you. This will reset your current witness selection.'
-    );
-    // @ icone of the set proxy box
-    await expect(this.witnessesSetProxyBoxAtIcon).toHaveCSS('background-color', 'rgb(203, 213, 225)');
-    await expect(this.witnessesSetProxyBoxAtIcon).toHaveCSS('border-width', '1px');
-    await expect(this.witnessesSetProxyBoxAtIcon).toHaveCSS('border-color', 'rgb(0, 0, 0)');
-    // input of the set proxy box
-    await expect(this.witnessesSetProxyBoxInput).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
-    await expect(this.witnessesSetProxyBoxInput).toHaveCSS('border-width', '1px');
-    await expect(this.witnessesSetProxyBoxInput).toHaveCSS('border-color', 'rgb(226, 232, 240)');
-    await expect(this.witnessesSetProxyBoxInput).toHaveCSS('placeholder', '');
-    // button of the set proxy box
-    await expect(this.witnessesSetProxyBoxButton).toHaveText('Set proxy');
-    await expect(this.witnessesSetProxyBoxButton).toHaveCSS('background-color', 'rgb(218, 43, 43)');
-    await expect(this.witnessesSetProxyBoxButton).toHaveCSS('color', 'rgb(248, 250, 252)');
-  }
-
-  async validateWitnessTableHeadStyleText() {
-    const expectedListOfColumnNames: string[] = ['Rank', 'Witness', 'Votes received', 'Price feed'];
-    const listOfColumnNames: string[] = await this.witnessesTableHead.locator('tr th').allTextContents();
-
-    await expect(listOfColumnNames.toString()).toBe(expectedListOfColumnNames.toString());
-    await expect(this.witnessesTableHead).toHaveCSS('background-color', 'rgb(226, 232, 240)');
-    await expect(this.witnessesTableHead.locator('th').first()).toHaveCSS('color', 'rgb(15, 23, 42)');
-    await expect(this.witnessesTableHead).toHaveCSS('font-weight', '400');
+  /**
+   * Deep link straight to the page, then wait for the CLIENT fetch to land.
+   * The shell and the table container are server-rendered, but rows arrive from
+   * a React Query fetch, so `witnesses-loading` must clear before any row
+   * assertion — otherwise a row count of 0 is just "not fetched yet".
+   */
+  async goto() {
+    await this.page.goto(WitnessPage.URL);
+    await this.page.waitForLoadState('domcontentloaded');
+    await expect(this.witnessesTable).toBeVisible();
+    await expect(this.witnessesLoading).toHaveCount(0, { timeout: 30000 });
   }
 }

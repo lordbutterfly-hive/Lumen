@@ -187,7 +187,20 @@ const AppHeader: FC = () => {
               28 -> 34; a phone is the one width where the wordmark competes with
               the controls for room, and 24px buys 16 of the ~48 needed for the
               menu button. Unchanged at every width the design was drawn for. */}
-          <span className="font-sans text-[24px] font-bold leading-none tracking-[-0.025em] text-[#161511] sm:text-[28px] lg:text-[34px]">
+          {/* ★ THE WORDMARK IS LORA, NOT THE UI FACE (owner, 2026-08-11: "our logo
+              is not fucking Lora, you need to set it Lora"). `font-serif` binds to
+              --font-source-serif, which layout.tsx loads as Lora at 400/500/600/700.
+
+              600 rather than the old 700: Lora's bold is considerably heavier in
+              colour than Open Sans's at the same nominal weight, and at 34px a
+              serif bold reads as shouting where the sans bold read as confident.
+              Swap `font-semibold` for `font-medium` if 500 is preferred — both
+              weights are already in the loaded subset, so it costs no extra fetch.
+
+              Tracking relaxed from -0.025em to -0.01em. The tight negative tracking
+              was tuned for Open Sans; a serif with real bracketed serifs collides
+              at that value, and "Lumen" has an m-n pair that shows it first. */}
+          <span className="font-serif text-[24px] font-semibold leading-none tracking-[-0.01em] text-[#161511] sm:text-[28px] lg:text-[34px]">
             Lumen
           </span>
         </Link>

@@ -73,6 +73,7 @@ import { CircleSpinner } from 'react-spinners-kit';
 import { useStorageWithTTL } from '@ui/hooks/useStorageWithTTL';
 import { StorageTTL } from '@ui/lib/storage-with-ttl';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import VotesComponentWrapper from '@/blog/features/votes/votes-component-wrapper';
 import { isCommunity } from '@ui/lib/utils';
 import {
@@ -99,6 +100,27 @@ const PostContent = () => {
   const category = params?.param ?? '';
   const permlink = params?.permlink ?? '';
   const { user, isHydrated } = useUserClient();
+  /**
+   * ★ SAME BUG CLASS AS app-header.tsx ("NEVER SHOW A SIGNED-IN READER A
+   * SIGNED-OUT HEADER", 2026-08-10, N-3). `user.isLoggedIn`/`user.username`
+   * cannot answer during SSR and report signed-out/empty on the client until
+   * `/api/users/me` returns, so any RENDER gate read straight off `user`
+   * flickers a signed-in reader into the signed-out variant for that window.
+   * `identity` prefers the client's real answer once it has landed and falls
+   * back to the cookie the server already read before then.
+   *
+   * Fixed on this pass (2026-08-11): the AlertDialogFlag trigger, the
+   * `viewerIsAuthor` ownership gate (and the PostDeleteDialog block that
+   * depends on it), `postFollowTarget`, and the footer Reply/DialogLogin
+   * branch. The comment PAGINATION block below is explicitly OFF LIMITS and
+   * untouched. `PostDeleteDialog`'s own internal `user.isLoggedIn` check
+   * (post-delete-dialog.tsx) is a separate file/hook call, still raw — same
+   * accepted residual as the AlertDialogFlag dialog above it: in the narrow
+   * window where the SSR-cookie fallback says logged-in but the raw query
+   * hasn't answered yet, the dialog can mount with its own OK/confirm button
+   * briefly absent, self-healing the moment the client answers land.
+   */
+  const identity = useSessionIdentity();
   const ssrObserver = useSSRObserver();
   const initialPostData = useInitialPostData();
   const initialDiscussion = useInitialDiscussion();
@@ -212,7 +234,7 @@ const PostContent = () => {
   // saw no Edit or Delete button on their own post. The overlay carries the Lumen
   // identity on both, so compare against that too.
   const viewerIsAuthor = Boolean(
-    user.isLoggedIn && (postData?.author === user.username || litePost?.author === user.username)
+    identity.isLoggedIn && (postData?.author === identity.username || litePost?.author === identity.username)
   );
   const [mutedPost, setMutedPost] = useState<boolean>(postData?.stats?.gray || false);
   // ★ NSFW gate for the post page itself (2026-08-09) — see post-body-section.tsx.
@@ -283,10 +305,14 @@ const PostContent = () => {
 
       if (!results) return null;
 
-      // Filter out null/invalid posts and only include full Entry objects (not stubs)
-      const fullPosts = results.filter(
-        (post) => post && !isPostStub(post) && (post as Entry).post_id
-      ) as Entry[];
+      // Filter out null/invalid posts and only include full Entry objects (not stubs).
+      // ★ WAS ALSO requiring `(post as Entry).post_id` — dropped every real result.
+      // The live Hivesense REST response never sends `post_id` (verified 2026-08-11,
+      // 0 of 23 entries checked across similar/by-ids), even though it's typed as a
+      // required field on `Entry`. `isPostStub` already does the real, honest check
+      // (does the entry actually carry title/body), so the redundant truthiness test
+      // on a field the API doesn't send is gone.
+      const fullPosts = results.filter((post) => post && !isPostStub(post)) as Entry[];
       return fullPosts;
     }
   });
@@ -327,8 +353,8 @@ const PostContent = () => {
   // Lumen post, the chain author otherwise. Never yourself.
   const postFollowTarget = (() => {
     const target = litePost?.author || crossPostData?.author || postData?.author;
-    if (!target || !user.isLoggedIn) return null;
-    return target === user.username ? null : target;
+    if (!target || !identity.isLoggedIn) return null;
+    return target === identity.username ? null : target;
   })();
   // The viewer's own follow/mute lists, which ButtonsContainer diffs against to
   // decide whether it is showing Follow or Unfollow.
@@ -785,7 +811,7 @@ const PostContent = () => {
                       </h1>
                       {postInCommunity && (
                         <div className="mt-1 shrink-0 cursor-pointer rounded-full border border-transparent p-1.5 text-muted-foreground transition-colors hover:border-border hover:bg-background-secondary hover:text-destructive">
-                          {!user.isLoggedIn ? (
+                          {!identity.isLoggedIn ? (
                             <DialogLogin>
                               <FlagIcon onClick={() => {}} />
                             </DialogLogin>
@@ -1066,7 +1092,7 @@ const PostContent = () => {
                         isReblogged={isReblogged}
                       />
                       <span className="text-border">|</span>
-                      {user && user.isLoggedIn ? (
+                      {identity.isLoggedIn ? (
                         <>
                           <button
                             onClick={() => {

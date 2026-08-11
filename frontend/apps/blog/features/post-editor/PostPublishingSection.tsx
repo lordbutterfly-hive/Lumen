@@ -169,7 +169,9 @@ export function PostPublishingSection({
         </div>
       ) : (
         <div className="flex flex-col gap-2">
-          <span className="text-sm font-medium">{t("submit_page.author_rewards")}</span>
+          <span className="text-sm font-medium" id="post-publishing-reward-type-label">
+            {t("submit_page.author_rewards")}
+          </span>
           {post_s && parseFloat(post_s.max_accepted_payout) === 0 ? (
             <span className="text-xs text-muted-foreground">
               {t("submit_page.reward_options_final")}
@@ -196,7 +198,18 @@ export function PostPublishingSection({
                           }
                         }}
                       >
-                        <SelectTrigger className="w-[180px]" data-testid="edit-reward-type-select">
+                        {/* Radix's SelectTrigger is role="combobox" and does not get an
+                            accessible name from its own visible content (verified via the
+                            a11y tree — same class as the four Preferences comboboxes,
+                            `apps/blog/features/account-settings/form.tsx`). The visible
+                            "Author rewards:" span two lines above already labels this
+                            control for sighted users; `aria-labelledby` wires the same
+                            text in for the accessibility tree instead of duplicating it. */}
+                        <SelectTrigger
+                          className="w-[180px]"
+                          data-testid="edit-reward-type-select"
+                          aria-labelledby="post-publishing-reward-type-label"
+                        >
                           <SelectValue>
                             {field.value === "50%" && "50% HBD / 50% HP"}
                             {field.value === "100%" && t("submit_page.power_up")}
@@ -273,7 +286,9 @@ export function PostPublishingSection({
           render={() => (
             <FormItem>
               <div className="flex flex-wrap items-center gap-3 text-sm">
-                <span className="text-muted-foreground">{t("submit_page.posting_to")}</span>
+                <span className="text-muted-foreground" id="post-publishing-posting-to-label">
+                  {t("submit_page.posting_to")}
+                </span>
                 <FormControl>
                   <Select
                     value={
@@ -292,9 +307,15 @@ export function PostPublishingSection({
                     }}
                   >
                     <FormControl>
+                      {/* Same class as the reward-type SelectTrigger above: role="combobox"
+                          does not get an accessible name from content (verified via the
+                          a11y tree). The "Posting to:" span right beside this control
+                          already labels it visibly; `aria-labelledby` wires that same text
+                          in for the accessibility tree. */}
                       <SelectTrigger
                         className="w-auto min-w-[140px]"
                         data-testid="posting-to-list-trigger"
+                        aria-labelledby="post-publishing-posting-to-label"
                       >
                         <SelectValue placeholder="Select category" />
                       </SelectTrigger>

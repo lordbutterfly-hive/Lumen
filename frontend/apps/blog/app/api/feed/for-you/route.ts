@@ -1413,13 +1413,106 @@ function cursorOf(entries: Entry[]): { author: string; permlink: string } | null
  * bytes for everyone, and no reader can tell a sixty-second-old trending page from
  * a live one. Keyed by observer as well, because Hive scopes what it returns to
  * that observer, so one reader's copy is never handed to another.
+ *
+ * ★★★ A FRESH TTL IS NOT ENOUGH — THE COLD PATH WAS STILL ON THE REQUEST
+ * (2026-08-11), PROFILED, NOT GUESSED.
+ *
+ * The 60s window above stops a BURST of concurrent visitors from each paying the
+ * upstream cost (`fetchFallbackOnce` already collapses those into one call), but
+ * every 61st second the VERY NEXT anonymous request — on the home page, the
+ * highest-traffic surface in the product — still blocked synchronously on
+ * `getRankedPaged`, i.e. on two sequential `bridge.get_ranked_posts` calls against
+ * a public node this app does not control.
+ *
+ * Instrumented directly (temporary file-based timers, since this box's dev-server
+ * stdout is a pipe with no second reader): on a QUIET path the two calls together
+ * cost 2.3-9.8s — already above the "well under 10s" bar on their own, because
+ * each call routinely ran 2-6s through wax against a ~1s direct-curl baseline to
+ * the same node. Under the REAL, sustained contention this box carries (multiple
+ * agents, a 10-core box regularly at load average 3-5, one dev-server restart
+ * observed mid-session), the SAME two calls were measured at 19s, 73s and 90.5s
+ * wall clock, and twice failed outright — a fast `WaxError: Unknown request error`
+ * at 802ms and a hard `WaxError: Request timed out` at 7.5s — for calls that a
+ * direct `curl` to the identical endpoint, run back-to-back six times in the same
+ * window, answered in 0.85-4.4s every time. That gap is the node being no slower
+ * than advertised while THIS PROCESS, under load, is slower to schedule the
+ * callback that notices the response — exactly the kind of tail latency a
+ * contended box produces unpredictably, which is precisely why no amount of
+ * reordering or parallelising these two calls fixes it: they cannot be
+ * parallelised anyway (`getRankedPaged`'s second page needs the first page's
+ * cursor — see its own comment), and even a "fast" 2-9s run is not a 200 that a
+ * reader on the single highest-traffic route should ever wait on if an answer
+ * already exists.
+ *
+ * There was NO N+1 hydration hiding in this path — checked, not assumed:
+ * `fallback()` never calls `hydrate()` (that per-post fetch loop belongs only to
+ * `assembleFeed()`, on the signed-in recsys path). `getPostsRanked` does make one
+ * extra `getPost` per genuine cross-post, but those run in parallel
+ * (`Promise.all` in `resolvePosts`, `packages/transaction/lib/bridge-api.ts`) and
+ * were not the measured cost.
+ *
+ * So the fix is the one already proven twice in this codebase for the identical
+ * shape of problem — the personal feed a few hundred lines up (`readViewerFeed`:
+ * "ANYTHING STORED IS SERVED IMMEDIATELY... rebuilt behind them") and
+ * `apps/blog/lib/lite/retention/streak-cache.ts` (`readStaleStreakCache` +
+ * `tryStartRevalidation`): ANY cached copy is served on the request that finds it
+ * expired, and a background refresh is kicked — never awaited — to replace it.
+ * `FALLBACK_CACHE_MS` still labels a copy `fresh` vs `stale-revalidating`, but it
+ * no longer decides whether a reader waits; only "has this key ever been built"
+ * does, matching the personal feed's own "no age at which this route goes back to
+ * blocking" rule. That is a deliberately UNBOUNDED stale window — not a second,
+ * shorter TTL — for the same reason the personal store has none: a reader must
+ * never be the one who pays for a slow upstream when a usable answer, however old,
+ * is sitting in memory.
  */
 const FALLBACK_CACHE_MS = 60_000;
-const FALLBACK_CACHE_MAX = 50;
+/**
+ * ★★★ SIZED AGAINST REAL KEY CARDINALITY (2026-08-11). The key below is now
+ * `(sort, tag, chainObserver)` — `limit` no longer multiplies it (see the note
+ * at `cacheKey`). `sort` has 2 values. `chainObserver` is `DEFAULT_OBSERVER`
+ * for every anonymous/unconfigured caller, which is the overwhelming majority
+ * of traffic through this function; it is a real signed-in username only when
+ * THAT viewer's own build is degraded, which is bounded by how many real
+ * sessions are concurrently degraded, not by anything an anonymous caller can
+ * inflate. `tag` is the one attacker-reachable axis — any `[a-z0-9-]{1,64}`
+ * string reaches this cache on the anonymous path. `TOPIC_CACHE_MAX` a few
+ * lines up is this file's own precedent for "how many distinct tags is
+ * realistic" (200); matched here for the same reason rather than invented.
+ */
+const FALLBACK_CACHE_MAX = 200;
 const fallbackCache = new Map<string, { entries: Entry[]; at: number }>();
 const fallbackInflight = new Map<string, Promise<Entry[]>>();
 
+/**
+ * ★★★ TRUE LRU, NOT INSERTION ORDER (2026-08-11) — this was a real eviction
+ * bug, found by adversarial review and reproduced here before the fix:
+ *
+ *   const m = new Map(); m.set('a', 1); m.set('b', 2); m.set('a', 99);
+ *   [...m.keys()] // -> ['a', 'b'] — 'a' is still FIRST, despite being
+ *                 // written last. `Map.set` on an existing key never moves it.
+ *
+ * The old version below evicted `keys().next().value` — the oldest INSERTED
+ * key — on the unstated assumption that refreshing an entry re-inserts it at
+ * the tail. It does not. The home page's key is written ONCE at boot and only
+ * ever REFRESHED after that (this function runs again on the same key for
+ * every background revalidation), so it was the oldest-inserted key
+ * permanently, from the moment a 50th distinct key ever appeared — and the
+ * very next insertion evicted it, forever, in a loop: re-inserted at the
+ * tail, aged back to the head as everything after it also cycles through, evicted
+ * again next time the bound is hit. The hottest key in the product was the one
+ * guaranteed to be gone, and any anonymous caller could force that moment on
+ * demand just by requesting enough distinct `tag`/`limit` combinations.
+ *
+ * Fixed with delete-then-set on every WRITE here (a refresh now genuinely
+ * moves the key to the tail) and, in `fallback()` below, on every READ too via
+ * `touchFallback` — a key that is merely being SERVED, not rewritten, also has
+ * to count as recently used, or a key refreshed only once every
+ * `FALLBACK_CACHE_MS` would still drift back to "oldest" between refreshes
+ * under sustained traffic to OTHER keys. That is real LRU; the previous code
+ * was "oldest write wins forever."
+ */
 function rememberFallback(key: string, entries: Entry[]): void {
+  fallbackCache.delete(key); // no-op if absent; makes a re-write move to the tail
   if (fallbackCache.size >= FALLBACK_CACHE_MAX) {
     const oldest = fallbackCache.keys().next().value;
     if (oldest !== undefined) fallbackCache.delete(oldest);
@@ -1427,7 +1520,21 @@ function rememberFallback(key: string, entries: Entry[]): void {
   fallbackCache.set(key, { entries, at: Date.now() });
 }
 
-/** One upstream fetch per key at a time — a burst of visitors joins one call. */
+/** Marks `key` as just-used without changing its value — see `rememberFallback` above. */
+function touchFallback(key: string): void {
+  const hit = fallbackCache.get(key);
+  if (!hit) return;
+  fallbackCache.delete(key);
+  fallbackCache.set(key, hit);
+}
+
+/**
+ * One upstream fetch per key at a time — a burst of visitors joins one call, and
+ * so does a background revalidation racing a synchronous cold-path caller for the
+ * same key. This is the ONLY correctness-bearing dedup; a caller checking
+ * `fallbackInflight.has(key)` first is purely an optimisation to skip building an
+ * unnecessary closure, never required for safety.
+ */
 function fetchFallbackOnce(key: string, load: () => Promise<Entry[]>): Promise<Entry[]> {
   const running = fallbackInflight.get(key);
   if (running) return running;
@@ -1446,66 +1553,98 @@ async function fallback(
   viewer = ''
 ): Promise<NextResponse> {
   const sort = tag ? 'created' : 'trending';
-  const cacheKey = `${sort}|${tag}|${chainObserver}|${limit}`;
+  // ★★★ NO LONGER KEYED BY `limit` (2026-08-11). `limit` is caller-supplied,
+  // clamped 1..50 — keying on it let ONE caller alone create up to
+  // `MAX_LIMIT` (50) distinct cache entries for what is otherwise the exact
+  // same trending/topic list, a free 50x multiplier on top of whatever `tag`
+  // already contributes (see `FALLBACK_CACHE_MAX`'s note). The cache now
+  // always holds the `MAX_LIMIT`-sized page for a given `(sort, tag,
+  // chainObserver)` and each caller's own `limit` slices it at response time,
+  // so one entry serves every limit from 1 to 50 instead of up to 50 entries
+  // serving one each.
+  //
+  // ★ SHOULD AN ANONYMOUS CALLER BE ABLE TO CREATE A KEY AT ALL? Yes,
+  // deliberately: the anonymous home page (`tag=''`) is the highest-traffic
+  // route in the product and the entire reason this cache exists, and topic
+  // fallback (recsys down, reader on `/topics/x`) is a legitimate degraded
+  // case for a signed-in OR signed-out reader. Refusing to cache for
+  // anonymous callers would turn this back into the unbounded-latency,
+  // unbounded-upstream-load route the 2026-08-10/11 comments above measured.
+  // The defence against an anonymous caller weaponising that is the LRU fix
+  // above (a key that is actually being read cannot be starved out) plus
+  // dropping `limit` from the key (removing the cheapest amplification), not
+  // withholding caching from anonymous traffic altogether.
+  const cacheKey = `${sort}|${tag}|${chainObserver}`;
+
+  // `chainObserver`, never the raw viewer — see the note at its declaration.
+  //
+  // ★ For a TOPIC we fall back to `created` (newest first) rather than
+  // `trending`: a topic page that cannot be ranked should at least be current.
+  // Trending within one tag is dominated by a handful of old high-payout posts,
+  // which reads as a dead topic.
+  // ★ HIVE CAPS THIS AT 20 (2026-08-07). `bridge.get_ranked_posts` asserts
+  // `limit = N outside valid range [1:20]` and throws for anything larger, so
+  // `getRankedPaged` pages past it internally. This now always asks for
+  // `MAX_LIMIT` (50) rather than the caller's own `limit` (previously anywhere
+  // from 1 to 50) — see the note above on why the key dropped `limit`; the
+  // fetch size has to stop varying with it too, or the cached page would be
+  // too short to slice for a caller who asks for more than whoever built it
+  // asked for. The throw used to be swallowed by the catch below into an empty
+  // 200, so a SIGNED-OUT visitor got "No posts yet" on the home page while the
+  // identical call worked everywhere else in the app (every other caller
+  // happens to ask for <= 20). Proven directly against api.hive.blog:
+  // limit=20 -> 20 posts, limit=30 -> assert_exception.
+  const load = (): Promise<Entry[]> =>
+    fetchFallbackOnce(cacheKey, async () => {
+      const posts = await getRankedPaged(sort, tag, chainObserver, MAX_LIMIT);
+      const merged = await mergeLumenEngagement(posts);
+      if (merged.length > 0) rememberFallback(cacheKey, merged);
+      return merged;
+    });
+
   const cached = fallbackCache.get(cacheKey);
-  if (cached && Date.now() - cached.at < FALLBACK_CACHE_MS) {
+  if (cached) {
+    touchFallback(cacheKey); // LRU: being SERVED counts as recently used, not just being rewritten.
+    const fresh = Date.now() - cached.at < FALLBACK_CACHE_MS;
+    // ★ THE REQUEST NEVER WAITS ON THIS. Fire-and-forget, single-flighted with any
+    // other caller (including a concurrent cold request — see `fetchFallbackOnce`),
+    // and its own failure is logged rather than thrown at nobody.
+    if (!fresh && !fallbackInflight.has(cacheKey)) {
+      void load().catch((error) =>
+        logger.warn('for-you: background trending refresh failed for %s: %o', cacheKey, error)
+      );
+    }
+    const sliced = cached.entries.slice(0, limit);
     return feedJson({
-      entries: cached.entries,
+      entries: sliced,
       source: 'trending-fallback',
       degraded: reason,
       detail,
-      cache: 'fallback-cached',
-      nextCursor: cursorOf(cached.entries)
+      cache: fresh ? 'fallback-cached' : 'fallback-stale-revalidating',
+      builtAt: new Date(cached.at).toISOString(),
+      nextCursor: cursorOf(sliced)
     }, viewer);
   }
 
+  // ---- NOTHING CACHED FOR THIS KEY YET: the one case a request actually waits
+  // on the upstream node. Every key gets exactly one such reader, ever — after
+  // this, the branch above always has something to serve instantly.
   try {
-    // `chainObserver`, never the raw viewer — see the note at its declaration.
-    //
-    // ★ For a TOPIC we fall back to `created` (newest first) rather than
-    // `trending`: a topic page that cannot be ranked should at least be current.
-    // Trending within one tag is dominated by a handful of old high-payout posts,
-    // which reads as a dead topic.
-    // ★ HIVE CAPS THIS AT 20 (2026-08-07). `bridge.get_ranked_posts` asserts
-    // `limit = N outside valid range [1:20]` and throws for anything larger —
-    // and the feed asks for 30. The throw was swallowed by the catch below into
-    // an empty 200, so a SIGNED-OUT visitor got "No posts yet" on the home page
-    // while the identical call worked everywhere else in the app (every other
-    // caller happens to ask for <= 20). Proven directly against api.hive.blog:
-    // limit=20 -> 20 posts, limit=30 -> assert_exception.
-    const merged = await fetchFallbackOnce(cacheKey, async () => {
-      const posts = await getRankedPaged(sort, tag, chainObserver, limit);
-      return mergeLumenEngagement(posts);
-    });
-    if (merged.length > 0) rememberFallback(cacheKey, merged);
+    const merged = await load();
+    const sliced = merged.slice(0, limit);
     return feedJson({
-      entries: merged,
+      entries: sliced,
       source: 'trending-fallback',
       degraded: reason,
       detail,
       cache: 'fallback',
-      nextCursor: cursorOf(merged)
+      builtAt: new Date().toISOString(),
+      nextCursor: cursorOf(sliced)
     }, viewer);
   } catch (error) {
     // Loud, because an empty feed and a broken feed look identical to a reader.
     logger.error(error, 'for-you: fallback to trending also failed (limit=%d, tag=%s)', limit, tag || '(none)');
 
-    // ★ A STALE PAGE BEATS NO PAGE. If we ever had this list, serve it rather than
-    // erroring: it is trending, it is the same for everyone, and being a few
-    // minutes old is invisible next to being blank. Only a reader who arrives
-    // while we have never had a copy sees the failure.
-    const stale = fallbackCache.get(cacheKey);
-    if (stale && stale.entries.length > 0) {
-      logger.warn('for-you: serving a stale trending page (%dms old) after an upstream failure', Date.now() - stale.at);
-      return feedJson({
-        entries: stale.entries,
-        source: 'trending-fallback',
-        degraded: reason,
-        detail,
-        cache: 'fallback-stale',
-        nextCursor: cursorOf(stale.entries)
-      }, viewer);
-    }
     // ★★★ THIS USED TO BE A 200, AND THAT IS HOW A READER'S FEED GOT WIPED
     // (2026-08-10). Reproduced on this box: three sequential requests to
     // `?limit=30`, no cookie, no interaction — 958,497 bytes / 30 posts, then

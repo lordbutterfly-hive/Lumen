@@ -180,6 +180,32 @@ export async function enforceMagiGqlRate(
 }
 
 /**
+ * Per-IP daily cap on the Hivesense REST proxy (`app/api/hivesense`) — same
+ * shape and same reason as `enforceMagiGqlRate` above (2026-08-11): that route
+ * used to call a cross-origin third-party API straight from the browser (CORS
+ * broke the status probe permanently), fixed with a same-origin proxy that now
+ * needs its own rate floor, since nothing upstream of it bounds request rate
+ * either.
+ *
+ * OWN BUCKET, NOT `enforceMagiGqlRate`'s — deliberately, for the same reason
+ * `enforceStreakRate` and `enforceMagiGqlRate` itself don't share one: this
+ * route is called on every post-detail page view (a status probe cached
+ * app-wide with `staleTime: Infinity`, cheap — plus one "similar posts" fetch
+ * per post navigated to, NOT cached across posts), which is a different
+ * traffic shape than the two GQL proxies' 15-45s polling. A shared counter
+ * would let one feature's normal volume 429 the other's.
+ *
+ * FAIL-OPEN ON A LIMITER OUTAGE, same posture as every other best-effort call
+ * site in this file — "similar posts" is a read-only enhancement, not core
+ * functionality, and a Postgres hiccup must not take it offline.
+ */
+const HIVESENSE_PER_IP_PER_DAY = envPositiveInt('LITE_HIVESENSE_PER_IP_PER_DAY', 10_000);
+
+export async function enforceHivesenseRate(ip: string): Promise<boolean> {
+  return rateRepo.checkAndConsume(`ip:${ip}`, 'hivesense', HIVESENSE_PER_IP_PER_DAY, dayKey());
+}
+
+/**
  * Read a positive integer from the environment, falling back on anything that is
  * not one. The empty string matters here: `.env` files ship these keys PRESENT
  * AND EMPTY as documentation, and `Number('')` is 0 — which `checkAndConsume`

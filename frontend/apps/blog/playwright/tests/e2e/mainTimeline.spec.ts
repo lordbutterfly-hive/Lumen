@@ -225,7 +225,11 @@ test.describe('Home page tests', () => {
     await homePage.moveToFirstPostContentByClickingTitilePostCard();
   });
 
-  test.skip('move to the first post content by clicking the description of the post card', async ({ page }) => {
+  // ★ UNSKIPPED 2026-08-11 (was skipped with no reason at all). The feature is
+  // live; only the locator was stale — the home timeline renders Lumen's card,
+  // whose dek is `medium-card-dek`, not the classic card's `post-description`.
+  // Fixed in support/pages/homePage.ts (`postDescription` now matches either).
+  test('move to the first post content by clicking the description of the post card', async ({ page }) => {
     await homePage.goto();
     await homePage.moveToFirstPostContentByClickingDescriptionPostCard();
   });
@@ -311,15 +315,13 @@ test.describe('Home page tests', () => {
     await expect(homePage.getCardExploreHiveLinks).toHaveCount(5);
   });
 
-  // Shortcuts sidebar is no longer avaiable on the Home Page
-  test.skip('validate that Shortcuts sidebar is visible', async ({ page }) => {
-    const homePage = new HomePage(page);
-    await homePage.goto();
-
-    await expect(homePage.getCardUserShortcuts).toBeVisible();
-    await expect(homePage.getCardUserShortcutsTitle).toHaveText('Shortcuts');
-    await expect(homePage.getCardUserShortcutsLinks).toHaveCount(3);
-  });
+  /*
+   * ★ 'validate that Shortcuts sidebar is visible' DELETED 2026-08-11 — FEATURE
+   * GONE, and the skip comment already said so ("Shortcuts sidebar is no longer
+   * avaiable on the Home Page"). `card-user-shortcuts` has zero occurrences in
+   * product source and no successor component exists. A skipped test for a
+   * deleted feature is permanent fake coverage; deleting it is the honest record.
+   */
 
   test('validate that All posts in communities sidebar is visible', async ({ page }) => {
     await homePage.goto();
@@ -329,29 +331,33 @@ test.describe('Home page tests', () => {
     await expect(homePage.getTrendingCommunitiesSideBarLinks).toHaveCount(13);
   });
 
-  test.skip('move to the Proposals page', async ({ page, context }) => {
+  /*
+   * ★ BOTH UNSKIPPED AND REWRITTEN 2026-08-11 (they carried no reason at all).
+   *
+   * The navigation exists — it changed shape twice over, and the old spec asserted
+   * BOTH old shapes at once:
+   *   - testid:  `nav-proposals-link` / `nav-witnesses-link` (0 hits in product
+   *              source) -> `left-rail-vote-proposals` / `left-rail-vote-witness`
+   *              (features/layouts/left-rail.tsx:256-273).
+   *   - target:  a NEW TAB to an external wallet app -> a same-tab in-app route.
+   *              `left-rail.tsx:225-227` documents the move explicitly: "Wallet /
+   *              Witnesses / Proposals are now first-class in-app pages ... not
+   *              external links to wallet.openhive.network".
+   *   - URL:     `/~witnesses` -> `/witnesses` (app/witnesses/page.tsx).
+   *
+   * So `context.waitForEvent('page')` could only ever hang: nothing opens a second
+   * page any more. Same-tab assertions below.
+   */
+  test('move to the Proposals page', async ({ page }) => {
     await homePage.goto();
-    await page.click('[data-testid="nav-proposals-link"]');
-    // await homePage.moveToNavProposalsPage();
-
-    const [newWindow] = await Promise.all([
-      context.waitForEvent('page'),
-      await page.click('[data-testid="nav-proposals-link"]')
-    ]);
-    await newWindow.waitForLoadState();
-    expect(newWindow.url()).toContain(`/proposals`);
+    await page.click('[data-testid="left-rail-vote-proposals"]');
+    await expect(page).toHaveURL(/\/proposals/);
   });
 
-  test.skip('move to the Witnesses page', async ({ page, context }) => {
+  test('move to the Witnesses page', async ({ page }) => {
     await homePage.goto();
-    await page.click('[data-testid="nav-witnesses-link"]');
-    // await homePage.moveToNavWitnessesPage();
-    const [newWindow] = await Promise.all([
-      context.waitForEvent('page'),
-      await page.click('[data-testid="nav-witnesses-link"]')
-    ]);
-    await newWindow.waitForLoadState();
-    expect(newWindow.url()).toContain(`/~witnesses`);
+    await page.click('[data-testid="left-rail-vote-witness"]');
+    await expect(page).toHaveURL(/\/witnesses/);
   });
 
   test('move to the Our dApps page', async ({ page }) => {
@@ -360,12 +366,20 @@ test.describe('Home page tests', () => {
     await homePage.moveToNavOurdAppsPage();
   });
 
-  // Navbar search input was deleted now is icone to open search page
-  test.skip('navigation search input is visible', async ({ page }) => {
+  /*
+   * ★ UNSKIPPED 2026-08-11. The stated reason ("Navbar search input was deleted
+   * now is icone to open search page") is factually wrong against current source:
+   * the header renders a real `<input type="search">` inline at every viewport
+   * (features/search/search-input.tsx:63-72, `data-testid="header-search-input"`;
+   * mounted at app-header.tsx:215-217 and :502-504). There is no search icon
+   * standing in for it. Only the placeholder copy changed: 'Search...' ->
+   * 'Search posts' (search-input.tsx:58,65).
+   */
+  test('navigation search input is visible', async ({ page }) => {
     await homePage.goto();
 
     await expect(homePage.getNavSearchInput).toBeVisible();
-    await expect(homePage.getNavSearchInput).toHaveAttribute('placeholder', 'Search...');
+    await expect(homePage.getNavSearchInput).toHaveAttribute('placeholder', 'Search posts');
   });
 
   test('navigation search link is visible', async ({ page }) => {
@@ -410,20 +424,25 @@ test.describe('Home page tests', () => {
     await expect(homePage.signupBtn).toBeVisible();
   });
 
-  // gtg profil and his avatar is no longer aviable on the home page
-  test.skip('navigation user avatar and its dropdown list is visible', async ({ page }) => {
-    await homePage.goto();
-
-    await expect(homePage.getNavUserAvatar).toBeVisible();
-    await expect(homePage.getNavUserAvatar.locator('img')).toHaveAttribute(
-      'src',
-      'https://images.hive.blog/u/gtg/avatar/small'
-    );
-
-    await homePage.getNavUserAvatar.click();
-    await page.waitForSelector(homePage.getNavProfileMenuContent['_selector']);
-    await expect(homePage.getNavProfileMenuContent.getByText('My Account')).toBeVisible();
-  });
+  /*
+   * ★ 'navigation user avatar and its dropdown list is visible' DELETED
+   * 2026-08-11 — unfixable as written, in this file.
+   *
+   * It asserted that an ANONYMOUS visitor sees @gtg's avatar hard-coded into the
+   * header. That was an artifact of an old always-logged-in dev build and is now
+   * architecturally impossible: the avatar trigger renders only under
+   * `user?.isLoggedIn` (features/layouts/app-header.tsx:370-386), and signed-out
+   * visitors get `data-testid="login-link"` instead (app-header.tsx:481). Every
+   * locator it used is also dead — `profile-menu` / `profile-menu-content` have 0
+   * hits (current: `profile-avatar-button` / `user-profile-menu-content`,
+   * features/layouts/site-header/user-menu.tsx:205), and the "My Account" copy
+   * does not exist anywhere in that menu.
+   *
+   * COVERAGE GAP, deliberately left open rather than faked: the logged-in avatar
+   * dropdown has no test. It belongs in an authenticated spec using the
+   * fixture-auth seeder (support/fixture-auth/seeder.ts), not in this anonymous
+   * home-timeline file.
+   */
 
   test('navigation create post button is visible', async ({ page }) => {
     await homePage.goto();

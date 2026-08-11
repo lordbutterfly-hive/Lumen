@@ -21,7 +21,14 @@ const RolesSelect = ({
 
   return (
     <Select value={value} onValueChange={(e: Roles) => onValueChange(e)} disabled={disabled}>
-      <SelectTrigger data-testid={testId}>
+      {/* Same class as post-select-filter.tsx: role="combobox" does not get an
+          accessible name from content, so the visible current role value
+          ("Member", "Mod", …) left this nameless (verified via the a11y tree).
+          `communities.role` ("Role") already labels this exact control
+          visibly in one of the two call sites (add-role.tsx); used directly
+          here since this component owns both call sites and neither's
+          adjacent markup is reachable from inside it. */}
+      <SelectTrigger data-testid={testId} aria-label={t('communities.role')}>
         <SelectValue />
       </SelectTrigger>
       <SelectContent>

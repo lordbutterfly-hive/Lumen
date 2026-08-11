@@ -7,6 +7,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@ui/co
 import { Slider } from '@ui/components/slider';
 import { Icons } from '@ui/components/icons';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import DialogLogin from '@/blog/components/dialog-login';
 import { useQuery } from '@tanstack/react-query';
 import { getListVotesByCommentVoter } from '@transaction/lib/hive-api';
@@ -49,6 +50,22 @@ const getVoteValue = (
 
 const VotesComponent = ({ post, type }: { post: Entry; type: 'comment' | 'post' }) => {
   const { user } = useUserClient();
+  /**
+   * ★★★ SAME DEFECT AS /witnesses, NOW ON EVERY SINGLE POST AND COMMENT
+   * (2026-08-11, class sweep). `user.isLoggedIn` cannot answer during SSR and
+   * reports "signed out" on the client until `/api/users/me` returns, so every
+   * upvote/downvote control on every card, everywhere in the app, rendered the
+   * logged-OUT branch (icon wrapped in `DialogLogin`, opening the login modal
+   * instead of casting the vote) for up to several seconds after every page load —
+   * this is the single most-rendered instance of the bug in the app. `identity`
+   * prefers the client's answer once it has genuinely arrived and falls back to
+   * the session the SERVER read from the cookie until then. `identity.username` is
+   * used as `voter` below instead of the raw, possibly-still-empty
+   * `user.username` — the two hooks' `isLoggedIn`/`username` pairs are read
+   * together so they never disagree with each other. See
+   * features/layouts/server-session.tsx.
+   */
+  const identity = useSessionIdentity();
   const { t } = useTranslation('common_blog');
   const [clickedVoteButton, setClickedVoteButton] = useState('');
   const [storedVotesValues, storeVotesValues] = useStorageWithTTL(
@@ -62,7 +79,7 @@ const VotesComponent = ({ post, type }: { post: Entry; type: 'comment' | 'post' 
   const [sliderDownvote, setSliderDownvote] = useState(() =>
     getVoteValue(storedVotesValues, type, 'downvote')
   );
-  const voter = user.username;
+  const voter = identity.username;
   const pastPayout = new Date(`${post.payout_at}Z`) < new Date();
   useEffect(() => {
     setSliderUpvote(getVoteValue(storedVotesValues, type, 'upvote'));
@@ -79,12 +96,12 @@ const VotesComponent = ({ post, type }: { post: Entry; type: 'comment' | 'post' 
   // Source the vote from Lumen instead, and enable the query on sign-in rather than
   // on a chain vote that will never be there.
   const { data: userVotes } = useQuery({
-    queryKey: ['votes', post.author, post.permlink, user?.username],
+    queryKey: ['votes', post.author, post.permlink, voter],
     queryFn: () =>
       isLite
         ? fetchLiteEngagement(post.author, post.permlink)
-        : getListVotesByCommentVoter([post.author, post.permlink, user?.username], 1),
-    enabled: isLite ? !!user?.username : !!checkVote || !!clickedVoteButton,
+        : getListVotesByCommentVoter([post.author, post.permlink, voter], 1),
+    enabled: isLite ? !!voter : !!checkVote || !!clickedVoteButton,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     refetchOnMount: false
@@ -126,7 +143,7 @@ const VotesComponent = ({ post, type }: { post: Entry; type: 'comment' | 'post' 
           size={20}
           color="#dc2626"
         />
-      ) : user.isLoggedIn && enable_slider && !vote_upvoted ? (
+      ) : identity.isLoggedIn && enable_slider && !vote_upvoted ? (
         <Popover>
           <PopoverTrigger aria-label={t('cards.post_card.upvote')} disabled={voteMutation.isLoading}>
             <TooltipContainer
@@ -191,7 +208,7 @@ const VotesComponent = ({ post, type }: { post: Entry; type: 'comment' | 'post' 
             </div>
           </PopoverContent>
         </Popover>
-      ) : user.isLoggedIn && vote_upvoted ? (
+      ) : identity.isLoggedIn && vote_upvoted ? (
         <VoteRemovalDialog
           voteType="upvote"
           onConfirm={() => {
@@ -216,7 +233,7 @@ const VotesComponent = ({ post, type }: { post: Entry; type: 'comment' | 'post' 
             </TooltipContainer>
           </span>
         </VoteRemovalDialog>
-      ) : user.isLoggedIn ? (
+      ) : identity.isLoggedIn ? (
         <TooltipContainer
           loading={voteMutation.isLoading}
           text={t('cards.post_card.upvote')}
@@ -261,7 +278,7 @@ const VotesComponent = ({ post, type }: { post: Entry; type: 'comment' | 'post' 
           size={20}
           color="#dc2626"
         />
-      ) : user.isLoggedIn && enable_slider && !vote_downvoted ? (
+      ) : identity.isLoggedIn && enable_slider && !vote_downvoted ? (
         <Popover>
           <PopoverTrigger disabled={voteMutation.isLoading}>
             <TooltipContainer
@@ -335,7 +352,7 @@ const VotesComponent = ({ post, type }: { post: Entry; type: 'comment' | 'post' 
             </div>
           </PopoverContent>
         </Popover>
-      ) : user.isLoggedIn && vote_downvoted ? (
+      ) : identity.isLoggedIn && vote_downvoted ? (
         <VoteRemovalDialog
           voteType="downvote"
           onConfirm={() => {
@@ -360,7 +377,7 @@ const VotesComponent = ({ post, type }: { post: Entry; type: 'comment' | 'post' 
             </TooltipContainer>
           </span>
         </VoteRemovalDialog>
-      ) : user.isLoggedIn ? (
+      ) : identity.isLoggedIn ? (
         <TooltipContainer
           loading={voteMutation.isLoading}
           text={t('cards.post_card.downvote')}

@@ -137,9 +137,13 @@ export class HomePage {
   readonly profileAvatarButton: Locator;
 
   /**
-   * Where Lumen's signed-out post timeline lives. See `goto()` for why it is not `/`.
+   * Where Lumen's signed-out post timeline lives. See `goto()`.
+   *
+   * `/` — NOT `/trending`. `/trending` is a retired route that only redirects here
+   * (`app/(main-and-community)/trending/page.tsx:13-15`), so pointing the harness at
+   * it bought nothing and cost a redirect. Verified 2026-08-11.
    */
-  static readonly HOME_TIMELINE_PATH = '/trending';
+  static readonly HOME_TIMELINE_PATH = '/';
 
   /**
    * ★ THE LUMEN CARD *OR* THE CLASSIC ONE, AND BOTH ARE LOAD-BEARING (2026-08-09).
@@ -297,8 +301,15 @@ export class HomePage {
     this.getCardUserShortcutsLinks = this.getCardUserShortcuts.locator('div ul li');
     this.getNavHbauthLink = page.locator('[data-testid="navbar-hbauth-link"]');
     this.getNavHbauthButton = this.getNavHbauthLink.locator('button');
-    // this.getNavSearchInput = page.locator('header div nav input[type="search"]'); // old one
-    this.getNavSearchInput = page.locator('input[type="search"]');
+    /*
+      ★ THE VISIBLE ONE (2026-08-11). The header mounts SearchInput TWICE — a
+      `hidden md:block` column at >=768px (app-header.tsx:215-217) and a
+      `md:hidden` full-width row below it (app-header.tsx:502-504). Both are in the
+      DOM at all times, so a bare `input[type="search"]` resolves to two elements
+      and `expect(...).toBeVisible()` fails Playwright's strict mode regardless of
+      which one is on screen. `:visible` picks whichever the current viewport shows.
+    */
+    this.getNavSearchInput = page.locator('[data-testid="header-search-input"]:visible');
     this.getNavSearchLink = page.locator('[data-testid="navbar-search-link"]');
     // ★ 2026-08-10: the mode dropdown, the AI/tag/account modes and their
     // placeholders ("AI Search", "Search tags...") are gone — one field now,
@@ -320,7 +331,19 @@ export class HomePage {
       '[data-testid="nav-sidebar-menu-content"] > button'
     );
     this.postTitle = page.locator('[data-testid="post-title"] a');
-    this.postDescription = page.locator('[data-testid="post-description"]');
+    /*
+      ★ EITHER CARD'S DEK (2026-08-11), same reason as CARD_ANY above. Lumen's
+      feed card names its description `medium-card-dek`
+      (features/discovery-feed/medium-post-card.tsx:369); `post-description` only
+      exists on the CLASSIC card (features/list-of-posts/post-list-item.tsx), which
+      still ships on profile tabs, search and tag pages. The bare
+      `post-description` locator matched nothing on the home timeline, which is
+      what disabled 'move to the first post content by clicking the description of
+      the post card'.
+    */
+    this.postDescription = page.locator(
+      '[data-testid="medium-card-dek"], [data-testid="post-description"]'
+    );
     this.loginBtn = page.locator('[data-testid="login-btn"]');
     this.signupBtn = page.locator('[data-testid="signup-btn"]');
     this.loginModal = page.locator('[role="dialog"]');
@@ -356,29 +379,54 @@ export class HomePage {
   }
 
   /**
-   * ★ LANDS ON THE PAGE THAT ACTUALLY LISTS POSTS (2026-08-09).
+   * ★ GOES STRAIGHT TO `/` (2026-08-11). Supersedes the 2026-08-09 `/trending`
+   * workaround, which had silently stopped working.
    *
-   * This used to `goto('/')` and then wait for the post timeline. On Lumen that can
-   * never succeed for the signed-out visitor these tests are: `/` is
-   * `features/discovery-feed/home-shell.tsx`, and signed out it renders a landing
-   * page ("A calmer place to read and write on Hive" + a Log in prompt) with zero
-   * post cards. Verified in a real browser: `/` exposes 0 `data-testid` nodes at all,
-   * `/trending` exposes 29 and renders 30 cards.
+   * The 2026-08-09 note said `/` rendered a signed-out landing page with zero post
+   * cards, so `goto()` was repointed at `/trending`. Both halves of that are now
+   * false, and the second half is worse than false — it is a tax on every test:
    *
-   * So the timeline this page object models lives at `/trending`, and that is where
-   * `goto()` goes. `HOME_TIMELINE_PATH` is a named constant because it IS the
-   * assumption: if Lumen ever gives `/` a signed-out feed again, this one line is the
-   * only edit.
+   *  1. `/` DOES render the signed-out timeline. Measured 2026-08-11 against the warm
+   *     dev server: `/` returns 200 and the discovery feed hydrates post cards.
+   *  2. `/trending` is retired. `app/(main-and-community)/trending/page.tsx:13-15` is
+   *     just `redirect('/')`, so the workaround pointed at a route whose only job is
+   *     to send you back to the page it was trying to avoid.
+   *  3. That redirect is NOT a cheap 30x. Because `redirect()` runs inside a streaming
+   *     render, Next.js cannot set a Location header and falls back to a client-side
+   *     bounce — `curl -D - http://localhost:3000/trending` returns
+   *     `HTTP/1.1 200 OK` with `<meta http-equiv="refresh" content="1;url=/">` in the
+   *     body. So the old `goto()` paid: render `/trending` (~6 s) + the meta-refresh's
+   *     hard-coded 1 s + render `/` (~38 s cold) before a single assertion ran, against
+   *     a 60 s per-test budget (`playwright.config.ts:19`).
+   *  4. It was also a flake source. `waitForLoadState('domcontentloaded')` resolved on
+   *     the *`/trending`* document; the meta-refresh then navigated the page out from
+   *     under the very next line, which is exactly how you get intermittent
+   *     "execution context was destroyed" on the card wait.
    *
-   * Fifty-seven callers across twelve specs sat behind the old line and failed in
-   * `beforeEach`, so none of their assertions ever ran.
+   * Removing the hop gives ~7 s of the 60 s budget back to EVERY spec that enters
+   * through here, and removes the destroyed-context race entirely.
+   *
+   * NOTE this is only the redirect hop. `/` itself is separately slow cold (~38-55 s
+   * measured 2026-08-11); that is a product-side latency issue, not a harness one, and
+   * is why the card wait below re-throws with an explicit diagnostic — so a run that
+   * dies on home-feed latency is never mistaken for the spec's own subject failing.
    */
   async goto() {
     await this.page.goto(HomePage.HOME_TIMELINE_PATH);
     await this.page.waitForLoadState('domcontentloaded');
     // The cards are client-rendered from a React Query fetch, so the selector has to
     // be awaited rather than asserted — `domcontentloaded` fires long before it.
-    await this.getMainTimeLineOfPosts.first().waitFor({ state: 'visible' });
+    try {
+      await this.getMainTimeLineOfPosts.first().waitFor({ state: 'visible' });
+    } catch (error) {
+      throw new Error(
+        `HomePage.goto(): no post card (${HomePage.CARD_ANY}) appeared on ` +
+          `"${HomePage.HOME_TIMELINE_PATH}". This is the harness entry point, NOT this ` +
+          `spec's subject — the signed-out home feed is known to take ~38-55s cold ` +
+          `against a 60s test timeout. Check the home feed's latency before ` +
+          `suspecting the test.\nOriginal: ${(error as Error).message}`
+      );
+    }
   }
 
   async gotoSpecificUrl(url: string) {

@@ -33,34 +33,26 @@ test.describe('Post page tests', () => {
     await postPage.moveToTheFirstPostInHomePageByPostTitle();
   });
 
-  test.skip('validate the post content pages styles in the dark theme', async ({ page, browserName }) => {
-    // Skipped: Hardcoded RGB value tests are brittle and break on any style change
-    await postPage.gotoHomePage();
-    await postPage.moveToTheFirstPostInHomePageByPostTitle();
-    await homePage.changeThemeMode('Dark');
-    await homePage.validateThemeModeIsDark();
-
-    expect(await postPage.getElementCssPropertyValue(postPage.articleTitle, 'background-color')).toBe(
-      'rgba(0, 0, 0, 0)'
-    );
-    expect(await postPage.getElementCssPropertyValue(postPage.articleTitle, 'color')).toBe(
-      'rgb(255, 255, 255)'
-    );
-
-    expect(await postPage.getElementCssPropertyValue(postPage.articleAuthorData, 'background-color')).toBe(
-      'rgba(0, 0, 0, 0)'
-    );
-    expect(await postPage.getElementCssPropertyValue(postPage.articleAuthorData, 'color')).toBe(
-      'rgb(148, 163, 184)'
-    );
-
-    expect(await postPage.getElementCssPropertyValue(postPage.articleBody, 'background-color')).toBe(
-      'rgba(0, 0, 0, 0)'
-    );
-    expect(await postPage.getElementCssPropertyValue(postPage.articleBody, 'color')).toBe(
-      'rgb(248, 250, 252)'
-    );
-  });
+  /*
+   * ★ 'validate the post content pages styles in the dark theme' DELETED
+   * 2026-08-11 — FEATURE GONE.
+   *
+   * There is no dark theme to validate. The blog app dropped next-themes and every
+   * `dark:` variant and is light-only by owner ruling —
+   * features/layouts/providers.tsx:27-38 ("Dark mode was never reachable — no
+   * toggle existed anywhere in the product, and the `.dark` styles that did ship
+   * were provably broken when forced"). The `mode-switch` testid this relied on
+   * through `homePage.changeThemeMode('Dark')` has 0 occurrences in product source
+   * and 0 nodes on a live page load (verified 2026-08-11).
+   *
+   * The old skip reason ("hardcoded RGB value tests are brittle") was also true and
+   * still is, so this is not coverage worth resurrecting in another theme.
+   *
+   * NOTE for whoever greps next: `homePage.changeThemeMode()` /
+   * `validateDarkModeByClass()` are still CALLED by several ACTIVE tests in
+   * mainTimeline.spec.ts and elsewhere. Those tests are broken for this same
+   * reason — reported separately; not silently disabled here.
+   */
 
   test('validate the popover card with author info is displayed after click username in the post', async ({
     page
@@ -224,7 +216,24 @@ test.describe('Post page tests', () => {
     );
   });
 
-  // Mute button is no more in the dropdown card after clicking that way test is skipped.
+  /*
+   * ★ STILL SKIPPED 2026-08-11, with the real precondition named.
+   *
+   * Was: "Mute button is no more in the dropdown card after clicking that way".
+   * Half right. The Mute button DOES still exist in the user popover card
+   * (features/mute-follow/mute-button.tsx:32-53, `data-testid="profile-mute-button"`,
+   * mounted via popover-card-data.tsx:151-159 -> buttons-container.tsx:238-246) —
+   * but it is rendered ONLY for a logged-in viewer (buttons-container.tsx:229).
+   * A signed-out visitor, which is all this spec file ever is, gets a single
+   * "Follow" button wrapped in DialogLogin (buttons-container.tsx:256-266) and no
+   * Mute button at all.
+   *
+   * REQUIRES: an authenticated session (seed one with
+   * support/fixture-auth/seeder.ts), plus re-measuring the four colours below —
+   * the button moved from a bespoke red-outline variant to the shared Button with
+   * `variant="default"` + `hover:text-destructive` (mute-button.tsx:34-37), so the
+   * hard-coded rgb(239,68,68) / rgb(254,226,226) values are almost certainly stale.
+   */
   test.skip('validate Mute button style in the popover card in light theme', async ({ page }) => {
     await postPage.gotoHomePage();
     await postPage.moveToTheFirstPostInHomePageByImage();

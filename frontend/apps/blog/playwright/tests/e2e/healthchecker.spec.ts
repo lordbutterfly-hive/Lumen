@@ -2,6 +2,33 @@ import { expect, test } from '@playwright/test';
 import { HealthcheckerPage } from '../support/pages/healthcheckerPage';
 import { HomePage } from '../support/pages/homePage';
 
+/**
+ * ★ KNOWN COVERAGE GAP, recorded 2026-08-11 when `apiEndpointHealthchecker.spec.ts`
+ * was DELETED.
+ *
+ * That file held 14 `test.describe.skip`ped tests whose stated reason was
+ * "healthchecker changed". It had been dead a long time: it drove
+ * `/@{user}/settings` and clicked `[data-testid="comment-close-open"]` to expand an
+ * API-endpoint panel that used to be embedded in profile settings. That panel is
+ * gone — `features/account-settings/form.tsx` now has exactly two sections
+ * (`settings-public-profile`, `settings-preferences`) and endpoint switching lives
+ * on this standalone `/healthchecker` route instead. Its checker-title constant was
+ * stale too ('Condenser - Get accounts' -> 'Database - Find accounts',
+ * components/healthcheckers-wrapper.tsx:50). So it was deleted rather than left
+ * pretending to be coverage.
+ *
+ * Most of what it tested this file already covers on the correct route. These four
+ * behaviours it covered are now genuinely UNTESTED and are worth adding here:
+ *   1. Adding a custom node (`api-address-input` + the "Add" button).
+ *   2. Deleting a custom node.
+ *   3. The invalid-URL validation message ("must start with http:// or https://").
+ *   4. Filtering the node list ("Filter by URL…").
+ * (Its other two, exact-RGB style checks in light and dark mode, are NOT worth
+ * restoring — the app is light-only now, see features/layouts/providers.tsx:27-38.)
+ *
+ * Naming the gap here rather than carrying 14 skipped tests that imply it is closed.
+ */
+
 test.describe('Healthchecker page - Basic navigation', () => {
     let healthcheckerPage: HealthcheckerPage;
     let homePage: HomePage;

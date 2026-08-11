@@ -112,17 +112,40 @@ test.describe('Profile page of @gtg', () => {
     // await profilePage.moveToHivebuzzByLinkInSocialTab();
   });
 
-  // Skipped - Settings Tab is unavailable
-  test.skip('move to Settings Tab', async ({ page }) => {
-    // profileSettingsTabIsNotSelected()/moveToSettingsTab() were removed
-    // 2026-08-10 (drove the deleted profile-navigation chrome); navigate to
-    // the still-live `/settings` route directly. Already test.skip'd above
-    // for an unrelated, pre-existing reason ("Settings Tab is unavailable").
+  /*
+   * ★ UNSKIPPED + RENAMED 2026-08-11. The reason ("Settings Tab is unavailable")
+   * is true of the TAB and irrelevant to this test: the body no longer touches a
+   * tab at all — it deep-links to `/@gtg/settings`, which is a live route
+   * (app/[param]/(user-profile)/settings/page.tsx). The tab is genuinely gone
+   * (features/account-profile/redesign/profile-tabs.tsx:11-12 is `posts |
+   * comments`); settings is now reached from the left rail
+   * (left-rail.tsx:274-287) or the account menu (user-menu.tsx:170-174). Renamed
+   * so the title stops describing navigation it does not perform.
+   */
+  test('settings route is reachable', async ({ page }) => {
     await page.goto('/@gtg/settings');
     await page.waitForLoadState('domcontentloaded');
   });
 
-  // Skipped - Settings Tab is unavailable
+  /*
+   * ★ STILL SKIPPED 2026-08-11, but for the REAL reason — this needs an
+   * authenticated session as the profile's OWNER.
+   *
+   * Not "Settings Tab is unavailable": the form itself is alive and every field
+   * this test names still exists (features/account-settings/form.tsx — #profileImage:263,
+   * #coverImage:296, #name:329, #about:349, #location:365, #website:381,
+   * #blacklistDescription:404, #mutedListDescription:422, pps-update-button:441).
+   * What blocks it is the ownership gate at
+   * app/[param]/(user-profile)/settings/content.tsx:61 — `SettingsForm` mounts only
+   * when `identity.isLoggedIn && identity.username === username`. An anonymous
+   * visitor gets the "These aren't your settings" card instead (content.tsx:82-96),
+   * so `publicProfileSettingsHeader` resolves to the wrong copy.
+   *
+   * TO ENABLE: seed an owner session with support/fixture-auth/seeder.ts and target
+   * that seeded account's own /settings, instead of the hard-coded /@gtg. This
+   * spec file is otherwise entirely anonymous, so that move belongs in an
+   * authenticated spec, not here.
+   */
   test.skip('move to Settings Tab and validate public profile settings form is visible', async ({ page }) => {
     // profileSettingsTabIsNotSelected()/moveToSettingsTab() were removed
     // 2026-08-10 (drove the deleted profile-navigation chrome); navigate to
@@ -152,7 +175,15 @@ test.describe('Profile page of @gtg', () => {
     await expect(profilePage.ppsButtonUpdate).toBeVisible();
   });
 
-  // Skipped - Settings Tab is unavailable
+  /*
+   * ★ STILL SKIPPED 2026-08-11 — same real reason as the test above: needs an
+   * authenticated OWNER session (settings/content.tsx:61). The Preferences section
+   * itself is alive with all four controls intact —
+   * `settings-preferences` (features/account-settings/form.tsx:469),
+   * `not-safe-for-work-content`:473, `blog-post-rewards`:508,
+   * `comment-post-rewards`:536, `referral-system`:564.
+   * TO ENABLE: seed an owner session via support/fixture-auth/seeder.ts.
+   */
   test.skip('move to Settings Tab and validate preferences settings form is visible', async ({ page }) => {
     // profileSettingsTabIsNotSelected()/moveToSettingsTab() were removed
     // 2026-08-10 (drove the deleted profile-navigation chrome); navigate to
@@ -169,46 +200,23 @@ test.describe('Profile page of @gtg', () => {
     await expect(profilePage.preferencesSettingsReferralSystem).toBeVisible();
   });
 
-  // Skipped - Settings Tab is unavailable
-  test.skip('move to Settings Tab and validate advanced settings form is visible', async ({ page }) => {
-    // profileSettingsTabIsNotSelected()/moveToSettingsTab() were removed
-    // 2026-08-10 (drove the deleted profile-navigation chrome); navigate to
-    // the still-live `/settings` route directly. Already test.skip'd above
-    // for an unrelated, pre-existing reason ("Settings Tab is unavailable").
-    await page.goto('/@gtg/settings');
-    await page.waitForLoadState('domcontentloaded');
-
-    await expect(profilePage.advancedProfileSettingsHeader).toBeVisible();
-    await expect(profilePage.advancedSettingsApiEndpointRadioGroup).toBeVisible();
-    expect((await profilePage.advancedSettingsApiEndpointList.all()).length).toBe(4);
-
-    const expectedEndpoints: string[] = [
-      'https://api.hive.blog',
-      'https://rpc.ausbit.dev',
-      'https://anyx.io',
-      'https://api.deathwing.me'
-    ];
-
-    (await profilePage.advancedSettingsApiEndpointList.all()).forEach(async (element, index) => {
-      expect(await element.textContent()).toBe(expectedEndpoints[index]);
-    });
-
-    await expect(profilePage.advancedSettingsApiEndpointButton.first()).toHaveAttribute(
-      'data-state',
-      'checked'
-    );
-    await expect(profilePage.advancedSettingsApiEndpointButton.last()).toHaveAttribute(
-      'data-state',
-      'unchecked'
-    );
-
-    await expect(profilePage.advancedSettingsApiEndpointAddInput).toHaveAttribute(
-      'placeholder',
-      'Add API Endpoint'
-    );
-    await expect(profilePage.advancedSettingsApiEndpointAddButton).toHaveText('Add');
-    await expect(profilePage.advancedSettingsApiResetEndpointsButton).toBeVisible();
-  });
+  /*
+   * ★ 'move to Settings Tab and validate advanced settings form is visible'
+   * DELETED 2026-08-11 — FEATURE GONE.
+   *
+   * It asserted an "Advanced Settings" section on /settings holding a 4-item API
+   * endpoint radio group (api.hive.blog / rpc.ausbit.dev / anyx.io /
+   * api.deathwing.me), an "Add API Endpoint" input and a reset button. The
+   * settings form now has exactly two sections — `settings-public-profile` and
+   * `settings-preferences` (features/account-settings/form.tsx) — and there is no
+   * third. `api-endpoint-radiogroup`, `add-api-endpoint` and
+   * `advanced-profile-settings` all have 0 hits in product source.
+   *
+   * Endpoint switching moved out to the standalone /healthchecker page
+   * (app/healthchecker/page.tsx, components/healthcheckers-wrapper.tsx) and is
+   * covered by e2e/healthchecker.spec.ts. See the KNOWN COVERAGE GAP note at the
+   * top of e2e/healthchecker.spec.ts for what that spec does and does not reach.
+   */
 
   test('Move to the login modal after clicking the Follow button', async ({ page }) => {
     const loginDialog = new LoginForm(page);

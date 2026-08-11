@@ -16,7 +16,13 @@ import { deriveGate, deriveLeagueInputs, utcDay } from '@/blog/features/retentio
 import { getLogger } from '@ui/lib/logging';
 import { getClientIp } from '@/blog/lib/lite/http/ip';
 import { enforceStreakRate } from '@/blog/lib/lite/antispam/rate-limit';
-import { readStreakCache, writeStreakCache } from '@/blog/lib/lite/retention/streak-cache';
+import {
+  finishRevalidation,
+  readStaleStreakCache,
+  readStreakCache,
+  tryStartRevalidation,
+  writeStreakCache
+} from '@/blog/lib/lite/retention/streak-cache';
 import {
   countFeedsReachedWithPrior,
   findHiveWalkCursor,
@@ -333,6 +339,62 @@ export async function GET(req: NextRequest, { params }: { params: { user: string
     return NextResponse.json(hit.body, { headers: { 'x-cache': 'hit' } });
   }
 
+  // ════ STALE-WHILE-REVALIDATE (2026-08-11) ════
+  //
+  // Measured live, signed in, on the home page: `GET /api/streak/lordbutterfly` took
+  // 6.4-15.8s and intermittently 502'd — this widget sits in the LEFT RAIL, so it is on
+  // every page. Instrumented the route call-by-call to find out why before touching
+  // anything:
+  //
+  //   - The "~50-call fan-out" the comments above describe is the FIRST-EVER walk for an
+  //     account. Once the incremental-walk store (migration 0028) has a cursor, a real
+  //     miss makes 3-8 upstream Hive calls, not 50 — that part of the design is already
+  //     working. Even a genuine first-ever walk (no stored cursor at all) measured 12
+  //     calls / ~8s, not the pathological case.
+  //   - What is NOT cheap: a single Hive call to the configured public node routinely
+  //     takes 1-6s, and a raw `curl` straight at api.hive.blog for the EXACT call this
+  //     route makes (`bridge.get_account_posts`, sort=posts) reproduced an upstream 502
+  //     from Hive's OWN infrastructure in 5.4s, unrelated to anything in this file.
+  //     `CALL_TIMEOUT_MS` (6s) sits right at the edge of that node's normal latency for
+  //     this call shape, so ordinary variance — not hangs — trips it regularly.
+  //   - FAIL LOUD is right for the NUMBER (a page-0 failure must never be silently read
+  //     as "inactive") but a page-0 failure 502s the ENTIRE response, and the client
+  //     retried once on top of that (`retry: 1`, now 0 — see use-retention.ts), doubling
+  //     the cost of exactly the requests that were already struggling. A decorative rail
+  //     widget cannot be allowed to depend, on every uncached page view, on a single call
+  //     to a public node it does not control landing inside a 6-second window.
+  //
+  // The fix is NOT to weaken FAIL LOUD for what gets COMPUTED or CACHED — an entry is
+  // still written only from a real, successful walk (see `computeStreakBody` below,
+  // unchanged in that respect). It is to stop making the HTTP RESPONSE wait on that
+  // computation once a recent-enough real answer already exists: an entry between
+  // `STREAK_TTL_MS` and `STREAK_STALE_TTL_MS` old is served immediately (a real,
+  // previously-computed value — never invented, and `provenance.computedAt` on the wire
+  // already says exactly how old it is), while a refresh runs in the background,
+  // single-flighted per account (`tryStartRevalidation`) so concurrent page views during
+  // the stale window trigger at most one upstream walk between them. A background
+  // failure is swallowed (logged only) and leaves the existing stale entry in place —
+  // the reader sees last-known-good, not an error, and the next view tries again.
+  //
+  // Only two cases still pay the full synchronous cost, both narrow and both cases where
+  // there is genuinely nothing honest to fall back to: an account's true first-ever view
+  // (no cache entry at all — this is the FAIL LOUD path, unchanged), and a return visit
+  // so much later than `STREAK_STALE_TTL_MS` that even the stale value would be
+  // misleading. The per-IP limiter below still guards exactly that synchronous path, same
+  // as before — a background revalidation is account-keyed and single-flighted, which
+  // already bounds it to at most one attempt per account per stale window regardless of
+  // how many readers or IPs are viewing it, so it does not need (and deliberately does
+  // not pay) the IP limiter built for the enumeration threat.
+  const stale = readStaleStreakCache(user, currentGoal);
+  if (stale) {
+    if (tryStartRevalidation(user)) {
+      computeStreakBody(user, currentGoal)
+        .catch((err) => logger.warn(err, 'streak: background revalidation threw for %s', user))
+        .finally(() => finishRevalidation(user));
+    }
+    return NextResponse.json(stale.body, { headers: { 'x-cache': 'stale' } });
+  }
+
   // F-L15: per-IP rate limit on this public, unauth route, now guarding ONLY the
   // expensive path (a cache miss fans ~50 Hive calls). Its own `streak` bucket, NOT
   // the signup funnel's shared `lookup` budget — see enforceStreakRate for why that
@@ -347,6 +409,22 @@ export async function GET(req: NextRequest, { params }: { params: { user: string
     /* limiter unavailable — proceed; the cache still bounds amplification */
   }
 
+  const result = await computeStreakBody(user, currentGoal);
+  return NextResponse.json(result.body, {
+    status: result.status,
+    headers: result.status === 200 ? { 'x-cache': 'miss' } : undefined
+  });
+}
+
+/**
+ * The actual computation: everything from the feed walk through writing the cache.
+ * Pulled out of `GET` so it has exactly one caller-independent shape — a plain result,
+ * never a `NextResponse` — and can be `await`ed on the synchronous cold path or fired
+ * fire-and-forget as a background revalidation (see the stale-while-revalidate block in
+ * `GET`). FAIL LOUD is unchanged: a transient upstream failure still returns 502 and is
+ * never cached; only a definitive not-found is cached, and only briefly.
+ */
+async function computeStreakBody(user: string, currentGoal: number | undefined): Promise<{ status: number; body: unknown }> {
   try {
     const cutoffMs = Date.now() - WINDOW_WEEKS * 7 * 86_400_000;
     const cutoffDay = utcDay(new Date(cutoffMs).toISOString());
@@ -413,11 +491,11 @@ export async function GET(req: NextRequest, { params }: { params: { user: string
     // genuinely-missing account re-walked every time.
     if (accountRes.status !== 'fulfilled') {
       logger.error(accountRes.reason, 'streak: account read failed for %s', user);
-      return NextResponse.json({ error: 'upstream unavailable', detail: 'account' }, { status: 502 });
+      return { status: 502, body: { error: 'upstream unavailable', detail: 'account' } };
     }
     if (!accountRes.value) {
       writeStreakCache(user, { at: Date.now(), body: null, notFound: true });
-      return NextResponse.json({ error: 'account not found' }, { status: 404 });
+      return { status: 404, body: { error: 'account not found' } };
     }
 
     const account = accountRes.value;
@@ -428,7 +506,7 @@ export async function GET(req: NextRequest, { params }: { params: { user: string
     // active-weeks arm and vote breadth, so its failure is a 502.
     if (postsRes.status !== 'fulfilled') {
       logger.error(postsRes.reason, 'streak: posts walk failed for %s', user);
-      return NextResponse.json({ error: 'upstream unavailable', detail: 'posts feed' }, { status: 502 });
+      return { status: 502, body: { error: 'upstream unavailable', detail: 'posts feed' } };
     }
     const postWalk: FeedWalk = postsRes.value;
     const commentsFailed = commentsRes.status !== 'fulfilled';
@@ -684,7 +762,7 @@ export async function GET(req: NextRequest, { params }: { params: { user: string
         voteReadsNeeded,
         budgetLeft
       );
-      return NextResponse.json({ error: 'upstream unavailable', detail: 'vote sample' }, { status: 502 });
+      return { status: 502, body: { error: 'upstream unavailable', detail: 'vote sample' } };
     }
     // `user` is passed so the author's own upvote is not counted as one of the
     // distinct people who engaged with them — see creditedGivers' docstring, and
@@ -1038,11 +1116,13 @@ export async function GET(req: NextRequest, { params }: { params: { user: string
     }
 
     // `goalUsed` is stored so a stale-goal hit is detected even on a worker that never
-    // saw the invalidation — see streak-cache.ts.
+    // saw the invalidation — see streak-cache.ts. This write is what makes the
+    // stale-while-revalidate block in `GET` correct: it refreshes `at`, so the very next
+    // read (fresh or, once STREAK_TTL_MS has passed again, stale) reflects THIS walk.
     writeStreakCache(user, { at: Date.now(), body, goalUsed: dailyGoal });
-    return NextResponse.json(body, { headers: { 'x-cache': 'miss' } });
+    return { status: 200, body };
   } catch (error) {
     logger.error(error, 'streak route failed for %s', user);
-    return NextResponse.json({ error: 'upstream unavailable' }, { status: 502 });
+    return { status: 502, body: { error: 'upstream unavailable' } };
   }
 }
