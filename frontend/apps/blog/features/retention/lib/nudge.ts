@@ -34,8 +34,7 @@ export type NudgeKind =
   | 'milestone'
   | 'reach'
   | 'weekday_today'
-  | 'new_people_week'
-  | 'streak_holds';
+  | 'new_people_week';
 
 export interface NudgeFacts {
   /** Consecutive days with an authored act, from the chain-derived streak. */
@@ -155,12 +154,15 @@ export function selectNudge(facts: NudgeFacts): Nudge | null {
   //    ★ `streakDays + 1`, THE SAME OFF-BY-ONE THE CARD HAD. `actsToday === 0` is checked one
   //    line up, so the run cannot include today: the day being talked about is the NEXT one.
   //    The card said "Day 2 lands" beside a flame reading "2-day streak"; this said it too.
-  if (facts.streakDays >= 2 && facts.actsToday === 0 && facts.freezesAvailable > 0) {
-    return {
-      kind: 'streak_holds',
-      vars: { days: facts.streakDays + 1, freezes: facts.freezesAvailable }
-    };
-  }
+  // ★★★ THE FLAT STREAK LINE IS GONE (owner ruling, 2026-08-11).
+  //
+  // It rendered "Day 4 lands if you post or comment today." above the feed. Whatever
+  // the freeze wording softened it with, the sentence is still a deadline the reader
+  // did not ask for, sitting on top of the thing they came to read. The owner does not
+  // want it over the feed again, so it is removed rather than reworded.
+  //
+  // The streak itself is not hidden: the flame and the Today card still report what is
+  // banked. What is deleted is the app telling you what you owe it today.
 
   // Nothing true and interesting today. Say nothing.
   return null;

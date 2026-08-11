@@ -951,8 +951,6 @@
       "title": "Today",
       "progress": "{{done}} of {{goal}}",
       "done": "Done for today.",
-      "holds": "Day {{days}} lands if you post or comment today.",
-      "holds_goal": "Day {{days}} needs {{goal}} today.",
       "start": "One post or comment starts a streak.",
       "start_goal": "{{goal}} posts or comments starts a streak.",
       "deadline": "You have until {{time}}.",
@@ -970,7 +968,9 @@
         "regular_sub": "2 a day",
         "serious": "Serious",
         "serious_sub": "4 a day"
-      }
+      },
+      "goal_only": "{{goal}} posts or comments today.",
+      "open": "Anything you post or comment counts today."
     },
     "nudge": {
       "new_giver": "@{{name}} voted on you for the first time. That is {{count}} in all.",
@@ -980,7 +980,6 @@
       "reach": "Your last post landed in {{count}} feeds.",
       "weekday_today": "You post most on {{day}}. It is {{day_short}}.",
       "new_people_week": "{{count}} people found you this week. None of them follow you.",
-      "streak_holds": "Day {{days}} lands if you post or comment today.",
       "dismiss": "Dismiss",
       "ago_recent": "just now",
       "ago_hours": "{{count}}h ago",

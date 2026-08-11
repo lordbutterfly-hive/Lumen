@@ -65,9 +65,13 @@ export function todayHeadline({ met, streakDays, goal }: TodayState): TodayHeadl
   // Today is `streakDays + 1`. Naming the day they are about to REACH is both honest and the
   // more motivating half: the flame reports what is banked, the headline reports what is next,
   // and the two numbers now differ because they mean different things.
+  // ★★★ NO "Day N lands if you post today" (owner ruling, 2026-08-11). The same
+  // sentence was removed from the above-feed nudge for the same reason: it is a
+  // deadline the reader did not ask for. The card states the goal WITHOUT attaching a
+  // day number to it, so it reports what today needs instead of what a streak costs.
   return target > 1
-    ? { key: 'retention.today.holds_goal', vars: { days: streakDays + 1, goal: target } }
-    : { key: 'retention.today.holds', vars: { days: streakDays + 1 } };
+    ? { key: 'retention.today.goal_only', vars: { goal: target } }
+    : { key: 'retention.today.open', vars: {} };
 }
 
 export interface ReachTrend {

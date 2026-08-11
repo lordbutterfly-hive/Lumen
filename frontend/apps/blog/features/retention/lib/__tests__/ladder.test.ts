@@ -853,8 +853,10 @@ check('an unanswered reply outranks a milestone', nudge({ unansweredReply: { aut
 check('a milestone outranks reach', nudge({ streakDays: 30, feedsReached: 900 })?.kind === 'milestone');
 check('reach outranks the weekday pattern', nudge({ feedsReached: 900, busiestWeekday: 3, actsToday: 0 })?.kind === 'reach');
 check('the weekday pattern outranks the aggregate new-people line', nudge({ busiestWeekday: 3, actsToday: 0, newPeopleThisWeek: 3 })?.kind === 'weekday_today');
-check('new people outrank the flat streak line', nudge({ newPeopleThisWeek: 3, streakDays: 5, actsToday: 0, freezesAvailable: 2 })?.kind === 'new_people_week');
-check('the flat streak line is last', nudge({ streakDays: 5, actsToday: 0, freezesAvailable: 2 })?.kind === 'streak_holds');
+check('new people still surface with a streak running', nudge({ newPeopleThisWeek: 3, streakDays: 5, actsToday: 0, freezesAvailable: 2 })?.kind === 'new_people_week');
+// The flat streak line ("Day N lands if you post today") was removed by owner ruling
+// 2026-08-11, so there is nothing left for it to rank last. It now returns null.
+check('the flat streak line no longer exists', nudge({ streakDays: 5, actsToday: 0, freezesAvailable: 2 }) === null);
 
 // The guards.
 check('a milestone we cannot PROVE is never celebrated', nudge({ streakDays: 30, streakIsLowerBound: true })?.kind !== 'milestone');
@@ -1062,7 +1064,8 @@ for (const k of [
   'retention.ranks.down_body',
   'retention.today.title',
   'retention.today.done',
-  'retention.today.holds',
+  'retention.today.open',
+  'retention.today.goal_only',
   'retention.today.goal_hint',
   'retention.nudge.dismiss',
   'retention.nudge.open',
@@ -1072,7 +1075,7 @@ for (const k of [
   check(`key exists: ${k}`, hasKey(k), k);
 }
 // Every nudge kind must have a line, or the selector can pick something unprintable.
-for (const kind of ['new_giver', 'unanswered', 'milestone', 'milestone_month', 'reach', 'weekday_today', 'new_people_week', 'streak_holds']) {
+for (const kind of ['new_giver', 'unanswered', 'milestone', 'milestone_month', 'reach', 'weekday_today', 'new_people_week']) {
   check(`nudge line exists: ${kind}`, hasKey(`retention.nudge.${kind}`), kind);
 }
 // The three daily goals, each with a label and a subtitle.
@@ -1386,8 +1389,8 @@ section('16. the UX-pass fixes, as assertions');
   check('no headline ever prints day zero', !JSON.stringify(H(false, 0, 4)).includes('"days":0'));
 
   // ★ THE GATE IS NAMED. The card said "Day 2 holds" while silently requiring four acts.
-  check('a streak with goal 1 uses the plain hold line', H(false, 2, 1).key === 'retention.today.holds');
-  check('a streak with goal above 1 uses the goal line', H(false, 2, 4).key === 'retention.today.holds_goal');
+  check('a goal of 1 states the day is open, with no deadline', H(false, 2, 1).key === 'retention.today.open');
+  check('a goal above 1 states the goal, with no day number', H(false, 2, 4).key === 'retention.today.goal_only');
   // ★ THE DAY IS `streakDays + 1`: a run of 2 with nothing yet today means today would be
   // day 3. Rendering 2 put the same integer on the card as the flame beside it while asking
   // the reader to earn it — 'the streak is either already 2 or not yet 2'.
@@ -1401,15 +1404,18 @@ section('16. the UX-pass fixes, as assertions');
   // fails. Without it, "holds_goal" could be quietly aliased back to "holds".
   check('the two hold lines are genuinely different keys', H(false, 2, 1).key !== H(false, 2, 4).key);
   // A fractional or zero goal must not be able to produce the "reach 0" sentence.
-  check('goal below 1 is treated as 1', H(false, 2, 0).key === 'retention.today.holds');
-  check('a fractional goal floors rather than rounding up', H(false, 2, 1.9).key === 'retention.today.holds');
+  check('goal below 1 is treated as 1', H(false, 2, 0).key === 'retention.today.open');
+  check('a fractional goal floors rather than rounding up', H(false, 2, 1.9).key === 'retention.today.open');
 
-  for (const k of ['retention.today.done', 'retention.today.start', 'retention.today.start_goal', 'retention.today.holds', 'retention.today.holds_goal', 'retention.today.deadline', 'retention.today.deadline_midnight']) {
+  for (const k of ['retention.today.done', 'retention.today.start', 'retention.today.start_goal', 'retention.today.open', 'retention.today.goal_only', 'retention.today.deadline', 'retention.today.deadline_midnight']) {
     check(`today copy exists: ${k}`, hasKey(k), k);
   }
   // The old wording is gone from the file, so it cannot be reintroduced by a merge.
-  const holdsText = String((EN as Record<string, Record<string, Record<string, string>>>).retention.today.holds);
-  check('the daily card no longer says "UTC" at the reader', !/UTC/.test(holdsText), holdsText);
+  // `today.holds` itself was deleted with the "Day N lands if you post today" line
+  // (owner ruling 2026-08-11), so the UTC guard now runs over the line that replaced it.
+  const openText = String((EN as Record<string, Record<string, Record<string, string>>>).retention.today.open);
+  check('the daily card no longer says "UTC" at the reader', !/UTC/.test(openText), openText);
+  check('the deadline wording is gone from the card', !/lands if you post/i.test(JSON.stringify(EN)));
 }
 
 // ── 16b. the deadline, in the reader's own clock ─────────────────────────────
