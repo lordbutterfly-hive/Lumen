@@ -20,9 +20,15 @@ import { SETTINGS_CARD, SETTINGS_CARD_HINT, SETTINGS_CARD_TITLE } from './lib/ca
 const ModerationLists = ({ username }: { username: string }) => {
   const { t } = useTranslation('common_blog');
 
+  // ★ "MUTED USERS" DROPPED FROM THIS ROW LIST (audit item 13). It used to
+  // chevron-link to `/@{username}/lists/muted`, and `MutedList` — a full,
+  // richer render of that exact same list with avatars and working Unmute
+  // buttons — sits directly underneath this card. Keeping both put the same
+  // heading on the page twice with two different affordances for the same
+  // data. The other three rows still link out because nothing on this page
+  // renders their content directly.
   const links = [
     { href: `/@${username}/lists/blacklisted`, label: t('user_profile.lists.blacklisted_users') },
-    { href: `/@${username}/lists/muted`, label: t('user_profile.lists.muted_users') },
     { href: `/@${username}/lists/followed_blacklists`, label: t('user_profile.lists.followed_blacklists') },
     { href: `/@${username}/lists/followed_muted_lists`, label: t('user_profile.lists.followed_muted_lists') }
   ];

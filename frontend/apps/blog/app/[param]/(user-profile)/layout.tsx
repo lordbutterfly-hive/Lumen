@@ -20,12 +20,20 @@ const logger = getLogger('app');
 const SITE_DESC =
   'Communities without borders. A social network owned and operated by its users, powered by Hive.';
 
+// ★ NEVER `siteConfig.name` HERE (audit item 15). The root layout wraps every
+// page's title in `%s - ${siteConfig.name}` ("Lumen"), and a segment that
+// hands back the SITE name itself as its own title becomes the %s — "Lumen -
+// Lumen" in the tab, observed live while this layout's data was loading. A
+// real, if generic, word for what the page IS reads correctly through that
+// same template ("Profile - Lumen") and never collides with it.
+const FALLBACK_TITLE = 'Profile';
+
 export async function generateMetadata({ params }: { params: { param: string } }): Promise<Metadata> {
   const raw = params.param;
   // Only process if it looks like a username (starts with @ or %40)
   if (!raw.startsWith('@') && !raw.startsWith('%40')) {
     return {
-      title: siteConfig.name,
+      title: FALLBACK_TITLE,
       description: SITE_DESC
     };
   }
@@ -34,7 +42,7 @@ export async function generateMetadata({ params }: { params: { param: string } }
   // too — otherwise a banned account's `about` text and avatar would still be
   // emitted as the page title, description and OpenGraph image.
   if (isBannedAuthor(username)) {
-    return { title: siteConfig.name, description: SITE_DESC };
+    return { title: FALLBACK_TITLE, description: SITE_DESC };
   }
   try {
     // Use cached version - deduplicated with Layout's prefetch within the same request
@@ -43,7 +51,13 @@ export async function generateMetadata({ params }: { params: { param: string } }
     // "on Hive" here is a factual statement about the chain the account lives
     // on (Lumen is a Hive frontend), not a branding mismatch — left as-is.
     const about = account?.profile?.about || `Profile of @${username} on Hive.`;
-    const title = `Blog ${username}`;
+    // ★ NOT "Blog {username}" ANY MORE (audit item 15). "Blog" was the name of
+    // a tab in the legacy two-tab profile header (Blog / Social) that this
+    // redesign removed — see the shell's own comment further down this file.
+    // The tab is gone; the word describing it stayed behind in every browser
+    // tab and share card. `@{username}` is how the product refers to a
+    // profile everywhere else (the sub-page shell's eyebrow, bylines, links).
+    const title = `@${username}`;
     return {
       title: {
         default: title,
@@ -65,10 +79,10 @@ export async function generateMetadata({ params }: { params: { param: string } }
   } catch (error) {
     logger.error(error, 'Error in generateMetadata:');
     return {
-      title: siteConfig.name,
+      title: FALLBACK_TITLE,
       description: SITE_DESC,
       openGraph: {
-        title: siteConfig.name,
+        title: FALLBACK_TITLE,
         description: SITE_DESC
       }
     };

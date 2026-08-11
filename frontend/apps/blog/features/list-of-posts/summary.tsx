@@ -46,7 +46,7 @@ const PostSummary = ({
             ) : null}
             <Link
               href={`/${post.category}/@${displayAuthor ?? post.author}/${post.permlink}`}
-              className="whitespace-normal break-words visited:text-gray-500 dark:visited:text-gray-400"
+              className="whitespace-normal break-words visited:text-gray-500"
             >
               {post.title}
             </Link>

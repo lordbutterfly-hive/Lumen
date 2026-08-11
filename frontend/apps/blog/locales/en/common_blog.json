@@ -812,7 +812,8 @@
     "muted_users_hint": "People whose posts and comments are hidden from you.",
     "muted_users_empty": "You have not muted anyone.",
     "unmute_button": "Unmute",
-    "unmute_locked": "Only @{{username}} can change this list."
+    "unmute_locked": "Only @{{username}} can change this list.",
+    "update_hint": "Edit any field above to enable Update."
   },
   "four_oh_four": {
     "this_page_does_not_exist": "Sorry! This page does not exist.",

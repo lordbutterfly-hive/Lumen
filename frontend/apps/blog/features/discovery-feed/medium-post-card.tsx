@@ -21,6 +21,7 @@ import PostCardUpvotesTooltip from '@/blog/features/list-of-posts/post-card-upvo
 import DetailsCardHover from '@/blog/features/list-of-posts/details-card-hover';
 import { LeagueByline } from '@/blog/features/retention/components/league-byline';
 import type { RankMark } from '@/blog/features/retention/hooks/use-rank-marks';
+import TokenAuthorChip from '@/blog/features/creator-tokens/ui/token-author-chip';
 import { Entry } from '@hive/common-hiveio-packages/wax';
 import { isNsfwPost, useNsfwPreference } from '@/blog/lib/nsfw';
 
@@ -207,6 +208,12 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
           ·
         </span>
         <TimeAgo date={post.created} />
+
+        {/* Creator-token chip (design brief §2) — owner ruling: a token price
+            indicator belongs next to every post and every name. Renders
+            nothing when the author has no token, or the answer isn't known
+            yet; see the component's own doc. */}
+        <TokenAuthorChip handle={displayAuthor} />
       </div>
 
       {/* Body grid — text column, plus a fixed thumbnail column ONLY when there

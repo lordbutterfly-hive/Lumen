@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { Avatar, AvatarFallback, AvatarImage } from '@ui/components';
 import { getUserAvatarUrl } from '@hive/ui';
 import { Button } from '@ui/components/button';
@@ -65,7 +66,7 @@ const MAX_PAYOUT_HBD = '1000000000';
  * lite backend titles with, so the two tiers cannot drift.
  */
 export default function ShortFormComposer() {
-  const { user, isHydrated } = useUserClient();
+  const { user } = useUserClient();
   const router = useRouter();
   // The full editor's mutation, reused verbatim for the Hive-keyed tier.
   const postMutation = usePostMutation();
@@ -75,15 +76,35 @@ export default function ShortFormComposer() {
   const [error, setError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Hydration-safe, matching the pattern already used for this same hook
-  // elsewhere (e.g. useLiveStudio): before the client has hydrated, `user` is
-  // still the SSR default (isLoggedIn: false) even for a genuinely signed-in
-  // visitor, so `isLoggedIn` alone must never gate real behaviour ahead of it.
-  const loggedIn = isHydrated && user.isLoggedIn;
+  /**
+   * ★★★ THE COMPOSER KNEW WHO YOU WERE LAST TOO (2026-08-11, same class of bug
+   * as the header/left-rail fix in `server-session.tsx`, N-3).
+   *
+   * This used to be `isHydrated && user.isLoggedIn` — the "hydration-safe"
+   * pattern used across the creator-tokens hooks, but hydration-safe only means
+   * it will not lie about a signed-OUT visitor; it still reports a genuinely
+   * signed-in reader as logged out for as long as `useUserClient()` takes to
+   * read localStorage and `/api/users/me` to answer, which on this app is the
+   * same 3-5s window the header/left-rail were fixed for. This composer sits at
+   * the top of the home feed, so it was the very first thing that window's
+   * flash hit. `useSessionIdentity()` is the same helper those already use:
+   * server cookie until the client has a real answer, never overridden once one
+   * arrives.
+   */
+  const identity = useSessionIdentity();
+  const loggedIn = identity.isLoggedIn;
   // A lite account has no Hive keys, so it cannot sign in-browser: its short
   // post is proxied via /api/lite/posts instead of the Keychain/wax editor.
+  // Unlike `loggedIn`, this only affects which path `submit()` takes below, and
+  // submit only runs after the reader has typed something and clicked Post —
+  // by then `useUserClient()` has long since answered for real, so this stays
+  // on the plain client value rather than the server-cookie blend.
   const isLite = user.account_tier === 'lite';
   const isExpanded = isFocused || text.length > 0;
+  // Avatar/alt only — real actions below (createPermlink, the lite/full post
+  // path) keep using `user.username` untouched, for the same reason `isLite`
+  // does: those only run after the client has answered.
+  const displayUsername = user.username || identity.username;
 
   /**
    * One handler, because there is one user-facing action. The tier decides which
@@ -200,14 +221,14 @@ export default function ShortFormComposer() {
         <Avatar className="h-11 w-11 shrink-0 overflow-hidden rounded-full">
           <AvatarImage
             className="h-full w-full object-cover"
-            src={getUserAvatarUrl(user.username, 'small')}
-            alt={user.username}
+            src={getUserAvatarUrl(displayUsername, 'small')}
+            alt={displayUsername}
           />
           <AvatarFallback>
             <img
               className="h-full w-full object-cover"
-              src={getUserAvatarUrl(user.username, 'small')}
-              alt={user.username}
+              src={getUserAvatarUrl(displayUsername, 'small')}
+              alt={displayUsername}
             />
           </AvatarFallback>
         </Avatar>
@@ -236,14 +257,14 @@ export default function ShortFormComposer() {
         <Avatar className="h-11 w-11 shrink-0 overflow-hidden rounded-full">
           <AvatarImage
             className="h-full w-full object-cover"
-            src={getUserAvatarUrl(user.username, 'small')}
-            alt={user.username}
+            src={getUserAvatarUrl(displayUsername, 'small')}
+            alt={displayUsername}
           />
           <AvatarFallback>
             <img
               className="h-full w-full object-cover"
-              src={getUserAvatarUrl(user.username, 'small')}
-              alt={user.username}
+              src={getUserAvatarUrl(displayUsername, 'small')}
+              alt={displayUsername}
             />
           </AvatarFallback>
         </Avatar>

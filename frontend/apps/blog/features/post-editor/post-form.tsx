@@ -309,7 +309,7 @@ export default function PostForm({
               <div
                 role="alert"
                 data-testid="draft-save-failed"
-                className="rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900 dark:border-red-800 dark:bg-red-950 dark:text-red-100"
+                className="rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900"
               >
                 <strong className="font-semibold">This draft is not being saved.</strong> It is too
                 large for your browser&apos;s storage, so it will be lost if you close or reload this

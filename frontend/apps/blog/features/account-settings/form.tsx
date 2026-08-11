@@ -388,6 +388,17 @@ const SettingsForm = ({ username }: { username: string }) => {
         >
           {busy ? <CircleSpinner loading size={18} color="#ffffff" /> : t('settings_page.update')}
         </button>
+        {/* ★ THE GREY STATE HAD NO EXPLANATION (audit item 13). The colour swap
+            (red = something to save, grey = nothing to save) reads correctly
+            once you know the rule, but nothing on the page states the rule
+            itself — so a reader who has not yet touched a field sees a
+            greyed-out button with no way to tell "not done loading", "broken"
+            and "nothing changed yet" apart. Static text, not state-dependent:
+            it is true regardless of which of those three is why the button
+            looks the way it does right now. */}
+        {sameData && !busy ? (
+          <p className="mt-2 text-[12.5px] text-[#6b7280]">{t('settings_page.update_hint')}</p>
+        ) : null}
       </section>
 
       <section className={SETTINGS_CARD} data-testid="settings-preferences">

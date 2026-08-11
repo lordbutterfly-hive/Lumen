@@ -33,8 +33,8 @@ const NOTIFICATIONS_LIMIT = 50;
 function EndOfNotificationsNotice({ t }: { t: (key: string) => string }) {
   return (
     <div className="my-6 flex flex-col items-center justify-center gap-2 text-center text-sm text-gray-500">
-      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/30">
-        <Icons.check className="h-4 w-4 text-green-600 dark:text-green-400" />
+      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-green-100">
+        <Icons.check className="h-4 w-4 text-green-600" />
       </div>
       <span>{t('navigation.profile_notifications_tab_navbar.end_of_notifications')}</span>
       <span className="text-xs">{t('navigation.profile_notifications_tab_navbar.notifications_90_day_limit')}</span>

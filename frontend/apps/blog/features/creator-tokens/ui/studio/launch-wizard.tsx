@@ -1,8 +1,9 @@
 'use client';
 
 import { FC, useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import type { Service } from '../../market/token-detail';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { useLiveStudio } from '../../live/use-live-studio';
 import { MarketUnavailable } from '../../live/market-states';
 import { buyQuote } from '../../market/curve';
@@ -60,7 +61,28 @@ function sanitizeMoneyInput(raw: string): string {
 
 const LaunchWizard: FC = () => {
   const router = useRouter();
+  const pathname = usePathname();
   const studio = useLiveStudio();
+  /**
+   * ★★★ STEP 1 DISPLAY ONLY — NOT THE LAUNCH GATE (2026-08-11).
+   *
+   * `studio.loggedIn` (`use-live-studio.ts`) waits for `useUserClient()` to
+   * hydrate from localStorage, which on this app trails the server by 3-5s —
+   * so a genuinely signed-in reader who opened this wizard was shown "Not
+   * signed in" at the top of step 1 of their own launch flow. The server
+   * already read the session cookie to render this page; `useSessionIdentity`
+   * (same helper `app-header.tsx` and `left-rail.tsx` use) hands that answer
+   * down instead of guessing "signed out" until the client catches up.
+   *
+   * This is used for STEP 1's account confirmation copy only. The step-2
+   * launch button below keeps gating on `studio.loggedIn` and `studio.isLite`
+   * exactly as before — those decide whether an actual signed, money-moving
+   * transaction fires, and that must stay conservative: wait for the real
+   * client answer, never act on the server's cookie-only guess. A stale
+   * "disabled" button for an extra second is safe; broadcasting on a guess is
+   * not.
+   */
+  const identity = useSessionIdentity();
   // A failed read is NOT "no market" — see the launch button below.
   const cannotConfirmMarket = studio.status === 'error';
   const alreadyHasMarket = Boolean(studio.market);
@@ -77,6 +99,14 @@ const LaunchWizard: FC = () => {
   // buy with no signal anywhere. The launch itself still completed; we hold
   // here instead of navigating away so the creator sees that before leaving.
   const [firstBuySkipped, setFirstBuySkipped] = useState(false);
+  // ★★★ THE FINAL STEP MUST BE CONFIRMED, NOT JUST CLICKED (2026-08-11, audit
+  // item 5). `launch()` fires a real, irreversible on-chain registration —
+  // and a restored draft (below) could drop a reader straight onto this step
+  // with "Launch my token" as the ONLY visible action. Requiring a second,
+  // explicit confirmation before `launch()` runs means arriving here already
+  // on step 3 is no longer one click from spending real money, whether that
+  // arrival was a restored draft or a normal walk-through.
+  const [confirmArmed, setConfirmArmed] = useState(false);
 
   // ★ DRAFT PERSISTENCE (2026-08-07, found in live QA). Every field lived in
   // plain useState with no history entry and no storage, so a refresh, a single
@@ -93,6 +123,14 @@ const LaunchWizard: FC = () => {
   // interstitial was keyed per viewer in the same fix wave; this was missed.
   const DRAFT_KEY = `lumen-launch-wizard-draft-${studio.creator ?? 'anon'}`;
   const [restored, setRestored] = useState(false);
+  // ★★★ VISIBLE, NOT SILENT (2026-08-11, audit item 5). A fresh navigation to
+  // `/creators/launch` with a saved draft used to cold-boot straight onto
+  // whichever step the draft last held — often the final, irreversible one —
+  // with nothing on screen explaining why, no way to tell it apart from a
+  // normal walk-through, and no way to clear it short of opening devtools.
+  // Set only when a real draft was actually found, so a genuinely fresh
+  // wizard never shows a banner about a draft that does not exist.
+  const [restoredFromDraft, setRestoredFromDraft] = useState(false);
   useEffect(() => {
     try {
       const raw = window.sessionStorage.getItem(DRAFT_KEY);
@@ -101,6 +139,7 @@ const LaunchWizard: FC = () => {
         if (typeof d.step === 'number') setStep(Math.min(2, Math.max(0, d.step)));
         if (d.prices && typeof d.prices === 'object') setPrices(d.prices);
         if (typeof d.firstBuy === 'string') setFirstBuy(d.firstBuy);
+        setRestoredFromDraft(true);
       }
     } catch {
       // A corrupt or unreadable draft must never block the wizard — start fresh.
@@ -121,6 +160,43 @@ const LaunchWizard: FC = () => {
       // never a precondition for launching.
     }
   }, [restored, step, prices, cap, firstBuy, DRAFT_KEY]);
+
+  // ★ THE STEP IN THE URL (2026-08-11, audit item 5). Reflection only — a
+  // `?step=` param the reader can see, refresh on, and land on with the
+  // browser's Back button, without turning the step into a second source of
+  // truth. `router.replace` (not `push`) so paging through 3 short steps does
+  // not pile up history entries, and it never READS the param back on mount:
+  // the actual restore above (sessionStorage, keyed per account) stays the
+  // only thing that decides where a reader lands, so there is exactly one
+  // place that logic can drift. A full `/creators/launch/[step]` route (the
+  // audit's other suggestion) was considered and rejected: every field here
+  // (prices, first buy) lives in this component's own state, not in the URL
+  // or a route-keyed cache, and Next's app router unmounts a client
+  // component across a dynamic-segment change — chasing that state through
+  // route transitions is a materially bigger, riskier rewrite than what this
+  // bug actually needs.
+  useEffect(() => {
+    if (!restored) return;
+    const params = new URLSearchParams(window.location.search);
+    params.set('step', String(step + 1));
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [restored, step]);
+
+  /** Clears the saved draft and every field it carried, back to a blank wizard. */
+  const startOver = () => {
+    try {
+      window.sessionStorage.removeItem(DRAFT_KEY);
+    } catch {
+      // Nothing to undo if storage was never reachable.
+    }
+    setRestoredFromDraft(false);
+    setStep(0);
+    setPrices({ ask: '10', review: '80' });
+    setFirstBuy('');
+    setFailed(null);
+    setConfirmArmed(false);
+  };
 
   // ★ RANGE VALIDATION (2026-08-07, found in live QA against the deployed
   // contract). Before this, the wizard had NO upper bound and NO lower bound on
@@ -261,6 +337,25 @@ const LaunchWizard: FC = () => {
           ))}
         </div>
 
+        {/* ★ THE RESTORED-DRAFT / START-OVER AFFORDANCE (2026-08-11, audit
+            item 5). Only shown when a real draft was actually read back, so a
+            reader who lands here mid-progress knows why (a saved draft, not a
+            bug), and has an explicit way out of it rather than the page's
+            state being the only place that knowledge lives. */}
+        {restoredFromDraft ? (
+          <div className="mb-4 flex items-center justify-between gap-3 rounded-[12px] border border-[#e4e6e9] bg-[#f6f7f8] px-4 py-3 text-[13px] text-[#4b5563]">
+            <span>
+              Picked up your saved draft at step {step + 1} of {STEPS.length}.
+            </span>
+            <button
+              onClick={startOver}
+              className="flex-shrink-0 text-[13px] font-semibold text-[#c0392b] hover:underline"
+            >
+              Start over
+            </button>
+          </div>
+        ) : null}
+
         <div className="rounded-[18px] border border-[#ebebeb] bg-white p-6 shadow-[0_1px_2px_rgba(20,18,10,0.03)]">
           {step === 0 ? (
             <>
@@ -274,7 +369,7 @@ const LaunchWizard: FC = () => {
                         through all four steps of a wizard whose entire premise
                         is "a token bound to your account", and the first thing
                         they saw was a dash where their name should be. */}
-                    {studio.loggedIn ? `@${studio.creator ?? '—'}` : 'Not signed in'}
+                    {identity.isLoggedIn ? `@${studio.creator ?? identity.username ?? '—'}` : 'Not signed in'}
                   </div>
                   {/* ★ REMOVED 2026-08-06: this line was HARDCODED "Hive reputation 68 ·
                       1,240 followers". It rendered before the username had even
@@ -286,7 +381,7 @@ const LaunchWizard: FC = () => {
                 </div>
               </div>
               <p className="mt-3 font-serif text-[14px] leading-[1.55] text-[#4b5563]">
-                {studio.loggedIn && studio.isLite ? (
+                {identity.isLoggedIn && studio.isLite ? (
                   <>
                     {/* ★ SAY IT ON STEP 1, NOT STEP 4.
                         Creator Studio tells a lite account the truth the moment
@@ -302,10 +397,10 @@ const LaunchWizard: FC = () => {
                     </a>{' '}
                     when you want to go ahead.
                   </>
-                ) : studio.loggedIn ? (
+                ) : identity.isLoggedIn ? (
                   <>
-                    Your token is bound to <strong>@{studio.creator ?? 'your account'}</strong> — one per account. It
-                    can’t be moved or renamed, and nobody can create one pretending to be you.
+                    Your token is bound to <strong>@{studio.creator ?? identity.username}</strong> — one per account.
+                    It can’t be moved or renamed, and nobody can create one pretending to be you.
                   </>
                 ) : (
                   <>
@@ -445,38 +540,67 @@ const LaunchWizard: FC = () => {
                   to manage it.
                 </div>
               ) : null}
-              <button
-                onClick={firstBuySkipped ? () => router.push('/creators/studio') : launch}
-                disabled={
-                  launching ||
-                  studio.isLite ||
-                  !studio.loggedIn ||
-                  formError !== null ||
-                  cannotConfirmMarket ||
-                  alreadyHasMarket
-                }
-                // Every sibling control in this feature exposes its disabled
-                // reason to assistive tech via `title`; this one did not.
-                title={
-                  formError ??
-                  (!studio.loggedIn
-                    ? 'Sign in to launch a token.'
-                    : studio.isLite
-                      ? 'This account can’t sign transactions yet. Upgrade to a full account first.'
-                      : cannotConfirmMarket
-                        ? 'We can’t check whether you already have a token right now.'
-                        : alreadyHasMarket
-                          ? 'You already have a token. A creator can only have one.'
-                          : undefined)
-                }
-                className="mt-5 w-full rounded-[13px] bg-[#c0392b] py-[15px] text-[15px] font-bold text-white hover:bg-[#96271b] disabled:opacity-60"
-              >
-                {firstBuySkipped
-                  ? 'Continue to Studio'
-                  : launching
-                    ? 'Launching…'
+              {/* ★★★ AN EXPLICIT CONFIRM BEFORE THE IRREVERSIBLE CALL
+                  (2026-08-11, audit item 5). The button below used to call
+                  `launch()` directly on click — one click, no way back, and
+                  the ONLY primary action on a step a restored draft can drop
+                  a reader onto without them ever seeing steps 1 or 2. Arming
+                  first and asking again, in words, is the smaller gate than a
+                  second dialog and keeps the whole flow on one screen. */}
+              {confirmArmed && !firstBuySkipped ? (
+                <div className="mt-5 rounded-[12px] border border-[#e4e6e9] bg-[#f6f7f8] px-4 py-3.5">
+                  <p className="text-[13.5px] font-semibold text-[#161511]">
+                    This launches your token on the chain. It can’t be undone.
+                  </p>
+                  <div className="mt-3 flex gap-2.5">
+                    <button
+                      onClick={() => setConfirmArmed(false)}
+                      disabled={launching}
+                      className="flex-1 rounded-[11px] border border-[#e4e6e9] bg-white py-2.5 text-[14px] font-semibold text-[#3f4650] disabled:opacity-60"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={launch}
+                      disabled={launching}
+                      className="flex-1 rounded-[11px] bg-[#c0392b] py-2.5 text-[14px] font-bold text-white hover:bg-[#96271b] disabled:opacity-60"
+                    >
+                      {launching ? 'Launching…' : 'Yes, launch my token'}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  onClick={firstBuySkipped ? () => router.push('/creators/studio') : () => setConfirmArmed(true)}
+                  disabled={
+                    launching ||
+                    studio.isLite ||
+                    !studio.loggedIn ||
+                    formError !== null ||
+                    cannotConfirmMarket ||
+                    alreadyHasMarket
+                  }
+                  // Every sibling control in this feature exposes its disabled
+                  // reason to assistive tech via `title`; this one did not.
+                  title={
+                    formError ??
+                    (!studio.loggedIn
+                      ? 'Sign in to launch a token.'
+                      : studio.isLite
+                        ? 'This account can’t sign transactions yet. Upgrade to a full account first.'
+                        : cannotConfirmMarket
+                          ? 'We can’t check whether you already have a token right now.'
+                          : alreadyHasMarket
+                            ? 'You already have a token. A creator can only have one.'
+                            : undefined)
+                  }
+                  className="mt-5 w-full rounded-[13px] bg-[#c0392b] py-[15px] text-[15px] font-bold text-white hover:bg-[#96271b] disabled:opacity-60"
+                >
+                  {firstBuySkipped
+                    ? 'Continue to Studio'
                     : `Launch my token${firstBuy && parseFloat(firstBuy.replace(/,/g, '')) > 0 ? ` · first buy ${usdWhole(parseFloat(firstBuy.replace(/,/g, '')) || 0)}` : ''}`}
-              </button>
+                </button>
+              )}
             </>
           ) : null}
 
@@ -507,7 +631,15 @@ const LaunchWizard: FC = () => {
             </div>
           ) : (
             <div className="mt-4 text-center">
-              <button onClick={() => setStep(1)} className="text-[13.5px] font-semibold text-[#6b7280]">Back</button>
+              <button
+                onClick={() => {
+                  setConfirmArmed(false);
+                  setStep(1);
+                }}
+                className="text-[13.5px] font-semibold text-[#6b7280]"
+              >
+                Back
+              </button>
             </div>
           )}
         </div>

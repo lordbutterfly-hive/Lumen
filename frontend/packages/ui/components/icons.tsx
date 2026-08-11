@@ -90,6 +90,7 @@ export const Icons = {
   undo: CI.undo,
   doorOpen: CI.doorOpen,
   wallet: CI.wallet,
+  creatorTokens: CI.creatorTokens,
   messagesSquare: CI.messagesSquare,
   keyRound: CI.keyRound,
   house: CI.house,

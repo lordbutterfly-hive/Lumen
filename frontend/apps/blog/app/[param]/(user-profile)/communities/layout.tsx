@@ -1,5 +1,4 @@
 import { Metadata } from 'next';
-import { siteConfig } from '@ui/config/site';
 import { isBannedAuthor } from '@/blog/lib/moderation/banned-authors';
 import React, { ReactNode } from 'react';
 import ProfileSubpageShell from '@/blog/features/layouts/user-profile/profile-subpage-shell';
@@ -9,7 +8,9 @@ export async function generateMetadata({ params }: { params: { param: string } }
   const username = params?.param?.startsWith('%40') ? params.param.replace('%40', '') : params.param;
   // See followers/layout.tsx: the title is built from the URL alone, so it
   // renders a banned account's name even on the 404 this route serves.
-  if (isBannedAuthor(username)) return { title: siteConfig.name };
+  // ★ NOT `siteConfig.name` (audit item 15) — the root layout's `%s - Lumen`
+  // template turns the bare site name into "Lumen - Lumen" in the tab.
+  if (isBannedAuthor(username)) return { title: 'Communities' };
   const title = `Communities ${username}`;
 
   return {

@@ -31,7 +31,7 @@ const CommunitiesSelectFilter = ({
       }}
     >
       <SelectTrigger
-        className="w-fit bg-white dark:bg-background/95 dark:text-white"
+        className="w-fit bg-white"
         data-testid="communities-filter"
       >
         <SelectValue placeholder="Select a filter" />

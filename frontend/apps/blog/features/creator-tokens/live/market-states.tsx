@@ -15,10 +15,21 @@
 import { FC, ReactNode } from 'react';
 import TokenShell from '../ui/token-shell';
 
+/**
+ * ★ A REAL h1 (2026-08-11, audit item 8). `/creators/[handle]` had no heading
+ * element at all whenever the market couldn't be shown — this title was a
+ * plain `<div>` — so a screen-reader user landed here with nothing to land
+ * on, the same defect `token-market-view.tsx` fixed for the SUCCESS state on
+ * 2026-08-07. Every caller of `Panel`/`MarketMissing` below `return`s this in
+ * place of its own page content (see e.g. `creator-studio.tsx`'s early
+ * `status === 'unavailable'` guard, before its own h1-bearing branches), so
+ * there is never a second h1 on the same render. Styling unchanged; only the
+ * element is.
+ */
 const Panel: FC<{ title: string; children: ReactNode }> = ({ title, children }) => (
   <TokenShell>
     <div className="mt-[26px] rounded-[18px] border border-[#ebebeb] bg-white p-8 shadow-[0_1px_2px_rgba(20,18,10,0.03)]">
-      <div className="mb-2 font-serif text-[19px] font-semibold text-[#161511]">{title}</div>
+      <h1 className="mb-2 font-serif text-[19px] font-semibold text-[#161511]">{title}</h1>
       <p className="max-w-[52ch] text-[14px] leading-[1.6] text-[#6b7280]">{children}</p>
     </div>
   </TokenShell>
@@ -86,9 +97,9 @@ export const MarketReadFailed: FC<{ onRetry?: () => void; launchHref?: string }>
 export const MarketMissing: FC<{ handle: string }> = ({ handle }) => (
   <TokenShell>
     <div className="mt-[26px] rounded-[18px] border border-[#ebebeb] bg-white p-8 shadow-[0_1px_2px_rgba(20,18,10,0.03)]">
-      <div className="mb-2 font-serif text-[19px] font-semibold text-[#161511]">
+      <h1 className="mb-2 font-serif text-[19px] font-semibold text-[#161511]">
         @{handle} hasn’t launched a token
-      </div>
+      </h1>
       <p className="mb-5 max-w-[52ch] text-[14px] leading-[1.6] text-[#6b7280]">
         This creator hasn’t opened a market yet, so there’s nothing to buy or spend here.
       </p>

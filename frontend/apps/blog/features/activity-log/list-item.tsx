@@ -18,33 +18,33 @@ function getNotificationIcon(type: string) {
     case 'vote':
       return {
         icon: <Icons.arrowUpCircle className="h-4 w-4" />,
-        color: 'text-green-600 dark:text-green-400'
+        color: 'text-green-600'
       };
     case 'reblog':
       return {
         icon: <Icons.forward className="h-4 w-4" />,
-        color: 'text-blue-600 dark:text-blue-400'
+        color: 'text-blue-600'
       };
     case 'reply':
     case 'reply_comment':
       return {
         icon: <Icons.comment className="h-4 w-4" />,
-        color: 'text-purple-600 dark:text-purple-400'
+        color: 'text-purple-600'
       };
     case 'mention':
       return {
         icon: <Icons.atSign className="h-4 w-4" />,
-        color: 'text-amber-600 dark:text-amber-400'
+        color: 'text-amber-600'
       };
     case 'follow':
       return {
         icon: <Icons.userPlus className="h-4 w-4" />,
-        color: 'text-cyan-600 dark:text-cyan-400'
+        color: 'text-cyan-600'
       };
     case 'error':
       return {
         icon: <Icons.settings className="h-4 w-4" />,
-        color: 'text-red-600 dark:text-red-400'
+        color: 'text-red-600'
       };
     default:
       return {
@@ -144,7 +144,7 @@ const NotificationListItem = ({
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <Link
           href={`/${fixedUrl}`}
-          className="line-clamp-2 text-sm hover:text-destructive visited:text-gray-500 dark:visited:text-gray-400"
+          className="line-clamp-2 text-sm hover:text-destructive visited:text-gray-500"
         >
           <span data-testid="notification-account-and-message">
             <strong data-testid="subscriber-name">{msg.split(' ')[0]}</strong>

@@ -6,6 +6,7 @@ import { useTranslation } from '@/blog/i18n/client';
 import ChangeTitleDialog from '../community-profile/change-title-dialog';
 import TimeAgo from '@hive/ui/components/time-ago';
 import { UserPopoverCard, UserPopoverCardProps } from './user-popover-card';
+import TokenAuthorChip from '@/blog/features/creator-tokens/ui/token-author-chip';
 
 interface UserInfoProps extends UserPopoverCardProps {
   permlink: string;
@@ -101,6 +102,10 @@ function UserInfo({
       <span className="text-muted-foreground" title={String(parseDate(created))}>
         <TimeAgo date={created} />
       </span>
+
+      {/* Creator-token chip (design brief §2, "and post pages") — same
+          component and same render rule as the feed card's byline. */}
+      <TokenAuthorChip handle={author} />
     </div>
   );
 }

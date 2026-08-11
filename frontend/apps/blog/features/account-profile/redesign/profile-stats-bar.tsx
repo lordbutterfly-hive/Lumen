@@ -1,10 +1,8 @@
-import { Coins } from 'lucide-react';
 import { Link } from '@hive/ui';
 import { Icons } from '@ui/components/icons';
 import TooltipContainer from '@ui/components/tooltip-container';
 import { cn, numberWithCommas } from '@ui/lib/utils';
 import { useTranslation } from '@/blog/i18n/client';
-import { getCreatorTokensConfig } from '@/blog/features/creator-tokens/lib/creator-tokens-data-source';
 
 interface Stat {
   value: string;
@@ -40,10 +38,6 @@ export default function ProfileStatsBar({
   hpEffective?: string;
 }) {
   const { t } = useTranslation('common_blog');
-  // null whenever CREATOR_TOKENS_CONTRACT_ID/NET_ID/GQL_URL aren't provisioned
-  // for this deploy (see getCreatorTokensConfig doc) — render nothing rather
-  // than a link to a feature this environment doesn't have.
-  const creatorTokensConfigured = getCreatorTokensConfig() !== null;
 
   const stats: Stat[] = [
     {
@@ -125,28 +119,15 @@ export default function ProfileStatsBar({
         )
       )}
 
-      {/* ★ P-4: the first button said "Token", a bare noun sitting beside another
-          bare noun ("Wallet") with no clue what pressing it would do — an amount?
-          a balance? a thing to mint? The label now names the action; the
-          destination (/creators/<name>, this account's creator-token page) is
-          unchanged. See locales/en/common_blog.json, profile.creator_token.
-
-          ★ AND THE PAIR WRAPS AS A PAIR. That longer label plus the
-          three-decimal HP figure (W-11) is more than one line of this row can
-          hold on a 752px column, and with `ml-auto` on the first button only,
-          the second broke away onto a line of its own while the first stayed up
-          beside the stats. Grouping them means the row either holds both or
-          moves both. `self-center`: the row is items-start so the stat labels
-          share a baseline, but the buttons belong on the group's vertical
-          centre. */}
+      {/* ★ THE CREATOR-TOKEN GHOST LINK THAT USED TO LIVE HERE IS GONE
+          (creator-token-prominence pass, 2026-08-11). A tertiary grey button
+          reading "View creator token" was the ONLY entry point to what the
+          owner now ranks as the primary product — it is replaced by
+          ProfileTokenCard (features/creator-tokens/ui/profile-token-card.tsx),
+          a real data card between this row and the tabs, in profile-main.tsx.
+          `self-center`: the row is items-start so the stat labels share a
+          baseline, but Wallet belongs on the group's vertical centre. */}
       <div className="ml-auto flex flex-wrap items-center gap-2.5 self-center">
-        {creatorTokensConfigured ? (
-          <Link href={`/creators/${username}`} className={ROW_BUTTON_CLASS} data-testid="profile-creator-token-link">
-            <Coins className="h-[17px] w-[17px]" />
-            {t('profile.creator_token')}
-          </Link>
-        ) : null}
-
         <Link href="/wallet" className={ROW_BUTTON_CLASS}>
           <Icons.wallet className="h-[17px] w-[17px]" />
           {t('profile.wallet')}

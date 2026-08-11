@@ -13,6 +13,7 @@ import { useSSRObserver, useInitialPosts } from '@/blog/components/observer-prov
 import { useFollowingInfiniteQuery } from '@/blog/features/account-lists/hooks/use-following-infinitequery';
 import NoDataError from '@/blog/components/no-data-error';
 import { ProfileLeagueCard } from '@/blog/features/retention/components/profile-league-card';
+import ProfileTokenCard from '@/blog/features/creator-tokens/ui/profile-token-card';
 import PageMasthead from '@/blog/features/layouts/page-masthead';
 import ProfileMainSkeleton from './profile-main-skeleton';
 import ProfileCover from './profile-cover';
@@ -192,6 +193,14 @@ export default function ProfileMain() {
         hp={hp.toFixed(3)}
         hpEffective={hpEffective.toFixed(3)}
       />
+
+      {/* Creator-token surface (design brief §3, creator-token-prominence pass):
+          directly under the stats row and above the Posts/Comments tabs — and
+          above the league/rank card below, which is the closest real analogue
+          this app has to the brief's "Spark rank card" (the mockup predates
+          the retention rework and has no such card at all). Renders nothing of
+          its own when there is nothing real to show — see the component's doc. */}
+      <ProfileTokenCard username={username} isOwnProfile={isOwnProfile} />
 
       <ProfileLeagueCard username={username} className="mt-5" chainAccount={!profileData._temporary} />
 

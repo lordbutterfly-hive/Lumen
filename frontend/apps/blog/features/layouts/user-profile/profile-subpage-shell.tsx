@@ -40,11 +40,22 @@ export type ProfileSubpage = 'settings' | 'followers' | 'followed' | 'communitie
 const ProfileSubpageShell = ({
   username,
   page,
-  children
+  children,
+  rightRail
 }: {
   username: string;
   page: ProfileSubpage;
   children: ReactNode;
+  /**
+   * ★ /settings DOES NOT WANT THE FEED RAIL (audit item 13). The default here
+   * is the same `<RightRail />` every sub-page used to get unconditionally —
+   * the streak card, the prediction-market widget and Topics, all of them
+   * feed context that has nothing to do with account settings. `undefined`
+   * (every caller except settings) keeps that default so followers/followed/
+   * communities/lists are unchanged; passing `null` drops the rail — and its
+   * grid column — entirely, which settings/layout.tsx does.
+   */
+  rightRail?: ReactNode;
 }) => {
   const { t } = useTranslation('common_blog');
 
@@ -56,8 +67,14 @@ const ProfileSubpageShell = ({
     lists: t('profile.subpage.lists_title')
   };
 
+  const rail = rightRail === undefined ? <RightRail /> : rightRail;
+
   return (
-    <div className="relative mx-auto grid max-w-[1720px] grid-cols-1 gap-11 px-6 pb-20 pt-[26px] md:grid-cols-[200px_minmax(0,1fr)] md:px-11 xl:grid-cols-[200px_minmax(0,1fr)_312px]">
+    <div
+      className={`relative mx-auto grid max-w-[1720px] grid-cols-1 gap-11 px-6 pb-20 pt-[26px] md:grid-cols-[200px_minmax(0,1fr)] md:px-11 ${
+        rail ? 'xl:grid-cols-[200px_minmax(0,1fr)_312px]' : ''
+      }`}
+    >
       <div
         className="pointer-events-none absolute bottom-20 left-[244px] top-[26px] hidden w-px bg-[#ececec] md:block"
         aria-hidden
@@ -84,9 +101,7 @@ const ProfileSubpageShell = ({
         {children}
       </main>
 
-      <aside className="sticky top-24 hidden h-fit xl:block">
-        <RightRail />
-      </aside>
+      {rail ? <aside className="sticky top-24 hidden h-fit xl:block">{rail}</aside> : null}
     </div>
   );
 };

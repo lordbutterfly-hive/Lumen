@@ -1,25 +1,81 @@
 'use client';
 
 import { useEffect } from 'react';
-import { Button } from '@ui/components/button';
+import { Link } from '@hive/ui';
 import { handleError } from '@ui/lib/handle-error';
+import PageMasthead from '@/blog/features/layouts/page-masthead';
+import { isChunkLoadError, reloadOnceForChunkError } from '@/blog/lib/chunk-error-reload';
 
+// TODO i18n — staged copy, same precedent as app-header's LABELS.
+const COPY = {
+  title: 'Something went wrong',
+  body: 'This page hit an error it could not recover from. Reloading usually fixes it.',
+  updatingTitle: 'Updating Lumen',
+  updatingBody: 'A newer version of this page is ready. Reloading now.',
+  tryAgain: 'Try again',
+  home: 'Go to the home feed'
+};
+
+const PRIMARY =
+  'inline-flex h-10 items-center justify-center rounded-[14px] bg-[#c0392b] px-5 font-sans text-[14px] font-semibold text-white transition-colors hover:bg-[#a83224]';
+const SECONDARY =
+  'inline-flex h-10 items-center justify-center rounded-[14px] border border-[#e4e6e9] px-5 font-sans text-[14px] font-semibold text-[#3f4650] transition-colors hover:bg-[#f6f7f8]';
+
+/**
+ * ★★★ ROOT ERROR BOUNDARY, LUMEN-STYLED, CHUNK-LOAD-AWARE (2026-08-11).
+ *
+ * Was the stock shadcn "Something went wrong!" — default sans, a
+ * `text-muted-foreground` line, a default-variant `Button` — the same
+ * off-brand shape `app/not-found.tsx` was fixed for on 2026-08-10. Same
+ * masthead, same brand-red action button, no bare `<h2>`.
+ *
+ * ★ CHUNK-LOAD-ERROR AUTO-RECOVERY. `ChunkLoadError: Loading chunk app/layout
+ * failed` reached a real reader on `/@lordbutterfly` and produced Next's dev
+ * overlay — because in dev this route is not even mounted yet, so there was
+ * no boundary alive to catch it. In production the same failure means: this
+ * tab loaded before the last deploy, and the chunk it now needs was purged
+ * with the old build. No amount of "Try again" fixes that — the chunk is not
+ * coming back — so this reloads the document once instead of showing an error
+ * a retry cannot resolve. See `lib/chunk-error-reload.ts` for why this alone
+ * is not the whole fix: when `app/layout.js` itself is the purged chunk,
+ * `app/error.js` is usually purged in the same deploy, and this component's
+ * own code never gets to run. `app/layout.tsx` carries a second, dependency-free
+ * copy of this same detection in a plain inline `<script>` for exactly that
+ * case.
+ */
 export default function Error({
   error,
-  reset,
+  reset
 }: {
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const chunkError = isChunkLoadError(error);
+
   useEffect(() => {
-    handleError(error, { method: 'RootErrorBoundary', params: { digest: error.digest } });
-  }, [error]);
+    handleError(error, { method: 'RootErrorBoundary', params: { digest: error.digest, chunkError } });
+    if (chunkError) reloadOnceForChunkError();
+  }, [error, chunkError]);
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-4 p-4">
-      <h2 className="text-2xl font-bold">Something went wrong!</h2>
-      <p className="text-muted-foreground">An unexpected error occurred. Please try again.</p>
-      <Button onClick={() => reset()}>Try again</Button>
+    <div className="mx-auto flex min-h-[70vh] max-w-[520px] flex-col items-center justify-center px-6 text-center">
+      <div className="w-full text-left">
+        <PageMasthead title={chunkError ? COPY.updatingTitle : COPY.title}>
+          <p className="max-w-[460px] font-serif text-[13px] leading-[1.55] text-[#6b7280]">
+            {chunkError ? COPY.updatingBody : COPY.body}
+          </p>
+        </PageMasthead>
+        {!chunkError ? (
+          <div className="flex flex-wrap items-center gap-3">
+            <button type="button" onClick={() => reset()} className={PRIMARY}>
+              {COPY.tryAgain}
+            </button>
+            <Link href="/" className={SECONDARY}>
+              {COPY.home}
+            </Link>
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }

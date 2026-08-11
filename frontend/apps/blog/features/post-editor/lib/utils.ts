@@ -356,5 +356,20 @@ export const onBatchImageUpload = async (
 
 export type { BatchFileItem, FileProcessingStatus, ProcessingOptions };
 
+// ★ WAS `font-source` (2026-08-11, audit item 6). That utility has ZERO
+// generated CSS: Tailwind's content glob only scans `**/*.{jsx,tsx}` (see
+// `packages/tailwindcss/tailwind.config.js`), and this string lives in a
+// plain `.ts` file, so the class name is invisible to the JIT scanner and
+// compiles to nothing. The post body silently fell back to the inherited
+// `font-sans` (Open Sans) on `<body>`, while every feed/profile excerpt of
+// the same prose (e.g. `medium-post-card.tsx`, `profile-identity.tsx`) uses
+// the working `font-serif` utility and renders Lora. `font-serif` already
+// resolves to the exact same `var(--font-source-serif)` (see
+// `apps/blog/tailwind.config.js`) that `font-source` was meant to alias, so
+// swapping to it is a same-font, zero-behavior-change fix that makes post
+// bodies match excerpts instead of a rename that would need a new dead alias
+// chased down again later. `font-sanspro` elsewhere on this page (the title)
+// is NOT dead — it has a real compiled rule and is correctly Open Sans by
+// design — so it is left alone.
 export const postClassName =
-  'font-source text-[16.5px] prose-h1:text-[26.4px] prose-h2:text-[23.1px] prose-h3:text-[19.8px] prose-h4:text-[18.1px] sm:text-[17.6px] sm:prose-h1:text-[28px] sm:prose-h2:text-[24.7px] sm:prose-h3:text-[22.1px] sm:prose-h4:text-[19.4px] lg:text-[19.2px] lg:prose-h1:text-[30.7px] lg:prose-h2:text-[28.9px] lg:prose-h3:text-[23px] lg:prose-h4:text-[21.1px] prose-p:mb-6 prose-p:mt-0 prose-img:cursor-pointer prose-img:max-w-full prose-img:h-auto';
+  'font-serif text-[16.5px] prose-h1:text-[26.4px] prose-h2:text-[23.1px] prose-h3:text-[19.8px] prose-h4:text-[18.1px] sm:text-[17.6px] sm:prose-h1:text-[28px] sm:prose-h2:text-[24.7px] sm:prose-h3:text-[22.1px] sm:prose-h4:text-[19.4px] lg:text-[19.2px] lg:prose-h1:text-[30.7px] lg:prose-h2:text-[28.9px] lg:prose-h3:text-[23px] lg:prose-h4:text-[21.1px] prose-p:mb-6 prose-p:mt-0 prose-img:cursor-pointer prose-img:max-w-full prose-img:h-auto';

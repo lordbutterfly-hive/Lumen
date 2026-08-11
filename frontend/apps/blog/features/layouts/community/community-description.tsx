@@ -48,7 +48,7 @@ const CommunityDescription = ({
   return (
     <div className="flex w-full max-w-[240px] flex-col">
       <Card
-        className={clsx('my-4 hidden h-fit w-auto flex-col px-4 text-primary dark:bg-background md:flex', {
+        className={clsx('my-4 hidden h-fit w-auto flex-col px-4 text-primary md:flex', {
           'animate-pulse': data._temporary
         })}
         data-testid="community-info-sidebar"
@@ -136,7 +136,7 @@ const CommunityDescription = ({
         </CardContent>
       </Card>
       <Card
-        className={clsx('my-4 hidden h-fit w-auto flex-col px-4 text-primary dark:bg-background md:flex', {
+        className={clsx('my-4 hidden h-fit w-auto flex-col px-4 text-primary md:flex', {
           'animate-pulse': data._temporary
         })}
         data-testid="community-description-rules-sidebar"

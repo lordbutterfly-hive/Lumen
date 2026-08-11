@@ -8,6 +8,45 @@ import ScrollToElement from './scroll-to-element';
 import { cn } from '@ui/lib/utils';
 import { isUrlWhitelisted } from '@hive/ui/config/lists/phishing';
 
+/**
+ * ★★★ ONE H1 PER POST PAGE (2026-08-11, audit item 8). The post page already
+ * renders its own `<h1 data-testid="article-title">` for the post's title
+ * (`app/[param]/[p2]/[permlink]/content.tsx`), and a reader's own Markdown can
+ * ALSO open with a `#` heading, which this renderer turned into a second raw
+ * `<h1>` inside the body — two H1s on one page, which breaks heading-based
+ * screen-reader navigation (there is no longer exactly one "most important
+ * heading" to land on).
+ *
+ * Demotes every markdown heading by one level (h1->h2 ... h5->h6; h6 has
+ * nowhere lower to go) so the post's own title stays the page's only h1. Pure
+ * string substitution on the rendered HTML, done here rather than in the
+ * shared `@hive/renderer` package: that package is also used for comments,
+ * community descriptions and editor previews, none of which have a
+ * page-level h1 to collide with, and rewriting its Remarkable heading rule
+ * globally would change heading sizes (via the `prose-hN:` selectors in
+ * `postClassName`) everywhere at once. Done on the STRING, not via a
+ * post-mount DOM walk, so it runs identically during SSR and on the client —
+ * no hydration mismatch, and a crawler with no JS still sees the demoted,
+ * single-h1 structure.
+ *
+ * Processed h5 -> h1 (highest level first) deliberately: each step only ever
+ * touches its own original tag name, and by the time a lower step runs, the
+ * level it's about to consume can no longer collide with a tag a previous
+ * step just produced (previous steps always produce a HIGHER number than any
+ * level still to be consumed).
+ */
+function demoteHeadings(html: string): string {
+  let out = html;
+  for (let level = 5; level >= 1; level--) {
+    const from = `h${level}`;
+    const to = `h${level + 1}`;
+    out = out
+      .replace(new RegExp(`<${from}(?=[\\s>])`, 'g'), `<${to}`)
+      .replace(new RegExp(`</${from}>`, 'g'), `</${to}>`);
+  }
+  return out;
+}
+
 const RendererContainer = ({
   body,
   author,
@@ -156,9 +195,13 @@ const RendererContainer = ({
   const htmlBody = useMemo(() => {
     if (body) {
       const postContext = author || permlink ? { author, permlink } : undefined;
-      return hiveRenderer.render(body, postContext);
+      const rendered = hiveRenderer.render(body, postContext);
+      // Only the standalone post page (mainPost) also renders its own page-level
+      // h1 — comments, previews and community descriptions do not, so they are
+      // left with their original heading levels.
+      return mainPost ? demoteHeadings(rendered) : rendered;
     }
-  }, [hiveRenderer, body, author, permlink]);
+  }, [hiveRenderer, body, author, permlink, mainPost]);
 
   return !htmlBody ? (
     <Loading loading={false} />

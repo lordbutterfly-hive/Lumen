@@ -151,7 +151,7 @@ const PostListItem = memo(
           {post.original_entry ? (
             <div className="mt-2 rounded-sm bg-background-secondary px-2 py-1 text-sm" data-testid="cross-post-banner">
               <p className="flex items-center gap-1 text-xs md:text-sm">
-                <Icons.crossPost className="h-4 w-4 text-slate-500 dark:text-slate-400" />{' '}
+                <Icons.crossPost className="h-4 w-4 text-slate-500" />{' '}
                 <Link className="hover:cursor-pointer hover:text-destructive" href={`/@${post.author}`} data-testid="cross-post-author-link">
                   {post.author}
                 </Link>{' '}

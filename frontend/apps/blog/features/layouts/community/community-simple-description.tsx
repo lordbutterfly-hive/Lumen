@@ -47,7 +47,7 @@ const CommunitySimpleDescription = ({
 
   return (
     <Card
-      className={clsx('my-4 flex h-fit w-full flex-col gap-3 p-3 text-primary dark:bg-background sm:p-4', {
+      className={clsx('my-4 flex h-fit w-full flex-col gap-3 p-3 text-primary sm:p-4', {
         'animate-pulse': data._temporary
       })}
       data-testid="community-simple-description-sidebar"

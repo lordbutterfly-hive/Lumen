@@ -3,6 +3,7 @@
 import { Link } from '@hive/ui';
 
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { useTranslation } from '@/blog/i18n/client';
 import DialogLogin from '@/blog/components/dialog-login';
 import PageMasthead from '@/blog/features/layouts/page-masthead';
@@ -42,18 +43,41 @@ const SECONDARY_BUTTON_CLASS =
 export default function WalletContent() {
   const { t } = useTranslation('common_blog');
   const { user } = useUserClient();
+  /**
+   * ★★★ THE PAGE ALREADY KNEW; THIS COMPONENT DID NOT ASK IT (2026-08-11).
+   *
+   * `app/wallet/page.tsx` reads the session cookie on the server and redirects
+   * a signed-out reader before this ever renders — so anyone who reaches here
+   * IS signed in, confirmed server-side. This component still gated its own
+   * "logged out" branch on raw `useUserClient()`, which cannot answer during
+   * SSR and reports signed-out on the client for 3-5s until `/api/users/me`
+   * returns — so a reader the server had already cleared to be here was shown
+   * "Log in to see your Hive wallet" on the one page whose entire premise is
+   * "you are signed in". `useSessionIdentity` (the same helper the header and
+   * left rail use) carries the server's already-correct answer instead of
+   * re-guessing "signed out" until the client catches up.
+   */
+  const identity = useSessionIdentity();
   // A keyless Lumen account has no Hive account, so there is nothing on chain to
   // look up. Passing '' disables the account queries (`enabled: !!username` in
   // use-wallet-account.ts) — without that the page fetched a name that does not
   // exist, got an empty result back, and threw inside the figure derivation
   // before any of the honest states below could render. The whole page was a
   // blank error, reached from a link that is always on screen in the left rail.
+  //
+  // `isLite` still reads the plain client value, not `identity` — the server
+  // session only carries isLoggedIn/username, not account tier. While the
+  // client hasn't answered yet, `isLite` defaults false, `user.username` is
+  // still '', and the account query below stays disabled — which the existing
+  // isLoading branch already renders as a neutral "loading" masthead rather
+  // than guessing a tier. That is correct: it never shows a lite reader the
+  // full-balance UI or a full reader the lite UI, it just waits one beat.
   const isLite = user.account_tier === 'lite';
   const { account, figures, dynamicGlobal, chain, isLoading, isError } = useWalletAccount(
     isLite ? '' : user.username
   );
 
-  if (!user.isLoggedIn) {
+  if (!identity.isLoggedIn) {
     return (
       <div data-testid="wallet-content-logged-out">
         <PageMasthead title={t('wallet.page_title')}>

@@ -37,7 +37,16 @@ export type LiveMarketStatus =
   | 'missing'
   | 'ready';
 
-const marketKey = (creator: string) => ['creatorTokens', 'live', 'market', creator];
+/**
+ * Exported (2026-08-11, creator-token-prominence pass) so the lightweight
+ * header-pill/byline-chip read (live/use-token-price-chip.ts) can target the
+ * EXACT SAME cache entry this hook's own market query uses — a reader who
+ * opens a creator's token page after seeing their chip in the feed gets an
+ * instant, already-cached price instead of a second chain read, and vice
+ * versa. react-query dedupes by the key's contents, not by which file built
+ * it, so this only needs to be the single source of truth for the shape.
+ */
+export const creatorMarketKey = (creator: string) => ['creatorTokens', 'live', 'market', creator];
 const positionKey = (creator: string, holder?: string) => ['creatorTokens', 'live', 'position', creator, holder];
 const offeringsKey = (creator: string) => ['creatorTokens', 'live', 'offerings', creator];
 const deliveryKey = (creator: string) => ['creatorTokens', 'live', 'delivery', creator];
@@ -103,7 +112,7 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
   const enabled = Boolean(creator) && !unavailable;
 
   const marketQuery = useQuery({
-    queryKey: marketKey(creator),
+    queryKey: creatorMarketKey(creator),
     queryFn: () => dataSource!.readMarket(creator),
     enabled,
     staleTime: STALE_MS,
@@ -179,7 +188,7 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
       : null;
 
   const invalidate = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: marketKey(creator) });
+    queryClient.invalidateQueries({ queryKey: creatorMarketKey(creator) });
     queryClient.invalidateQueries({ queryKey: positionKey(creator, viewer ?? undefined) });
   }, [queryClient, creator, viewer]);
 
@@ -293,7 +302,7 @@ export function useLiveTokenMarket(creator: string): LiveTokenMarketResult {
 
     isBuying: buyMutation.isLoading,
     retry: () => {
-      for (const key of [marketKey(creator), positionKey(creator, viewer ?? undefined), offeringsKey(creator), deliveryKey(creator), historyKey(creator)]) {
+      for (const key of [creatorMarketKey(creator), positionKey(creator, viewer ?? undefined), offeringsKey(creator), deliveryKey(creator), historyKey(creator)]) {
         queryClient.invalidateQueries({ queryKey: key });
       }
     },

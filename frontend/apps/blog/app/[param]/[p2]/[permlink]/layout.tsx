@@ -1,7 +1,6 @@
 import { Metadata } from 'next';
 import React, { PropsWithChildren } from 'react';
 import { notFound } from 'next/navigation';
-import { siteConfig } from '@ui/config/site';
 import { getPostCached } from '@/blog/lib/cached-api';
 import { liteEntryForPermlinkCached } from '@/blog/lib/lite/render/lite-entry-cached';
 import { liteRecordExists } from '@/blog/lib/lite/render/lite-entry';
@@ -19,6 +18,11 @@ const logger = getLogger('app');
 // the same site, not a second one.
 const SITE_DESC =
   'Communities without borders. A social network owned and operated by its users, powered by Hive.';
+
+// ★ NEVER `siteConfig.name` HERE (audit item 15) — see the long note at its
+// use below. The root layout's `%s - Lumen` template turns the bare site name
+// into "Lumen - Lumen" in the tab.
+const FALLBACK_TITLE = 'Post';
 
 export async function generateMetadata({
   params
@@ -68,8 +72,16 @@ export async function generateMetadata({
     // is what every share preview and search result shows, forever.
     if (post && !post._lite) await attachLiteIdentities([post]);
 
+    // ★ NOT `siteConfig.name` WHEN THERE IS NO REAL TITLE (audit item 15). A
+    // Hive COMMENT's own `title` field is conventionally empty (only the
+    // top-level post carries one), and a Lumen post that has not indexed yet
+    // resolves with no post at all — both fell into this branch before, and
+    // the root layout's `%s - Lumen` template turned the bare site name into
+    // "Lumen - Lumen" in the tab for what is, on this route, an ordinary and
+    // frequent case, not an error. Also dropped the trailing space `realTitle`
+    // used to carry into the template (`"Title  - Lumen"`, doubled).
     const realTitle = post?._lite?.title || post?.title;
-    const title = realTitle ? `${realTitle} ` : siteConfig.name;
+    const title = realTitle || FALLBACK_TITLE;
     const description =
       post?.json_metadata?.summary ||
       post?.json_metadata?.description ||
@@ -97,10 +109,10 @@ export async function generateMetadata({
   } catch (error) {
     logger.error(error, 'Error in generateMetadata');
     return {
-      title: siteConfig.name,
+      title: FALLBACK_TITLE,
       description: SITE_DESC,
       openGraph: {
-        title: siteConfig.name,
+        title: FALLBACK_TITLE,
         description: SITE_DESC
       }
     };

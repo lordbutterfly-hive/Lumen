@@ -1,5 +1,4 @@
 import { Metadata } from 'next';
-import { siteConfig } from '@ui/config/site';
 import { isBannedAuthor } from '@/blog/lib/moderation/banned-authors';
 import React, { ReactNode } from 'react';
 import ProfileSubpageShell from '@/blog/features/layouts/user-profile/profile-subpage-shell';
@@ -10,7 +9,9 @@ export async function generateMetadata({ params }: { params: { param: string } }
 
   // See followers/layout.tsx: the title is built from the URL alone, so it
   // renders a banned account's name even on the 404 this route serves.
-  if (isBannedAuthor(username)) return { title: siteConfig.name };
+  // ★ NOT `siteConfig.name` (audit item 15) — the root layout's `%s - Lumen`
+  // template turns the bare site name into "Lumen - Lumen" in the tab.
+  if (isBannedAuthor(username)) return { title: 'Settings' };
   const title = `Settings ${username}`;
 
   return {
@@ -30,7 +31,10 @@ export default function Layout({
 }) {
   const username = extractUsernameFromParam(params.param) ?? '';
   return (
-    <ProfileSubpageShell username={username} page="settings">
+    // ★ NOT THE FEED RAIL (audit item 13). Streak card, prediction market and
+    // Topics belong to the reading surfaces, not to account settings — see
+    // profile-subpage-shell.tsx's `rightRail` prop.
+    <ProfileSubpageShell username={username} page="settings" rightRail={null}>
       {children}
     </ProfileSubpageShell>
   );

@@ -64,7 +64,7 @@ export function CommunitiesSelect({ title }: { title: string }) {
         }
       }}
     >
-      <SelectTrigger className="bg-white dark:bg-background/95 dark:text-white">
+      <SelectTrigger className="bg-white">
         <SelectValue placeholder={title} />
       </SelectTrigger>
       <SelectContent

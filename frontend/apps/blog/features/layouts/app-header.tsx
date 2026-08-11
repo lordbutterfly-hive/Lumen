@@ -17,10 +17,10 @@ import DialogLogin from '@/blog/components/dialog-login';
 import UserMenu from '@/blog/features/layouts/site-header/user-menu';
 import NotificationsMenu from '@/blog/features/layouts/site-header/notifications-menu';
 import { ManabarRing } from '@/blog/features/layouts/site-header/manabar-ring';
-import SearchButton from '@/blog/features/layouts/site-header/search-button';
 import MobileNav from '@/blog/features/layouts/mobile-nav';
 import { SearchInput } from '@/blog/features/search/search-input';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
+import HeaderTokenPill from '@/blog/features/creator-tokens/ui/header-token-pill';
 
 // TODO i18n - move into locales/*/common_blog.json once copy is final
 const LABELS = {
@@ -28,7 +28,8 @@ const LABELS = {
   write: 'Write',
   notifications: 'Notifications',
   login: 'Log in',
-  yourProfile: 'Your profile'
+  yourProfile: 'Your profile',
+  creatorTokens: 'Creator Tokens'
 };
 
 /**
@@ -165,9 +166,23 @@ const AppHeader: FC = () => {
           at 820px the header rendered as "Lumen | Search…" over "✏ Log in",
           doubling its height and leaving Log in floating under the wordmark.
           Verified pre-existing (screenshotted at 820px before any change here).
-          `auto` sizes the third column to the cluster; xl's explicit 312px
-          right-rail column takes over unchanged above 1280px. */}
-      <div className="mx-auto grid max-w-[1720px] grid-cols-[1fr_auto] items-center gap-3 px-6 py-[14px] md:grid-cols-[200px_minmax(0,1fr)_auto] md:gap-11 md:px-11 xl:grid-cols-[200px_minmax(0,1fr)_312px]">
+          `auto` sizes the third column to the cluster.
+
+          ★ NO MORE xl:312px OVERRIDE (creator-token-prominence pass,
+          2026-08-11, design brief §1: "Header grid changes from 200px
+          minmax(0,1fr) 312px to 200px minmax(0,1fr) auto so the right cluster
+          sizes to content"). The action cluster now carries the "Creator
+          Tokens" link plus the token pill/CTA on top of write/notifications/
+          avatar, and that is reliably wider than 312px — a fixed column would
+          either clip it or force it onto the second row the comment above
+          this one already fixed once. `auto` from md upward, unconditionally,
+          matches the reference mockup (Lumen.dc.html) exactly. This trades
+          away the header search box's previous pixel-perfect alignment with
+          the content grid's fixed 312px right rail at xl+; that grid is a
+          separate element two rows down and was never coupled to this one
+          structurally, only visually, and the brief calls this trade out by
+          name. */}
+      <div className="mx-auto grid max-w-[1720px] grid-cols-[1fr_auto] items-center gap-3 px-6 py-[14px] md:grid-cols-[200px_minmax(0,1fr)_auto] md:gap-11 md:px-11">
         {/* col 1 — Open Sans wordmark over the nav column (design-handoff-v2: no
             serif display face). The 14px inset matches the left-rail rows' own
             px-[14px], so the wordmark's left edge lands on the nav icons' left
@@ -184,14 +199,57 @@ const AppHeader: FC = () => {
 
         {/* col 2 — search spans the center column (desktop). The ONLY search
             field in the product: /search has no box of its own any more, it
-            reads the URL this one writes. */}
+            reads the URL this one writes. Below md there is no third grid
+            column to put it in (col 1 becomes 1fr, col 3 is the icon
+            cluster, and the cluster already has zero horizontal slack at
+            that width — see the write-button note above), so mobile gets
+            its own full-width row underneath instead of a column here. */}
         <div className="hidden md:block">
           <SearchInput />
         </div>
 
         {/* col 3 — action cluster over the right rail */}
         <div className="flex items-center justify-end gap-2 md:gap-3.5">
-          <SearchButton aiTag={false} className="md:hidden" />
+          {/* ★★★ SEARCHBUTTON REMOVED (2026-08-11, audit item 9). This used to
+              render its own `a[href="/search"]` + nested `<button>` here,
+              `md:hidden`-ed only on the INNER button — so the outer anchor
+              stayed in the DOM, unhidden, at every width: collapsed to 0x0 and
+              invisible on desktop but still a real, tabbable, aria-label
+              "Search" stop sitting right next to the real search field's own
+              "Search posts" input and button, and at mobile the two nested
+              INSIDE each other (a `<button>` inside an `<a href>`, the same
+              invalid-HTML shape already fixed for the Write icon below,
+              A-2). The owner's ruling was explicit: ONE search control, the
+              header field. `SearchInput` now renders below at every width
+              (see the row right after this grid), so this component has
+              nothing left to do — deleted at `features/layouts/site-header/
+              search-button.tsx` rather than left as dead code nobody imports. */}
+
+          {/* Creator Tokens entry point (design brief §1) — owner ruling:
+              this cluster is the part of the redesign he likes most, and
+              creator tokens are the primary product, so it gets first claim
+              on the header, ahead of Write/Notifications/Avatar.
+
+              ★ HIDDEN BELOW xl, ON PURPOSE. The write-button note two blocks
+              up already documents md (768-1279px) as having ZERO horizontal
+              slack — 820px was a measured near-miss with three controls, one
+              of them a two-word "Log in" button. Two more controls (a text
+              link plus a pill) would reopen exactly that overflow. xl is also
+              the one width tier that used to reserve a fixed 312px here, so
+              it is the first width with genuine room. The design brief itself
+              scopes this whole pass to desktop ("mobile is a separate task"),
+              and md/lg are not "mobile" but are not where this fits either —
+              xl is the honest floor, not a mobile cutoff by another name. */}
+          <Link
+            href="/creators"
+            className="hidden shrink-0 whitespace-nowrap px-1 font-sans text-[14.5px] font-semibold text-[#3f4650] transition-colors hover:text-[#161511] xl:inline-block"
+            data-testid="header-creator-tokens-link"
+          >
+            {LABELS.creatorTokens}
+          </Link>
+          <div className="hidden xl:block">
+            <HeaderTokenPill />
+          </div>
 
           <TooltipContainer title={LABELS.write}>
             {identity.isLoggedIn ? (
@@ -415,6 +473,17 @@ const AppHeader: FC = () => {
               of the header nav). Below md only — see mobile-nav.tsx. */}
           <MobileNav />
         </div>
+      </div>
+
+      {/* ★ THE SAME FIELD, ITS OWN ROW, BELOW md (2026-08-11, audit item 9).
+          Not a second search control — this is the identical `SearchInput`
+          instance-type rendered in col 2 above, just placed where a phone
+          has room for it instead of squeezed into the icon cluster. Only one
+          of the two is ever on screen at a given width (`md:hidden` here,
+          `hidden md:block` above), so there is still exactly one search
+          field in the DOM's visible tree at any size. */}
+      <div className="border-t border-[#ebebeb] px-6 pb-3 pt-2.5 md:hidden">
+        <SearchInput />
       </div>
     </header>
   );

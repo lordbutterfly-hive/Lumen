@@ -376,7 +376,7 @@ export function ReplyTextbox({
         </div>
 
         {shadowReplyRecovery && (
-          <div className="flex items-center justify-between rounded-md bg-amber-50 px-3 py-2 text-sm dark:bg-amber-900/20">
+          <div className="flex items-center justify-between rounded-md bg-amber-50 px-3 py-2 text-sm">
             <span className="text-foreground/80">{t('post_content.footer.comment.shadow_draft_found')}</span>
             <div className="flex gap-2">
               <Button
@@ -413,7 +413,7 @@ export function ReplyTextbox({
           <div
             role="alert"
             data-testid="reply-draft-save-failed"
-            className="rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900 dark:border-red-800 dark:bg-red-950 dark:text-red-100"
+            className="rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900"
           >
             <strong className="font-semibold">This reply is not being saved.</strong> Your browser
             has no room to store it, so it will be lost if you close or reload this tab. Post it

@@ -62,6 +62,18 @@ export const PATHS: Record<string, string> = {
     '<circle cx="8.5" cy="12" r="4"/><path d="M11.9 9.9l7.6-4.4"/><path d="M17 7.1l2 1.1"/><path d="M15.2 8.1l1.4 2.4"/>',
   wallet:
     '<path d="M4 8a2.5 2.5 0 0 1 2.5-2.5H16A1.5 1.5 0 0 1 17.5 7v2"/><path d="M4 8v9a2 2 0 0 0 2 2h12.5a1.5 1.5 0 0 0 1.5-1.5V11a1.5 1.5 0 0 0-1.5-1.5H6.5A2.5 2.5 0 0 1 4 8z"/><path d="M15 12.3l2.2 2.2-2.2 2.2-2.2-2.2z" stroke-linejoin="miter"/>',
+  // A coin (plain circle, same weight as `circle`) carrying the product's own
+  // ◈ token glyph as a mitered facet at its centre — the same "rhombus chip"
+  // idiom `wallet` already uses for its card slot, just centred in a coin
+  // instead of tucked into a wallet body. Replaces a lucide `Users` icon that
+  // was never on this set's grid at all (left-rail.tsx used it directly,
+  // unstyled by this file), and deliberately is NOT a $-glyph-in-a-circle —
+  // owner ruling 2026-08-11: the previous glyph read as a dollar sign, and a
+  // creator TOKEN should not look like currency. Reusing ◈'s own diamond shape
+  // ties the nav icon to the one glyph every other creator-token surface in
+  // the product already uses, rather than inventing a second symbol for the
+  // same idea.
+  creatorTokens: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.8l4.2 4.2-4.2 4.2-4.2-4.2z" stroke-linejoin="miter"/>',
 
   // ── post actions (Hive family — rhombus / angular signature) ──────────────
   arrowBigUp: '<path d="M12 4l7.5 7.5H15V19H9v-7.5H4.5z" stroke-linejoin="miter"/>',
@@ -224,6 +236,7 @@ export const settings = make('settings');
 export const doorOpen = make('doorOpen');
 export const keyRound = make('keyRound');
 export const wallet = make('wallet');
+export const creatorTokens = make('creatorTokens');
 export const arrowBigUp = make('arrowBigUp');
 export const arrowBigDown = make('arrowBigDown');
 export const arrowUpCircle = make('arrowUpCircle');

@@ -1,7 +1,7 @@
 'use client';
 
 import { ComponentType, useEffect, useState } from 'react';
-import { Loader2, LucideProps, Users } from 'lucide-react';
+import { Loader2, LucideProps } from 'lucide-react';
 import { usePathname } from 'next/navigation';
 import { Icons } from '@ui/components/icons';
 import { Separator } from '@ui/components/separator';
@@ -17,7 +17,10 @@ const LABELS = {
   home: 'Home',
   profile: 'Profile',
   wallet: 'Wallet',
-  creators: 'Creators',
+  // ★ RENAMED (design brief "Also changed", creator-token-prominence pass,
+  // 2026-08-11): "Creators" undersold what this row is — creator TOKENS, the
+  // product's primary surface per owner ruling, not a people directory.
+  creators: 'Creator Tokens',
   voteWitness: 'Witnesses',
   voteProposals: 'Proposals',
   settings: 'Settings'
@@ -213,10 +216,14 @@ export default function LeftRail() {
           onNavigate={setPendingHref}
           testId="left-rail-wallet"
         />
-        {/* Creators — the creator-token discovery surface (design handoff-v2). */}
+        {/* Creator Tokens — the creator-token discovery surface (design
+            handoff-v2). Icon: Icons.creatorTokens (custom-icons.tsx) — a coin
+            carrying the product's own ◈ glyph, replacing a lucide `Users`
+            icon the owner flagged as reading like a dollar sign and
+            "shitty" (2026-08-11); see that icon's own doc for the reasoning. */}
         <InternalNavRow
           href="/creators"
-          icon={Users}
+          icon={Icons.creatorTokens}
           label={LABELS.creators}
           isActive={activeUnder('/creators')}
           isPending={navigatingTo === '/creators'}

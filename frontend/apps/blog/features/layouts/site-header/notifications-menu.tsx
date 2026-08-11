@@ -1,6 +1,6 @@
 'use client';
 
-import { ReactNode, useState } from 'react';
+import { ReactNode, forwardRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { CircleSpinner } from 'react-spinners-kit';
 import { Popover, PopoverContent, PopoverTrigger } from '@ui/components/popover';
@@ -36,14 +36,19 @@ import { useTranslation } from '@/blog/i18n/client';
  * deleted. There is still NO "see all" link, and there should not be one: the
  * page it would point at does not exist. Hive's own API caps this list at the
  * last 90 days.
+ *
+ * ★★★ FORWARDS ITS REF (2026-08-11, audit item 7a). `app-header.tsx` renders
+ * this as the child of `<TooltipContainer asChild>` (`packages/ui/components
+ * /tooltip-container.tsx`), so Radix clones IT and hands it a ref to measure
+ * for tooltip positioning — same shape as the bug fixed in
+ * `components/dialog-login.tsx` (P0-4): React warned "Function components
+ * cannot be given refs. Check the render method of `SlotClone`", and the ref
+ * is aimed at THIS component, not at `children` (a plain `<Button>` two
+ * levels in, which already forwards fine on its own). Forwarding to
+ * `PopoverTrigger` puts the ref back on the real DOM node, exactly like
+ * `DialogTrigger asChild ref={ref}` does in dialog-login.tsx.
  */
-const NotificationsMenu = ({
-  username,
-  lastRead,
-  children,
-  chainAccount = true,
-  unreadCount = 0
-}: {
+const NotificationsMenu = forwardRef<HTMLButtonElement, {
   username: string;
   lastRead: Date;
   children: ReactNode;
@@ -54,7 +59,10 @@ const NotificationsMenu = ({
    * the bell's badge shows, so the panel and the badge can never disagree.
    */
   unreadCount?: number;
-}) => {
+}>(function NotificationsMenu(
+  { username, lastRead, children, chainAccount = true, unreadCount = 0 },
+  ref
+) {
   const [open, setOpen] = useState(false);
   const { t } = useTranslation('common_blog');
   const markAllAsRead = useMarkAllNotificationsAsReadMutation();
@@ -115,7 +123,7 @@ const NotificationsMenu = ({
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>{children}</PopoverTrigger>
+      <PopoverTrigger asChild ref={ref}>{children}</PopoverTrigger>
       <PopoverContent
         align="end"
         // ★ A FLOATING PANEL NEEDS ELEVATION AND THE HOUSE RADIUS (2026-08-10,
@@ -197,6 +205,6 @@ const NotificationsMenu = ({
       </PopoverContent>
     </Popover>
   );
-};
+});
 
 export default NotificationsMenu;

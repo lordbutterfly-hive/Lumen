@@ -1,4 +1,4 @@
-import { Link, getUserAvatarUrl } from '@hive/ui';
+import { Link, getUserAvatarDirectUrl } from '@hive/ui';
 import { Icons } from '@ui/components/icons';
 import { cn } from '@ui/lib/utils';
 import { useTranslation } from '@/blog/i18n/client';
@@ -35,14 +35,23 @@ export default function WitnessIdentityCell({ row, className }: WitnessIdentityC
             slow load lands on the witness's initial instead of a broken glyph, and the
             image removes itself rather than leaving one behind. The alt was empty on
             every row, which for a link to somebody's profile is a missing name, not a
-            decorative image. */}
+            decorative image.
+
+            ★ SOURCE SWITCHED TO THE IMAGE HOST DIRECTLY (audit item 14). This
+            pointed at our own `/api/avatar` proxy — the same 6+ second-per-row
+            queueing bug the feed's byline avatar had (see the note on
+            `getUserAvatarDirectUrl`) — so a table of 20+ witnesses queued
+            behind each other on our own single-threaded route instead of the
+            image host's own connection pool. The monogram above is already the
+            fallback for a real failure; this just stops manufacturing one out
+            of ordinary load time. */}
         <span
           className={`relative flex h-[38px] w-[38px] shrink-0 items-center justify-center overflow-hidden rounded-[11px] bg-[#f1f3f5] font-sans text-[15px] font-bold uppercase text-[#9ca3af] ${row.isDisabled ? 'opacity-40 grayscale' : ''}`}
           aria-hidden="true"
         >
           {row.owner.slice(0, 1)}
           <img
-            src={getUserAvatarUrl(row.owner, 'medium')}
+            src={getUserAvatarDirectUrl(row.owner, 'medium')}
             alt=""
             width={38}
             height={38}

@@ -103,7 +103,7 @@ const CommentList = ({
               <div
                 key={`parent-${comment.post_id}-index-${index}`}
                 className={clsx('min-w-0 flex', {
-                  'my-2 rounded border-2 border-red-600 bg-green-50 p-2 dark:bg-slate-950':
+                  'my-2 rounded border-2 border-red-600 bg-green-50 p-2':
                     markedHash?.includes(`@${comment.author}/${comment.permlink}`) && comment.depth < 8
                 })}
               >

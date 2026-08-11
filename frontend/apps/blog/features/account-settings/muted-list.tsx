@@ -7,7 +7,7 @@ import { useUnmuteMutation } from '@/blog/features/mute-follow/hooks/use-mute-mu
 import { useTranslation } from '@/blog/i18n/client';
 import { handleError } from '@ui/lib/handle-error';
 import { CircleSpinner } from 'react-spinners-kit';
-import { Avatar, AvatarFallback, AvatarImage, getUserAvatarUrl, getDefaultImageUrl } from '@ui/components';
+import { getUserAvatarDirectUrl } from '@ui/components';
 import BasePathLink from '@/blog/components/base-path-link';
 import { SETTINGS_CARD, SETTINGS_CARD_HINT, SETTINGS_CARD_TITLE } from './lib/card';
 
@@ -61,20 +61,34 @@ const MutedList = ({ username }: { username: string }) => {
               unmuteMutation.isPending && unmuteMutation.variables?.username === mutedUser.name;
             return (
               <li key={mutedUser.name} className="flex items-center gap-3 px-1 py-3">
-                {/* The tinted ground matters: Radix renders NOTHING while the
-                    avatar request is in flight and only swaps in the fallback on
-                    an error, so 22 rows of pending avatars left 22 holes in the
-                    list. A filled circle reads as "loading", not as broken. */}
-                <Avatar className="h-9 w-9 shrink-0 bg-[#f1f3f5]">
-                  <AvatarImage
-                    className="h-full w-full object-cover"
-                    src={getUserAvatarUrl(mutedUser.name, 'small')}
+                {/* ★ SAME PATTERN AS THE WITNESS TABLE (audit item 14). This used
+                    to be a Radix `Avatar` pointed at our own `/api/avatar` proxy
+                    (the slow path — see the long note on `getUserAvatarDirectUrl`)
+                    with a generic, uncached, non-personalised default picture as
+                    the fallback: Radix shows that fallback for the entire time the
+                    request is in flight, not just on a real error, so a page of
+                    muted users read as a column of blank grey circles for as long
+                    as the proxy took. A monogram sits behind the image now — same
+                    letter, same tinted ground, same `onError` hide as the witness
+                    rows — so a real avatar swaps in when the direct load succeeds
+                    and the initial is what shows the rest of the time, not a hole. */}
+                <span
+                  className="relative flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#f1f3f5] font-sans text-[13px] font-bold uppercase text-[#9ca3af]"
+                  aria-hidden="true"
+                >
+                  {mutedUser.name.slice(0, 1)}
+                  <img
+                    src={getUserAvatarDirectUrl(mutedUser.name, 'small')}
                     alt=""
+                    width={36}
+                    height={36}
+                    loading="lazy"
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none';
+                    }}
+                    className="absolute inset-0 h-9 w-9 rounded-full object-cover"
                   />
-                  <AvatarFallback>
-                    <img className="h-full w-full object-cover" src={getDefaultImageUrl()} alt="" />
-                  </AvatarFallback>
-                </Avatar>
+                </span>
 
                 <BasePathLink
                   href={`/@${mutedUser.name}`}
