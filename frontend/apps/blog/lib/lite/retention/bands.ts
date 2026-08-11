@@ -113,6 +113,13 @@ export function armPosition(arm: LeagueArm, steps: ArmStep[], value: number): Ar
  * `activeDays` is passed straight through with no observation gate: Lumen created this account,
  * so every day in its history is a day Lumen watched. The chain path cannot make that assumption
  * and filters on `first_built_at` — see deriveLeagueInputs.
+ *
+ * ★ CALLERS MUST PASS THE ACTIVITY_WINDOW_DAYS-WINDOWED COUNT (365), NOT THE
+ * PRESENCE_WINDOW_DAYS one (60) above. Those are two different spans for two different jobs —
+ * this is the arm the RANK is built on, PRESENCE_WINDOW_DAYS is only the "active N of the last
+ * M days" UI stat — and feeding this function the shorter span is exactly the bug that made
+ * ranks 5-9 unreachable (fixed 2026-08-11 in facts-query.ts / compute.ts). See
+ * `RetentionFacts.activeDaysInActivityWindow`.
  */
 export function activityArmPosition(activeDays: number): ArmPosition {
   return armPosition('activity', ACTIVITY_ARM, Math.max(0, Math.floor(activeDays)));

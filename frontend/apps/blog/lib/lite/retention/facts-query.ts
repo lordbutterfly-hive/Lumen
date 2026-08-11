@@ -5,6 +5,10 @@ import {
   VOUCHED_MIN_AGE_DAYS
 } from './credit-givers';
 import { PRESENCE_WINDOW_DAYS } from './bands';
+// Cross-lane on purpose: the arm's window and the ladder's own rank-9 threshold must agree,
+// or the two drift the way PRESENCE_WINDOW_DAYS and this arm did — see the header comment
+// below, and ladder.test.ts §11b.
+import { ACTIVITY_WINDOW_DAYS } from '@/blog/features/retention/lib/compute-league';
 
 /**
  * The one-round-trip read behind the Lumen-native league. ONE statement, no chain call,
@@ -12,12 +16,23 @@ import { PRESENCE_WINDOW_DAYS } from './bands';
  *
  * WHAT IT ANSWERS, and from where:
  *   tenure     <- lumen_user.created_at
- *   presence   <- distinct UTC days with a row in lumen_post / lumen_vote / lumen_reblog
- *                 / lumen_follow, returned as day strings so the PURE `computeStreak`
- *                 does the streak and active-week arithmetic (this module deliberately
- *                 does none of it)
+ *   act days   <- distinct UTC days with a row in lumen_post / lumen_vote / lumen_reblog
+ *                 / lumen_follow, returned UNWINDOWED as day strings so the PURE
+ *                 `computeStreak` does the streak and active-week arithmetic (this module
+ *                 deliberately does none of it)
  *   engagement <- distinct OTHER users who voted / reblogged / replied to my posts,
  *                 split into vouched vs unknown so `creditGivers` can budget them
+ *
+ * ★ TWO WINDOWED COUNTS OVER THE SAME `my_days` SET, FOR TWO DIFFERENT JOBS (fixed 2026-08-11).
+ * `active_days_in_window` (windowed on PRESENCE_WINDOW_DAYS, 60) is the "active N of the last
+ * M days" PRESENCE stat — a UI number, nothing ranks on it.
+ * `active_days_in_activity_window` (windowed on ACTIVITY_WINDOW_DAYS, 365) is what
+ * `bands.ts`'s `activityArmPosition` actually ranks on. They used to be the SAME column,
+ * windowed on PRESENCE_WINDOW_DAYS alone — so the arm could never see past 60 days, and since
+ * the ladder's rank-9 threshold is 260 days, ranks 5 through 9 were unawardable to any lite
+ * account by any behaviour whatsoever. `compute.ts` now reads `activeDaysInActivityWindow`
+ * for the arm and `activeDaysInWindow` for the presence stat; do not let them collapse back
+ * into one field.
  *
  * ★ TWO THINGS IN HERE ARE NOT OBVIOUS AND WERE MEASURED, NOT ASSUMED.
  *
@@ -46,8 +61,20 @@ export interface RetentionFacts {
   createdAt: Date;
   /** 'YYYY-MM-DD' UTC days on which this user did something. Feeds `computeStreak`. */
   actDaysUTC: string[];
-  /** Distinct active days inside the trailing presence window — the presence arm. */
+  /**
+   * Distinct active days inside the trailing PRESENCE_WINDOW_DAYS (60). This is the "active N
+   * of the last M days" UI stat only — NOT what the ladder ranks on. See
+   * `activeDaysInActivityWindow` for that.
+   */
   activeDaysInWindow: number;
+  /**
+   * Distinct active days inside the trailing ACTIVITY_WINDOW_DAYS (365) — the value
+   * `bands.ts`'s `activityArmPosition` actually reads. Deliberately a SEPARATE field from
+   * `activeDaysInWindow` above: the two windows measure different spans for different
+   * consumers, and sharing one column was the bug that made ranks 5-9 unreachable
+   * (fixed 2026-08-11).
+   */
+  activeDaysInActivityWindow: number;
   /** Distinct OTHER users who engaged this user's posts, split for the budget. */
   vouchedGivers: number;
   unknownGivers: number;
@@ -60,6 +87,7 @@ interface FactsRow {
   created_at: Date;
   act_days: string[] | null;
   active_days_in_window: string;
+  active_days_in_activity_window: string;
   vouched_givers: string;
   unknown_givers: string;
   scanned_givers: string;
@@ -67,7 +95,7 @@ interface FactsRow {
 }
 
 // $1 user_id · $2 presence window days · $3 giver scan limit
-// $4 vouched min age days · $5 vouched min active days
+// $4 vouched min age days · $5 vouched min active days · $6 activity (arm) window days
 const SQL = `
 WITH me AS (
   SELECT user_id, created_at FROM lumen_user WHERE user_id = $1
@@ -145,6 +173,10 @@ SELECT (SELECT created_at FROM me)                                        AS cre
        (SELECT array_agg(d::text ORDER BY d) FROM my_days)                AS act_days,
        (SELECT count(*) FROM my_days
          WHERE d > (now() AT TIME ZONE 'UTC')::date - $2::int)            AS active_days_in_window,
+       -- The ARM's own count, over the wider ACTIVITY_WINDOW_DAYS ($6) — see the header
+       -- comment. Same my_days set, different span, kept as its own column on purpose.
+       (SELECT count(*) FROM my_days
+         WHERE d > (now() AT TIME ZONE 'UTC')::date - $6::int)            AS active_days_in_activity_window,
        (SELECT count(*) FROM classified WHERE vouched)                    AS vouched_givers,
        (SELECT count(*) FROM classified WHERE NOT vouched)                AS unknown_givers,
        (SELECT count(*) FROM givers)                                      AS scanned_givers,
@@ -157,7 +189,8 @@ export async function loadRetentionFacts(userId: string): Promise<RetentionFacts
     PRESENCE_WINDOW_DAYS,
     GIVER_SCAN_LIMIT,
     VOUCHED_MIN_AGE_DAYS,
-    VOUCHED_MIN_ACTIVE_DAYS
+    VOUCHED_MIN_ACTIVE_DAYS,
+    ACTIVITY_WINDOW_DAYS
   ]);
   const row = rows[0];
   if (!row || !row.created_at) return null;
@@ -167,6 +200,7 @@ export async function loadRetentionFacts(userId: string): Promise<RetentionFacts
     createdAt: row.created_at,
     actDaysUTC: row.act_days ?? [],
     activeDaysInWindow: Number(row.active_days_in_window),
+    activeDaysInActivityWindow: Number(row.active_days_in_activity_window),
     vouchedGivers: Number(row.vouched_givers),
     unknownGivers: Number(row.unknown_givers),
     giversCapped: scanned >= GIVER_SCAN_LIMIT,
@@ -178,6 +212,6 @@ export async function loadRetentionFacts(userId: string): Promise<RetentionFacts
  * The statement itself, so an operator can EXPLAIN it or sweep it across the whole
  * table without copying it into a second place that can then drift. Parameters, in
  * order: user_id, presence window days, giver scan limit, vouched min age days,
- * vouched min active days.
+ * vouched min active days, activity (arm) window days.
  */
 export const RETENTION_FACTS_SQL = SQL;

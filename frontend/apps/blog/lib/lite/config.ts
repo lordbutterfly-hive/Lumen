@@ -39,7 +39,30 @@ export const liteConfig = {
   chainEnv: siteConfig.chainEnv,
   /** Master kill-switch — lite accounts stay dark until infra + legal sign-off. */
   enabled: process.env.LITE_ACCOUNTS_ENABLED === 'yes',
-  /** Session lifetime — matches the oidc.ts 14-day convention (spec §A.5). */
+  /**
+   * Session lifetime — matches the oidc.ts 14-day convention (spec §A.5).
+   *
+   * WIRED AGAIN (F-L37, 2026-08-11), mechanically different from before. J6
+   * made getLiteSession() issue a true browser-session cookie
+   * (`cookieOptions.maxAge: undefined`), which as a side effect forces
+   * iron-session's internal seal `ttl` to 0 — no expiry embedded in the
+   * sealed cookie VALUE at all any more (see the comment in getLiteSession()
+   * and in packages/smart-signer/lib/session.ts for the byte-level proof).
+   * That made this field genuinely dead for a few hours: a leaked cookie
+   * string would have stayed valid forever, bounded only by
+   * `session_epoch`/per-device revocation.
+   *
+   * getLiteSession() now enforces this value itself, independent of
+   * iron-session: it stamps `sessionIssuedAt` into the session payload the
+   * moment a session authenticates, and refuses (treats-as-signed-out) any
+   * session whose stamp is older than `sessionTtlDays`, or has no stamp at
+   * all (every cookie issued before this change — see getLiteSession()'s
+   * LEGACY POLICY comment for why that case is treated as expired, not
+   * grandfathered in). This does NOT touch `cookieOptions.maxAge` or any
+   * seal `ttl` — the cookie stays a true session cookie, per the owner's
+   * explicit requirement; this is a second, independent expiry enforced in
+   * application code on top of it.
+   */
   sessionTtlDays: 14,
   dbPoolMax: Number(process.env.LITE_DB_POOL_MAX || 10),
   /**

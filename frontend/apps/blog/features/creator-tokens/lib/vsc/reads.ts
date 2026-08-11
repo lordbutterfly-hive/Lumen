@@ -363,8 +363,38 @@ function collectGqlErrors(value: unknown): string | null {
   return errors.map((e) => (typeof getJsonProp(e, 'message') === 'string' ? getJsonProp(e, 'message') : 'unknown error')).join('; ');
 }
 
-async function postGql(gqlUrl: string, query: string, variables: Record<string, unknown>): Promise<unknown> {
-  const res = await fetch(gqlUrl, {
+// ★ SAME-ORIGIN PROXY (2026-08-11, job J5 — owner-reported: the header pill
+// never showed the "Launch your token" CTA it demonstrably has, because this
+// fetch never resolved). This used to `fetch(gqlUrl, …)` straight from the
+// browser at REACT_APP_CREATOR_TOKENS_GQL_URL (magi-test.techcoderx.com).
+// packages/middleware/lib/csp.ts already allows that origin in connect-src
+// (2026-08-06) — CSP was never the blocker. The NODE itself sends no
+// Access-Control-Allow-Origin header, so every browser refused the request at
+// the CORS PREFLIGHT, before CSP was ever consulted. readMarket's own catch
+// swallowed that into phase 'UNKNOWN' — an honest answer, but it meant this
+// read (and every other creator-tokens read: positions, quotes, asks…) could
+// never leave 'unknown'/'loading' in any browser, ever, however the contract
+// was configured. A browser cannot self-grant CORS permission the far server
+// never sent; the fix is to stop making the browser hold the cross-origin
+// connection at all. Every query now goes to this app's OWN same-origin route
+// (app/api/creator-tokens/gql/route.ts), which re-issues it server-to-server
+// (no CORS between two servers) against the same GQL endpoint, read there via
+// `process.env.REACT_APP_CREATOR_TOKENS_GQL_URL` directly — that var is
+// ALSO mirrored into the browser's `window.__ENV` by @beam-australia/react-env
+// (that mirroring is what let the browser dial the raw host directly before
+// this fix), but the proxy route deliberately ignores anything a client might
+// send and only ever reads its own server env: accepting a client-supplied
+// upstream URL would turn a read-only chain proxy into an open SSRF relay.
+//
+// The proxy also only forwards the THREE known, fixed query strings below
+// (STATE_QUERY / STATE_QUERY_HEX / HEAD_QUERY, exported so the route can
+// allowlist against the same source of truth) — never arbitrary client-sent
+// GraphQL — so this endpoint cannot become a blank-check relay into the Magi
+// node's full schema.
+const CREATOR_TOKENS_GQL_PROXY_PATH = '/api/creator-tokens/gql';
+
+async function postGql(query: string, variables: Record<string, unknown>): Promise<unknown> {
+  const res = await fetch(CREATOR_TOKENS_GQL_PROXY_PATH, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ query, variables })
@@ -376,21 +406,26 @@ async function postGql(gqlUrl: string, query: string, variables: Record<string, 
   return getJsonProp(json, 'data');
 }
 
-const STATE_QUERY = `query CreatorTokensState($contractId: String!, $keys: [String!]!) {
+export const STATE_QUERY = `query CreatorTokensState($contractId: String!, $keys: [String!]!) {
   getStateByKeys(contractId: $contractId, keys: $keys)
 }`;
 // F-C5 — the hex variant, for byte-encoded families only (the matured `bal|`
 // bucket). `encoding` is a per-CALL argument on the node's resolver, so hex and
 // default keys cannot share a request; that is why this is a second query and a
 // second method rather than a flag on the existing one.
-const STATE_QUERY_HEX = `query CreatorTokensStateHex($contractId: String!, $keys: [String!]!) {
+export const STATE_QUERY_HEX = `query CreatorTokensStateHex($contractId: String!, $keys: [String!]!) {
   getStateByKeys(contractId: $contractId, keys: $keys, encoding: "hex")
 }`;
-const HEAD_QUERY = `query CreatorTokensHead {
+export const HEAD_QUERY = `query CreatorTokensHead {
   localNodeInfo { last_processed_block }
 }`;
 
 export class CreatorTokensGqlClient {
+  // No longer picks the network target (see postGql's own doc — every call now
+  // goes to the same-origin proxy, which reads the real upstream from its own
+  // server env). Kept as a constructor parameter only so existing call sites
+  // (vsc-data-source.ts's `new CreatorTokensGqlClient(config.gqlUrl)`, the e2e
+  // harness's FakeGql subclass) do not need an unrelated signature change.
   constructor(private readonly gqlUrl: string) {}
 
   async getStateByKeys(contractId: string, keys: string[]): Promise<Record<string, string | null>> {
@@ -414,7 +449,7 @@ export class CreatorTokensGqlClient {
     const CHUNK = 100;
     for (let i = 0; i < keys.length; i += CHUNK) {
       const chunk = keys.slice(i, i + CHUNK);
-      const data = await postGql(this.gqlUrl, query, { contractId, keys: chunk });
+      const data = await postGql(query, { contractId, keys: chunk });
       const rawMap = getJsonProp(data, 'getStateByKeys');
       for (const key of chunk) {
         const value = getJsonProp(rawMap, key);
@@ -426,7 +461,7 @@ export class CreatorTokensGqlClient {
 
   async getHeadBlock(): Promise<number | null> {
     try {
-      const data = await postGql(this.gqlUrl, HEAD_QUERY, {});
+      const data = await postGql(HEAD_QUERY, {});
       const raw = getJsonProp(getJsonProp(data, 'localNodeInfo'), 'last_processed_block');
       const height = Number(raw);
       // M-g, fixed at the ROOT rather than at each of readMarket's/

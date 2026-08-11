@@ -34,8 +34,33 @@ function collectGqlErrors(value: unknown): string | null {
     .join('; ');
 }
 
-async function postGql(gqlUrl: string, query: string, variables: Record<string, unknown>): Promise<unknown> {
-  const res = await fetch(gqlUrl, {
+// ★ SAME-ORIGIN PROXY (2026-08-11, sibling fix to job J5's creator-tokens
+// proxy — read that fix's doc in features/creator-tokens/lib/vsc/reads.ts
+// first; this mirrors it exactly). This client used to `fetch(gqlUrl, …)`
+// straight from the browser at REACT_APP_VSC_MARKET_GQL_URL. The identical
+// CORS bug applies here: packages/middleware/lib/csp.ts's connect-src
+// permission was never the blocker — the Magi node sends no
+// Access-Control-Allow-Origin header, so any browser that actually reached
+// this code would be refused at the CORS PREFLIGHT before CSP was ever
+// consulted. The var is unset in this environment (getMarketConfig()
+// returns null and the app falls back to the Mock data source), so the bug
+// is dormant, not yet observed failing here — but it is the same shape as
+// the creator-tokens failure and will reproduce the moment this feature is
+// provisioned. Every query now goes to this app's OWN same-origin route
+// (app/api/prediction-market/gql/route.ts), which re-issues it
+// server-to-server (no CORS between two servers) against the real endpoint,
+// read there via `process.env.REACT_APP_VSC_MARKET_GQL_URL` directly — the
+// route deliberately ignores anything a client might send and only ever
+// reads its own server env; accepting a client-supplied upstream URL would
+// turn a read-only chain proxy into an open SSRF relay.
+//
+// The proxy also only forwards the TWO known, fixed query strings below
+// (STATE_QUERY / HEAD_QUERY, exported so the route can allowlist against the
+// same source of truth) — never arbitrary client-sent GraphQL.
+const VSC_MARKET_GQL_PROXY_PATH = '/api/prediction-market/gql';
+
+async function postGql(query: string, variables: Record<string, unknown>): Promise<unknown> {
+  const res = await fetch(VSC_MARKET_GQL_PROXY_PATH, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ query, variables })
@@ -51,11 +76,11 @@ async function postGql(gqlUrl: string, query: string, variables: Record<string, 
   return getJsonProp(json, 'data');
 }
 
-const STATE_QUERY = `query VscMarketState($contractId: String!, $keys: [String!]!) {
+export const STATE_QUERY = `query VscMarketState($contractId: String!, $keys: [String!]!) {
   getStateByKeys(contractId: $contractId, keys: $keys)
 }`;
 
-const HEAD_QUERY = `query VscMarketHead {
+export const HEAD_QUERY = `query VscMarketHead {
   localNodeInfo {
     last_processed_block
   }
@@ -73,16 +98,18 @@ export interface VscGqlClient {
 }
 
 export class DefaultVscGqlClient implements VscGqlClient {
-  private readonly gqlUrl: string;
-
-  constructor(gqlUrl: string) {
-    this.gqlUrl = gqlUrl;
-  }
+  // No longer picks the network target (see postGql's own doc above — every
+  // call now goes to the same-origin proxy, which reads the real upstream
+  // from its own server env). Kept as a constructor parameter only so
+  // existing call sites (vsc-market-data-source.ts's
+  // `new DefaultVscGqlClient(deps.config.gqlUrl)`) do not need an unrelated
+  // signature change. Mirrors CreatorTokensGqlClient's identical choice.
+  constructor(private readonly gqlUrl: string) {}
 
   async getStateByKeys(contractId: string, keys: string[]): Promise<Record<string, string | null>> {
     const out: Record<string, string | null> = {};
     if (keys.length === 0) return out;
-    const data = await postGql(this.gqlUrl, STATE_QUERY, { contractId, keys });
+    const data = await postGql(STATE_QUERY, { contractId, keys });
     const rawMap = getJsonProp(data, 'getStateByKeys');
     for (const key of keys) {
       const value = getJsonProp(rawMap, key);
@@ -93,7 +120,7 @@ export class DefaultVscGqlClient implements VscGqlClient {
 
   async getHeadBlock(): Promise<number | null> {
     try {
-      const data = await postGql(this.gqlUrl, HEAD_QUERY, {});
+      const data = await postGql(HEAD_QUERY, {});
       const info = getJsonProp(data, 'localNodeInfo');
       const raw = getJsonProp(info, 'last_processed_block');
       const height = Number(raw);

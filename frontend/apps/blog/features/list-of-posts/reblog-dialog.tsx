@@ -1,6 +1,6 @@
 'use client';
 
-import { ReactNode, useState } from 'react';
+import { ComponentPropsWithoutRef, forwardRef, ReactNode, useState } from 'react';
 import { CircleSpinner } from 'react-spinners-kit';
 import {
   AlertDialog,
@@ -19,20 +19,47 @@ import DialogLogin from '@/blog/components/dialog-login';
 import { useTranslation } from '@/blog/i18n/client';
 import { useRebloggedByQuery } from './hooks/use-reblogged-by-query';
 
-export function ReblogDialog({
-  children,
-  author,
-  permlink,
-  action,
-  isReblogged: isRebloggedProp
-}: {
+interface ReblogDialogProps extends Omit<ComponentPropsWithoutRef<typeof AlertDialogTrigger>, 'asChild' | 'children'> {
   children: ReactNode;
   author: string;
   permlink: string;
   action: (dialogResponse: boolean) => void;
   /** Optional: skip the query if reblog status is already known */
   isReblogged?: boolean;
-}) {
+}
+
+/**
+ * ★ Wrapped in forwardRef for the same reason as `DialogLogin`
+ * (see `components/dialog-login.tsx:20-37`): `medium-post-card.tsx` renders
+ * this directly inside a `TooltipTrigger asChild` slot, and Radix's
+ * `SlotClone` hands the child a ref. A plain function component can't accept
+ * one — "Function components cannot be given refs" — so the ref must be
+ * forwarded onto the real trigger (`AlertDialogTrigger`), not onto the child.
+ *
+ * `post-list-item.tsx` looks like the same pattern but isn't: it puts a plain
+ * `<div className="flex items-center">` between `TooltipTrigger asChild` and
+ * `<ReblogDialog>`, so there the ref lands on that div — a no-op as far as
+ * this component is concerned.
+ *
+ * The same `SlotClone` that hands `medium-post-card.tsx`'s trigger a ref also
+ * merges its own props onto the child (`onPointerEnter`/`onPointerLeave`/
+ * `onFocus`/`onBlur`/`data-state`/`aria-describedby`, the hooks the Tooltip
+ * needs to know when to open and what to label). Those are forwarded here too
+ * (`...triggerProps`) — without it the medium-card reblog tooltip silently
+ * never opens and the trigger never gets `aria-describedby`, even though the
+ * ref fix alone looks complete.
+ */
+export const ReblogDialog = forwardRef<HTMLButtonElement, ReblogDialogProps>(function ReblogDialog(
+  {
+    children,
+    author,
+    permlink,
+    action,
+    isReblogged: isRebloggedProp,
+    ...triggerProps
+  },
+  ref
+) {
   const { user } = useUserClient();
   const { t } = useTranslation('common_blog');
   const [open, setOpen] = useState(false);
@@ -51,7 +78,9 @@ export function ReblogDialog({
 
   return (
     <AlertDialog open={open} onOpenChange={setOpen}>
-      <AlertDialogTrigger asChild>{children}</AlertDialogTrigger>
+      <AlertDialogTrigger asChild ref={ref} {...triggerProps}>
+        {children}
+      </AlertDialogTrigger>
       <AlertDialogContent className="flex flex-col gap-8 sm:rounded-r-xl ">
         <AlertDialogHeader className="gap-2">
           <div className="flex items-center justify-between">
@@ -106,4 +135,4 @@ export function ReblogDialog({
       </AlertDialogContent>
     </AlertDialog>
   );
-}
+});

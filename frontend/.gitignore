@@ -37,3 +37,13 @@ NOTES/
 
 # Secondary Next instance (scripts/dev:3010) — see next.config.js distDir.
 .next-dev/
+
+# One-off scratch probes. These have been hand-excluded from every sync since
+# 2026-08-06 and were still turning up as staging candidates on 2026-08-11, which
+# is one slip away from committing them. `follow20.tmp.mjs` in particular
+# broadcasts custom_json to MAINNET api.hive.blog using a posting WIF read from
+# the environment — it must never reach the repo. Ignored by name rather than by
+# pattern so a deliberately-added probe still has to be named here.
+apps/blog/follow20.tmp.mjs
+apps/blog/probe-readmarket.ts
+apps/blog/qa-profile-settings-proof.mjs

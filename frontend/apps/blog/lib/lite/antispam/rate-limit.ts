@@ -126,6 +126,60 @@ export async function enforceStreakRate(ip: string): Promise<boolean> {
 }
 
 /**
+ * Per-IP daily cap on the Magi (VSC) GraphQL proxy routes — creator-tokens and
+ * prediction-market (`app/api/creator-tokens/gql`, `app/api/prediction-market/gql`).
+ *
+ * Adversarial review, 2026-08-11: those two routes forward a client-chosen
+ * `variables` payload to a real upstream node on every call, holding a server
+ * connection for up to 10s (their own `UPSTREAM_TIMEOUT_MS`), with no cap on
+ * how fast a caller could drive them. Not an open relay — the upstream host is
+ * read from `process.env` only and the query itself is exact-match allowlisted
+ * — but with nothing metering the RATE, anyone on the internet could drive our
+ * server into hammering the Magi node as fast as they could send requests.
+ *
+ * SCOPED, NOT SHARED — same shape as `enforceChallengeRate`'s `btc`/`evm`/`google`
+ * split, and for the same reason `enforceStreakRate` above got its own bucket
+ * instead of joining `lookup`: these two routes are NOT equally hot. Read
+ * `enforceStreakRate`'s doc for the incident this caused once already (the
+ * streak route briefly shared the signup funnel's `lookup` bucket and 429'd the
+ * site's own name-availability check). The creator-tokens price chip and the
+ * prediction-market poll refetch on their own 15-45s intervals
+ * (`use-token-price-chip.ts`, `use-market.ts`, `use-live-token-market.ts`, …)
+ * with `cache: 'no-store'` and NO server-side cache in front of either proxy —
+ * unlike the streak route, every single client refetch reaches this limiter,
+ * not just cache misses — so a shared counter would let one feature's normal
+ * polling volume 429 the other's.
+ *
+ * SIZING. No cache to lean on, so this has to clear honest continuous polling
+ * at the hottest known interval (15s ⇒ 5,760/day for one tab left open and
+ * focused all day) with headroom for more than one hook per page and more than
+ * one real user behind a shared/NAT IP, while still being a real ceiling
+ * against a script. Generous by the same philosophy as every other cap in this
+ * file — it exists to bound cost, not to meter honest use.
+ *
+ * FAIL-OPEN ON A LIMITER OUTAGE, deliberately, same posture as
+ * `enforceStreakRate`. Both GQL proxy routes work independently of the
+ * lite-accounts feature (they gate only on their own `REACT_APP_*_GQL_URL`,
+ * never on `liteConfig.enabled`/`assertLiteEnabled`), so a Postgres hiccup — or
+ * a deploy that has creator-tokens/prediction-market provisioned but the
+ * lite-accounts datastore not yet — must not take chain reads offline. Callers
+ * are expected to wrap this in the same try/catch-and-proceed the streak route
+ * uses.
+ *
+ * Bounding `variables.keys` itself (the upstream's own documented 1..100 range,
+ * `getStateByKeys`, schema.graphql:813) is a SEPARATE control enforced directly
+ * in each route — this function only bounds how often a caller may ask at all.
+ */
+const MAGI_GQL_PER_IP_PER_DAY = envPositiveInt('LITE_MAGI_GQL_PER_IP_PER_DAY', 10_000);
+
+export async function enforceMagiGqlRate(
+  ip: string,
+  scope: 'creator_tokens' | 'prediction_market'
+): Promise<boolean> {
+  return rateRepo.checkAndConsume(`ip:${ip}`, `${scope}_gql`, MAGI_GQL_PER_IP_PER_DAY, dayKey());
+}
+
+/**
  * Read a positive integer from the environment, falling back on anything that is
  * not one. The empty string matters here: `.env` files ship these keys PRESENT
  * AND EMPTY as documentation, and `Number('')` is 0 — which `checkAndConsume`

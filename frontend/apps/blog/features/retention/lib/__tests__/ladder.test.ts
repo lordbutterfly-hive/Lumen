@@ -76,8 +76,18 @@ import { MIN_REACH_TO_MENTION, STREAK_MILESTONES, selectNudge, type NudgeFacts }
 // presence window and the shared streak maths must agree on ONE number.
 import {
   PRESENCE_WINDOW_DAYS as LITE_PRESENCE_WINDOW_DAYS,
-  PRESENCE_WINDOW_WEEKS as LITE_PRESENCE_WINDOW_WEEKS
+  PRESENCE_WINDOW_WEEKS as LITE_PRESENCE_WINDOW_WEEKS,
+  activityArmPosition as liteActivityArmPosition
 } from '@/blog/lib/lite/retention/bands';
+// Cross-lane on purpose, section 11b: proves the LITE WIRING (facts-query.ts -> compute.ts)
+// feeds the shared ladder the right window, not just that the shared ladder's own arithmetic
+// is correct in isolation — which every check above this line already covers and none of them
+// would have caught J1 (the ladder itself was fine; the caller fed it the wrong number).
+// `facts-query.ts` is deliberately NOT imported here: it opens a real Postgres pool on import
+// of `../db/pool`, and this suite has no DB. `RetentionFacts` is a type-only import, so it
+// erases at compile time and pulls in nothing at runtime.
+import { computeLiteRetention } from '@/blog/lib/lite/retention/compute';
+import type { RetentionFacts } from '@/blog/lib/lite/retention/facts-query';
 import { daySetCompleteFrom, isStreakLowerBound } from '../walk-coverage';
 import { reachTrend, todayHeadline } from '../copy-select';
 import { localDeadlineLabel, nextUtcMidnightMs } from '../deadline';
@@ -635,6 +645,96 @@ check(
     windowWeeks: LITE_PRESENCE_WINDOW_WEEKS
   });
   check('a future-dated act still counts', future.activeWeeks === 2, `${future.activeWeeks}`);
+}
+
+// ─── 11b. the lite activity arm reads the ACTIVITY window, never the presence window ──────
+section('11b. the lite activity arm reads the activity window, not the presence window');
+
+// ★ THE INVARIANT THAT WOULD HAVE CAUGHT J1 (2026-08-11). `facts-query.ts` used to count the
+// arm's input over PRESENCE_WINDOW_DAYS (60) because it shared ONE column with the "active N
+// of the last M days" presence stat. ACTIVITY_ARM's rank-9 threshold is 260 days, so a 60-day
+// ceiling made ranks 5 through 9 unawardable to any lite account by any behaviour whatsoever —
+// silently, because every check above this line exercises `computeLeague` / `ACTIVITY_ARM`
+// directly and none of them go through the lite wiring (facts-query.ts -> compute.ts ->
+// bands.ts) that actually supplies the day count. `ladder.test.ts:78` imported
+// PRESENCE_WINDOW_DAYS long before this section existed and never once asserted it against
+// the tier index; that omission is what let this ship.
+//
+// Asserted against `ACTIVITY_ARM[last].min`, never a typed-in 260, so this keeps holding if
+// the curve is retuned.
+{
+  const topThreshold = ACTIVITY_ARM[ACTIVITY_ARM.length - 1].min;
+
+  check(
+    'the activity window can reach the top rank threshold',
+    ACTIVITY_WINDOW_DAYS >= topThreshold,
+    `window ${ACTIVITY_WINDOW_DAYS}d, top rank needs ${topThreshold}d`
+  );
+  // The two spans must be genuinely different, or the mutation guards below prove nothing.
+  check(
+    'the presence window is genuinely shorter than the activity window',
+    LITE_PRESENCE_WINDOW_DAYS < ACTIVITY_WINDOW_DAYS,
+    `presence ${LITE_PRESENCE_WINDOW_DAYS}d vs activity ${ACTIVITY_WINDOW_DAYS}d`
+  );
+
+  // ★ MUTATION: this is what shipped. Feed the shared arm the PRESENCE-windowed figure
+  // instead of the activity-windowed one, straight through `bands.ts`'s own exported wrapper,
+  // and it caps well short of the top rank and even short of the public mark.
+  const onPresenceAlone = liteActivityArmPosition(LITE_PRESENCE_WINDOW_DAYS).index;
+  check(
+    'MUTATION: the presence window alone cannot reach the top rank',
+    onPresenceAlone < MAX_TIER_INDEX,
+    `index ${onPresenceAlone} at ${LITE_PRESENCE_WINDOW_DAYS} days`
+  );
+  check(
+    'MUTATION: the presence window alone cannot even reach the public mark',
+    onPresenceAlone < MARK_TIER_INDEX,
+    `index ${onPresenceAlone} at ${LITE_PRESENCE_WINDOW_DAYS} days, mark is ${MARK_TIER_INDEX}`
+  );
+  // The fix, on the same wrapper: the activity window really does clear the top threshold.
+  check(
+    'the activity window itself reaches the top rank',
+    liteActivityArmPosition(ACTIVITY_WINDOW_DAYS).index === MAX_TIER_INDEX,
+    `index ${liteActivityArmPosition(ACTIVITY_WINDOW_DAYS).index} at ${ACTIVITY_WINDOW_DAYS} days`
+  );
+
+  // ★ END TO END: a synthetic `RetentionFacts` with a top-rank activity-window count and a
+  // tiny presence-window count must still land on the top rank. If `computeLiteRetention`
+  // ever regresses to reading `activeDaysInWindow` (the presence figure) instead of
+  // `activeDaysInActivityWindow` (this arm's real input), this fails.
+  const makeFacts = (activeDaysInActivityWindow: number, activeDaysInWindow: number): RetentionFacts => ({
+    createdAt: new Date('2026-01-01T00:00:00Z'),
+    actDaysUTC: [],
+    activeDaysInWindow,
+    activeDaysInActivityWindow,
+    vouchedGivers: 0,
+    unknownGivers: 0,
+    giversCapped: false,
+    postCount: 0
+  });
+  const now = Date.parse('2026-08-11T00:00:00Z');
+  const atTop = computeLiteRetention('proof', makeFacts(topThreshold, 3), now);
+  check(
+    'a lite account with the top-rank activity-window day count reaches the top rank, with a tiny presence figure',
+    atTop.summary.rank.rankNumber === MAX_TIER_INDEX,
+    `rank ${atTop.summary.rank.rankNumber} (presence figure was 3)`
+  );
+  // MUTATION: the same facts with the two fields swapped must NOT reach the top rank — proving
+  // the rank really does track `activeDaysInActivityWindow` and not whichever field happens to
+  // be larger or is read first.
+  const swapped = computeLiteRetention('mutation', makeFacts(3, topThreshold), now);
+  check(
+    'MUTATION: swapping the two fields on the same facts object does not reach the top rank',
+    swapped.summary.rank.rankNumber < MAX_TIER_INDEX,
+    `rank ${swapped.summary.rank.rankNumber}`
+  );
+  // The presence figure itself must still reach the wire untouched — it is a real stat, not
+  // dead weight now that the arm no longer reads it.
+  check(
+    'the presence figure still reaches the detail block, unwindowed by the activity span',
+    atTop.detail.activeDaysInWindow === 3,
+    `${atTop.detail.activeDaysInWindow}`
+  );
 }
 
 // ─── 12. freeze durability ─────────────────────────────────────────────────

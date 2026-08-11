@@ -93,21 +93,39 @@ export class MagiIndexerClient {
   }
 
   /**
-   * Every query is scoped to `indexer_contract_id`. One Hasura instance serves
-   * every contract on the network, so an unscoped query would silently mix in
-   * another contract's markets — and on a balances view that means showing
-   * somebody tokens they do not hold.
+   * NOT scoped to `indexer_contract_id` — that column does not exist on any of
+   * the five `lumen_ct_*` views on this Hasura instance (confirmed live via
+   * introspection against https://indexer.testnet.magi.milohpr.com/v1/graphql,
+   * 2026-08-11). Every query used to filter on it and every one of them failed
+   * with `field 'indexer_contract_id' not found in type: '..._bool_exp'`.
    *
-   * THROWS on transport or GraphQL error rather than resolving empty. Callers
-   * turn that into their own `unavailable` flag; an empty array here would be
-   * indistinguishable from "genuinely nothing", which is the exact conflation
-   * these reads exist to avoid.
+   * This is safe for the same reason it looked dangerous: this Hasura instance
+   * is per-network (one deployment = one testnet), and today it is also
+   * effectively per-contract in practice, so there is no second contract's rows
+   * to leak here. `this.contractId` is kept as a field on the client (set from
+   * the constructor, unchanged) purely as dormant plumbing for the day scoping
+   * comes back — but it is NOT included in the `variables` sent over the wire
+   * below. That is not optional: this Hasura instance validates the variables
+   * payload strictly and rejects any variable that isn't declared by the query
+   * document, even ones no field references — `{"errors":[{"message":
+   * "unexpected variables in variableValues: contractId", ...}]}` — confirmed
+   * live, 2026-08-11. So every query below now declares only the `$vars` it
+   * actually uses, and `query()` must forward `variables` unmodified.
+   *
+   * IF MULTI-CONTRACT SCOPING EVER APPEARS (either this Hasura instance starts
+   * serving more than one Magi creator-tokens deployment, or the upstream
+   * mapping adds a real `indexer_contract_id`/`contract_id` column to these
+   * views), every query below MUST add both: a `$contractId: String!` to its
+   * signature AND `contractId: this.contractId` back into the variables object
+   * passed to `query()`, plus the matching `where:` filter, or reads will
+   * silently mix rows across contracts again. Check the live schema with an
+   * introspection query before re-adding it — don't guess the column name.
    */
   private async query(query: string, variables: Record<string, unknown>): Promise<unknown> {
     const res = await fetch(this.endpoint, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ query, variables: { ...variables, contractId: this.contractId } })
+      body: JSON.stringify({ query, variables })
     });
     if (!res.ok) throw new Error(`magi indexer: HTTP ${res.status}`);
     const json: unknown = await res.json();
@@ -120,8 +138,8 @@ export class MagiIndexerClient {
 
   async balancesOf(holder: string): Promise<HasuraBalanceRow[]> {
     const data = await this.query(
-      `query Balances($contractId: String!, $holder: String!) {
-         lumen_ct_balances(where: {indexer_contract_id: {_eq: $contractId}, holder: {_eq: $holder}}) {
+      `query Balances($holder: String!) {
+         lumen_ct_balances(where: {holder: {_eq: $holder}}) {
            creator tokens
          }
        }`,
@@ -135,8 +153,8 @@ export class MagiIndexerClient {
 
   async asksOf(asker: string): Promise<HasuraAskRow[]> {
     const data = await this.query(
-      `query MyAsks($contractId: String!, $asker: String!) {
-         lumen_ct_my_asks(where: {indexer_contract_id: {_eq: $contractId}, asker: {_eq: $asker}}, order_by: {asked_block: desc}) {
+      `query MyAsks($asker: String!) {
+         lumen_ct_my_asks(where: {asker: {_eq: $asker}}, order_by: {asked_block: desc}) {
            creator seq status offering_id asked_block rating
          }
        }`,
@@ -154,8 +172,8 @@ export class MagiIndexerClient {
 
   async deliveryOf(creator: string): Promise<HasuraDeliveryRow | null> {
     const data = await this.query(
-      `query Delivery($contractId: String!, $creator: String!) {
-         lumen_ct_delivery_record(where: {indexer_contract_id: {_eq: $contractId}, creator: {_eq: $creator}}) {
+      `query Delivery($creator: String!) {
+         lumen_ct_delivery_record(where: {creator: {_eq: $creator}}) {
            creator registered_block answered_count missed_count declined_count completion_pct median_response_blocks avg_rating rating_count
          }
        }`,
@@ -180,8 +198,8 @@ export class MagiIndexerClient {
   /** Price history as SUPPLY points. The caller applies the ported curve formula — see the view's own doc for why the price is not stored. */
   async priceHistoryOf(creator: string, limit = 200): Promise<HasuraPricePoint[]> {
     const data = await this.query(
-      `query PriceHistory($contractId: String!, $creator: String!, $limit: Int!) {
-         lumen_ct_price_history(where: {indexer_contract_id: {_eq: $contractId}, creator: {_eq: $creator}}, order_by: {block: asc}, limit: $limit) {
+      `query PriceHistory($creator: String!, $limit: Int!) {
+         lumen_ct_price_history(where: {creator: {_eq: $creator}}, order_by: {block: asc}, limit: $limit) {
            block supply_after side
          }
        }`,
@@ -197,8 +215,8 @@ export class MagiIndexerClient {
   /** The ranked creator list. Ordering lives in the VIEW, deliberately — so a client cannot quietly re-rank on price or volume. */
   async discovery(limit = 60): Promise<HasuraDeliveryRow[]> {
     const data = await this.query(
-      `query Discovery($contractId: String!, $limit: Int!) {
-         lumen_ct_discovery(where: {indexer_contract_id: {_eq: $contractId}}, limit: $limit) {
+      `query Discovery($limit: Int!) {
+         lumen_ct_discovery(limit: $limit) {
            creator registered_block answered_count missed_count declined_count completion_pct median_response_blocks avg_rating rating_count
          }
        }`,

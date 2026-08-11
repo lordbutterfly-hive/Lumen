@@ -165,14 +165,76 @@ function sessionUserFor(user) {
  * @param user      `{ userId, displayName }`
  * @param epoch     the `session_epoch` stamped at issue
  * @param sessionId per-device id; pass `null` to mint a LEGACY (pre-sid) cookie,
- *                  which is what every session issued before this build carries.
+ *                  which is what every session issued before that build carries.
+ * @param issuedAt  epoch-ms for `sessionIssuedAt` (F-L37, 2026-08-11), the
+ *                  server-enforced TTL stamp checked by getLiteSession(). Defaults
+ *                  to `Date.now()` — a REAL login always stamps one now, so a
+ *                  default-minted cookie should too, or every existing caller of
+ *                  this function that expects "fresh session -> 200" would start
+ *                  seeing 401s for a reason that has nothing to do with what it is
+ *                  testing. Pass an old timestamp (e.g. `Date.now() - 15*86400000`)
+ *                  to mint an EXPIRED session, or `null` to mint a LEGACY cookie
+ *                  with no stamp at all — what every cookie issued before F-L37
+ *                  carries, which getLiteSession() also treats as expired.
  */
-export async function mintLiteSession(user, epoch, sessionId = randomUUID()) {
+export async function mintLiteSession(user, epoch, sessionId = randomUUID(), issuedAt = Date.now()) {
   const { password, name } = await resolveCookie(user);
   const data = { user: sessionUserFor(user), sessionEpoch: epoch };
   if (sessionId) data.sessionId = sessionId;
+  if (issuedAt !== null) data.sessionIssuedAt = issuedAt;
   const sealed = await sealData(data, { password, ttl: 60 * 60 * 24 * 14 });
   return { sealed, sessionId, cookieName: name };
+}
+
+/**
+ * Resolve `{ password, name }` once — the SAME secret/cookie-name discovery
+ * `mintLiteSession` uses (and caches, module-wide, in `RESOLVED`), exposed
+ * directly so a caller can seal a DIFFERENTLY-SHAPED payload (a full-Hive
+ * session, below) through the identical, server-verified secret. The probe
+ * is a throwaway LITE-shaped session; `resolveCookie` only needs the server
+ * to unseal it and echo the display name back, never a matching DB row, so
+ * this touches no table and mints no real account.
+ */
+export async function resolveSessionSecret() {
+  return resolveCookie({ userId: 'qa-secret-probe', displayName: `qa-secret-probe-${randomUUID()}` });
+}
+
+/**
+ * Seal a FULL-HIVE iron-session cookie — byte-for-byte the shape
+ * `packages/smart-signer/lib/api-handlers/auth/login.ts` writes at
+ * `session.user = user; await session.save();` (see that file, ~line 149:
+ * `isLoggedIn, username, avatarUrl, loginType, keyType, authenticateOnBackend,
+ * chatAuthToken, oauthConsent, strict` — and, notably, NO `account_tier` key
+ * at all; a real Hive login never sets one). This harness cannot drive Hive
+ * Keychain (a browser extension), so for tests that only need the SERVER-SIDE
+ * session shape — not a genuine signature — this seals the cookie directly,
+ * the same trick `mintLiteSession` already uses for the lite tier.
+ *
+ * @param username           Hive account name to appear as.
+ * @param hiveSessionIssuedAt epoch-ms for the F-L38 (2026-08-11) Hive TTL
+ *   stamp `hiveSessionIssuedAt`. Omit (or pass `undefined`) to mint a cookie
+ *   with NO stamp at all — what every real Hive cookie carries today, since
+ *   `login.ts` was out of scope to edit and getLiteSession() only backfills
+ *   this field on READ. Pass an old timestamp (e.g. `Date.now() -
+ *   15*86400000`) to mint an over-TTL session for the expiry proof.
+ */
+export async function mintHiveSession(username, hiveSessionIssuedAt) {
+  const { password, name } = await resolveSessionSecret();
+  const user = {
+    isLoggedIn: true,
+    username,
+    avatarUrl: '',
+    loginType: 'keychain',
+    keyType: 'posting',
+    authenticateOnBackend: false,
+    chatAuthToken: '',
+    oauthConsent: {},
+    strict: false
+  };
+  const data = { user };
+  if (hiveSessionIssuedAt !== undefined) data.hiveSessionIssuedAt = hiveSessionIssuedAt;
+  const sealed = await sealData(data, { password, ttl: 60 * 60 * 24 * 14 });
+  return { sealed, cookieName: name };
 }
 
 /** Issue a request carrying one sealed session cookie. */

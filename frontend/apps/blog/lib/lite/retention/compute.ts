@@ -89,7 +89,13 @@ export function computeLiteRetention(
 
   // ★ ONE ARM, SHARED WITH THE CHAIN LADDER. A lite account's every day was observed by Lumen
   // (Lumen created it), so its day count needs no `first_built_at` gate — see bands.ts.
-  const arms = { activity: activityArmPosition(facts.activeDaysInWindow) };
+  //
+  // ★ READS `activeDaysInActivityWindow`, NOT `activeDaysInWindow` (fixed 2026-08-11). The
+  // latter is windowed to PRESENCE_WINDOW_DAYS (60) for the "active N of the last M days"
+  // presence stat below; the ladder's rank-9 threshold is 260 days, so feeding the arm that
+  // 60-day figure made ranks 5-9 unawardable to any lite account by any behaviour whatsoever.
+  // See facts-query.ts's header comment for where the two counts come from.
+  const arms = { activity: activityArmPosition(facts.activeDaysInActivityWindow) };
 
   // One arm, so there is nothing to take a MIN of and nothing to tie with — the same
   // simplification `computeLeague` got. The rule the two paths share is now the arm itself.

@@ -28,8 +28,7 @@ const LABELS = {
   write: 'Write',
   notifications: 'Notifications',
   login: 'Log in',
-  yourProfile: 'Your profile',
-  creatorTokens: 'Creator Tokens'
+  yourProfile: 'Your profile'
 };
 
 /**
@@ -240,13 +239,22 @@ const AppHeader: FC = () => {
               scopes this whole pass to desktop ("mobile is a separate task"),
               and md/lg are not "mobile" but are not where this fits either —
               xl is the honest floor, not a mobile cutoff by another name. */}
-          <Link
-            href="/creators"
-            className="hidden shrink-0 whitespace-nowrap px-1 font-sans text-[14.5px] font-semibold text-[#3f4650] transition-colors hover:text-[#161511] xl:inline-block"
-            data-testid="header-creator-tokens-link"
-          >
-            {LABELS.creatorTokens}
-          </Link>
+          {/* ★ ONE CONTROL, NOT TWO (owner, 2026-08-11: "you now have creator
+              tokens next to launch your token — two pills of the same thing
+              next to each other").
+
+              A "Creator Tokens" text link used to sit here, immediately left of
+              this pill. Both pointed at the same feature and, for the common
+              case of an account with no token, they read as one instruction
+              said twice: "Creator Tokens" beside "Launch your token".
+
+              The link is DELETED rather than restyled or moved, because its
+              destination is not orphaned: `/creators` is already a primary
+              nav row in left-rail.tsx:225. The pill is the only header control
+              this feature needs, and it carries the state the link never could
+              — a live price straight to Studio if you have a token, the launch
+              CTA if you do not. The owner's brief asked for exactly one pill in
+              the top right. */}
           <div className="hidden xl:block">
             <HeaderTokenPill />
           </div>

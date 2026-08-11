@@ -73,10 +73,37 @@ function buildConnectSrcHosts(): Set<string> {
   // contract can never again leave the CSP behind — the failure mode was
   // especially cruel because both the feature config and the contract were
   // right, and the only symptom was a generic "chain unreachable".
+  //
+  // ★ REACT_APP_CREATOR_TOKENS_GQL_URL REMOVED FROM THIS LIST (2026-08-11,
+  // job J5's follow-on). That CSP grant turned out to be irrelevant to the
+  // actual bug: the node sends no Access-Control-Allow-Origin header, so the
+  // browser was refused at the CORS preflight before CSP was ever consulted
+  // (see features/creator-tokens/lib/vsc/reads.ts's `postGql` doc). The real
+  // fix routes every creator-tokens GQL read through a same-origin proxy
+  // (app/api/creator-tokens/gql/route.ts), which reads this var itself,
+  // server-side, where CSP does not apply — so the browser no longer calls
+  // magi-test.techcoderx.com (or whatever this var points at) directly, and
+  // granting it connect-src here would be a stale, unused permission the
+  // moment a fresh deploy sets the var. Verified 2026-08-11: grepped every
+  // .ts/.tsx file for both the literal host and this var name; the only
+  // remaining browser-reachable reference was the now-proxied client in
+  // reads.ts, whose constructor keeps a `gqlUrl` parameter for call-site
+  // compatibility but never uses it to fetch.
+  //
+  // ★ REACT_APP_VSC_MARKET_GQL_URL REMOVED FROM THIS LIST TOO (adversarial
+  // review follow-up, same day). Same reasoning, same bug, same fix, applied
+  // to the sibling prediction-market proxy (app/api/prediction-market/gql/route.ts,
+  // features/prediction-market/lib/vsc-gql.ts's `postGql`) before this feature
+  // was ever provisioned in production. Verified by grep: `DefaultVscGqlClient`
+  // (vsc-gql.ts) keeps its `gqlUrl` constructor parameter for the same
+  // call-site-compatibility reason as reads.ts above but never fetches it
+  // directly — `postGql` always posts to the same-origin proxy path. The only
+  // OTHER browser-reachable Magi host for this feature is the indexer
+  // (`REACT_APP_VSC_MARKET_INDEXER_URL`, `magi-indexer.ts`'s `MagiIndexerClient`),
+  // which is a genuinely separate host fetched directly from the client and is
+  // NOT touched here — it keeps its grant below.
   for (const varName of [
-    'REACT_APP_CREATOR_TOKENS_GQL_URL',
     'REACT_APP_CREATOR_TOKENS_INDEXER_URL',
-    'REACT_APP_VSC_MARKET_GQL_URL',
     'REACT_APP_VSC_MARKET_INDEXER_URL'
   ]) {
     const value = process.env[varName];

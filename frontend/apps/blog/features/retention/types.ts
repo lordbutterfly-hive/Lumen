@@ -243,6 +243,18 @@ export interface RetentionStats {
    * window, and the most identity-defining fact available about a Hive account — most people
    * are certain whether they are a poster or a replier and most are wrong. Render
    * "you reply 4 times for every post"; never render either figure.
+   *
+   * ★★ NEVER RENDER THE RATIO WITHOUT CHECKING WALK DEPTH FIRST (found live, 2026-08-11).
+   * These two counts come from INDEPENDENT feed walks (route.ts:735-736) that each truncate
+   * on their own clock/page budget, and under load they read to very different depths —
+   * measured live at ~185 days for posts against ~21-32 days for replies. A ratio built from
+   * two spans of different length is not a ratio of the same thing: it printed "Posts and
+   * replies about equally" for a user whose real rate was ~10.2 replies per post.
+   * `retention-stats.tsx`'s `walksAreComparablyDeep` is the gate — it reads THIS REQUEST's own
+   * two walk boundaries (`provenance.coverage.postsOldestSeen` / `commentsOldestSeen`), never
+   * the STORED-UNION completeness flags (`coverage.activeWeeksIsLowerBound`,
+   * `coverage.historyComplete`), which go true forever the first time either walk ever
+   * finishes and would silently reintroduce this exact bug behind a gate that looks like a fix.
    */
   postsInWindow?: number;
   repliesInWindow?: number;

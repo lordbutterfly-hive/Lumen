@@ -4,10 +4,12 @@ import { useTranslation } from '@/blog/i18n/client';
 import {
   headcountOfGivers,
   postsBehindGivers,
+  type RetentionCoverage,
   type RetentionSummaryResponse
 } from '../hooks/use-retention';
 import { voiced, type RetentionVoice } from '../lib/viewer-copy';
 import { reachTrend } from '../lib/copy-select';
+import type { RetentionStats } from '../types';
 
 /**
  * ★ THE INTERESTING NUMBERS (owner ruling, 2026-08-09).
@@ -205,22 +207,14 @@ export function useRetentionStatLines(
   // have it for all time"). A ratio is a shape, not a total, and it is stable whatever the
   // window — which is exactly why it is the honest thing to show. A near-1 ratio says so
   // rather than rounding to a fake asymmetry.
-  const p = stats?.postsInWindow;
-  const r = stats?.repliesInWindow;
-  if (typeof p === 'number' && typeof r === 'number' && p + r >= 8) {
-    const ratio = r >= p ? (p > 0 ? r / p : r) : p > 0 && r > 0 ? p / r : p;
-    const rounded = Math.round(ratio);
-    // `_one` is worded as "about equally", so a ratio that rounds to 1 states the symmetry
-    // instead of claiming a 1x asymmetry, which would be a sentence with no content.
-    // ★ VOICELESS, deliberately. It shipped with `_their` variants and they were cut: a
-    // label-style sentence ("Replies 4x for every post.") is correct on your own profile AND
-    // on a stranger's, exactly like "Longest streak: 9+ days." above it. Six strings instead
-    // of twelve, and one fewer place for the voice to leak onto somebody else's page.
-    lines.push({
-      id: 'voice',
-      text: t(r >= p ? 'retention.stats.replier' : 'retention.stats.poster', { count: Math.max(1, rounded) })
-    });
-  }
+  //
+  // ★★ AND GATED ON WHETHER THE TWO WALKS THIS RATIO IS BUILT FROM READ EQUALLY FAR BACK
+  // (2026-08-11, found live). See `voiceLine` below for the full story and the tolerance —
+  // short version: `postsInWindow` / `repliesInWindow` come from two independent feed walks
+  // that can truncate at very different depths under load, and this printed "about equally"
+  // for a user whose real rate was ~10.2 replies per post.
+  const voiceStat = voiceLine(stats, coverage, t);
+  if (voiceStat) lines.push(voiceStat);
 
   // ── The long run ─────────────────────────────────────────────────────────
   if (typeof stats?.busiestWeekday === 'number') {
@@ -305,6 +299,157 @@ export function useRetentionStatLines(
   }
 
   return lines;
+}
+
+/**
+ * How much shallower one feed walk's reach may be relative to the other's, as a
+ * FRACTION OF THE DEEPER WALK, before the replies-per-post ratio goes silent.
+ *
+ * ★★ REPLACED 2026-08-11, SAME DAY, WRONG SHAPE. This used to be an ABSOLUTE-GAP
+ * tolerance scaled by the lookback window (`|postsDepth - repliesDepth| <= windowDays
+ * * 0.25`). An adversarial reviewer executed the real functions and showed the gap
+ * is the wrong quantity: the failure this gate exists to catch is `repliesInWindow`
+ * being UNDERCOUNTED BY A FACTOR — a RATIO — because the replies walk truncates far
+ * shallower than the posts walk, not the two walks disagreeing by some number of
+ * days. A gap tolerance bounds the gap; it does not bound the ratio a gap of that
+ * size can hide once one of the two depths is small. Measured live, every one of
+ * these passed the old gate and printed a ratio line built from mismatched spans:
+ *
+ *   posts=46d  replies=1d    ratio 46.0x   gap=45.0  (old tol 45.5 @ 26wk) → passed, wrong
+ *   posts=45d  replies=0.5d  ratio 90.0x   gap=44.5  (old tol 45.5 @ 26wk) → passed, wrong
+ *   posts=50d  replies=5d    ratio 10.0x   gap=45.0  (old tol 45.5 @ 26wk) → passed, wrong
+ *   posts=8d   replies=1d    ratio  8.0x   gap= 7.0  (old tol  7.0 @  4wk) → passed, wrong
+ *
+ * The last row is the proof it was a shape bug, not a tuning bug: shrinking the
+ * window shrinks the absolute tolerance right along with the absolute gap, so the
+ * DEPTH RATIO that slips through is unbounded at any window size. A relative test
+ * closes all four at once: `min(postsDepth, repliesDepth) / max(...) >= 0.75` gives
+ * 1/46≈0.02, 0.5/45≈0.01, 5/50=0.10, 1/8=0.125 — every one far under the floor,
+ * regardless of what `windowWeeks` happens to be. `windowWeeks` plays no part in
+ * this gate any more.
+ *
+ * ★ 0.75 (THE SHALLOWER WALK MUST REACH AT LEAST 3/4 AS FAR BACK AS THE DEEPER ONE).
+ * The measured live failure never got shallower than an 8x ratio (0.125) even at its
+ * mildest observed case. Two walks made by the SAME request share one wall-clock
+ * budget and one page cap, so ordinary jitter between them is a handful of pages —
+ * a few percent of either walk's depth on any account with real history, nowhere
+ * near 25%. 0.75 leaves roughly an order of magnitude of margin between "ordinary
+ * jitter" and "the observed failure" while both known-good live shapes in this
+ * file's tests clear it comfortably (150d/140d = 0.933, 140d/150d = 0.933).
+ *
+ * ★ 5 DAYS, THE ABSOLUTE FLOOR. A pure ratio breaks exactly on the case this gate
+ * must not suppress: two walks that both legitimately ran out of REAL history at a
+ * shallow point (3d vs 1d on a brand-new account) have a ratio of 1/3 ≈ 0.33 — well
+ * under 0.75 — yet the shallowness there is the TRUTH, not a truncation artefact.
+ * `gap <= 5 days` is checked FIRST and short-circuits straight to a pass, before the
+ * ratio is even computed, specifically for that account age. 5 (not the bare
+ * minimum of 2 that `3d vs 1d` needs) leaves room for a brand-new account whose
+ * first reply trails its first post by up to a working week — still plausibly true
+ * history, not a bug. It stays small enough to matter: this file's own `posts=8d
+ * replies=1d` measurement has a 7-day gap, ABOVE this floor, so it is still forced
+ * through the ratio test below — and still correctly fails it at 0.125. The floor
+ * rescues the few-days-old account; it does not rescue the account whose replies
+ * walk gave up 8x shallower than its posts walk.
+ */
+const RATIO_WALK_DEPTH_TOLERANCE_FRACTION = 0.75;
+const RATIO_WALK_DEPTH_ABSOLUTE_FLOOR_DAYS = 5;
+
+/**
+ * Days between now and an ISO timestamp from the wire. `NaN` for a missing or
+ * unparseable timestamp — the caller must treat that as "unknown depth", never as
+ * zero days back.
+ *
+ * Mirrors the normalisation route.ts itself applies to the same field before
+ * comparing it against a cutoff (see `inWindow`, `oldestMs` there): Hive's `created`
+ * timestamps are UTC without a trailing `Z`, so one is stripped if present and
+ * reattached rather than left to whatever `Date.parse` guesses for a bare,
+ * local-looking string.
+ */
+export function daysBack(iso: string | undefined): number {
+  if (!iso) return NaN;
+  const ms = Date.parse(`${iso.replace(/[zZ]$/, '')}Z`);
+  return Number.isFinite(ms) ? (Date.now() - ms) / 86_400_000 : NaN;
+}
+
+/**
+ * Did THIS REQUEST's own posts walk and comments walk read comparably far into
+ * history?
+ *
+ * Reads `coverage.postsOldestSeen` / `coverage.commentsOldestSeen` (route.ts:978-979)
+ * — THIS REQUEST's own two walk boundaries — and nothing else.
+ *
+ * ★★ DO NOT SWAP THESE FOR `coverage.activeWeeksIsLowerBound` OR
+ * `coverage.historyComplete`. Both of those read the STORED UNION across every walk
+ * this account has ever had done for it, and go true (respectively, stay false)
+ * forever the first time either walk happens to finish — they answer "is the
+ * ladder's active-weeks figure exact", which is a different question from "did the
+ * two feeds THIS response's `postsInWindow` / `repliesInWindow` came from reach
+ * equally far back on THIS request". Reusing them would leave the ratio gated "open"
+ * by a walk from a previous visit while this response's own two feeds disagreed by
+ * months — the exact bug this function exists to close, wearing a gate that looks
+ * like a fix.
+ *
+ * Absent or unparseable timestamps FAIL the gate rather than pass it — "we don't
+ * know how deep this walk went" is exactly the state this line must stay silent in,
+ * per this file's ABSENT-NEVER-ZERO rule.
+ */
+export function walksAreComparablyDeep(coverage: RetentionCoverage | undefined): boolean {
+  const postsDepth = daysBack(coverage?.postsOldestSeen);
+  const repliesDepth = daysBack(coverage?.commentsOldestSeen);
+  if (!Number.isFinite(postsDepth) || !Number.isFinite(repliesDepth)) return false;
+  // Absolute floor first, and it short-circuits: a young account whose two walks
+  // both stopped a handful of days apart is the case this gate must let through,
+  // whatever the ratio between two small numbers happens to be.
+  if (Math.abs(postsDepth - repliesDepth) <= RATIO_WALK_DEPTH_ABSOLUTE_FLOOR_DAYS) return true;
+  const deeper = Math.max(postsDepth, repliesDepth);
+  const shallower = Math.min(postsDepth, repliesDepth);
+  // `deeper` cannot be 0 past this point: `deeper === 0` implies `shallower === 0`
+  // too (it is the min of two non-negative depths), which is a gap of 0 — already
+  // returned `true` above. No divide-by-zero guard needed below.
+  return shallower / deeper >= RATIO_WALK_DEPTH_TOLERANCE_FRACTION;
+}
+
+/**
+ * The replies-per-post ratio line, or `undefined` when it cannot be honestly built.
+ *
+ * ★ THE BUG THIS GATES (found live, 2026-08-11). `postsInWindow` and
+ * `repliesInWindow` (route.ts:735-736) come from two INDEPENDENT feed walks that
+ * each truncate on their own clock/page budget. Under load they stop at very
+ * different depths — measured live at ~185 days for posts against ~21-32 days for
+ * replies, `cappedReason` flipping between `page_cap` and `time_budget` request to
+ * request. A ratio built from two spans of different length is not a ratio of the
+ * same thing: this printed "Posts and replies about equally" for a user whose real
+ * rate was ~10.2 replies per post, because the replies walk gave up roughly six to
+ * nine times shallower than the posts walk that fed the same sentence.
+ * `walksAreComparablyDeep` is the fix — see its own docstring for the tolerance and
+ * for why it must never read the neighbouring STORED-UNION completeness flags.
+ *
+ * Takes `t` rather than calling `useTranslation`, exactly like `sampleNote` below —
+ * a plain function called from inside the hook, not a second hook with its own
+ * ordering rules, and directly testable without a React render context (see
+ * `lib/__tests__/ratio-depth-gate.test.ts`).
+ */
+export function voiceLine(
+  stats: RetentionStats | undefined,
+  coverage: RetentionCoverage | undefined,
+  t: (key: string, vars?: Record<string, unknown>) => string
+): StatLine | undefined {
+  const p = stats?.postsInWindow;
+  const r = stats?.repliesInWindow;
+  if (typeof p !== 'number' || typeof r !== 'number' || p + r < 8) return undefined;
+  if (!walksAreComparablyDeep(coverage)) return undefined;
+  const ratio = r >= p ? (p > 0 ? r / p : r) : p > 0 && r > 0 ? p / r : p;
+  const rounded = Math.round(ratio);
+  // `_one` is worded as "about equally", so a ratio that rounds to 1 states the symmetry
+  // instead of claiming a 1x asymmetry, which would be a sentence with no content.
+  // ★ VOICELESS, deliberately. It shipped with `_their` variants and they were cut: a
+  // label-style sentence ("Replies 4x for every post.") is correct on your own profile AND
+  // on a stranger's, exactly like "Longest streak: 9+ days." above it. Six strings instead
+  // of twelve, and one fewer place for the voice to leak onto somebody else's page.
+  return {
+    id: 'voice',
+    text: t(r >= p ? 'retention.stats.replier' : 'retention.stats.poster', { count: Math.max(1, rounded) })
+  };
 }
 
 /**
