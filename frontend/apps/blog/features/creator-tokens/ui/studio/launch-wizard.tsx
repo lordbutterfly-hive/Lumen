@@ -16,6 +16,7 @@ import {
 import { usdWhole } from '../../market/format';
 import TokenShell from '../token-shell';
 import { writeFailureMessage } from '../write-failure';
+import { UserAvatarImg } from '@ui/components';
 
 const STEPS = ['Account', 'What you offer', 'Launch'];
 
@@ -361,7 +362,26 @@ const LaunchWizard: FC = () => {
             <>
               <h1 className="font-serif text-2xl font-semibold text-[#161511]">Confirm your account</h1>
               <div className="mt-4 flex items-center gap-3 rounded-xl border border-[#e4e6e9] px-4 py-3.5">
-                <span className="h-11 w-11 rounded-[13px]" style={{ background: 'linear-gradient(135deg,#c0392b,#e07b3e)' }} />
+                {/* ★ CONVERGED (F6 item 22). This was a flat gradient square that never
+                    attempted a real avatar at all — every creator, regardless of
+                    account, saw the same orange box on the first screen of their own
+                    launch flow. Falls back to the brand gradient (no letter guess)
+                    only for the genuinely signed-out case, where there is no account
+                    to draw an avatar OR an initial for. */}
+                {identity.isLoggedIn && (studio.creator ?? identity.username) ? (
+                  <UserAvatarImg
+                    username={(studio.creator ?? identity.username) as string}
+                    apiSize="medium"
+                    pixelSize={44}
+                    radiusClassName="rounded-[13px]"
+                  />
+                ) : (
+                  <span
+                    aria-hidden="true"
+                    className="h-11 w-11 rounded-[13px]"
+                    style={{ background: 'linear-gradient(135deg,#c0392b,#e07b3e)' }}
+                  />
+                )}
                 <div>
                   <div className="text-[15px] font-bold text-[#161511]">
                     {/* ★ `@—` and "@your account" are placeholder strings that

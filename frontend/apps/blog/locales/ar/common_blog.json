@@ -226,7 +226,8 @@
       "reason_community_type": "غير مسموح في هذا المجتمع",
       "reason_parent_muted": "المحتوى الأصلي مكتوم",
       "reason_low_reputation": "سمعة منخفضة",
-      "reason_community_role": "مكتوم في المجتمع"
+      "reason_community_role": "مكتوم في المجتمع",
+      "replying_to": "ردًا على @{{author}}"
     }
   },
   "alert_dialog_reblog": {

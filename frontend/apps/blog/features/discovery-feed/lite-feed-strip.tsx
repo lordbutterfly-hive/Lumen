@@ -1,8 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { Link } from '@hive/ui';
-import { Avatar, AvatarFallback } from '@ui/components';
+import { Link, UserAvatarImg } from '@hive/ui';
 import TimeAgo from '@ui/components/time-ago';
 import { getPostSummary } from '@/blog/lib/utils';
 import { Entry } from '@hive/common-hiveio-packages/wax';
@@ -31,7 +30,6 @@ async function fetchLiteFeed(): Promise<Entry[]> {
 function LitePostCard({ entry }: { entry: Entry }) {
   const dek = getPostSummary(entry.json_metadata, entry.body);
   const image = typeof entry.json_metadata?.image === 'string' ? entry.json_metadata.image : '';
-  const initial = (entry.author?.[0] ?? 'L').toUpperCase();
   // ★ ALWAYS CLICKABLE (2026-08-07). This used to render a pending post as an
   // inert block, on the theory that a not-yet-broadcast post has no destination.
   // It does: `/blog/@<author>/<lite-permlink>` renders the post for ANY viewer —
@@ -49,9 +47,11 @@ function LitePostCard({ entry }: { entry: Entry }) {
   const body = (
     <>
       <div className="mb-2 flex items-center gap-2 font-sans text-sm">
-        <Avatar className="h-6 w-6">
-          <AvatarFallback className="bg-[#f0ead9] text-[12px] text-[#9a7b2e]">{initial}</AvatarFallback>
-        </Avatar>
+        {/* ★ CONVERGED (F6 item 22). This never attempted a real avatar at all —
+            always the bare initial, even for a lite account with a real uploaded
+            picture (`/api/avatar` resolves those via `liteAvatar()`; see that
+            route). Amber tint kept, to match this strip's own "via Lumen" accent. */}
+        <UserAvatarImg username={entry.author ?? 'L'} pixelSize={24} className="bg-[#f0ead9] text-[#9a7b2e]" />
         <span className="font-medium text-[#161511]">{entry.author}</span>
         <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700">via Lumen</span>
         <span className="text-xs text-muted-foreground">

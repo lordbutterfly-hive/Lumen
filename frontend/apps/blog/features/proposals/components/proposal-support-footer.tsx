@@ -51,6 +51,11 @@ export default function ProposalSupportFooter({
   // "Support"/"Un-support" toggle — surface an honest "couldn't load your votes" note instead.
   const showIndeterminate = isLoggedIn && votesUnavailable;
 
+  // The hover/focus -> "Remove vote" swap only promises an action that is actually
+  // available right now — a supported-but-expired (or lite-blocked) proposal stays on
+  // the plain "Supported" label instead of hinting at a removal the button won't perform.
+  const canRemoveOnHover = isSupported && !isPending && !isLiteBlocked && !isExpired;
+
   const button = (
     <button
       type="button"
@@ -58,18 +63,56 @@ export default function ProposalSupportFooter({
       onClick={isLoggedIn && !isLiteBlocked ? onToggle : undefined}
       data-testid="proposal-support-toggle"
       aria-pressed={isSupported}
+      /**
+       * ★★★ THE ACCESSIBLE NAME DOES NOT DEPEND ON HOVER (2026-08-11, item 21).
+       * The visible label swaps to "Remove vote" only on `:hover`/`:focus-visible`
+       * below, which is real for a sighted mouse/keyboard user but tells a screen
+       * reader nothing — AT announces the ACCESSIBLE NAME, not a CSS pseudo-state.
+       * This `aria-label` says the full thing ("Supported. Activate to remove your
+       * vote…") unconditionally, so a screen-reader or switch-control user gets the
+       * complete instruction on first encounter, with no dependency on triggering
+       * hover/focus first. It still starts with "Supported" — the same word as the
+       * visible resting label — so it satisfies WCAG 2.5.3 (Label in Name) for
+       * speech-input users too.
+       */
+      aria-label={canRemoveOnHover ? t('proposals.card.remove_vote_aria') : undefined}
       className={cn(
-        'rounded-[10px] px-5 py-2.5 font-sans text-[13px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60',
+        'group rounded-[10px] px-5 py-2.5 font-sans text-[13px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60',
         isSupported
-          ? 'border border-[#c0392b] bg-[#c0392b] text-white hover:bg-[#96271b]'
+          ? 'border border-[#e4e6e9] bg-white text-[#3f4650] hover:border-[#c0392b] hover:bg-[#fdf3f2] hover:text-[#c0392b] focus-visible:border-[#c0392b] focus-visible:bg-[#fdf3f2] focus-visible:text-[#c0392b]'
           : 'border border-[#e4e6e9] bg-white text-[#3f4650] hover:bg-[#f6f7f8]'
       )}
     >
-      {isPending
-        ? t('proposals.card.support_pending')
-        : isSupported
-          ? t('proposals.card.unsupport')
-          : t('proposals.card.support')}
+      {isPending ? (
+        t('proposals.card.support_pending')
+      ) : isSupported ? (
+        canRemoveOnHover ? (
+          /**
+           * ★★★ "SUPPORTED" IS NOT A WARNING (2026-08-11, fuckery list item 21). This
+           * toggle used to render as a SOLID RED button labelled "Un-support" the
+           * instant a reader supported a proposal — red is this app's ONE destructive
+           * colour (delete, un-follow, block), so the normal, successful "you already
+           * back this" state read as an error the whole time it was true. It is now
+           * neutral/outline at rest, matching the not-yet-supported button, and only
+           * hints at removal ("Remove vote") on hover OR keyboard focus — both
+           * `group-hover:` and `group-focus-visible:` on each span below, so a
+           * sighted keyboard-only reader (Tab, no mouse) sees the exact same
+           * affordance a mouse user does before pressing anything.
+           */
+          <>
+            <span aria-hidden="true" className="group-hover:hidden group-focus-visible:hidden">
+              {t('proposals.card.supported')}
+            </span>
+            <span aria-hidden="true" className="hidden group-hover:inline group-focus-visible:inline">
+              {t('proposals.card.remove_vote')}
+            </span>
+          </>
+        ) : (
+          t('proposals.card.supported')
+        )
+      ) : (
+        t('proposals.card.support')
+      )}
     </button>
   );
 

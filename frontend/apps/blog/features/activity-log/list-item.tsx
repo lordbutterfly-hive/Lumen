@@ -1,7 +1,6 @@
 import { Icons } from '@hive/ui/components/icons';
 import TimeAgo from '@hive/ui/components/time-ago';
-import { configuredImagesEndpoint } from '@hive/ui/config/public-vars';
-import { Avatar, AvatarFallback, AvatarImage } from '@ui/components/avatar';
+import { UserAvatarImg } from '@ui/components';
 import { IAccountNotification } from '@hive/common-hiveio-packages/wax';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { usePathname } from 'next/navigation';
@@ -87,7 +86,6 @@ const NotificationListItem = ({
   const mentions = msg.match(usernamePattern);
   const notificationDate = new Date(date);
   const { icon, color } = getNotificationIcon(type);
-  const imageHosterUrl = configuredImagesEndpoint;
   const fixedUrl = url.startsWith('c') ? url.replace('c', 'trending') : url;
   const errorMessage = type === 'error';
   const isOwner = isOwnerProp ?? (user.isLoggedIn && user.username === username);
@@ -112,22 +110,14 @@ const NotificationListItem = ({
         <span className="h-2 w-2 shrink-0" />
       )}
 
-      {/* Avatar for the user who triggered the notification, or fallback icon */}
+      {/* Avatar for the user who triggered the notification, or fallback icon.
+          ★ CONVERGED (F6 item 22). This fell back to a generic, non-personalised
+          `/defaultavatar.png` on error and never tried our own `/api/avatar` proxy
+          at all — so a lite account or a dead Steemit-era `profile_image` showed
+          the SAME picture as everybody else instead of their own initial. */}
       {avatarUsername ? (
         <Link href={`/@${avatarUsername}`} data-testid="notification-account-icon-link" className="shrink-0">
-          <Avatar className="h-10 w-10">
-            <AvatarImage
-              src={`${imageHosterUrl}/u/${avatarUsername}/avatar/small`}
-              alt={`${avatarUsername} profile picture`}
-            />
-            <AvatarFallback className="bg-transparent">
-              <img
-                className="h-10 w-10 rounded-full"
-                alt={`${avatarUsername} profile picture`}
-                src="/defaultavatar.png"
-              />
-            </AvatarFallback>
-          </Avatar>
+          <UserAvatarImg username={avatarUsername} pixelSize={40} alt={`${avatarUsername} profile picture`} />
         </Link>
       ) : (
         <div

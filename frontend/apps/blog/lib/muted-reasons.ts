@@ -1,3 +1,5 @@
+import { BlacklistReason } from './moderation/blacklist-reason';
+
 /**
  * Hivemind muted_reasons enum values.
  * See: hivemind/hive/db/sql_scripts/postgrest/utilities/muted_reasons_operations.sql
@@ -28,15 +30,23 @@ const POST_HIDDEN_KEYS: Record<number, string> = {
 
 /**
  * Returns the translation key for the comment mute reason tag.
- * Priority: muted by viewer > blacklisted > muted_reasons from API > fallback "downvoted"
+ * Priority: muted by viewer > REAL blacklist match (own, then followed) >
+ * muted_reasons from API (which is how a reputation-only flag surfaces as "low
+ * reputation" instead of the false "blacklisted" — see `classifyBlacklist`) >
+ * fallback "downvoted".
  */
 export function getCommentMuteReasonKey(
   mutedReasons: number[] | undefined,
   isMutedByViewer: boolean,
-  isBlacklisted: boolean
+  blacklistReason: BlacklistReason
 ): string {
   if (isMutedByViewer) return 'cards.comment_card.reason_muted';
-  if (isBlacklisted) return 'cards.comment_card.reason_blacklisted';
+  // ★ 'reputation' is deliberately NOT handled here — it is not a real blacklist
+  // match (see blacklist-reason.ts). It falls through to `mutedReasons` below,
+  // which already carries LOW_REPUTATION (3) whenever Hivemind grays a comment for
+  // low reputation, and resolves to the correct, existing "low reputation" key.
+  if (blacklistReason === 'own') return 'cards.comment_card.reason_blacklisted_by_you';
+  if (blacklistReason === 'followed') return 'cards.comment_card.reason_on_followed_list';
 
   if (mutedReasons && mutedReasons.length > 0) {
     const key = COMMENT_REASON_KEYS[mutedReasons[0]];

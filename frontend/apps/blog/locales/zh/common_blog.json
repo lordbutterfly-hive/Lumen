@@ -219,7 +219,8 @@
       "reason_community_type": "不允许在此社区发帖",
       "reason_parent_muted": "父级内容已被静音",
       "reason_low_reputation": "声誉低",
-      "reason_community_role": "在社区中被静音"
+      "reason_community_role": "在社区中被静音",
+      "replying_to": "回复 @{{author}}"
     }
   },
   "amount_hover_card": {

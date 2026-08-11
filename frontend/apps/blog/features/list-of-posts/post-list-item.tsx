@@ -12,7 +12,7 @@ import imageUserBlocklist from '@ui/config/lists/image-user-blocklist';
 import userIllegalContent from '@ui/config/lists/user-illegal-content';
 import gdprUserList from '@ui/config/lists/gdpr-user-list';
 import TimeAgo from '@ui/components/time-ago';
-import { getUserAvatarUrl } from '@ui/lib/avatar-utils';
+import { UserAvatarImg } from '@ui/components';
 import { accountReputation } from '@hive/ui';
 import { IFollowList, Entry } from '@hive/common-hiveio-packages/wax';
 import { useLiteOverlay } from '@/blog/lib/lite/client/use-lite-overlay';
@@ -184,21 +184,18 @@ const PostListItem = memo(
           <CardHeader className="px-0 py-1">
             <div className="md:text-md flex items-center text-sm">
               {nsfw === 'show' && post.blacklists.length < 1 && !blacklistCheck ? (
-                // The avatar is a CSS background-image on a plain <div> — unlike
-                // MediumPostCard's avatar, there is no <img alt> here for the link to
-                // pick up as its name, so without this it was announced as an
-                // unnamed link.
+                // ★ CONVERGED (F6 item 22). This was a bare CSS `background-image`
+                // pointed at our own `/api/avatar` proxy with NO fallback at all —
+                // a dead `profile_image` or a lite account rendered an empty
+                // transparent circle, not even a broken-image glyph. The link
+                // still carries the aria-label the image itself never had.
                 <Link
                   href={`/@${displayAuthor}`}
                   data-testid="post-card-avatar"
                   aria-label={t('cards.post_card.author_profile', { author: displayAuthor })}
+                  className="mr-3"
                 >
-                  <div
-                    className="mr-3 h-[24px] w-[24px] rounded-3xl bg-cover bg-no-repeat"
-                    style={{
-                      backgroundImage: `url(${getUserAvatarUrl(displayAuthor, 'small')})`
-                    }}
-                  />
+                  <UserAvatarImg username={displayAuthor} pixelSize={24} />
                 </Link>
               ) : null}
               <div className="flex flex-wrap items-center gap-0.5 md:flex-nowrap">

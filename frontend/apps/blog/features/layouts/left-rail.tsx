@@ -149,6 +149,12 @@ export default function LeftRail() {
   const homeHref = '/';
   const profileHref = `/@${identity.username}`;
   const settingsHref = `/@${identity.username}/settings`;
+  // Blacklisted/muted/followed-blacklists/followed-muted-lists — reached only via
+  // a link ON the settings page (`moderation-lists.tsx`: "they live in settings
+  // with the rest of the housekeeping"), not from the profile itself. A whole
+  // family of sub-paths, not one page, so this is a PREFIX like `settingsHref`
+  // is an exact page — see the exception handling below.
+  const listsHref = `/@${identity.username}/lists`;
 
   /**
    * ★ A SUB-PAGE IS STILL THAT PAGE, WITH ONE EXCEPTION.
@@ -160,11 +166,23 @@ export default function LeftRail() {
    * its OWN row, so Profile must NOT claim it, or both light up at once, which is
    * exactly the "two rows are active and one of them is wrong" this rail is being
    * fixed for.
+   *
+   * ★★ THE EXCEPTION HAS TO BE A PREFIX TOO (this fix). `except` used to be
+   * matched with `===`, which only ever worked for `settingsHref` because
+   * settings has no sub-pages of its own. `listsHref` is not one page but four
+   * (`/lists/blacklisted`, `/lists/muted`, `/lists/followed_blacklists`,
+   * `/lists/followed_muted_lists`) — an exact-match exception would let every one
+   * of them fall through and re-claim the Profile row, which is exactly what was
+   * happening: Profile lit up on every moderation-list page. Each excepted href
+   * now excludes itself AND anything nested under it, the same rule `href` itself
+   * already gets one line up.
    */
   const activeUnder = (href: string, ...except: string[]) =>
     !navigatingTo &&
     !!pathname &&
-    (pathname === href || (pathname.startsWith(`${href}/`) && !except.includes(pathname)));
+    (pathname === href ||
+      (pathname.startsWith(`${href}/`) &&
+        !except.some((ex) => pathname === ex || pathname.startsWith(`${ex}/`))));
 
   return (
     <nav aria-label={LABELS.primaryNav} className="flex flex-col py-4" data-testid="left-rail-nav">
@@ -185,7 +203,7 @@ export default function LeftRail() {
             href={profileHref}
             icon={Icons.user}
             label={LABELS.profile}
-            isActive={activeUnder(profileHref, settingsHref)}
+            isActive={activeUnder(profileHref, settingsHref, listsHref)}
             isPending={navigatingTo === profileHref}
             onNavigate={setPendingHref}
             testId="left-rail-profile"
@@ -258,7 +276,10 @@ export default function LeftRail() {
             href={settingsHref}
             icon={Icons.settings}
             label={LABELS.settings}
-            isActive={activeIs(settingsHref)}
+            // Moderation lists (`/@you/lists/*`) are reached only from a link on
+            // this page and nowhere on the profile — see `listsHref` above — so
+            // this row has to claim that whole prefix too, not just its own href.
+            isActive={activeUnder(settingsHref) || activeUnder(listsHref)}
             isPending={navigatingTo === settingsHref}
             onNavigate={setPendingHref}
             testId="left-rail-settings"

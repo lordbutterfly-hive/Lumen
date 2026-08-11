@@ -219,7 +219,8 @@
       "reason_community_type": "не разрешено в этом сообществе",
       "reason_parent_muted": "родительский контент заглушен",
       "reason_low_reputation": "низкая репутация",
-      "reason_community_role": "заглушен в сообществе"
+      "reason_community_role": "заглушен в сообществе",
+      "replying_to": "Ответ пользователю @{{author}}"
     }
   },
   "amount_hover_card": {

@@ -38,6 +38,28 @@ NOTES/
 # Secondary Next instance (scripts/dev:3010) — see next.config.js distDir.
 .next-dev/
 
+# Throwaway probe scripts, anywhere in the tree. The `.tmp.` infix is the marker
+# agents already reach for by habit (follow20.tmp.mjs, g1-coinflip.tmp.mjs, ...).
+# Added 2026-08-11 after a review found three of these sitting unignored at the
+# repo ROOT, where the qa/harness rules below could never reach them.
+*.tmp.mjs
+*.tmp.ts
+*.tmp.js
+
+# Agent scratch under qa/harness. The COMMITTED convention in this directory is
+# `*-proof.mjs` — a named, reusable proof script that documents its own run
+# command (lite-session-ttl-proof.mjs, hive-session-ttl-proof.mjs, ...). Anything
+# else written here during a fan-out is throwaway: ad-hoc probes named after the
+# agent that made them, and screenshots. Screenshots are BINARIES and this repo
+# does not take binaries. Added 2026-08-11 after a sync dry-run found 3 PNGs and
+# 6 single-use probe scripts queued for commit.
+qa/harness/**/*.png
+qa/harness/**/*.jpg
+qa/harness/**/*.webm
+qa/harness/**/*-shots/
+qa/harness/f[0-9]-*.mjs
+qa/harness/g[0-9]-*.mjs
+
 # One-off scratch probes. These have been hand-excluded from every sync since
 # 2026-08-06 and were still turning up as staging candidates on 2026-08-11, which
 # is one slip away from committing them. `follow20.tmp.mjs` in particular

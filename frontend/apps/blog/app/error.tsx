@@ -13,7 +13,8 @@ const COPY = {
   updatingTitle: 'Updating Lumen',
   updatingBody: 'A newer version of this page is ready. Reloading now.',
   tryAgain: 'Try again',
-  home: 'Go to the home feed'
+  home: 'Go to the home feed',
+  reload: 'Reload'
 };
 
 const PRIMARY =
@@ -42,6 +43,14 @@ const SECONDARY =
  * own code never gets to run. `app/layout.tsx` carries a second, dependency-free
  * copy of this same detection in a plain inline `<script>` for exactly that
  * case.
+ *
+ * ★ ITEM 4 (2026-08-11): the `chunkError` branch used to render ONLY the
+ * "Updating Lumen... Reloading now" text with no button at all. That text is
+ * a promise, not a guarantee — `reloadOnceForChunkError()` silently no-ops
+ * inside its 10-minute cooldown, and a repeat failure inside that window left
+ * this exact card on screen forever with nothing to click. Now a manual
+ * reload button is always rendered for the chunk-error case too, so a stuck
+ * "reloading now" message always has a way out.
  */
 export default function Error({
   error,
@@ -65,7 +74,13 @@ export default function Error({
             {chunkError ? COPY.updatingBody : COPY.body}
           </p>
         </PageMasthead>
-        {!chunkError ? (
+        {chunkError ? (
+          <div className="flex flex-wrap items-center gap-3">
+            <button type="button" onClick={() => window.location.reload()} className={PRIMARY}>
+              {COPY.reload}
+            </button>
+          </div>
+        ) : (
           <div className="flex flex-wrap items-center gap-3">
             <button type="button" onClick={() => reset()} className={PRIMARY}>
               {COPY.tryAgain}
@@ -74,7 +89,7 @@ export default function Error({
               {COPY.home}
             </Link>
           </div>
-        ) : null}
+        )}
       </div>
     </div>
   );

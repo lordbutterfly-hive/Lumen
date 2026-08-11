@@ -5,6 +5,7 @@ import { Icons } from '@ui/components/icons';
 import TimeAgo from '@ui/components/time-ago';
 import { dateToShow } from '@ui/lib/parse-date';
 import { accountReputation, accountReputationPrecise } from '@hive/ui';
+import { cn } from '@ui/lib/utils';
 import { useTranslation } from '@/blog/i18n/client';
 import { compareDates } from '@/blog/lib/utils';
 import { ProfileLeagueChip } from '@/blog/features/retention/components/profile-league-chip';
@@ -24,6 +25,12 @@ interface ProfileIdentityProps {
    * 79.77). Undefined for a lite account, which has no Hive account to have one.
    */
   reputation?: number;
+  /**
+   * E1 (BUILDMAP-FUCKERY-V2): the viewer has muted and/or blacklisted this account.
+   * Dims the bio/handle block as a visual cue, matching the cover's own dimming —
+   * `ProfileModerationBanner` above still carries the actual explanation.
+   */
+  moderated?: boolean;
 }
 
 /**
@@ -67,7 +74,8 @@ export default function ProfileIdentity({
   lastVoteTime,
   lastPost,
   chainAccount = true,
-  reputation
+  reputation,
+  moderated = false
 }: ProfileIdentityProps) {
   const { t } = useTranslation('common_blog');
   // The explanation is collapsed by default. It opens on click as well as hover, because
@@ -79,7 +87,7 @@ export default function ProfileIdentity({
   const showReputation = chainAccount && typeof reputation === 'number';
 
   return (
-    <div className="min-w-0">
+    <div className={cn('min-w-0', moderated && 'opacity-60 grayscale')} data-testid="profile-identity-block">
       <div className="flex flex-wrap items-center gap-2 font-sans text-[14.5px] text-[#6b7280]">
         <span className="font-semibold text-[#3f4650]">@{username}</span>
         <ProfileLeagueChip username={username} chainAccount={chainAccount} />

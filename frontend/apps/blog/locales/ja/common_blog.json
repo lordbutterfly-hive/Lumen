@@ -219,7 +219,8 @@
       "reason_community_type": "このコミュニティでは許可されていません",
       "reason_parent_muted": "親コンテンツがミュートされています",
       "reason_low_reputation": "低い評価",
-      "reason_community_role": "コミュニティでミュート"
+      "reason_community_role": "コミュニティでミュート",
+      "replying_to": "@{{author}} への返信"
     }
   },
   "amount_hover_card": {

@@ -4,8 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
-import { Avatar, AvatarFallback, AvatarImage } from '@ui/components';
-import { getUserAvatarUrl } from '@hive/ui';
+import { UserAvatarImg } from '@ui/components';
 import { Button } from '@ui/components/button';
 import { cn } from '@ui/lib/utils';
 import DialogLogin from '@/blog/components/dialog-login';
@@ -218,20 +217,11 @@ export default function ShortFormComposer() {
   if (!isExpanded) {
     return (
       <div className="flex items-center gap-4 rounded-[18px] border border-[#ebebeb] bg-white p-[20px_22px] shadow-[0_1px_2px_rgba(20,18,10,0.03)]">
-        <Avatar className="h-11 w-11 shrink-0 overflow-hidden rounded-full">
-          <AvatarImage
-            className="h-full w-full object-cover"
-            src={getUserAvatarUrl(displayUsername, 'small')}
-            alt={displayUsername}
-          />
-          <AvatarFallback>
-            <img
-              className="h-full w-full object-cover"
-              src={getUserAvatarUrl(displayUsername, 'small')}
-              alt={displayUsername}
-            />
-          </AvatarFallback>
-        </Avatar>
+        {/* ★ CONVERGED (F6 item 22). This was a Radix `AvatarFallback` pointed at
+            the EXACT SAME URL `AvatarImage` had just failed on — the same N-4 bug
+            app-header.tsx's HeaderAvatar was fixed for, just not here: on a real
+            error this rendered nothing, an empty ring, not a fallback. */}
+        <UserAvatarImg username={displayUsername} pixelSize={44} alt={displayUsername} />
         <button
           type="button"
           onClick={() => setIsFocused(true)}
@@ -254,20 +244,7 @@ export default function ShortFormComposer() {
   return (
     <div className="rounded-2xl border border-border bg-background p-6 font-sans shadow-sm transition-shadow">
       <div className="flex gap-3">
-        <Avatar className="h-11 w-11 shrink-0 overflow-hidden rounded-full">
-          <AvatarImage
-            className="h-full w-full object-cover"
-            src={getUserAvatarUrl(displayUsername, 'small')}
-            alt={displayUsername}
-          />
-          <AvatarFallback>
-            <img
-              className="h-full w-full object-cover"
-              src={getUserAvatarUrl(displayUsername, 'small')}
-              alt={displayUsername}
-            />
-          </AvatarFallback>
-        </Avatar>
+        <UserAvatarImg username={displayUsername} pixelSize={44} alt={displayUsername} />
         <textarea
           ref={textareaRef}
           value={text}

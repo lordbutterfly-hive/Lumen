@@ -200,6 +200,8 @@
     },
     "post_card": {
       "reputation_title": "Reputation",
+      "muted_interstitial": "Post from @{{author}}, who you've muted, is hidden.",
+      "reveal_post": "Reveal post",
       "in": "in",
       "downvote_warning": "Downvoting a post can decrease pending rewards and make it less visible. Common reasons:",
       "reason_1": "• Disagreement on rewards",
@@ -248,11 +250,15 @@
       "reason_muted": "muted by you",
       "reason_downvoted": "downvoted",
       "reason_blacklisted": "blacklisted",
+      "reason_blacklisted_by_you": "blacklisted by you",
+      "reason_on_followed_list": "on a list you follow",
       "reason_community_moderation": "muted by community moderator",
       "reason_community_type": "not allowed in this community",
       "reason_parent_muted": "parent content is muted",
       "reason_low_reputation": "low reputation",
-      "reason_community_role": "muted in community"
+      "reason_community_role": "muted in community",
+      "replying_to": "Replying to @{{author}}",
+      "manage_list_link": "Manage list"
     }
   },
   "alert_dialog_reblog": {
@@ -269,6 +275,15 @@
     "remove_downvote_title": "Remove Downvote",
     "remove_downvote_description": "Removing your vote.",
     "confirm": "OK",
+    "cancel": "Cancel"
+  },
+  "reset_all_lists_dialog": {
+    "trigger": "Reset all lists",
+    "title": "Reset every list?",
+    "description": "This clears your blacklist, muted list, followed blacklists, and followed muted lists — all in one on-chain transaction. It can't be undone from here.",
+    "type_to_confirm": "Type RESET to confirm",
+    "confirm_placeholder": "RESET",
+    "action": "Reset everything",
     "cancel": "Cancel"
   },
   "amount_hover_card": {
@@ -316,8 +331,17 @@
     "block_button": "Block",
     "unblock_button": "Unblock",
     "unmute_button": "Unmute",
+    "blacklist_button": "Blacklist",
+    "unblacklist_button": "Unblacklist",
     "unfollow_button": "Unfollow",
     "follow_button": "Follow",
+    "moderated_badge_muted": "Muted",
+    "moderated_badge_blacklisted": "Blacklisted",
+    "moderated_badge_both": "Muted & Blacklisted",
+    "moderation_banner_muted": "You have muted @{{username}}. Their posts are dimmed for you.",
+    "moderation_banner_blacklisted": "You have blacklisted @{{username}}.",
+    "moderation_banner_both": "You have muted and blacklisted @{{username}}. Their posts are dimmed for you.",
+    "moderation_banner_view_list": "View list",
     "hive_buzz_badge_title": "This is {{username}}'s level badged earned from Hivebuzz programs",
     "user_level_title": "{{username}} is a {{level}} (based on staked VESTS). Click for more stats on HiveBuzz.",
     "twitter_badge_title": "To get the Twitter badge, link your account at HivePosh.com",
@@ -373,6 +397,19 @@
         "add_account_to_list": "Add Account(s) To List",
         "single_account": "(single account or comma separated list)",
         "add_to_list": "Add to list",
+        "checking_accounts": "Checking account(s)…",
+        "confirm_in_keychain": "Confirm in Hive Keychain…",
+        "confirm_waiting_signature": "Waiting for your signature…",
+        "cancel": "Cancel",
+        "error_empty_input": "Enter at least one account name.",
+        "error_already_on_list": "Already on this list: {{names}}",
+        "error_invalid_format": "Not a valid Hive account name: {{names}}",
+        "error_not_found": "No Hive account found for: {{names}}",
+        "error_api_error": "Couldn't verify {{names}} right now — please try again.",
+        "error_timeout": "No response after 30 seconds. If a Hive Keychain window opened, check for it, or try again.",
+        "error_rejected": "The request was declined.",
+        "error_broadcast_failed": "Couldn't complete the request: {{message}}",
+        "error_cancelled": "Cancelled. If a Hive Keychain window is still open, closing it is safe — nothing has been submitted.",
         "description_not_added": "User hasn't added a description to their blacklist yet",
         "empty_list": "There are no users on this list yet",
         "search_this_list": "Search This List",
@@ -1430,7 +1467,12 @@
       "expired": "Expired"
     },
     "list": {
-      "heading": "Funded proposals",
+      "heading": {
+        "all": "All proposals",
+        "active": "Active proposals",
+        "upcoming": "Upcoming proposals",
+        "expired": "Expired proposals"
+      },
       "empty": "No proposals match this filter."
     },
     "error": {
@@ -1442,6 +1484,9 @@
       "vote_value": "Vote value",
       "support": "Support",
       "unsupport": "Un-support",
+      "supported": "Supported",
+      "remove_vote": "Remove vote",
+      "remove_vote_aria": "Supported. Activate to remove your vote from this proposal.",
       "support_pending": "Submitting…",
       "votes_unavailable": "Vote status unavailable",
       "daily_pay": "Daily pay",

@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Big from 'big.js';
 import { ChevronDown, ChevronUp, Repeat } from 'lucide-react';
-import { Link, getUserAvatarUrl } from '@hive/ui';
+import { Link, UserAvatarImg } from '@hive/ui';
 import { useTranslation } from '@/blog/i18n/client';
 import { useDelegations } from '../hooks/use-delegations';
 import { getDelegationsUrl } from '../lib/wallet-endpoint';
@@ -89,11 +89,8 @@ export default function DelegatedOutPanel({
                     className="flex min-w-0 items-center gap-2.5 text-[13.5px] text-[#2a2822] hover:text-[#c0392b]"
                     data-testid="wallet-delegated-out-account"
                   >
-                    <img
-                      src={getUserAvatarUrl(d.name, 'small')}
-                      alt=""
-                      className="h-6 w-6 shrink-0 rounded-full object-cover"
-                    />
+                    {/* ★ CONVERGED (F6 item 22). No fallback before. */}
+                    <UserAvatarImg username={d.name} pixelSize={24} />
                     <span className="truncate">@{d.name}</span>
                   </Link>
                   <span className="shrink-0 font-sans text-[13.5px] font-semibold tabular-nums text-[#3f4650]">

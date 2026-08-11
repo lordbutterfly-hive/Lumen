@@ -40,20 +40,38 @@ const SELECT_CONTENT = 'rounded-[12px] border border-[#e4e6e9] bg-white p-1 shad
 const SELECT_ITEM =
   'cursor-pointer rounded-[9px] py-2 font-sans text-[13.5px] text-[#161511] focus:bg-[#fdf2f0] focus:text-[#c0392b]';
 
+/**
+ * ★ S7 — DIRTY-FIELD CUE (2026-08-11). The Update button already goes from
+ * grey to red the moment ANY field differs from what was loaded, but nothing
+ * on the page said WHICH field caused that — a reader who touched one of nine
+ * inputs had to remember which one themselves. `isDirty` marks that one field:
+ * a small dot beside its label, `aria-hidden` because it is reinforcement of
+ * something the value itself already conveys, not new information — and
+ * `data-dirty` so this is checkable in a test without relying on color.
+ */
 const Field = ({
   htmlFor,
   label,
   error,
+  isDirty,
   children
 }: {
   htmlFor: string;
   label: string;
   error?: string | null;
+  isDirty?: boolean;
   children: ReactNode;
 }) => (
-  <div>
+  <div data-dirty={isDirty ? 'true' : 'false'}>
     <label className={SETTINGS_LABEL} htmlFor={htmlFor}>
       {label}
+      {isDirty ? (
+        <span
+          className="ml-1.5 inline-block h-[6px] w-[6px] rounded-full bg-[#c0392b] align-middle"
+          aria-hidden="true"
+          data-testid="field-dirty-dot"
+        />
+      ) : null}
     </label>
     {children}
     {error ? <p className="mt-1.5 text-[12px] text-[#c0392b]">{error}</p> : null}
@@ -84,6 +102,21 @@ const SettingsForm = ({ username }: { username: string }) => {
     DEFAULT_PREFERENCES,
     StorageTTL.PERMANENT
   );
+  /**
+   * ★ S6 — PREFERENCES SAVE SILENTLY (2026-08-11). Unlike the profile card
+   * above (an explicit Update button, a toast on success), every Preferences
+   * combobox wrote straight to localStorage on `onValueChange` with no
+   * feedback at all — a reader who picked "Always hide" for NSFW content had
+   * no way to tell it took effect versus the click having done nothing. This
+   * writes AND confirms in one place, reusing the same `changes_saved` copy
+   * the profile save already uses (it is generically true here too — a
+   * preference changed and was saved), so this doesn't need a second
+   * translation key or a second design language for "it worked".
+   */
+  const updatePreference = <K extends keyof Preferences>(key: K, value: Preferences[K]) => {
+    setPreferences((prev) => ({ ...prev, [key]: value }));
+    toast({ title: t('settings_page.changes_saved'), variant: 'success' });
+  };
   const chainProfile = data?.profile;
   const profileData: Partial<Settings> = (isLite ? liteProfile : chainProfile) ?? {};
 
@@ -219,7 +252,12 @@ const SettingsForm = ({ username }: { username: string }) => {
         <p className={SETTINGS_CARD_HINT}>{t('settings_page.settings_intro')}</p>
 
         <div className="mt-5 grid grid-cols-1 gap-5 md:grid-cols-2">
-          <Field htmlFor="profileImage" label={t('settings_page.profile_image_url')} error={validationCheck.profile_image}>
+          <Field
+            htmlFor="profileImage"
+            label={t('settings_page.profile_image_url')}
+            error={validationCheck.profile_image}
+            isDirty={settings.profile_image !== profileSettings.profile_image}
+          >
             <input
               type="text"
               id="profileImage"
@@ -247,7 +285,12 @@ const SettingsForm = ({ username }: { username: string }) => {
             />
           </Field>
 
-          <Field htmlFor="coverImage" label={t('settings_page.cover_image_url')} error={validationCheck.cover_image}>
+          <Field
+            htmlFor="coverImage"
+            label={t('settings_page.cover_image_url')}
+            error={validationCheck.cover_image}
+            isDirty={settings.cover_image !== profileSettings.cover_image}
+          >
             <input
               type="text"
               id="coverImage"
@@ -275,7 +318,12 @@ const SettingsForm = ({ username }: { username: string }) => {
             />
           </Field>
 
-          <Field htmlFor="name" label={t('settings_page.profile_name')} error={validationCheck.name}>
+          <Field
+            htmlFor="name"
+            label={t('settings_page.profile_name')}
+            error={validationCheck.name}
+            isDirty={settings.name !== profileSettings.name}
+          >
             <input
               type="text"
               id="name"
@@ -286,7 +334,12 @@ const SettingsForm = ({ username }: { username: string }) => {
             />
           </Field>
 
-          <Field htmlFor="about" label={t('settings_page.profile_about')} error={validationCheck.about}>
+          <Field
+            htmlFor="about"
+            label={t('settings_page.profile_about')}
+            error={validationCheck.about}
+            isDirty={settings.about !== profileSettings.about}
+          >
             <input
               // ★ A BIO IS NOT AN EMAIL ADDRESS (2026-08-07). This was
               // `type="email"`, so a normal sentence tripped the browser's own
@@ -301,7 +354,12 @@ const SettingsForm = ({ username }: { username: string }) => {
             />
           </Field>
 
-          <Field htmlFor="location" label={t('settings_page.profile_location')} error={validationCheck.location}>
+          <Field
+            htmlFor="location"
+            label={t('settings_page.profile_location')}
+            error={validationCheck.location}
+            isDirty={settings.location !== profileSettings.location}
+          >
             <input
               type="text"
               id="location"
@@ -312,7 +370,12 @@ const SettingsForm = ({ username }: { username: string }) => {
             />
           </Field>
 
-          <Field htmlFor="website" label={t('settings_page.profile_website')} error={validationCheck.website}>
+          <Field
+            htmlFor="website"
+            label={t('settings_page.profile_website')}
+            error={validationCheck.website}
+            isDirty={settings.website !== profileSettings.website}
+          >
             <input
               type="text"
               id="website"
@@ -334,6 +397,7 @@ const SettingsForm = ({ username }: { username: string }) => {
                 htmlFor="blacklistDescription"
                 label={t('settings_page.blacklist_description')}
                 error={validationCheck.blacklist_description}
+                isDirty={settings.blacklist_description !== profileSettings.blacklist_description}
               >
                 <input
                   type="text"
@@ -351,6 +415,7 @@ const SettingsForm = ({ username }: { username: string }) => {
                 htmlFor="mutedListDescription"
                 label={t('settings_page.mute_list_description')}
                 error={validationCheck.muted_list_description}
+                isDirty={settings.muted_list_description !== profileSettings.muted_list_description}
               >
                 <input
                   type="text"
@@ -411,12 +476,17 @@ const SettingsForm = ({ username }: { username: string }) => {
             </label>
             <Select
               value={preferences.nsfw}
-              onValueChange={(e: 'hide' | 'warn' | 'show') =>
-                setPreferences((prev) => ({ ...prev, nsfw: e }))
-              }
+              onValueChange={(e: 'hide' | 'warn' | 'show') => updatePreference('nsfw', e)}
               name="not-safe-for-work-content"
             >
-              <SelectTrigger className={SELECT_TRIGGER}>
+              {/* ★ S5 — `id` MATCHING THE LABEL'S `htmlFor` (2026-08-11). The
+                  `<label htmlFor>` above already pointed at this id; nothing
+                  in this tree ever carried it, so the a11y tree reported a
+                  bare `combobox` with an empty accessible name on all four of
+                  these — verified via the accessibility tree, not by eye.
+                  `button` is a labelable element, so this alone wires the
+                  association (no `aria-labelledby` needed). */}
+              <SelectTrigger id="not-safe-for-work-content" className={SELECT_TRIGGER}>
                 <SelectValue placeholder={t('settings_page.not_safe_for_work_nsfw_content')} />
               </SelectTrigger>
               <SelectContent className={SELECT_CONTENT}>
@@ -441,12 +511,10 @@ const SettingsForm = ({ username }: { username: string }) => {
             </label>
             <Select
               value={preferences.blog_rewards}
-              onValueChange={(e: '0%' | '50%' | '100%') =>
-                setPreferences((prev) => ({ ...prev, blog_rewards: e }))
-              }
+              onValueChange={(e: '0%' | '50%' | '100%') => updatePreference('blog_rewards', e)}
               name="blog-post-rewards"
             >
-              <SelectTrigger className={SELECT_TRIGGER}>
+              <SelectTrigger id="blog-post-rewards" className={SELECT_TRIGGER}>
                 <SelectValue placeholder={t('settings_page.choose_default_blog_payout')} />
               </SelectTrigger>
               <SelectContent className={SELECT_CONTENT}>
@@ -472,11 +540,9 @@ const SettingsForm = ({ username }: { username: string }) => {
             <Select
               name="comment-post-rewards"
               value={preferences.comment_rewards}
-              onValueChange={(e: '0%' | '50%' | '100%') =>
-                setPreferences((prev) => ({ ...prev, comment_rewards: e }))
-              }
+              onValueChange={(e: '0%' | '50%' | '100%') => updatePreference('comment_rewards', e)}
             >
-              <SelectTrigger className={SELECT_TRIGGER}>
+              <SelectTrigger id="comment-post-rewards" className={SELECT_TRIGGER}>
                 <SelectValue placeholder={t('settings_page.choose_default_comment_payout')} />
               </SelectTrigger>
               <SelectContent className={SELECT_CONTENT}>
@@ -502,11 +568,9 @@ const SettingsForm = ({ username }: { username: string }) => {
             <Select
               name="referral-system"
               value={preferences.referral_system}
-              onValueChange={(e: 'enabled' | 'disabled') =>
-                setPreferences((prev) => ({ ...prev, referral_system: e }))
-              }
+              onValueChange={(e: 'enabled' | 'disabled') => updatePreference('referral_system', e)}
             >
-              <SelectTrigger className={SELECT_TRIGGER}>
+              <SelectTrigger id="referral-system" className={SELECT_TRIGGER}>
                 <SelectValue placeholder={t('settings_page.default_beneficiaries')} />
               </SelectTrigger>
               <SelectContent className={SELECT_CONTENT}>

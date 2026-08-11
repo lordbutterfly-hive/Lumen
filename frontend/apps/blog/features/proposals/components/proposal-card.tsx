@@ -1,7 +1,6 @@
 'use client';
 
-import { Link } from '@hive/ui';
-import { getUserAvatarUrl } from '@ui/lib/avatar-utils';
+import { Link, UserAvatarImg } from '@hive/ui';
 import { cn } from '@ui/lib/utils';
 import { useTranslation } from '@/blog/i18n/client';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
@@ -50,12 +49,13 @@ export default function ProposalCard({ vm, isSupported, votesUnavailable }: Prop
         <div className="min-w-0">
           {/* Byline */}
           <div className="mb-2 flex items-center gap-2.5 font-sans text-[13px] text-[#6b7280]">
+            {/* ★ CONVERGED (F6 item 22). This had no fallback at all — a dead
+                Steemit-era `profile_image` or a lite account with no Hive avatar
+                showed the browser's broken-image glyph next to the proposal's
+                creator. The app's one avatar component, direct host then proxy
+                then monogram, same as everywhere else. */}
             <Link href={`/@${proposal.creator}`} className="shrink-0" data-testid="proposal-card-avatar">
-              <img
-                src={getUserAvatarUrl(proposal.creator, 'small')}
-                alt={proposal.creator}
-                className="h-[30px] w-[30px] rounded-full object-cover"
-              />
+              <UserAvatarImg username={proposal.creator} pixelSize={30} alt={proposal.creator} />
             </Link>
             <span>
               {t('proposals.card.by')}{' '}

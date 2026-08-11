@@ -2,12 +2,13 @@
 
 import { useFollowListQuery } from '@/blog/components/hooks/use-follow-list';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { useInitialFollowList } from '@/blog/components/observer-provider';
 import { useUnmuteMutation } from '@/blog/features/mute-follow/hooks/use-mute-mutations';
 import { useTranslation } from '@/blog/i18n/client';
 import { handleError } from '@ui/lib/handle-error';
 import { CircleSpinner } from 'react-spinners-kit';
-import { getUserAvatarDirectUrl } from '@ui/components';
+import { Skeleton, UserAvatarImg } from '@ui/components';
 import BasePathLink from '@/blog/components/base-path-link';
 import { SETTINGS_CARD, SETTINGS_CARD_HINT, SETTINGS_CARD_TITLE } from './lib/card';
 
@@ -23,16 +24,31 @@ import { SETTINGS_CARD, SETTINGS_CARD_HINT, SETTINGS_CARD_TITLE } from './lib/ca
 const MutedList = ({ username }: { username: string }) => {
   const { t } = useTranslation('common_blog');
   const { user } = useUserClient();
-  // ★ OWNERSHIP. This list belongs to `username` — the profile being VIEWED — but
-  // the unmute mutation always signs as the LOGGED-IN user. Nothing gates
-  // /@anyone/settings, so on someone else's settings page every Unmute button
-  // broadcast an unmute from the viewer's own account against a name from a
-  // stranger's list: a wasted chain write at best, and at worst it silently
-  // undid a mute the viewer had deliberately set. A lite viewer has no signer at
-  // all and got a raw crash.
-  //
-  // The list stays visible (it is public follow data); only the WRITE is gated.
-  const canUnmute = user.isLoggedIn && user.account_tier !== 'lite' && user.username === username;
+  /**
+   * ★★★ OWNERSHIP, FIXED (2026-08-11, fuckery-v2 G1: S1/S3). This was
+   * `user.isLoggedIn && user.username === username` off raw `useUserClient()`,
+   * which cannot answer during SSR and reports signed-out until `/api/users/me`
+   * returns — so `canUnmute` stayed false long after the real owner had loaded
+   * the page, and the hint fell through to `unmute_locked` ("Only @lordbutterfly
+   * can change this list.") ON HIS OWN PAGE. Measured live, at t=97s: still zero
+   * Unmute buttons for the actual owner.
+   *
+   * `identity` (`features/layouts/server-session.tsx`, the same fix the header
+   * already shipped) is seeded from the session cookie the server read, so
+   * `isOwnerMatch` is correct from the very first render. What it does NOT carry
+   * is `account_tier` — that only exists on the real client user object, and a
+   * keyless lite viewer has no signer at all, so granting write access before
+   * we genuinely know the tier would reopen the exact `getSigner(undefined)`
+   * crash `list-variant.tsx`'s own history already documents. So the WRITE gate
+   * (`canUnmute`, which controls the actual button) still waits for
+   * `identity.clientAnswered`; only the ACCUSATION ("this isn't yours") is
+   * removed from the unresolved window — see `hint` below.
+   */
+  const identity = useSessionIdentity();
+  const isOwnerMatch = identity.isLoggedIn && identity.username === username;
+  const canUnmute = identity.clientAnswered
+    ? isOwnerMatch && user.isLoggedIn && user.account_tier !== 'lite' && user.username === username
+    : false;
   const initialFollowList = useInitialFollowList();
   const mutedQuery = useFollowListQuery(username, 'muted', initialFollowList);
   const unmuteMutation = useUnmuteMutation();
@@ -46,9 +62,24 @@ const MutedList = ({ username }: { username: string }) => {
   return (
     <section className={SETTINGS_CARD} data-testid="settings-muted-users">
       <h2 className={SETTINGS_CARD_TITLE}>{t('settings_page.muted_users')}</h2>
-      <p className={SETTINGS_CARD_HINT}>
-        {canUnmute ? t('settings_page.muted_users_hint') : t('settings_page.unmute_locked', { username })}
-      </p>
+      {/* ★ S3 — NEVER "Only @you can change this list" ON YOUR OWN PAGE.
+          `unmute_locked` is only shown once `isOwnerMatch` is false, which
+          `identity` already knows immediately from the session cookie — the
+          same trust level the header gives it. The one genuinely uncertain
+          window is `isOwnerMatch === true` but the tier is not confirmed yet
+          (`!identity.clientAnswered`): a skeleton bar stands in rather than
+          asserting either message, so the real owner is never told this
+          isn't theirs while we're still waiting to find out whether they can
+          write to it. */}
+      {!isOwnerMatch ? (
+        <p className={SETTINGS_CARD_HINT}>{t('settings_page.unmute_locked', { username })}</p>
+      ) : identity.clientAnswered ? (
+        <p className={SETTINGS_CARD_HINT}>
+          {canUnmute ? t('settings_page.muted_users_hint') : t('settings_page.unmute_locked', { username })}
+        </p>
+      ) : (
+        <Skeleton className="mt-1.5 h-[13px] w-56" data-testid="settings-muted-hint-skeleton" />
+      )}
 
       {muted.length === 0 ? (
         <p className="mt-4 rounded-[14px] bg-[#f7f7f7] px-4 py-5 text-center text-[13.5px] text-[#6b7280]">
@@ -68,27 +99,10 @@ const MutedList = ({ username }: { username: string }) => {
                     the fallback: Radix shows that fallback for the entire time the
                     request is in flight, not just on a real error, so a page of
                     muted users read as a column of blank grey circles for as long
-                    as the proxy took. A monogram sits behind the image now — same
-                    letter, same tinted ground, same `onError` hide as the witness
-                    rows — so a real avatar swaps in when the direct load succeeds
-                    and the initial is what shows the rest of the time, not a hole. */}
-                <span
-                  className="relative flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#f1f3f5] font-sans text-[13px] font-bold uppercase text-[#9ca3af]"
-                  aria-hidden="true"
-                >
-                  {mutedUser.name.slice(0, 1)}
-                  <img
-                    src={getUserAvatarDirectUrl(mutedUser.name, 'small')}
-                    alt=""
-                    width={36}
-                    height={36}
-                    loading="lazy"
-                    onError={(e) => {
-                      e.currentTarget.style.display = 'none';
-                    }}
-                    className="absolute inset-0 h-9 w-9 rounded-full object-cover"
-                  />
-                </span>
+                    as the proxy took. Now the app's one avatar component (F6 item
+                    22): direct host first, `/api/avatar` retried on error, letter
+                    underneath the whole time so there is never a hole. */}
+                <UserAvatarImg username={mutedUser.name} pixelSize={36} />
 
                 <BasePathLink
                   href={`/@${mutedUser.name}`}

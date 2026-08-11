@@ -1,10 +1,17 @@
 'use client';
 
+import { MoreHorizontal } from 'lucide-react';
 import { Icons } from '@hive/ui/components/icons';
 import parseDate from '@hive/ui/lib/parse-date';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader } from '@hive/ui/components/card';
 import { cn } from '@hive/ui/lib/utils';
 import { Link } from '@hive/ui';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger
+} from '@hive/ui/components/dropdown-menu';
 import { Separator } from '@ui/components/separator';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@ui/components/accordion';
 import { memo, useEffect, useRef, useState, useCallback, type ReactNode } from 'react';
@@ -37,7 +44,9 @@ import { UserPopoverCard } from './user-popover-card';
 import { useTranslation } from '@/blog/i18n/client';
 import VotesComponentWrapper from '@/blog/features/votes/votes-component-wrapper';
 import { getCommentMuteReasonKey } from '@/blog/lib/muted-reasons';
+import { classifyBlacklist } from '@/blog/lib/moderation/blacklist-reason';
 import { useLiteOverlay } from '@/blog/lib/lite/client/use-lite-overlay';
+import { useModerationStatus } from '@/blog/features/mute-follow/hooks/use-moderation-status';
 
 interface CommentListProps {
   permissionToMute: Boolean;
@@ -52,6 +61,10 @@ interface CommentListProps {
   flagText: string | undefined;
   filteringEnabled?: boolean;
   onCommnentLinkClick: (hash: string) => void;
+  /** Set by CommentList once nesting passes MAX_VISUAL_DEPTH (item 10): the
+   *  thread stops indenting further, so this names who the flattened reply is
+   *  actually answering, since the connector line no longer shows it. */
+  replyingToAuthor?: string;
   children?: ReactNode;
 }
 export const commentClassName =
@@ -70,6 +83,7 @@ const CommentListItem = memo(function CommentListItem({
   observer,
   filteringEnabled = true,
   onCommnentLinkClick,
+  replyingToAuthor,
   children
 }: CommentListProps) {
   const { t } = useTranslation('common_blog');
@@ -92,7 +106,32 @@ const CommentListItem = memo(function CommentListItem({
 
   const isMutedByViewer = mutedList?.some((x) => x.name === comment.author);
   const isGrayedByStats = comment.stats?.gray;
-  const isBlacklisted = comment.blacklists && comment.blacklists.length > 0;
+  // ★ NOT `comment.blacklists.length > 0` — Hivemind mixes a synthetic
+  // "reputation-N" token into that array for any low/negative-reputation author,
+  // with no list involved at all. See `classifyBlacklist` for the measured proof
+  // (bpcvoter1/bpcvoter3: reputation-only, on NO real list; bpcvoter2: confirmed
+  // on lordbutterfly's own list, and the only entry carrying "my blacklist").
+  // `isGrayedByStats` below is intentionally unaffected — hiding low-reputation
+  // comments by default is correct; MISLABELLING why is what was wrong.
+  const blacklistReason = classifyBlacklist(comment.blacklists);
+  // ★ E5 (BUILDMAP-FUCKERY-V2, G3) — "Reveal Comment" gave no author-level context
+  // and no route back to the list that caused the hide. Only the two REAL, viewer-
+  // controlled list matches get a link — a community-moderation hide, a low-
+  // reputation hide or a plain downvote have no list to route back to; the reason
+  // text next to "Reveal Comment" already names those, unchanged.
+  const hiddenReasonListHref = isMutedByViewer
+    ? `/@${user.username}/lists/muted`
+    : blacklistReason === 'own'
+      ? `/@${user.username}/lists/blacklisted`
+      : blacklistReason === 'followed'
+        ? `/@${user.username}/lists/followed_blacklists`
+        : null;
+  // ★ E2 (BUILDMAP-FUCKERY-V2, G3) — the comment overflow menu. Acts on
+  // `comment.author`, same reasoning as the UserPopoverCard passed `author` two
+  // lines up: it is the real signer, and when `liteOverlay` is set that signer is
+  // the shared publishing account, so `targetIsLite` hides the controls rather than
+  // muting/blacklisting every lite author at once.
+  const moderation = useModerationStatus(comment.author, Boolean(liteOverlay));
   const isOriginallyHidden = filteringEnabled && (isGrayedByStats || isMutedByViewer);
   const [hiddenComment, setHiddenComment] = useState(isOriginallyHidden);
   const [openState, setOpenState] = useState<string>(isOriginallyHidden ? '' : 'item-1');
@@ -184,19 +223,7 @@ const CommentListItem = memo(function CommentListItem({
     <>
       {currentDepth < 8 ? (
         <li data-testid="comment-list-item" className="w-full min-w-0">
-          <div className="flex w-full min-w-0" id={commentId} ref={ref}>
-            <img
-              className={clsx('mr-3 hidden shrink-0 rounded-3xl sm:block', {
-                'mx-[15px] h-[25px] w-[25px] opacity-50': hiddenComment,
-                'h-[40px] w-[40px]': !hiddenComment,
-                'opacity-50': tempraryHidden
-              })}
-              height="40"
-              width="40"
-              src={getUserAvatarUrl(displayAuthor, 'small')}
-              alt={`${displayAuthor} profile picture`}
-              loading="lazy"
-            />
+          <div className="w-full min-w-0" id={commentId} ref={ref}>
             <Accordion type="single" collapsible value={openState} className="w-full min-w-0">
               <AccordionItem className="w-full min-w-0" value="item-1">
                 {/* ★ THE COMMENT SUBTREE WAS AN UNMIGRATED VISUAL SYSTEM (v8, post detail).
@@ -207,22 +234,31 @@ const CommentListItem = memo(function CommentListItem({
                     Pinned to the house tokens here: white surface, #ebebeb hairline,
                     14px radius, which is the radius the design system assigns to rows. */}
                 <Card
-                  className={cn(`mb-4 w-full min-w-0 overflow-hidden rounded-[14px] border-[#ebebeb] bg-white text-primary depth-${comment.depth}`, {
-                    'opacity-50 hover:opacity-100': hiddenComment || tempraryHidden,
-                    'border border-destructive': comment._temporary,
-                    'border border-blue-400/50': comment._optimistic
-                  })}
+                  className={cn(
+                    `mb-4 w-full min-w-0 overflow-hidden rounded-[14px] border-[#ebebeb] bg-white text-primary depth-${comment.depth}`,
+                    {
+                      'opacity-50 hover:opacity-100': hiddenComment || tempraryHidden,
+                      'border border-destructive': comment._temporary,
+                      'border border-blue-400/50': comment._optimistic
+                    }
+                  )}
                 >
-                  <CardHeader className="px-0 py-0">
+                  {/* ★ ONE padding token for the whole card (item 5/6/8): CardHeader
+                      carries it here, CardContent and CardFooter below match it
+                      exactly (px-3 py-2), and nothing inside any of the three rows
+                      adds its own competing offset (the old pl-1/ml-4/px-[5px]/px-2
+                      mix is what produced 4px at one depth and 12-16px at another —
+                      it was never depth-dependent, just inconsistent per row). */}
+                  <CardHeader className="px-3 py-2">
                     <div className="flex w-full justify-between">
                       <div
                         className="flex w-full flex-col justify-start sm:flex-row sm:items-center"
                         data-testid="comment-card-header"
                       >
                         <div className="flex w-full items-center justify-between text-xs sm:text-sm">
-                          <div className="my-1 flex flex-wrap items-center pl-1">
+                          <div className="flex flex-wrap items-center">
                             {comment._temporary && !comment._optimistic ? (
-                              <div className="flex items-center pl-1 font-bold hover:cursor-pointer hover:text-destructive">
+                              <div className="flex items-center font-bold hover:cursor-pointer hover:text-destructive">
                                 {displayAuthor}
                               </div>
                             ) : (
@@ -233,8 +269,18 @@ const CommentListItem = memo(function CommentListItem({
                                     {t('global.publishing')}
                                   </span>
                                 )}
+                                {/* ★ item 7: ONE avatar rule for every depth. Used to be TWO —
+                                    a 40px avatar rendered before the card (desktop only,
+                                    outside this component's own padding, and the thing that
+                                    made the per-depth indent compound by 52px on top of the
+                                    24px thread line) plus this 20px one (mobile only). Now
+                                    there is just this one, at every breakpoint and every depth,
+                                    living inside the card's own padding so it can never float
+                                    in the gutter or cross the connector line. The card-level
+                                    `opacity-50` already fades hidden/temporary comments, so this
+                                    doesn't need its own opacity variant. */}
                                 <img
-                                  className=" h-[20px] w-[20px] rounded-3xl sm:hidden"
+                                  className="mr-1.5 h-[20px] w-[20px] shrink-0 rounded-3xl"
                                   height="20"
                                   width="20"
                                   src={getUserAvatarUrl(displayAuthor, 'small')}
@@ -276,7 +322,7 @@ const CommentListItem = memo(function CommentListItem({
                                 )}
                                 <Link
                                   href={`#@${comment.author}/${comment.permlink}`}
-                                  className="hover:text-destructive md:text-sm ml-1"
+                                  className="ml-1 hover:text-destructive md:text-sm"
                                   title={String(parseDate(comment.created))}
                                   data-testid="comment-timestamp-link"
                                   onClick={() => {
@@ -294,6 +340,17 @@ const CommentListItem = memo(function CommentListItem({
                                   >
                                     <Icons.link className="h-3 w-3" />
                                   </Link>
+                                )}
+                                {/* ★ item 10: once CommentList stops indenting past
+                                    MAX_VISUAL_DEPTH, this is the only thing left that says
+                                    who a flattened reply is actually answering. */}
+                                {replyingToAuthor && (
+                                  <span
+                                    className="whitespace-nowrap text-[11px] text-muted-foreground"
+                                    data-testid="comment-replying-to"
+                                  >
+                                    {t('cards.comment_card.replying_to', { author: replyingToAuthor })}
+                                  </span>
                                 )}
                               </>
                             )}
@@ -317,7 +374,9 @@ const CommentListItem = memo(function CommentListItem({
                               ) : null}
                               <AccordionTrigger
                                 className="pb-0 pt-1 !no-underline sm:hidden"
-                                aria-label={openState === 'item-1' ? 'Collapse this reply' : 'Expand this reply'}
+                                aria-label={
+                                  openState === 'item-1' ? 'Collapse this reply' : 'Expand this reply'
+                                }
                                 onClick={() => setOpenState((prev) => (prev === 'item-1' ? '' : 'item-1'))}
                               />
                             </div>
@@ -330,7 +389,12 @@ const CommentListItem = memo(function CommentListItem({
                               onClick={() => setOpenState((prev) => (prev === 'item-1' ? '' : 'item-1'))}
                             >
                               <span
-                                className="ml-4 cursor-pointer text-xs sm:text-sm"
+                                // ★ item 9: this used to wrap mid-phrase ("Reveal
+                                // Comment" / "(blacklisted)" on separate lines) once the
+                                // per-depth indent (item 10) had eaten enough width.
+                                // whitespace-nowrap keeps it one line; the row itself is
+                                // free to wrap around it if the viewport is that narrow.
+                                className="cursor-pointer whitespace-nowrap text-xs sm:text-sm"
                                 onClick={() => setHiddenComment(!hiddenComment)}
                               >
                                 {hiddenComment
@@ -338,13 +402,34 @@ const CommentListItem = memo(function CommentListItem({
                                   : t('cards.comment_card.hide_comment')}
                                 {hiddenComment && (
                                   <span className="ml-1 text-muted-foreground">
-                                    ({t(getCommentMuteReasonKey(comment.stats?.muted_reasons, isMutedByViewer, isBlacklisted))})
+                                    (
+                                    {t(
+                                      getCommentMuteReasonKey(
+                                        comment.stats?.muted_reasons,
+                                        isMutedByViewer,
+                                        blacklistReason
+                                      )
+                                    )}
+                                    )
                                   </span>
                                 )}
                               </span>
                             </AccordionTrigger>
                             {/* Flag icon stays in this section for originally hidden comments */}
-                            <div className="flex items-center">
+                            <div className="flex items-center gap-2">
+                              {/* ★ E5 — the way back to the list that caused this hide.
+                                  Deliberately OUTSIDE the AccordionTrigger button above:
+                                  an anchor nested inside a button is invalid HTML, so the
+                                  link lives in this sibling row instead. */}
+                              {hiddenComment && hiddenReasonListHref && user.isLoggedIn ? (
+                                <Link
+                                  href={hiddenReasonListHref}
+                                  className="whitespace-nowrap text-xs text-muted-foreground underline-offset-2 hover:text-destructive hover:underline sm:text-sm"
+                                  data-testid="comment-hidden-reason-list-link"
+                                >
+                                  {t('cards.comment_card.manage_list_link')}
+                                </Link>
+                              ) : null}
                               {flagText && comment.community && !user.isLoggedIn ? (
                                 <DialogLogin>
                                   <FlagTooltip onClick={() => {}} />
@@ -365,7 +450,7 @@ const CommentListItem = memo(function CommentListItem({
 
                         {comment._temporary && !comment._optimistic ? null : !openState ? (
                           <div
-                            className="ml-4 flex h-5 items-center gap-2 text-xs sm:text-sm"
+                            className="flex h-5 items-center gap-2 text-xs sm:text-sm"
                             data-testid="comment-card-footer"
                           >
                             <VotesComponentWrapper post={comment} type="comment" />
@@ -403,8 +488,15 @@ const CommentListItem = memo(function CommentListItem({
                     </div>
                   </CardHeader>
                   <AccordionContent className="h-fit p-0">
-                    <Separator orientation="horizontal" />
-                    <CardContent className="h-fit w-full min-w-0 overflow-hidden px-[5px] py-[1px] hover:bg-background-tertiary" data-testid="comment-card-to-hover">
+                    {/* ★ item 8: this used to be header / hairline / body / hairline /
+                        footer — three stacked, separately-bordered bands rather than one
+                        card. Both internal <Separator>s are gone; the card's own border
+                        is the only edge now, and CardContent matches the same px-3 py-2
+                        token as the header and footer above/below it. */}
+                    <CardContent
+                      className="h-fit w-full min-w-0 overflow-hidden px-3 py-2 hover:bg-background-tertiary"
+                      data-testid="comment-card-to-hover"
+                    >
                       {legalBlockedUser ? (
                         <div className="px-2 py-6">{t('global.unavailable_for_legal_reasons')}</div>
                       ) : userFromDMCA ? (
@@ -433,11 +525,17 @@ const CommentListItem = memo(function CommentListItem({
                         </CardDescription>
                       )}
                     </CardContent>
-                    <Separator orientation="horizontal" />{' '}
-                    <CardFooter className="px-2 py-1">
+                    <CardFooter className="px-3 py-2">
                       {comment._temporary && !comment._optimistic ? null : (
                         <div
-                          className="flex items-center gap-2 pt-1 text-xs sm:text-sm"
+                          // ★ item 9: this used to be a single non-wrapping row inside a
+                          // Card with `overflow-hidden`. Once per-depth indent (fixed
+                          // separately, item 10) ate enough of the card's width the row
+                          // had nowhere to go but clip — the downvote arrow rendered
+                          // half-width and the payout vanished past the card's right
+                          // edge. flex-wrap means a still-narrow card reflows the row
+                          // onto a second line instead of silently cutting it off.
+                          className="flex flex-wrap items-center gap-2 pt-1 text-xs sm:text-sm"
                           data-testid="comment-card-footer"
                         >
                           <VotesComponentWrapper post={comment} type="comment" />
@@ -450,8 +548,7 @@ const CommentListItem = memo(function CommentListItem({
                               className={clsx(
                                 'flex items-center hover:cursor-pointer hover:text-destructive',
                                 {
-                                  'line-through opacity-50':
-                                    parseFloat(comment.max_accepted_payout) === 0
+                                  'line-through opacity-50': parseFloat(comment.max_accepted_payout) === 0
                                 }
                               )}
                             >
@@ -459,7 +556,6 @@ const CommentListItem = memo(function CommentListItem({
                               {comment.payout.toFixed(2)}
                             </div>
                           </DetailsCardHover>
-                          <Separator orientation="vertical" className="h-5" />
                           {!!comment.stats && comment.stats.total_votes > 0 ? (
                             <>
                               <div className="flex items-center">
@@ -471,14 +567,17 @@ const CommentListItem = memo(function CommentListItem({
                                   </span>
                                 </DetailsCardVoters>
                               </div>
-                              <Separator orientation="vertical" className="h-5" />
                             </>
                           ) : null}
+                          {/* ★ item 11: "the app's tokens" — copied verbatim from the
+                              reply editor's own Cancel button (reply-textbox.tsx), the
+                              nearest sibling component in this same feature, rather than
+                              inventing a new de-emphasised-text convention here. */}
                           {user.isLoggedIn ? (
                             <button
                               disabled={deleteCommentMutation.isLoading}
                               onClick={() => setReply(!reply)}
-                              className="flex items-center hover:cursor-pointer hover:text-destructive"
+                              className="flex items-center text-foreground/60 hover:cursor-pointer hover:text-destructive"
                               data-testid="comment-card-footer-reply"
                             >
                               {t('cards.comment_card.reply')}
@@ -486,7 +585,7 @@ const CommentListItem = memo(function CommentListItem({
                           ) : (
                             <DialogLogin>
                               <button
-                                className="flex items-center hover:cursor-pointer hover:text-destructive"
+                                className="flex items-center text-foreground/60 hover:cursor-pointer hover:text-destructive"
                                 data-testid="comment-card-footer-reply"
                               >
                                 {t('post_content.footer.reply')}
@@ -494,48 +593,42 @@ const CommentListItem = memo(function CommentListItem({
                             </DialogLogin>
                           )}
                           {user && user.isLoggedIn && comment.author === user.username ? (
-                            <>
-                              <Separator orientation="vertical" className="h-5" />
-                              <button
-                                disabled={deleteCommentMutation.isLoading}
-                                onClick={() => {
-                                  setEdit(!edit);
-                                }}
-                                className="flex items-center hover:cursor-pointer hover:text-destructive"
-                                data-testid="comment-card-footer-edit"
-                              >
-                                {t('cards.comment_card.edit')}
-                              </button>
-                            </>
+                            <button
+                              disabled={deleteCommentMutation.isLoading}
+                              onClick={() => {
+                                setEdit(!edit);
+                              }}
+                              className="flex items-center text-foreground/60 hover:cursor-pointer hover:text-destructive"
+                              data-testid="comment-card-footer-edit"
+                            >
+                              {t('cards.comment_card.edit')}
+                            </button>
                           ) : null}
                           {comment.replies.length === 0 &&
                           user.isLoggedIn &&
                           comment.author === user.username &&
                           new Date() < new Date(`${comment.payout_at}Z`) ? (
-                            <>
-                              <Separator orientation="vertical" className="h-5" />
-                              <PostDeleteDialog
-                                permlink={comment.permlink}
-                                action={dialogAction}
-                                label="Comment"
+                            <PostDeleteDialog
+                              permlink={comment.permlink}
+                              action={dialogAction}
+                              label="Comment"
+                            >
+                              <button
+                                disabled={edit || deleteCommentMutation.isLoading}
+                                className="flex items-center text-foreground/60 hover:cursor-pointer hover:text-destructive"
+                                data-testid="comment-card-footer-delete"
                               >
-                                <button
-                                  disabled={edit || deleteCommentMutation.isLoading}
-                                  className="flex items-center hover:cursor-pointer hover:text-destructive"
-                                  data-testid="comment-card-footer-delete"
-                                >
-                                  {deleteCommentMutation.isLoading ? (
-                                    <CircleSpinner
-                                      loading={deleteCommentMutation.isLoading}
-                                      size={18}
-                                      color="#dc2626"
-                                    />
-                                  ) : (
-                                    t('cards.comment_card.delete')
-                                  )}
-                                </button>
-                              </PostDeleteDialog>
-                            </>
+                                {deleteCommentMutation.isLoading ? (
+                                  <CircleSpinner
+                                    loading={deleteCommentMutation.isLoading}
+                                    size={18}
+                                    color="#dc2626"
+                                  />
+                                ) : (
+                                  t('cards.comment_card.delete')
+                                )}
+                              </button>
+                            </PostDeleteDialog>
                           ) : null}
                           {permissionToMute ? (
                             <MutePostDialog
@@ -548,6 +641,46 @@ const CommentListItem = memo(function CommentListItem({
                               discussionAuthor={parentAuthor}
                               temporaryDisable={comment.stats?._temporary}
                             />
+                          ) : null}
+                          {/* ★ E2 — Mute/Blacklist reachable from the comment itself, not
+                              only from a popover triggered by clicking the author's name.
+                              Hidden (not disabled) when either side cannot hold a chain
+                              moderation record — see `useModerationStatus`. */}
+                          {moderation.available ? (
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <button
+                                  type="button"
+                                  aria-label={t('profile.overflow_menu_label')}
+                                  className="flex items-center text-foreground/60 hover:cursor-pointer hover:text-destructive"
+                                  data-testid="comment-card-footer-overflow"
+                                >
+                                  <MoreHorizontal className="h-4 w-4" />
+                                </button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="w-52">
+                                <DropdownMenuItem
+                                  onClick={moderation.toggleMute}
+                                  disabled={moderation.muteBusy}
+                                  className="cursor-pointer"
+                                  data-testid="comment-mute-menu-item"
+                                >
+                                  {moderation.isMuted
+                                    ? t('user_profile.unmute_button')
+                                    : t('user_profile.mute_button')}
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={moderation.toggleBlacklist}
+                                  disabled={moderation.blacklistBusy}
+                                  className="cursor-pointer text-destructive focus:text-destructive"
+                                  data-testid="comment-blacklist-menu-item"
+                                >
+                                  {moderation.isBlacklisted
+                                    ? t('user_profile.unblacklist_button')
+                                    : t('user_profile.blacklist_button')}
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           ) : null}
                         </div>
                       )}

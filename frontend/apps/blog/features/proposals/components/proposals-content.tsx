@@ -93,8 +93,23 @@ export default function ProposalsContent({
           <>
             <DhfStatsBar stats={stats} />
             <ProposalsToolbar tab={tab} onTabChange={setTab} sort={sort} onSortChange={setSort} />
+            {/* ★★★ THE HEADING SAID "FUNDED" NO MATTER WHAT WAS LISTED BELOW IT
+                (2026-08-11, fuckery list item 20). This was a single static string
+                ("Funded proposals") rendered above the list regardless of which tab
+                was selected, so under All — which `matchesTab` deliberately shows
+                every status for — the reader saw a "FUNDED PROPOSALS" banner sitting
+                directly over proposals badged EXPIRED (e.g. #214, ended Apr 2023).
+                Worse, even inside "Active" not every 'active'-status proposal IS
+                funded: `computeFundingState` (proposals-format.ts) ranks them against
+                the #0 Return Proposal and the treasury's daily budget, and
+                `ProposalStatsColumn` already renders a distinct "below funding
+                threshold" state for the ones that fall short — the OLD heading
+                claimed all of them were funded regardless. The heading now keys on
+                the same `tab` the list itself filters by, so it never asserts
+                something about the tab's contents that isn't true for entries with a
+                different status. */}
             <div className="mb-1.5 font-sans text-xs font-bold uppercase tracking-[0.05em] text-[#9ca3af]">
-              {t('proposals.list.heading')}
+              {t(`proposals.list.heading.${tab}`)}
             </div>
             <ProposalList
               proposals={proposals}

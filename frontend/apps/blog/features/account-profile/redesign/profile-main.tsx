@@ -11,14 +11,17 @@ import { DEFAULT_OBSERVER, chainObserver } from '@/blog/lib/utils';
 import { extractUsernameFromParam } from '@/blog/utils/validate-links';
 import { useSSRObserver, useInitialPosts } from '@/blog/components/observer-provider';
 import { useFollowingInfiniteQuery } from '@/blog/features/account-lists/hooks/use-following-infinitequery';
+import { useModerationStatus } from '@/blog/features/mute-follow/hooks/use-moderation-status';
 import NoDataError from '@/blog/components/no-data-error';
 import { ProfileLeagueCard } from '@/blog/features/retention/components/profile-league-card';
 import ProfileTokenCard from '@/blog/features/creator-tokens/ui/profile-token-card';
 import PageMasthead from '@/blog/features/layouts/page-masthead';
+import { cn } from '@ui/lib/utils';
 import ProfileMainSkeleton from './profile-main-skeleton';
 import ProfileCover from './profile-cover';
 import ProfileIdentity from './profile-identity';
 import ProfileActions from './profile-actions';
+import ProfileModerationBanner from './profile-moderation-banner';
 import ProfileStatsBar from './profile-stats-bar';
 import ProfileTabs from './profile-tabs';
 import { getCoverImageUrl } from './lib/get-cover-image-url';
@@ -72,6 +75,23 @@ export default function ProfileMain() {
   // Viewer's own following list — drives both ProfileActions' isFollow state
   // and (for an own-profile view) the live following-count stat below.
   const following = useFollowingInfiniteQuery(user.username, 1000, 'blog', ['blog']);
+
+  // ★ E1 (BUILDMAP-FUCKERY-V2) — see profile-moderation-banner.tsx for the full
+  // account of why this exists. Same hook `ProfileActions` and the post/comment
+  // overflow menus use, called again here rather than lifted and passed down: it is
+  // a read-only cache-backed query (react-query dedupes the network call across all
+  // three call sites), and lifting it would mean threading moderation state through
+  // a component this file otherwise has no reason to touch.
+  //
+  // ★★ MUST STAY ABOVE EVERY EARLY RETURN BELOW (bug caught live, 2026-08-11).
+  // `useModerationStatus` calls several hooks of its own. Placed after the
+  // pending/error/notFound returns, the FIRST render (still loading) skips it
+  // entirely and a LATER render (data arrived) reaches it — "Rendered more hooks
+  // than during the previous render", a hard React crash, not a slow page. It
+  // looked like a hang because the error boundary swallowed it. `profileData` is
+  // not needed for the call itself — `Boolean(profileData?._temporary)` is safe
+  // before the `!profileData` check below ever runs.
+  const moderation = useModerationStatus(username, Boolean(profileData?._temporary));
 
   if (isProfileError || isDynamicGlobalError || isChainError) {
     return <NoDataError />;
@@ -130,7 +150,17 @@ export default function ProfileMain() {
 
   return (
     <div data-testid="profile-redesign-main">
-      <ProfileCover username={username} coverImageUrl={getCoverImageUrl(profileData.profile)} />
+      {!isOwnProfile ? (
+        <ProfileModerationBanner username={username} liteTarget={Boolean(profileData._temporary)} />
+      ) : null}
+      {/* ★ E1 — "no dimming" was the specific, named gap. A muted/blacklisted
+          account's cover and identity block now visibly read as moderated instead
+          of rendering pixel-identical to any other profile; the banner above still
+          carries the actual explanation and the way back to the list, so this stays
+          a purely visual cue rather than duplicating that text. */}
+      <div className={cn(moderation.isModerated && 'opacity-60 grayscale')} data-testid="profile-moderated-visuals">
+        <ProfileCover username={username} coverImageUrl={getCoverImageUrl(profileData.profile)} />
+      </div>
 
       {/* ★ P-1: THE SHELL, AND THE SIX PIXELS.
           The identity block was bare text on the page background — the same "no
@@ -167,6 +197,7 @@ export default function ProfileMain() {
               // `bridge.get_profile` (packages/transaction/lib/hive-api.ts). Zero extra
               // requests for the badge.
               reputation={profileData.reputation}
+              moderated={moderation.isModerated}
             />
             {/* `_temporary` is how a Lumen lite account's stand-in profile is marked:
                 no Hive account exists behind it, so a follow of this person can only

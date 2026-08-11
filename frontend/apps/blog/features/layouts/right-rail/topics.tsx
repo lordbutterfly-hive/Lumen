@@ -103,7 +103,24 @@ const Topics = () => {
     // Ask for far more than we show: community ids and tribe tags occupy most of
     // the head of this list, so a request for 12 yielded 0 usable topics.
     queryFn: () => getTrendingTags(120),
-    staleTime: StaleTime.LONG
+    staleTime: StaleTime.LONG,
+    // ★ 20+ SECONDS OF GREY PILLS, TRACED (audit item O3). This card never hangs
+    // forever — an RPC node that outright refuses the connection surfaces the
+    // honest "Couldn't load trending topics." at ~12s, and one that silently
+    // swallows the request (no response, no error — the worst case) still gets
+    // there, at ~31s, because the shared wax client's own `apiTimeout` (see
+    // `hive-chain-service.ts`) aborts each attempt at 5s. That 31s IS the
+    // reported symptom: react-query's default `retry: 3` means THREE 5s
+    // timeouts plus backoff between them, all against the SAME node — a retry
+    // buys nothing here, because endpoint failover
+    // (`advanceToNextRpcEndpoint`) is explicitly server-only ("browser: respect
+    // the reader's node"), so a down node in the browser is down for every
+    // attempt alike. One retry still absorbs a genuine one-off blip; capping it
+    // here (rather than lowering the shared query-client default, which other,
+    // non-decorative queries may have good reason to keep) turns the worst case
+    // for this one decorative widget into ~11s without touching anything else
+    // that reads `right-rail-trending-tags` or the client's global defaults.
+    retry: 1
   });
 
   // ★ SAMPLED FROM A WIDE POOL (2026-08-07). Taking the top 9 of a trending list

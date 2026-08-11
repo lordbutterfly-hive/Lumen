@@ -9,6 +9,29 @@ import { handleError } from '@ui/lib/handle-error';
 const logger = getLogger('app');
 
 /**
+ * Insert one optimistic row per name in a ", "-joined batch (B1/G2 — the
+ * add-account form on the muted-list page can submit several names in ONE
+ * `mute` call, same as blacklist/followed-list), skipping any already
+ * present. `username` here is the SAME parameter `transactionService.mute`
+ * calls `otherBlogs` and splits on ', '.
+ */
+function addAllToMutedCache(
+  queryClient: ReturnType<typeof useQueryClient>,
+  mutedQueryKey: string[],
+  username: string
+) {
+  const names = username.split(', ').filter((n) => n.length > 0);
+  const currentData: IFollowList[] = queryClient.getQueryData(mutedQueryKey) ?? [];
+  const existingNames = new Set(currentData.map((e) => e.name));
+  const newRows = names
+    .filter((name) => !existingNames.has(name))
+    .map((name) => ({ name, blacklist_description: '', muted_list_description: '', _temporary: true }));
+  if (newRows.length > 0) {
+    queryClient.setQueryData<IFollowList[]>(mutedQueryKey, [...newRows, ...currentData]);
+  }
+}
+
+/**
  * Makes mute transaction.
  *
  * @export
@@ -22,13 +45,7 @@ export function useMuteMutation() {
     onMutate: async (params: { username: string }) => {
       await queryClient.cancelQueries({ queryKey: mutedQueryKey });
       const prevMutedList: IFollowList[] | undefined = queryClient.getQueryData(mutedQueryKey);
-      const currentData = prevMutedList ?? [];
-      if (!currentData.some((e) => e.name === params.username)) {
-        queryClient.setQueryData<IFollowList[]>(mutedQueryKey, [
-          { name: params.username, blacklist_description: '', muted_list_description: '', _temporary: true },
-          ...currentData
-        ]);
-      }
+      addAllToMutedCache(queryClient, mutedQueryKey, params.username);
       return { prevMutedList };
     },
     mutationFn: async (params: { username: string }) => {
@@ -92,13 +109,7 @@ export function useMuteMutation() {
         queryClient.setQueryData(['muted', otherUsername], newData);
       }
       // Safety net: re-apply optimistic add to current user's muted list
-      const currentMuted: IFollowList[] = queryClient.getQueryData(mutedQueryKey) ?? [];
-      if (!currentMuted.some((e) => e.name === otherUsername)) {
-        queryClient.setQueryData<IFollowList[]>(mutedQueryKey, [
-          { name: otherUsername, blacklist_description: '', muted_list_description: '', _temporary: true },
-          ...currentMuted
-        ]);
-      }
+      addAllToMutedCache(queryClient, mutedQueryKey, otherUsername);
     },
     onSuccess: (data) => {
       const { username } = user;

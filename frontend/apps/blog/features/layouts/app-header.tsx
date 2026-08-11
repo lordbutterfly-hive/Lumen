@@ -3,7 +3,7 @@
 import { FC } from 'react';
 import { usePathname } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { Link, getUserAvatarUrl } from '@hive/ui';
+import { Link, UserAvatarImg } from '@hive/ui';
 import { Button, buttonVariants } from '@ui/components/button';
 import { Icons } from '@ui/components/icons';
 import TooltipContainer from '@ui/components/tooltip-container';
@@ -41,29 +41,25 @@ const LABELS = {
  * empty rather than as a picture that did not arrive. That is the whole header's
  * only piece of identity.
  *
- * Same shape as `features/witnesses/witness-identity-cell.tsx`: the monogram sits
- * UNDER the image and the image removes itself on error, so there is always a
- * letter and never a broken glyph. `alt=""` plus `aria-hidden` because the
+ * Same shape as `features/witnesses/witness-identity-cell.tsx`, and now the
+ * SAME COMPONENT (F6 item 22, converged): the monogram sits UNDER the image
+ * and the image removes itself on error, so there is always a letter and
+ * never a broken glyph. `alt=""` (the component's default) because the
  * control around it already carries the name ("Account menu" / "Your profile") —
  * an alt here would make screen readers say it twice.
+ *
+ * ★ This used to call `getUserAvatarUrl` directly — our own `/api/avatar`
+ * proxy — on every render, unconditionally. That is the header, so it is on
+ * every single page for every signed-in reader; it never had the direct-host
+ * fast path the feed got on 2026-08-10. `UserAvatarImg` tries
+ * `images.hive.blog` first and only falls back to the proxy on error.
  */
 const HeaderAvatar: FC<{ username: string }> = ({ username }) => (
-  <span
-    aria-hidden="true"
-    className="relative z-30 flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#f1f3f5] font-sans text-[14px] font-bold uppercase leading-none text-[#6b7280]"
-  >
-    {username.slice(0, 1)}
-    <img
-      src={getUserAvatarUrl(username || '', 'small')}
-      alt=""
-      width={36}
-      height={36}
-      onError={(e) => {
-        e.currentTarget.style.display = 'none';
-      }}
-      className="absolute inset-0 h-9 w-9 rounded-full object-cover"
-    />
-  </span>
+  <UserAvatarImg
+    username={username || ''}
+    pixelSize={36}
+    className="z-30"
+  />
 );
 
 /**

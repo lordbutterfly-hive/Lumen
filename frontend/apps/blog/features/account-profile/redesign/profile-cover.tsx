@@ -1,9 +1,17 @@
-import { getUserAvatarUrl, getDefaultImageUrl } from '@ui/lib/avatar-utils';
+import { UserAvatarImg } from '@ui/components';
 
 /**
  * Cover banner + overlapping rounded-square avatar (design-handoff-v2,
  * Profile.dc.html). Cover falls back to the brand gradient when the
  * account has no (safe) cover image set — never a broken image / empty box.
+ *
+ * ★ CONVERGED (F6 item 22). The avatar used to go straight to `/api/avatar`
+ * (our own proxy, on every profile page view) and fall back to a generic,
+ * non-personalised default picture on error. Now the app's one avatar
+ * component: `images.hive.blog` directly, the proxy only as the error path
+ * (which itself generates a real per-username initial), and the same brand
+ * gradient as the cover sits behind it the whole time instead of a bare
+ * default photo that has nothing to do with this account.
  */
 export default function ProfileCover({ username, coverImageUrl }: { username: string; coverImageUrl: string }) {
   return (
@@ -11,15 +19,14 @@ export default function ProfileCover({ username, coverImageUrl }: { username: st
       <div className="h-[210px] overflow-hidden rounded-[22px] border border-[#ebebeb] bg-gradient-to-br from-[#c0392b] to-[#e07b3e]">
         {coverImageUrl ? <img src={coverImageUrl} alt="" className="h-full w-full object-cover" /> : null}
       </div>
-      <div className="absolute bottom-[-48px] left-8 h-[120px] w-[120px] overflow-hidden rounded-[26px] border-[5px] border-white bg-gradient-to-br from-[#c0392b] to-[#e07b3e] shadow-[0_6px_22px_rgba(20,18,10,0.14)]">
-        <img
-          src={getUserAvatarUrl(username, 'large')}
+      <div className="absolute bottom-[-48px] left-8">
+        <UserAvatarImg
+          username={username}
+          apiSize="large"
+          pixelSize={120}
+          radiusClassName="rounded-[26px]"
+          className="border-[5px] border-white bg-gradient-to-br from-[#c0392b] to-[#e07b3e] text-white/90 shadow-[0_6px_22px_rgba(20,18,10,0.14)]"
           alt={username}
-          className="h-full w-full object-cover"
-          onError={(event) => {
-            event.currentTarget.onerror = null;
-            event.currentTarget.src = getDefaultImageUrl();
-          }}
         />
       </div>
     </div>

@@ -2,7 +2,7 @@
 
 import { Link } from '@hive/ui';
 import { Popover, PopoverContent, PopoverTrigger } from '@ui/components/popover';
-import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { useTranslation } from '@/blog/i18n/client';
 import { ManabarRing } from '@/blog/features/layouts/site-header/manabar-ring';
 import { LeagueEmblem } from '../emblems/league-emblem';
@@ -44,23 +44,79 @@ import { StreakFlame } from './streak-flame';
 // for that future wiring — do not re-add them without a real data source.
 
 export function LeagueShowcase() {
-  const { user } = useUserClient();
   // ★ WHICHEVER LADDER APPLIES TO THIS VIEWER. A lite account has no chain
   // tenure, so the chain route can never answer for it — but the Lumen-native
   // ladder can, and used to be fetched by nothing at all. See
   // use-viewer-retention.ts.
-  const { summary } = useViewerRetention();
+  const { summary, isError } = useViewerRetention();
+  // ★★★ RESERVE THE SPACE FROM THE FIRST PAINT (2026-08-11, fuckery F6 item 17).
+  //
+  // This used to gate on `useUserClient().user.isLoggedIn` — which cannot
+  // answer during SSR and answers "signed out" on the client until hydration
+  // catches up — AND on `summary`, whose own fetch (`/api/streak/[user]`) this
+  // file's sibling hook documents as having been measured taking as long as
+  // 639 SECONDS in a bad case. Until BOTH resolved, `LeagueShowcase` rendered
+  // only the headless `<RetentionFeedback />` — zero height — so the block
+  // popped into existence at full height whenever it finally arrived and
+  // shoved every row below it (Home, Profile, Wallet…) down with it. Driven
+  // live: Profile's own row jumped ~46px the instant the widget mounted, and
+  // that is the misclick the owner reported — "clicked Profile, landed on
+  // Home" is exactly what happens when a click lands mid-reflow.
+  //
+  // `useSessionIdentity()` is the fix the header and the rest of this rail
+  // already use for the identical hydration-lag problem (see its own doc,
+  // N-3): it answers from the SERVER-read session cookie until the client has
+  // a real answer, so it is correct on the very first render, server and
+  // client alike. Using IT to decide whether to reserve space — rather than
+  // the lagged client-only `user.isLoggedIn` — means the reserved box exists
+  // before hydration even finishes, not after.
+  //
+  // Once we know to reserve space, `summary truthy → real content` and
+  // `summary falsy but not errored → skeleton` covers the data-fetch delay:
+  // `ShowcaseSkeleton` mirrors the real button's exact box model (same
+  // padding classes, same 34px icon slot, same two text-size classes), so
+  // swapping one for the other changes zero pixels of height. On a genuine
+  // fetch failure (`isError`) this drops back to reserving nothing — the
+  // original "the block disappears rather than show a fabricated tier"
+  // behavior — so a real error does not leave a skeleton shimmering forever.
+  const identity = useSessionIdentity();
 
   // Headless; renders no DOM. Mounted here rather than threaded through a layout
   // somebody else owns, and deliberately OUTSIDE the guard below: a lite account
   // has no league block to show and is exactly who the feedback moments are for.
-  if (!user.isLoggedIn || !summary) return <RetentionFeedback />;
+  if (!identity.isLoggedIn) return <RetentionFeedback />;
 
   return (
     <>
       <RetentionFeedback />
-      <ShowcaseBlock summary={summary} />
+      {summary ? <ShowcaseBlock summary={summary} /> : isError ? null : <ShowcaseSkeleton />}
     </>
+  );
+}
+
+/**
+ * Same outer `<li>`, same inner padding/gap classes, same 34px icon
+ * footprint, same two text-size classes as `ShowcaseBlock` below — so its
+ * rendered height is identical to the real content's, not a guessed pixel
+ * value that could drift out of sync with it. `text-transparent` on real
+ * text-size spans (rather than a fixed `h-*`) means the placeholder bars sit
+ * at exactly the font's real line-height, whatever that computes to.
+ */
+function ShowcaseSkeleton() {
+  return (
+    <li className="px-1 pb-2" data-testid="league-showcase-skeleton">
+      <div aria-hidden="true" className="flex w-full items-center gap-2.5 rounded-xl px-[10px] py-2 text-left">
+        <span className="relative inline-flex h-[34px] w-[34px] shrink-0 animate-pulse items-center justify-center rounded-full bg-[#f1f3f5]" />
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="w-16 animate-pulse truncate rounded bg-[#f1f3f5] font-sans text-[14px] font-semibold text-transparent">
+            &nbsp;
+          </span>
+          <span className="w-12 animate-pulse truncate rounded bg-[#f1f3f5] font-sans text-[11.5px] font-medium tabular-nums text-transparent">
+            &nbsp;
+          </span>
+        </span>
+      </div>
+    </li>
   );
 }
 

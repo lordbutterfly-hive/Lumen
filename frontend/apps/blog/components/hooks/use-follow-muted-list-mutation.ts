@@ -10,6 +10,27 @@ import { scheduleInvalidations } from '@/blog/lib/react-query';
 const logger = getLogger('app');
 
 /**
+ * Insert one optimistic row per name in a ", "-joined batch (B1/G2 — the
+ * add-account form can submit several names in ONE call), skipping any
+ * already present.
+ */
+function addAllToListCache(
+  queryClient: ReturnType<typeof useQueryClient>,
+  queryKey: string[],
+  otherBlogs: string
+) {
+  const names = otherBlogs.split(', ').filter((n) => n.length > 0);
+  const currentData: IFollowList[] = queryClient.getQueryData(queryKey) ?? [];
+  const existingNames = new Set(currentData.map((e) => e.name));
+  const newRows = names
+    .filter((name) => !existingNames.has(name))
+    .map((name) => ({ name, blacklist_description: '', muted_list_description: '', _temporary: true }));
+  if (newRows.length > 0) {
+    queryClient.setQueryData<IFollowList[]>(queryKey, [...newRows, ...currentData]);
+  }
+}
+
+/**
  * Makes follow muted transaction.
  *
  * @export
@@ -27,15 +48,8 @@ export function useFollowMutedBlogMutation() {
       await queryClient.cancelQueries({ queryKey });
 
       const prevData: IFollowList[] | undefined = queryClient.getQueryData(queryKey);
-      const currentData = prevData ?? [];
 
-      const alreadyExists = currentData.some((e) => e.name === otherBlogs);
-      if (!alreadyExists) {
-        queryClient.setQueryData<IFollowList[]>(queryKey, [
-          { name: otherBlogs, blacklist_description: '', muted_list_description: '', _temporary: true },
-          ...currentData
-        ]);
-      }
+      addAllToListCache(queryClient, queryKey, otherBlogs);
 
       return { prevData, queryKey };
     },
@@ -50,13 +64,7 @@ export function useFollowMutedBlogMutation() {
     onSettled: (data) => {
       if (!data) return;
       const { otherBlogs } = data;
-      const currentData: IFollowList[] = queryClient.getQueryData(queryKey) ?? [];
-      if (!currentData.some((e) => e.name === otherBlogs)) {
-        queryClient.setQueryData<IFollowList[]>(queryKey, [
-          { name: otherBlogs, blacklist_description: '', muted_list_description: '', _temporary: true },
-          ...currentData
-        ]);
-      }
+      addAllToListCache(queryClient, queryKey, otherBlogs);
     },
 
     onSuccess: (data) => {

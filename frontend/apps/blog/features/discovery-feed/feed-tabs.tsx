@@ -12,6 +12,7 @@ import { Entry } from '@hive/common-hiveio-packages/wax';
 import { PostListSkeleton } from '@hive/ui';
 import { cn } from '@ui/lib/utils';
 import NoDataError from '@/blog/components/no-data-error';
+import { getMarketDataSource } from '@/blog/features/prediction-market/lib/market-data-source';
 import MarketTab from '@/blog/features/prediction-market/market-tab';
 import MediumPostCard from './medium-post-card';
 // ONE batched request per list, never one per card — see use-rank-marks.ts.
@@ -41,8 +42,17 @@ type TabKey = 'for-you' | 'feed' | 'predictions';
 const TAB_KEYS: readonly TabKey[] = ['for-you', 'feed', 'predictions'];
 const TAB_PARAM = 'tab';
 
-function toTabKey(raw: string | null): TabKey {
-  return raw !== null && (TAB_KEYS as readonly string[]).includes(raw) ? (raw as TabKey) : 'for-you';
+function toTabKey(raw: string | null, marketAvailable: boolean): TabKey {
+  if (raw === null || !(TAB_KEYS as readonly string[]).includes(raw)) return 'for-you';
+  // ★ item 3 (adversarial review): `?tab=predictions` used to resolve to
+  // 'predictions' even when the market is unconfigured, so the button for it
+  // is hidden (see `marketAvailable` below) AND the panel falls through to
+  // ForYouFeed — but `activeTab` itself stayed 'predictions', which no
+  // rendered TabButton matches, so neither tab showed as active while the
+  // for-you feed rendered. Falling back to the default tab here keeps the
+  // active-tab indicator in sync with whatever actually renders.
+  if (raw === 'predictions' && !marketAvailable) return 'for-you';
+  return raw as TabKey;
 }
 
 // ★★★ "For You" IS THE RANKING ENGINE NOW (2026-08-06).
@@ -507,7 +517,6 @@ export default function FeedTabs() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
-  const [activeTab, setActiveTab] = useState<TabKey>(() => toTabKey(searchParams?.get(TAB_PARAM) ?? null));
   const { user, isHydrated } = useUserClient();
   const loggedIn = isHydrated && user.isLoggedIn;
   // NOTE: the SSR observer resolution that used to live here went with the
@@ -515,11 +524,33 @@ export default function FeedTabs() {
   // server-side (a client-supplied viewer would let anyone request anyone else's
   // personalised feed), and the Following tab passes `user.username` directly.
 
+  // ★ THE PREDICTIONS TAB IS GONE UNTIL THE MARKET SHIPS (owner ruling,
+  // 2026-08-11, item F8/P3). No REACT_APP_VSC_MARKET_* contract is provisioned
+  // on this build, so this tab existed only to open a screen whose whole
+  // content is "not available yet" — a permanent top-level tab announcing a
+  // feature that does not exist. Gated on the SAME provisioning check
+  // `useMarket()`/`MarketTab` already use (`getMarketDataSource() !== null`,
+  // see lib/market-config.ts), not a new flag, so the tab reappears on its own
+  // the day the contract is live. `MarketTab` itself is untouched — nothing was
+  // deleted, only its entry point is conditional. A stale `?tab=predictions`
+  // URL (bookmarked, or from before this change) resolves — active-tab state
+  // included, via `toTabKey` — to the default tab rather than opening a dead
+  // screen with no tab looking active.
+  //
+  // Computed above the `activeTab` state so both the initializer and the
+  // sync effect below can fold it into `toTabKey` instead of resolving a tab
+  // key that `marketAvailable` immediately has to override again at render.
+  const marketAvailable = getMarketDataSource() !== null;
+
+  const [activeTab, setActiveTab] = useState<TabKey>(() =>
+    toTabKey(searchParams?.get(TAB_PARAM) ?? null, marketAvailable)
+  );
+
   // Keep the tab in sync with ?tab= so the right-rail widget's "View market"
   // link and browser back/forward switch tabs without remounting.
   useEffect(() => {
-    setActiveTab(toTabKey(searchParams?.get(TAB_PARAM) ?? null));
-  }, [searchParams]);
+    setActiveTab(toTabKey(searchParams?.get(TAB_PARAM) ?? null, marketAvailable));
+  }, [searchParams, marketAvailable]);
 
   const selectTab = (tab: TabKey) => {
     setActiveTab(tab);
@@ -565,9 +596,11 @@ export default function FeedTabs() {
         <TabButton isActive={activeTab === 'feed'} onClick={() => selectTab('feed')}>
           {LABELS.feed}
         </TabButton>
-        <TabButton isActive={activeTab === 'predictions'} onClick={() => selectTab('predictions')}>
-          {LABELS.predictions}
-        </TabButton>
+        {marketAvailable ? (
+          <TabButton isActive={activeTab === 'predictions'} onClick={() => selectTab('predictions')}>
+            {LABELS.predictions}
+          </TabButton>
+        ) : null}
       </div>
 
       {/* ★ THE SECOND DOOR TO THE INTEREST PICKER (2026-08-08).
@@ -593,7 +626,7 @@ export default function FeedTabs() {
           The picker keeps its `openSignal` prop, so a deliberate "edit interests"
           entry point in settings can be wired later. Nothing renders one today. */}
 
-      {activeTab === 'predictions' ? (
+      {activeTab === 'predictions' && marketAvailable ? (
         <MarketTab />
       ) : activeTab === 'feed' ? (
         loggedIn ? (

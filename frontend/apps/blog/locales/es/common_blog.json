@@ -219,7 +219,8 @@
       "reason_community_type": "no permitido en esta comunidad",
       "reason_parent_muted": "el contenido padre está silenciado",
       "reason_low_reputation": "reputación baja",
-      "reason_community_role": "silenciado en la comunidad"
+      "reason_community_role": "silenciado en la comunidad",
+      "replying_to": "Respondiendo a @{{author}}"
     }
   },
   "amount_hover_card": {

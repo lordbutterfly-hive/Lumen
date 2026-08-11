@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import LeftRail from '@/blog/features/layouts/left-rail';
-import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { useTranslation } from '@/blog/i18n/client';
 import { useWitnessesData } from './hooks/use-witnesses-data';
 import { useWitnessFilters } from './hooks/use-witness-filters';
@@ -21,7 +21,19 @@ import WitnessesRightRail from './witnesses-right-rail';
  */
 export default function WitnessesShell() {
   const { t } = useTranslation('common_blog');
-  const { user } = useUserClient();
+  /**
+   * ★★★ NEVER SHOW A SIGNED-IN READER THE LOGGED-OUT WITNESSES CTA (2026-08-11,
+   * fuckery list item 19). `useUserClient()` alone answers "signed out" until
+   * React mounts, localStorage is read and `/api/users/me` returns — measured
+   * ~10s on this box, during which the stats bar showed "Log in to vote for
+   * witnesses" to an already-signed-in reader before flipping to "2 votes left".
+   * That reads as a dead session, the exact class of bug this app has been burned
+   * by before. `useSessionIdentity` (same pattern as `AppHeader`/`LeftRail`, see
+   * `features/layouts/server-session.tsx`) answers from the session cookie the
+   * server already read, so the first paint — server and client alike — already
+   * knows the answer instead of guessing "logged out".
+   */
+  const identity = useSessionIdentity();
   const data = useWitnessesData();
   const filtersState = useWitnessFilters(data.rows);
   const router = useRouter();
@@ -80,7 +92,7 @@ export default function WitnessesShell() {
           witnessCount={filtersState.filteredRows.length}
           totalWitnessCount={data.witnessCount}
           votesLeft={data.votesLeft}
-          isLoggedIn={user.isLoggedIn}
+          isLoggedIn={identity.isLoggedIn}
           hasProxy={data.hasProxy}
           proxyAccount={data.proxyAccount}
         />
@@ -108,7 +120,7 @@ export default function WitnessesShell() {
           isLoading={data.isLoading}
           isError={data.isError}
           onRetry={data.refetch}
-          isLoggedIn={user.isLoggedIn}
+          isLoggedIn={identity.isLoggedIn}
           hasProxy={data.hasProxy}
           ownVotesUnavailable={data.ownVotesUnavailable}
           hpAprPercent={data.hpAprPercent}
@@ -118,7 +130,7 @@ export default function WitnessesShell() {
       <aside className="sticky top-24 hidden h-fit xl:block">
         <WitnessesRightRail
           filtersState={filtersState}
-          isLoggedIn={user.isLoggedIn}
+          isLoggedIn={identity.isLoggedIn}
           hasProxy={data.hasProxy}
           proxyAccount={data.proxyAccount}
         />

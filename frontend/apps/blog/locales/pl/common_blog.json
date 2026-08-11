@@ -221,7 +221,8 @@
       "reason_community_type": "niedozwolone w tej społeczności",
       "reason_parent_muted": "treść nadrzędna jest wyciszona",
       "reason_low_reputation": "niska reputacja",
-      "reason_community_role": "wyciszony w społeczności"
+      "reason_community_role": "wyciszony w społeczności",
+      "replying_to": "Odpowiedź do @{{author}}"
     }
   },
   "amount_hover_card": {

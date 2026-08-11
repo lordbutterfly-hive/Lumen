@@ -1,4 +1,4 @@
-import { Link, getUserAvatarDirectUrl } from '@hive/ui';
+import { Link, UserAvatarImg } from '@hive/ui';
 import { Icons } from '@ui/components/icons';
 import { cn } from '@ui/lib/utils';
 import { useTranslation } from '@/blog/i18n/client';
@@ -33,35 +33,22 @@ export default function WitnessIdentityCell({ row, className }: WitnessIdentityC
             at all, and the Params tab rendered them as broken-image icons inline in
             the table (naturalWidth 0). A monogram sits UNDER the image, so a failed or
             slow load lands on the witness's initial instead of a broken glyph, and the
-            image removes itself rather than leaving one behind. The alt was empty on
-            every row, which for a link to somebody's profile is a missing name, not a
-            decorative image.
+            image removes itself rather than leaving one behind.
 
-            ★ SOURCE SWITCHED TO THE IMAGE HOST DIRECTLY (audit item 14). This
-            pointed at our own `/api/avatar` proxy — the same 6+ second-per-row
-            queueing bug the feed's byline avatar had (see the note on
-            `getUserAvatarDirectUrl`) — so a table of 20+ witnesses queued
-            behind each other on our own single-threaded route instead of the
-            image host's own connection pool. The monogram above is already the
-            fallback for a real failure; this just stops manufacturing one out
-            of ordinary load time. */}
-        <span
-          className={`relative flex h-[38px] w-[38px] shrink-0 items-center justify-center overflow-hidden rounded-[11px] bg-[#f1f3f5] font-sans text-[15px] font-bold uppercase text-[#9ca3af] ${row.isDisabled ? 'opacity-40 grayscale' : ''}`}
-          aria-hidden="true"
-        >
-          {row.owner.slice(0, 1)}
-          <img
-            src={getUserAvatarDirectUrl(row.owner, 'medium')}
-            alt=""
-            width={38}
-            height={38}
-            loading="lazy"
-            onError={(e) => {
-              e.currentTarget.style.display = 'none';
-            }}
-            className="absolute inset-0 h-[38px] w-[38px] rounded-[11px] object-cover"
-          />
-        </span>
+            ★ SOURCE SWITCHED TO THE IMAGE HOST DIRECTLY (audit item 14), then
+            CONVERGED onto the app's one avatar component (F6 item 22): this used to
+            hide the image on error and stop, which meant a Lumen lite account or a
+            dead Steemit-era `profile_image` never got the `/api/avatar` proxy's
+            generated fallback the way the feed's byline avatar did — only the bare
+            initial, forever. `UserAvatarImg` retries through the proxy before giving
+            up, so this table now behaves exactly like every other avatar in the app. */}
+        <UserAvatarImg
+          username={row.owner}
+          apiSize="medium"
+          pixelSize={38}
+          radiusClassName="rounded-[11px]"
+          className={row.isDisabled ? 'opacity-40 grayscale' : undefined}
+        />
         <span className="sr-only">{t('witnesses.profile_link_aria', { witness: row.owner })}</span>
       </Link>
       <div className="min-w-0">

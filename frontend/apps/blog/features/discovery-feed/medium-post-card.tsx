@@ -1,13 +1,20 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Link } from '@hive/ui';
+import { MoreHorizontal, AlertTriangle } from 'lucide-react';
+import { Link, UserAvatarImg } from '@hive/ui';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger
+} from '@hive/ui/components/dropdown-menu';
 import { useTranslation } from '@/blog/i18n/client';
 import { useLiteOverlay } from '@/blog/lib/lite/client/use-lite-overlay';
 import { Icons } from '@ui/components/icons';
 import TimeAgo from '@ui/components/time-ago';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@ui/components/tooltip';
-import { getUserAvatarDirectUrl, getUserAvatarUrl } from '@ui/lib/avatar-utils';
+import { getUserAvatarUrl } from '@ui/lib/avatar-utils';
 import { cn } from '@ui/lib/utils';
 import { handleError } from '@ui/lib/handle-error';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
@@ -24,6 +31,8 @@ import type { RankMark } from '@/blog/features/retention/hooks/use-rank-marks';
 import TokenAuthorChip from '@/blog/features/creator-tokens/ui/token-author-chip';
 import { Entry } from '@hive/common-hiveio-packages/wax';
 import { isNsfwPost, useNsfwPreference } from '@/blog/lib/nsfw';
+import { useModerationStatus } from '@/blog/features/mute-follow/hooks/use-moderation-status';
+import { classifyBlacklist } from '@/blog/lib/moderation/blacklist-reason';
 
 // TODO: move to i18n
 const LABELS = {
@@ -54,6 +63,21 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
   const liteOverlay = useLiteOverlay(post);
   const displayAuthor = liteOverlay?.author ?? post.author;
   const displayTitle = liteOverlay?.title || post.title;
+
+  // ★ E1/E2/E4 (BUILDMAP-FUCKERY-V2, G3) — "muting a user currently does nothing".
+  // Moderation acts on `post.author`, the account that actually signed on chain —
+  // never `displayAuthor` — matching the rule `comment-list-item.tsx` and
+  // `PostListItem` already follow. When a `liteOverlay` is present, `post.author` is
+  // the SHARED publishing account behind every lite author, so offering Mute/
+  // Blacklist here would silence that shared account for every lite writer, not just
+  // this one — `useModerationStatus`'s `targetIsLite` hides the controls exactly the
+  // way `ProfileActions`/`ButtonsContainer` already hide Mute for the same reason.
+  const moderation = useModerationStatus(post.author, Boolean(liteOverlay));
+  // NOT `post.blacklists.length > 0` — see `classifyBlacklist`'s doc for the measured
+  // proof that Hivemind mixes a synthetic "reputation-N" token into that array for
+  // any low/negative-reputation author with no list involved at all.
+  const blacklistReason = classifyBlacklist(post.blacklists);
+  const [moderationRevealed, setModerationRevealed] = useState(false);
 
   // ★ NSFW GATE (2026-08-09) — see lib/nsfw.ts for why this lives here at all.
   // Every hook runs before the `hide` early-return below, so hook order stays
@@ -101,6 +125,51 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
   // 'hide' means the reader asked not to see these at all — the classic list
   // renders nothing for them (`nsfw === 'hide' ? null : ...`) and so does this.
   if (isNsfw && nsfwPreference === 'hide') return null;
+
+  // ★ E1 — THE HEADLINE DEFECT. Before this, a muted author's post rendered with
+  // full title, excerpt and thumbnail — pixel-identical to anyone else's — because
+  // nothing in this card ever looked at the viewer's mute list at all. Blacklist gets
+  // a small badge instead of a full collapse (see the mark below): it is informational
+  // — the same convention `comment-list-item.tsx` already applies (blacklist alone
+  // never hides a comment, only labels why a downvote/mute hide happened) — while Mute
+  // is the viewer's own explicit "I don't want to see this" and collapses the card,
+  // matching E4's ask that muted, blacklisted and downvoted stop looking identical.
+  if (moderation.isMuted && !moderationRevealed) {
+    return (
+      <article
+        className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-[18px] border border-[#ebebeb] bg-[#f9f7f5] p-[18px] font-sans text-[13.5px] text-[#6b7280]"
+        data-testid="medium-card-muted"
+      >
+        <span>{t('cards.post_card.muted_interstitial', { author: displayAuthor })}</span>
+        <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
+          <button
+            type="button"
+            onClick={() => setModerationRevealed(true)}
+            className="font-semibold text-[#2a2822] underline-offset-2 hover:underline"
+            data-testid="medium-card-muted-reveal"
+          >
+            {t('cards.post_card.reveal_post')}
+          </button>
+          <button
+            type="button"
+            onClick={moderation.toggleMute}
+            disabled={moderation.muteBusy}
+            className="underline-offset-2 hover:underline disabled:opacity-60"
+            data-testid="medium-card-muted-unmute"
+          >
+            {t('user_profile.unmute_button')}
+          </button>
+          <Link
+            href={`/@${user.username}/lists/muted`}
+            className="underline-offset-2 hover:underline"
+            data-testid="medium-card-muted-list-link"
+          >
+            {t('user_profile.moderation_banner_view_list')}
+          </Link>
+        </span>
+      </article>
+    );
+  }
 
   return (
     <article
@@ -151,23 +220,10 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
               to our own `/api/avatar` per feed page, 6.0-6.3s each on a warm server,
               19 of them still unreturned 45s in — see the long note on
               `getUserAvatarDirectUrl`. The proxy stays as the error path, which is
-              what keeps lite accounts and dead profile images working. */}
-          <img
-            src={getUserAvatarDirectUrl(displayAuthor, 'small')}
-            alt={displayAuthor}
-            className="h-[26px] w-[26px] rounded-full object-cover"
-            loading="lazy"
-            decoding="async"
-            onError={(e) => {
-              // A flag, not a src comparison: `img.src` reads back ABSOLUTE, and the
-              // proxy URL is relative, so comparing them would never match and the
-              // failing proxy would re-trigger this handler forever.
-              const img = e.currentTarget;
-              if (img.dataset.fellBack === '1') return;
-              img.dataset.fellBack = '1';
-              img.src = getUserAvatarUrl(displayAuthor, 'small');
-            }}
-          />
+              what keeps lite accounts and dead profile images working.
+              ★ Now the app's one avatar component (F6 item 22, converged) — same
+              direct→proxy chain this card originated, applied everywhere else too. */}
+          <UserAvatarImg username={displayAuthor} pixelSize={26} alt={displayAuthor} />
         </Link>
         <Link
           href={`/@${displayAuthor}`}
@@ -176,6 +232,34 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
         >
           {displayAuthor}
         </Link>
+        {/* ★ E2/E4 — the blacklist mark. Informational only (see the collapse note
+            above for why blacklist does not hide the card the way Mute does).
+            `reputation`/`none` render nothing: a merely low-reputation author is not
+            on anyone's list, and labelling them "blacklisted" is the exact mislabel
+            E3 corrected for comments — same rule, same component, applied here. */}
+        {blacklistReason === 'own' || blacklistReason === 'followed' ? (
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger
+                aria-label={t(
+                  blacklistReason === 'own'
+                    ? 'cards.comment_card.reason_blacklisted_by_you'
+                    : 'cards.comment_card.reason_on_followed_list'
+                )}
+                data-testid="medium-card-blacklist-mark"
+              >
+                <AlertTriangle className="h-3.5 w-3.5 text-destructive" aria-hidden="true" />
+              </TooltipTrigger>
+              <TooltipContent>
+                {t(
+                  blacklistReason === 'own'
+                    ? 'cards.comment_card.reason_blacklisted_by_you'
+                    : 'cards.comment_card.reason_on_followed_list'
+                )}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        ) : null}
         {/* ★★ THE BYLINE MARK, MOUNTED AT LAST (owner instruction, 2026-08-09).
             It was removed on 2026-08-08 because it rendered
             `bylineTierFromReputation(post.author_reputation)` — a DIFFERENT function
@@ -214,6 +298,47 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
             nothing when the author has no token, or the answer isn't known
             yet; see the component's own doc. */}
         <TokenAuthorChip handle={displayAuthor} />
+
+        {/* ★ E2 — THE POST OVERFLOW MENU THAT DID NOT EXIST. Before this pass there
+            was no way to moderate an author from the feed at all — clicking their
+            name only ever navigated to the profile. Hidden by `moderation.available`
+            when either side cannot hold a chain moderation record (lite viewer or
+            lite-proxied author) — same "hidden, not disabled" rule as everywhere
+            else `useModerationStatus` is used. */}
+        {moderation.available ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                aria-label={t('profile.overflow_menu_label')}
+                className="ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[#9aa1ab] transition-colors hover:bg-[#f4f5f7] hover:text-[#4b5563]"
+                data-testid="medium-card-overflow-trigger"
+              >
+                <MoreHorizontal className="h-4 w-4" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52">
+              <DropdownMenuItem
+                onClick={moderation.toggleMute}
+                disabled={moderation.muteBusy}
+                className="cursor-pointer"
+                data-testid="medium-card-mute-menu-item"
+              >
+                {moderation.isMuted ? t('user_profile.unmute_button') : t('user_profile.mute_button')}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={moderation.toggleBlacklist}
+                disabled={moderation.blacklistBusy}
+                className="cursor-pointer text-destructive focus:text-destructive"
+                data-testid="medium-card-blacklist-menu-item"
+              >
+                {moderation.isBlacklisted
+                  ? t('user_profile.unblacklist_button')
+                  : t('user_profile.blacklist_button')}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
       </div>
 
       {/* Body grid — text column, plus a fixed thumbnail column ONLY when there
@@ -297,7 +422,22 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
             <img
               src={thumbnail}
               alt=""
-              className="h-[132px] w-[190px] rounded-[14px] bg-[#f4f5f7] object-cover"
+              // ★ CONTAIN, NOT COVER (F6 item 23). `find_first_img` requests
+              // `?width=256&height=512&mode=fit` from images.hive.blog, which
+              // fits the SOURCE image inside that box preserving its own aspect
+              // ratio — so what actually arrives is whatever shape the post's
+              // image is (measured on the "Mischievous Mondays" card:
+              // 256x144, a 16:9 shape, against this 190x132, a ~3:2 box).
+              // `object-cover` fills the box by cropping the wider dimension
+              // — for a photo that is usually invisible, but this feed also
+              // carries text-as-image graphics (contest banners, memes,
+              // quote cards) where the crop can land mid-word, exactly as it
+              // did here: 22px sliced off each side, and the right-hand cut
+              // happened to fall through a letter. `contain` always shows the
+              // whole image — worst case it pillarboxes against the same
+              // `bg-[#f4f5f7]` the box already carries for the pre-load
+              // state, never slices content the post author chose to show.
+              className="h-[132px] w-[190px] rounded-[14px] bg-[#f4f5f7] object-contain"
               loading="lazy"
               decoding="async"
               // ★ THE IMAGE PIPELINE IS HEALTHY — measured, 2026-08-08, after a

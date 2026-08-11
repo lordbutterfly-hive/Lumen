@@ -2,7 +2,7 @@
 
 import { isNsfwPost, useNsfwPreference } from '@/blog/lib/nsfw';
 import BasePathLink from '@/blog/components/base-path-link';
-import LeftRail from '@/blog/features/layouts/left-rail';
+import PageShell from '@/blog/features/layouts/page-shell';
 import DialogLogin from '@/blog/components/dialog-login';
 import { useFollowListQuery } from '@/blog/components/hooks/use-follow-list';
 import { usePinMutation, useUnpinMutation } from '@/blog/components/hooks/use-pin-mutations';
@@ -62,6 +62,7 @@ import dmcaUserList from '@ui/config/lists/dmca-user-list';
 import gdprUserList from '@ui/config/lists/gdpr-user-list';
 import userIllegalContent from '@ui/config/lists/user-illegal-content';
 import { handleError } from '@ui/lib/handle-error';
+import { getLogger } from '@ui/lib/logging';
 import parseDate from '@ui/lib/parse-date';
 import { buildSafePath } from '@ui/lib/sanitize-url';
 import { Clock, Link2 } from 'lucide-react';
@@ -85,6 +86,8 @@ import { StaleTime } from '@/blog/lib/react-query';
 
 // Maximum number of comments per page
 const MAX_COMMENTS_PER_PAGE = 50;
+
+const logger = getLogger('app');
 
 const PostContent = () => {
   const searchParams = useSearchParams();
@@ -433,64 +436,114 @@ const PostContent = () => {
     );
 
     // Divide main comments into pages - maximum 50 comments total per page
+    //
+    // ★ KEYED ON `author/permlink`, NOT `post_id` (2026-08-11).
+    //
+    // `post_id` is typed as a required `number` on `Entry`
+    // (packages/common-hiveio-packages/src/wax/extended-hive.chain.ts), but Hive's
+    // `bridge.get_discussion` never actually sends it — confirmed live against
+    // api.hive.blog: 0 of 125 entries on a real discussion carry the field, root
+    // post and replies alike. Every `comment.post_id` here was `undefined`, so
+    // `Set<number>` collapsed every `.add(undefined)` into one entry and
+    // `.has(undefined)` matched every comment, silently defeating the 50-per-page
+    // cap: the whole thread rendered on "page 1" regardless of size.
+    // `${author}/${permlink}` is Hive's real unique identity for a piece of
+    // content and is always present, so it is what actually distinguishes entries.
     const mainPost = discussionState.find((c) => c.depth === 0);
-    const pages: Set<number>[] = [];
-    let currentPageIds = new Set<number>();
+    const keyOf = (entry: Entry) => `${entry.author}/${entry.permlink}`;
+    const pages: Set<string>[] = [];
+    let currentPageIds = new Set<string>();
     let currentPageCount = mainPost ? 1 : 0;
 
     if (mainPost) {
-      currentPageIds.add(mainPost.post_id);
+      currentPageIds.add(keyOf(mainPost));
     }
 
-    for (const mainComment of mainComments) {
-      // Estimate how many comments this main comment has (1 + nested)
-      const parentKey = `${mainComment.author}/${mainComment.permlink}`;
-      const directChildren = commentsByParent.get(parentKey) || [];
-      // Simple estimate: main + direct children
-      const estimatedCount = 1 + Math.min(directChildren.length, 10);
+    const startNewPage = () => {
+      pages.push(currentPageIds);
+      currentPageIds = new Set<string>();
+      currentPageCount = mainPost ? 1 : 0;
+      if (mainPost) {
+        currentPageIds.add(keyOf(mainPost));
+      }
+    };
 
-      // If adding this comment probably exceeds the limit, save the current page
-      if (
-        currentPageCount + estimatedCount > MAX_COMMENTS_PER_PAGE &&
-        currentPageIds.size > (mainPost ? 1 : 0)
-      ) {
-        pages.push(currentPageIds);
-        currentPageIds = new Set<number>();
-        currentPageCount = mainPost ? 1 : 0;
-        if (mainPost) {
-          currentPageIds.add(mainPost.post_id);
-        }
+    // ★ EVERY COMMENT MUST LAND ON EXACTLY ONE PAGE (2026-08-11 regression fix).
+    //
+    // `placedKeys` is scoped to the WHOLE pass — every main comment across every
+    // top-level thread, not reset per main comment or per page — so a comment can
+    // never be silently re-queued, and (the actual bug) never silently dropped
+    // when it is skipped as "already placed" but was never added to any page.
+    const placedKeys = new Set<string>();
+    if (mainPost) {
+      placedKeys.add(keyOf(mainPost));
+    }
+
+    // ★★★ A SUBTREE MUST NEVER SPAN TWO PAGES — discovered the hard way, in a
+    // real signed-in browser, AFTER a first fix that only satisfied the
+    // in-memory Set (2026-08-11).
+    //
+    // The first attempt at this fix kept a per-mainComment BFS `queue` and, when
+    // a page filled mid-subtree, rolled to a new page and kept draining the SAME
+    // queue into it — so every descendant ended up in SOME page's `Set<string>`,
+    // and the flat "is every key placed" assertion below was satisfied. It
+    // still rendered broken: page 2 of a live thread claimed 48 comments in its
+    // Set but rendered only 6 `[data-testid="comment-list-item"]` nodes.
+    //
+    // The reason is `CommentList` (features/post-rendering/comment-list.tsx):
+    // it resolves parent -> child by filtering `data.parent_author ===
+    // parent.author && data.parent_permlink === parent.permlink` and recurses,
+    // where `data` is THIS PAGE's flat `paginatedDiscussionState.comments` —
+    // not the full discussion. A descendant is only reachable if its ENTIRE
+    // ancestor chain, up to a main comment, is present in that same page's flat
+    // list. Splitting a subtree across pages puts a child on page 2 whose
+    // parent (the thread's mainComment) rendered on page 1 — page 2 has no node
+    // to attach it under, so it renders nowhere. Same failure shape as the bug
+    // this whole fix targets, just moved one layer down: complete Set
+    // membership is necessary but not sufficient — CommentList also needs
+    // membership to be TREE-CONNECTED within a single page.
+    //
+    // The fix: treat each top-level comment's full subtree (itself + every
+    // descendant, however deep) as one atomic, indivisible unit. Compute its
+    // REAL size with a full walk — not the old `1 + min(directChildren, 10)`
+    // estimate, which is exactly what let pages fill mid-subtree in the first
+    // place — and place the whole thing on one page. If it does not fit a
+    // fresh page, start a new one first; if it STILL does not fit even a fresh
+    // page (a single thread with more than ~49 descendants), let that one page
+    // overshoot the 50 cap rather than truncate — a documented, bounded
+    // overshoot beats truncation, which is unrenderable by construction (see
+    // above) and was the entire bug.
+    for (const mainComment of mainComments) {
+      const subtree: Entry[] = [];
+      const seenInWalk = new Set<string>(); // guards a corrupt/cyclic parent chain
+      const walkQueue: Entry[] = [mainComment];
+      while (walkQueue.length > 0) {
+        const node = walkQueue.shift()!;
+        const nodeKey = keyOf(node);
+        if (seenInWalk.has(nodeKey)) continue;
+        seenInWalk.add(nodeKey);
+        subtree.push(node);
+        const children = commentsByParent.get(nodeKey) || [];
+        walkQueue.push(...children);
       }
 
-      // Now collect actual comments with the limit
-      const remainingLimit = MAX_COMMENTS_PER_PAGE - currentPageCount;
-      if (remainingLimit <= 0) continue;
+      // Roll to a fresh page if this subtree would overflow the current one —
+      // but never roll an EMPTY page (nothing but the main post), or an
+      // oversized subtree would spin up an endless run of empty pages ahead of
+      // it and never actually get placed.
+      if (
+        currentPageIds.size > (mainPost ? 1 : 0) &&
+        currentPageCount + subtree.length > MAX_COMMENTS_PER_PAGE
+      ) {
+        startNewPage();
+      }
 
-      currentPageIds.add(mainComment.post_id);
-      currentPageCount++;
-
-      // Collect nested comments with the limit (iteratively)
-      const queue: Entry[] = [...directChildren].sort(
-        (a, b) => new Date(a.created).getTime() - new Date(b.created).getTime()
-      );
-      const visited = new Set<number>([mainComment.post_id]);
-
-      while (queue.length > 0 && currentPageCount < MAX_COMMENTS_PER_PAGE) {
-        const current = queue.shift()!;
-        if (visited.has(current.post_id)) continue;
-        if (currentPageIds.has(current.post_id)) continue;
-
-        visited.add(current.post_id);
-        currentPageIds.add(current.post_id);
+      for (const entry of subtree) {
+        const entryKey = keyOf(entry);
+        if (placedKeys.has(entryKey)) continue; // safety net; see seenInWalk above
+        placedKeys.add(entryKey);
+        currentPageIds.add(entryKey);
         currentPageCount++;
-
-        // Add children of this comment to the queue
-        const currentParentKey = `${current.author}/${current.permlink}`;
-        const currentChildren = commentsByParent.get(currentParentKey) || [];
-        const sortedCurrentChildren = [...currentChildren].sort(
-          (a, b) => new Date(a.created).getTime() - new Date(b.created).getTime()
-        );
-        queue.push(...sortedCurrentChildren);
       }
     }
 
@@ -498,17 +551,30 @@ const PostContent = () => {
       pages.push(currentPageIds);
     }
 
+    // ★ ASSERT THE INVARIANT, DON'T JUST HOPE FOR IT. Every entry in
+    // `discussionState` must be reachable from some page — that is the whole
+    // point of the fix above. Log loudly (not throw): a comment thread should
+    // degrade to "imperfectly paginated", never crash the entire post page for
+    // every reader over a pagination edge case.
+    if (discussionState.length !== placedKeys.size) {
+      const missing = discussionState.filter((c) => !placedKeys.has(keyOf(c)));
+      logger.error(
+        { totalEntries: discussionState.length, placed: placedKeys.size, missing: missing.map(keyOf) },
+        'paginatedDiscussionState: comment(s) unreachable on any page'
+      );
+    }
+
     const totalPages = Math.max(1, pages.length);
     const validPage = Math.min(commentsPage, totalPages);
-    const pageIncludedIds = pages[validPage - 1] || new Set<number>();
+    const pageIncludedIds = pages[validPage - 1] || new Set<string>();
 
     // Always include the main post
-    if (mainPost && !pageIncludedIds.has(mainPost.post_id)) {
-      pageIncludedIds.add(mainPost.post_id);
+    if (mainPost && !pageIncludedIds.has(keyOf(mainPost))) {
+      pageIncludedIds.add(keyOf(mainPost));
     }
 
     // Create the final list using Set for O(1) lookup
-    const paginatedComments = discussionState.filter((comment) => pageIncludedIds.has(comment.post_id));
+    const paginatedComments = discussionState.filter((comment) => pageIncludedIds.has(keyOf(comment)));
 
     return {
       comments: paginatedComments,
@@ -650,21 +716,23 @@ const PostContent = () => {
 
   return (
     <>
-      <div className="grid grid-cols-1 md:grid-cols-12">
-        {/* ★ THE POST PAGE HAD NO NAVIGATION (v8, post detail). Opening a post dropped
-            the reader out of the app shell: no left rail, so no Home, Profile, Wallet,
-            Creators, Witnesses or Proposals, and the only way back was the browser
-            button. The column was already here and already the right width, holding
-            only the suggestion list. LeftRail goes above it, sticky like every other
-            route, and the suggestions keep the space underneath. */}
-        <div className="col-span-2 hidden md:block">
-          <div className="sticky top-24">
-            <LeftRail />
-          </div>
-          {suggestionData ? <AnimatedList suggestions={suggestionData} /> : null}
-        </div>
-        <div className="w-full min-w-0 py-8 md:col-span-8 md:mx-auto md:flex md:flex-col">
-          <div className={postContainerClasses}>
+      {/* ★★★ THE CANONICAL APP FRAME, NOT A BESPOKE ONE (F9, 2026-08-11, buildmap
+          item 12). This used to be a hand-rolled `grid-cols-12` with no
+          `max-w-[1720px]` cap, a proportional (not fixed-200px) left column, and
+          an empty `col-span-2` div standing in for a right rail — measured as
+          ~236-247px of pure dead space on the right at 1415-1485px viewports,
+          while every other reading surface (home, topics, search, creators,
+          proposals) got the real 200/1fr/312 frame with a working right rail.
+          `PageShell` is that frame, extracted once and reused — see its own doc
+          comment for why. The article card itself (`postContainerClasses`) is
+          UNCHANGED: it was already `max-w-4xl mx-auto`, so its own width was never
+          the problem; only the chrome around it was. The suggestion list keeps its
+          previous position, sticky under the nav in the left column. */}
+      <PageShell
+        mainClassName="min-w-0 py-8 flex flex-col"
+        leftRailExtra={suggestionData ? <AnimatedList suggestions={suggestionData} /> : null}
+      >
+        <div className={postContainerClasses}>
             {crossedPost ? (
               <div className="mb-4 flex items-center gap-2 bg-background-secondary p-5 text-sm">
                 <Icons.crossPost className="h-4 w-4" />
@@ -1231,9 +1299,7 @@ const PostContent = () => {
               setCommentsPage={handleSetCommentsPage}
             />
           ) : null}
-        </div>
-        <div className="col-span-2" />
-      </div>
+      </PageShell>
       <PostingLoader isSubmitting={isSubmitting} />
     </>
   );

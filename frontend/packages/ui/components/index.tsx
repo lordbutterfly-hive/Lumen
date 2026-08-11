@@ -5,6 +5,7 @@ export * from "./accordion";
 export * from "./alert";
 export * from "./alert-dialog";
 export * from "./avatar";
+export * from "./user-avatar-img";
 export * from "./badge";
 export * from "./button";
 export * from "./card";

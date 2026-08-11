@@ -7,7 +7,7 @@ import { Button } from '@ui/components';
 import { handleError } from '@ui/lib/handle-error';
 import BasePathLink from '@/blog/components/base-path-link';
 import { CircleSpinner } from 'react-spinners-kit';
-import { getUserAvatarUrl } from '@hive/ui';
+import { UserAvatarImg } from '@hive/ui';
 
 const ListItem = ({
   item,
@@ -64,15 +64,12 @@ const ListItem = ({
   return (
     <li
       data-testid="user-list-item"
-      className={`flex items-center justify-between border-b border-border-primary/30 px-3 py-2 transition-colors last:border-b-0 odd:bg-background-tertiary/50 hover:bg-background-tertiary ${item._temporary ? 'opacity-50' : ''}`}
+      className={`flex items-center justify-between border-b border-[#ebebeb] px-3 py-2 transition-colors last:border-b-0 odd:bg-background-tertiary/50 hover:bg-[#fdf2f0] ${item._temporary ? 'opacity-50' : ''}`}
     >
       <span className="flex min-w-0 items-center gap-2">
-        <img
-          src={getUserAvatarUrl(item.name, 'small')}
-          alt=""
-          className="h-6 w-6 shrink-0 rounded-full bg-background-tertiary"
-          loading="lazy"
-        />
+        {/* ★ CONVERGED (F6 item 22). No fallback at all before — a broken avatar
+            was just a broken `<img>` glyph in this list. */}
+        <UserAvatarImg username={item.name} pixelSize={24} />
         {!item._temporary ? (
           <BasePathLink
             data-testid="user-list-item-name"
@@ -98,7 +95,12 @@ const ListItem = ({
       {accountOwner ? (
         <Button
           variant="outlineRed"
-          className="ml-2 min-w-[90px] shrink-0 whitespace-nowrap px-2 py-1 text-xs"
+          // ★ CAPITALIZED (F9, 2026-08-11, buildmap item 15). The translation
+          // strings themselves ("unblacklist", "unfollow blacklist", ...) are
+          // lowercase by convention — every other button label in the app is
+          // Title Case, so this is a presentational fix, not a copy change; a
+          // locale that capitalizes its own strings differently is unaffected.
+          className="ml-2 min-w-[90px] shrink-0 whitespace-nowrap px-2 py-1 text-xs capitalize"
           size="xs"
           onClick={() => handleDelete(item.name)}
           disabled={isItemLoading || item._temporary}

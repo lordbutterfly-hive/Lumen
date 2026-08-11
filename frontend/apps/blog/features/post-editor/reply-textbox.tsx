@@ -33,11 +33,31 @@ import { getStorageItem, removeStorageItem, StorageTTL } from '@ui/lib/storage-w
 import { useStorageWithTTL } from '@ui/hooks/useStorageWithTTL';
 import { useLoggedUserContext } from '@/blog/features/votes/hooks/use-logged-user';
 
+// ★ item 18: this used to reserve a single 200px box — but the mounted
+// MdEditor is THREE bands (EditorToolbar, a `windowheight`-tall CodeMirror
+// instance, EditorOptionsBar), not one, so the real thing is ~75-90px taller
+// than what this placeholder held open. The gap didn't show up as "slow" — it
+// showed up as the whole comment thread visibly jumping down the instant the
+// dynamic import resolved, independent of how fast that import was. Each band
+// below reuses the real component's own height-bearing classes (EditorToolbar:
+// `h-7` buttons + `py-1` = 36px; the editor: `windowheight` itself, 200px,
+// matching `use-codemirror.ts`'s `height: ${windowheight}px`; EditorOptionsBar:
+// `px-3 py-2` around one content row, ~40px) so the reserved space is derived
+// from the real layout, not a second guess. Not pixel-measured live in a
+// browser — the shared dev server was under heavy concurrent load for this
+// entire session (other agents' jobs from the same build map hammering :3000)
+// — so treat these three numbers as a close approximation, not a proven exact
+// match; re-measure with the F2 harness once the server is quiet if exactness
+// matters.
 const MdEditor = dynamic(() => import('./md-editor'), {
   ssr: false,
   loading: () => (
-    <div className="flex h-[200px] w-full items-center justify-center rounded-md border border-border bg-background-secondary/30">
-      <CircleSpinner loading size={24} color="#dc2626" />
+    <div className="w-full" data-testid="reply-editor-loading">
+      <div className="h-[37px] rounded-t-md border-x border-t border-border bg-background-secondary/50" />
+      <div className="flex h-[200px] w-full items-center justify-center border-x border-border bg-background-secondary/30">
+        <CircleSpinner loading size={24} color="#dc2626" />
+      </div>
+      <div className="h-[40px] border-x border-t border-border bg-background-secondary/50" />
     </div>
   )
 });
@@ -415,9 +435,9 @@ export function ReplyTextbox({
             data-testid="reply-draft-save-failed"
             className="rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900"
           >
-            <strong className="font-semibold">This reply is not being saved.</strong> Your browser
-            has no room to store it, so it will be lost if you close or reload this tab. Post it
-            now, or copy your text somewhere safe.
+            <strong className="font-semibold">This reply is not being saved.</strong> Your browser has no room
+            to store it, so it will be lost if you close or reload this tab. Post it now, or copy your text
+            somewhere safe.
           </div>
         ) : null}
 
@@ -558,7 +578,7 @@ export function ReplyTextbox({
               </span>
             )}
             <Link href="https://docs.github.com/en/get-started/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax">
-              <span className="text-muted-foreground hover:text-destructive transition-colors">
+              <span className="text-muted-foreground transition-colors hover:text-destructive">
                 {t('post_content.footer.comment.markdown_styling_guide')}
               </span>
             </Link>

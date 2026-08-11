@@ -1,5 +1,6 @@
 'use client';
 
+import { forwardRef } from 'react';
 import type { LucideProps } from 'lucide-react';
 
 /**
@@ -189,9 +190,27 @@ export const PATHS: Record<string, string> = {
     '<path d="M4 11L12 4l8 7"/><path d="M6 9.8V19a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V9.8"/><path d="M9.75 20v-5a1 1 0 0 1 1-1h2.5a1 1 0 0 1 1 1v5"/>'
 };
 
+/**
+ * ★ forwardRef (2026-08-11, F7). Every icon here used to be a plain function
+ * component, so any Radix `asChild` slot whose CHILD resolves to one of these
+ * — not wrapped in an intervening real DOM element like a `<button>` or
+ * `<span>` — got "Function components cannot be given refs" and Radix's
+ * `SlotClone` silently dropped the ref instead of attaching it. Hit in
+ * production on the post page: `reblog-trigger.tsx`'s icon-only variant (no
+ * `showLabel`) hands `Icons.forward` straight to `ReblogDialog`, whose
+ * `AlertDialogTrigger asChild` clones its `children` directly (see
+ * `reblog-dialog.tsx`, which forwards its OWN ref correctly and is not the
+ * bug). Every other call site in the app happens to wrap its icon in a real
+ * element first, so this was invisible everywhere except that one spot — but
+ * the failure mode is generic to the whole set, not specific to `forward`.
+ * Fixing it once here, at the factory, means every icon this module makes
+ * (~80 of them) can now sit directly inside any `asChild` slot, anywhere,
+ * without a caller having to remember to wrap it.
+ */
 const make = (name: string) => {
-  const Icon = (props: LucideProps) => (
+  const Icon = forwardRef<SVGSVGElement, Omit<LucideProps, 'ref'>>((props, ref) => (
     <svg
+      ref={ref}
       xmlns="http://www.w3.org/2000/svg"
       viewBox="0 0 24 24"
       width={24}
@@ -205,7 +224,7 @@ const make = (name: string) => {
       // eslint-disable-next-line react/no-danger -- house icon set: inner SVG geometry is a trusted constant from PATHS, never user input
       dangerouslySetInnerHTML={{ __html: PATHS[name] }}
     />
-  );
+  ));
   Icon.displayName = `Icon(${name})`;
   return Icon;
 };

@@ -9,18 +9,28 @@ import { scheduleInvalidations } from '@/blog/lib/react-query';
 
 const logger = getLogger('app');
 
-/** Add item to IFollowList cache if not already present. */
+/**
+ * Add item(s) to IFollowList cache if not already present.
+ *
+ * ★ B1 (G2) — `otherBlogs` can now be a ", "-joined batch (the add-account
+ * form validates and joins multiple names into ONE call, matching
+ * `transactionService.*Blog(...).split(', ')`). One optimistic row per name,
+ * not one row named "name-one, name-two" — that garbled-row shape was
+ * exactly the bug being fixed.
+ */
 function addToListCache(
   queryClient: ReturnType<typeof useQueryClient>,
   queryKey: string[],
-  name: string
+  otherBlogs: string
 ) {
+  const names = otherBlogs.split(', ').filter((n) => n.length > 0);
   const currentData: IFollowList[] = queryClient.getQueryData(queryKey) ?? [];
-  if (!currentData.some((e) => e.name === name)) {
-    queryClient.setQueryData<IFollowList[]>(queryKey, [
-      { name, blacklist_description: '', muted_list_description: '', _temporary: true },
-      ...currentData
-    ]);
+  const existingNames = new Set(currentData.map((e) => e.name));
+  const newRows = names
+    .filter((name) => !existingNames.has(name))
+    .map((name) => ({ name, blacklist_description: '', muted_list_description: '', _temporary: true }));
+  if (newRows.length > 0) {
+    queryClient.setQueryData<IFollowList[]>(queryKey, [...newRows, ...currentData]);
   }
 }
 

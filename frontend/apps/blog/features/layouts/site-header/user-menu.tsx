@@ -9,7 +9,7 @@ import {
   DropdownMenuTrigger
 } from '@ui/components/dropdown-menu';
 import { ReactNode } from 'react';
-import { Link, getUserAvatarUrl } from '@hive/ui';
+import { Link, UserAvatarImg } from '@hive/ui';
 import BasePathLink from '../../../components/base-path-link';
 import LangToggle from '../lang-toggle';
 import { useLogout } from '@smart-signer/lib/auth/use-logout';
@@ -38,30 +38,15 @@ const ROW_CLASS =
 const META_CLASS = 'shrink-0 font-sans text-[12.5px] tabular-nums text-[#a29a92]';
 
 /**
- * A small, self-contained avatar for the menu's OWN header block — same
- * "letter under the image, image removes itself on error" shape as
- * app-header.tsx's HeaderAvatar (N-4: an empty ring/broken image reads as an
- * account that vanished, not a picture that failed to load), kept as its own
- * tiny copy here rather than importing that one, since HeaderAvatar is sized
- * and composed specifically for the manabar-ring trigger it sits inside.
+ * A small, self-contained avatar for the menu's OWN header block — the app's
+ * one avatar component (F6 item 22, converged), sized at 38px for this
+ * block rather than app-header.tsx's HeaderAvatar (36px, manabar-ring
+ * trigger). Previously called `getUserAvatarUrl` (our own `/api/avatar`
+ * proxy) directly on every render; now tries `images.hive.blog` first and
+ * only falls back to the proxy on error, same as everywhere else.
  */
 const MenuAvatar = ({ username }: { username: string }) => (
-  <span
-    aria-hidden="true"
-    className="relative flex h-[38px] w-[38px] shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#f1f3f5] font-sans text-[13px] font-bold uppercase leading-none text-[#6b7280]"
-  >
-    {username.slice(0, 1)}
-    <img
-      src={getUserAvatarUrl(username || '', 'small')}
-      alt=""
-      width={38}
-      height={38}
-      onError={(e) => {
-        e.currentTarget.style.display = 'none';
-      }}
-      className="absolute inset-0 h-[38px] w-[38px] rounded-full object-cover"
-    />
-  </span>
+  <UserAvatarImg username={username || ''} pixelSize={38} />
 );
 
 /**
