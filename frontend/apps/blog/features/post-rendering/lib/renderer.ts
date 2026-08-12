@@ -48,7 +48,23 @@ const renderDefaultOptions = {
   assetsHeight: 480,
   // Note: Instagram uses iframe-only resize (postMessage), Twitter loads widgets.js for native rendering
   plugins: [new TablePlugin(), new InstagramResizePlugin(), new TwitterResizePlugin()],
-  imageProxyFn: (url: string) => proxifyImageSrc(url, 1536, 0),
+  // Post body images render into a max-w-4xl content column. Measured its
+  // rendered CSS width across breakpoints: 394px @768w, 650px @1024w,
+  // 710px @1440w (this project's own standard test viewport -- see the
+  // playwright-mcp config), plateauing at a hard 854px cap from 1920w
+  // through 2560w (confirmed unchanged at both). 1420 = 2x the 1440w slot:
+  // enough for a retina (dpr=2) display at the project's standard desktop
+  // width without the ~4x overshoot the old hardcoded 1536 represented
+  // relative to how this column actually renders at more typical/mobile
+  // widths (2x @768w would be ~788, 2x @1024w ~1300). Picking 1420 over the
+  // 854-cap's 2x (1708) also means it actually engages mode=fit's downscale
+  // for the very common oversized-source-photo case: proxifyImageSrc never
+  // upscales, so any width >= a photo's native width is a no-op -- verified
+  // on a 1411px-native test image, where 1420 and 1708 produced
+  // byte-identical output (both just returned the native resolution) while
+  // 1100 (the audit's original, narrower reference point) forced a real
+  // downscale and a meaningfully smaller file.
+  imageProxyFn: (url: string) => proxifyImageSrc(url, 1420, 0),
   usertagUrlFn: (account: string) => (basePath ? `${basePath}/@${account}` : `/@${account}`),
   hashtagUrlFn: (hashtag: string) => (basePath ? `${basePath}/trending/${hashtag}` : `/trending/${hashtag}`),
   isLinkSafeFn: (url: string) => isLinkSafe(url),
@@ -77,7 +93,7 @@ export function getRenderer(author: string = ''): DefaultRenderer {
 export function getPreviewRenderer(token: string, author: string = ''): DefaultRenderer {
   const options = {
     ...renderDefaultOptions,
-    imageProxyFn: (url: string) => proxifyImageSrc(url, 1536, 0, 'match', token),
+    imageProxyFn: (url: string) => proxifyImageSrc(url, 1420, 0, 'match', token),
   };
   if (!!author && imageUserBlocklist.includes(author)) {
     return new DefaultRenderer({ ...options, doNotShowImages: true });

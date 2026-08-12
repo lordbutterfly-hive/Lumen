@@ -487,7 +487,26 @@ export async function resolvePostOwnerActor(
 ): Promise<FollowActor | null> {
   const postId = litePostIdOf({ permlink });
   if (postId) {
-    const row = await posts.getPostById(postId).catch(() => null);
+    // ★★★ NO `.catch(() => null)` HERE, AND THAT IS THE WHOLE POINT (2026-08-12).
+    //
+    // This read used to swallow its own failure and return `null`, which reads
+    // downstream as "resolved fine, and nobody owns this post". That is a
+    // different sentence from "the database did not answer", and the difference
+    // is load-bearing: `applyOwnerBlocksToAuthoredEntries` was hardened earlier
+    // TODAY to tell those two apart — resolved-null stays visible (the container
+    // -root case), a throw withholds the entry — and this inner catch quietly
+    // defeated that guard by never letting a throw reach it. The outer try/catch
+    // was correct and simply never fired.
+    //
+    // So a failure propagates. Every caller already fails closed on it: the three
+    // effect-(B) filters mark the parent unresolvable and withhold its entries,
+    // and `/api/lite/posts/replies` answers with an empty list. Effect (B) is the
+    // half a reader cannot opt out of — "cannot prove this is safe to serve"
+    // must never resolve to "serve it".
+    //
+    // ★ The lesson, for the third time today: hardening a caller is worthless if
+    // the callee eats the error first. Check the whole path, not the boundary.
+    const row = await posts.getPostById(postId);
     if (row) return { userId: row.userId };
   }
   const clean = (author ?? '').trim().replace(/^@/, '').toLowerCase();

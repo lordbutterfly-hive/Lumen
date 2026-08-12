@@ -38,14 +38,18 @@ import { TIMEOUTS } from '../support/constants';
  * fixture harness is built to prove safely, and no part of this cleanup
  * pass builds new mock infrastructure for `/api/lite/block/*`.
  *
- * `/api/lite/block/state` (which `useLumenBlock` polls to decide whether to
- * render the button at all — `block.available`) is stubbed LOCALLY, in this
- * spec only, so the assertion below is deterministic regardless of whether
- * a real Lumen DB is reachable from this webServer: `state/route.ts`
- * degrades any lookup failure to `available:false` ("must never claim a
- * block that may not exist"), which would make BlockButton silently vanish
- * and fail this test for an environment reason that has nothing to do with
- * whether Mute is really gone.
+ * `/api/lite/block/state-bulk` (which `useLumenBlock` now coalesces every
+ * mounted card's request into — see that hook's doc for the N+1 fix this
+ * batching replaced, 2026-08-12) is stubbed LOCALLY, in this spec only, so
+ * the assertion below is deterministic regardless of whether a real Lumen DB
+ * is reachable from this webServer: `state-bulk/route.ts` degrades any
+ * lookup failure to `available:false` for every requested target ("must
+ * never claim a block that may not exist"), which would make BlockButton
+ * silently vanish and fail this test for an environment reason that has
+ * nothing to do with whether Mute is really gone. The stub below echoes back
+ * whatever `(target, kind)` pairs the page actually batched together — every
+ * comment on this thread mounts its own `useLumenBlock`, so the real request
+ * asks about all of steevc's fellow commenters too, not just him.
  *
  * Pinned post + commenter unchanged from the original recording:
  * `/@hiveio/hive-at-blockchain-rio` has 8 top-level (depth=1) replies;
@@ -64,14 +68,26 @@ test.use({
 test('MUTE-PROP-01 — Comment author popover offers Block, not Mute', async ({ page }) => {
   // Same-origin Lumen route, not a chain call — see the file doc above for
   // why this is stubbed here rather than left to whatever this webServer's
-  // real backend answers.
-  await page.route('**/api/lite/block/state**', (route) =>
-    route.fulfill({
+  // real backend answers. Reads the real `targets` query param so this stays
+  // correct regardless of how many other comment authors' `useLumenBlock`
+  // instances happen to share this page's coalescing window.
+  await page.route('**/api/lite/block/state-bulk**', (route) => {
+    const url = new URL(route.request().url());
+    let pairs: [string, string][] = [];
+    try {
+      pairs = JSON.parse(url.searchParams.get('targets') ?? '[]');
+    } catch {
+      pairs = [];
+    }
+    return route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ ok: true, available: true, blocking: false })
-    })
-  );
+      body: JSON.stringify({
+        ok: true,
+        states: pairs.map(([target, kind]) => ({ target, kind, available: true, blocking: false }))
+      })
+    });
+  });
 
   await page.goto(MUTE_COMMENT_POST);
   await expect(page.getByTestId('login-btn')).toBeHidden({

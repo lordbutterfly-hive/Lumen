@@ -169,7 +169,36 @@ function ForYouFeed() {
    * list on its own. It only ever answers "how many new ones are there", which
    * becomes the button above the feed. `refetchIntervalInBackground` stays at its
    * default of false, so a tab left open in another window is not polling.
+   *
+   * ★★★ THE FIRST POLL CANNOT ANSWER ANYTHING, SO IT NO LONGER RUNS (2026-08-12)
+   * — root cause of a MEASURED duplicate `/api/feed/for-you` request on every
+   * home-page load (160-168KB wasted, byte-identical, on the critical path, both
+   * signed in and signed out).
+   *
+   * `enabled` below used to be `(data?.pages?.length ?? 0) > 0` directly — true
+   * the INSTANT page 1 lands — and react-query fetches a query the moment it
+   * becomes enabled with no data of its own, `refetchInterval`'s cadence only
+   * governing fetches AFTER that first one. So this query fired again, within
+   * the same load, with the exact same params (no cursor, same limit) as the
+   * `useInfiniteQuery` fetch that had just resolved a beat earlier — confirmed
+   * live on :3000 with two identical `?limit=30` responses, md5-identical,
+   * ~168KB each. That first answer could never have told the reader anything
+   * anyway: it is the same viewer's same recsys snapshot, diffed against itself
+   * zero seconds later, which is always "0 new posts" by construction — the
+   * comparison only becomes meaningful once real time (`FEED_POLL_MS`) has
+   * actually passed. So the query now waits out that interval before its FIRST
+   * run too, instead of running once for free and then again on schedule; the
+   * timer starts once, off the first page landing, and is not restarted by
+   * later pages arriving via infinite scroll.
    */
+  const hasFirstPage = (data?.pages?.length ?? 0) > 0;
+  const [pollReady, setPollReady] = useState(false);
+  useEffect(() => {
+    if (!hasFirstPage) return;
+    const id = setTimeout(() => setPollReady(true), FEED_POLL_MS);
+    return () => clearTimeout(id);
+  }, [hasFirstPage]);
+
   const { data: incoming } = useQuery<ForYouResponse>({
     queryKey: FOR_YOU_INCOMING_KEY,
     queryFn: () => fetchForYou(),
@@ -179,8 +208,9 @@ function ForYouFeed() {
     refetchOnMount: false,
     staleTime: FEED_POLL_MS,
     retry: 0,
-    // Nothing to compare against until the reader has a first page.
-    enabled: (data?.pages?.length ?? 0) > 0
+    // Nothing to compare against until the reader has a first page, and nothing
+    // NEW to find until FEED_POLL_MS has actually elapsed since then.
+    enabled: pollReady
   });
 
   /** New posts the reader accepted, kept above the pages they were already reading. */

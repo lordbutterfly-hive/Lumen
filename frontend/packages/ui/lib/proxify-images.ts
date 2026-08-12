@@ -7,7 +7,7 @@ const proxyBase = configuredImagesEndpoint;
 interface ProxyOptions {
   [key: string]: string | number | undefined;
   format: string;
-  mode: string;
+  mode?: string;
   width?: number;
   height?: number;
 }
@@ -30,13 +30,22 @@ export function getLatestUrl(str: string): string {
   return last;
 }
 
-export function proxifyImageSrc(url?: string, width = 0, height = 0, format = 'match', token?: string) {
+export function proxifyImageSrc(url?: string, width = 0, height = 0, format = 'webp', token?: string) {
   if (!url || typeof url !== 'string') {
     return '';
   }
 
-  // Skip already-proxified URLs (ones that already have /p/ hash format)
-  if (url.startsWith(`${proxyBase}/p/`)) {
+  // Skip already-proxified URLs (ones that already carry our resize/format
+  // query string). A bare `${proxyBase}/p/<hash>` URL with no query string is
+  // NOT necessarily "already proxied" -- it's also the exact path shape Hive's
+  // own raw image storage uses for uploads, since proxyBase (images.hive.blog)
+  // is both the CDN and the resize proxy. `format` is the one option this
+  // function unconditionally sets on every URL it builds (mode/width/height
+  // are omitted for GIFs, see below), so its presence -- not the path alone --
+  // is what actually means "already went through this function". Matching on
+  // the path alone would wrongly treat every raw Hive-hosted upload as
+  // pre-proxied and skip resizing/reformatting it entirely.
+  if (url.startsWith(`${proxyBase}/p/`) && /[?&]format=/.test(url)) {
     return url; // Return as-is, already proxified
   }
 
@@ -57,22 +66,34 @@ export function proxifyImageSrc(url?: string, width = 0, height = 0, format = 'm
   const encodedUrl = realUrl.replace(/ /g, '%20');
   const pHash = extractPHash(encodedUrl);
 
-  // Detect GIF URLs - skip resizing to preserve animation frames
-  // Resizing GIFs strips animation frames to reduce file size
+  // Detect GIF URLs - the resize proxy is unsafe for GIFs in two ways
+  // (verified empirically against the live proxy, not just from the original
+  // comment here): asking it to resize (width/height) collapses the
+  // animation to a single static frame, AND asking it to `mode=fit` with NO
+  // width/height (which is what a naive "just skip the dimensions" fix would
+  // send) hits a proxy-side bug that inflates the file 45-63x instead of
+  // passing it through (a 66KB/3-frame source came back as a 4.1MB/97-"frame"
+  // response). So GIFs get `format` only -- no mode, no width, no height --
+  // which reproduces the original bytes untouched.
   const isGif = /\.gif($|\?)/i.test(realUrl);
 
   const options: ProxyOptions = {
-    format,
-    mode: 'fit'
+    // 'match' passes GIF bytes through unchanged regardless of what format
+    // the caller/default asked for; converting to webp would flatten it same
+    // as resizing would.
+    format: isGif ? 'match' : format
   };
 
-  // Only add width/height for non-GIF images to preserve animation
-  if (!isGif && width > 0) {
-    options.width = width;
-  }
+  if (!isGif) {
+    options.mode = 'fit';
 
-  if (!isGif && height > 0) {
-    options.height = height;
+    if (width > 0) {
+      options.width = width;
+    }
+
+    if (height > 0) {
+      options.height = height;
+    }
   }
 
   const qs = querystring.stringify(options);

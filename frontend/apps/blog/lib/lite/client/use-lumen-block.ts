@@ -47,6 +47,171 @@ export interface LumenBlock {
   toggle: () => Promise<string | null>;
 }
 
+/**
+ * ★★★ THE N+1 FIX — WHY THIS IS A REQUEST-COALESCING LAYER, NOT A SWITCH TO THE
+ * LIST ENDPOINT (2026-08-12).
+ *
+ * Measured: `/api/lite/block/state` fired once per distinct author on a feed page
+ * (20-30 parallel requests on one home load) and once per comment author on a post
+ * thread (~100 on a 50-comment page) — every mounted card runs its own
+ * `useLumenBlock`, and React Query has no way to know two different QUERY KEYS
+ * (one per `target`) are answerable from the same trip.
+ *
+ * `/api/lite/block/list` (below, `useLumenBlockList`) already solves a DIFFERENT
+ * problem the same way a fix here might look tempting to lean on — but it cannot
+ * stand in for this hook, for two reasons that matter:
+ *
+ *   1. It answers "who has the viewer blocked", which gives `isBlocking` for free,
+ *      but NOT `available` — whether a Block control belongs here at all. That
+ *      needs the SAME self-check and name-resolution `blockState` already does
+ *      (not yourself, and the name actually resolves to a real actor), which the
+ *      list was never asked and does not carry.
+ *   2. It is fetched with `staleTime: 60s` and shared across the WHOLE page by
+ *      query-key dedup already — reusing it here would still leave `available`
+ *      unanswered, so this hook would need to run ITS OWN per-target request for
+ *      that half anyway, buying nothing.
+ *
+ * So the fix is a request-coalescing layer: every mounted `useLumenBlock` still
+ * asks its own question through its own React Query cache entry (queryKey
+ * unchanged below — `toggle()`'s `invalidateQueries` below still targets exactly
+ * the pair that changed), but the ACTUAL FETCH is deferred a few milliseconds and
+ * merged with every other pending request into ONE call to
+ * `/api/lite/block/state-bulk`. The batched server-side work
+ * (`blockStatesBulk`/`resolveBlockTargetsBulk`, `lib/lite/social/block-service.ts`
+ * and `block-actor.ts`) answers the SAME question this hook always asked —
+ * `available` AND `isBlocking`, per exact target — just for N targets in one trip
+ * instead of N trips, so nothing about what a caller receives changes.
+ *
+ * A short `setTimeout` window, not a bare microtask: every card on an SSR-hydrated
+ * page mounts in the same commit, but React can flush passive effects across more
+ * than one pass (concurrent features, a Suspense boundary settling separately), and
+ * a microtask queued by the FIRST request would fire before a later pass's requests
+ * exist to join it. A few milliseconds of macrotask delay costs nothing perceptible
+ * next to the network round trip it is replacing 20-30 of, and still catches every
+ * request from the same render burst.
+ */
+const BATCH_WINDOW_MS = 10;
+
+interface PendingBlockRequest {
+  resolve: (value: { available: boolean; blocking: boolean }) => void;
+  reject: (error: Error) => void;
+}
+
+/** One entry per distinct `(kind, target)` pair currently waiting on a flush. */
+interface PendingBlockGroup {
+  target: string;
+  targetKind: 'hive' | 'lumen';
+  requests: PendingBlockRequest[];
+}
+
+function pendingKey(target: string, targetKind: 'hive' | 'lumen'): string {
+  return `${targetKind}:${target}`;
+}
+
+// Module-scope by design: this is what lets every `useLumenBlock` instance on the
+// page — one per card, mounted independently — join the SAME outbound request
+// rather than each keeping its own queue.
+let pendingBlockBatch: Map<string, PendingBlockGroup> | null = null;
+let blockBatchTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleBlockBatchFlush(): void {
+  if (blockBatchTimer) return;
+  blockBatchTimer = setTimeout(() => {
+    const batch = pendingBlockBatch;
+    pendingBlockBatch = null;
+    blockBatchTimer = null;
+    if (batch) void flushBlockBatch(batch);
+  }, BATCH_WINDOW_MS);
+}
+
+/**
+ * ★ DELIVERED IN CHUNKS, NOT ONE TIGHT LOOP — MEASURED, NOT THEORISED (2026-08-12).
+ *
+ * A first version of this file settled every pending promise in a single
+ * synchronous `for` loop. On a real 30-card home feed that reproducibly crashed
+ * the page: React's console reported "Maximum update depth exceeded" inside
+ * Radix's `Popper`/`Menu`/`DropdownMenu` stack, caught by the app's nearest error
+ * boundary (`NotFoundErrorBoundary`) — every `MediumPostCard`'s overflow menu
+ * mounting/updating in the same React commit apparently trips something in that
+ * third-party stack. Confirmed by direct A/B on the same running dev server: the
+ * pre-fix code (30 staggered network responses, naturally spread over real time by
+ * the browser's own per-host connection limit) never crashed it; resolving the
+ * SAME 30 answers from one bulk response, all in one JS turn, did — every time.
+ * An 8-target comment thread (`CommentListItem` uses the identical DropdownMenu)
+ * did not crash either, so this is a volume effect, not a shape-of-code one.
+ *
+ * `MediumPostCard`/the Radix stack are not this file's to fix — see the ownership
+ * note at the top of this file. The fix that belongs here is to stop HANDING every
+ * consumer its answer in the same commit: settle a few requests, yield a real
+ * macrotask (`setTimeout(0)`, not a microtask — a microtask would not give React a
+ * chance to actually commit and paint in between), then settle the next few. This
+ * keeps the network win (still exactly one HTTP request) while spreading its 30
+ * answers back out over several small React commits, the way independent network
+ * completions used to.
+ */
+const DELIVERY_CHUNK_SIZE = 6;
+
+async function deliverInChunks(groups: PendingBlockGroup[], settle: (group: PendingBlockGroup) => void): Promise<void> {
+  for (let i = 0; i < groups.length; i += DELIVERY_CHUNK_SIZE) {
+    for (const group of groups.slice(i, i + DELIVERY_CHUNK_SIZE)) settle(group);
+    if (i + DELIVERY_CHUNK_SIZE < groups.length) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
+  }
+}
+
+async function flushBlockBatch(batch: Map<string, PendingBlockGroup>): Promise<void> {
+  const groups = [...batch.values()];
+  let settle: (group: PendingBlockGroup) => void;
+  try {
+    const targets = groups.map((g) => [g.target, g.targetKind]);
+    const params = new URLSearchParams({ targets: JSON.stringify(targets) });
+    const res = await fetch(`/api/lite/block/state-bulk?${params.toString()}`);
+    // Same rule the single-item read documented below: a failed lookup must never
+    // resolve as a clean answer. Throwing here rejects every promise in this
+    // flush, so every one of THIS BATCH's queries throws and engages its own
+    // retry — none of them silently resolve "not blocked".
+    if (!res.ok) throw new Error(`block bulk state read failed: HTTP ${res.status}`);
+    const body = (await res.json()) as {
+      ok?: boolean;
+      states?: Array<{ target: string; kind: string; available: boolean; blocking: boolean }>;
+    };
+    if (body.ok === false || !body.states) throw new Error('block bulk state read failed server-side');
+    const byKey = new Map(body.states.map((s) => [pendingKey(s.target, s.kind as 'hive' | 'lumen'), s]));
+    settle = (group) => {
+      const state = byKey.get(pendingKey(group.target, group.targetKind));
+      for (const req of group.requests) {
+        if (state) req.resolve({ available: state.available, blocking: state.blocking });
+        // A target this hook asked for but the response omitted is the same
+        // "could not find out" outcome as an HTTP failure, not "not blocked" —
+        // never silently substitute a clean answer for a missing one.
+        else req.reject(new Error('block state missing from bulk response'));
+      }
+    };
+  } catch (error) {
+    const err = error instanceof Error ? error : new Error('block bulk state read failed');
+    settle = (group) => {
+      for (const req of group.requests) req.reject(err);
+    };
+  }
+  await deliverInChunks(groups, settle);
+}
+
+/** Joins (or starts) the current coalescing window for one `(target, kind)` pair. */
+function requestBlockState(
+  target: string,
+  targetKind: 'hive' | 'lumen'
+): Promise<{ available: boolean; blocking: boolean }> {
+  return new Promise((resolve, reject) => {
+    if (!pendingBlockBatch) pendingBlockBatch = new Map();
+    const key = pendingKey(target, targetKind);
+    const existing = pendingBlockBatch.get(key);
+    if (existing) existing.requests.push({ resolve, reject });
+    else pendingBlockBatch.set(key, { target, targetKind, requests: [{ resolve, reject }] });
+    scheduleBlockBatchFlush();
+  });
+}
+
 export function useLumenBlock(
   target: string,
   targetKind: 'hive' | 'lumen',
@@ -60,23 +225,13 @@ export function useLumenBlock(
     queryKey,
     enabled: enabled && Boolean(target),
     staleTime: 60 * 1000,
-    queryFn: async () => {
-      // Same rule as the list read below: a failed lookup resolved as
-      // `blocking: false`, which React Query treated as a success — no retry, and a
-      // Block button that offers to block somebody the reader has ALREADY blocked.
-      // Throwing engages retry, so a transient failure recovers on its own.
-      //
-      // `res.ok` is the HTTP status; the route answers 200 with `ok: false` when it
-      // degrades (including its 429), so both are checked. `available: false` from a
-      // healthy server is a real answer and is left alone — it means this pair cannot
-      // be blocked, not that the read broke.
-      const params = new URLSearchParams({ target, kind: targetKind });
-      const res = await fetch(`/api/lite/block/state?${params.toString()}`);
-      if (!res.ok) throw new Error(`block state read failed: HTTP ${res.status}`);
-      const body = (await res.json()) as { ok?: boolean; available: boolean; blocking: boolean };
-      if (body.ok === false) throw new Error('block state read failed server-side');
-      return { available: body.available, blocking: body.blocking };
-    }
+    // Same rule as the list read below: a failed lookup resolved as
+    // `blocking: false`, which React Query treated as a success — no retry, and a
+    // Block button that offers to block somebody the reader has ALREADY blocked.
+    // Throwing engages retry, so a transient failure recovers on its own — see
+    // `requestBlockState`/`flushBlockBatch` above for where that throw now
+    // originates (a shared, coalesced fetch instead of one fetch per card).
+    queryFn: () => requestBlockState(target, targetKind)
   });
 
   const isBlocking = Boolean(data?.blocking);

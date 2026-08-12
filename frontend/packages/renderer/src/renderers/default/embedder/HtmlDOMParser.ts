@@ -536,13 +536,25 @@ export class HtmlDOMParser {
     }
 
     /**
-     * Applies proxy URLs to all non-local images in the document.
+     * Applies proxy URLs to all images in the document, except ones that have
+     * already been proxied.
      *
      * This method:
      * - Finds all img elements in the document
-     * - For each image with a non-local URL (not matching linksRe.local pattern):
+     * - For each image whose URL isn't already proxied (not matching
+     *   linksRe.alreadyProxied, i.e. it doesn't already carry a
+     *   `/p/<hash>?...mode=fit...` resize query string):
      *   - Transforms the src URL using the configured imageProxyFn
-     * - Local images are left unchanged
+     * - Already-proxied images are left unchanged, to avoid re-proxying a URL
+     *   the imageProxyFn itself already produced
+     *
+     * Note: this used to skip every image hosted on hive.blog (any subdomain),
+     * on the assumption that "our own domain" meant "already sized right".
+     * That's not true: images.hive.blog is both the resize proxy's target
+     * domain AND Hive's raw upload storage, so a same-domain check alone
+     * skipped virtually all real post images -- including full-resolution,
+     * original-format uploads -- rather than the small set that were actually
+     * already proxied.
      *
      * @param doc - The Document object containing the DOM to process
      * @private
@@ -558,7 +570,7 @@ export class HtmlDOMParser {
         }
         Array.from(doc.getElementsByTagName('img')).forEach((node) => {
             const url: string = node.getAttribute('src') || '';
-            if (!linksRe.local.test(url)) {
+            if (!linksRe.alreadyProxied.test(url)) {
                 node.setAttribute('src', this.options.imageProxyFn(url));
             }
         });

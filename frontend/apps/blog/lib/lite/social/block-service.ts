@@ -4,8 +4,8 @@ import { checkLiteActorById, checkSessionValidity } from '../auth/account-status
 import * as blocks from '../repositories/block-repository';
 import * as users from '../repositories/user-repository';
 import { isBannedAuthor } from '@/blog/lib/moderation/banned-authors';
-import { FollowActor, sameActor, sessionActor } from './follow-actor';
-import { BlockTargetKind, resolveBlockTarget } from './block-actor';
+import { FollowActor, actorKey, sameActor, sessionActor } from './follow-actor';
+import { BlockTargetKind, resolveBlockTarget, resolveBlockTargetsBulk } from './block-actor';
 import { SessionRef } from '../types';
 
 /**
@@ -194,6 +194,83 @@ export async function blockState(
   if (sameActor(actor, target.actor)) return { available: false, blocking: false };
 
   return { available: true, blocking: await blocks.isBlocked(actor, target.actor) };
+}
+
+export interface BulkBlockStateInput {
+  target: string;
+  kind: BlockTargetKind;
+}
+
+export interface BulkBlockStateResult extends BlockState {
+  target: string;
+  kind: BlockTargetKind;
+}
+
+/**
+ * Bounds one request's DB fan-out, not a real page's needs: the measured storm
+ * this exists to close tops out around 20-30 authors on a feed and ~100 comments
+ * on a heavy thread (almost always far fewer DISTINCT authors than comments,
+ * since the same person often replies more than once). 200 is generous headroom
+ * over both, so a legitimate page never truncates.
+ */
+const MAX_BULK_BLOCK_TARGETS = 200;
+
+/**
+ * ★★★ `blockState`, FOR A WHOLE PAGE'S WORTH OF AUTHORS AT ONCE (2026-08-12).
+ *
+ * This is the N+1 fix named in `use-lumen-block.ts`'s doc — `/api/lite/block/state`
+ * was firing once per distinct author on a feed (20-30 requests measured on one
+ * home load) and once per comment author on a thread (~100 on a 50-comment page).
+ *
+ * Rather than looping `blockState()` per target — which would still be N DB round
+ * trips even after the N HTTP round trips were collapsed into one request — this
+ * resolves EVERY target with the batched sibling of `resolveBlockTarget`
+ * (`resolveBlockTargetsBulk`, at most 3 `IN (...)` queries total, regardless of how
+ * many targets), then answers "is any of them blocked" with `blockedPairsAmong` —
+ * the SAME many-to-many primitive `block-filter.ts` already uses to check a whole
+ * thread's ancestors against a whole thread's comment authors in one query — here
+ * narrowed to a single blocker (the signed-in viewer) against the page's authors.
+ * Total DB cost for a whole page: at most 4 queries, independent of N.
+ *
+ * Degrades exactly like `blockState` per target: signed out, self, or an
+ * unresolvable name all answer `{ available: false, blocking: false }` for that
+ * one entry — never for the whole batch, so one bad name on a page cannot hide
+ * the Block control for everyone else on it.
+ */
+export async function blockStatesBulk(
+  sessionUser: User | undefined,
+  items: BulkBlockStateInput[]
+): Promise<BulkBlockStateResult[]> {
+  const capped = items.slice(0, MAX_BULK_BLOCK_TARGETS);
+
+  const actor = await sessionActor(sessionUser);
+  if (!actor) return capped.map((item) => ({ ...item, available: false, blocking: false }));
+
+  const resolutions = await resolveBlockTargetsBulk(
+    capped.map((item) => ({ name: item.target, kind: item.kind }))
+  );
+
+  const blockerKey = actorKey(actor);
+  // Every RESOLVED, NON-SELF target this page could possibly show as blocked —
+  // deduped by key, since the same author routinely appears more than once on a
+  // comment thread and `blockedPairsAmong` only needs to be asked about them once.
+  const targetKeys = new Set<string>();
+  resolutions.forEach((res) => {
+    if (res.ok && !sameActor(actor, res.actor)) targetKeys.add(actorKey(res.actor));
+  });
+  const blockedPairs = await blocks.blockedPairsAmong([blockerKey], [...targetKeys]);
+
+  return capped.map((item, i) => {
+    const res = resolutions[i];
+    if (!res.ok || sameActor(actor, res.actor)) {
+      return { ...item, available: false, blocking: false };
+    }
+    return {
+      ...item,
+      available: true,
+      blocking: blockedPairs.has(blocks.pairKey(blockerKey, actorKey(res.actor)))
+    };
+  });
 }
 
 /** The viewer's own block list, as stable node keys — for the read-side filters. */

@@ -25,6 +25,16 @@ export const local = (flags = 'i') => new RegExp(urlSet({domain: '(?:localhost|(
 export const remote = (flags = 'i') => new RegExp(urlSet({domain: `(?!localhost|(?:.*\\.)?hive.blog)${domainPath}`}), flags);
 export const image = (flags = 'i') => new RegExp(urlSet({path: imagePath}), flags);
 export const imageFile = (flags = 'i') => new RegExp(imagePath, flags);
+// Matches a URL that has already been through an image-resize proxy of the
+// `/p/<hash>?format=...` shape (see @hive/ui's proxifyImageSrc). `format` is
+// the one query param that function unconditionally appends to every URL it
+// builds (mode/width/height are omitted for GIFs), so its presence -- not
+// just the `/p/` path -- is what actually means "already proxied". The path
+// alone isn't enough: Hive's own raw image storage uses the identical
+// `/p/<hash>` shape (no query string) for unprocessed uploads, so testing on
+// host/path alone (e.g. "is this hive.blog?") would wrongly treat every raw
+// upload as pre-proxied and skip resizing/reformatting it.
+export const alreadyProxied = (flags = 'i') => new RegExp('/p/[^/?#]+\\?[^#]*\\bformat=', flags);
 
 export default {
     any: any(),
@@ -32,6 +42,7 @@ export default {
     remote: remote(),
     image: image(),
     imageFile: imageFile(),
+    alreadyProxied: alreadyProxied(),
     vimeo: /https?:\/\/(?:vimeo\.com\/|player\.vimeo\.com\/video\/)([0-9]+)\/?(#t=((\d+)s?))?\/?/,
     vimeoId: /(?:vimeo\.com\/|player\.vimeo\.com\/video\/)([0-9]+)/,
     twitch: /https?:\/\/(?:www.)?twitch\.tv\/(?:(videos)\/)?([a-zA-Z0-9][\w]{3,24})/i,

@@ -110,6 +110,98 @@ export async function resolveBlockTarget(
 }
 
 /**
+ * ★★★ THE BATCHED SIBLING OF {@link resolveBlockTarget} — for a whole page's worth
+ * of authors in a bounded, fixed number of queries instead of one resolution per
+ * name (2026-08-12, N+1 fix — see `use-lumen-block.ts`'s doc for the measured
+ * storm this exists to close).
+ *
+ * Same per-kind rules as the single-name version, just run as batched `IN (...)`
+ * lookups instead of one-row-at-a-time ones: `'lumen'` only ever checks the handle
+ * table, `'hive'` only ever checks the Hive-account table (falling back to a
+ * shape check), and `'auto'` tries Lumen first, then Hive — never mixed, for the
+ * same correctness reason the doc above gives (a handle and a Hive account can
+ * share a spelling and be different people).
+ *
+ * Returns results in the SAME ORDER as `inputs`, one per element — including
+ * duplicates, which are cheap here because every name was already resolved by a
+ * shared lookup table built once, not re-queried.
+ */
+export async function resolveBlockTargetsBulk(
+  inputs: { name: string; kind: BlockTargetKind }[]
+): Promise<TargetResolution[]> {
+  const cleaned = inputs.map((i) => i.name.trim().replace(/^@/, '').toLowerCase());
+
+  // 'lumen' AND 'auto' both need the handle table; only 'hive' skips it.
+  const lumenNames = new Set<string>();
+  const hiveNames = new Set<string>();
+  inputs.forEach((input, i) => {
+    const clean = cleaned[i];
+    if (!clean) return;
+    if (input.kind === 'hive') hiveNames.add(clean);
+    else lumenNames.add(clean);
+  });
+
+  const [lumenRows, hiveRows] = await Promise.all([
+    lumenNames.size > 0 ? users.findUsersByDisplayNames([...lumenNames]) : Promise.resolve([]),
+    hiveNames.size > 0 ? users.findUsersByHiveAccountNames([...hiveNames]) : Promise.resolve([])
+  ]);
+  const byDisplayName = new Map(lumenRows.map((r) => [r.displayName.toLowerCase(), r]));
+  const byHiveName = new Map(hiveRows.map((r) => [(r.hiveAccountName ?? '').toLowerCase(), r]));
+
+  // An 'auto' name that missed the handle table still needs the Hive-account
+  // fallback `resolveBlockTarget`'s own 'auto' branch takes — one more batched
+  // query, scoped to only the names that actually need it, rather than a lookup
+  // per miss.
+  const autoFallbackNames = new Set<string>();
+  inputs.forEach((input, i) => {
+    const clean = cleaned[i];
+    if (input.kind === 'auto' && clean && !byDisplayName.has(clean)) autoFallbackNames.add(clean);
+  });
+  if (autoFallbackNames.size > 0) {
+    const rows = await users.findUsersByHiveAccountNames([...autoFallbackNames]);
+    for (const row of rows) if (row.hiveAccountName) byHiveName.set(row.hiveAccountName.toLowerCase(), row);
+  }
+
+  return inputs.map((input, i): TargetResolution => {
+    const clean = cleaned[i];
+    if (!clean) return { ok: false, error: 'invalid_name' };
+
+    if (input.kind === 'lumen') {
+      const row = byDisplayName.get(clean);
+      if (!row) return { ok: false, error: 'not_found' };
+      return {
+        ok: true,
+        actor: { userId: row.userId },
+        isLumenUser: true,
+        isLite: row.accountTier === 'lite' && !row.hiveAccountName
+      };
+    }
+
+    if (input.kind === 'hive') {
+      const upgraded = byHiveName.get(clean);
+      if (upgraded) return { ok: true, actor: { userId: upgraded.userId }, isLumenUser: true, isLite: false };
+      if (!HIVE_NAME.test(clean)) return { ok: false, error: 'invalid_name' };
+      return { ok: true, actor: { hive: clean }, isLumenUser: false, isLite: false };
+    }
+
+    // 'auto'
+    const lumenRow = byDisplayName.get(clean);
+    if (lumenRow) {
+      return {
+        ok: true,
+        actor: { userId: lumenRow.userId },
+        isLumenUser: true,
+        isLite: lumenRow.accountTier === 'lite' && !lumenRow.hiveAccountName
+      };
+    }
+    const upgraded = byHiveName.get(clean);
+    if (upgraded) return { ok: true, actor: { userId: upgraded.userId }, isLumenUser: true, isLite: false };
+    if (!HIVE_NAME.test(clean)) return { ok: false, error: 'invalid_name' };
+    return { ok: true, actor: { hive: clean }, isLumenUser: false, isLite: false };
+  });
+}
+
+/**
  * ★ WHICH NODE WROTE THIS ENTRY — for a whole page, in at most two queries.
  *
  * Every filter in this feature reduces to "is this entry's author one of these
