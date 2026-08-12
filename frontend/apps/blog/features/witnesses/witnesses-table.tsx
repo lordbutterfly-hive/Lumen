@@ -11,6 +11,7 @@ import {
   STICKY_RANK_CLASS
 } from './lib/table-grid';
 import { WitnessRow } from './lib/types';
+import { LumenLoader } from '@hive/ui';
 
 interface WitnessesTableProps {
   rows: WitnessRow[];
@@ -168,14 +169,11 @@ export default function WitnessesTable({
                 className="px-3.5 py-6"
                 data-testid="witnesses-loading"
               >
-                {/* X-4: one loading language. The home feed uses skeleton blocks, this
-                    page used a bare centred word, and the stats bar used em-dashes.
-                    All three are skeletons now. */}
-                <div className="flex flex-col gap-2" aria-label={t('global.loading')} role="status">
-                  {Array.from({ length: 8 }).map((_, i) => (
-                    <div key={i} className="h-[52px] animate-pulse rounded-[10px] bg-[#f1f3f5]" />
-                  ))}
-                </div>
+                {/* X-4: one loading language. The home feed used skeleton blocks, this
+                    page a bare centred word, the stats bar em-dashes. All three now
+                    speak the same language — which as of 2026-08-12 is `LumenLoader`
+                    for a region of content and the warm sweep for a single value. */}
+                <LumenLoader size="md" label={t('global.loading')} />
               </div>
             ) : isError ? (
               <div

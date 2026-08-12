@@ -2,10 +2,13 @@ import type {
   FullAccount,
   AccountFollowStats,
   IVote,
+  IVoteListItem,
   IFeedHistory,
   Community,
   IAccountNotification,
   IFollow,
+  IFollowList,
+  FollowListType,
   IWitness,
   IListWitnessVotes,
   IUnreadNotifications,
@@ -157,6 +160,26 @@ export function fetchPostStatus(
   return fetchJson(`/api/post-status?${params.toString()}`, 'post status');
 }
 
+/**
+ * `getPost`, typed — same `/api/post-status` route `fetchPostStatus` above
+ * already hits (deliberately reused rather than adding a second route for the
+ * same `bridge.get_post` call), unwrapped to the bare `Entry | null` shape
+ * `getPost` itself returned. `content.tsx`'s main `postData` query (the
+ * highest-traffic read in the app) called `getPost` directly — the one call
+ * on that page the sibling `crossPostData`/`fetchPostStatus` fix (2026-08-12)
+ * did not reach, because it has `initialData` and does not download the WASM
+ * on the FIRST render. It still called `getPost` — i.e. `getChain()` — from
+ * the browser on every later refetch (`staleTime: MEDIUM` expiring, a window
+ * refocus, or the SSR-observer-race key change the `communityData` query
+ * right below it is already documented for), so it is fixed the same way as
+ * every other read in this file, not left resting on "the fast path happens
+ * not to hit it."
+ */
+export async function fetchPost(author: string, permlink: string, observer: string): Promise<Entry | null> {
+  const { post } = await fetchPostStatus(author, permlink, observer);
+  return (post as Entry | null) ?? null;
+}
+
 export function fetchCommunityRoles(community: string): Promise<string[][] | null> {
   return fetchJson(`/api/community-roles?community=${encodeURIComponent(community)}`, 'community roles');
 }
@@ -234,6 +257,34 @@ export function fetchFollowers(params: FollowListParams): Promise<IFollow[]> {
 }
 export function fetchFollowing(params: FollowListParams): Promise<IFollow[]> {
   return fetchJson(`/api/following?${followParams(params).toString()}`, 'following');
+}
+
+/**
+ * `bridge.get_follow_list` (mute/blacklist), not `condenser_api.get_following`
+ * (`fetchFollowing` above) — a different relationship, same shared-gateway
+ * reasoning. See `apps/blog/app/api/follow-list/route.ts`; this was the one
+ * read behind `useModerationStatus`/`use-follow-list.tsx` that ~33 sibling
+ * reads already had a server route for and this one did not.
+ */
+export function fetchFollowList(observer: string, type: FollowListType): Promise<IFollowList[]> {
+  const params = new URLSearchParams({ observer, type });
+  return fetchJson(`/api/follow-list?${params.toString()}`, 'follow list');
+}
+
+/**
+ * "Has `voter` already voted on this exact post/comment" — the read behind
+ * every vote button's initial state (`votes-component.tsx`) and the
+ * post-broadcast confirmation poll (`use-vote-mutation.ts`). See
+ * `apps/blog/app/api/comment-vote/route.ts`. Always `limit: 1` server-side —
+ * both callers only ever check one voter against one post, never paginate.
+ */
+export function fetchListVotesByCommentVoter(
+  author: string,
+  permlink: string,
+  voter: string
+): Promise<{ votes: IVoteListItem[] }> {
+  const params = new URLSearchParams({ author, permlink, voter });
+  return fetchJson(`/api/comment-vote?${params.toString()}`, 'comment vote');
 }
 
 export function fetchRebloggedBy(author: string, permlink: string): Promise<string[]> {

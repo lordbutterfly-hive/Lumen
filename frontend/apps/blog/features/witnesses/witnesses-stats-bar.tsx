@@ -25,7 +25,10 @@ interface WitnessesStatsBarProps {
  * "loading" without asserting anything.
  */
 function StatSkeleton() {
-  return <span className="inline-block h-[13px] w-[46px] animate-pulse rounded bg-[#ececec] align-middle" aria-hidden="true" />;
+  // `lumen-shimmer` rather than the `Skeleton` component only because that renders
+  // a <div>, and this sits inline inside a stat line. Same class, same warm sweep —
+  // see the "first light" note in packages/tailwindcss/globals.css.
+  return <span className="lumen-shimmer inline-block h-[13px] w-[46px] rounded align-middle" aria-hidden="true" />;
 }
 
 const STAT_VALUE_CLASS = 'font-sans tabular-nums';

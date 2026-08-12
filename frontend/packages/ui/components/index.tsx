@@ -26,6 +26,7 @@ export * from "./scroll-area";
 export * from "./select";
 export * from "./separator";
 export * from "./sheet";
+export * from "./lumen-loader";
 export * from "./skeleton";
 export * from "./switch";
 export * from "./tabs";

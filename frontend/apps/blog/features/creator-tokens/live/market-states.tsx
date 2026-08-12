@@ -14,6 +14,7 @@
 
 import { FC, ReactNode } from 'react';
 import TokenShell from '../ui/token-shell';
+import { LumenLoader } from '@hive/ui';
 
 /**
  * ★ A REAL h1 (2026-08-11, audit item 8). `/creators/[handle]` had no heading
@@ -129,10 +130,8 @@ export const MarketMissing: FC<{ handle: string }> = ({ handle }) => (
 
 export const MarketLoading: FC = () => (
   <TokenShell>
-    <div className="mt-[26px] animate-pulse rounded-[20px] border border-[#ebebeb] bg-white p-[26px]">
-      <div className="mb-4 h-6 w-40 rounded bg-[#f1f3f5]" />
-      <div className="mb-3 h-[44px] w-56 rounded bg-[#f1f3f5]" />
-      <div className="h-2 w-full rounded bg-[#f1f3f5]" />
+    <div className="mt-[26px] rounded-[20px] border border-[#ebebeb] bg-white p-[26px]">
+      <LumenLoader size="md" />
     </div>
   </TokenShell>
 );

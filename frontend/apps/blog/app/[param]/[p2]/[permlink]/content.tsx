@@ -43,8 +43,7 @@ import sorter, { SortOrder } from '@/blog/lib/sorter';
 import { DEFAULT_OBSERVER, chainObserver } from '@/blog/lib/utils';
 import { getBasePath } from '@ui/lib/path-utils';
 import { useQuery } from '@tanstack/react-query';
-import { getPost } from '@transaction/lib/bridge-api';
-import { fetchCommunity, fetchCommunityRoles, fetchPostStatus } from '@/blog/lib/chain-fetch';
+import { fetchCommunity, fetchCommunityRoles, fetchPost, fetchPostStatus } from '@/blog/lib/chain-fetch';
 import { fetchDiscussion } from '@/blog/lib/lite/client/discussion-fetch';
 import { isBlockedEntry, useLumenBlockList } from '@/blog/lib/lite/client/use-lumen-block';
 import { fetchLiteEntryByPermlink } from '@/blog/lib/lite/client/lite-post-fetch';
@@ -180,8 +179,18 @@ const PostContent = () => {
     queryKey: ['postData', author, permlink, observer],
     // Lumen lite posts are not fetchable by their display name (it is not a Hive
     // account), so fall back to resolving by permlink through our own API.
+    //
+    // ★ THROUGH OUR SERVER, NOT THE CHAIN CLIENT (2026-08-12). This called
+    // `getPost` directly (`getChain()`, `wax.common.wasm`) — the sibling
+    // `crossPostData` query below already made this exact fix, but noted this
+    // query as out of scope because `initialData` protects its FIRST render.
+    // It does not protect a later one: `staleTime: MEDIUM` (2 min) expiring
+    // while the reader is still on the page, a window refocus, or the
+    // SSR-observer-race key change `communityData` (further down) is already
+    // documented for all still ran `getPost` from the browser. Same route as
+    // `crossPostData`: `apps/blog/app/api/post-status/route.ts`.
     queryFn: async () => {
-      const fromChain = await getPost(author, permlink, observer).catch(() => null);
+      const fromChain = await fetchPost(author, permlink, observer).catch(() => null);
       const base = fromChain ?? ((await fetchLiteEntryByPermlink(permlink)) as typeof fromChain);
       if (!base) return base;
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { PostListSkeleton } from '@hive/ui';
+import { LumenLoader } from '@hive/ui';
 import { useTranslation } from '@/blog/i18n/client';
 import NoDataError from '@/blog/components/no-data-error';
 import ProfileCommentCard from './profile-comment-card';
@@ -54,7 +54,7 @@ export default function ProfileCommentsList({
   // Show what we have. Only surrender the whole surface when there is genuinely
   // nothing to show.
   if (isError && entries.length === 0) return <NoDataError />;
-  if (isLoading || (isFetching && entries.length === 0)) return <PostListSkeleton count={4} />;
+  if (isLoading || (isFetching && entries.length === 0)) return <LumenLoader size="lg" />;
 
   if (entries.length === 0) {
     return (

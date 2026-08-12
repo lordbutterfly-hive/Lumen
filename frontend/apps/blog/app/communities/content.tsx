@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Input } from '@ui/components/input';
 import { Icons } from '@ui/components/icons';
 import { Separator } from '@ui/components/separator';
-import { Skeleton } from '@hive/ui';
+import { LumenLoader } from '@hive/ui';
 import CommunitiesSelectFilter from '@/blog/features/communities-list/communities-select-filter';
 import CommunitiesList from '@/blog/features/communities-list/communities-list';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
@@ -18,31 +18,8 @@ import { DEFAULT_OBSERVER, chainObserver } from '@/blog/lib/utils';
 import { StaleTime } from '@/blog/lib/react-query';
 import { useSSRObserver, useInitialCommunities, useInitialSubscriptions } from '@/blog/components/observer-provider';
 
-function CommunityCardSkeleton() {
-  return (
-    <div className="flex items-start gap-3 rounded-lg border bg-background p-4">
-      <Skeleton className="h-12 w-12 shrink-0 rounded-full" />
-      <div className="flex flex-1 flex-col gap-2">
-        <Skeleton className="h-5 w-32" />
-        <Skeleton className="h-4 w-full" />
-        <Skeleton className="h-4 w-3/4" />
-        <div className="mt-2 flex gap-4">
-          <Skeleton className="h-4 w-20" />
-          <Skeleton className="h-4 w-20" />
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function CommunitiesListSkeleton() {
-  return (
-    <div className="grid gap-4 md:grid-cols-2">
-      {Array.from({ length: 6 }).map((_, i) => (
-        <CommunityCardSkeleton key={i} />
-      ))}
-    </div>
-  );
+  return <LumenLoader size="lg" />;
 }
 
 const CommunitiesContent = () => {

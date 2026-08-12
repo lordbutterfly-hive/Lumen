@@ -8,7 +8,7 @@ import { fetchAccountPosts } from '@/blog/lib/lite/client/account-posts-fetch';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { isBlockedEntry, useLumenBlockList } from '@/blog/lib/lite/client/use-lumen-block';
 import { Entry } from '@hive/common-hiveio-packages/wax';
-import { PostListSkeleton } from '@hive/ui';
+import { LumenLoader } from '@hive/ui';
 import { cn } from '@ui/lib/utils';
 import NoDataError from '@/blog/components/no-data-error';
 import { getMarketDataSource } from '@/blog/features/prediction-market/lib/market-data-source';
@@ -281,7 +281,7 @@ function ForYouFeed() {
     if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  if (isLoading) return <PostListSkeleton count={5} />;
+  if (isLoading) return <LumenLoader size="lg" />;
   // ★ `isError` IS NO LONGER PART OF THIS GUARD. It is true for a failed REFETCH as
   // well as a failed first load, so an error on the poll-driven path used to throw
   // away a perfectly good page. Only "we have nothing at all to show" is an error
@@ -548,7 +548,7 @@ function EntryFeed({ sort, observer, lite = false }: { sort: string; observer: s
   const shown = entries.length > 0 ? entries : lastRendered.current;
 
   if (isLoading || (isFetching && !data?.pages?.[0]?.length)) {
-    return <PostListSkeleton count={5} />;
+    return <LumenLoader size="lg" />;
   }
   // ★ `isError` ALONE IS NO LONGER THE GUARD, same fix as ForYouFeed: it is true
   // for a failed background refetch as well as a failed first load, and with
@@ -806,7 +806,7 @@ export default function FeedTabs() {
           // — which `EntryFeed`'s `lite` prop needs — isn't confirmed yet. Neither
           // the login dead end nor a feed mounted with a guessed tier is honest
           // here; a skeleton is.
-          <PostListSkeleton count={5} />
+          <LumenLoader size="lg" />
         ) : (
           <EntryFeed sort={FEED_SORT} observer={identity.username} lite={user.account_tier === 'lite'} />
         )

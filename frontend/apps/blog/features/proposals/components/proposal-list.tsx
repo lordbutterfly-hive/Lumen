@@ -3,7 +3,7 @@
 import { useTranslation } from '@/blog/i18n/client';
 import { ProposalSort, ProposalTab, ProposalViewModel } from '../lib/proposals-types';
 import ProposalCard from './proposal-card';
-import ProposalCardSkeleton from './proposal-card-skeleton';
+import { LumenLoader } from '@hive/ui';
 
 function matchesTab(vm: ProposalViewModel, tab: ProposalTab): boolean {
   if (tab === 'all') return true;
@@ -43,9 +43,7 @@ export default function ProposalList({ proposals, votedIds, votesUnavailable, ta
   if (isLoading && proposals.length === 0) {
     return (
       <div className="flex flex-col gap-3.5" data-testid="proposal-list-loading">
-        {[0, 1, 2, 3].map((i) => (
-          <ProposalCardSkeleton key={i} />
-        ))}
+        <LumenLoader size="lg" />
       </div>
     );
   }

@@ -10,7 +10,7 @@ import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import DialogLogin from '@/blog/components/dialog-login';
 import { useQuery } from '@tanstack/react-query';
-import { getListVotesByCommentVoter } from '@transaction/lib/hive-api';
+import { fetchListVotesByCommentVoter } from '@/blog/lib/chain-fetch';
 import { Entry } from '@hive/common-hiveio-packages/wax';
 import { Popover, PopoverTrigger, PopoverContent } from '@ui/components/popover';
 import { useLoggedUserContext } from '@/blog/features/votes/hooks/use-logged-user';
@@ -95,12 +95,19 @@ const VotesComponent = ({ post, type }: { post: Entry; type: 'comment' | 'post' 
   // chain here is what made a lite vote light up and then vanish on the next load.
   // Source the vote from Lumen instead, and enable the query on sign-in rather than
   // on a chain vote that will never be there.
+  //
+  // ★ THROUGH OUR SERVER, NOT THE CHAIN CLIENT (2026-08-12). This called
+  // `getListVotesByCommentVoter` directly — it reaches `getChain()` and
+  // downloads `wax.common.wasm`. `enabled` below fires on mount for any
+  // rendered post/comment the signed-in viewer has already voted on (no click
+  // needed) — every `MediumPostCard` on the home feed and both profile tabs,
+  // every comment in a post's thread. See `apps/blog/app/api/comment-vote/route.ts`.
   const { data: userVotes } = useQuery({
     queryKey: ['votes', post.author, post.permlink, voter],
     queryFn: () =>
       isLite
         ? fetchLiteEngagement(post.author, post.permlink)
-        : getListVotesByCommentVoter([post.author, post.permlink, voter], 1),
+        : fetchListVotesByCommentVoter(post.author, post.permlink, voter),
     enabled: isLite ? !!voter : !!checkVote || !!clickedVoteButton,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,

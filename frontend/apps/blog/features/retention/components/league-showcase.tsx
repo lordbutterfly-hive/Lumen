@@ -106,12 +106,12 @@ function ShowcaseSkeleton() {
   return (
     <li className="px-1 pb-2" data-testid="league-showcase-skeleton">
       <div aria-hidden="true" className="flex w-full items-center gap-2.5 rounded-xl px-[10px] py-2 text-left">
-        <span className="relative inline-flex h-[34px] w-[34px] shrink-0 animate-pulse items-center justify-center rounded-full bg-[#f1f3f5]" />
+        <span className="lumen-shimmer inline-flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full" />
         <span className="flex min-w-0 flex-1 flex-col">
-          <span className="w-16 animate-pulse truncate rounded bg-[#f1f3f5] font-sans text-[14px] font-semibold text-transparent">
+          <span className="lumen-shimmer w-16 truncate rounded font-sans text-[14px] font-semibold text-transparent">
             &nbsp;
           </span>
-          <span className="w-12 animate-pulse truncate rounded bg-[#f1f3f5] font-sans text-[11.5px] font-medium tabular-nums text-transparent">
+          <span className="lumen-shimmer w-12 truncate rounded font-sans text-[11.5px] font-medium tabular-nums text-transparent">
             &nbsp;
           </span>
         </span>

@@ -8,7 +8,7 @@ import RightRail from '@/blog/features/layouts/right-rail';
 import PageMasthead from '@/blog/features/layouts/page-masthead';
 import MediumPostCard from './medium-post-card';
 import { filterVisiblePosts, useNsfwPreference } from '@/blog/lib/nsfw';
-import { PostListSkeleton } from '@hive/ui';
+import { LumenLoader } from '@hive/ui';
 import { Entry } from '@hive/common-hiveio-packages/wax';
 
 /**
@@ -158,7 +158,7 @@ export default function TopicShell({ tag }: { tag: string }) {
         </PageMasthead>
 
         {isLoading ? (
-          <PostListSkeleton count={5} />
+          <LumenLoader size="lg" />
         ) : isError && shown.length === 0 && !hasNextPage ? (
           // ★ `isError` ALONE IS NO LONGER THE GUARD, same fix as ForYouFeed: with
           // `shown` already holding the last good page, only "nothing at all to

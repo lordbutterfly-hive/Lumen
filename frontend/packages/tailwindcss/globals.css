@@ -42,6 +42,13 @@
     --ring: 215 20.2% 65.1%;
 
     --radius: 0.5rem;
+
+    /* ★ The two-colour "First light" stock (see the loading language at the foot of
+       this file). Space-separated rather than comma-separated so they can be used as
+       `rgb(var(--x) / <alpha>)`, which the comma form above cannot do. Warm, not the
+       cool `--muted` grey the old skeletons pulsed in. */
+    --lumen-stock: 242 239 234;
+    --lumen-sweep: 255 255 255;
   }
 
   .dark {
@@ -83,6 +90,15 @@
     --ring: 216 34% 17%;
 
     --radius: 0.5rem;
+
+    /* Dark keeps the warmth but inverts the relationship: the stock goes to a warm
+       charcoal and the travelling light stays white but much fainter, because at
+       0.85 alpha on a dark block a sweep reads as a strobe rather than a highlight.
+       The loader itself needs no dark variant — an ember glowing on dark is if
+       anything more literal than on cream. */
+    --lumen-stock: 44 42 40;
+    --lumen-sweep: 255 246 238;
+    --lumen-sweep-opacity: 0.26;
   }
 }
 
@@ -380,4 +396,289 @@ summary {
   outline: 2px solid #c0392b;
   outline-offset: 2px;
   border-radius: 2px;
+}
+
+/**
+ * ★★★ "FIRST LIGHT" — THE LUMEN LOADING LANGUAGE (2026-08-12, owner ruling).
+ *
+ * "get rid of that on all pages and replace it with a cool light modern animation
+ * for loading on social media thats interesting and unique."
+ *
+ * What was here before came from hive.blog by way of denser: grey `animate-pulse`
+ * blocks arranged into a ghost of a post card. Two things were wrong with it, and
+ * only one of them was taste.
+ *
+ * ★ THE CORRECTNESS PROBLEM. A skeleton earns its keep by reserving the EXACT
+ * shape the real content will take, so nothing moves when it arrives. Ours stopped
+ * doing that at the redesign: `PostListItemSkeleton` drew a `Card` with a 150x105
+ * thumbnail on the left, while a real Lumen feed card is
+ * `rounded-[18px] border-[#ebebeb] bg-white p-[22px]` with a 190x132 image on the
+ * right. So for the ~500ms between shell paint (~140ms) and first card (~675ms) we
+ * flashed a layout that never arrives, and then shifted. A wrong skeleton is worse
+ * than no skeleton — it is a promise the page breaks.
+ *
+ * ★ THE IDEA. Lumen is the SI unit of luminous flux: light leaving a source. So the
+ * loading state is not a placeholder for content, it is the product's own name drawn
+ * literally — a warm ember waking on the cream stock, pushing rings of light outward
+ * that cool from brand red (#c0392b) to amber as they travel and dissolve. Warm, on
+ * a warm palette, where every competitor's loader is cool grey. Nobody else can use
+ * it, because nobody else is called Lumen.
+ *
+ * Four details separate this from a stock pulse-ring loader, and each is deliberate:
+ *
+ *  1. THE RINGS HAVE DIRECTION. Each is a `conic-gradient` masked to a hairline, so
+ *     it is bright along one arc and gone along the other — light emitted from a
+ *     source, not a sonar ping. A uniform ring is the tell of a generated loader.
+ *  2. NOTHING SYNCS. Flux runs at 2.8s, the ember breathes at 2.4s, the bloom at
+ *     4.2s, and the three rings drift at 9s/13s/17s in alternating directions. The
+ *     composite does not visibly repeat, so it reads as something alive rather than
+ *     something looping.
+ *  3. ★ IT IS ALREADY IN FLIGHT ON FRAME ONE. Every delay is NEGATIVE. Measured, our
+ *     loading window is roughly half a second; a loader that starts from nothing
+ *     spends most of that looking broken and then gets removed before it blooms. The
+ *     negative offsets mean the first painted frame is already mid-expression.
+ *  4. IT SETTLES, IT DOES NOT TICK. `cubic-bezier(.16,.84,.44,1)` — rings shoot out
+ *     and drift to a stop. Linear easing is what makes motion feel mechanical.
+ *
+ * ★ AND THE SMALL SLOTS SPEAK THE SAME LANGUAGE. `Skeleton` (the primitive) keeps
+ * existing, because a one-line placeholder for a single number genuinely should not
+ * become a radiating light bloom — but it is restyled from `animate-pulse bg-muted`
+ * (a grey block dimming in place) to warm stock with a light SWEEP across it. Same
+ * idea, one dimension instead of two. That is what keeps the app coherent: big
+ * surfaces get the bloom, value slots get the sweep, and no surface is left holding
+ * a cool-grey pulse next to a warm one.
+ */
+@layer components {
+  .lumen-loader {
+    --lumen-size: 76px;
+    /* The source, and the colour it cools to on the way out. */
+    --lumen-hot: 192 57 43;
+    --lumen-warm: 214 129 45;
+    display: grid;
+    place-items: center;
+    isolation: isolate;
+  }
+
+  /* Every layer occupies the same grid cell, so they stack concentrically without
+     absolute positioning — which means the whole thing centres itself inside
+     whatever min-height the caller reserves, with no offset maths. */
+  .lumen-loader > * {
+    grid-area: 1 / 1;
+  }
+
+  /* A tight glow around the source, breathing with the ember. An earlier pass had
+     this at 2.6x the ring — which photographed as a pink smudge rather than a light,
+     because a glow that extends well past the thing glowing reads as fog. */
+  .lumen-loader__bloom {
+    width: calc(var(--lumen-size) * 0.85);
+    height: calc(var(--lumen-size) * 0.85);
+    border-radius: 9999px;
+    background: radial-gradient(
+      circle,
+      rgb(var(--lumen-warm) / 0.3) 0%,
+      rgb(var(--lumen-hot) / 0.13) 40%,
+      transparent 70%
+    );
+    animation: lumen-bloom 2.4s cubic-bezier(0.4, 0, 0.2, 1) -0.6s infinite;
+  }
+
+  .lumen-loader__ring {
+    width: var(--lumen-size);
+    height: var(--lumen-size);
+    border-radius: 9999px;
+    /* Bright along one arc, absent along the other — see note 1 above. */
+    background: conic-gradient(
+      from 0deg,
+      rgb(var(--lumen-hot) / 0) 0deg,
+      rgb(var(--lumen-hot) / 0.6) 84deg,
+      rgb(var(--lumen-warm) / 0.9) 158deg,
+      rgb(var(--lumen-hot) / 0.35) 236deg,
+      rgb(var(--lumen-hot) / 0) 330deg
+    );
+    /* Punches the middle out, leaving a 2px gradient hairline. A `border` cannot
+       take a gradient, which is why this is a mask and not a border. */
+    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+    mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+    /* `scale` and `rotate` as individual properties, so the two animations can drive
+       them independently — a single `transform` would have the later one win. */
+    animation:
+      lumen-flux 2.8s cubic-bezier(0.16, 0.84, 0.44, 1) infinite,
+      lumen-drift 9s linear infinite;
+  }
+
+  .lumen-loader__ring--1 {
+    animation-delay: -0.2s, -1.4s;
+  }
+  .lumen-loader__ring--2 {
+    animation-duration: 2.8s, 13s;
+    animation-delay: -1.14s, -4.2s;
+    animation-direction: normal, reverse;
+  }
+  .lumen-loader__ring--3 {
+    animation-duration: 2.8s, 17s;
+    animation-delay: -2.08s, -8.5s;
+  }
+
+  /*
+   * ★ THE ONE THING THE EYE CAN FOLLOW. The flux rings alone were measured against
+   * three alternatives on a real render and read as ambient — pretty, but with no
+   * focal motion, so at a glance the mark looked static. This is a short bright arc
+   * at a fixed radius orbiting once every 1.15s, brightest at its leading edge and
+   * dissolving behind it. It carries the "something is happening" signal; the rings
+   * carry the atmosphere. Its period is deliberately unrelated to theirs.
+   */
+  .lumen-loader__comet {
+    width: calc(var(--lumen-size) * 0.64);
+    height: calc(var(--lumen-size) * 0.64);
+    border-radius: 9999px;
+    background: conic-gradient(
+      from 0deg,
+      rgb(var(--lumen-hot) / 0) 0deg,
+      rgb(var(--lumen-hot) / 0) 195deg,
+      rgb(var(--lumen-hot) / 0.35) 285deg,
+      rgb(var(--lumen-warm) / 1) 345deg,
+      #ff9a3c 358deg,
+      rgb(var(--lumen-hot) / 0) 360deg
+    );
+    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+    mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+    animation: lumen-drift 1.15s cubic-bezier(0.62, 0.06, 0.4, 0.96) infinite;
+  }
+
+  .lumen-loader__ember {
+    width: calc(var(--lumen-size) * 0.16);
+    height: calc(var(--lumen-size) * 0.16);
+    border-radius: 9999px;
+    /* Highlight off-centre, so it reads as a lit sphere rather than a flat dot. */
+    background: radial-gradient(
+      circle at 38% 34%,
+      #ef7d63 0%,
+      rgb(var(--lumen-hot)) 58%,
+      rgb(var(--lumen-hot) / 0) 78%
+    );
+    box-shadow: 0 0 calc(var(--lumen-size) * 0.3) rgb(var(--lumen-hot) / 0.45);
+    animation: lumen-ember 2.4s cubic-bezier(0.4, 0, 0.2, 1) -0.6s infinite;
+  }
+
+  /* The one-dimensional relative: warm stock with light travelling across it. */
+  .lumen-shimmer {
+    position: relative;
+    overflow: hidden;
+    background-color: rgb(var(--lumen-stock));
+  }
+  .lumen-shimmer::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      100deg,
+      transparent 22%,
+      rgb(var(--lumen-sweep) / 0.85) 46%,
+      rgb(var(--lumen-sweep) / 0.5) 58%,
+      transparent 78%
+    );
+    transform: translateX(-100%);
+    opacity: var(--lumen-sweep-opacity, 1);
+    animation: lumen-sweep 1.6s cubic-bezier(0.4, 0, 0.2, 1) -0.4s infinite;
+  }
+}
+
+/* Holds near-full brightness for most of the travel and only surrenders at the end.
+   An earlier curve faded from the start, so the outer rings had gone before they
+   were big enough to see and the mark looked like a single ring. */
+@keyframes lumen-flux {
+  0% {
+    scale: 0.14;
+    opacity: 0;
+  }
+  9% {
+    opacity: 1;
+  }
+  62% {
+    opacity: 0.9;
+  }
+  100% {
+    scale: 1;
+    opacity: 0;
+  }
+}
+
+@keyframes lumen-drift {
+  to {
+    rotate: 360deg;
+  }
+}
+
+@keyframes lumen-ember {
+  0%,
+  100% {
+    scale: 1;
+    opacity: 0.9;
+  }
+  50% {
+    scale: 1.32;
+    opacity: 1;
+  }
+}
+
+@keyframes lumen-bloom {
+  0%,
+  100% {
+    scale: 0.85;
+    opacity: 0.6;
+  }
+  50% {
+    scale: 1.15;
+    opacity: 1;
+  }
+}
+
+@keyframes lumen-sweep {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/**
+ * ★ REDUCED MOTION KEEPS THE PICTURE, DROPS THE TRAVEL. The rings freeze at three
+ * fixed radii — which is still a flux diagram, still recognisably the same mark —
+ * and only opacity breathes. Nothing scales, rotates or translates. Falling back to
+ * a static grey box would have told these readers the feature is missing rather
+ * than adapted.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .lumen-loader__bloom,
+  .lumen-loader__ring,
+  .lumen-loader__comet,
+  .lumen-loader__ember {
+    animation: lumen-hold 3s ease-in-out infinite;
+  }
+  .lumen-loader__ring--1 {
+    scale: 0.42;
+  }
+  .lumen-loader__ring--2 {
+    scale: 0.71;
+    animation-delay: -1s;
+  }
+  .lumen-loader__ring--3 {
+    scale: 1;
+    animation-delay: -2s;
+  }
+  .lumen-loader__comet {
+    animation-delay: -0.5s;
+  }
+  .lumen-shimmer::after {
+    animation: lumen-hold 3s ease-in-out infinite;
+    transform: none;
+  }
+}
+
+@keyframes lumen-hold {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 0.85;
+  }
 }

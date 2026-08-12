@@ -15,7 +15,7 @@ import { Entry } from '@hive/common-hiveio-packages/wax';
 import PostList from '../list-of-posts/posts-loader';
 import NoDataError from '@/blog/components/no-data-error';
 import { isCommunity } from '@ui/lib/utils';
-import { PostListSkeleton } from '@hive/ui';
+import { LumenLoader } from '@hive/ui';
 import { useSSRObserver, useInitialPosts } from '@/blog/components/observer-provider';
 
 const SortedPagesPosts = ({ sort, tag = '' }: { sort: SortTypes; tag?: string }) => {
@@ -119,7 +119,7 @@ const SortedPagesPosts = ({ sort, tag = '' }: { sort: SortTypes; tag?: string })
   // Handle initial loading state (also show skeleton when refetching with no data,
   // e.g. during observer transition after hydration)
   if (isLoading || (isFetching && !data?.pages?.[0]?.length)) {
-    return <PostListSkeleton count={5} />;
+    return <LumenLoader size="lg" />;
   }
 
   // Handle empty feed for "my" (friends) page

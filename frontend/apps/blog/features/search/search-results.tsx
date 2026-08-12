@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { useInView } from 'react-intersection-observer';
-import { Link, PostListSkeleton } from '@hive/ui';
+import { Link, LumenLoader } from '@hive/ui';
 import { fetchSearch } from '@/blog/lib/chain-fetch';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import SearchSortSelect from './sort-select';
@@ -183,14 +183,14 @@ const SearchResults = ({ query, sort }: { query: string; sort: SearchSort }) => 
     <div className="flex flex-col gap-6">
       {header}
 
-      {/* ★ SKELETONS, NOT A HELD EMPTY STATE (owner item R-5, 2026-08-10). The
-          page used to keep "Type above to begin" on screen for the entire
+      {/* ★ A LOADING STATE, NOT A HELD EMPTY STATE (owner item R-5, 2026-08-10).
+          The page used to keep "Type above to begin" on screen for the entire
           search — measured at 3.5s here and reported at ~20s on a broad term —
           so the one message on screen told the reader nothing had started yet.
-          `PostListSkeleton` is what the home feed already shows while it
-          loads. */}
+          `LumenLoader` is what the home feed shows while it loads (2026-08-12;
+          it was `PostListSkeleton` until the ghost cards were retired). */}
       {isLoading ? (
-        <PostListSkeleton count={5} />
+        <LumenLoader size="lg" />
       ) : total === 0 ? (
         <p className="py-10 text-center font-sans text-sm text-muted-foreground">
           {t('search_page.no_results_for', { query })}

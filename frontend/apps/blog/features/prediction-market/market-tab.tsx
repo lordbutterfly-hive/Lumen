@@ -12,6 +12,7 @@ import PriceChart, { type ChartSeries } from './price-chart';
 import MarketStatusChip from './market-status-chip';
 import Countdown from './countdown';
 import { buildOutcomeColorMap } from './outcome-colors';
+import { LumenLoader } from '@hive/ui';
 
 // Maps the contract's void-reason codes to the matching translation key. Each
 // branch below calls the translation function with a literal key string so the
@@ -106,7 +107,7 @@ export default function MarketTab() {
   if (isLoading) {
     return (
       <div className="py-16">
-        <div className="mx-auto h-64 w-full max-w-3xl animate-pulse rounded-[20px] bg-[#f1f3f5]" />
+        <LumenLoader size="lg" className="mx-auto max-w-3xl" label={t('global.loading')} />
       </div>
     );
   }

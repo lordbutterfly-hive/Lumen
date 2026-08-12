@@ -1,6 +1,6 @@
 'use client';
 
-import { Link } from '@hive/ui';
+import { Link, LumenLoader } from '@hive/ui';
 import { Icons } from '@ui/components/icons';
 import { useTranslation } from '@/blog/i18n/client';
 import { useMarket } from './use-market';
@@ -49,7 +49,7 @@ export default function MarketWidget() {
       </div>
 
       {isLoading || !round ? (
-        <div className="h-28 animate-pulse rounded-md bg-[#f1f3f5]" />
+        <LumenLoader size="sm" className="min-h-[112px]" label={t('global.loading')} />
       ) : (
         <>
           <Link

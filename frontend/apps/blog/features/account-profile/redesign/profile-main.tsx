@@ -16,7 +16,7 @@ import { ProfileLeagueCard } from '@/blog/features/retention/components/profile-
 import ProfileTokenCard from '@/blog/features/creator-tokens/ui/profile-token-card';
 import PageMasthead from '@/blog/features/layouts/page-masthead';
 import { cn } from '@ui/lib/utils';
-import ProfileMainSkeleton from './profile-main-skeleton';
+import { LumenLoader } from '@hive/ui';
 import ProfileCover from './profile-cover';
 import ProfileIdentity from './profile-identity';
 import ProfileActions from './profile-actions';
@@ -171,7 +171,7 @@ export default function ProfileMain() {
   }
 
   if (isProfilePending || isDynamicGlobalPending) {
-    return <ProfileMainSkeleton />;
+    return <LumenLoader size="lg" className="min-h-[70vh]" />;
   }
 
   if (!profileData) {
@@ -189,7 +189,7 @@ export default function ProfileMain() {
     return <NoDataError />;
   }
   if (isChainPending || !hpFigures) {
-    return <ProfileMainSkeleton />;
+    return <LumenLoader size="lg" className="min-h-[70vh]" />;
   }
 
   const { delegatedHive, vestingHive } = hpFigures;

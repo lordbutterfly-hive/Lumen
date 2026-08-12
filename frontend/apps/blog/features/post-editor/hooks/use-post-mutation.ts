@@ -10,7 +10,7 @@ import { getLogger } from '@ui/lib/logging';
 import { handleError } from '@ui/lib/handle-error';
 import { formatNaiAsset } from '@ui/lib/helpers';
 import { scheduleInvalidations, scheduleValidatedRefetch } from '@/blog/lib/react-query';
-import { getPost } from '@transaction/lib/bridge-api';
+import { fetchPost } from '@/blog/lib/chain-fetch';
 import { setStorageItem, removeStorageItem, StorageTTL } from '@ui/lib/storage-with-ttl';
 import { recordRetentionAct } from '@/blog/features/retention/components/retention-moments';
 
@@ -230,10 +230,17 @@ export function usePostMutation() {
       if (user?.account_tier !== 'lite' && !data.editMode) recordRetentionAct('post');
       // Use validated refetch for post data to avoid overwriting optimistic cache
       // with stale Hivemind responses (Hivemind may not have indexed the post yet)
+      //
+      // ★ THROUGH OUR SERVER, NOT THE CHAIN CLIENT (2026-08-12). This called
+      // `getPost` directly (`getChain()`, `wax.common.wasm`) to confirm a
+      // just-published/edited post indexed — fires after every publish for a
+      // signed-in reader. See `apps/blog/app/api/post-status/route.ts`
+      // (`fetchPost` is the same route `content.tsx`'s `postData`/
+      // `crossPostData` queries use).
       scheduleValidatedRefetch(
         queryClient,
         ['postData', username, permlink, username],
-        () => getPost(username, permlink, username),
+        () => fetchPost(username, permlink, username),
         (freshData) => freshData != null && !freshData._optimistic,
         undefined,
         {

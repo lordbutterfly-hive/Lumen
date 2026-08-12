@@ -1,7 +1,7 @@
 'use client';
 
 import { Entry } from '@hive/common-hiveio-packages/wax';
-import { PostListSkeleton } from '@hive/ui';
+import { LumenLoader } from '@hive/ui';
 import { useTranslation } from '@/blog/i18n/client';
 import NoDataError from '@/blog/components/no-data-error';
 import MediumPostCard from '@/blog/features/discovery-feed/medium-post-card';
@@ -57,7 +57,7 @@ export default function ProfilePostsList({
   // Show what we have. Only surrender the whole surface when there is genuinely
   // nothing to show.
   if (isError && entries.length === 0) return <NoDataError />;
-  if (isLoading || (isFetching && entries.length === 0)) return <PostListSkeleton count={4} />;
+  if (isLoading || (isFetching && entries.length === 0)) return <LumenLoader size="lg" />;
 
   if (entries.length === 0) {
     return (

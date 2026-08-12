@@ -11,7 +11,7 @@ import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { fetchAccountPosts } from '@/blog/lib/lite/client/account-posts-fetch';
 import { Entry } from '@hive/common-hiveio-packages/wax';
-import { PostListSkeleton } from '@hive/ui';
+import { LumenLoader } from '@hive/ui';
 import userIllegalContent from '@ui/config/lists/user-illegal-content';
 import { useParams } from 'next/navigation';
 import { useEffect } from 'react';
@@ -98,7 +98,7 @@ const PostsContent = ({ query }: { query: QueryTypes }) => {
   if (isError) return <NoDataError />;
 
   if (isLoading || (isFetching && !data?.pages?.[0]?.length)) {
-    return <PostListSkeleton count={4} />;
+    return <LumenLoader size="lg" />;
   }
 
   return !legalBlockedUser ? (

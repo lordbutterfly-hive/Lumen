@@ -2,7 +2,7 @@ import { useRef } from 'react';
 import { useMutation, QueryClient, useQueryClient } from '@tanstack/react-query';
 import { TransactionBroadcastResult, transactionService } from '@transaction/index';
 import { Entry } from '@hive/common-hiveio-packages/wax';
-import { getListVotesByCommentVoter } from '@transaction/lib/hive-api';
+import { fetchListVotesByCommentVoter } from '@/blog/lib/chain-fetch';
 import { getLogger } from '@ui/lib/logging';
 import { toast } from '@ui/components/hooks/use-toast';
 import { handleError } from '@ui/lib/handle-error';
@@ -134,10 +134,27 @@ export function useVoteMutation() {
       queryClient.setQueryData(queryKey, newVoteData);
 
       // Determine vote count delta
-      const hadPreviousVote = prevVoteData
-        && Array.isArray((prevVoteData as { votes: unknown[] }).votes)
-        && (prevVoteData as { votes: { vote_percent: number }[] }).votes.length > 0
-        && (prevVoteData as { votes: { vote_percent: number }[] }).votes[0].vote_percent !== 0;
+      //
+      // ★ THE ROW MUST BE THIS VOTER'S ROW (pre-existing bug, found 2026-08-12 while
+      // verifying the chain-read reroute; NOT introduced by it — the direct
+      // `getListVotesByCommentVoter` call this replaced had identical semantics).
+      //
+      // `database_api.list_votes` with `order: by_comment_voter` returns votes
+      // lexicographically STARTING FROM the `[author, permlink, voter]` triple. So
+      // when this reader has NOT voted, it does not return an empty list — it
+      // returns the NEXT voter's row. Reproduced live: asking for `hbd-temp`'s vote
+      // on a real trending post came back with `brain71`'s.
+      //
+      // Reading `votes[0].vote_percent` without checking whose vote it is therefore
+      // reported "this reader already had a vote" for a stranger's vote, making
+      // `isNewVote` false and the optimistic `voteDelta` 0 — so casting a first vote
+      // left the count visibly unchanged until the 16s/30s invalidation corrected
+      // it. The vote itself always broadcast fine; only the count was wrong, and
+      // only briefly. The other two consumers of this exact query already guard the
+      // same way (`votes-component.tsx`'s `userVote`, and the validator below).
+      const prevVotes = (prevVoteData as { votes?: { voter: string; vote_percent: number }[] } | undefined)?.votes;
+      const prevVote = Array.isArray(prevVotes) ? prevVotes[0] : undefined;
+      const hadPreviousVote = !!prevVote && prevVote.voter === voter && prevVote.vote_percent !== 0;
       const isNewVote = weight !== 0 && !hadPreviousVote;
       const isRemovingVote = weight === 0 && hadPreviousVote;
       const voteDelta = isNewVote ? 1 : isRemovingVote ? -1 : 0;
@@ -218,10 +235,15 @@ export function useVoteMutation() {
 
       // Vote data has optimistic update - use validated refetch to avoid
       // overwriting optimistic data with stale API responses from Hivemind
+      //
+      // ★ THROUGH OUR SERVER, NOT THE CHAIN CLIENT (2026-08-12). This called
+      // `getListVotesByCommentVoter` directly (`getChain()`, `wax.common.wasm`)
+      // to confirm the broadcast landed — fires after every vote a signed-in
+      // reader casts. See `apps/blog/app/api/comment-vote/route.ts`.
       cleanupRef.current = scheduleValidatedRefetch(
         queryClient,
         ['votes', author, permlink, voter],
-        () => getListVotesByCommentVoter([author, permlink, voter], 1),
+        () => fetchListVotesByCommentVoter(author, permlink, voter),
         (freshData) => {
           const vote = freshData.votes?.[0];
           if (weight === 0) {

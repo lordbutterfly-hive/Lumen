@@ -1,8 +1,20 @@
 'use client';
 
 import { usePathname } from 'next/navigation';
-import { PostListSkeleton, Skeleton } from '@hive/ui';
+import { LumenLoader, Skeleton } from '@hive/ui';
 
+/**
+ * ★ THE SIDEBARS KEEP THEIR PLACEHOLDERS, THE POST LIST DOES NOT (2026-08-12).
+ *
+ * The rule applied across the app: a placeholder that genuinely reserves the shape
+ * the content will take stays; one that draws a ghost of something in a layout we no
+ * longer use goes. This nav is a short column of same-height links, and five bars is
+ * an honest picture of that — so it survives, now carrying the warm light sweep from
+ * the same "first light" language as the loader rather than the old grey pulse.
+ * `PostListSkeleton` was the other kind: a 150x105 thumbnail on the left of a `Card`,
+ * against a real Lumen feed card that is `rounded-[18px] bg-white p-[22px]` with a
+ * 190x132 image on the right. See `packages/tailwindcss/globals.css`.
+ */
 function SidebarSkeleton() {
   return (
     <div className="flex w-full flex-col gap-2">
@@ -39,7 +51,7 @@ export default function Loading() {
                 <Skeleton className="h-6 w-48" />
                 <Skeleton className="h-9 w-[180px]" />
               </div>
-              <PostListSkeleton count={5} />
+              <LumenLoader size="lg" />
             </div>
           </div>
           <div className="hidden xl:col-span-2 xl:flex">
@@ -54,7 +66,7 @@ export default function Loading() {
   // provides the container/grid, so the skeleton just needs the post list.
   return (
     <div className="flex flex-grow flex-col">
-      <PostListSkeleton count={5} />
+      <LumenLoader size="lg" />
     </div>
   );
 }
