@@ -78,8 +78,9 @@ export default function PowerDownDialog({
       <div className="flex items-center gap-3">
         <Input
           {...form.register('amount', { valueAsNumber: true })}
-          type="number"
-          step="any"
+          type="text"
+          inputMode="decimal"
+          autoComplete="off"
           className="tabular-nums"
         />
         <span className="text-[13px] font-semibold text-[#3f4650]">HIVE</span>

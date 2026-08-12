@@ -2,7 +2,7 @@
 
 import PageMasthead from '@/blog/features/layouts/page-masthead';
 import { FC, useMemo, useState } from 'react';
-import { Link } from '@hive/ui';
+import { Link, LumenLoader } from '@hive/ui';
 import { useLiveDiscovery } from '../../live/use-live-discovery';
 import { usdFromHbd } from '../../live/adapt';
 import type { CreatorSummary } from '../../types';
@@ -245,7 +245,7 @@ const CreatorsView: FC = () => {
           Creator tokens aren’t available on this build yet.
         </div>
       ) : discovery.isLoading ? (
-        <div className="rounded-[14px] border border-dashed border-[#e4e6e9] px-5 py-8 text-center text-[13.5px] text-[#9ca3af]">Loading creators…</div>
+        <LumenLoader size="md" />
       ) : discovery.failed ? (
         // NOT "no creators" — this page must never render a failed lookup as an
         // empty market. It is the same unavailable-vs-empty rule the wallet and

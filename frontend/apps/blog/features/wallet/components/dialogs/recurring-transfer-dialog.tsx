@@ -94,8 +94,9 @@ export default function RecurringTransferDialog({ trigger, username }: { trigger
         <div className="flex gap-2">
           <Input
             {...form.register('amount', { valueAsNumber: true })}
-            type="number"
-            step="any"
+            type="text"
+            inputMode="decimal"
+            autoComplete="off"
             className="tabular-nums"
           />
           <Select
@@ -120,14 +121,14 @@ export default function RecurringTransferDialog({ trigger, username }: { trigger
           <label className="text-[13px] font-semibold text-[#3f4650]">
             {t('wallet.dialogs.recurring.recurrence_hours')}
           </label>
-          <Input {...form.register('recurrence', { valueAsNumber: true })} type="number" min={24} />
+          <Input {...form.register('recurrence', { valueAsNumber: true })} type="text" inputMode="numeric" autoComplete="off" />
           <FieldError message={form.formState.errors.recurrence?.message} />
         </div>
         <div className="flex flex-col gap-1.5">
           <label className="text-[13px] font-semibold text-[#3f4650]">
             {t('wallet.dialogs.recurring.executions')}
           </label>
-          <Input {...form.register('executions', { valueAsNumber: true })} type="number" min={2} />
+          <Input {...form.register('executions', { valueAsNumber: true })} type="text" inputMode="numeric" autoComplete="off" />
           <FieldError message={form.formState.errors.executions?.message} />
         </div>
       </div>

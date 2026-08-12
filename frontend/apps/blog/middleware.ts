@@ -1,3 +1,4 @@
+import type { NextRequest, NextResponse } from 'next/server';
 import { createMiddleware } from '@hive/middleware/lib/common';
 
 // NOTE: Nonce-based CSP is disabled because Next.js 14 doesn't fully support it.
@@ -6,7 +7,7 @@ import { createMiddleware } from '@hive/middleware/lib/common';
 // See GitLab issue #796 for tracking nonce CSP support in future Next.js versions.
 
 // Blog-specific middleware: redirects root to /trending, applies CSP at runtime
-export const middleware = createMiddleware({
+const baseMiddleware = createMiddleware({
   // rootRedirect removed for the rebuild: '/' now renders the discovery home.
   // The legacy trending feed still lives at /trending.
   csp: {
@@ -27,6 +28,41 @@ export const middleware = createMiddleware({
     reportUri: '/api/csp-report'
   }
 });
+
+/**
+ * ★★★ A COOKIE-BEARING RESPONSE IS NEVER SHARED-CACHEABLE — ENFORCED, NOT REMEMBERED.
+ *
+ * This is the FOURTH instance of the same bug in one day. `api/avatar`,
+ * `api/trending-tags` and `api/streak/marks` were each found separately, each fixed by
+ * adding a name to the `matcher` exclusion list below, and each time the fix was
+ * written up as "the standing rule". A fourth sweep then found that nearly the whole
+ * `/api/lite/*` GET surface plus `/api/feed/for-you` still answers with `Set-Cookie`
+ * — including the 400-day `session_uid` — and **no `Cache-Control` header at all**.
+ * Verified live, with real content: a session was minted, used to block an account,
+ * and `GET /api/lite/block/list` then returned that viewer's private block list
+ * carrying three `Set-Cookie` headers and no cache directive.
+ *
+ * An exclusion list is a memory, and memory is what kept failing. Three developers
+ * remembering a rule is three chances to forget it; the next route added is the next
+ * instance. So the rule stops being a list and becomes an invariant:
+ *
+ *   if a response sets a cookie and does not state its own cache policy,
+ *   it is `private, no-store`.
+ *
+ * Anything that genuinely wants to be shared-cached must either say so explicitly
+ * (its own `Cache-Control`, which this will not overwrite) or stay out of the
+ * middleware entirely via the `matcher` — which is exactly what the three public
+ * routes above already do, so they are unaffected. The failure mode is now a route
+ * that is accidentally *uncacheable*, which costs a little traffic, instead of one
+ * that accidentally replays one reader's session to another.
+ */
+export async function middleware(request: NextRequest): Promise<NextResponse> {
+  const response = await baseMiddleware(request);
+  if (response.headers.has('set-cookie') && !response.headers.has('cache-control')) {
+    response.headers.set('cache-control', 'private, no-store');
+  }
+  return response;
+}
 
 /**
  * ★★ STATIC ASSETS MUST NOT ENTER MIDDLEWARE — IT TRUNCATES THEM (2026-08-09).

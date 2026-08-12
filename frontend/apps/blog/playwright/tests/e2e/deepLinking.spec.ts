@@ -125,15 +125,6 @@ test.describe('Deep Linking tests', () => {
    * STATIC PAGES DIRECT LINKS
    */
 
-  test('direct link to FAQ page loads correctly', async ({ page }) => {
-    await page.goto('/faq.html');
-
-    await expect(page).toHaveURL('/faq.html');
-    await expect(page.getByRole('heading', { name: 'Hive.blog FAQ' })).toBeVisible({
-      timeout: TIMEOUTS.ELEMENT_VISIBLE
-    });
-  });
-
   test('direct link to privacy policy page loads correctly', async ({ page }) => {
     await page.goto('/privacy.html');
 
@@ -148,15 +139,6 @@ test.describe('Deep Linking tests', () => {
     await page.waitForLoadState('networkidle');
 
     await expect(page).toHaveURL('/tos.html');
-  });
-
-  test('direct link to welcome page loads correctly', async ({ page }) => {
-    await page.goto('/welcome');
-
-    await expect(page).toHaveURL('/welcome');
-    await expect(page.getByText('Welcome to Hive!')).toBeVisible({
-      timeout: TIMEOUTS.ELEMENT_VISIBLE
-    });
   });
 
   /**

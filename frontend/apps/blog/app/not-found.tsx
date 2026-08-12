@@ -12,7 +12,7 @@ const COPY = {
   title: 'That page is not here',
   body: 'The link may be wrong, or the page may have been moved or deleted. Both ways back are below.',
   home: 'Go to the home feed',
-  trending: 'Browse trending'
+  communities: 'Browse communities'
 };
 
 const PRIMARY =
@@ -63,8 +63,8 @@ export default function NotFound() {
           <Link href="/" className={PRIMARY}>
             {COPY.home}
           </Link>
-          <Link href="/trending" className={SECONDARY}>
-            {COPY.trending}
+          <Link href="/communities" className={SECONDARY}>
+            {COPY.communities}
           </Link>
         </div>
       </main>

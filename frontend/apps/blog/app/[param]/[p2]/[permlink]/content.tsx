@@ -449,6 +449,21 @@ const PostContent = () => {
   // blocked means gone, not "click to reveal". Children come off with it for free —
   // `CommentList` descends from rendered parents, so a comment whose parent is not in
   // the list is never reached.
+  //
+  // ★★★ THAT SUBTREE REMOVAL IS RULED CORRECT — DO NOT "FIX" IT (owner, 2026-08-12).
+  //
+  // An exploratory QA pass raised it as a defect: blocking one commenter also hides
+  // OTHER people's replies nested under them (reproduced on a real thread — 15
+  // comments became 13, not 14). Two fixes were offered, re-parenting the orphans to
+  // the nearest visible ancestor, or a tombstone. Both were declined.
+  //
+  // The owner's reasoning, which is the part worth keeping: on Lumen nobody can reply
+  // to a comment they cannot see, and a blocked comment is not shown. So a reply
+  // sitting under a blocked comment was almost certainly written on ANOTHER Hive
+  // frontend (PeakD, Ecency, hive.blog), where the block does not apply. Losing those
+  // from this reader's view is an accepted cost, not a bug. A tombstone was declined
+  // separately and for the same reason as everywhere else: it is a collapse, and
+  // Lumen does not collapse.
   const viewerBlocks = useLumenBlockList(user.isLoggedIn);
 
   const discussionState = useMemo(() => {
@@ -842,7 +857,7 @@ const PostContent = () => {
                     this post{' '}
                   </Link>
                   in{' '}
-                  <Link href={`/created/${postData?.community}`} className="font-bold hover:text-destructive">
+                  <Link href={`/topics/${postData?.community}`} className="font-bold hover:text-destructive">
                     {postData?.community_title ?? postData?.community}
                   </Link>
                 </span>
@@ -1026,7 +1041,7 @@ const PostContent = () => {
                         .map((tag: string) => (
                           <li key={tag}>
                             <Link
-                              href={`/trending/${tag}`}
+                              href={`/topics/${tag}`}
                               className="inline-block rounded-full border border-border bg-background-secondary px-3 py-1 text-sm font-medium text-muted-foreground transition-all hover:border-destructive hover:bg-destructive/10 hover:text-destructive"
                             >
                               #{tag}
@@ -1053,7 +1068,7 @@ const PostContent = () => {
                       <span className="font-semibold text-destructive">
                         {postData.community_title ? (
                           <Link
-                            href={`/trending/${crossPostData?.community ?? postData.community}`}
+                            href={`/topics/${crossPostData?.community ?? postData.community}`}
                             className="hover:underline"
                             data-testid="footer-comment-community-category-link"
                           >
@@ -1061,7 +1076,7 @@ const PostContent = () => {
                           </Link>
                         ) : (
                           <Link
-                            href={`/trending/${postData.category}`}
+                            href={`/topics/${postData.category}`}
                             className="hover:underline"
                             data-testid="footer-comment-community-category-link"
                           >

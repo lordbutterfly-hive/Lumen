@@ -22,8 +22,8 @@ const HIVE_BLOG_DOMAINS = new Set([
 /** Blog path prefixes that should be converted to relative paths */
 const KNOWN_BLOG_PATH_PREFIXES = [
   '/trending', '/hot', '/created', '/payout', '/muted', '/roles',
-  '/communities', '/search', '/welcome',
-  '/faq.html', '/privacy.html', '/tos.html', '/submit.html'
+  '/communities', '/search',
+  '/privacy.html', '/tos.html', '/submit.html'
 ];
 
 interface HiveUrlMatch {

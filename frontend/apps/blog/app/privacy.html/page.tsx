@@ -4,13 +4,13 @@ const PrivacyPage = () => {
       <div className="mb-4 max-w-2xl text-sm font-light">
         <div>
           <h1 className="mb-4 text-4xl sm:text-6xl">Privacy Policy</h1>
-          <h2 className="mb-4 text-3xl sm:text-5xl">Effective: Oct 7, 2019</h2>
+          <h2 className="mb-4 text-3xl sm:text-5xl">Effective: 13 August 2026</h2>
           <p className="mb-4 ">
             <span />
           </p>
           <p className="mb-4 ">
             <span>
-              This Privacy Policy describes how this site collects, uses and discloses information, and what
+              This Privacy Policy describes how Lumen collects, uses and discloses information, and what
               choices you have with respect to the information.
             </span>
           </p>
@@ -19,8 +19,8 @@ const PrivacyPage = () => {
           </p>
           <p className="mb-4 ">
             <span>
-              When we refer to this site’s operator, we mean the entity that acts as the controller of your
-              information.
+              When we refer to Lumen, we mean this service and the entity that operates it, which acts as the
+              controller of your information.
             </span>
           </p>
           <p className="mb-4 ">
@@ -45,7 +45,7 @@ const PrivacyPage = () => {
           </p>
           <p className="mb-4 ">
             <span>
-              If you are visiting this site from the European Union (EU), see our Notice to EU Data Subjects
+              If you are visiting Lumen from the European Union (EU), see our Notice to EU Data Subjects
               below for our legal bases for processing and transfer of your data.
             </span>
           </p>
@@ -309,6 +309,61 @@ const PrivacyPage = () => {
           <p className="mb-4 ">
             <span />
           </p>
+          <h3 className="mb-4 text-3xl">CONTENT PUBLISHED TO THE HIVE BLOCKCHAIN</h3>
+          <p className="mb-4 ">
+            <span>
+              Lumen publishes to the Hive blockchain, which is a public, permanent, distributed
+              record maintained by independent parties around the world. This section describes the
+              single most important limit on the choices set out below, and you should read it
+              before you post.
+            </span>
+          </p>
+          <p className="mb-4 ">
+            <span>
+              <b>What becomes public and permanent.</b> Posts and comments are written to the Hive
+              blockchain. If you sign in with your own Hive account, your votes, follows, mutes and
+              reblogs are written there too. Anything written to the blockchain is readable by
+              anyone, is copied by many independent operators, and is retained indefinitely.
+            </span>
+          </p>
+          <p className="mb-4 ">
+            <span>
+              <b>Lumen cannot delete, edit or recall it.</b> Once a post or comment has been
+              broadcast, it is outside our control. We can stop displaying it on Lumen, and we will
+              do so where we are required to; we cannot remove it from the blockchain, and neither
+              can anyone else. Editing a post publishes a new version — the earlier version remains
+              in the record.
+            </span>
+          </p>
+          <p className="mb-4 ">
+            <span>
+              <b>What this means for your rights.</b> Where you have a right to erasure of your
+              personal information, we can honour it for the information Lumen itself holds. We
+              cannot honour it for information already written to the blockchain, because that
+              information is not ours to erase. Please do not publish anything you may later need
+              removed, and take particular care with information that identifies you or another
+              person.
+            </span>
+          </p>
+          <p className="mb-4 ">
+            <span>
+              <b>Lumen accounts without a Hive key.</b> If you use Lumen without your own Hive
+              account, your posts and comments are still published to the Hive blockchain, under an
+              account operated by Lumen rather than by you, and the paragraphs above apply to them
+              in full. Your votes and reblogs are different: those are recorded only by Lumen, are
+              not written to the blockchain, and can be deleted. Your sign-in details — such as a
+              wallet address or a Google account identifier — are held by Lumen and are never
+              published to the blockchain.
+            </span>
+          </p>
+          <p className="mb-4 ">
+            <span>
+              <b>Information Lumen holds itself.</b> Separately from the blockchain, Lumen keeps
+              records such as your account, your sign-in method, the accounts you have blocked, and
+              (for accounts without a Hive key) your votes and reblogs. This information is under
+              our control, and the choices described below apply to it.
+            </span>
+          </p>
           <h3 className="mb-4 text-3xl">INFORMATION CHOICES AND CHANGES</h3>
           <p className="mb-4 ">
             <span />
@@ -333,7 +388,7 @@ const PrivacyPage = () => {
           <p className="mb-4 ">
             <span>
               &nbsp;We welcome your comments or questions about this Policy, and you may contact us at:
-              privacy@hive.io.
+              [PRIVACY CONTACT ADDRESS — NOT YET SET].
             </span>
           </p>
           <p className="mb-4 ">
@@ -431,7 +486,7 @@ const PrivacyPage = () => {
               We only use your personal information as permitted by law. We are required to inform you of the
               legal bases of our processing of your personal information, which are described in the table
               below. If you have questions about the legal bases under which we process your personal
-              information, contact us at legal@hive.io.
+              information, contact us at [LEGAL CONTACT ADDRESS — NOT YET SET].
             </span>
           </p>
           <p className="mb-4 ">
@@ -482,7 +537,7 @@ const PrivacyPage = () => {
             <span>
               Where our use of your personal information is based upon your consent, you have the right to
               withdraw it anytime in the manner indicated in the Service or by contacting us at
-              privacy@hive.io
+              [PRIVACY CONTACT ADDRESS — NOT YET SET]
             </span>
           </p>
           <p className="mb-4 ">
@@ -585,12 +640,12 @@ const PrivacyPage = () => {
           </p>
           <p className="mb-4 ">
             <span>
-              You can submit these requests by email to privacy@hive.io. We may request specific information
+              You can submit these requests by email to [PRIVACY CONTACT ADDRESS — NOT YET SET]. We may request specific information
               from you to help us confirm your identity and process your request. Applicable law may require
               or permit us to decline your request. If we decline your request, we will tell you why, subject
               to legal restrictions. If you would like to submit a complaint about our use of your personal
               information or response to your requests regarding your personal information, you may contact us
-              at privacy@hive.io or submit a complaint to the data protection regulator in your jurisdiction.
+              at [PRIVACY CONTACT ADDRESS — NOT YET SET] or submit a complaint to the data protection regulator in your jurisdiction.
             </span>
             <span>.</span>
           </p>

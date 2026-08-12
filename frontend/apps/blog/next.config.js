@@ -71,6 +71,69 @@ const nextConfig = {
     '@hive/middleware'
   ],
 
+  /**
+   * ★★★ RETIRED ROUTES MUST REDIRECT BEFORE THEY RENDER (2026-08-12).
+   *
+   * `trending / hot / created / payout / muted` were retired on 2026-08-08 — Lumen
+   * has one ranked home feed plus topic pages, and no chain-sort destinations. Each
+   * of those routes was left as a `page.tsx` calling `redirect()`, which looks like
+   * it costs nothing. Measured, it costs a great deal:
+   *
+   *   GET /trending              -> 200, 95,791 bytes, <meta http-equiv="refresh"
+   *                                content="1;url=/">
+   *   GET /trending/photography  -> 200, 49,787 bytes, 1s meta-refresh to /topics/…
+   *
+   * NOT a 307. The reason is `(main-and-community)/loading.tsx`: because the group
+   * has a loading boundary, Next STREAMS the route, so the shell is flushed — and
+   * the 200 status committed — before the page component ever runs. `redirect()`
+   * can no longer set a status code, so it degrades to a meta-refresh with a
+   * ONE-SECOND delay. A visitor to a page we deleted from the product renders a
+   * full document, watches the loading animation, waits a second, and only then
+   * bounces. Crawlers see a 200 with content, which is a soft redirect and far
+   * worse for search than a real one.
+   *
+   * `redirects()` runs in routing, before any rendering, so these become genuine
+   * 308s: zero bytes, zero render, no delay. The `page.tsx` stubs are left in place
+   * as a backstop if this config is ever edited, but they should no longer be
+   * reachable.
+   *
+   * ★ ORDER MATTERS. `/:sort/my` MUST precede `/:sort/:tag` or the `:tag` pattern
+   * swallows `my` and sends readers to a topic page for a topic called "my".
+   *
+   * ★ `permanent: false` (307), NOT 308, and that is deliberate. It matches exactly
+   * what the `redirect()` stubs already returned, so this change moves ONLY the cost
+   * and changes no semantics. A 308 would be better for search — it de-indexes the
+   * old URL and passes link equity — but browsers cache it indefinitely, so it is
+   * effectively one-way. That is the owner's call to make, not a side effect of a
+   * performance fix.
+   *
+   * The `/lists/*` and `/comments` entries below have the same cause — they sit in
+   * `[param]/(user-profile)/`, which also has a `loading.tsx`.
+   */
+  async redirects() {
+    const RETIRED_SORTS = ['trending', 'hot', 'created', 'payout', 'muted'];
+    return [
+      ...RETIRED_SORTS.flatMap((sort) => [
+        { source: `/${sort}`, destination: '/', permanent: false },
+        { source: `/${sort}/my`, destination: '/', permanent: false },
+        { source: `/${sort}/:tag`, destination: '/topics/:tag', permanent: false }
+      ]),
+      // The four legacy moderation lists — one Blocked list now (owner ruling,
+      // 2026-08-12). A hash fragment is never sent to the server, so it is carried
+      // here in the destination for the browser to apply on arrival.
+      ...['muted', 'blacklisted', 'followed_blacklists', 'followed_muted_lists'].map((list) => ({
+        source: `/:user((?:@|%40)[^/]+)/lists/${list}`,
+        destination: '/:user/settings#blocked-accounts',
+        permanent: false
+      })),
+      {
+        source: '/:user((?:@|%40)[^/]+)/comments',
+        destination: '/:user?tab=comments',
+        permanent: false
+      }
+    ];
+  },
+
   async rewrites() {
     return {
       beforeFiles: [],

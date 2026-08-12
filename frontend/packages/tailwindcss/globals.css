@@ -457,6 +457,13 @@ summary {
     display: grid;
     place-items: center;
     isolation: isolate;
+    /* ★ 15% more faded (owner, 2026-08-12: "it needs to be 10-20% more faded like
+       the peakd one"). Applied once on the root rather than by editing every alpha
+       in the gradients below, so the layers keep their relationship to each other
+       and the whole mark stays tunable from one number. `isolation: isolate` above
+       means this composites the group as a unit, so overlapping rings do not
+       double up where they cross. */
+    opacity: 0.85;
   }
 
   /* Every layer occupies the same grid cell, so they stack concentrically without

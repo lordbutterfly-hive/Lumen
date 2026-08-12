@@ -33,7 +33,7 @@ const CommunitiesListItem = ({
       <div className="w-4/6">
         <CardHeader>
           <Link
-            href={`trending/${community.name}`}
+            href={`/topics/${community.name}`}
             className="text-destructive"
             data-testid="community-list-item-title"
           >

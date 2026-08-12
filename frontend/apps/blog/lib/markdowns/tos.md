@@ -1,7 +1,7 @@
-Last Updated March 20, 2020
+Last Updated 13 August 2026
 
-This agreement (the “Agreement”) between you and this site’s operators
-(“we”, “us”, “our”) sets out your rights to access and use of this site and
+This agreement (the “Agreement”) between you and Lumen
+(“Lumen”, “we”, “us”, “our”) sets out your rights to access and use of Lumen and
 any other products or services provided by this web site (the “Service”).
 If you are accepting this Agreement and using the Services on behalf of a
 company, organization, government, or other legal entity, you represent and
@@ -102,9 +102,9 @@ personal injury caused by negligence, fraudulent misrepresentation, or any
 other liability which may not otherwise be limited or excluded under United
 States law.
 
-## 6. Agreement to Hold this Site's Operators Harmless
+## 6. Agreement to Hold Lumen Harmless
 
-6.1. You agree to hold harmless this site (and its operators) from any claim,
+6.1. You agree to hold harmless Lumen from any claim,
 demand, action, damage, loss, cost, or expense, including without limitation
 reasonable legal fees, arising out, or relating to:
 
@@ -153,6 +153,27 @@ Advances in code cracking or technical advances such as the development of
 quantum computers may present risks to the Services that you use and your
 Account, which could result in the theft or loss of your property. By using the
 Service or accessing Hive Content, you acknowledge these inherent risks.
+
+### 8.1 Accounts with and without a Hive key
+
+Lumen offers two kinds of account, and your rights differ between them.
+
+If you sign in with your own Hive account, you hold your own keys. Everything you
+publish, vote on, follow or mute is signed by you and broadcast to the Hive
+blockchain under your own account. Lumen never holds your keys and cannot act for
+you.
+
+If you sign in without a Hive account — for example with a wallet address or a
+Google account — Lumen operates an account on your behalf. Your posts and comments
+are published to the Hive blockchain under an account controlled by Lumen, not by
+you, and they decline all rewards, so they earn nothing. Your votes and reblogs are
+recorded by Lumen only and are not broadcast. You may later obtain your own Hive
+account; content published before that point remains attributed to the Lumen
+account that published it and cannot be reassigned to you.
+
+In both cases, anything broadcast to the Hive blockchain is public and permanent and
+cannot be deleted by Lumen or by anyone else. See our Privacy Policy for what that
+means for your rights.
 
 ## 9. The Services
 
@@ -302,7 +323,7 @@ Copyright Act ("DMCA"), and we retain the right to remove access to user
 content provided via the Service that we deem to be infringing the copyright
 of others. If you become aware of user content on the Service that infringes
 your copyright rights, you may submit a properly formatted DMCA request
-(see 17 U.S.C. § 512) to this site’s operator(s).
+(see 17 U.S.C. § 512) to Lumen.
 
 Misrepresentations of infringement can result in liability for monetary
 damages. You may want to consult an attorney before taking any action pursuant
@@ -310,7 +331,7 @@ to the DMCA. A DMCA request can be sent to us via the contact information below:
 
 Copyright Agent
 
-legal@hive.io
+[LEGAL CONTACT ADDRESS — NOT YET SET]
 
 Please send our Copyright Agent the following information:
 
@@ -415,7 +436,7 @@ loss of data, whether in an action in contract, tort (including, but not
 limited to, negligence) or otherwise, arising out of, or in any way connected
 with, the use of, or inability to use, the Service or the Hive Content.
 To the fullest extent permitted by applicable law, in no event shall the
-aggregate liability of this site’s operators or any related party, whether
+aggregate liability of Lumen or any related party, whether
 in contract, warranty, tort (including negligence, whether active, passive or
 imputed), product liability, strict liability or other theory, arising out of
 or relating to the use of or inability to use of the Service.
@@ -434,7 +455,7 @@ discontinuance of the Service.
 ## 20. Arbitration
 
 Please read the following section carefully because it requires you to
-arbitrate certain disputes with this site's operators and limits the way you can seek
+arbitrate certain disputes with Lumen and limits the way you can seek
 relief from them. If you do not agree with this Section 20, please
 discontinue using the Service.
 
@@ -458,7 +479,7 @@ action or proceeding arising out of this Agreement.
 ## 22. Termination
 
 We reserve the right, without notice and in our sole discretion, to terminate
-your license to access and use of the Service, which includes this site, and
+your license to access and use of the Service, which includes Lumen, and
 to block or prevent your future access to, and use of, the Service that we
 provide.
 
@@ -480,4 +501,4 @@ Services after a change to this agreement, you agree to those changes.
 
 ## 25. Contact Information
 
-Notices to this site’s operators should be directed to legal@hive.io.
+Notices to Lumen should be directed to [LEGAL CONTACT ADDRESS — NOT YET SET].

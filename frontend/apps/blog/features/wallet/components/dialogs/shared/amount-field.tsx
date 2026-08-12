@@ -31,8 +31,32 @@ export default function AmountField({
       <div className="relative">
         <Input
           {...register}
-          type="number"
-          step="any"
+          /* ★ TEXT, NOT number — A COMMA DECIMAL WAS SILENTLY 10x-ing THE AMOUNT
+             (2026-08-12). On `<input type="number">` Chrome DISCARDS a comma
+             keystroke rather than rejecting it, so a person typing "1,5" — which is
+             how a decimal is written in es, fr, it, pl and ru, five of the nine
+             locales this app ships — ends up with the digits concatenated:
+
+               type="number"  typed "1,5" -> value "15"   (+value = 15)
+               type="text"    typed "1,5" -> value "1,5"  (+value = NaN)
+
+             Reproduced in a bare browser page with no app code involved. `register(...,
+             { valueAsNumber: true })` then handed zod a perfectly legitimate 15, so
+             every check passed and it reached the signing boundary at ten times the
+             intended amount.
+
+             `type="text"` makes it NaN instead, which fails the `z.number()` schema —
+             the amount is REJECTED rather than guessed at. Deliberately no
+             comma-to-dot rewrite: "1,000" is one thousand to a British reader and one
+             to a German one, and silently picking either is the same class of bug we
+             are removing. `inputMode="decimal"` keeps the numeric keypad on mobile.
+
+             NOTE: pasting a comma was always safe — `type="number"` yields "" -> 0,
+             which already failed the positive check. Only TYPING was dangerous, which
+             is why automated `fill()` tests never caught it. */
+          type="text"
+          inputMode="decimal"
+          autoComplete="off"
           placeholder="0.000"
           data-testid={testId}
           className="pr-16 font-sans tabular-nums"

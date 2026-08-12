@@ -60,7 +60,7 @@ const BasePathLink = ({
 
     // Also force reload for static pages to avoid intermittent navigation failures
     const isStaticPage =
-      href === '/welcome' || href === '/faq.html' || href === '/privacy.html' || href === '/tos.html';
+      href === '/privacy.html' || href === '/tos.html';
 
     if ((needsReload || isStaticPage) && basePath) {
       e.preventDefault();

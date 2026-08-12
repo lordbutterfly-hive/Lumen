@@ -58,7 +58,7 @@ export default function ProposalsMainHeader() {
     >
       <p className="max-w-[620px] font-serif text-[13px] leading-[1.55] text-[#6b7280]">
         {t('proposals.header.intro')}{' '}
-        <a href="/faq.html" className="text-[#c0392b] hover:underline">
+        <a href="/help.html" className="text-[#c0392b] hover:underline">
           {t('proposals.header.faq_link')}
         </a>
         .

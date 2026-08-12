@@ -764,14 +764,6 @@ export class HomePage {
     await expect(this.page).toHaveURL('welcome');
   }
 
-  async moveToFaqPage() {
-    await this.getNavSidebarMenu.click();
-    await this.getNavSidebarMenuContent.getByRole('button', { name: 'FAQ' }).click();
-    await this.page.waitForTimeout(5000);
-    await expect(this.page.getByRole('heading', { name: 'Hive.blog FAQ' })).toBeVisible();
-    await expect(this.page).toHaveURL('faq.html');
-  }
-
   async moveToPrivacyPolicyPage() {
     await this.getNavSidebarMenu.click();
     await this.getNavSidebarMenuContent.getByRole('button', { name: 'Privacy Policy' }).click();
