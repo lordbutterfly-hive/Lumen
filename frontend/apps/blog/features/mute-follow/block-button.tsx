@@ -8,14 +8,18 @@ import { useTranslation } from '@/blog/i18n/client';
 /**
  * Block / Unblock.
  *
- * Sits next to Follow and, where it is still shown, Mute. It is a DIFFERENT control
- * from Mute and the labels have to keep them apart: Mute is Hive's chain-wide,
- * viewer-only ignore; Block is Lumen's, and it also removes the blocked account's
- * replies from under the blocker's own posts for every reader.
+ * Sits next to Follow — the ONE moderation control here (owner ruling, 2026-08-12:
+ * "mute and personal blacklist should be the same damn thing... just call it
+ * block"). This used to sit next to a separate on-chain Mute button; that button
+ * was retired from every primary surface (this one, the profile/post/comment
+ * overflow menus) in the same pass. Block hides the target from the viewer's own
+ * feeds AND removes the blocked account's replies from under the blocker's own
+ * posts, for every reader — the second half is the reason it replaced Mute rather
+ * than sitting beside it.
  *
- * Rendered for BOTH account tiers, unlike Mute — a lite account has no key to sign a
- * chain mute, which is why it was hidden from them entirely and why they had no way
- * to get rid of anybody until now.
+ * Rendered for BOTH account tiers, unlike the old Mute — a lite account has no key
+ * to sign a chain mute, which is why Mute was hidden from them entirely and why
+ * they had no way to get rid of anybody until Block existed.
  */
 const BlockButton = ({
   variant,

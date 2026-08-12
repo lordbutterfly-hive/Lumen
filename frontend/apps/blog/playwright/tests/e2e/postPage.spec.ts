@@ -217,57 +217,69 @@ test.describe('Post page tests', () => {
   });
 
   /*
-   * ★ STILL SKIPPED 2026-08-11, with the real precondition named.
+   * ★ STILL SKIPPED 2026-08-12, real precondition named, retargeted at Block.
    *
-   * Was: "Mute button is no more in the dropdown card after clicking that way".
-   * Half right. The Mute button DOES still exist in the user popover card
-   * (features/mute-follow/mute-button.tsx:32-53, `data-testid="profile-mute-button"`,
-   * mounted via popover-card-data.tsx:151-159 -> buttons-container.tsx:238-246) —
-   * but it is rendered ONLY for a logged-in viewer (buttons-container.tsx:229).
-   * A signed-out visitor, which is all this spec file ever is, gets a single
-   * "Follow" button wrapped in DialogLogin (buttons-container.tsx:256-266) and no
-   * Mute button at all.
+   * Was "validate Mute button style in the popover card in light theme",
+   * already skipped since 2026-08-11 pending an authenticated session (a
+   * signed-out visitor, which is all this spec file ever is, gets a single
+   * "Follow" button wrapped in DialogLogin and no moderation control at
+   * all). That precondition is UNCHANGED and still why this stays skipped.
    *
-   * REQUIRES: an authenticated session (seed one with
-   * support/fixture-auth/seeder.ts), plus re-measuring the four colours below —
-   * the button moved from a bespoke red-outline variant to the shared Button with
-   * `variant="default"` + `hover:text-destructive` (mute-button.tsx:34-37), so the
-   * hard-coded rgb(239,68,68) / rgb(254,226,226) values are almost certainly stale.
+   * What DID change (2026-08-12, Block consolidation, owner ruling — "mute
+   * and personal blacklist should be the same damn thing... just call it
+   * block"): Mute itself is gone from this popover, for every viewer,
+   * signed in or not. `features/mute-follow/mute-button.tsx` no longer
+   * exists (deleted, unused) and `buttons-container.tsx` renders Follow +
+   * BlockButton (`features/mute-follow/block-button.tsx`,
+   * `data-testid="profile-block-button"`) only. Re-measuring "Mute button
+   * style" is no longer a meaningful test — there is no Mute button to
+   * measure — so this now targets Block instead.
+   *
+   * The four colour values below are CARRIED OVER, UNVERIFIED, from the old
+   * Mute assertions, not re-measured against Block. `BlockButton` shares
+   * the same shared `<Button>` primitive and the same `hover:text-destructive`
+   * class Mute used, but keys its `text-destructive` state off `isBlocking`
+   * rather than off `disabled` the way Mute did
+   * (`clsx('hover:text-destructive', { 'text-destructive': isBlocking })` vs
+   * Mute's old `{ 'text-destructive': disabled }`) — a real behavioural
+   * difference this pass did not verify against a running browser. Treat
+   * these numbers as a scaffold, not a fact, until someone re-measures with
+   * a real authenticated session.
    */
-  test.skip('validate Mute button style in the popover card in light theme', async ({ page }) => {
+  test.skip('validate Block button style in the popover card in light theme', async ({ page }) => {
     await postPage.gotoHomePage();
     await postPage.moveToTheFirstPostInHomePageByImage();
 
     await postPage.articleAuthorName.click();
 
     // button styles
-    expect(await postPage.getElementCssPropertyValue(postPage.buttonMutePopoverCard, 'color')).toBe(
+    expect(await postPage.getElementCssPropertyValue(postPage.buttonBlockPopoverCard, 'color')).toBe(
       'rgb(239, 68, 68)'
     );
     expect(
-      await postPage.getElementCssPropertyValue(postPage.buttonMutePopoverCard, 'background-color')
+      await postPage.getElementCssPropertyValue(postPage.buttonBlockPopoverCard, 'background-color')
     ).toBe('rgba(0, 0, 0, 0)');
-    expect(await postPage.getElementCssPropertyValue(postPage.buttonMutePopoverCard, 'border-color')).toBe(
+    expect(await postPage.getElementCssPropertyValue(postPage.buttonBlockPopoverCard, 'border-color')).toBe(
       'rgb(239, 68, 68)'
     );
-    expect(await postPage.getElementCssPropertyValue(postPage.buttonMutePopoverCard, 'border-style')).toBe(
+    expect(await postPage.getElementCssPropertyValue(postPage.buttonBlockPopoverCard, 'border-style')).toBe(
       'solid'
     );
 
     // button styles when hovered over it
-    await postPage.buttonMutePopoverCard.hover();
+    await postPage.buttonBlockPopoverCard.hover();
     await postPage.page.waitForTimeout(1000);
 
-    expect(await postPage.getElementCssPropertyValue(postPage.buttonMutePopoverCard, 'color')).toBe(
+    expect(await postPage.getElementCssPropertyValue(postPage.buttonBlockPopoverCard, 'color')).toBe(
       'rgb(15, 23, 42)'
     );
     expect(
-      await postPage.getElementCssPropertyValue(postPage.buttonMutePopoverCard, 'background-color')
+      await postPage.getElementCssPropertyValue(postPage.buttonBlockPopoverCard, 'background-color')
     ).toBe('rgb(254, 226, 226)');
-    expect(await postPage.getElementCssPropertyValue(postPage.buttonMutePopoverCard, 'border-color')).toBe(
+    expect(await postPage.getElementCssPropertyValue(postPage.buttonBlockPopoverCard, 'border-color')).toBe(
       'rgb(239, 68, 68)'
     );
-    expect(await postPage.getElementCssPropertyValue(postPage.buttonMutePopoverCard, 'border-style')).toBe(
+    expect(await postPage.getElementCssPropertyValue(postPage.buttonBlockPopoverCard, 'border-style')).toBe(
       'solid'
     );
   });

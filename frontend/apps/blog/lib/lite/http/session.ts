@@ -1,6 +1,7 @@
 import { cookies } from 'next/headers';
 import { getIronSession, IronSession } from 'iron-session';
-import { sessionOptions, HIVE_SESSION_TTL_MS } from '@smart-signer/lib/session';
+import { sessionOptions } from '@smart-signer/lib/session';
+import { applyHiveSessionTtl } from '@smart-signer/lib/get-session';
 import { IronSessionData } from '@smart-signer/types/common';
 import { liteConfig } from '../config';
 // NOTE (F-L37, 2026-08-11): `liteConfig.sessionTtlDays` is imported again.
@@ -287,21 +288,16 @@ export async function getLiteSession(): Promise<IronSession<IronSessionData>> {
   // nothing else, would never get backfilled — a real, narrow, stated gap;
   // both of those readers only ever consult `session.user?.userId` (always
   // undefined for a Hive account), so it has no other effect on them.
-  if (session.user && !isLite) {
-    if (session.hiveSessionIssuedAt !== undefined) {
-      if (Date.now() - session.hiveSessionIssuedAt > HIVE_SESSION_TTL_MS) {
-        session.user = undefined;
-        session.hiveSessionIssuedAt = undefined;
-      }
-    } else {
-      session.hiveSessionIssuedAt = Date.now();
-      try {
-        await session.save();
-      } catch {
-        // Server Component render context — see the paragraph above.
-      }
-    }
-  }
+  // ★ ONE POLICY, THREE READERS (2026-08-12). This block used to be a hand-copied
+  // twin of the one in `packages/smart-signer/lib/get-session.ts`, kept in step
+  // only by a comment asking the next reader to remember. That is the same
+  // failure mode that opened the hole this policy exists to close: F-L38 wired
+  // the check into the one call site it owned and every other reader enforced
+  // nothing. The policy now lives in `applyHiveSessionTtl` and all three readers
+  // (this one, `getAppSession`, and `apps/blog/lib/server-session.ts`) call it.
+  // `canPersist: true` — this accessor is reached from Route Handlers, where the
+  // write is legal; the helper swallows the Server-Component case described above.
+  await applyHiveSessionTtl(session, { canPersist: true });
 
   // Stamp the tier-appropriate "issued at" field the instant `session.user`
   // is assigned a truthy value on a session that does not already carry

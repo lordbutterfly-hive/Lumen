@@ -1,32 +1,56 @@
 import { test, expect } from '../support/fixture-proxy-test';
-import { installBroadcastInterceptor } from '../support/fixture-auth/broadcast-interceptor';
 import { TIMEOUTS } from '../support/constants';
 
 /**
- * §9.2 Mute cross-page propagation — MUTE-PROP-01.
+ * §9.2 Mute → Block consolidation — MUTE-PROP-01.
  *
- * Muting a comment author via the user popover on a post-detail page
- * collapses their comment in-place. Mechanism — `useMuteMutation.onMutate`
- * prepends the target to `['muted', currentUser]` (use-mute-mutations.ts:22-32)
- * before the broadcast even fires, which immediately flips
- * `isMutedByViewer = true` in comment-list-item.tsx:80. The component
- * switches into its `isOriginallyHidden` branch
- * (comment-list-item.tsx:297), replacing the body with an
- * AccordionTrigger showing "Reveal Comment (muted by you)".
+ * ★ REWRITTEN (2026-08-12, Block consolidation cleanup). This used to mute a
+ * comment author LIVE via the user popover's MuteButton
+ * (`data-testid="profile-mute-button"`, mounted by
+ * `features/mute-follow/buttons-container.tsx`) and assert the comment
+ * collapsed in-place behind an AccordionTrigger reading "Reveal Comment
+ * (muted by you)". Neither half of that is still true:
  *
- * No page reload required: the popover lives on the same page, the
- * mutation runs against the live QueryClient, the comment subscribes
- * to the same cache key, and React Query notifies subscribers on
- * setQueryData.
+ *   1. Mute's WRITE affordance was retired from every primary surface —
+ *      including this popover — in favour of one control, Block (owner
+ *      ruling 2026-08-12: "mute and personal blacklist should be the same
+ *      damn thing... just call it block", `lib/lite/social/block-service.ts`).
+ *      There is no more MuteButton to click here; `buttons-container.tsx`
+ *      only renders Follow + Block now, for every author.
+ *   2. Even the OLD behaviour this test asserted (collapse-with-Reveal for
+ *      the viewer's own mute) is gone. `lib/muted-reasons.ts`'s
+ *      `isOwnModerationHide` now hard-hides a comment from an account the
+ *      viewer personally muted or blacklisted — no card, no Reveal, the
+ *      same treatment an actual Block gets
+ *      (`comment-list-item.tsx`'s `if (userModerationHidden) return null`).
  *
- * Pinned post + commenter: `/@hiveio/hive-at-blockchain-rio` has 8
- * top-level (depth=1) replies; `steevc` is one of them ("Have fun
- * spreading the word about Hive."). We mute steevc rather than hiveio
- * because hiveio's only reply on this post sits at depth=3 inside a
- * nested thread and isn't rendered without expanding the parent —
- * which complicates the locator without changing what the test
- * proves. Re-record if the post is removed or steevc's top-level
- * comment is pruned.
+ * This spec now proves the structural half of the Block reality that
+ * doesn't require a new mutation: the popover offers Block, and nothing
+ * calling itself Mute renders there for anybody. It deliberately does NOT
+ * click Block. Unlike on-chain mute (a Hive `custom_json` this suite stubs
+ * via `installBroadcastInterceptor`), a Lumen block is a same-origin
+ * `/api/lite/block` POST to this app's own backend — nothing in
+ * `playwright/tests/support/fixture-auth/` mocks that (see that directory's
+ * CLAUDE.md: it only stubs chain broadcast/verify_authority RPCs and
+ * replays chain reads through the :8200 fixture proxy). Exercising a real
+ * Block click here would write a real row against whatever backend this
+ * suite's webServer is actually wired to — outside what this offline
+ * fixture harness is built to prove safely, and no part of this cleanup
+ * pass builds new mock infrastructure for `/api/lite/block/*`.
+ *
+ * `/api/lite/block/state` (which `useLumenBlock` polls to decide whether to
+ * render the button at all — `block.available`) is stubbed LOCALLY, in this
+ * spec only, so the assertion below is deterministic regardless of whether
+ * a real Lumen DB is reachable from this webServer: `state/route.ts`
+ * degrades any lookup failure to `available:false` ("must never claim a
+ * block that may not exist"), which would make BlockButton silently vanish
+ * and fail this test for an environment reason that has nothing to do with
+ * whether Mute is really gone.
+ *
+ * Pinned post + commenter unchanged from the original recording:
+ * `/@hiveio/hive-at-blockchain-rio` has 8 top-level (depth=1) replies;
+ * `steevc` is one of them ("Have fun spreading the word about Hive.").
+ * Re-record if the post is removed or steevc's top-level comment is pruned.
  */
 
 const MUTE_COMMENT_POST = '/@hiveio/hive-at-blockchain-rio';
@@ -37,21 +61,28 @@ test.use({
   authenticatedUser: {}
 });
 
-test('MUTE-PROP-01 — Muting a comment author collapses their comment in-place', async ({ page }) => {
-  const broadcast = await installBroadcastInterceptor(page, undefined, {
-    confirmInBlock: true
-  });
+test('MUTE-PROP-01 — Comment author popover offers Block, not Mute', async ({ page }) => {
+  // Same-origin Lumen route, not a chain call — see the file doc above for
+  // why this is stubbed here rather than left to whatever this webServer's
+  // real backend answers.
+  await page.route('**/api/lite/block/state**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true, available: true, blocking: false })
+    })
+  );
+
   await page.goto(MUTE_COMMENT_POST);
   await expect(page.getByTestId('login-btn')).toBeHidden({
     timeout: TIMEOUTS.HYDRATION
   });
 
-  // Locate steevc's comment — the comment-list-item whose
-  // author-name-link button contains the target's username inside the
-  // header `<button>`. The button text concatenates name + reputation
-  // ("steevc(75)"), so we match on the inner `<span>` that holds just
-  // the name to keep the locator immune to reputation drift on
-  // re-record.
+  // Locate steevc's comment — the comment-list-item whose author-name-link
+  // button contains the target's username inside the header `<button>`.
+  // The button text concatenates name + reputation ("steevc(75)"), so we
+  // match on the inner `<span>` that holds just the name to keep the
+  // locator immune to reputation drift on re-record.
   const targetComment = page
     .getByTestId('comment-list-item')
     .filter({
@@ -61,17 +92,19 @@ test('MUTE-PROP-01 — Muting a comment author collapses their comment in-place'
     })
     .first();
   await expect(targetComment).toBeVisible();
-  // Baseline: body visible (no Reveal Comment trigger yet).
-  await expect(targetComment.getByText('Reveal Comment')).toHaveCount(0);
 
-  // Open the popover from the author's name and click MuteButton inside.
+  // Open the popover from the author's name.
   await targetComment.getByTestId('author-name-link').first().click();
   const popover = page.getByTestId('user-popover-card-content');
   await expect(popover).toBeVisible();
-  await popover.getByTestId('profile-mute-button').click();
-  await broadcast.waitForCount(1);
 
-  // Comment collapses immediately on optimistic cache update.
-  await expect(targetComment.getByText('Reveal Comment')).toBeVisible();
-  await expect(targetComment.getByText('(muted by you)')).toBeVisible();
+  // Block is the one moderation control now — offered inline next to
+  // Follow (buttons-container.tsx), not behind a menu, in the popover.
+  const blockButton = popover.getByTestId('profile-block-button');
+  await expect(blockButton).toBeVisible();
+  await expect(blockButton).toHaveText('Block');
+
+  // Mute never mounts here any more, for anybody — buttons-container.tsx
+  // no longer imports MuteButton at all.
+  await expect(popover.getByTestId('profile-mute-button')).toHaveCount(0);
 });

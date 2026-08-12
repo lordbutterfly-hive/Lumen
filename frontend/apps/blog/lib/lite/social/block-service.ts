@@ -41,8 +41,21 @@ import { SessionRef } from '../types';
  *  3. A CHAIN WRITE IS NOT OURS TO MAKE. `ignore` is a public, permanent, signed
  *     statement broadcast under the user's own name to every Hive front end. Pressing
  *     a Lumen product control should not publish anything on the user's behalf
- *     unless they asked for exactly that. Lumen's existing on-chain Mute button is
- *     still there for anyone who wants the chain-wide version, and it is unchanged.
+ *     unless they asked for exactly that.
+ *
+ *     ★ UPDATE, 2026-08-12 — THE OWNER RULED ON THE "STILL THERE" HALF, NOT ON THIS
+ *     ONE. This point used to end "Lumen's existing on-chain Mute button is still
+ *     there for anyone who wants the chain-wide version, and it is unchanged." The
+ *     owner has since ruled there should be ONE moderation control, called Block —
+ *     "mute and personal blacklist should be the same damn thing... just call it
+ *     block." So Mute's WRITE affordance was retired from every primary surface
+ *     (profile/post/comment overflow menus, the author popover, `buttons-container.tsx`)
+ *     in the same pass this comment was updated. The four reasons ABOVE — why a block
+ *     itself still never becomes an `ignore` broadcast — are UNCHANGED and NOT
+ *     overturned by that ruling: only "is there a separate button that still creates a
+ *     chain-wide mute" moved from yes to no. Any mute a viewer already has predates
+ *     this and is still honoured (see `lib/muted-reasons.ts`'s `isOwnModerationHide`),
+ *     now with the SAME no-collapse treatment Block gets, not the old collapse.
  *  4. IT WOULD NEED A SIGNER IN THE BROWSER. Blocking would then fail for the
  *     Keychain-less half of full accounts, and would be unavailable from any
  *     server-side path — including moderation tooling.

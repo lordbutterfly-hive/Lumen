@@ -15,6 +15,7 @@ import { cn } from '@ui/lib/utils';
 import { useTranslation } from '@/blog/i18n/client';
 import { handleError } from '@ui/lib/handle-error';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import DialogLogin from '@/blog/components/dialog-login';
 import { useFollowMutation, useUnfollowMutation } from '@/blog/features/mute-follow/hooks/use-follow-mutations';
 import { useModerationStatus } from '@/blog/features/mute-follow/hooks/use-moderation-status';
@@ -53,6 +54,21 @@ export default function ProfileActions({
 }) {
   const { t } = useTranslation('common_blog');
   const { user } = useUserClient();
+  /**
+   * ★★★ SAME RACE AS EVERY OTHER OWNERSHIP GATE (2026-08-12, F5). This was raw
+   * `useUserClient()` for the two checks below that decide WHICH UI renders — "are
+   * you logged in at all" and "is this your own profile" — which cannot answer
+   * during SSR and reports "signed out" until `/api/users/me` returns. A signed-in
+   * reader hard-loading their own profile briefly saw a "Follow" button offering to
+   * follow themselves (the login-gate hadn't yet flipped, so neither had the
+   * own-profile check), and any signed-in reader saw the DialogLogin-wrapped button
+   * instead of the real follow control. `identity` (server-session.tsx) is seeded
+   * from the session cookie the server already read, so both checks are correct on
+   * the first render. `user.account_tier` stays on the raw hook below — it does not
+   * exist on `identity` by design (only the real client object has it), same as
+   * `list-variant.tsx` / `muted-list.tsx`.
+   */
+  const identity = useSessionIdentity();
   const explorerHost = env('EXPLORER_DOMAIN') || '';
 
   const moderation = useModerationStatus(username, liteTarget);
@@ -62,7 +78,7 @@ export default function ProfileActions({
   // early returns below, because hooks cannot be conditional.
   const lumen = useLumenFollow(
     username,
-    user.isLoggedIn && username !== user.username && (user.account_tier === 'lite' || liteTarget)
+    identity.isLoggedIn && username !== identity.username && (user.account_tier === 'lite' || liteTarget)
   );
   // ★ BLOCK, FOR BOTH TIERS. Unlike Mute below — which is a chain operation and so is
   // hidden whenever either side is keyless — a block is always Lumen's own record and
@@ -73,10 +89,10 @@ export default function ProfileActions({
   const block = useLumenBlock(
     username,
     liteTarget ? 'lumen' : 'hive',
-    user.isLoggedIn && username !== user.username
+    identity.isLoggedIn && username !== identity.username
   );
 
-  if (!user.isLoggedIn) {
+  if (!identity.isLoggedIn) {
     return (
       <DialogLogin>
         <button
@@ -90,12 +106,12 @@ export default function ProfileActions({
     );
   }
 
-  if (user.username === username) return null;
+  if (identity.username === username) return null;
 
   const isFollow = lumen.applies
     ? lumen.isFollowing
     : Boolean(
-        following.data?.pages[0]?.some((f) => f.follower === user.username && f.following === username)
+        following.data?.pages[0]?.some((f) => f.follower === identity.username && f.following === username)
       );
   // On the Lumen path the viewer's chain follow list is irrelevant and may never
   // load at all (a lite viewer has no Hive account), so it must not gate the button.
@@ -139,6 +155,21 @@ export default function ProfileActions({
         ? 'user_profile.moderated_badge_blacklisted'
         : 'user_profile.moderated_badge_muted';
 
+  // ★ ADOPTING `muteStatusUnknown`/`blacklistStatusUnknown` (2026-08-12, job 1 — G4).
+  // `moderation.isModerated` is `isMuted || isBlacklisted`, and both halves stay
+  // `false` on a read failure for backward compatibility (see `use-moderation-
+  // status.ts`) — so without this check, a mute or blacklist read that genuinely
+  // failed for THIS pair rendered the exact same plain black "Follow" CTA as a
+  // truly clean account, on the one surface whose entire job is telling a viewer
+  // "you already moderated this account" (see the E2 comment on the badge below).
+  // That is the same "unknown reads as safe" shape `medium-post-card.tsx`'s
+  // `muteStatusUnknown` gate already exists to prevent for feed content — this is
+  // the same fix applied to the primary CTA slot instead of a card's visibility.
+  // Only relevant when NOT already known-moderated: if `isModerated` is already
+  // true, the badge below is already telling the truth regardless of what the
+  // OTHER, still-uncertain half would have said.
+  const moderationStatusUncertain = !moderation.isModerated && moderation.moderationStatusUnknown;
+
   return (
     <div className="flex shrink-0 items-center gap-2.5">
       {/* ★ E2: A MODERATED ACCOUNT DOES NOT GET A PLAIN "Follow" CTA. Before this,
@@ -153,6 +184,18 @@ export default function ProfileActions({
           data-testid="profile-moderated-badge"
         >
           {t(moderatedBadgeKey)}
+        </span>
+      ) : moderationStatusUncertain ? (
+        // ★ NEITHER "Follow" NOR the moderated badge — see `moderationStatusUncertain`'s
+        // doc above. Neutral, not destructive: this is not a claim that the account IS
+        // moderated (`use-moderation-status.ts` keeps the backward-compat `false` for a
+        // reason — this pair may genuinely be clean), only that the primary CTA cannot
+        // honestly say which right now.
+        <span
+          className="rounded-xl border border-[#e4e6e9] bg-[#f9f7f5] px-4 py-3 font-sans text-[13.5px] font-semibold text-[#6b7280]"
+          data-testid="profile-moderation-unknown-badge"
+        >
+          {t('user_profile.moderation_status_unknown_badge')}
         </span>
       ) : (
         <button
@@ -183,8 +226,10 @@ export default function ProfileActions({
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-52">
           {/* The badge above took over the primary CTA slot, so Follow/Unfollow has to
-              stay reachable from somewhere — here. */}
-          {moderation.isModerated ? (
+              stay reachable from somewhere — here. Same condition as the badge itself
+              (moderated OR uncertain), so this item is never missing while a badge, not
+              the Follow button, occupies the primary slot. */}
+          {moderation.isModerated || moderationStatusUncertain ? (
             <DropdownMenuItem
               onClick={handleFollowClick}
               disabled={busy}
@@ -208,38 +253,28 @@ export default function ProfileActions({
               {block.isBlocking ? t('user_profile.unblock_button') : t('user_profile.block_button')}
             </DropdownMenuItem>
           ) : null}
-          {/* Mute and Blacklist are both chain operations, so both are hidden whenever
-              either side is a lite account: a keyless viewer cannot sign one, and a
-              lite profile is not an account that can be muted or blacklisted. Better
-              absent than broken. */}
-          {moderation.available ? (
-            <>
-              <DropdownMenuItem
-                onClick={moderation.toggleMute}
-                disabled={moderation.muteBusy}
-                className="cursor-pointer"
-                data-testid="profile-mute-menu-item"
-              >
-                {moderation.isMuted ? t('user_profile.unmute_button') : t('user_profile.mute_button')}
-              </DropdownMenuItem>
-              {/* ★ E2 — THE ITEM THAT DID NOT EXIST. Previously the only way to
-                  blacklist anyone was to navigate to `/@you/lists/blacklisted` and
-                  hand-type the username into a page that usually failed to render its
-                  add-form at all (see G2). Same mutation the /lists page's
-                  unblacklist buttons already use — `useBlacklistBlogMutation` /
-                  `useUnblacklistBlogMutation` — via `useModerationStatus`. */}
-              <DropdownMenuItem
-                onClick={moderation.toggleBlacklist}
-                disabled={moderation.blacklistBusy}
-                className="cursor-pointer text-destructive focus:text-destructive"
-                data-testid="profile-blacklist-menu-item"
-              >
-                {moderation.isBlacklisted
-                  ? t('user_profile.unblacklist_button')
-                  : t('user_profile.blacklist_button')}
-              </DropdownMenuItem>
-            </>
-          ) : null}
+          {/* ★ ONE CONTROL, CALLED BLOCK (owner ruling, 2026-08-12).
+              "on Lumen mute and personal blacklist should be the same damn thing …
+              btw it should be called block. just call it block."
+
+              Mute and Blacklist used to sit here as two further items, so this menu
+              offered three overlapping ways to moderate one person, each with a
+              different reach and a different way to undo it. Both are now gone from
+              every overflow menu (this one, the post card, the comment card, and the
+              Follow/Block row) in favour of Block alone.
+
+              Block is also the only one of the three that could carry the owner's
+              actual requirement. Mute and Blacklist are per-viewer chain preferences:
+              they hide someone from YOU and do nothing about that person spamming
+              your posts for everyone else, which is the reason the ruling was made.
+              Block hides them from you AND stops their replies under your content
+              reaching any other reader (block-service.ts, effects A and B). It also
+              works for both account tiers, where the chain operations need a key the
+              lite half of the userbase does not have.
+
+              Existing on-chain mute/blacklist entries are still honoured on read and
+              are still removable from Settings, so nothing a user set before this is
+              stranded. */}
           {explorerHost ? (
             <DropdownMenuItem asChild>
               <Link

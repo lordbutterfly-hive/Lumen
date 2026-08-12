@@ -5,6 +5,7 @@ import { useInfiniteQuery } from '@tanstack/react-query';
 import { useInView } from 'react-intersection-observer';
 import { getPostsRanked } from '@transaction/lib/bridge-api';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { useStorageWithTTL } from '@ui/hooks/useStorageWithTTL';
 import { StorageTTL } from '@ui/lib/storage-with-ttl';
 import { DEFAULT_OBSERVER, DEFAULT_PREFERENCES, Preferences, SortTypes, chainObserver } from '@/blog/lib/utils';
@@ -21,6 +22,20 @@ const SortedPagesPosts = ({ sort, tag = '' }: { sort: SortTypes; tag?: string })
   const ssrObserver = useSSRObserver();
   const initialPosts = useInitialPosts();
   const { user, isHydrated } = useUserClient();
+  /**
+   * ★ THE "enabled" GATE WAS LAGGING BEHIND THE OBSERVER IT SITS NEXT TO
+   * (2026-08-12, G2). `observer` already goes out of its way to use the
+   * cookie/SSR-aware `ssrObserver` before hydration specifically so the query
+   * key matches what the server prefetched — but the `enabled` flag for the
+   * "my" (following) feed below was still gated on raw `user.isLoggedIn`, which
+   * cannot answer during SSR and reports signed-out until `/api/users/me`
+   * returns. So a signed-in reader on `/created` (tag `my`) could have the whole
+   * infinite query wrongly disabled for that window even though `observer` was
+   * already correct. `identity.isLoggedIn` (server-session.tsx) is seeded from
+   * the same session cookie `ssrObserver` is built from, so the two now agree
+   * from the first render.
+   */
+  const identity = useSessionIdentity();
   // Use SSR observer before hydration to match prefetched cache keys,
   // then switch to client observer (which should be the same value for logged-in users)
   const clientObserver = chainObserver(user);
@@ -56,7 +71,7 @@ const SortedPagesPosts = ({ sort, tag = '' }: { sort: SortTypes; tag?: string })
     },
     // Don't fetch "my communities" for anonymous users — the API would return
     // hive.blog's subscriptions which are meaningless to the actual user.
-    enabled: !(tag === 'my' && !user.isLoggedIn),
+    enabled: !(tag === 'my' && !identity.isLoggedIn),
     // Server-fetched data passed directly via context, bypassing Hydrate/dehydrate
     // which has compatibility issues with Next.js App Router streaming SSR in RQ v4.
     // initialData is only used when the query has no cached data (first load).

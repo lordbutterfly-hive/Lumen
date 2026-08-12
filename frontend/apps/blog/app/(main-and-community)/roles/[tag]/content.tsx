@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import Loading from '@ui/components/loading';
 import AddRole from '@/blog/features/community-profile/add-role';
 import { Table, TableBody, TableHead, TableHeader, TableRow } from '@ui/components/table';
-import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { getRoleValue, Roles, rolesLevels } from '@/blog/features/community-profile/lib/utils';
 import TableItem from '@/blog/features/community-profile/table-item';
 import NoDataError from '@/blog/components/no-data-error';
@@ -12,7 +12,19 @@ import { getListCommunityRoles } from '@transaction/lib/bridge-api';
 import { useTranslation } from '@/blog/i18n/client';
 
 const Content = ({ community }: { community: string }) => {
-  const { user } = useUserClient();
+  /**
+   * ★★★ SAME RACE AS EVERY OTHER PERMISSION GATE (2026-08-12, G1). This was
+   * raw `useUserClient()`'s `user.username`, which cannot answer during SSR
+   * and reports empty until `/api/users/me` returns — so `loggedUser` never
+   * matched the viewer's own row in `data` for that whole window, `AddRole`
+   * stayed hidden even for a genuine admin/mod, and the fallback object below
+   * always claimed `role: 'guest'`. `identity.username` is seeded from the
+   * session cookie the server already read, so the match is correct on the
+   * first render. No `account_tier`-style field is involved here — the role
+   * list itself is server-fetched and not tier-gated — so nothing needs to
+   * wait on `identity.clientAnswered`, unlike the lite-only panels.
+   */
+  const identity = useSessionIdentity();
   const { t } = useTranslation('common_blog');
 
   const { data, isLoading, isError } = useQuery({
@@ -31,10 +43,10 @@ const Content = ({ community }: { community: string }) => {
         : []
   });
 
-  const loggedUser = data?.find((e) => e.name === user.username) ?? {
+  const loggedUser = data?.find((e) => e.name === identity.username) ?? {
     value: 1,
     role: 'guest',
-    name: user.username,
+    name: identity.username,
     title: ''
   };
 

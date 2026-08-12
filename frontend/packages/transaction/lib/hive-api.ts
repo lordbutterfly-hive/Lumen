@@ -11,6 +11,7 @@ import {
 } from '@hive/common-hiveio-packages/wax';
 import { GetDynamicGlobalPropertiesResponse } from '@hiveio/wax';
 import { getChain } from './chain';
+import { bannedAuthorList, hasBannedAuthors } from '@ui/config/lists/banned-authors';
 import { ApiAccount, IManabarData } from '@hiveio/wax';
 import { DATA_LIMIT } from './bridge-api';
 import { isBannedAuthor, withoutBannedAuthors } from '@ui/config/lists/banned-authors';
@@ -225,6 +226,49 @@ export const getAccount = (username: string): Promise<FullAccount> =>
   getAccounts([username]).then((resp) => resp[0]);
 
 /**
+ * How many banned accounts sit on each side of this account's follow graph.
+ *
+ * ★ THE COUNT-VS-LIST MISMATCH, on the most-visited surface there is.
+ * `bridge.get_profile().stats` returns `followers`/`following` as raw Hivemind
+ * counts that include banned accounts, while `getFollowers`/`getFollowing`
+ * below filter the LIST those numbers are printed next to. So a profile header
+ * said "84 Followers" over a list rendering 83.
+ *
+ * Fixed the same way `bannedSubscriptionCounts` in `bridge-api.ts` fixes the
+ * community-subscriber version, and for the same reason it works there and not
+ * for `post.stats.total_votes`: the asymmetry. Voters are unbounded per post
+ * with no cheap way to ask "did X vote here". A follow edge IS directly
+ * askable — `get_relationship_between_accounts` answers one edge in one small
+ * call — and the ban list is tiny and fixed (6 names at the time of writing).
+ * So this asks the ban list about this account rather than paging this
+ * account's followers looking for the ban list.
+ *
+ * Cost is `2 * banList.length` small parallel calls, only on profile reads,
+ * only when a ban list is configured, behind the same cache as the profile
+ * itself (`getAccountFullCached`).
+ *
+ * Fails OPEN to the raw count on any error: a wrong-by-one follower number is
+ * a cosmetic defect, and a profile page that will not load is not.
+ */
+const bannedFollowEdges = async (username: string): Promise<{ followers: number; following: number }> => {
+  if (!hasBannedAuthors()) return { followers: 0, following: 0 };
+  const names = bannedAuthorList();
+  const chain = await getChain();
+  const edge = (follower: string, followed: string) =>
+    chain.api.bridge.get_relationship_between_accounts([follower, followed]).catch(() => null);
+  const [inbound, outbound] = await Promise.all([
+    // banned -> username: inflates this account's FOLLOWER count
+    Promise.all(names.map((name) => edge(name, username))),
+    // username -> banned: inflates this account's FOLLOWING count
+    Promise.all(names.map((name) => edge(username, name)))
+  ]);
+  return {
+    followers: inbound.filter((r) => r?.follows).length,
+    following: outbound.filter((r) => r?.follows).length
+  };
+};
+
+/**
  * Fetches follow stats and reputation from bridge.get_profile.
  * Returns both values from a single API call.
  */
@@ -242,11 +286,12 @@ export const getProfileInfo = async (
       reputation: 25
     };
   }
+  const banned = await bannedFollowEdges(username).catch(() => ({ followers: 0, following: 0 }));
   return {
     follow_stats: {
       account: username,
-      follower_count: profile.stats.followers,
-      following_count: profile.stats.following
+      follower_count: Math.max(0, profile.stats.followers - banned.followers),
+      following_count: Math.max(0, profile.stats.following - banned.following)
     },
     reputation: profile.reputation ?? 25
   };

@@ -67,14 +67,20 @@ const CommentsSection = memo(function CommentsSection({
     [paginatedDiscussionState.comments, postData.author, postData.permlink]
   );
 
+  // ★ MUTED-BY-VIEWER DROPPED FROM THIS COUNT (owner ruling, 2026-08-12). This
+  // switch controls `filteringEnabled`, which now only ever reveals the chain-wide
+  // low-reputation collapse (`comment.stats?.gray`) — a comment from someone the
+  // viewer personally muted or blacklisted is hard-hidden by `comment-list-item.tsx`
+  // before this list ever sees it, with no toggle able to bring it back (see
+  // `isOwnModerationHide`). Counting it here would advertise a "Reveal" the switch
+  // no longer performs.
   const hiddenCount = useMemo(() => {
     return paginatedDiscussionState.comments.filter((comment) => {
       // Skip the post itself (only count its replies)
       if (comment.author === postData.author && comment.permlink === postData.permlink) return false;
-      const isMutedByViewer = mutedList?.some((x) => x.name === comment.author);
-      return comment.stats?.gray || isMutedByViewer;
+      return Boolean(comment.stats?.gray);
     }).length;
-  }, [paginatedDiscussionState.comments, mutedList, postData.author, postData.permlink]);
+  }, [paginatedDiscussionState.comments, postData.author, postData.permlink]);
 
   useEffect(() => {
     if (prevCommentsPageRef.current !== commentsPage) {

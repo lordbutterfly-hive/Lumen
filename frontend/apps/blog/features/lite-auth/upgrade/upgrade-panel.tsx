@@ -4,6 +4,7 @@ import { FC, useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { csrfHeaderName } from '@smart-signer/lib/csrf-protection';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { useNameSuggest } from './use-name-suggest';
 import { AccountKeys, generateAccountKeys, ownerKeyMatches, publicKeysOf } from './browser-keys';
 import { fetchAuthMethods, requestStepUp, type LiteAuthMethodName } from '@/blog/lib/lite/client/lite-security';
@@ -143,6 +144,27 @@ type Stage = 'name' | 'keys' | 'done' | 'already' | 'notLinked';
 const UpgradePanel: FC = () => {
   const router = useRouter();
   const { user } = useUserClient();
+  /**
+   * ★★★ SAME RACE AS security-panel.tsx, SAME TIER COMPOUND (2026-08-12, G1).
+   * The entry gate below used raw `useUserClient()`'s `user?.isLoggedIn` —
+   * blank during SSR — so a genuinely signed-in lite reader always saw "Sign
+   * in with your Lumen account to upgrade" for the hydration + fetch window,
+   * on the screen that starts the irreversible key-generation flow.
+   * `identity.isLoggedIn` answers that half immediately from the session
+   * cookie. `account_tier` (needed for the rest of the gate, and for the
+   * `useEffect` below that seeds the status check / name suggestions) still
+   * does not exist on `identity`, so it stays off raw `user`, and the render
+   * waits for `identity.clientAnswered` — the same `[QUERY_KEY.user]` query
+   * `account_tier` comes from — before trusting it, rather than mounting the
+   * name-picker (or the wrong message) on a guess. The `useEffect` itself is
+   * deliberately NOT switched to `identity`: it is a run-once effect keyed on
+   * `user?.isLoggedIn`/`user?.account_tier` together (`started` latches after
+   * the first pass), and firing it early off `identity` while those two raw
+   * fields are still unresolved would let it complete its one pass with an
+   * empty `account_tier` and never retry the `checkName` seed once the real
+   * tier lands.
+   */
+  const identity = useSessionIdentity();
   const { status: nameStatus, check: checkName } = useNameSuggest();
   const [stage, setStage] = useState<Stage>('name');
   const [name, setName] = useState('');
@@ -394,6 +416,20 @@ const UpgradePanel: FC = () => {
     }
   };
 
+  if (!identity.isLoggedIn) {
+    return (
+      <div className="mx-auto max-w-[560px] p-6 text-[15px] text-[#4b5563]">
+        Sign in with your Lumen account to upgrade.
+      </div>
+    );
+  }
+  if (!identity.clientAnswered) {
+    // Genuinely signed in per the session cookie, but `account_tier` — which the
+    // rest of this gate and the status-check effect above both need — isn't
+    // confirmed yet. Neither the sign-in message nor the name picker is honest
+    // here.
+    return <div className="mx-auto max-w-[560px] p-6 text-[15px] text-[#9ca3af]">Loading…</div>;
+  }
   if (!user?.isLoggedIn || user.account_tier !== 'lite') {
     return (
       <div className="mx-auto max-w-[560px] p-6 text-[15px] text-[#4b5563]">

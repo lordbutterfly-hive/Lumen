@@ -1,7 +1,5 @@
 import { NextApiHandler } from 'next';
-import { getIronSession } from 'iron-session';
-import { sessionOptions } from '@smart-signer/lib/session';
-import { IronSessionData } from '@smart-signer/types/common';
+import { getAppSession } from '@smart-signer/lib/get-session';
 import { getLogger } from '@hive/ui/lib/logging';
 import { siteConfig } from '@hive/ui/config/site';
 import { getChatAuthToken } from '@smart-signer/lib/rocket-chat';
@@ -34,7 +32,9 @@ export const chatSso: NextApiHandler = async (req, res) => {
 
   let user;
   try {
-    const session = await getIronSession<IronSessionData>(req, res, sessionOptions);
+    // F-L39 (2026-08-12): see get-session.ts's doc comment — was a bare
+    // `getIronSession(req, res, sessionOptions)` with no expiry enforcement.
+    const session = await getAppSession(req, res);
     user = session.user;
     logger.info('chatSso session user: isLoggedIn=%s, username=%s', user?.isLoggedIn, user?.username);
   } catch (error) {

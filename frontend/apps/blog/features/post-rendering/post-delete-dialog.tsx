@@ -11,7 +11,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger
 } from '@ui/components/alert-dialog';
-import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { ReactNode, useState } from 'react';
 
 export function PostDeleteDialog({
@@ -25,7 +25,15 @@ export function PostDeleteDialog({
   action: (permlink: string) => void;
   label: string;
 }) {
-  const { user } = useUserClient();
+  /**
+   * ★ SAME RACE, THE OK BUTTON (2026-08-12, F5 sweep). This was raw
+   * `user.isLoggedIn`, which cannot answer during SSR and reports "signed out"
+   * until `/api/users/me` returns — a real signed-in owner who opened this
+   * dialog quickly could see no confirm button at all. Nothing else in this
+   * file needs the raw client user object, so `useSessionIdentity` replaces
+   * `useUserClient()` outright.
+   */
+  const identity = useSessionIdentity();
   const [open, setOpen] = useState(false);
 
   return (
@@ -45,7 +53,7 @@ export function PostDeleteDialog({
           <AlertDialogCancel className="hover:text-red-800" data-testid="flag-dialog-cancel">
             Cancel
           </AlertDialogCancel>
-          {user && user.isLoggedIn ? (
+          {identity.isLoggedIn ? (
             <AlertDialogAction
               autoFocus
               className="rounded-none bg-gray-800 text-base text-white shadow-lg shadow-red-600 hover:bg-red-600 hover:shadow-gray-800 disabled:bg-gray-400 disabled:shadow-none"

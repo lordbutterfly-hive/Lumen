@@ -9,7 +9,7 @@ import { StaleTime } from '@/blog/lib/react-query';
 import { useSSRObserver, useInitialPosts } from '@/blog/components/observer-provider';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useInfiniteQuery } from '@tanstack/react-query';
-import { getAccountPosts } from '@transaction/lib/bridge-api';
+import { fetchAccountPosts } from '@/blog/lib/lite/client/account-posts-fetch';
 import { Entry } from '@hive/common-hiveio-packages/wax';
 import { PostListSkeleton } from '@hive/ui';
 import userIllegalContent from '@ui/config/lists/user-illegal-content';
@@ -48,8 +48,15 @@ const PostsContent = ({ query }: { query: QueryTypes }) => {
 
   const { data, isFetching, isFetchingNextPage, fetchNextPage, hasNextPage, isError, isLoading } = useInfiniteQuery({
     queryKey: ['accountEntriesInfinite', username, query, observer],
+    // ★ SERVER-SIDE, NOT A DIRECT CHAIN READ. See `fetchAccountPosts` for why:
+    // the Comments tab can carry this account's replies under someone ELSE's
+    // post, and a post owner's block on this author has to remove those from
+    // every reader here, not just the blocker's own browser (effect B, see
+    // `lib/lite/social/block-filter.ts`). The Posts/Feed tabs never carry a
+    // reply (a root post has no parent to block against), so routing them
+    // through the same call costs nothing and keeps this component simple.
     queryFn: async ({ pageParam }: { pageParam?: Entry }) => {
-      return await getAccountPosts(query, username, observer, pageParam?.author, pageParam?.permlink);
+      return await fetchAccountPosts(query, username, observer, pageParam?.author, pageParam?.permlink);
     },
     getNextPageParam: (lastPage) => {
       if (lastPage && lastPage.length === PER_PAGE) {

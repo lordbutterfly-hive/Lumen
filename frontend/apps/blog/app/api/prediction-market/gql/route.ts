@@ -45,6 +45,15 @@ const logger = getLogger('app');
  * traffic can never starve (or be starved by) the creator-tokens proxy's; and
  * `MAX_STATE_KEYS` mirrors getStateByKeys' own documented 1..100-key range
  * rather than trusting the upstream's rejection to be our only bound.
+ *
+ * ★ `MAX_VARIABLES_BYTES` ADDED (2026-08-12) — sibling fix to the same finding
+ * on the creator-tokens proxy: `MAX_STATE_KEYS` bounds `keys` COUNT, not SIZE,
+ * and was credited with bounding our amplification of the upstream when it
+ * does not — proven live there, a single ~900 KB key sailed straight through
+ * a 100-item array and reached the real upstream. See `MAX_VARIABLES_BYTES`'s
+ * own comment for the sizing (this route's own key builders never carry two
+ * accounts in one key, so the creator-tokens proxy's worst case is the wider
+ * one — the same number is used here so the two mirrors do not diverge).
  */
 
 const ALLOWED_QUERIES = new Set<string>([STATE_QUERY, HEAD_QUERY]);
@@ -54,6 +63,24 @@ const UPSTREAM_TIMEOUT_MS = 10_000;
 
 /** Mirrors getStateByKeys' own documented range (schema.graphql:813) — never our own guess. */
 const MAX_STATE_KEYS = 100;
+
+/**
+ * Byte-size ceiling on the forwarded `variables`, alongside (not instead of)
+ * `MAX_STATE_KEYS` above — that cap only bounds how many entries `keys`
+ * holds, nothing bounds how big any one entry is.
+ *
+ * Same value as the creator-tokens proxy (app/api/creator-tokens/gql/route.ts)
+ * — deliberately, since the two are mirrors and must not diverge. That
+ * route's own key builders (reads.ts) carry the wider worst case (two
+ * 160-byte accounts in one key, e.g. kBal/kMatured — ~325 bytes/key, ~32.5 KB
+ * at MAX_STATE_KEYS); this route's key builders (vsc-market-data-source.ts:
+ * rk/rkOutcomePool/rkStake/rkStakeTotal/rkClaimed) never carry more than one
+ * account per key, so this route's own legitimate worst case is smaller
+ * still. 64 KiB leaves real headroom over either route's actual traffic
+ * while staying nowhere near the ~900 KB single-key payload proven
+ * (adversarial review, 2026-08-11) to sail through the key-COUNT-only cap.
+ */
+const MAX_VARIABLES_BYTES = 64 * 1024;
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const gqlUrl = process.env.REACT_APP_VSC_MARKET_GQL_URL;
@@ -82,6 +109,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   const variablesObj = typeof variables === 'object' && variables !== null ? (variables as Record<string, unknown>) : {};
+
+  // Measured against the exact JSON this route forwards below (`variables:
+  // variablesObj`'s underlying value) — not an estimate. Catches an
+  // oversized value on ANY field, not just an oversized `keys` array, so a
+  // single giant string still trips this even where the key-count check
+  // below would never fire (e.g. HEAD_QUERY's empty variables, or a huge
+  // contractId).
+  const variablesBytes = Buffer.byteLength(JSON.stringify(variablesObj), 'utf8');
+  if (variablesBytes > MAX_VARIABLES_BYTES) {
+    return NextResponse.json(
+      { errors: [{ message: `variables must be at most ${MAX_VARIABLES_BYTES} bytes` }] },
+      { status: 400 }
+    );
+  }
+
   // Only STATE_QUERY carries `keys`; HEAD_QUERY sends none, so this is skipped
   // rather than forced, and cannot itself reject a legitimate HEAD_QUERY call.
   if ('keys' in variablesObj) {

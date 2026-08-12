@@ -44,10 +44,10 @@ import { getUserAvatarUrl } from '@hive/ui';
 import { UserPopoverCard } from './user-popover-card';
 import { useTranslation } from '@/blog/i18n/client';
 import VotesComponentWrapper from '@/blog/features/votes/votes-component-wrapper';
-import { getCommentMuteReasonKey } from '@/blog/lib/muted-reasons';
+import { getCommentMuteReasonKey, isOwnModerationHide } from '@/blog/lib/muted-reasons';
 import { classifyBlacklist } from '@/blog/lib/moderation/blacklist-reason';
 import { useLiteOverlay } from '@/blog/lib/lite/client/use-lite-overlay';
-import { useModerationStatus } from '@/blog/features/mute-follow/hooks/use-moderation-status';
+import { useLumenBlock } from '@/blog/lib/lite/client/use-lumen-block';
 
 interface CommentListProps {
   permissionToMute: Boolean;
@@ -145,6 +145,11 @@ const CommentListItem = memo(function CommentListItem({
   // controlled list matches get a link — a community-moderation hide, a low-
   // reputation hide or a plain downvote have no list to route back to; the reason
   // text next to "Reveal Comment" already names those, unchanged.
+  //
+  // ★ Still computed even though `isMutedByViewer`/`own` now hard-hide below
+  // (`userModerationHidden`) rather than reaching this link: `blacklistReason`
+  // 'followed' still routes a collapsed comment back to the followed-list page,
+  // and this expression stays correct for that case without a second branch.
   const hiddenReasonListHref = isMutedByViewer
     ? `/@${identity.username}/lists/muted`
     : blacklistReason === 'own'
@@ -152,13 +157,37 @@ const CommentListItem = memo(function CommentListItem({
       : blacklistReason === 'followed'
         ? `/@${identity.username}/lists/followed_blacklists`
         : null;
-  // ★ E2 (BUILDMAP-FUCKERY-V2, G3) — the comment overflow menu. Acts on
-  // `comment.author`, same reasoning as the UserPopoverCard passed `author` two
-  // lines up: it is the real signer, and when `liteOverlay` is set that signer is
-  // the shared publishing account, so `targetIsLite` hides the controls rather than
-  // muting/blacklisting every lite author at once.
-  const moderation = useModerationStatus(comment.author, Boolean(liteOverlay));
-  const isOriginallyHidden = filteringEnabled && (isGrayedByStats || isMutedByViewer);
+  // ★ OWNER RULING 2026-08-12 — "mute and personal blacklist should be the same
+  // damn thing... just call it block." The comment overflow menu's ONE moderation
+  // control is Block (below), not separate Mute/Blacklist items. Acts on
+  // `displayAuthor`/its name-space, same split ButtonsContainer/ProfileActions
+  // already use for Block: `comment.author` is the SHARED publishing account for
+  // a lite-authored comment, and blocking THAT would block every lite author's
+  // comments at once — the identical trap the old Mute/Blacklist code guarded
+  // against with `targetIsLite`. `identity` (not `user`) is deliberate: the same
+  // async-identity race that hid Block on the profile dropdown (server-session.tsx)
+  // would otherwise hide it here too.
+  const block = useLumenBlock(
+    displayAuthor,
+    liteOverlay ? 'lumen' : 'hive',
+    identity.isLoggedIn && displayAuthor !== identity.username
+  );
+  const handleBlockClick = async () => {
+    const failure = await block.toggle();
+    if (failure) {
+      handleError(new Error(failure), {
+        method: block.isBlocking ? 'lumen-unblock' : 'lumen-block',
+        params: { username: displayAuthor }
+      });
+    }
+  };
+  // ★ THE VIEWER'S OWN MODERATION HARD-HIDES — NO COLLAPSE, NO REVEAL (owner
+  // ruling 2026-08-12; see `isOwnModerationHide`'s doc for exactly which of the
+  // 9 hidden-reason states this covers and which stay collapsed). This is
+  // SEPARATE from `isOriginallyHidden` below, which still drives the low-
+  // reputation collapse-with-Reveal the owner said must NOT change.
+  const userModerationHidden = isOwnModerationHide(Boolean(isMutedByViewer), blacklistReason);
+  const isOriginallyHidden = filteringEnabled && isGrayedByStats;
   const [hiddenComment, setHiddenComment] = useState(isOriginallyHidden);
   const [openState, setOpenState] = useState<string>(isOriginallyHidden ? '' : 'item-1');
   const [tempraryHidden, setTemporaryHidden] = useState(false);
@@ -218,11 +247,16 @@ const CommentListItem = memo(function CommentListItem({
   const parentFromGDPR = gdprUserList.some((e) => e === comment.parent_author);
 
   useEffect(() => {
-    const shouldBeHidden = filteringEnabled && !!(comment.stats?.gray || isMutedByViewer);
+    // `isMutedByViewer` dropped from this recompute (2026-08-12): it now hard-hides
+    // the whole comment via `userModerationHidden` below, before this state ever
+    // matters, and folding it back in here would make `filteringEnabled` — the
+    // low-reputation "show N filtered comments" switch — able to reveal it again,
+    // exactly the reveal affordance the owner said must not exist for it.
+    const shouldBeHidden = filteringEnabled && !!comment.stats?.gray;
     setHiddenComment(shouldBeHidden);
     setOpenState(shouldBeHidden ? '' : 'item-1');
     setTemporaryHidden(filteringEnabled && !!comment.stats?.gray);
-  }, [comment.stats?.gray, isMutedByViewer, filteringEnabled]);
+  }, [comment.stats?.gray, filteringEnabled]);
   const currentDepth = comment.depth - parent_depth;
 
   const deleteCommentMutation = useDeleteCommentMutation();
@@ -243,6 +277,20 @@ const CommentListItem = memo(function CommentListItem({
   };
 
   if (userFromGDPR || parentFromGDPR) {
+    return null;
+  }
+  // ★ OWNER RULING 2026-08-12 — "we should have no collapses like Hiveblog or
+  // ecency or peakd... it works the same way" as Block. A comment from someone
+  // the viewer muted or personally blacklisted is now gone the same way a
+  // genuinely Lumen-Blocked account's comment already is (filtered out before
+  // this component ever mounts, in `[permlink]/content.tsx`'s `discussionState`)
+  // — no card, no "Reveal Comment", and the subtree goes with it for the same
+  // reason `block-filter.ts` cascades a Block's hide: a reply routinely quotes
+  // what it answers, so leaving it visible would serve the hidden words back
+  // through somebody else's mouth. Recoverable only from Settings (Muted Users /
+  // Blacklisted Users), same as an actual Block is only recoverable from the
+  // Blocked Accounts list.
+  if (userModerationHidden) {
     return null;
   }
   return (
@@ -668,11 +716,20 @@ const CommentListItem = memo(function CommentListItem({
                               temporaryDisable={comment.stats?._temporary}
                             />
                           ) : null}
-                          {/* ★ E2 — Mute/Blacklist reachable from the comment itself, not
-                              only from a popover triggered by clicking the author's name.
-                              Hidden (not disabled) when either side cannot hold a chain
-                              moderation record — see `useModerationStatus`. */}
-                          {moderation.available ? (
+                          {/* ★ E2, REVISED 2026-08-12 (owner ruling) — Block reachable
+                              from the comment itself, not only from a popover triggered
+                              by clicking the author's name. This used to be two items,
+                              Mute and Blacklist; the owner's ruling collapsed them into
+                              the one control that already does both of what those two
+                              were trying to do, plus the part neither of them could
+                              (hiding the blocked account's replies under the viewer's
+                              OWN content from every other reader — see
+                              `lib/lite/social/block-service.ts`). Hidden (not disabled)
+                              for the same reason Mute/Blacklist were: a lite comment's
+                              `comment.author` is the shared publishing account, not a
+                              blockable person — `useLumenBlock`'s own "not yourself"
+                              check covers the rest. */}
+                          {block.available ? (
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>
                                 <button
@@ -686,24 +743,14 @@ const CommentListItem = memo(function CommentListItem({
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end" className="w-52">
                                 <DropdownMenuItem
-                                  onClick={moderation.toggleMute}
-                                  disabled={moderation.muteBusy}
-                                  className="cursor-pointer"
-                                  data-testid="comment-mute-menu-item"
-                                >
-                                  {moderation.isMuted
-                                    ? t('user_profile.unmute_button')
-                                    : t('user_profile.mute_button')}
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                  onClick={moderation.toggleBlacklist}
-                                  disabled={moderation.blacklistBusy}
+                                  onClick={handleBlockClick}
+                                  disabled={block.busy}
                                   className="cursor-pointer text-destructive focus:text-destructive"
-                                  data-testid="comment-blacklist-menu-item"
+                                  data-testid="comment-block-menu-item"
                                 >
-                                  {moderation.isBlacklisted
-                                    ? t('user_profile.unblacklist_button')
-                                    : t('user_profile.blacklist_button')}
+                                  {block.isBlocking
+                                    ? t('user_profile.unblock_button')
+                                    : t('user_profile.block_button')}
                                 </DropdownMenuItem>
                               </DropdownMenuContent>
                             </DropdownMenu>

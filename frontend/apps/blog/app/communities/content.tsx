@@ -9,6 +9,7 @@ import { Skeleton } from '@hive/ui';
 import CommunitiesSelectFilter from '@/blog/features/communities-list/communities-select-filter';
 import CommunitiesList from '@/blog/features/communities-list/communities-list';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { Link } from '@hive/ui';
 import env from '@beam-australia/react-env';
 import { getCommunities } from '@transaction/lib/bridge-api';
@@ -53,6 +54,14 @@ const CommunitiesContent = () => {
   const initialCommunities = useInitialCommunities();
   const initialSubscriptions = useInitialSubscriptions();
   const { user, isHydrated } = useUserClient();
+  /**
+   * ★ SAME RACE, "Create a Community" LINK (2026-08-12, F5 sweep). This was raw
+   * `user.isLoggedIn`, which cannot answer during SSR and reports "signed out"
+   * until `/api/users/me` returns — so a real signed-in owner's own "Create a
+   * Community" link was briefly missing on every hard load. `identity`
+   * (server-session.tsx) is seeded from the cookie the server already read.
+   */
+  const identity = useSessionIdentity();
   const [sort, setSort] = useState('rank');
   const [inputQuery, setInputQuery] = useState<string>('');
   const [query, setQuery] = useState<string | null>(null);
@@ -97,10 +106,10 @@ const CommunitiesContent = () => {
         <span className="text-sm font-medium sm:text-xl" data-testid="communities-header">
           {t('communities.communities')}
         </span>
-        {user.isLoggedIn ? (
+        {identity.isLoggedIn ? (
           <Link
             className="text-sm font-medium text-red-600"
-            href={`${walletHost}/@${user.username}/communities`}
+            href={`${walletHost}/@${identity.username}/communities`}
           >
             Create a Community
           </Link>

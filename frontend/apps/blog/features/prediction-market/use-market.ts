@@ -3,6 +3,7 @@
 import { useCallback } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { getMarketDataSource } from './lib/market-data-source';
 
 const ROUND_KEY = ['predictionMarket', 'round'] as const;
@@ -26,8 +27,23 @@ const SERIES_REFETCH_MS = 120_000;
  */
 export function useMarket() {
   const queryClient = useQueryClient();
-  const { user, isHydrated } = useUserClient();
-  const loggedIn = isHydrated && user.isLoggedIn;
+  const { user } = useUserClient();
+  /**
+   * ★ SAME RACE AS EVERY OTHER LOGIN GATE (2026-08-12, G2). This was
+   * `isHydrated && user.isLoggedIn` — `user.isLoggedIn` cannot answer during SSR
+   * and reports signed-out on the client until `/api/users/me` returns, and
+   * `isHydrated` adds nothing here (it only tracks whether the mount effect has
+   * run, not whether the session is known), so a signed-in reader landing on the
+   * market saw "Log in to bet" for the same multi-second window every other
+   * identity-gated control had. `identity.isLoggedIn` answers immediately from
+   * the session cookie the server already read. `user.account_tier` below stays
+   * on the raw hook — it does not exist on `identity` by design (same as
+   * `bet-form.tsx`'s own `isLite`, `muted-list.tsx`, `profile-actions.tsx`) — a
+   * keyless lite account still cannot sign a bet, and `placeBetMutation` below
+   * refuses it independently of anything rendered.
+   */
+  const identity = useSessionIdentity();
+  const loggedIn = identity.isLoggedIn;
   // A keyless Lumen account: it can read the market but cannot sign anything.
   const isLite = user.account_tier === 'lite';
   const dataSource = getMarketDataSource();

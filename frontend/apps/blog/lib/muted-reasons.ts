@@ -68,3 +68,42 @@ export function getPostHiddenMessageKey(mutedReasons: number[] | undefined): str
 
   return 'post_content.body.content_were_hidden';
 }
+
+/**
+ * ═══ WHICH OF THE 9 HIDDEN-REASON STATES ARE THE VIEWER'S OWN CHOICE ═══
+ * (owner ruling, 2026-08-12: "on Lumen mute and personal blacklist should be the
+ * same damn thing... we should have no collapses like Hiveblog or ecency or
+ * peakd... if you mute or blacklist someone it works the same way" as Block. A
+ * SEPARATE ruling, unchanged by this one: low-reputation/downvote collapse stays
+ * exactly as it is — that is a chain-wide signal, not the user's decision.)
+ *
+ * Between `MutedReason` (5 values) and `classifyBlacklist`'s `BlacklistReason`
+ * (4 values, one of which — 'none' — never reaches a caller that already knows a
+ * comment is hidden), `getCommentMuteReasonKey` can return 9 distinct strings.
+ * Exactly TWO of them are a decision the viewer made about THIS one account:
+ *
+ *   - `isMutedByViewer` (the viewer's own chain `ignore`)
+ *   - `blacklistReason === 'own'` (a REAL match on the viewer's own blacklist —
+ *     never the synthetic `reputation-N` token `classifyBlacklist` strips out)
+ *
+ * Both must now render exactly like a Lumen Block: gone, with no collapse box
+ * and no Reveal affordance anywhere, recoverable only from Settings.
+ *
+ * The other seven are NOT the viewer's own decision about this one account:
+ *
+ *   - `blacklistReason === 'followed'` is someone else's curated blacklist the
+ *     viewer opted INTO — a subscription to a third party's judgement, not a
+ *     personal one about this account (compare "I blocked @x" to "I follow
+ *     @hive-watchers' blacklist, which happens to include @x").
+ *   - The five `MutedReason` codes (community moderation/type/role, a muted
+ *     parent, low reputation) and the downvote fallback are all chain-wide
+ *     signals Hivemind computed, not a choice this viewer made.
+ *
+ * Those seven keep the existing collapse-with-Reveal treatment, unchanged.
+ */
+export function isOwnModerationHide(
+  isMutedByViewer: boolean,
+  blacklistReason: BlacklistReason
+): boolean {
+  return isMutedByViewer || blacklistReason === 'own';
+}

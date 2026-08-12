@@ -194,6 +194,106 @@ export async function applyOwnerBlocksToReplies<T extends Entry>(
 }
 
 /**
+ * Effect (B) for one author's OWN post/comment history -- the profile Posts and
+ * Comments tabs (`getAccountPosts` sort `'comments'`, and the lite-account
+ * equivalent `getLiteUserPosts`). Every entry here has a DIFFERENT parent, and
+ * that parent is essentially never in `entries`: the array is one person's
+ * writing across many unrelated threads, not one conversation. That rules out
+ * {@link applyOwnerBlocksToThread}'s trick of resolving ancestry by looking the
+ * coordinate up inside the same array: on this shape there is nothing there to
+ * find, and wiring that function in here would silently hide nothing.
+ *
+ * ★★★ ONE HOP, DELIBERATELY -- READ THIS BEFORE "FIXING" IT.
+ *
+ * This checks only the entry's DIRECT parent: does the account that wrote
+ * `parent_author`/`parent_permlink` (the root post, or an intermediate
+ * comment) have a live block against THIS entry's author? That is the actual
+ * spam vector this feature exists to close: a blocked account replying
+ * straight onto the blocker's post or comment and then pointing people at
+ * their own profile to read it, answered from a field every entry already
+ * carries, with no extra fetch per level.
+ *
+ * What it does NOT catch: a comment nested two or more levels under the
+ * blocker's content, whose own immediate parent is a THIRD party's comment.
+ * Per the owner's rule ("a reply under my comment is under my content too",
+ * see the file header) that comment is under the blocker's content too and
+ * ideally would be hidden here as well. A full ancestry walk would need one
+ * MORE lookup per level, per entry, with no bound on how deep a real thread
+ * nests. `applyOwnerBlocksToThread` pays nothing extra to walk ancestry
+ * because every ancestor is already loaded as part of the same thread page; a
+ * profile's Posts/Comments tab instead pages roughly 20 entries drawn from up
+ * to 20 UNRELATED threads, so that cost cannot be amortised the same way. It
+ * would be N levels times 20 entries of fresh lookups on every single page
+ * load.
+ *
+ * The residual gap this leaves: a reply two-plus hops under a blocker's post
+ * can still turn up on its author's own profile. It does NOT turn up on the
+ * THREAD itself: `applyOwnerBlocksToThread` / `...ToDiscussion` /
+ * `...ToReplies` walk the full ancestry and already catch it there, so the
+ * words are already withheld from the page people actually read a
+ * conversation on. A profile scrape for a specific buried reply is a narrower
+ * and far less likely route to the same content than the thread itself. If
+ * this gap ever needs closing, the fix is a BOUNDED ancestry walk here (cap
+ * the depth, do not walk forever), not an unbounded one.
+ */
+export async function applyOwnerBlocksToAuthoredEntries<T extends Entry>(entries: T[]): Promise<T[]> {
+  const withParent = entries
+    .map((entry) => ({ entry, parent: parentCoordKey(entry) }))
+    .filter((row): row is { entry: T; parent: string } => row.parent !== null);
+  if (withParent.length === 0) return entries;
+
+  // One owner resolution per DISTINCT parent coordinate, not per entry: a
+  // profile page routinely has several replies hanging under the same post.
+  const parentRefs = new Map<string, { author: string; permlink: string }>();
+  for (const { entry, parent } of withParent) {
+    if (!parentRefs.has(parent)) {
+      parentRefs.set(parent, { author: entry.parent_author as string, permlink: entry.parent_permlink as string });
+    }
+  }
+
+  const resolvedOwners = await Promise.all(
+    [...parentRefs.entries()].map(async ([parent, { author, permlink }]) => {
+      // A single bad lookup must not take the whole tab down with it: fail
+      // that one parent open (unresolved owner, so its replies stay visible)
+      // rather than the entire page.
+      const owner = await resolvePostOwnerActor(author, permlink).catch(() => null);
+      return [parent, owner] as const;
+    })
+  );
+  const ownerKeyByParent = new Map<string, string>();
+  for (const [parent, owner] of resolvedOwners) {
+    if (owner) ownerKeyByParent.set(parent, actorKey(owner));
+  }
+  if (ownerKeyByParent.size === 0) return entries;
+
+  const resolver = await buildEntryActorResolver(entries);
+  const authorKeyByEntry = new Map<T, string>();
+  const authorKeys = new Set<string>();
+  for (const { entry } of withParent) {
+    const key = resolver.keyOf(entry);
+    if (key) {
+      authorKeyByEntry.set(entry, key);
+      authorKeys.add(key);
+    }
+  }
+  if (authorKeys.size === 0) return entries;
+
+  const blockedPairs = await blocks.blockedPairsAmong([...new Set(ownerKeyByParent.values())], [...authorKeys]);
+  if (blockedPairs.size === 0) return entries;
+
+  const hidden = new Set<T>();
+  for (const { entry, parent } of withParent) {
+    const ownerKey = ownerKeyByParent.get(parent);
+    const authorKey = authorKeyByEntry.get(entry);
+    if (ownerKey && authorKey && blockedPairs.has(blocks.pairKey(ownerKey, authorKey))) {
+      hidden.add(entry);
+    }
+  }
+  if (hidden.size === 0) return entries;
+  return entries.filter((entry) => !hidden.has(entry));
+}
+
+/**
  * Who owns the post at these coordinates, as a block-graph node.
  *
  * ★ THE SHARED PUBLISHING ACCOUNT IS NOT AN OWNER. Every Lumen post is signed on

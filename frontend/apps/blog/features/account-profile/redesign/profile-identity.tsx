@@ -27,8 +27,11 @@ interface ProfileIdentityProps {
   reputation?: number;
   /**
    * E1 (BUILDMAP-FUCKERY-V2): the viewer has muted and/or blacklisted this account.
-   * Dims the bio/handle block as a visual cue, matching the cover's own dimming —
-   * `ProfileModerationBanner` above still carries the actual explanation.
+   * Dims the bio/handle block as a visual cue, matching the cover's own dimming.
+   * The standalone `ProfileModerationBanner` that used to carry the actual
+   * explanation in words was retired (2026-08-12, Block consolidation cleanup,
+   * see `profile-main.tsx`) — `ProfileActions`' CTA-slot badge is the
+   * explanation now.
    */
   moderated?: boolean;
 }

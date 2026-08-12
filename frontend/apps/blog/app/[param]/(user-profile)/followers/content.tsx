@@ -7,6 +7,7 @@ import PrevNextButtons from '@/blog/features/account-lists/prev-next-buttons';
 import ButtonsContainer from '@/blog/features/mute-follow/buttons-container';
 import { useTranslation } from '@/blog/i18n/client';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { useIsMutating, useQuery } from '@tanstack/react-query';
 import { getAccountFull } from '@transaction/lib/hive-api';
 import { IFollow } from '@hive/common-hiveio-packages/wax';
@@ -25,6 +26,16 @@ const FollowersContent = ({
   const { t } = useTranslation('common_blog');
   const [page, setPage] = useState(0);
   const { user } = useUserClient();
+  /**
+   * ★★★ SAME RACE AS followed/content.tsx (2026-08-12, G1). Raw
+   * `useUserClient()`'s `user.isLoggedIn`/`user.username` cannot answer during
+   * SSR, so the viewer's own follow/mute list fetches below started late and
+   * every row's follow/block control (including on your own row) was hidden
+   * until `/api/users/me` returned. `identity` is seeded from the session
+   * cookie the server already read. `user` (raw, unchanged) still goes into
+   * `ButtonsContainer`, which needs `account_tier` — not on `identity`.
+   */
+  const identity = useSessionIdentity();
 
   const { data: profileData } = useQuery({
     queryKey: ['profileData', username],
@@ -36,8 +47,8 @@ const FollowersContent = ({
   const isMutating = isFollowMutating > 0 || isUnfollowMutating > 0;
 
   const followersData = useFollowersInfiniteQuery(username, LIMIT, initialFollowers);
-  const following = useFollowingInfiniteQuery(user.username, 1000, 'blog', ['blog']);
-  const mute = useFollowingInfiniteQuery(user.username, 1000, 'ignore', ['ignore']);
+  const following = useFollowingInfiniteQuery(identity.username, 1000, 'blog', ['blog']);
+  const mute = useFollowingInfiniteQuery(identity.username, 1000, 'ignore', ['ignore']);
 
   const handleNextPage = () => {
     if (!followersData.data) return;
@@ -94,7 +105,7 @@ const FollowersContent = ({
                 className="flex items-center justify-between bg-background-tertiary px-3 font-semibold text-destructive odd:bg-background"
               >
                 <BasePathLink href={`/@${e.follower}`}>{e.follower}</BasePathLink>
-                {!user.isLoggedIn || user.username === e.follower ? null : (
+                {!identity.isLoggedIn || identity.username === e.follower ? null : (
                   <div>
                     <ButtonsContainer
                       username={e.follower}

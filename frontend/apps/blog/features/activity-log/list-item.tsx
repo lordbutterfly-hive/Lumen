@@ -2,7 +2,7 @@ import { Icons } from '@hive/ui/components/icons';
 import TimeAgo from '@hive/ui/components/time-ago';
 import { UserAvatarImg } from '@ui/components';
 import { IAccountNotification } from '@hive/common-hiveio-packages/wax';
-import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { usePathname } from 'next/navigation';
 import { Link } from '@hive/ui';
 import { cn } from '@ui/lib/utils';
@@ -81,14 +81,22 @@ const NotificationListItem = ({
   const { t } = useTranslation('common_blog');
   const pathname = usePathname();
   const username = pathname?.split('/')[1].replace('@', '') || '';
-  const { user } = useUserClient();
+  /**
+   * ★ SAME RACE AS THE HEADER/RAIL (2026-08-12, F5). This was raw `useUserClient()`,
+   * which cannot answer during SSR and reports "signed out" until `/api/users/me`
+   * returns — so a real owner's own notifications briefly rendered every row as read
+   * (`isOwner` false ⇒ `isUnread` false) regardless of the bell's own unread badge.
+   * `useSessionIdentity` (features/layouts/server-session.tsx) is seeded from the
+   * session cookie the server already read, so it is correct from the first render.
+   */
+  const identity = useSessionIdentity();
 
   const mentions = msg.match(usernamePattern);
   const notificationDate = new Date(date);
   const { icon, color } = getNotificationIcon(type);
   const fixedUrl = url.startsWith('c') ? url.replace('c', 'trending') : url;
   const errorMessage = type === 'error';
-  const isOwner = isOwnerProp ?? (user.isLoggedIn && user.username === username);
+  const isOwner = isOwnerProp ?? (identity.isLoggedIn && identity.username === username);
   const isUnread = isOwner && notificationDate > lastRead;
 
   // Get the first mentioned user for avatar display

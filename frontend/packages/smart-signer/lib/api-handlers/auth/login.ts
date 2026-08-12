@@ -1,12 +1,10 @@
 import createHttpError from 'http-errors';
 import { NextApiHandler } from 'next';
-import { getIronSession } from 'iron-session';
-import { sessionOptions } from '@smart-signer/lib/session';
+import { getAppSession } from '@smart-signer/lib/get-session';
 import { getAccount } from '@transaction/lib/hive-api';
 import { getChain } from '@transaction/lib/chain';
 import { postLoginSchema, PostLoginSchema } from '@smart-signer/lib/auth/utils';
 import { User } from '@smart-signer/types/common';
-import { IronSessionData } from '@smart-signer/types/common';
 import { cookieNamePrefix } from '@smart-signer/lib/session';
 import { checkCsrfHeader } from '@smart-signer/lib/csrf-protection';
 import { verifyLoginChallenge } from '@smart-signer/lib/verify-login-challenge';
@@ -157,8 +155,19 @@ export const loginUser: NextApiHandler<User> = async (req, res) => {
     oauthConsent,
     strict: verifiedUser?.strict ? true : false
   };
-  const session = await getIronSession<IronSessionData>(req, res, sessionOptions);
+  const session = await getAppSession(req, res);
   session.user = user;
+  // F-L39 (2026-08-12): stamp the Hive TTL clock AT ISSUE, here, rather than
+  // relying solely on `getAppSession()`'s read-side backfill. This is the
+  // ACTUAL issuance point for every full-Hive session (the OAuth/consent/
+  // chat-token handlers only ever read one login.ts already created) — the
+  // "real, stated gap" F-L38 left open (see the long comment on
+  // `hiveSessionIssuedAt` in packages/smart-signer/types/common.ts: "a Hive
+  // user whose browsing never reaches a route that calls getLiteSession()
+  // never gets backfilled"). Stamping here means that gap no longer exists
+  // for any session created from this point forward; the read-side backfill
+  // remains only for the backlog of sessions issued before this change.
+  session.hiveSessionIssuedAt = Date.now();
   await session.save();
 
   // Set account_info cookie for page visit logging in Edge Runtime middleware.

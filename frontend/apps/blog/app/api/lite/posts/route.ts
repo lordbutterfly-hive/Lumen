@@ -6,12 +6,35 @@ import { createLitePost, getLiteUserPosts, CreatePostRequest } from '@/blog/lib/
 import { findUserByDisplayName } from '@/blog/lib/lite/repositories/user-repository';
 import { dbPostToEntry } from '@/blog/lib/lite/render/db-post-to-entry';
 import { resolvePublicNames } from '@/blog/lib/lite/render/current-name';
+import { applyOwnerBlocksToAuthoredEntries } from '@/blog/lib/lite/social/block-filter';
 import { ParentRef } from '@/blog/lib/lite/types';
+import type { Entry } from '@hive/common-hiveio-packages/wax';
 
 const logger = getLogger('app');
 
 /** Hive account charset. */
 const HIVE_NAME = /^[a-z][a-z0-9.-]{2,15}$/;
+
+/**
+ * Stand-in for `parent_author` when the real parent is a LITE post rather than
+ * a chain one. `resolvePostOwnerActor` (block-filter.ts) resolves ownership
+ * from `parent_permlink` first -- it recognises the synthetic `lite-<id>`
+ * shape and looks the id up directly, never touching this value at all as
+ * long as that lookup succeeds. It is read only if the referenced lite post
+ * has since been deleted, and even then it must never accidentally name a
+ * real account: `'0'` cannot be a Hive account name (must start with a
+ * letter) and cannot be a Lumen block key either, so it resolves to "no
+ * owner found" rather than risking a false match against an unrelated real
+ * account that happens to share this placeholder's spelling.
+ */
+const UNRESOLVED_LITE_PARENT_AUTHOR = '0';
+
+/** `lite-<id>` -- the same synthetic permlink `dbPostToEntry` gives an
+ *  unpublished lite post, which is exactly the shape `litePostIdOf` parses
+ *  back into a post id. */
+function liteParentPermlink(postId: string): string {
+  return `lite-${postId.toLowerCase()}`;
+}
 
 /**
  * A permlink we are REFERENCING, not creating.
@@ -183,7 +206,42 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // than read off the row so an upgraded author's back catalogue shows their new
     // Hive name (see render/current-name.ts).
     const names = await resolvePublicNames(list);
-    return NextResponse.json({ entries: list.map((post) => dbPostToEntry(post, names.get(post.postId))) });
+
+    // ★★★ STAMP THE PARENT, THEN APPLY EFFECT (B) (2026-08-12).
+    //
+    // `dbPostToEntry` never sets `parent_author`/`parent_permlink` -- it was
+    // written for feed cards, which only ever show a post's OWN identity, not
+    // what it replies to (same gap `/api/lite/posts/replies` hit and fixed
+    // for its one-fixed-parent case). This route is different: it is the
+    // Comments tab, so `kind=comments` returns replies to MANY different
+    // parents on one page, and the block check needs to know each one.
+    //
+    // A lite reply's parent is a `ParentRef`, resolved on chain PUBLISH but
+    // known immediately either way:
+    //   - `{type: 'chain', author, permlink}` -- already a real chain
+    //     coordinate, used as-is.
+    //   - `{type: 'lite', id}` -- another Lumen post, not yet known by a
+    //     chain author/permlink. `resolvePostOwnerActor` resolves a `lite-<id>`
+    //     permlink straight from the id without ever needing an author
+    //     string, so the placeholder author here is a formality the normal
+    //     path never reads (see `UNRESOLVED_LITE_PARENT_AUTHOR`).
+    const withParents: Entry[] = list.map((post) => {
+      const entry = dbPostToEntry(post, names.get(post.postId));
+      if (post.parentRef?.type === 'chain') {
+        return { ...entry, parent_author: post.parentRef.author, parent_permlink: post.parentRef.permlink };
+      }
+      if (post.parentRef?.type === 'lite') {
+        return {
+          ...entry,
+          parent_author: UNRESOLVED_LITE_PARENT_AUTHOR,
+          parent_permlink: liteParentPermlink(post.parentRef.id)
+        };
+      }
+      return entry;
+    });
+    const entries = await applyOwnerBlocksToAuthoredEntries(withParents);
+
+    return NextResponse.json({ entries });
   } catch (error) {
     logger.error(error, 'Lite author posts failed');
     return NextResponse.json({ error: 'server_error' }, { status: 500 });

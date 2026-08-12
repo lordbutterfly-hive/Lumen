@@ -10,6 +10,7 @@ import { IFollow } from '@hive/common-hiveio-packages/wax';
 import { useMemo, useState } from 'react';
 import ButtonsContainer from '@/blog/features/mute-follow/buttons-container';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import Loading from '@ui/components/loading';
 
 const LIMIT = 50;
@@ -30,17 +31,33 @@ const FollowedContent = ({
   const [page, setPage] = useState(0);
 
   const { user } = useUserClient();
+  /**
+   * ★★★ SAME RACE AS EVERY OTHER OWNERSHIP GATE (2026-08-12, G1). This page's
+   * "am I looking at my own followed list" check, the viewer's-own-list
+   * queries that feed it, and the per-row "hide the follow button on myself"
+   * check were all off raw `useUserClient()` — blank until `/api/users/me`
+   * returns — so a genuine owner's own list briefly went un-cross-filtered
+   * (stale/duplicate rows visible until the client answered) and EVERY row's
+   * follow/block control was hidden for that whole window, not just your own.
+   * `identity` is seeded from the session cookie the server already read, so
+   * both are correct from the first render — including starting the viewer's
+   * own follow/mute list fetches (below) as soon as the cookie is known,
+   * rather than waiting on client hydration. `user` (raw, unchanged) still
+   * goes down into `ButtonsContainer` — it needs `account_tier`, which does
+   * not exist on `identity`, same as everywhere else this pattern applies.
+   */
+  const identity = useSessionIdentity();
   const isFollowMutating = useIsMutating({ mutationKey: ['follow'] });
   const isUnfollowMutating = useIsMutating({ mutationKey: ['unfollow'] });
   const isMutating = isFollowMutating > 0 || isUnfollowMutating > 0;
 
   const followingData = useFollowingInfiniteQuery(username, LIMIT, undefined, undefined, initialFollowing);
-  const following = useFollowingInfiniteQuery(user?.username || '', 1000, 'blog', ['blog']);
-  const mute = useFollowingInfiniteQuery(user.username, 1000, 'ignore', ['ignore']);
+  const following = useFollowingInfiniteQuery(identity.username, 1000, 'blog', ['blog']);
+  const mute = useFollowingInfiniteQuery(identity.username, 1000, 'ignore', ['ignore']);
 
   // When viewing own profile, cross-filter list against the optimistically-correct
   // follow status query to handle stale API responses from slow Hivemind indexing.
-  const isOwnProfile = user.isLoggedIn && username === user.username;
+  const isOwnProfile = identity.isLoggedIn && username === identity.username;
   const followedSet = useMemo(() => {
     if (!isOwnProfile || !following.data?.pages) return null;
     const set = new Set<string>();
@@ -119,7 +136,7 @@ const FollowedContent = ({
                 className="flex items-center justify-between bg-background-tertiary px-3 font-semibold text-destructive odd:bg-background"
               >
                 <BasePathLink href={`/@${e.following}`}>{e.following}</BasePathLink>
-                {!user.isLoggedIn || user.username === e.following ? null : (
+                {!identity.isLoggedIn || identity.username === e.following ? null : (
                   <div className="flex gap-2">
                     <ButtonsContainer
                       username={e.following}

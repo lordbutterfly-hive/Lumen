@@ -3,6 +3,7 @@
 import { FC, useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { useSignOut } from '@smart-signer/lib/auth/use-sign-out';
 import {
   bindGoogle,
@@ -129,6 +130,24 @@ const MethodRow: FC<{ method: LiteAuthMethod }> = ({ method }) => {
 
 const SecurityPanel: FC = () => {
   const { user } = useUserClient();
+  /**
+   * ★★★ SAME RACE AS EVERY OTHER IDENTITY GATE, COMPOUNDED BY TIER
+   * (2026-08-12, G1). `isLite` below was already gated on raw
+   * `useUserClient()`'s `user?.isLoggedIn`, which cannot answer during SSR —
+   * so a genuinely signed-in lite reader landing on this page always saw
+   * "Sign in with your Lumen account…" for the whole hydration + fetch
+   * window, on the one screen whose entire job is telling someone they have
+   * only one way back into their account. `identity.isLoggedIn` answers that
+   * half immediately from the session cookie. The other half — whether this
+   * account IS lite — genuinely cannot be known any sooner: `account_tier`
+   * does not exist on `identity` by design (only the real client `user`
+   * object has it, same as `muted-list.tsx`/`profile-actions.tsx`). So the
+   * render below is three-way, not two: definitely signed out (identity),
+   * signed in but tier not confirmed yet (`identity.clientAnswered`, same
+   * `[QUERY_KEY.user]` query `account_tier` comes from — a loading state, not
+   * a guess), then the real `isLite` check once it's safe to trust.
+   */
+  const identity = useSessionIdentity();
   const router = useRouter();
   const signOutMutation = useSignOut();
   const [confirmSignOutAll, setConfirmSignOutAll] = useState(false);
@@ -251,6 +270,12 @@ const SecurityPanel: FC = () => {
     await afterLink();
   };
 
+  if (!identity.isLoggedIn) {
+    return <div className="mx-auto max-w-[560px] p-6 text-[15px] text-[#4b5563]">{COPY.signedOut}</div>;
+  }
+  if (!identity.clientAnswered) {
+    return <div className="mx-auto max-w-[560px] p-6 text-[15px] text-[#9ca3af]">{COPY.loading}</div>;
+  }
   if (!isLite) {
     return <div className="mx-auto max-w-[560px] p-6 text-[15px] text-[#4b5563]">{COPY.signedOut}</div>;
   }

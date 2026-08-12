@@ -13,6 +13,7 @@ import {
 } from 'react';
 import { EditorView } from '@codemirror/view';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { toast } from '@ui/components/hooks/use-toast';
 import { ToastAction } from '@ui/components/toast';
 import imageUserBlocklist from '@ui/config/lists/image-user-blocklist';
@@ -41,6 +42,20 @@ interface MdEditorProps {
 const MdEditor: FC<MdEditorProps> = ({ onChange, persistedValue = '', placeholder, windowheight }) => {
   const { t } = useTranslation('common_blog');
   const { user } = useUserClient();
+  /**
+   * ★ SAME RACE, A DIFFERENT GATE (2026-08-12, G2). `imageUserBlocklist.includes(user.username)`
+   * used raw `user.username`, which is '' during SSR and stays '' on the client until
+   * `/api/users/me` returns — so for a genuinely blocked user, `isBlockedUser` read false for
+   * that whole window, which does not just mis-render (file input shown, drag handlers
+   * attached): `handlePaste`/`dropHandler` below gate the ACTUAL upload call on the same flag,
+   * so a blocked user could paste or drop an image and have it uploaded before the block ever
+   * took effect. `identity.username` is seeded from the session cookie the server already
+   * read, so the blocklist check is correct on the very first render. The upload calls
+   * themselves keep passing raw `user.username` (unchanged) — same reasoning as the paste
+   * handler's existing `user.username`-not-`signer.username` note just below: they run only on
+   * a real user interaction, well after identity has resolved.
+   */
+  const identity = useSessionIdentity();
   const { signer } = useSignerContext();
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -111,7 +126,7 @@ const MdEditor: FC<MdEditorProps> = ({ onChange, persistedValue = '', placeholde
     view.focus();
   }, []);
 
-  const isBlockedUser = imageUserBlocklist?.includes(user.username);
+  const isBlockedUser = imageUserBlocklist?.includes(identity.username);
 
   // Paste handler (images + Hive URL conversion)
   const handlePaste = useCallback(

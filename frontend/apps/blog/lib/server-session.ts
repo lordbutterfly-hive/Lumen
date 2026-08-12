@@ -1,6 +1,7 @@
 import { cookies } from 'next/headers';
 import { getIronSession } from 'iron-session';
 import { sessionOptions } from '@smart-signer/lib/session';
+import { applyHiveSessionTtl } from '@smart-signer/lib/get-session';
 import type { IronSessionData } from '@smart-signer/types/common';
 import { getLogger } from '@ui/lib/logging';
 
@@ -30,6 +31,15 @@ const SIGNED_OUT: ServerSessionUser = { isLoggedIn: false, username: '' };
 export async function getServerSessionUser(): Promise<ServerSessionUser> {
   try {
     const session = await getIronSession<IronSessionData>(cookies(), sessionOptions);
+    // A sealed cookie no longer carries its own expiry (J6's `maxAge: undefined`
+    // forces iron-session's seal `ttl` to 0), so expiry is enforced in
+    // application code or not at all. This reader gates real redirects for
+    // `/wallet`, `/wallet/tokens`, `/creators/launch`, `/creators/studio` and
+    // `/profile`, and tells the header and left rail whether to draw a
+    // signed-in product — so without this call a 400-day-old cookie still
+    // opened all of them. `canPersist: false` because this runs inside a Server
+    // Component render, where Next.js forbids writing cookies.
+    await applyHiveSessionTtl(session, { canPersist: false });
     if (session.user?.isLoggedIn && session.user.username) {
       return { isLoggedIn: true, username: session.user.username };
     }

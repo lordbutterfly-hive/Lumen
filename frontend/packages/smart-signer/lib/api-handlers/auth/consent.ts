@@ -1,9 +1,7 @@
 import createHttpError from 'http-errors';
 import { NextApiHandler } from 'next';
-import { getIronSession } from 'iron-session';
-import { sessionOptions } from '@smart-signer/lib/session';
+import { getAppSession } from '@smart-signer/lib/get-session';
 import { User } from '@smart-signer/types/common';
-import { IronSessionData } from '@smart-signer/types/common';
 import { checkCsrfHeader } from '@smart-signer/lib/csrf-protection';
 import { getLogger } from '@hive/ui/lib/logging';
 import { postConsentSchema, PostConsentSchema } from '@smart-signer/lib/auth/utils';
@@ -22,9 +20,14 @@ export const registerConsent: NextApiHandler<User> = async (req, res) => {
 
   let user: User | undefined;
   try {
-    const session = await getIronSession<IronSessionData>(
-      req, res, sessionOptions
-    );
+    // F-L39 (2026-08-12): was `getIronSession(req, res, sessionOptions)`
+    // directly — no Hive-session expiry check at all, which is the exact bug
+    // this handler was used to prove live (a 400-day-old sealed cookie got a
+    // 403 here — i.e. it PASSED this auth gate — instead of the 401 an
+    // expired session should get). `getAppSession()` enforces the same
+    // `hiveSessionIssuedAt` TTL `getLiteSession()` enforces for lite routes.
+    // See that function's doc comment for the full history.
+    const session = await getAppSession(req, res);
     user = session.user;
   } catch (error) {
     logger.error(error, 'registerConsent error');
@@ -59,7 +62,7 @@ export const registerConsent: NextApiHandler<User> = async (req, res) => {
   const data: PostConsentSchema = await postConsentSchema.parseAsync(req.body);
   user.oauthConsent[data.oauthClientId] = data.consent;
 
-  const session = await getIronSession<IronSessionData>(req, res, sessionOptions);
+  const session = await getAppSession(req, res);
   session.user = user;
   await session.save();
   res.json(user);

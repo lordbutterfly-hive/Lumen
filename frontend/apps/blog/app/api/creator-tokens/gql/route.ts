@@ -49,6 +49,13 @@ const logger = getLogger('app');
  * than a number invented here — relying on the upstream to reject an oversized
  * `keys` array (as it does today) means our amplification is bounded only by
  * someone else's validation, which is the actual defect.
+ *
+ * ★ `MAX_VARIABLES_BYTES` ADDED (2026-08-12) — the cap above bounds `keys`
+ * COUNT, not SIZE, and was credited with bounding our amplification of the
+ * upstream when it does not: proven live, a single ~900 KB key sailed
+ * straight through a 100-item array (well under `MAX_STATE_KEYS`) and reached
+ * the real upstream, which returned 200. See `MAX_VARIABLES_BYTES`'s own
+ * comment for how that limit was sized.
  */
 
 const ALLOWED_QUERIES = new Set<string>([STATE_QUERY, STATE_QUERY_HEX, HEAD_QUERY]);
@@ -58,6 +65,30 @@ const UPSTREAM_TIMEOUT_MS = 10_000;
 
 /** Mirrors getStateByKeys' own documented range (schema.graphql:813) — never our own guess. */
 const MAX_STATE_KEYS = 100;
+
+/**
+ * Byte-size ceiling on the forwarded `variables`, alongside (not instead of)
+ * `MAX_STATE_KEYS` above — that cap only bounds how many entries `keys`
+ * holds, nothing bounds how big any one entry is.
+ *
+ * Sized from what THIS app's own key builders can legitimately produce
+ * (reads.ts), not a guessed round number: the widest single key this client
+ * ever builds carries TWO accounts — kBal (`mb|<did>|<did>`) and kMatured
+ * (`bal|<did>|<did>`) — each up to isWellFormedDid's own 160-byte max
+ * (mirroring core/util.go's MaxAccountLen), so ~4 + 160 + 1 + 160 = 325 bytes
+ * worst case. At MAX_STATE_KEYS (100) that's ~32.5 KB of key content alone;
+ * add contractId and JSON array/object framing and the largest query this
+ * client could ever legitimately send is still under 33 KB. 64 KiB leaves
+ * that real ~2x headroom while staying nowhere near the ~900 KB single-key
+ * payload proven (adversarial review, 2026-08-11) to sail through the
+ * key-COUNT-only cap — that payload is ~14x over this limit.
+ *
+ * Shared verbatim with the prediction-market proxy (app/api/prediction-market/gql/route.ts):
+ * that route's own key builders (vsc-market-data-source.ts) never carry two
+ * accounts in one key, so its legitimate worst case is smaller than this —
+ * using the same number keeps the two deliberate mirrors from diverging.
+ */
+const MAX_VARIABLES_BYTES = 64 * 1024;
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const gqlUrl = process.env.REACT_APP_CREATOR_TOKENS_GQL_URL;
@@ -85,6 +116,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   const variablesObj = typeof variables === 'object' && variables !== null ? (variables as Record<string, unknown>) : {};
+
+  // Measured against the exact JSON this route forwards below (`variables:
+  // variablesObj`'s underlying value) — not an estimate. Catches an
+  // oversized value on ANY field, not just an oversized `keys` array, so a
+  // single giant string still trips this even where the key-count check
+  // below would never fire (e.g. HEAD_QUERY's empty variables, or a huge
+  // contractId).
+  const variablesBytes = Buffer.byteLength(JSON.stringify(variablesObj), 'utf8');
+  if (variablesBytes > MAX_VARIABLES_BYTES) {
+    return NextResponse.json(
+      { errors: [{ message: `variables must be at most ${MAX_VARIABLES_BYTES} bytes` }] },
+      { status: 400 }
+    );
+  }
+
   // Only STATE_QUERY / STATE_QUERY_HEX carry `keys`; HEAD_QUERY sends none, so this
   // is skipped rather than forced, and cannot itself reject a legitimate HEAD_QUERY call.
   if ('keys' in variablesObj) {

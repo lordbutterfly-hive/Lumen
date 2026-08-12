@@ -46,7 +46,6 @@ export class ProfilePage {
   readonly profileLocation: Locator;
   readonly profileStats: Locator;
   readonly followButton: Locator;
-  readonly muteButton: Locator;
   readonly userLinks: Locator;
   readonly profileBlogPostsList: Locator;
 
@@ -267,7 +266,12 @@ export class ProfilePage {
     this.profileFollowing = this.profileStats.locator('> a').nth(2);
     this.profileHP = this.profileStats.locator('> div').first();
     this.followButton = page.locator('[data-testid="profile-follow-button"]');
-    this.muteButton = page.locator('[data-testid="profile-mute-button"]');
+    // ★ `muteButton` REMOVED (2026-08-12, Block consolidation cleanup). It
+    // targeted `data-testid="profile-mute-button"`, which no longer renders
+    // anywhere — the redesigned profile header (`ProfileActions`) offers a
+    // Block menu item, not a Mute button, and this locator's last two
+    // callers (`socialMute.spec.ts`, deleted; `socialUnmute.spec.ts`,
+    // retargeted at `/lists/muted`) no longer need it.
     this.userLinks = page.locator('[data-testid="user-links"]');
     this.profileBlogPostsList = page.getByTestId('post-list-profile-blog-list');
 

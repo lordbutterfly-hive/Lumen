@@ -1,9 +1,8 @@
 import { NextApiHandler } from "next";
-import { getIronSession } from 'iron-session';
-import { sessionOptions, cookieNamePrefix } from '@smart-signer/lib/session';
+import { cookieNamePrefix } from '@smart-signer/lib/session';
+import { getAppSession } from '@smart-signer/lib/get-session';
 import { defaultUser } from '@smart-signer/lib/auth/utils';
 import { User } from '@smart-signer/types/common';
-import { IronSessionData } from '@smart-signer/types/common';
 import { getLogger } from "@hive/ui/lib/logging";
 
 const logger = getLogger('app');
@@ -22,7 +21,16 @@ const logger = getLogger('app');
  * created a session at all (see `lite-auth/login/keychain-signin.tsx`).
  */
 export const getUser: NextApiHandler<User> = async (req, res) => {
-  const session = await getIronSession<IronSessionData>(req, res, sessionOptions);
+  // F-L39 (2026-08-12): this is THE "am I logged in" endpoint the rest of
+  // the app trusts for its client-side auth state — see the "NO
+  // SESSION-REVOCATION CHECK HERE" comment on the route wrapper
+  // (apps/blog/pages/api/users/me.ts) for how much weight that carries.
+  // `getIronSession(req, res, sessionOptions)` directly had NO expiry
+  // enforcement, so a leaked, decades-stale cookie STRING would read as
+  // signed-in here forever. `getAppSession()` enforces the same
+  // `hiveSessionIssuedAt` TTL `getLiteSession()` already enforces for lite
+  // routes — see its doc comment for the full history.
+  const session = await getAppSession(req, res);
   if (session.user) {
     res.json({
       ...session.user,

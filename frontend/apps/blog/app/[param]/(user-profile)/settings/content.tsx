@@ -2,6 +2,7 @@
 
 import SettingsForm from '@/blog/features/account-settings/form';
 import MutedList from '@/blog/features/account-settings/muted-list';
+import BlockedList from '@/blog/features/account-settings/blocked-list';
 import ModerationLists from '@/blog/features/account-settings/moderation-lists';
 import { SETTINGS_CARD, SETTINGS_CARD_HINT, SETTINGS_CARD_TITLE } from '@/blog/features/account-settings/lib/card';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
@@ -99,6 +100,12 @@ const SettingsContent = ({ username }: { username: string }) => {
         <OwnerGateSkeleton />
       )}
 
+      {/* ★ FIRST, ABOVE THE LEGACY LISTS (owner ruling, 2026-08-12). Block is now
+          the ONE primary moderation control across the profile/post/comment
+          overflow menus; this card is where "make sure it persists" gets proven —
+          see `blocked-list.tsx`'s header comment. Mute/Blacklist keep their own
+          cards below for anyone with pre-existing chain-based entries. */}
+      <BlockedList username={username} />
       <ModerationLists username={username} />
       <MutedList username={username} />
     </div>

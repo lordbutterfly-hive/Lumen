@@ -69,6 +69,48 @@ function parseList(raw: string | undefined | null): string[] {
  */
 let cached: Set<string> | null = null;
 
+/**
+ * ★ THE WARNING THIS FILE DID NOT HAVE (2026-08-12). An empty ban list is a
+ * completely ordinary state — a fresh checkout, a preview deploy, a `.env`
+ * that dropped a line — and until now it was also a COMPLETELY SILENT one:
+ * `isBannedAuthor` just returns `false` for everybody, forever, and nothing
+ * anywhere says moderation is off. The bpcvoter ring (see `.env.blog.example`)
+ * was live in one operator's `.env.local` only, which does not travel with a
+ * commit or a deploy — the exact shape of gap this closes.
+ *
+ * ★ WHY A LOUD LOG AND NOT A REFUSAL TO BOOT. Checked how this codebase treats
+ * every other "REQUIRED" env var before choosing: nowhere does the running
+ * server call `process.exit`/throw at startup over a missing config value —
+ * every `process.exit` in the repo is in a CLI script or self-test, never in
+ * the Next.js process itself. The actual precedent
+ * (`packages/smart-signer/lib/oauth/config.ts`, `DENSER_SERVER_SECRET_COOKIE_
+ * PASSWORD`) is two-part: warn once, unmissably, at first use ("...will not
+ * work"), and reserve a hard `throw` for the function that ACTUALLY needs the
+ * value at the moment it needs it (`getJwtSecret()`). There is no equivalent
+ * throw point here — `isBannedAuthor` is consulted on every render, all over
+ * the app, and making it throw would turn "moderation is unconfigured" into
+ * "the site is down", which is a strictly worse failure mode for a value the
+ * owner may deliberately leave unset. So this follows the established
+ * pattern rather than inventing a stricter one: loud warning, degraded
+ * service, nothing hidden.
+ *
+ * Fires from whichever runtime resolves the list first — server or browser,
+ * see the memoisation note above — which means an operator watching either
+ * server logs or the browser console will see it. `cached` already guarantees
+ * this body runs once per module lifetime, so no separate "warned already"
+ * flag is needed.
+ */
+function warnBanListEmpty(): void {
+  console.error(
+    '[banned-authors] REACT_APP_BANNED_AUTHORS and LUMEN_BANNED_AUTHORS are both unset ' +
+      '(or empty). Author moderation is DISABLED: every banned account will render ' +
+      'completely normally, on every surface, until one of these is set. This is not a ' +
+      'crash, and nothing else will warn you — see .env.blog.example for the variable, ' +
+      'and packages/ui/config/lists/banned-authors.ts for the fields it accepts and why ' +
+      'there is deliberately no committed default list of names.'
+  );
+}
+
 function bannedSet(): Set<string> {
   if (cached) return cached;
   const fromPublic = parseList(env('BANNED_AUTHORS'));
@@ -76,6 +118,7 @@ function bannedSet(): Set<string> {
   const fromServer =
     typeof process !== 'undefined' && process.env ? parseList(process.env.LUMEN_BANNED_AUTHORS) : [];
   cached = new Set([...fromPublic, ...fromServer]);
+  if (cached.size === 0) warnBanListEmpty();
   return cached;
 }
 

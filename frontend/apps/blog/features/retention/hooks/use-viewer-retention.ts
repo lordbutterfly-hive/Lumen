@@ -2,6 +2,7 @@
 
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { useRetention, type RetentionSummaryResponse, type RetentionSource } from './use-retention';
 
 /**
@@ -78,6 +79,15 @@ export interface ViewerRetention {
    * block sat on "Working out where you are standing…" with no request ever
    * issued. `fetchStatus` is the field that means "a fetch is actually
    * happening", and it is the one this reports.
+   *
+   * ★ PLUS ONE MORE CASE (2026-08-12, G2): "we know you're signed in but we do
+   * not yet know which ladder applies to you." Neither the chain nor the lite
+   * query below can be `enabled` until `user.account_tier` is known, and that
+   * field has no session-cookie equivalent — unlike `isLoggedIn`, it can only
+   * come from the client query resolving. So this also reports loading for that
+   * narrow, real window, rather than falling through to `active.fetchStatus`
+   * (which is legitimately idle — neither query has started yet) and reading as
+   * "not loading" to a caller who would otherwise render "unavailable".
    */
   isLoading: boolean;
   /** The applicable query failed — the caller must say so, not render blank. */
@@ -99,6 +109,20 @@ export interface ViewerRetention {
  */
 export function useViewerRetention(): ViewerRetention {
   const { user, isHydrated } = useUserClient();
+  /**
+   * ★ SAME RACE, ONE LEVEL DEEPER (2026-08-12, G2). Every consumer of this hook
+   * (TodayCard, RanksLadder, ProfileLeagueCard's own chip, the showcase, the
+   * nudge, the weekly recap) ultimately renders off `summary`/`isLoading`/
+   * `isError`/`source` below, and all four used to gate on raw `user.isLoggedIn`
+   * — which cannot answer during SSR and reports signed-out on the client until
+   * `/api/users/me` returns. `identity.isLoggedIn` (server-session.tsx) answers
+   * immediately from the session cookie the server already read, so a signed-in
+   * reader is never told "signed out" here. `isChain`/`isLite` stay on the raw
+   * `user.isLoggedIn`/`user.account_tier` below — `account_tier` does not exist
+   * on `identity` by design, and it is genuinely what decides which of the two
+   * queries to enable, so there is no earlier-available signal for that split.
+   */
+  const identity = useSessionIdentity();
   const isLite = user.isLoggedIn && user.account_tier === 'lite';
   const isChain = user.isLoggedIn && !isLite;
 
@@ -108,13 +132,17 @@ export function useViewerRetention(): ViewerRetention {
   const active = isLite ? lite : chain;
   // Until the session itself has settled we do not yet know WHICH query applies,
   // so that counts as in-flight too — otherwise the first painted frame after
-  // hydration would briefly claim the answer is unavailable.
-  const inFlight = !isHydrated || active.fetchStatus !== 'idle';
+  // hydration would briefly claim the answer is unavailable. `!identity.clientAnswered`
+  // covers the identity-race window specifically: `identity.isLoggedIn` can be
+  // true (from the cookie) while `isChain`/`isLite` are still both false because
+  // `user.account_tier` has not resolved yet — during that window neither query
+  // below is even enabled, so `active.fetchStatus` alone would read as idle.
+  const inFlight = !isHydrated || !identity.clientAnswered || active.fetchStatus !== 'idle';
   return {
-    summary: user.isLoggedIn ? active.data : undefined,
-    source: user.isLoggedIn ? (isLite ? 'lumen' : 'chain') : null,
-    isLoading: user.isLoggedIn && !active.data && inFlight,
-    isError: user.isLoggedIn && active.isError,
+    summary: identity.isLoggedIn ? active.data : undefined,
+    source: identity.isLoggedIn ? (isLite ? 'lumen' : 'chain') : null,
+    isLoading: identity.isLoggedIn && !active.data && inFlight,
+    isError: identity.isLoggedIn && active.isError,
     refetch: () => active.refetch()
   };
 }

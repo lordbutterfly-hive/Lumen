@@ -18,6 +18,8 @@ import { getUserAvatarUrl } from '@ui/lib/avatar-utils';
 import { cn } from '@ui/lib/utils';
 import { handleError } from '@ui/lib/handle-error';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
+import { useLumenBlock } from '@/blog/lib/lite/client/use-lumen-block';
 import { getPostSummary } from '@/blog/lib/utils';
 import { find_first_img } from '@/blog/features/list-of-posts/post-img';
 import VotesComponentWrapper from '@/blog/features/votes/votes-component-wrapper';
@@ -33,6 +35,7 @@ import { Entry } from '@hive/common-hiveio-packages/wax';
 import { isNsfwPost, useNsfwPreference } from '@/blog/lib/nsfw';
 import { useModerationStatus } from '@/blog/features/mute-follow/hooks/use-moderation-status';
 import { classifyBlacklist } from '@/blog/lib/moderation/blacklist-reason';
+import { isOwnModerationHide } from '@/blog/lib/muted-reasons';
 
 // TODO: move to i18n
 const LABELS = {
@@ -56,6 +59,18 @@ const LABELS = {
 export default function MediumPostCard({ post, mark }: { post: Entry; mark?: RankMark }) {
   const { t } = useTranslation('common_blog');
   const { user } = useUserClient();
+  /**
+   * ★ GAP-2 FIX (owner ruling 2026-08-12, "Block does not render reliably").
+   * `user.isLoggedIn` from raw `useUserClient()` cannot answer during SSR and
+   * reports signed-out until `/api/users/me` returns — the same class of race
+   * `server-session.tsx`'s big comment documents for the header, and the exact
+   * reason a live enumeration of the profile dropdown found Block sometimes
+   * absent from a signed-in session. `user` stays for everything else this card
+   * already used it for (reblog author, chain follow lists); `identity` is used
+   * ONLY to gate the new Block control below, so it renders on the first paint
+   * instead of waiting on a client round trip.
+   */
+  const identity = useSessionIdentity();
   const reblogMutation = useReblogMutation();
   // A Lumen proxy post arrives from Hivemind authored by the shared publishing
   // account, so without this overlay a lite user's post shows the wrong name here.
@@ -72,12 +87,36 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
   // Blacklist here would silence that shared account for every lite writer, not just
   // this one — `useModerationStatus`'s `targetIsLite` hides the controls exactly the
   // way `ProfileActions`/`ButtonsContainer` already hide Mute for the same reason.
+  // ★ STILL NEEDED (2026-08-12): `moderation.isMuted` and `moderation.muteStatusUnknown`
+  // still decide whether this card renders (see the two gates below) — only its
+  // Mute/Blacklist WRITE controls were removed from this card's overflow menu,
+  // replaced by Block (owner ruling). `available`/`isBlacklisted`/`toggleMute`/
+  // `toggleBlacklist`/`muteBusy`/`blacklistBusy` are no longer read here.
   const moderation = useModerationStatus(post.author, Boolean(liteOverlay));
   // NOT `post.blacklists.length > 0` — see `classifyBlacklist`'s doc for the measured
   // proof that Hivemind mixes a synthetic "reputation-N" token into that array for
   // any low/negative-reputation author with no list involved at all.
   const blacklistReason = classifyBlacklist(post.blacklists);
   const [moderationRevealed, setModerationRevealed] = useState(false);
+  // ★ OWNER RULING 2026-08-12 — the post overflow menu's ONE moderation control is
+  // Block, not separate Mute/Blacklist items (see comment-list-item.tsx for the
+  // identical change and its reasoning). Acts on `displayAuthor`/its name-space,
+  // same lite-vs-chain split `moderation` above already uses, for the same reason:
+  // `post.author` is the shared publishing account for a lite-authored post.
+  const block = useLumenBlock(
+    displayAuthor,
+    liteOverlay ? 'lumen' : 'hive',
+    identity.isLoggedIn && displayAuthor !== identity.username
+  );
+  const handleBlockClick = async () => {
+    const failure = await block.toggle();
+    if (failure) {
+      handleError(new Error(failure), {
+        method: block.isBlocking ? 'lumen-unblock' : 'lumen-block',
+        params: { username: displayAuthor }
+      });
+    }
+  };
 
   // ★ NSFW GATE (2026-08-09) — see lib/nsfw.ts for why this lives here at all.
   // Every hook runs before the `hide` early-return below, so hook order stays
@@ -126,49 +165,65 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
   // renders nothing for them (`nsfw === 'hide' ? null : ...`) and so does this.
   if (isNsfw && nsfwPreference === 'hide') return null;
 
-  // ★ E1 — THE HEADLINE DEFECT. Before this, a muted author's post rendered with
-  // full title, excerpt and thumbnail — pixel-identical to anyone else's — because
-  // nothing in this card ever looked at the viewer's mute list at all. Blacklist gets
-  // a small badge instead of a full collapse (see the mark below): it is informational
-  // — the same convention `comment-list-item.tsx` already applies (blacklist alone
-  // never hides a comment, only labels why a downvote/mute hide happened) — while Mute
-  // is the viewer's own explicit "I don't want to see this" and collapses the card,
-  // matching E4's ask that muted, blacklisted and downvoted stop looking identical.
-  if (moderation.isMuted && !moderationRevealed) {
+  // ★ DEFECT-2 FIX (2026-08-12) — mute status "unknown" must render differently
+  // from "confirmed not muted", and it must NOT render as an ordinary card.
+  //
+  // Measured: `condenser_api.get_following` (the mute-list read behind
+  // `moderation.isMuted`, see `use-moderation-status.ts`) times out often enough
+  // that 3 of 4 fresh page loads lost the mute signal entirely — and because the
+  // query used to swallow that failure into an empty, "successful" page (fixed in
+  // `use-following-infinitequery.tsx`), this card had no way to tell "the viewer
+  // mutes nobody" from "we don't know". It rendered the full post either way.
+  //
+  // The choice here is deliberately the SAME ONE `for-you/route.ts` already makes
+  // for a failed refetch: an error must not masquerade as an empty, clean result
+  // (that file's own comment: "THIS IS HOW A READER'S FEED GOT WIPED... 503 is the
+  // honest answer"). Applied to a single card instead of a whole feed, "honest"
+  // means the reader is told the check could not be completed and is given an
+  // explicit choice to view anyway — never a card that silently claims to have
+  // been checked. This also matches `hydrate()` in that same file: "cannot prove
+  // X is safe => do not serve it as normal" — fail closed on the RENDER decision,
+  // but say so, rather than either lying "clean" (the old bug) or lying "muted"
+  // (which `medium-card-muted` below would if reused for an unknown status).
+  //
+  // Not gated behind `moderationRevealed` from the branch below — a reader who
+  // revealed ONE unknown-status post has not thereby vouched for every other one
+  // sharing this page's single, shared mute-list query.
+  if (moderation.muteStatusUnknown && !moderationRevealed) {
     return (
       <article
-        className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-[18px] border border-[#ebebeb] bg-[#f9f7f5] p-[18px] font-sans text-[13.5px] text-[#6b7280]"
-        data-testid="medium-card-muted"
+        className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-[18px] border border-dashed border-[#e0dcd4] bg-[#f9f7f5] p-[18px] font-sans text-[13.5px] text-[#6b7280]"
+        data-testid="medium-card-moderation-unknown"
       >
-        <span>{t('cards.post_card.muted_interstitial', { author: displayAuthor })}</span>
-        <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
-          <button
-            type="button"
-            onClick={() => setModerationRevealed(true)}
-            className="font-semibold text-[#2a2822] underline-offset-2 hover:underline"
-            data-testid="medium-card-muted-reveal"
-          >
-            {t('cards.post_card.reveal_post')}
-          </button>
-          <button
-            type="button"
-            onClick={moderation.toggleMute}
-            disabled={moderation.muteBusy}
-            className="underline-offset-2 hover:underline disabled:opacity-60"
-            data-testid="medium-card-muted-unmute"
-          >
-            {t('user_profile.unmute_button')}
-          </button>
-          <Link
-            href={`/@${user.username}/lists/muted`}
-            className="underline-offset-2 hover:underline"
-            data-testid="medium-card-muted-list-link"
-          >
-            {t('user_profile.moderation_banner_view_list')}
-          </Link>
-        </span>
+        <span>{t('cards.post_card.moderation_status_unknown', { author: displayAuthor })}</span>
+        <button
+          type="button"
+          onClick={() => setModerationRevealed(true)}
+          className="font-semibold text-[#2a2822] underline-offset-2 hover:underline"
+          data-testid="medium-card-moderation-unknown-reveal"
+        >
+          {t('cards.post_card.reveal_post')}
+        </button>
       </article>
     );
+  }
+
+  // ★ OWNER RULING 2026-08-12 — "we should have no collapses like Hiveblog or
+  // ecency or peakd... it works the same way" as Block. This used to be a
+  // collapse-with-Reveal-and-Unmute interstitial (E1); a post from someone the
+  // viewer muted or personally ('own') blacklisted is now simply gone, exactly
+  // like a Lumen-Blocked author's post already is on the tabs that filter
+  // `isBlockedEntry` before this component ever mounts (`feed-tabs.tsx`). No
+  // interstitial, no Reveal, no inline Unmute — recoverable only from Settings
+  // (Muted Users / Blacklisted Users / Blocked Accounts), same as a real Block.
+  // `blacklistReason === 'followed'` is NOT included — see `isOwnModerationHide`'s
+  // doc for why that one stays the informational badge below, unchanged.
+  //
+  // Ordered AFTER the `muteStatusUnknown` gate above on purpose: that gate is
+  // "we don't know yet, so don't claim clean OR muted"; this one only fires once
+  // the mute-list read actually succeeded and came back positive.
+  if (isOwnModerationHide(moderation.isMuted, blacklistReason)) {
+    return null;
   }
 
   return (
@@ -299,13 +354,17 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
             yet; see the component's own doc. */}
         <TokenAuthorChip handle={displayAuthor} />
 
-        {/* ★ E2 — THE POST OVERFLOW MENU THAT DID NOT EXIST. Before this pass there
-            was no way to moderate an author from the feed at all — clicking their
-            name only ever navigated to the profile. Hidden by `moderation.available`
-            when either side cannot hold a chain moderation record (lite viewer or
-            lite-proxied author) — same "hidden, not disabled" rule as everywhere
-            else `useModerationStatus` is used. */}
-        {moderation.available ? (
+        {/* ★ E2, REVISED 2026-08-12 (owner ruling) — THE POST OVERFLOW MENU'S ONE
+            MODERATION CONTROL IS BLOCK. Before this pass there was no way to
+            moderate an author from the feed at all; this menu then grew Mute and
+            Blacklist as two separate items. The owner's ruling collapsed both
+            into Block, which already does everything those two were trying to do
+            plus the half neither could (hiding this author's replies under the
+            viewer's OWN content from every other reader). Hidden (not disabled)
+            when either side cannot hold a Lumen block record — same "hidden, not
+            disabled" rule `useModerationStatus` used, now enforced by
+            `useLumenBlock`'s own `available` answer instead. */}
+        {block.available ? (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
@@ -319,22 +378,12 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-52">
               <DropdownMenuItem
-                onClick={moderation.toggleMute}
-                disabled={moderation.muteBusy}
-                className="cursor-pointer"
-                data-testid="medium-card-mute-menu-item"
-              >
-                {moderation.isMuted ? t('user_profile.unmute_button') : t('user_profile.mute_button')}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={moderation.toggleBlacklist}
-                disabled={moderation.blacklistBusy}
+                onClick={handleBlockClick}
+                disabled={block.busy}
                 className="cursor-pointer text-destructive focus:text-destructive"
-                data-testid="medium-card-blacklist-menu-item"
+                data-testid="medium-card-block-menu-item"
               >
-                {moderation.isBlacklisted
-                  ? t('user_profile.unblacklist_button')
-                  : t('user_profile.blacklist_button')}
+                {block.isBlocking ? t('user_profile.unblock_button') : t('user_profile.block_button')}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

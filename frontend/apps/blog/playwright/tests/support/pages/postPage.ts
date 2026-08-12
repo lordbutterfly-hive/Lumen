@@ -23,7 +23,15 @@ export class PostPage {
   readonly userHpPopoverCard: Locator;
   readonly userAboutPopoverCard: Locator;
   readonly buttonFollowPopoverCard: Locator;
-  readonly buttonMutePopoverCard: Locator;
+  /**
+   * ★ RENAMED FROM `buttonMutePopoverCard` (2026-08-12, Block consolidation
+   * cleanup). Mute was retired from the popover entirely (owner ruling
+   * 2026-08-12) — `buttons-container.tsx` now renders Follow + Block only,
+   * for every author. Targets `data-testid="profile-block-button"`
+   * directly rather than matching button text, so it doesn't ambiguously
+   * match both the "Block"/"Unblock" states.
+   */
+  readonly buttonBlockPopoverCard: Locator;
 
   readonly commentListItems: Locator;
   readonly commentContentToHover: Locator;
@@ -159,7 +167,7 @@ export class PostPage {
     this.userHpPopoverCard = page.locator('[data-testid="user-hp"]');
     this.userAboutPopoverCard = page.locator('[data-testid="user-about"]');
     this.buttonFollowPopoverCard = page.getByTestId('user-popover-card-content').locator('button').getByText('Follow');
-    this.buttonMutePopoverCard = page.locator('button').getByText('Mute');
+    this.buttonBlockPopoverCard = page.getByTestId('profile-block-button');
     this.commentListItems = page.locator('[data-testid="comment-list-item"]');
     this.commentContentToHover = page.getByTestId('comment-card-to-hover');
     this.commentListItem = '[data-testid="comment-list-item"]'

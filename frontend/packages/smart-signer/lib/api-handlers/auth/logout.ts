@@ -1,9 +1,7 @@
 import { NextApiHandler } from 'next';
-import { getIronSession } from 'iron-session';
-import { sessionOptions } from '@smart-signer/lib/session';
+import { getAppSession } from '@smart-signer/lib/get-session';
 import { defaultUser } from '@smart-signer/lib/auth/utils';
 import { User } from '@smart-signer/types/common';
-import { IronSessionData } from '@smart-signer/types/common';
 import { checkCsrfHeader } from '@smart-signer/lib/csrf-protection';
 import { getLogger } from '@ui/lib/logging';
 import { oidc } from '@smart-signer/lib/oidc';
@@ -30,10 +28,15 @@ export const logoutUser: NextApiHandler<User> = async (req, res) => {
   }
 
   try {
-    // Destroy app session
-    const session = await getIronSession<IronSessionData>(
-      req, res, sessionOptions
-    );
+    // Destroy app session. F-L39 (2026-08-12): routed through `getAppSession()`
+    // like every other call site in this package, for consistency — logout
+    // has no auth DECISION riding on session freshness (it unconditionally
+    // destroys whatever is here), but going through the shared accessor
+    // means an already-stale session logs itself out as "unknown" rather
+    // than attributing the destroy to a username `getAppSession()` has
+    // already blanked, and keeps this file from being the one straggler
+    // that still calls `getIronSession(req, res, sessionOptions)` raw.
+    const session = await getAppSession(req, res);
     if (session) {
       // Log logout event BEFORE destroying session (need user data for log)
       const username = session.user?.username || 'unknown';

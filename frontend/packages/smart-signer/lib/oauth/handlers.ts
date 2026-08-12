@@ -11,9 +11,8 @@
  */
 
 import { NextApiHandler, NextApiRequest, NextApiResponse } from 'next';
-import { getIronSession } from 'iron-session';
-import { sessionOptions } from '@smart-signer/lib/session';
-import { IronSessionData, OAuthState } from '@smart-signer/types/common';
+import { getAppSession } from '@smart-signer/lib/get-session';
+import { OAuthState } from '@smart-signer/types/common';
 import { siteConfig } from '@hive/ui/config/site';
 import { getHiveUserProfile } from '@smart-signer/lib/get-hive-user-profile';
 import { getLogger } from '@hive/ui/lib/logging';
@@ -63,8 +62,14 @@ const DEFAULT_AVATAR_HASH = 'DQmb2HNSGKN3pakguJ4ChCRjgkVuDN9WniFRPmrxoJ4sjR4';
  *    -> Use session state, generate code, redirect to client
  */
 export const handleAuthorize: NextApiHandler = async (req, res) => {
-  // Get user session first to check for stored OAuth state
-  const session = await getIronSession<IronSessionData>(req, res, sessionOptions);
+  // Get user session first to check for stored OAuth state.
+  // F-L39 (2026-08-12): `getAppSession()` replaces a bare
+  // `getIronSession(req, res, sessionOptions)` here — see that function's doc
+  // comment for why every direct call site in this package was unable to
+  // enforce the Hive session TTL, and what a stale-but-sealed cookie used to
+  // buy an attacker against a route like this one (issuing an OAuth
+  // authorization code for `user.username`).
+  const session = await getAppSession(req, res);
   const user = session.user;
   const storedOAuthState = session.oauthState;
 
@@ -387,7 +392,7 @@ export const getOAuthReturnUrl = async (
   req: NextApiRequest,
   res: NextApiResponse
 ): Promise<string | null> => {
-  const session = await getIronSession<IronSessionData>(req, res, sessionOptions);
+  const session = await getAppSession(req, res);
   const oauthState = session.oauthState;
 
   if (!oauthState) {

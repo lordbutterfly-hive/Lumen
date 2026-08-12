@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import { useInfiniteQuery, type UseInfiniteQueryResult } from '@tanstack/react-query';
 import { useInView } from 'react-intersection-observer';
-import { getAccountPosts } from '@transaction/lib/bridge-api';
+import { fetchAccountPosts } from '@/blog/lib/lite/client/account-posts-fetch';
 import { Entry } from '@hive/common-hiveio-packages/wax';
 import { StaleTime } from '@/blog/lib/react-query';
 import { isBlockedEntry, useLumenBlockList } from '@/blog/lib/lite/client/use-lumen-block';
@@ -90,10 +90,20 @@ export function useAccountEntries(
 
   const result = useInfiniteQuery({
     queryKey: ['profileRedesignEntries', username, query, observer, lite],
+    // ★ CHAIN BRANCH GOES THROUGH `/api/account-posts`, NOT A DIRECT CHAIN
+    // READ (2026-08-12). This hook feeds the LIVE Comments tab (`?tab=comments`
+    // on `/@username` -- see `profile-comments-list.tsx`), and this is exactly
+    // where a post owner's block on the account being viewed has to remove
+    // their replies from every reader, not just the blocker's own browser
+    // (effect B, `lib/lite/social/block-filter.ts`). A filter that only runs
+    // in the browser is enforced by precisely the people it exists to
+    // constrain. The Posts tab query carries no `parent_author` (root posts
+    // have no parent), so routing it through the same call is a no-op there
+    // and keeps the two tabs on one code path.
     queryFn: async ({ pageParam }: { pageParam?: PageParam }) =>
       lite
         ? await fetchLiteAuthorEntries(username, query, pageParam?.permlink)
-        : (await getAccountPosts(
+        : (await fetchAccountPosts(
             BRIDGE_SORT_FOR_QUERY[query],
             username,
             observer,
@@ -135,15 +145,21 @@ export function useAccountEntries(
     }
   }, [inView, hasNextPage, isFetching, isError, fetchNextPage]);
 
-  // ★ EFFECT (A) ON A LIST THE BROWSER FETCHES ITSELF.
+  // ★ EFFECT (A) STAYS HERE, EVEN THOUGH THE CHAIN BRANCH NOW GOES THROUGH OUR
+  // OWN SERVER (2026-08-12, see the `fetchAccountPosts` call above).
   //
-  // `getAccountPosts` goes straight from this browser to a Hive node, so no Lumen
-  // server ever sees this response and there is nowhere else to apply the reader's
-  // own block list. Client-side is honest HERE and only here: the sole person who
-  // could defeat it is the reader, and all they would win is seeing something they
-  // asked not to see. The OTHER half of blocking — a post owner hiding somebody's
-  // replies from OTHER readers — is never enforced this way, because there the
-  // person running the filter would be the person it exists to constrain.
+  // Effect (A) -- "I never see them again" -- is the READER's own preference,
+  // and `/api/account-posts` is deliberately session-less (same reasoning as
+  // `/api/discussion`): it answers the same for every caller so the response
+  // can be cached and effect (B) stays a property of the ACCOUNT being
+  // viewed, not of who happens to be looking. So the viewer's own block list
+  // is still applied client-side, on top of whatever the server already
+  // filtered. This is honest HERE and only here: the sole person who could
+  // defeat it is the reader, and all they would win is seeing something they
+  // asked not to see. The OTHER half of blocking -- a post owner hiding
+  // somebody's replies from OTHER readers -- is effect (B), and that is now
+  // enforced on the server this hook fetches from (`applyOwnerBlocksToAuthoredEntries`
+  // in `lib/lite/social/block-filter.ts`), never here.
   const blockList = useLumenBlockList(Boolean(username));
   const raw = result.data?.pages.flat() ?? [];
   const entries = blockList.loaded ? raw.filter((entry) => !isBlockedEntry(entry, blockList)) : raw;

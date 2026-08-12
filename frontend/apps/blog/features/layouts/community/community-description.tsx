@@ -16,6 +16,7 @@ import EditCommunityDialog from '../../community-profile/edit-dialog';
 import { Separator } from '@ui/components';
 import clsx from 'clsx';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 
 const CommunityDescription = ({
   data,
@@ -38,10 +39,21 @@ const CommunityDescription = ({
     () => Boolean(data.context.subscribed) || subscribedFromList
   );
   const { user } = useUserClient();
+  /**
+   * ★★★ SAME RACE AS EVERY OTHER TEAM-MEMBERSHIP GATE (2026-08-12, G1). This
+   * was raw `useUserClient()`'s `user.username` for all three of these —
+   * blank until `/api/users/me` returns — so the "Edit roles" link, the
+   * admin-only `EditCommunityDialog`, and `SubsListDialog`'s moderation
+   * controls all stayed hidden from a genuine mod/admin for that window.
+   * `identity.username` is seeded from the session cookie the server already
+   * read. `user` (raw) stays below, unchanged, for `SubscribeCommunity` —
+   * that one needs `account_tier`, which does not exist on `identity`.
+   */
+  const identity = useSessionIdentity();
   const { t } = useTranslation('common_blog');
-  const userRole = data.team.find((e) => e[0] === user.username);
-  const adminRole = data.team.find((e) => e[0] === user.username && e[1] === 'admin');
-  const userCanModerate = data.team.find((e) => e[0] === user.username);
+  const userRole = data.team.find((e) => e[0] === identity.username);
+  const adminRole = data.team.find((e) => e[0] === identity.username && e[1] === 'admin');
+  const userCanModerate = data.team.find((e) => e[0] === identity.username);
   useEffect(() => {
     setIsSubscribed(Boolean(data.context.subscribed) || subscribedFromList);
   }, [data.context.subscribed, subscribedFromList]);

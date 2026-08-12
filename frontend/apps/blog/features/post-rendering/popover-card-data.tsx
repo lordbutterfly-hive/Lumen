@@ -16,6 +16,7 @@ import { useFollowingInfiniteQuery } from '../account-lists/hooks/use-following-
 import ButtonsContainer from '../mute-follow/buttons-container';
 import { useTranslation } from '@/blog/i18n/client';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { hiveChainService } from '@transaction/lib/hive-chain-service';
 import { AlertTriangle } from 'lucide-react';
 import { accountReputation } from '@hive/ui';
@@ -31,6 +32,17 @@ interface PopoverCardDataProps {
 const PopoverCardData = ({ author, blacklist, authorReputation, liteName }: PopoverCardDataProps) => {
   const { t } = useTranslation('common_blog');
   const { user } = useUserClient();
+  /**
+   * ★ GAP-2 FIX (owner ruling 2026-08-12, "Block does not render reliably").
+   * The two gates below (`user.isLoggedIn && ...`) used to be the FIRST thing that
+   * could hide the Follow/Block row: raw `useUserClient()` cannot answer during SSR
+   * and reports signed-out until `/api/users/me` returns, so a viewer who WAS signed
+   * in could still have this whole row skipped on first paint — before
+   * `ButtonsContainer` (which carries its own, matching fix) ever got a chance to
+   * render Block at all. `user` stays for everything else this file needs it for
+   * (chain follow/mute list queries, HP math); `identity` gates only these two rows.
+   */
+  const identity = useSessionIdentity();
   // A lite author is not a Hive account: querying `author` would return the SHARED
   // publishing account and present its followers, HP and bio as this person's. Both
   // hooks disable themselves on an empty name, so pass one.
@@ -88,7 +100,7 @@ const PopoverCardData = ({ author, blacklist, authorReputation, liteName }: Popo
               this person can live — there is no account on chain to follow. Offered
               to any signed-in viewer, lite or full; Mute stays hidden because muting
               IS a chain operation and has no target here. */}
-          {user.isLoggedIn && user.username !== liteName ? (
+          {identity.isLoggedIn && identity.username !== liteName ? (
             <div className="ml-auto flex gap-2">
               <ButtonsContainer
                 username={liteName}
@@ -146,7 +158,7 @@ const PopoverCardData = ({ author, blacklist, authorReputation, liteName }: Popo
                   ({accountReputation(authorReputation)})
                 </span>
               </div>
-              {!legalBlockedUser && user.username !== author && (
+              {!legalBlockedUser && identity.username !== author && (
                 <div className="mt-2 flex gap-2">
                   <ButtonsContainer
                     username={author}

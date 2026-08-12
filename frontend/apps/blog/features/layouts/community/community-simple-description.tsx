@@ -13,6 +13,7 @@ import BasePathLink from '@/blog/components/base-path-link';
 import EditCommunityDialog from '../../community-profile/edit-dialog';
 import clsx from 'clsx';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 
 const CommunitySimpleDescription = ({
   data,
@@ -36,14 +37,23 @@ const CommunitySimpleDescription = ({
     () => Boolean(data.context.subscribed) || subscribedFromList
   );
   const { user } = useUserClient();
+  /**
+   * ★★★ SAME RACE AS THE FULL SIDEBAR VARIANT (community-description.tsx,
+   * 2026-08-12, G1). `user.username` off raw `useUserClient()` cannot answer
+   * during SSR, so the "Roles" link, `EditCommunityDialog` and
+   * `SubsListDialog`'s moderation controls all stayed hidden from a genuine
+   * mod/admin until `/api/users/me` returned. `user` (raw) stays below for
+   * `SubscribeCommunity`, which needs `account_tier` — not on `identity`.
+   */
+  const identity = useSessionIdentity();
 
   useEffect(() => {
     setIsSubscribed(Boolean(data.context.subscribed) || subscribedFromList);
   }, [data.context.subscribed, subscribedFromList]);
 
-  const userRole = data.team.find((e) => e[0] === user.username);
-  const userCanModerate = data.team.find((e) => e[0] === user.username);
-  const adminRole = data.team.find((e) => e[0] === user.username && e[1] === 'admin');
+  const userRole = data.team.find((e) => e[0] === identity.username);
+  const userCanModerate = data.team.find((e) => e[0] === identity.username);
+  const adminRole = data.team.find((e) => e[0] === identity.username && e[1] === 'admin');
 
   return (
     <Card

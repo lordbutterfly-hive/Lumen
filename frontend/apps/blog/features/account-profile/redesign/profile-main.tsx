@@ -7,6 +7,7 @@ import { getChain } from '@transaction/lib/chain';
 import { convertToHP } from '@ui/lib/utils';
 import { convertStringToBig } from '@ui/lib/helpers';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { DEFAULT_OBSERVER, chainObserver } from '@/blog/lib/utils';
 import { extractUsernameFromParam } from '@/blog/utils/validate-links';
 import { useSSRObserver, useInitialPosts } from '@/blog/components/observer-provider';
@@ -21,7 +22,6 @@ import ProfileMainSkeleton from './profile-main-skeleton';
 import ProfileCover from './profile-cover';
 import ProfileIdentity from './profile-identity';
 import ProfileActions from './profile-actions';
-import ProfileModerationBanner from './profile-moderation-banner';
 import ProfileStatsBar from './profile-stats-bar';
 import ProfileTabs from './profile-tabs';
 import { getCoverImageUrl } from './lib/get-cover-image-url';
@@ -39,6 +39,23 @@ export default function ProfileMain() {
   const params = useParams<{ param: string }>();
   const username = extractUsernameFromParam(params?.param ?? '') ?? '';
   const { user, isHydrated } = useUserClient();
+  /**
+   * ★★★ SAME RACE AS EVERY OTHER OWNERSHIP GATE (2026-08-12, G3). `isOwnProfile`
+   * below used to read straight off `user.isLoggedIn`/`user.username`, which
+   * cannot answer during SSR and reports signed-out until `/api/users/me`
+   * returns. A signed-in reader hard-loading their own profile would briefly
+   * read as a visitor: `followingCount` fell back to the profile's on-chain
+   * `follow_stats.following_count` instead of the live query result, and the
+   * viewer's own following list (`following` below) was fetched under an
+   * empty username until the client caught up. `identity`
+   * (`features/layouts/server-session.tsx`, the same fix `ProfileActions` /
+   * `MutedList` / `ListVariant` already carry) is seeded from the session
+   * cookie the server already read, so both are correct from the first
+   * render. `user`/`isHydrated` stay in play below only for `chainObserver`,
+   * which needs `account_tier` — a field that only exists on the real client
+   * object, never on `identity`.
+   */
+  const identity = useSessionIdentity();
   const ssrObserver = useSSRObserver();
   const initialPosts = useInitialPosts();
   const observer = isHydrated ? (chainObserver(user)) : ssrObserver;
@@ -74,14 +91,37 @@ export default function ProfileMain() {
 
   // Viewer's own following list — drives both ProfileActions' isFollow state
   // and (for an own-profile view) the live following-count stat below.
-  const following = useFollowingInfiniteQuery(user.username, 1000, 'blog', ['blog']);
+  // `identity.username`, not `user.username` — see the race note above.
+  const following = useFollowingInfiniteQuery(identity.username, 1000, 'blog', ['blog']);
 
-  // ★ E1 (BUILDMAP-FUCKERY-V2) — see profile-moderation-banner.tsx for the full
-  // account of why this exists. Same hook `ProfileActions` and the post/comment
+  // ★ E1 (BUILDMAP-FUCKERY-V2). Same hook `ProfileActions` and the post/comment
   // overflow menus use, called again here rather than lifted and passed down: it is
   // a read-only cache-backed query (react-query dedupes the network call across all
   // three call sites), and lifting it would mean threading moderation state through
   // a component this file otherwise has no reason to touch.
+  //
+  // ★ THE STANDALONE BANNER IS GONE (2026-08-12, Block consolidation cleanup).
+  // This file used to also mount `ProfileModerationBanner` here, which
+  // re-derived this same `isModerated` flag to print "You have muted/
+  // blacklisted @user" with its own Unmute/Unblacklist buttons and "View
+  // list" links — a second, page-level status readout on top of the badge
+  // `ProfileActions` already shows in the CTA slot (`moderated_badge_*`),
+  // and a second live control on top of Settings' Blocked Accounts / Muted
+  // Users cards and the `/lists/*` pages, which is where mute and blacklist
+  // entries are actually managed post-consolidation (see
+  // `account-settings/blocked-list.tsx`, `muted-list.tsx`,
+  // `moderation-lists.tsx` — all three are reachable from Settings and none
+  // of their routes/actions were removed, so nothing a viewer set before
+  // this is stranded). Relabelling the banner's actions "Unblock" to match
+  // the owner's "one control called Block" ruling would have been actively
+  // wrong, not just redundant: this state is on-chain mute/blacklist, not a
+  // Lumen Block (`lib/lite/social/block-service.ts`) — the two are
+  // unrelated records — and a banner reading "Unblock" here without
+  // touching an actual Lumen block is exactly the "I blocked them and
+  // they're still there" confusion that file's own doc comment warns
+  // against. `moderation` stays wired into this component only for the two
+  // dimming cues below (`ProfileCover`'s wrapper, `ProfileIdentity`'s
+  // `moderated` prop) — visual cues, not controls.
   //
   // ★★ MUST STAY ABOVE EVERY EARLY RETURN BELOW (bug caught live, 2026-08-11).
   // `useModerationStatus` calls several hooks of its own. Placed after the
@@ -142,7 +182,7 @@ export default function ProfileMain() {
   const hp = vestingHive;
   const hpEffective = vestingHive.minus(delegatedHive);
 
-  const isOwnProfile = user.isLoggedIn && username === user.username;
+  const isOwnProfile = identity.isLoggedIn && username === identity.username;
   const followingCount =
     isOwnProfile && following.data?.pages
       ? following.data.pages.reduce((sum, page) => sum + page.length, 0)
@@ -150,14 +190,15 @@ export default function ProfileMain() {
 
   return (
     <div data-testid="profile-redesign-main">
-      {!isOwnProfile ? (
-        <ProfileModerationBanner username={username} liteTarget={Boolean(profileData._temporary)} />
-      ) : null}
       {/* ★ E1 — "no dimming" was the specific, named gap. A muted/blacklisted
           account's cover and identity block now visibly read as moderated instead
-          of rendering pixel-identical to any other profile; the banner above still
-          carries the actual explanation and the way back to the list, so this stays
-          a purely visual cue rather than duplicating that text. */}
+          of rendering pixel-identical to any other profile. The standalone
+          moderation banner that used to sit above this and spell the reason out
+          in words is gone (2026-08-12, Block consolidation cleanup — see the
+          `moderation` comment above); the CTA-slot badge in `ProfileActions`
+          ("Muted" / "Blacklisted" / "Muted & Blacklisted") is now this page's
+          only textual moderation readout, so this dimming stays what it always
+          was underneath the banner: a purely visual cue, not the explanation. */}
       <div className={cn(moderation.isModerated && 'opacity-60 grayscale')} data-testid="profile-moderated-visuals">
         <ProfileCover username={username} coverImageUrl={getCoverImageUrl(profileData.profile)} />
       </div>

@@ -1,9 +1,8 @@
 import { oidc } from '@smart-signer/lib/oidc';
 import { GetServerSideProps } from 'next';
 import { getLogger } from '@ui/lib/logging';
-import { getIronSession } from 'iron-session';
+import { getAppSession } from './get-session';
 import { IronSessionData } from '@smart-signer/types/common';
-import { sessionOptions } from './session';
 import { siteConfig } from '@hive/ui/config/site';
 import { getSafeRedirectUrl } from './redirect-validation';
 
@@ -40,7 +39,14 @@ export const loginPageController: GetServerSideProps = async (ctx) => {
   const uid = ctx.query.uid || '' as string;
   const oauthReturn = ctx.query.oauth_return === 'true';
 
-  const session = await getIronSession<IronSessionData>(req, res, sessionOptions);
+  // F-L39 (2026-08-12): see get-session.ts's doc comment — was a bare
+  // `getIronSession(req, res, sessionOptions)` with no expiry enforcement.
+  // (Note: this controller is not currently wired to any route in either
+  // apps/blog or apps/wallet — grepped repo-wide, confirmed unreferenced —
+  // but it is still exported from this package and would inherit the same
+  // bug the moment something imports it, so it is fixed here too rather than
+  // left as a landmine.)
+  const session = await getAppSession(req, res);
   const user = session.user;
 
   // Handle new OAuth flow (oauth_return=true)

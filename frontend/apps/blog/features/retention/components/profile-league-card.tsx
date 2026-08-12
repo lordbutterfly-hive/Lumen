@@ -1,7 +1,7 @@
 'use client';
 
 import { Link } from '@hive/ui';
-import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { useTranslation } from '@/blog/i18n/client';
 import { LeagueEmblem } from '../emblems/league-emblem';
 import { TIERS } from '../lib/tiers';
@@ -63,9 +63,18 @@ export function ProfileLeagueCard({ username, className, chainAccount = true }: 
   // have engaged with your posts" on somebody else's page, seen by a tester on 4 of
   // 4 accounts. Names are lowercased upstream, and a signed-out reader is never the
   // owner.
-  const { user } = useUserClient();
+  //
+  // ★ SAME RACE, THIS CARD'S OWN VERSION (2026-08-12, G2). This was raw
+  // `useUserClient()` — `user.isLoggedIn`/`user.username` cannot answer during SSR
+  // and report signed-out/empty on the client until `/api/users/me` returns, so the
+  // owner viewing their own profile could still be shown the third-person 'other'
+  // copy for that window. `identity` (server-session.tsx) is seeded from the
+  // session cookie the server already read, so `voice` is correct on first render.
+  const identity = useSessionIdentity();
   const voice: RetentionVoice =
-    user.isLoggedIn && user.username.toLowerCase() === (username || '').toLowerCase() ? 'own' : 'other';
+    identity.isLoggedIn && identity.username.toLowerCase() === (username || '').toLowerCase()
+      ? 'own'
+      : 'other';
   if (!summary) return null;
   // Split so the rank hooks below never sit behind that guard.
   return <LeagueCardBody summary={summary} className={className} voice={voice} />;

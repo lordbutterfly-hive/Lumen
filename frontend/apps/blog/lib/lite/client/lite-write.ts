@@ -163,8 +163,16 @@ export async function liteFollow(followeeName: string, unfollow = false): Promis
  * Lumen exactly like a lite account's — no `ignore` custom_json is broadcast. The
  * reasoning is in `lib/lite/social/block-service.ts`; the short version is that an
  * on-chain mute cannot express "hide their replies under my post from everyone", so
- * broadcasting one would promise less than the button does. The existing on-chain
- * Mute control is untouched for anyone who wants the chain-wide version.
+ * broadcasting one would promise less than the button does.
+ *
+ * ★ RECONCILED WITH THE OWNER'S "JUST CALL IT BLOCK" RULING (2026-08-12). This used
+ * to say the on-chain Mute control was untouched, offered alongside Block for anyone
+ * who wanted the chain-wide version. The owner has since ruled there should be ONE
+ * control, named Block — so Mute's WRITE path was retired from every primary surface
+ * (profile/post/comment overflow menus, the author popover). That does not reopen
+ * this function's OWN decision above: Block still never broadcasts `ignore`, for the
+ * same four reasons `block-service.ts` gives. What changed is which button a reader
+ * can press to CREATE a new mute-shaped record at all — not what this one does.
  */
 export async function liteBlock(
   targetName: string,

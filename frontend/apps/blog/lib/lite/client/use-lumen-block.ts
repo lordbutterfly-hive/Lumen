@@ -45,10 +45,21 @@ export function useLumenBlock(
     enabled: enabled && Boolean(target),
     staleTime: 60 * 1000,
     queryFn: async () => {
+      // Same rule as the list read below: a failed lookup resolved as
+      // `blocking: false`, which React Query treated as a success — no retry, and a
+      // Block button that offers to block somebody the reader has ALREADY blocked.
+      // Throwing engages retry, so a transient failure recovers on its own.
+      //
+      // `res.ok` is the HTTP status; the route answers 200 with `ok: false` when it
+      // degrades (including its 429), so both are checked. `available: false` from a
+      // healthy server is a real answer and is left alone — it means this pair cannot
+      // be blocked, not that the read broke.
       const params = new URLSearchParams({ target, kind: targetKind });
       const res = await fetch(`/api/lite/block/state?${params.toString()}`);
-      if (!res.ok) return { available: false, blocking: false };
-      return (await res.json()) as { available: boolean; blocking: boolean };
+      if (!res.ok) throw new Error(`block state read failed: HTTP ${res.status}`);
+      const body = (await res.json()) as { ok?: boolean; available: boolean; blocking: boolean };
+      if (body.ok === false) throw new Error('block state read failed server-side');
+      return { available: body.available, blocking: body.blocking };
     }
   });
 
@@ -84,9 +95,25 @@ export interface LumenBlockList {
   userIds: Set<string>;
   names: Set<string>;
   loaded: boolean;
+  /**
+   * The read terminally failed, so this list is not "empty" — it is UNKNOWN.
+   *
+   * Consumers currently keep rendering when this is true, which is a deliberate
+   * choice rather than an oversight: this list serves effect (A), the viewer's own
+   * "I never see them" preference, and failing closed on it would blank a reader's
+   * entire feed over a database hiccup. Showing a blocked account for a moment is
+   * the smaller harm than showing nothing at all.
+   *
+   * What is NOT acceptable is a consumer that cannot tell the difference, which is
+   * why this flag exists and why the query above now throws instead of resolving
+   * empty. Effect (B) — the half a reader cannot opt out of, and the anti-spam one —
+   * never reads this hook; it runs server-side and fails closed.
+   */
+  unknown: boolean;
 }
 
-const EMPTY_LIST: LumenBlockList = { userIds: new Set(), names: new Set(), loaded: false };
+const EMPTY_LIST: LumenBlockList = { userIds: new Set(), names: new Set(), loaded: false, unknown: false };
+const UNKNOWN_LIST: LumenBlockList = { userIds: new Set(), names: new Set(), loaded: false, unknown: true };
 
 /**
  * The viewer's own block list, for the surfaces the BROWSER fetches straight from a
@@ -103,14 +130,28 @@ const EMPTY_LIST: LumenBlockList = { userIds: new Set(), names: new Set(), loade
  * leaves (`/api/discussion`, `/api/lite/posts/replies`, and the post page's SSR).
  */
 export function useLumenBlockList(enabled: boolean): LumenBlockList {
-  const { data } = useQuery({
+  const { data, isError } = useQuery({
     queryKey: ['lumenBlockList'],
     enabled,
     staleTime: 60 * 1000,
     queryFn: async (): Promise<{ userIds: string[]; names: string[] }> => {
+      // ★ A FAILED READ MUST NOT RESOLVE AS "THIS READER BLOCKS NOBODY" (2026-08-12).
+      //
+      // This returned an empty list on any failure. React Query saw a SUCCESSFUL
+      // result, so it never retried and never set `isError` — the same defect the
+      // mute list had, where a timed-out `get_following` was reported as "you mute
+      // nobody" and cost 3 of 4 page loads their moderation silently.
+      //
+      // Throwing is most of the fix on its own: retry with backoff now engages, so a
+      // transient failure recovers instead of quietly unblocking everyone for the
+      // rest of the session.
+      //
+      // `res.ok` is the HTTP status. The route answers 200 even when it degrades and
+      // reports the real outcome in the body's `ok`, so both are checked.
       const res = await fetch('/api/lite/block/list');
-      if (!res.ok) return { userIds: [], names: [] };
-      const body = (await res.json()) as { userIds?: string[]; names?: string[] };
+      if (!res.ok) throw new Error(`block list read failed: HTTP ${res.status}`);
+      const body = (await res.json()) as { ok?: boolean; userIds?: string[]; names?: string[] };
+      if (body.ok === false) throw new Error('block list read failed server-side');
       return { userIds: body.userIds ?? [], names: body.names ?? [] };
     }
   });
@@ -119,13 +160,15 @@ export function useLumenBlockList(enabled: boolean): LumenBlockList {
   // in `useMemo` dependency arrays (the comment thread does) — so the thread would
   // re-sort and re-paginate on every single render of the post page.
   return useMemo(() => {
+    if (isError) return UNKNOWN_LIST;
     if (!data) return EMPTY_LIST;
     return {
       userIds: new Set(data.userIds),
       names: new Set(data.names.map((n) => n.toLowerCase())),
-      loaded: true
+      loaded: true,
+      unknown: false
     };
-  }, [data]);
+  }, [data, isError]);
 }
 
 interface BlockableEntry {

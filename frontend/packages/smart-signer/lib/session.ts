@@ -91,14 +91,23 @@ export const sessionOptions: SessionOptions = {
     // this cookie, none of which that job owned.
     //
     // F-L38 (2026-08-11) adds exactly that stamp — `hiveSessionIssuedAt`,
-    // see `IronSessionData` in packages/smart-signer/types/common.ts — but
-    // it is CHECKED, not written, in every route: it is only ever persisted
-    // by `getLiteSession()` in apps/blog/lib/lite/http/session.ts, the one
-    // Hive-session-touching call site this later job owned. `login.ts` (the
-    // actual issuance point) and the OAuth/consent/chat-token handlers still
-    // call `getIronSession(req, res, sessionOptions)` directly and were out
-    // of THIS job's ownership too — see the long comment in that file for
-    // exactly what that gap does and does not cover.
+    // see `IronSessionData` in packages/smart-signer/types/common.ts — wired
+    // into `getLiteSession()` in apps/blog/lib/lite/http/session.ts, the one
+    // Hive-session-touching call site that job owned.
+    //
+    // ★ CORRECTED, F-L39 (2026-08-12): the paragraph above used to end here,
+    // stating `login.ts` and the OAuth/consent/chat-token handlers still
+    // called `getIronSession(req, res, sessionOptions)` directly with no
+    // expiry check at all — a real gap, proven live (a 400-day-old sealed
+    // cookie passed `/api/auth/consent`'s auth gate). That gap is now closed:
+    // every call site in `packages/smart-signer/lib/**` reads its session
+    // through `getAppSession()` (`packages/smart-signer/lib/get-session.ts`),
+    // which enforces this same stamp, and `login.ts` now WRITES it at issue
+    // instead of relying solely on `getLiteSession()`'s read-side backfill.
+    // See `get-session.ts`'s doc comment for the full history and for why
+    // its enforcement logic is a deliberate, hand-synced COPY of
+    // `getLiteSession()`'s — not a shared call — since this package cannot
+    // import from `apps/blog`.
     maxAge: undefined,
   },
 };

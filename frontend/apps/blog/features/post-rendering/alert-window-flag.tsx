@@ -16,6 +16,7 @@ import { useTranslation } from '@/blog/i18n/client';
 import { useFlagMutation } from '../../components/hooks/use-flag-mutation';
 import { handleError } from '@ui/lib/handle-error';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 
 export function AlertDialogFlag({
   children,
@@ -31,6 +32,14 @@ export function AlertDialogFlag({
   permlink: string;
 }) {
   const { user } = useUserClient();
+  /**
+   * ★ SAME RACE, THE OK/LITE-NOTICE FOOTER (2026-08-12, F5 sweep). This was raw
+   * `user.isLoggedIn` picking whether ANY footer content rendered at all — cannot
+   * answer during SSR, reports "signed out" until `/api/users/me` returns, so a
+   * real signed-in owner who opened this dialog quickly saw an empty footer.
+   * `user.account_tier` stays on the raw hook for `isLite` — not on `identity`.
+   */
+  const identity = useSessionIdentity();
   const [notes, setNotes] = useState('');
   const { t } = useTranslation('common_blog');
   const flagMutation = useFlagMutation();
@@ -88,7 +97,7 @@ export function AlertDialogFlag({
           <AlertDialogCancel className="hover:text-destructive" data-testid="flag-dialog-cancel">
             {t('post_content.flag.cancel')}
           </AlertDialogCancel>
-          {user && user.isLoggedIn ? (
+          {identity.isLoggedIn ? (
             isLite ? (
               <p className="max-w-prose self-center text-sm text-destructive" data-testid="flag-dialog-lite">
                 {t('post_content.flag.lite_cannot_flag')}

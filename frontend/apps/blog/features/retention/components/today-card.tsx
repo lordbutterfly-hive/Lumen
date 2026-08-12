@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { ManabarRing } from '@/blog/features/layouts/site-header/manabar-ring';
 import { useTranslation } from '@/blog/i18n/client';
 import { TIERS } from '../lib/tiers';
@@ -52,7 +52,16 @@ export type TodaySurface = 'rail' | 'inline';
 
 export function TodayCard({ className, surface = 'rail' }: { className?: string; surface?: TodaySurface }) {
   const { t } = useTranslation('common_blog');
-  const { user } = useUserClient();
+  /**
+   * ★ SAME RACE AS EVERY OTHER GATE THAT return-nulls A SIGNED-IN READER
+   * (2026-08-12, G2). This was raw `useUserClient()`'s `user.isLoggedIn`, which
+   * cannot answer during SSR and reports signed-out on the client until
+   * `/api/users/me` returns — so the ENTIRE daily-loop card silently disappeared
+   * for a signed-in reader for that window, not just a wrong branch inside it.
+   * `identity.isLoggedIn` (server-session.tsx) answers immediately from the
+   * session cookie the server already read.
+   */
+  const identity = useSessionIdentity();
   const { summary, refetch } = useViewerRetention();
   // ★ RESOLVED AFTER MOUNT, NEVER DURING RENDER. The deadline is a UTC instant stated in
   // the BROWSER's timezone, so computing it in the render body would make the server's
@@ -88,7 +97,7 @@ export function TodayCard({ className, surface = 'rail' }: { className?: string;
   }, [serverGoalRaw, pendingGoal]);
 
 
-  if (!user.isLoggedIn || !summary) return null;
+  if (!identity.isLoggedIn || !summary) return null;
 
   const today = summary.today;
   // A server predating the daily loop sends no `today` block. Render nothing rather

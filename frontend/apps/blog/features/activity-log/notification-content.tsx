@@ -24,7 +24,7 @@ import { convertStringToBig } from '@ui/lib/helpers';
 import { CircleSpinner } from 'react-spinners-kit';
 import { getAccountNotifications, getUnreadNotifications } from '@transaction/lib/bridge-api';
 import { useTranslation } from '@/blog/i18n/client';
-import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { Icons } from '@hive/ui/components/icons';
 
 const NOTIFICATIONS_LIMIT = 50;
@@ -55,7 +55,19 @@ const NotificationActivities = ({
   const [fetchAfterId, setFetchAfterId] = useState<number | null>(null);
   // Track if we've reached the end of available notifications
   const [hasMoreData, setHasMoreData] = useState(true);
-  const { user } = useUserClient();
+  /**
+   * ★★★ SAME RACE AS SETTINGS/LISTS (2026-08-12, F5). This was raw `useUserClient()`
+   * for every ownership check below (`accountOwner`, plus the two queries keyed off
+   * the viewer's own username) — cannot answer during SSR, reports "signed out" until
+   * `/api/users/me` returns. On this dialog that meant the real owner's own "Claim
+   * rewards" panel and "Mark all as read" button — and the queries that feed them —
+   * stayed dark well after the page was interactive. `identity` (server-session.tsx)
+   * is seeded from the cookie the server already read, so it is correct on the very
+   * first render; nothing else in this file needs the raw client user object (no
+   * `account_tier` or other client-only field is read here), so it replaces
+   * `useUserClient()` outright rather than living alongside it.
+   */
+  const identity = useSessionIdentity();
   const markAllNotificationsAsReadMutation = useMarkAllNotificationsAsReadMutation();
   const claimRewardMutation = useClaimRewardsMutation();
 
@@ -67,9 +79,9 @@ const NotificationActivities = ({
   } | null>(null);
 
   const { data: unreadNotifications } = useQuery({
-    queryKey: ['unreadNotifications', user?.username],
-    queryFn: () => getUnreadNotifications(user?.username || ''),
-    enabled: !!user?.username,
+    queryKey: ['unreadNotifications', identity.username],
+    queryFn: () => getUnreadNotifications(identity.username || ''),
+    enabled: !!identity.username,
     refetchOnMount: true,
     refetchInterval: 20000
   });
@@ -84,12 +96,12 @@ const NotificationActivities = ({
   });
 
   const { data: profileData } = useQuery({
-    queryKey: ['profileData', user.username],
-    queryFn: () => getAccountFull(user.username),
-    enabled: !!user.username
+    queryKey: ['profileData', identity.username],
+    queryFn: () => getAccountFull(identity.username),
+    enabled: !!identity.username
   });
 
-  const accountOwner = user.username === username;
+  const accountOwner = identity.isLoggedIn && identity.username === username;
   const { data: apiAccounts } = useQuery({
     queryKey: ['apiAccount', username],
     queryFn: () => getFindAccounts(username),

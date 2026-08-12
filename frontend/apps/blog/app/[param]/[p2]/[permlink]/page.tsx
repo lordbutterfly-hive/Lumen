@@ -120,21 +120,47 @@ const PostPage = async ({
     // so an un-resolved thread shows that one name against everybody's words until
     // the client corrects each comment individually. Resolve the whole thread here,
     // in two queries, before it is serialised.
-    discussionData = await attachLiteIdentitiesToDiscussion(discussionData);
-
     // ★★★ EFFECT (B) — A BLOCKED ACCOUNT'S REPLIES UNDER THIS THREAD ARE NOT SERVED
     // TO ANYBODY, and that includes the server-rendered HTML.
     //
-    // Applied AFTER `attachLiteIdentities` on purpose: that is what puts the real
-    // writer's `_lite.userId` on each entry, and without it a Lumen reply looks
-    // authored by the shared publishing account — so the filter would either miss
-    // every lite commenter or hide all of them at once.
+    // The filter is applied AFTER `attachLiteIdentities` on purpose: that is what
+    // puts the real writer's `_lite.userId` on each entry, and without it a Lumen
+    // reply looks authored by the shared publishing account — so the filter would
+    // either miss every lite commenter or hide all of them at once.
     //
     // The same filter runs again in `/api/discussion`, which is what the browser
     // re-fetches this thread through. Both are needed: this one decides the first
     // paint (and what a crawler or a JS-less reader gets), that one decides every
     // subsequent read.
-    discussionData = await applyOwnerBlocksToDiscussion(discussionData);
+    //
+    // ★★★ AND BOTH STEPS MUST FAIL EMPTY, NEVER FAIL OPEN (2026-08-12).
+    //
+    // These two assignments used to sit bare inside the big `try` below, whose
+    // `catch` only logs and carries on. So a throw in EITHER of them left
+    // `discussionData` holding whatever it held beforehand — the UNFILTERED thread —
+    // which was then rendered into the server HTML and handed to every reader and
+    // every crawler, with a blocked account's replies in it and nothing but a log
+    // line to say so. A database hiccup inside `blockedPairsAmong` is enough.
+    //
+    // ★ The identity step is inside this guard, not just the filter, and that is the
+    // whole point: if `attachLiteIdentitiesToDiscussion` throws, control skips the
+    // filter entirely and lands in the outer catch with the raw thread still in the
+    // variable. Guarding only the filter would close the obvious door and leave that
+    // one open.
+    //
+    // Effect (B) is the half of Block a reader cannot opt out of, and the half the
+    // feature exists for, so a silent unfiltered fallback is the one outcome that
+    // must never happen. `/api/discussion` already states this rule for itself
+    // ("FAIL EMPTY, NEVER FAIL OPEN") and answers with no thread; this path now
+    // agrees with it. The post itself still renders — `postData` is fetched
+    // separately and is what gates the 404 — the reader just gets no comments.
+    try {
+      discussionData = await attachLiteIdentitiesToDiscussion(discussionData);
+      discussionData = await applyOwnerBlocksToDiscussion(discussionData);
+    } catch (error) {
+      logger.error(error, 'owner-block filter failed for %s; serving no thread', permlink);
+      discussionData = null;
+    }
     if (isLoggedIn) {
       mutedListData = mutedListResult.status === 'fulfilled' ? (mutedListResult.value ?? null) : null;
       if (mutedListResult.status === 'rejected') {

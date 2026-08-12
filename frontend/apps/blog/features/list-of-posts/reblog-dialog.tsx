@@ -15,6 +15,7 @@ import {
 } from '@ui/components/alert-dialog';
 import { Button } from '@ui/components/button';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import DialogLogin from '@/blog/components/dialog-login';
 import { useTranslation } from '@/blog/i18n/client';
 import { useRebloggedByQuery } from './hooks/use-reblogged-by-query';
@@ -61,6 +62,16 @@ export const ReblogDialog = forwardRef<HTMLButtonElement, ReblogDialogProps>(fun
   ref
 ) {
   const { user } = useUserClient();
+  /**
+   * ★ SAME RACE, THE OK/LOGIN FOOTER (2026-08-12, F5 sweep). This was raw
+   * `user.isLoggedIn` deciding between the real "Reblog" action and a
+   * DialogLogin-wrapped button — cannot answer during SSR, reports "signed out"
+   * until `/api/users/me` returns, so a real signed-in reader who opened this
+   * dialog quickly could hit a login prompt instead of reblogging.
+   * `user.username`/`user.account_tier` stay on the raw hook: they feed the
+   * reblog-status query and the lite/full copy, neither of which is on `identity`.
+   */
+  const identity = useSessionIdentity();
   const { t } = useTranslation('common_blog');
   const [open, setOpen] = useState(false);
 
@@ -105,7 +116,7 @@ export const ReblogDialog = forwardRef<HTMLButtonElement, ReblogDialogProps>(fun
           <AlertDialogCancel className="hover:text-red-800" data-testid="reblog-dialog-cancel">
             {t('alert_dialog_reblog.cancel')}
           </AlertDialogCancel>
-          {user && user.isLoggedIn ? (
+          {identity.isLoggedIn ? (
             <AlertDialogAction
               autoFocus
               disabled={shouldDisableAction}

@@ -43,11 +43,19 @@ export default function ProposalsToolbar({ tab, onTabChange, sort, onSortChange 
       </div>
 
       <div className="flex items-center gap-2 font-sans text-[13px] text-[#6b7280]">
-        {t('proposals.toolbar.sort_label')}
+        <span id="proposals-sort-label">{t('proposals.toolbar.sort_label')}</span>
         <Select value={sort} onValueChange={(value) => onSortChange(value as ProposalSort)}>
+          {/* Radix's SelectTrigger is role="combobox" and does not get an accessible
+              name from its own visible content (same class as the four Preferences
+              comboboxes, `apps/blog/features/account-settings/form.tsx`, and the
+              submit-page reward-type select, `PostPublishingSection.tsx`). The
+              "Sort by" text above already labels this control for sighted users;
+              `aria-labelledby` wires that same text in for the accessibility tree
+              instead of duplicating it. */}
           <SelectTrigger
             className="h-auto w-auto gap-1.5 rounded-[10px] border-[#e4e6e9] px-3.5 py-2 font-sans text-[13px] font-semibold text-[#3f4650]"
             data-testid="proposals-sort-select"
+            aria-labelledby="proposals-sort-label"
           >
             <SelectValue />
           </SelectTrigger>

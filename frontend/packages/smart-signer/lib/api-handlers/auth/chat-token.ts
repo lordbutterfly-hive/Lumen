@@ -1,9 +1,7 @@
 import createHttpError from 'http-errors';
 import { NextApiHandler } from 'next';
-import { getIronSession } from 'iron-session';
-import { sessionOptions } from '@smart-signer/lib/session';
+import { getAppSession } from '@smart-signer/lib/get-session';
 import { User } from '@smart-signer/types/common';
-import { IronSessionData } from '@smart-signer/types/common';
 import { checkCsrfHeader } from '@smart-signer/lib/csrf-protection';
 import { getLogger } from '@hive/ui/lib/logging';
 import { siteConfig } from '@hive/ui/config/site';
@@ -22,9 +20,12 @@ export const getChatToken: NextApiHandler<User> = async (req, res) => {
 
   let user: User | undefined;
   try {
-    const session = await getIronSession<IronSessionData>(
-      req, res, sessionOptions
-    );
+    // F-L39 (2026-08-12): see the identical comment in consent.ts —
+    // `getAppSession()` replaces a bare `getIronSession(req, res,
+    // sessionOptions)` here for the same reason: this handler mints a real
+    // Rocket.Chat auth token, and an expired-but-sealed cookie used to pass
+    // the `isLoggedIn` check below just as well as a fresh one.
+    const session = await getAppSession(req, res);
     user = session.user;
   } catch (error) {
     logger.error(error, 'getChatToken error');
@@ -51,7 +52,7 @@ export const getChatToken: NextApiHandler<User> = async (req, res) => {
     ...user,
     chatAuthToken,
   };
-  const session = await getIronSession<IronSessionData>(req, res, sessionOptions);
+  const session = await getAppSession(req, res);
   session.user = user;
   await session.save();
   res.json(user);

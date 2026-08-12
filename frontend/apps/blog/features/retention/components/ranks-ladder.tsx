@@ -1,6 +1,6 @@
 'use client';
 
-import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { useTranslation } from '@/blog/i18n/client';
 import { LeagueEmblem } from '../emblems/league-emblem';
 import { TIERS, TIER_ORDER, TOTAL_RANKS } from '../lib/tiers';
@@ -90,10 +90,19 @@ function LadderRow({ tier, current }: { tier: LeagueTier; current: boolean }) {
  */
 function YouAreHere() {
   const { t } = useTranslation('common_blog');
-  const { user } = useUserClient();
+  /**
+   * ★ SAME RACE AS EVERY OTHER "ARE YOU SIGNED IN" GATE (2026-08-12, G2). This was
+   * raw `useUserClient()`'s `user.isLoggedIn`, which cannot answer during SSR and
+   * reports signed-out on the client until `/api/users/me` returns — so a signed-in
+   * reader landing on /ranks saw "Sign in to see where you stand" for that whole
+   * window, on the one page whose entire job is to say where they stand.
+   * `identity.isLoggedIn` (server-session.tsx) answers immediately from the session
+   * cookie the server already read.
+   */
+  const identity = useSessionIdentity();
   const { summary, isLoading, isError } = useViewerRetention();
 
-  if (!user.isLoggedIn) {
+  if (!identity.isLoggedIn) {
     return (
       <p className="mt-4 font-sans text-[15px] leading-normal text-[#6b7280]" data-testid="ranks-signed-out">
         {t('retention.ranks.signed_out')}

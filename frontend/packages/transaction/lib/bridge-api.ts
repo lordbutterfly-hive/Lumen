@@ -10,6 +10,8 @@ import {
 } from '@hive/common-hiveio-packages/wax';
 import { getChain } from './chain';
 import {
+  bannedAuthorList,
+  hasBannedAuthors,
   isBannedAuthor,
   withoutBannedAuthors,
   withoutBannedDiscussion
@@ -53,11 +55,20 @@ export const getCommunities = async (
   query?: string | null,
   observer: string = 'hive.blog'
 ): Promise<Community[] | null> => {
-  return (await getChain()).api.bridge.list_communities({
+  const communities = await (await getChain()).api.bridge.list_communities({
     query,
     sort,
     observer
   });
+  // Same correction as `getCommunity` — this list is what feeds each card's
+  // `.subscribers` figure on `/communities` (`communities-list-item.tsx`), so
+  // it gets the identical fix rather than leaving that surface inconsistent
+  // with the one just below it. `bannedSubscriptionCounts` is one round of
+  // calls regardless of how many communities are in `communities`, so this
+  // does not multiply cost per card.
+  if (!communities) return communities;
+  const banned = await bannedSubscriptionCounts();
+  return communities.map((c) => withCorrectedSubscriberCount(c, banned));
 };
 
 export const getSubscriptions = async (account: string): Promise<string[][] | null> => {
@@ -110,7 +121,42 @@ export const getPostsRanked = async (
 const isBannedEntry = (post: Entry): boolean =>
   isBannedAuthor(post?.author) || isBannedAuthor(post?.json_metadata?.original_author);
 
-const dropBannedEntries = (posts: Entry[]): Entry[] => posts.filter((post) => !isBannedEntry(post));
+/**
+ * The mirror image of the cross-post case above, and it has to be handled the
+ * opposite way.
+ *
+ * A cross-post SHELL is dropped whole because the shell's content — title,
+ * body, everything the reader sees — belongs to the banned account; keeping
+ * it would let that account's writing reach every feed under someone else's
+ * signature. A reblog is the reverse relationship: `reblogged_by` names
+ * whoever chose to AMPLIFY the post, not whoever wrote it. The post itself
+ * still belongs to its real `author`, who is not banned (`isBannedEntry`
+ * already dropped this entry if it were) and did nothing wrong by having a
+ * banned account reblog them. Dropping the post here would ban the reader
+ * from the WRONG person's work — the one thing this list is not allowed to
+ * do (see the file header).
+ *
+ * So only the credit line comes off. `post-list-item.tsx` and
+ * `medium-post-card.tsx` both render `reblogged_by[0]` as a clickable
+ * "Reblogged by X" pointing straight at that account's profile — exactly the
+ * visibility and promotion the ban exists to deny — while leaving the post
+ * itself, and its legitimate author, fully intact. Mirrors `getRebloggedBy`
+ * in `hive-api.ts`, which already strips banned names out of the same
+ * relationship read from the other direction (the dedicated "who reblogged
+ * this post" list); this is the feed-card side of the identical rule.
+ */
+const withoutBannedReblogger = (post: Entry): Entry => {
+  if (!post.reblogged_by || post.reblogged_by.length === 0) return post;
+  const credited = withoutBannedAuthors(post.reblogged_by, (name) => name);
+  if (credited.length === post.reblogged_by.length) return post;
+  // Empty out entirely rather than leave `[]` — every render site already
+  // guards on `post.reblogged_by` being present/non-empty before showing the
+  // credit line, so `undefined` is what makes that line disappear.
+  return { ...post, reblogged_by: credited.length > 0 ? credited : undefined };
+};
+
+const dropBannedEntries = (posts: Entry[]): Entry[] =>
+  posts.filter((post) => !isBannedEntry(post)).map(withoutBannedReblogger);
 
 const resolvePosts = (posts: Entry[], observer: string): Promise<Entry[]> => {
   const promises = posts.map((p) => resolvePost(p, observer));
@@ -163,7 +209,7 @@ export const getPost = async (
     .then((resp) => {
       if (resp) {
         if (isBannedEntry(resp)) return null;
-        return resolvePost(resp, observer);
+        return resolvePost(withoutBannedReblogger(resp), observer);
       }
 
       return resp;
@@ -255,11 +301,56 @@ const notificationActor = (n: IAccountNotification): string => {
   return /@([a-z0-9.-]{3,16})\//.exec(n?.url ?? '')?.[1] ?? '';
 };
 
+/**
+ * How many of the (small, fixed) banned accounts subscribe to each community,
+ * keyed by community name — computed by walking the BAN LIST once, not by
+ * walking any community's subscriber list.
+ *
+ * Same arithmetic-mismatch class as `dropBannedEntries` above: `get_community`
+ * returns `.subscribers` as a raw Hivemind count, but `getSubscribers` below
+ * filters the LIST that same number is displayed next to (`SubsListDialog`).
+ * A banned account subscribed to a community makes the two disagree.
+ *
+ * The reason this is fixable where `post.stats.total_votes` (documented,
+ * deliberately left alone — see that predicate's own comment) is not: voters
+ * are unbounded per POST and there is no cheap way to ask "did banned account
+ * X vote on post Y" without paging the vote list. Subscriptions run the other
+ * way. `bridge.list_subscribers` is capped at ~100 rows per call and sorted
+ * alphabetically — a community with thousands of subscribers (confirmed live:
+ * hive-148441 has 24,931) cannot be fully paged on every page load. But
+ * `bridge.list_all_subscriptions` per ACCOUNT is not paginated in this
+ * codebase's use of it (`getSubscriptions`, above) and the ban list itself is
+ * tiny and fixed — 6 names at the time of writing. So instead of paging every
+ * community looking for 6 names, this pages the 6 names looking for every
+ * community they are in: one `list_all_subscriptions` call per banned
+ * account, in parallel, independent of how large the community (or how many
+ * communities the caller is about to render) is.
+ */
+const bannedSubscriptionCounts = async (): Promise<Map<string, number>> => {
+  const counts = new Map<string, number>();
+  if (!hasBannedAuthors()) return counts;
+  const lists = await Promise.all(
+    bannedAuthorList().map((name) => getSubscriptions(name).catch(() => null))
+  );
+  for (const rows of lists) {
+    for (const row of rows ?? []) counts.set(row[0], (counts.get(row[0]) ?? 0) + 1);
+  }
+  return counts;
+};
+
+/** Apply the correction above to one `Community`'s `.subscribers` count. */
+const withCorrectedSubscriberCount = (community: Community, banned: Map<string, number>): Community => {
+  const drop = banned.get(community.name) ?? 0;
+  return drop === 0 ? community : { ...community, subscribers: Math.max(0, community.subscribers - drop) };
+};
+
 export const getCommunity = async (
   name: string,
   observer: string | undefined = ''
 ): Promise<Community | null> => {
-  return (await getChain()).api.bridge.get_community({ name, observer });
+  const community = await (await getChain()).api.bridge.get_community({ name, observer });
+  if (!community) return community;
+  return withCorrectedSubscriberCount(community, await bannedSubscriptionCounts());
 };
 export const getListCommunityRoles = async (community: string): Promise<string[][] | null> => {
   return (await getChain()).api.bridge

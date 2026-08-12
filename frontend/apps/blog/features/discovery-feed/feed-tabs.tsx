@@ -20,6 +20,7 @@ import { useRankMarks } from '@/blog/features/retention/hooks/use-rank-marks';
 import { filterVisiblePosts, useNsfwPreference } from '@/blog/lib/nsfw';
 import InterestPicker from '@/blog/features/lite-auth/interests/interest-picker';
 import DialogLogin from '@/blog/components/dialog-login';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 
 // TODO: move to i18n
 const LABELS = {
@@ -517,8 +518,34 @@ export default function FeedTabs() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
-  const { user, isHydrated } = useUserClient();
-  const loggedIn = isHydrated && user.isLoggedIn;
+  const { user } = useUserClient();
+  /**
+   * ★★★ SAME RACE AS EVERY OTHER IDENTITY GATE, ON THE HOME FEED (2026-08-12,
+   * G1 — highest-stakes file in this pass). This was `isHydrated &&
+   * user.isLoggedIn` off raw `useUserClient()`. `isHydrated` only means
+   * "this component has mounted" — it says nothing about whether
+   * `/api/users/me` has answered — and the server always renders
+   * `isHydrated: false`, so EVERY signed-in reader landing on the Following
+   * tab saw the "log in" dead end for the mount + fetch window, on the
+   * single most-visited tab in the app. `identity.isLoggedIn` is seeded from
+   * the session cookie the server already read, so the tab picks the right
+   * branch on the very first render.
+   *
+   * `EntryFeed`'s `lite` prop is deliberately NOT switched to `identity`: it
+   * decides which BACKEND `EntryFeed` queries (Hive bridge vs. Lumen's own
+   * store — see `EntryFeed`'s own `queryFn`, which has no `enabled` guard),
+   * and it can only be read off `user.account_tier`, which does not exist on
+   * `identity`. Flipping the outer gate to `identity.isLoggedIn` a render
+   * before `user.account_tier` resolves would mount `EntryFeed` with a false
+   * `lite` for a genuinely-lite reader — exactly the
+   * `assert_exception — Account X does not exist` failure this file's own
+   * `FEED_SORT` comment documents, self-inflicted by this very fix. So below,
+   * the feed waits one further step, for `identity.clientAnswered` — the same
+   * `[QUERY_KEY.user]` query `user.account_tier` comes from — before
+   * `EntryFeed` ever mounts, rather than either flashing the login dead end
+   * or mounting it with a tier we don't actually know yet.
+   */
+  const identity = useSessionIdentity();
   // NOTE: the SSR observer resolution that used to live here went with the
   // trending For You feed. The ranked route resolves the viewer from the SESSION
   // server-side (a client-supplied viewer would let anyone request anyone else's
@@ -629,9 +656,7 @@ export default function FeedTabs() {
       {activeTab === 'predictions' && marketAvailable ? (
         <MarketTab />
       ) : activeTab === 'feed' ? (
-        loggedIn ? (
-          <EntryFeed sort={FEED_SORT} observer={user.username} lite={user.account_tier === 'lite'} />
-        ) : (
+        !identity.isLoggedIn ? (
           /* v8: this was a dead end. One grey sentence, a stray capital F mid-line,
              and nothing to click, on the one tab a signed-out reader is most likely
              to try. It now says what the tab is for and offers the door. */
@@ -646,6 +671,14 @@ export default function FeedTabs() {
               </button>
             </DialogLogin>
           </div>
+        ) : !identity.clientAnswered ? (
+          // Genuinely signed in (per the session cookie), but `user.account_tier`
+          // — which `EntryFeed`'s `lite` prop needs — isn't confirmed yet. Neither
+          // the login dead end nor a feed mounted with a guessed tier is honest
+          // here; a skeleton is.
+          <PostListSkeleton count={5} />
+        ) : (
+          <EntryFeed sort={FEED_SORT} observer={identity.username} lite={user.account_tier === 'lite'} />
         )
       ) : (
         <ForYouFeed />

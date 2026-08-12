@@ -116,17 +116,30 @@ const CommentList = ({
     }
   }, []);
 
+  // ★ "MUTED-FIRST" SPLIT REMOVED — DEAD, VERIFIED ALGEBRAICALLY (2026-08-12, F5).
+  // This used to filter the line below into `mutedContent` (items with `depth === 1`)
+  // and `unmutedContent` (the rest, via a `post_id` set-difference), then return
+  // `[...mutedContent, ...unmutedContent]` — apparently meaning to put "muted" replies
+  // first. It never changed anything. Every item here is, by construction, a DIRECT
+  // CHILD of the same `parent` (see the filter below), and Hive gives every direct
+  // reply to one comment/post the same `depth` — there is no mixed-depth sibling
+  // group, ever. So `mutedContent` was always either ALL of the filtered list (when
+  // `parent` is the top-level post, so every child is depth 1) or NONE of it (any
+  // deeper parent) — never a genuine subset. When it was ALL, `unmutedContent`
+  // collapsed to `[]` too: the exclusion check compares each item against
+  // `mutedContent`, which contains that very item, so it always matches itself and
+  // gets excluded — true regardless of `post_id`, which the Hive bridge API never
+  // actually sends anyway (see the `commentKey` note below). Either branch reduces to
+  // `[...mutedContent, ...unmutedContent] === filtered`, same order, always — and
+  // "muted" was never a real per-user mute check here to begin with; that's
+  // `mutedList` / `filteringEnabled`, handled downstream in `CommentListItem`.
+  // Confirmed render-identical (same keys, same order) on a real thread before and
+  // after this change — see the deliverable notes for the comparison.
   const arr = useMemo(() => {
     if (!data || !parent) return undefined;
-    const filtered = data.filter(
+    return data.filter(
       (x) => x?.parent_author === parent?.author && x?.parent_permlink === parent?.permlink
     );
-
-    const mutedContent = filtered.filter(
-      (item) => parent && item.depth === 1 && item.parent_author === parent.author
-    );
-    const unmutedContent = filtered.filter((md) => mutedContent.every((fd) => fd.post_id !== md.post_id));
-    return [...mutedContent, ...unmutedContent];
   }, [data, parent?.author, parent?.permlink]);
   return (
     <ul data-testid="comment-list" className="w-full min-w-0 overflow-hidden">
