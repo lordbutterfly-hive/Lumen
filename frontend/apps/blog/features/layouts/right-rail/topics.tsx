@@ -5,7 +5,26 @@ import { usePathname } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { Link, Skeleton } from '@hive/ui';
 import { cn } from '@ui/lib/utils';
-import { getTrendingTags } from '@transaction/lib/hive';
+import type { ITrendingTag } from '@hive/common-hiveio-packages/wax';
+
+/**
+ * ★ THROUGH OUR SERVER, NOT STRAIGHT TO A HIVE NODE (2026-08-12).
+ *
+ * This used to call `getTrendingTags` here in the browser. That function does
+ * `await getChain()`, and `@hiveio/wax` has a single entry point, so importing
+ * it from a `'use client'` widget mounted on nearly every page shell pulled the
+ * whole ~2.3 MB wax bundle — WASM included — into the client graph of most
+ * routes. Measured on the production build as an anonymous visitor:
+ * `wax.common.wasm`, 2.34 MB, actually fetched, by a reader who will never sign
+ * anything. `/api/trending-tags` returns the same list as plain JSON, cached,
+ * and keeps the chain client on the server. See that route for the full note.
+ */
+async function fetchTrendingTags(): Promise<ITrendingTag[]> {
+  const res = await fetch('/api/trending-tags');
+  if (!res.ok) throw new Error(`trending tags request failed: HTTP ${res.status}`);
+  const body = (await res.json()) as { tags?: ITrendingTag[] };
+  return body.tags ?? [];
+}
 import { StaleTime } from '@/blog/lib/react-query';
 import { useTranslation } from '@/blog/i18n/client';
 
@@ -102,7 +121,7 @@ const Topics = () => {
     queryKey: ['right-rail-trending-tags'],
     // Ask for far more than we show: community ids and tribe tags occupy most of
     // the head of this list, so a request for 12 yielded 0 usable topics.
-    queryFn: () => getTrendingTags(120),
+    queryFn: fetchTrendingTags,
     staleTime: StaleTime.LONG,
     // ★ 20+ SECONDS OF GREY PILLS, TRACED (audit item O3). This card never hangs
     // forever — an RPC node that outright refuses the connection surfaces the

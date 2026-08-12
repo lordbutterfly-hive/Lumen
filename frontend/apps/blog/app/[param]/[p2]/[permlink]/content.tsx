@@ -43,13 +43,14 @@ import sorter, { SortOrder } from '@/blog/lib/sorter';
 import { DEFAULT_OBSERVER, chainObserver } from '@/blog/lib/utils';
 import { getBasePath } from '@ui/lib/path-utils';
 import { useQuery } from '@tanstack/react-query';
-import { getCommunity, getListCommunityRoles, getPost } from '@transaction/lib/bridge-api';
+import { getPost } from '@transaction/lib/bridge-api';
+import { fetchCommunity, fetchCommunityRoles, fetchPostStatus } from '@/blog/lib/chain-fetch';
 import { fetchDiscussion } from '@/blog/lib/lite/client/discussion-fetch';
 import { isBlockedEntry, useLumenBlockList } from '@/blog/lib/lite/client/use-lumen-block';
 import { fetchLiteEntryByPermlink } from '@/blog/lib/lite/client/lite-post-fetch';
 import { fetchLiteEngagement } from '@/blog/lib/lite/client/lite-engagement';
 import { Entry } from '@hive/common-hiveio-packages/wax';
-import { getActiveVotes } from '@transaction/lib/hive-api';
+import { fetchActiveVotes } from '@/blog/lib/chain-fetch';
 import { getSimilarPostsByPost, getHiveSenseStatus, isPostStub } from '@transaction/lib/hivesense-api';
 import { Badge } from '@ui/components/badge';
 import { Button } from '@ui/components/button';
@@ -257,6 +258,12 @@ const PostContent = () => {
   const crossedPost = Array.isArray(postData?.json_metadata?.tags) && postData.json_metadata.tags.includes('cross-post');
   const legalBlockedUser = userIllegalContent.some((e) => e === postData?.author);
   const copyRightCheck = dmcaList.includes(pathname ?? '');
+  // ★ THROUGH OUR SERVER, NOT THE CHAIN CLIENT (2026-08-12). This called
+  // `getPost` directly for the cross-post source — unlike the main `postData`
+  // query above (SSR `initialData`, `staleTime: MEDIUM`), this one has
+  // neither, so it downloaded `wax.common.wasm` every time it ran, for any
+  // visitor reading a cross-posted article. See
+  // `apps/blog/app/api/post-status/route.ts`.
   const { data: crossPostData } = useQuery({
     queryKey: [
       'postData',
@@ -264,8 +271,16 @@ const PostContent = () => {
       postData?.json_metadata.original_permlink,
       observer
     ],
-    queryFn: () =>
-      getPost(postData?.json_metadata.original_author, postData?.json_metadata.original_permlink, observer),
+    queryFn: async () => {
+      // `getPost` (the direct call this replaced) defaulted both to `''`;
+      // matched here since `fetchPostStatus` takes plain `string` params.
+      const status = await fetchPostStatus(
+        postData?.json_metadata.original_author ?? '',
+        postData?.json_metadata.original_permlink ?? '',
+        observer
+      );
+      return status.post as typeof postData;
+    },
     enabled: crossedPost
   });
 
@@ -318,9 +333,16 @@ const PostContent = () => {
   });
   const communityObserverMatchesSSR = observer === ssrObserver;
   const useCommunityInitialData = initialCommunity && communityObserverMatchesSSR;
+  // ★ THROUGH OUR SERVER, NOT THE CHAIN CLIENT (2026-08-12). `initialData`
+  // below only covers first load while the client observer still matches
+  // SSR's — the moment a signed-in reader's identity resolves post-hydration
+  // (routine, on nearly every load — see `server-session.tsx`), this
+  // unconditionally re-fetches via `getChain()`. Every post inside a
+  // community, on the highest-traffic page in the app. See
+  // `apps/blog/app/api/community/route.ts`.
   const { data: communityData } = useQuery({
     queryKey: ['community', category, observer],
-    queryFn: () => getCommunity(category, observer),
+    queryFn: () => fetchCommunity(category, observer),
     enabled: postInCommunity,
     initialData: useCommunityInitialData ? initialCommunity : undefined,
     initialDataUpdatedAt: useCommunityInitialData ? Date.now() : undefined,
@@ -618,9 +640,14 @@ const PostContent = () => {
   const commentSite = postDepth !== 0;
   const userFromDMCA = dmcaUserList.some((e) => e === postData?.author);
 
+  // ★ THROUGH OUR SERVER, NOT THE CHAIN CLIENT (2026-08-12). Unconditional
+  // (no `initialData`) on every community post — the highest-traffic page in
+  // the app. See `apps/blog/app/api/community-roles/route.ts`, which also
+  // backs `roles/[tag]/content.tsx`'s own, separately-broken instance of this
+  // same read (see that file for its own key-mismatch note).
   const { data: userCanModerate } = useQuery({
     queryKey: ['rolesList', category],
-    queryFn: () => getListCommunityRoles(category),
+    queryFn: () => fetchCommunityRoles(category),
     enabled: postInCommunity,
     onError: (error) => {
       handleError(error, { method: 'getListCommunityRoles', params: { category } });
@@ -634,21 +661,53 @@ const PostContent = () => {
     }
   });
 
+  // ★ THROUGH OUR SERVER, NOT THE CHAIN CLIENT (2026-08-12). Unconditional
+  // (no `initialData`) for virtually every post — the highest-traffic page
+  // in the app, both signed in and out. See
+  // `apps/blog/app/api/active-votes/route.ts`.
   const { data: activeVotesData } = useQuery({
     queryKey: ['activeVotes', author, permlink],
-    queryFn: () => getActiveVotes(author, permlink),
+    queryFn: () => fetchActiveVotes(author, permlink),
     enabled: isOnChain,
     onError: (error) => {
       handleError(error, { method: 'getActiveVotes', params: { author, permlink } });
     }
   });
 
-  const { data: mutedList } = useFollowListQuery(
+  const { data: mutedList, isError: mutedListIsError } = useFollowListQuery(
     user.username,
     'muted',
     initialMutedList,
     user.account_tier !== 'lite'
   );
+  /**
+   * ★ BUG 1 FIX (2026-08-12, FX3) — the mute-unknown fix that reached
+   * `medium-post-card.tsx` (`use-moderation-status.ts`'s `muteStatusUnknown`,
+   * fixed today) never reached the comment thread, which reads a SEPARATE
+   * fetch of the SAME relationship (`bridge.get_follow_list`, follow_type
+   * "muted" — the bridge equivalent of `condenser_api.get_following` type
+   * "ignore" `useModerationStatus` reads). `getFollowList` never swallows a
+   * genuine failure into a fake empty array (no `.catch(() => [])` anywhere
+   * in its path — same property `use-moderation-status.ts`'s own comment
+   * verified for the blacklist read), so React Query's retries (3 attempts,
+   * backoff) run to completion and `isError` is the honest, exhausted-retry
+   * signal.
+   *
+   * `mutedList || initialMutedList || []` two lines up stays exactly as it
+   * was — every OTHER caller of `mutedList` in this file still needs a plain
+   * array, and collapsing "loading"/"errored"/"empty" into `[]` there is only
+   * a bug when a CONSUMER treats that `[]` as a confirmed-clean answer. This
+   * flag is threaded down ALONGSIDE the array (through `CommentsSection` ->
+   * `CommentList` -> `CommentListItem`, the same path `mutedList` already
+   * takes) so a consumer that DOES gate rendered content on mute status
+   * (`comment-list-item.tsx`) can tell "confirmed nobody in this list" apart
+   * from "we don't actually know right now" — see that file's own gate for
+   * why this is threaded as a flag alongside the prop rather than switching
+   * the comment thread onto `useModerationStatus` (a second, divergent read
+   * of the same relationship, which an earlier pass explicitly declined to
+   * introduce).
+   */
+  const mutedListUnknown = mutedListIsError;
 
   const pinMutations = usePinMutation();
   const unpinMutation = useUnpinMutation();
@@ -1317,6 +1376,7 @@ const PostContent = () => {
               paginatedDiscussionState={paginatedDiscussionState}
               userCanModerate={!!userCanModerate}
               mutedList={mutedList || initialMutedList || []}
+              mutedListUnknown={mutedListUnknown}
               flagText={communityData?.flag_text}
               discussionAuthor={author}
               discussionPermlink={permlink}

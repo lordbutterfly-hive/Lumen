@@ -1,6 +1,7 @@
 import { cookies } from 'next/headers';
 import { getIronSession } from 'iron-session';
 import { sessionOptions } from '@smart-signer/lib/session';
+import { applyHiveSessionTtl } from '@smart-signer/lib/get-session';
 import type { IronSessionData } from '@smart-signer/types/common';
 import { getLogger } from '@ui/lib/logging';
 import HomeShell from '@/blog/features/discovery-feed/home-shell';
@@ -27,6 +28,12 @@ async function hasSession(): Promise<boolean> {
   const cookieStore = cookies();
   try {
     const session = await getIronSession<IronSessionData>(cookieStore, sessionOptions);
+    // F-L40 (2026-08-12): a sealed Hive session cookie carries no expiry of its
+    // own (see get-session.ts's doc comment) — without this call a 400-day-old
+    // cookie still read as signed in here, hiding the sign-in intro from a
+    // visitor who should be seeing it. `canPersist: false`: this runs inside a
+    // Server Component render, where Next.js forbids writing cookies.
+    await applyHiveSessionTtl(session, { canPersist: false });
     return Boolean(session.user?.isLoggedIn);
   } catch (error) {
     // A malformed or rotated cookie must not take the home page down. Treating the

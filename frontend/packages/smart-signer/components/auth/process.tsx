@@ -3,14 +3,17 @@ import { cookieNamePrefix } from '@smart-signer/lib/session';
 import { getCookie } from '@ui/lib/utils';
 import { KeyType } from '@smart-signer/types/common';
 import { useSignIn } from '@smart-signer/lib/auth/use-sign-in';
-import { Signatures, PostLoginSchema } from '@smart-signer/lib/auth/utils';
-import { getSigner } from '@smart-signer/lib/signer/get-signer';
+// Type-only, and from login-schema.ts specifically (not auth/utils.ts, which
+// re-exports neither anymore) — see that file's header comment for why the split
+// exists: `postLoginSchema` needs `TTransactionPackType` as a REAL runtime value
+// from '@hiveio/wax', and this file is reachable from every page.
+import type { Signatures, PostLoginSchema } from '@smart-signer/lib/auth/login-schema';
 import { SignerOptions } from '@smart-signer/lib/signer/signer';
 import { useSigner } from '@smart-signer/lib/use-signer';
 import { LoginFormSchema as SignInFormSchema } from '../signin-form';
 import { getOperationForLogin } from '@smart-signer/lib/login-operation';
-import { getChain } from '@transaction/lib/chain';
-import { operation } from '@hiveio/wax';
+// Type-only: `operation` is a wax type alias, never touched as a value here.
+import type { operation as WaxOperation } from '@hiveio/wax';
 
 import { getLogger } from '@hive/ui/lib/logging';
 const logger = getLogger('app');
@@ -49,11 +52,25 @@ export const useProcessAuth = (authenticateOnBackend: boolean, strict: boolean) 
     };
 
     try {
+      // Both loaded here rather than statically imported at module scope
+      // (2026-08-12): this hook is called unconditionally from
+      // GoogleOAuthRedirectHandler, which every page mounts via Providers, so a
+      // static import of either would have reintroduced the exact leak fixed in
+      // packages/transaction/index.ts and signer-provider.tsx — `getSigner`
+      // pulls in all 7 signer backends, `getChain` pulls in wax's WASM-backed
+      // chain client — for every visitor, even ones who never touch Google
+      // sign-in. `signAuth` itself is only ever invoked from an actual OAuth
+      // redirect continuation (see handleOAuthRedirect's early return above),
+      // so paying for either import here is fine.
+      const [{ getChain }, { getSigner }] = await Promise.all([
+        import('@transaction/lib/chain'),
+        import('@smart-signer/lib/signer/get-signer')
+      ]);
       const hiveChain = await getChain();
       // Read challenge directly from cookie — React state may not have updated yet
       // if signAuth is called early (e.g., biometric auto-unlock on page load).
       const challenge = loginChallenge || getCookie(`${cookieNamePrefix}login_challenge`) || '';
-      const operation: operation = await getOperationForLogin(username, keyType, challenge, loginType);
+      const operation: WaxOperation = await getOperationForLogin(username, keyType, challenge, loginType);
 
       const expr = new Date();
       expr.setHours(expr.getHours() + 1);

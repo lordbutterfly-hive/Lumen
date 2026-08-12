@@ -1,9 +1,18 @@
 import { useInfiniteQuery } from '@tanstack/react-query';
-import { IGetFollowParams, DEFAULT_PARAMS_FOR_FOLLOW, getFollowing } from '@transaction/lib/hive-api';
+import { IGetFollowParams, DEFAULT_PARAMS_FOR_FOLLOW } from '@transaction/lib/hive-api';
+import { fetchFollowing } from '@/blog/lib/chain-fetch';
 import { IFollow } from '@hive/common-hiveio-packages/wax';
 import { StaleTime } from '@/blog/lib/react-query';
 import { liteFollowList } from '../lib/lite-follow-list';
 
+/**
+ * ★ THROUGH OUR SERVER, NOT THE CHAIN CLIENT (2026-08-12). This called
+ * `getFollowing` directly, which downloads `wax.common.wasm` — and this hook
+ * backs the author hover-card's Follow/Mute state (`popover-card-data.tsx`),
+ * the redesigned profile page, and the Followed/Muted list pages, so it is
+ * one of the most widely-reached reads in the app. See
+ * `apps/blog/app/api/following/route.ts`.
+ */
 export const useFollowingInfiniteQuery = (
   account: IGetFollowParams['account'],
   limit: IGetFollowParams['limit'] = DEFAULT_PARAMS_FOR_FOLLOW.limit,
@@ -34,10 +43,10 @@ export const useFollowingInfiniteQuery = (
       // status as unknown rather than silently reading it as "not muted" — see that
       // file, and `medium-post-card.tsx`, for the consumer side of this fix.
       if (type === 'ignore') {
-        return await getFollowing({ account, start: last_id, type, limit });
+        return await fetchFollowing({ account, start: last_id, type, limit });
       }
 
-      const chain = await getFollowing({ account, start: last_id, type, limit }).catch(() => []);
+      const chain = await fetchFollowing({ account, start: last_id, type, limit }).catch(() => []);
       if (chain.length > 0 || last_id) return chain;
       // Empty first page: the account may be a Lumen one, whose follow graph
       // lives in our own store rather than on chain. Only the follow list falls

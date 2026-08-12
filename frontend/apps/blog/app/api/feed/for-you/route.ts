@@ -12,6 +12,7 @@ import { getLiteSession } from '@/blog/lib/lite/http/session';
 import { listFolloweesOf } from '@/blog/lib/lite/repositories/follow-repository';
 import { listBlockedIdentitiesOf, listBlockedKeysOf } from '@/blog/lib/lite/repositories/block-repository';
 import { filterBlockedForViewer } from '@/blog/lib/lite/social/block-filter';
+import { chainMutedKeysOfActor } from '@/blog/lib/lite/social/chain-mute';
 import type { FollowActor } from '@/blog/lib/lite/social/follow-actor';
 import { findUserById, findUserByHiveAccountName } from '@/blog/lib/lite/repositories/user-repository';
 import { attachLiteIdentities } from '@/blog/lib/lite/render/attach-lite';
@@ -218,7 +219,21 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
     const session = await getLiteSession();
     const actor = await viewerBlockActor(session.user?.userId ?? '', session.user?.username ?? '');
-    blockedKeys = actor ? new Set(await listBlockedKeysOf(actor)) : new Set();
+    if (actor) {
+      // ★ CHAIN MUTES MERGED HERE TOO (owner ruling, 2026-08-12) — a PeakD mute
+      // now removes the muted author from this reader's feed exactly like a Lumen
+      // block does. See `chain-mute.ts`'s header for why this degrades to "none
+      // known right now" on failure rather than failing the whole feed closed —
+      // effect (A) is the viewer's own preference, and the existing catch below
+      // already accepts an unfiltered feed over none for the SAME reason.
+      const [lumenKeys, chainMutes] = await Promise.all([
+        listBlockedKeysOf(actor),
+        chainMutedKeysOfActor(actor)
+      ]);
+      blockedKeys = new Set([...lumenKeys, ...chainMutes.keys]);
+    } else {
+      blockedKeys = new Set();
+    }
   } catch (error) {
     // A reader whose block list cannot be read gets an unfiltered feed rather than
     // no feed. Logged, because silently ignoring a block is exactly the shape of

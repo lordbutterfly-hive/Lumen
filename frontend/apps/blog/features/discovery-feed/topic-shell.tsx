@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { useInView } from 'react-intersection-observer';
 import LeftRail from '@/blog/features/layouts/left-rail';
@@ -10,7 +10,6 @@ import MediumPostCard from './medium-post-card';
 import { filterVisiblePosts, useNsfwPreference } from '@/blog/lib/nsfw';
 import { PostListSkeleton } from '@hive/ui';
 import { Entry } from '@hive/common-hiveio-packages/wax';
-import { StaleTime } from '@/blog/lib/react-query';
 
 /**
  * A TOPIC IS THE FEED, FILTERED — not a different, older-looking page.
@@ -60,7 +59,22 @@ export default function TopicShell({ tag }: { tag: string }) {
         if (!lastPage.entries || lastPage.entries.length === 0) return undefined;
         return lastPage.nextCursor;
       },
-      staleTime: StaleTime.MEDIUM
+      // ★★★ THE FEED NEVER CHANGES UNDER A READER (2026-08-12) — this page IS
+      // the ranked feed, filtered to one tag (see the file header), asking the
+      // same `/api/feed/for-you` route, so it inherited the exact defect
+      // ForYouFeed itself was fixed for on 2026-08-10 and this file was never
+      // touched: `staleTime: StaleTime.MEDIUM` (2 minutes) with every automatic
+      // refetch trigger left at its library default meant window focus,
+      // reconnect or a remount could replace `data.pages` — and therefore this
+      // topic's whole rendered list — with whatever the route answered next,
+      // including a thin page from a recsys cold-start or a Hive node hiccup.
+      // Same fix, same reasoning: nothing about a ranked page changing while a
+      // reader is scrolled into it is time-critical, so every automatic
+      // trigger is off.
+      staleTime: Infinity,
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
+      refetchOnMount: false
     });
 
   useEffect(() => {
@@ -82,6 +96,16 @@ export default function TopicShell({ tag }: { tag: string }) {
   // and the scroll sentinel auto-fetches forever. See lib/nsfw.ts.
   const entries = filterVisiblePosts(rawEntries, nsfwPreference);
 
+  // ★★★ AN EMPTY ANSWER NEVER PAINTS OVER A FULL PAGE (2026-08-12) — mirrors
+  // ForYouFeed's fix. `staleTime: Infinity` above stops the ordinary trigger,
+  // but an explicit `invalidateQueries` (see use-lumen-block.ts) still forces a
+  // refetch regardless of staleTime, and the route can still legitimately
+  // answer thin. Holding the last non-empty list this page actually rendered
+  // means the worst case is stale, not a topic that looks like it went silent.
+  const lastRendered = useRef<Entry[]>([]);
+  if (entries.length > 0) lastRendered.current = entries;
+  const shown = entries.length > 0 ? entries : lastRendered.current;
+
   const ranked = data?.pages?.[0]?.source === 'recsys';
 
   // ★ A COMMUNITY ID IS NOT A READABLE TOPIC (owner ruling, 2026-08-07).
@@ -89,8 +113,8 @@ export default function TopicShell({ tag }: { tag: string }) {
   // tells a reader nothing. The posts themselves carry the real name, so use it
   // for the heading and keep the raw id only as the sub-label.
   const isCommunityId = /^hive-\d+$/i.test(tag);
-  const communityName = entries.find((e) => (e as { community_title?: string }).community_title)?.[
-    'community_title' as keyof typeof entries[number]
+  const communityName = shown.find((e) => (e as { community_title?: string }).community_title)?.[
+    'community_title' as keyof typeof shown[number]
   ] as string | undefined;
   const displayName = isCommunityId && communityName ? communityName : tag;
 
@@ -119,12 +143,12 @@ export default function TopicShell({ tag }: { tag: string }) {
             />
             {ranked ? 'Ranked for you' : 'Newest first'}
           </span>
-          {entries.length > 0 ? (
+          {shown.length > 0 ? (
             <>
               <span className="text-[#dcd7d2]" aria-hidden>
                 ·
               </span>
-              <span className="tabular-nums">{entries.length} posts</span>
+              <span className="tabular-nums">{shown.length} posts</span>
             </>
           ) : null}
           <span className="text-[#dcd7d2]" aria-hidden>
@@ -135,11 +159,16 @@ export default function TopicShell({ tag }: { tag: string }) {
 
         {isLoading ? (
           <PostListSkeleton count={5} />
-        ) : isError ? (
+        ) : isError && shown.length === 0 && !hasNextPage ? (
+          // ★ `isError` ALONE IS NO LONGER THE GUARD, same fix as ForYouFeed: with
+          // `shown` already holding the last good page, only "nothing at all to
+          // show, and nothing more coming" is an actual dead end — a failed
+          // background refetch rides out silently instead of replacing the topic
+          // with an error line.
           <p className="py-12 text-center font-sans text-sm text-muted-foreground">
             We couldn’t load this topic just now. Try again in a moment.
           </p>
-        ) : entries.length === 0 ? (
+        ) : shown.length === 0 ? (
           // Never a bare dead end: an empty topic still offers a way onward.
           <div className="rounded-[20px] border border-dashed border-[#e6e0da] bg-[#fdfcfb] px-8 py-14 text-center">
             <p className="mb-1 font-serif text-[19px] font-semibold text-[#161511]">Nothing here yet</p>
@@ -155,17 +184,27 @@ export default function TopicShell({ tag }: { tag: string }) {
             </a>
           </div>
         ) : (
-          entries.map((entry) => (
+          shown.map((entry) => (
             <MediumPostCard key={`${entry.author}-${entry.permlink}`} post={entry} />
           ))
         )}
 
-        {entries.length > 0 && hasNextPage ? (
+        {/* ★ BUG 2 FIX (2026-08-12, FX3) — same fix, same reasoning as
+            `feed-tabs.tsx`'s `ForYouFeed`/`EntryFeed`: this sentinel used to be
+            gated on `shown.length > 0`, so a page where NSFW-hide filtering
+            removed every post while the server still had more (`hasNextPage:
+            true`) never mounted it — `ref` never attached, `inView` could
+            never become true, and infinite scroll dead-ended on "Nothing here
+            yet" with more content one page away. Mounted on `hasNextPage`
+            alone; the effect above already guards against a request loop
+            (`!isFetchingNextPage` before fetching, stops at `hasNextPage:
+            false`), unchanged by this fix. */}
+        {hasNextPage ? (
           <div ref={ref} className="py-8 text-center font-sans text-[13px] text-[#6b7280]">
             {isFetchingNextPage ? 'Loading more…' : ''}
           </div>
         ) : null}
-        {entries.length > 0 && !hasNextPage ? (
+        {!hasNextPage && shown.length > 0 ? (
           <p className="py-8 text-center font-sans text-[13px] text-[#6b7280]">That’s everything under #{tag}.</p>
         ) : null}
       </main>

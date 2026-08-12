@@ -2,9 +2,7 @@
 
 import { useParams, notFound } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { getAccountFull, getDynamicGlobalProperties } from '@transaction/lib/hive-api';
-import { getChain } from '@transaction/lib/chain';
-import { convertToHP } from '@ui/lib/utils';
+import { fetchAccount, fetchDynamicGlobalProperties, fetchVestsToHp } from '@/blog/lib/chain-fetch';
 import { convertStringToBig } from '@ui/lib/helpers';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
@@ -30,10 +28,22 @@ import { getCoverImageUrl } from './lib/get-cover-image-url';
  * Redesigned profile page (design-handoff-v2, Profile.dc.html), mounted at
  * the (user-profile) route group's root — `/@username`. Reuses the exact
  * data-fetch shape `ProfileLayout` (features/layouts/user-profile) already
- * established: same `getAccountFull`/`getDynamicGlobalProperties`/`getChain`
- * calls, same `['profileData', username]` / `['dynamicGlobalData']` query
- * keys the route's layout.tsx server-prefetches, so this component inherits
- * that SSR hydration for free instead of re-fetching on first paint.
+ * established: same `['profileData', username]` / `['dynamicGlobalData']`
+ * query keys the route's layout.tsx server-prefetches, so this component
+ * inherits that SSR hydration for free instead of re-fetching on first
+ * paint.
+ *
+ * ★ THROUGH OUR SERVER, NOT THE CHAIN CLIENT (2026-08-12). The three queries
+ * below used to call `getAccountFull`/`getDynamicGlobalProperties`/`getChain`
+ * directly, here in the browser — the last one via its own unconditional
+ * `useQuery({queryFn: () => getChain()})`, used only to reach
+ * `chain.vestsToHp()` for the HP figures further down. `getChain()`
+ * INSTANTIATES `@hiveio/wax` at runtime and downloads `wax.common.wasm`
+ * (2.34 MB) — none of that was gated on being signed in, so this ran for
+ * every visitor to `/@username`, the second-highest-traffic route in the
+ * app. See `apps/blog/app/api/account/route.ts`,
+ * `.../api/dynamic-global-properties/route.ts` and
+ * `.../api/vests-to-hp/route.ts`.
  */
 export default function ProfileMain() {
   const params = useParams<{ param: string }>();
@@ -66,7 +76,7 @@ export default function ProfileMain() {
     isLoading: isProfilePending
   } = useQuery({
     queryKey: ['profileData', username],
-    queryFn: () => getAccountFull(username),
+    queryFn: () => fetchAccount(username),
     enabled: Boolean(username)
   });
 
@@ -76,17 +86,40 @@ export default function ProfileMain() {
     isLoading: isDynamicGlobalPending
   } = useQuery({
     queryKey: ['dynamicGlobalData'],
-    queryFn: () => getDynamicGlobalProperties()
+    queryFn: () => fetchDynamicGlobalProperties()
   });
 
+  // Replaces the old `hiveChain` query (`getChain()`, unconditional, no
+  // `enabled` guard) — the chain instance itself was never displayed, it only
+  // fed the two `convertToHP` calls below. Both HP figures are fetched here
+  // together, once `profileData`/`dynamicGlobalData` are in, via
+  // `fetchVestsToHp` (see its doc comment for why the computation itself
+  // stays server-side rather than being reimplemented in plain JS).
+  const canComputeHp = Boolean(
+    profileData?.delegated_vesting_shares && profileData?.received_vesting_shares && profileData?.vesting_shares
+  );
   const {
-    data: hiveChain,
+    data: hpFigures,
     isError: isChainError,
     isLoading: isChainPending
   } = useQuery({
-    queryKey: ['hiveChain'],
-    queryFn: () => getChain(),
-    staleTime: Infinity
+    queryKey: ['profileHpFigures', username, dynamicGlobalData?.total_vesting_shares],
+    queryFn: async () => {
+      const totalVestingShares = dynamicGlobalData!.total_vesting_shares;
+      const totalVestingFundHive = dynamicGlobalData!.total_vesting_fund_hive;
+      const [delegatedHive, vestingHive] = await Promise.all([
+        fetchVestsToHp(
+          convertStringToBig(profileData!.delegated_vesting_shares!).minus(
+            convertStringToBig(profileData!.received_vesting_shares!)
+          ),
+          totalVestingShares,
+          totalVestingFundHive
+        ),
+        fetchVestsToHp(convertStringToBig(profileData!.vesting_shares!), totalVestingShares, totalVestingFundHive)
+      ]);
+      return { delegatedHive, vestingHive };
+    },
+    enabled: Boolean(profileData) && Boolean(dynamicGlobalData) && canComputeHp
   });
 
   // Viewer's own following list — drives both ProfileActions' isFollow state
@@ -133,11 +166,11 @@ export default function ProfileMain() {
   // before the `!profileData` check below ever runs.
   const moderation = useModerationStatus(username, Boolean(profileData?._temporary));
 
-  if (isProfileError || isDynamicGlobalError || isChainError) {
+  if (isProfileError || isDynamicGlobalError) {
     return <NoDataError />;
   }
 
-  if (isProfilePending || isDynamicGlobalPending || isChainPending || !hiveChain) {
+  if (isProfilePending || isDynamicGlobalPending) {
     return <ProfileMainSkeleton />;
   }
 
@@ -145,29 +178,21 @@ export default function ProfileMain() {
     return notFound();
   }
 
-  if (
-    !dynamicGlobalData ||
-    !profileData.delegated_vesting_shares ||
-    !profileData.received_vesting_shares ||
-    !profileData.vesting_shares
-  ) {
+  if (!dynamicGlobalData || !canComputeHp) {
     return <NoDataError />;
   }
 
-  const delegatedHive = convertToHP(
-    convertStringToBig(profileData.delegated_vesting_shares).minus(
-      convertStringToBig(profileData.received_vesting_shares)
-    ),
-    hiveChain,
-    dynamicGlobalData.total_vesting_shares,
-    dynamicGlobalData.total_vesting_fund_hive
-  );
-  const vestingHive = convertToHP(
-    convertStringToBig(profileData.vesting_shares),
-    hiveChain,
-    dynamicGlobalData.total_vesting_shares,
-    dynamicGlobalData.total_vesting_fund_hive
-  );
+  // Only reachable once `canComputeHp` is true, which is exactly `hpFigures`'s
+  // own `enabled` condition — so a pending/error state here means the fetch
+  // genuinely hasn't resolved yet, not that it was never going to run.
+  if (isChainError) {
+    return <NoDataError />;
+  }
+  if (isChainPending || !hpFigures) {
+    return <ProfileMainSkeleton />;
+  }
+
+  const { delegatedHive, vestingHive } = hpFigures;
   // ★ HP HEADLINE = OWN STAKE, matching how Hive's own wallet presents it
   // (2026-08-06, owner ruling). Hive shows the account's OWN staked HIVE as the
   // prominent figure and the delegation-adjusted total underneath as "Tot:":

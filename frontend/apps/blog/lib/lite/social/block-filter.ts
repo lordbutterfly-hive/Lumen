@@ -6,6 +6,12 @@ import { liteConfig } from '../config';
 import { litePostIdOf } from '../render/lite-post-id';
 import { FollowActor, actorKey, sessionActor } from './follow-actor';
 import { actorForDisplayedName, buildEntryActorResolver } from './block-actor';
+import {
+  chainMutedKeysOfActor,
+  hiveNameOfActor,
+  hiveNamesByUserId,
+  ownerChainMutedNamesOrThrow
+} from './chain-mute';
 
 /**
  * ★★★ WHERE A BLOCK ACTUALLY REMOVES SOMETHING.
@@ -36,6 +42,19 @@ import { actorForDisplayedName, buildEntryActorResolver } from './block-actor';
  * reasons: a conversation hanging off nothing is unreadable, and — the one that
  * matters — replies routinely quote what they answer, so leaving them would serve the
  * blocked words back through somebody else's mouth.
+ *
+ * ★★★ AND A CHAIN MUTE IS NOW READ AS THE SAME THING (owner ruling, 2026-08-12):
+ * "mutes and blocks are treated the same... if someone mutes on peakd it should be
+ * treated as blocked on Lumen." Every function below now ALSO consults
+ * `chain-mute.ts` — (A) the viewer's own on-chain ignore list, (B) the content
+ * owner's — and folds it into the SAME `hidden` set a Lumen block would populate.
+ * There is no separate "chain-muted" code path through these filters; a name in
+ * either source is simply blocked. The one place the two sources are told apart at
+ * all is the Settings list and its removal control, because a chain entry needs a
+ * signed transaction to remove and a Lumen block does not — see `chain-mute.ts`'s
+ * header for the fail-open/fail-closed split that follows from effect (A) vs (B), and
+ * `/api/lite/block/list`'s `source` field for where the removal-path distinction is
+ * actually surfaced.
  */
 
 /** `${author}/${permlink}`, the key `bridge.get_discussion` uses for its map. */
@@ -49,15 +68,54 @@ function parentCoordKey(entry: Entry): string | null {
 }
 
 /**
+ * The Hive account name behind one ENTRY's author, for matching against a chain mute
+ * list — as opposed to `EntryActorResolver.keyOf`, which answers in the Lumen
+ * `u:`/`h:` key space a Lumen block is stored in. The two are different questions: a
+ * pure lite author has a perfectly good Lumen key (`u:<id>`) but no Hive identity at
+ * all, and a chain mute can never name them (confirmed by the owner: "Lite accounts
+ * do not have Hive mutes"). Costs one row lookup for an upgraded `_lite` author and
+ * nothing at all for an ordinary chain entry, whose `author` IS the answer.
+ */
+async function ownerHiveNameOfEntry(entry: Entry): Promise<string | null> {
+  if (entry._lite) {
+    return entry._lite.userId ? hiveNameOfActor({ userId: entry._lite.userId }) : null;
+  }
+  return (entry.author ?? '').toLowerCase() || null;
+}
+
+/**
+ * The same question, batched over a whole page of entries: every entry's Hive
+ * account name, keyed by `coordKey`, or `null` where the author has none. One query
+ * for every DISTINCT `_lite.userId` in the page, regardless of how many entries
+ * share it — a thread routinely has several replies from the same lite author.
+ */
+async function authorHiveNamesOf(entries: Entry[]): Promise<Map<string, string | null>> {
+  const liteUserIds = entries.map((entry) => entry._lite?.userId).filter((id): id is string => Boolean(id));
+  const hiveNameByUserId = await hiveNamesByUserId(liteUserIds);
+  const map = new Map<string, string | null>();
+  for (const entry of entries) {
+    const coord = coordKey(entry);
+    if (entry._lite) {
+      map.set(coord, entry._lite.userId ? (hiveNameByUserId.get(entry._lite.userId) ?? null) : null);
+    } else {
+      map.set(coord, (entry.author ?? '').toLowerCase() || null);
+    }
+  }
+  return map;
+}
+
+/**
  * Effect (B) over one thread. Returns the entries that may be served, in input order.
  *
  * Cost: two batched user lookups (`buildEntryActorResolver`) plus ONE block query for
- * the entire thread, regardless of how many comments it has.
+ * the entire thread, regardless of how many comments it has — plus, now, ONE chain
+ * mute lookup for the root post's owner (cached; see `chain-mute.ts`), never one per
+ * commenter.
  */
 export async function applyOwnerBlocksToThread<T extends Entry>(entries: T[]): Promise<T[]> {
   if (entries.length < 2) return entries;
 
-  const resolver = await buildEntryActorResolver(entries);
+  const resolver = await buildEntryActorResolver(entries, { onLookupFailure: 'throw' });
   const keyByCoord = new Map<string, string | null>();
   const byCoord = new Map<string, T>();
   for (const entry of entries) {
@@ -69,9 +127,25 @@ export async function applyOwnerBlocksToThread<T extends Entry>(entries: T[]): P
   // Every participant is both a potential blocker (as somebody's ancestor) and a
   // potential blocked party, so one set serves both sides of the single query.
   const participants = [...new Set([...keyByCoord.values()].filter((k): k is string => Boolean(k)))];
-  if (participants.length < 2) return entries;
-  const blockedPairs = await blocks.blockedPairsAmong(participants, participants);
-  if (blockedPairs.size === 0) return entries;
+  const blockedPairs =
+    participants.length >= 2 ? await blocks.blockedPairsAmong(participants, participants) : new Set<string>();
+
+  // ★ CHAIN-MUTE REACH — the ROOT POST OWNER's on-chain ignore list, and ONLY
+  // theirs; see `ownerChainMutedNamesOrThrow`'s doc for why this does not walk
+  // every ancestor the way the Lumen-block loop below does. Computed
+  // UNCONDITIONALLY — independent of `blockedPairs` — because a thread with zero
+  // Lumen blocks can still have a root author whose PeakD mutes should hide
+  // replies here. Fails CLOSED: an unresolvable owner throws, and every caller of
+  // this function already answers "no thread" rather than an unfiltered one when
+  // its OWN Lumen-block resolution throws (see `[permlink]/page.tsx` and
+  // `/api/discussion`'s "FAIL EMPTY, NEVER FAIL OPEN").
+  const root = entries.find((entry) => !parentCoordKey(entry));
+  const rootOwnerName = root ? await ownerHiveNameOfEntry(root) : null;
+  const chainMuted = rootOwnerName
+    ? await ownerChainMutedNamesOrThrow({ hive: rootOwnerName })
+    : new Set<string>();
+
+  if (blockedPairs.size === 0 && chainMuted.size === 0) return entries;
 
   const hidden = new Set<string>();
   for (const entry of entries) {
@@ -94,6 +168,20 @@ export async function applyOwnerBlocksToThread<T extends Entry>(entries: T[]): P
       cursor = ancestor ? parentCoordKey(ancestor) : null;
     }
   }
+
+  // Chain-mute reach: every entry is checked directly against the ROOT owner's
+  // ignore list — no ancestor walk, because only the root's chain state was ever
+  // fetched (see the note above).
+  if (chainMuted.size > 0) {
+    const authorHiveName = await authorHiveNamesOf(entries);
+    for (const entry of entries) {
+      const coord = coordKey(entry);
+      if (hidden.has(coord)) continue;
+      const name = authorHiveName.get(coord);
+      if (name && chainMuted.has(name)) hidden.add(coord);
+    }
+  }
+
   if (hidden.size === 0) return entries;
 
   // Cascade downwards. Depth order is not guaranteed by the source, so repeat until
@@ -179,17 +267,31 @@ export async function applyOwnerBlocksToReplies<T extends Entry>(
 ): Promise<T[]> {
   if (!owner || entries.length === 0) return entries;
   const ownerKey = actorKey(owner);
-  const resolver = await buildEntryActorResolver(entries);
+  const resolver = await buildEntryActorResolver(entries, { onLookupFailure: 'throw' });
   const authorKeys = entries
     .map((entry) => resolver.keyOf(entry))
     .filter((k): k is string => Boolean(k));
-  if (authorKeys.length === 0) return entries;
 
-  const blockedPairs = await blocks.blockedPairsAmong([ownerKey], authorKeys);
-  if (blockedPairs.size === 0) return entries;
+  // Chain-mute reach for this same owner — see `ownerChainMutedNamesOrThrow`'s doc.
+  // Fetched unconditionally, independent of `authorKeys`: a page whose every entry
+  // failed to resolve a LUMEN key can still have entries resolvable by Hive name.
+  const chainMuted = await ownerChainMutedNamesOrThrow(owner);
+
+  if (authorKeys.length === 0 && chainMuted.size === 0) return entries;
+
+  const blockedPairs =
+    authorKeys.length > 0 ? await blocks.blockedPairsAmong([ownerKey], authorKeys) : new Set<string>();
+  if (blockedPairs.size === 0 && chainMuted.size === 0) return entries;
+
+  const authorHiveName = chainMuted.size > 0 ? await authorHiveNamesOf(entries) : null;
   return entries.filter((entry) => {
     const key = resolver.keyOf(entry);
-    return !key || !blockedPairs.has(blocks.pairKey(ownerKey, key));
+    if (key && blockedPairs.has(blocks.pairKey(ownerKey, key))) return false;
+    if (authorHiveName) {
+      const name = authorHiveName.get(coordKey(entry));
+      if (name && chainMuted.has(name)) return false;
+    }
+    return true;
   });
 }
 
@@ -235,6 +337,11 @@ export async function applyOwnerBlocksToReplies<T extends Entry>(
  * and far less likely route to the same content than the thread itself. If
  * this gap ever needs closing, the fix is a BOUNDED ancestry walk here (cap
  * the depth, do not walk forever), not an unbounded one.
+ *
+ * The chain-mute reach added below rides the SAME one-hop boundary: it asks only
+ * the DIRECT parent's owner's on-chain ignore list, piggy-backed onto the owner
+ * resolution this function already pays for per distinct parent (see
+ * `ownerChainMutedNamesOrThrow`). It is not a second, wider walk.
  */
 export async function applyOwnerBlocksToAuthoredEntries<T extends Entry>(entries: T[]): Promise<T[]> {
   const withParent = entries
@@ -251,22 +358,79 @@ export async function applyOwnerBlocksToAuthoredEntries<T extends Entry>(entries
     }
   }
 
+  // ★★★ A FAILED LOOKUP IS NOT "NO OWNER" (2026-08-12, adversarial review).
+  //
+  // This was `.catch(() => null)`, which collapsed two completely different
+  // answers into one:
+  //
+  //   * `null` — resolved fine, and there is genuinely no Lumen owner to speak
+  //     for this parent. `resolvePostOwnerActor` returns this deliberately for a
+  //     container root published under the shared frontend account, so that one
+  //     system account can never become blocker-of-record for everybody. These
+  //     entries MUST stay visible.
+  //   * a THROW — a database hiccup. We do not know whether this parent's owner
+  //     blocked the author.
+  //
+  // Treating the second as the first is effect (B) failing OPEN: a blocked
+  // account's comments under the blocker's post get served to everyone, which is
+  // the precise thing this filter exists to prevent, and it contradicts the rule
+  // the calling routes state for themselves ("FAIL EMPTY, NEVER FAIL OPEN").
+  //
+  // Now a failed lookup hides that parent's entries. The blast radius is one
+  // parent, not the page — the old comment's fear of "taking the whole tab down"
+  // only applies if you fail the request, which this does not do. If the
+  // database is down for every parent, the tab renders empty, which is exactly
+  // what `/api/account-posts` already chose to serve in its own catch.
   const resolvedOwners = await Promise.all(
     [...parentRefs.entries()].map(async ([parent, { author, permlink }]) => {
-      // A single bad lookup must not take the whole tab down with it: fail
-      // that one parent open (unresolved owner, so its replies stay visible)
-      // rather than the entire page.
-      const owner = await resolvePostOwnerActor(author, permlink).catch(() => null);
-      return [parent, owner] as const;
+      try {
+        // `owner: null` here is a real answer — "resolved, and nobody owns this
+        // parent in Lumen terms" — and is treated as visible.
+        const owner = await resolvePostOwnerActor(author, permlink);
+        // ★ THE CHAIN-MUTE FETCH SHARES THIS SAME try/catch, DELIBERATELY. A
+        // failure to read THIS parent's owner's on-chain ignore list is the exact
+        // same "cannot vouch this parent is safe" answer a failed Lumen-owner
+        // lookup already is — see the big comment above this block. Folding it in
+        // here means the existing fail-closed machinery (`unresolvableParents` /
+        // `withoutUnresolvable`) protects both sources with no new bookkeeping.
+        const chainMuted = await ownerChainMutedNamesOrThrow(owner);
+        return [parent, { resolved: true as const, owner, chainMuted }] as const;
+      } catch {
+        return [parent, { resolved: false as const, owner: null, chainMuted: new Set<string>() }] as const;
+      }
     })
   );
-  const ownerKeyByParent = new Map<string, string>();
-  for (const [parent, owner] of resolvedOwners) {
-    if (owner) ownerKeyByParent.set(parent, actorKey(owner));
-  }
-  if (ownerKeyByParent.size === 0) return entries;
+  const unresolvableParents = new Set(
+    resolvedOwners.filter(([, result]) => !result.resolved).map(([parent]) => parent)
+  );
+  /**
+   * Drop entries hanging under a parent whose owner could not be looked up.
+   *
+   * ★ Applied at EVERY exit below, not just the last one. This function has
+   * three early returns of the form `return entries` (no resolvable owners, no
+   * resolvable authors, no block edges), and each of them would otherwise hand
+   * back the unresolvable entries untouched — reinstating the exact fail-open
+   * this change closes, on the paths most likely to be taken when the database
+   * is unhealthy.
+   */
+  const withoutUnresolvable = (list: T[]): T[] => {
+    if (unresolvableParents.size === 0) return list;
+    return list.filter((entry) => {
+      const parent = parentCoordKey(entry);
+      return !(parent && unresolvableParents.has(parent));
+    });
+  };
 
-  const resolver = await buildEntryActorResolver(entries);
+  const ownerKeyByParent = new Map<string, string>();
+  const chainMutedByParent = new Map<string, Set<string>>();
+  for (const [parent, result] of resolvedOwners) {
+    if (!result.resolved) continue;
+    if (result.owner) ownerKeyByParent.set(parent, actorKey(result.owner));
+    if (result.chainMuted.size > 0) chainMutedByParent.set(parent, result.chainMuted);
+  }
+  if (ownerKeyByParent.size === 0 && chainMutedByParent.size === 0) return withoutUnresolvable(entries);
+
+  const resolver = await buildEntryActorResolver(entries, { onLookupFailure: 'throw' });
   const authorKeyByEntry = new Map<T, string>();
   const authorKeys = new Set<string>();
   for (const { entry } of withParent) {
@@ -276,10 +440,16 @@ export async function applyOwnerBlocksToAuthoredEntries<T extends Entry>(entries
       authorKeys.add(key);
     }
   }
-  if (authorKeys.size === 0) return entries;
+  if (authorKeys.size === 0 && chainMutedByParent.size === 0) return withoutUnresolvable(entries);
 
-  const blockedPairs = await blocks.blockedPairsAmong([...new Set(ownerKeyByParent.values())], [...authorKeys]);
-  if (blockedPairs.size === 0) return entries;
+  const blockedPairs =
+    ownerKeyByParent.size > 0 && authorKeys.size > 0
+      ? await blocks.blockedPairsAmong([...new Set(ownerKeyByParent.values())], [...authorKeys])
+      : new Set<string>();
+  // Chain-mute names, batched over every entry once rather than per parent —
+  // see `authorHiveNamesOf`.
+  const authorHiveName = chainMutedByParent.size > 0 ? await authorHiveNamesOf(entries) : null;
+  if (blockedPairs.size === 0 && !authorHiveName) return withoutUnresolvable(entries);
 
   const hidden = new Set<T>();
   for (const { entry, parent } of withParent) {
@@ -287,10 +457,19 @@ export async function applyOwnerBlocksToAuthoredEntries<T extends Entry>(entries
     const authorKey = authorKeyByEntry.get(entry);
     if (ownerKey && authorKey && blockedPairs.has(blocks.pairKey(ownerKey, authorKey))) {
       hidden.add(entry);
+      continue;
+    }
+    const parentChainMuted = authorHiveName ? chainMutedByParent.get(parent) : undefined;
+    if (parentChainMuted) {
+      const name = authorHiveName?.get(coordKey(entry));
+      if (name && parentChainMuted.has(name)) hidden.add(entry);
     }
   }
-  if (hidden.size === 0) return entries;
-  return entries.filter((entry) => !hidden.has(entry));
+  // Both exits go through `withoutUnresolvable`: an entry whose parent could not
+  // be looked up is withheld whether or not any block edge was found, because
+  // "no edge found" and "could not check" are the same answer here.
+  if (hidden.size === 0) return withoutUnresolvable(entries);
+  return withoutUnresolvable(entries.filter((entry) => !hidden.has(entry)));
 }
 
 /**
@@ -326,11 +505,25 @@ export async function resolvePostOwnerActor(
  * (A) VIEWER-SIDE
  * ------------------------------------------------------------------------- */
 
-/** The signed-in viewer's block list as node keys. Empty for anonymous callers. */
+/**
+ * The signed-in viewer's own blocked-and-chain-muted node keys, merged into the one
+ * set a served-entry filter matches against. Empty for anonymous callers.
+ *
+ * ★ CHAIN MUTES, MERGED (owner ruling, 2026-08-12): "if someone mutes on peakd it
+ * should be treated as blocked on Lumen." `chainMutedKeysOfActor` degrades to nothing
+ * on a lookup failure rather than failing closed — see its doc and `chain-mute.ts`'s
+ * header for why effect (A) and effect (B) deliberately disagree on this. A pure lite
+ * viewer contributes nothing extra here, correctly: they have no Hive account to have
+ * muted anyone from.
+ */
 export async function viewerBlockedKeySet(sessionUser: User | undefined): Promise<Set<string>> {
   const actor = await sessionActor(sessionUser);
   if (!actor) return new Set();
-  return new Set(await blocks.listBlockedKeysOf(actor));
+  const [lumenKeys, chainMutes] = await Promise.all([
+    blocks.listBlockedKeysOf(actor),
+    chainMutedKeysOfActor(actor)
+  ]);
+  return new Set([...lumenKeys, ...chainMutes.keys]);
 }
 
 /**

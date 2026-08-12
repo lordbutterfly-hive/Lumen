@@ -4,9 +4,8 @@ import { useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useInView } from 'react-intersection-observer';
-import { getAccountPosts } from '@transaction/lib/bridge-api';
+import { fetchAccountPosts } from '@/blog/lib/lite/client/account-posts-fetch';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
-import { StaleTime } from '@/blog/lib/react-query';
 import { isBlockedEntry, useLumenBlockList } from '@/blog/lib/lite/client/use-lumen-block';
 import { Entry } from '@hive/common-hiveio-packages/wax';
 import { PostListSkeleton } from '@hive/ui';
@@ -336,13 +335,33 @@ function ForYouFeed() {
         ))
       )}
 
-      {/* The sentinel: scrolling it into view fetches the next page. */}
-      {shown.length > 0 && hasNextPage ? (
+      {/* ★ BUG 2 FIX (2026-08-12, FX3) — "infinite scroll can dead-end with a
+          confident 'No posts yet'". The sentinel used to be gated on
+          `shown.length > 0`, same as the empty-message branch above it. If
+          NSFW-hide filtering removed every post on the currently-loaded
+          page(s) while the server still had more (`hasNextPage: true`), that
+          guard was false — the sentinel never mounted, `useInView`'s `ref`
+          never attached to any DOM node, `inView` could never become true,
+          and the auto-fetch effect above (`if (inView && hasNextPage && ...)
+          fetchNextPage()`) never fired again. Infinite scroll permanently
+          dead-ended on "No posts yet." while more content sat one page away.
+          Mounting this on `hasNextPage` ALONE — decoupled from `shown.length`
+          — lets a fully-filtered page still advance: the sentinel is
+          typically already in the (short) viewport, so the effect fires
+          immediately and keeps paging until either real content appears or
+          the server genuinely has no more (`hasNextPage` false), at which
+          point this stops rendering and nothing further fetches. Same fix,
+          same reasoning as `EntryFeed` below and `topic-shell.tsx`.
+          Not a request loop: the existing effect already guards against
+          fetching while one is in flight (`!isFetchingNextPage`) and against
+          fetching past the last page (`hasNextPage`) — neither guard changed
+          here, only when this sentinel is allowed to exist in the DOM. */}
+      {hasNextPage ? (
         <div ref={ref} className="py-8 text-center font-sans text-[13px] text-muted-foreground">
           {isFetchingNextPage ? 'Loading more…' : ''}
         </div>
       ) : null}
-      {shown.length > 0 && !hasNextPage ? (
+      {!hasNextPage && shown.length > 0 ? (
         <p className="py-8 text-center font-sans text-[13px] text-muted-foreground">
           That’s everything for now.
         </p>
@@ -372,6 +391,15 @@ const FEED_SORT = 'feed';
  * `MediumPostCard`s instead of the classic `PostList` item. Uses
  * `getAccountPosts` (bridge.get_account_posts), not `getPostsRanked` — see the
  * FEED_SORT note above for why.
+ *
+ * ★ THROUGH OUR SERVER, NOT THE CHAIN CLIENT (2026-08-12). This called
+ * `getAccountPosts` directly from `@transaction/lib/bridge-api` — a straight
+ * `getChain()` read in the browser — instead of the `fetchAccountPosts`
+ * wrapper this same directory's `lib/lite/client/account-posts-fetch.ts`
+ * already built (and documents) for exactly this purpose. `EntryFeed` only
+ * mounts for a signed-in, non-lite reader on the Following tab, but that is
+ * still every such reader on the home page, the highest-traffic page in the
+ * app.
  */
 /**
  * ★★★ A LITE ACCOUNT HAS NO FOLLOW FEED ON HIVE, BECAUSE IT HAS NO ACCOUNT ON HIVE.
@@ -405,7 +433,7 @@ function EntryFeed({ sort, observer, lite = false }: { sort: string; observer: s
       queryFn: async ({ pageParam }) => {
         if (lite) return await fetchLiteFollowing(LITE_FOLLOWING_LIMIT);
         const { author, permlink } = (pageParam as { author?: string; permlink?: string }) || {};
-        const postsData = await getAccountPosts(sort, observer, observer, author ?? '', permlink ?? '');
+        const postsData = await fetchAccountPosts(sort, observer, observer, author ?? '', permlink ?? '');
         return postsData ?? [];
       },
       getNextPageParam: (lastPage: Entry[]) => {
@@ -418,7 +446,29 @@ function EntryFeed({ sort, observer, lite = false }: { sort: string; observer: s
         if (!last?.author || !last?.permlink) return undefined;
         return { author: last.author, permlink: last.permlink };
       },
-      staleTime: StaleTime.MEDIUM
+      // ★★★ THE FEED NEVER CHANGES UNDER A READER (2026-08-12) — the same defect
+      // ForYouFeed was fixed for on 2026-08-10 (see its comment above), never
+      // carried over to this sibling tab despite living three hundred lines
+      // below it in the same file. This carried `staleTime: StaleTime.MEDIUM`
+      // (2 minutes) with every automatic refetch trigger left at its library
+      // default, so window focus, reconnect or a remount could fire a
+      // background refetch the instant the data turned two minutes old — and
+      // each one REPLACES `data.pages` wholesale. The `queryFn` above reaches a
+      // Hive node directly from the browser for a chain account, or Lumen's own
+      // `/api/lite/feed/following` for a lite one; either can legitimately come
+      // back thin on a transient hiccup without the reader's follow graph
+      // having changed at all, and card keys here are `author-permlink` too, so
+      // a swap is a full unmount/remount, not a re-render.
+      //
+      // A chronological follow feed has exactly as little business refreshing
+      // itself under a reader as a ranked one does — nothing about post 14
+      // changing while it is on screen is time-critical. Every automatic
+      // trigger is off for the same reason ForYouFeed's are; new posts surface
+      // through the existing "Load more" control instead of a silent swap.
+      staleTime: Infinity,
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
+      refetchOnMount: false
     });
 
   useEffect(() => {
@@ -445,44 +495,94 @@ function EntryFeed({ sort, observer, lite = false }: { sort: string; observer: s
   // below: hiding a post is a display decision and must not change hook behaviour.
   const marks = useRankMarks((data?.pages.flat() ?? []).map((e) => e.author));
 
-  if (isError) {
-    return <NoDataError />;
-  }
-
-  if (isLoading || (isFetching && !data?.pages?.[0]?.length)) {
-    return <PostListSkeleton count={5} />;
-  }
-
+  // ★ EVERY DERIVED LIST IS BUILT ABOVE THE GUARDS, same reason as ForYouFeed:
+  // the empty-answer guard right below reads it, and a hook may never run
+  // conditionally.
+  //
   // Same NSFW list-level filter as the ranked feed above (see lib/nsfw.ts).
   const entries = filterVisiblePosts(
     (data?.pages.flat() ?? []).filter((entry) => !isBlockedEntry(entry, blockList)),
     nsfwPreference
   );
 
-  if (entries.length === 0) {
-    return <p className="py-12 text-center font-sans text-sm text-muted-foreground">{LABELS.empty}</p>;
+  // ★★★ AN EMPTY ANSWER NEVER PAINTS OVER A FULL PAGE (2026-08-12) — mirrors
+  // ForYouFeed's fix, verbatim reasoning. `staleTime: Infinity` and the
+  // disabled triggers above stop the ORDINARY way this used to fire, but an
+  // explicit `invalidateQueries` (a block, a login — see use-lumen-block.ts and
+  // use-lite-login.ts) can still force a refetch regardless of staleTime, and
+  // whatever it returns can still legitimately be thin. Holding the last
+  // non-empty list this component actually rendered means the worst case here
+  // is stale, not blank.
+  const lastRendered = useRef<Entry[]>([]);
+  if (entries.length > 0) lastRendered.current = entries;
+  const shown = entries.length > 0 ? entries : lastRendered.current;
+
+  if (isLoading || (isFetching && !data?.pages?.[0]?.length)) {
+    return <PostListSkeleton count={5} />;
+  }
+  // ★ `isError` ALONE IS NO LONGER THE GUARD, same fix as ForYouFeed: it is true
+  // for a failed background refetch as well as a failed first load, and with
+  // `shown` already holding the last good page, only "we have nothing at all
+  // to show, and nothing more coming" is an actual dead end.
+  if (isError && shown.length === 0 && !hasNextPage) {
+    return <NoDataError />;
   }
 
+  // ★ BUG 2 FIX (2026-08-12, FX3) — "infinite scroll can dead-end with a
+  // confident 'No posts yet'". This used to `return` the empty message here,
+  // BEFORE the button/sentinel below ever rendered. If block-filtering
+  // (`isBlockedEntry`) or NSFW-hide removed every post on the currently-loaded
+  // page(s) while the server still had more (`hasNextPage: true`), that early
+  // return meant the button — which doubles as the `useInView` sentinel via
+  // its own `ref` — never mounted, so `inView` could never become true and the
+  // auto-fetch effect above never fired again. The reader saw a confident
+  // dead end with more content one page away.
+  //
+  // Folding the empty case into the SAME return (rather than a separate early
+  // return) keeps the button/sentinel reachable whenever there is content OR
+  // more pages remain, decoupled from `shown.length`. Not a request loop: the
+  // effect above already guards against fetching while one is in flight
+  // (`!isFetching`) and against fetching past the last page (`hasNextPage`) —
+  // neither guard changed, only when this element is allowed to exist in the
+  // DOM.
   return (
     <div>
-      {entries.map((entry) => (
-        <MediumPostCard
-          key={`${entry.author}-${entry.permlink}`}
-          post={entry}
-          mark={marks.get(entry.author?.toLowerCase() ?? '')}
-        />
-      ))}
-      <div className="flex justify-center py-6">
-        <button
+      {shown.length === 0 ? (
+        <p className="py-12 text-center font-sans text-sm text-muted-foreground">{LABELS.empty}</p>
+      ) : (
+        shown.map((entry) => (
+          <MediumPostCard
+            key={`${entry.author}-${entry.permlink}`}
+            post={entry}
+            mark={marks.get(entry.author?.toLowerCase() ?? '')}
+          />
+        ))
+      )}
+      {shown.length > 0 ? (
+        <div className="flex justify-center py-6">
+          <button
+            ref={ref}
+            type="button"
+            onClick={() => fetchNextPage()}
+            disabled={!hasNextPage || isFetchingNextPage}
+            className="font-sans text-sm text-muted-foreground hover:text-foreground disabled:cursor-default"
+          >
+            {isFetchingNextPage ? LABELS.loadingMore : hasNextPage ? LABELS.loadMore : LABELS.nothingMore}
+          </button>
+        </div>
+      ) : hasNextPage ? (
+        // Nothing rendered on this page after filtering, but the server still
+        // has more — an invisible-label sentinel (no "Load more" text inviting
+        // a click above an empty list) that still auto-fires via `inView`,
+        // mirroring ForYouFeed's own fully-filtered-page sentinel above.
+        <div
           ref={ref}
-          type="button"
-          onClick={() => fetchNextPage()}
-          disabled={!hasNextPage || isFetchingNextPage}
-          className="font-sans text-sm text-muted-foreground hover:text-foreground disabled:cursor-default"
+          className="py-8 text-center font-sans text-[13px] text-muted-foreground"
+          data-testid="entry-feed-auto-sentinel"
         >
-          {isFetchingNextPage ? LABELS.loadingMore : hasNextPage ? LABELS.loadMore : LABELS.nothingMore}
-        </button>
-      </div>
+          {isFetchingNextPage ? LABELS.loadingMore : ''}
+        </div>
+      ) : null}
     </div>
   );
 }

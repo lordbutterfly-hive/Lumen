@@ -463,7 +463,7 @@ func Register(s Store, caller, creator string, block uint64, face, cap int64) er
 // of Register so launch.go can validate the registration and the launch buy
 // together, BEFORE either writes a single key — RULING G's "nothing mutates
 // on a rejected call", applied across a two-part state transition.
-func registerCheck(s Store, caller, creator string, face, cap int64) error {
+func registerCheck(s Store, caller, creator string, block uint64, face, cap int64) error {
 	if caller != creator {
 		return newErr(ErrAuth, "caller must be the creator (identity binding)")
 	}
@@ -521,6 +521,45 @@ func registerCheck(s Store, caller, creator string, face, cap int64) error {
 	}
 	if sup := getMoney(s, kSupply(creator)); sup.Sign() != 0 {
 		return newErr(ErrState, "previous incarnation still has supply outstanding; wind it down first — a new market may never inherit credits")
+	}
+
+	// ---- THE DELINQUENCY-ESCAPE GUARD (2026-08-12) ----------------------
+	//
+	// MEASURED DEFECT: registerApply zeroes kDelinquentUntil (correctly — see
+	// its comment), so a creator serving an active 7-day delinquency ban could
+	// Retire, drain the market, CloseIfDrained, and re-register to walk away
+	// from the conviction ~2 days early with the miss/delivered record reset to
+	// 0/0 — repeatable on the SAME identity, and cheapest for exactly the
+	// low-commitment creator the delivery gate exists to catch. The only
+	// behavioural record this contract keeps for "takes money and goes silent"
+	// was erasable on demand.
+	//
+	// REFUSE AT THE DOOR; DO NOT CARRY THE PENALTY INTO THE NEW INCARNATION.
+	// The obvious fix — letting kDelinquentUntil survive registerApply — is
+	// WRONG and would be a live regression, for the reason registerApply's own
+	// delivery-standing comment names: it would falsify the premise
+	// launch.go's launchBuyCheck depends on, that "immediately after
+	// registerApply a market cannot be delinquent, so the first Buy is still
+	// infallible". launchBuyCheck pre-validates the launch buy and the Buy that
+	// follows it is asserted to be infallible — a delinquent fresh market would
+	// make that Buy fail AFTER registerApply had already written, tripping the
+	// "pre-validated launch buy cannot fail" panic. Refusing the registration
+	// keeps the post-register state exactly as clean as it has always been, so
+	// every downstream invariant holds unchanged.
+	//
+	// This is the same shape as the re-incarnation money guard directly above,
+	// and for the same reason: a new market may not be built on top of the old
+	// one's unresolved obligations. The creator is not stranded — they serve
+	// out the ban they earned (at most DelinquencyBlocks, 7 days) and register
+	// after it lapses. Their holders are unaffected: the wind-down rails
+	// (Refund/RefundHolder) stayed open throughout and are what emptied the
+	// market in the first place.
+	//
+	// An EXPIRED conviction never blocks anything — the comparison is strictly
+	// against the current block, so a creator returning after any real absence
+	// registers exactly as before.
+	if until := getU64(s, kDelinquentUntil(creator)); until > block {
+		return newErr(ErrState, "a delinquency penalty from the previous incarnation is still active; re-registration is refused until it lapses")
 	}
 	return nil
 }
@@ -607,6 +646,32 @@ func registerApply(s Store, creator string, block uint64, face, cap int64) {
 	setU64(s, kDeliveredCount(creator), 0)
 	setU64(s, kDelinquentUntil(creator), 0)
 	setU64(s, kMaxOffenceUntil(creator), 0) // same reason: it is per-window state of the DEAD incarnation
+
+	// THE RATING AGGREGATE IS PER-INCARNATION TOO (defect found 2026-08-12,
+	// owner-ruled the same day). This reset was MISSING while every one of the
+	// keys above was present, which made the carry-over asymmetric in the worst
+	// possible direction: the dead incarnation's delivery record was wiped
+	// (above) while its REPUTATION survived. A creator could therefore bank a
+	// good star average, abandon the market, re-register, and open a brand-new
+	// incarnation carrying the old one's rating with the accountability
+	// counters at 0/0 — reproduced end-to-end: a new incarnation reported
+	// (sum=33, count=7), an inherited 4.71-star average, with zero deliveries
+	// in its current life.
+	//
+	// Same bug class and same fix shape as the kObsIdx / kFaceAnchor /
+	// kRetiredAt / delivery-standing resets above, and it restores rating.go's
+	// own stated contract: "count == 0 means UNRATED, which a UI must show as
+	// no ratings yet", plus SPEC §1.7.5's "a creator returning later
+	// re-registers and starts fresh".
+	//
+	// Only the AGGREGATE is reset. The per-ask kAskRating(creator, seq) marks
+	// are deliberately left alone: kSeq is monotone ACROSS incarnations, so a
+	// new incarnation can never mint a seq that collides with a dead one's, and
+	// Rate() reads the escrow record rather than the aggregate. Clearing them
+	// would be an unbounded loop over a sparse, monotone id space inside
+	// registration — the same argument bumpOfferEpoch makes above.
+	setU64(s, kRatingSum(creator), 0)
+	setU64(s, kRatingCount(creator), 0)
 
 	setU64(s, kPaidUntil(creator), block+SubscriptionPeriod)
 	setMoney(s, kFace(creator), big.NewInt(face)) // kFace is money-typed, see SetFace

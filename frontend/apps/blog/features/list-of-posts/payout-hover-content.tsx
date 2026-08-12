@@ -7,7 +7,7 @@ import { useQuery } from '@tanstack/react-query';
 import Big from 'big.js';
 import Loading from '@ui/components/loading';
 import { convertStringToBig } from '@ui/lib/helpers';
-import { getFeedHistory } from '@transaction/lib/hive-api';
+import { fetchFeedHistory } from '@/blog/lib/chain-fetch';
 import { Entry } from '@hive/common-hiveio-packages/wax';
 import { useTranslation } from '@/blog/i18n/client';
 
@@ -16,11 +16,17 @@ interface IBeneficiary {
   weight: number;
 }
 
+/**
+ * ★ THROUGH OUR SERVER, NOT THE CHAIN CLIENT (2026-08-12). This called
+ * `getFeedHistory` directly, which downloads `wax.common.wasm` — and this
+ * component mounts on hover over any post's payout amount, in any list, for
+ * any visitor. See `apps/blog/app/api/feed-history/route.ts`.
+ */
 export default function PayoutHoverContent({ post }: { post: Entry }) {
   const { t } = useTranslation('common_blog');
   const { data, isLoading } = useQuery({
     queryKey: ['feedHistory'],
-    queryFn: () => getFeedHistory()
+    queryFn: () => fetchFeedHistory()
   });
   if (isLoading || !data) {
     return <Loading loading />;

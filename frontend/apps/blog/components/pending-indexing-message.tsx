@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { usePathname, useRouter } from 'next/navigation';
-import { getPost } from '@transaction/lib/bridge-api';
+import { fetchPostStatus } from '@/blog/lib/chain-fetch';
 import { CircleSpinner } from 'react-spinners-kit';
 import { Icons } from '@ui/components/icons';
 import { Button } from '@ui/components/button';
@@ -38,12 +38,17 @@ export default function PendingIndexingMessage({
 
   const hasTimedOut = elapsedSeconds >= 180;
 
-  const { data: postData } = useQuery({
+  // ★ THROUGH OUR SERVER, NOT THE CHAIN CLIENT (2026-08-12). This polled
+  // `getPost` directly, every 10s for up to 180s — each poll downloaded
+  // `wax.common.wasm` on first call. See
+  // `apps/blog/app/api/post-status/route.ts`.
+  const { data: postStatus } = useQuery({
     queryKey: ['pendingPostPoll', author, permlink, observer],
-    queryFn: () => getPost(author, permlink, observer),
+    queryFn: () => fetchPostStatus(author, permlink, observer),
     refetchInterval: hasTimedOut ? false : 10000,
     enabled: !hasTimedOut
   });
+  const postData = postStatus?.post ?? null;
 
   // Post appeared in Hivemind — strip ?pending and reload with real data
   useEffect(() => {

@@ -74,5 +74,34 @@ export const config = {
    * the username/size query params and never reads a cookie or a session. Excluding
    * it keeps the cache win and removes the header that made caching unsafe.
    */
-  matcher: ['/((?!_next/static|_next/image|favicon\\.ico|api/avatar).*)']
+  // ★ `api/trending-tags` added 2026-08-12, for exactly the reason above and
+  // caught by an adversarial review the same day it was written. That route is
+  // the global trending tag list: it reads no cookie and no session, and it is
+  // deliberately served `public, s-maxage=3600, stale-while-revalidate=86400`
+  // so a shared cache can hold it. With this middleware attached it was
+  // answering with three `Set-Cookie` headers — including the 400-day
+  // `session_uid` — on a publicly cacheable response, which is precisely the
+  // replay hazard described above, at a TTL 12x longer than the avatar proxy's.
+  // Verified live before the fix: `set-cookie: session_uid=...` alongside
+  // `cache-control: public`.
+  // ★ `api/streak/marks` added 2026-08-12. PRE-EXISTING instance of the same
+  // hazard, found by a failure-state sweep and reproduced live: that route sets
+  // `cache-control: public, max-age=60` (route.ts:66) while this middleware was
+  // still attaching `Set-Cookie` to it, including the 400-day `session_uid`:
+  //
+  //   GET /api/streak/marks?users=gtg   (no cookies sent)
+  //   -> set-cookie: session_uid=...; Max-Age=34560000
+  //   -> cache-control: public, max-age=60
+  //
+  // It is not a quiet corner either: `LeagueByline` calls it from
+  // `medium-post-card.tsx`, so it fires on every discovery-feed page's byline
+  // batch, signed in or not. A shared cache holding that response replays one
+  // visitor's session cookies to the next for the full minute.
+  //
+  // ★★ THE STANDING RULE, since this is now the third instance: a route that
+  // sets `cache-control: public` MUST be excluded here, or it must not be
+  // public. Per-viewer routes stay on the middleware and use `private, no-store`.
+  matcher: [
+    '/((?!_next/static|_next/image|favicon\\.ico|api/avatar|api/trending-tags|api/streak/marks).*)'
+  ]
 };

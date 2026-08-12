@@ -1,4 +1,12 @@
-import { operation, ApiOperation, ApiTransaction, custom_json } from '@hiveio/wax';
+// Type-only: `operation`/`ApiOperation`/`ApiTransaction` are wax type aliases,
+// never touched as values in this file. `custom_json` IS touched as a value
+// (`.create(...)` below) — that one is loaded lazily inside getOperationForLogin
+// instead, since this module is reachable, statically, from every page:
+// GoogleOAuthRedirectHandler (mounted unconditionally by Providers) calls
+// useProcessAuth (packages/smart-signer/components/auth/process.tsx), which
+// imports getOperationForLogin from here. A plain top-level `custom_json` import
+// would have reopened the same '@hiveio/wax' WASM-bundle leak fixed there.
+import type { operation, ApiOperation, ApiTransaction } from '@hiveio/wax';
 import { KeyType } from '@smart-signer/types/common';
 
 /**
@@ -17,9 +25,14 @@ export async function getOperationForLogin(
   loginChallenge: string,
   loginType: string
 ): Promise<operation> {
+  const { custom_json } = await import('@hiveio/wax');
   let operation: operation;
   if (keyType === KeyType.posting) {
-    const customJsonLoginChallenge: custom_json = custom_json.create({
+    // Type annotation dropped — `custom_json` is a locally-destructured VALUE
+    // binding (see the dynamic import above), and TS cannot resolve it as a
+    // type from a destructure the way a static `import { custom_json }` would;
+    // `.create(...)`'s return type is inferred instead, which is identical.
+    const customJsonLoginChallenge = custom_json.create({
       id: `denser_${loginType}`,
       json: JSON.stringify({ challenge: loginChallenge }),
       required_auths: [],
@@ -27,7 +40,7 @@ export async function getOperationForLogin(
     });
     operation = { custom_json_operation: customJsonLoginChallenge };
   } else if (keyType === KeyType.active) {
-    const customJsonLoginChallenge: custom_json = custom_json.create({
+    const customJsonLoginChallenge = custom_json.create({
       id: `denser_${loginType}`,
       json: JSON.stringify({ challenge: loginChallenge }),
       required_auths: [username],

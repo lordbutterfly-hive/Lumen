@@ -364,7 +364,7 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
             when either side cannot hold a Lumen block record — same "hidden, not
             disabled" rule `useModerationStatus` used, now enforced by
             `useLumenBlock`'s own `available` answer instead. */}
-        {block.available ? (
+        {block.available || block.unknown ? (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
@@ -377,14 +377,29 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-52">
-              <DropdownMenuItem
-                onClick={handleBlockClick}
-                disabled={block.busy}
-                className="cursor-pointer text-destructive focus:text-destructive"
-                data-testid="medium-card-block-menu-item"
-              >
-                {block.isBlocking ? t('user_profile.unblock_button') : t('user_profile.block_button')}
-              </DropdownMenuItem>
+              {block.available ? (
+                <DropdownMenuItem
+                  onClick={handleBlockClick}
+                  disabled={block.busy}
+                  className="cursor-pointer text-destructive focus:text-destructive"
+                  data-testid="medium-card-block-menu-item"
+                >
+                  {block.isBlocking ? t('user_profile.unblock_button') : t('user_profile.block_button')}
+                </DropdownMenuItem>
+              ) : (
+                // `unknown`, not `available`: the read failed rather than "this pair
+                // cannot be blocked" (use-lumen-block.ts). A disabled item that says
+                // so, not a vanished menu, is the honest answer during a backend
+                // outage.
+                <DropdownMenuItem
+                  disabled
+                  className="cursor-not-allowed"
+                  data-testid="medium-card-block-menu-item-unknown"
+                  title={t('user_profile.block_status_unknown_hint')}
+                >
+                  {t('user_profile.block_status_unknown')}
+                </DropdownMenuItem>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         ) : null}

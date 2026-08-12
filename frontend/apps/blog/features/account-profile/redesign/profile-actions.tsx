@@ -121,6 +121,19 @@ export default function ProfileActions({
 
   const handleFollowClick = async () => {
     try {
+      // ★ REFUSE RATHER THAN GUESS (2026-08-12). `lumen.applies` is false both when
+      // this pair genuinely has no Lumen edge AND when the state read failed, and
+      // the branch below treats false as "so it must be a chain follow". For a
+      // keyless viewer that means reaching for a signer that does not exist; for a
+      // lite target it means broadcasting a chain `custom_json` follow against a
+      // name that is not a Hive account at all.
+      //
+      // `unknown` is scoped to exactly the pairs where a Lumen edge was POSSIBLE —
+      // the query never runs, so never errors, otherwise — so refusing here can
+      // never block an ordinary Hive-to-Hive follow. Same check
+      // `buttons-container.tsx` now makes; this file has the same routing and was
+      // missed when that one was fixed.
+      if (lumen.unknown) return;
       // Either side keyless: the follow cannot be a chain operation. A lite viewer has
       // no key to sign one, and a lite profile has no account to be followed.
       if (lumen.applies) {
@@ -201,7 +214,10 @@ export default function ProfileActions({
         <button
           type="button"
           onClick={handleFollowClick}
-          disabled={busy}
+          // Disabled on `unknown` too, not just refused on click: a button that
+          // looks live and does nothing is its own bad state. Same treatment
+          // `follow-button.tsx` now gives it.
+          disabled={busy || lumen.unknown}
           data-testid="profile-follow-button"
           className={cn(
             'rounded-xl px-7 py-3 font-sans text-[14.5px] font-semibold transition-colors disabled:opacity-60',
@@ -210,7 +226,11 @@ export default function ProfileActions({
               : 'bg-[#1a1a17] text-white hover:bg-[#2a2822]'
           )}
         >
-          {isFollow ? t('profile.following') : t('user_profile.follow_button')}
+          {lumen.unknown
+            ? t('user_profile.follow_status_unknown')
+            : isFollow
+              ? t('profile.following')
+              : t('user_profile.follow_button')}
         </button>
       )}
 
@@ -232,7 +252,7 @@ export default function ProfileActions({
           {moderation.isModerated || moderationStatusUncertain ? (
             <DropdownMenuItem
               onClick={handleFollowClick}
-              disabled={busy}
+              disabled={busy || lumen.unknown}
               className="cursor-pointer"
               data-testid="profile-follow-menu-item"
             >
@@ -251,6 +271,19 @@ export default function ProfileActions({
               data-testid="profile-block-menu-item"
             >
               {block.isBlocking ? t('user_profile.unblock_button') : t('user_profile.block_button')}
+            </DropdownMenuItem>
+          ) : block.unknown ? (
+            // The state read failed rather than "this pair cannot be blocked" — see
+            // `unknown`'s doc on `use-lumen-block.ts`. A disabled item that says so is
+            // right; letting Block vanish here would read as "this person can't be
+            // blocked", which is never true.
+            <DropdownMenuItem
+              disabled
+              className="cursor-not-allowed"
+              data-testid="profile-block-menu-item-unknown"
+              title={t('user_profile.block_status_unknown_hint')}
+            >
+              {t('user_profile.block_status_unknown')}
             </DropdownMenuItem>
           ) : null}
           {/* ★ ONE CONTROL, CALLED BLOCK (owner ruling, 2026-08-12).

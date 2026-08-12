@@ -1,33 +1,82 @@
+// ★ RUNTIME-VS-TYPE SPLIT (2026-08-12) — this file is the reason an anonymous
+// visitor who never signs anything downloaded @hiveio/wax's ~2.3 MB WASM chain
+// module on every page. `@hiveio/wax` ships exactly ONE entry point
+// (wasm/dist/bundle/web.js) that bundles that WASM module — there is no lighter
+// "just the operation-builder classes" import path, so ANY plain, non-`type`
+// import from '@hiveio/wax' anywhere in this file's static graph drags the whole
+// thing along. Every name below that this file only ever uses as a TYPE is
+// imported with the per-specifier `type` modifier, which TypeScript erases at
+// compile time — it never reaches the emitted JS, so it can never do that.
+//
+// The names this file constructs at runtime (BlogPostOperation,
+// CommunityOperation, EFollowBlogAction, FollowOperation, ReplyOperation,
+// ResourceCreditsOperation) — plus the two names used BOTH as a type and as a
+// value (AccountAuthorityUpdateOperation, EAvailableCommunityRoles) — are loaded
+// on demand by `loadWax()` below, the only path left from this module into wax's
+// WASM-backed runtime. `transactionService` (the singleton this file exports) is
+// reachable from the root layout on every page load via `SignerProvider`
+// (packages/smart-signer/components/signer-provider.tsx) — that reachability
+// itself is fine and stays; what changes is that walking the static import graph
+// no longer walks into wax's runtime bundle to get there.
 import {
-  ApiAccount,
-  BlogPostOperation,
-  CommunityOperation,
-  EFollowBlogAction,
-  FollowOperation,
+  type ApiAccount,
   type IArticle,
   type IReplyData,
   type ITransaction,
-  NaiAsset,
-  ReplyOperation,
+  type NaiAsset,
   type asset as IAsset,
   type authority,
   type future_extensions,
-  EAvailableCommunityRoles,
-  AccountAuthorityUpdateOperation,
-  ESupportedLanguages,
+  type EAvailableCommunityRoles,
+  type AccountAuthorityUpdateOperation,
+  type ESupportedLanguages,
   type IHiveChainInterface,
-  type GetDynamicGlobalPropertiesResponse,
-  ResourceCreditsOperation
+  type GetDynamicGlobalPropertiesResponse
 } from '@hiveio/wax';
-import { getSigner } from '@smart-signer/lib/signer/get-signer';
-import { SignerOptions, SignTransaction } from '@smart-signer/lib/signer/signer';
-import { Beneficiarie, Preferences } from '@hive/common-hiveio-packages/wax';
-import WorkerBee, { IWorkerBee } from '@hiveio/workerbee';
+// Type-only: `SignerOptions`/`SignTransaction` are interfaces, never touched as
+// values here. Not just tidiness — `signer.ts` is the base class every one of the
+// 7 signer backends extends, so a VALUE import here would give this file a second,
+// independent static path into that whole subtree (`signTransaction()` below
+// already covers the real one, via a dynamic `import('@smart-signer/lib/signer/
+// get-signer')` on first actual signing call).
+import type { SignerOptions, SignTransaction } from '@smart-signer/lib/signer/signer';
+// Type-only for the same reason: `@hive/common-hiveio-packages/wax` re-exports
+// `hive-chain-service.ts`, which statically imports `createHiveChain` from
+// '@hiveio/wax' as a VALUE. `Beneficiarie`/`Preferences` are only ever used here
+// as parameter types, so eliding this import removes that path too.
+import type { Beneficiarie, Preferences } from '@hive/common-hiveio-packages/wax';
+// Type-only: `IWorkerBee` is only ever the type of `this.bot`. The WorkerBee
+// CLASS (the thing that actually needs the chain) is loaded on demand inside
+// broadcastAndObserveTransaction(), the only method that ever constructs one.
+import type { IWorkerBee } from '@hiveio/workerbee';
 import { getLogger } from '@hive/ui/lib/logging';
-import { createAsset, getAsset } from './lib/utils';
-import { getChain } from './lib/chain';
 
 const logger = getLogger('app');
+
+/**
+ * Lazily imports the pieces of `@hiveio/wax` this service constructs at
+ * runtime — the operation-builder classes, plus the two names touched as a
+ * VALUE (`EAvailableCommunityRoles.ADMIN`, `AccountAuthorityUpdateOperation
+ * .createFor`). Every other name imported from '@hiveio/wax' above is
+ * `type`-only and erased at compile time; this is deliberately the ONLY
+ * reachable runtime path from this module into wax's WASM-backed bundle.
+ *
+ * Cached like `getModal()` in
+ * apps/blog/features/lite-auth/wallet/appkit.ts: never cache a REJECTED
+ * promise, or one transient chunk-load error would poison every later
+ * attempt (e.g. every subsequent vote or follow click) for the rest of the
+ * page session.
+ */
+let waxRuntimePromise: Promise<typeof import('@hiveio/wax')> | null = null;
+const loadWax = (): Promise<typeof import('@hiveio/wax')> => {
+  if (!waxRuntimePromise) {
+    waxRuntimePromise = import('@hiveio/wax').catch((error) => {
+      waxRuntimePromise = null;
+      throw error;
+    });
+  }
+  return waxRuntimePromise;
+};
 
 export type TransactionErrorCallback = (error: any) => any;
 
@@ -140,7 +189,7 @@ export class TransactionService {
       ...transactionOptions
     };
 
-    const txBuilder = await (await getChain()).createTransaction();
+    const txBuilder = await (await this.getChain()).createTransaction();
 
     // Create transaction from operation
     cb(txBuilder);
@@ -163,15 +212,23 @@ export class TransactionService {
   /**
    * Sign transaction using smart-signer.
    *
+   * `getSigner` (and, transitively, all 7 signer backends it registers — see
+   * get-signer.ts) is loaded here, on first actual signing call, rather than
+   * imported statically. Same reasoning as `loadWax()` above: this class is
+   * a module singleton reachable from every page via SignerProvider, so a
+   * static import here would have been just as much of a leak as the wax
+   * operation-builder classes.
+   *
    * @param {ITransaction} txBuilder
    * @return {*}  {Promise<string>}
    * @memberof TransactionService
    */
-  signTransaction(
+  async signTransaction(
     txBuilder: ITransaction,
     singleSignKeyType?: SignTransaction['singleSignKeyType'],
     requiredKeyType?: SignTransaction['requiredKeyType']
   ): Promise<string> {
+    const { getSigner } = await import('@smart-signer/lib/signer/get-signer');
     const signer = getSigner(this.signerOptions);
     return signer.signTransaction({
       digest: txBuilder.sigDigest,
@@ -194,12 +251,20 @@ export class TransactionService {
     const transactionId = txBuilder.id;
     logger.info('Broadcasting transaction id: %o, body: %o', transactionId, txBuilder.toApi());
     await (
-      await getChain()
+      await this.getChain()
     ).api.network_broadcast_api.broadcast_transaction({ max_block_age: -1, trx: txBuilder.toApiJson() });
     return { transactionId };
   }
 
+  /**
+   * `./lib/chain` is loaded here rather than statically imported at module
+   * scope. It is the ONLY chokepoint every other method in this class goes
+   * through to reach the chain (directly, or via `this.getChain()` below),
+   * so keeping the import lazy here is enough to keep it out of this file's
+   * static graph entirely — no other method needs its own dynamic import.
+   */
   async getChain(): Promise<IHiveChainInterface> {
+    const { getChain } = await import('./lib/chain');
     return await getChain();
   }
 
@@ -228,6 +293,11 @@ export class TransactionService {
       if (!this.bot) {
         logger.info('Creating bot');
         const hiveChain = await this.getChain();
+        // WorkerBee is loaded here rather than imported statically for the same
+        // reason as loadWax() above — it is only ever needed once an observed
+        // broadcast is actually requested, never merely because this singleton
+        // was constructed.
+        const { default: WorkerBee } = await import('@hiveio/workerbee');
         this.bot = new WorkerBee(hiveChain);
       }
       // Start bot
@@ -298,6 +368,7 @@ export class TransactionService {
   }
 
   async subscribe(community: string, transactionOptions: TransactionOptions = {}) {
+    const { CommunityOperation } = await loadWax();
     return await this.processHiveAppOperation((builder) => {
       builder.pushOperation(
         new CommunityOperation().subscribe(community).authorize(this.signerOptions.username)
@@ -306,6 +377,7 @@ export class TransactionService {
   }
 
   async unsubscribe(community: string, transactionOptions: TransactionOptions = {}) {
+    const { CommunityOperation } = await loadWax();
     return await this.processHiveAppOperation((builder) => {
       builder.pushOperation(
         new CommunityOperation().unsubscribe(community).authorize(this.signerOptions.username)
@@ -320,6 +392,7 @@ export class TransactionService {
     notes: string,
     transactionOptions: TransactionOptions = {}
   ) {
+    const { CommunityOperation } = await loadWax();
     return await this.processHiveAppOperation((builder) => {
       builder.pushOperation(
         new CommunityOperation()
@@ -335,6 +408,7 @@ export class TransactionService {
     role: EAvailableCommunityRoles,
     transactionOptions: TransactionOptions = {}
   ) {
+    const { CommunityOperation } = await loadWax();
     return await this.processHiveAppOperation((builder) => {
       builder.pushOperation(
         new CommunityOperation().setRole(community, username, role).authorize(this.signerOptions.username)
@@ -348,6 +422,7 @@ export class TransactionService {
     permlink: string,
     transactionOptions: TransactionOptions = {}
   ) {
+    const { CommunityOperation } = await loadWax();
     return await this.processHiveAppOperation((builder) => {
       builder.pushOperation(
         new CommunityOperation().pinPost(community, username, permlink).authorize(this.signerOptions.username)
@@ -360,6 +435,7 @@ export class TransactionService {
     permlink: string,
     transactionOptions: TransactionOptions = {}
   ) {
+    const { CommunityOperation } = await loadWax();
     return await this.processHiveAppOperation((builder) => {
       builder.pushOperation(
         new CommunityOperation()
@@ -376,6 +452,7 @@ export class TransactionService {
     notes: string,
     transactionOptions: TransactionOptions = {}
   ) {
+    const { CommunityOperation } = await loadWax();
     return await this.processHiveAppOperation((builder) => {
       builder.pushOperation(
         new CommunityOperation()
@@ -392,6 +469,7 @@ export class TransactionService {
     notes: string,
     transactionOptions: TransactionOptions = {}
   ) {
+    const { CommunityOperation } = await loadWax();
     return await this.processHiveAppOperation((builder) => {
       builder.pushOperation(
         new CommunityOperation()
@@ -407,6 +485,7 @@ export class TransactionService {
     title: string,
     transactionOptions: TransactionOptions = {}
   ) {
+    const { CommunityOperation } = await loadWax();
     return await this.processHiveAppOperation((builder) => {
       builder.pushOperation(
         new CommunityOperation()
@@ -417,6 +496,7 @@ export class TransactionService {
   }
 
   async reblog(username: string, permlink: string, transactionOptions: TransactionOptions = {}) {
+    const { FollowOperation } = await loadWax();
     return await this.processHiveAppOperation((builder) => {
       builder.pushOperation(
         new FollowOperation()
@@ -427,6 +507,7 @@ export class TransactionService {
   }
 
   async follow(username: string, transactionOptions: TransactionOptions = {}) {
+    const { FollowOperation } = await loadWax();
     return await this.processHiveAppOperation((builder) => {
       builder.pushOperation(
         new FollowOperation()
@@ -437,6 +518,7 @@ export class TransactionService {
   }
 
   async unfollow(username: string, transactionOptions: TransactionOptions = {}) {
+    const { FollowOperation } = await loadWax();
     return await this.processHiveAppOperation((builder) => {
       builder.pushOperation(
         new FollowOperation()
@@ -447,6 +529,7 @@ export class TransactionService {
   }
 
   async mute(otherBlogs: string, blog = '', transactionOptions: TransactionOptions = {}) {
+    const { FollowOperation } = await loadWax();
     return await this.processHiveAppOperation((builder) => {
       builder.pushOperation(
         new FollowOperation()
@@ -457,6 +540,7 @@ export class TransactionService {
   }
 
   async unmute(blog: string, transactionOptions: TransactionOptions = {}) {
+    const { FollowOperation } = await loadWax();
     return await this.processHiveAppOperation((builder) => {
       builder.pushOperation(
         new FollowOperation()
@@ -467,6 +551,7 @@ export class TransactionService {
   }
 
   async resetBlogList(transactionOptions: TransactionOptions = {}) {
+    const { FollowOperation, EFollowBlogAction } = await loadWax();
     return await this.processHiveAppOperation((builder) => {
       builder.pushOperation(
         new FollowOperation()
@@ -477,6 +562,7 @@ export class TransactionService {
   }
 
   async blacklistBlog(otherBlogs: string, blog = '', transactionOptions: TransactionOptions = {}) {
+    const { FollowOperation } = await loadWax();
     return await this.processHiveAppOperation((builder) => {
       builder.pushOperation(
         new FollowOperation()
@@ -487,6 +573,7 @@ export class TransactionService {
   }
 
   async unblacklistBlog(blog: string, transactionOptions: TransactionOptions = {}) {
+    const { FollowOperation } = await loadWax();
     return await this.processHiveAppOperation((builder) => {
       builder.pushOperation(
         new FollowOperation()
@@ -497,6 +584,7 @@ export class TransactionService {
   }
 
   async followBlacklistBlog(otherBlogs: string, blog = '', transactionOptions: TransactionOptions = {}) {
+    const { FollowOperation } = await loadWax();
     return await this.processHiveAppOperation((builder) => {
       builder.pushOperation(
         new FollowOperation()
@@ -507,6 +595,7 @@ export class TransactionService {
   }
 
   async unfollowBlacklistBlog(blog: string, transactionOptions: TransactionOptions = {}) {
+    const { FollowOperation } = await loadWax();
     return await this.processHiveAppOperation((builder) => {
       builder.pushOperation(
         new FollowOperation()
@@ -517,6 +606,7 @@ export class TransactionService {
   }
 
   async followMutedBlog(otherBlogs: string, blog = '', transactionOptions: TransactionOptions = {}) {
+    const { FollowOperation } = await loadWax();
     return await this.processHiveAppOperation((builder) => {
       builder.pushOperation(
         new FollowOperation()
@@ -527,6 +617,7 @@ export class TransactionService {
   }
 
   async resetAllBlog(transactionOptions: TransactionOptions = {}) {
+    const { FollowOperation } = await loadWax();
     return await this.processHiveAppOperation((builder) => {
       builder.pushOperation(
         new FollowOperation()
@@ -537,6 +628,7 @@ export class TransactionService {
   }
 
   async resetBlacklistBlog(transactionOptions: TransactionOptions = {}) {
+    const { FollowOperation } = await loadWax();
     return await this.processHiveAppOperation((builder) => {
       builder.pushOperation(
         new FollowOperation()
@@ -547,6 +639,7 @@ export class TransactionService {
   }
 
   async resetFollowBlacklistBlog(transactionOptions: TransactionOptions = {}) {
+    const { FollowOperation } = await loadWax();
     return await this.processHiveAppOperation((builder) => {
       builder.pushOperation(
         new FollowOperation()
@@ -557,6 +650,7 @@ export class TransactionService {
   }
 
   async resetFollowMutedBlog(transactionOptions: TransactionOptions = {}) {
+    const { FollowOperation } = await loadWax();
     return await this.processHiveAppOperation((builder) => {
       builder.pushOperation(
         new FollowOperation()
@@ -567,6 +661,7 @@ export class TransactionService {
   }
 
   async unfollowMutedBlog(blog: string, transactionOptions: TransactionOptions = {}) {
+    const { FollowOperation } = await loadWax();
     return await this.processHiveAppOperation((builder) => {
       builder.pushOperation(
         new FollowOperation()
@@ -583,6 +678,7 @@ export class TransactionService {
     preferences: Preferences,
     transactionOptions: TransactionOptions = {}
   ) {
+    const { ReplyOperation } = await loadWax();
     const replyOperationData: IReplyData = {
       parentAuthor,
       parentPermlink,
@@ -598,6 +694,10 @@ export class TransactionService {
       replyOperationData.percentHbd = 10000;
     }
     if (preferences.comment_rewards === '0%') {
+      // ./lib/utils re-imports the chain itself (createAsset needs chain.ASSETS
+      // for NAI/precision), so it is loaded here too rather than statically —
+      // same reasoning as getChain() above.
+      const { createAsset } = await import('./lib/utils');
       replyOperationData.maxAcceptedPayout = await createAsset('0', 'HBD');
     }
 
@@ -615,6 +715,7 @@ export class TransactionService {
     body: string,
     transactionOptions: TransactionOptions = {}
   ) {
+    const { ReplyOperation } = await loadWax();
     const reply = new ReplyOperation({
       parentAuthor,
       parentPermlink,
@@ -643,6 +744,7 @@ export class TransactionService {
     image?: string,
     transactionOptions: TransactionOptions = {}
   ) {
+    const { BlogPostOperation } = await loadWax();
     const blogPost = new BlogPostOperation({
       category: category !== 'blog' ? category : tags[0],
       beneficiaries,
@@ -683,6 +785,7 @@ export class TransactionService {
     image?: string,
     transactionOptions: TransactionOptions = {}
   ) {
+    const { BlogPostOperation } = await loadWax();
     const blogPost = new BlogPostOperation({
       category: category !== 'blog' ? category : tags[0],
       tags,
@@ -1007,8 +1110,9 @@ export class TransactionService {
     transactionOptions: TransactionOptions
   ) {
     try {
+      const { AccountAuthorityUpdateOperation } = await loadWax();
       const accountAuthorityUpdateOp = await AccountAuthorityUpdateOperation.createFor(
-        await getChain(),
+        await this.getChain(),
         account
       );
 
@@ -1081,7 +1185,7 @@ export class TransactionService {
     transactionOptions: TransactionOptions = {}
   ) {
     const { median_props } = await (
-      await getChain()
+      await this.getChain()
     ).api.database_api.get_witness_schedule({});
 
     // Transform NAI format to amount string
@@ -1089,6 +1193,7 @@ export class TransactionService {
       parseInt(median_props.account_creation_fee.amount) /
       Math.pow(10, median_props.account_creation_fee.precision)
     ).toString();
+    const { getAsset } = await import('./lib/utils');
     const fee = await getAsset(feeAmount, 'HIVE');
     return (
       await this.processHiveAppOperation((builder) => {
@@ -1120,6 +1225,7 @@ export class TransactionService {
     description: string,
     transactionOptions: TransactionOptions = {}
   ) {
+    const { CommunityOperation, EAvailableCommunityRoles } = await loadWax();
     return await this.processHiveAppOperation(async (builder) => {
       builder.pushOperation(
         new CommunityOperation()
@@ -1143,6 +1249,7 @@ export class TransactionService {
     admin: string,
     transactionOptions: TransactionOptions = {}
   ) {
+    const { CommunityOperation } = await loadWax();
     return await this.processHiveAppOperation(async (builder) => {
       builder.pushOperation(
         new CommunityOperation()
@@ -1207,6 +1314,7 @@ export class TransactionService {
     toAccount: string,
     transactionOptions: TransactionOptions = {}
   ) {
+    const { ResourceCreditsOperation } = await loadWax();
     return await this.processHiveAppOperation((builder) => {
       builder.pushOperation(
         new ResourceCreditsOperation().delegate(fromAccount, amount, toAccount).authorize(fromAccount)
@@ -1214,6 +1322,7 @@ export class TransactionService {
     }, transactionOptions);
   }
   async undelegateRC(fromAccount: string, toAccount: string, transactionOptions: TransactionOptions = {}) {
+    const { ResourceCreditsOperation } = await loadWax();
     return await this.processHiveAppOperation((builder) => {
       builder.pushOperation(
         new ResourceCreditsOperation().removeDelegation(fromAccount, toAccount).authorize(fromAccount)
@@ -1223,7 +1332,34 @@ export class TransactionService {
 }
 export const transactionService = new TransactionService();
 
-export { isHiveAccountNameValid } from './lib/validate-hive-account';
-
-// Validation utilities
-export * from './lib/validation';
+// ★ NO MORE BARREL RE-EXPORTS OF VALIDATION HELPERS HERE (2026-08-12).
+//
+// This file used to end with:
+//   export { isHiveAccountNameValid } from './lib/validate-hive-account';
+//   export * from './lib/validation';
+//
+// Both are STATIC (non-`type`) re-exports, so — unlike every name at the top
+// of this file, which is careful to stay `type`-only or behind `loadWax()` —
+// they pulled `./lib/validate-hive-account` and `./lib/validation/*` into
+// THIS module's own static graph. `validate-hive-account.ts` statically
+// imports `./chain`, which statically imports `@hiveio/wax` as a VALUE (not
+// `type`), and `./lib/validation/existence/{account,community}.ts` import
+// `./bridge-api`/`./hive-api`, which do the same. Since `transactionService`
+// (this file) is reachable from the root layout on every page via
+// `SignerProvider`, these two lines were a second and third runtime path
+// into wax's bundle from the one file whose own top-of-file comment claims
+// `loadWax()` is the ONLY one — found by an adversarial review that read this
+// file to the end.
+//
+// Fixed at the root rather than by re-auditing the re-export: every browser
+// call site that reached these through `@transaction/index` (`checkAccountExists`
+// in `features/witnesses/set-proxy-dialog.tsx` and `features/account-lists/
+// hooks/use-add-to-list-form.ts`; `isValidAccountNameFormat` in the same
+// hook) was ALSO a genuine `getChain()`-reaching browser read on its own
+// merits — moved to `/api/account-exists` (see that route). Once none of
+// them needed the barrel, removing it was correct, not just convenient.
+// Everything that still needs these validators imports them directly from
+// `@transaction/lib/validate-hive-account` / `@transaction/lib/validation`
+// (already the pattern every SERVER caller used — `app/api/avatar/route.ts`,
+// `app/[param]/(user-profile)/layout.tsx`, `lib/lite/auth/auth-service.ts`),
+// which never touches this file's graph at all.

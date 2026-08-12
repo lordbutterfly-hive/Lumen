@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@hive/ui';
 import { Icons } from '@ui/components/icons';
-import { getAccountNotifications, getUnreadNotifications } from '@transaction/lib/bridge-api';
+import { fetchAccountNotifications, fetchUnreadNotifications } from '@/blog/lib/chain-fetch';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { getStorageItem, setStorageItem, StorageTTL } from '@ui/lib/storage-with-ttl';
 import { useTranslation } from '@/blog/i18n/client';
@@ -86,9 +86,19 @@ export function RetentionNudge({ className }: { className?: string }) {
   }, [user.isLoggedIn]);
 
   // Warm from the app header on every page; costs nothing to read here.
+  //
+  // ★ THROUGH OUR SERVER, NOT THE CHAIN CLIENT (2026-08-12). This called
+  // `getUnreadNotifications`/`getAccountNotifications` directly — a SECOND,
+  // independent path into `getChain()` beyond the one already fixed in
+  // `app-header.tsx`'s own query (same queryKey, `['unreadNotifications',
+  // user]`, but a separate call site, so fixing the header alone left this
+  // one still downloading `wax.common.wasm` for every signed-in reader on
+  // the pages that mount this nudge). See
+  // `apps/blog/app/api/notifications/unread/route.ts` and
+  // `.../api/notifications/account/route.ts`.
   const { data: unread } = useQuery({
     queryKey: ['unreadNotifications', user.username],
-    queryFn: () => getUnreadNotifications(user.username),
+    queryFn: () => fetchUnreadNotifications(user.username),
     enabled: Boolean(user.isLoggedIn && user.username),
     staleTime: 5 * 60 * 1000
   });
@@ -96,7 +106,7 @@ export function RetentionNudge({ className }: { className?: string }) {
   // ONLY fetched when the count above says there is something to find.
   const { data: notifications } = useQuery({
     queryKey: ['retention-nudge-notifications', user.username],
-    queryFn: () => getAccountNotifications(user.username, undefined, NOTIFICATION_SCAN),
+    queryFn: () => fetchAccountNotifications(user.username, undefined, NOTIFICATION_SCAN),
     enabled: Boolean(user.isLoggedIn && user.username && (unread?.unread ?? 0) > 0),
     staleTime: 5 * 60 * 1000
   });

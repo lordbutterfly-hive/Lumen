@@ -1,6 +1,8 @@
 'use client';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
-import { SignerOptions } from '@smart-signer/lib/signer/signer';
+// Type-only — same reasoning as use-signer.ts's matching comment: this hook is
+// called by SignerProviderClient (apps/wallet) on every page.
+import type { SignerOptions } from '@smart-signer/lib/signer/signer';
 
 /**
  * Signer hook for App Router (uses useUserClient).

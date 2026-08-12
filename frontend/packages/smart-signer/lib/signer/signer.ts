@@ -1,7 +1,14 @@
 import { LoginType } from '@smart-signer/types/common';
 import { KeyType } from '@smart-signer/types/common';
 import { StorageType } from '@smart-signer/lib/storage-mixin';
-import { THexString, transaction, TTransactionPackType } from '@hiveio/wax';
+// Type-only: this file is the abstract base every one of the 7 signer backends
+// extends, AND it is reachable statically from `use-signer.ts` (SignerProvider's
+// `useSigner()` hook, mounted on every page) — so unlike the signer subclasses
+// themselves (which only load behind get-signer.ts's dynamic import), this file's
+// own '@hiveio/wax' names have to stay type-only or they reopen the same leak.
+// `TTransactionPackType` in particular IS a real runtime enum elsewhere
+// (auth/utils.ts builds a zod schema from it) — here it is only ever a type.
+import type { THexString, transaction, TTransactionPackType } from '@hiveio/wax';
 
 import { getLogger } from '@hive/ui/lib/logging';
 const logger = getLogger('app');

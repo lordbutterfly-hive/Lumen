@@ -412,11 +412,18 @@ func TestAskRateLong_MinimumHistory(t *testing.T) {
 		t.Fatalf("long TWAP = %s, want 1000 (constant history)", rate)
 	}
 
-	// Staleness: newest sample older than LongMaxStaleBlocks: refuse.
+	// Staleness NO LONGER REFUSES once bootstrapped (owner ruling 2026-08-12;
+	// see twapWindowRead). A long ring that satisfied count+span keeps quoting
+	// its average however long the market stays quiet — because a quiet market
+	// is one whose SUPPLY has not moved, so the average is still correct.
 	s3 := NewMemStore()
 	stFillLong(s3, creator1, q-50, stObsCount, big.NewInt(1000))
-	if _, err := askRateLong(s3, creator1, q-50+LongMaxStaleBlocks+1); err == nil {
-		t.Fatal("askRateLong priced on a stale window")
+	stale, err := askRateLong(s3, creator1, q-50+LongMaxStaleBlocks+1)
+	if err != nil {
+		t.Fatalf("askRateLong refused a bootstrapped-but-quiet window: %v", err)
+	}
+	if stale.Cmp(big.NewInt(1000)) != 0 {
+		t.Fatalf("stale long TWAP = %s, want the unchanged 1000 (constant history)", stale)
 	}
 
 	// The epoch filter: samples recorded before the current incarnation's
@@ -516,12 +523,19 @@ func TestSettlementRefusalGatesNoOutflow(t *testing.T) {
 		t.Fatalf("Ask(to-reclaim): %v", err)
 	}
 
-	// The market goes QUIET: past MaxStaleBlocks both windows refuse. This
-	// is one of the ordinary conditions the ruling names ("a market quiet 3
-	// days") — under PAR it silently mispriced; now it refuses.
+	// Drive settlement into refusal. NOTE (2026-08-12): this used to go QUIET
+	// past MaxStaleBlocks, but staleness no longer refuses once a market has
+	// bootstrapped (owner ruling — see twapWindowRead). The property THIS test
+	// exists to pin is unchanged and still valuable: *whatever* makes
+	// settlement refuse, no outflow may be gated by it. So the refusal is now
+	// induced by the gate that does still bite — a ring below the bootstrap
+	// minimum, produced by resetting the write counter exactly as Register
+	// does when a market re-registers.
 	quiet := askBlock + MaxStaleBlocks + LongObsSpacing + 10
+	setU64(s, kObsIdx(creator), 0)
+	setU64(s, kObsLongIdx(creator), 0)
 	if _, err := SettlementRate(s, creator, quiet); err == nil {
-		t.Fatal("premise broken: settlement still prices after the quiet gap")
+		t.Fatal("premise broken: settlement still prices with a below-bootstrap ring")
 	}
 	// New service inflows are refused now — that is ALL the refusal gates.
 	if _, err := askAt0(s, holder1, creator, quiet, big.NewInt(10), commission, "refused", MinAskDeadline); err == nil {

@@ -1,4 +1,6 @@
-import { PostLoginSchema } from '@smart-signer/lib/auth/utils';
+// Type-only, from login-schema.ts — see the matching comment in
+// components/auth/process.tsx.
+import type { PostLoginSchema } from '@smart-signer/lib/auth/login-schema';
 import { User } from '@smart-signer/types/common';
 import { getLogger } from '@ui/lib/logging';
 

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useRef, useState } from 'react';
-import { checkAccountExists, isValidAccountNameFormat } from '@transaction/index';
+import { fetchAccountExists } from '@/blog/lib/chain-fetch';
 import { joinAccountNames, parseAccountListInput } from '../lib/parse-account-list';
 
 /**
@@ -100,23 +100,25 @@ export function useAddToListForm(existingNames: string[], submit: (joinedNames: 
 
       setPhase('checking');
 
-      const formatChecks = await Promise.all(
-        candidates.map(async (name) => ({ name, ok: await isValidAccountNameFormat(name) }))
+      // ★ THROUGH OUR SERVER, NOT THE CHAIN CLIENT (2026-08-12). This called
+      // `isValidAccountNameFormat` then `checkAccountExists` directly — both
+      // reach `getChain()` and download `wax.common.wasm`. `/api/account-
+      // exists` does the same two checks server-side in one request; one
+      // fetch per candidate replaces what used to be two waves of chain
+      // calls. See `apps/blog/app/api/account-exists/route.ts`.
+      const checks = await Promise.all(
+        candidates.map(async (name) => ({ name, result: await fetchAccountExists(name) }))
       );
       if (abandonedRef.current) return false;
-      const invalidFormat = formatChecks.filter((r) => !r.ok).map((r) => r.name);
+      const invalidFormat = checks.filter((r) => !r.result.validFormat).map((r) => r.name);
       if (invalidFormat.length > 0) {
         setPhase('error');
         setError({ kind: 'invalid_format', names: invalidFormat });
         return false;
       }
 
-      const existenceChecks = await Promise.all(
-        candidates.map(async (name) => ({ name, result: await checkAccountExists(name) }))
-      );
-      if (abandonedRef.current) return false;
-      const apiErrors = existenceChecks.filter((r) => r.result.status === 'api_error').map((r) => r.name);
-      const notFound = existenceChecks.filter((r) => r.result.status === 'not_found').map((r) => r.name);
+      const apiErrors = checks.filter((r) => r.result.status === 'api_error').map((r) => r.name);
+      const notFound = checks.filter((r) => r.result.status === 'not_found').map((r) => r.name);
 
       if (apiErrors.length > 0) {
         setPhase('error');

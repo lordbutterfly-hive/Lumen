@@ -1,7 +1,7 @@
 'use client';
 import { IFollowList } from '@hive/common-hiveio-packages/wax';
 import { useMemo, useState } from 'react';
-import { getAccountFull } from '@transaction/lib/hive-api';
+import { fetchAccount } from '@/blog/lib/chain-fetch';
 import { useQuery } from '@tanstack/react-query';
 import ListVariant from './list-variant';
 
@@ -16,9 +16,12 @@ export default function ProfileLists({
   variant: 'blacklisted' | 'muted' | 'follow_blacklist' | 'follow_muted';
   data: IFollowList[] | undefined;
 }) {
+  // ★ THROUGH OUR SERVER, NOT THE CHAIN CLIENT (2026-08-12). Unconditional
+  // (no `enabled` gate), on the blacklist/muted/followed-blacklist/followed-
+  // muted list pages. See `apps/blog/app/api/account/route.ts`.
   const { data: profilData } = useQuery({
     queryKey: ['profileData', username],
-    queryFn: () => getAccountFull(username)
+    queryFn: () => fetchAccount(username)
   });
   const [filter, setFilter] = useState('');
 

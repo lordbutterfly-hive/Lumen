@@ -72,6 +72,7 @@ const CommentList = ({
   parent,
   parent_depth,
   mutedList,
+  mutedListUnknown,
   flagText,
   discussionAuthor,
   discussionPermlink,
@@ -85,6 +86,10 @@ const CommentList = ({
   parent: Entry;
   parent_depth: number;
   mutedList: IFollowList[];
+  /** True when the viewer's mute-list read failed — see `content.tsx`'s
+   *  `mutedListUnknown` doc comment. Threaded down alongside `mutedList`
+   *  itself, including into the recursive `CommentList` call below. */
+  mutedListUnknown?: boolean;
   flagText: string | undefined;
   discussionAuthor: string;
   discussionPermlink: string;
@@ -178,6 +183,7 @@ const CommentList = ({
                       key={`${commentKey}-item`}
                       parent_depth={parent_depth}
                       mutedList={mutedList}
+                      mutedListUnknown={mutedListUnknown}
                       flagText={flagText}
                       discussionAuthor={discussionAuthor}
                       discussionPermlink={discussionPermlink}
@@ -192,6 +198,7 @@ const CommentList = ({
                         highestPermlink={highestPermlink}
                         permissionToMute={permissionToMute}
                         mutedList={mutedList}
+                        mutedListUnknown={mutedListUnknown}
                         data={data}
                         parent={comment}
                         key={`${commentKey}-list`}

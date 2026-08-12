@@ -4,7 +4,7 @@ import { ReactNode, forwardRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { CircleSpinner } from 'react-spinners-kit';
 import { Popover, PopoverContent, PopoverTrigger } from '@ui/components/popover';
-import { getAccountNotifications } from '@transaction/lib/bridge-api';
+import { fetchAccountNotifications } from '@/blog/lib/chain-fetch';
 import NotificationList from '@/blog/features/activity-log/list';
 import { useMarkAllNotificationsAsReadMutation } from '@/blog/features/activity-log/hooks/use-notifications-read-mutation';
 import BasePathLink from '@/blog/components/base-path-link';
@@ -74,10 +74,15 @@ const NotificationsMenu = forwardRef<HTMLButtonElement, {
   //   asserts "Account <name> does not exist", React Query retries, and the
   //   popover sits on "Loading" while it does. The empty state below is the
   //   correct and final answer for a lite reader today.
+  // ★ THROUGH OUR SERVER, NOT THE CHAIN CLIENT (2026-08-12). This called
+  // `getAccountNotifications` directly, which downloads `wax.common.wasm` —
+  // mounted in the header on every page, and reachable by any signed-in Hive
+  // reader who opens the bell. See
+  // `apps/blog/app/api/notifications/account/route.ts`.
   const enabled = open && !!username && chainAccount;
   const { data: notifications, isLoading } = useQuery({
     queryKey: ['AccountNotification', username],
-    queryFn: () => getAccountNotifications(username),
+    queryFn: () => fetchAccountNotifications(username),
     enabled
   });
 

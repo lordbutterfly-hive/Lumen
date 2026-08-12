@@ -1,9 +1,7 @@
 'use client';
 
 import SettingsForm from '@/blog/features/account-settings/form';
-import MutedList from '@/blog/features/account-settings/muted-list';
 import BlockedList from '@/blog/features/account-settings/blocked-list';
-import ModerationLists from '@/blog/features/account-settings/moderation-lists';
 import { SETTINGS_CARD, SETTINGS_CARD_HINT, SETTINGS_CARD_TITLE } from '@/blog/features/account-settings/lib/card';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { Skeleton } from '@ui/components';
@@ -100,14 +98,16 @@ const SettingsContent = ({ username }: { username: string }) => {
         <OwnerGateSkeleton />
       )}
 
-      {/* ★ FIRST, ABOVE THE LEGACY LISTS (owner ruling, 2026-08-12). Block is now
-          the ONE primary moderation control across the profile/post/comment
-          overflow menus; this card is where "make sure it persists" gets proven —
-          see `blocked-list.tsx`'s header comment. Mute/Blacklist keep their own
-          cards below for anyone with pre-existing chain-based entries. */}
+      {/* ★ THE ONE MODERATION CARD (owner ruling, 2026-08-12): "there should be no
+          muted list. its all block list, we merged it and it works all as
+          block." `BlockedList` now reads BOTH Lumen blocks and the viewer's own
+          on-chain mutes from the same `/api/lite/block/list` response — see its
+          header comment for the removal-path wrinkle a chain entry keeps. The
+          two cards that used to sit below it (`ModerationLists`, a set of links
+          out to the four legacy `/lists/*` pages; `MutedList`, a second render of
+          the same chain ignore list) are gone — those four routes now redirect
+          here instead of rendering their own content. */}
       <BlockedList username={username} />
-      <ModerationLists username={username} />
-      <MutedList username={username} />
     </div>
   );
 };

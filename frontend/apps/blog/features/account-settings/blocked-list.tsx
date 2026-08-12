@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { liteBlock } from '@/blog/lib/lite/client/lite-write';
+import { useUnmuteMutation } from '@/blog/features/mute-follow/hooks/use-mute-mutations';
 import { useTranslation } from '@/blog/i18n/client';
 import { handleError } from '@ui/lib/handle-error';
 import { CircleSpinner } from 'react-spinners-kit';
@@ -14,32 +15,60 @@ import { SETTINGS_CARD, SETTINGS_CARD_HINT, SETTINGS_CARD_TITLE } from './lib/ca
 interface BlockedPeer {
   name: string;
   kind: 'hive' | 'lumen';
+  source: 'lumen' | 'chain' | 'both';
 }
 
 /**
- * ★★★ "MAKE SURE IT PERSISTS" (owner ruling, 2026-08-12) — THIS CARD IS THE PROOF.
+ * ★★★ THE ONE MODERATION LIST (owner ruling, 2026-08-12).
  *
- * A Lumen Block writes a real, durable row (`lumen_block`, soft-deleted on unblock —
- * see `block-repository.ts`) and it already survives a reload: the bug the owner was
- * almost certainly reacting to is not that blocks were lost, it is that there was NO
- * PLACE THAT SHOWED THEM. Mute and Blacklist have lived at `/@you/lists/muted` and
- * `/@you/lists/blacklisted` since before this feature existed; Block had no `/lists`
- * page of its own and no settings card, so a viewer who blocked someone had no way to
- * come back later and confirm it, and — the part that actually matters — no way to
- * ever undo it. `block-repository.ts`'s `listBlockedPeers` doc already anticipated
- * this screen ("The people behind the list — for a 'Blocked accounts' settings
- * screen"); nothing rendered it until now.
+ * "there should be no muted list. its all block list, we merged it and it works all
+ * as block... mutes and blocks are treated the same." This card used to sit above two
+ * others — `ModerationLists` (links out to the four legacy `/lists/*` pages) and
+ * `MutedList` (a second, separately-fetched render of the chain ignore list). Both are
+ * gone; this is the only moderation card on Settings now, and the four `/lists/*`
+ * routes redirect here (see their `page.tsx` files) rather than rendering their own
+ * content — see `chain-mute.ts` and `/api/lite/block/list` for why a "muted" list was
+ * never a second concept to begin with, just a data source this list was not yet
+ * reading.
  *
- * Modelled on `muted-list.tsx` (same card chrome, same avatar/name/action row, same
- * owner-gate shape), reusing `/api/lite/block/list` — the same endpoint the reader-
- * side feed/thread filters already call — via its `peers` field, which carries the
- * per-account (name, name-space) pairing a settings row needs and the merged
- * `keys`/`userIds`/`names` fields (built for filter-matching) do not.
+ * ★ "MAKE SURE IT PERSISTS" — a Lumen Block writes a real, durable row
+ * (`lumen_block`, soft-deleted on unblock — see `block-repository.ts`) and survives a
+ * reload on its own; the original bug this card was built to fix was that nothing
+ * SHOWED it. Reuses `/api/lite/block/list`'s `peers` field — the same endpoint the
+ * reader-side feed/thread filters call — which now carries BOTH a viewer's Lumen
+ * blocks and their own on-chain mutes in the one array.
  *
- * ★ TIER-AGNOSTIC, UNLIKE `MutedList`. Block works for every combination of the two
- * account tiers (see `block-service.ts`), so this card asks only "is this your own
- * settings page", never "do you have a Hive account" — a lite account can have
- * blocked people too, and needs to be able to see and undo it exactly like a full one.
+ * ★★★ THE HONEST WRINKLE, AND WHY THE REMOVAL PATH SPLITS HERE AND ONLY HERE.
+ *
+ * A Lumen block is a row this app owns; unblocking retracts it instantly. A chain
+ * entry (`source: 'chain'`/`'both'`, `peer.source`) is a real Hive `ignore` written
+ * from PeakD, Ecency or anywhere else — there is no local row to delete, only a
+ * signed on-chain unmute, which needs a real Hive signer (Keychain/HiveAuth) in the
+ * browser. This is confirmed to be the ONLY case that needs handling: the owner
+ * ruled directly that "Lite accounts do not have Hive mutes. They only have Lumen
+ * blocks." — so `source` is never `'chain'`/`'both'` for a lite viewer's own list, and
+ * this card does not build a lite-specific signing path at all.
+ *
+ * ★ THE DECISION: no local override. Pressing "Unblock" on a `'chain'` row does not
+ * hide the entry from THIS list while the mute survives on chain — it broadcasts the
+ * unmute. Two reasons. First, `chain-mute.ts` reads the chain fresh (bounded by its
+ * cache TTL): a local "ignore this one" flag would fight the next refresh, which is
+ * exactly the kind of two-sources-of-truth bug this whole feature exists to remove.
+ * Second, and the one that actually matters: this list's entire promise is "this is
+ * who Lumen is currently protecting you and your content from" — a row that says
+ * Unblocked while the person is still muted on chain (and, per effect (B), still
+ * hidden from everyone under this viewer's own content) would be a list that lies
+ * about the viewer's own moderation state. Same wording everywhere, one button label
+ * ("Unblock") on every row — but for a `'chain'`/`'both'` row it is labelled with a
+ * hint explaining what pressing it actually does, rather than silently no-op'ing
+ * (`liteBlock`'s unblock call has nothing to retract for a pure chain entry) or
+ * silently doing something a lite reader could never confirm.
+ *
+ * ★ TIER-AGNOSTIC FOR THE LUMEN HALF, UNLIKE THE OLD `MutedList`. Block works for
+ * every combination of the two account tiers, so this card asks only "is this your
+ * own settings page" for the Lumen rows. The chain-removal path additionally needs a
+ * real Hive signer, which `useUnmuteMutation` already knows how to ask for (and how
+ * to fail honestly when one is not available) — no new gate is added here.
  */
 const BlockedList = ({ username }: { username: string }) => {
   const { t } = useTranslation('common_blog');
@@ -47,6 +76,7 @@ const BlockedList = ({ username }: { username: string }) => {
   const isOwner = identity.isLoggedIn && identity.username === username;
   const queryClient = useQueryClient();
   const [pendingName, setPendingName] = useState<string | null>(null);
+  const unmuteMutation = useUnmuteMutation();
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['lumenBlockedPeers'],
@@ -74,10 +104,11 @@ const BlockedList = ({ username }: { username: string }) => {
   });
 
   // Nobody else's block list is any of the current viewer's business, and this card
-  // has nothing true to say about it either way — same "say nothing" rule
-  // `MutedList` follows for the same reason.
+  // has nothing true to say about it either way — same "say nothing" rule the old
+  // `MutedList` followed for the same reason.
   if (!isOwner) return null;
 
+  /** `source: 'lumen'`/`'both'` — a real `lumen_block` row exists; retract it. */
   const handleUnblock = async (peer: BlockedPeer) => {
     setPendingName(peer.name);
     const result = await liteBlock(peer.name, peer.kind, true);
@@ -94,8 +125,26 @@ const BlockedList = ({ username }: { username: string }) => {
     await queryClient.invalidateQueries({ queryKey: ['forYouRanked'] });
   };
 
+  /** `source: 'chain'` — no local row. The only removal path is a signed on-chain
+   *  unmute, which needs a real Hive signer in this browser. */
+  const handleChainRemove = async (peer: BlockedPeer) => {
+    setPendingName(peer.name);
+    try {
+      await unmuteMutation.mutateAsync({ username: peer.name });
+      await queryClient.invalidateQueries({ queryKey: ['lumenBlockedPeers'] });
+      await queryClient.invalidateQueries({ queryKey: ['lumenBlockList'] });
+    } catch (error) {
+      // `useUnmuteMutation`'s own `onError` already toasts — this is the SAME
+      // "resolves false forever" trap `use-lumen-block.ts` documents for its own
+      // toggle, so the failure is still reported here rather than swallowed.
+      handleError(error, { method: 'chain-unmute', params: { username: peer.name } });
+    } finally {
+      setPendingName(null);
+    }
+  };
+
   return (
-    <section className={SETTINGS_CARD} data-testid="settings-blocked-accounts">
+    <section id="blocked-accounts" className={SETTINGS_CARD} data-testid="settings-blocked-accounts">
       <h2 className={SETTINGS_CARD_TITLE}>{t('settings_page.blocked_accounts')}</h2>
       <p className={SETTINGS_CARD_HINT}>{t('settings_page.blocked_accounts_hint')}</p>
 
@@ -123,22 +172,42 @@ const BlockedList = ({ username }: { username: string }) => {
         <ul className="mt-4 divide-y divide-[#f1f3f5] border-t border-[#f1f3f5]">
           {data.map((peer) => {
             const pending = pendingName === peer.name;
+            const fromChain = peer.source === 'chain' || peer.source === 'both';
             return (
-              <li key={`${peer.kind}:${peer.name}`} className="flex items-center gap-3 px-1 py-3">
+              <li
+                key={`${peer.kind}:${peer.name}`}
+                className="flex items-center gap-3 px-1 py-3"
+                data-testid="settings-blocked-row"
+                data-source={peer.source}
+              >
                 <UserAvatarImg username={peer.name} pixelSize={36} />
 
-                <BasePathLink
-                  href={`/@${peer.name}`}
-                  className="min-w-0 flex-1 truncate text-[14px] font-semibold text-[#161511] hover:text-[#c0392b]"
-                >
-                  @{peer.name}
-                </BasePathLink>
+                <div className="min-w-0 flex-1">
+                  <BasePathLink
+                    href={`/@${peer.name}`}
+                    className="block truncate text-[14px] font-semibold text-[#161511] hover:text-[#c0392b]"
+                  >
+                    @{peer.name}
+                  </BasePathLink>
+                  {/* ★ THE CHAIN BADGE — the entry is visibly identifiable, per the
+                      brief's own requirement, rather than looking like any other row
+                      until the button turns out not to work the way it does for
+                      everyone else. */}
+                  {fromChain ? (
+                    <p
+                      className="mt-0.5 truncate text-[12px] text-[#9ca3af]"
+                      data-testid="settings-blocked-chain-badge"
+                    >
+                      {t('settings_page.blocked_accounts_chain_hint')}
+                    </p>
+                  ) : null}
+                </div>
 
                 <button
                   type="button"
                   data-testid="settings-unblock-button"
                   className="inline-flex h-9 min-w-[92px] items-center justify-center rounded-[14px] border border-[#e4e6e9] bg-white px-4 text-[13px] font-bold text-[#c0392b] transition-colors hover:border-[#c0392b] hover:bg-[#fdf2f0] disabled:cursor-not-allowed disabled:opacity-60"
-                  onClick={() => handleUnblock(peer)}
+                  onClick={() => (fromChain ? handleChainRemove(peer) : handleUnblock(peer))}
                   disabled={pending}
                 >
                   {pending ? (

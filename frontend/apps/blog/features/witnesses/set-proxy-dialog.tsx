@@ -12,7 +12,7 @@ import {
 } from '@ui/components/dialog';
 import { Input } from '@ui/components/input';
 import { Icons } from '@ui/components/icons';
-import { checkAccountExists } from '@transaction/index';
+import { fetchAccountExists } from '@/blog/lib/chain-fetch';
 import { useTranslation } from '@/blog/i18n/client';
 import { useSetProxyMutation } from './hooks/use-set-proxy-mutation';
 
@@ -52,7 +52,11 @@ export default function SetProxyDialog({ trigger, mode, currentProxy }: SetProxy
     if (!trimmed) return;
 
     setChecking(true);
-    const result = await checkAccountExists(trimmed);
+    // ★ THROUGH OUR SERVER, NOT THE CHAIN CLIENT (2026-08-12). This called
+    // `checkAccountExists` (a real chain lookup) directly on submit, which
+    // downloads `wax.common.wasm`. See
+    // `apps/blog/app/api/account-exists/route.ts`.
+    const result = await fetchAccountExists(trimmed);
     setChecking(false);
 
     // A node error is NOT a verdict on the account — don't call a maybe-valid account "invalid".

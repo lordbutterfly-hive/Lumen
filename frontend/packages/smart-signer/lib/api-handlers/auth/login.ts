@@ -3,7 +3,7 @@ import { NextApiHandler } from 'next';
 import { getAppSession } from '@smart-signer/lib/get-session';
 import { getAccount } from '@transaction/lib/hive-api';
 import { getChain } from '@transaction/lib/chain';
-import { postLoginSchema, PostLoginSchema } from '@smart-signer/lib/auth/utils';
+import { postLoginSchema, PostLoginSchema } from '@smart-signer/lib/auth/login-schema';
 import { User } from '@smart-signer/types/common';
 import { cookieNamePrefix } from '@smart-signer/lib/session';
 import { checkCsrfHeader } from '@smart-signer/lib/csrf-protection';

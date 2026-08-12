@@ -140,7 +140,19 @@ const ButtonsContainer = ({
   // Lumen's own follow graph, for any pair the chain cannot hold (see useLumenFollow).
   // The query only runs when one side is keyless, so an ordinary Hive-to-Hive button
   // is unchanged and costs nothing.
-  const lumen = useLumenFollow(username, user.isLoggedIn && (user.account_tier === 'lite' || liteTarget));
+  // ★ `identity`, NOT `user` (2026-08-12). This gate was the one place in this
+  // file still reading raw `useUserClient()`, which reports SIGNED OUT until
+  // `/api/users/me` answers. During that window the query is DISABLED, so it
+  // never runs and never errors — which means the `lumen.unknown` guard added
+  // today cannot fire, while the button is already clickable. A click in that
+  // window falls through to the chain-follow path for a pair the chain cannot
+  // hold. `identity` is seeded from the session cookie server-side and is
+  // correct on the first render; `account_tier` stays on the raw hook because it
+  // does not exist on `identity`.
+  const lumen = useLumenFollow(
+    username,
+    identity.isLoggedIn && (user.account_tier === 'lite' || liteTarget)
+  );
 
   // ★ BLOCK IS OFFERED TO EVERYONE, ON EVERY BYLINE — the one moderation control
   // here (owner ruling 2026-08-12 retired the on-chain Mute button that used to
@@ -193,6 +205,24 @@ const ButtonsContainer = ({
       if (failure) handleError(new Error(failure), { method: 'lite-follow', params: { username } });
       return;
     }
+    // ★ THE BUG THIS GUARD CLOSES (2026-08-12). `lumen.applies` is ALSO false while
+    // the state read is still failing (see `LumenFollow.unknown`'s doc), and without
+    // this check execution fell straight through to the CHAIN mutation below — a
+    // signer that does not exist for a keyless viewer, or a `custom_json` follow
+    // broadcast against a name that is not a Hive account at all. `unknown` is scoped
+    // by construction to exactly the pairs where a Lumen edge was possible (the query
+    // never runs, so never errors, when it wasn't), so this can only refuse a follow
+    // that genuinely might belong to Lumen — never an ordinary Hive-to-Hive one.
+    // The button is already disabled for this state (FollowButton's `unknown` prop),
+    // so a click reaching here at all means something bypassed the UI gate; refuse
+    // rather than guess either way.
+    if (lumen.unknown) {
+      handleError(new Error(t('user_profile.follow_status_unknown_hint')), {
+        method: 'lite-follow',
+        params: { username }
+      });
+      return;
+    }
     if (!isFollow) {
       try {
         await followMutation.mutateAsync({ username });
@@ -214,7 +244,13 @@ const ButtonsContainer = ({
   // `lumen.pending` matters: until the state query answers, `applies` is false and the
   // click would take the CHAIN path — which for a keyless viewer means a signer that
   // does not exist. Disabled until we know which path this button is.
-  const loading = lumen.applies || lumen.pending
+  // `lumen.unknown` joins the same group for the same reason: the chain's own
+  // `isLoading`/`isFetching` booleans mean nothing here (a keyless viewer's chain
+  // follow list may never resolve at all), and letting them leak into `loading` could
+  // render a spinner in place of `FollowButton`'s honest `unknown` label instead of
+  // just disabling the control.
+  const onLumenPath = lumen.applies || lumen.pending || lumen.unknown;
+  const loading = onLumenPath
     ? lumen.busy || lumen.pending
     : follow.isLoading || follow.isFetching || followMutation.isPending || unfollowMutation.isPending;
   return (
@@ -231,13 +267,22 @@ const ButtonsContainer = ({
             isFollow={isFollow}
             onClick={handlerFollow}
             disabled={temporaryDisabled}
+            // `lumen.unknown`: the state read failed rather than resolving "this is a
+            // chain follow" — see `LumenFollow.unknown`'s doc and `handlerFollow`'s
+            // guard above. Disabled + honestly labelled, same pattern as BlockButton.
+            unknown={lumen.unknown}
           />
-          {block.available ? (
+          {block.available || block.unknown ? (
+            // `block.unknown`: the read failed rather than "this pair cannot be
+            // blocked" (use-lumen-block.ts). Still mounted so BlockButton can render
+            // its disabled, honestly-labelled state instead of vanishing during a
+            // backend outage — see BlockButton's `unknown` prop.
             <BlockButton
               loading={block.busy}
               variant={variant}
               isBlocking={block.isBlocking}
               onClick={handlerBlock}
+              unknown={block.unknown}
             />
           ) : null}
         </>

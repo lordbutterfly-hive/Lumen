@@ -13,7 +13,7 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from '@/blog/i18n/client';
 import { withBasePath } from '@ui/lib/path-utils';
-import { getCommunities, getSubscriptions } from '@transaction/lib/bridge-api';
+import { fetchCommunities, fetchSubscriptions } from '@/blog/lib/chain-fetch';
 import { useRouter } from 'next/navigation';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
@@ -21,6 +21,13 @@ import { DEFAULT_OBSERVER, chainObserver } from '@/blog/lib/utils';
 import { StaleTime } from '@/blog/lib/react-query';
 import { useSSRObserver, useInitialCommunities, useInitialSubscriptions } from '@/blog/components/observer-provider';
 
+/**
+ * ★ THROUGH OUR SERVER, NOT THE CHAIN CLIENT (2026-08-12). This dropdown
+ * mounts on every main/community feed page (see the identity-race comment
+ * below), and its `communitiesList` query ran UNCONDITIONALLY — `getChain()`
+ * downloaded `wax.common.wasm` for every visitor, signed in or not, on
+ * nearly every page shell. See `apps/blog/app/api/communities/route.ts`.
+ */
 export function CommunitiesSelect({ title }: { title: string }) {
   const { user, isHydrated } = useUserClient();
   /**
@@ -45,14 +52,14 @@ export function CommunitiesSelect({ title }: { title: string }) {
 
   const { isLoading, data } = useQuery({
     queryKey: ['communitiesList', sort, query, observer],
-    queryFn: () => getCommunities(sort, query, observer),
+    queryFn: () => fetchCommunities(sort, query, observer),
     initialData: initialCommunities ?? undefined,
     initialDataUpdatedAt: initialCommunities ? Date.now() : undefined,
     staleTime: StaleTime.LONG
   });
   const { data: mySubsData } = useQuery({
     queryKey: ['subscriptions', observer],
-    queryFn: () => getSubscriptions(observer),
+    queryFn: () => fetchSubscriptions(observer),
     enabled: observer !== DEFAULT_OBSERVER,
     initialData: initialSubscriptions ?? undefined,
     initialDataUpdatedAt: initialSubscriptions ? Date.now() : undefined,

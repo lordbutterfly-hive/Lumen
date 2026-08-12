@@ -288,13 +288,20 @@ export async function getLiteSession(): Promise<IronSession<IronSessionData>> {
   // nothing else, would never get backfilled — a real, narrow, stated gap;
   // both of those readers only ever consult `session.user?.userId` (always
   // undefined for a Hive account), so it has no other effect on them.
-  // ★ ONE POLICY, THREE READERS (2026-08-12). This block used to be a hand-copied
-  // twin of the one in `packages/smart-signer/lib/get-session.ts`, kept in step
-  // only by a comment asking the next reader to remember. That is the same
-  // failure mode that opened the hole this policy exists to close: F-L38 wired
-  // the check into the one call site it owned and every other reader enforced
-  // nothing. The policy now lives in `applyHiveSessionTtl` and all three readers
-  // (this one, `getAppSession`, and `apps/blog/lib/server-session.ts`) call it.
+  // ★ ONE POLICY, FIVE READERS (updated F-L40, 2026-08-12). This block used to be
+  // a hand-copied twin of the one in `packages/smart-signer/lib/get-session.ts`,
+  // kept in step only by a comment asking the next reader to remember. That is
+  // the same failure mode that opened the hole this policy exists to close:
+  // F-L38 wired the check into the one call site it owned and every other
+  // reader enforced nothing. The policy now lives in `applyHiveSessionTtl`, and
+  // every reader that touches a Hive session calls it: this one, `getAppSession`,
+  // `apps/blog/lib/server-session.ts`'s `getServerSessionUser`, and — closed by
+  // F-L40, found by grepping `getIronSession` repo-wide rather than trusting the
+  // "three readers" count above, which was itself already stale —
+  // `apps/blog/lib/auth-utils.ts`'s `getObserver` and `apps/blog/app/page.tsx`'s
+  // `hasSession`. Re-verify this list by grep, not by re-reading this comment,
+  // the next time a call site is added: that is exactly the mistake this policy
+  // exists to stop repeating.
   // `canPersist: true` — this accessor is reached from Route Handlers, where the
   // write is legal; the helper swallows the Server-Component case described above.
   await applyHiveSessionTtl(session, { canPersist: true });

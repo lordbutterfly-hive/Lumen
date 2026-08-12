@@ -4,7 +4,7 @@ import { useEffect } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { useInView } from 'react-intersection-observer';
 import { Link, PostListSkeleton } from '@hive/ui';
-import { getByText } from '@transaction/lib/hive-api';
+import { fetchSearch } from '@/blog/lib/chain-fetch';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import SearchSortSelect from './sort-select';
 import { SearchSort } from '@ui/hooks/use-search';
@@ -65,10 +65,14 @@ const SearchResults = ({ query, sort }: { query: string; sort: SearchSort }) => 
   const clientObserver = chainObserver(user);
   const observer = isHydrated ? clientObserver : ssrObserver;
 
+  // ★ THROUGH OUR SERVER, NOT THE CHAIN CLIENT (2026-08-12). This called
+  // `getByText` directly on every search — `/search` is public, so this
+  // downloaded `wax.common.wasm` for any visitor who searched. See
+  // `apps/blog/app/api/search/route.ts`.
   const { data, isLoading, isFetchingNextPage, fetchNextPage, hasNextPage, isError } = useInfiniteQuery({
     queryKey: ['searchByText', query, sort, observer],
     queryFn: async ({ pageParam }: { pageParam?: { author: string; permlink: string } }) => {
-      return await getByText({
+      return await fetchSearch({
         pattern: query,
         observer,
         start_permlink: pageParam?.permlink ?? '',

@@ -132,8 +132,43 @@ export interface EntryActorResolver {
   keyOf(entry: Entry | null | undefined): string | null;
 }
 
+/**
+ * What to do when a user-lookup query FAILS (as opposed to returning no rows).
+ *
+ * ★★★ WHY THIS IS A PARAMETER AND NOT A FIXED POLICY (2026-08-12).
+ *
+ * Both lookups below used to end in `.catch(() => [])`, which turns "the
+ * database errored" into "resolved, found nobody". For an UPGRADED user — one
+ * with both a Hive account and a Lumen `userId` — that means they get keyed by
+ * their chain name instead of their Lumen id, so a block edge recorded against
+ * the Lumen id is never matched, and their blocked comment is served.
+ *
+ * That is effect (B) failing OPEN, and it silently defeated the fail-closed
+ * guard added to `block-filter.ts` the same day: the guard's try/catch never
+ * fired, because the callee had already eaten the error before it could.
+ *
+ * But the swallow could not simply be removed, because this resolver serves
+ * BOTH effects, and they want opposite things on failure:
+ *
+ *   'throw'   — effect (B) (`applyOwnerBlocksTo{Thread,Replies,AuthoredEntries}`).
+ *               "Their comments under my content are served to nobody" is a
+ *               promise a reader cannot opt out of. Unenforceable means unservable:
+ *               every caller answers empty, never unfiltered, so a failure costs a
+ *               thread rather than exposing content the owner removed.
+ *   'degrade' — effect (A) (`filterBlockedForViewer`). This is the viewer's OWN
+ *               "I never see them" preference. Failing closed here would blank a
+ *               reader's entire feed over a database hiccup, which is the larger
+ *               harm; showing someone they blocked for a moment is the smaller.
+ *               This is a documented, deliberate decision, not an oversight.
+ *
+ * Default is 'degrade' so that any future caller is, at worst, no worse off than
+ * before this parameter existed. Effect (B) call sites opt in explicitly.
+ */
+export type ActorLookupFailurePolicy = 'throw' | 'degrade';
+
 export async function buildEntryActorResolver(
-  entries: (Entry | null | undefined)[]
+  entries: (Entry | null | undefined)[],
+  { onLookupFailure = 'degrade' }: { onLookupFailure?: ActorLookupFailurePolicy } = {}
 ): Promise<EntryActorResolver> {
   const hiveNames = new Set<string>();
   const handleNames = new Set<string>();
@@ -149,16 +184,21 @@ export async function buildEntryActorResolver(
 
   const byHive = new Map<string, string>();
   const byHandle = new Map<string, string>();
-  // Failures degrade to chain identity rather than throwing: a block that cannot be
-  // resolved must not take a comment thread down with it.
+  // See `ActorLookupFailurePolicy` above for why this is the caller's choice.
+  // Under 'degrade' a failed lookup falls back to chain identity, exactly as
+  // before; under 'throw' it propagates so the caller can fail closed.
+  const onFailure = (error: unknown): never[] => {
+    if (onLookupFailure === 'throw') throw error;
+    return [];
+  };
   if (hiveNames.size > 0) {
-    const rows = await users.findUsersByHiveAccountNames([...hiveNames]).catch(() => []);
+    const rows = await users.findUsersByHiveAccountNames([...hiveNames]).catch(onFailure);
     for (const row of rows) {
       if (row.hiveAccountName) byHive.set(row.hiveAccountName.toLowerCase(), row.userId);
     }
   }
   if (handleNames.size > 0) {
-    const rows = await users.findUsersByDisplayNames([...handleNames]).catch(() => []);
+    const rows = await users.findUsersByDisplayNames([...handleNames]).catch(onFailure);
     for (const row of rows) byHandle.set(row.displayName.toLowerCase(), row.userId);
   }
 

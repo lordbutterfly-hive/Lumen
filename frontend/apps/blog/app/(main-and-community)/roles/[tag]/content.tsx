@@ -8,7 +8,7 @@ import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { getRoleValue, Roles, rolesLevels } from '@/blog/features/community-profile/lib/utils';
 import TableItem from '@/blog/features/community-profile/table-item';
 import NoDataError from '@/blog/components/no-data-error';
-import { getListCommunityRoles } from '@transaction/lib/bridge-api';
+import { fetchCommunityRoles } from '@/blog/lib/chain-fetch';
 import { useTranslation } from '@/blog/i18n/client';
 
 const Content = ({ community }: { community: string }) => {
@@ -27,9 +27,17 @@ const Content = ({ community }: { community: string }) => {
   const identity = useSessionIdentity();
   const { t } = useTranslation('common_blog');
 
+  // ★ THROUGH OUR SERVER, NOT THE CHAIN CLIENT (2026-08-12). This called
+  // `getListCommunityRoles` directly, unconditionally, on `/roles/[tag]` —
+  // reachable by any visitor, signed in or not. (Note this query's key,
+  // `['rolesList', community]`, has never matched this route's own
+  // `page.tsx`'s SSR-prefetch key, `['community', tag]` — so that server
+  // fetch was always discarded before this fix too; fixing the fetcher here
+  // removes the browser-side WASM cost regardless of that separate
+  // hydration mismatch.) See `apps/blog/app/api/community-roles/route.ts`.
   const { data, isLoading, isError } = useQuery({
     queryKey: ['rolesList', community],
-    queryFn: () => getListCommunityRoles(community),
+    queryFn: () => fetchCommunityRoles(community),
     enabled: Boolean(community),
     select: (list) =>
       list

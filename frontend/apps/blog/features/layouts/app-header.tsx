@@ -9,7 +9,25 @@ import { Icons } from '@ui/components/icons';
 import TooltipContainer from '@ui/components/tooltip-container';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@ui/components/tooltip';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
-import { getUnreadNotifications } from '@transaction/lib/bridge-api';
+/**
+ * ★ THROUGH OUR SERVER, NOT THE CHAIN CLIENT (2026-08-12).
+ *
+ * This called `getUnreadNotifications` here in the browser. That reaches
+ * `getChain()`, which INSTANTIATES `@hiveio/wax` at runtime and fetches
+ * `wax.common.wasm` — 2.34 MB — on every page, for every signed-in Hive reader.
+ * The bell is mounted on every route, so this was the single widest instance of
+ * it. Anonymous visitors never hit it (`enabled: isChainAccount`), which is
+ * exactly how an anonymous-only measurement missed it. See
+ * `app/api/notifications/unread/route.ts` for the full note and the rule.
+ *
+ * `fetchUnreadNotifications` moved into `lib/chain-fetch.ts` (2026-08-12):
+ * `features/retention/components/retention-nudge.tsx` needed the identical
+ * fetch (same route, same shape) and was carrying its own direct
+ * `getUnreadNotifications` import as a second, unfixed path into the same
+ * bug — sharing one fetcher is what actually closes that off, a local copy
+ * here would not have.
+ */
+import { fetchUnreadNotifications } from '@/blog/lib/chain-fetch';
 import { useLoggedUserContext } from '@/blog/features/votes/hooks/use-logged-user';
 import { useTranslation } from '@/blog/i18n/client';
 import { hoursAndMinutes } from '@/blog/lib/utils';
@@ -107,7 +125,7 @@ const AppHeader: FC = () => {
   const isChainAccount = !!user.username && user.account_tier !== 'lite';
   const { data } = useQuery({
     queryKey: ['unreadNotifications', user.username],
-    queryFn: () => getUnreadNotifications(user.username),
+    queryFn: () => fetchUnreadNotifications(user.username),
     enabled: isChainAccount
   });
   const upvotePercent = manabarsData?.upvote.percentageValue ?? 0;

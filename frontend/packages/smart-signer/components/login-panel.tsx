@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { LoginType } from '@smart-signer/types/common';
 import { getCookie } from '@ui/lib/utils';
-import { Signatures, PostLoginSchema } from '@smart-signer/lib/auth/utils';
+import type { Signatures, PostLoginSchema } from '@smart-signer/lib/auth/login-schema';
 import { useSignIn } from '@smart-signer/lib/auth/use-sign-in';
 import { useUser } from '@smart-signer/lib/auth/use-user';
 import { LoginForm, LoginFormSchema } from '@smart-signer/components/login-form';

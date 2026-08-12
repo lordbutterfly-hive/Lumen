@@ -16,13 +16,13 @@ import { LoadMoreButton } from './load-more-button';
 import { Button } from '@ui/components/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@ui/components/tabs';
 import { getRewardsString } from '../../lib/utils';
-import { getAccountFull, getFindAccounts } from '@transaction/lib/hive-api';
+import { getFindAccounts } from '@transaction/lib/hive-api';
+import { fetchAccount, fetchAccountNotifications, fetchUnreadNotifications } from '@/blog/lib/chain-fetch';
 import { useMarkAllNotificationsAsReadMutation } from './hooks/use-notifications-read-mutation';
 import { useClaimRewardsMutation } from './hooks/use-claim-reward-mutation';
 import { handleError } from '@ui/lib/handle-error';
 import { convertStringToBig } from '@ui/lib/helpers';
 import { CircleSpinner } from 'react-spinners-kit';
-import { getAccountNotifications, getUnreadNotifications } from '@transaction/lib/bridge-api';
 import { useTranslation } from '@/blog/i18n/client';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { Icons } from '@hive/ui/components/icons';
@@ -78,9 +78,16 @@ const NotificationActivities = ({
     hive: string; hbd: string; vests: string; expiresAt: number;
   } | null>(null);
 
+  // ★ THROUGH OUR SERVER, NOT THE CHAIN CLIENT (2026-08-12). These three
+  // queries called `getUnreadNotifications`/`getAccountNotifications`/
+  // `getAccountFull` directly. This component is dialog-gated (`activity-log/
+  // dialog.tsx`, mounted from the community sidebar), so it only runs once a
+  // reader opens it — still a genuine `getChain()` call in the browser when
+  // it does. See `apps/blog/app/api/notifications/unread/route.ts`,
+  // `.../api/notifications/account/route.ts` and `.../api/account/route.ts`.
   const { data: unreadNotifications } = useQuery({
     queryKey: ['unreadNotifications', identity.username],
-    queryFn: () => getUnreadNotifications(identity.username || ''),
+    queryFn: () => fetchUnreadNotifications(identity.username || ''),
     enabled: !!identity.username,
     refetchOnMount: true,
     refetchInterval: 20000
@@ -90,14 +97,14 @@ const NotificationActivities = ({
 
   const { isFetching, data: moreData } = useQuery({
     queryKey: ['AccountNotificationMoreData', username, fetchAfterId],
-    queryFn: () => getAccountNotifications(username, fetchAfterId, NOTIFICATIONS_LIMIT),
+    queryFn: () => fetchAccountNotifications(username, fetchAfterId, NOTIFICATIONS_LIMIT),
     enabled: !!username && fetchAfterId !== null && hasMoreData,
     staleTime: 0
   });
 
   const { data: profileData } = useQuery({
     queryKey: ['profileData', identity.username],
-    queryFn: () => getAccountFull(identity.username),
+    queryFn: () => fetchAccount(identity.username),
     enabled: !!identity.username
   });
 

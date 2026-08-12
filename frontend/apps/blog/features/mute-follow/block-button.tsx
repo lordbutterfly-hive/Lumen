@@ -26,7 +26,8 @@ const BlockButton = ({
   loading,
   isBlocking,
   onClick,
-  disabled
+  disabled,
+  unknown = false
 }: {
   variant:
     | 'default'
@@ -44,6 +45,14 @@ const BlockButton = ({
   isBlocking: boolean;
   onClick: () => void;
   disabled?: boolean;
+  /**
+   * The block-state read failed permanently (see `unknown` on `use-lumen-block.ts`'s
+   * `LumenBlock`) — render a disabled, honestly-labelled button instead of Block/
+   * Unblock. The caller still mounts this component in that case (rather than the
+   * usual `block.available` gate) precisely so the control does not disappear during
+   * a backend outage with nothing telling the reader why.
+   */
+  unknown?: boolean;
 }) => {
   const { t } = useTranslation('common_blog');
 
@@ -54,12 +63,15 @@ const BlockButton = ({
       size="sm"
       data-testid="profile-block-button"
       onClick={() => onClick()}
-      disabled={loading || disabled}
+      disabled={loading || disabled || unknown}
+      title={unknown ? t('user_profile.block_status_unknown_hint') : undefined}
     >
       {loading ? (
         <span className="flex h-5 w-12 items-center justify-center">
           <CircleSpinner loading={loading} size={18} color="#dc2626" />
         </span>
+      ) : unknown ? (
+        t('user_profile.block_status_unknown')
       ) : isBlocking ? (
         t('user_profile.unblock_button')
       ) : (

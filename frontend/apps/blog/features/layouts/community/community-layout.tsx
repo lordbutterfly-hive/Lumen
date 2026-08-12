@@ -6,11 +6,11 @@ import CommunitiesMyBar from '../communities-my-bar';
 import CommunitiesSidebar from './communities-sidebar';
 import { useQuery } from '@tanstack/react-query';
 import {
-  getAccountNotifications,
-  getCommunity,
-  getSubscribers,
-  getSubscriptions
-} from '@transaction/lib/bridge-api';
+  fetchAccountNotifications,
+  fetchCommunity,
+  fetchCommunitySubscribers,
+  fetchSubscriptions
+} from '@/blog/lib/chain-fetch';
 import CommunityDescription from './community-description';
 import { CommunitiesSelect } from '@/blog/features/layouts/communities-select';
 import PostSelectFilter from '@/blog/features/layouts/post-select-filter';
@@ -27,6 +27,16 @@ import {
 import { t } from 'i18next';
 import { Skeleton } from '@hive/ui';
 
+/**
+ * ★ THROUGH OUR SERVER, NOT THE CHAIN CLIENT (2026-08-12). This wraps every
+ * community page, and every query below used to call `getChain()` directly —
+ * `getSubscribers`/`getAccountNotifications`/`getCommunity` are gated only on
+ * `isCommunity` (true for any visitor to any `hive-*` community, signed in or
+ * not), so this ran for every such visit. See
+ * `apps/blog/app/api/community/route.ts`,
+ * `.../api/community/subscribers/route.ts` and
+ * `.../api/notifications/account/route.ts`.
+ */
 const CommunityLayout = ({ children, community }: { children: ReactNode; community: string }) => {
   const { user, isHydrated } = useUserClient();
   const pathname = usePathname();
@@ -39,18 +49,18 @@ const CommunityLayout = ({ children, community }: { children: ReactNode; communi
   const isCommunity = community?.startsWith('hive-');
   const { data: subsData } = useQuery({
     queryKey: ['subscribers', community],
-    queryFn: () => getSubscribers(community ?? ''),
+    queryFn: () => fetchCommunitySubscribers(community ?? ''),
     enabled: isCommunity
   });
   const { data: notificationData } = useQuery({
     queryKey: ['AccountNotification', community],
-    queryFn: () => getAccountNotifications(community ?? ''),
+    queryFn: () => fetchAccountNotifications(community ?? ''),
     enabled: isCommunity
   });
 
   const { data: mySubsData } = useQuery({
     queryKey: ['subscriptions', observer],
-    queryFn: () => getSubscriptions(observer),
+    queryFn: () => fetchSubscriptions(observer),
     enabled: observer !== DEFAULT_OBSERVER,
     initialData: initialSubscriptions ?? undefined,
     initialDataUpdatedAt: initialSubscriptions ? Date.now() : undefined,
@@ -66,7 +76,7 @@ const CommunityLayout = ({ children, community }: { children: ReactNode; communi
 
   const { data: communityData, isLoading: isCommunityLoading } = useQuery({
     queryKey: ['community', community, observer],
-    queryFn: () => getCommunity(community, observer),
+    queryFn: () => fetchCommunity(community, observer),
     enabled: isCommunity,
     initialData: useInitialData ? initialCommunity : undefined,
     initialDataUpdatedAt: useInitialData ? Date.now() : undefined,

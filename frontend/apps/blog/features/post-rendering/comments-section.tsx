@@ -20,6 +20,10 @@ interface CommentsSectionProps {
   };
   userCanModerate: boolean;
   mutedList: IFollowList[];
+  /** True when the viewer's mute-list read failed (retries exhausted) — see
+   *  `content.tsx`'s own doc comment on `mutedListUnknown`. Threaded through
+   *  to `CommentList` -> `CommentListItem` alongside `mutedList` itself. */
+  mutedListUnknown?: boolean;
   flagText: string | undefined;
   discussionAuthor: string;
   discussionPermlink: string;
@@ -33,6 +37,7 @@ const CommentsSection = memo(function CommentsSection({
   paginatedDiscussionState,
   userCanModerate,
   mutedList,
+  mutedListUnknown,
   flagText,
   discussionAuthor,
   discussionPermlink,
@@ -144,6 +149,7 @@ const CommentsSection = memo(function CommentsSection({
             highestPermlink={postData.permlink}
             permissionToMute={userCanModerate}
             mutedList={mutedList}
+            mutedListUnknown={mutedListUnknown}
             data={paginatedDiscussionState.comments}
             flagText={flagText}
             filteringEnabled={filteringEnabled}

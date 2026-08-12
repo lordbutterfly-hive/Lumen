@@ -2,16 +2,10 @@
 
 import { useCallback, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { getChain } from '@transaction/lib/chain';
-import { getAccount, getAccounts, getDynamicGlobalProperties } from '@transaction/lib/hive-api';
-import { getListWitnessVotes, getWitnessesByVote } from '@transaction/lib/hive';
+import { fetchAccount, fetchWitnessesPage, fetchWitnessVotes } from '@/blog/lib/chain-fetch';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
-import { getLogger } from '@ui/lib/logging';
-import { buildWitnessRows } from '../lib/build-witness-rows';
-import { MAX_WITNESS_VOTES, WITNESS_FETCH_LIMIT } from '../lib/constants';
+import { MAX_WITNESS_VOTES } from '../lib/constants';
 import { WitnessRow } from '../lib/types';
-
-const logger = getLogger('app');
 
 export interface UseWitnessesDataResult {
   rows: WitnessRow[];
@@ -61,43 +55,39 @@ export function useWitnessesData(): UseWitnessesDataResult {
   const username = identity.username;
   const queryClient = useQueryClient();
 
-  const dgpQuery = useQuery({
-    queryKey: ['witnesses-page', 'dynamic-global-properties'],
-    queryFn: getDynamicGlobalProperties
-  });
-
-  const chainQuery = useQuery({
-    queryKey: ['witnesses-page', 'chain'],
-    queryFn: getChain,
-    staleTime: Infinity
-  });
-
-  const witnessesQuery = useQuery({
-    queryKey: ['witnesses-page', 'witness-list'],
-    queryFn: () => getWitnessesByVote(WITNESS_FETCH_LIMIT)
+  /**
+   * ★★★ THROUGH OUR SERVER, NOT THE CHAIN CLIENT (2026-08-12). This hook used
+   * to run FIVE separate chain reads in the browser — `getDynamicGlobalProperties`,
+   * a dedicated `useQuery({queryFn: getChain})`, `getWitnessesByVote`,
+   * `getAccounts`, plus (signed-in only) `getAccount`/`getListWitnessVotes` —
+   * every one reaching `getChain()`. `/witnesses` has NO sign-in wall, so this
+   * downloaded `wax.common.wasm` for every visitor, anonymous or signed in,
+   * just to view a read-only table — the single widest unnecessary blast
+   * radius found in this pass (highest-priority finding of the audit).
+   *
+   * The four visitor-independent reads (dgp, witness list, witness account
+   * batch, and the chain-instance math `buildWitnessRows`/`calculateHpApr`
+   * need) are now ONE combined server route — see
+   * `apps/blog/app/api/witnesses-page/route.ts` for why they're bundled
+   * rather than four separate ones. The two signed-in-only reads
+   * (`ownAccountQuery`, `ownVotesQuery`) stay separate, genuinely per-viewer
+   * queries, now against `/api/account` and `/api/witness-votes`.
+   */
+  const pageQuery = useQuery({
+    queryKey: ['witnesses-page', 'bulk'],
+    queryFn: () => fetchWitnessesPage<WitnessRow>()
   });
 
   const ownAccountQuery = useQuery({
     queryKey: ['witnesses-page', 'own-account', username],
-    queryFn: () => getAccount(username),
+    queryFn: () => fetchAccount(username),
     enabled: isLoggedIn
   });
 
   const ownVotesQuery = useQuery({
     queryKey: ['witnesses-page', 'own-votes', username],
-    queryFn: () => getListWitnessVotes(username, MAX_WITNESS_VOTES, 'by_account_witness'),
+    queryFn: () => fetchWitnessVotes(username, MAX_WITNESS_VOTES, 'by_account_witness'),
     enabled: isLoggedIn
-  });
-
-  const owners = useMemo(() => witnessesQuery.data?.map((w) => w.owner) ?? [], [witnessesQuery.data]);
-
-  const accountsQuery = useQuery({
-    queryKey: ['witnesses-page', 'witness-accounts', owners],
-    queryFn: async () => {
-      const accounts = await getAccounts(owners);
-      return new Map(accounts.map((a) => [a.name, a]));
-    },
-    enabled: owners.length > 0
   });
 
   const ownVotes = useMemo(() => {
@@ -107,32 +97,14 @@ export function useWitnessesData(): UseWitnessesDataResult {
     );
   }, [ownVotesQuery.data, username]);
 
+  // `ownVotes` is a per-viewer overlay on top of the shared, server-computed
+  // rows — applying it here is a plain `Set.has()` per row, no chain access
+  // needed, so it stays client-side same as before.
   const rows = useMemo(() => {
-    if (!witnessesQuery.data || !dgpQuery.data || !chainQuery.data) return [];
-    return buildWitnessRows({
-      witnesses: witnessesQuery.data,
-      accounts: accountsQuery.data ?? new Map(),
-      dgp: dgpQuery.data,
-      chain: chainQuery.data,
-      ownVotes
-    });
-  }, [witnessesQuery.data, dgpQuery.data, chainQuery.data, accountsQuery.data, ownVotes]);
-
-  const hpAprPercent = useMemo(() => {
-    if (!chainQuery.data || !dgpQuery.data) return null;
-    try {
-      const dgp = dgpQuery.data;
-      return chainQuery.data.calculateHpApr(
-        dgp.head_block_number,
-        dgp.vesting_reward_percent,
-        dgp.virtual_supply,
-        dgp.total_vesting_fund_hive
-      );
-    } catch (error) {
-      logger.error('calculateHpApr failed: %o', error);
-      return null;
-    }
-  }, [chainQuery.data, dgpQuery.data]);
+    if (!pageQuery.data) return [];
+    if (ownVotes.size === 0) return pageQuery.data.rows;
+    return pageQuery.data.rows.map((row) => ({ ...row, isVoted: ownVotes.has(row.owner) }));
+  }, [pageQuery.data, ownVotes]);
 
   const refetch = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: ['witnesses-page'] });
@@ -140,15 +112,15 @@ export function useWitnessesData(): UseWitnessesDataResult {
 
   return {
     rows,
-    isLoading: witnessesQuery.isLoading || dgpQuery.isLoading,
-    isError: witnessesQuery.isError || dgpQuery.isError || chainQuery.isError,
+    isLoading: pageQuery.isLoading,
+    isError: pageQuery.isError,
     ownDataError: isLoggedIn && (ownVotesQuery.isError || ownAccountQuery.isError),
     ownVotesUnavailable: isLoggedIn && ownVotesQuery.isError,
     refetch,
-    headBlock: dgpQuery.data?.head_block_number ?? 0,
-    hpAprPercent,
-    hbdInterestRatePercent: dgpQuery.data ? dgpQuery.data.hbd_interest_rate / 100 : null,
-    // Loading or errored own-votes reads as "unknown," never a confident MAX_WITNESS_VOTES.
+    headBlock: pageQuery.data?.headBlock ?? 0,
+    hpAprPercent: pageQuery.data?.hpAprPercent ?? null,
+    hbdInterestRatePercent: pageQuery.data?.hbdInterestRatePercent ?? null,
+    // Loading or errored own-votes reads as "unknown," never a confident-but-wrong MAX_WITNESS_VOTES.
     votesLeft:
       isLoggedIn && (ownVotesQuery.isLoading || ownVotesQuery.isError)
         ? null
@@ -156,6 +128,6 @@ export function useWitnessesData(): UseWitnessesDataResult {
     ownVotesCount: ownVotes.size,
     proxyAccount: ownAccountQuery.data?.proxy ?? '',
     hasProxy: !!ownAccountQuery.data?.proxy,
-    witnessCount: witnessesQuery.data?.length ?? 0
+    witnessCount: pageQuery.data?.witnessCount ?? 0
   };
 }

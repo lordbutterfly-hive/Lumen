@@ -110,24 +110,63 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const liteIds = followees.filter((f) => ULID.test(f));
     const chainNames = followees.filter((f) => !ULID.test(f)).slice(0, MAX_CHAIN_AUTHORS);
 
-    const [liteRows, chainPages] = await Promise.all([
-      posts.listByUsers(liteIds, { limit }),
-      Promise.all(
-        chainNames.map((author) =>
+    // ★★★ A DEAD SOURCE MUST NOT SINK A LIVE ONE (2026-08-12) — the equivalent,
+    // on this route, of the /api/feed/for-you fix that keeps page-1 posts when
+    // a later page times out. This used to be `Promise.all([listByUsers(...),
+    // Promise.all(chainNames.map(...))])`: the per-author chain fetches already
+    // caught their own failures (one unreachable author must not empty the
+    // whole feed, per the comment below), but the Lumen lookup did not — so ONE
+    // Postgres timeout rejected the OUTER `Promise.all` and threw away every
+    // chain post that had already resolved successfully, turning a partial
+    // failure into a total one and answering with a bare 500 to a reader who
+    // actually had real posts sitting in the other, already-settled promise.
+    // Each source now fails on its own; a working source is served even when
+    // its sibling is down.
+    let liteRows: Awaited<ReturnType<typeof posts.listByUsers>> = [];
+    let liteOk = true;
+    if (liteIds.length > 0) {
+      try {
+        liteRows = await posts.listByUsers(liteIds, { limit });
+      } catch (error) {
+        logger.warn('following feed: lite posts lookup failed: %o', error);
+        liteOk = false;
+      }
+    }
+
+    const chainResults = await Promise.all(
+      chainNames.map(async (author) => {
+        try {
           // `sort: 'posts'` is this author's own root posts. Deliberately not
           // 'blog' (which folds in their reblogs) — a reblog by someone you
           // follow is a different product decision, and silently including it
           // here would make the feed disagree with what the follow promised.
-          getAccountPosts('posts', author, author, '', '')
-            .then((r) => (r ?? []).slice(0, PER_CHAIN_AUTHOR))
-            // One unreachable author must not empty the whole feed.
-            .catch((error) => {
-              logger.warn('following feed: chain author %s failed: %o', author, error);
-              return [] as Entry[];
-            })
-        )
-      )
-    ]);
+          const r = await getAccountPosts('posts', author, author, '', '');
+          return { ok: true, entries: (r ?? []).slice(0, PER_CHAIN_AUTHOR) };
+        } catch (error) {
+          // One unreachable author must not empty the whole feed.
+          logger.warn('following feed: chain author %s failed: %o', author, error);
+          return { ok: false, entries: [] as Entry[] };
+        }
+      })
+    );
+    const chainPages = chainResults.map((r) => r.entries);
+    const chainOk = chainNames.length === 0 || chainResults.some((r) => r.ok);
+
+    // ★ TOTAL FAILURE GETS A FAILING STATUS, NOT AN EMPTY 200 — same reasoning
+    // as the cursor-page branch in /api/feed/for-you (which answers 502 rather
+    // than `{entries: []}`): a reader who follows people and got nothing back
+    // because every source we asked was unreachable is not the same reader
+    // whose followees genuinely posted nothing, and conflating them would tell
+    // react-query the request succeeded — which is exactly what lets an empty
+    // answer paint over a feed the reader was already reading. `attempted`
+    // counts only the sources this reader's follow graph actually has; a
+    // reader with no chain followees is never penalised for chainOk being
+    // vacuously true.
+    const attempted = (liteIds.length > 0 ? 1 : 0) + (chainNames.length > 0 ? 1 : 0);
+    const succeeded = (liteIds.length > 0 && liteOk ? 1 : 0) + (chainNames.length > 0 && chainOk ? 1 : 0);
+    if (attempted > 0 && succeeded === 0) {
+      return NextResponse.json({ error: 'server_error' }, { status: 502 });
+    }
 
     const names = await resolvePublicNames(liteRows);
     const liteEntries = liteRows.map((p) => dbPostToEntry(p, names.get(p.postId)));

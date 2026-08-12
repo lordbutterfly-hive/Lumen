@@ -54,6 +54,11 @@ interface CommentListProps {
   comment: Entry;
   parent_depth: number;
   mutedList: IFollowList[];
+  /** True when the viewer's mute-list read failed (React Query's retries
+   *  exhausted) — see `content.tsx`'s `mutedListUnknown` doc comment. Threaded
+   *  down from there through `CommentsSection` -> `CommentList`, alongside
+   *  `mutedList` itself. */
+  mutedListUnknown?: boolean;
   parentPermlink: string;
   discussionAuthor: string;
   discussionPermlink: string;
@@ -76,6 +81,7 @@ const CommentListItem = memo(function CommentListItem({
   comment,
   parent_depth,
   mutedList,
+  mutedListUnknown,
   parentPermlink,
   parentAuthor,
   flagText,
@@ -191,6 +197,12 @@ const CommentListItem = memo(function CommentListItem({
   const [hiddenComment, setHiddenComment] = useState(isOriginallyHidden);
   const [openState, setOpenState] = useState<string>(isOriginallyHidden ? '' : 'item-1');
   const [tempraryHidden, setTemporaryHidden] = useState(false);
+  // ★ BUG 1 FIX (2026-08-12, FX3) — local, per-comment, same reasoning
+  // `medium-post-card.tsx`'s own `moderationRevealed` gives for its own copy of
+  // this state: a reader who reveals ONE unknown-status comment has not thereby
+  // vouched for every other comment sharing this page's single, page-level
+  // mute-list query. See the gate below, right before `userModerationHidden`.
+  const [moderationRevealed, setModerationRevealed] = useState(false);
   const commentId = `@${comment.author}/${comment.permlink}`;
 
   // Build storage keys only when user is logged in (empty string disables hook)
@@ -278,6 +290,44 @@ const CommentListItem = memo(function CommentListItem({
 
   if (userFromGDPR || parentFromGDPR) {
     return null;
+  }
+  // ★ BUG 1 FIX (2026-08-12, FX3) — "the mute-unknown fix reached the post card
+  // but never the comment thread." `isMutedByViewer` above (`mutedList?.some(...)`)
+  // reads `false` on an empty or unresolved `mutedList`, exactly like `isMuted` in
+  // `use-moderation-status.ts` did before its own fix — an "unknown" mute-list read
+  // and a "confirmed nobody muted" read are the same expression. Without this gate,
+  // a muted account's comment renders in full, unlabelled, during a fetch hiccup —
+  // directly contradicting the owner's "gone, no collapse, no Reveal" ruling below,
+  // which only holds if the mute check actually ran.
+  //
+  // Ordered BEFORE `userModerationHidden`: this can't tell WHICH author on this page
+  // is muted (the read that would answer that is the one that failed), so every
+  // comment degrades the same way while the page-level mute-list query is unresolved
+  // — matching `medium-post-card.tsx`'s DEFECT-2 fix on the sibling surface exactly
+  // (same shape: neutral "we don't know" card + explicit Reveal, never a silent
+  // "clean" render and never a silent hide). Children are withheld too, same
+  // reasoning as `userModerationHidden`'s own cascade below: a reply routinely
+  // quotes what it answers, and until the mute status resolves we don't yet know
+  // whether the parent should be shown at all.
+  if (mutedListUnknown && !moderationRevealed) {
+    return (
+      <li data-testid="comment-list-item" className="w-full min-w-0">
+        <div
+          className="mb-4 flex w-full min-w-0 flex-wrap items-center justify-between gap-3 rounded-[14px] border border-dashed border-[#e0dcd4] bg-[#f9f7f5] px-3 py-2.5 font-sans text-[12.5px] text-[#6b7280]"
+          data-testid="comment-moderation-unknown"
+        >
+          <span>{t('cards.comment_card.moderation_status_unknown', { author: displayAuthor })}</span>
+          <button
+            type="button"
+            onClick={() => setModerationRevealed(true)}
+            className="font-semibold text-[#2a2822] underline-offset-2 hover:underline"
+            data-testid="comment-moderation-unknown-reveal"
+          >
+            {t('cards.comment_card.moderation_status_unknown_reveal')}
+          </button>
+        </div>
+      </li>
+    );
   }
   // ★ OWNER RULING 2026-08-12 — "we should have no collapses like Hiveblog or
   // ecency or peakd... it works the same way" as Block. A comment from someone
@@ -729,7 +779,7 @@ const CommentListItem = memo(function CommentListItem({
                               `comment.author` is the shared publishing account, not a
                               blockable person — `useLumenBlock`'s own "not yourself"
                               check covers the rest. */}
-                          {block.available ? (
+                          {block.available || block.unknown ? (
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>
                                 <button
@@ -742,16 +792,31 @@ const CommentListItem = memo(function CommentListItem({
                                 </button>
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end" className="w-52">
-                                <DropdownMenuItem
-                                  onClick={handleBlockClick}
-                                  disabled={block.busy}
-                                  className="cursor-pointer text-destructive focus:text-destructive"
-                                  data-testid="comment-block-menu-item"
-                                >
-                                  {block.isBlocking
-                                    ? t('user_profile.unblock_button')
-                                    : t('user_profile.block_button')}
-                                </DropdownMenuItem>
+                                {block.available ? (
+                                  <DropdownMenuItem
+                                    onClick={handleBlockClick}
+                                    disabled={block.busy}
+                                    className="cursor-pointer text-destructive focus:text-destructive"
+                                    data-testid="comment-block-menu-item"
+                                  >
+                                    {block.isBlocking
+                                      ? t('user_profile.unblock_button')
+                                      : t('user_profile.block_button')}
+                                  </DropdownMenuItem>
+                                ) : (
+                                  // `unknown`, not `available`: the read failed rather than
+                                  // "this pair cannot be blocked" (use-lumen-block.ts). A
+                                  // disabled item that says so, not a vanished menu, is the
+                                  // honest answer during a backend outage.
+                                  <DropdownMenuItem
+                                    disabled
+                                    className="cursor-not-allowed"
+                                    data-testid="comment-block-menu-item-unknown"
+                                    title={t('user_profile.block_status_unknown_hint')}
+                                  >
+                                    {t('user_profile.block_status_unknown')}
+                                  </DropdownMenuItem>
+                                )}
                               </DropdownMenuContent>
                             </DropdownMenu>
                           ) : null}

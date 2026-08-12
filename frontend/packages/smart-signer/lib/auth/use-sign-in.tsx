@@ -1,7 +1,10 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { QUERY_KEY } from '@smart-signer/lib/query-keys';
 import { fetchJson } from '@smart-signer/lib/fetch-json';
-import { PostLoginSchema } from '@smart-signer/lib/auth/utils';
+// Type-only, from login-schema.ts — see the matching comment in
+// components/auth/process.tsx, which is what makes this hook reachable from
+// every page (via GoogleOAuthRedirectHandler).
+import type { PostLoginSchema } from '@smart-signer/lib/auth/login-schema';
 import { User } from '@smart-signer/types/common';
 import { csrfHeaderName } from '@smart-signer/lib/csrf-protection';
 import { verifyLogin } from '@smart-signer/lib/verify-login';

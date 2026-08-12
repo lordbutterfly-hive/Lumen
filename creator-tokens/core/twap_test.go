@@ -344,13 +344,39 @@ func TestTwapWeightClampChangesReturnedRate(t *testing.T) {
 
 // A market nobody has touched for longer than MaxStaleBlocks must refuse to
 // price rather than quote from stale data.
-func TestTwapRefusesStaleObservations(t *testing.T) {
+// REPLACES TestTwapRefusesStaleObservations (owner ruling 2026-08-12).
+// Staleness no longer refuses once a market has bootstrapped: observations are
+// written by exactly the functions that move supply while settlements are
+// possible, so a quiet window means an UNCHANGED supply, not a wrong price.
+// See twapWindowRead's comment for the full argument.
+//
+// Both directions are pinned here, because "never refuses" would be the wrong
+// fix and this test is what stops it drifting there.
+func TestTwapPricesWhenQuietOnceBootstrapped(t *testing.T) {
 	s := NewMemStore()
 	creator := "grace"
 	stableTenObservations(s, creator)
 
-	_, err := AskRate(s, creator, 27000+MaxStaleBlocks+1)
-	assertErrSymbol(t, err, ErrOracle)
+	// (a) A bootstrapped ring PRICES after an arbitrarily long quiet gap.
+	for _, gap := range []uint64{MaxStaleBlocks + 1, 10 * MaxStaleBlocks, 100 * MaxStaleBlocks} {
+		rate, err := AskRate(s, creator, 27000+gap)
+		if err != nil {
+			t.Fatalf("gap=%d: bootstrapped ring refused to price: %v", gap, err)
+		}
+		if rate == nil || rate.Sign() <= 0 {
+			t.Fatalf("gap=%d: priced non-positively (%v) — a quiet market must still quote its average", gap, rate)
+		}
+	}
+
+	// (b) A market that has NOT bootstrapped still refuses. The count/span
+	// gate is the bootstrap latch and it must keep biting.
+	fresh := NewMemStore()
+	RecordObs(fresh, "newbie", 1000, mpBig(5000))
+	if _, err := AskRate(fresh, "newbie", 1000+MaxStaleBlocks+1); err == nil {
+		t.Fatal("a single-observation market priced; the bootstrap gate is gone")
+	} else {
+		assertErrSymbol(t, err, ErrOracle)
+	}
 }
 
 // ---------------------------------------------------------------------------

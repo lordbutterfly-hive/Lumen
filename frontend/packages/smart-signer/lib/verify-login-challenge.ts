@@ -1,6 +1,6 @@
 import { ApiAuthority } from '@hiveio/wax';
 import { FullAccount } from '@hive/common-hiveio-packages/wax';
-import { Signatures } from '@smart-signer/lib/auth/utils';
+import type { Signatures } from '@smart-signer/lib/auth/login-schema';
 import { verifySignature } from '@smart-signer/lib/verify-signature';
 
 import { getLogger } from '@hive/ui/lib/logging';

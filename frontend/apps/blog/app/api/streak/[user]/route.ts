@@ -436,17 +436,41 @@ async function computeStreakBody(user: string, currentGoal: number | undefined):
 
     // ════ THE PERSISTED HISTORY (migration 0028) ════
     //
-    // BEST EFFORT, ALWAYS. Every read and write against the store is wrapped: a
-    // Postgres hiccup degrades this route to exactly its previous walk-only
-    // behaviour, and must never take a profile page down. Same posture the limiter
-    // above already takes, for the same reason.
+    // ★ FAIL LOUD, NOT "BEST EFFORT" (2026-08-12). This used to swallow-and-degrade like
+    // the goal read above, on the theory that a Postgres hiccup should never take a
+    // profile page down. That theory does not hold here, because `cursor` decides
+    // `firstObservedDayUTC` below — the SOLE gate `deriveLeagueInputs` uses to count
+    // observed act-days (see derive-league-inputs.ts: "an empty firstObservedDayUTC
+    // counts nothing, rather than counting everything"). A resolved `null` (the cursor
+    // row genuinely does not exist yet — a real new account) and a REJECTED read (a
+    // transient Postgres error) both used to collapse to the same `cursor = null` here,
+    // and nothing downstream can tell "nothing observed yet" from "we don't know" —
+    // both render as `observedActDays: 0` → rank 0, "Unranked", for an account that may
+    // have years of activity. Worse, that wrong body was then written into the shared
+    // cache unconditionally (see `writeStreakCache` below), pinning "Unranked" on a
+    // public profile for up to STREAK_TTL_MS + STREAK_STALE_TTL_MS (30 minutes) from one
+    // blip.
+    //
+    // This now follows the same pattern the route already applies to `getAccount` and
+    // the posts walk: a THROW is a 502 (never cached, never rendered as a measurement),
+    // while a clean resolve — including a legitimate `null` for a brand-new account —
+    // proceeds exactly as before. `listHiveActDays` shares the rule for the same reason:
+    // it is only reached once a real cursor confirms there is stored history, and losing
+    // IT silently would leave `storeCoversWindow` believing the walk can shortcut to an
+    // incremental read while `storedDays` quietly contributes zero history — an
+    // undercount from the same class of failure, just smaller.
     let cursor: HiveWalkCursor | null = null;
     let storedDays: string[] = [];
     try {
       cursor = await findHiveWalkCursor(user);
       if (cursor) storedDays = await listHiveActDays(user);
     } catch (err) {
-      logger.warn(err, 'streak: retention history unavailable for %s (degrading to walk-only)', user);
+      logger.error(
+        err,
+        'streak: retention history read failed for %s — refusing to compute a rank from an unproven "never observed" cursor',
+        user
+      );
+      return { status: 502, body: { error: 'upstream unavailable', detail: 'retention history' } };
     }
 
     // ★ HOW DEEP TO WALK, AND WHY IT IS NOT ALWAYS THE WINDOW.
@@ -561,11 +585,30 @@ async function computeStreakBody(user: string, currentGoal: number | undefined):
     // without being charged twice. Passing them as act-days instead made the streak
     // idempotent but not STABLE — the same account read 4 on the request that spent the
     // freeze and 5 on the next one, because a bridged day started counting as activity.
+    //
+    // ★ A FAILED READ DEFAULTS TO ZERO MERCY, AND THAT DEFAULT MUST NOT BE PUBLISHED AS
+    // EXACT (2026-08-12). `available: 0, spentDays: []` was always the conservative
+    // choice on the SPEND side — it can never grant a freeze that was not earned, so
+    // it is safe there. It is not conservative on the READ side: a gap a banked freeze
+    // or an already-covered day would have bridged is instead walked as a genuine
+    // break, so `streakDays` comes back SHORTER than the truth — a streak mercy should
+    // have protected breaks instead. That is the same direction `streakDays` is already
+    // allowed to be a floor for (a capped feed walk), but this route was still adding
+    // it to `provenance.exact` unconditionally, so a broken streak read as a hard fact
+    // with nothing signalling the ledger it depended on never loaded. `freezeReadFailed`
+    // forces the existing `streakDaysIsLowerBound` floor below — one flag, one meaning,
+    // whichever cause tripped it — rather than inventing a second "kind of exact".
     let freeze: FreezeState = { spentDays: [], available: 0, earned: 0 };
+    let freezeReadFailed = false;
     try {
       freeze = await readFreezeState(user, actDaysUTC.length);
     } catch (err) {
-      logger.warn(err, 'streak: freeze ledger unavailable for %s (streak computed without mercy)', user);
+      freezeReadFailed = true;
+      logger.warn(
+        err,
+        'streak: freeze ledger unavailable for %s — streak computed without mercy and marked a floor',
+        user
+      );
     }
 
     // Today's authored acts, needed BEFORE the streak now that the goal gates it.
@@ -915,7 +958,10 @@ async function computeStreakBody(user: string, currentGoal: number | undefined):
     // on a PREVIOUS visit is observed and exact — which is the common case for a
     // returning reader and used to be reported as a floor every single time.
     const coveredFrom = completeFrom;
-    const streakDaysIsLowerBound = isStreakLowerBound(streak.streakBrokeOnUTC, coveredFrom);
+    // ★ A FAILED FREEZE READ FORCES THIS FLOOR TOO, INDEPENDENT OF WALK COVERAGE.
+    // `isStreakLowerBound` only knows about the feed-walk boundary; it has no way to
+    // know mercy was unavailable this request. See the freeze-read block above.
+    const streakDaysIsLowerBound = freezeReadFailed || isStreakLowerBound(streak.streakBrokeOnUTC, coveredFrom);
 
     const exact = ['tenureYear'];
     if (!streakDaysIsLowerBound) exact.push('streakDays');
@@ -1088,7 +1134,15 @@ async function computeStreakBody(user: string, currentGoal: number | undefined):
           // Which bound bit, for ops and for wording: null whenever not capped.
           // The posts walk is load-bearing, so its reason wins when both capped.
           cappedReason: postWalk.cappedReason ?? commentWalk.cappedReason ?? null,
-          commentsFeedUnavailable: commentsFailed
+          commentsFeedUnavailable: commentsFailed,
+          /**
+           * The freeze ledger read failed this request, so `streakDays` may be a floor
+           * even where the feed walk itself was complete — see the freeze-read block
+           * above. `streakDaysIsLowerBound` already carries this into the render rule;
+           * published separately, same as `commentsFeedUnavailable`, so the REASON is
+           * stated rather than assumed.
+           */
+          freezeStateUnavailable: freezeReadFailed
         },
         // ★ `receivedEngagement` IS NO LONGER LISTED HERE, because it is no longer a
         // proxy. It read "reputation-derived proxy, not a measured per-post engagement

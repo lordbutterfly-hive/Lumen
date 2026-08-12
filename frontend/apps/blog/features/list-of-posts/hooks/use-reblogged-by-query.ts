@@ -1,8 +1,13 @@
 import { useQuery } from '@tanstack/react-query';
-import { getRebloggedBy } from '@transaction/lib/hive-api';
+import { fetchRebloggedBy } from '@/blog/lib/chain-fetch';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { fetchLiteEngagement } from '@/blog/lib/lite/client/lite-engagement';
 
+/**
+ * ★ THROUGH OUR SERVER, NOT THE CHAIN CLIENT (2026-08-12). This called
+ * `getRebloggedBy` directly, which downloads `wax.common.wasm`. See
+ * `apps/blog/app/api/reblogged-by/route.ts`.
+ */
 export const useRebloggedByQuery = (author: string = '', permlink: string = '', username: string = '') => {
   const { user } = useUserClient();
   const isLite = user?.account_tier === 'lite';
@@ -18,7 +23,7 @@ export const useRebloggedByQuery = (author: string = '', permlink: string = '', 
         const engagement = await fetchLiteEngagement(author, permlink);
         return engagement.reblogged;
       }
-      const data = await getRebloggedBy(author, permlink);
+      const data = await fetchRebloggedBy(author, permlink);
       return data.includes(username);
     },
 

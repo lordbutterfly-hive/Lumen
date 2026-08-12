@@ -1,7 +1,16 @@
 import * as z from 'zod';
 import { validateHiveAccountName } from '@smart-signer/lib/validators/validate-hive-account-name';
 import { LoginType, User, KeyType } from '@smart-signer/types/common';
-import { TTransactionPackType } from '@hiveio/wax';
+
+// ★ `postLoginSchema`/`PostLoginSchema`/`Signatures` moved to ./login-schema.ts
+// (2026-08-12) — DO NOT bring them back here. That schema needs
+// `TTransactionPackType` as a real runtime VALUE from '@hiveio/wax' to build
+// `z.nativeEnum(...)`, and this file's `defaultUser` below is on the static
+// import path of `use-user-core.ts` — reached, unconditionally, from every page
+// via SignerProvider's `useUser`/`useUserClient`. Keeping the wax-dependent
+// schema in the SAME module as `defaultUser` meant every page's unavoidable
+// need for `defaultUser` also evaluated that schema, and with it wax's ~2.3 MB
+// WASM-backed bundle — see login-schema.ts's header comment for the full trace.
 
 export const username = z.string()
     .superRefine((val, ctx) => {
@@ -17,38 +26,11 @@ export const username = z.string()
         return true;
     });
 
-export const postLoginSchema = z.object({
-    keyType: z.nativeEnum(KeyType, {
-        invalid_type_error: 'Invalid keyType',
-        required_error: 'keyType is required',
-    }),
-    loginType: z.nativeEnum(LoginType, {
-        invalid_type_error: 'Invalid loginType',
-        required_error: 'loginType is required',
-    }),
-    hivesignerToken: z.string({
-        invalid_type_error: "hivesignerToken must be a string",
-        required_error: "hivesignerToken is required",
-    }),
-    signatures: z.object({
-        posting: z.string(),
-        active: z.string(),
-    }),
-    pack: z.nativeEnum(TTransactionPackType),
-    strict: z.boolean(),
-    txJSON: z.string(),
-    authenticateOnBackend: z.boolean(),
-    username,
-});
-export type PostLoginSchema = z.infer<typeof postLoginSchema>;
-
 export const postConsentSchema = z.object({
   oauthClientId: z.string(),
   consent: z.boolean(),
 });
 export type PostConsentSchema = z.infer<typeof postConsentSchema>;
-
-export type Signatures = PostLoginSchema["signatures"];
 
 export const defaultUser: User = {
     isLoggedIn: false,

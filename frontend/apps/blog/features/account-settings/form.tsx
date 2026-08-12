@@ -2,7 +2,7 @@
 
 import { useTranslation } from '@/blog/i18n/client';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { getAccountFull } from '@transaction/lib/hive-api';
+import { fetchAccount } from '@/blog/lib/chain-fetch';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { fetchLiteProfile, saveLiteProfile } from '@/blog/lib/lite/client/lite-profile';
 import { MutableRefObject, ReactNode, useEffect, useRef, useState } from 'react';
@@ -86,9 +86,11 @@ const SettingsForm = ({ username }: { username: string }) => {
   // database and is read and written over /api/lite/profile; every field below
   // behaves the same either way.
   const isLite = user?.account_tier === 'lite';
+  // ★ THROUGH OUR SERVER, NOT THE CHAIN CLIENT (2026-08-12). See
+  // `apps/blog/app/api/account/route.ts`.
   const { data } = useQuery({
     queryKey: ['profileData', username],
-    queryFn: () => getAccountFull(username),
+    queryFn: () => fetchAccount(username),
     enabled: !isLite
   });
   const { data: liteProfile } = useQuery({

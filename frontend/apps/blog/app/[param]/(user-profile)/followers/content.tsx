@@ -9,7 +9,7 @@ import { useTranslation } from '@/blog/i18n/client';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { useIsMutating, useQuery } from '@tanstack/react-query';
-import { getAccountFull } from '@transaction/lib/hive-api';
+import { fetchAccount } from '@/blog/lib/chain-fetch';
 import { IFollow } from '@hive/common-hiveio-packages/wax';
 import { useState } from 'react';
 import Loading from '@ui/components/loading';
@@ -37,9 +37,11 @@ const FollowersContent = ({
    */
   const identity = useSessionIdentity();
 
+  // ★ THROUGH OUR SERVER, NOT THE CHAIN CLIENT (2026-08-12). Unconditional
+  // (no `enabled` gate). See `apps/blog/app/api/account/route.ts`.
   const { data: profileData } = useQuery({
     queryKey: ['profileData', username],
-    queryFn: () => getAccountFull(username)
+    queryFn: () => fetchAccount(username)
   });
 
   const isFollowMutating = useIsMutating({ mutationKey: ['follow'] });

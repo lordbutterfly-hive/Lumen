@@ -9,7 +9,7 @@ import { getSigner } from '@smart-signer/lib/signer/get-signer';
 import { getOperationForLogin } from '@smart-signer/lib/login-operation';
 import { getChain } from '@transaction/lib/chain';
 import { hasCompatibleKeychain } from '@smart-signer/lib/signer/signer-keychain';
-import { Signatures } from '@smart-signer/lib/auth/utils';
+import type { Signatures } from '@smart-signer/lib/auth/login-schema';
 import {
   parseAutopost2,
   cleanupCondenserStorage,

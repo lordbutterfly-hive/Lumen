@@ -31,8 +31,13 @@ export const SignerProviderClient = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     logger.info('Starting SignerProviderClient.useEffect() to setup Signer');
     (async () => {
-      const _getSigner = (await import('@smart-signer/lib/signer/get-signer')).getSigner;
       if (signerOptions.username !== '') {
+        // ★ Loaded here, inside the branch that actually needs it — see the
+        // matching comment in signer-provider.tsx (the App Router twin of this
+        // file) for why: get-signer.ts's static import pulls in all 7 signer
+        // backends and their `@hiveio/wax-signers-*` providers, so a visitor
+        // with no username to build a signer for should never pay for it.
+        const _getSigner = (await import('@smart-signer/lib/signer/get-signer')).getSigner;
         setSigner(_getSigner(signerOptions));
         transactionService.setSignerOptions(signerOptions);
       } else {

@@ -27,6 +27,22 @@ export interface LumenBlock {
   pending: boolean;
   isBlocking: boolean;
   busy: boolean;
+  /**
+   * The state read failed permanently (retries exhausted), so `available: false`
+   * MEANS "we don't know", not "this control does not apply here" — the same
+   * distinction `LumenBlockList.unknown` draws below, carried across to this
+   * hook's sibling.
+   *
+   * `available` alone cannot tell a caller the difference: it is also `false`
+   * while the query is still loading and whenever `enabled` is false (signed
+   * out, or viewing yourself) — both of which a caller is right to render as
+   * "no control here". Gating the SAME WAY on a permanent failure hid the
+   * control during a backend outage with nothing telling the reader why, which
+   * reads as "this person can't be blocked" — never true, just unknown right
+   * now. A caller that checks `unknown` can show a disabled control with an
+   * honest explanation instead of letting Block silently vanish.
+   */
+  unknown: boolean;
   /** Resolves to an error message when the change was refused, else null. */
   toggle: () => Promise<string | null>;
 }
@@ -40,7 +56,7 @@ export function useLumenBlock(
   const [busy, setBusy] = useState(false);
   const queryKey = ['lumenBlockState', target, targetKind];
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey,
     enabled: enabled && Boolean(target),
     staleTime: 60 * 1000,
@@ -70,6 +86,11 @@ export function useLumenBlock(
     pending: enabled && Boolean(target) && isLoading,
     isBlocking,
     busy,
+    // Scoped by construction, same as `pending` above: `enabled: enabled &&
+    // Boolean(target)` on the query means it never runs — so never errors —
+    // when this control does not apply, so `isError` is already exactly "the
+    // read that WOULD have answered this failed", nothing more to gate here.
+    unknown: isError,
     toggle: async () => {
       setBusy(true);
       const result = await liteBlock(target, targetKind, isBlocking);

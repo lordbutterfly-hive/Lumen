@@ -14,6 +14,18 @@ import { getLogger } from '@ui/lib/logging';
 
 const logger = getLogger('app');
 
+/**
+ * How long the profile layout will wait for its React Query prefetches before
+ * sending the page anyway. Sized against the measured cost of the two real
+ * network prefetches (~362ms and ~364ms against api.hive.blog, in parallel):
+ * a healthy chain answers inside this and keeps the full hydration benefit, a
+ * degraded one stops costing the reader their first byte.
+ */
+const PREFETCH_BUDGET_MS = 400;
+
+/** Backoff before the single account-fetch retry. See its call site. */
+const RETRY_BACKOFF_MS = 200;
+
 // Matches app/layout.tsx's SITE_DESC — not imported (that constant isn't
 // exported) but kept word-for-word so the fallback title/description here
 // reads as the same site, not a second one.
@@ -144,7 +156,15 @@ const Layout = async ({ children, params }: { children: ReactNode; params: { par
   // the retry has to bypass the cache and go through the plain getAccountFull.
   let account = await getAccountFullCached(username).catch(async (error) => {
     logger.error(error, 'getAccountFullCached failed; retrying once before treating as not-found');
-    await new Promise((resolve) => setTimeout(resolve, 600));
+    // Backoff before the retry, trimmed from 600ms (2026-08-12). The retry
+    // itself is load-bearing and stays — it fixes a real reported bug where a
+    // tab errored once and worked on a second visit. But this sits directly in
+    // TTFB whenever the first call fails, and the original 600ms was a round
+    // number rather than a measured one. A retry that bypasses the request
+    // cache opens a fresh connection, which is what actually recovers a
+    // transient failure; the pause only needs to be long enough not to arrive
+    // inside the same blip.
+    await new Promise((resolve) => setTimeout(resolve, RETRY_BACKOFF_MS));
     return getAccountFull(username).catch(() => null);
   });
 
@@ -187,7 +207,34 @@ const Layout = async ({ children, params }: { children: ReactNode; params: { par
       );
     }
 
-    await Promise.all(prefetchPromises);
+    // ★★★ PREFETCHING MUST NOT HOLD THE PAGE HOSTAGE (2026-08-12).
+    //
+    // This was a bare `await Promise.all(...)`, so the profile page could not
+    // send its first byte until every prefetch had answered. Measured against
+    // the real chain API: `get_account_reputations` ~362ms and
+    // `get_dynamic_global_properties` ~364ms, neither cached, both on every
+    // profile view. They run in parallel, so they added roughly 360ms to a
+    // ~560ms TTFB — the majority of it, on the slowest server route we have.
+    //
+    // The prefetch is an OPTIMISATION, not a requirement: its only job is to
+    // seed the React Query cache so the browser does not refetch. Every one of
+    // these queries already has a client-side path that fetches if the
+    // dehydrated state lacks it. So the correct shape is "take the benefit if
+    // it is cheap, never pay more than a budget for it".
+    //
+    // Whatever has resolved when the budget expires still gets dehydrated —
+    // `dehydrate()` reads whatever is in the cache at that moment — so a fast
+    // prefetch keeps its full benefit and a slow one simply stops being the
+    // reader's problem. This can therefore never be slower than the old
+    // behaviour, and never leaves the client with less than it fetches anyway.
+    //
+    // ★ Deliberately NOT cancelling the in-flight prefetches on timeout: they
+    // are already in the request's memoized cache, and letting them finish
+    // costs nothing the reader waits for.
+    await Promise.race([
+      Promise.allSettled(prefetchPromises),
+      new Promise((resolve) => setTimeout(resolve, PREFETCH_BUDGET_MS))
+    ]);
   } catch (error) {
     logger.error(error, 'Error in Layout:');
   }

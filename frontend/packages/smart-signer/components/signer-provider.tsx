@@ -37,8 +37,16 @@ export const SignerProvider = ({ children }: { children: ReactNode }) => {
         transactionService.clearSignerOptions();
         return;
       }
-      const _getSigner = (await import('@smart-signer/lib/signer/get-signer')).getSigner;
       if (signerOptions.username !== '') {
+        // ★ Loaded HERE, inside the branch that actually needs it — not above,
+        // unconditionally (2026-08-12). get-signer.ts statically pulls in all 7
+        // signer backends (hbauth/hiveauth/keychain/peakvault/metamask/wif/
+        // google-drive) plus their `@hiveio/wax-signers-*` providers, each of
+        // which extends a real `@hiveio/wax` base class — so importing it, even
+        // only to discard the result, still downloads that whole subtree. An
+        // anonymous visitor (username === '') or a lite session (handled above)
+        // never had a signer to build, so they no longer pay for one.
+        const _getSigner = (await import('@smart-signer/lib/signer/get-signer')).getSigner;
         setSigner(_getSigner(signerOptions));
         transactionService.setSignerOptions(signerOptions);
       } else {

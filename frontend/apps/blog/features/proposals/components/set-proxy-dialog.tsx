@@ -17,8 +17,7 @@ import { useTranslation } from '@/blog/i18n/client';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import DialogLogin from '@/blog/components/dialog-login';
-import { isHiveAccountNameValid } from '@transaction/lib/validate-hive-account';
-import { getAccount } from '@transaction/lib/hive-api';
+import { fetchAccountExists } from '@/blog/lib/chain-fetch';
 import { useProxyMutation } from '../hooks/use-proxy-mutation';
 
 interface Props {
@@ -78,8 +77,13 @@ export default function SetProxyDialog({ children, currentProxy }: Props) {
       setIsChecking(true);
       setError(null);
       try {
-        const validFormat = await isHiveAccountNameValid(proxyValue);
-        if (!validFormat) {
+        // ★ THROUGH OUR SERVER, NOT THE CHAIN CLIENT (2026-08-12). This called
+        // `isHiveAccountNameValid` and `getAccount` directly, both of which
+        // download `wax.common.wasm` — the same fix as `features/witnesses/
+        // set-proxy-dialog.tsx`, and now the same shared route. See
+        // `apps/blog/app/api/account-exists/route.ts`.
+        const result = await fetchAccountExists(proxyValue);
+        if (!result.validFormat) {
           setError(t('proposals.proxy_dialog.errors.invalid_format'));
           return;
         }
@@ -87,8 +91,11 @@ export default function SetProxyDialog({ children, currentProxy }: Props) {
           setError(t('proposals.proxy_dialog.errors.self_proxy'));
           return;
         }
-        const account = await getAccount(proxyValue);
-        if (!account?.name) {
+        if (result.status === 'api_error') {
+          setError(t('proposals.proxy_dialog.errors.verify_failed'));
+          return;
+        }
+        if (result.status === 'not_found') {
           setError(t('proposals.proxy_dialog.errors.not_found', { proxy: proxyValue }));
           return;
         }

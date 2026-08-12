@@ -375,6 +375,9 @@ export function invalidateViewerFeed(viewer: string): void {
   // inputs. Bumping the generation both refuses their writes and stops the next
   // request from joining them.
   generation.set(viewer, viewerGeneration(viewer) + 1);
+  // Bounded here, at the one place the map can grow. The viewer whose era was
+  // just bumped is protected from its own sweep - see `pruneGenerations`.
+  pruneGenerations(viewer);
   if (!storeEnabled()) return;
   // Tombstone first, so that from this instruction onward NOTHING can serve or
   // promote the row that is about to be deleted — the delete itself is
@@ -405,6 +408,52 @@ const generation = new Map<string, number>();
  */
 export function viewerGeneration(viewer: string): number {
   return generation.get(viewer) ?? 0;
+}
+
+/**
+ * Keep `generation` from growing forever (2026-08-12).
+ *
+ * ★ THE ONLY UNBOUNDED STRUCTURE IN THIS FILE, and it sat right next to the one
+ * that is carefully bounded. `feedCache` evicts at FEED_MAX_VIEWERS and
+ * `inflight`/`failedAt` delete themselves when a build settles, but `generation`
+ * was only ever `set` and `get`: one entry per viewer ever invalidated, kept for
+ * the life of the process. Small (a username and an integer) and therefore easy
+ * to miss, but it is real growth on a long-lived production process, and it
+ * OUTLIVES the eviction of the very cache entry it describes.
+ *
+ * ★★ WHY THIS PRUNES ON A CONDITION RATHER THAN JUST DELETING. Dropping a
+ * viewer's entry resets their era to 0, and `buildOnce` captures an era at start
+ * and re-checks it at write time. A build that captured era 3 against a pruned
+ * counter would normally just have its write REFUSED (3 !== 0), which is safe —
+ * but if the counter then climbed back to 3 through three fresh invalidations
+ * while that build was still running, a stale result could be accepted as
+ * current. So a viewer is pruned only when nothing can be holding a captured
+ * era for them: no in-flight build, no cached feed, no pending invalidation.
+ * Under those conditions the entry is provably dead weight.
+ *
+ * Runs only when the map exceeds the same ceiling the feed cache uses, so the
+ * common path costs nothing.
+ */
+function pruneGenerations(protectViewer?: string): void {
+  if (generation.size <= FEED_MAX_VIEWERS) return;
+  for (const viewer of generation.keys()) {
+    // ★ `protectViewer` exists because the only caller is `invalidateViewerFeed`,
+    // and by the time it runs, THAT viewer looks maximally prune-eligible: its
+    // cache entry was just deleted, its tombstone is not added until two lines
+    // later, and it usually has no in-flight build. So the sweep could drop the
+    // era it had just bumped, resetting `viewerGeneration()` to 0 and throwing
+    // away the invalidation. Worse on the `!storeEnabled()` path, which returns
+    // before any tombstone is ever set.
+    //
+    // The damage was bounded — `readViewerFeed` re-checks both the era and the
+    // tombstone after its await, so nothing stale could be SERVED — but it cost
+    // a needless cold rebuild, the 7-16s this module exists to avoid.
+    if (viewer === protectViewer) continue;
+    if (inflight.has(viewer) || feedCache.has(viewer) || pendingInvalidation.has(viewer)) continue;
+    generation.delete(viewer);
+    failedAt.delete(viewer);
+    if (generation.size <= FEED_MAX_VIEWERS) return;
+  }
 }
 
 /**

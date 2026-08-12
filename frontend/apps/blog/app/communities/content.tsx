@@ -12,12 +12,11 @@ import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { Link } from '@hive/ui';
 import env from '@beam-australia/react-env';
-import { getCommunities } from '@transaction/lib/bridge-api';
+import { fetchCommunities, fetchSubscriptions } from '@/blog/lib/chain-fetch';
 import { useTranslation } from '@/blog/i18n/client';
 import { DEFAULT_OBSERVER, chainObserver } from '@/blog/lib/utils';
 import { StaleTime } from '@/blog/lib/react-query';
 import { useSSRObserver, useInitialCommunities, useInitialSubscriptions } from '@/blog/components/observer-provider';
-import { getSubscriptions } from '@transaction/lib/bridge-api';
 
 function CommunityCardSkeleton() {
   return (
@@ -73,9 +72,14 @@ const CommunitiesContent = () => {
   const isInitialQuery = sort === 'rank' && query === null;
   const observerMatchesSSR = observer === ssrObserver;
   const useInitialData = isInitialQuery && initialCommunities && observerMatchesSSR;
+  // ★ THROUGH OUR SERVER, NOT THE CHAIN CLIENT (2026-08-12). This called
+  // `getCommunities`/`getSubscriptions` directly on the main `/communities`
+  // directory — every visitor, signed in or not. See
+  // `apps/blog/app/api/communities/route.ts` and
+  // `.../api/subscriptions/route.ts`.
   const { data: communitiesData, isFetching } = useQuery({
     queryKey: ['communitiesList', sort, query, observer],
-    queryFn: async () => await getCommunities(sort, query, observer),
+    queryFn: async () => await fetchCommunities(sort, query, observer),
     initialData: useInitialData ? initialCommunities : undefined,
     initialDataUpdatedAt: useInitialData ? Date.now() : undefined,
     staleTime: StaleTime.LONG
@@ -83,7 +87,7 @@ const CommunitiesContent = () => {
 
   const { data: userSubscriptions } = useQuery({
     queryKey: ['subscriptions', observer],
-    queryFn: () => getSubscriptions(observer),
+    queryFn: () => fetchSubscriptions(observer),
     enabled: observer !== DEFAULT_OBSERVER,
     initialData: initialSubscriptions ?? undefined,
     initialDataUpdatedAt: initialSubscriptions ? Date.now() : undefined,

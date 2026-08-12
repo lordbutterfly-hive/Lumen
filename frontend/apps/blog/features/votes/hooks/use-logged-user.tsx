@@ -3,7 +3,7 @@ import { createContext, FC, useContext } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { netVests } from '@/blog/lib/utils';
 import { FullAccount } from '@hive/common-hiveio-packages/wax';
-import { getAccountFull, getManabar } from '@transaction/lib/hive-api';
+import { fetchAccount, fetchManabar } from '@/blog/lib/chain-fetch';
 
 interface SingleManabar {
   max: string;
@@ -52,15 +52,26 @@ export const LoggedUserProvider: FC<{ children: React.ReactNode }> = ({ children
   // Both chain queries are now skipped for lite accounts. They are meaningless
   // there: no vests, no manabar, no reputation. The defaults below (0 vests,
   // reputation 25) are exactly what a keyless account should report.
+  //
+  // ★★★ THROUGH OUR SERVER, NOT THE CHAIN CLIENT (2026-08-12). Both queries
+  // below used to call `getAccountFull`/`getManabar` directly, here in the
+  // browser. That reaches `getChain()`, which INSTANTIATES `@hiveio/wax` and
+  // downloads `wax.common.wasm` (2.34 MB) — and because this provider is
+  // global and `isChainAccount` is the SAME gate `app-header.tsx`'s unread-
+  // notifications query already used, this was the sibling instance of the
+  // exact bug fixed there: an anonymous-only measurement would have missed
+  // this one too, since `enabled` is false until a real Hive account signs
+  // in. See `apps/blog/app/api/account/route.ts` and `.../api/manabar/
+  // route.ts`.
   const isChainAccount = !!user.username && user.account_tier !== 'lite';
   const { data: accountData } = useQuery({
     queryKey: ['loggedUserAccount', user.username],
-    queryFn: () => getAccountFull(user.username),
+    queryFn: () => fetchAccount(user.username),
     enabled: isChainAccount
   });
   const { data: manabarsData } = useQuery({
     queryKey: ['manabars', user.username],
-    queryFn: () => getManabar(user.username),
+    queryFn: () => fetchManabar(user.username),
     enabled: isChainAccount,
     refetchOnWindowFocus: false,
     refetchInterval: 60000

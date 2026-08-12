@@ -4,7 +4,7 @@ import SocialActivities from '@/blog/features/account-social/social-activities';
 import SubscriptionList from '@/blog/features/account-social/subscription-list';
 import { useTranslation } from '@/blog/i18n/client';
 import { useQuery } from '@tanstack/react-query';
-import { getSubscriptions } from '@transaction/lib/bridge-api';
+import { fetchSubscriptions } from '@/blog/lib/chain-fetch';
 import { getHivebuzzBadges, getPeakdBadges, isThirdPartyApiEnabled } from '@transaction/lib/custom-api';
 import { getUserAvatarUrl } from '@ui/lib/avatar-utils';
 import { Link } from '@hive/ui';
@@ -13,9 +13,11 @@ const CommunityContent = ({ username }: { username: string }) => {
   const { t } = useTranslation('common_blog');
   const thirdPartyEnabled = isThirdPartyApiEnabled();
 
+  // ★ THROUGH OUR SERVER, NOT THE CHAIN CLIENT (2026-08-12). Unconditional
+  // (no `enabled` gate). See `apps/blog/app/api/subscriptions/route.ts`.
   const { data } = useQuery({
     queryKey: ['listAllSubscription', username],
-    queryFn: () => getSubscriptions(username)
+    queryFn: () => fetchSubscriptions(username)
   });
 
   const { data: hivebuzz } = useQuery({

@@ -131,7 +131,7 @@ type RegisterResult struct {
 // path by which this function mints a launch slice to anybody else.
 func RegisterWithFirstBuy(s Store, caller, creator string, block uint64, face, cap int64, firstBuy *big.Int) (*RegisterResult, error) {
 	// ---- guards for BOTH halves, before any write (RULING G) ----
-	if err := registerCheck(s, caller, creator, face, cap); err != nil {
+	if err := registerCheck(s, caller, creator, block, face, cap); err != nil {
 		return nil, err
 	}
 	n, err := launchBuyCheck(block, cap, firstBuy)

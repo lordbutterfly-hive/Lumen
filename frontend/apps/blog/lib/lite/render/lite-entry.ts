@@ -57,9 +57,42 @@ export async function liteEntryForPost(
   let chainEntry: Entry | null = null;
   try {
     chainEntry = (await getPost(post.hiveAuthor, post.hivePermlink, observer)) ?? null;
-  } catch {
-    // Node trouble shouldn't blank the page — fall back to what we still hold.
-    chainEntry = null;
+  } catch (error) {
+    // ★ A NODE HICCUP MUST NOT RENDER A CONFIDENT EMPTY POST (2026-08-12).
+    //
+    // This unconditionally swallowed the error and fell back to `dbPostToEntry(post,
+    // ...)` — "Node trouble shouldn't blank the page", per the comment that used to
+    // sit here. But by the time this line can even run, `post.hiveAuthor` and
+    // `post.hivePermlink` are both set, which only happens after a successful
+    // publish (`markPostPublished`, post-repository.ts) — and under the default
+    // config (`pruneBodyAfterPublish`, on unless `LITE_PRUNE_BODY_AFTER_PUBLISH=no`)
+    // that same publish already blanked `post.body` to `''`. So the "fallback" this
+    // comment promised did not exist: rendering the row served a live, published
+    // post as a normal 200 with an empty body — indistinguishable from an author who
+    // genuinely wrote nothing — which is a worse failure than an honest error, not a
+    // gentler one.
+    //
+    // The row IS a legitimate fallback when it still holds real content: pruning is
+    // opt-in and off by default in some deployments, and nothing else about this
+    // catch block changes for that case. Only pruned rows (the common case) need the
+    // rest of this fix.
+    if (post.body) {
+      chainEntry = null;
+    } else {
+      // Nothing left to render this post from — surface the failure instead of
+      // inventing an answer. Every consumer already has an honest path for a throw
+      // here: `/api/lite/posts/[id]/route.ts` answers 500 `server_error` instead of
+      // 200 with an empty body; `layout.tsx`'s `generateMetadata` falls back to
+      // generic site metadata instead of a real title over no description; and the
+      // post page's own outer catch (`content.tsx`'s caller, `page.tsx`) logs and
+      // leaves `postData` unset, which renders `notFound()` rather than a blank
+      // article. A 404 or a 500 on a transient blip is not perfect, but it is never
+      // mistaken for "this post has no body" — which is the one thing this function
+      // must not claim. Not retried in place: every one of those callers is a fresh
+      // request a reader can simply reload, and doubling this call's latency here
+      // would tax every real, permanent failure to buy back only the transient ones.
+      throw error;
+    }
   }
   if (!chainEntry) return dbPostToEntry(post, publicName);
 

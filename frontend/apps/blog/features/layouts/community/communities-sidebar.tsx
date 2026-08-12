@@ -2,7 +2,7 @@
 
 import { Link } from '@hive/ui';
 import { useQuery } from '@tanstack/react-query';
-import { getCommunities } from '@transaction/lib/bridge-api';
+import { fetchCommunities } from '@/blog/lib/chain-fetch';
 import { cn } from '@ui/lib/utils';
 import { Card, CardContent, CardHeader, CardTitle } from '@hive/ui/components/card';
 import { FC } from 'react';
@@ -12,6 +12,11 @@ import { DEFAULT_OBSERVER, chainObserver } from '@/blog/lib/utils';
 import { StaleTime } from '@/blog/lib/react-query';
 import { useSSRObserver, useInitialCommunities } from '@/blog/components/observer-provider';
 
+/**
+ * ★ THROUGH OUR SERVER, NOT THE CHAIN CLIENT (2026-08-12). Same rule and same
+ * unconditional query as `communities-select.tsx` — see
+ * `apps/blog/app/api/communities/route.ts`.
+ */
 const CommunitiesSidebar: FC = () => {
   const { t } = useTranslation('common_blog');
   const sort = 'rank';
@@ -26,7 +31,7 @@ const CommunitiesSidebar: FC = () => {
 
   const { data } = useQuery({
     queryKey: ['communitiesList', sort, query, observer],
-    queryFn: () => getCommunities(sort, query, observer),
+    queryFn: () => fetchCommunities(sort, query, observer),
     initialData: initialCommunities ?? undefined,
     initialDataUpdatedAt: initialCommunities ? Date.now() : undefined,
     staleTime: StaleTime.LONG

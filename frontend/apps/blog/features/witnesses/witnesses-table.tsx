@@ -71,9 +71,42 @@ export default function WitnessesTable({
     setVisibleCount(FIRST_PAGE);
   }, [rowsKey]);
 
+  /**
+   * ★★★ STUCK AT 120/250 (2026-08-12). `IntersectionObserver` only calls back on a
+   * threshold CROSSING, not on every frame the sentinel happens to still be inside
+   * the viewport. Scrolling straight to the bottom crosses the threshold exactly
+   * once (`moreInView` false -> true); this effect added one page (60 -> 120); and
+   * if the sentinel was still on screen after that page rendered — no NEW crossing
+   * — the observer never called back again, so this effect (keyed only on the
+   * boolean) had nothing left to re-run on. Pagination stalled with more rows
+   * available and the sentinel still visible. Scrolling away and back created a
+   * fresh crossing, which is why that "unstuck" it — a level check disguised as an
+   * edge-triggered fix.
+   *
+   * Adding `visibleCount` re-arms the check on every page load: each time it
+   * changes, this effect re-runs and re-reads the LATEST `moreInView`, so a
+   * sentinel that is still visible keeps advancing without waiting for a new scroll
+   * event.
+   *   - Can't runaway on a short list whose sentinel never leaves the viewport: the
+   *     functional updater's `n >= rows.length` guard caps `visibleCount` at the
+   *     full list, and once it stops changing React bails the state update
+   *     (`Object.is` same value), so the effect has nothing left to re-run on — the
+   *     list just finishes loading immediately instead of looping.
+   *   - Can't fire mid-fetch or past the last page: there is no fetch here. `rows`
+   *     arrives once from `useWitnessesData`'s single `useQuery` (see
+   *     `hooks/use-witnesses-data.ts`) and this only slices it locally, so there is
+   *     no in-flight request to race and no `hasNextPage` to overrun beyond the
+   *     same `n >= rows.length` guard.
+   *   - Can't double-fire meaningfully under React 18 StrictMode's dev-only mount
+   *     double-invoke: `moreInView` is false on mount in the normal case (60 rows
+   *     exceed the initial viewport), so both invocations are no-ops. Even in the
+   *     edge case where the sentinel is already in view at mount, both invocations
+   *     go through the same `n >= rows.length` guard on a local array slice — at
+   *     most one extra page reveals a render early, in dev only, never a runaway.
+   */
   useEffect(() => {
     if (moreInView) setVisibleCount((n) => (n >= rows.length ? n : n + PAGE_STEP));
-  }, [moreInView, rows.length]);
+  }, [moreInView, rows.length, visibleCount]);
 
   const visibleRows = useMemo(() => rows.slice(0, visibleCount), [rows, visibleCount]);
   const gridTemplate = GENERAL_GRID_TEMPLATE;
