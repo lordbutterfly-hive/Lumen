@@ -21,7 +21,6 @@ import { useTranslation } from '@/blog/i18n/client';
 import ProfileCover from './profile-cover';
 import ProfileIdentity from './profile-identity';
 import ProfileActions from './profile-actions';
-import ProfileStatsBar from './profile-stats-bar';
 import ProfileTabs from './profile-tabs';
 import { getCoverImageUrl } from './lib/get-cover-image-url';
 
@@ -266,6 +265,15 @@ export default function ProfileMain() {
               // requests for the badge.
               reputation={profileData.reputation}
               moderated={moderation.isModerated}
+              // ★ The stats line these feed used to be a separate 112px card
+              // (`ProfileStatsBar`, deleted 2026-08-13). `follow_stats` is passed
+              // WITHOUT a `?? 0` fallback on purpose: absent means absent, and the
+              // line renders an em dash rather than an invented zero.
+              followerCount={profileData.follow_stats?.follower_count}
+              postCount={profileData.post_count}
+              followingCount={followingCount}
+              hp={hp.toFixed(3)}
+              hpEffective={hpEffective.toFixed(3)}
             />
             {/* `_temporary` is how a Lumen lite account's stand-in profile is marked:
                 no Hive account exists behind it, so a follow of this person can only
@@ -279,19 +287,6 @@ export default function ProfileMain() {
         </PageMasthead>
       </div>
 
-      <ProfileStatsBar
-        username={username}
-        followerCount={profileData.follow_stats?.follower_count ?? 0}
-        postCount={profileData.post_count ?? 0}
-        followingCount={followingCount}
-        // ★ W-11: three decimals, the same precision the wallet prints, because
-        // the two pages showed the same account's HP as "74,868" here and
-        // "74,867.553" there and left the reader to work out whether that was
-        // two numbers or one. ProfileStatsBar still does the comma grouping, so
-        // what goes in is an ungrouped fixed-point string, as it always was.
-        hp={hp.toFixed(3)}
-        hpEffective={hpEffective.toFixed(3)}
-      />
 
       {/* Creator-token surface (design brief §3, creator-token-prominence pass):
           directly under the stats row and above the Posts/Comments tabs — and

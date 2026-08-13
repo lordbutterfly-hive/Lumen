@@ -498,7 +498,14 @@
     "load_failed_retry": "Couldn't load more. Tap to try again",
     "reputation_title": "Reputation {{value}}. A stake-weighted total of the votes @{{username}} has received. Lumen does not use it for anything.",
     "reputation_label": "Hive reputation",
-    "reputation_short": "rep"
+    "reputation_short": "rep",
+    "stats_line": {
+      "followers_one": "follower",
+      "followers_other": "followers",
+      "posts_one": "post",
+      "posts_other": "posts",
+      "following": "following"
+    }
   },
   "communities": {
     "set_title_for_user": "Set Title for @{{username}}",

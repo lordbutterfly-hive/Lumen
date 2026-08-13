@@ -3,9 +3,11 @@
 import { useState } from 'react';
 import { Icons } from '@ui/components/icons';
 import TimeAgo from '@ui/components/time-ago';
+import TooltipContainer from '@ui/components/tooltip-container';
+import { Link } from '@hive/ui';
 import { dateToShow } from '@ui/lib/parse-date';
 import { accountReputation, accountReputationPrecise } from '@hive/ui';
-import { cn } from '@ui/lib/utils';
+import { cn, numberWithCommas } from '@ui/lib/utils';
 import { useTranslation } from '@/blog/i18n/client';
 import { compareDates } from '@/blog/lib/utils';
 import { ProfileLeagueChip } from '@/blog/features/retention/components/profile-league-chip';
@@ -34,6 +36,21 @@ interface ProfileIdentityProps {
    * explanation now.
    */
   moderated?: boolean;
+  /**
+   * The stats line under the meta row. Replaces the standalone 112px
+   * `ProfileStatsBar` card (2026-08-13) — same four numbers, one line, no card
+   * chrome. Counts are OPTIONAL on purpose: `follow_stats` can be absent from
+   * `bridge.get_profile`, and the spec is explicit that a missing number renders
+   * as an em dash IN PLACE rather than dropping the item, so the line never
+   * reflows between loads.
+   */
+  followerCount?: number;
+  postCount?: number;
+  followingCount?: number;
+  /** Own staked HIVE, ungrouped fixed-point (e.g. "74886.174"). */
+  hp?: string;
+  /** Delegation-adjusted total; shown only in the tooltip. */
+  hpEffective?: string;
 }
 
 /**
@@ -79,7 +96,12 @@ export default function ProfileIdentity({
   chainAccount = true,
   reputation,
   moderated = false
-}: ProfileIdentityProps) {
+,
+  followerCount,
+  postCount,
+  followingCount,
+  hp,
+  hpEffective}: ProfileIdentityProps) {
   const { t } = useTranslation('common_blog');
   // The explanation is collapsed by default. It opens on click as well as hover, because
   // a `title` is invisible on touch — see the badge below.
@@ -164,6 +186,86 @@ export default function ProfileIdentity({
           {t('user_profile.active')} <TimeAgo date={compareDates([created, lastVoteTime, lastPost])} />
         </span>
       </div>
+
+      {/*
+        ★ THE STATS CARD IS NOW A LINE (2026-08-13).
+        Replaces `ProfileStatsBar`'s 831x112 card: 132px of vertical height
+        (112 card + 20 margin) and ~236px of dead horizontal space removed, so
+        the first post sits correspondingly higher.
+
+        A SIBLING of the meta row, not a child, so it wraps onto its own row and
+        the icon spacing above is untouched.
+
+        14px/22px, matching the meta row it sits under. The spec asked for
+        13.5px/20.25px, which were that row's values BEFORE the same day's
+        typography pass rounded every fractional size away; re-introducing them
+        would put this line back off the pixel grid on its own.
+
+        Numbers are weight 600 in #161511 against the #6b7280 label — the
+        weight/colour contrast is what makes them read as data, so they stay the
+        same SIZE as the labels. `tabular-nums` stops the digits jittering when a
+        count revalidates.
+      */}
+      <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 font-sans text-[14px] leading-[22px] text-[#6b7280]">
+        <Link href={`/@${username}/followers`} className="underline-offset-2 hover:underline">
+          <StatNumber value={followerCount} />{' '}
+          {t('user_profile.stats_line.followers', { count: followerCount ?? 0 })}
+        </Link>
+        <StatDot />
+        <span>
+          <StatNumber value={postCount} /> {t('user_profile.stats_line.posts', { count: postCount ?? 0 })}
+        </span>
+        <StatDot />
+        {/* `/following`, not `/followed`: the old path is a permanent redirect as
+            of the same day's route rename, and an internal link that knowingly
+            points at a redirect costs every reader a round trip. */}
+        <Link href={`/@${username}/following`} className="underline-offset-2 hover:underline">
+          <StatNumber value={followingCount} /> {t('user_profile.stats_line.following')}
+        </Link>
+        {hp ? (
+          <>
+            <StatDot />
+            {/* The exact three-decimal figure and the delegation-adjusted total
+                live ONLY here — that is where the deleted card's sub-line went. */}
+            <TooltipContainer
+              title={`${numberWithCommas(hp)} ${t('profile.stats.hp')}${
+                hpEffective && hpEffective !== hp
+                  ? ` · ${t('profile.stats.hp_effective', { value: numberWithCommas(hpEffective) })}`
+                  : ''
+              }`}
+            >
+              <span
+                className="cursor-help underline-offset-2 decoration-dotted hover:underline focus:underline"
+                tabIndex={0}
+                data-testid="profile-hp-effective"
+              >
+                <span className="font-semibold tabular-nums tracking-[-0.01em] text-[#161511]">
+                  {numberWithCommas(String(Math.round(Number(hp))))}
+                </span>{' '}
+                {t('profile.stats.hp')}
+              </span>
+            </TooltipContainer>
+          </>
+        ) : null}
+      </div>
     </div>
+  );
+}
+
+/** A count, or an em dash when the API did not return one — never a dropped item. */
+function StatNumber({ value }: { value?: number }) {
+  return (
+    <span className="font-semibold tabular-nums tracking-[-0.01em] text-[#161511]">
+      {typeof value === 'number' ? value.toLocaleString('en-US') : '—'}
+    </span>
+  );
+}
+
+/** `aria-hidden` + `select-none` so copying the line yields clean text. */
+function StatDot() {
+  return (
+    <span aria-hidden className="select-none text-[#d1d5db]">
+      ·
+    </span>
   );
 }
