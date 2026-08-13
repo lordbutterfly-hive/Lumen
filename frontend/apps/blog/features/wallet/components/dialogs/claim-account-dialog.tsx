@@ -55,12 +55,12 @@ export default function ClaimAccountDialog({
             {t('wallet.dialogs.claim_account.description')}
           </DialogDescription>
         </DialogHeader>
-        <p className="rounded-[10px] bg-[#f6f7f8] px-3 py-2 text-[13px] text-[#3f4650]">
+        <p className="rounded-[10px] bg-[#f6f7f8] px-3 py-2 text-[13px] leading-[20px] text-[#3f4650]">
           {pendingClaimedAccounts > 0
             ? t('wallet.dialogs.claim_account.pending', { count: pendingClaimedAccounts })
             : t('wallet.dialogs.claim_account.pending_none')}
         </p>
-        <p className="text-[13px] leading-[1.5] text-[#6b7280]" data-testid="claim-account-todo-notice">
+        <p className="text-[13px] leading-[20px] text-[#6b7280]" data-testid="claim-account-todo-notice">
           {t('wallet.dialogs.claim_account.todo_notice')}
         </p>
         <DialogFooter className="mt-2 flex-row items-center justify-end gap-2">

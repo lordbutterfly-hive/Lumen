@@ -35,6 +35,31 @@ export function proxifyImageSrc(url?: string, width = 0, height = 0, format = 'w
     return '';
   }
 
+  // ★ RELATIVE URLS ARE OURS — NEVER HAND THEM TO A THIRD-PARTY PROXY (2026-08-13).
+  //
+  // Everything below encodes `url` into `${proxyBase}/p/<base58>`, which asks
+  // images.hive.blog to go and FETCH that url itself. A relative path only means
+  // something to our own origin, so the proxy resolves nothing and answers
+  // `HTTP 400 {"error":{"name":"invalid_proxy_url"}}` — a JSON body where the
+  // browser was promised an image, which Chrome then kills as
+  // `net::ERR_BLOCKED_BY_ORB`, leaving a broken thumbnail.
+  //
+  // Measured on the live post page, not deduced: three failures per page, and
+  // base58-decoding the hashes gave back our own `/api/avatar?username=beggars`,
+  // `/api/avatar?username=unklebonehead` and `/api/avatar/default`. They arrive
+  // here from `find_first_img`'s last fallback (features/list-of-posts/post-img.tsx),
+  // which returns `getUserAvatarUrl(author,'large')`, and from
+  // `getDefaultImageUrl()` on the `onError` retry in suggestions-posts/card.tsx —
+  // so the retry was as unproxyable as the original and failed the same way.
+  //
+  // Returning it untouched is the whole fix: the browser loads it from us, which
+  // is what a same-origin URL is for. Resizing is lost, but `/api/avatar` already
+  // takes its own `size`/`width`/`height` params, so nothing that reaches here
+  // needed this function to resize it.
+  if (!/^https?:\/\//i.test(url)) {
+    return url;
+  }
+
   // Skip already-proxified URLs (ones that already carry our resize/format
   // query string). A bare `${proxyBase}/p/<hash>` URL with no query string is
   // NOT necessarily "already proxied" -- it's also the exact path shape Hive's

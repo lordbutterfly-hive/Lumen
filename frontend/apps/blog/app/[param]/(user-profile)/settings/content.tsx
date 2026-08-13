@@ -25,7 +25,7 @@ const OwnerGateSkeleton = () => (
     <div className="mt-5 grid grid-cols-1 gap-5 md:grid-cols-2">
       {Array.from({ length: 6 }).map((_, i) => (
         <div key={i}>
-          <Skeleton className="mb-1.5 h-[12.5px] w-24" />
+          <Skeleton className="mb-1.5 h-[12px] w-24" />
           <Skeleton className="h-10 w-full" />
         </div>
       ))}
@@ -89,7 +89,7 @@ const SettingsContent = ({ username }: { username: string }) => {
           </p>
           <a
             href={identity.isLoggedIn ? `/@${identity.username}/settings` : '/login'}
-            className="mt-5 inline-block rounded-[14px] bg-[#c0392b] px-5 py-2.5 text-[14px] font-bold text-white transition-colors hover:bg-[#96271b]"
+            className="mt-5 inline-block rounded-[14px] bg-[#c0392b] px-5 py-2.5 text-[14px] leading-[22px] font-bold text-white transition-colors hover:bg-[#96271b]"
           >
             {identity.isLoggedIn ? 'Go to my settings' : 'Log in'}
           </a>
@@ -111,7 +111,7 @@ const SettingsContent = ({ username }: { username: string }) => {
           <button
             type="button"
             onClick={identity.retrySession}
-            className="mt-5 inline-block rounded-[14px] bg-[#c0392b] px-5 py-2.5 text-[14px] font-bold text-white transition-colors hover:bg-[#96271b]"
+            className="mt-5 inline-block rounded-[14px] bg-[#c0392b] px-5 py-2.5 text-[14px] leading-[22px] font-bold text-white transition-colors hover:bg-[#96271b]"
           >
             Try again
           </button>

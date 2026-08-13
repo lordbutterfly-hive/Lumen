@@ -53,17 +53,17 @@ const PageMasthead: FC<PageMastheadProps> = ({ eyebrow, title, mark, children, a
     {mark ? <MastheadGlyph mark={mark} /> : null}
 
     {eyebrow ? (
-      <p className="relative z-10 mb-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#c0392b]/70">
+      <p className="relative z-10 mb-1.5 text-[12px] leading-[18px] font-semibold uppercase tracking-[0.14em] text-[#c0392b]/70">
         {eyebrow}
       </p>
     ) : null}
 
-    <h1 className="relative z-10 font-serif text-[34px] font-semibold leading-[1.08] tracking-[-0.015em] text-[#161511]">
+    <h1 className="relative z-10 font-serif text-[34px] font-semibold leading-[38px] tracking-[-0.015em] text-[#161511]">
       {title}
     </h1>
 
     {children || actions ? (
-      <div className="relative z-10 mt-3.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[13px] text-[#6b7280]">
+      <div className="relative z-10 mt-3.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[13px] leading-[20px] text-[#6b7280]">
         {children}
         {actions ? <div className="ml-auto flex items-center gap-2">{actions}</div> : null}
       </div>

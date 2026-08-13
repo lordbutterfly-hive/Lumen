@@ -225,7 +225,7 @@ export default function ShortFormComposer() {
         <button
           type="button"
           onClick={() => setIsFocused(true)}
-          className="flex-1 text-left font-sans text-[19px] text-[#9ca3af]"
+          className="flex-1 text-left font-sans text-[20px] leading-[30px] text-[#9ca3af]"
         >
           {LABELS.placeholder}
         </button>
@@ -253,7 +253,7 @@ export default function ShortFormComposer() {
           onBlur={() => setIsFocused(false)}
           placeholder={LABELS.placeholder}
           rows={1}
-          className="max-h-80 min-h-[56px] flex-1 resize-none overflow-hidden border-none bg-transparent py-2 font-sans text-[19px] leading-relaxed text-foreground placeholder:text-[#9ca3af] focus:outline-none focus-visible:ring-0"
+          className="max-h-80 min-h-[56px] flex-1 resize-none overflow-hidden border-none bg-transparent py-2 font-sans text-[20px] leading-[32px] text-foreground placeholder:text-[#9ca3af] focus:outline-none focus-visible:ring-0"
         />
       </div>
       <div className="mt-3 flex items-center justify-between border-t border-border pl-[56px] pt-3">

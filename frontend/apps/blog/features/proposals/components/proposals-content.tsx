@@ -74,7 +74,7 @@ export default function ProposalsContent({
         aria-hidden
       />
 
-      <aside className="sticky top-24 hidden h-fit md:block">
+      <aside className="sticky top-24 hidden h-fit bg-background-secondary md:block">
         <LeftRail />
       </aside>
 
@@ -87,11 +87,11 @@ export default function ProposalsContent({
             role="alert"
           >
             <p className="font-sans text-sm font-semibold text-destructive">{t('global.something_went_wrong')}</p>
-            <p className="font-sans text-[13px] text-[#6b7280]">{t('proposals.error.description')}</p>
+            <p className="font-sans text-[13px] leading-[20px] text-[#6b7280]">{t('proposals.error.description')}</p>
             <button
               type="button"
               onClick={refetch}
-              className="rounded-[10px] border border-[#e4e6e9] bg-white px-4 py-2 font-sans text-[13px] font-semibold text-[#3f4650] transition-colors hover:bg-[#f6f7f8]"
+              className="rounded-[10px] border border-[#e4e6e9] bg-white px-4 py-2 font-sans text-[13px] leading-[20px] font-semibold text-[#3f4650] transition-colors hover:bg-[#f6f7f8]"
             >
               {t('proposals.error.retry')}
             </button>
@@ -130,7 +130,7 @@ export default function ProposalsContent({
         )}
       </main>
 
-      <aside className="sticky top-24 hidden h-fit xl:block">
+      <aside className="sticky top-24 hidden h-fit bg-background-secondary xl:block">
         <ProposalsRightRail thresholdHp={returnProposalVoteValueHp} currentProxy={loggedUser?.proxy ?? ''} />
       </aside>
     </div>

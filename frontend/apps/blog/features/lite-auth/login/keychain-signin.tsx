@@ -157,7 +157,7 @@ const KeychainSignin: FC<KeychainSigninProps> = ({ redirectTo = '/' }) => {
           className="h-[34px] w-[34px] flex-shrink-0 rounded-[10px]"
         />
         <span className="min-w-0 flex-1">
-          <span className="block text-[15px] font-semibold text-[#161511]">{COPY.title}</span>
+          <span className="block text-[15px] leading-[24px] font-semibold text-[#161511]">{COPY.title}</span>
           <span className="block text-xs text-[#6b7280]">{COPY.sub}</span>
         </span>
         {/* ★ TOP-ALIGNED, NOT CENTRED (fuckery list C6). Centring a one-line chip
@@ -165,7 +165,7 @@ const KeychainSignin: FC<KeychainSigninProps> = ({ redirectTo = '/' }) => {
             subtitle, so it read as a label for the subtitle. It describes the
             METHOD, so it sits level with the method's name. */}
         {detected ? (
-          <span className="mt-0.5 flex-shrink-0 self-start rounded-full bg-[#eef7f1] px-2.5 py-1 text-[11px] font-semibold text-[#2f7d4f]">
+          <span className="mt-0.5 flex-shrink-0 self-start rounded-full bg-[#eef7f1] px-2.5 py-1 text-[12px] leading-[18px] font-semibold text-[#2f7d4f]">
             {COPY.detected}
           </span>
         ) : null}
@@ -173,11 +173,11 @@ const KeychainSignin: FC<KeychainSigninProps> = ({ redirectTo = '/' }) => {
 
       {open ? (
         <div className="mt-2.5 rounded-[14px] border border-[#f1f3f5] bg-[#fbfbfc] p-4">
-          <label htmlFor="keychain-username" className="block text-[13px] font-medium text-[#4b5563]">
+          <label htmlFor="keychain-username" className="block text-[13px] leading-[20px] font-medium text-[#4b5563]">
             {COPY.usernameLabel}
           </label>
           <div className="mt-1.5 flex items-center rounded-[10px] border border-[#e4e6e9] bg-white px-3 focus-within:border-[#c0392b]">
-            <span className="text-[15px] text-[#9ca3af]">@</span>
+            <span className="text-[15px] leading-[24px] text-[#9ca3af]">@</span>
             <input
               id="keychain-username"
               value={username}
@@ -189,21 +189,21 @@ const KeychainSignin: FC<KeychainSigninProps> = ({ redirectTo = '/' }) => {
               autoComplete="username"
               spellCheck={false}
               data-testid="keychain-username"
-              className="h-11 w-full bg-transparent px-1.5 text-[15px] text-[#161511] outline-none placeholder:text-[#9ca3af]"
+              className="h-11 w-full bg-transparent px-1.5 text-[15px] leading-[24px] text-[#161511] outline-none placeholder:text-[#9ca3af]"
             />
           </div>
           <button
             onClick={() => void signIn()}
             disabled={busy || detected === false}
             data-testid="keychain-signin"
-            className="mt-3 h-12 w-full cursor-pointer rounded-[12px] bg-[#161511] text-[15px] font-semibold text-white hover:bg-[#2b2822] disabled:cursor-not-allowed disabled:opacity-50"
+            className="mt-3 h-12 w-full cursor-pointer rounded-[12px] bg-[#161511] text-[15px] leading-[24px] font-semibold text-white hover:bg-[#2b2822] disabled:cursor-not-allowed disabled:opacity-50"
           >
             {busy ? COPY.working : COPY.submit}
           </button>
           {detected === false ? (
-            <p className="mt-2.5 text-[13px] leading-[1.55] text-[#b45309]">{COPY.notDetected}</p>
+            <p className="mt-2.5 text-[13px] leading-[20px] text-[#b45309]">{COPY.notDetected}</p>
           ) : null}
-          {error ? <p className="mt-2.5 text-[13px] leading-[1.55] text-[#b45309]">{error}</p> : null}
+          {error ? <p className="mt-2.5 text-[13px] leading-[20px] text-[#b45309]">{error}</p> : null}
         </div>
       ) : null}
     </div>

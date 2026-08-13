@@ -9,7 +9,6 @@ export interface HiveMarketPrices {
   hiveSparkline: number[];
 }
 
-const COINGECKO_BASE = 'https://api.coingecko.com/api/v3';
 const FETCH_TIMEOUT_MS = 8000;
 
 async function fetchJson(url: string): Promise<unknown> {
@@ -48,12 +47,18 @@ export function useHiveMarketPrices() {
   return useQuery({
     queryKey: ['hiveMarketPrices'],
     queryFn: async (): Promise<HiveMarketPrices> => {
-      const [simple, chart] = await Promise.all([
-        fetchJson(
-          `${COINGECKO_BASE}/simple/price?ids=hive,hive_dollar&vs_currencies=usd,btc&include_24hr_change=true`
-        ) as Promise<SimplePriceResponse>,
-        fetchJson(`${COINGECKO_BASE}/coins/hive/market_chart?vs_currency=usd&days=7`) as Promise<MarketChartResponse>
-      ]);
+      // ★ THROUGH OUR SERVER, NOT api.coingecko.com DIRECTLY (2026-08-13).
+      // Measured: two cross-origin calls per wallet load, ~250ms each, charging
+      // CoinGecko's free-tier per-IP rate limit to the READER — so enough people
+      // behind one NAT and the price card fails for all of them. `/api/market-prices`
+      // makes the same two calls server-side and memoises them for 60s, which also
+      // stops handing every reader's IP to a third party. Everything below this line
+      // is unchanged: same two payload shapes, same refusal to coerce a missing
+      // price to 0.
+      const { simple, chart } = (await fetchJson('/api/market-prices')) as {
+        simple: SimplePriceResponse;
+        chart: MarketChartResponse;
+      };
 
       // A 200 with a missing/zero price (soft rate-limit, partial payload, schema
       // change) must NOT be coerced to 0 — a $0 HIVE price silently renders the

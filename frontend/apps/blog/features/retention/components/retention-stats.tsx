@@ -512,7 +512,7 @@ export function RetentionStats({ summary, className, voice = 'own' }: RetentionS
         {lines.map((line) => (
           <li
             key={line.id}
-            className="font-sans text-[14px] leading-snug text-[#3f4650]"
+            className="font-sans text-[14px] leading-[22px] text-[#3f4650]"
             data-testid={`retention-stat-${line.id}`}
             // A native title, deliberately: this is a one-sentence aside on a
             // number, and pulling in a positioned tooltip primitive for it would

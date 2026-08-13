@@ -340,7 +340,7 @@ function ForYouFeed() {
           promising posts and the next saying there are none. When there is
           nothing to show, the empty state is the only honest message on screen. */}
       {degradedMessage && shown.length > 0 ? (
-        <p className="mb-4 rounded-[9px] bg-[#fdf6e7] px-3 py-2 font-sans text-[12.5px] text-[#9a7b2e]">
+        <p className="mb-4 rounded-[9px] bg-[#fdf6e7] px-3 py-2 font-sans text-[13px] leading-[20px] text-[#9a7b2e]">
           {degradedMessage}
         </p>
       ) : null}
@@ -352,7 +352,7 @@ function ForYouFeed() {
             type="button"
             onClick={acceptNew}
             data-testid="for-you-new-posts"
-            className="rounded-full bg-[#c0392b] px-4 py-2 font-sans text-[13.5px] font-semibold text-white shadow-[0_1px_3px_rgba(20,18,10,0.12)] transition-colors hover:bg-[#a5301f]"
+            className="rounded-full bg-[#c0392b] px-4 py-2 font-sans text-[14px] leading-[22px] font-semibold text-white shadow-[0_1px_3px_rgba(20,18,10,0.12)] transition-colors hover:bg-[#a5301f]"
           >
             {offered.length === 1 ? LABELS.newPost : LABELS.newPosts(offered.length)}
           </button>
@@ -393,12 +393,12 @@ function ForYouFeed() {
           fetching past the last page (`hasNextPage`) — neither guard changed
           here, only when this sentinel is allowed to exist in the DOM. */}
       {hasNextPage ? (
-        <div ref={ref} className="py-8 text-center font-sans text-[13px] text-muted-foreground">
+        <div ref={ref} className="py-8 text-center font-sans text-[13px] leading-[20px] text-muted-foreground">
           {isFetchingNextPage ? 'Loading more…' : ''}
         </div>
       ) : null}
       {!hasNextPage && shown.length > 0 ? (
-        <p className="py-8 text-center font-sans text-[13px] text-muted-foreground">
+        <p className="py-8 text-center font-sans text-[13px] leading-[20px] text-muted-foreground">
           That’s everything for now.
         </p>
       ) : null}
@@ -624,7 +624,7 @@ function EntryFeed({ sort, observer, lite = false }: { sort: string; observer: s
         // mirroring ForYouFeed's own fully-filtered-page sentinel above.
         <div
           ref={ref}
-          className="py-8 text-center font-sans text-[13px] text-muted-foreground"
+          className="py-8 text-center font-sans text-[13px] leading-[20px] text-muted-foreground"
           data-testid="entry-feed-auto-sentinel"
         >
           {isFetchingNextPage ? LABELS.loadingMore : ''}
@@ -650,7 +650,16 @@ function TabButton({
       aria-selected={isActive}
       onClick={onClick}
       className={cn(
-        'whitespace-nowrap rounded-[9px] px-5 py-2.5 font-sans text-[14.5px] font-semibold transition-colors',
+        // ★ 15px/24px -> 14px/22px (2026-08-13, typography pass 2: font twins).
+        // This is the third copy of the same control. `proposals-toolbar.tsx`
+        // and `creators-view.tsx` draw the identical segmented pill — same
+        // white active fill, same `shadow-[0_1px_2px_rgba(20,18,10,0.08)]`
+        // token, same semibold label — at 14px/22px, and this one alone was
+        // 15px/24px. Nothing distinguishes the job: all three switch which
+        // slice of a list is showing. 14px is the scale's UI default step
+        // (`text-14`/`text-sm`, 423 call sites) so the label now matches every
+        // other button and tab in the product instead of being a size of one.
+        'whitespace-nowrap rounded-[9px] px-5 py-2.5 font-sans text-[14px] leading-[22px] font-semibold transition-colors',
         isActive
           ? 'bg-white text-[#161511] shadow-[0_1px_2px_rgba(20,18,10,0.08),0_1px_3px_rgba(20,18,10,0.05)]'
           : 'bg-transparent text-[#6b7280] hover:text-[#161511]'
@@ -828,7 +837,7 @@ export default function FeedTabs() {
             <DialogLogin>
               <button
                 type="button"
-                className="rounded-[13px] bg-[#c0392b] px-5 py-2.5 font-sans text-[14px] font-semibold text-white hover:bg-[#a5301f]"
+                className="rounded-[13px] bg-[#c0392b] px-5 py-2.5 font-sans text-[14px] leading-[22px] font-semibold text-white hover:bg-[#a5301f]"
               >
                 {LABELS.loginCta}
               </button>
@@ -847,7 +856,7 @@ export default function FeedTabs() {
             <button
               type="button"
               onClick={identity.retrySession}
-              className="rounded-[13px] border border-[#e4e6e9] px-5 py-2.5 font-sans text-[14px] font-semibold text-[#3f4650] hover:bg-[#f6f7f8]"
+              className="rounded-[13px] border border-[#e4e6e9] px-5 py-2.5 font-sans text-[14px] leading-[22px] font-semibold text-[#3f4650] hover:bg-[#f6f7f8]"
             >
               {LABELS.sessionRetry}
             </button>

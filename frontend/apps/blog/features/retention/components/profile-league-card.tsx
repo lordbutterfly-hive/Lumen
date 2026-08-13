@@ -109,16 +109,16 @@ function LeagueCardBody({
       <div className="flex items-center gap-4">
         <LeagueEmblem tier={tier} size="profile" />
         <div className="min-w-0">
-          <h2 className="font-sans text-[22px] font-semibold leading-tight text-[#161511]">{naming.name}</h2>
+          <h2 className="font-sans text-[22px] font-semibold leading-[28px] text-[#161511]">{naming.name}</h2>
           {/* THE SCALE, ALWAYS. A rung name without it is just a word. */}
           <p
-            className="mt-1 font-sans text-[14px] font-medium tabular-nums text-[#6b7280]"
+            className="mt-1 font-sans text-[14px] leading-[22px] font-medium tabular-nums text-[#6b7280]"
             data-testid="profile-league-scale"
           >
             {naming.scale}
           </p>
           {copy.meaning ? (
-            <p className="mt-2 max-w-[420px] font-serif text-[15.5px] leading-normal text-[#3f4650]">
+            <p className="mt-2 max-w-[420px] font-serif text-[16px] leading-[24px] text-[#3f4650]">
               {copy.meaning}
             </p>
           ) : null}
@@ -153,7 +153,7 @@ function LeagueCardBody({
           {/* The countable, with the arm named in the noun: "4 more ACTIVE weeks", not
               "4 more weeks", which left a tester guessing it meant posting. */}
           <p
-            className="mt-2 font-sans text-[14px] font-semibold text-[#3f4650]"
+            className="mt-2 font-sans text-[14px] leading-[22px] font-semibold text-[#3f4650]"
             data-testid="profile-league-distance"
           >
             {progress.distance}
@@ -163,11 +163,11 @@ function LeagueCardBody({
           </p>
         </div>
       ) : copy.kind === 'blank' ? (
-        <p className="mt-4 font-sans text-[14px] text-[#6b7280]" data-testid="profile-league-blank">
+        <p className="mt-4 font-sans text-[14px] leading-[22px] text-[#6b7280]" data-testid="profile-league-blank">
           {t(voiced('retention.blank', voice))}
         </p>
       ) : copy.kind === 'top' ? (
-        <p className="mt-4 font-sans text-[14px] font-semibold text-[#3f4650]" data-testid="profile-league-top">
+        <p className="mt-4 font-sans text-[14px] leading-[22px] font-semibold text-[#3f4650]" data-testid="profile-league-top">
           {t('retention.at_top')}
         </p>
       ) : null}
@@ -177,7 +177,7 @@ function LeagueCardBody({
 
       <Link
         href="/ranks"
-        className="mt-5 inline-block font-sans text-[14px] font-semibold text-[#c0392b] hover:underline"
+        className="mt-5 inline-block font-sans text-[14px] leading-[22px] font-semibold text-[#c0392b] hover:underline"
         data-testid="profile-league-ranks-link"
       >
         {t('retention.ranks.see_all')}

@@ -325,8 +325,6 @@
       "muted_users": "المستخدمون الصامت",
       "followed_blacklists": "قوائم الكتم المتبعة",
       "followed_muted_lists": "قوائم الصمت المتبعة",
-      "followers_pages": "صفحة المتابعين {{current}} من {{total}}",
-      "followed_pages": "صفحة المتابعة {{current}} من {{total}}",
       "list": {
         "unblacklist": "إلغاء إدراجها من القائمة السوداء",
         "unmute": "إلغاء كتم الصوت",

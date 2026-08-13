@@ -173,7 +173,7 @@ const Topics = () => {
 
   return (
     <section data-testid="right-rail-topics">
-      <h3 className="mb-[14px] text-[14.5px] font-bold text-[#161511]">{t('right_rail.topics.heading')}</h3>
+      <h3 className="mb-[14px] text-[15px] leading-[24px] font-bold text-[#161511]">{t('right_rail.topics.heading')}</h3>
       {isLoading ? (
         <div className="flex flex-wrap gap-2" data-testid="right-rail-topics-loading">
           {Array.from({ length: MAX_TOPICS }).map((_, index) => (
@@ -199,7 +199,7 @@ const Topics = () => {
                   aria-current={current ? 'page' : undefined}
                   data-current={current ? 'true' : undefined}
                   className={cn(
-                    'inline-flex items-center gap-0.5 rounded-full border px-[11px] py-[5px] text-[12.5px] font-medium capitalize transition-colors',
+                    'inline-flex items-center gap-0.5 rounded-full border px-[11px] py-[5px] text-[13px] leading-[20px] font-medium capitalize transition-colors',
                     current
                       ? 'border-[#c0392b] bg-[#fdf2f0] text-[#c0392b]'
                       : 'border-[#ececec] bg-[#faf9f7] text-[#4b5563] hover:border-[#c0392b] hover:bg-[#fdf2f0] hover:text-[#c0392b]'

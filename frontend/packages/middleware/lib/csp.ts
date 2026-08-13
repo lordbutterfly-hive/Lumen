@@ -238,11 +238,40 @@ function buildScriptSrc(): string {
 }
 
 /**
+ * Build style-src directive
+ *
+ * ★ `accounts.google.com/gsi/` (2026-08-13). GIS does not only run script — its
+ * client injects `<link rel="stylesheet" href="https://accounts.google.com/gsi/style">`
+ * for the button it renders. `script-src` and `frame-src` already allowed the
+ * host (see above), so the script loaded and the iframe was permitted while the
+ * stylesheet alone was refused:
+ *   "Loading the stylesheet 'https://accounts.google.com/gsi/style' violates
+ *    the following Content Security Policy directive: style-src 'self' 'unsafe-inline'"
+ * — observed live in the browser console on the login page, 2026-08-13. That
+ * leaves the Google button mounted but unstyled, which is the same "Google login
+ * does nothing" symptom the two bugs documented above produced, from a third
+ * independent cause. Path-scoped to `/gsi/` (exactly as `buildScriptSrc` scopes
+ * it) rather than opening the whole host, and gated on the same
+ * `googleSignInEnabled()` predicate so a deployment without Google sign-in does
+ * not carry the allowance.
+ */
+function buildStyleSrc(): string {
+  let styleSrc = "style-src 'self' 'unsafe-inline'";
+
+  if (googleSignInEnabled()) {
+    styleSrc += ' https://accounts.google.com/gsi/';
+  }
+
+  return styleSrc;
+}
+
+/**
  * Build the full CSP header value at runtime
  */
 export function buildCsp(config: CspConfig = {}): string {
   const connectSrcHosts = buildConnectSrcHosts();
   const scriptSrc = buildScriptSrc();
+  const styleSrc = buildStyleSrc();
 
   // Image proxy host — all external images are proxied through this
   let imagesHost = 'https://images.hive.blog';
@@ -265,8 +294,8 @@ export function buildCsp(config: CspConfig = {}): string {
     "default-src 'self'",
     // Scripts: self + inline (required for Next.js) + eval (required for HBAuth/Beekeeper WASM) + Google Sign-In
     scriptSrc,
-    // Styles: self + inline (required for React/Next.js styling)
-    "style-src 'self' 'unsafe-inline'",
+    // Styles: self + inline (required for React/Next.js styling) + Google Sign-In
+    styleSrc,
     // Images: self + image proxy + data URIs + blob (for image processing/previews)
     // Wallet icons in the connect modal are served from Reown's asset API.
     reownEnabled()

@@ -24,11 +24,11 @@ export default function MarketWidget() {
   if (isUnavailable) {
     return (
       <div className="font-sans text-[#161511]" data-testid="right-rail-prediction-market">
-        <h3 className="mb-2.5 flex items-center gap-2 text-[14.5px] font-bold text-[#161511]">
+        <h3 className="mb-2.5 flex items-center gap-2 text-[15px] leading-[24px] font-bold text-[#161511]">
           <Icons.marketChart className="h-[19px] w-[19px] text-[#c0392b]" />
           {t('prediction_market.heading')}
         </h3>
-        <p className="font-sans text-[12.5px] text-[#6b7280]">{t('prediction_market.unavailable_widget')}</p>
+        <p className="font-sans text-[13px] leading-[20px] text-[#6b7280]">{t('prediction_market.unavailable_widget')}</p>
       </div>
     );
   }
@@ -41,7 +41,7 @@ export default function MarketWidget() {
   return (
     <div className="font-sans text-[#161511]" data-testid="right-rail-prediction-market">
       <div className="mb-3.5 flex items-center justify-between">
-        <h3 className="flex items-center gap-2 text-[14.5px] font-bold text-[#161511]">
+        <h3 className="flex items-center gap-2 text-[15px] leading-[24px] font-bold text-[#161511]">
           <Icons.marketChart className="h-[19px] w-[19px] text-[#c0392b]" />
           {t('prediction_market.heading')}
         </h3>
@@ -54,25 +54,25 @@ export default function MarketWidget() {
         <>
           <Link
             href="/?tab=predictions"
-            className="font-sans text-[17px] font-semibold leading-[1.3] text-[#161511] hover:underline"
+            className="font-sans text-[17px] font-semibold leading-[26px] text-[#161511] hover:underline"
           >
             {round.question}
           </Link>
-          <div className="mb-3.5 mt-1.5 font-sans text-[12.5px] text-[#6b7280]">
+          <div className="mb-3.5 mt-1.5 font-sans text-[13px] leading-[20px] text-[#6b7280]">
             {t('prediction_market.ref')} ${round.referencePrice.toFixed(3)} · {t('prediction_market.locks_in')}{' '}
             <Countdown closesAt={round.closesAt} className="tabular-nums" />
           </div>
 
           <BucketBars buckets={round.buckets} size="compact" />
 
-          <div className="mt-3.5 flex items-center justify-between border-t border-[#f0f0f0] pt-3.5 font-sans text-[12.5px] text-[#6b7280]">
+          <div className="mt-3.5 flex items-center justify-between border-t border-[#f0f0f0] pt-3.5 font-sans text-[13px] leading-[20px] text-[#6b7280]">
             <span>
               <strong className="font-semibold tabular-nums text-[#2a2822]">{round.totalPool.toFixed(0)}</strong> {round.asset}{' '}
               {t('prediction_market.pool').toLowerCase()}
             </span>
             <Link
               href="/?tab=predictions"
-              className="inline-flex items-center gap-0.5 font-sans text-[12.5px] font-semibold text-[#c0392b] hover:underline"
+              className="inline-flex items-center gap-0.5 font-sans text-[13px] leading-[20px] font-semibold text-[#c0392b] hover:underline"
             >
               {t('prediction_market.view_market')}
               <Icons.chevronRight className="h-3.5 w-3.5" />

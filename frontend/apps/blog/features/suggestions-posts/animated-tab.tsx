@@ -14,8 +14,12 @@ const AnimatedList = ({ suggestions }: { suggestions: Entry[] }) => {
     StorageTTL.PERMANENT
   );
 
+  // bg-background-secondary: an opaque background on a composited (sticky)
+  // layer, so Chrome keeps LCD/subpixel antialiasing for the text inside it
+  // instead of falling back to greyscale. Same colour as the page body, so
+  // nothing changes visually. See typography audit item 2.
   return (
-    <div className="md:sticky md:top-24 md:flex md:max-h-[calc(100vh-96px)] md:flex-col">
+    <div className="bg-background-secondary md:sticky md:top-24 md:flex md:max-h-[calc(100vh-96px)] md:flex-col">
       <AnimatePresence mode="wait" initial={false}>
         {showSuggestions ? (
           <motion.div
@@ -27,7 +31,7 @@ const AnimatedList = ({ suggestions }: { suggestions: Entry[] }) => {
             className="flex min-h-0 flex-col"
           >
             <div className="flex shrink-0 items-center justify-between px-4 pb-3 pt-1">
-              <h2 className="font-sanspro text-lg font-semibold">You Might Also Like</h2>
+              <h2 className="font-sans text-lg font-semibold">You Might Also Like</h2>
               <button
                 type="button"
                 onClick={() => storeShowSuggestions(false)}

@@ -29,7 +29,7 @@ export function SubsListDialog({
         <div>Latest {title} Subscribers</div>
         <ul>
           {subs.map((e: string[]) => (
-            <li key={e[0]} className="flex items-center gap-1 p-[1.5px] text-sm">
+            <li key={e[0]} className="flex items-center gap-1 p-[2px] text-sm">
               <BasePathLink href={`/@${e[0]}`} className="text-destructive">
                 @{e[0]}
               </BasePathLink>

@@ -23,7 +23,7 @@ export default function PriceCardHbd() {
   return (
     <div className={CARD_CLASS} data-testid="wallet-price-hbd">
       <div className="font-sans text-[24px] font-bold tabular-nums text-[#161511]">$1.000</div>
-      <div className="mt-1.5 text-[12.5px] text-[#6b7280]">{t('wallet.market.hbd_price_label')}</div>
+      <div className="mt-1.5 text-[13px] leading-[20px] text-[#6b7280]">{t('wallet.market.hbd_price_label')}</div>
       <div className="mt-1.5 text-[12px] text-[#9ca3af]">
         {isLoading || isError || !data
           ? t('wallet.market.unavailable')

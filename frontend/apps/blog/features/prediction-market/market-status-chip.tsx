@@ -28,7 +28,7 @@ export default function MarketStatusChip({
 
   if (variant === 'bare') {
     return (
-      <span className={cn('inline-flex items-center gap-[5px] text-[11px] font-bold', config.textClass)}>
+      <span className={cn('inline-flex items-center gap-[5px] text-[12px] leading-[18px] font-bold', config.textClass)}>
         <span className={cn('h-1.5 w-1.5 rounded-full', config.dotClass)} aria-hidden="true" />
         {config.label}
       </span>
@@ -38,7 +38,7 @@ export default function MarketStatusChip({
   return (
     <span
       className={cn(
-        'inline-flex flex-shrink-0 items-center gap-[7px] rounded-full px-[13px] py-[7px] text-[12.5px] font-bold',
+        'inline-flex flex-shrink-0 items-center gap-[7px] rounded-full px-[13px] py-[7px] text-[13px] leading-[20px] font-bold',
         config.pillBgClass,
         config.textClass
       )}

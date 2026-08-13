@@ -73,8 +73,35 @@ interface CommentListProps {
   replyingToAuthor?: string;
   children?: ReactNode;
 }
+// ★★★ COMMENTS ARE NOW LORA, LIKE POST BODIES (2026-08-13, typography audit
+// item 3) — the ONE judgment call in this pass, flagged as such.
+//
+// This said `font-sanspro`, which LOOKED like it was selecting a third face
+// ("Source Sans Pro") and in fact resolved, character for character, to the
+// same `var(--font-sans)` stack as `font-sans` — Open Sans. So a reader
+// scrolling out of the article and into the replies crossed a serif-to-sans
+// switch that nobody chose: post bodies are Lora (`font-serif`, see
+// `features/post-editor/lib/utils.ts`), replies were Open Sans. `font-sanspro`
+// has since been deleted from the Tailwind config (audit item 4), so this had
+// to name a real utility either way; `font-serif` is the one that matches the
+// evident intent that Lora is this product's reading face.
+//
+// What deliberately did NOT change: the SIZE relationship. Audit item 3 asks
+// for one reading typeface AND one reading size, but making replies the same
+// 17px as the article is a hierarchy decision the owner has not made, so only
+// the family was unified here. Sizes are the previous ones rounded to whole
+// pixels (12.5/13.4/14.6 -> 13/14/15; the middle step would collide with the
+// first at a straight round, so it goes up).
+//
+// Every size is paired with an explicit whole-pixel line-height. `prose` sets
+// `line-height: 1.75` as a UNITLESS ratio, so 14.6px produced a 25.55px line
+// box and every following block inherited the fractional offset; the new
+// leadings (24/24/26px, and per-heading below) are that same rhythm rounded to
+// the pixel grid — to an EVEN pixel, which is what keeps a centred flex row off
+// the half pixel (see `typo-codemod2` reasoning: `(26-21)/2 = 2.5`). Paragraph margins likewise: `mb-[9.6px] mt-[1.6px]
+// last:mb-[3.2px]` -> `10px / 2px / 4px` (audit item 8).
 export const commentClassName =
-  'font-sanspro text-[12.5px] prose-h1:text-[20px] prose-h2:text-[17.5px] prose-h4:text-[13.7px] sm:text-[13.4px] sm:prose-h1:text-[21.5px] sm:prose-h2:text-[18.7px] sm:prose-h3:text-[16px]  sm:prose-h4:text-[14.7px] lg:text-[14.6px] lg:prose-h1:text-[23.3px] lg:prose-h2:text-[20.4px] lg:prose-h3:text-[17.5px] lg:prose-h4:text-[16px] prose-h3:text-[15px] prose-p:mb-[9.6px] prose-p:mt-[1.6px] last:prose-p:mb-[3.2px] prose-img:max-w-full prose-img:h-auto prose-img:max-h-[400px]';
+  'font-serif text-[13px] leading-[24px] prose-h1:text-[20px] prose-h1:leading-[22px] prose-h2:text-[18px] prose-h2:leading-[24px] prose-h3:text-[15px] prose-h3:leading-[24px] prose-h4:text-[14px] prose-h4:leading-[22px] sm:text-[14px] sm:leading-[24px] sm:prose-h1:text-[22px] sm:prose-h1:leading-[24px] sm:prose-h2:text-[20px] sm:prose-h2:leading-[26px] sm:prose-h3:text-[16px] sm:prose-h3:leading-[26px] sm:prose-h4:text-[15px] sm:prose-h4:leading-[22px] lg:text-[15px] lg:leading-[26px] lg:prose-h1:text-[24px] lg:prose-h1:leading-[26px] lg:prose-h2:text-[20px] lg:prose-h2:leading-[28px] lg:prose-h3:text-[18px] lg:prose-h3:leading-[28px] lg:prose-h4:text-[16px] lg:prose-h4:leading-[24px] prose-p:mb-[10px] prose-p:mt-[2px] last:prose-p:mb-[4px] prose-img:max-w-full prose-img:h-auto prose-img:max-h-[400px]';
 
 /**
  * ★★★ FOUR HONEST PUBLISH STATES, ONLY THE FIRST WITH A SPINNER (O7 F2a,
@@ -370,7 +397,7 @@ const CommentListItem = memo(function CommentListItem({
     return (
       <li data-testid="comment-list-item" className="w-full min-w-0">
         <div
-          className="mb-4 flex w-full min-w-0 flex-wrap items-center justify-between gap-3 rounded-[14px] border border-dashed border-[#e0dcd4] bg-[#f9f7f5] px-3 py-2.5 font-sans text-[12.5px] text-[#6b7280]"
+          className="mb-4 flex w-full min-w-0 flex-wrap items-center justify-between gap-3 rounded-[14px] border border-dashed border-[#e0dcd4] bg-[#f9f7f5] px-3 py-2.5 font-sans text-[13px] leading-[20px] text-[#6b7280]"
           data-testid="comment-moderation-unknown"
         >
           <span>{t('cards.comment_card.moderation_status_unknown', { author: displayAuthor })}</span>
@@ -540,7 +567,7 @@ const CommentListItem = memo(function CommentListItem({
                                     who a flattened reply is actually answering. */}
                                 {replyingToAuthor && (
                                   <span
-                                    className="whitespace-nowrap text-[11px] text-muted-foreground"
+                                    className="whitespace-nowrap text-[12px] leading-[18px] text-muted-foreground"
                                     data-testid="comment-replying-to"
                                   >
                                     {t('cards.comment_card.replying_to', { author: replyingToAuthor })}

@@ -120,13 +120,13 @@ const TokenAuthorChip: FC<{ handle: string }> = ({ handle }) => {
       className="inline-flex shrink-0 items-center gap-[7px] rounded-full border border-[#e6dcd6] bg-[#FBF7F2] py-[3px] pl-[9px] pr-[4px] transition-colors hover:border-[#d9c8bf] hover:bg-[#f8f1ea]"
       data-testid="token-author-chip"
     >
-      <span aria-hidden="true" className="text-[11px] leading-none text-[#c0392b]">
+      <span aria-hidden="true" className="text-[12px] leading-[18px] leading-none text-[#c0392b]">
         ◈
       </span>
-      <span className="font-sans text-[12.5px] font-bold leading-none tabular-nums text-[#161511]">
+      <span className="font-sans text-[13px] leading-[20px] font-bold leading-none tabular-nums text-[#161511]">
         {usdPrice(priceUsd)}
       </span>
-      <span className="rounded-full border border-[#ecdfd8] bg-white px-[9px] py-[2px] font-sans text-[11.5px] font-bold leading-none text-[#c0392b]">
+      <span className="rounded-full border border-[#ecdfd8] bg-white px-[9px] py-[2px] font-sans text-[12px] font-bold leading-none text-[#c0392b]">
         {COPY.buy}
       </span>
     </Link>

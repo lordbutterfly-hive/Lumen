@@ -43,7 +43,7 @@ export default function AccountHistoryList({
   return (
     <section id="wallet-history" className="mt-[34px]">
       <div className="mb-4 flex items-center gap-3.5">
-        <span className="text-[11.5px] font-bold uppercase tracking-[0.09em] text-[#9ca3af]">
+        <span className="text-[12px] font-bold uppercase tracking-[0.09em] text-[#9ca3af]">
           {t('wallet.history.label')}
         </span>
         <div className="h-px flex-1 bg-[#ebebeb]" />
@@ -51,15 +51,15 @@ export default function AccountHistoryList({
 
       <div className={CARD_CLASS} data-testid="wallet-history-card">
         {isError ? (
-          <p className="py-6 text-center text-[13.5px] text-destructive" data-testid="wallet-history-error">
+          <p className="py-6 text-center text-[14px] leading-[22px] text-destructive" data-testid="wallet-history-error">
             {t('wallet.history.error')}
           </p>
         ) : isLoading ? (
-          <p className="py-6 text-center text-[13.5px] text-[#9ca3af]" data-testid="wallet-history-loading">
+          <p className="py-6 text-center text-[14px] leading-[22px] text-[#9ca3af]" data-testid="wallet-history-loading">
             {t('wallet.history.loading')}
           </p>
         ) : entries.length === 0 ? (
-          <p className="py-6 text-center text-[13.5px] text-[#9ca3af]" data-testid="wallet-history-empty">
+          <p className="py-6 text-center text-[14px] leading-[22px] text-[#9ca3af]" data-testid="wallet-history-empty">
             {t('wallet.history.empty')}
           </p>
         ) : (
@@ -77,7 +77,7 @@ export default function AccountHistoryList({
                   href={transfersUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-[12.5px] font-semibold text-[#c0392b] hover:text-[#96271b]"
+                  className="text-[13px] leading-[20px] font-semibold text-[#c0392b] hover:text-[#96271b]"
                   data-testid="wallet-history-view-more"
                 >
                   {t('wallet.history.view_full')}

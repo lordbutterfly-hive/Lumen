@@ -55,12 +55,12 @@ const HeaderTokenPill: FC = () => {
         className="flex items-center gap-2.5 rounded-full border border-[#e6dcd6] bg-[#FBF7F2] py-[7px] pl-3 pr-2 transition-colors hover:border-[#d9c8bf] hover:bg-[#f8f1ea]"
         data-testid="header-token-pill"
       >
-        <span aria-hidden="true" className="text-[13px] leading-none text-[#c0392b]">
+        <span aria-hidden="true" className="text-[13px] leading-[20px] leading-none text-[#c0392b]">
           ◈
         </span>
-        <span className="font-sans text-[13.5px] font-bold leading-none text-[#161511]">@{identity.username}</span>
+        <span className="font-sans text-[14px] leading-[22px] font-bold leading-none text-[#161511]">@{identity.username}</span>
         <span aria-hidden="true" className="h-[15px] w-px bg-[#e6dcd6]" />
-        <span className="pr-1.5 font-sans text-[13.5px] font-bold leading-none tabular-nums text-[#161511]">
+        <span className="pr-1.5 font-sans text-[14px] leading-[22px] font-bold leading-none tabular-nums text-[#161511]">
           {usdPrice(chip.priceUsd)}
         </span>
       </Link>
@@ -72,10 +72,10 @@ const HeaderTokenPill: FC = () => {
   return (
     <Link
       href="/creators/launch"
-      className="flex items-center gap-2 whitespace-nowrap rounded-full border border-[#c0392b] bg-white px-4 py-[9px] font-sans text-[13.5px] font-bold text-[#c0392b] transition-colors hover:bg-[#c0392b] hover:text-white"
+      className="flex items-center gap-2 whitespace-nowrap rounded-full border border-[#c0392b] bg-white px-4 py-[9px] font-sans text-[14px] leading-[22px] font-bold text-[#c0392b] transition-colors hover:bg-[#c0392b] hover:text-white"
       data-testid="header-token-launch-cta"
     >
-      <span aria-hidden="true" className="text-[13px] leading-none">
+      <span aria-hidden="true" className="text-[13px] leading-[20px] leading-none">
         ◈
       </span>
       <span>{COPY.launch}</span>

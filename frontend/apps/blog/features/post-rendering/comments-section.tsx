@@ -116,7 +116,7 @@ const CommentsSection = memo(function CommentsSection({
           <p className="font-sans text-sm font-semibold text-foreground">
             {t('select_sort.sort_comments.no_comments_title')}
           </p>
-          <p className="font-sans text-[13px] text-muted-foreground">
+          <p className="font-sans text-[13px] leading-[20px] text-muted-foreground">
             {t('select_sort.sort_comments.no_comments_body')}
           </p>
         </div>

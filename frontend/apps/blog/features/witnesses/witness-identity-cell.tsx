@@ -56,11 +56,11 @@ export default function WitnessIdentityCell({ row, className }: WitnessIdentityC
           <Link
             href={`/@${row.owner}`}
             data-testid="witness-name-link"
-            className={`font-sans text-[14.5px] font-bold ${row.isDisabled ? 'text-[#9ca3af] line-through' : 'text-[#161511]'}`}
+            className={`font-sans text-[15px] leading-[24px] font-bold ${row.isDisabled ? 'text-[#9ca3af] line-through' : 'text-[#161511]'}`}
           >
             {row.owner}
           </Link>
-          <span className="rounded-md bg-[#eef2ff] px-[6px] py-px font-sans text-[10.5px] font-bold tabular-nums text-[#4f5bd5]">
+          <span className="rounded-md bg-[#eef2ff] px-[6px] py-px font-sans text-[12px] leading-[18px] font-bold tabular-nums text-[#4f5bd5]">
             {row.running_version || t('witnesses.unknown_version')}
           </span>
           {externalUrl && (
@@ -81,7 +81,7 @@ export default function WitnessIdentityCell({ row, className }: WitnessIdentityC
             that can never be too long. One fixed width for both tabs, and the fallback
             is never clipped. */}
         <div
-          className={`max-w-[340px] font-sans text-[12.5px] text-[#9ca3af] ${row.description ? 'truncate' : ''}`}
+          className={`max-w-[340px] font-sans text-[13px] leading-[20px] text-[#9ca3af] ${row.description ? 'truncate' : ''}`}
         >
           {row.description || t('witnesses.no_description')}
         </div>

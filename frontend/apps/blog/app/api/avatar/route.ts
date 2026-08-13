@@ -98,7 +98,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
               status: 200,
               headers: new Headers({
                 'Content-Type': picture.headers.get('content-type') || 'image/png',
-                'Cache-Control': 'public, max-age=60, stale-while-revalidate=300',
+                'Cache-Control': 'public, max-age=86400, stale-while-revalidate=604800',
+                // ★ 60s -> 1 day + a 7-day revalidate window (2026-08-13). Measured: the
+                // post page makes 14 separate /api/avatar calls at 700-737ms each, and at
+                // max-age=60 every one of them came back a minute later on the next page.
+                // An avatar is the most static thing on a byline; when someone does change
+                // theirs, stale-while-revalidate serves the old one once and refreshes
+                // behind it, so the cost of the longer life is one stale render, not a
+                // broken one.
                 'X-Content-Type-Options': 'nosniff'
               })
             });
@@ -123,7 +130,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // Prepare headers, copying content-type from the origin
     const headers = new Headers({
       'Content-Type': response.headers.get('content-type') || 'image/png',
-      'Cache-Control': 'public, max-age=60, stale-while-revalidate=300',
+      // Same 1-day life as the lite branch above, and for the same reason.
+      'Cache-Control': 'public, max-age=86400, stale-while-revalidate=604800',
       'X-Content-Type-Options': 'nosniff',
     });
 

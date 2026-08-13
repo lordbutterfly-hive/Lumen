@@ -20,22 +20,45 @@ import { siteConfig } from '@ui/config/site';
 // headers, nav, labels, chips, buttons, tabs, table headers and numbers
 // (tabular-nums) — and Lora for running body prose. The handoff is explicit:
 // "ONLY two families ... no Inter, no serif display face." Self-hosted via
-// next/font so it complies with the app CSP (font-src 'self'). The CSS-variable
-// names are deliberately kept (--font-inter / --font-source-serif) so the whole
-// tailwind + denser font pipeline downstream needs no change — only the family
-// bound to each variable swaps.
+// next/font so it complies with the app CSP (font-src 'self').
+//
+// ★ VARIABLE NAMES NOW MATCH THE FAMILY (2026-08-13, typography audit item 5).
+// These were `--font-inter` and `--font-source-serif` — names left over from
+// two font swaps ago. Nothing named Inter or Source Serif has been in this
+// bundle for a long time; keeping the old names meant every reader of
+// `tailwind.config.js` had to already know that to understand what
+// `font-serif` resolves to. Renamed to `--font-sans` / `--font-serif`, which
+// is what the two Tailwind utilities that consume them are already called.
+//
+// ★ PRELOAD (2026-08-13, typography audit item 7). `preload` is stated
+// explicitly rather than left to next/font's default because the audit's item 7
+// asked for the Lora latin subset at 400/600/700 to be preloaded. MEASURED on
+// the shipped build BEFORE this change, by walking the generated font
+// stylesheet: Lora normal 400, 500, 600 AND 700 all resolve to the SAME latin
+// file (`5c0c2bcbaa4149ca-s.p.woff2` — the `.p.` infix is next/font's own
+// "preloaded" marker), and that file is already emitted as
+// `<link rel="preload" as="font">` in the document, together with the Lora
+// italic file and the Open Sans file — 3 preload links, covering every weight
+// this app asks for. So item 7 was already satisfied; the audit's evidence for
+// it (`document.fonts.check('700 16.5px Lora')` returning false) is a
+// measurement artifact — the CSS family name in this document is
+// `__Lora_a0ef65`, not `Lora`, so that call was asking about a family that does
+// not exist in the page. Stating `preload: true` here keeps it true if someone
+// later adds a weight or a subset.
 const openSans = Open_Sans({
   subsets: ['latin'],
   weight: ['400', '500', '600', '700', '800'],
-  variable: '--font-inter',
-  display: 'swap'
+  variable: '--font-sans',
+  display: 'swap',
+  preload: true
 });
 const lora = Lora({
   subsets: ['latin'],
   weight: ['400', '500', '600', '700'],
   style: ['normal', 'italic'],
-  variable: '--font-source-serif',
-  display: 'swap'
+  variable: '--font-serif',
+  display: 'swap',
+  preload: true
 });
 
 // Get basePath from build-time environment

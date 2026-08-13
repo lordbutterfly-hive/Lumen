@@ -68,7 +68,7 @@ export function MagiFuelGauge({
     return (
       <div className={`flex items-center gap-3 ${className}`} data-testid="magi-fuel-loading">
         {ring(0, UNKNOWN)}
-        <span className="text-[12.5px] text-[#6b7280]">Checking your Magi balance…</span>
+        <span className="text-[13px] leading-[20px] text-[#6b7280]">Checking your Magi balance…</span>
       </div>
     );
   }
@@ -79,7 +79,7 @@ export function MagiFuelGauge({
     return (
       <div className={`flex items-center gap-3 ${className}`} data-testid="magi-fuel-failed">
         {ring(0, UNKNOWN)}
-        <span className="text-[12.5px] text-[#6b7280]">
+        <span className="text-[13px] leading-[20px] text-[#6b7280]">
           Couldn’t check your Magi balance just now — nothing is wrong with your funds.
         </span>
       </div>
@@ -96,7 +96,7 @@ export function MagiFuelGauge({
     return (
       <div className={`flex items-start gap-3 ${className}`} data-testid="magi-fuel-blocked">
         {ring(readiness, SHORT)}
-        <div className="text-[12.5px] leading-[1.5]">
+        <div className="text-[13px] leading-[20px]">
           <div className="font-semibold text-[#b45309]">Not enough on Magi to send a transaction</div>
           <div className="text-[#6b7280]">
             {/* Two genuinely different situations, measured on chain: a Hive
@@ -118,7 +118,7 @@ export function MagiFuelGauge({
   return (
     <div className={`flex items-start gap-3 ${className}`} data-testid="magi-fuel-ok">
       {ring(readiness, short ? SHORT : READY)}
-      <div className="text-[12.5px] leading-[1.5]">
+      <div className="text-[13px] leading-[20px]">
         <div className="font-semibold text-[#161511]">{hbd(balance.hbdBaseUnits)} HBD on Magi</div>
         {short ? (
           <div className="text-[#b45309]">
@@ -192,7 +192,7 @@ export function MagiFundingHelp({
 
   return (
     <div
-      className={`rounded-[12px] border border-[#f6e2c4] bg-[#fdf6ec] px-4 py-3 text-[12.5px] leading-[1.55] text-[#7c4a08] ${className}`}
+      className={`rounded-[12px] border border-[#f6e2c4] bg-[#fdf6ec] px-4 py-3 text-[13px] leading-[20px] text-[#7c4a08] ${className}`}
       data-testid="magi-funding-help"
     >
       <div className="mb-1 font-semibold">Adding HBD to Magi</div>

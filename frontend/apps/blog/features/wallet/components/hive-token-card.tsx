@@ -13,7 +13,7 @@ const CARD_CLASS = 'mb-[18px] rounded-[18px] border border-[#ebebeb] bg-white p-
 // W-2/W-3: was rounded-[11px] bg-[#2f7d4f] — the success green used as an
 // action colour, at a radius no other control on the page shared.
 const SEND_BUTTON_CLASS =
-  'flex items-center gap-1.5 rounded-[14px] bg-[#c0392b] px-[18px] py-2.5 text-[13.5px] font-semibold text-white transition-colors hover:bg-[#96271b]';
+  'flex items-center gap-1.5 rounded-[14px] bg-[#c0392b] px-[18px] py-2.5 text-[14px] leading-[22px] font-semibold text-white transition-colors hover:bg-[#96271b]';
 
 export default function HiveTokenCard({
   username,
@@ -34,8 +34,8 @@ export default function HiveTokenCard({
         <div className="flex items-center gap-3.5">
           <TokenIcon currency="HIVE" />
           <div>
-            <div className="text-[17px] font-bold text-[#161511]">{t('wallet.hive_card.name')}</div>
-            <div className="text-[13.5px] text-[#6b7280]">{t('wallet.hive_card.description')}</div>
+            <div className="text-[17px] leading-[26px] font-bold text-[#161511]">{t('wallet.hive_card.name')}</div>
+            <div className="text-[14px] leading-[22px] text-[#6b7280]">{t('wallet.hive_card.description')}</div>
           </div>
         </div>
         <div className="flex items-center gap-3.5">

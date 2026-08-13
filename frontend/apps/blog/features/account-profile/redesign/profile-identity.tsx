@@ -91,7 +91,7 @@ export default function ProfileIdentity({
 
   return (
     <div className={cn('min-w-0', moderated && 'opacity-60 grayscale')} data-testid="profile-identity-block">
-      <div className="flex flex-wrap items-center gap-2 font-sans text-[14.5px] text-[#6b7280]">
+      <div className="flex flex-wrap items-center gap-2 font-sans text-[15px] leading-[24px] text-[#6b7280]">
         <span className="font-semibold text-[#3f4650]">@{username}</span>
         <ProfileLeagueChip username={username} chainAccount={chainAccount} />
         {showReputation ? (
@@ -101,7 +101,7 @@ export default function ProfileIdentity({
             aria-expanded={repOpen}
             // The accessible name carries what the pill cannot: what the number IS.
             aria-label={`${t('user_profile.reputation_label')} ${accountReputationPrecise(reputation)}`}
-            className="rounded-full bg-[#f1f3f5] px-2 py-0.5 font-sans text-[12.5px] font-semibold tabular-nums text-[#6b7280] transition-colors hover:bg-[#e8eaed]"
+            className="rounded-full bg-[#f1f3f5] px-2 py-0.5 font-sans text-[13px] leading-[20px] font-semibold tabular-nums text-[#6b7280] transition-colors hover:bg-[#e8eaed]"
             data-testid="profile-reputation"
             // A native title, on purpose: it is the same affordance hive.blog uses for
             // the same number, it survives without JS, and it needs no positioned
@@ -132,7 +132,7 @@ export default function ProfileIdentity({
           the touch and pointer paths can never drift apart. */}
       {showReputation && repOpen ? (
         <p
-          className="mt-1.5 max-w-[440px] font-sans text-[12.5px] leading-snug text-[#6b7280]"
+          className="mt-1.5 max-w-[440px] font-sans text-[13px] leading-[20px] text-[#6b7280]"
           data-testid="profile-reputation-explainer"
         >
           {t('user_profile.reputation_title', {
@@ -143,10 +143,10 @@ export default function ProfileIdentity({
       ) : null}
 
       {profile?.about ? (
-        <p className="mt-3 max-w-[520px] font-serif text-[16.5px] leading-normal text-[#3f4650]">{profile.about}</p>
+        <p className="mt-3 max-w-[520px] font-serif text-[17px] leading-[26px] text-[#3f4650]">{profile.about}</p>
       ) : null}
 
-      <div className="mt-3.5 flex flex-wrap gap-4 font-sans text-[13.5px] text-[#6b7280]">
+      <div className="mt-3.5 flex flex-wrap gap-4 font-sans text-[14px] leading-[22px] text-[#6b7280]">
         {profile?.location ? (
           <span className="flex items-center gap-1.5">
             <Icons.mapPin className="h-[15px] w-[15px] text-[#9ca3af]" />

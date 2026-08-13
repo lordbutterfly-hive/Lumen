@@ -32,7 +32,7 @@ export default function WitnessesHeader() {
         </>
       }
     >
-      <p className="max-w-[620px] font-serif text-[13px] leading-[1.55] text-[#6b7280]">{t('witnesses.intro')}</p>
+      <p className="max-w-[620px] font-serif text-[13px] leading-[20px] text-[#6b7280]">{t('witnesses.intro')}</p>
     </PageMasthead>
   );
 }

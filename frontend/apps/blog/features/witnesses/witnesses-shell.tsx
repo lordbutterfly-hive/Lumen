@@ -93,7 +93,7 @@ export default function WitnessesShell() {
         aria-hidden
       />
 
-      <aside className="sticky top-24 hidden h-fit md:block">
+      <aside className="sticky top-24 hidden h-fit bg-background-secondary md:block">
         <LeftRail />
       </aside>
 
@@ -119,13 +119,13 @@ export default function WitnessesShell() {
             className="my-3 flex items-center justify-between gap-4 rounded-xl border border-[#f5c6c0] bg-[#fdf3f2] px-4 py-3"
             data-testid="witnesses-own-data-error"
           >
-            <span className="font-sans text-[13px] text-[#c0392b]">
+            <span className="font-sans text-[13px] leading-[20px] text-[#c0392b]">
               {t('witnesses.own_data_error.message')}
             </span>
             <button
               type="button"
               onClick={data.refetch}
-              className="shrink-0 font-sans text-[13px] font-semibold text-[#c0392b] underline hover:text-[#96271b]"
+              className="shrink-0 font-sans text-[13px] leading-[20px] font-semibold text-[#c0392b] underline hover:text-[#96271b]"
             >
               {t('witnesses.own_data_error.retry')}
             </button>
@@ -144,7 +144,7 @@ export default function WitnessesShell() {
         />
       </main>
 
-      <aside className="sticky top-24 hidden h-fit xl:block">
+      <aside className="sticky top-24 hidden h-fit bg-background-secondary xl:block">
         <WitnessesRightRail
           filtersState={filtersState}
           isLoggedIn={identity.isLoggedIn}

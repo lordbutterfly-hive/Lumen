@@ -7,7 +7,7 @@ const PriceChart: FC<{ points: number[] }> = ({ points }) => {
   const w = 380;
   const h = 190;
   if (points.length < 2) {
-    return <div className="flex h-[190px] items-center justify-center text-[13px] text-[#9ca3af]">No price history yet.</div>;
+    return <div className="flex h-[190px] items-center justify-center text-[13px] leading-[20px] text-[#9ca3af]">No price history yet.</div>;
   }
   const min = Math.min(...points) * 0.98;
   const max = Math.max(...points) * 1.02;

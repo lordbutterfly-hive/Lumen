@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
+import { cachedRead } from '@/blog/lib/server-read-cache';
 import { convertToHP } from '@ui/lib/utils';
 import { getChain } from '@transaction/lib/chain';
 import Big from 'big.js';
@@ -48,9 +49,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // `convertToHP`'s second positional param is the chain instance itself —
     // fine to construct here, server-side, where the WASM cost this whole
     // route exists to avoid never touches a browser bundle.
-    const chain = await getChain();
-    const hp = convertToHP(Big(vests), chain, totalVestingShares, totalVestingFundHive);
-    return NextResponse.json(hp.toString(), { headers: { 'cache-control': 'private, no-store' } });
+    // ★ MEMOISED + IN-FLIGHT COALESCED (2026-08-13). Measured on a profile view:
+    // this fired FOUR times, two of them in the same millisecond with identical
+    // params. It is a pure function of (vests, totals) — same inputs, same number,
+    // no per-reader component — so identical calls share one computation and, more
+    // importantly, one `getChain()`. See lib/server-read-cache.ts; the in-flight map
+    // is what collapses the same-millisecond pair, which a TTL alone cannot.
+    const hp = await cachedRead(`vests-to-hp:${vests}:${totalsParam}`, 30_000, async () => {
+      const chain = await getChain();
+      return convertToHP(Big(vests), chain, totalVestingShares, totalVestingFundHive).toString();
+    });
+    return NextResponse.json(hp, { headers: { 'cache-control': 'private, no-store' } });
   } catch (error) {
     logger.error(error, 'vests-to-hp conversion failed for vests=%s', vests);
     return NextResponse.json({ error: 'vests_to_hp_unavailable' }, { status: 502 });

@@ -258,7 +258,7 @@ const GoogleSignIn: FC<Props> = ({ onIdToken, onError, nonce }) => {
     <div
       ref={shell}
       data-testid="google-signin-row"
-      className="relative mb-1 h-[65px] w-full overflow-hidden rounded-[14px] border border-[#e4e6e9] bg-white focus-within:border-[#c0392b]"
+      className="relative mb-1 h-[64px] w-full overflow-hidden rounded-[14px] border border-[#e4e6e9] bg-white focus-within:border-[#c0392b]"
     >
       <div
         aria-hidden="true"
@@ -273,7 +273,7 @@ const GoogleSignIn: FC<Props> = ({ onIdToken, onError, nonce }) => {
           </svg>
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block font-sans text-[15px] font-semibold text-[#161511]">Continue with Google</span>
+          <span className="block font-sans text-[15px] leading-[24px] font-semibold text-[#161511]">Continue with Google</span>
           <span className="block font-sans text-xs text-[#6b7280]">No wallet, no extension, nothing to install.</span>
         </span>
       </div>

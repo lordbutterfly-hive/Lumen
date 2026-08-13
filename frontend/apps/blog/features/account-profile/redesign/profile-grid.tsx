@@ -18,7 +18,7 @@ export default function ProfileGrid() {
         aria-hidden
       />
 
-      <aside className="sticky top-24 hidden h-fit md:block">
+      <aside className="sticky top-24 hidden h-fit bg-background-secondary md:block">
         <LeftRail />
       </aside>
 
@@ -26,7 +26,7 @@ export default function ProfileGrid() {
         <ProfileMain />
       </main>
 
-      <aside className="sticky top-24 hidden h-fit xl:block">
+      <aside className="sticky top-24 hidden h-fit bg-background-secondary xl:block">
         <RightRail />
       </aside>
     </div>

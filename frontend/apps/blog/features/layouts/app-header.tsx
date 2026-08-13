@@ -161,7 +161,17 @@ const AppHeader: FC = () => {
 
   return (
     <header
-      className="sticky top-0 z-40 w-full border-b border-[#ebebeb] bg-white/90 font-sans backdrop-blur-md"
+      /* ★ OPAQUE, NO BACKDROP-BLUR (2026-08-13, typography audit item 2). Was
+         `bg-white/90 backdrop-blur-md`. `position: sticky` already promotes
+         this header to its own composited layer, and Chrome will not use
+         LCD/subpixel antialiasing for text painted into a composited layer that
+         has no opaque background — it falls back to greyscale AA, which reads
+         thinner and greyer. So the wordmark, the search field and every header
+         control were being antialiased by a DIFFERENT method than the centre
+         column on every page. `backdrop-filter` forces the promotion on its own
+         even without sticky, and 90% white over a 97% grey page background is a
+         ~0.3% tint nobody can see, so both are dropped for a flat `bg-white`. */
+      className="sticky top-0 z-40 w-full border-b border-[#ebebeb] bg-white font-sans"
       translate="no"
     >
       {/* ★ gap-3 BELOW md, not gap-11 (2026-08-08). 44px is the desktop grid's
@@ -218,7 +228,7 @@ const AppHeader: FC = () => {
               Tracking relaxed from -0.025em to -0.01em. The tight negative tracking
               was tuned for Open Sans; a serif with real bracketed serifs collides
               at that value, and "Lumen" has an m-n pair that shows it first. */}
-          <span className="font-serif text-[24px] font-semibold leading-none tracking-[-0.01em] text-[#161511] sm:text-[28px] lg:text-[34px]">
+          <span className="font-serif text-[24px] font-semibold leading-none tracking-[-0.01em] text-[#161511] sm:text-[30px] lg:text-[34px] lg:leading-[52px]">
             Lumen
           </span>
         </Link>

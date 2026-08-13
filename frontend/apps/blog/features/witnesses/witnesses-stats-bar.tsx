@@ -59,7 +59,7 @@ export default function WitnessesStatsBar({
 
   return (
     <div
-      className="my-5 flex flex-wrap items-center gap-[26px] rounded-2xl border border-[#ebebeb] bg-[#fbfbfa] px-[22px] py-4 font-sans text-[13.5px] text-[#6b7280]"
+      className="my-5 flex flex-wrap items-center gap-[26px] rounded-2xl border border-[#ebebeb] bg-[#fbfbfa] px-[22px] py-4 font-sans text-[14px] leading-[22px] text-[#6b7280]"
       data-testid="witnesses-stats-bar"
     >
       <span>

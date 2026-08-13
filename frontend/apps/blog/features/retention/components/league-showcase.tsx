@@ -108,10 +108,10 @@ function ShowcaseSkeleton() {
       <div aria-hidden="true" className="flex w-full items-center gap-2.5 rounded-xl px-[10px] py-2 text-left">
         <span className="lumen-shimmer inline-flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full" />
         <span className="flex min-w-0 flex-1 flex-col">
-          <span className="lumen-shimmer w-16 truncate rounded font-sans text-[14px] font-semibold text-transparent">
+          <span className="lumen-shimmer w-16 truncate rounded font-sans text-[14px] leading-[22px] font-semibold text-transparent">
             &nbsp;
           </span>
-          <span className="lumen-shimmer w-12 truncate rounded font-sans text-[11.5px] font-medium tabular-nums text-transparent">
+          <span className="lumen-shimmer w-12 truncate rounded font-sans text-[12px] font-medium tabular-nums text-transparent">
             &nbsp;
           </span>
         </span>
@@ -177,10 +177,10 @@ function ShowcaseBlock({ summary }: { summary: RetentionSummaryResponse }) {
               </span>
             </span>
             <span className="flex min-w-0 flex-1 flex-col">
-              <span className="truncate font-sans text-[14px] font-semibold text-[#161511]">{name}</span>
+              <span className="truncate font-sans text-[14px] leading-[22px] font-semibold text-[#161511]">{name}</span>
               {/* THE SCALE IS NOT OPTIONAL — a rank without it is just a word. */}
               <span
-                className="truncate font-sans text-[11.5px] font-medium tabular-nums text-[#6b7280]"
+                className="truncate font-sans text-[12px] font-medium tabular-nums text-[#6b7280]"
                 data-testid="league-showcase-scale"
               >
                 {scale}
@@ -197,8 +197,8 @@ function ShowcaseBlock({ summary }: { summary: RetentionSummaryResponse }) {
           <div className="flex items-center gap-3">
             <LeagueEmblem tier={rank.tier} size="popover" />
             <div className="min-w-0">
-              <p className="font-sans text-[17px] font-semibold leading-tight">{name}</p>
-              <p className="mt-0.5 font-sans text-[13px] font-medium tabular-nums text-[#6b7280]">{scale}</p>
+              <p className="font-sans text-[17px] font-semibold leading-[26px]">{name}</p>
+              <p className="mt-0.5 font-sans text-[13px] leading-[20px] font-medium tabular-nums text-[#6b7280]">{scale}</p>
               {/* The floor flag travels with the number, never separately —
                   a bare 32 where the server only proved "at least 32" is the
                   same lie the active-weeks line was fixed for. */}
@@ -212,14 +212,14 @@ function ShowcaseBlock({ summary }: { summary: RetentionSummaryResponse }) {
           </div>
 
           {meaning ? (
-            <p className="mt-3.5 font-serif text-[15.5px] leading-normal text-[#3f4650]">{meaning}</p>
+            <p className="mt-3.5 font-serif text-[16px] leading-[24px] text-[#3f4650]">{meaning}</p>
           ) : null}
           {/* The countable, not a paragraph of advice. Same rule as the profile card:
               a distance is only a true thing to say when something is being measured
               and there is somewhere above to go. */}
           {kind === 'progress' && progress.distance ? (
             <p
-              className="mt-2 font-sans text-[13.5px] font-semibold text-[#3f4650]"
+              className="mt-2 font-sans text-[14px] leading-[22px] font-semibold text-[#3f4650]"
               data-testid="league-showcase-distance"
             >
               {progress.distance}
@@ -231,14 +231,14 @@ function ShowcaseBlock({ summary }: { summary: RetentionSummaryResponse }) {
               ) : null}
             </p>
           ) : kind === 'top' ? (
-            <p className="mt-2 font-sans text-[13.5px] font-semibold text-[#3f4650]">{t('retention.at_top')}</p>
+            <p className="mt-2 font-sans text-[14px] leading-[22px] font-semibold text-[#3f4650]">{t('retention.at_top')}</p>
           ) : null}
 
           <RetentionStats summary={summary} className="mt-3.5" />
 
           <Link
             href="/ranks"
-            className="mt-3.5 inline-block font-sans text-[13.5px] font-semibold text-[#c0392b] hover:underline"
+            className="mt-3.5 inline-block font-sans text-[14px] leading-[22px] font-semibold text-[#c0392b] hover:underline"
             data-testid="league-showcase-ranks-link"
           >
             {t('retention.ranks.see_all')}

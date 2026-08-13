@@ -26,8 +26,8 @@ import ResetAllListsDialog from './reset-all-lists-dialog';
 // the same main-column width settings does.
 const LIST_CARD =
   'w-full rounded-[18px] border border-[#ebebeb] bg-white p-6 shadow-[0_1px_2px_rgba(20,18,10,0.03)]';
-const LIST_CARD_TITLE = 'font-serif text-[19px] font-semibold leading-[1.2] text-[#161511]';
-const LIST_SECTION_HEADING = 'flex items-center gap-2 text-[15px] font-semibold text-[#161511]';
+const LIST_CARD_TITLE = 'font-serif text-[18px] font-semibold leading-[28px] text-[#161511]';
+const LIST_SECTION_HEADING = 'flex items-center gap-2 text-[15px] leading-[24px] font-semibold text-[#161511]';
 
 const ListArea = ({
   titleBy,
@@ -147,7 +147,7 @@ const ListArea = ({
           {titleBy}
         </h1>
         <p
-          className={clsx('mt-1.5 text-[13px] leading-[1.6] text-[#6b7280]', {
+          className={clsx('mt-1.5 text-[13px] leading-[20px] text-[#6b7280]', {
             hidden: !listDescription
           })}
         >

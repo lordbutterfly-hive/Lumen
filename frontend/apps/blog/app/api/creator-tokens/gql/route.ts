@@ -3,6 +3,7 @@ import { getLogger } from '@ui/lib/logging';
 import { STATE_QUERY, STATE_QUERY_HEX, HEAD_QUERY } from '@/blog/features/creator-tokens/lib/vsc/reads';
 import { getClientIp } from '@/blog/lib/lite/http/ip';
 import { enforceMagiGqlRate } from '@/blog/lib/lite/antispam/rate-limit';
+import { cachedRead } from '@/blog/lib/server-read-cache';
 
 const logger = getLogger('app');
 
@@ -167,8 +168,54 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     /* limiter unavailable — proceed */
   }
 
+  // ★★★ A 3-SECOND MEMO OF *SUCCESSFUL* READS, KEYED ON THE FULL BODY (2026-08-13).
+  //
+  // The `cache: 'no-store'` below and its comment stay exactly as they are — this
+  // does not re-enable Next's Data Cache, which is what that comment is about. This
+  // is our own map, and it is deliberately built to not have either of the two
+  // failures that comment names:
+  //
+  //   - "a stale 502 that never clears once the node recovers" — only HTTP 200 is
+  //     ever stored. An error is returned and forgotten, so the next caller retries
+  //     the node immediately.
+  //   - "if Next's cache key ever ignores the body, one creator's read served back
+  //     for a DIFFERENT creator's query" — the key here IS the body: query text plus
+  //     the exact variables. Two different creators cannot collide because their
+  //     `keys` arrays differ, which is the whole content of the key.
+  //
+  // Why it is now worth having: measured in a browser on `/@ecency` (2026-08-13),
+  // **9 POSTs to this route at 779-899ms each** — roughly 7 seconds of round trips on
+  // one profile view, of which the `CreatorTokensHead` query alone is byte-identical
+  // every time. 3s is one Hive-side block or so: long enough to collapse a single
+  // page render's burst, short enough that a price the reader is watching is never
+  // meaningfully behind, and far shorter than the client's own 30s refetch interval.
+  // Pinned after the guard above: TypeScript does not carry that narrowing into a
+  // nested function, and `fetchUpstream` closes over this.
+  const upstreamUrl: string = gqlUrl;
+  const cacheKey = `ct-gql:${upstreamUrl}:${JSON.stringify({ query, variables })}`;
+
   try {
-    const upstream = await fetch(gqlUrl, {
+    const cached = await cachedRead<{ status: number; text: string; contentType: string } | null>(
+      cacheKey,
+      3_000,
+      async () => {
+        const res = await fetchUpstream();
+        // Only a success is worth remembering — see above.
+        return res.status === 200 ? res : null;
+      }
+    );
+    if (cached) {
+      return new NextResponse(cached.text, {
+        status: cached.status,
+        headers: { 'Content-Type': cached.contentType }
+      });
+    }
+  } catch {
+    /* fall through to a direct, uncached attempt */
+  }
+
+  async function fetchUpstream(): Promise<{ status: number; text: string; contentType: string }> {
+    const upstream = await fetch(upstreamUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ query, variables: typeof variables === 'object' && variables !== null ? variables : {} }),
@@ -190,9 +237,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // postGql (reads.ts) already knows how to read a GraphQL {data,errors}
     // envelope and treat a non-ok status as a failure — duplicating that
     // parsing here would be a second copy that could disagree with the first.
-    return new NextResponse(text, {
+    return {
       status: upstream.status,
-      headers: { 'Content-Type': upstream.headers.get('content-type') ?? 'application/json' }
+      text,
+      contentType: upstream.headers.get('content-type') ?? 'application/json'
+    };
+  }
+
+  try {
+    const direct = await fetchUpstream();
+    return new NextResponse(direct.text, {
+      status: direct.status,
+      headers: { 'Content-Type': direct.contentType }
     });
   } catch (error) {
     logger.error(error, 'Creator tokens GQL proxy: upstream unreachable');

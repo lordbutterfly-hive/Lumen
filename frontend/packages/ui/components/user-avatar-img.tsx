@@ -63,6 +63,30 @@ export interface UserAvatarImgProps {
  *      if `/api/avatar` itself is unreachable, and it also masks the instant
  *      before the direct image paints, so there is never a blank frame.
  */
+/**
+ * The type scale from `packages/tailwindcss/tailwind.config.js`, as numbers.
+ *
+ * This component is the one place in the app that computes a font-size at
+ * runtime instead of naming a class, so it is also the one place the scale
+ * cannot be enforced by Tailwind. Before this, `Math.round(pixelSize * 0.36)`
+ * put sizes the scale does not contain into the rendered app — measured on a
+ * signed-in census of 15 routes: 10px (small bylines) and 43px (the 120px
+ * profile avatar), i.e. 2 of the app's 21 distinct font sizes existed solely
+ * because of this expression.
+ */
+const TYPE_SCALE = [12, 13, 14, 15, 16, 17, 18, 20, 22, 24, 26, 30, 34, 44, 60];
+
+/**
+ * Nearest step on the type scale. Keeps the monogram proportional to its box
+ * (it still grows with the avatar) while landing on a size the rest of the
+ * product actually uses. Safe to snap: the glyph is flex-centred in a fixed
+ * square with `leading-none` and `overflow-hidden`, so its size cannot move
+ * anything around it.
+ */
+function snapToScale(px: number): number {
+  return TYPE_SCALE.reduce((best, step) => (Math.abs(step - px) < Math.abs(best - px) ? step : best));
+}
+
 export function UserAvatarImg({
   username,
   apiSize = 'small',
@@ -88,11 +112,18 @@ export function UserAvatarImg({
         // is the "grey-ground" replacement (`#6f6963`, 4.87:1 on `#f1f3f5`),
         // not the plain-white one, because the background is baked into this
         // same className.
-        'relative inline-flex shrink-0 items-center justify-center overflow-hidden bg-[#f1f3f5] font-sans font-bold uppercase text-[#6f6963]',
+        // leading-none (2026-08-13, typography audit item 1): the monogram's
+        // font-size is COMPUTED (`pixelSize * 0.36`), so it was frequently odd —
+        // 43px at a 120px avatar — and Tailwind Preflight's inherited unitless
+        // `line-height: 1.5` turned that into a 64.5px line box. The glyph is
+        // centred in a fixed square, so its line box only needs to be whole.
+        // (Pass 2 additionally snaps the computed size to the type scale — see
+        // `snapToScale` above — so it is now whole AND on-scale.)
+        'relative inline-flex shrink-0 items-center justify-center overflow-hidden bg-[#f1f3f5] font-sans font-bold uppercase leading-none text-[#6f6963]',
         radiusClassName,
         className
       )}
-      style={{ width: pixelSize, height: pixelSize, fontSize: Math.max(10, Math.round(pixelSize * 0.36)) }}
+      style={{ width: pixelSize, height: pixelSize, fontSize: snapToScale(pixelSize * 0.36) }}
       data-testid="user-avatar-img"
     >
       {(username || '?').trim().slice(0, 1)}

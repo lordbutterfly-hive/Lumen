@@ -72,7 +72,7 @@ export default function BetForm({ round }: { round: RoundState }) {
             {selected && (
               <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: colors[selected.id] }} aria-hidden="true" />
             )}
-            <span className="font-sans text-[15px] font-semibold text-[#161511]">
+            <span className="font-sans text-[15px] leading-[24px] font-semibold text-[#161511]">
               {selected ? selected.label : t('prediction_market.pick_outcome')}
             </span>
           </span>
@@ -103,9 +103,9 @@ export default function BetForm({ round }: { round: RoundState }) {
                   >
                     <span className="flex items-center gap-2.5">
                       <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: colors[bucket.id] }} aria-hidden="true" />
-                      <span className="font-sans text-[14px] text-[#2a2822]">{bucket.label}</span>
+                      <span className="font-sans text-[14px] leading-[22px] text-[#2a2822]">{bucket.label}</span>
                     </span>
-                    <span className="font-sans text-[13px] font-bold tabular-nums text-[#161511]">{bucket.oddsPct}¢</span>
+                    <span className="font-sans text-[13px] leading-[20px] font-bold tabular-nums text-[#161511]">{bucket.oddsPct}¢</span>
                   </button>
                 </li>
               ))}
@@ -119,13 +119,13 @@ export default function BetForm({ round }: { round: RoundState }) {
         <div className="mb-5 flex items-center justify-between rounded-[13px] border border-[#e9f5ee] bg-[#f4faf6] px-4 py-3">
           <span className="flex items-center gap-2.5">
             <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: colors[selected.id] }} aria-hidden="true" />
-            <span className="font-sans text-[13.5px] text-[#3f4650]">
+            <span className="font-sans text-[14px] leading-[22px] text-[#3f4650]">
               {t('prediction_market.backing')} <span className="font-semibold text-[#161511]">{selected.label}</span>
             </span>
           </span>
           <span className="text-right">
-            <span className="block font-sans text-[15px] font-bold tabular-nums text-[#161511]">{selected.oddsPct}¢</span>
-            <span className="block font-sans text-[10px] text-[#9ca3af]">{t('prediction_market.pool_share')}</span>
+            <span className="block font-sans text-[15px] leading-[24px] font-bold tabular-nums text-[#161511]">{selected.oddsPct}¢</span>
+            <span className="block font-sans text-[12px] leading-[18px] text-[#9ca3af]">{t('prediction_market.pool_share')}</span>
           </span>
         </div>
       )}
@@ -140,7 +140,7 @@ export default function BetForm({ round }: { round: RoundState }) {
           the unit suffix on hover. */}
       <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-end gap-3">
         <div className="min-w-0">
-          <div className="mb-1 font-sans text-[12.5px] font-semibold text-[#6b7280]">{t('prediction_market.buy_in')}</div>
+          <div className="mb-1 font-sans text-[13px] leading-[20px] font-semibold text-[#6b7280]">{t('prediction_market.buy_in')}</div>
           <div className="flex min-w-0 items-baseline gap-1.5">
             <input
               type="number"
@@ -151,9 +151,9 @@ export default function BetForm({ round }: { round: RoundState }) {
               onChange={(event) => setAmount(event.target.value)}
               placeholder="0"
               aria-label={t('prediction_market.buy_in_aria', { asset: round.asset })}
-              className="w-full min-w-0 flex-1 appearance-none bg-transparent font-sans text-[30px] font-bold leading-[1.1] tracking-[-0.02em] tabular-nums text-[#161511] outline-none placeholder:text-[#c8cdd3] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+              className="w-full min-w-0 flex-1 appearance-none bg-transparent font-sans text-[30px] leading-[46px] font-bold tracking-[-0.02em] tabular-nums text-[#161511] outline-none placeholder:text-[#c8cdd3] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
             />
-            <span className="shrink-0 font-sans text-[14px] font-semibold leading-[1.1] text-[#6b7280]">
+            <span className="shrink-0 font-sans text-[14px] font-semibold leading-[22px] text-[#6b7280]">
               {round.asset}
             </span>
           </div>
@@ -162,13 +162,13 @@ export default function BetForm({ round }: { round: RoundState }) {
         <Icons.arrowRight className="mb-[7px] h-[22px] w-[22px] shrink-0 text-[#c1c7ce]" />
 
         <div className="min-w-0 text-right">
-          <div className="mb-1 font-sans text-[12.5px] font-semibold text-[#6b7280]">{t('prediction_market.est_payout')}</div>
-          <div className="truncate font-sans text-[30px] font-bold leading-[1.1] tracking-[-0.02em] tabular-nums text-[#2f7d4f]">
+          <div className="mb-1 font-sans text-[13px] leading-[20px] font-semibold text-[#6b7280]">{t('prediction_market.est_payout')}</div>
+          <div className="truncate font-sans text-[30px] leading-[46px] font-bold tracking-[-0.02em] tabular-nums text-[#2f7d4f]">
             {estimate > 0 ? fmt(estimate) : '—'}
           </div>
         </div>
       </div>
-      <p className="mt-1.5 text-right font-sans text-[11.5px] text-[#9ca3af]">{t('prediction_market.est_payout_caption')}</p>
+      <p className="mt-1.5 text-right font-sans text-[12px] text-[#9ca3af]">{t('prediction_market.est_payout_caption')}</p>
 
       {/* Amount chips */}
       <div className="mt-4 flex gap-2">
@@ -180,7 +180,7 @@ export default function BetForm({ round }: { round: RoundState }) {
               type="button"
               onClick={() => setAmount(String(chip))}
               className={cn(
-                'flex-1 rounded-[11px] border py-2.5 font-sans text-[14px] font-semibold tabular-nums transition-colors',
+                'flex-1 rounded-[11px] border py-2.5 font-sans text-[14px] leading-[22px] font-semibold tabular-nums transition-colors',
                 on
                   ? 'border-[#1a1a17] bg-[#1a1a17] text-white'
                   : 'border-[#e2e4e7] bg-white text-[#3f4650] hover:border-[#161511]'
@@ -196,7 +196,7 @@ export default function BetForm({ round }: { round: RoundState }) {
         type="button"
         disabled={!loggedIn || isLite || !isValid || isPlacingBet}
         onClick={submit}
-        className="mt-5 w-full rounded-[14px] bg-[#1a1a17] py-[15px] font-sans text-[15.5px] font-semibold text-white transition-colors hover:bg-black disabled:opacity-50"
+        className="mt-5 w-full rounded-[14px] bg-[#1a1a17] py-[15px] font-sans text-[16px] font-semibold text-white transition-colors hover:bg-black disabled:opacity-50"
       >
         {!loggedIn
           ? t('prediction_market.login_to_bet')
@@ -207,7 +207,7 @@ export default function BetForm({ round }: { round: RoundState }) {
               : t('prediction_market.place_bet')}
       </button>
 
-      <p className="mt-3 text-center font-sans text-[11.5px] leading-[1.5] text-[#9ca3af]">{t('prediction_market.fine_print')}</p>
+      <p className="mt-3 text-center font-sans text-[12px] leading-[18px] text-[#9ca3af]">{t('prediction_market.fine_print')}</p>
     </div>
   );
 }

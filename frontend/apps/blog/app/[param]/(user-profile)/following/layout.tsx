@@ -23,6 +23,8 @@ export async function generateMetadata({ params }: { params: { param: string } }
 
 // The shell is mounted BY THIS ROUTE — see profile-subpage-shell.tsx for why
 // the legacy pathname switch that used to pick the chrome had to go.
+// `page="following"` renders the heading "Following", which is what this page
+// has always been called everywhere except its own URL.
 export default function Layout({
   children,
   params
@@ -32,7 +34,7 @@ export default function Layout({
 }) {
   const username = extractUsernameFromParam(params.param) ?? '';
   return (
-    <ProfileSubpageShell username={username} page="followed">
+    <ProfileSubpageShell username={username} page="following">
       {children}
     </ProfileSubpageShell>
   );

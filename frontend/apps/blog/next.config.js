@@ -26,7 +26,21 @@ const nextConfig = {
 
   reactStrictMode: true,
   poweredByHeader: false, // Don't expose X-Powered-By: Next.js
-  compress: false, // Nginx handles compression; disabling avoids zlib memory retention (denser#886)
+  // ★ COMPRESSION IS ON UNLESS SOMETHING IN FRONT IS DOING IT (2026-08-13).
+  //
+  // This was `false` on the reasoning "Nginx handles compression; disabling avoids
+  // zlib memory retention (denser#886)". The premise stopped being true: measured in
+  // a real browser against this build, Home pulls 50 JS files / 3,250 KB where
+  // `encodedBodySize === decodedBodySize` on every single one — nothing anywhere in
+  // the chain is compressing, and gzip -9 on the very same chunks is 3.5x smaller
+  // (11,422 KB -> 3,277 KB). An uncompressed 3.4 MB frontend is a far worse problem
+  // than zlib arena retention, so the default now favours the reader.
+  //
+  // If a compressing proxy IS confirmed in front of a given deployment, set
+  // `NEXT_DISABLE_COMPRESSION=true` there to hand the work back to it and restore
+  // denser#886's behaviour — double-compressing is pure waste, which is what that
+  // issue was really about.
+  compress: process.env.NEXT_DISABLE_COMPRESSION !== 'true',
   output: 'standalone',
   swcMinify: false,
   basePath: basePath,

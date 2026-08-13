@@ -107,7 +107,7 @@ export function PostPublishingSection({
     <div className="flex flex-col gap-4 rounded-[14px] border border-[#ebebeb] bg-white p-4">
       {/* Same one section-label treatment as the metadata card, which is the
           masthead eyebrow. See PostMetadataSection.tsx for the reasoning (C-14). */}
-      <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#c0392b]/70">
+      <span className="text-[12px] leading-[18px] font-semibold uppercase tracking-[0.14em] text-[#c0392b]/70">
         {t("submit_page.publishing_section")}
       </span>
 

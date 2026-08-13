@@ -146,7 +146,7 @@ export default function TopicShell({ tag }: { tag: string }) {
         aria-hidden
       />
 
-      <aside className="sticky top-24 hidden h-fit md:block">
+      <aside className="sticky top-24 hidden h-fit bg-background-secondary md:block">
         <LeftRail />
       </aside>
 
@@ -195,17 +195,17 @@ export default function TopicShell({ tag }: { tag: string }) {
           // retry — it does NOT assert "no posts carry this tag", which is a
           // statement about the topic that we have no evidence for.
           <div className="rounded-[20px] border border-dashed border-[#e6e0da] bg-[#fdfcfb] px-8 py-14 text-center">
-            <p className="mb-1 font-serif text-[19px] font-semibold text-[#161511]">
+            <p className="mb-1 font-serif text-[20px] leading-[30px] font-semibold text-[#161511]">
               We couldn’t load this topic
             </p>
-            <p className="mx-auto mb-5 max-w-[42ch] text-[13.5px] leading-[1.6] text-[#6b7280]">
+            <p className="mx-auto mb-5 max-w-[42ch] text-[14px] leading-[22px] text-[#6b7280]">
               Something went wrong on our side, so we don’t know what’s under{' '}
               <span className="font-semibold text-[#161511]">#{tag}</span> right now. It isn’t necessarily empty.
             </p>
             <button
               type="button"
               onClick={() => refetch()}
-              className="inline-block rounded-[13px] bg-[#c0392b] px-5 py-2.5 text-[14px] font-bold text-white hover:bg-[#96271b]"
+              className="inline-block rounded-[13px] bg-[#c0392b] px-5 py-2.5 text-[14px] leading-[22px] font-bold text-white hover:bg-[#96271b]"
             >
               Try again
             </button>
@@ -213,14 +213,14 @@ export default function TopicShell({ tag }: { tag: string }) {
         ) : shown.length === 0 ? (
           // Never a bare dead end: an empty topic still offers a way onward.
           <div className="rounded-[20px] border border-dashed border-[#e6e0da] bg-[#fdfcfb] px-8 py-14 text-center">
-            <p className="mb-1 font-serif text-[19px] font-semibold text-[#161511]">Nothing here yet</p>
-            <p className="mx-auto mb-5 max-w-[42ch] text-[13.5px] leading-[1.6] text-[#6b7280]">
+            <p className="mb-1 font-serif text-[20px] leading-[30px] font-semibold text-[#161511]">Nothing here yet</p>
+            <p className="mx-auto mb-5 max-w-[42ch] text-[14px] leading-[22px] text-[#6b7280]">
               No posts carry the tag <span className="font-semibold text-[#161511]">{tag}</span> right now. This page
               only ever shows that one tag, so it stays empty until someone posts under it.
             </p>
             <a
               href="/"
-              className="inline-block rounded-[13px] bg-[#c0392b] px-5 py-2.5 text-[14px] font-bold text-white hover:bg-[#96271b]"
+              className="inline-block rounded-[13px] bg-[#c0392b] px-5 py-2.5 text-[14px] leading-[22px] font-bold text-white hover:bg-[#96271b]"
             >
               Back to your feed
             </a>
@@ -242,16 +242,16 @@ export default function TopicShell({ tag }: { tag: string }) {
             (`!isFetchingNextPage` before fetching, stops at `hasNextPage:
             false`), unchanged by this fix. */}
         {hasNextPage ? (
-          <div ref={ref} className="py-8 text-center font-sans text-[13px] text-[#6b7280]">
+          <div ref={ref} className="py-8 text-center font-sans text-[13px] leading-[20px] text-[#6b7280]">
             {isFetchingNextPage ? 'Loading more…' : ''}
           </div>
         ) : null}
         {!hasNextPage && shown.length > 0 ? (
-          <p className="py-8 text-center font-sans text-[13px] text-[#6b7280]">That’s everything under #{tag}.</p>
+          <p className="py-8 text-center font-sans text-[13px] leading-[20px] text-[#6b7280]">That’s everything under #{tag}.</p>
         ) : null}
       </main>
 
-      <aside className="sticky top-24 hidden h-fit xl:block">
+      <aside className="sticky top-24 hidden h-fit bg-background-secondary xl:block">
         <RightRail />
       </aside>
     </div>

@@ -282,7 +282,7 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
           mockup's Lora wordmark was the stray outlier. */}
       {embedded ? null : (
         <div className="mb-8 mt-16 text-center">
-          <Link href="/" className="font-sans text-[42px] font-bold leading-none tracking-[-0.025em] text-[#161511]">
+          <Link href="/" className="font-sans text-[44px] leading-[52px] font-bold leading-none tracking-[-0.025em] text-[#161511]">
             Lumen
           </Link>
           <p className="mt-2 font-serif text-base text-[#6b7280]">{COPY.tagline}</p>
@@ -310,7 +310,7 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                     : 'border-b border-[#f3ede9] bg-[radial-gradient(120%_100%_at_0%_0%,#fdf1ee_0%,#fff_62%)] px-[30px] pb-6 pt-8'
                 }
               >
-                <h1 className={`font-serif font-semibold leading-[1.12] tracking-[-0.01em] text-[#161511] ${embedded ? 'text-[22px]' : 'text-center text-[30px]'}`}>
+                <h1 className={`font-serif font-semibold tracking-[-0.01em] text-[#161511] ${embedded ? 'text-[22px] leading-[26px]' : 'text-center text-[30px] leading-[46px] leading-[34px]'}`}>
                   {COPY.welcome}
                 </h1>
                 {/* Google is the only walletless way in, so it is what makes the
@@ -320,7 +320,7 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                     it shows the conservative sentence and the browser corrects
                     it. Erring that way round is deliberate — over-promising is
                     the failure this fixes. */}
-                <p className={`mt-2 text-[14.5px] leading-[1.55] text-[#4b5563] ${embedded ? '' : 'text-center'}`}>
+                <p className={`mt-2 text-[15px] leading-[24px] text-[#4b5563] ${embedded ? '' : 'text-center'}`}>
                   {googleReady ? COPY.welcomeSub : COPY.welcomeSubWalletsOnly}
                 </p>
               </div>
@@ -343,7 +343,7 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                     <button
                       type="button"
                       disabled
-                      className="flex h-[65px] w-full items-center justify-center gap-[11px] rounded-[14px] border border-[#e4e6e9] bg-white text-[15.5px] font-semibold text-[#161511] opacity-60"
+                      className="flex h-[64px] w-full items-center justify-center gap-[11px] rounded-[14px] border border-[#e4e6e9] bg-white text-[16px] font-semibold text-[#161511] opacity-60"
                     >
                       {COPY.google}
                     </button>
@@ -358,7 +358,7 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                       type="button"
                       disabled
                       aria-disabled="true"
-                      className="flex h-[65px] w-full cursor-not-allowed items-center justify-center gap-[11px] rounded-[14px] border border-[#e4e6e9] bg-white text-[15.5px] font-semibold text-[#161511] opacity-60"
+                      className="flex h-[64px] w-full cursor-not-allowed items-center justify-center gap-[11px] rounded-[14px] border border-[#e4e6e9] bg-white text-[16px] font-semibold text-[#161511] opacity-60"
                     >
                       <svg width="20" height="20" viewBox="0 0 48 48" aria-hidden>
                         <path fill="#4285F4" d="M45.1 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h11.8c-.5 2.7-2 5-4.4 6.6v5.5h7.1c4.1-3.8 6.6-9.4 6.6-16.1z" />
@@ -368,7 +368,7 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                       </svg>
                       {COPY.google}
                     </button>
-                    <p className="mt-2 text-center text-[13px] leading-[1.5] text-[#6b7280]">{COPY.googleSeam}</p>
+                    <p className="mt-2 text-center text-[13px] leading-[20px] text-[#6b7280]">{COPY.googleSeam}</p>
                   </div>
                 )}
 
@@ -421,7 +421,7 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                       className="h-[34px] w-[34px] flex-shrink-0 rounded-[10px]"
                     />
                     <span className="min-w-0 flex-1">
-                      <span className="block text-[15px] font-semibold text-[#161511]">{COPY.btcTitle}</span>
+                      <span className="block text-[15px] leading-[24px] font-semibold text-[#161511]">{COPY.btcTitle}</span>
                       <span className="block text-xs text-[#6b7280]">{COPY.btcSub}</span>
                     </span>
                   </button>
@@ -459,7 +459,7 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                       </svg>
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="block text-[15px] font-semibold text-[#161511]">{COPY.evmTitle}</span>
+                      <span className="block text-[15px] leading-[24px] font-semibold text-[#161511]">{COPY.evmTitle}</span>
                       <span className="block text-xs text-[#6b7280]">{COPY.evmSub}</span>
                     </span>
                   </button>
@@ -480,9 +480,9 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
 
                 <KeychainSignin />
 
-                {error ? <p className="mt-4 text-center text-[13px] leading-[1.5] text-[#b45309]">{error}</p> : null}
+                {error ? <p className="mt-4 text-center text-[13px] leading-[20px] text-[#b45309]">{error}</p> : null}
 
-                <p className="mt-[18px] text-center text-xs leading-[1.5] text-[#9ca3af]">
+                <p className="mt-[18px] text-center text-xs text-[#9ca3af]">
                   By continuing you agree to Lumen’s <Link href="/tos.html">Terms</Link> and{' '}
                   <Link href="/privacy.html">Privacy Policy</Link>.
                 </p>
@@ -498,7 +498,7 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                 setView('default');
                 setError(null);
               }}
-              className="mb-4 flex items-center gap-1.5 border-0 bg-transparent p-0 text-[13px] font-semibold text-[#6b7280]"
+              className="mb-4 flex items-center gap-1.5 border-0 bg-transparent p-0 text-[13px] leading-[20px] font-semibold text-[#6b7280]"
             >
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2">
                 <path d="M15 18l-6-6 6-6" />
@@ -506,9 +506,9 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
               {COPY.back}
             </button>
             <h1 className="font-serif text-2xl font-semibold text-[#161511]">{COPY.namePick}</h1>
-            <p className="mt-1.5 text-sm leading-[1.5] text-[#6b7280]">{COPY.namePickSub}</p>
+            <p className="mt-1.5 text-sm text-[#6b7280]">{COPY.namePickSub}</p>
 
-            <div className={`mb-2 mt-[18px] flex h-12 items-center gap-2 rounded-xl border-[1.5px] px-3.5 ${nameBorder}`}>
+            <div className={`mb-2 mt-[18px] flex h-12 items-center gap-2 rounded-xl border-2 px-3.5 ${nameBorder}`}>
               <span className="font-bold text-[#9ca3af]">@</span>
               <input
                 value={name}
@@ -521,9 +521,9 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                 className="min-w-0 flex-1 border-0 font-sans text-base font-semibold text-[#161511] outline-none"
               />
               {nameStatus.state === 'checking' ? (
-                <span className="text-[13px] font-semibold text-[#9ca3af]">{COPY.checking}</span>
+                <span className="text-[13px] leading-[20px] font-semibold text-[#9ca3af]">{COPY.checking}</span>
               ) : nameStatus.state === 'available' ? (
-                <span className="flex items-center gap-1.5 text-[13px] font-semibold text-[#2f7d4f]">
+                <span className="flex items-center gap-1.5 text-[13px] leading-[20px] font-semibold text-[#2f7d4f]">
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2f7d4f" strokeWidth="2.4">
                     <path d="M20 6L9 17l-5-5" />
                   </svg>
@@ -532,7 +532,7 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
               ) : null}
             </div>
             {nameStatus.state === 'unavailable' ? (
-              <p className="mb-2 text-[12.5px] font-medium text-[#b45309]">{nameStatus.reason}</p>
+              <p className="mb-2 text-[13px] leading-[20px] font-medium text-[#b45309]">{nameStatus.reason}</p>
             ) : null}
             <p className="mb-[18px] text-xs text-[#9ca3af]">{COPY.nameRules}</p>
 
@@ -544,12 +544,12 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
             <button
               onClick={submitName}
               disabled={busy || nameStatus.state !== 'available' || (captchaRequired && !captchaToken)}
-              className="h-12 w-full cursor-pointer rounded-xl bg-[#c0392b] text-[15px] font-semibold text-white hover:bg-[#a5301f] disabled:cursor-not-allowed disabled:opacity-50"
+              className="h-12 w-full cursor-pointer rounded-xl bg-[#c0392b] text-[15px] leading-[24px] font-semibold text-white hover:bg-[#a5301f] disabled:cursor-not-allowed disabled:opacity-50"
             >
               {busy ? COPY.checking : COPY.create}
             </button>
-            {error ? <p className="mt-3 text-center text-[13px] leading-[1.5] text-[#b45309]">{error}</p> : null}
-            <p className="mt-3 text-center text-xs leading-[1.5] text-[#6b7280]">{COPY.createReassure}</p>
+            {error ? <p className="mt-3 text-center text-[13px] leading-[20px] text-[#b45309]">{error}</p> : null}
+            <p className="mt-3 text-center text-xs text-[#6b7280]">{COPY.createReassure}</p>
           </div>
         )}
       </div>
@@ -563,7 +563,7 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
       {/* v8: this footer belongs to the standalone PAGE. Rendered inside the dialog it
           became a single orphaned "Help" link under the card, with no context and no
           sibling. The page keeps it; the dialog does not. */}
-      <div className={`my-9 flex gap-5 text-[13px] text-[#9ca3af] ${embedded ? 'hidden' : ''}`}>
+      <div className={`my-9 flex gap-5 text-[13px] leading-[20px] text-[#9ca3af] ${embedded ? 'hidden' : ''}`}>
         {/* ★ HELP FOR THE PERSON ACTUALLY ON THIS SCREEN (2026-08-08, UX tester).
             This pointed at /faq.html — the inherited "Hive.blog FAQ", which opens
             on master passwords, owner keys, Resource Credits and MVESTs and refers

@@ -33,7 +33,7 @@ export default function ProfileCommentCard({ post }: { post: Entry }) {
   return (
     <article className="rounded-[18px] border border-[#ebebeb] bg-white p-[22px] transition-colors hover:border-[#e0ddd6]">
       {/* "replying to @x in community" header */}
-      <div className="mb-2.5 flex flex-wrap items-center gap-1.5 font-sans text-[13px] text-[#9ca3af]">
+      <div className="mb-2.5 flex flex-wrap items-center gap-1.5 font-sans text-[13px] leading-[20px] text-[#9ca3af]">
         <Icons.arrowBigUp className="h-[14px] w-[14px] -rotate-90 text-[#c8ccd2]" aria-hidden="true" />
         {post.parent_author ? (
           <>
@@ -60,18 +60,18 @@ export default function ProfileCommentCard({ post }: { post: Entry }) {
       {post.title ? (
         <Link href={href} className="block">
           {/* Decoded for the same reason as the feed card — see medium-post-card.tsx. */}
-          <h3 className="mb-1.5 font-sans text-[18px] font-semibold text-[#161511]">{normalizeTitle(post.title)}</h3>
+          <h3 className="mb-1.5 font-sans text-[18px] leading-[28px] font-semibold text-[#161511]">{normalizeTitle(post.title)}</h3>
         </Link>
       ) : null}
 
       {body ? (
         <Link href={href} className="block">
-          <p className="line-clamp-3 font-serif text-[15.5px] leading-normal text-[#4b5563]">{body}</p>
+          <p className="line-clamp-3 font-serif text-[16px] leading-[24px] text-[#4b5563]">{body}</p>
         </Link>
       ) : null}
 
       {/* Footer — same control grammar as MediumPostCard's action bar, minus reblog. */}
-      <div className="mt-3.5 flex items-center gap-2 font-sans text-[13.5px]">
+      <div className="mt-3.5 flex items-center gap-2 font-sans text-[14px] leading-[22px]">
         {/* ★ NO PILL INSIDE THE CARD (2026-08-08). Same fix the feed card got:
             a grey capsule sitting on a white card reads as a second, nested
             surface — the owner's words were "a grey pill inside the window", and
@@ -95,7 +95,7 @@ export default function ProfileCommentCard({ post }: { post: Entry }) {
           <span
             className={cn(
               // Payout is flat too — same reason as the vote group above.
-              'ml-auto flex items-center px-[3px] py-[6px] text-[13.5px] font-bold tabular-nums text-[#6b7280] transition-colors hover:cursor-pointer hover:text-[#2a2822]',
+              'ml-auto flex items-center px-[3px] py-[6px] text-[14px] leading-[22px] font-bold tabular-nums text-[#6b7280] transition-colors hover:cursor-pointer hover:text-[#2a2822]',
               payoutDeclined && 'bg-transparent text-muted-foreground line-through'
             )}
           >

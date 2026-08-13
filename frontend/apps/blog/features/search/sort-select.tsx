@@ -51,7 +51,7 @@ function SearchSortSelect({ query }: { query: string }) {
 
   return (
     <div className="flex shrink-0 items-center gap-2">
-      <label htmlFor="search-sort" className="font-sans text-[13px] text-[#6b7280]">
+      <label htmlFor="search-sort" className="font-sans text-[13px] leading-[20px] text-[#6b7280]">
         {t('search_page.sort_by', { defaultValue: 'Sort by' })}
       </label>
       <div className="relative">
@@ -60,7 +60,7 @@ function SearchSortSelect({ query }: { query: string }) {
           data-testid="search-sort-by-dropdown-list"
           value={(sortQuery as SearchSort) ?? 'relevance'}
           onChange={(event) => handleSearch(query, event.target.value as SearchSort)}
-          className="h-9 appearance-none rounded-[14px] border border-[#ebebeb] bg-white py-0 pl-3 pr-8 font-sans text-[13px] text-[#161511] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c0392b]/30"
+          className="h-9 appearance-none rounded-[14px] border border-[#ebebeb] bg-white py-0 pl-3 pr-8 font-sans text-[13px] leading-[20px] text-[#161511] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c0392b]/30"
         >
           <option value="relevance">{t('search_page.sort_relevance', { defaultValue: 'Relevance' })}</option>
           <option value="created">{t('search_page.sort_newest', { defaultValue: 'Newest' })}</option>

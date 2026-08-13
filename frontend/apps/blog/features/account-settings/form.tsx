@@ -50,10 +50,10 @@ import {
  *  redundant now that the real ring is back, so it goes too rather than
  *  stacking a red border UNDER a red ring. */
 const SELECT_TRIGGER =
-  'h-10 w-full rounded-[10px] border border-[#e4e6e9] bg-white px-3 font-sans text-[13.5px] text-[#161511] [&>svg]:opacity-100 [&>svg]:text-[#6b7280]';
+  'h-10 w-full rounded-[10px] border border-[#e4e6e9] bg-white px-3 font-sans text-[14px] leading-[22px] text-[#161511] [&>svg]:opacity-100 [&>svg]:text-[#6b7280]';
 const SELECT_CONTENT = 'rounded-[12px] border border-[#e4e6e9] bg-white p-1 shadow-[0_8px_24px_rgba(20,18,10,0.10)]';
 const SELECT_ITEM =
-  'cursor-pointer rounded-[9px] py-2 font-sans text-[13.5px] text-[#161511] focus:bg-[#fdf2f0] focus:text-[#c0392b]';
+  'cursor-pointer rounded-[9px] py-2 font-sans text-[14px] leading-[22px] text-[#161511] focus:bg-[#fdf2f0] focus:text-[#c0392b]';
 
 /**
  * ★ S7 — DIRTY-FIELD CUE (2026-08-11). The Update button already goes from
@@ -289,7 +289,7 @@ const SettingsForm = ({ username }: { username: string }) => {
               onChange={(e) => setSettings((prev) => ({ ...prev, profile_image: e.target.value }))}
             />
             <label
-              className="mt-1.5 inline-block cursor-pointer text-[12.5px] font-semibold text-[#c0392b] hover:text-[#96271b]"
+              className="mt-1.5 inline-block cursor-pointer text-[13px] leading-[20px] font-semibold text-[#c0392b] hover:text-[#96271b]"
               htmlFor="profilePicture"
             >
               {t('settings_page.upload_image')}
@@ -322,7 +322,7 @@ const SettingsForm = ({ username }: { username: string }) => {
               onChange={(e) => setSettings((prev) => ({ ...prev, cover_image: e.target.value }))}
             />
             <label
-              className="mt-1.5 inline-block cursor-pointer text-[12.5px] font-semibold text-[#c0392b] hover:text-[#96271b]"
+              className="mt-1.5 inline-block cursor-pointer text-[13px] leading-[20px] font-semibold text-[#c0392b] hover:text-[#96271b]"
               htmlFor="coverPicture"
             >
               {t('settings_page.upload_image')}
@@ -461,7 +461,7 @@ const SettingsForm = ({ username }: { username: string }) => {
           type="button"
           onClick={() => onSubmit()}
           data-testid="pps-update-button"
-          className="mt-6 inline-flex h-11 min-w-[176px] items-center justify-center rounded-[14px] bg-[#c0392b] px-6 text-[14px] font-bold text-white transition-colors hover:bg-[#96271b] disabled:cursor-not-allowed disabled:bg-[#e6e2df] disabled:text-[#9ca3af]"
+          className="mt-6 inline-flex h-11 min-w-[176px] items-center justify-center rounded-[14px] bg-[#c0392b] px-6 text-[14px] leading-[22px] font-bold text-white transition-colors hover:bg-[#96271b] disabled:cursor-not-allowed disabled:bg-[#e6e2df] disabled:text-[#9ca3af]"
           disabled={
             sameData ||
             disabledBtn ||
@@ -484,7 +484,7 @@ const SettingsForm = ({ username }: { username: string }) => {
             it is true regardless of which of those three is why the button
             looks the way it does right now. */}
         {sameData && !busy ? (
-          <p className="mt-2 text-[12.5px] text-[#6b7280]">{t('settings_page.update_hint')}</p>
+          <p className="mt-2 text-[13px] leading-[20px] text-[#6b7280]">{t('settings_page.update_hint')}</p>
         ) : null}
       </section>
 
@@ -497,7 +497,7 @@ const SettingsForm = ({ username }: { username: string }) => {
             per-account. Same muted-helper-text treatment `update_hint` already
             uses below the profile Update button, so this reads as the same
             kind of house copy, not a warning callout. */}
-        <p className="mt-2 text-[12.5px] text-[#6b7280]" data-testid="settings-preferences-device-scope">
+        <p className="mt-2 text-[13px] leading-[20px] text-[#6b7280]" data-testid="settings-preferences-device-scope">
           {t('settings_page.preferences_device_scope')}
         </p>
 
@@ -634,7 +634,7 @@ const SettingsForm = ({ username }: { username: string }) => {
           page — that gap stays open until the footer ships. */}
       <section className={SETTINGS_CARD} data-testid="settings-legal">
         <h2 className={SETTINGS_CARD_TITLE}>{t('settings_page.legal_title')}</h2>
-        <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-[13.5px]">
+        <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-[14px] leading-[22px]">
           <BasePathLink href="/privacy.html" className="font-semibold text-[#c0392b] hover:text-[#96271b]">
             {t('navigation.sidebar.privacy_policy')}
           </BasePathLink>

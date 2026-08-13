@@ -47,7 +47,7 @@ function ChipBody({ tier, className }: { tier: keyof typeof TIERS; className?: s
       data-testid="profile-league-chip"
     >
       <LeagueEmblem tier={tier} size="nav" />
-      <span className="font-sans text-[14px] font-bold text-[#161511]">
+      <span className="font-sans text-[14px] leading-[22px] font-bold text-[#161511]">
         {name}
         <span aria-hidden="true" className="mx-1 font-medium text-[#cbd0d6]">
           ·

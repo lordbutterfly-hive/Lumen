@@ -65,7 +65,7 @@ export default function PriceChart({
         {GRIDLINES.map((g) => (
           <g key={g}>
             <line x1={0} y1={toY(g)} x2={W} y2={toY(g)} stroke="#f2f2f2" strokeWidth={1} />
-            <text x={W + 8} y={toY(g) + 4} fontSize={10.5} fill="#9ca3af">
+            <text x={W + 8} y={toY(g) + 4} fontSize={12} fill="#9ca3af">
               {g}¢
             </text>
           </g>
@@ -91,7 +91,7 @@ export default function PriceChart({
             key={d}
             x={toX(i, xLabels.length)}
             y={H + 20}
-            fontSize={10.5}
+            fontSize={12}
             fill="#9ca3af"
             textAnchor={i === 0 ? 'start' : i === xLabels.length - 1 ? 'end' : 'middle'}
           >
@@ -100,7 +100,7 @@ export default function PriceChart({
         ))}
       </svg>
       {placeholder && (
-        <p className={cn('mt-1 text-center text-[11px] text-[#9ca3af]')}>{t('prediction_market.chart_caption')}</p>
+        <p className={cn('mt-1 text-center text-[12px] leading-[18px] text-[#9ca3af]')}>{t('prediction_market.chart_caption')}</p>
       )}
     </div>
   );

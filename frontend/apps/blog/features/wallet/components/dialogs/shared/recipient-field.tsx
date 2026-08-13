@@ -25,7 +25,7 @@ export default function RecipientField({
 }) {
   return (
     <div className="flex flex-col gap-1.5">
-      <label className="text-[13px] font-semibold text-[#3f4650]">{label}</label>
+      <label className="text-[13px] leading-[20px] font-semibold text-[#3f4650]">{label}</label>
       <div className="relative">
         <Icons.atSign className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#9ca3af]" />
         <Input {...register} disabled={disabled} placeholder="username" data-testid={testId} className="pl-9" />

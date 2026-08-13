@@ -138,7 +138,7 @@ const SearchResults = ({ query, sort }: { query: string; sort: SearchSort }) => 
 
   const header = (
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <p className="font-sans text-[14px] text-[#6b7280]" data-testid="search-result-count">
+      <p className="font-sans text-[14px] leading-[22px] text-[#6b7280]" data-testid="search-result-count">
         {isLoading
           ? t('search_page.searching_for', { query, defaultValue: 'Searching for “{{query}}”' })
           : t(countKey, { count: total, query, defaultValue: COUNT_FALLBACK[countKey] })}
@@ -215,12 +215,12 @@ const SearchResults = ({ query, sort }: { query: string; sort: SearchSort }) => 
 
       {/* The sentinel: scrolling it into view fetches the next page. */}
       {total > 0 && hasNextPage ? (
-        <div ref={ref} className="py-6 text-center font-sans text-[13px] text-muted-foreground">
+        <div ref={ref} className="py-6 text-center font-sans text-[13px] leading-[20px] text-muted-foreground">
           {isFetchingNextPage ? t('search_page.loading_more', { defaultValue: 'Loading more…' }) : ''}
         </div>
       ) : null}
       {total > 0 && !hasNextPage ? (
-        <p className="py-6 text-center font-sans text-[13px] text-muted-foreground">
+        <p className="py-6 text-center font-sans text-[13px] leading-[20px] text-muted-foreground">
           {t('search_page.end_of_results', { defaultValue: 'That’s every match.' })}
         </p>
       ) : null}

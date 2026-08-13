@@ -50,7 +50,7 @@ export function PostMetadataSection({
           now reuse the masthead's eyebrow exactly (11px/600 uppercase, 0.14em,
           #c0392b at 70%), see features/layouts/page-masthead.tsx, so the page
           has one small-label style rather than one per component. */}
-      <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#c0392b]/70">
+      <span className="text-[12px] leading-[18px] font-semibold uppercase tracking-[0.14em] text-[#c0392b]/70">
         {t("submit_page.metadata_section")}
       </span>
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
 import { getManabar } from '@transaction/lib/hive-api';
+import { cachedRead } from '@/blog/lib/server-read-cache';
 
 const logger = getLogger('app');
 
@@ -21,7 +22,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'username_required' }, { status: 400 });
   }
   try {
-    const manabar = await getManabar(username);
+    // ★ 3s SERVER-SIDE MEMO (2026-08-13) — wire contract unchanged, see
+    // lib/server-read-cache.ts. Measured at a steady 130-444ms on every page.
+    // Shorter than `/api/account`'s 5s precisely because of the comment above:
+    // this bar regenerates continuously, so one Hive block is the honest ceiling.
+    // That is still enough to collapse the duplicate reads a single render makes.
+    const manabar = await cachedRead(`manabar:${username}`, 3_000, () => getManabar(username));
     return NextResponse.json(manabar, { headers: { 'cache-control': 'private, no-store' } });
   } catch (error) {
     logger.error(error, 'manabar lookup failed for %s', username);

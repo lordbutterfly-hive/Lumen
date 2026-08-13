@@ -139,12 +139,12 @@ export default function MarketTab() {
         {/* Header */}
         <div className="border-b border-[#f0f0f0] px-7 pb-5 pt-[22px]">
           <div className="flex items-start justify-between gap-4">
-            <h1 className="font-sans text-[30px] font-semibold leading-tight tracking-[-0.02em] text-[#161511]">
+            <h1 className="font-sans text-[30px] font-semibold leading-[38px] tracking-[-0.02em] text-[#161511]">
               {round.question}
             </h1>
             <MarketStatusChip status={round.status} />
           </div>
-          <div className="mt-3 flex flex-wrap gap-x-[22px] gap-y-1 font-sans text-[13.5px] text-[#6b7280]">
+          <div className="mt-3 flex flex-wrap gap-x-[22px] gap-y-1 font-sans text-[14px] leading-[22px] text-[#6b7280]">
             <span>
               <strong className="font-semibold text-[#2a2822]">{t('prediction_market.ref')}</strong> ${round.referencePrice.toFixed(3)}
             </span>
@@ -191,8 +191,8 @@ export default function MarketTab() {
               {round.buckets.map((bucket) => (
                 <div key={bucket.id} className="flex items-center gap-2">
                   <span className="h-[9px] w-[9px] rounded-full" style={{ backgroundColor: colors[bucket.id] }} aria-hidden="true" />
-                  <span className="font-sans text-[13.5px] font-medium text-[#3f4650]">{bucket.label}</span>
-                  <span className="font-sans text-[13.5px] font-bold tabular-nums text-[#161511]">{bucket.oddsPct}¢</span>
+                  <span className="font-sans text-[14px] leading-[22px] font-medium text-[#3f4650]">{bucket.label}</span>
+                  <span className="font-sans text-[14px] leading-[22px] font-bold tabular-nums text-[#161511]">{bucket.oddsPct}¢</span>
                 </div>
               ))}
             </div>
@@ -201,7 +201,7 @@ export default function MarketTab() {
 
             {/* Pool odds ladder */}
             <div className="mt-[26px] border-t border-[#f0f0f0] pt-[22px]">
-              <div className="mb-3.5 font-sans text-[12.5px] font-bold uppercase tracking-[0.05em] text-[#6b7280]">
+              <div className="mb-3.5 font-sans text-[13px] leading-[20px] font-bold uppercase tracking-[0.05em] text-[#6b7280]">
                 {t('prediction_market.pool_odds')}
               </div>
               <BucketBars buckets={round.buckets} size="full" />
@@ -271,7 +271,7 @@ export default function MarketTab() {
               when the position itself says the deadline has passed. */}
           {!isResolved && myPosition.reclaimable && (
             <div className="mt-3 rounded-[14px] border border-[#f6e2c4] bg-[#fdf6ec] p-3">
-              <p className="font-sans text-[13px] leading-[1.5] text-[#b45309]">
+              <p className="font-sans text-[13px] leading-[20px] text-[#b45309]">
                 {t('prediction_market.reclaim_explain')}
               </p>
               <button
@@ -294,8 +294,8 @@ export default function MarketTab() {
 function KeyStat({ label, value, last }: { label: string; value: string; last?: boolean }) {
   return (
     <div className={cn('px-6 py-[18px]', !last && 'border-r border-[#f0f0f0]')}>
-      <div className="mb-1.5 font-sans text-[11.5px] font-bold uppercase tracking-[0.05em] text-[#6b7280]">{label}</div>
-      <div className="font-sans text-[19px] font-bold tabular-nums text-[#161511]">{value}</div>
+      <div className="mb-1.5 font-sans text-[12px] font-bold uppercase tracking-[0.05em] text-[#6b7280]">{label}</div>
+      <div className="font-sans text-[20px] leading-[30px] font-bold tabular-nums text-[#161511]">{value}</div>
     </div>
   );
 }

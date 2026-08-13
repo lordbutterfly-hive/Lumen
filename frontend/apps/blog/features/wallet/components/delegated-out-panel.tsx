@@ -41,12 +41,12 @@ export default function DelegatedOutPanel({
         className="flex w-full items-center justify-between rounded-[14px] border border-[#ebebeb] bg-white px-3.5 py-2.5 transition-colors hover:bg-[#f6f7f8]"
         data-testid="wallet-delegated-out-toggle"
       >
-        <span className="flex items-center gap-2.5 text-[13.5px] font-semibold text-[#3f4650]">
+        <span className="flex items-center gap-2.5 text-[14px] leading-[22px] font-semibold text-[#3f4650]">
           <Repeat className="h-[15px] w-[15px] text-[#9ca3af]" />
           {t('wallet.delegated.out')}
         </span>
         <span className="flex items-center gap-2.5">
-          <span className="font-sans text-[15px] font-bold tabular-nums text-[#c0392b]">
+          <span className="font-sans text-[15px] leading-[24px] font-bold tabular-nums text-[#c0392b]">
             {/* ★ No sign at zero (2026-08-09). The minus was unconditional, so an
                 account delegating nothing read "-0.000 HP" — a negative-looking
                 figure for the absence of a thing. */}
@@ -64,14 +64,14 @@ export default function DelegatedOutPanel({
       {delegatedOpen ? (
         <div className="rounded-[14px] border border-[#ebebeb] bg-[#fbfbfa] px-4 py-3.5" data-testid="wallet-delegated-out-list">
           <div className="mb-2.5 flex items-center justify-between">
-            <span className="text-[13px] font-bold text-[#2a2822]">
+            <span className="text-[13px] leading-[20px] font-bold text-[#2a2822]">
               {t('wallet.delegated.accounts_count', { count: delegatees?.length ?? 0 })}
             </span>
             <a
               href={getDelegationsUrl(username)}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-[12.5px] font-semibold text-[#c0392b] hover:text-[#96271b]"
+              className="text-[13px] leading-[20px] font-semibold text-[#c0392b] hover:text-[#96271b]"
               data-testid="wallet-manage-delegations"
             >
               {t('wallet.delegated.manage')}
@@ -86,21 +86,21 @@ export default function DelegatedOutPanel({
                 >
                   <Link
                     href={`/@${d.name}`}
-                    className="flex min-w-0 items-center gap-2.5 text-[13.5px] text-[#2a2822] hover:text-[#c0392b]"
+                    className="flex min-w-0 items-center gap-2.5 text-[14px] leading-[22px] text-[#2a2822] hover:text-[#c0392b]"
                     data-testid="wallet-delegated-out-account"
                   >
                     {/* ★ CONVERGED (F6 item 22). No fallback before. */}
                     <UserAvatarImg username={d.name} pixelSize={24} />
                     <span className="truncate">@{d.name}</span>
                   </Link>
-                  <span className="shrink-0 font-sans text-[13.5px] font-semibold tabular-nums text-[#3f4650]">
+                  <span className="shrink-0 font-sans text-[14px] leading-[22px] font-semibold tabular-nums text-[#3f4650]">
                     {d.hp} HP
                   </span>
                 </div>
               ))}
             </div>
           ) : (
-            <p className="text-[13px] text-[#9ca3af]">{t('wallet.delegated.none')}</p>
+            <p className="text-[13px] leading-[20px] text-[#9ca3af]">{t('wallet.delegated.none')}</p>
           )}
         </div>
       ) : null}

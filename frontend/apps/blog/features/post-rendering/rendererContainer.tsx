@@ -158,7 +158,7 @@ const RendererContainer = ({
     // comment's mount effect reach into the MAIN POST's DOM (and vice versa).
     const sub = ref.current?.querySelectorAll('sub');
     sub?.forEach((e) => {
-      e.classList.add('leading-[150%]');
+      e.classList.add('leading-[22px]');
     });
     const threeSpeak = ref.current?.querySelectorAll('.threeSpeakWrapper');
     threeSpeak?.forEach((link) => {

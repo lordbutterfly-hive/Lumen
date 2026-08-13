@@ -364,12 +364,43 @@ export type { BatchFileItem, FileProcessingStatus, ProcessingOptions };
 // `font-sans` (Open Sans) on `<body>`, while every feed/profile excerpt of
 // the same prose (e.g. `medium-post-card.tsx`, `profile-identity.tsx`) uses
 // the working `font-serif` utility and renders Lora. `font-serif` already
-// resolves to the exact same `var(--font-source-serif)` (see
-// `apps/blog/tailwind.config.js`) that `font-source` was meant to alias, so
-// swapping to it is a same-font, zero-behavior-change fix that makes post
+// resolves to the exact same variable (see `apps/blog/tailwind.config.js`,
+// where it is now called `--font-serif`) that `font-source` was meant to alias,
+// so swapping to it is a same-font, zero-behavior-change fix that makes post
 // bodies match excerpts instead of a rename that would need a new dead alias
-// chased down again later. `font-sanspro` elsewhere on this page (the title)
-// is NOT dead — it has a real compiled rule and is correctly Open Sans by
-// design — so it is left alone.
+// chased down again later. (2026-08-13: `font-sanspro`, mentioned by the
+// previous version of this note, has since been deleted outright — it was a
+// byte-identical duplicate of `font-sans`; its real call sites, including this
+// page's title, now say `font-sans`.)
+//
+// ★★★ THE RESPONSIVE AND HEADING RAMP THAT USED TO BE HERE NEVER RENDERED
+// (2026-08-13, typography audit item 1). This file is a `.ts`, and the Tailwind
+// content glob was `**/*.{jsx,tsx}` (see `packages/tailwindcss/tailwind.config.js`),
+// so the JIT scanner never read this string. MEASURED on the shipped build:
+// `26.4px`, `23.1px`, `19.8px`, `18.1px`, `17.6px`, `19.2px`, `30.7px`, `28.9px`
+// and `21.1px` each appear ZERO times in `/_next/static/css/*.css`. `16.5px`
+// appeared exactly once — and only because `medium-post-card.tsx` and
+// `profile-identity.tsx` (both `.tsx`) happened to use the same value for feed
+// excerpts. Net effect on a real post at a 1534px viewport: the body was
+// 16.5px at EVERY breakpoint, `prose-p:mb-6` did nothing, and every heading fell
+// back to the typography plugin's em ramp off the 16.5px container —
+// h1 2.25em = 37.125px, h2 24.75px, h3 20.625px, h4 16.5px, all fractional, all
+// on fractional line boxes. `apps/blog/tailwind.config.js` now also scans `.ts`,
+// so from here on this string is real and must be read as such.
+//
+// Sizes are whole pixels paired with whole-pixel line-heights so a post body
+// lands on the device pixel grid: the app inherits Tailwind Preflight's
+// `:host,html{line-height:1.5}` — a UNITLESS ratio — and `prose` overrides it
+// with `1.75`, so ANY container size that is not a multiple of 4 produced a
+// fractional line box and pushed every following block off the grid.
+//
+// Values are the previous RENDERED geometry rounded to whole pixels, not a new
+// scale: body 16.5/28.875 -> 17/28 (also audit item 6's "17-18px, ~1.6
+// leading"), h1 37.125/41.25 -> 36/40, h2 24.75/33 -> 25/32, h3 20.625/33 ->
+// 21/32, h4 16.5/24.75 -> 17/24. The dead ramp's own numbers (h1 26.4px) are
+// deliberately NOT revived — switching post h1 from a rendered 37px to 26px is a
+// redesign, not a rounding, and nobody has asked for one. Paragraph rhythm was a
+// collapsed 20.625px; `prose-p:my-5` is 20px (audit item 8: whole-pixel prose
+// margins).
 export const postClassName =
-  'font-serif text-[16.5px] prose-h1:text-[26.4px] prose-h2:text-[23.1px] prose-h3:text-[19.8px] prose-h4:text-[18.1px] sm:text-[17.6px] sm:prose-h1:text-[28px] sm:prose-h2:text-[24.7px] sm:prose-h3:text-[22.1px] sm:prose-h4:text-[19.4px] lg:text-[19.2px] lg:prose-h1:text-[30.7px] lg:prose-h2:text-[28.9px] lg:prose-h3:text-[23px] lg:prose-h4:text-[21.1px] prose-p:mb-6 prose-p:mt-0 prose-img:cursor-pointer prose-img:max-w-full prose-img:h-auto';
+  'font-serif text-[17px] leading-[28px] prose-p:my-5 prose-h1:text-[34px] prose-h1:leading-[40px] prose-h2:text-[26px] prose-h2:leading-[32px] prose-h3:text-[22px] prose-h3:leading-[32px] prose-h4:text-[17px] prose-h4:leading-[24px] prose-img:cursor-pointer prose-img:max-w-full prose-img:h-auto';

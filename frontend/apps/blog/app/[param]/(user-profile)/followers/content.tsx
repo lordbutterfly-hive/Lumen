@@ -1,21 +1,34 @@
 'use client';
 
-import BasePathLink from '@/blog/components/base-path-link';
+import { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { IFollow } from '@hive/common-hiveio-packages/wax';
+import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { fetchAccount } from '@/blog/lib/chain-fetch';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { useFollowersInfiniteQuery } from '@/blog/features/account-lists/hooks/use-followers-infinitequery';
 import { useFollowingInfiniteQuery } from '@/blog/features/account-lists/hooks/use-following-infinitequery';
-import PrevNextButtons from '@/blog/features/account-lists/prev-next-buttons';
-import ButtonsContainer from '@/blog/features/mute-follow/buttons-container';
-import { useTranslation } from '@/blog/i18n/client';
-import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
-import { useSessionIdentity } from '@/blog/features/layouts/server-session';
-import { useIsMutating, useQuery } from '@tanstack/react-query';
-import { fetchAccount } from '@/blog/lib/chain-fetch';
-import { IFollow } from '@hive/common-hiveio-packages/wax';
-import { useState } from 'react';
-import Loading from '@ui/components/loading';
+import FollowListView, { type FollowListEntry } from '@/blog/features/account-lists/follow-list/follow-list-view';
+import { FOLLOW_LIST_PAGE_SIZE } from '@/blog/features/account-lists/follow-list/tokens';
 
-const LIMIT = 50;
-
+/**
+ * `/@user/followers`.
+ *
+ * All chrome now lives in `FollowListView` (features/account-lists/follow-list),
+ * which this page and `/@user/following` share. What is left here is exactly the
+ * data this route owns: the followers cursor, the page index, and the count.
+ *
+ * ★ WHAT THIS FILE NO LONGER DOES, and why each was removed:
+ *   - the `div.p-2` wrapper: it made the list 16px narrower than the masthead.
+ *   - two `<h1>` "Followers page 1 from 54" sentences: not grammatical, and a
+ *     page counter is not a heading — the masthead already carries the h1.
+ *   - two `<PrevNextButtons>` blocks: rendered above AND below, both in the
+ *     `outlineRed` variant whose `text-slate-600` is rgb(71,85,105), a colour
+ *     that appears nowhere else in the product.
+ *   - the whole-list `isMutating` spinner overlay: every row's own Follow button
+ *     already shows and disables itself while its mutation is in flight, so the
+ *     overlay greyed out 49 rows the reader was not touching.
+ */
 const FollowersContent = ({
   username,
   initialFollowers
@@ -23,17 +36,15 @@ const FollowersContent = ({
   username: string;
   initialFollowers: IFollow[] | null;
 }) => {
-  const { t } = useTranslation('common_blog');
   const [page, setPage] = useState(0);
   const { user } = useUserClient();
   /**
-   * ★★★ SAME RACE AS followed/content.tsx (2026-08-12, G1). Raw
-   * `useUserClient()`'s `user.isLoggedIn`/`user.username` cannot answer during
-   * SSR, so the viewer's own follow/mute list fetches below started late and
-   * every row's follow/block control (including on your own row) was hidden
-   * until `/api/users/me` returned. `identity` is seeded from the session
-   * cookie the server already read. `user` (raw, unchanged) still goes into
-   * `ButtonsContainer`, which needs `account_tier` — not on `identity`.
+   * ★★★ SEEDED FROM THE SESSION COOKIE, NOT `useUserClient()` (2026-08-12, G1).
+   * Raw `user.isLoggedIn`/`user.username` cannot answer during SSR, so the
+   * viewer's own follow/mute list fetches below started late and every row's
+   * control was hidden until `/api/users/me` returned. `user` (raw, unchanged)
+   * still goes down into the row actions, which need `account_tier` — not a
+   * field on `identity`.
    */
   const identity = useSessionIdentity();
 
@@ -44,11 +55,7 @@ const FollowersContent = ({
     queryFn: () => fetchAccount(username)
   });
 
-  const isFollowMutating = useIsMutating({ mutationKey: ['follow'] });
-  const isUnfollowMutating = useIsMutating({ mutationKey: ['unfollow'] });
-  const isMutating = isFollowMutating > 0 || isUnfollowMutating > 0;
-
-  const followersData = useFollowersInfiniteQuery(username, LIMIT, initialFollowers);
+  const followersData = useFollowersInfiniteQuery(username, FOLLOW_LIST_PAGE_SIZE, initialFollowers);
   const following = useFollowingInfiniteQuery(identity.username, 1000, 'blog', ['blog']);
   const mute = useFollowingInfiniteQuery(identity.username, 1000, 'ignore', ['ignore']);
 
@@ -74,71 +81,40 @@ const FollowersContent = ({
     if (page <= 0) return;
     setPage((prev) => prev - 1);
   };
+
+  const items: FollowListEntry[] = useMemo(
+    () => (followersData.data?.pages[page] ?? []).map((edge) => ({ username: edge.follower })),
+    [followersData.data?.pages, page]
+  );
+
+  // Every follower fetched so far, for the search's client-side half.
+  const loadedNames = useMemo(
+    () => (followersData.data?.pages ?? []).flat().map((edge) => edge.follower),
+    [followersData.data?.pages]
+  );
+
+  const followerCount = profileData?.follow_stats?.follower_count;
+  const totalPages = followerCount ? Math.ceil(followerCount / FOLLOW_LIST_PAGE_SIZE) : 1;
+
   return (
-    <div className="flex flex-col gap-2 p-2">
-      <h1 className="self-center p-2">
-        {t('user_profile.lists.followers_pages', {
-          current: page + 1,
-          total: profileData?.follow_stats?.follower_count
-            ? Math.ceil(profileData?.follow_stats?.follower_count / LIMIT)
-            : 1
-        })}
-      </h1>
-      <PrevNextButtons
-        onNextPage={handleNextPage}
-        onPrevPage={handlePrevPage}
-        hasNextPage={!!followersData.hasNextPage}
-        hasPrevPage={page > 0}
-        isLoading={followersData.isFetchingNextPage}
-      />
-      {followersData.isLoading ? (
-        <Loading loading />
-      ) : (
-        <div className="relative">
-          {isMutating && (
-            <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/60">
-              <Loading loading />
-            </div>
-          )}
-          <ul>
-            {followersData.data?.pages[page].map((e) => (
-              <li
-                key={e.follower}
-                className="flex items-center justify-between bg-background-tertiary px-3 font-semibold text-destructive odd:bg-background"
-              >
-                <BasePathLink href={`/@${e.follower}`}>{e.follower}</BasePathLink>
-                {!identity.isLoggedIn || identity.username === e.follower ? null : (
-                  <div>
-                    <ButtonsContainer
-                      username={e.follower}
-                      user={user}
-                      variant="basic"
-                      follow={following}
-                      mute={mute}
-                    />
-                  </div>
-                )}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      <PrevNextButtons
-        onNextPage={handleNextPage}
-        onPrevPage={handlePrevPage}
-        hasNextPage={!!followersData.hasNextPage}
-        hasPrevPage={page > 0}
-        isLoading={followersData.isFetchingNextPage}
-      />
-      <h1 className="self-center p-2">
-        {t('user_profile.lists.followers_pages', {
-          current: page + 1,
-          total: profileData?.follow_stats?.follower_count
-            ? Math.ceil(profileData?.follow_stats?.follower_count / LIMIT)
-            : 1
-        })}
-      </h1>
-    </div>
+    <FollowListView
+      variant="followers"
+      account={username}
+      items={items}
+      loadedNames={loadedNames}
+      isLoading={followersData.isLoading}
+      totalCount={followerCount}
+      page={page}
+      totalPages={totalPages}
+      hasNextPage={!!followersData.hasNextPage}
+      hasPrevPage={page > 0}
+      isPageLoading={followersData.isFetchingNextPage}
+      onNextPage={handleNextPage}
+      onPrevPage={handlePrevPage}
+      user={user}
+      follow={following}
+      mute={mute}
+    />
   );
 };
 

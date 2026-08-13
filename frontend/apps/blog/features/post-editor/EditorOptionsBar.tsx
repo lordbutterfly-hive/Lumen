@@ -51,7 +51,7 @@ const EditorOptionsBar: FC<EditorOptionsBarProps> = ({
       className="flex flex-wrap items-center gap-x-5 gap-y-2 border-x border-t border-border bg-background-secondary/50 px-3 py-2"
       data-testid="editor-options-bar"
     >
-      <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#c0392b]/70">
+      <span className="text-[12px] leading-[18px] font-semibold uppercase tracking-[0.14em] text-[#c0392b]/70">
         {EDITOR_OPTIONS_LABEL}
       </span>
 

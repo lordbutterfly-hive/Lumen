@@ -89,8 +89,13 @@ export type MastheadMark = keyof typeof GLYPHS;
  */
 const MastheadGlyph: FC<{ mark: MastheadMark }> = ({ mark }) => {
   const g = GLYPHS[mark];
-  const top = INK_TOP - (BASELINE_FROM_SPAN_TOP - g.ascent) * SCALE;
-  const right = INK_RIGHT - (g.advance - g.inkRight) * SCALE;
+  // Math.round (2026-08-13, typography audit item 1): both offsets are measured
+  // ink metrics scaled by SCALE (120/146), which lands on a fraction of a pixel
+  // and was the LAST fractional-Y text node left on Home and Trending. Rounding
+  // moves the mark by at most half a pixel, well inside the optical tolerance
+  // the numbers above were tuned to, and puts it on the device pixel grid.
+  const top = Math.round(INK_TOP - (BASELINE_FROM_SPAN_TOP - g.ascent) * SCALE);
+  const right = Math.round(INK_RIGHT - (g.advance - g.inkRight) * SCALE);
   return (
     // z-0 with the content on z-10: an absolutely positioned element paints ABOVE
     // its static siblings, so without this the mark would sit ON the words at

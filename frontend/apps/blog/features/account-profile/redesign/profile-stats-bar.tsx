@@ -17,7 +17,7 @@ interface Stat {
 // The row's two grey link-buttons. 14px, the system radius for a button; these
 // were 11px, one of the several radii the pages carried side by side.
 const ROW_BUTTON_CLASS =
-  'flex items-center gap-2 rounded-[14px] border border-[#e4e6e9] bg-[#f4f5f7] px-5 py-2.5 font-sans text-[14px] font-semibold text-[#3f4650] transition-colors hover:bg-[#ebedf0]';
+  'flex items-center gap-2 rounded-[14px] border border-[#e4e6e9] bg-[#f4f5f7] px-5 py-2.5 font-sans text-[14px] leading-[22px] font-semibold text-[#3f4650] transition-colors hover:bg-[#ebedf0]';
 
 /** Followers / Posts / Following / HP stat row + grey Wallet button (design-handoff-v2, Profile.dc.html). */
 export default function ProfileStatsBar({
@@ -60,7 +60,10 @@ export default function ProfileStatsBar({
     {
       value: numberWithCommas(String(followingCount)),
       label: t('user_profile.lists.following_label'),
-      href: `/@${username}/followed`
+      // ★ `/following`, not `/followed` (2026-08-13 route rename). The old path
+      // still resolves via a permanent redirect, but an internal link that
+      // knowingly points at a redirect costs every reader an extra round trip.
+      href: `/@${username}/following`
     },
     {
       value: numberWithCommas(hp),
@@ -139,14 +142,14 @@ export default function ProfileStatsBar({
 
 function StatValue({ value }: { value: string }) {
   return (
-    <span className="font-sans text-[23px] font-bold tabular-nums tracking-[-0.02em] text-[#161511]">
+    <span className="font-sans text-[24px] leading-[36px] font-bold tabular-nums tracking-[-0.02em] text-[#161511]">
       {value}
     </span>
   );
 }
 
 function StatLabel({ label }: { label: string }) {
-  return <span className="font-sans text-[13px] font-medium text-[#6b7280]">{label}</span>;
+  return <span className="font-sans text-[13px] leading-[20px] font-medium text-[#6b7280]">{label}</span>;
 }
 
 /**
@@ -159,7 +162,7 @@ function StatSub({ sub, tooltip }: { sub: string; tooltip?: string }) {
   const text = (
     <span
       className={cn(
-        'font-sans text-[11.5px] leading-[1.35] text-[#9ca3af]',
+        'font-sans text-[12px] leading-[18px] text-[#9ca3af]',
         tooltip && 'cursor-help decoration-dotted underline-offset-2 hover:underline focus:underline'
       )}
       tabIndex={tooltip ? 0 : undefined}

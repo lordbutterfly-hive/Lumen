@@ -115,6 +115,10 @@ const hydrationCache = new Map<string, { entry: Entry; at: number }>();
 const TOPIC_CACHE_MS = 120_000;
 const TOPIC_CACHE_MAX = 200;
 const topicFeedCache = new Map<string, { entries: Entry[]; ranked: number; at: number }>();
+/** When the ranker last failed to serve a `viewer|topic`. See the branch that writes it. */
+const topicFailedAt = new Map<string, number>();
+/** How long that failure is trusted before the ranker is tried again. */
+const TOPIC_FAIL_MS = 20_000;
 const topicInflight = new Map<string, Promise<BuiltFeed | null>>();
 
 function rememberTopicFeed(key: string, entries: Entry[], ranked: number): void {
@@ -553,13 +557,38 @@ async function serveForYou(req: NextRequest): Promise<NextResponse> {
       }, viewer);
     }
 
+    // ★★★ REMEMBER THAT THE RANKER CANNOT SERVE THIS TAG (2026-08-13).
+    //
+    // `rememberTopicFeed` below only runs on SUCCESS, so when recsys cannot serve a
+    // tag — which is every tag right now — nothing was ever remembered and each
+    // request rebuilt the whole viewer state and re-attempted the ranker before
+    // handing back a fallback page that was already cached. Measured signed-in on
+    // `?tag=hive-110713`: 2,884ms cold and then a rock-steady 1,524/1,531/1,524ms,
+    // every one of them answering `cache=fallback-cached` — i.e. paying ~1.5s to
+    // serve something it already had. The plain feed on the same session is 15ms.
+    //
+    // So the negative gets a short memory of its own. `TOPIC_FAIL_MS` is deliberately
+    // much shorter than `TOPIC_CACHE_MS`: a ranker that has just come back should be
+    // picked up quickly, and being wrong here costs only that one topic page a stale
+    // fallback for a few seconds, never a wrong or missing page.
+    const failedAt = topicFailedAt.get(topicKey);
+    if (failedAt !== undefined && Date.now() - failedAt < TOPIC_FAIL_MS) {
+      return fallback(chainObserver, limit, 'unavailable', 'recsys did not return a usable feed', topic, viewer);
+    }
+
     const built = await buildTopicOnce(topicKey, async () => {
       const state = await collectViewerState(viewer, isLite, userId);
       return assembleFeed({ viewer, limit, chainObserver, topic, ...state });
     });
     if (!built) {
+      if (topicFailedAt.size >= TOPIC_CACHE_MAX) {
+        const oldest = topicFailedAt.keys().next().value;
+        if (oldest !== undefined) topicFailedAt.delete(oldest);
+      }
+      topicFailedAt.set(topicKey, Date.now());
       return fallback(chainObserver, limit, 'unavailable', 'recsys did not return a usable feed', topic, viewer);
     }
+    topicFailedAt.delete(topicKey);
     rememberTopicFeed(topicKey, built.entries, built.ranked);
     // ★ NOT RECORDED IN THE SERVED LOG, DELIBERATELY. The log's domain is the
     // PERSONAL ranked page — the thing the demotion will act on and the thing

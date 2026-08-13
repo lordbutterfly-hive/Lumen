@@ -78,7 +78,7 @@ const MainPageLayout = ({
         aria-hidden
       />
 
-      <aside className="sticky top-24 hidden h-fit md:block">
+      <aside className="sticky top-24 hidden h-fit bg-background-secondary md:block">
         <LeftRail />
       </aside>
 
@@ -87,7 +87,7 @@ const MainPageLayout = ({
           <div className="mb-5 flex w-full items-center justify-between" translate="no">
             <div className="mr-2 flex w-[320px] flex-col">
               <span
-                className="hidden font-sans text-[15px] font-semibold text-[#161511] md:block"
+                className="hidden font-sans text-[15px] leading-[24px] font-semibold text-[#161511] md:block"
                 data-testid="community-name"
               >
                 {renderListName()}
@@ -106,7 +106,7 @@ const MainPageLayout = ({
         {children}
       </main>
 
-      <aside className="sticky top-24 hidden h-fit xl:block">
+      <aside className="sticky top-24 hidden h-fit bg-background-secondary xl:block">
         <RightRail />
       </aside>
     </div>

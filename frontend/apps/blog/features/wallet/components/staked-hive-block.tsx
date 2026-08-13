@@ -14,9 +14,9 @@ import DelegatedOutPanel from './delegated-out-panel';
 
 // W-2/W-3: both were rounded-[10px], and Stake was bg-[#2f7d4f].
 const STAKE_BUTTON_CLASS =
-  'flex items-center gap-1.5 rounded-[14px] bg-[#c0392b] px-[15px] py-2 text-[13px] font-semibold text-white transition-colors hover:bg-[#96271b]';
+  'flex items-center gap-1.5 rounded-[14px] bg-[#c0392b] px-[15px] py-2 text-[13px] leading-[20px] font-semibold text-white transition-colors hover:bg-[#96271b]';
 const UNSTAKE_BUTTON_CLASS =
-  'flex items-center gap-1.5 rounded-[14px] border border-[#e4e6e9] bg-white px-[15px] py-2 text-[13px] font-semibold text-[#3f4650] transition-colors hover:bg-[#f6f7f8]';
+  'flex items-center gap-1.5 rounded-[14px] border border-[#e4e6e9] bg-white px-[15px] py-2 text-[13px] leading-[20px] font-semibold text-[#3f4650] transition-colors hover:bg-[#f6f7f8]';
 
 export default function StakedHiveBlock({
   username,
@@ -39,20 +39,20 @@ export default function StakedHiveBlock({
       <div className="flex items-start justify-between gap-4">
         <div className="max-w-[520px]">
           <div className="mb-1 flex items-center gap-2">
-            <span className="text-[15px] font-bold text-[#2a2822]">{t('wallet.staked.title')}</span>
-            <span className="rounded-[7px] bg-[#f1f3f5] px-2 py-[2px] text-[11.5px] font-bold text-[#6b7280]">
+            <span className="text-[15px] leading-[24px] font-bold text-[#2a2822]">{t('wallet.staked.title')}</span>
+            <span className="rounded-[7px] bg-[#f1f3f5] px-2 py-[2px] text-[12px] font-bold text-[#6b7280]">
               {t('wallet.staked.badge')}
             </span>
-            <span className="rounded-[7px] bg-[#e9f5ee] px-2 py-[2px] text-[11.5px] font-bold text-[#2f7d4f]">
+            <span className="rounded-[7px] bg-[#e9f5ee] px-2 py-[2px] text-[12px] font-bold text-[#2f7d4f]">
               {t('wallet.staked.apr', { apr: hpApr.toFixed(2) })}
             </span>
           </div>
-          <p className="font-serif text-[13.5px] leading-[1.5] text-[#6b7280]">{t('wallet.staked.description')}</p>
+          <p className="font-serif text-[14px] leading-[22px] text-[#6b7280]">{t('wallet.staked.description')}</p>
 
           {powerDown.isActive ? (
             <div
               // W-3: was rounded-[10px]. A notice is a row; rows are 14px.
-              className="mt-2.5 flex items-center gap-2.5 rounded-[14px] border border-[#f6e2c4] bg-[#fef6ec] px-3 py-2.5 text-[12.5px] text-[#8a5a20]"
+              className="mt-2.5 flex items-center gap-2.5 rounded-[14px] border border-[#f6e2c4] bg-[#fef6ec] px-3 py-2.5 text-[13px] leading-[20px] text-[#8a5a20]"
               data-testid="wallet-power-down-notice"
             >
               <AlertCircle className="h-[15px] w-[15px] shrink-0 text-[#c98a2b]" />
@@ -68,7 +68,7 @@ export default function StakedHiveBlock({
                 trigger={
                   <button
                     type="button"
-                    className="shrink-0 rounded-[7px] border border-[#d99] bg-white px-2.5 py-[2px] text-[11px] font-bold text-[#c0392b] hover:bg-[#fdf2f1]"
+                    className="shrink-0 rounded-[7px] border border-[#d99] bg-white px-2.5 py-[2px] text-[12px] leading-[18px] font-bold text-[#c0392b] hover:bg-[#fdf2f1]"
                     data-testid="wallet-stop-power-down"
                   >
                     {t('wallet.staked.stop')}

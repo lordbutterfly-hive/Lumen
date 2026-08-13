@@ -1053,7 +1053,7 @@ const PostContent = () => {
                   {!commentSite ? (
                     <div className="flex items-start justify-between gap-3">
                       <h1
-                        className="font-sanspro text-2xl font-extrabold leading-tight tracking-tight text-foreground sm:text-3xl"
+                        className="font-sans text-2xl font-extrabold leading-[30px] tracking-tight text-foreground sm:text-3xl sm:leading-[38px]"
                         data-testid="article-title"
                       >
                         {displayTitle}
@@ -1558,7 +1558,7 @@ const PostContent = () => {
                 <div className="md:hidden">
                   {!!suggestionData ? (
                     <div className="mt-6 border-t border-border pt-4">
-                      <h2 className="mb-3 px-4 font-sanspro text-lg font-bold">
+                      <h2 className="mb-3 px-4 font-sans text-lg font-bold">
                         You Might Also Like
                       </h2>
                       <SuggestionsList suggestions={suggestionData} horizontal />
@@ -1587,7 +1587,7 @@ const PostContent = () => {
               error state. */}
           {!!postData && !nsfwHidden && liteRepliesTruncated ? (
             <p
-              className="px-4 py-2 font-sans text-[13px] text-[#6b7280]"
+              className="px-4 py-2 font-sans text-[13px] leading-[20px] text-[#6b7280]"
               data-testid="lite-replies-truncated"
             >
               {t('post_content.lite_replies_truncated')}

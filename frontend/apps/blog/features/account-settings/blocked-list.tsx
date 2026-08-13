@@ -159,13 +159,13 @@ const BlockedList = ({ username }: { username: string }) => {
         // `undefined` on a failed read, so the empty branch below would otherwise
         // catch it and state, in plain language, that this reader has blocked nobody.
         <p
-          className="mt-4 rounded-[14px] border border-[#eee2dc] bg-[#fbfbfa] px-4 py-5 text-center text-[13.5px] text-[#6b7280]"
+          className="mt-4 rounded-[14px] border border-[#eee2dc] bg-[#fbfbfa] px-4 py-5 text-center text-[14px] leading-[22px] text-[#6b7280]"
           data-testid="settings-blocked-accounts-error"
         >
           {t('settings_page.blocked_accounts_error')}
         </p>
       ) : !data || data.length === 0 ? (
-        <p className="mt-4 rounded-[14px] bg-[#f7f7f7] px-4 py-5 text-center text-[13.5px] text-[#6b7280]">
+        <p className="mt-4 rounded-[14px] bg-[#f7f7f7] px-4 py-5 text-center text-[14px] leading-[22px] text-[#6b7280]">
           {t('settings_page.blocked_accounts_empty')}
         </p>
       ) : (
@@ -185,7 +185,7 @@ const BlockedList = ({ username }: { username: string }) => {
                 <div className="min-w-0 flex-1">
                   <BasePathLink
                     href={`/@${peer.name}`}
-                    className="block truncate text-[14px] font-semibold text-[#161511] hover:text-[#c0392b]"
+                    className="block truncate text-[14px] leading-[22px] font-semibold text-[#161511] hover:text-[#c0392b]"
                   >
                     @{peer.name}
                   </BasePathLink>
@@ -206,7 +206,7 @@ const BlockedList = ({ username }: { username: string }) => {
                 <button
                   type="button"
                   data-testid="settings-unblock-button"
-                  className="inline-flex h-9 min-w-[92px] items-center justify-center rounded-[14px] border border-[#e4e6e9] bg-white px-4 text-[13px] font-bold text-[#c0392b] transition-colors hover:border-[#c0392b] hover:bg-[#fdf2f0] disabled:cursor-not-allowed disabled:opacity-60"
+                  className="inline-flex h-9 min-w-[92px] items-center justify-center rounded-[14px] border border-[#e4e6e9] bg-white px-4 text-[13px] leading-[20px] font-bold text-[#c0392b] transition-colors hover:border-[#c0392b] hover:bg-[#fdf2f0] disabled:cursor-not-allowed disabled:opacity-60"
                   onClick={() => (fromChain ? handleChainRemove(peer) : handleUnblock(peer))}
                   disabled={pending}
                 >

@@ -31,7 +31,7 @@ export function StreakFlame({ days, active, isLowerBound = false, className }: S
   return (
     <div className={cn('inline-flex items-center gap-1.5', color, className)} data-testid="retention-streak-flame">
       <Flame className="h-4 w-4 shrink-0" fill={active ? 'currentColor' : 'none'} aria-hidden="true" />
-      <span className="text-[13px] font-medium tabular-nums" title={isLowerBound ? t('retention.day_streak_floor_hint') : undefined}>
+      <span className="text-[13px] leading-[20px] font-medium tabular-nums" title={isLowerBound ? t('retention.day_streak_floor_hint') : undefined}>
         {label}
       </span>
     </div>

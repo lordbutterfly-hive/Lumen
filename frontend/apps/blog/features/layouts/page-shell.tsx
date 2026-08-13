@@ -63,14 +63,14 @@ export default function PageShell({
         aria-hidden
       />
 
-      <aside className="sticky top-24 hidden h-fit md:block">
+      <aside className="sticky top-24 hidden h-fit bg-background-secondary md:block">
         <LeftRail />
         {leftRailExtra}
       </aside>
 
       <main className={mainClassName}>{children}</main>
 
-      {rail ? <aside className="sticky top-24 hidden h-fit xl:block">{rail}</aside> : null}
+      {rail ? <aside className="sticky top-24 hidden h-fit bg-background-secondary xl:block">{rail}</aside> : null}
     </div>
   );
 }

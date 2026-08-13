@@ -27,7 +27,7 @@ export default function AmountField({
 }) {
   return (
     <div className="flex flex-col gap-1.5">
-      <label className="text-[13px] font-semibold text-[#3f4650]">{label}</label>
+      <label className="text-[13px] leading-[20px] font-semibold text-[#3f4650]">{label}</label>
       <div className="relative">
         <Input
           {...register}
@@ -61,7 +61,7 @@ export default function AmountField({
           data-testid={testId}
           className="pr-16 font-sans tabular-nums"
         />
-        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[13px] font-semibold text-[#9ca3af]">
+        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[13px] leading-[20px] font-semibold text-[#9ca3af]">
           {currency}
         </span>
       </div>

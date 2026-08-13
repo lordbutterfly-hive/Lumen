@@ -12,7 +12,7 @@ import { Locator, Page, expect } from '@playwright/test';
  * features/app/components) and live: `/@user/posts`, `/@user/payout`,
  * `/@user/replies` and `/@user/notifications` all 302 to `/404` today —
  * those routes were deleted along with the chrome that linked to them
- * (`/comments`, `/communities`, `/settings`, `/followers`, `/followed`
+ * (`/comments`, `/communities`, `/settings`, `/followers`, `/following`
  * still resolve). Every locator and helper that targeted that chrome has
  * been removed below rather than left pointing at nothing.
  *
@@ -248,7 +248,7 @@ export class ProfilePage {
      * `features/layouts/user-profile/profile-subpage-shell.tsx:87`. Server-rendered,
      * so it is a safe wait target. Use this instead of the dead `profileInfo`
      * (`profile-info` — 0 occurrences in product source; see the class doc above)
-     * on /communities, /followers, /followed, /settings and friends.
+     * on /communities, /followers, /following, /settings and friends.
      */
     this.profileSubpageMain = page.locator('[data-testid="profile-subpage-main"]');
     this.profileName = page.locator('[data-testid="profile-name"]');
@@ -541,7 +541,10 @@ export class ProfilePage {
   }
 
   async gotoFollowedProfilePage(nickName: string) {
-    await this.page.goto(`/@${nickName}/followed`);
+    // ★ `/following` since the 2026-08-13 route rename. `/followed` still
+    // answers (308 permanent redirect) but a test that navigates through a
+    // redirect is measuring the redirect as well as the page.
+    await this.page.goto(`/@${nickName}/following`);
     await this.page.waitForLoadState('domcontentloaded');
     await this.page.waitForSelector(this.profileInfo['_selector']);
   }

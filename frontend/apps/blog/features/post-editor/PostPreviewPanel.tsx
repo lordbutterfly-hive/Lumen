@@ -77,7 +77,7 @@ export function PostPreviewPanel({
     >
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-t-[14px] border border-b-0 border-[#ebebeb] bg-white px-4 py-2">
         {/* Same section-label treatment as the metadata and publishing cards (C-14). */}
-        <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#c0392b]/70">
+        <span className="text-[12px] leading-[18px] font-semibold uppercase tracking-[0.14em] text-[#c0392b]/70">
           {t("submit_page.preview")}
         </span>
 

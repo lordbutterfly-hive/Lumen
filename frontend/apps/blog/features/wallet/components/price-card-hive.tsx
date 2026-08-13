@@ -13,8 +13,8 @@ export default function PriceCardHive() {
   if (isLoading || isError || !data) {
     return (
       <div className={CARD_CLASS} data-testid="wallet-price-hive">
-        <span className="font-sans text-[26px] font-bold tabular-nums text-[#161511]">—</span>
-        <div className="mt-1.5 text-[12.5px] text-[#6b7280]">{t('wallet.market.unavailable')}</div>
+        <span className="font-sans text-[26px] leading-[40px] font-bold tabular-nums text-[#161511]">—</span>
+        <div className="mt-1.5 text-[13px] leading-[20px] text-[#6b7280]">{t('wallet.market.unavailable')}</div>
       </div>
     );
   }
@@ -24,7 +24,7 @@ export default function PriceCardHive() {
   return (
     <div className={CARD_CLASS} data-testid="wallet-price-hive">
       <div className="flex items-center justify-between">
-        <span className="font-sans text-[26px] font-bold tabular-nums text-[#161511]">
+        <span className="font-sans text-[26px] leading-[40px] font-bold tabular-nums text-[#161511]">
           ${data.hiveUsd.toFixed(4)}
         </span>
         <span
@@ -36,7 +36,7 @@ export default function PriceCardHive() {
           {data.hiveUsd24hChange.toFixed(1)}%
         </span>
       </div>
-      <div className="mt-1.5 text-[12.5px] text-[#6b7280]">
+      <div className="mt-1.5 text-[13px] leading-[20px] text-[#6b7280]">
         {t('wallet.market.hive_via', { btc: data.hiveBtc.toFixed(8) })}
       </div>
       <div className="mt-0.5 text-[12px] text-[#9ca3af]">{t('wallet.market.hive_source')}</div>

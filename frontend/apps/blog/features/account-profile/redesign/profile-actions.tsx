@@ -97,7 +97,7 @@ export default function ProfileActions({
       <DialogLogin>
         <button
           type="button"
-          className="rounded-xl bg-[#1a1a17] px-7 py-3 font-sans text-[14.5px] font-semibold text-white"
+          className="rounded-xl bg-[#1a1a17] px-7 py-3 font-sans text-[15px] leading-[24px] font-semibold text-white"
           data-testid="profile-follow-button"
         >
           {t('user_profile.follow_button')}
@@ -193,7 +193,7 @@ export default function ProfileActions({
           below — this slot's job becomes telling the truth about moderation state. */}
       {moderation.isModerated ? (
         <span
-          className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 font-sans text-[13.5px] font-semibold text-destructive"
+          className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 font-sans text-[14px] leading-[22px] font-semibold text-destructive"
           data-testid="profile-moderated-badge"
         >
           {t(moderatedBadgeKey)}
@@ -205,7 +205,7 @@ export default function ProfileActions({
         // reason — this pair may genuinely be clean), only that the primary CTA cannot
         // honestly say which right now.
         <span
-          className="rounded-xl border border-[#e4e6e9] bg-[#f9f7f5] px-4 py-3 font-sans text-[13.5px] font-semibold text-[#6b7280]"
+          className="rounded-xl border border-[#e4e6e9] bg-[#f9f7f5] px-4 py-3 font-sans text-[14px] leading-[22px] font-semibold text-[#6b7280]"
           data-testid="profile-moderation-unknown-badge"
         >
           {t('user_profile.moderation_status_unknown_badge')}
@@ -220,7 +220,7 @@ export default function ProfileActions({
           disabled={busy || lumen.unknown}
           data-testid="profile-follow-button"
           className={cn(
-            'rounded-xl px-7 py-3 font-sans text-[14.5px] font-semibold transition-colors disabled:opacity-60',
+            'rounded-xl px-7 py-3 font-sans text-[15px] leading-[24px] font-semibold transition-colors disabled:opacity-60',
             isFollow
               ? 'border border-[#e4e6e9] bg-white text-[#3f4650] hover:bg-[#f6f7f8]'
               : 'bg-[#1a1a17] text-white hover:bg-[#2a2822]'

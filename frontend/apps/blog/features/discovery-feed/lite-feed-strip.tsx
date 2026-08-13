@@ -53,14 +53,14 @@ function LitePostCard({ entry }: { entry: Entry }) {
             route). Amber tint kept, to match this strip's own "via Lumen" accent. */}
         <UserAvatarImg username={entry.author ?? 'L'} pixelSize={24} className="bg-[#f0ead9] text-[#9a7b2e]" />
         <span className="font-medium text-[#161511]">{entry.author}</span>
-        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700">via Lumen</span>
+        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[12px] leading-[18px] font-medium text-amber-700">via Lumen</span>
         <span className="text-xs text-muted-foreground">
           · <TimeAgo date={entry.created} />
         </span>
       </div>
       {entry.title ? (
         // Decoded for the same reason as the feed card — see medium-post-card.tsx.
-        <h3 className="font-serif text-2xl font-bold leading-snug text-[#161511]">{normalizeTitle(entry.title)}</h3>
+        <h3 className="font-serif text-2xl font-bold text-[#161511]">{normalizeTitle(entry.title)}</h3>
       ) : null}
       {dek ? <p className="mt-1 line-clamp-3 font-serif text-lg text-[#4b5563]">{dek}</p> : null}
       {image ? <img src={image} alt="" className="mt-3 max-h-44 w-full rounded-lg object-cover" /> : null}

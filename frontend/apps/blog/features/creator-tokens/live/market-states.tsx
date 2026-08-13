@@ -31,8 +31,8 @@ import { useTranslation } from '@/blog/i18n/client';
 const Panel: FC<{ title: string; children: ReactNode }> = ({ title, children }) => (
   <TokenShell>
     <div className="mt-[26px] rounded-[18px] border border-[#ebebeb] bg-white p-8 shadow-[0_1px_2px_rgba(20,18,10,0.03)]">
-      <h1 className="mb-2 font-serif text-[19px] font-semibold text-[#161511]">{title}</h1>
-      <p className="max-w-[52ch] text-[14px] leading-[1.6] text-[#6b7280]">{children}</p>
+      <h1 className="mb-2 font-serif text-[20px] leading-[30px] font-semibold text-[#161511]">{title}</h1>
+      <p className="max-w-[52ch] text-[14px] leading-[22px] text-[#6b7280]">{children}</p>
     </div>
   </TokenShell>
 );
@@ -57,7 +57,7 @@ const Panel: FC<{ title: string; children: ReactNode }> = ({ title, children }) 
  */
 const LaunchEscape: FC<{ href?: string }> = ({ href }) =>
   href ? (
-    <a href={href} className="mt-4 inline-block text-[13.5px] font-semibold text-[#c0392b] hover:underline">
+    <a href={href} className="mt-4 inline-block text-[14px] leading-[22px] font-semibold text-[#c0392b] hover:underline">
       If you haven’t launched a token yet, open the launch wizard →
     </a>
   ) : null;
@@ -99,28 +99,28 @@ export const MarketReadFailed: FC<{ onRetry?: () => void; launchHref?: string }>
 export const MarketMissing: FC<{ handle: string }> = ({ handle }) => (
   <TokenShell>
     <div className="mt-[26px] rounded-[18px] border border-[#ebebeb] bg-white p-8 shadow-[0_1px_2px_rgba(20,18,10,0.03)]">
-      <h1 className="mb-2 font-serif text-[19px] font-semibold text-[#161511]">
+      <h1 className="mb-2 font-serif text-[20px] leading-[30px] font-semibold text-[#161511]">
         @{handle} hasn’t launched a token
       </h1>
-      <p className="mb-5 max-w-[52ch] text-[14px] leading-[1.6] text-[#6b7280]">
+      <p className="mb-5 max-w-[52ch] text-[14px] leading-[22px] text-[#6b7280]">
         This creator hasn’t opened a market yet, so there’s nothing to buy or spend here.
       </p>
       <div className="flex flex-wrap gap-3">
         <a
           href="/creators"
-          className="rounded-[13px] bg-[#c0392b] px-5 py-2.5 text-[14px] font-bold text-white hover:bg-[#96271b]"
+          className="rounded-[13px] bg-[#c0392b] px-5 py-2.5 text-[14px] leading-[22px] font-bold text-white hover:bg-[#96271b]"
         >
           Browse creators
         </a>
         <a
           href="/creators/launch"
-          className="rounded-[13px] border border-[#e4e6e9] px-5 py-2.5 text-[14px] font-bold text-[#161511] hover:bg-[#f6f7f8]"
+          className="rounded-[13px] border border-[#e4e6e9] px-5 py-2.5 text-[14px] leading-[22px] font-bold text-[#161511] hover:bg-[#f6f7f8]"
         >
           Launch your own token
         </a>
         <a
           href={`/@${handle}`}
-          className="rounded-[13px] border border-[#e4e6e9] px-5 py-2.5 text-[14px] font-bold text-[#161511] hover:bg-[#f6f7f8]"
+          className="rounded-[13px] border border-[#e4e6e9] px-5 py-2.5 text-[14px] leading-[22px] font-bold text-[#161511] hover:bg-[#f6f7f8]"
         >
           Back to @{handle}
         </a>

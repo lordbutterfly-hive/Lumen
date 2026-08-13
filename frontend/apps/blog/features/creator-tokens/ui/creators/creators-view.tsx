@@ -50,7 +50,7 @@ const DeliveryStrip: FC<{ marks: boolean[] }> = ({ marks }) => (
     {marks.map((answered, i) => (
       <span
         key={i}
-        className={`h-3.5 w-3.5 rounded ${answered ? 'bg-[#2f7d4f]' : 'border-[1.5px] border-[#d5d8dd] bg-white'}`}
+        className={`h-3.5 w-3.5 rounded ${answered ? 'bg-[#2f7d4f]' : 'border-2 border-[#d5d8dd] bg-white'}`}
       />
     ))}
   </div>
@@ -84,7 +84,7 @@ const CreatorCard: FC<{ c: CreatorSummary }> = ({ c }) => {
       <div className="mb-3.5 flex items-center gap-3">
         <span className="h-[46px] w-[46px] flex-shrink-0 rounded-[13px]" style={{ background: avatarFill(c.creator) }} />
         <div className="min-w-0 flex-1">
-          <div className="text-[15.5px] font-bold text-[#161511]">@{c.creator}</div>
+          <div className="text-[16px] font-bold text-[#161511]">@{c.creator}</div>
           {/* No bio: not contract state, not indexed, and inventing one under
               someone's name reads as their words. */}
         </div>
@@ -93,12 +93,12 @@ const CreatorCard: FC<{ c: CreatorSummary }> = ({ c }) => {
       {c.completionPct !== null ? (
         <div>
           <DeliveryStrip marks={marks} />
-          <div className="text-[13px] tabular-nums text-[#3f4650]">
+          <div className="text-[13px] leading-[20px] tabular-nums text-[#3f4650]">
             {c.completionPct}% completion rate · {c.answeredCount} of {c.answeredCount + c.missedCount}
             {c.medianResponseBlocks !== null ? ` · usually within ${responseLabel(c.medianResponseBlocks)}` : ''}
           </div>
           {c.avgRating !== null ? (
-            <div className="mt-1 text-[12.5px] tabular-nums text-[#6b7280]">
+            <div className="mt-1 text-[13px] leading-[20px] tabular-nums text-[#6b7280]">
               Rated {c.avgRating}/5 by {c.ratingCount} buyer{c.ratingCount === 1 ? '' : 's'}
             </div>
           ) : null}
@@ -106,14 +106,14 @@ const CreatorCard: FC<{ c: CreatorSummary }> = ({ c }) => {
       ) : (
         // No record YET — this creator simply has not been hired. Deliberately
         // not dressed up as a positive, and it is why they sort last.
-        <div className="rounded-[11px] border border-dashed border-[#e4e6e9] px-3.5 py-3 text-[13px] text-[#9ca3af]">
+        <div className="rounded-[11px] border border-dashed border-[#e4e6e9] px-3.5 py-3 text-[13px] leading-[20px] text-[#9ca3af]">
           {COPY.recordUnavailable}
         </div>
       )}
 
       <div className="mt-3.5 flex items-center justify-between gap-3 border-t border-[#f1f3f5] pt-3.5">
-        <span className="text-[12.5px] tabular-nums text-[#6b7280]">From {usdWhole(usdFromHbd(c.faceHbd))} per task</span>
-        <span className="text-[11.5px] tabular-nums text-[#9ca3af]">
+        <span className="text-[13px] leading-[20px] tabular-nums text-[#6b7280]">From {usdWhole(usdFromHbd(c.faceHbd))} per task</span>
+        <span className="text-[12px] tabular-nums text-[#9ca3af]">
           Token {usdPrice(usdFromHbd(c.priceHbd))} · cap {usdCompact(usdFromHbd(c.marketCapHbd))}
         </span>
       </div>
@@ -153,7 +153,7 @@ const CreatorsView: FC = () => {
     <div className="flex flex-col gap-5 pt-[26px]">
       <div className="rounded-[18px] border border-[#ebebeb] bg-white p-5 shadow-[0_1px_2px_rgba(20,18,10,0.03)]">
         <div className="mb-1.5 font-serif text-lg font-semibold text-[#161511]">{COPY.launchTitle}</div>
-        <p className="mb-4 font-serif text-[13.5px] leading-[1.5] text-[#6b7280]">{COPY.launchSub}</p>
+        <p className="mb-4 font-serif text-[14px] leading-[22px] text-[#6b7280]">{COPY.launchSub}</p>
         <Link
           href="/creators/studio"
           className="block rounded-[11px] bg-[#c0392b] py-3 text-center text-sm font-semibold text-white hover:bg-[#a5301f]"
@@ -162,12 +162,12 @@ const CreatorsView: FC = () => {
         </Link>
       </div>
       <div className="rounded-[18px] border border-[#ebebeb] bg-white p-5">
-        <div className="mb-3.5 text-[14.5px] font-bold text-[#161511]">{COPY.howTitle}</div>
+        <div className="mb-3.5 text-[15px] leading-[24px] font-bold text-[#161511]">{COPY.howTitle}</div>
         <div className="flex flex-col gap-3.5">
           {[COPY.how1, COPY.how2, COPY.how3].map((line, i) => (
             <div key={i} className="flex gap-3">
               <span className="font-serif font-bold text-[#c0392b]">{i + 1}</span>
-              <span className="text-[13px] leading-[1.5] text-[#3f4650]">{line}</span>
+              <span className="text-[13px] leading-[20px] text-[#3f4650]">{line}</span>
             </div>
           ))}
         </div>
@@ -181,7 +181,7 @@ const CreatorsView: FC = () => {
           shell. Same masthead as home, topics, witnesses and proposals now. No mark:
           /creators has no assigned glyph and R5 forbids inventing one. */}
       <PageMasthead title={COPY.title}>
-        <p className="max-w-[660px] text-[13px] leading-[1.55] text-[#6b7280]">{COPY.sub}</p>
+        <p className="max-w-[660px] text-[13px] leading-[20px] text-[#6b7280]">{COPY.sub}</p>
       </PageMasthead>
 
       <div className="my-5 flex flex-wrap items-center justify-between gap-4">
@@ -193,7 +193,7 @@ const CreatorsView: FC = () => {
                 key={s.id}
                 onClick={() => setSort(s.id)}
                 aria-pressed={on}
-                className={`rounded-lg px-[15px] py-2 text-[13.5px] font-semibold ${
+                className={`rounded-lg px-[15px] py-2 text-[14px] leading-[22px] font-semibold ${
                   on ? 'bg-white text-[#161511] shadow-[0_1px_2px_rgba(20,18,10,0.08)]' : 'text-[#6b7280]'
                 }`}
               >
@@ -204,7 +204,7 @@ const CreatorsView: FC = () => {
         </div>
         <button
           onClick={() => setAnswersOnly((v) => !v)}
-          className={`rounded-full border px-[15px] py-2 text-[13px] font-semibold ${answersOnly ? 'border-[#c0392b] bg-[#fbeeec] text-[#c0392b]' : 'border-[#e4e6e9] bg-white text-[#6b7280] hover:border-[#c0392b]'}`}
+          className={`rounded-full border px-[15px] py-2 text-[13px] leading-[20px] font-semibold ${answersOnly ? 'border-[#c0392b] bg-[#fbeeec] text-[#c0392b]' : 'border-[#e4e6e9] bg-white text-[#6b7280] hover:border-[#c0392b]'}`}
         >
           {COPY.answers}
         </button>
@@ -214,8 +214,8 @@ const CreatorsView: FC = () => {
         <div className="mb-[22px] rounded-2xl border border-[#ebebeb] bg-[#faf9f6] px-5 py-[18px]">
           <div className="mb-3.5 flex items-center justify-between">
             <div>
-              <div className="text-[15px] font-bold text-[#161511]">{COPY.newHere}</div>
-              <div className="text-[12.5px] text-[#9ca3af]">{COPY.newHereSub}</div>
+              <div className="text-[15px] leading-[24px] font-bold text-[#161511]">{COPY.newHere}</div>
+              <div className="text-[13px] leading-[20px] text-[#9ca3af]">{COPY.newHereSub}</div>
             </div>
             <button onClick={() => setShowNew(false)} className="cursor-pointer text-xl leading-none text-[#9ca3af]">
               ×
@@ -231,11 +231,11 @@ const CreatorsView: FC = () => {
                 <div className="mb-3 flex items-center gap-3">
                   <span className="h-10 w-10 rounded-[11px]" style={{ background: avatarFill(c.creator) }} />
                   <div>
-                    <div className="text-[14.5px] font-bold text-[#161511]">@{c.creator}</div>
+                    <div className="text-[15px] leading-[24px] font-bold text-[#161511]">@{c.creator}</div>
                   </div>
                 </div>
-                <div className="text-[12.5px] font-semibold text-[#b45309]">{COPY.newNothing}</div>
-                <div className="mt-1.5 text-[12.5px] tabular-nums text-[#6b7280]">From {usdWhole(usdFromHbd(c.faceHbd))} per task</div>
+                <div className="text-[13px] leading-[20px] font-semibold text-[#b45309]">{COPY.newNothing}</div>
+                <div className="mt-1.5 text-[13px] leading-[20px] tabular-nums text-[#6b7280]">From {usdWhole(usdFromHbd(c.faceHbd))} per task</div>
               </Link>
             ))}
           </div>
@@ -243,7 +243,7 @@ const CreatorsView: FC = () => {
       ) : null}
 
       {discovery.unavailable ? (
-        <div className="rounded-[14px] border border-dashed border-[#e4e6e9] px-5 py-8 text-center text-[13.5px] leading-[1.6] text-[#9ca3af]">
+        <div className="rounded-[14px] border border-dashed border-[#e4e6e9] px-5 py-8 text-center text-[14px] leading-[22px] text-[#9ca3af]">
           Creator tokens aren’t available on this build yet.
         </div>
       ) : discovery.isLoading ? (
@@ -252,12 +252,12 @@ const CreatorsView: FC = () => {
         // NOT "no creators" — this page must never render a failed lookup as an
         // empty market. It is the same unavailable-vs-empty rule the wallet and
         // delivery reads follow.
-        <div className="rounded-[14px] border border-dashed border-[#e4e6e9] px-5 py-8 text-center text-[13.5px] leading-[1.6] text-[#9ca3af]">
+        <div className="rounded-[14px] border border-dashed border-[#e4e6e9] px-5 py-8 text-center text-[14px] leading-[22px] text-[#9ca3af]">
           We can’t load the creator list right now. The index that ranks creators by their delivery record is
           unreachable. If you already know a creator, their token page still works: /creators/their-name.
         </div>
       ) : creators.length === 0 ? (
-        <div className="rounded-[14px] border border-dashed border-[#e4e6e9] px-5 py-8 text-center text-[13.5px] text-[#9ca3af]">
+        <div className="rounded-[14px] border border-dashed border-[#e4e6e9] px-5 py-8 text-center text-[14px] leading-[22px] text-[#9ca3af]">
           No creators have launched a token yet.
         </div>
       ) : (

@@ -94,7 +94,7 @@ export default function ProposalSupportFooter({
        */
       aria-label={canRemoveOnHover ? t('proposals.card.remove_vote_aria') : undefined}
       className={cn(
-        'group rounded-[10px] px-5 py-2.5 font-sans text-[13px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60',
+        'group rounded-[10px] px-5 py-2.5 font-sans text-[13px] leading-[20px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60',
         isSupported
           ? 'border border-[#e4e6e9] bg-white text-[#3f4650] hover:border-[#c0392b] hover:bg-[#fdf3f2] hover:text-[#c0392b] focus-visible:border-[#c0392b] focus-visible:bg-[#fdf3f2] focus-visible:text-[#c0392b]'
           : 'border border-[#e4e6e9] bg-white text-[#3f4650] hover:bg-[#f6f7f8]'
@@ -135,14 +135,14 @@ export default function ProposalSupportFooter({
 
   return (
     <div className="mt-4 flex items-center justify-between gap-4 border-t border-[#f1f3f5] pt-3.5">
-      <span className="flex items-center gap-2 font-sans text-[12.5px] text-[#6b7280]">
+      <span className="flex items-center gap-2 font-sans text-[13px] leading-[20px] text-[#6b7280]">
         <HeartIcon filled={showIndeterminate ? false : isSupported} />
         {t('proposals.card.vote_value')}{' '}
         <strong className="tabular-nums text-[#2a2822]">{formatHp(voteValueHp)}</strong>
       </span>
       {showIndeterminate ? (
         <span
-          className="font-sans text-[12.5px] italic text-[#9ca3af]"
+          className="font-sans text-[13px] leading-[20px] italic text-[#9ca3af]"
           data-testid="proposal-support-unavailable"
         >
           {t('proposals.card.votes_unavailable')}

@@ -115,10 +115,10 @@ export function WeeklyRecapCard({ className }: WeeklyRecapCardProps) {
         <Icons.close className="h-4 w-4" />
       </button>
 
-      <p className="pr-8 font-sans text-[13px] font-semibold uppercase tracking-[0.06em] text-[#9ca3af]">
+      <p className="pr-8 font-sans text-[13px] leading-[20px] font-semibold uppercase tracking-[0.06em] text-[#9ca3af]">
         {t('retention.recap.title')}
       </p>
-      <p className="mt-1.5 font-sans text-[17px] font-semibold leading-snug text-[#161511]" data-testid="retention-weekly-recap-line">
+      <p className="mt-1.5 font-sans text-[17px] font-semibold leading-[26px] text-[#161511]" data-testid="retention-weekly-recap-line">
         {segments.join(' · ')}
       </p>
       {/* ★ THE "note" LINE IS DELETED (2026-08-09). It read: "No trophy, no
@@ -128,7 +128,7 @@ export function WeeklyRecapCard({ className }: WeeklyRecapCardProps) {
           it. */}
       <Link
         href="/ranks"
-        className="mt-2.5 inline-block font-sans text-[14px] font-semibold text-[#c0392b] hover:underline"
+        className="mt-2.5 inline-block font-sans text-[14px] leading-[22px] font-semibold text-[#c0392b] hover:underline"
         data-testid="retention-weekly-recap-link"
       >
         {t('retention.recap.link')}

@@ -199,7 +199,7 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
   if (moderation.muteStatusUnknown && !moderationRevealed) {
     return (
       <article
-        className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-[18px] border border-dashed border-[#e0dcd4] bg-[#f9f7f5] p-[18px] font-sans text-[13.5px] text-[#6b7280]"
+        className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-[18px] border border-dashed border-[#e0dcd4] bg-[#f9f7f5] p-[18px] font-sans text-[14px] leading-[22px] text-[#6b7280]"
         data-testid="medium-card-moderation-unknown"
       >
         <span>{t('cards.post_card.moderation_status_unknown', { author: displayAuthor })}</span>
@@ -260,7 +260,7 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
           reads the same way everywhere in the app. */}
       {post.reblogged_by && post.reblogged_by.length > 0 ? (
         <div
-          className="mb-2.5 flex items-center gap-1.5 font-sans text-[12.5px] font-medium text-[#6b7280]"
+          className="mb-2.5 flex items-center gap-1.5 font-sans text-[13px] leading-[20px] font-medium text-[#6b7280]"
           data-testid="medium-card-reblogged-by"
         >
           <Icons.forward className="h-3.5 w-3.5 shrink-0" />
@@ -276,7 +276,7 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
       ) : null}
 
       {/* Byline row */}
-      <div className="flex flex-wrap items-center gap-2 font-sans text-[13.5px] text-[#6b7280]">
+      <div className="flex flex-wrap items-center gap-2 font-sans text-[14px] leading-[22px] text-[#6b7280]">
         <Link href={`/@${displayAuthor}`} className="shrink-0" data-testid="medium-card-avatar">
           {/* ★ STRAIGHT TO THE IMAGE HOST (2026-08-10). This one line was 29 requests
               to our own `/api/avatar` per feed page, 6.0-6.3s each on a warm server,
@@ -448,7 +448,7 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
       <div className="mt-[13px] flex flex-wrap items-start gap-[26px]">
         <div className="min-w-0 flex-1 basis-[240px]">
           <Link href={href} className="block" data-testid="medium-card-title">
-            <h2 className="line-clamp-2 font-sans text-[26px] font-semibold leading-[1.22] tracking-[-0.015em] text-[#161511]">
+            <h2 className="line-clamp-2 font-sans text-[26px] font-semibold leading-[32px] tracking-[-0.015em] text-[#161511]">
               {displayTitle}
             </h2>
           </Link>
@@ -462,7 +462,7 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
             // reader's browse-mode link list) while the title link remains the
             // one real stop.
             <Link href={href} className="mt-[10px] block" data-testid="medium-card-dek" tabIndex={-1}>
-              <p className="line-clamp-2 font-serif text-[16.5px] leading-normal text-[#4b5563]">{dek}</p>
+              <p className="line-clamp-2 font-serif text-[17px] leading-[26px] text-[#4b5563]">{dek}</p>
             </Link>
           ) : null}
 
@@ -471,10 +471,10 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
               that has no image at all. */}
           {isNsfw ? (
             <div
-              className="mt-[10px] flex flex-wrap items-center gap-2 font-sans text-[13px] text-[#6b7280]"
+              className="mt-[10px] flex flex-wrap items-center gap-2 font-sans text-[13px] leading-[20px] text-[#6b7280]"
               data-testid="medium-card-nsfw-notice"
             >
-              <span className="rounded-[6px] border border-[#c0392b] px-1.5 py-0.5 text-[11.5px] font-semibold uppercase tracking-wide text-[#c0392b]">
+              <span className="rounded-[6px] border border-[#c0392b] px-1.5 py-0.5 text-[12px] font-semibold uppercase tracking-wide text-[#c0392b]">
                 {LABELS.nsfwBadge}
               </span>
               {nsfwPreference === 'show' ? null : (
@@ -579,20 +579,37 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
           being pushed off-screen. Unlike the grid→flex change above, this one
           was not re-proven by CSS injection after the fix — flagging that
           honestly rather than claiming a measurement I didn't take. */}
+      {/* ★ 15px/24px -> 14px/22px (2026-08-13, typography pass 2: font twins).
+          The card's own byline row (above) is 14px/22px and the payout chip
+          INSIDE this very row is `text-sm`, i.e. also 14px — so the row was
+          rendering its own last child one step smaller than everything beside
+          it, and the vote count / comment count / reblog count one step LARGER
+          than the byline naming the author. That is drift, not hierarchy: an
+          action bar is not more important than the byline it sits under. One
+          step (14px/22px, the scale's UI default) for the whole row now. Icons
+          are unaffected — they are pinned at 20px in px, not em. */}
       <div
-        className="mt-[18px] flex flex-wrap items-center gap-2.5 font-sans text-[14.5px]"
+        className="mt-[18px] flex flex-wrap items-center gap-2.5 font-sans text-[14px] leading-[22px]"
         data-testid="medium-card-footer"
       >
         {/* Vote pill. The arrows are denser's real VotesComponent, so their size is
-            lifted here (21px) rather than in the shared component — the classic
+            lifted here (20px) rather than in the shared component — the classic
             feed keeps its own scale. The count's chevron is suppressed: next to a
-            live up/down pair a third arrow glyph is noise, not information. */}
+            live up/down pair a third arrow glyph is noise, not information.
+            ★ 21px -> 20px (2026-08-13, typography audit item 1). An ODD icon
+            height made this row 37px and its parent 49px, and `align-items:
+            center` then put every text child in the row on a half pixel —
+            `(49 - 36) / 2 = 6.5`. MEASURED: 120 of the 121 remaining
+            fractional-Y text nodes on Home traced to exactly this row. 20px is
+            also what the comment and reblog icons beside it already use
+            (`iconClassName="h-[20px] w-[20px]"`), so this makes the row
+            internally consistent as well as whole-pixel. */}
         {/* ★ NO PILL INSIDE THE CARD (2026-08-08). The vote controls sat in their
             own grey rounded box, which read as a card inside a card once each
             post got its own border. The vote count keeps its weight from type,
             not from a background. Hover still lights each control, matching the
             comment and reblog buttons beside it. */}
-        <div className="flex items-center gap-1 rounded-[10px] px-1 py-1.5 [&_svg]:h-[21px] [&_svg]:w-[21px]">
+        <div className="flex items-center gap-1 rounded-[10px] px-1 py-1.5 [&_svg]:h-[20px] [&_svg]:w-[20px]">
           <VotesComponentWrapper post={post} type="post" />
           {post.stats ? (
             <span className="flex items-center pl-1 font-bold tabular-nums text-[#2a2822]">

@@ -76,7 +76,7 @@ export default function AccountHistoryRow({ entry }: { entry: DescribedHistoryEn
       data-testid="wallet-history-row"
     >
       <div className="min-w-0 flex-1">
-        <p className="break-words text-[13.5px] text-[#2a2822]">
+        <p className="break-words text-[14px] leading-[22px] text-[#2a2822]">
           {t(entry.labelKey, entry.labelParams)}
           {entry.counterparty ? (
             <>
@@ -113,7 +113,7 @@ export default function AccountHistoryRow({ entry }: { entry: DescribedHistoryEn
 
       {entry.amountText ? (
         <span
-          className={`shrink-0 text-right font-sans text-[13.5px] font-semibold tabular-nums ${TONE_CLASS[entry.tone]}`}
+          className={`shrink-0 text-right font-sans text-[14px] leading-[22px] font-semibold tabular-nums ${TONE_CLASS[entry.tone]}`}
           data-testid="wallet-history-amount"
         >
           {TONE_SIGN[entry.tone]}
@@ -126,7 +126,7 @@ export default function AccountHistoryRow({ entry }: { entry: DescribedHistoryEn
         // failed to load. These operations genuinely move nothing, so the row
         // says so instead of leaving the reader to guess which it was.
         <span
-          className="shrink-0 text-right font-sans text-[12.5px] font-medium text-[#9ca3af]"
+          className="shrink-0 text-right font-sans text-[13px] leading-[20px] font-medium text-[#9ca3af]"
           data-testid="wallet-history-no-amount"
         >
           {t('wallet.history.no_amount')}

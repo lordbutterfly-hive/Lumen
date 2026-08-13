@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
 import { getClientIp } from '@/blog/lib/lite/http/ip';
 import { enforceHivesenseRate } from '@/blog/lib/lite/antispam/rate-limit';
+import { cachedRead } from '@/blog/lib/server-read-cache';
 
 const logger = getLogger('app');
 
@@ -60,6 +61,13 @@ const logger = getLogger('app');
  */
 
 const UPSTREAM_TIMEOUT_MS = 10_000;
+
+/** The `status` probe only. See its own comment in POST for the measurement. */
+const STATUS_TIMEOUT_MS = 2_500;
+
+/** How long one answer to "does this node offer hivesense" is reused server-side.
+ *  Node capability, not content: it changes when someone reconfigures a node. */
+const STATUS_CACHE_MS = 300_000;
 
 /** Upstream's own documented bound for a single by-ids call (extended-hive.chain.ts's
  *  `HivesenseEndpointsPostsByIdsPayload`, `@maxItems 50`) — not a number invented here. */
@@ -150,7 +158,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     typeof record.params === 'object' && record.params !== null ? (record.params as Record<string, unknown>) : {};
 
   const base = upstreamBase();
-  const init: RequestInit = { signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS), cache: 'no-store' };
+  // ★ THE AVAILABILITY PROBE GETS A SHORT LEASH (2026-08-13). Measured in a browser
+  // on the post page: 4,485ms, the slowest single request in the app, and fired
+  // twice. `status` answers one question — "does this node offer hivesense at all"
+  // — whose answer is the same for every reader and changes only when a node is
+  // reconfigured. Nothing on the page needs it to render; the widget it gates is
+  // below the fold. So it gets 2.5s instead of 10s: on a node that does not offer
+  // hivesense (which is the case here) waiting the full ten seconds buys exactly
+  // the same "no", ten times slower, on every post page.
+  const isStatusProbe = (operation as Operation) === 'status';
+  const init: RequestInit = {
+    signal: AbortSignal.timeout(isStatusProbe ? STATUS_TIMEOUT_MS : UPSTREAM_TIMEOUT_MS),
+    cache: 'no-store'
+  };
   let upstreamUrl: URL;
 
   switch (operation as Operation) {
@@ -215,8 +235,37 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   try {
-    const upstream = await fetch(upstreamUrl.toString(), init);
-    const text = await upstream.text();
+    // The probe's answer is identical for every reader, so one process-wide read
+    // serves them all for STATUS_CACHE_MS instead of one per post page. Every other
+    // operation is per-post and goes straight upstream, unchanged.
+    // ★★★ THE FAILURE IS THE ANSWER WORTH CACHING (2026-08-13, second pass).
+    //
+    // First attempt wrapped only the successful read, which cached nothing that
+    // mattered: this node does NOT offer hivesense, so the probe TIMES OUT, the
+    // promise rejects, and nothing is stored — every post page paid the full
+    // timeout again. Measured after that first attempt: still 3,008 ms on the post
+    // page, the slowest request left in the app.
+    //
+    // "This node has no hivesense" is a fact about the node, and a timeout is how
+    // that fact arrives. So the rejection is caught INSIDE the memo and turned into
+    // a value, which is then cached for STATUS_CACHE_MS like any other answer. The
+    // 502 shape returned here is byte-identical to what the outer catch produced
+    // before, so `getHiveSenseStatus()` still reads it as "unavailable" and the
+    // widget stays hidden exactly as it did.
+    const { status, text } = isStatusProbe
+      ? await cachedRead(`hivesense:status:${base}`, STATUS_CACHE_MS, async () => {
+          try {
+            const res = await fetch(upstreamUrl.toString(), init);
+            return { status: res.status, text: await res.text() };
+          } catch {
+            return { status: 502, text: JSON.stringify({ error: 'upstream unreachable' }) };
+          }
+        })
+      : await (async () => {
+          const res = await fetch(upstreamUrl.toString(), init);
+          return { status: res.status, text: await res.text() };
+        })();
+    const upstream = { status };
     // Pass the upstream BODY + status straight through, same posture as the
     // creator-tokens/prediction-market proxies: hivesense-api.ts already knows how
     // to read a success payload vs. an error, duplicating that here would drift.

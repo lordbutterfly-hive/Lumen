@@ -28,7 +28,18 @@
     "../../packages/ui/elements/common/layout.tsx",
     "../../packages/ui/components/time-ago.tsx",
     "../../packages/ui/components/card-skeleton.tsx",
-    ".next-dev/types/**/*.ts"
+    ".next-dev/types/**/*.ts",
+    ".next-prod4/types/**/*.ts",
+    ".next-prod5/types/**/*.ts",
+    ".next-prod6/types/**/*.ts",
+    ".next-prod8/types/**/*.ts",
+    ".next-prod9/types/**/*.ts",
+    ".next-prod10/types/**/*.ts",
+    ".next-typo/types/**/*.ts",
+    ".next-follow/types/**/*.ts",
+    ".next-all/types/**/*.ts",
+    ".next-scale/types/**/*.ts",
+    ".next-final/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",

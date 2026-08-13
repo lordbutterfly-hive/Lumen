@@ -307,8 +307,6 @@
       "muted_users": "Wyciszeni użytkownicy",
       "followed_blacklists": "Obserwowane Czarne Listy",
       "followed_muted_lists": "Obserwowane Wyciszone Listy",
-      "followers_pages": "Obserwujący, strona {{current}} z {{total}}",
-      "followed_pages": "Obserwowani, strona {{current}} z {{total}}",
       "list": {
         "unblacklist": "usuń z czarnej listy",
         "unmute": "wyłącz wyciszenie",

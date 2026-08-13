@@ -63,19 +63,19 @@ const ProfileTokenCard: FC<{ username: string; isOwnProfile: boolean }> = ({ use
       >
         <div className="min-w-0">
           <div className="flex items-center gap-[9px]">
-            <span aria-hidden="true" className="text-[13px] leading-none text-[#c0392b]">
+            <span aria-hidden="true" className="text-[13px] leading-[20px] leading-none text-[#c0392b]">
               ◈
             </span>
-            <span className="font-sans text-[11.5px] font-bold uppercase tracking-[0.14em] text-[#c0392b]">
+            <span className="font-sans text-[12px] font-bold uppercase tracking-[0.14em] text-[#c0392b]">
               {COPY.eyebrow}
             </span>
-            <span className="font-sans text-[13px] font-semibold text-[#8a827a]">@{username}</span>
+            <span className="font-sans text-[13px] leading-[20px] font-semibold text-[#8a827a]">@{username}</span>
           </div>
           <div className="mt-[11px] flex flex-wrap items-baseline gap-3.5">
-            <span className="font-sans text-[34px] font-bold tabular-nums tracking-[-0.02em] text-[#161511]">
+            <span className="font-sans text-[34px] leading-[52px] font-bold tabular-nums tracking-[-0.02em] text-[#161511]">
               {usdPrice(market.priceUsd)}
             </span>
-            <span className="font-sans text-[13.5px] font-medium text-[#8a827a]">{COPY.currentPrice}</span>
+            <span className="font-sans text-[14px] leading-[22px] font-medium text-[#8a827a]">{COPY.currentPrice}</span>
           </div>
           {/* Completion rate / median reply — indexer-backed (live/adapt.ts's
               adaptDelivery). Omitted entirely rather than shown as "unavailable"
@@ -84,13 +84,13 @@ const ProfileTokenCard: FC<{ username: string; isOwnProfile: boolean }> = ({ use
           {d.available ? (
             <div className="mt-4 flex flex-wrap gap-[26px]">
               <div className="flex flex-col gap-0.5">
-                <span className="font-sans text-[17px] font-bold tabular-nums text-[#161511]">{d.completionPct}%</span>
-                <span className="text-[12.5px] text-[#8a827a]">{COPY.completionRate}</span>
+                <span className="font-sans text-[17px] leading-[26px] font-bold tabular-nums text-[#161511]">{d.completionPct}%</span>
+                <span className="text-[13px] leading-[20px] text-[#8a827a]">{COPY.completionRate}</span>
               </div>
               {d.typicalResponse ? (
                 <div className="flex flex-col gap-0.5">
-                  <span className="font-sans text-[17px] font-bold tabular-nums text-[#161511]">{d.typicalResponse}</span>
-                  <span className="text-[12.5px] text-[#8a827a]">{COPY.medianReply}</span>
+                  <span className="font-sans text-[17px] leading-[26px] font-bold tabular-nums text-[#161511]">{d.typicalResponse}</span>
+                  <span className="text-[13px] leading-[20px] text-[#8a827a]">{COPY.medianReply}</span>
                 </div>
               ) : null}
             </div>
@@ -98,7 +98,7 @@ const ProfileTokenCard: FC<{ username: string; isOwnProfile: boolean }> = ({ use
         </div>
         <Link
           href={`/creators/${username}?a=buy`}
-          className="shrink-0 rounded-xl bg-[#c0392b] px-7 py-3 font-sans text-[14.5px] font-bold text-white transition-colors hover:bg-[#a5301f]"
+          className="shrink-0 rounded-xl bg-[#c0392b] px-7 py-3 font-sans text-[15px] leading-[24px] font-bold text-white transition-colors hover:bg-[#a5301f]"
           data-testid="profile-token-buy"
         >
           {COPY.buy}
@@ -114,17 +114,17 @@ const ProfileTokenCard: FC<{ username: string; isOwnProfile: boolean }> = ({ use
         data-testid="profile-token-card-launch"
       >
         <div className="flex items-center gap-2.5">
-          <span aria-hidden="true" className="text-[15px] leading-none text-[#c0392b]">
+          <span aria-hidden="true" className="text-[15px] leading-[24px] leading-none text-[#c0392b]">
             ◈
           </span>
           <div>
-            <div className="font-sans text-[14.5px] font-bold text-[#161511]">{COPY.launchTitle}</div>
-            <p className="mt-0.5 font-sans text-[13px] text-[#8a827a]">{COPY.launchBody}</p>
+            <div className="font-sans text-[15px] leading-[24px] font-bold text-[#161511]">{COPY.launchTitle}</div>
+            <p className="mt-0.5 font-sans text-[13px] leading-[20px] text-[#8a827a]">{COPY.launchBody}</p>
           </div>
         </div>
         <Link
           href="/creators/launch"
-          className="shrink-0 rounded-xl bg-[#c0392b] px-6 py-2.5 font-sans text-[13.5px] font-bold text-white transition-colors hover:bg-[#a5301f]"
+          className="shrink-0 rounded-xl bg-[#c0392b] px-6 py-2.5 font-sans text-[14px] leading-[22px] font-bold text-white transition-colors hover:bg-[#a5301f]"
         >
           {COPY.launchCta}
         </Link>

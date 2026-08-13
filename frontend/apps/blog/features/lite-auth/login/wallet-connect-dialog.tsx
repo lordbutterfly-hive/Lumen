@@ -158,7 +158,7 @@ const WalletConnectDialog: FC<Props> = ({ chain, onClose, onAuthenticated, onNee
           <div className="font-serif text-xl font-semibold text-[#161511]">{copy.title}</div>
           <button
             onClick={onClose}
-            className="cursor-pointer border-0 bg-transparent text-[22px] leading-none text-[#9ca3af]"
+            className="cursor-pointer border-0 bg-transparent text-[22px] leading-[34px] leading-none text-[#9ca3af]"
           >
             ×
           </button>
@@ -166,14 +166,14 @@ const WalletConnectDialog: FC<Props> = ({ chain, onClose, onAuthenticated, onNee
 
         {!manual ? (
           <>
-            <p className="mb-4 text-[13px] leading-[1.5] text-[#6b7280]">{S.connectHelp}</p>
+            <p className="mb-4 text-[13px] leading-[20px] text-[#6b7280]">{S.connectHelp}</p>
             <button
               onClick={connectAndVerify}
               disabled={connecting || !connectorReady}
-              className="flex h-12 w-full cursor-pointer items-center justify-center gap-2.5 rounded-xl bg-[#161511] text-[15px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex h-12 w-full cursor-pointer items-center justify-center gap-2.5 rounded-xl bg-[#161511] text-[15px] leading-[24px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
             >
               <span
-                className="flex h-[26px] w-[26px] flex-shrink-0 items-center justify-center rounded-full text-[13px] font-extrabold text-white"
+                className="flex h-[26px] w-[26px] flex-shrink-0 items-center justify-center rounded-full text-[13px] leading-[20px] font-extrabold text-white"
                 style={{ backgroundColor: copy.symbolBg }}
               >
                 {copy.symbol}
@@ -181,12 +181,12 @@ const WalletConnectDialog: FC<Props> = ({ chain, onClose, onAuthenticated, onNee
               {connecting ? S.connecting : copy.connect}
             </button>
             {!connectorReady ? (
-              <p className="mt-3 text-[12.5px] leading-[1.5] text-[#b45309]">{S.unconfigured}</p>
+              <p className="mt-3 text-[13px] leading-[20px] text-[#b45309]">{S.unconfigured}</p>
             ) : null}
             {chain === 'btc' ? (
               <button
                 onClick={() => setManual(true)}
-                className="mt-3 h-10 w-full cursor-pointer border-0 bg-transparent text-[13.5px] font-semibold text-[#6b7280]"
+                className="mt-3 h-10 w-full cursor-pointer border-0 bg-transparent text-[14px] leading-[22px] font-semibold text-[#6b7280]"
               >
                 {S.manualToggle}
               </button>
@@ -194,7 +194,7 @@ const WalletConnectDialog: FC<Props> = ({ chain, onClose, onAuthenticated, onNee
           </>
         ) : (
           <>
-            <label className="mb-1.5 block text-[13px] font-semibold text-[#4b5563]">{copy.addrLabel}</label>
+            <label className="mb-1.5 block text-[13px] leading-[20px] font-semibold text-[#4b5563]">{copy.addrLabel}</label>
             <div className="mb-3.5 flex items-center gap-2.5 rounded-xl border border-[#e4e6e9] px-[15px] py-3">
               <span
                 className="flex h-[30px] w-[30px] flex-shrink-0 items-center justify-center rounded-full font-extrabold text-white"
@@ -226,21 +226,21 @@ const WalletConnectDialog: FC<Props> = ({ chain, onClose, onAuthenticated, onNee
                 >
                   <path d="M12 9v4M12 17h.01M10.3 3.9l-8 14A2 2 0 004 21h16a2 2 0 001.7-3l-8-14a2 2 0 00-3.4 0z" />
                 </svg>
-                <p className="text-[12.5px] leading-[1.5] text-[#b45309]">{S.taproot}</p>
+                <p className="text-[13px] leading-[20px] text-[#b45309]">{S.taproot}</p>
               </div>
             ) : !challenge ? (
               <button
                 onClick={requestMessage}
                 disabled={busy || address.trim().length < 8}
-                className="h-12 w-full cursor-pointer rounded-xl bg-[#161511] text-[15px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                className="h-12 w-full cursor-pointer rounded-xl bg-[#161511] text-[15px] leading-[24px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {busy ? S.working : S.getMessage}
               </button>
             ) : (
               <div className="rounded-xl border border-[#ebebeb] bg-[#faf9f6] p-4">
                 <div className="mb-2 text-sm font-semibold text-[#161511]">{S.signHeading}</div>
-                <p className="mb-3 text-[13px] leading-[1.5] text-[#6b7280]">{S.signHelp}</p>
-                <div className="mb-3 whitespace-pre-wrap break-all rounded-[9px] border border-[#e4e6e9] bg-white px-3 py-2.5 font-mono text-[13px] text-[#161511]">
+                <p className="mb-3 text-[13px] leading-[20px] text-[#6b7280]">{S.signHelp}</p>
+                <div className="mb-3 whitespace-pre-wrap break-all rounded-[9px] border border-[#e4e6e9] bg-white px-3 py-2.5 font-mono text-[13px] leading-[20px] text-[#161511]">
                   {challenge.message}
                 </div>
                 <textarea
@@ -253,7 +253,7 @@ const WalletConnectDialog: FC<Props> = ({ chain, onClose, onAuthenticated, onNee
                 <button
                   onClick={verifyManual}
                   disabled={busy || signature.trim().length < 8}
-                  className="mt-3 h-12 w-full cursor-pointer rounded-xl bg-[#c0392b] text-[15px] font-semibold text-white hover:bg-[#a5301f] disabled:cursor-not-allowed disabled:opacity-50"
+                  className="mt-3 h-12 w-full cursor-pointer rounded-xl bg-[#c0392b] text-[15px] leading-[24px] font-semibold text-white hover:bg-[#a5301f] disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {busy ? S.working : S.verify}
                 </button>
@@ -267,7 +267,7 @@ const WalletConnectDialog: FC<Props> = ({ chain, onClose, onAuthenticated, onNee
                   setChallenge(null);
                   setError(null);
                 }}
-                className="mt-3 h-10 w-full cursor-pointer border-0 bg-transparent text-[13.5px] font-semibold text-[#6b7280]"
+                className="mt-3 h-10 w-full cursor-pointer border-0 bg-transparent text-[14px] leading-[22px] font-semibold text-[#6b7280]"
               >
                 {S.connectToggle}
               </button>
@@ -275,11 +275,11 @@ const WalletConnectDialog: FC<Props> = ({ chain, onClose, onAuthenticated, onNee
           </>
         )}
 
-        {error ? <p className="mt-3 text-[13px] leading-[1.5] text-[#b45309]">{error}</p> : null}
+        {error ? <p className="mt-3 text-[13px] leading-[20px] text-[#b45309]">{error}</p> : null}
 
         <button
           onClick={onClose}
-          className="mt-2 h-10 w-full cursor-pointer border-0 bg-transparent text-[13.5px] font-semibold text-[#6b7280]"
+          className="mt-2 h-10 w-full cursor-pointer border-0 bg-transparent text-[14px] leading-[22px] font-semibold text-[#6b7280]"
         >
           {S.cancel}
         </button>

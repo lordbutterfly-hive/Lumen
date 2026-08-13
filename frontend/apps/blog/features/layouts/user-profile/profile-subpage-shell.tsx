@@ -35,7 +35,14 @@ import { useTranslation } from '@/blog/i18n/client';
  * px-11 — the same one HomeShell, WitnessesShell and ProfileGrid use.
  */
 
-export type ProfileSubpage = 'settings' | 'followers' | 'followed' | 'communities' | 'lists';
+// ★ `following`, not `followed` (2026-08-13). The route was renamed to
+// `/@user/following` — the word the heading, the profile stat tile and every
+// label in the product already used — so the key that selects that heading is
+// renamed with it. `followed` is gone from this union because the only segment
+// that used it (`(user-profile)/followed`) is now a bare redirect and mounts no
+// shell at all; leaving a dead key here is how a "route and label disagree" bug
+// grows back.
+export type ProfileSubpage = 'settings' | 'followers' | 'following' | 'communities' | 'lists';
 
 const ProfileSubpageShell = ({
   username,
@@ -62,7 +69,7 @@ const ProfileSubpageShell = ({
   const titles: Record<ProfileSubpage, string> = {
     settings: t('navigation.profile_navbar.settings'),
     followers: t('user_profile.lists.followers_label'),
-    followed: t('user_profile.lists.following_label'),
+    following: t('user_profile.lists.following_label'),
     communities: t('navigation.profile_navbar.social'),
     lists: t('profile.subpage.lists_title')
   };
@@ -80,7 +87,7 @@ const ProfileSubpageShell = ({
         aria-hidden
       />
 
-      <aside className="sticky top-24 hidden h-fit md:block">
+      <aside className="sticky top-24 hidden h-fit bg-background-secondary md:block">
         <LeftRail />
       </aside>
 
@@ -101,7 +108,7 @@ const ProfileSubpageShell = ({
         {children}
       </main>
 
-      {rail ? <aside className="sticky top-24 hidden h-fit xl:block">{rail}</aside> : null}
+      {rail ? <aside className="sticky top-24 hidden h-fit bg-background-secondary xl:block">{rail}</aside> : null}
     </div>
   );
 };

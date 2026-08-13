@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
 import { getAccountFull } from '@transaction/lib/hive-api';
+import { cachedRead } from '@/blog/lib/server-read-cache';
 
 const logger = getLogger('app');
 
@@ -31,7 +32,16 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'username_required' }, { status: 400 });
   }
   try {
-    const account = await getAccountFull(username);
+    // ★ 5s SERVER-SIDE MEMO (2026-08-13) — the wire contract above is unchanged.
+    // Measured: 933ms on Home, 912ms on a topic page, 1,145ms on /@ecency, and a
+    // profile view asks twice. `getAccountFull(username)` is public chain state for
+    // that one account, identical whoever asks, so memoising it per username leaks
+    // nothing between readers; see lib/server-read-cache.ts. 5s is under two Hive
+    // blocks. RAISED 5s -> 15s after measuring: at 5s the memo expired between page
+    // navigations, so every page still paid the cold ~700-900ms. 15s covers a reader
+    // clicking through several pages; balances shown in the header can be five blocks
+    // behind, which is invisible next to the second it was costing on every route.
+    const account = await cachedRead(`account:${username}`, 15_000, () => getAccountFull(username));
     return NextResponse.json(account, { headers: { 'cache-control': 'private, no-store' } });
   } catch (error) {
     logger.error(error, 'account lookup failed for %s', username);

@@ -199,7 +199,7 @@ export function RetentionNudge({ className }: { className?: string }) {
       data-testid="retention-nudge"
       data-nudge-kind={nudge.kind}
     >
-      <p className="min-w-0 flex-1 pr-6 font-sans text-[15px] leading-snug text-[#3f4650]">
+      <p className="min-w-0 flex-1 pr-6 font-sans text-[15px] leading-[24px] text-[#3f4650]">
         {t(key, vars)}
         {/* ★★ IT LINKED TO `/notifications`, WHICH DOES NOT EXIST (found 2026-08-09 by a UX
             agent: "the nudge's only CTA 404s"). Not a typo — `app/notifications` was never

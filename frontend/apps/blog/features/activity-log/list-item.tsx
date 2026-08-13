@@ -172,7 +172,7 @@ const NotificationListItem = ({
         <Tooltip>
           <TooltipTrigger asChild>
             <div
-              className="flex shrink-0 items-center gap-1 font-sans text-[11px] text-[#6b7280]"
+              className="flex shrink-0 items-center gap-1 font-sans text-[12px] leading-[18px] text-[#6b7280]"
               data-testid="notification-reputation-badge"
               title={t('navigation.profile_notifications_tab_navbar.reputation_at_time')}
               aria-label={`${t('navigation.profile_notifications_tab_navbar.reputation_label')} ${score}`}

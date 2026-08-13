@@ -61,7 +61,7 @@ const SubmitContent = () => {
           aria-hidden
         />
 
-        <aside className="sticky top-24 hidden h-fit md:block">
+        <aside className="sticky top-24 hidden h-fit bg-background-secondary md:block">
           <LeftRail />
         </aside>
 

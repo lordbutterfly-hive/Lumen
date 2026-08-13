@@ -99,7 +99,7 @@ function TabButton({ isActive, onClick, label }: { isActive: boolean; onClick: (
       aria-selected={isActive}
       onClick={onClick}
       className={cn(
-        'flex items-center gap-2 border-b-[2.5px] px-1.5 py-3 font-sans text-[15.5px] font-semibold transition-colors',
+        'flex items-center gap-2 border-b-[2px] px-1.5 py-3 font-sans text-[16px] font-semibold transition-colors',
         isActive ? 'border-[#c0392b] text-[#161511]' : 'border-transparent text-[#6b7280] hover:text-[#161511]'
       )}
     >

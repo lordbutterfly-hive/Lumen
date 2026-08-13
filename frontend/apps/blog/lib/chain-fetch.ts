@@ -283,8 +283,88 @@ export function fetchListVotesByCommentVoter(
   permlink: string,
   voter: string
 ): Promise<{ votes: IVoteListItem[] }> {
-  const params = new URLSearchParams({ author, permlink, voter });
-  return fetchJson(`/api/comment-vote?${params.toString()}`, 'comment vote');
+  return queueCommentVote(author, permlink, voter);
+}
+
+/**
+ * ★★★ COALESCED INTO ONE REQUEST (2026-08-13). Measured signed-in on
+ * `/@lordbutterfly`: **19 `/api/comment-vote` requests on one page load**,
+ * 400-590ms each, one per rendered post — every `VotesComponent` on a feed,
+ * profile tab or comment thread mounts and asks for its own card. The browser
+ * serialises them behind its per-host connection limit, which is what put the
+ * last request on that page 12.7 seconds after the click.
+ *
+ * Every caller keeps its own `useQuery` and its own cache entry — nothing above
+ * this line changes. What changes is that the requests LEAVE together: calls
+ * landing in the same tick are collected and sent to `/api/comment-vote/bulk`
+ * as one round trip, and each caller's promise is settled from the batch.
+ *
+ * The flush is a `setTimeout(0)`, not a microtask: React mounts the cards across
+ * a render pass, and a microtask would fire between them and send batches of one.
+ *
+ * Batches are per-voter (a batch is always one viewer's own vote state) and are
+ * chunked to the route's own `MAX_TARGETS`, so a very long thread sends two
+ * requests rather than silently losing the tail.
+ *
+ * No fallback to the single-item route on failure, deliberately: the bulk route
+ * never throws for an individual target (it reports that one as "no vote"), so
+ * the only way this rejects is a total request failure — which would equally have
+ * failed all 19 individual requests.
+ */
+interface PendingCommentVote {
+  author: string;
+  permlink: string;
+  resolve: (value: { votes: IVoteListItem[] }) => void;
+  reject: (reason: unknown) => void;
+}
+
+const COMMENT_VOTE_BATCH_MAX = 100; // mirrors MAX_TARGETS in app/api/comment-vote/bulk/route.ts
+const pendingCommentVotes = new Map<string, PendingCommentVote[]>();
+let commentVoteFlushScheduled = false;
+
+function queueCommentVote(
+  author: string,
+  permlink: string,
+  voter: string
+): Promise<{ votes: IVoteListItem[] }> {
+  return new Promise((resolve, reject) => {
+    const queue = pendingCommentVotes.get(voter) ?? [];
+    queue.push({ author, permlink, resolve, reject });
+    pendingCommentVotes.set(voter, queue);
+
+    if (commentVoteFlushScheduled) return;
+    commentVoteFlushScheduled = true;
+    setTimeout(() => {
+      commentVoteFlushScheduled = false;
+      const batches = [...pendingCommentVotes];
+      pendingCommentVotes.clear();
+      for (const [batchVoter, waiting] of batches) {
+        for (let i = 0; i < waiting.length; i += COMMENT_VOTE_BATCH_MAX) {
+          void flushCommentVotes(batchVoter, waiting.slice(i, i + COMMENT_VOTE_BATCH_MAX));
+        }
+      }
+    }, 0);
+  });
+}
+
+async function flushCommentVotes(voter: string, waiting: PendingCommentVote[]): Promise<void> {
+  const params = new URLSearchParams({
+    voter,
+    targets: JSON.stringify(waiting.map((w) => [w.author, w.permlink]))
+  });
+  try {
+    const body = await fetchJson<{ votes: Record<string, IVoteListItem | null> }>(
+      `/api/comment-vote/bulk?${params.toString()}`,
+      'comment vote'
+    );
+    for (const w of waiting) {
+      const vote = body.votes?.[`${w.author.toLowerCase()}/${w.permlink}`] ?? null;
+      // Same shape the single-item route returns, so callers are unchanged.
+      w.resolve({ votes: vote ? [vote] : [] });
+    }
+  } catch (error) {
+    for (const w of waiting) w.reject(error);
+  }
 }
 
 export function fetchRebloggedBy(author: string, permlink: string): Promise<string[]> {

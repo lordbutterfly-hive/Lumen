@@ -9,9 +9,9 @@ import SavingsWithdrawDialog from './dialogs/savings-withdraw-dialog';
 
 // W-2/W-3: Deposit was bg-[#2f7d4f] and both were rounded-[10px].
 const DEPOSIT_BUTTON_CLASS =
-  'rounded-[14px] bg-[#c0392b] px-[15px] py-2 text-[13px] font-semibold text-white transition-colors hover:bg-[#96271b]';
+  'rounded-[14px] bg-[#c0392b] px-[15px] py-2 text-[13px] leading-[20px] font-semibold text-white transition-colors hover:bg-[#96271b]';
 const WITHDRAW_BUTTON_CLASS =
-  'rounded-[14px] border border-[#e4e6e9] bg-white px-[15px] py-2 text-[13px] font-semibold text-[#3f4650] transition-colors hover:bg-[#f6f7f8]';
+  'rounded-[14px] border border-[#e4e6e9] bg-white px-[15px] py-2 text-[13px] leading-[20px] font-semibold text-[#3f4650] transition-colors hover:bg-[#f6f7f8]';
 
 /**
  * One HIVE or HBD row inside the Savings Vault panel. Generic over currency
@@ -62,16 +62,16 @@ export default function SavingsSlotCard({
       <div className="min-w-0 max-w-[420px]">
         <div className="mb-1 flex items-center gap-2">
           <TokenIcon currency={currency} size={20} />
-          <span className="text-[15px] font-bold text-[#2a2822]">{title}</span>
+          <span className="text-[15px] leading-[24px] font-bold text-[#2a2822]">{title}</span>
           <span
-            className={`rounded-[7px] px-2 py-[2px] text-[11.5px] font-bold ${
+            className={`rounded-[7px] px-2 py-[2px] text-[12px] font-bold ${
               chipTone === 'green' ? 'bg-[#e9f5ee] text-[#2f7d4f]' : 'bg-[#f1f3f5] text-[#6b7280]'
             }`}
           >
             {chip}
           </span>
         </div>
-        {description ? <p className="font-serif text-[13px] text-[#6b7280]">{description}</p> : null}
+        {description ? <p className="font-serif text-[13px] leading-[20px] text-[#6b7280]">{description}</p> : null}
       </div>
       {/* ★ THE load-bearing change (map item 1). Wrapping the outer row
           alone is not enough: this button group is ~370px on its own
@@ -84,7 +84,7 @@ export default function SavingsSlotCard({
           not at a `sm:`/`md:` variant — the desktop row is still one line
           because 370px fits comfortably above ~943px, no breakpoint needed. */}
       <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2.5">
-        <span className="font-sans text-[19px] font-bold tabular-nums text-[#161511]">
+        <span className="font-sans text-[20px] leading-[30px] font-bold tabular-nums text-[#161511]">
           {formatTokenAmount(balance)}
         </span>
         <SavingsDepositDialog

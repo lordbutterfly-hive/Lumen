@@ -1,5 +1,34 @@
-import type { NextRequest, NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
+import { NextResponse } from 'next/server';
 import { createMiddleware } from '@hive/middleware/lib/common';
+
+/**
+ * ★★★ `/@user/followed` -> `/@user/following`, AS A REAL HTTP 308 (2026-08-13).
+ *
+ * The followers/following redesign renamed the route to the word the heading,
+ * the profile stat tile and every label in the product already used. The old
+ * path has been linkable for the life of the app, so it must keep resolving.
+ *
+ * ★ WHY THIS IS NOT JUST `permanentRedirect()` IN THE PAGE. It is that too —
+ * `app/[param]/(user-profile)/followed/page.tsx` calls it, as a fallback — but
+ * on its own that is NOT an HTTP redirect. Measured on the built app before
+ * this was added:
+ *
+ *     GET /@lordbutterfly/followed  ->  HTTP 200
+ *     body: <template data-dgst="NEXT_REDIRECT;replace;/@lordbutterfly/following;308;">
+ *
+ * The `(user-profile)` route group has a `loading.tsx`, so Next flushes the
+ * shell before the page component runs; by the time `permanentRedirect` throws,
+ * the status line is already sent and the redirect can only be delivered inside
+ * the RSC stream for the CLIENT router to perform. A browser follows that, but
+ * `curl`, a crawler, a link checker and any non-browser client see a 200 and a
+ * loading skeleton. A permanent rename has to be answered before rendering.
+ *
+ * Doing it here rather than in `next.config.js` `redirects()` is deliberate:
+ * that file is owned by another change in flight, and this middleware already
+ * runs on exactly this path (see the `matcher` at the bottom of this file).
+ */
+const FOLLOWED_PATH = /^\/(@|%40)([a-zA-Z0-9.-]{1,16})\/followed\/?$/;
 
 // NOTE: Nonce-based CSP is disabled because Next.js 14 doesn't fully support it.
 // Next.js internal scripts (__NEXT_DATA__, hydration) don't receive nonces automatically,
@@ -57,6 +86,16 @@ const baseMiddleware = createMiddleware({
  * that accidentally replays one reader's session to another.
  */
 export async function middleware(request: NextRequest): Promise<NextResponse> {
+  // The route rename, answered before anything renders — see FOLLOWED_PATH.
+  // `nextUrl.clone()` carries the basePath and the query string, so a link with
+  // `?foo=1` keeps it and a deployment under a basePath still lands.
+  const renamed = FOLLOWED_PATH.exec(request.nextUrl.pathname);
+  if (renamed) {
+    const url = request.nextUrl.clone();
+    url.pathname = `/@${renamed[2]}/following`;
+    return NextResponse.redirect(url, 308);
+  }
+
   const response = await baseMiddleware(request);
   if (response.headers.has('set-cookie') && !response.headers.has('cache-control')) {
     response.headers.set('cache-control', 'private, no-store');

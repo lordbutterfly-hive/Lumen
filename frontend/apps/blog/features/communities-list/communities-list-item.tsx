@@ -47,7 +47,7 @@ const CommunitiesListItem = ({
           className="flex flex-col items-start px-6 text-sm"
           data-testid="community-list-item-footer"
         >
-          <p className="text-sm font-medium leading-5 text-primary/80">
+          <p className="text-sm font-medium text-primary/80">
             {community.subscribers} {t('communities.subscribers')} <span className="mx-1">•</span>{' '}
             {community.num_authors} {t('communities.authors')} <span className="mx-1">•</span>
             {community.num_pending} {t('communities.posts')}

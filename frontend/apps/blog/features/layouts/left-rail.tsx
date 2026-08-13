@@ -46,7 +46,7 @@ type NavIcon = ComponentType<LucideProps>;
  * the page you are on look identical, and the rail stops telling you where you are.
  */
 const ROW_CLASS =
-  'flex items-center gap-[14px] rounded-xl px-[14px] py-[11px] font-sans text-[15px] text-[#4b5563] transition-colors hover:bg-[#fdf2f0] hover:text-[#c0392b]';
+  'flex items-center gap-[14px] rounded-xl px-[14px] py-[11px] font-sans text-[15px] leading-[24px] text-[#4b5563] transition-colors hover:bg-[#fdf2f0] hover:text-[#c0392b]';
 const ROW_ACTIVE_CLASS = 'bg-[#f1f3f5] font-medium text-[#161511]';
 
 /**

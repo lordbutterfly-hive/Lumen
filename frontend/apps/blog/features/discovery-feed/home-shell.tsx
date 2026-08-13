@@ -34,7 +34,7 @@ export default async function HomeShell({ showIntro = false }: { showIntro?: boo
         aria-hidden
       />
 
-      <aside className="sticky top-24 hidden h-fit md:block">
+      <aside className="sticky top-24 hidden h-fit bg-background-secondary md:block">
         <LeftRail />
       </aside>
 
@@ -76,7 +76,7 @@ export default async function HomeShell({ showIntro = false }: { showIntro?: boo
         </div>
       </main>
 
-      <aside className="sticky top-24 hidden h-fit xl:block">
+      <aside className="sticky top-24 hidden h-fit bg-background-secondary xl:block">
         <RightRail />
       </aside>
     </div>

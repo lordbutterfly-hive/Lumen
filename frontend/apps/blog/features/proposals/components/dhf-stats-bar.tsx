@@ -12,7 +12,7 @@ export default function DhfStatsBar({ stats }: { stats: DhfStats | undefined }) 
   if (!stats) {
     return (
       <div
-        className="my-5 flex flex-wrap gap-6 rounded-2xl border border-[#ebebeb] bg-[#fbfbfa] p-[16px_22px] font-sans text-[13.5px] text-[#6b7280]"
+        className="my-5 flex flex-wrap gap-6 rounded-2xl border border-[#ebebeb] bg-[#fbfbfa] p-[16px_22px] font-sans text-[14px] leading-[22px] text-[#6b7280]"
         data-testid="dhf-stats-bar-loading"
       >
         {Array.from({ length: 4 }).map((_, index) => (
@@ -24,7 +24,7 @@ export default function DhfStatsBar({ stats }: { stats: DhfStats | undefined }) 
 
   return (
     <div
-      className="my-5 flex flex-wrap gap-6 rounded-2xl border border-[#ebebeb] bg-[#fbfbfa] p-[16px_22px] font-sans text-[13.5px] text-[#6b7280]"
+      className="my-5 flex flex-wrap gap-6 rounded-2xl border border-[#ebebeb] bg-[#fbfbfa] p-[16px_22px] font-sans text-[14px] leading-[22px] text-[#6b7280]"
       data-testid="dhf-stats-bar"
     >
       <span>

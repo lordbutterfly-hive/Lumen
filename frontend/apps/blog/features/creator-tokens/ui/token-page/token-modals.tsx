@@ -15,8 +15,8 @@ export type TokenDialog = 'buy' | 'sell' | 'redeem' | 'ask' | 'send' | 'inter' |
 
 const ModalHead: FC<{ title: string; onClose: () => void }> = ({ title, onClose }) => (
   <div className="flex items-center justify-between px-6 pt-[22px]">
-    <div className="font-serif text-[21px] font-semibold text-[#161511]">{title}</div>
-    <button onClick={onClose} className="cursor-pointer border-0 bg-transparent text-[22px] text-[#9ca3af]">
+    <div className="font-serif text-[22px] leading-[32px] font-semibold text-[#161511]">{title}</div>
+    <button onClick={onClose} className="cursor-pointer border-0 bg-transparent text-[22px] leading-[34px] text-[#9ca3af]">
       ×
     </button>
   </div>
@@ -74,9 +74,9 @@ const BuyModal: FC<{
     <ModalShell width={460} onClose={onClose} title={`Buy @${m.handle} token`}>
       <ModalHead title={`Buy @${m.handle} token`} onClose={onClose} />
       <div className="px-6 pb-6 pt-[18px]">
-        <label className="mb-[7px] block text-[12.5px] font-semibold text-[#6b7280]">Amount (USD)</label>
+        <label className="mb-[7px] block text-[13px] leading-[20px] font-semibold text-[#6b7280]">Amount (USD)</label>
         <div className="mb-2.5 flex items-center rounded-xl border border-[#e4e6e9] px-4 py-3 focus-within:border-[#c0392b] focus-within:ring-1 focus-within:ring-[#c0392b]">
-          <span className="text-[22px] font-bold text-[#161511]">$</span>
+          <span className="text-[22px] leading-[34px] font-bold text-[#161511]">$</span>
           <input
             value={amt}
             onChange={(e) => {
@@ -84,7 +84,7 @@ const BuyModal: FC<{
               setFailure(null); // a fresh amount deserves a fresh attempt, not a stale error
             }}
             inputMode="decimal"
-            className="ml-0.5 flex-1 border-0 text-[22px] font-bold tabular-nums text-[#161511] outline-none"
+            className="ml-0.5 flex-1 border-0 text-[22px] leading-[34px] font-bold tabular-nums text-[#161511] outline-none"
           />
         </div>
         <div className="mb-4 flex gap-2">
@@ -95,26 +95,26 @@ const BuyModal: FC<{
                 setAmt(v);
                 setFailure(null);
               }}
-              className="flex-1 rounded-[9px] border border-[#e4e6e9] py-2 text-[13px] font-semibold text-[#3f4650] hover:border-[#c0392b] hover:text-[#c0392b]"
+              className="flex-1 rounded-[9px] border border-[#e4e6e9] py-2 text-[13px] leading-[20px] font-semibold text-[#3f4650] hover:border-[#c0392b] hover:text-[#c0392b]"
             >
               ${v}
             </button>
           ))}
         </div>
         <div className="mb-3.5 rounded-xl border border-[#ebebeb] bg-[#faf9f6] px-4 py-3.5 tabular-nums">
-          <div className="text-[15px] font-bold text-[#161511]">≈ {tok(q.tokens)} tokens</div>
-          <div className="mt-2 flex justify-between text-[12.5px] text-[#6b7280]">
+          <div className="text-[15px] leading-[24px] font-bold text-[#161511]">≈ {tok(q.tokens)} tokens</div>
+          <div className="mt-2 flex justify-between text-[13px] leading-[20px] text-[#6b7280]">
             <span>Average price</span>
             <span>~{usdPrice(q.avgPrice)} each</span>
           </div>
-          <div className="mt-1 flex justify-between text-[12.5px] text-[#6b7280]">
+          <div className="mt-1 flex justify-between text-[13px] leading-[20px] text-[#6b7280]">
             <span>Price after your buy</span>
             <span>~{usdPrice(q.priceAfter)}</span>
           </div>
         </div>
         <button
           onClick={() => setAdv((v) => !v)}
-          className="mb-3 flex items-center gap-1.5 border-0 bg-transparent text-[12.5px] font-semibold text-[#6b7280]"
+          className="mb-3 flex items-center gap-1.5 border-0 bg-transparent text-[13px] leading-[20px] font-semibold text-[#6b7280]"
         >
           Advanced {adv ? '▴' : '▾'}
         </button>
@@ -127,14 +127,14 @@ const BuyModal: FC<{
                 value={maxPrice}
                 onChange={(e) => setMaxPrice(e.target.value)}
                 inputMode="decimal"
-                className="ml-0.5 flex-1 border-0 text-[15px] font-semibold tabular-nums outline-none"
+                className="ml-0.5 flex-1 border-0 text-[15px] leading-[24px] font-semibold tabular-nums outline-none"
               />
             </div>
-            <div className="mt-1.5 text-[11.5px] text-[#9ca3af]">
+            <div className="mt-1.5 text-[12px] text-[#9ca3af]">
               Don’t buy above this — the curve moves as others trade.
             </div>
             {overMax ? (
-              <div className="mt-1.5 text-[11.5px] font-semibold text-[#b45309]">
+              <div className="mt-1.5 text-[12px] font-semibold text-[#b45309]">
                 Your buy would push the price to {usdPrice(q.priceAfter)}, above your max — lower the amount
                 or raise the cap.
               </div>
@@ -144,10 +144,10 @@ const BuyModal: FC<{
         {/* What you can actually spend, and whether you can send anything at all. */}
         <MagiFuelGauge state={spending} costBaseUnits={costBaseUnits} kind={payer?.kind} className="mb-3" />
         {blockedBySpending && payer ? <MagiFundingHelp kind={payer.kind} className="mb-3" /> : null}
-        <div className="mb-3 rounded-[10px] bg-[#f6f7f8] px-3.5 py-3 text-[12.5px] leading-[1.5] text-[#6b7280]">
+        <div className="mb-3 rounded-[10px] bg-[#f6f7f8] px-3.5 py-3 text-[13px] leading-[20px] text-[#6b7280]">
           Includes a 10% trade fee (5% to @{m.handle}, 5% to Lumen).
         </div>
-        <p className="mb-3.5 font-serif text-[12.5px] leading-[1.55] text-[#9ca3af]">
+        <p className="mb-3.5 font-serif text-[13px] leading-[20px] text-[#9ca3af]">
           This token’s price floats and you can lose money. The floor ({usdPrice(m.floorUsd)}) is what the reserve would
           pay out per token if the market wound down — not a price you can sell at on demand. Sell soon after buying and
           an early-exit fee applies on top of the trade fee.
@@ -178,7 +178,7 @@ const BuyModal: FC<{
           // Note it does NOT block on `affordability === 'unknown'`: a failed
           // balance read must not stop a user who may well be able to afford this.
           disabled={!Number.isFinite(usd) || usd <= 0 || overMax || busy || blockedBySpending}
-          className="w-full rounded-[13px] bg-[#c0392b] py-[15px] text-[15px] font-bold text-white hover:bg-[#a5301f] disabled:opacity-50"
+          className="w-full rounded-[13px] bg-[#c0392b] py-[15px] text-[15px] leading-[24px] font-bold text-white hover:bg-[#a5301f] disabled:opacity-50"
         >
           {busy
             ? 'Confirm in your wallet…'
@@ -189,7 +189,7 @@ const BuyModal: FC<{
                 : `Buy — ${usdWhole(usd)}`}
         </button>
         {failure ? (
-          <div className="mt-2.5 text-center text-[12.5px] font-semibold text-[#c0392b]">{failure}</div>
+          <div className="mt-2.5 text-center text-[13px] leading-[20px] font-semibold text-[#c0392b]">{failure}</div>
         ) : null}
         <div className="mt-2.5 text-center text-xs text-[#9ca3af]">One signature confirms your buy.</div>
       </div>
@@ -244,10 +244,10 @@ const SellModal: FC<{
       <ModalHead title={redeem ? `Redeem @${m.handle} token` : `Sell @${m.handle} token`} onClose={onClose} />
       <div className="px-6 pb-6 pt-[18px]">
         <div className="mb-[7px] flex items-center justify-between">
-          <label className="text-[12.5px] font-semibold text-[#6b7280]">Amount (tokens)</label>
+          <label className="text-[13px] leading-[20px] font-semibold text-[#6b7280]">Amount (tokens)</label>
           <button
             onClick={() => setAmt(String(held))}
-            className="border-0 bg-transparent text-[12.5px] font-semibold text-[#c0392b]"
+            className="border-0 bg-transparent text-[13px] leading-[20px] font-semibold text-[#c0392b]"
           >
             {redeem ? 'Redeem all' : 'Sell all'} ({tok(held)})
           </button>
@@ -260,16 +260,16 @@ const SellModal: FC<{
               setFailure(null); // a fresh amount deserves a fresh attempt, not a stale error
             }}
             inputMode="decimal"
-            className="flex-1 border-0 text-[22px] font-bold tabular-nums text-[#161511] outline-none"
+            className="flex-1 border-0 text-[22px] leading-[34px] font-bold tabular-nums text-[#161511] outline-none"
           />
-          <span className="text-[13px] font-semibold text-[#9ca3af]">tokens</span>
+          <span className="text-[13px] leading-[20px] font-semibold text-[#9ca3af]">tokens</span>
         </div>
         {q.exitFeePct > 0 ? (
           <div className="mb-3.5 rounded-xl border border-[#f6e2c4] bg-[#fdf6ec] px-4 py-3.5">
-            <div className="mb-1.5 text-[13.5px] font-bold text-[#b45309]">
+            <div className="mb-1.5 text-[14px] leading-[22px] font-bold text-[#b45309]">
               Early-exit fee: {feePctLabel}% now
             </div>
-            <p className="mb-2.5 text-[12.5px] leading-[1.5] text-[#8a5a20]">
+            <p className="mb-2.5 text-[13px] leading-[20px] text-[#8a5a20]">
               You’ve held these ~{m.position?.heldDays ?? 0} days. The fee drops to 0% if you hold ~6 weeks.
             </p>
             <div className="h-1.5 overflow-hidden rounded bg-[#f4e3c8]">
@@ -282,7 +282,7 @@ const SellModal: FC<{
                 style={{ width: `${(q.exitFeePct / EXIT_FEE_MAX) * 100}%` }}
               />
             </div>
-            <div className="mt-1.5 flex justify-between text-[11px] tabular-nums text-[#b45309]">
+            <div className="mt-1.5 flex justify-between text-[12px] leading-[18px] tabular-nums text-[#b45309]">
               <span>{feePctLabel}% now</span>
               <span>0% at 6 wks</span>
             </div>
@@ -298,12 +298,12 @@ const SellModal: FC<{
               rate genuinely applies to both doors (see Market position exitTaxBps). */}
           {redeem ? null : (
             <>
-              <div className="mb-1.5 flex justify-between text-[13px] text-[#3f4650]">
+              <div className="mb-1.5 flex justify-between text-[13px] leading-[20px] text-[#3f4650]">
                 <span>Curve proceeds</span>
                 <span>{usdPrice(q.curveProceedsUsd)}</span>
               </div>
               {q.exitFeeUsd > 0 ? (
-                <div className="mb-1.5 flex justify-between text-[13px] text-[#b45309]">
+                <div className="mb-1.5 flex justify-between text-[13px] leading-[20px] text-[#b45309]">
                   <span>Early-exit fee ({feePctLabel}%)</span>
                   <span>−{usdPrice(q.exitFeeUsd)}</span>
                 </div>
@@ -314,12 +314,12 @@ const SellModal: FC<{
               rail (refund.go) is a pro-rata slice of the reserve and does not pay
               it, so showing it here would be inventing a deduction. */}
           {redeem ? null : (
-            <div className="mb-2 flex justify-between text-[13px] text-[#b45309]">
+            <div className="mb-2 flex justify-between text-[13px] leading-[20px] text-[#b45309]">
               <span>Trade fee (10%)</span>
               <span>−{usdPrice(q.tradeFeeUsd)}</span>
             </div>
           )}
-          <div className="flex justify-between border-t border-[#f1f3f5] pt-2 text-[15px]">
+          <div className="flex justify-between border-t border-[#f1f3f5] pt-2 text-[15px] leading-[24px]">
             <span className="font-bold">You receive</span>
             {/* Redeem: derived from the position's own already-taxed floor value,
                 scaled pro rata — the slice is linear in tokens and the tax rate is
@@ -334,7 +334,7 @@ const SellModal: FC<{
         <button
           type="button"
           onClick={() => setAdvOpen((v) => !v)}
-          className="mb-2 border-0 bg-transparent text-[12.5px] font-semibold text-[#6b7280]"
+          className="mb-2 border-0 bg-transparent text-[13px] leading-[20px] font-semibold text-[#6b7280]"
         >
           Advanced {advOpen ? '▴' : '▾'}
         </button>
@@ -352,11 +352,11 @@ const SellModal: FC<{
                 }}
                 inputMode="decimal"
                 placeholder="optional"
-                className="flex-1 border-0 text-[15px] font-semibold tabular-nums text-[#161511] outline-none"
+                className="flex-1 border-0 text-[15px] leading-[24px] font-semibold tabular-nums text-[#161511] outline-none"
               />
-              <span className="text-[13px] font-semibold text-[#9ca3af]">HBD</span>
+              <span className="text-[13px] leading-[20px] font-semibold text-[#9ca3af]">HBD</span>
             </div>
-            <p className="mt-1.5 text-[11.5px] leading-[1.4] text-[#9ca3af]">
+            <p className="mt-1.5 text-[12px] leading-[18px] text-[#9ca3af]">
               Leave blank to always exit at the going rate. If set, the {redeem ? 'redeem' : 'sell'} reverts
               (nothing spent) when the net would fall below it.
             </p>
@@ -378,7 +378,7 @@ const SellModal: FC<{
             }
           }}
           disabled={!Number.isFinite(tokens) || tokens <= 0 || held <= 0 || tokens > held || busy}
-          className="w-full rounded-[13px] bg-[#1a1a17] py-[15px] text-[15px] font-bold text-white hover:bg-black disabled:opacity-50"
+          className="w-full rounded-[13px] bg-[#1a1a17] py-[15px] text-[15px] leading-[24px] font-bold text-white hover:bg-black disabled:opacity-50"
         >
           {busy
             ? 'Confirm in your wallet…'
@@ -389,7 +389,7 @@ const SellModal: FC<{
                 : `Sell — get ~${usdPrice(q.receiveUsd)}`}
         </button>
         {failure ? (
-          <div className="mt-2.5 text-center text-[12.5px] font-semibold text-[#c0392b]">{failure}</div>
+          <div className="mt-2.5 text-center text-[13px] leading-[20px] font-semibold text-[#c0392b]">{failure}</div>
         ) : null}
         {/* This used to read "Selling is always available — even if this market
             winds down", which is false: sell() throws once the market is
@@ -455,19 +455,19 @@ const AskModal: FC<{
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
           placeholder={`What do you want to ask @${m.handle}?`}
-          className="h-[120px] w-full resize-y rounded-xl border border-[#e4e6e9] px-4 py-3.5 font-serif text-[15px] leading-[1.5] text-[#161511] outline-none focus:border-[#c0392b]"
+          className="h-[120px] w-full resize-y rounded-xl border border-[#e4e6e9] px-4 py-3.5 font-serif text-[15px] leading-[24px] text-[#161511] outline-none focus:border-[#c0392b]"
         />
         <div className="my-2 mb-3.5 text-xs text-[#9ca3af]">
           Private — stored on Lumen, only its fingerprint goes on-chain.
         </div>
-        <div className="mb-4 rounded-xl border border-[#ebebeb] px-4 py-3.5 text-[14px] leading-[1.55] text-[#3f4650]">
+        <div className="mb-4 rounded-xl border border-[#ebebeb] px-4 py-3.5 text-[14px] leading-[22px] text-[#3f4650]">
           This costs <strong className="tabular-nums text-[#161511]">{tok(q.tokens)} tokens</strong> from your
           balance, plus a separate{' '}
           <strong className="tabular-nums text-[#161511]">{usdPrice(q.commissionUsd)}</strong> platform
           commission paid in HBD — {usdWhole(usd)} total. If unanswered within your deadline, you get it all
           back.
         </div>
-        <label className="mb-2 block text-[12.5px] font-semibold text-[#6b7280]">Answer due within</label>
+        <label className="mb-2 block text-[13px] leading-[20px] font-semibold text-[#6b7280]">Answer due within</label>
         <div className="mb-4 flex items-center gap-3.5">
           <input
             type="range"
@@ -477,7 +477,7 @@ const AskModal: FC<{
             onChange={(e) => setDeadline(Number(e.target.value))}
             className="flex-1 accent-[#c0392b]"
           />
-          <span className="w-[70px] text-right text-[14px] font-bold tabular-nums text-[#161511]">
+          <span className="w-[70px] text-right text-[14px] leading-[22px] font-bold tabular-nums text-[#161511]">
             {deadline} days
           </span>
         </div>
@@ -501,7 +501,7 @@ const AskModal: FC<{
             }
           }}
           disabled={!canAsk || busy}
-          className="w-full rounded-[13px] bg-[#1a1a17] py-[15px] text-[15px] font-semibold text-white hover:bg-black disabled:opacity-50"
+          className="w-full rounded-[13px] bg-[#1a1a17] py-[15px] text-[15px] leading-[24px] font-semibold text-white hover:bg-black disabled:opacity-50"
         >
           {busy
             ? 'Confirm in your wallet…'
@@ -512,7 +512,7 @@ const AskModal: FC<{
                 : `Send question — ${tok(q.tokens)} tokens + ${usdPrice(q.commissionUsd)} HBD`}
         </button>
         {failure ? (
-          <div className="mt-2.5 text-center text-[12.5px] font-semibold text-[#c0392b]">{failure}</div>
+          <div className="mt-2.5 text-center text-[13px] leading-[20px] font-semibold text-[#c0392b]">{failure}</div>
         ) : null}
       </div>
     </ModalShell>
@@ -535,7 +535,7 @@ const SendModal: FC<{
     <ModalShell width={420} onClose={onClose} title={`Send @${m.handle} tokens`}>
       <ModalHead title={`Send @${m.handle} tokens`} onClose={onClose} />
       <div className="px-6 pb-6 pt-[18px]">
-        <label className="mb-1.5 block text-[12.5px] font-semibold text-[#6b7280]">
+        <label className="mb-1.5 block text-[13px] leading-[20px] font-semibold text-[#6b7280]">
           To (Lumen or Hive name)
         </label>
         <input
@@ -545,13 +545,13 @@ const SendModal: FC<{
             setFailure(null);
           }}
           placeholder="@name"
-          className="mb-3.5 w-full rounded-xl border border-[#e4e6e9] px-4 py-3 text-[15px] font-semibold text-[#161511] outline-none focus:border-[#c0392b] focus:ring-1 focus:ring-[#c0392b]"
+          className="mb-3.5 w-full rounded-xl border border-[#e4e6e9] px-4 py-3 text-[15px] leading-[24px] font-semibold text-[#161511] outline-none focus:border-[#c0392b] focus:ring-1 focus:ring-[#c0392b]"
         />
         <div className="mb-1.5 flex items-center justify-between">
-          <label className="text-[12.5px] font-semibold text-[#6b7280]">Amount (tokens)</label>
+          <label className="text-[13px] leading-[20px] font-semibold text-[#6b7280]">Amount (tokens)</label>
           <button
             onClick={() => setAmt(String(held))}
-            className="border-0 bg-transparent text-[12.5px] font-semibold text-[#c0392b]"
+            className="border-0 bg-transparent text-[13px] leading-[20px] font-semibold text-[#c0392b]"
           >
             Max ({tok(held)})
           </button>
@@ -564,7 +564,7 @@ const SendModal: FC<{
           }}
           inputMode="decimal"
           placeholder="0"
-          className="mb-3.5 w-full rounded-xl border border-[#e4e6e9] px-4 py-3 text-[22px] font-bold tabular-nums text-[#161511] outline-none focus:border-[#c0392b] focus:ring-1 focus:ring-[#c0392b]"
+          className="mb-3.5 w-full rounded-xl border border-[#e4e6e9] px-4 py-3 text-[22px] leading-[34px] font-bold tabular-nums text-[#161511] outline-none focus:border-[#c0392b] focus:ring-1 focus:ring-[#c0392b]"
         />
         <button
           onClick={async () => {
@@ -587,7 +587,7 @@ const SendModal: FC<{
             }
           }}
           disabled={!valid || busy}
-          className="w-full rounded-[13px] bg-[#1a1a17] py-[15px] text-[15px] font-bold text-white hover:bg-black disabled:opacity-50"
+          className="w-full rounded-[13px] bg-[#1a1a17] py-[15px] text-[15px] leading-[24px] font-bold text-white hover:bg-black disabled:opacity-50"
         >
           {busy
             ? 'Confirm in your wallet…'
@@ -596,7 +596,7 @@ const SendModal: FC<{
               : `Send ${tok(tokens)} tokens`}
         </button>
         {failure ? (
-          <div className="mt-2.5 text-center text-[12.5px] font-semibold text-[#c0392b]">{failure}</div>
+          <div className="mt-2.5 text-center text-[13px] leading-[20px] font-semibold text-[#c0392b]">{failure}</div>
         ) : null}
         <div className="mt-2.5 text-center text-xs text-[#9ca3af]">
           Transfers are free and instant on Lumen. Never blocked by billing.
@@ -609,7 +609,7 @@ const SendModal: FC<{
 const InterstitialModal: FC<{ handle: string; onClose: () => void }> = ({ onClose }) => (
   <ModalShell width={480} onClose={onClose} title="Before you trade this token">
     <div className="px-6 py-[26px]">
-      <div className="mb-[18px] font-serif text-[22px] font-semibold text-[#161511]">
+      <div className="mb-[18px] font-serif text-[22px] leading-[34px] font-semibold text-[#161511]">
         Before you trade this token
       </div>
       <div className="mb-[22px] flex flex-col gap-3.5">
@@ -619,7 +619,7 @@ const InterstitialModal: FC<{ handle: string; onClose: () => void }> = ({ onClos
           'The floor, shown next to the price, is what the reserve would pay out per token if the market wound down — not a price you can always sell at.',
           'Selling soon after buying has an early-exit fee that fades to zero over 6 weeks.'
         ].map((line, i) => (
-          <p key={i} className="font-serif text-[14px] leading-[1.55] text-[#3f4650]">
+          <p key={i} className="font-serif text-[14px] leading-[22px] text-[#3f4650]">
             {line}
           </p>
         ))}
@@ -627,7 +627,7 @@ const InterstitialModal: FC<{ handle: string; onClose: () => void }> = ({ onClos
       <div className="flex gap-3">
         <button
           onClick={onClose}
-          className="flex-1 rounded-xl bg-[#1a1a17] py-3.5 text-[14.5px] font-semibold text-white hover:bg-black"
+          className="flex-1 rounded-xl bg-[#1a1a17] py-3.5 text-[15px] leading-[24px] font-semibold text-white hover:bg-black"
         >
           I understand — show the market
         </button>

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
+import { cachedRead } from '@/blog/lib/server-read-cache';
 import { getFollowing } from '@transaction/lib/hive-api';
 
 const logger = getLogger('app');
@@ -21,7 +22,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'account_required' }, { status: 400 });
   }
   try {
-    const following = await getFollowing({ account, start, type, limit });
+    // ★ MEMOISED (2026-08-13): measured firing four times on one profile view.
+    // A follow list is public chain data for `account`, identical whoever asks, so
+    // one upstream read serves the burst. See lib/server-read-cache.ts.
+    const following = await cachedRead(
+      `following:${account}:${type}:${start}:${limit}`,
+      15_000,
+      () => getFollowing({ account, start, type, limit })
+    );
     return NextResponse.json(following, { headers: { 'cache-control': 'private, no-store' } });
   } catch (error) {
     logger.error(error, 'following lookup failed for %s', account);

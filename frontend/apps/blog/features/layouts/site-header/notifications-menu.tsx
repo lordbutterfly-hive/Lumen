@@ -155,7 +155,7 @@ const NotificationsMenu = forwardRef<HTMLButtonElement, {
               type="button"
               onClick={handleMarkAllAsRead}
               disabled={markAllAsRead.isPending}
-              className="shrink-0 rounded-[14px] px-2 py-1 font-sans text-[12.5px] font-semibold text-[#c0392b] transition-colors hover:bg-[#fdf2f0] disabled:cursor-not-allowed disabled:opacity-50"
+              className="shrink-0 rounded-[14px] px-2 py-1 font-sans text-[13px] leading-[20px] font-semibold text-[#c0392b] transition-colors hover:bg-[#fdf2f0] disabled:cursor-not-allowed disabled:opacity-50"
               data-testid="notifications-mark-all-read"
             >
               {markAllAsRead.isPending ? (

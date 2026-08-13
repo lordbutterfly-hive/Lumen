@@ -16,9 +16,9 @@ const COPY = {
 };
 
 const PRIMARY =
-  'inline-flex h-10 items-center justify-center rounded-[14px] bg-[#c0392b] px-5 font-sans text-[14px] font-semibold text-white transition-colors hover:bg-[#a83224]';
+  'inline-flex h-10 items-center justify-center rounded-[14px] bg-[#c0392b] px-5 font-sans text-[14px] leading-[22px] font-semibold text-white transition-colors hover:bg-[#a83224]';
 const SECONDARY =
-  'inline-flex h-10 items-center justify-center rounded-[14px] border border-[#e4e6e9] px-5 font-sans text-[14px] font-semibold text-[#3f4650] transition-colors hover:bg-[#f6f7f8]';
+  'inline-flex h-10 items-center justify-center rounded-[14px] border border-[#e4e6e9] px-5 font-sans text-[14px] leading-[22px] font-semibold text-[#3f4650] transition-colors hover:bg-[#f6f7f8]';
 
 /**
  * ★★★ THE 404 WAS THE ONE PAGE NOT BUILT IN THIS PRODUCT (2026-08-10).
@@ -45,7 +45,7 @@ export default function NotFound() {
         aria-hidden
       />
 
-      <aside className="sticky top-24 hidden h-fit md:block">
+      <aside className="sticky top-24 hidden h-fit bg-background-secondary md:block">
         <LeftRail />
       </aside>
 
@@ -53,10 +53,10 @@ export default function NotFound() {
         <p className="font-sans text-[12px] font-bold uppercase tracking-[0.14em] text-[#c0392b]">
           {COPY.code}
         </p>
-        <h1 className="mt-3 max-w-[16ch] font-serif text-[38px] font-bold leading-[1.12] text-[#161511]">
+        <h1 className="mt-3 max-w-[16ch] font-serif text-[34px] font-bold leading-[44px] text-[#161511]">
           {COPY.title}
         </h1>
-        <p className="mt-4 max-w-[46ch] font-serif text-[15px] leading-[1.65] text-[#6b7280]">
+        <p className="mt-4 max-w-[46ch] font-serif text-[15px] leading-[26px] text-[#6b7280]">
           {COPY.body}
         </p>
         <div className="mt-7 flex flex-wrap items-center gap-3">

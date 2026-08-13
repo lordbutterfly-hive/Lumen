@@ -47,8 +47,8 @@ const SuggestionsCard = ({ entry, horizontal }: SuggestionsCardProps) => {
             </div>
           )}
           <div className="p-2">
-            <h2 className="line-clamp-2 text-xs font-semibold leading-tight">{displayTitle}</h2>
-            <p className="mt-1 truncate text-[11px] text-muted-foreground">@{displayAuthor}</p>
+            <h2 className="line-clamp-2 text-xs font-semibold">{displayTitle}</h2>
+            <p className="mt-1 truncate text-[12px] leading-[18px] text-muted-foreground">@{displayAuthor}</p>
           </div>
         </Link>
       </div>

@@ -139,6 +139,41 @@
       'rlig' 1,
       'calt' 1;
   }
+
+  /**
+   * ★★★ THE ONLY FRACTIONAL FONT-SIZE LEFT IN THE APP WAS HERE
+   * (2026-08-13, typography pass 2).
+   *
+   * The rendered census of 15 signed-in routes reported exactly one fractional
+   * size app-wide — 11.25px — with no `11.25` anywhere in the repo to explain
+   * it. Traced to a real post: `<sub>` inside a comment body, i.e. Preflight's
+   * `sub, sup { font-size: 75% }` (Preflight ships modern-normalize; this is
+   * not our declaration) landing on `commentClassName`'s 15px lg step.
+   * 0.75 x 15 = 11.25. `small { font-size: 80% }` is the same trap one element
+   * over: 0.8 x 17 (post body) = 13.6px.
+   *
+   * A PERCENTAGE CAN NEVER BE SAFE HERE, which is why this is absolute and not
+   * a tidier ratio. Our reading containers are deliberately 13px, 14px, 15px
+   * and 17px (`commentClassName`, `postClassName`) — none of them a multiple
+   * of 4 — so any percentage that reads well at one of them is fractional at
+   * the others, and a fractional glyph size drags the whole following block
+   * off the device pixel grid via prose's unitless 1.75 leading.
+   *
+   * 12px and 13px are steps on the scale (see the shared tailwind.config.js).
+   * Hive authors use `<sub>` as this platform's small-print convention — long
+   * footnote sentences, not just numeric subscripts — so it lands on the
+   * micro step rather than something smaller. `line-height` is left to
+   * Preflight's `0` for sub/sup, which is what keeps a subscript from opening
+   * up the line box it sits in; `rendererContainer.tsx` re-adds an explicit
+   * whole-pixel leading to prose `<sub>` where it needs one.
+   */
+  sub,
+  sup {
+    font-size: 12px;
+  }
+  small {
+    font-size: 13px;
+  }
 }
 
 .prose :where(code):not(:where([class~='not-prose'], [class~='not-prose'] *)):after,
