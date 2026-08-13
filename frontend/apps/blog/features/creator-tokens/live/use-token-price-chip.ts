@@ -33,6 +33,7 @@ import { useQuery } from '@tanstack/react-query';
 import { getCreatorTokensDataSource } from '../lib/creator-tokens-data-source';
 import { usdFromHbd } from './adapt';
 import { creatorMarketKey } from './use-live-token-market';
+import type { Market } from '../types';
 
 const STALE_MS = 15_000;
 const REFETCH_MS = 30_000;
@@ -55,7 +56,35 @@ export function useTokenPriceChip(handle: string): TokenPriceChip {
     queryFn: () => dataSource!.readMarket(trimmed),
     enabled,
     staleTime: STALE_MS,
-    refetchInterval: REFETCH_MS,
+    // ★ STOP POLLING ONCE THE ANSWER CANNOT CHANGE (O6 build map item 6,
+    // 2026-08-13). `readMarket` never throws on a failed chain/indexer read —
+    // it CATCHES and resolves `unknownMarket()` (`vsc-data-source.ts`) so the
+    // chip never renders broken mid-outage. But that means react-query always
+    // sees a "success", so its own `retry`/backoff never engages — a constant
+    // 30s number here polled a DEAD backend forever, on every page, for the
+    // rest of the session: measured live, 2 POSTs per refetch (`getStateByKeys`
+    // + `getHeadBlock` in one `Promise.all`) against an indexer that was 502ing
+    // throughout, including on routes with no creator-token UI at all
+    // (`/witnesses`). This hook has three callers (this file's own doc), all
+    // deduping onto the same `creatorMarketKey`, so the fix belongs here, not
+    // in any one caller — `site-header/user-menu.tsx` picks it up for free.
+    //
+    // Cadence is data-driven, not a constant: keep polling only while the last
+    // resolved answer was a LIVE market. `null` (this creator has never
+    // registered one — not a fact that changes on a clock) and `'UNKNOWN'`
+    // (the read itself failed) both stop the interval. `data === undefined`
+    // (no answer yet — first mount, or `enabled` just flipped true) keeps the
+    // original constant cadence so the FIRST successful read is never starved.
+    // A later remount (e.g. navigating away and back) still fires that one-time
+    // mount read, so "no market -> has market" is never permanently missed —
+    // only the blind, indefinite repeat against a known-bad or known-empty
+    // answer is.
+    refetchInterval: (data: Market | null | undefined) => {
+      if (data === undefined) return REFETCH_MS;
+      if (data === null) return false;
+      if (data.phase === 'UNKNOWN') return false;
+      return REFETCH_MS;
+    },
     // One retry, same reasoning as discovery: a chip that hangs through three
     // backoffs on a busy feed reads as broken, and readMarket already has its
     // own honest 'UNKNOWN' fallback for a failed read.

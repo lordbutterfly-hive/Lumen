@@ -2,12 +2,30 @@
   "global": {
     "no_rewards": "No rewards pending redemption.",
     "loading": "Loading",
+    "loading_post": "Loading post",
+    "loading_posts": "Loading posts",
+    "loading_profile": "Loading profile",
+    "loading_followers": "Loading followers",
+    "loading_following": "Loading following",
+    "loading_communities": "Loading communities",
+    "loading_comments": "Loading comments",
+    "loading_search_results": "Loading search results",
+    "loading_creators": "Loading creators",
+    "loading_market": "Loading market",
+    "loading_proposals": "Loading proposals",
+    "home_feed": "Home feed",
+    "close": "Close",
+    "cancel": "Cancel",
+    "ok": "OK",
     "publishing": "Publishing...",
     "confirmed_indexing": "Confirmed on blockchain. Waiting for indexing...",
     "indexing_slow": "Indexing is taking longer than usual. This is normal during high traffic.",
     "indexing_timeout": "Post indexing timed out. Your post may still appear shortly. Try reloading the page.",
     "reload_page": "Reload page",
     "something_went_wrong": "Something went wrong",
+    "offline_title": "You're offline",
+    "offline_banner": "You're offline. Lumen can't open anything new until your connection is back.",
+    "offline_blocked": "Lumen needs a connection to open that. It will work again once you're back online.",
     "unavailable_for_legal_reasons": "Unavailable For Legal Reasons",
     "time_ago": {
       "a_few_seconds": " a few seconds ago",
@@ -90,6 +108,7 @@
     },
     "communities_nav": {
       "my_friends": "My friends",
+      "user_friends": "Accounts @{{username}} follows",
       "all_posts": "All posts",
       "trending_communities": "Trending Communities",
       "explore_communities": "Explore communities..."
@@ -261,7 +280,10 @@
       "reason_low_reputation": "low reputation",
       "reason_community_role": "muted in community",
       "replying_to": "Replying to @{{author}}",
-      "manage_list_link": "Manage list"
+      "manage_list_link": "Manage list",
+      "publish_queued": "Queued to publish to Hive.",
+      "publish_waiting": "Saved on Lumen. Still waiting for its turn to reach Hive.",
+      "publish_delayed": "Saved on Lumen, but it hasn't reached Hive yet. Your writing is safe — nothing is lost."
     }
   },
   "alert_dialog_reblog": {
@@ -573,6 +595,11 @@
       "view_the_full_context": "View the full context",
       "view_the_direct_parent": "View the direct parent"
     },
+    "delete_dialog": {
+      "title_post": "Confirm Delete Post",
+      "title_comment": "Confirm Delete Comment",
+      "confirm": "Are you sure?"
+    },
     "header": {
       "hover_author": {
         "follow_button": "Follow",
@@ -658,7 +685,8 @@
       "ok": "OK",
       "lite_cannot_flag": "Reporting a post to its community moderators needs a full Hive account. Upgrade to report."
     },
-    "a_community": "a community"
+    "a_community": "a community",
+    "lite_replies_truncated": "Some replies aren’t shown here — this thread is larger than we can load at once."
   },
   "submit_page": {
     "log_in_to_post": "Log in to make a post.",
@@ -678,6 +706,7 @@
     "metadata_section": "Metadata",
     "publishing_section": "Publishing",
     "title": "Title",
+    "post_body": "Post body",
     "insert_images_by_dragging": "Insert images by dragging & dropping or by ",
     "insert_images_info": "Selecting image is provide in editor toolbar via picture icon",
     "insert_images_text": "Select image",
@@ -779,6 +808,8 @@
     "shadow_draft_discard": "Discard"
   },
   "search_page": {
+    "heading": "Search",
+    "heading_for_query": "Search results for “{{query}}”",
     "placeholder": "Search",
     "no_results": "Nothing was found.",
     "error": "There was an error",
@@ -858,7 +889,11 @@
     "blocked_accounts_error": "We could not load your blocked accounts. Reload the page to try again.",
     "blocked_accounts_chain_hint": "Muted on Hive from another app. Unblocking here signs an on-chain transaction and needs Hive Keychain.",
     "unblock_button": "Unblock",
-    "update_hint": "Edit any field above to enable Update."
+    "update_hint": "Edit any field above to enable Update.",
+    "preferences_device_scope": "These apply to this browser only. They are not saved to your account, and other devices keep their own.",
+    "saved_on_this_browser": "Saved — this browser only.",
+    "legal_title": "Legal & Help",
+    "help_link": "Help"
   },
   "four_oh_four": {
     "this_page_does_not_exist": "Sorry! This page does not exist.",
@@ -1245,9 +1280,13 @@
         "next": "Next",
         "recipient_not_found": "Account not found",
         "recipient_required": "Recipient is required",
+        "recipient_length": "Hive account names are 3–16 characters",
+        "recipient_check_failed": "Couldn't check this account — try again",
         "amount_positive": "Amount must be greater than 0",
+        "amount_invalid": "Enter an amount using a dot for decimals, e.g. 1.5",
         "amount_exceeds_balance": "Amount exceeds available balance",
         "amount_precision": "Amount has too many decimal places",
+        "memo_too_long": "Memo is too long (max 2048 characters)",
         "success_title": "Transaction broadcast",
         "error_title": "Transaction failed"
       },
@@ -1263,7 +1302,8 @@
         "title": "Power Down",
         "description": "Schedule a 13-week Hive Power withdrawal.",
         "per_week": "≈ {{amount}} HIVE per payment, across 13 weekly payments",
-        "already_active": "A power down is already in progress: {{remaining}} HIVE remaining."
+        "already_active": "A power down is already in progress: {{remaining}} HIVE remaining.",
+        "available": "Available to power down: {{amount}} HP"
       },
       "stop_power_down": {
         "title": "Stop power down",
@@ -1290,7 +1330,9 @@
         "title": "Recurring transfer",
         "description": "Schedule an automatic repeating transfer.",
         "recurrence_hours": "Repeat every (hours, min 24)",
-        "executions": "Number of payments (min 2)"
+        "executions": "Number of payments (min 2)",
+        "recurrence_min": "Repeat at least every 24 hours",
+        "executions_min": "Schedule at least 2 payments"
       },
       "claim_account": {
         "title": "Claim account token",
@@ -1303,7 +1345,8 @@
     },
     "lite_title": "No wallet yet",
     "lite_body": "A Lumen account has no Hive wallet of its own. Upgrade to a full Hive account to get one. Your posts, followers and history all come with you on Lumen.",
-    "lite_upgrade": "Upgrade my account"
+    "lite_upgrade": "Upgrade my account",
+    "session_unavailable": "We couldn’t check your account, so the advanced tools are hidden. Reload to try again."
   },
   "profile": {
     "following": "Following",
@@ -1566,7 +1609,8 @@
         "post_not_found": "No post found at @{{creator}}/{{permlink}}. Create the post first, then link it here."
       }
     },
-    "lite_cannot_vote": "Voting on proposals needs a full Hive account. Upgrade to vote."
+    "lite_cannot_vote": "Voting on proposals needs a full Hive account. Upgrade to vote.",
+    "session_unavailable": "We couldn’t check your account just now, so this is unavailable. Reload to try again."
   },
   "prediction_market": {
     "heading": "Prediction Market",

@@ -485,7 +485,8 @@
       "community_rules": "Reglas de la comunidad",
       "cancel": "Cancelar",
       "ok": "Aceptar"
-    }
+    },
+    "lite_replies_truncated": "Algunas respuestas no se muestran aquí: este hilo es más grande de lo que podemos cargar de una vez."
   },
   "submit_page": {
     "log_in_to_post": "Inicia sesión para publicar.",

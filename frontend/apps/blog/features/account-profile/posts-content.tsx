@@ -69,7 +69,27 @@ const PostsContent = ({ query }: { query: QueryTypes }) => {
     enabled: Boolean(username),
     // Server-fetched data passed directly via context, bypassing Hydrate/dehydrate
     initialData: initialPosts ? { pages: [initialPosts], pageParams: [undefined] } : undefined,
-    initialDataUpdatedAt: initialPosts ? Date.now() : undefined,
+    // ★ SEED IT STALE, NOT FRESH (2026-08-13). `Date.now()` here told React Query the
+    // server-rendered page was freshly fetched, so the `staleTime` window blocked the
+    // `queryFn` — and the queryFn is where Lumen's own engagement (a lite reader's
+    // votes and reblogs, which never touch the chain) gets merged in. The SSR seed is
+    // a raw chain read with no merge, so a vote a reader had just cast vanished on
+    // every reload until the window expired. Verified in a browser: the count reverted
+    // 2/2 on this surface while the API itself returned the correct number.
+    //
+    // 0 means "paint this instantly, then revalidate" — the seed still avoids a
+    // loading flash, it just no longer suppresses the merge. Same two-token change
+    // already applied to the post page's `postData` query for the same reason; this
+    // surface was its twin and was missed.
+    initialDataUpdatedAt: initialPosts ? 0 : undefined,
+    // ★ A FAILED READ MUST SURFACE FAST (2026-08-13). `/api/account-posts` now
+    // THROWS on a degraded upstream read instead of answering `{entries: null}`,
+    // which is correct — but this query never overrode React Query's default
+    // `retry: 3`, so the honest error it now produces would sit behind three
+    // attempts and ~7s of backoff before the reader is told anything. That is the
+    // exact "spreads the wait to two more profile tabs" regression the sequencing
+    // note warned about. One retry absorbs a genuine blip; three only delays bad news.
+    retry: 1,
     staleTime: StaleTime.MEDIUM
   });
 
@@ -95,10 +115,24 @@ const PostsContent = ({ query }: { query: QueryTypes }) => {
     return t('user_profile.no_blogging_yet', { username: username });
   };
 
-  if (isError) return <NoDataError />;
+  // ★ ONLY WHEN THERE IS NOTHING TO LOSE (2026-08-13). This was an unconditional
+  // `if (isError)`, which is safe for a single query and wrong for an INFINITE one:
+  // `isError` here covers the LATEST page fetch, including the page-2 request that
+  // fires by itself on scroll. `/api/account-posts` now throws honestly on a
+  // degraded upstream read instead of returning a silent empty list, and `retry` is
+  // 1 rather than 3 — both correct on their own, but together they mean a single
+  // hiccup while a reader is 20 comments deep would REPLACE those 20 comments with
+  // "nothing to see", destroying content already on screen to report a failure to
+  // fetch more of it.
+  //
+  // The three sibling lists (`profile-posts-list`, `profile-comments-list`,
+  // `feed-tabs`) already guard on `entries.length === 0` for exactly this reason;
+  // this file got the retry half of the change and not the guard half. Show the
+  // error only when the reader would otherwise be left with a blank page.
+  if (isError && !data?.pages?.some((page) => (page?.length ?? 0) > 0)) return <NoDataError />;
 
   if (isLoading || (isFetching && !data?.pages?.[0]?.length)) {
-    return <LumenLoader size="lg" />;
+    return <LumenLoader size="lg" label={t('global.loading_posts')} />;
   }
 
   return !legalBlockedUser ? (

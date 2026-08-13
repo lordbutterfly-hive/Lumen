@@ -1,4 +1,9 @@
+import type { Entry } from '@hive/common-hiveio-packages/wax';
+import { getLogger } from '@ui/lib/logging';
 import { query } from '../db/pool';
+import { liteConfig } from '../config';
+
+const logger = getLogger('app');
 
 /**
  * Lumen-local votes & reblogs for lite users (migration 0009). These are NOT
@@ -171,4 +176,58 @@ export async function getEngagementTotals(
     out.set(`${row.target_author}/${row.target_permlink}`, { votes, reblogs });
   }
   return out;
+}
+
+/**
+ * Fold Lumen-local votes and reblogs into the counts an entry displays.
+ *
+ * ★ EXTRACTED FROM `/api/feed/for-you` (2026-08-13 handover, S7 -- O2-votes.md
+ * item 1's server half + item 2's comment half). `getEngagementTotals` above had
+ * exactly ONE caller in the whole app before this move -- the for-you route --
+ * which is why a Lumen vote or reblog showed correctly on Home/For You and on
+ * `/topics/*`, then reverted to the chain-only number the instant a reader
+ * reloaded ANY other surface: `/api/discussion` (a comment thread), `/api/
+ * account-posts` (a profile's Posts/Comments tabs) and `/api/search` never called
+ * this at all. It is not that those routes read it wrong -- nothing on their side
+ * had ever heard of `lumen_vote` / `lumen_reblog`. The chain does not know about
+ * them and never will (a lite vote is Lumen-local by design -- see `castVote`'s
+ * own doc above), so the tally a reader sees has to be the sum, computed here
+ * once, and now called by every route that serves entries a Lumen vote can land
+ * on.
+ *
+ * COPY, NEVER MUTATE (2026-08-08, carried over unchanged from the original
+ * for-you-only version -- do not lose this while moving the code). The entry
+ * objects handed in here do NOT belong to this request -- they come out of
+ * shared caches (the feed cache, the Hive post cache, Next's fetch cache
+ * underneath `getDiscussion`/`getAccountPosts`/`getByText`) -- so writing the
+ * merged totals straight onto `entry.stats.total_votes` / `entry.reblogs` means
+ * every request re-applies the same Lumen votes to the same shared object and the
+ * count CLIMBS on every reload with nobody voting (measured on the original
+ * version: 2, 2, 2, 2, 4, then 4, 4, 4… while the engagement API sat correctly at
+ * 1 the whole time). A count that grows when you refresh is worse than one that
+ * is merely wrong, because it looks alive.
+ */
+export async function mergeLumenEngagement(entries: Entry[]): Promise<Entry[]> {
+  if (entries.length === 0 || !liteConfig.enabled || !liteConfig.databaseUrl) return entries;
+  try {
+    const totals = await getEngagementTotals(entries.map((e) => ({ author: e.author, permlink: e.permlink })));
+    if (totals.size === 0) return entries;
+    return entries.map((entry) => {
+      const extra = totals.get(`${entry.author}/${entry.permlink}`);
+      if (!extra) return entry;
+      return {
+        ...entry,
+        reblogs: (entry.reblogs ?? 0) + extra.reblogs,
+        stats: entry.stats
+          ? { ...entry.stats, total_votes: (entry.stats.total_votes ?? 0) + extra.votes }
+          : entry.stats
+      };
+    });
+  } catch (error) {
+    // A missing Lumen tally must never blank out an otherwise-working page — the
+    // chain numbers alone are still true, just incomplete. Same posture as every
+    // other optional-enhancement catch in this codebase (e.g. `attachLiteIdentities`).
+    logger.warn('mergeLumenEngagement: could not merge Lumen counts: %o', error);
+    return entries;
+  }
 }

@@ -32,13 +32,26 @@ function RowLabel({ label, sub }: { label: string; sub: string }) {
  */
 export default function AdvancedToolsCard({
   username,
-  netHp,
-  hbdBalance,
+  maxHp,
+  liquidHive,
+  liquidHbd,
   pendingClaimedAccounts
 }: {
   username: string;
-  netHp: Big;
-  hbdBalance: Big;
+  /**
+   * ★ MOVABLE HP, not effective (2026-08-13, map item 10). `wallet-derived.ts`
+   * states the rule directly: `netHp` includes HP delegated IN, which cannot
+   * be re-delegated because it belongs to the delegator. Delegate used to be
+   * passed `netHp` under this same prop name (also called `netHp`), which
+   * printed a MOVABLE balance of "Balance: 200.053" on a tester account whose
+   * actually-delegatable stake was ~0, with Use-Max filling in a value the
+   * chain was always going to reject. Renamed from `netHp` to `maxHp` so the
+   * prop name states what every caller must supply, matching the rename
+   * PowerDownDialog already needed for the same reason.
+   */
+  maxHp: Big;
+  liquidHive: Big;
+  liquidHbd: Big;
   pendingClaimedAccounts: number;
 }) {
   const { t } = useTranslation('common_blog');
@@ -59,7 +72,7 @@ export default function AdvancedToolsCard({
       <div className="flex flex-col gap-0.5">
         <DelegateDialog
           username={username}
-          netHp={netHp}
+          maxHp={maxHp}
           trigger={
             <button type="button" className={ROW_CLASS} data-testid="wallet-advanced-delegate">
               <span className={ICON_WRAP_CLASS}>
@@ -89,7 +102,7 @@ export default function AdvancedToolsCard({
 
         <ConvertDialog
           username={username}
-          hbdBalance={hbdBalance}
+          hbdBalance={liquidHbd}
           trigger={
             <button type="button" className={ROW_CLASS} data-testid="wallet-advanced-convert">
               <span className={ICON_WRAP_CLASS}>
@@ -103,6 +116,8 @@ export default function AdvancedToolsCard({
 
         <RecurringTransferDialog
           username={username}
+          liquidHive={liquidHive}
+          liquidHbd={liquidHbd}
           trigger={
             <button type="button" className={ROW_CLASS} data-testid="wallet-advanced-recurring">
               <span className={ICON_WRAP_CLASS}>

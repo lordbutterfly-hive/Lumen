@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useStorageWithTTL } from "@ui/hooks/useStorageWithTTL";
-import { StorageTTL, getItemsByPrefix, removeStorageItem } from "@ui/lib/storage-with-ttl";
+import { StorageTTL, getItemsByPrefix, getStorageItem, removeStorageItem } from "@ui/lib/storage-with-ttl";
 import { Entry } from "@hive/common-hiveio-packages/wax";
 import { DEFAULT_PREFERENCES, Preferences } from "@/blog/lib/utils";
 import { useTranslation } from "@/blog/i18n/client";
@@ -37,8 +37,12 @@ export function usePostFormState({ username, editMode, post_s, categoryParam }: 
     payoutType: preferences.blog_rewards,
   };
 
+  // Hoisted so the reactive storage hook below and the direct-read hydrate
+  // effect further down can never disagree on which draft they mean.
+  const draftKey = editMode ? `postData-edit-${post_s?.permlink}` : `postData-new-${username}`;
+
   const [storedPost, storePost, removePost] = useStorageWithTTL<AccountFormValues>(
-    editMode ? `postData-edit-${post_s?.permlink}` : `postData-new-${username}`,
+    draftKey,
     defaultValues,
     StorageTTL.DRAFT
   );
@@ -97,6 +101,11 @@ export function usePostFormState({ username, editMode, post_s, categoryParam }: 
 
   // Track if we've hydrated from localStorage to avoid resetting form during typing
   const hasHydratedRef = useRef(false);
+  // The stored payout preference is applied AT MOST ONCE per composer (S9 fix
+  // below). The hydrate effect is re-armed on `draftKey`, and `draftKey` contains
+  // `username`, so without this a late-resolving username would re-apply the
+  // preference over a payout the writer had already changed by hand.
+  const preferenceAppliedRef = useRef(false);
   // Track if post was successfully submitted to prevent auto-save from re-creating draft
   const hasSubmittedRef = useRef(false);
 
@@ -143,31 +152,144 @@ export function usePostFormState({ username, editMode, post_s, categoryParam }: 
    */
   const [restoredFromDraft, setRestoredFromDraft] = useState(false);
 
-  // Hydrate form from localStorage after initial render
+  // Re-armed on `draftKey` change rather than latched "once ever": `username`
+  // can still be resolving when this mounts (server-session.tsx prefers the
+  // cookie first, the client's `/api/users/me` answer second), and a key
+  // change means a different draft to look for.
+  const hydratedKeyRef = useRef<string | null>(null);
+
+  // Hydrate form from localStorage after initial render.
+  //
+  // ★★★ READ LOCALSTORAGE DIRECTLY HERE — NOT `storedPost` (2026-08-13).
+  //
+  // `storedPost` comes from `useStorageWithTTL`, i.e.
+  // `useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)`.
+  // `/submit.html` renders a client component that Next still SSRs, so the
+  // FIRST client render of this hook is a HYDRATION render, and React's
+  // documented behaviour there is to use `getServerSnapshot()` — which
+  // `useStorageWithTTL` hard-codes to the empty `defaultValues` — without
+  // ever consulting `getSnapshot()` for that render. The hook's own passive
+  // effect then notices the mismatch and schedules a re-render, but passive
+  // effects on one fiber run in HOOK-DECLARATION ORDER, and this hydrate
+  // effect is declared after `useStorageWithTTL`, so it runs in the very
+  // same pass — still closed over the empty `storedPost`. By the time the
+  // real draft would have arrived on the next render, this effect had
+  // already latched `hasHydratedRef` and would never run again: the draft
+  // was never read into the form for the life of the page.
+  //
+  // `localStorage` is synchronous, and a passive effect is by definition
+  // already running in the browser, so reading it directly here — once,
+  // ourselves — has no such race to lose.
   useEffect(() => {
-    if (hasHydratedRef.current) return;
+    if (!draftKey || hydratedKeyRef.current === draftKey) return;
+    hydratedKeyRef.current = draftKey;
 
-    const hasStoredData = storedPost.postArea || storedPost.title || storedPost.tags;
-    const shouldHydrate = editMode ? hasDraftChanges : hasStoredData;
+    const draft = getStorageItem<AccountFormValues>(draftKey);
 
-    if (shouldHydrate) {
+    /**
+     * ★★★ THE PAYOUT PREFERENCE LOSES THE SAME RACE THE DRAFT JUST WON
+     * (2026-08-13, adversarial review S9). Read this next to the paragraph above —
+     * it is the identical fault, one hook earlier, and it costs money rather than
+     * keystrokes.
+     *
+     * `preferences` also comes from `useStorageWithTTL`, so on the hydration render
+     * it is `DEFAULT_PREFERENCES` (`blog_rewards: '50%'`), not what the writer
+     * actually chose. Two things then conspire:
+     *
+     *   1. `defaultValues` is built from that empty snapshot, and
+     *      `useStorageWithTTL` captures its `initialValue` ONCE, in a ref, on the
+     *      first render (its own doc says the value must be a stable reference).
+     *      So `storedPost` falls back to an object carrying `maxAcceptedPayout:
+     *      1000000` / `payoutType: '50%'` — the DEFAULTS — whenever there is no
+     *      draft on disk.
+     *   2. `entryValues` therefore reads `storedPost?.maxAcceptedPayout ??
+     *      (preferences.blog_rewards === '0%' ? 0 : 1000000)`, and the left side is
+     *      never `undefined`, so `??` can never reach the real preference. Same for
+     *      `storedPost?.payoutType || preferences.blog_rewards`.
+     *
+     * `useForm` reads `entryValues` exactly once, so for a NEW post with no draft a
+     * writer whose stored preference is "0% — decline payout" silently got a normal
+     * 50/50 post. The preference was unreachable, not merely awkward to reach.
+     *
+     * Fix is the same shape as the draft fix: read localStorage DIRECTLY here, in a
+     * passive effect that is by definition already in the browser, and apply it —
+     * but only to the payout pair, only when nothing more specific has already
+     * spoken for them. Precedence, strongest first: an EDIT's on-chain values
+     * (`post_s`) > a saved draft's own payout choice > the stored preference. The
+     * effect is still keyed on `draftKey` only, so it cannot re-fire mid-typing.
+     */
+    const storedPreferences = username ? getStorageItem<Preferences>(`user-preferences-${username}`) : null;
+    const preferredPayoutType = storedPreferences?.blog_rewards;
+    const preferredMaxAcceptedPayout = preferredPayoutType === '0%' ? 0 : 1000000;
+    // An edit is governed by what is already on chain, never by a preference; and
+    // a preference is a STARTING VALUE, so it is applied once and never re-applied
+    // over a choice the writer has since made by hand.
+    const preferenceApplies =
+      !editMode && !post_s && !!preferredPayoutType && !preferenceAppliedRef.current;
+
+    // Recomputed from the draft we just read directly, NOT from the
+    // module-level `hasDraftChanges` above — that one is derived from the
+    // same raced `storedPost` and is falsy on this very first render.
+    const draftDiffersFromPost =
+      !!draft &&
+      ((!!draft.postArea && draft.postArea !== post_s?.body) ||
+        (!!draft.title && draft.title !== post_s?.title));
+    const shouldHydrate = editMode ? draftDiffersFromPost : !!(draft?.postArea || draft?.title || draft?.tags);
+
+    if (preferenceApplies) preferenceAppliedRef.current = true;
+
+    if (shouldHydrate && draft) {
       if (!editMode) setRestoredFromDraft(true);
       form.reset({
         ...entryValues,
-        title: storedPost.title || entryValues.title,
-        postArea: storedPost.postArea || entryValues.postArea,
-        postSummary: storedPost.postSummary || entryValues.postSummary,
-        tags: storedPost.tags || entryValues.tags,
-        author: storedPost.author || entryValues.author,
-        category: editMode ? entryValues.category : storedPost.category || entryValues.category,
-        beneficiaries: storedPost.beneficiaries || entryValues.beneficiaries,
-        maxAcceptedPayout: storedPost.maxAcceptedPayout ?? entryValues.maxAcceptedPayout,
-        payoutType: storedPost.payoutType || entryValues.payoutType,
+        title: draft.title || entryValues.title,
+        postArea: draft.postArea || entryValues.postArea,
+        postSummary: draft.postSummary || entryValues.postSummary,
+        tags: draft.tags || entryValues.tags,
+        author: draft.author || entryValues.author,
+        category: editMode ? entryValues.category : draft.category || entryValues.category,
+        beneficiaries: draft.beneficiaries || entryValues.beneficiaries,
+        // A draft's own payout choice is a deliberate act and outranks the standing
+        // preference; the preference only fills a gap the draft left.
+        maxAcceptedPayout:
+          draft.maxAcceptedPayout ??
+          (preferenceApplies ? preferredMaxAcceptedPayout : entryValues.maxAcceptedPayout),
+        payoutType:
+          draft.payoutType || (preferenceApplies ? preferredPayoutType : entryValues.payoutType),
       });
-      setPreviewContent(storedPost.postArea);
+      setPreviewContent(draft.postArea);
+    } else if (preferenceApplies) {
+      // ★ NO DRAFT, NEW POST — this is the path the race actually broke, and the
+      // one nothing used to reset at all. `form.reset` here replaces the payout
+      // pair `useForm` captured from the pre-hydration `entryValues` snapshot with
+      // the writer's real stored preference.
+      //
+      // Spread `form.getValues()`, NOT `entryValues`: this effect is re-armed on
+      // `draftKey`, and `draftKey` contains `username`, which can still be
+      // resolving when the composer mounts. Spreading the stale render-time
+      // snapshot would overwrite anything typed between the two passes with the
+      // empty defaults — the exact destruction the draft fix above exists to stop.
+      // Current values change nothing except the two fields named below.
+      const current = form.getValues();
+      if (
+        current.payoutType !== preferredPayoutType ||
+        current.maxAcceptedPayout !== preferredMaxAcceptedPayout
+      ) {
+        form.reset({
+          ...current,
+          maxAcceptedPayout: preferredMaxAcceptedPayout,
+          payoutType: preferredPayoutType,
+        });
+      }
     }
     hasHydratedRef.current = true;
-  }, [storedPost, editMode, hasDraftChanges]);
+    // Deliberately key-only. `entryValues` and `form` are read, not tracked:
+    // `entryValues` is a fresh object every render, and tracking it would
+    // turn this back into a reactive effect that can re-fire mid-typing —
+    // which is the exact race this rewrite exists to remove. See "Why not
+    // the obvious alternative" in the O1 build map for the rejected fix.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftKey]);
 
   // useWatch provides reactive values that update on every form change
   const formValues = useWatch({

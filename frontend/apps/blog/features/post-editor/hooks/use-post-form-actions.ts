@@ -3,6 +3,7 @@
 import { Dispatch, MutableRefObject, RefObject, SetStateAction, useCallback, useEffect, useRef, useState } from "react";
 import { UseFormReturn } from "react-hook-form";
 import { useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { createAsset, createPermlink } from "@transaction/lib/utils";
 import { withBasePath } from "@ui/lib/path-utils";
 import { getLogger } from "@ui/lib/logging";
@@ -63,6 +64,7 @@ export function usePostFormActions({
   btnRef,
 }: UsePostFormActionsParams) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const postMutation = usePostMutation();
   const { user } = useUserClient();
 
@@ -101,6 +103,22 @@ export function usePostFormActions({
   useEffect(() => {
     if (hasSubmittedRef.current) return;
     if (!hasHydratedRef.current) return;
+    // ★ A BLANK FORM MUST NEVER BE WHAT GETS WRITTEN OVER WORK THAT IS
+    // ALREADY SAVED (2026-08-13). `hasHydratedRef` latches inside
+    // `usePostFormState`'s hydrate effect, and `usePostFormActions` runs
+    // AFTER that hook in `post-form.tsx`, in the SAME commit. On a reload
+    // with a real draft on disk, that hydrate effect reads localStorage and
+    // calls `form.reset(...)` synchronously — but `watchedValues` here was
+    // already computed for THIS render, from the form state as it was
+    // BEFORE that reset propagates, i.e. still the empty defaults. So this
+    // effect can see the latch as `true` and an empty `watchedValues` in the
+    // same pass, schedule this timer, and 500 ms later call
+    // `storePost(empty)` straight over the draft the hydrate effect had
+    // just restored. Emptying the composer on purpose already goes through
+    // Discard draft -> `handleCancelConfirm` -> `removePost()`, and a
+    // successful publish is already handled by `hasSubmittedRef` above, so
+    // nothing legitimate needs this effect to ever write an empty form.
+    if (!watchedValues.title?.trim() && !watchedValues.postArea?.trim()) return;
     clearTimeout(storeTimerRef.current);
     storeTimerRef.current = setTimeout(() => {
       // ★ A FAILED AUTO-SAVE MUST BE VISIBLE (2026-08-09). `storePost` used to
@@ -233,10 +251,41 @@ export function usePostFormActions({
         //   push to "/" — the home feed — on the reasoning that a lite post has
         //   no page yet; that is only true of its CHAIN page, and it dropped the
         //   reader on the single screen the toast had just promised.
-        await router.push(
-          withBasePath(editMode && post_s?.url ? post_s.url : `/@${user.username}`),
-          undefined
-        );
+        //
+        // ★★★ AN EDIT MUST NOT NAVIGATE AT ALL (2026-08-13). It used to push to
+        // `post_s.url`, which `db-post-to-entry.ts` builds as the two-segment
+        // `/@author/lite-<ulid>` for a post that is not on chain yet. There is
+        // no three-segment route for that shape, so `next.config.js`'s fallback
+        // rewrite hands it to `/api/resolve-post`, which does a CHAIN lookup,
+        // finds nothing (the lite post hasn't been broadcast), and 302s to the
+        // literal path `/404` — "Changes saved" immediately followed by a 404.
+        // The edit already happened on the post's own page (content.tsx renders
+        // PostForm there), so there is nowhere to navigate TO: exit edit mode
+        // in place, same as the chain edit path below (no `router.push` there
+        // either). But that path leans on `refreshPage`/`setEditMode` alone
+        // because the *real* revalidation for a chain edit happens inside
+        // `usePostMutation`'s `onSuccess` (`scheduleValidatedRefetch` against
+        // `/api/post-status`) — this lite branch has no such mutation to hook
+        // into, so it invalidates the React Query cache directly instead.
+        // React Query v4 prefix-matches array keys, so the 3-element key here
+        // invalidates every `['postData', author, permlink, observer]` variant
+        // `content.tsx:179` reads. Without this, `router.replace(pathname)`
+        // (what `refreshPage` does) can be answered from the Next client
+        // router cache and leave the pre-edit body on screen — trading a false
+        // 404 for a silent "my edit did not save".
+        if (editMode) {
+          queryClient.invalidateQueries({ queryKey: ["postData", post_s?.author, post_s?.permlink] });
+          if (setEditMode) setEditMode(false);
+          if (refreshPage) refreshPage();
+          else if (post_s) {
+            // Only reachable if PostForm is ever mounted in edit mode without
+            // `refreshPage` — today's one edit-mode caller always passes it.
+            // Three segments: the shape the app can actually route.
+            await router.push(withBasePath(`/${post_s.category}/@${post_s.author}/${post_s.permlink}`));
+          }
+        } else {
+          await router.push(withBasePath(`/@${user.username}`), undefined);
+        }
       } else {
         handleError(new Error(result.message), { method: "lite-post", params: { title: data.title } });
       }

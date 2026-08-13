@@ -11,6 +11,7 @@ import { Providers } from '../features/layouts/providers';
 import { getServerSessionUser } from '../lib/server-session';
 import { StorageCleanup } from '@hive/ui';
 import CondenserMigration from '../components/condenser-migration';
+import OfflineGuard from '../components/offline-guard';
 import { getEnvVersion } from '../lib/env-version';
 import { Open_Sans, Lora } from 'next/font/google';
 import { siteConfig } from '@ui/config/site';
@@ -368,7 +369,13 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
         '<p style="margin:0 0 6px;font-size:34px;font-weight:600;line-height:1.1;">Lumen</p>' +
         '<p style="margin:0 0 4px;font-size:15px;font-weight:600;">Something went wrong</p>' +
         '<p style="margin:0 0 20px;font-size:13px;line-height:1.55;color:#6b7280;">' +
-        'This page could not finish loading. Reloading usually fixes it.</p>' +
+        // The card can now be reached with no network (see reloadOnce), where
+        // "reloading usually fixes it" would be a straight lie - reloading is
+        // the one thing that cannot work. Say which one it is.
+        (navigator.onLine === false
+          ? 'You are offline, so this page could not finish loading. Reload once your connection is back.'
+          : 'This page could not finish loading. Reloading usually fixes it.') +
+        '</p>' +
         '<button type="button" id="lumen-chunk-error-reload" style="height:40px;' +
         'padding:0 20px;border-radius:14px;border:none;background:#c0392b;color:#fff;' +
         'font-size:14px;font-weight:600;cursor:pointer;">Reload</button></div>';
@@ -390,6 +397,22 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   function reloadOnce() {
     chunkErrorSeen = true;
     if (reloadTriggered) return;
+    // ★★★ NEVER RELOAD WITH NO NETWORK (2026-08-13). A reload is a fresh
+    // document request; offline it cannot come back, so it lands on Chrome's
+    // network-error page and the app is GONE - the exact outcome this guard
+    // exists to prevent, self-inflicted. MEASURED: offline, one synthetic
+    // 'Loading chunk 917 failed' on a fully working page put the tab on
+    // chrome-error://chromewebdata/ with no click anywhere. That is not a
+    // hypothetical: cutting the connection mid-load fails the in-flight
+    // <script> tags, which is exactly what this listener fires on. A chunk
+    // that failed because there is no network is also not the stale-deploy
+    // purge this guard was written for - it will simply load when the
+    // connection returns. Same shape as the cooldown branch below: only a page
+    // that never came up earns the card.
+    if (navigator.onLine === false) {
+      if (!appMounted) showRecoveryCard();
+      return;
+    }
     var last = 0;
     try { last = Number(sessionStorage.getItem(KEY)) || 0; } catch (e) {}
     var now = Date.now();
@@ -442,14 +465,31 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
       <body className="bg-background-secondary font-sans">
         <div className="min-h-screen">
           <Providers>
-            <ServerSessionProvider value={serverSession}>
-              <StorageCleanup />
-              <CondenserMigration />
-              {/* Every route lands at the top of its own page. See scroll-reset.tsx. */}
-              <ScrollReset />
-              <AppHeader />
-              <main className="mx-auto">{children}</main>
-            </ServerSessionProvider>
+            {/* ★ EVERY client navigation is inside this (2026-08-13). Offline, a
+                failed RSC fetch makes Next hard-navigate the document, which then
+                fails at the network layer and replaces the entire app with
+                Chrome's error page — measured on the feed tabs AND on ordinary
+                <Link>s, signed in and signed out. No error boundary can catch a
+                browser navigation, so it has to be stopped before the router
+                starts it; this sits high enough to cover every link and every
+                `useRouter()` call site at once. See components/offline-guard.tsx. */}
+            <OfflineGuard>
+              <ServerSessionProvider value={serverSession}>
+                <StorageCleanup />
+                <CondenserMigration />
+                {/* Every route lands at the top of its own page. See scroll-reset.tsx. */}
+                <ScrollReset />
+                <AppHeader />
+                {/* ★ NOT <main> (2026-08-13). Every page shell already renders its own
+                    <main> (home-shell, page-shell, main-page-layout), so this outer one
+                    produced a <main> inside a <main> on every page — invalid, and it
+                    leaves assistive technology with two competing "main content"
+                    landmarks. The inner ones are the correct ones because they wrap the
+                    page content without the surrounding chrome, so this becomes a plain
+                    wrapper rather than removing the landmark entirely. */}
+                <div className="mx-auto">{children}</div>
+              </ServerSessionProvider>
+            </OfflineGuard>
           </Providers>
         </div>
         <ClientEffects />

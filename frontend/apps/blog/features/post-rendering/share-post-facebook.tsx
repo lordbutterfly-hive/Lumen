@@ -13,13 +13,20 @@ export default function FacebookShare({ url }: { url: string }) {
     );
   };
   return (
-    <div
+    // ★ KEYBOARD-UNREACHABLE TRIGGER FIX (2026-08-13, O5 a11y build map item 2).
+    // Was a bare `<div onClick>` — no role, no tabindex, unreachable by
+    // keyboard (measured live: `tabIndex=-1` at every level of the DOM
+    // chain). Same defect, all four social triggers, none previously
+    // reported. `title` (hover-only, not consistently announced) becomes a
+    // real `aria-label`.
+    <button
+      type="button"
       className="cursor-pointer text-muted-foreground transition-colors hover:text-destructive"
       onClick={openWindow}
-      title={t('post_content.footer.share_on') + `Facebook`}
+      aria-label={t('post_content.footer.share_on') + `Facebook`}
       data-testid="share-on-facebook"
     >
       <Facebook className="h-[18px] w-[18px]" />
-    </div>
+    </button>
   );
 }

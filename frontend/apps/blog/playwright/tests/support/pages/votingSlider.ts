@@ -21,14 +21,18 @@ export class VotingSlider {
     this.page = page;
     this.upvoteSliderModal = page.locator('[data-testid="upvote-slider-modal"]');
     this.upvoteSliderButton = page.locator('[data-testid="upvote-button-slider"]');
-    this.upvoteSliderButtonIcon = page.locator('[data-testid="upvote-button-slider"] > button > svg');
+    // ★ Testid moved onto the real `<button>` itself (2026-08-13, votes
+    // keyboard-a11y fix) — it used to sit on a wrapper `<span>` around the
+    // button, which made every vote control on the page a two-tab-stop trap.
+    // `svg` is now a direct child of the testid element, not a grandchild.
+    this.upvoteSliderButtonIcon = page.locator('[data-testid="upvote-button-slider"] > svg');
     this.upvoteSliderThumb = page.locator('[data-testid="upvote-slider-thumb"]');
     this.upvoteSliderTrack = page.locator('[data-testid="upvote-slider-track"]');
     this.upvoteSliderPercentageValue = page.locator('[data-testid="upvote-slider-percentage-value"]');
 
     this.downvoteSliderModal = page.locator('[data-testid="downvote-slider-modal"]');
     this.downvoteSliderButton = page.locator('[data-testid="downvote-button-slider"]');
-    this.downvoteSliderButtonIcon = page.locator('[data-testid="downvote-button-slider"] > button > svg');
+    this.downvoteSliderButtonIcon = page.locator('[data-testid="downvote-button-slider"] > svg');
     this.downvoteSliderThumb = page.locator('[data-testid="downvote-slider-thumb"]');
     this.downvoteSliderTrack = page.locator('[data-testid="downvote-slider-track"]');
     this.downvoteSliderPercentageValue = page.locator('[data-testid="downvote-slider-percentage-value"]');

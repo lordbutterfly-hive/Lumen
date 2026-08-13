@@ -117,7 +117,13 @@ export default function StakedHiveBlock({
               // re-delegated. Passing it let the Unstake dialog accept 30.030 HP on an
               // account that owned 0.000 — a transaction the chain was always going to
               // refuse, configured with no warning.
-              netHp={movableHp}
+              // ★ Prop renamed netHp -> maxHp (2026-08-13, map item 10 rider). This
+              // prop was literally named `netHp` while receiving `movableHp` — the
+              // exact mislabel that let the sibling Delegate dialog reintroduce this
+              // class of bug by passing `netHp` (the real net figure) through
+              // unchanged. `maxHp` names what every caller must supply: the true
+              // ceiling for whatever this dialog moves.
+              maxHp={movableHp}
               trigger={
                 <button
                   type="button"

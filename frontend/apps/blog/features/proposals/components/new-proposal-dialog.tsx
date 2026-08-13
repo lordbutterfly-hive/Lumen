@@ -68,8 +68,19 @@ export default function NewProposalDialog({ children }: { children: ReactNode })
   // to treat the account as lite — i.e. keep showing this blocked state — until
   // the client has genuinely answered, matching list-variant.tsx's write-gate
   // precedent.
+  //
+  // ★ AND THE REASON MUST BE TRUE (2026-08-13, adversarial review S4). A failed
+  // `/api/users/me` can never set `clientAnswered`, so this branch is reachable
+  // permanently for a FULL Hive account — and it was telling that reader they need
+  // to upgrade. The block is unchanged; the sentence is now the honest one.
   if (!identity.clientAnswered || user.account_tier === 'lite') {
-    return <TooltipContainer title={t('proposals.lite_cannot_vote')}>{children}</TooltipContainer>;
+    return (
+      <TooltipContainer
+        title={identity.sessionUnavailable ? t('proposals.session_unavailable') : t('proposals.lite_cannot_vote')}
+      >
+        {children}
+      </TooltipContainer>
+    );
   }
 
   const receiverValue = receiver.trim() || user.username;

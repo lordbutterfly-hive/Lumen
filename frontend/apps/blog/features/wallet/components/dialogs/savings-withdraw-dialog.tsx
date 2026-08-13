@@ -1,6 +1,6 @@
 'use client';
 
-import { ReactNode, useMemo, useState } from 'react';
+import { ReactNode, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -12,15 +12,12 @@ import { useTranslation } from '@/blog/i18n/client';
 import { useSavingsWithdrawMutation } from '../../hooks/use-savings-mutations';
 import WalletDialogShell from './shared/wallet-dialog-shell';
 import AmountField from './shared/amount-field';
+import { useWalletDialog } from './shared/use-wallet-dialog';
+import { buildAmountSchema } from './shared/amount-schema';
 
 const buildSchema = (savingsBalance: Big, t: (key: string, opts?: Record<string, unknown>) => string) =>
   z.object({
-    amount: z
-      .number({ message: t('wallet.dialogs.common.amount_positive') })
-      .positive({ message: t('wallet.dialogs.common.amount_positive') })
-      .refine((value) => value <= savingsBalance.toNumber(), {
-        message: t('wallet.dialogs.common.amount_exceeds_balance')
-      })
+    amount: buildAmountSchema({ max: savingsBalance }, t)
   });
 
 type WithdrawFormValues = z.infer<ReturnType<typeof buildSchema>>;
@@ -42,11 +39,11 @@ export default function SavingsWithdrawDialog({
   savingsBalance: Big;
 }) {
   const { t } = useTranslation('common_blog');
-  const [open, setOpen] = useState(false);
   const withdrawMutation = useSavingsWithdrawMutation();
 
   const schema = useMemo(() => buildSchema(savingsBalance, t), [savingsBalance, t]);
   const form = useForm<WithdrawFormValues>({ resolver: zodResolver(schema), mode: 'onSubmit' });
+  const { open, setOpen, onOpenChange } = useWalletDialog(form);
 
   const onSubmit = form.handleSubmit(async (values) => {
     try {
@@ -77,7 +74,7 @@ export default function SavingsWithdrawDialog({
       title={t('wallet.dialogs.savings_withdraw.title', { currency })}
       description={t('wallet.dialogs.savings_withdraw.description', { currency })}
       open={open}
-      onOpenChange={setOpen}
+      onOpenChange={onOpenChange}
       onSubmit={onSubmit}
       submitLabel={t('wallet.savings.withdraw')}
       cancelLabel={t('wallet.dialogs.common.cancel')}

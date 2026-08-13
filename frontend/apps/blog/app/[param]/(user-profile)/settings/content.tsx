@@ -94,6 +94,28 @@ const SettingsContent = ({ username }: { username: string }) => {
             {identity.isLoggedIn ? 'Go to my settings' : 'Log in'}
           </a>
         </section>
+      ) : identity.sessionUnavailable ? (
+        /* ★★★ THE SKELETON BELOW WAS PERMANENT ON A FAILED SESSION READ
+           (2026-08-13, adversarial review S4). `clientAnswered` is
+           `dataUpdatedAt > 0` and React Query's error reducer never sets
+           `dataUpdatedAt`, so a `/api/users/me` that only ever failed left this
+           page showing six skeleton fields forever, with nothing to click.
+           The gate itself is unchanged and still fails closed: this branch does
+           NOT decide the reader is the owner, it only stops claiming the answer
+           is still on its way. */
+        <section className={`${SETTINGS_CARD} text-center`} data-testid="settings-owner-gate-error">
+          <h2 className={SETTINGS_CARD_TITLE}>We couldn’t check your account</h2>
+          <p className={`${SETTINGS_CARD_HINT} mx-auto max-w-[46ch]`}>
+            Your settings are safe — we just couldn’t confirm who you are, so we can’t open the form yet.
+          </p>
+          <button
+            type="button"
+            onClick={identity.retrySession}
+            className="mt-5 inline-block rounded-[14px] bg-[#c0392b] px-5 py-2.5 text-[14px] font-bold text-white transition-colors hover:bg-[#96271b]"
+          >
+            Try again
+          </button>
+        </section>
       ) : (
         <OwnerGateSkeleton />
       )}

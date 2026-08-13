@@ -39,7 +39,21 @@
 
     --link: 0, 70%, 45%;
 
-    --ring: 215 20.2% 65.1%;
+    /* ★ THE ONE FOCUS-RING OVERRIDE (2026-08-13, O5 a11y build map item 7).
+       `outline-none` (Tailwind) does not remove a focus outline — it sets
+       `outline: 2px solid transparent` on purpose, so forced-colors mode
+       still shows a ring. Fourteen `packages/ui` components then draw
+       `focus-visible:ring-2 focus-visible:ring-ring` on top of that
+       transparent outline, and `ring` resolves through `tailwind.config.js`
+       (`ring: 'hsl(var(--ring))'`) to exactly this token — so every one of
+       those components' focus ring fell back to slate-400 (`#94a3b8`)
+       instead of the brand red the `:focus-visible` rule below already
+       defines. This was the ONLY place that grey came from — verified no
+       component overrides `--ring` itself, and `border-ring`/`bg-ring`/
+       `text-ring`/`divide-ring` have zero hits in `apps` or `packages`, so
+       nothing else borrows this token decoratively. Changing it here turns
+       every one of those rings brand-red at once; no component file moves. */
+    --ring: 5.6 63.4% 46.1%; /* hsl() of #c0392b, the same brand red as :focus-visible below */
 
     --radius: 0.5rem;
 
@@ -87,7 +101,11 @@
 
     --link: 0, 90%, 65%;
 
-    --ring: 216 34% 17%;
+    /* ★ Dark-mode half of the same fix (item 7). Was `216 34% 17%` = `#1d283a`
+       — a near-black ring on this theme's near-black surfaces, effectively
+       invisible. A lighter brand red, legible on dark, same rule as
+       `--destructive`'s own light/dark split three lines up. */
+    --ring: 6 78% 62%;
 
     --radius: 0.5rem;
 

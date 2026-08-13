@@ -12,5 +12,11 @@ export const metadata: Metadata = {
  * existed with nothing anywhere linking to them — this page is that missing door.
  */
 export default function UpgradePage() {
-  return <UpgradePanel />;
+  // ★ NO SHELL ON THIS ROUTE — see app/security/page.tsx for why the landmark
+  // lives here rather than in the root layout.
+  return (
+    <main>
+      <UpgradePanel />
+    </main>
+  );
 }

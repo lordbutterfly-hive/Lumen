@@ -18,5 +18,11 @@ export const metadata: Metadata = {
 };
 
 export default function LoginPage() {
-  return <LumenLogin />;
+  // ★ NO SHELL ON THIS ROUTE — see app/security/page.tsx for why the landmark
+  // lives here rather than in the root layout.
+  return (
+    <main>
+      <LumenLogin />
+    </main>
+  );
 }

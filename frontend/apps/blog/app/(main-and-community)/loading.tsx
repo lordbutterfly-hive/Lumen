@@ -2,6 +2,7 @@
 
 import { usePathname } from 'next/navigation';
 import { LumenLoader, Skeleton } from '@hive/ui';
+import { useTranslation } from '@/blog/i18n/client';
 
 /**
  * ★ THE SIDEBARS KEEP THEIR PLACEHOLDERS, THE POST LIST DOES NOT (2026-08-12).
@@ -29,6 +30,7 @@ function SidebarSkeleton() {
 }
 
 export default function Loading() {
+  const { t } = useTranslation('common_blog');
   const pathname = usePathname();
   const segments = pathname?.split('/');
   // Routes like /trending/hive-xxx have a tag in the 3rd segment.
@@ -51,7 +53,7 @@ export default function Loading() {
                 <Skeleton className="h-6 w-48" />
                 <Skeleton className="h-9 w-[180px]" />
               </div>
-              <LumenLoader size="lg" />
+              <LumenLoader size="lg" label={t('global.loading_posts')} />
             </div>
           </div>
           <div className="hidden xl:col-span-2 xl:flex">
@@ -66,7 +68,7 @@ export default function Loading() {
   // provides the container/grid, so the skeleton just needs the post list.
   return (
     <div className="flex flex-grow flex-col">
-      <LumenLoader size="lg" />
+      <LumenLoader size="lg" label={t('global.loading_posts')} />
     </div>
   );
 }

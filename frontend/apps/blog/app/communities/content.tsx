@@ -19,7 +19,8 @@ import { StaleTime } from '@/blog/lib/react-query';
 import { useSSRObserver, useInitialCommunities, useInitialSubscriptions } from '@/blog/components/observer-provider';
 
 function CommunitiesListSkeleton() {
-  return <LumenLoader size="lg" />;
+  const { t } = useTranslation('common_blog');
+  return <LumenLoader size="lg" label={t('global.loading_communities')} />;
 }
 
 const CommunitiesContent = () => {

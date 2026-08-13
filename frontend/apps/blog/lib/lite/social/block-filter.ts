@@ -343,11 +343,25 @@ export async function applyOwnerBlocksToReplies<T extends Entry>(
  * resolution this function already pays for per distinct parent (see
  * `ownerChainMutedNamesOrThrow`). It is not a second, wider walk.
  */
-export async function applyOwnerBlocksToAuthoredEntries<T extends Entry>(entries: T[]): Promise<T[]> {
+export interface AuthoredEntriesFilterResult<T> {
+  /** What is safe to serve. */
+  entries: T[];
+  /**
+   * How many entries were withheld because their parent's owner could not be
+   * LOOKED UP — not because a block was found. This is the "we could not check"
+   * count, and it is the caller's job to decide what an answer built on it is
+   * allowed to claim. See the fail-closed note inside this function.
+   */
+  withheldUnresolvable: number;
+}
+
+export async function applyOwnerBlocksToAuthoredEntries<T extends Entry>(
+  entries: T[]
+): Promise<AuthoredEntriesFilterResult<T>> {
   const withParent = entries
     .map((entry) => ({ entry, parent: parentCoordKey(entry) }))
     .filter((row): row is { entry: T; parent: string } => row.parent !== null);
-  if (withParent.length === 0) return entries;
+  if (withParent.length === 0) return { entries, withheldUnresolvable: 0 };
 
   // One owner resolution per DISTINCT parent coordinate, not per entry: a
   // profile page routinely has several replies hanging under the same post.
@@ -378,9 +392,29 @@ export async function applyOwnerBlocksToAuthoredEntries<T extends Entry>(entries
   //
   // Now a failed lookup hides that parent's entries. The blast radius is one
   // parent, not the page — the old comment's fear of "taking the whole tab down"
-  // only applies if you fail the request, which this does not do. If the
-  // database is down for every parent, the tab renders empty, which is exactly
-  // what `/api/account-posts` already chose to serve in its own catch.
+  // only applies if you fail the request, which this does not do.
+  //
+  // ★★★ CORRECTED (2026-08-13, adversarial review S2) — THE JUSTIFICATION THAT
+  // USED TO END THIS PARAGRAPH IS NO LONGER TRUE, AND BELIEVING IT REINTRODUCES
+  // THE BUG. It read: "If the database is down for every parent, the tab renders
+  // empty, which is exactly what `/api/account-posts` already chose to serve in
+  // its own catch." That was accurate when it was written and was invalidated
+  // the same day, from underneath, by the change one layer up: the route's
+  // fail-empty was replaced with `{ entries: [], degraded: 'upstream_empty' }`
+  // and `account-posts-fetch.ts` now THROWS on that flag. So "renders empty" is
+  // no longer a thing that route chooses to do — it is precisely the confident
+  // false claim ("@user hasn't posted yet") the whole change set exists to
+  // remove.
+  //
+  // Failing closed per parent is still right, and it stays. What was missing is
+  // that a total wipe-out looked identical to a genuinely empty account: this
+  // function returns fewer entries, THROWS NOTHING, so the route's outer catch
+  // never ran and no `degraded` flag was ever set. Withholding is now COUNTED
+  // and reported (`withheldUnresolvable`), and the routes decide: a partial
+  // withhold still serves the entries it could vouch for (killing a working page
+  // over one bad parent would be the S1 mistake in a different costume), while a
+  // result that collapsed to nothing is reported as degraded instead of as "this
+  // account has written nothing".
   const resolvedOwners = await Promise.all(
     [...parentRefs.entries()].map(async ([parent, { author, permlink }]) => {
       try {
@@ -404,7 +438,8 @@ export async function applyOwnerBlocksToAuthoredEntries<T extends Entry>(entries
     resolvedOwners.filter(([, result]) => !result.resolved).map(([parent]) => parent)
   );
   /**
-   * Drop entries hanging under a parent whose owner could not be looked up.
+   * Drop entries hanging under a parent whose owner could not be looked up, and
+   * SAY HOW MANY were dropped that way.
    *
    * ★ Applied at EVERY exit below, not just the last one. This function has
    * three early returns of the form `return entries` (no resolvable owners, no
@@ -412,13 +447,20 @@ export async function applyOwnerBlocksToAuthoredEntries<T extends Entry>(entries
    * back the unresolvable entries untouched — reinstating the exact fail-open
    * this change closes, on the paths most likely to be taken when the database
    * is unhealthy.
+   *
+   * ★ The count is computed from the SAME pass that does the dropping (2026-08-13),
+   * not re-derived by the caller, because "how many did you withhold blind" is not
+   * something a caller holding only the survivors can work out — an empty list is
+   * an empty list whether it was censored or genuinely empty. That indistinguishability
+   * WAS the bug.
    */
-  const withoutUnresolvable = (list: T[]): T[] => {
-    if (unresolvableParents.size === 0) return list;
-    return list.filter((entry) => {
+  const withoutUnresolvable = (list: T[]): AuthoredEntriesFilterResult<T> => {
+    if (unresolvableParents.size === 0) return { entries: list, withheldUnresolvable: 0 };
+    const kept = list.filter((entry) => {
       const parent = parentCoordKey(entry);
       return !(parent && unresolvableParents.has(parent));
     });
+    return { entries: kept, withheldUnresolvable: list.length - kept.length };
   };
 
   const ownerKeyByParent = new Map<string, string>();

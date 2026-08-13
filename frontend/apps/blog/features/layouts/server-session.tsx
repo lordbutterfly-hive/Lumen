@@ -1,8 +1,6 @@
 'use client';
 
 import { createContext, ReactNode, useContext } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
-import { QUERY_KEY } from '@smart-signer/lib/query-keys';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 
 /**
@@ -53,6 +51,19 @@ export interface SessionIdentity {
   username: string;
   /** True once `/api/users/me` has actually answered in this tab. */
   clientAnswered: boolean;
+  /**
+   * True when that request FAILED and has never once succeeded — so
+   * `clientAnswered` is false and will not become true by itself. See
+   * `use-user-core.ts` for why the two flags cannot be one.
+   *
+   * ★ A consumer that renders a skeleton, a spinner or a "loading" word while
+   * `!clientAnswered` MUST also handle this, or that skeleton is permanent. A
+   * consumer that CLOSES a capability while `!clientAnswered` must keep it closed
+   * here — this flag never authorises anything, it only explains.
+   */
+  sessionUnavailable: boolean;
+  /** Ask again. Pair it with whatever `sessionUnavailable` renders. */
+  retrySession: () => void;
 }
 
 /**
@@ -65,21 +76,43 @@ export interface SessionIdentity {
  * after it, the client is the ONLY answer, which is what lets a sign-out take
  * effect without a reload.
  *
- * Reading the query state outside the hook is safe here because `useUserClient`
- * subscribes to the same key in the same component, so the render that delivers
- * the new answer is the render that re-reads this.
+ * ★ CORRECTED (2026-08-13) — the paragraph this replaces was the bug.
+ * It used to read `dataUpdatedAt` with `queryClient.getQueryState()`, an
+ * imperative cache peek, and justified it by claiming: "Reading the query
+ * state outside the hook is safe here because `useUserClient` subscribes to
+ * the same key in the same component, so the render that delivers the new
+ * answer is the render that re-reads this." That is false whenever the
+ * answer is unchanged. React Query v4 tracks properties by proxy, and
+ * `useUserClient` only destructured `data`, so `data` was the sole tracked
+ * prop. `useUserCore` writes every response straight back to localStorage
+ * and reseeds the next page's query with it, so for a returning reader the
+ * next `/api/users/me` response is routinely deep-equal to the seed —
+ * structural sharing then returns the *same* `data` reference. `dataUpdatedAt`
+ * changed in the cache; nothing was subscribed to it; no render ever
+ * happened to re-read it. `clientAnswered` stuck at `false` forever, and
+ * every gate below, plus every other consumer of this hook that branches on
+ * `clientAnswered`, hung on a skeleton with no error and no explanation.
+ *
+ * The fix: `useUserClient()` now destructures `dataUpdatedAt` itself and
+ * returns `clientAnswered` directly (`use-user-core.ts`), which makes it a
+ * TRACKED prop — a deeply-equal response now correctly notifies and
+ * re-renders this component, resolving the gate.
  */
 export function useSessionIdentity(): SessionIdentity {
-  const { user } = useUserClient();
+  const { user, clientAnswered, sessionUnavailable, retrySession } = useUserClient();
   const server = useServerSession();
-  const queryClient = useQueryClient();
-  const clientAnswered = !!queryClient.getQueryState([QUERY_KEY.user])?.dataUpdatedAt;
+
+  // ★ `sessionUnavailable` rides ALONGSIDE the answer, it does not change it
+  // (2026-08-13). A failed `/api/users/me` says nothing about who you are, so the
+  // cookie/localStorage fallbacks below still decide `isLoggedIn` exactly as
+  // before — the flag only lets a consumer stop pretending it is still loading.
+  const failure = { sessionUnavailable, retrySession };
 
   if (clientAnswered) {
-    return { isLoggedIn: !!user.isLoggedIn, username: user.username, clientAnswered };
+    return { isLoggedIn: !!user.isLoggedIn, username: user.username, clientAnswered, ...failure };
   }
   // A localStorage seed that says "logged in" is still better than nothing; the
   // server's cookie reading wins only when the client has nothing at all.
-  if (user.isLoggedIn) return { isLoggedIn: true, username: user.username, clientAnswered };
-  return { isLoggedIn: server.isLoggedIn, username: server.username, clientAnswered };
+  if (user.isLoggedIn) return { isLoggedIn: true, username: user.username, clientAnswered, ...failure };
+  return { isLoggedIn: server.isLoggedIn, username: server.username, clientAnswered, ...failure };
 }

@@ -6,6 +6,7 @@ import RightRail from './right-rail';
 import { CommunitiesSelect } from '@/blog/features/layouts/communities-select';
 import PostSelectFilter from '@/blog/features/layouts/post-select-filter';
 import { useTranslation } from '@/blog/i18n/client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 
 /**
  * ★ THE LUMEN SHELL, NOT THE INHERITED DENSE GRID (owner report, 2026-08-08).
@@ -22,24 +23,51 @@ import { useTranslation } from '@/blog/i18n/client';
  * `LeftRail`, content, `RightRail` (whose Topics card is the Lumen
  * replacement for the old "Trending Communities" list). The header row (list
  * name + sort dropdown) and the subscriptions-driven mobile community picker
- * are UNCHANGED in behaviour — only the chrome around them moved. This layout
- * is shared by `/trending`, `/hot`, `/created`, `/muted`, `/payout`, their
- * `/my` variants, `/@username/feed` and `/communities`
- * (`hidePostsHeader={true}`), so all of them pick this up at once.
+ * are UNCHANGED in behaviour — only the chrome around them moved.
+ *
+ * ★ DOC CORRECTED (O6 build map item 5, 2026-08-13) — this used to claim
+ * `/trending`, `/hot`, `/created`, `/muted`, `/payout`, their `/my` variants,
+ * `/@username/feed` and `/communities` as consumers. That is stale: the
+ * working tree since deleted every one of those route layouts in favour of
+ * `ClientSideLayout` (`features/layouts/sorts/client-side-layout.tsx`), which
+ * never passes `tag === 'feed'`. `grep -rn "MainPageLayout" apps/blog/app`
+ * today returns exactly two consumers: `app/[param]/feed/layout.tsx`
+ * (`tag='feed'`) and `app/communities/layout.tsx` (`hidePostsHeader={true}`,
+ * so this header never renders there at all).
  */
 const MainPageLayout = ({
   children,
   tag = '',
-  hidePostsHeader = false
+  hidePostsHeader = false,
+  owner
 }: {
   children: ReactNode;
   tag?: string;
   hidePostsHeader?: boolean;
+  /**
+   * ★ O6 build map item 5 (2026-08-13). The `/@<user>/feed` heading and
+   * `<title>` said "My friends" for EVERY account's feed — measured live,
+   * `/@blocktrades/feed` and `/@bozz/feed` (different, genuinely different
+   * post lists) rendered byte-identical chrome. An explicit prop rather than
+   * parsing the URL here: this component is route-agnostic today (used by
+   * `/communities` too, where it doesn't apply), and `/@<user>/feed` is its
+   * only caller that can supply this.
+   */
+  owner?: string;
 }) => {
   const { t } = useTranslation('common_blog');
+  const identity = useSessionIdentity();
 
   const renderListName = () => {
-    if (tag === 'feed') return t('navigation.communities_nav.my_friends');
+    if (tag === 'feed') {
+      // Owner unresolved, or this feed belongs to the signed-in viewer: keep
+      // the existing, unchanged copy. Only a DIFFERENT account's feed gets
+      // the new, named copy.
+      if (owner && (!identity.isLoggedIn || owner !== identity.username)) {
+        return t('navigation.communities_nav.user_friends', { username: owner });
+      }
+      return t('navigation.communities_nav.my_friends');
+    }
     return t('navigation.communities_nav.all_posts');
   };
 

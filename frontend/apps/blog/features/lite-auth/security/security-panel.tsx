@@ -76,6 +76,9 @@ const COPY = {
   // never arrived — the one outcome this screen exists to prevent.
   loadError: "Couldn't load your sign-in methods just now.",
   loadRetry: 'Try again',
+  // ★ The SESSION read failing is a different failure from the METHODS read
+  // failing, and it used to have no words at all — see the gate below.
+  sessionError: "Couldn't check your account just now, so this page can't show your sign-in methods.",
   signedOut: 'Sign in with your Lumen account to manage sign-in methods.',
   primary: 'Primary'
 };
@@ -274,6 +277,28 @@ const SecurityPanel: FC = () => {
     return <div className="mx-auto max-w-[560px] p-6 text-[15px] text-[#4b5563]">{COPY.signedOut}</div>;
   }
   if (!identity.clientAnswered) {
+    // ★★★ "LOADING…" WAS PERMANENT ON A FAILED SESSION READ (2026-08-13,
+    // adversarial review S4). `clientAnswered` is `dataUpdatedAt > 0`, and React
+    // Query's error reducer never sets `dataUpdatedAt` — so a `/api/users/me` that
+    // only ever failed left this word on screen for the life of the page, on the
+    // one screen whose entire purpose is warning someone they have a single way
+    // back into their account. The same reasoning that produced `loadError` for
+    // the methods fetch (see COPY) applies here and was simply never followed
+    // through to the gate above it.
+    if (identity.sessionUnavailable) {
+      return (
+        <div className="mx-auto max-w-[560px] p-6">
+          <p className="text-[15px] text-[#4b5563]">{COPY.sessionError}</p>
+          <button
+            type="button"
+            onClick={identity.retrySession}
+            className="mt-3 rounded-[10px] border border-[#e4e6e9] px-4 py-2 text-[14px] font-semibold text-[#3f4650] hover:bg-[#f6f7f8]"
+          >
+            {COPY.loadRetry}
+          </button>
+        </div>
+      );
+    }
     return <div className="mx-auto max-w-[560px] p-6 text-[15px] text-[#9ca3af]">{COPY.loading}</div>;
   }
   if (!isLite) {

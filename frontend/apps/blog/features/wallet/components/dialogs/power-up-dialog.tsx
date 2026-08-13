@@ -1,6 +1,6 @@
 'use client';
 
-import { ReactNode, useMemo, useState } from 'react';
+import { ReactNode, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -12,16 +12,12 @@ import { useTranslation } from '@/blog/i18n/client';
 import { usePowerUpMutation } from '../../hooks/use-power-mutations';
 import WalletDialogShell from './shared/wallet-dialog-shell';
 import AmountField from './shared/amount-field';
+import { useWalletDialog } from './shared/use-wallet-dialog';
+import { buildAmountSchema } from './shared/amount-schema';
 
 const buildSchema = (balance: Big, t: (key: string, opts?: Record<string, unknown>) => string) =>
   z.object({
-    amount: z
-      .number({ message: t('wallet.dialogs.common.amount_positive') })
-      .positive({ message: t('wallet.dialogs.common.amount_positive') })
-      .refine((value) => value <= balance.toNumber(), { message: t('wallet.dialogs.common.amount_exceeds_balance') })
-      .refine((value) => /^\d+(\.\d{1,3})?$/.test(value.toString()), {
-        message: t('wallet.dialogs.common.amount_precision')
-      })
+    amount: buildAmountSchema({ max: balance }, t)
   });
 
 type PowerUpFormValues = z.infer<ReturnType<typeof buildSchema>>;
@@ -36,11 +32,11 @@ export default function PowerUpDialog({
   hiveBalance: Big;
 }) {
   const { t } = useTranslation('common_blog');
-  const [open, setOpen] = useState(false);
   const powerUpMutation = usePowerUpMutation();
 
   const schema = useMemo(() => buildSchema(hiveBalance, t), [hiveBalance, t]);
   const form = useForm<PowerUpFormValues>({ resolver: zodResolver(schema), mode: 'onSubmit' });
+  const { open, setOpen, onOpenChange } = useWalletDialog(form);
 
   const onSubmit = form.handleSubmit(async (values) => {
     try {
@@ -60,7 +56,7 @@ export default function PowerUpDialog({
       title={t('wallet.dialogs.power_up.title')}
       description={t('wallet.dialogs.power_up.description')}
       open={open}
-      onOpenChange={setOpen}
+      onOpenChange={onOpenChange}
       onSubmit={onSubmit}
       submitLabel={t('wallet.staked.stake')}
       cancelLabel={t('wallet.dialogs.common.cancel')}

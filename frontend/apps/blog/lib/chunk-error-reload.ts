@@ -56,6 +56,17 @@ export function isChunkLoadError(error: unknown): boolean {
  */
 export function reloadOnceForChunkError(): void {
   if (typeof window === 'undefined') return;
+  // ★★★ NEVER RELOAD WITH NO NETWORK (2026-08-13) — the same rule, from the same
+  // measurement, as the inline copy of this logic in `app/layout.tsx`: offline, a
+  // reload is a document request that cannot come back, so it replaces the whole
+  // app with the browser's network-error page. Reproduced there with one
+  // synthetic 'Loading chunk 917 failed' on a fully working page: the tab ended
+  // on `chrome-error://chromewebdata/`, no click anywhere. Offline the chunk is
+  // not PURGED (the case this module exists for), only unreachable — it loads
+  // when the connection does. The cooldown key is deliberately NOT written here:
+  // this attempt never happened, and a genuine stale-manifest failure after
+  // reconnecting must still be allowed its one reload.
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
   let last = 0;
   try {
     last = Number(window.sessionStorage.getItem(RELOAD_STORAGE_KEY)) || 0;

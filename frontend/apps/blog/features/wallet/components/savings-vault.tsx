@@ -116,7 +116,11 @@ export default function SavingsVault({
             depositLabel={t('wallet.savings.deposit')}
             withdrawLabel={t('wallet.savings.withdraw')}
             extraAction={
-              <div className="flex items-center gap-3.5">
+              // ★ Same wrap fix as savings-slot-card.tsx's own button group
+              // (map item 1) — this nested row (claimable text + Claim now)
+              // is itself a non-wrapping flex inside that group, and Claim
+              // now was the element that landed fully off-screen at 390px.
+              <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2.5">
                 {rewardHbd.gt(0) ? (
                   <div className="text-right">
                     <div className="text-[11.5px] tabular-nums text-[#9ca3af]">

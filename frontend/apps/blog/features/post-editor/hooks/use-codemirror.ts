@@ -27,6 +27,15 @@ import { lightTheme, darkCompartment, isDarkMode } from "../lib/codemirror-theme
 
 interface UseCodemirrorConfig {
   placeholder?: string;
+  /**
+   * Persistent accessible name for the editor's `.cm-content` (the node that
+   * carries `role="textbox"`). Unlike the CodeMirror `placeholder` extension —
+   * which Chromium falls back to for the accessible name, but which unmounts
+   * (and takes the name with it) the instant the document has content —
+   * `contentAttributes` writes `aria-label` directly onto `.cm-content`, so the
+   * name survives typing. Required so a third call site cannot ship silent.
+   */
+  ariaLabel: string;
   windowheight: number;
   persistedValue: string;
   onChangeRef: React.MutableRefObject<(value: string) => void>;
@@ -40,6 +49,7 @@ interface UseCodemirrorConfig {
 export function useCodemirror(config: UseCodemirrorConfig) {
   const {
     placeholder,
+    ariaLabel,
     windowheight,
     persistedValue,
     onChangeRef,
@@ -254,6 +264,10 @@ export function useCodemirror(config: UseCodemirrorConfig) {
       updateListener,
       pasteExtension,
       EditorView.lineWrapping,
+      // Attaches directly to `.cm-content` (the `role="textbox"` node), so the
+      // name is present on mount and never depends on the document being
+      // empty -- see the `ariaLabel` doc comment on `UseCodemirrorConfig`.
+      EditorView.contentAttributes.of({ "aria-label": ariaLabel }),
       EditorView.theme({
         "&": { height: `${windowheight}px` },
         ".cm-scroller": { overflow: "auto", overscrollBehavior: "contain" },

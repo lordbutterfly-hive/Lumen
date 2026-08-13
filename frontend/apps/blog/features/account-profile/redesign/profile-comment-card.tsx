@@ -7,7 +7,7 @@ import { cn, numberWithCommas } from '@ui/lib/utils';
 import { Entry } from '@hive/common-hiveio-packages/wax';
 import { useLiteOverlay } from '@/blog/lib/lite/client/use-lite-overlay';
 import { useTranslation } from '@/blog/i18n/client';
-import { getPostSummary } from '@/blog/lib/utils';
+import { getPostSummary, normalizeTitle } from '@/blog/lib/utils';
 import VotesComponentWrapper from '@/blog/features/votes/votes-component-wrapper';
 import PostCardCommentTooltip from '@/blog/features/list-of-posts/post-card-comment-tooltip';
 import PostCardUpvotesTooltip from '@/blog/features/list-of-posts/post-card-upvotes-tooltip';
@@ -59,7 +59,8 @@ export default function ProfileCommentCard({ post }: { post: Entry }) {
 
       {post.title ? (
         <Link href={href} className="block">
-          <h3 className="mb-1.5 font-sans text-[18px] font-semibold text-[#161511]">{post.title}</h3>
+          {/* Decoded for the same reason as the feed card — see medium-post-card.tsx. */}
+          <h3 className="mb-1.5 font-sans text-[18px] font-semibold text-[#161511]">{normalizeTitle(post.title)}</h3>
         </Link>
       ) : null}
 

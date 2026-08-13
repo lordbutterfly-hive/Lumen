@@ -20,7 +20,7 @@ import { handleError } from '@ui/lib/handle-error';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { useLumenBlock } from '@/blog/lib/lite/client/use-lumen-block';
-import { getPostSummary } from '@/blog/lib/utils';
+import { getPostSummary, normalizeTitle } from '@/blog/lib/utils';
 import { find_first_img } from '@/blog/features/list-of-posts/post-img';
 import VotesComponentWrapper from '@/blog/features/votes/votes-component-wrapper';
 import { ReblogDialog } from '@/blog/features/list-of-posts/reblog-dialog';
@@ -77,7 +77,14 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
   // No-op for ordinary Hive posts.
   const liteOverlay = useLiteOverlay(post);
   const displayAuthor = liteOverlay?.author ?? post.author;
-  const displayTitle = liteOverlay?.title || post.title;
+  // ★ DECODE BEFORE DISPLAY (2026-08-13). Titles arrive from the chain exactly as
+  // whatever client wrote them, and several Hive clients store HTML entities in
+  // `json_metadata` — so `&#039;` and `&acute;` were printed literally on the card.
+  // `normalizeTitle` decodes numeric and named entities and strips stray
+  // markdown/HTML. It is the same helper `getPostSummary` now uses for the dek
+  // below, so a title and its excerpt can no longer disagree about whether an
+  // apostrophe is an apostrophe.
+  const displayTitle = normalizeTitle(liteOverlay?.title || post.title);
 
   // ★ E1/E2/E4 (BUILDMAP-FUCKERY-V2, G3) — "muting a user currently does nothing".
   // Moderation acts on `post.author`, the account that actually signed on chain —
@@ -370,7 +377,12 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
               <button
                 type="button"
                 aria-label={t('profile.overflow_menu_label')}
-                className="ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[#9aa1ab] transition-colors hover:bg-[#f4f5f7] hover:text-[#4b5563]"
+                // ★ Contrast fix (2026-08-13, O5 a11y build map item 4). `#9aa1ab`
+                // measured 2.61:1 on this button's default white background —
+                // `#7a7268` (4.74:1 on white) is the plain-white replacement;
+                // the hover state already swaps to the higher-contrast
+                // `#4b5563` so the grey-ground variant isn't needed here.
+                className="ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[#7a7268] transition-colors hover:bg-[#f4f5f7] hover:text-[#4b5563]"
                 data-testid="medium-card-overflow-trigger"
               >
                 <MoreHorizontal className="h-4 w-4" />
@@ -416,13 +428,25 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
           an image. So the track only exists when it has content, and an
           imageless post gets the full width for its headline and dek instead of
           a 190px hole beside it. */}
-      <div
-        className={cn(
-          'mt-[13px] grid items-start gap-[26px]',
-          !nsfwShown || thumbnail ? 'grid-cols-[1fr_190px]' : 'grid-cols-1'
-        )}
-      >
-        <div className="min-w-0">
+      {/* ★ GRID → FLEX-WRAP (2026-08-13, O5 a11y build map item 5). The old
+          `grid-cols-[1fr_190px]` gave the thumbnail a hard 190px track and let
+          the text column (`1fr` over a `min-w-0` child) shrink to nothing —
+          measured live: 80px wide on an ordinary 390px phone (three
+          characters of a 26px, two-line-clamped headline), 10px at 320px,
+          with the squeeze absorbed silently rather than overflowing, which is
+          why an overflow-only sweep never caught it. `flex-wrap` makes the
+          decision on each item's hypothetical main size instead of the
+          viewport: `basis-[240px]` on the text column means the thumbnail
+          wraps below exactly when the CARD (not the window) is narrower than
+          240 + 26 (gap) + 190 (thumbnail) = 456px, and is otherwise
+          byte-identical to the old grid — proved by injecting the equivalent
+          CSS into the running page: 226px-wide text column at 320px, wrapped
+          below the thumbnail, vs 10px squeezed beside it before. The old
+          conditional `grid-cols-1`/`grid-cols-[1fr_190px]` branch is no
+          longer needed: with no second flex child (no thumbnail, no NSFW
+          placeholder) the text column simply takes the full row on its own. */}
+      <div className="mt-[13px] flex flex-wrap items-start gap-[26px]">
+        <div className="min-w-0 flex-1 basis-[240px]">
           <Link href={href} className="block" data-testid="medium-card-title">
             <h2 className="line-clamp-2 font-sans text-[26px] font-semibold leading-[1.22] tracking-[-0.015em] text-[#161511]">
               {displayTitle}
@@ -430,7 +454,14 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
           </Link>
 
           {dek ? (
-            <Link href={href} className="mt-[10px] block" data-testid="medium-card-dek">
+            // ★ REDUNDANT TAB STOP REMOVED (2026-08-13, O5 a11y build map item
+            // 8). This link, the title link above and the thumbnail link below
+            // all go to the exact same `href` — three tab stops for one
+            // destination on every card. `tabIndex={-1}` takes it out of the
+            // sequential Tab order (it stays clickable, and stays in a screen
+            // reader's browse-mode link list) while the title link remains the
+            // one real stop.
+            <Link href={href} className="mt-[10px] block" data-testid="medium-card-dek" tabIndex={-1}>
               <p className="line-clamp-2 font-serif text-[16.5px] leading-normal text-[#4b5563]">{dek}</p>
             </Link>
           ) : null}
@@ -468,7 +499,12 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
           // requested at all until the reader asks for it, or the picture has
           // already been fetched and painted by the time any overlay mounts.
           <div
-            className="flex h-[132px] w-[190px] items-center justify-center rounded-[14px] border border-dashed border-[#e0dcd4] bg-[#f4f5f7] font-sans text-[12px] font-medium uppercase tracking-wide text-[#9aa1ab]"
+            // `shrink-0` (flex-wrap fix, item 5): this box no longer sits in a
+            // fixed 190px grid track, so without it a flex row would shrink it
+            // like any other item. Colour (item 4): `#9aa1ab` measured 2.61:1
+            // on this box's own `#f4f5f7` background; `#6f6963` is the
+            // grey-ground replacement, 4.97:1 on `#f4f5f7`.
+            className="flex h-[132px] w-[190px] shrink-0 items-center justify-center rounded-[14px] border border-dashed border-[#e0dcd4] bg-[#f4f5f7] font-sans text-[12px] font-medium uppercase tracking-wide text-[#6f6963]"
             data-testid="medium-card-nsfw-thumbnail-hidden"
           >
             {LABELS.nsfwBadge}
@@ -482,6 +518,9 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
             className="shrink-0"
             data-testid="medium-card-thumbnail"
             aria-label={displayTitle}
+            // Same redundant-tab-stop removal as the dek link above — same
+            // destination as the title link.
+            tabIndex={-1}
           >
             <img
               src={thumbnail}
@@ -532,7 +571,18 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
 
       {/* Action bar — denser's own vote/reblog controls, restyled to the redesign.
           Vote arrows keep their real red-up / grey-down treatment (VotesComponent). */}
-      <div className="mt-[18px] flex items-center gap-2.5 font-sans text-[14.5px]" data-testid="medium-card-footer">
+      {/* `flex-wrap` (2026-08-13, O5 a11y build map item 5, second half): the
+          payout chip (`ml-auto`, below) was measured overflowing the
+          viewport by 57px at 320px across 14 sampled cards — a separate
+          element from the title-column collapse above, on this same
+          non-wrapping row. Wrapping lets it drop to its own line instead of
+          being pushed off-screen. Unlike the grid→flex change above, this one
+          was not re-proven by CSS injection after the fix — flagging that
+          honestly rather than claiming a measurement I didn't take. */}
+      <div
+        className="mt-[18px] flex flex-wrap items-center gap-2.5 font-sans text-[14.5px]"
+        data-testid="medium-card-footer"
+      >
         {/* Vote pill. The arrows are denser's real VotesComponent, so their size is
             lifted here (21px) rather than in the shared component — the classic
             feed keeps its own scale. The count's chevron is suppressed: next to a

@@ -119,7 +119,7 @@ const SortedPagesPosts = ({ sort, tag = '' }: { sort: SortTypes; tag?: string })
   // Handle initial loading state (also show skeleton when refetching with no data,
   // e.g. during observer transition after hydration)
   if (isLoading || (isFetching && !data?.pages?.[0]?.length)) {
-    return <LumenLoader size="lg" />;
+    return <LumenLoader size="lg" label={t('global.loading_posts')} />;
   }
 
   // Handle empty feed for "my" (friends) page

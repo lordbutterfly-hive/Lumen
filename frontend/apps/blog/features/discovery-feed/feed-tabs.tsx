@@ -9,6 +9,7 @@ import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { isBlockedEntry, useLumenBlockList } from '@/blog/lib/lite/client/use-lumen-block';
 import { Entry } from '@hive/common-hiveio-packages/wax';
 import { LumenLoader } from '@hive/ui';
+import { useTranslation } from '@/blog/i18n/client';
 import { cn } from '@ui/lib/utils';
 import NoDataError from '@/blog/components/no-data-error';
 import { getMarketDataSource } from '@/blog/features/prediction-market/lib/market-data-source';
@@ -20,6 +21,7 @@ import { filterVisiblePosts, useNsfwPreference } from '@/blog/lib/nsfw';
 import InterestPicker from '@/blog/features/lite-auth/interests/interest-picker';
 import DialogLogin from '@/blog/components/dialog-login';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
+import { useOffline } from '@/blog/components/offline-guard';
 
 // TODO: move to i18n
 const LABELS = {
@@ -34,6 +36,9 @@ const LABELS = {
   degradedAnonymous: 'Showing trending. Log in for your own feed.',
   loginPrompt: 'Following shows the people you follow.',
   loginCta: 'Log in',
+  // ★ The session read failed outright — see the Following-tab gate below.
+  sessionError: 'We couldn’t check your account, so we can’t load your Following feed.',
+  sessionRetry: 'Try again',
   newPost: 'Show 1 new post',
   newPosts: (count: number) => `Show ${count} new posts`
 };
@@ -106,6 +111,7 @@ async function fetchForYou(cursor?: { author?: string; permlink?: string }): Pro
 }
 
 function ForYouFeed() {
+  const { t } = useTranslation('common_blog');
   const { ref, inView } = useInView();
 
   // ★ INFINITE SCROLL (2026-08-07). This was a single `useQuery` for one page of
@@ -281,7 +287,7 @@ function ForYouFeed() {
     if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  if (isLoading) return <LumenLoader size="lg" />;
+  if (isLoading) return <LumenLoader size="lg" label={t('global.loading_posts')} />;
   // ★ `isError` IS NO LONGER PART OF THIS GUARD. It is true for a failed REFETCH as
   // well as a failed first load, so an error on the poll-driven path used to throw
   // away a perfectly good page. Only "we have nothing at all to show" is an error
@@ -456,6 +462,7 @@ async function fetchLiteFollowing(limit: number): Promise<Entry[]> {
 const LITE_FOLLOWING_LIMIT = 30;
 
 function EntryFeed({ sort, observer, lite = false }: { sort: string; observer: string; lite?: boolean }) {
+  const { t } = useTranslation('common_blog');
   const { ref, inView } = useInView();
   const { data, isFetching, isFetchingNextPage, fetchNextPage, hasNextPage, isError, isLoading } =
     useInfiniteQuery({
@@ -496,6 +503,16 @@ function EntryFeed({ sort, observer, lite = false }: { sort: string; observer: s
       // trigger is off for the same reason ForYouFeed's are; new posts surface
       // through the existing "Load more" control instead of a silent swap.
       staleTime: Infinity,
+      // ★ ONE RETRY, NOT THREE (2026-08-13). Every other option here exists to stop
+      // this feed refreshing itself under the reader; `retry` is the one that
+      // governs how long a GENUINE failure stays silent. React Query's default of 3
+      // plus backoff means roughly seven seconds of an unlabelled loading state
+      // before the reader is told anything went wrong — and the sibling read paths
+      // now throw honestly on a degraded upstream instead of returning an empty
+      // list, so that delay would be the only thing standing between a failure and
+      // the reader hearing about it. One attempt absorbs a transient blip; three
+      // only postpone bad news.
+      retry: 1,
       refetchOnWindowFocus: false,
       refetchOnReconnect: false,
       refetchOnMount: false
@@ -548,7 +565,7 @@ function EntryFeed({ sort, observer, lite = false }: { sort: string; observer: s
   const shown = entries.length > 0 ? entries : lastRendered.current;
 
   if (isLoading || (isFetching && !data?.pages?.[0]?.length)) {
-    return <LumenLoader size="lg" />;
+    return <LumenLoader size="lg" label={t('global.loading_posts')} />;
   }
   // ★ `isError` ALONE IS NO LONGER THE GUARD, same fix as ForYouFeed: it is true
   // for a failed background refetch as well as a failed first load, and with
@@ -645,6 +662,7 @@ function TabButton({
 }
 
 export default function FeedTabs() {
+  const { t } = useTranslation('common_blog');
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
@@ -698,6 +716,7 @@ export default function FeedTabs() {
   // sync effect below can fold it into `toTabKey` instead of resolving a tab
   // key that `marketAvailable` immediately has to override again at render.
   const marketAvailable = getMarketDataSource() !== null;
+  const { isOffline, notifyBlocked } = useOffline();
 
   const [activeTab, setActiveTab] = useState<TabKey>(() =>
     toTabKey(searchParams?.get(TAB_PARAM) ?? null, marketAvailable)
@@ -710,6 +729,20 @@ export default function FeedTabs() {
   }, [searchParams, marketAvailable]);
 
   const selectTab = (tab: TabKey) => {
+    // ★ THIS TAB IS THE CLICK THAT WAS REPORTED (2026-08-13). Offline, the
+    // `router.replace` below is already stopped by the app shell — see
+    // components/offline-guard.tsx, and read the measurement there: without it
+    // this one tap replaced all of Lumen with Chrome's network-error page.
+    // The early return is on top of that, not instead of it: `setActiveTab`
+    // is local state the router never sees, so without this the tab would
+    // slide to "Following" while the URL, and everything the URL drives,
+    // stayed on "For You" — a tab bar lying about which tab you are on.
+    // `isOffline()` and not the `offline` render flag: the flag can be up to
+    // 2.4 s behind the browser, measured — see components/offline-guard.tsx.
+    if (isOffline()) {
+      notifyBlocked();
+      return;
+    }
     setActiveTab(tab);
     const params = new URLSearchParams(searchParams?.toString() ?? '');
     if (tab === 'for-you') {
@@ -801,12 +834,30 @@ export default function FeedTabs() {
               </button>
             </DialogLogin>
           </div>
+        ) : !identity.clientAnswered && identity.sessionUnavailable ? (
+          // ★★★ A SKELETON THAT NEVER RESOLVES IS NOT HONEST EITHER (2026-08-13,
+          // adversarial review S4). `clientAnswered` can never flip true off a
+          // failed `/api/users/me` — React Query's error reducer does not touch
+          // `dataUpdatedAt` — so the loader below was PERMANENT on the app's
+          // most-visited tab. This branch still refuses to mount `EntryFeed` with a
+          // guessed `lite` (that gate is the whole reason the loader exists); it
+          // just says what happened and offers the retry instead of spinning.
+          <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
+            <p className="font-sans text-sm text-[#6b7280]">{LABELS.sessionError}</p>
+            <button
+              type="button"
+              onClick={identity.retrySession}
+              className="rounded-[13px] border border-[#e4e6e9] px-5 py-2.5 font-sans text-[14px] font-semibold text-[#3f4650] hover:bg-[#f6f7f8]"
+            >
+              {LABELS.sessionRetry}
+            </button>
+          </div>
         ) : !identity.clientAnswered ? (
           // Genuinely signed in (per the session cookie), but `user.account_tier`
           // — which `EntryFeed`'s `lite` prop needs — isn't confirmed yet. Neither
           // the login dead end nor a feed mounted with a guessed tier is honest
           // here; a skeleton is.
-          <LumenLoader size="lg" />
+          <LumenLoader size="lg" label={t('global.loading_posts')} />
         ) : (
           <EntryFeed sort={FEED_SORT} observer={identity.username} lite={user.account_tier === 'lite'} />
         )

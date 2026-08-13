@@ -19,7 +19,7 @@ import { attachLiteIdentities } from '@/blog/lib/lite/render/attach-lite';
 import { isLumenPermlink } from '@/blog/lib/lite/render/lite-post-id';
 import { findHiveReaderPrefs } from '@/blog/lib/lite/repositories/hive-reader-prefs-repository';
 import { tagsForInterests } from '@/blog/lib/lite/interests/taxonomy';
-import { getEngagementTotals } from '@/blog/lib/lite/repositories/engagement-repository';
+import { mergeLumenEngagement } from '@/blog/lib/lite/repositories/engagement-repository';
 import { resolveRankedLiteBatch } from '@/blog/lib/lite/repositories/post-repository';
 import { liteConfig } from '@/blog/lib/lite/config';
 import { filterBannedEntries } from '@/blog/lib/moderation/banned-authors';
@@ -1338,51 +1338,6 @@ async function getRankedPaged(
     if (page.length < HIVE_RANKED_MAX) break; // Hive had nothing more to give.
   }
   return out.slice(0, want);
-}
-
-/**
- * Fold Lumen-local votes and reblogs into the counts a card displays.
- *
- * ★ The chain does not know about them and never will (a lite vote is
- * Lumen-local by design), so the tallies a reader sees have to be the sum. This
- * mutates the entry's own `stats.total_votes` / `reblogs` deliberately: every
- * surface in the app already renders those two fields, so merging here fixes the
- * feed, the profile and the post page at once instead of teaching each card about
- * a second source of truth.
- */
-async function mergeLumenEngagement(entries: Entry[]): Promise<Entry[]> {
-  if (entries.length === 0 || !liteConfig.enabled || !liteConfig.databaseUrl) return entries;
-  try {
-    const totals = await getEngagementTotals(
-      entries.map((e) => ({ author: e.author, permlink: e.permlink }))
-    );
-    if (totals.size === 0) return entries;
-    return entries.map((entry) => {
-      const extra = totals.get(`${entry.author}/${entry.permlink}`);
-      if (!extra) return entry;
-      // ★ COPY, NEVER MUTATE (2026-08-08). The first version of this wrote the
-      // merged totals straight onto `entry.stats.total_votes` / `entry.reblogs`.
-      // Those post objects do NOT belong to this request — they come out of
-      // shared caches (the feed cache here, and the Hive post cache underneath),
-      // so every request re-applied the same Lumen votes to the same object and
-      // the count CLIMBED on each reload with nobody voting: measured 2, 2, 2, 2,
-      // 4, then 4, 4, 4… while the engagement API sat correctly at 1 the whole
-      // time. A count that grows when you refresh is worse than one that is
-      // merely wrong, because it looks alive.
-      return {
-        ...entry,
-        reblogs: (entry.reblogs ?? 0) + extra.reblogs,
-        stats: entry.stats
-          ? { ...entry.stats, total_votes: (entry.stats.total_votes ?? 0) + extra.votes }
-          : entry.stats
-      };
-    });
-  } catch (error) {
-    // A missing Lumen tally must never blank out a working feed — the chain
-    // numbers alone are still true, just incomplete.
-    logger.warn('for-you: could not merge Lumen engagement counts: %o', error);
-    return entries;
-  }
 }
 
 /**

@@ -338,7 +338,12 @@ export function ReplyTextbox({
         // there.
         toast({
           title: 'Reply sent',
-          description: 'It will appear in this thread once it reaches Hive, usually within a minute.',
+          // ★ NO TIME PROMISE (2026-08-13). This said "usually within a minute".
+          // That is only true while the publisher is draining, and it has not drained
+          // since 9 August — a real reply sat on "Publishing…" for over 24 hours
+          // having been told to expect a minute. Say what is true (it is saved, it
+          // is queued) and let the badge on the reply itself report the state.
+          description: 'It is saved and queued to publish to Hive.',
           variant: 'success'
         });
       } else {
@@ -450,6 +455,7 @@ export function ReplyTextbox({
             }}
             persistedValue={text}
             placeholder={t('post_content.footer.comment.reply')}
+            ariaLabel={t('post_content.footer.comment.reply')}
           />
           <div className="flex items-center rounded-b-md border-x border-b border-border bg-background-secondary/50 px-3 py-1.5 text-xs text-muted-foreground">
             {t('post_content.footer.comment.insert_images')} {t('post_content.footer.comment.selecting_them')}

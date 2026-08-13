@@ -52,8 +52,14 @@ export default function SavingsSlotCard({
   testId: string;
 }) {
   return (
-    <div className="flex items-center justify-between gap-4 rounded-[14px] border border-[#e7eee9] bg-white px-[18px] py-4" data-testid={testId}>
-      <div className="max-w-[420px]">
+    // ★ W-fix (2026-08-13, map item 1): flex-wrap + gap-x/gap-y, not a rigid
+    // non-wrapping row. See the inner button group below — that's the change
+    // that actually matters at narrow widths.
+    <div
+      className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 rounded-[14px] border border-[#e7eee9] bg-white px-[18px] py-4"
+      data-testid={testId}
+    >
+      <div className="min-w-0 max-w-[420px]">
         <div className="mb-1 flex items-center gap-2">
           <TokenIcon currency={currency} size={20} />
           <span className="text-[15px] font-bold text-[#2a2822]">{title}</span>
@@ -67,7 +73,17 @@ export default function SavingsSlotCard({
         </div>
         {description ? <p className="font-serif text-[13px] text-[#6b7280]">{description}</p> : null}
       </div>
-      <div className="flex shrink-0 items-center gap-3.5">
+      {/* ★ THE load-bearing change (map item 1). Wrapping the outer row
+          alone is not enough: this button group is ~370px on its own
+          against a ~304px content box at 390px viewport width, so it must
+          be able to wrap INTERNALLY too. `shrink-0` (removed) would not
+          have helped either — buttons don't shrink below their own text.
+          No Tailwind breakpoint sits in the right place (this only fits
+          unwrapped from a card content width of ~573px, i.e. ~943px
+          viewport in the md 2-column grid), so this wraps at every size,
+          not at a `sm:`/`md:` variant — the desktop row is still one line
+          because 370px fits comfortably above ~943px, no breakpoint needed. */}
+      <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2.5">
         <span className="font-sans text-[19px] font-bold tabular-nums text-[#161511]">
           {formatTokenAmount(balance)}
         </span>

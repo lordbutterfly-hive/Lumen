@@ -137,13 +137,31 @@ export function useViewerRetention(): ViewerRetention {
   // true (from the cookie) while `isChain`/`isLite` are still both false because
   // `user.account_tier` has not resolved yet — during that window neither query
   // below is even enabled, so `active.fetchStatus` alone would read as idle.
-  const inFlight = !isHydrated || !identity.clientAnswered || active.fetchStatus !== 'idle';
+  //
+  // ★ ...EXCEPT WHEN THE SESSION READ IS NEVER GOING TO SETTLE (2026-08-13,
+  // adversarial review S4). `clientAnswered` is `dataUpdatedAt > 0` and React
+  // Query's error reducer never touches `dataUpdatedAt`, so a `/api/users/me`
+  // that only ever failed pinned `inFlight` true FOREVER — every rank surface in
+  // the app (TodayCard, RanksLadder, the profile chip, the nudge, the weekly
+  // recap) sat on `isLoading` with no error and no way out. "We don't know yet"
+  // and "we asked and it failed" are different sentences and the consumers
+  // already render them differently; this hook was only ever able to say the
+  // first one.
+  const sessionSettled = identity.clientAnswered || identity.sessionUnavailable;
+  const inFlight = !isHydrated || !sessionSettled || active.fetchStatus !== 'idle';
   return {
     summary: identity.isLoggedIn ? active.data : undefined,
     source: identity.isLoggedIn ? (isLite ? 'lumen' : 'chain') : null,
     isLoading: identity.isLoggedIn && !active.data && inFlight,
-    isError: identity.isLoggedIn && active.isError,
-    refetch: () => active.refetch()
+    // A session we could not read is a rank we could not read: report the error
+    // rather than an eternal spinner. `refetch` below re-runs the underlying
+    // retention query; `identity.retrySession` is the one that re-asks who you
+    // are, and the consumers' retry buttons go through `refetch`, so re-ask both.
+    isError: identity.isLoggedIn && (active.isError || identity.sessionUnavailable),
+    refetch: () => {
+      if (identity.sessionUnavailable) identity.retrySession();
+      return active.refetch();
+    }
   };
 }
 

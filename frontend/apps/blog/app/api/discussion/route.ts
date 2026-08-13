@@ -5,6 +5,7 @@ import { getDiscussion } from '@transaction/lib/bridge-api';
 import { attachLiteIdentitiesToDiscussion } from '@/blog/lib/lite/render/attach-lite';
 import { liteChainCoordinates } from '@/blog/lib/lite/render/lite-entry';
 import { applyOwnerBlocksToDiscussion } from '@/blog/lib/lite/social/block-filter';
+import { mergeLumenEngagement } from '@/blog/lib/lite/repositories/engagement-repository';
 import { isPermlinkValid } from '@/blog/utils/validate-links';
 
 const logger = getLogger('app');
@@ -108,6 +109,19 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // on), blocks second.
     discussion = await attachLiteIdentitiesToDiscussion(discussion);
     discussion = await applyOwnerBlocksToDiscussion(discussion);
+
+    // ★ MERGE LUMEN ENGAGEMENT (2026-08-13, O2-votes.md item 2's comment half).
+    // `getEngagementTotals` had exactly ONE caller in the whole app before this --
+    // `/api/feed/for-you` -- so a Lumen (lite) vote on a COMMENT showed correctly
+    // the instant it happened (the client's own optimistic cache patch) and then
+    // reverted to the chain-only count on the very next reload, at any age,
+    // forever: nothing on this route had ever read `lumen_vote`/`lumen_reblog`.
+    // Applied last, after the block filter, so a Lumen lookup is never spent on
+    // an entry that is about to be discarded anyway.
+    const beforeMerge: Record<string, Entry> = discussion ?? {};
+    const discussionKeys = Object.keys(beforeMerge);
+    const mergedValues = await mergeLumenEngagement(discussionKeys.map((key) => beforeMerge[key]));
+    discussion = Object.fromEntries(discussionKeys.map((key, i) => [key, mergedValues[i]]));
 
     return NextResponse.json({ discussion: discussion ?? {} });
   } catch (error) {

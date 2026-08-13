@@ -1,6 +1,6 @@
 'use client';
 
-import { ReactNode, useMemo, useState } from 'react';
+import { ReactNode, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -12,13 +12,12 @@ import { useTranslation } from '@/blog/i18n/client';
 import { useSavingsDepositMutation } from '../../hooks/use-savings-mutations';
 import WalletDialogShell from './shared/wallet-dialog-shell';
 import AmountField from './shared/amount-field';
+import { useWalletDialog } from './shared/use-wallet-dialog';
+import { buildAmountSchema } from './shared/amount-schema';
 
 const buildSchema = (balance: Big, t: (key: string, opts?: Record<string, unknown>) => string) =>
   z.object({
-    amount: z
-      .number({ message: t('wallet.dialogs.common.amount_positive') })
-      .positive({ message: t('wallet.dialogs.common.amount_positive') })
-      .refine((value) => value <= balance.toNumber(), { message: t('wallet.dialogs.common.amount_exceeds_balance') })
+    amount: buildAmountSchema({ max: balance }, t)
   });
 
 type DepositFormValues = z.infer<ReturnType<typeof buildSchema>>;
@@ -36,11 +35,11 @@ export default function SavingsDepositDialog({
   liquidBalance: Big;
 }) {
   const { t } = useTranslation('common_blog');
-  const [open, setOpen] = useState(false);
   const depositMutation = useSavingsDepositMutation();
 
   const schema = useMemo(() => buildSchema(liquidBalance, t), [liquidBalance, t]);
   const form = useForm<DepositFormValues>({ resolver: zodResolver(schema), mode: 'onSubmit' });
+  const { open, setOpen, onOpenChange } = useWalletDialog(form);
 
   const onSubmit = form.handleSubmit(async (values) => {
     try {
@@ -64,7 +63,7 @@ export default function SavingsDepositDialog({
       title={t('wallet.dialogs.savings_deposit.title', { currency })}
       description={t('wallet.dialogs.savings_deposit.description', { currency })}
       open={open}
-      onOpenChange={setOpen}
+      onOpenChange={onOpenChange}
       onSubmit={onSubmit}
       submitLabel={t('wallet.savings.deposit')}
       cancelLabel={t('wallet.dialogs.common.cancel')}

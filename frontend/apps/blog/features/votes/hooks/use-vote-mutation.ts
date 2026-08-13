@@ -1,7 +1,6 @@
 import { useRef } from 'react';
 import { useMutation, QueryClient, useQueryClient } from '@tanstack/react-query';
 import { TransactionBroadcastResult, transactionService } from '@transaction/index';
-import { Entry } from '@hive/common-hiveio-packages/wax';
 import { fetchListVotesByCommentVoter } from '@/blog/lib/chain-fetch';
 import { getLogger } from '@ui/lib/logging';
 import { toast } from '@ui/components/hooks/use-toast';
@@ -13,78 +12,174 @@ import { recordRetentionAct } from '@/blog/features/retention/components/retenti
 
 const logger = getLogger('app');
 
-type CacheSnapshot = { queryKey: readonly unknown[]; data: unknown };
+const MAX_WALK_DEPTH = 8;
 
 /**
- * Optimistically update total_votes in postData, discussionData, and entriesInfinite caches.
- * Returns snapshots for rollback.
+ * A cached node is a vote target iff it carries this author+permlink AND a
+ * numeric `stats.total_votes` — the one shape every live vote-count surface
+ * shares (`Entry`, and every response wrapper that nests `Entry`s).
  */
-function optimisticUpdateTotalVotes(
+function isVoteTarget(node: Record<string, unknown>, author: string, permlink: string): boolean {
+  if (node.author !== author || node.permlink !== permlink) return false;
+  const stats = node.stats;
+  return (
+    !!stats &&
+    typeof stats === 'object' &&
+    typeof (stats as { total_votes?: unknown }).total_votes === 'number'
+  );
+}
+
+/**
+ * Object kinds we must not recurse into: enumerating their keys is
+ * meaningless (Date/RegExp/Promise) or would corrupt them (Map/Set/typed
+ * arrays), and none of them can structurally hold a vote-target Entry.
+ */
+function isWalkable(value: object): boolean {
+  return !(
+    value instanceof Date ||
+    value instanceof Map ||
+    value instanceof Set ||
+    value instanceof RegExp ||
+    value instanceof Promise ||
+    ArrayBuffer.isView(value)
+  );
+}
+
+/**
+ * Copy-on-write walk over one cached query's data: returns the SAME
+ * reference when nothing below it changed, and only recreates the objects
+ * on the path from the cache root down to a matched entry. That lets
+ * memoized siblings (`post-list-item.tsx`'s comparator, which checks
+ * `stats?.total_votes` and `original_entry` identity; `CommentListItem`'s
+ * default shallow compare) skip re-rendering everything else on the page.
+ */
+function patchVoteTarget(
+  value: unknown,
+  author: string,
+  permlink: string,
+  delta: number,
+  depth: number,
+  seen: WeakSet<object>
+): { value: unknown; changed: boolean } {
+  if (depth > MAX_WALK_DEPTH || value === null || typeof value !== 'object') {
+    return { value, changed: false };
+  }
+  if (seen.has(value)) return { value, changed: false }; // cycle guard
+  seen.add(value);
+  if (!isWalkable(value)) return { value, changed: false };
+
+  if (Array.isArray(value)) {
+    let changed = false;
+    const next = value.map((item) => {
+      const result = patchVoteTarget(item, author, permlink, delta, depth + 1, seen);
+      changed ||= result.changed;
+      return result.value;
+    });
+    return changed ? { value: next, changed: true } : { value, changed: false };
+  }
+
+  const node = value as Record<string, unknown>;
+  // Match BEFORE any further narrowing — a missed match is the defect being
+  // fixed here, so the vote-target check runs on every plain object node.
+  if (isVoteTarget(node, author, permlink)) {
+    const stats = node.stats as { total_votes: number };
+    return {
+      value: { ...node, stats: { ...stats, total_votes: Math.max(0, stats.total_votes + delta) } },
+      changed: true
+    };
+  }
+
+  let changed = false;
+  const next: Record<string, unknown> = {};
+  for (const key of Object.keys(node)) {
+    const result = patchVoteTarget(node[key], author, permlink, delta, depth + 1, seen);
+    changed ||= result.changed;
+    next[key] = result.value;
+  }
+  return changed ? { value: next, changed: true } : { value, changed: false };
+}
+
+/**
+ * Add `delta` to `stats.total_votes` on every cached node matching this
+ * author/permlink, across the ENTIRE query cache — not a hand-maintained key
+ * list. Rollback is the SAME call with `-delta`; see the block below.
+ *
+ * ★★★ WHY ROLLBACK IS A RE-WALK, NOT A SNAPSHOT RESTORE (2026-08-13, A1
+ * review V-1). This used to return the pre-vote top-level reference of every
+ * query it touched, and `onError` restored those references wholesale. The
+ * reasoning was "copy-on-write means nothing below it was ever mutated in
+ * place, so the old reference is an exact snapshot". The premise is true and
+ * the conclusion does not follow: copy-on-write guarantees the snapshot was
+ * never MUTATED, not that nothing else WROTE to that query key in the
+ * meantime — and a wholesale `setQueryData(key, snapshot)` discards every
+ * such write.
+ *
+ * That was survivable when the key list was three non-paginated keys. It is
+ * not survivable now the walk covers `forYouRanked`, `topicFeed`,
+ * `discoveryFeedEntries`, `searchByText`, `accountEntriesInfinite` and
+ * `profileRedesignEntries` — every one an infinite query holding the pages
+ * the reader has scrolled. Simulated against a real @tanstack/query-core v4
+ * QueryClient:
+ *
+ *   vote -> reader scrolls (fetchNextPage adds page 2) -> vote FAILS
+ *     snapshot restore : pages 2 -> 1   THE READER'S SECOND PAGE IS GONE
+ *
+ * and it does not come back: these queries are deliberately `staleTime:
+ * Infinity` with every automatic refetch trigger off, and this hook
+ * deliberately never invalidates them (see onSuccess), so the feed stays
+ * truncated for the rest of the session with the scroll position now below
+ * content that vanished. Re-walking with `-delta` cannot do that: it only
+ * ever edits a number on a matched node, so pages the reader loaded are
+ * untouchable by a rollback.
+ *
+ * It is also exact where the snapshot was not, in the case A1 measured:
+ * two votes in flight on the same feed and the FIRST fails — the snapshot
+ * restore wiped the second vote's optimistic +1 (which never self-heals,
+ * because that vote SUCCEEDED and success refetches no feed keys); the
+ * re-walk subtracts only this vote's own delta and leaves the other alone.
+ *
+ * ★ Honest about what it does NOT fix, so nobody re-derives the snapshot as
+ * an improvement:
+ *  - If a background refetch replaces a query's data mid-flight, the fresh
+ *    data never received the `+delta`, so subtracting leaves that surface one
+ *    LOW until its next refetch. (The snapshot's behaviour in the same case
+ *    was to throw the fresh server data away entirely and restore a stale
+ *    count — worse, and unbounded rather than off-by-one.)
+ *  - The `Math.max(0, …)` clamp below is not symmetric: a node already at 0
+ *    that gets `-1` stays 0, and the rollback then adds 1. That needs a
+ *    cached `total_votes` of 0 on a post this reader demonstrably has a chain
+ *    vote on — in which case 1 is closer to the truth than the 0 a snapshot
+ *    would have restored.
+ *
+ * ★ Why a whole-cache walk, not a key list (2026-08-13): the list this
+ * replaced named three keys (`postData`, `discussionData`,
+ * `entriesInfinite`) while six live surfaces render vote counts
+ * (`discoveryFeedEntries`, `accountEntriesInfinite`, `profileRedesignEntries`,
+ * `topicFeed`, `forYouRanked`, `searchByText`), and two of those
+ * (`forYouRanked`, `topicFeed`) wrap `Entry[]` inside a response object, so
+ * even an up-to-date key list needs a shape-specific handler per key. A key
+ * list silently rots — that's exactly how four keys got added over time
+ * while the vote count never moved on five of six feeds and nothing failed
+ * loudly enough to notice. A copy-on-write walk has no key list to fall out
+ * of date; its only risk is over-matching, which is bounded (author +
+ * permlink + a numeric `total_votes`) and cheap to test for (see the
+ * negative control in the QA steps this ships with).
+ */
+function adjustCachedTotalVotes(
   queryClient: QueryClient,
   author: string,
   permlink: string,
   delta: number
-): CacheSnapshot[] {
-  if (delta === 0) return [];
+): void {
+  if (delta === 0) return;
 
-  const snapshots: CacheSnapshot[] = [];
-
-  // Update postData queries (single Entry objects)
-  const postQueries = queryClient.getQueriesData<Entry>({ queryKey: ['postData', author, permlink] });
-  for (const [key, data] of postQueries) {
-    if (!data?.stats) continue;
-    snapshots.push({ queryKey: key, data: structuredClone(data) });
-    queryClient.setQueryData(key, {
-      ...data,
-      stats: { ...data.stats, total_votes: Math.max(0, data.stats.total_votes + delta) }
-    });
+  for (const query of queryClient.getQueryCache().getAll()) {
+    const data = query.state.data;
+    if (data === undefined) continue;
+    const result = patchVoteTarget(data, author, permlink, delta, 0, new WeakSet());
+    if (!result.changed) continue;
+    queryClient.setQueryData(query.queryKey, result.value);
   }
-
-  // Update discussionData queries (record of entries keyed by path)
-  const discussionQueries = queryClient.getQueriesData<Record<string, Entry>>({ queryKey: ['discussionData'] });
-  for (const [key, data] of discussionQueries) {
-    if (!data) continue;
-    const entryKey = Object.keys(data).find((k) => {
-      const entry = data[k];
-      return entry?.author === author && entry?.permlink === permlink;
-    });
-    if (!entryKey || !data[entryKey]?.stats) continue;
-    snapshots.push({ queryKey: key, data: structuredClone(data) });
-    const entry = data[entryKey];
-    queryClient.setQueryData(key, {
-      ...data,
-      [entryKey]: {
-        ...entry,
-        stats: { ...entry.stats, total_votes: Math.max(0, (entry.stats?.total_votes ?? 0) + delta) }
-      }
-    });
-  }
-
-  // Update entriesInfinite queries (paginated arrays of Entry objects)
-  const infiniteQueries = queryClient.getQueriesData<{ pages: Entry[][]; pageParams: unknown[] }>({
-    queryKey: ['entriesInfinite']
-  });
-  for (const [key, data] of infiniteQueries) {
-    if (!data?.pages) continue;
-    let found = false;
-    const updatedPages = data.pages.map((page) =>
-      page.map((entry) => {
-        if (entry.author === author && entry.permlink === permlink && entry.stats) {
-          found = true;
-          return {
-            ...entry,
-            stats: { ...entry.stats, total_votes: Math.max(0, (entry.stats.total_votes ?? 0) + delta) }
-          };
-        }
-        return entry;
-      })
-    );
-    if (!found) continue;
-    snapshots.push({ queryKey: key, data: structuredClone(data) });
-    queryClient.setQueryData(key, { ...data, pages: updatedPages });
-  }
-
-  return snapshots;
 }
 
 /**
@@ -159,11 +254,15 @@ export function useVoteMutation() {
       const isRemovingVote = weight === 0 && hadPreviousVote;
       const voteDelta = isNewVote ? 1 : isRemovingVote ? -1 : 0;
 
-      // Optimistically update total_votes in postData and discussionData caches
-      const prevCacheSnapshots = optimisticUpdateTotalVotes(queryClient, author, permlink, voteDelta);
+      // Optimistically bump total_votes on every cached surface showing this post
+      adjustCachedTotalVotes(queryClient, author, permlink, voteDelta);
 
-      // Return context for rollback
-      return { prevVoteData, queryKey, prevCacheSnapshots };
+      // Return context for rollback. `voteDelta` — not a set of cache
+      // snapshots — IS the rollback instruction: onError re-walks with its
+      // negation, which is exact under concurrent writes and, unlike a
+      // snapshot restore, cannot destroy feed pages the reader has since
+      // scrolled into. See adjustCachedTotalVotes.
+      return { prevVoteData, queryKey, author, permlink, voteDelta };
     },
 
     mutationFn: async (params: { voter: string; author: string; permlink: string; weight: number }) => {
@@ -256,8 +355,25 @@ export function useVoteMutation() {
       // Manabars don't have optimistic data from this mutation
       scheduleInvalidations(queryClient, [['manabars', voter]]);
 
-      // entriesInfinite has optimistic total_votes — delayed invalidation for full data refresh
-      scheduleInvalidations(queryClient, [['entriesInfinite']], [16000, 30000]);
+      // ★ ['entriesInfinite'] invalidation removed (2026-08-13). Confirmed
+      // dead: `entriesInfinite`'s only definition (`list-of-posts.tsx`,
+      // `SortedPagesPosts`) has zero importers anywhere under `app/`,
+      // `features/`, `components/`, `lib/` — no `pages/` router directory
+      // exists to render it. Invalidating a key nothing subscribes to is a
+      // no-op. The nine OTHER hooks that still invalidate this key
+      // (`use-blacklist-mutations.ts`, `use-follow-*-mutation.ts`,
+      // `use-mute-mutations.ts`, `use-post-mutation.ts`,
+      // `use-sign-in/out.tsx`) are untouched — that cleanup is not this
+      // hook's to make.
+      //
+      // ★ DO NOT add the six live feed keys here instead
+      // (`discoveryFeedEntries`, `topicFeed`, `forYouRanked`, etc.).
+      // `invalidateQueries` refetches regardless of `staleTime`, and those
+      // queries are deliberately `staleTime: Infinity` with every automatic
+      // trigger off (`feed-tabs.tsx`, `topic-shell.tsx`) — a refetch
+      // replaces `data.pages` wholesale and re-runs recsys ranking under the
+      // reader. `adjustCachedTotalVotes` above is the whole client-side
+      // fix for these surfaces; there is no invalidation half for them.
 
       // Discussion and post data need longer delays since Hivemind takes
       // longer to reflect vote changes in aggregated data
@@ -278,11 +394,12 @@ export function useVoteMutation() {
           context.prevVoteData ?? { votes: [] }
         );
       }
-      // Rollback total_votes optimistic updates
-      if (context?.prevCacheSnapshots) {
-        for (const { queryKey: key, data } of context.prevCacheSnapshots) {
-          queryClient.setQueryData(key, data);
-        }
+      // Rollback the total_votes bump by re-walking with the negated delta —
+      // NOT by restoring cache snapshots. A snapshot restore of an infinite
+      // query throws away every page the reader loaded while the vote was in
+      // flight, permanently for the session. See adjustCachedTotalVotes.
+      if (context?.voteDelta) {
+        adjustCachedTotalVotes(queryClient, context.author, context.permlink, -context.voteDelta);
       }
 
       handleError(error, {

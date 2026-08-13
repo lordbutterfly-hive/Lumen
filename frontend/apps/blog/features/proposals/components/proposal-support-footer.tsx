@@ -148,7 +148,19 @@ export default function ProposalSupportFooter({
           {t('proposals.card.votes_unavailable')}
         </span>
       ) : isLiteBlocked ? (
-        <TooltipContainer title={t('proposals.lite_cannot_vote')}>{button}</TooltipContainer>
+        /* ★ THE GATE STAYS SHUT, THE REASON STOPS LYING (2026-08-13, adversarial
+           review S4). `isLiteBlocked` is true for TWO different reasons — this is
+           genuinely a lite account, or `/api/users/me` has not answered — and the
+           second of those can now be permanent (a failed session read never sets
+           `dataUpdatedAt`, so `clientAnswered` never flips). Telling a reader with
+           a full Hive account "voting needs a full Hive account. Upgrade to vote"
+           because our own request failed is a false statement about THEM. The
+           button stays disabled either way; only the sentence changes. */
+        <TooltipContainer
+          title={identity.sessionUnavailable ? t('proposals.session_unavailable') : t('proposals.lite_cannot_vote')}
+        >
+          {button}
+        </TooltipContainer>
       ) : isLoggedIn ? (
         button
       ) : (

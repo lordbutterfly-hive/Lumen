@@ -17,6 +17,7 @@ import ProfileTokenCard from '@/blog/features/creator-tokens/ui/profile-token-ca
 import PageMasthead from '@/blog/features/layouts/page-masthead';
 import { cn } from '@ui/lib/utils';
 import { LumenLoader } from '@hive/ui';
+import { useTranslation } from '@/blog/i18n/client';
 import ProfileCover from './profile-cover';
 import ProfileIdentity from './profile-identity';
 import ProfileActions from './profile-actions';
@@ -46,6 +47,7 @@ import { getCoverImageUrl } from './lib/get-cover-image-url';
  * `.../api/vests-to-hp/route.ts`.
  */
 export default function ProfileMain() {
+  const { t } = useTranslation('common_blog');
   const params = useParams<{ param: string }>();
   const username = extractUsernameFromParam(params?.param ?? '') ?? '';
   const { user, isHydrated } = useUserClient();
@@ -171,7 +173,7 @@ export default function ProfileMain() {
   }
 
   if (isProfilePending || isDynamicGlobalPending) {
-    return <LumenLoader size="lg" className="min-h-[70vh]" />;
+    return <LumenLoader size="lg" className="min-h-[70vh]" label={t('global.loading_profile')} />;
   }
 
   if (!profileData) {
@@ -189,7 +191,7 @@ export default function ProfileMain() {
     return <NoDataError />;
   }
   if (isChainPending || !hpFigures) {
-    return <LumenLoader size="lg" className="min-h-[70vh]" />;
+    return <LumenLoader size="lg" className="min-h-[70vh]" label={t('global.loading_profile')} />;
   }
 
   const { delegatedHive, vestingHive } = hpFigures;

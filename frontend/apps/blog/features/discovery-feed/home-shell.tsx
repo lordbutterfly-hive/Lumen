@@ -6,6 +6,16 @@ import { WeeklyRecapCard } from '@/blog/features/retention/components/weekly-rec
 import { RetentionNudge } from '@/blog/features/retention/components/retention-nudge';
 import { TodayCard } from '@/blog/features/retention/components/today-card';
 import HomeIntro from '@/blog/components/home-intro';
+// ★ SERVER-SIDE t(), NOT `i18n/client` (a11y item 8/O5). This file has no
+// `'use client'` and is rendered directly by `app/page.tsx` (itself a Server
+// Component -- it calls `cookies()`), so it is a genuine Server Component.
+// `i18n/client`'s `useTranslation` is a real hook (`useState`/`useEffect` in
+// its client branch) and would crash here; `i18n/server`'s is a plain async
+// function built for exactly this case.
+// Aliased deliberately: this is the SERVER helper, an async function, NOT a
+// React hook. Imported under its own name it trips `react-hooks/rules-of-hooks`
+// ('cannot be called in an async function') purely because of the `use` prefix.
+import { useTranslation as getServerTranslation } from '@/blog/i18n/server';
 
 /**
  * Home shell — the redesign's fixed 3-column grid (200 / 1fr / 312, gap 44,
@@ -14,7 +24,8 @@ import HomeIntro from '@/blog/components/home-intro';
  * the retention league showcase atop it), center = composer + tabs, right = rail.
  * Responsive: nav collapses below md, right rail below xl.
  */
-export default function HomeShell({ showIntro = false }: { showIntro?: boolean }) {
+export default async function HomeShell({ showIntro = false }: { showIntro?: boolean }) {
+  const { t } = await getServerTranslation('common_blog');
   return (
     <div className="relative mx-auto grid max-w-[1720px] grid-cols-1 gap-11 px-6 pb-20 pt-[26px] md:grid-cols-[200px_minmax(0,1fr)] md:px-11 xl:grid-cols-[200px_minmax(0,1fr)_312px]">
       {/* 1px vertical divider at the nav's right edge — equal 44px gutter each side */}
@@ -28,6 +39,11 @@ export default function HomeShell({ showIntro = false }: { showIntro?: boolean }
       </aside>
 
       <main className="min-w-0">
+        {/* ★ A11Y ITEM 8/O5 -- one <h1> per page. The redesign deliberately has
+            no visible page title on the feed, so a visually-hidden heading is
+            the honest minimum: it names the landmark for a screen reader
+            without adding a title nothing else on the page has. */}
+        <h1 className="sr-only">{t('global.home_feed')}</h1>
         {/* ★ ORDER MATTERS AND IT IS ONE-IN, ONE-OUT. The nudge is at most ONE line
             once a day and renders nothing most days; the recap is one card on Mondays.
             Both sit above the composer because they are read and dismissed, not

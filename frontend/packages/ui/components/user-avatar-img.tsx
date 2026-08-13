@@ -81,7 +81,14 @@ export function UserAvatarImg({
     <span
       aria-hidden={alt === '' ? true : undefined}
       className={cn(
-        'relative inline-flex shrink-0 items-center justify-center overflow-hidden bg-[#f1f3f5] font-sans font-bold uppercase text-[#9ca3af]',
+        // ★ Contrast fix (2026-08-13, O5 a11y build map item 4). `#9ca3af` on
+        // this box's own `#f1f3f5` background measured 2.28:1, well under the
+        // 4.5:1 floor (the fallback initial is never large/bold enough for
+        // the large-text exemption — max 14px at the biggest call site). This
+        // is the "grey-ground" replacement (`#6f6963`, 4.87:1 on `#f1f3f5`),
+        // not the plain-white one, because the background is baked into this
+        // same className.
+        'relative inline-flex shrink-0 items-center justify-center overflow-hidden bg-[#f1f3f5] font-sans font-bold uppercase text-[#6f6963]',
         radiusClassName,
         className
       )}

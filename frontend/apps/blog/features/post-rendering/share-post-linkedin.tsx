@@ -22,13 +22,16 @@ export default function LinkedInShare({ title, url }: { title: string; url: stri
   };
 
   return (
-    <div
+    // ★ KEYBOARD-UNREACHABLE TRIGGER FIX (2026-08-13, O5 a11y build map item 2).
+    // See share-post-facebook.tsx for the shared reasoning.
+    <button
+      type="button"
       className="cursor-pointer text-muted-foreground transition-colors hover:text-destructive"
       onClick={openWindow}
-      title={t('post_content.footer.share_on') + `LinkedIn`}
+      aria-label={t('post_content.footer.share_on') + `LinkedIn`}
       data-testid="share-on-linkedin"
     >
       <Linkedin className="h-[18px] w-[18px]" />
-    </div>
+    </button>
   );
 }

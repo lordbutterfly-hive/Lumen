@@ -76,6 +76,61 @@ interface CommentListProps {
 export const commentClassName =
   'font-sanspro text-[12.5px] prose-h1:text-[20px] prose-h2:text-[17.5px] prose-h4:text-[13.7px] sm:text-[13.4px] sm:prose-h1:text-[21.5px] sm:prose-h2:text-[18.7px] sm:prose-h3:text-[16px]  sm:prose-h4:text-[14.7px] lg:text-[14.6px] lg:prose-h1:text-[23.3px] lg:prose-h2:text-[20.4px] lg:prose-h3:text-[17.5px] lg:prose-h4:text-[16px] prose-h3:text-[15px] prose-p:mb-[9.6px] prose-p:mt-[1.6px] last:prose-p:mb-[3.2px] prose-img:max-w-full prose-img:h-auto prose-img:max-h-[400px]';
 
+/**
+ * ★★★ FOUR HONEST PUBLISH STATES, ONLY THE FIRST WITH A SPINNER (O7 F2a,
+ * 2026-08-13). A real comment (`01KZW0GB585D9GQMWVHM7NNC3Q`) spun on
+ * "Publishing..." for ~24 hours with no timeout, no error branch and no
+ * terminal state — because `comment._optimistic` used to mean two different
+ * things (see `db-post-to-entry.ts`'s own doc): "just broadcast, resolving in
+ * seconds" on the CHAIN path (`use-comment-mutations.ts`), and "has never
+ * been broadcast at all, possibly ever" on the LITE path (this component's
+ * server-sourced comments, before `db-post-to-entry.ts`'s flag fix). One flag,
+ * one spinner, two truths — a spinner is what reads as a hang, so every state
+ * below the first loses it.
+ *
+ * `liteOverlay` (already computed above, for the byline) is the discriminator:
+ * it is non-null ONLY for an entry that passed through the lite pipeline
+ * (`isLumenProxiedEntry` — matches the `lumen-`/`lite-` permlink shapes or a
+ * `lumen_post_id`/`lumen/1.0` marker in `json_metadata`), so a plain chain
+ * comment's fresh client-side optimistic stub (`use-comment-mutations.ts`,
+ * temp `re-<author>-<ts>` permlink, no lite marker) never matches it — that
+ * path keeps its existing sub-30s "Publishing…" behaviour byte-identical, as
+ * the Phase-2 adjudication's sequencing note requires.
+ *
+ * Thresholds (15 min / 6 h) are judgement, not measurement — O7's own build
+ * map names them as such and recommends re-deriving them from real drain
+ * timings once the publisher has actually run for a week.
+ */
+const PUBLISH_QUEUED_WINDOW_MS = 15 * 60 * 1000;
+const PUBLISH_WAITING_WINDOW_MS = 6 * 60 * 60 * 1000;
+
+type PublishBadgeState = 'publishing' | 'queued' | 'waiting' | 'delayed' | null;
+
+function getPublishBadgeState(
+  isOptimistic: boolean,
+  isLitePipeline: boolean,
+  createdIso: string
+): PublishBadgeState {
+  if (!isOptimistic) return null;
+  // Chain path: a fresh client-side optimistic comment, not from the lite
+  // pipeline at all. Unchanged from before this fix — still spinning, still
+  // "Publishing...", still expected to resolve in seconds via
+  // `scheduleValidatedRefetch`.
+  if (!isLitePipeline) return 'publishing';
+
+  const ageMs = Date.now() - new Date(createdIso).getTime();
+  if (!Number.isFinite(ageMs) || ageMs < PUBLISH_QUEUED_WINDOW_MS) return 'queued';
+  if (ageMs < PUBLISH_WAITING_WINDOW_MS) return 'waiting';
+  return 'delayed';
+}
+
+const PUBLISH_BADGE_COPY_KEY: Record<Exclude<PublishBadgeState, null>, string> = {
+  publishing: 'global.publishing',
+  queued: 'cards.comment_card.publish_queued',
+  waiting: 'cards.comment_card.publish_waiting',
+  delayed: 'cards.comment_card.publish_delayed'
+};
+
 const CommentListItem = memo(function CommentListItem({
   permissionToMute,
   comment,
@@ -135,6 +190,8 @@ const CommentListItem = memo(function CommentListItem({
   // the chain.
   const liteOverlay = useLiteOverlay(comment);
   const displayAuthor = liteOverlay?.author ?? comment.author;
+  // See the four-state badge doc above `commentClassName`.
+  const publishBadgeState = getPublishBadgeState(!!comment._optimistic, !!liteOverlay, comment.created);
 
   const isMutedByViewer = mutedList?.some((x) => x.name === comment.author);
   const isGrayedByStats = comment.stats?.gray;
@@ -387,10 +444,23 @@ const CommentListItem = memo(function CommentListItem({
                               </div>
                             ) : (
                               <>
-                                {comment._optimistic && (
-                                  <span className="mr-2 flex items-center gap-1 text-xs text-blue-500">
-                                    <CircleSpinner size={10} color="#3b82f6" loading />
-                                    {t('global.publishing')}
+                                {publishBadgeState && (
+                                  <span
+                                    className={cn('mr-2 flex items-center gap-1 text-xs', {
+                                      'text-blue-500': publishBadgeState === 'publishing' || publishBadgeState === 'queued',
+                                      'text-muted-foreground': publishBadgeState === 'waiting',
+                                      'text-amber-600': publishBadgeState === 'delayed'
+                                    })}
+                                    data-testid="comment-publish-status"
+                                    data-publish-state={publishBadgeState}
+                                  >
+                                    {/* Spinner on the FIRST state only — a spinner is what
+                                        reads as a hang, and everything past "just broadcast,
+                                        resolving in seconds" is a calm, static sentence. */}
+                                    {publishBadgeState === 'publishing' && (
+                                      <CircleSpinner size={10} color="#3b82f6" loading />
+                                    )}
+                                    {t(PUBLISH_BADGE_COPY_KEY[publishBadgeState])}
                                   </span>
                                 )}
                                 {/* ★ item 7: ONE avatar rule for every depth. Used to be TWO —

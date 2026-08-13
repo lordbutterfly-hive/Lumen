@@ -9,6 +9,7 @@ import PageMasthead from '@/blog/features/layouts/page-masthead';
 import MediumPostCard from './medium-post-card';
 import { filterVisiblePosts, useNsfwPreference } from '@/blog/lib/nsfw';
 import { LumenLoader } from '@hive/ui';
+import { useTranslation } from '@/blog/i18n/client';
 import { Entry } from '@hive/common-hiveio-packages/wax';
 
 /**
@@ -36,11 +37,12 @@ interface TopicResponse {
 const LIMIT = 30;
 
 export default function TopicShell({ tag }: { tag: string }) {
+  const { t } = useTranslation('common_blog');
   const { ref, inView } = useInView();
 
   // Same infinite scroll as the main feed — a topic is the feed, filtered, so it
   // must not stop after one page either.
-  const { data, isLoading, isError, fetchNextPage, hasNextPage, isFetchingNextPage } =
+  const { data, isLoading, isError, fetchNextPage, hasNextPage, isFetchingNextPage, refetch } =
     useInfiniteQuery<TopicResponse>({
       queryKey: ['topicFeed', tag],
       queryFn: async ({ pageParam }) => {
@@ -71,6 +73,12 @@ export default function TopicShell({ tag }: { tag: string }) {
       // Same fix, same reasoning: nothing about a ranked page changing while a
       // reader is scrolled into it is time-critical, so every automatic
       // trigger is off.
+          // ★ A FAILED READ MUST SURFACE FAST (2026-08-13). This query never overrode
+    // React Query's default `retry: 3`, so a genuine failure sat behind three
+    // attempts and ~7s of backoff — measured at 5.4s / 9.1s on real failures —
+    // before the reader was told anything, behind an unlabelled spinner the whole
+    // time. One retry absorbs a transient blip; three only postpone bad news.
+      retry: 1,
       staleTime: Infinity,
       refetchOnWindowFocus: false,
       refetchOnReconnect: false,
@@ -107,6 +115,19 @@ export default function TopicShell({ tag }: { tag: string }) {
   const shown = entries.length > 0 ? entries : lastRendered.current;
 
   const ranked = data?.pages?.[0]?.source === 'recsys';
+
+  // ★★★ THE `degraded` FLAG WAS DECLARED AND NEVER READ (2026-08-13, adversarial
+  // review S10). `/api/feed/for-you` answers `{ entries: [], source:
+  // 'trending-fallback', degraded: <reason> }` at HTTP 200 when it cannot rank —
+  // an honest server admitting it fell back — and this page's `TopicResponse` type
+  // carried `degraded?: string` from the day it was written while nothing ever
+  // looked at it. So a degraded answer rendered as "Nothing here yet: no posts
+  // carry the tag <x> right now", which is a confident editorial claim about the
+  // topic, made on a read the server had just told us not to trust. Exactly the
+  // class of lie `/api/account-posts` was fixed for; same fix, different route.
+  //
+  // Read across ALL pages, not just page 0: a degraded page 2 is the same fact.
+  const degradedPage = (data?.pages ?? []).some((page) => !!page?.degraded);
 
   // ★ A COMMUNITY ID IS NOT A READABLE TOPIC (owner ruling, 2026-08-07).
   // Communities are shown as tags, so `hive-13323` lands here — and "#hive-13323"
@@ -158,7 +179,7 @@ export default function TopicShell({ tag }: { tag: string }) {
         </PageMasthead>
 
         {isLoading ? (
-          <LumenLoader size="lg" />
+          <LumenLoader size="lg" label={t('global.loading_posts')} />
         ) : isError && shown.length === 0 && !hasNextPage ? (
           // ★ `isError` ALONE IS NO LONGER THE GUARD, same fix as ForYouFeed: with
           // `shown` already holding the last good page, only "nothing at all to
@@ -168,6 +189,27 @@ export default function TopicShell({ tag }: { tag: string }) {
           <p className="py-12 text-center font-sans text-sm text-muted-foreground">
             We couldn’t load this topic just now. Try again in a moment.
           </p>
+        ) : shown.length === 0 && degradedPage ? (
+          // ★ AN EMPTY DEGRADED ANSWER IS NOT AN EMPTY TOPIC. The server said it
+          // could not serve this properly, so this page says that and offers a
+          // retry — it does NOT assert "no posts carry this tag", which is a
+          // statement about the topic that we have no evidence for.
+          <div className="rounded-[20px] border border-dashed border-[#e6e0da] bg-[#fdfcfb] px-8 py-14 text-center">
+            <p className="mb-1 font-serif text-[19px] font-semibold text-[#161511]">
+              We couldn’t load this topic
+            </p>
+            <p className="mx-auto mb-5 max-w-[42ch] text-[13.5px] leading-[1.6] text-[#6b7280]">
+              Something went wrong on our side, so we don’t know what’s under{' '}
+              <span className="font-semibold text-[#161511]">#{tag}</span> right now. It isn’t necessarily empty.
+            </p>
+            <button
+              type="button"
+              onClick={() => refetch()}
+              className="inline-block rounded-[13px] bg-[#c0392b] px-5 py-2.5 text-[14px] font-bold text-white hover:bg-[#96271b]"
+            >
+              Try again
+            </button>
+          </div>
         ) : shown.length === 0 ? (
           // Never a bare dead end: an empty topic still offers a way onward.
           <div className="rounded-[20px] border border-dashed border-[#e6e0da] bg-[#fdfcfb] px-8 py-14 text-center">

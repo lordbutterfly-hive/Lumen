@@ -24,6 +24,7 @@ import { DEFAULT_PREFERENCES, Preferences } from '@/blog/lib/utils';
 import { CircleSpinner } from 'react-spinners-kit';
 import { Signer } from '@smart-signer/lib/signer/signer';
 import { useSignerContext } from '@smart-signer/components/signer-provider';
+import BasePathLink from '@/blog/components/base-path-link';
 import {
   SETTINGS_CARD,
   SETTINGS_CARD_HINT,
@@ -32,10 +33,24 @@ import {
   SETTINGS_LABEL
 } from './lib/card';
 
-/** Radix select drawn in the house style — same border, radius and focus ink as
- *  the text fields beside it, so the two controls read as one form. */
+/** Radix select drawn in the house style — same border and radius as the text
+ *  fields beside it, so the two controls read as one form.
+ *
+ *  ★ RING RESTORED (2026-08-13, QA V3-a11y item 1 / O5 build map item 7).
+ *  This used to also carry `focus:ring-0 focus:ring-offset-0`, which
+ *  cancelled the shared `focus:ring-2 focus:ring-ring focus:ring-offset-2`
+ *  from `packages/ui/components/select.tsx:22` down to a 0px-wide ring on
+ *  both layers — measured live: `box-shadow: rgb(255,255,255) 0 0 0 0px,
+ *  rgb(192,57,43) 0 0 0 0px`, invisible even though the colour itself was
+ *  already correct brand red. `--ring` (globals.css) is brand red now, so
+ *  removing the override just lets this control draw the exact same
+ *  white-then-red double ring the Write button, the notification bell and
+ *  every dialog Close button already draw — the previous `focus-visible:
+ *  border-[#c0392b]` was a fallback for the ring being invisible and is
+ *  redundant now that the real ring is back, so it goes too rather than
+ *  stacking a red border UNDER a red ring. */
 const SELECT_TRIGGER =
-  'h-10 w-full rounded-[10px] border border-[#e4e6e9] bg-white px-3 font-sans text-[13.5px] text-[#161511] focus:ring-0 focus:ring-offset-0 focus-visible:border-[#c0392b] [&>svg]:opacity-100 [&>svg]:text-[#6b7280]';
+  'h-10 w-full rounded-[10px] border border-[#e4e6e9] bg-white px-3 font-sans text-[13.5px] text-[#161511] [&>svg]:opacity-100 [&>svg]:text-[#6b7280]';
 const SELECT_CONTENT = 'rounded-[12px] border border-[#e4e6e9] bg-white p-1 shadow-[0_8px_24px_rgba(20,18,10,0.10)]';
 const SELECT_ITEM =
   'cursor-pointer rounded-[9px] py-2 font-sans text-[13.5px] text-[#161511] focus:bg-[#fdf2f0] focus:text-[#c0392b]';
@@ -110,14 +125,19 @@ const SettingsForm = ({ username }: { username: string }) => {
    * combobox wrote straight to localStorage on `onValueChange` with no
    * feedback at all — a reader who picked "Always hide" for NSFW content had
    * no way to tell it took effect versus the click having done nothing. This
-   * writes AND confirms in one place, reusing the same `changes_saved` copy
-   * the profile save already uses (it is generically true here too — a
-   * preference changed and was saved), so this doesn't need a second
-   * translation key or a second design language for "it worked".
+   * writes AND confirms in one place.
+   *
+   * ★ O6 build map item 3 (2026-08-13) — NOT `settings_page.changes_saved`
+   * anymore. That copy is what the profile card above uses for a real
+   * per-account save (a chain broadcast, or `/api/lite/profile` for a lite
+   * account) — reusing it here for a write that never leaves this browser's
+   * localStorage is the specific thing that misleads: a reader who sets
+   * "Always hide" here and opens Lumen on another device gets no warning
+   * that the setting did not travel with them. Own copy, own key.
    */
   const updatePreference = <K extends keyof Preferences>(key: K, value: Preferences[K]) => {
     setPreferences((prev) => ({ ...prev, [key]: value }));
-    toast({ title: t('settings_page.changes_saved'), variant: 'success' });
+    toast({ title: t('settings_page.saved_on_this_browser'), variant: 'success' });
   };
   const chainProfile = data?.profile;
   const profileData: Partial<Settings> = (isLite ? liteProfile : chainProfile) ?? {};
@@ -470,6 +490,16 @@ const SettingsForm = ({ username }: { username: string }) => {
 
       <section className={SETTINGS_CARD} data-testid="settings-preferences">
         <h2 className={SETTINGS_CARD_TITLE}>{t('settings_page.preferences')}</h2>
+        {/* ★ O6 build map item 3 (2026-08-13). These four controls write to
+            localStorage only — no fetch, ever, on this path (`updatePreference`
+            above) — with nothing on the page saying so, next to a card
+            (Public Profile Settings, above) whose Update button DOES persist
+            per-account. Same muted-helper-text treatment `update_hint` already
+            uses below the profile Update button, so this reads as the same
+            kind of house copy, not a warning callout. */}
+        <p className="mt-2 text-[12.5px] text-[#6b7280]" data-testid="settings-preferences-device-scope">
+          {t('settings_page.preferences_device_scope')}
+        </p>
 
         <div className="mt-5 grid grid-cols-1 gap-5 md:grid-cols-2">
           <div data-testid="not-safe-for-work-content">
@@ -587,6 +617,37 @@ const SettingsForm = ({ username }: { username: string }) => {
               </SelectContent>
             </Select>
           </div>
+        </div>
+      </section>
+
+      {/* ★ O6 build map item 7 (2026-08-13) — the zero-risk half of "no footer
+          anywhere". `grep -rn "<footer" apps packages` returns zero matches
+          app-wide: Privacy, Terms and Help are unreachable once a reader is
+          signed in (the login screen's own links become unreachable the
+          moment `/login` starts redirecting home). The durable fix is a real
+          page-level footer — out of this file's ownership, and it carries its
+          own risk against the infinite-scroll feed (`lib/nsfw.ts`'s documented
+          runaway-fetch-loop case) that needs its own look before it ships.
+          This card is the part with no such risk: Settings is exactly where
+          "what did I agree to" is looked for, and it is a fixed-height page,
+          not a scrolling one. Does not help a signed-out reader on a post
+          page — that gap stays open until the footer ships. */}
+      <section className={SETTINGS_CARD} data-testid="settings-legal">
+        <h2 className={SETTINGS_CARD_TITLE}>{t('settings_page.legal_title')}</h2>
+        <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-[13.5px]">
+          <BasePathLink href="/privacy.html" className="font-semibold text-[#c0392b] hover:text-[#96271b]">
+            {t('navigation.sidebar.privacy_policy')}
+          </BasePathLink>
+          <BasePathLink href="/tos.html" className="font-semibold text-[#c0392b] hover:text-[#96271b]">
+            {t('navigation.sidebar.terms_of_service')}
+          </BasePathLink>
+          {/* Not special-cased by `base-path-link.tsx`'s `isStaticPage` reload
+              list (only `/privacy.html`/`/tos.html` are) — fine here, since
+              that special case exists to work around a basePath deployment
+              quirk on the OTHER two, not something `/help.html` needs. */}
+          <BasePathLink href="/help.html" className="font-semibold text-[#c0392b] hover:text-[#96271b]">
+            {t('settings_page.help_link')}
+          </BasePathLink>
         </div>
       </section>
     </>

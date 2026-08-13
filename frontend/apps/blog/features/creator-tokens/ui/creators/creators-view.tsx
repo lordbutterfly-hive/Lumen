@@ -3,6 +3,7 @@
 import PageMasthead from '@/blog/features/layouts/page-masthead';
 import { FC, useMemo, useState } from 'react';
 import { Link, LumenLoader } from '@hive/ui';
+import { useTranslation } from '@/blog/i18n/client';
 import { useLiveDiscovery } from '../../live/use-live-discovery';
 import { usdFromHbd } from '../../live/adapt';
 import type { CreatorSummary } from '../../types';
@@ -121,6 +122,7 @@ const CreatorCard: FC<{ c: CreatorSummary }> = ({ c }) => {
 };
 
 const CreatorsView: FC = () => {
+  const { t } = useTranslation('common_blog');
   const [sort, setSort] = useState<Sort>('reliable');
   const [showNew, setShowNew] = useState(true);
   const [answersOnly, setAnswersOnly] = useState(false);
@@ -245,7 +247,7 @@ const CreatorsView: FC = () => {
           Creator tokens aren’t available on this build yet.
         </div>
       ) : discovery.isLoading ? (
-        <LumenLoader size="md" />
+        <LumenLoader size="md" label={t('global.loading_creators')} />
       ) : discovery.failed ? (
         // NOT "no creators" — this page must never render a failed lookup as an
         // empty market. It is the same unavailable-vs-empty rule the wallet and

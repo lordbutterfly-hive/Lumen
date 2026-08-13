@@ -1,6 +1,6 @@
 'use client';
 
-import { ReactNode, useMemo, useState } from 'react';
+import { ReactNode, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -12,13 +12,12 @@ import { useTranslation } from '@/blog/i18n/client';
 import { useConvertMutation } from '../../hooks/use-convert-mutation';
 import WalletDialogShell from './shared/wallet-dialog-shell';
 import AmountField from './shared/amount-field';
+import { useWalletDialog } from './shared/use-wallet-dialog';
+import { buildAmountSchema } from './shared/amount-schema';
 
 const buildSchema = (hbdBalance: Big, t: (key: string, opts?: Record<string, unknown>) => string) =>
   z.object({
-    amount: z
-      .number({ message: t('wallet.dialogs.common.amount_positive') })
-      .positive({ message: t('wallet.dialogs.common.amount_positive') })
-      .refine((value) => value <= hbdBalance.toNumber(), { message: t('wallet.dialogs.common.amount_exceeds_balance') })
+    amount: buildAmountSchema({ max: hbdBalance }, t)
   });
 
 type ConvertFormValues = z.infer<ReturnType<typeof buildSchema>>;
@@ -33,11 +32,11 @@ export default function ConvertDialog({
   hbdBalance: Big;
 }) {
   const { t } = useTranslation('common_blog');
-  const [open, setOpen] = useState(false);
   const convertMutation = useConvertMutation();
 
   const schema = useMemo(() => buildSchema(hbdBalance, t), [hbdBalance, t]);
   const form = useForm<ConvertFormValues>({ resolver: zodResolver(schema), mode: 'onSubmit' });
+  const { open, setOpen, onOpenChange } = useWalletDialog(form);
 
   const onSubmit = form.handleSubmit(async (values) => {
     try {
@@ -61,7 +60,7 @@ export default function ConvertDialog({
       title={t('wallet.dialogs.convert.title')}
       description={t('wallet.dialogs.convert.description')}
       open={open}
-      onOpenChange={setOpen}
+      onOpenChange={onOpenChange}
       onSubmit={onSubmit}
       submitLabel={t('wallet.dialogs.common.next')}
       cancelLabel={t('wallet.dialogs.common.cancel')}

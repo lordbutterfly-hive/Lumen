@@ -43,7 +43,7 @@ export default function ProposalList({ proposals, votedIds, votesUnavailable, ta
   if (isLoading && proposals.length === 0) {
     return (
       <div className="flex flex-col gap-3.5" data-testid="proposal-list-loading">
-        <LumenLoader size="lg" />
+        <LumenLoader size="lg" label={t('global.loading_proposals')} />
       </div>
     );
   }

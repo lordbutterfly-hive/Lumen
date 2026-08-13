@@ -239,7 +239,25 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       }
       return entry;
     });
-    const entries = await applyOwnerBlocksToAuthoredEntries(withParents);
+    // ★ SAME "COULD NOT CHECK" ≠ "HAS NOTHING" RULE AS `/api/account-posts`
+    // (2026-08-13, adversarial review S2). This is the LITE half of the very same
+    // profile Comments tab (`use-account-entries.ts` picks between the two by
+    // account type), so a Lumen-database hiccup here produced the identical
+    // confident false empty: the filter withholds every entry whose parent it
+    // could not resolve, throws nothing, and the tab says the author has written
+    // nothing. Partial withholds still serve what survived; a total wipe-out is
+    // reported as degraded rather than as an empty account.
+    const filtered = await applyOwnerBlocksToAuthoredEntries(withParents);
+    const entries = filtered.entries;
+    if (entries.length === 0 && filtered.withheldUnresolvable > 0) {
+      logger.warn(
+        'lite author posts fully withheld for %s (kind=%s): %d entries unresolvable',
+        author,
+        kind,
+        filtered.withheldUnresolvable
+      );
+      return NextResponse.json({ entries: [], degraded: 'block_filter_unresolved' });
+    }
 
     return NextResponse.json({ entries });
   } catch (error) {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useEffect, useState, useMemo, memo } from 'react';
+import { useRef, useEffect, useState, useMemo, memo, MouseEvent as ReactMouseEvent } from 'react';
 import Loading from '@ui/components/loading';
 import { LeavePageDialog } from './leave-page-dialog';
 import { getRenderer, getPreviewRenderer } from './lib/renderer';
@@ -78,14 +78,36 @@ const RendererContainer = ({
     [proxyAuthToken, author]
   );
 
-  const handleClick = (e: Event) => {
+  /**
+   * ★ EVENT DELEGATION, NOT PER-NODE LISTENERS (2026-08-13, audit O6 item 1).
+   *
+   * A per-node `addEventListener('click', …)` attached in the mount effect
+   * below is destroyed the instant react-dom rewrites this container's
+   * `dangerouslySetInnerHTML` body — which it does on every re-render of
+   * this component (parent re-renders, this dialog's own `setOpen`, a
+   * sibling comment's renderer mounting), while the container `<div>` stays
+   * the SAME node so the effect's deps never change and it never re-runs to
+   * reattach. Measured: one click on ONE link disarmed the interstitial for
+   * EVERY external link on the page, including ones never clicked before.
+   *
+   * A single React `onClick` on the container is a synthetic listener React
+   * itself keeps alive at the root — it does not care how many times the
+   * DOM underneath gets rewritten. Resolving the anchor with `closest('a')`
+   * at click time (instead of relying on `e.target` being the anchor
+   * itself) also fixes the old handler's `anchor.parentElement` fallback,
+   * which threw if the click landed more than one level inside the `<a>`
+   * (e.g. an `<img>` inside a `<strong>` inside the link).
+   */
+  const handleBodyClick = (e: ReactMouseEvent<HTMLDivElement>) => {
+    const anchor = (e.target as Element).closest?.('a') as HTMLAnchorElement | null;
+    if (!anchor || !anchor.classList.contains('link-external')) return;
+    const href = anchor.href;
+    if (!href) return;
+    // Whitelisted external links are born with target="_blank" from the
+    // renderer's own `addTargetBlankToLinks: true` (lib/renderer.ts) — let
+    // them navigate normally instead of intercepting.
+    if (isUrlWhitelisted(href)) return;
     e.preventDefault();
-    const anchor = e.target as HTMLAnchorElement;
-    let href = anchor.href;
-    if (!href) {
-      const parent = anchor.parentElement as HTMLAnchorElement;
-      href = parent.href;
-    }
     setLink(href);
     setOpen(true);
   };
@@ -108,15 +130,6 @@ const RendererContainer = ({
   };
 
   useEffect(() => {
-    const nodes = ref.current?.querySelectorAll('a.link-external');
-    nodes?.forEach((n) => {
-      const href = (n as HTMLAnchorElement).href || (n.parentElement as HTMLAnchorElement)?.href;
-      if (isUrlWhitelisted(href)) {
-        n.setAttribute('target', '_blank');
-      } else {
-        n.addEventListener('click', handleClick);
-      }
-    });
     const youtubeFacades = ref.current?.querySelectorAll('.youtube-facade');
     if (previewMode) {
       youtubeFacades?.forEach((facade) => {
@@ -139,11 +152,15 @@ const RendererContainer = ({
         }
       });
     }
-    const sub = document.querySelectorAll('sub');
+    // ★ SCOPED TO ref.current, NOT `document` (2026-08-13, audit O6 item 1).
+    // `id="articleBody"` is not unique — every post body and every comment
+    // body on the page renders one — so a `document`-wide query here let one
+    // comment's mount effect reach into the MAIN POST's DOM (and vice versa).
+    const sub = ref.current?.querySelectorAll('sub');
     sub?.forEach((e) => {
       e.classList.add('leading-[150%]');
     });
-    const threeSpeak = document.querySelectorAll('.threeSpeakWrapper');
+    const threeSpeak = ref.current?.querySelectorAll('.threeSpeakWrapper');
     threeSpeak?.forEach((link) => {
       link.classList.add('videoWrapper');
     });
@@ -151,8 +168,9 @@ const RendererContainer = ({
     // This caused issue #759 where line breaks/spacing weren't visible in preview
     // Now paragraphs keep their default prose styling in both preview and published view
     if (communityDescription) {
-      const elementsWithVideoWrapper = document.querySelectorAll('.videoWrapper');
-      elementsWithVideoWrapper.forEach((element) => {
+      // Same scoping fix as above: was `document`-wide.
+      const elementsWithVideoWrapper = ref.current?.querySelectorAll('.videoWrapper');
+      elementsWithVideoWrapper?.forEach((element) => {
         element.classList.remove('videoWrapper');
       });
       const code_block = ref.current?.querySelectorAll('code');
@@ -183,7 +201,6 @@ const RendererContainer = ({
 
     return () => {
       pluginCleanups.forEach((cleanup) => cleanup());
-      nodes?.forEach((n) => n.removeEventListener('click', handleClick));
       if (previewMode) {
         youtubeFacades?.forEach((facade) => {
           facade.removeEventListener('click', handleYoutubeFacadeClick);
@@ -213,6 +230,7 @@ const RendererContainer = ({
           ref={ref}
           className={cn('prose w-full', className)}
           data-testid={dataTestid}
+          onClick={handleBodyClick}
           dangerouslySetInnerHTML={{
             __html: htmlBody
           }}

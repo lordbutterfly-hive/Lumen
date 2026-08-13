@@ -98,10 +98,33 @@ export default function WalletRightRail() {
       {identity.isLoggedIn && identity.clientAnswered && !isLite && (
         <AdvancedToolsCard
           username={user.username}
-          netHp={figures?.netHp ?? ZERO}
-          hbdBalance={figures?.liquidHbd ?? ZERO}
+          // ★ movableHp, not netHp (2026-08-13, map item 10). Delegate is the
+          // other half of the sentence wallet-derived.ts already documents for
+          // Power Down: received HP cannot be re-delegated, so any control that
+          // MOVES stake — Delegate included — must use movableHp, never netHp.
+          maxHp={figures?.movableHp ?? ZERO}
+          liquidHive={figures?.liquidHive ?? ZERO}
+          liquidHbd={figures?.liquidHbd ?? ZERO}
           pendingClaimedAccounts={pendingClaimedAccounts}
         />
+      )}
+      {/* ★ AN INVISIBLE CARD IS NOT AN EXPLANATION (2026-08-13, adversarial
+          review S4). The gate above is right and stays: `clientAnswered` false
+          means we cannot tell a lite account from a full one, and showing tools
+          that sign real transactions on a guess is not on. But a failed
+          `/api/users/me` can never set `clientAnswered` (the error reducer does
+          not touch `dataUpdatedAt`), so on this page — which is only reachable
+          BY a signed-in reader, the route redirects otherwise — Power Up,
+          Delegate and Claim account tokens simply stopped existing, permanently,
+          with nothing on screen accounting for it. This says why. It grants
+          nothing. */}
+      {identity.isLoggedIn && identity.sessionUnavailable && (
+        <p
+          className="rounded-[14px] border border-dashed border-[#e6e0da] px-4 py-3 text-[13px] leading-[1.5] text-[#6b7280]"
+          data-testid="wallet-rail-session-unavailable"
+        >
+          {t('wallet.session_unavailable')}
+        </p>
       )}
     </aside>
   );

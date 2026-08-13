@@ -485,7 +485,8 @@
       "community_rules": "社区规则",
       "cancel": "取消",
       "ok": "确定"
-    }
+    },
+    "lite_replies_truncated": "部分回复未在此显示 — 该主题的内容超出了一次可加载的数量。"
   },
   "submit_page": {
     "log_in_to_post": "登录后才能发布帖子。",

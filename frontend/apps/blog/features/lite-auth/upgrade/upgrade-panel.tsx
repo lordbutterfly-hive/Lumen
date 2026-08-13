@@ -428,6 +428,28 @@ const UpgradePanel: FC = () => {
     // rest of this gate and the status-check effect above both need — isn't
     // confirmed yet. Neither the sign-in message nor the name picker is honest
     // here.
+    //
+    // ★ AND "ISN'T CONFIRMED YET" CAN MEAN "NEVER WILL BE" (2026-08-13,
+    // adversarial review S4). `clientAnswered` cannot flip true off a failed read,
+    // so this "Loading…" was permanent. It still refuses to guess the tier — the
+    // gate below stays exactly as closed as it was — it just stops implying that
+    // waiting will help.
+    if (identity.sessionUnavailable) {
+      return (
+        <div className="mx-auto max-w-[560px] p-6">
+          <p className="text-[15px] text-[#4b5563]">
+            Couldn’t check your account just now, so we can’t start an upgrade.
+          </p>
+          <button
+            type="button"
+            onClick={identity.retrySession}
+            className="mt-3 rounded-[10px] border border-[#e4e6e9] px-4 py-2 text-[14px] font-semibold text-[#3f4650] hover:bg-[#f6f7f8]"
+          >
+            Try again
+          </button>
+        </div>
+      );
+    }
     return <div className="mx-auto max-w-[560px] p-6 text-[15px] text-[#9ca3af]">Loading…</div>;
   }
   if (!user?.isLoggedIn || user.account_tier !== 'lite') {

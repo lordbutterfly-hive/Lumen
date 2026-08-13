@@ -485,7 +485,8 @@
       "community_rules": "Regole della comunità",
       "cancel": "Annulla",
       "ok": "OK"
-    }
+    },
+    "lite_replies_truncated": "Alcune risposte non sono mostrate qui: questa discussione è più grande di quanto possiamo caricare in una volta."
   },
   "submit_page": {
     "log_in_to_post": "Accedi per pubblicare.",

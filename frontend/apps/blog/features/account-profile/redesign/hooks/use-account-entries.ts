@@ -74,7 +74,15 @@ async function fetchLiteAuthorEntries(
   if (before) params.set('before', before);
   const res = await fetch(`/api/lite/posts?${params.toString()}`);
   if (!res.ok) throw new Error(`lite posts ${res.status}`);
-  const body = (await res.json()) as { entries?: Entry[] };
+  const body = (await res.json()) as { entries?: Entry[]; degraded?: string | boolean };
+  // ★ THROW ON `degraded`, EXACTLY AS THE CHAIN BRANCH DOES (2026-08-13,
+  // adversarial review S2). `account-posts-fetch.ts` already refuses to turn a
+  // failed read into "no posts"; this lite twin was answering `[]` for the same
+  // class of failure, so the identical false "@user hasn't posted yet" survived on
+  // the lite half of the very same Comments tab. `isError` here renders the honest
+  // error branch the caller already has (`profile-comments-list.tsx`,
+  // `profile-posts-list.tsx`); a genuinely empty lite account never sets the flag.
+  if (body.degraded) throw new Error(`lite posts degraded: ${body.degraded}`);
   return body.entries ?? [];
 }
 
@@ -129,7 +137,27 @@ export function useAccountEntries(
     //   empty array is truthy, seeding it would install "no posts" as fresh data
     //   for the whole 2-minute staleTime and suppress the fetch that works.
     initialData: seed ? { pages: [seed], pageParams: [undefined] } : undefined,
-    initialDataUpdatedAt: seed ? Date.now() : undefined,
+    // ★ SEED IT STALE, NOT FRESH (2026-08-13). `Date.now()` here told React Query the
+    // server-rendered page was freshly fetched, so the `staleTime` window blocked the
+    // `queryFn` — and the queryFn is where Lumen's own engagement (a lite reader's
+    // votes and reblogs, which never touch the chain) gets merged in. The SSR seed is
+    // a raw chain read with no merge, so a vote a reader had just cast vanished on
+    // every reload until the window expired. Verified in a browser: the count reverted
+    // 2/2 on this surface while the API itself returned the correct number.
+    //
+    // 0 means "paint this instantly, then revalidate" — the seed still avoids a
+    // loading flash, it just no longer suppresses the merge. Same two-token change
+    // already applied to the post page's `postData` query for the same reason; this
+    // surface was its twin and was missed.
+    initialDataUpdatedAt: seed ? 0 : undefined,
+    // ★ A FAILED READ MUST SURFACE FAST (2026-08-13). `/api/account-posts` now
+    // THROWS on a degraded upstream read instead of answering `{entries: null}`,
+    // which is correct — but this query never overrode React Query's default
+    // `retry: 3`, so the honest error it now produces would sit behind three
+    // attempts and ~7s of backoff before the reader is told anything. That is the
+    // exact "spreads the wait to two more profile tabs" regression the sequencing
+    // note warned about. One retry absorbs a genuine blip; three only delays bad news.
+    retry: 1,
     staleTime: StaleTime.MEDIUM
   });
   const { hasNextPage, isFetching, isError, fetchNextPage } = result;

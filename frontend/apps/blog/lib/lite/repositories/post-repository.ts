@@ -220,6 +220,141 @@ export async function listRepliesToChainPost(
   return rows.map(mapPost);
 }
 
+/**
+ * Same as `listRepliesToChainPost`, batched over a SET of parents in one query.
+ *
+ * ★ WHY THIS EXISTS (2026-08-13, S6/S7 handover -- O4-stuck-states.md item 7).
+ * `listRepliesToChainPost` above -- and `/api/lite/posts/replies` before this
+ * change -- accepted exactly ONE parent: the chain identity of whatever post the
+ * caller asked about, always the THREAD ROOT in practice. That is right for a
+ * lite reply to the root post and silently wrong for a lite reply to a COMMENT: a
+ * nested reply's `publish_parent_*` is the comment it replies to, not the post at
+ * the top of the thread, so a caller that only ever asks about the root leaves
+ * every nested lite reply permanently unmatched -- not merely hidden, never
+ * fetched at all, on every page load. The fix is not a different WHERE clause on
+ * the same single-pair shape; it is asking about every node in the thread that
+ * could have a lite reply hanging off it, in ONE call, since the caller (the post
+ * page) already knows the whole tree by the time it asks. One row per (author,
+ * permlink) pair via `unnest` -- the same batching shape `getEngagementTotals`
+ * (engagement-repository.ts) already uses for the identical class of problem.
+ *
+ * Returns each matched post ALONGSIDE the specific requested parent it matched --
+ * not just the post -- because a batched caller cannot otherwise tell which of its
+ * N requested parents a given row answers. `dbPostToEntry` cannot derive
+ * `parent_author`/`parent_permlink` on its own (see the route's own doc), and with
+ * more than one parent in play there is no longer a single implicit answer for the
+ * route to fall back on the way the single-parent form still can.
+ *
+ * ★★★ THE CAP IS PER PARENT, THE ORDER IS NEWEST-FIRST, AND A CUT IS REPORTED
+ * (2026-08-13, adversarial review S3). The first batched version of this query kept
+ * the single-parent form's `ORDER BY post_id ASC LIMIT 200` verbatim, which silently
+ * became three different bugs the moment more than one parent was passed:
+ *
+ *   1. **The 200 was GLOBAL across the whole batch, not per parent.** Before
+ *      batching it belonged to ONE parent (the thread root) and was never close to
+ *      binding; batched over up to 200 parents it is shared 200 ways, so one chatty
+ *      comment could starve every other node in the thread of its replies. That is a
+ *      capacity regression created by the batching, not a pre-existing limit.
+ *   2. **`ASC` means the cut lands on the NEWEST rows.** This route exists because a
+ *      lite reader posted a reply and could not find it (see the route's own header),
+ *      so dropping the newest replies first defeats the exact purpose it was built
+ *      for -- the reply a reader is looking for is the one they just wrote.
+ *   3. **Nothing said a cut had happened.** A truncated answer is indistinguishable
+ *      from a complete one, so "there are no more replies" gets asserted on a result
+ *      that was quietly clipped.
+ *
+ * So: `row_number()` caps each parent independently (restoring the pre-batching
+ * per-thread guarantee), both orderings are `post_id DESC` (ULIDs are monotonic, so
+ * that is newest-first) and BOTH caps are queried with a +1 probe row whose presence
+ * is the truncation signal. The caller gets `truncated` and is expected to say so
+ * rather than present a clipped list as the whole story. Row ORDER is not part of the
+ * contract -- the post page re-sorts the merged thread itself (`sorter` in
+ * `[permlink]/content.tsx`) -- only which rows survive a cut is.
+ */
+export interface BatchedChainPostReplies {
+  matches: { post: LumenPost; parentAuthor: string; parentPermlink: string }[];
+  /** True when at least one parent hit `perParentLimit`, or the batch as a whole hit
+   *  `totalLimit`. The answer is INCOMPLETE and must not be presented as final. */
+  truncated: boolean;
+}
+
+export async function listRepliesToChainPosts(
+  parents: { author: string; permlink: string }[],
+  opts: { perParentLimit?: number; totalLimit?: number } = {}
+): Promise<BatchedChainPostReplies> {
+  const perParentLimit = opts.perParentLimit ?? 200;
+  const totalLimit = opts.totalLimit ?? 2000;
+  if (parents.length === 0) return { matches: [], truncated: false };
+
+  // Dedup, same reasoning as `getEngagementTotals` -- the caller's own parent list
+  // can legitimately repeat a pair (e.g. the thread root passed once as the post
+  // itself, with no obligation on the caller to filter it back out before asking).
+  const seen = new Set<string>();
+  const authors: string[] = [];
+  const permlinks: string[] = [];
+  for (const p of parents) {
+    const key = `${p.author}/${p.permlink}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    authors.push(p.author);
+    permlinks.push(p.permlink);
+  }
+
+  // Both `$3` and `$4` are asked for ONE MORE row than we intend to keep. That extra
+  // row is never returned to anyone -- its only job is to answer "was there more?"
+  // without a second COUNT query, which is the difference between an honest cap and a
+  // silent one.
+  const { rows } = await query<
+    PostRow & { matched_parent_author: string; matched_parent_permlink: string; parent_rank: string }
+  >(
+    `WITH matched AS (
+       SELECT lp.*,
+              w.parent_author AS matched_parent_author,
+              w.parent_permlink AS matched_parent_permlink,
+              row_number() OVER (
+                PARTITION BY w.parent_author, w.parent_permlink
+                ORDER BY lp.post_id DESC
+              ) AS parent_rank
+         FROM lumen_post lp
+         JOIN unnest($1::text[], $2::text[]) AS w(parent_author, parent_permlink)
+           ON lp.publish_parent_author = w.parent_author
+          AND lp.publish_parent_permlink = w.parent_permlink
+        WHERE lp.deleted_locally = false
+          AND lp.feed_visibility = 'visible'
+     )
+     SELECT * FROM matched
+      WHERE parent_rank <= $3
+      ORDER BY post_id DESC
+      LIMIT $4`,
+    [authors, permlinks, perParentLimit + 1, totalLimit + 1]
+  );
+
+  // The batch-wide probe row. Checked FIRST: if the global limit bound, some
+  // parents' probe rows may themselves have been cut off, so the per-parent check
+  // below can no longer see everything -- but `truncated` is already true either way.
+  const hitTotal = rows.length > totalLimit;
+  const kept = hitTotal ? rows.slice(0, totalLimit) : rows;
+
+  const seenPerParent = new Map<string, number>();
+  const matches: BatchedChainPostReplies['matches'] = [];
+  let hitPerParent = false;
+  for (const row of kept) {
+    const parentKey = `${row.matched_parent_author}/${row.matched_parent_permlink}`;
+    const rank = (seenPerParent.get(parentKey) ?? 0) + 1;
+    seenPerParent.set(parentKey, rank);
+    if (rank > perParentLimit) {
+      hitPerParent = true;
+      continue;
+    }
+    matches.push({
+      post: mapPost(row),
+      parentAuthor: row.matched_parent_author,
+      parentPermlink: row.matched_parent_permlink
+    });
+  }
+  return { matches, truncated: hitTotal || hitPerParent };
+}
+
 export async function listRecent(opts: { limit: number; before?: string }): Promise<LumenPost[]> {
   const { rows } = await query<PostRow>(
     `SELECT * FROM lumen_post

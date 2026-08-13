@@ -15,6 +15,7 @@
 import { FC, ReactNode } from 'react';
 import TokenShell from '../ui/token-shell';
 import { LumenLoader } from '@hive/ui';
+import { useTranslation } from '@/blog/i18n/client';
 
 /**
  * ★ A REAL h1 (2026-08-11, audit item 8). `/creators/[handle]` had no heading
@@ -128,10 +129,13 @@ export const MarketMissing: FC<{ handle: string }> = ({ handle }) => (
   </TokenShell>
 );
 
-export const MarketLoading: FC = () => (
-  <TokenShell>
-    <div className="mt-[26px] rounded-[20px] border border-[#ebebeb] bg-white p-[26px]">
-      <LumenLoader size="md" />
-    </div>
-  </TokenShell>
-);
+export const MarketLoading: FC = () => {
+  const { t } = useTranslation('common_blog');
+  return (
+    <TokenShell>
+      <div className="mt-[26px] rounded-[20px] border border-[#ebebeb] bg-white p-[26px]">
+        <LumenLoader size="md" label={t('global.loading_market')} />
+      </div>
+    </TokenShell>
+  );
+};

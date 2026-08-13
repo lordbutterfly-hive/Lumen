@@ -21,6 +21,13 @@ const SearchContent = ({ query, sort }: SearchContentProps) => {
     // the grid, so the frame can't drift out of sync with the other pages that
     // use it.
     <PageShell mainClassName="flex min-w-0 flex-col gap-6">
+      {/* ★ A11Y ITEM 8/O5 -- one <h1> per page, carrying the query when there
+          is one so a screen reader announces what was searched, not just
+          that a search page exists. Visually hidden: the page has no visible
+          title treatment (same ruling as the home feed, home-shell.tsx). */}
+      <h1 className="sr-only">
+        {query ? t('search_page.heading_for_query', { query }) : t('search_page.heading')}
+      </h1>
       {/* ★ NO SECOND SEARCH BOX HERE (owner ruling, 2026-08-10). This page
           rendered its own `ModeSwitchInput` directly beneath the header's,
           so arriving at /search showed TWO identical empty "Search..." fields

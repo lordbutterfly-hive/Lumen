@@ -54,7 +54,8 @@ export default function ProfileCommentsList({
   // Show what we have. Only surrender the whole surface when there is genuinely
   // nothing to show.
   if (isError && entries.length === 0) return <NoDataError />;
-  if (isLoading || (isFetching && entries.length === 0)) return <LumenLoader size="lg" />;
+  if (isLoading || (isFetching && entries.length === 0))
+    return <LumenLoader size="lg" label={t('global.loading_comments')} />;
 
   if (entries.length === 0) {
     return (

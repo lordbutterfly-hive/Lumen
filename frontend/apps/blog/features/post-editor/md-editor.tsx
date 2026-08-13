@@ -36,10 +36,13 @@ interface MdEditorProps {
   onChange: (value: string) => void;
   persistedValue: string;
   placeholder?: string;
+  /** Persistent accessible name for the editor -- see `use-codemirror.ts`'s
+   *  `ariaLabel` doc comment. Required so no call site can ship unnamed. */
+  ariaLabel: string;
   windowheight: number;
 }
 
-const MdEditor: FC<MdEditorProps> = ({ onChange, persistedValue = '', placeholder, windowheight }) => {
+const MdEditor: FC<MdEditorProps> = ({ onChange, persistedValue = '', placeholder, ariaLabel, windowheight }) => {
   const { t } = useTranslation('common_blog');
   const { user } = useUserClient();
   /**
@@ -228,6 +231,7 @@ const MdEditor: FC<MdEditorProps> = ({ onChange, persistedValue = '', placeholde
 
   const { viewRef, editorMountRef } = useCodemirror({
     placeholder,
+    ariaLabel,
     windowheight,
     persistedValue,
     onChangeRef,

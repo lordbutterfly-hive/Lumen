@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
 import { getByText } from '@transaction/lib/hive-api';
+import { mergeLumenEngagement } from '@/blog/lib/lite/repositories/engagement-repository';
 
 const logger = getLogger('app');
 
@@ -8,6 +9,13 @@ const logger = getLogger('app');
  * ★ Same rule as `/api/account`. `features/search/search-results.tsx` called
  * `getByText` directly on every non-empty search — `/search` is public, so
  * every visitor who used search downloaded `wax.common.wasm`.
+ *
+ * ★ MERGES LUMEN ENGAGEMENT (2026-08-13, O2-votes.md item 1's server half --
+ * `searchByText` was one of the surfaces named there where a Lumen vote/reblog
+ * reverted to the chain-only count on reload because nothing on the server side
+ * of this route had ever called `getEngagementTotals`). See
+ * `mergeLumenEngagement`'s own doc for the full mechanism and why it copies
+ * rather than mutates.
  */
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const pattern = (req.nextUrl.searchParams.get('pattern') ?? '').trim();
@@ -31,7 +39,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       start_author: startAuthor,
       start_permlink: startPermlink
     });
-    return NextResponse.json(results, { headers: { 'cache-control': 'private, no-store' } });
+    const merged = await mergeLumenEngagement(results);
+    return NextResponse.json(merged, { headers: { 'cache-control': 'private, no-store' } });
   } catch (error) {
     logger.error(error, 'search lookup failed for "%s"', pattern);
     return NextResponse.json({ error: 'search_unavailable' }, { status: 502 });

@@ -10,8 +10,17 @@ export function SharePost({ children, path, title }: { children: ReactNode; path
   const { t } = useTranslation('common_blog');
   return (
     <Dialog>
+      {/* ★ KEYBOARD-UNREACHABLE TRIGGER FIX (2026-08-13, O5 a11y build map item 2).
+          Radix's `DialogTrigger` renders a real `<button type="button">` by
+          default; `asChild` handed all of that to a bare `<div>` — not
+          focusable, no role, no tabindex, measured live as unreachable by a
+          40-press Tab walk. `title` is also a weak, hover-only accessible
+          name (not announced consistently), so it becomes a real
+          `aria-label` on the new button rather than just moving as-is. */}
       <DialogTrigger asChild>
-        <div title={t('post_content.footer.share_form.share_this_link')}>{children}</div>
+        <button type="button" aria-label={t('post_content.footer.share_form.share_this_link')}>
+          {children}
+        </button>
       </DialogTrigger>
       <DialogContent className="flex flex-col gap-4 sm:max-w-[600px]" data-testid="share-post-dialog">
         <DialogHeader>

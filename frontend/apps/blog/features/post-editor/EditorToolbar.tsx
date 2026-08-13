@@ -10,6 +10,7 @@ import { Icons } from "@ui/components/icons";
 import type { ToolbarButton } from "./lib/toolbar-config";
 import { ICON_CLASS } from "./lib/toolbar-config";
 import { FORMATTING_TOOLBAR_LABEL, SPOILER_LABEL } from "./lib/composer-copy";
+import { useRovingToolbarFocus } from "./hooks/use-roving-toolbar-focus";
 
 interface EditorToolbarProps {
   toolbarButtons: ToolbarButton[];
@@ -38,6 +39,17 @@ interface EditorToolbarProps {
  * neither formatting nor per-click actions: they are persistent preferences
  * stored in localStorage that change what happens on paste and on upload. They
  * now live in their own strip under the editor — see `EditorOptionsBar`.
+ *
+ * ★ ROVING FOCUS, NOT FIFTEEN TAB STOPS (2026-08-13, QA V3-a11y item 1).
+ * Every button here carried a hardcoded `tabIndex={-1}` with nothing else in
+ * this file moving focus between them — measured live: 50 Tab presses from
+ * the title field never once reached Bold; the whole bar was unreachable.
+ * `tabIndex={-1}` on the non-active buttons is exactly right for the
+ * WAI-ARIA "toolbar" pattern — the bug was that nothing gave the bar a way
+ * IN. `useRovingToolbarFocus` (own file, `hooks/`) keeps exactly one button
+ * tabbable at a time and moves that single stop — and real focus — on the
+ * arrow keys / Home / End, so Tab gains ONE stop for the whole bar instead
+ * of one per button, matching how a real toolbar is meant to behave.
  */
 const EditorToolbar: FC<EditorToolbarProps> = ({
   toolbarButtons,
@@ -47,6 +59,15 @@ const EditorToolbar: FC<EditorToolbarProps> = ({
   inputRef,
   t,
 }) => {
+  const visibleButtons = toolbarButtons.filter((btn) => !(btn.name === "image" && isBlockedUser));
+  // Roving-tabindex item count: the filtered formatting buttons, plus
+  // "Insert images" (only when not blocked) and "Spoiler" (always) — the
+  // same two extra buttons rendered below.
+  const itemCount = visibleButtons.length + (isBlockedUser ? 0 : 1) + 1;
+  const { getItemProps } = useRovingToolbarFocus(itemCount);
+  const text2imageIndex = visibleButtons.length;
+  const spoilerIndex = itemCount - 1;
+
   return (
     <div
       className="flex flex-wrap items-center gap-0.5 border-b border-border bg-background-secondary/50 px-1 py-1"
@@ -54,8 +75,7 @@ const EditorToolbar: FC<EditorToolbarProps> = ({
       role="toolbar"
       aria-label={FORMATTING_TOOLBAR_LABEL}
     >
-      {toolbarButtons.map((btn) => {
-        if (btn.name === "image" && isBlockedUser) return null;
+      {visibleButtons.map((btn, index) => {
         const label = btn.shortcut ? `${btn.title} (${btn.shortcut})` : btn.title;
         return (
           <TooltipProvider key={btn.name}>
@@ -64,10 +84,10 @@ const EditorToolbar: FC<EditorToolbarProps> = ({
                 <button
                   type="button"
                   data-name={btn.name}
-                  tabIndex={-1}
                   aria-label={label}
                   className="flex h-7 w-7 items-center justify-center rounded text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
                   onClick={() => onToolbarClick(btn.action)}
+                  {...getItemProps(index)}
                 >
                   {btn.icon}
                 </button>
@@ -87,10 +107,10 @@ const EditorToolbar: FC<EditorToolbarProps> = ({
                 <button
                   type="button"
                   data-name="text2image"
-                  tabIndex={-1}
                   className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
                   aria-label={t("submit_page.insert_images_text")}
                   onClick={() => inputRef.current?.click()}
+                  {...getItemProps(text2imageIndex)}
                 >
                   <Icons.paperclip className={ICON_CLASS} />
                 </button>
@@ -111,10 +131,10 @@ const EditorToolbar: FC<EditorToolbarProps> = ({
             <button
               type="button"
               data-name="spoiler"
-              tabIndex={-1}
               aria-label={SPOILER_LABEL}
               className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
               onClick={onSpoilerClick}
+              {...getItemProps(spoilerIndex)}
             >
               <Icons.eyeOff className={ICON_CLASS} />
             </button>

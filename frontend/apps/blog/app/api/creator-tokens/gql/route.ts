@@ -60,8 +60,19 @@ const logger = getLogger('app');
 
 const ALLOWED_QUERIES = new Set<string>([STATE_QUERY, STATE_QUERY_HEX, HEAD_QUERY]);
 
-/** Bounds how long this server will hold a connection open for a wedged upstream node. */
-const UPSTREAM_TIMEOUT_MS = 10_000;
+/**
+ * Bounds how long this server will hold a connection open for a wedged upstream node.
+ *
+ * ★ LOWERED FROM 10_000 (2026-08-13, O4-stuck-states.md item 5). Measured live: a
+ * failing upstream answers this proxy in 9.11 s, which is the DOMINANT term in the
+ * "bare spinner for 8-13 s" defect on `/creators/[handle]` -- `readMarket`
+ * (`vsc-data-source.ts`) catches every rejection and never lets `marketQuery`
+ * itself retry, so React Query's retry policy was never the driver here; this
+ * timeout was. 5 s keeps real, working responses unaffected (this route talks to
+ * one Magi node over a normal request/response call, not a slow indexer scan) while
+ * cutting the dead-air wait for a wedged one roughly in half.
+ */
+const UPSTREAM_TIMEOUT_MS = 5_000;
 
 /** Mirrors getStateByKeys' own documented range (schema.graphql:813) — never our own guess. */
 const MAX_STATE_KEYS = 100;

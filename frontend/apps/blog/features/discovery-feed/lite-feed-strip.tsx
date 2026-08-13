@@ -3,7 +3,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link, UserAvatarImg } from '@hive/ui';
 import TimeAgo from '@ui/components/time-ago';
-import { getPostSummary } from '@/blog/lib/utils';
+import { getPostSummary, normalizeTitle } from '@/blog/lib/utils';
 import { Entry } from '@hive/common-hiveio-packages/wax';
 
 /**
@@ -58,7 +58,10 @@ function LitePostCard({ entry }: { entry: Entry }) {
           · <TimeAgo date={entry.created} />
         </span>
       </div>
-      {entry.title ? <h3 className="font-serif text-2xl font-bold leading-snug text-[#161511]">{entry.title}</h3> : null}
+      {entry.title ? (
+        // Decoded for the same reason as the feed card — see medium-post-card.tsx.
+        <h3 className="font-serif text-2xl font-bold leading-snug text-[#161511]">{normalizeTitle(entry.title)}</h3>
+      ) : null}
       {dek ? <p className="mt-1 line-clamp-3 font-serif text-lg text-[#4b5563]">{dek}</p> : null}
       {image ? <img src={image} alt="" className="mt-3 max-h-44 w-full rounded-lg object-cover" /> : null}
     </>

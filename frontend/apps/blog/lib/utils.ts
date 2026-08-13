@@ -87,7 +87,25 @@ export function extractBodySummary(body: string, stripQuotes = false) {
   let desc = body;
 
   if (stripQuotes) desc = desc.replace(/(^(\n|\r|\s)*)>([\s\S]*?).*\s*/g, '');
-  desc = remarkableStripper.render(desc); // render markdown to html
+  return normalizeExcerpt(desc);
+}
+
+/**
+ * ★ SHARED TAIL, FACTORED OUT OF `extractBodySummary` (O6 build map item 2,
+ * 2026-08-13). Previously this pipeline (markdown -> plain text -> entity
+ * decode -> truncate) only ran on the body-fallback path. A post whose
+ * `json_metadata.description` is PRESENT skipped all of it — `getPostSummary`
+ * returned that field verbatim, raw entities and all (`&#039;`, unrendered
+ * `<i class=…>`/`![](…)` from a third-party posting client). Proven live on
+ * `/search`: the same post's dek showed `don&#039;t stop…![](https://…)` while
+ * a post with no `description` at all rendered clean, through this exact
+ * function.
+ *
+ * Text only — the result is safe to render as a JSX text child (React escapes
+ * on render) but must never be handed to `dangerouslySetInnerHTML`.
+ */
+export function normalizeExcerpt(text: string): string {
+  let desc = remarkableStripper.render(text); // render markdown to html
   desc = sanitize(desc, { allowedTags: [] }); // remove all html, leaving text
   desc = htmlDecode(desc);
 
@@ -111,6 +129,23 @@ export function extractBodySummary(body: string, stripQuotes = false) {
   return desc;
 }
 
+/**
+ * Clean a TITLE for display: decode entities, strip any stray markup, collapse
+ * whitespace. Deliberately NOT run through `normalizeExcerpt` — a title is not
+ * an excerpt, and must never be truncated or have its "first line only" rule
+ * applied.
+ *
+ * ★ Exported here per the O6 build map so this fix is ready to wire in, but
+ * NOT yet applied anywhere: every call site that renders a raw `post.title` /
+ * `entry.title` (`medium-post-card.tsx`, `lite-feed-strip.tsx`,
+ * `profile-comment-card.tsx`, `[permlink]/content.tsx`) sits outside this
+ * agent's owned files — see the delivery report.
+ */
+export function normalizeTitle(title: string): string {
+  const stripped = sanitize(title, { allowedTags: [] });
+  return htmlDecode(stripped).replace(/\s+/g, ' ').trim();
+}
+
 export function getPostSummary(jsonMetadata: JsonMetadata, body: string, stripQuotes = false) {
   const shortDescription = jsonMetadata?.description ? jsonMetadata?.description : jsonMetadata?.summary;
 
@@ -118,19 +153,51 @@ export function getPostSummary(jsonMetadata: JsonMetadata, body: string, stripQu
     return extractBodySummary(body, stripQuotes);
   }
 
-  return shortDescription;
+  return normalizeExcerpt(shortDescription);
 }
 
+/**
+ * Decode HTML entities back to plain text — named (`&rsquo;`) AND numeric,
+ * both decimal (`&#39;`) and hex (`&#x27;`). ★ Widened 2026-08-13 (O6 item 2):
+ * the previous regex (`/&[a-z]+;/g`) matched named entities only, so the
+ * on-chain `&#039;` this bug report was filed against passed straight
+ * through untouched. An unrecognised named entity, or a malformed/
+ * out-of-range numeric one, is left byte-identical rather than guessed at.
+ *
+ * Input is UNTRUSTED — any Hive account can write arbitrary bytes into a
+ * title or `json_metadata.description` — so a malformed `&#…;` must never
+ * throw (`String.fromCodePoint` throws on an out-of-range code point).
+ */
 export const htmlDecode = (txt: string) =>
-  txt.replace(/&[a-z]+;/g, (ch: string) => {
-    // @ts-ignore
-    const char = htmlCharMap[ch.substring(1, ch.length - 1)];
-    return char ? char : ch;
+  txt.replace(/&(#x[0-9a-f]+|#[0-9]+|[a-z]+);/gi, (entity: string) => {
+    const inner = entity.slice(1, -1);
+    if (inner[0] === '#') {
+      const isHex = inner[1] === 'x' || inner[1] === 'X';
+      const codePoint = parseInt(isHex ? inner.slice(2) : inner.slice(1), isHex ? 16 : 10);
+      if (!Number.isFinite(codePoint) || codePoint < 0 || codePoint > 0x10ffff) return entity;
+      try {
+        return String.fromCodePoint(codePoint);
+      } catch {
+        return entity;
+      }
+    }
+    const char = (htmlCharMap as Record<string, string>)[inner.toLowerCase()];
+    return char ? char : entity;
   });
 
 const htmlCharMap = {
   amp: '&',
   quot: '"',
+  lt: '<',
+  gt: '>',
+  nbsp: ' ',
+  apos: "'",
+  // ★ ADDED (O6 item 2) — the exact second entity family the report named:
+  // named, and previously absent from this map entirely, so it fell through
+  // untouched even though `htmlDecode` was already being called.
+  acute: '´',
+  ndash: '–',
+  mdash: '—',
   lsquo: '‘',
   rsquo: '’',
   sbquo: '‚',
@@ -141,7 +208,9 @@ const htmlCharMap = {
   trade: '™',
   hellip: '…',
   pound: '£',
-  copy: ''
+  // ★ FIXED (O6 item 2) — this was `''`: `&copy;` was being DELETED, not
+  // decoded, everywhere `extractBodySummary`/`normalizeExcerpt` runs.
+  copy: '©'
 };
 
 export function amt(string_amount: string) {

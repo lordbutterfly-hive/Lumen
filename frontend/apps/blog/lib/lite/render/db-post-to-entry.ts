@@ -70,6 +70,24 @@ export function dbPostToEntry(post: LumenPost, publicName?: string): Entry {
     title: post.title,
     updated: created,
     url: `/@${author}/${permlink}`,
-    _optimistic: true
+    // ★ TRUTHFUL FLAG (O7 F2a/F2b, 2026-08-13). This was unconditionally `true` —
+    // meaning a lite entry that has ALREADY been broadcast to Hive (`hivePermlink`
+    // set) still claimed to be "not yet published" forever. Two proven, separate
+    // consumers of that lie:
+    //   1. A published lite reply is served from BOTH `/api/lite/posts/replies`
+    //      (this constructor, keyed on the lite author) and `/api/discussion`
+    //      (the chain copy, keyed on the real publishing account). The two
+    //      author strings never match, so the post page's union renders both —
+    //      and this constructor's copy carried a permanent "Publishing…"
+    //      spinner on what was, in reality, a fully-landed comment.
+    //   2. `comment-list-item.tsx`'s badge had no way to tell "just broadcast,
+    //      resolving in seconds" from "queued for hours/days" — both read this
+    //      one flag as the same truth.
+    // `!post.hivePermlink` is exactly "has this row actually reached chain yet".
+    // The dedup fix for (1) itself lives in `content.tsx` (out of this file's
+    // ownership per the build map's file partition) — this one-line change does
+    // not deduplicate the row, but it does kill the permanent spinner on it,
+    // which was the visible harm.
+    _optimistic: !post.hivePermlink
   };
 }

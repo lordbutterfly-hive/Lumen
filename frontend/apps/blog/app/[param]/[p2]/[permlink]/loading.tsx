@@ -1,4 +1,11 @@
 import { LumenLoader } from '@hive/ui';
+// Server-side t() -- this file has no 'use client' (a Next.js `loading.tsx`
+// is a Server Component boundary), so `i18n/server`'s plain async function is
+// the safe one to call here, not `i18n/client`'s hook.
+// Aliased deliberately: this is the SERVER helper, an async function, NOT a
+// React hook. Imported under its own name it trips `react-hooks/rules-of-hooks`
+// ('cannot be called in an async function') purely because of the `use` prefix.
+import { useTranslation as getServerTranslation } from '@/blog/i18n/server';
 
 /**
  * ★ Was `PostDetailSkeleton` — a full ghost article: a title bar, an author row, ten
@@ -7,12 +14,13 @@ import { LumenLoader } from '@hive/ui';
  * the same nine-line body, so one shifted up and the other shifted down the moment
  * the real thing arrived. See `packages/tailwindcss/globals.css`.
  */
-export default function Loading() {
+export default async function Loading() {
+  const { t } = await getServerTranslation('common_blog');
   return (
     <div className="grid grid-cols-1 md:grid-cols-12">
       <div className="col-span-2 hidden md:block" />
       <div className="w-full min-w-0 py-8 md:col-span-8 md:mx-auto md:flex md:flex-col">
-        <LumenLoader size="lg" className="min-h-[60vh]" />
+        <LumenLoader size="lg" className="min-h-[60vh]" label={t('global.loading_post')} />
       </div>
       <div className="col-span-2" />
     </div>

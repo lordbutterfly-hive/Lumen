@@ -46,6 +46,7 @@ import { useQuery } from '@tanstack/react-query';
 import { fetchCommunity, fetchCommunityRoles, fetchPost, fetchPostStatus } from '@/blog/lib/chain-fetch';
 import { fetchDiscussion } from '@/blog/lib/lite/client/discussion-fetch';
 import { isBlockedEntry, useLumenBlockList } from '@/blog/lib/lite/client/use-lumen-block';
+import { litePostIdOf } from '@/blog/lib/lite/render/lite-post-id';
 import { fetchLiteEntryByPermlink } from '@/blog/lib/lite/client/lite-post-fetch';
 import { fetchLiteEngagement } from '@/blog/lib/lite/client/lite-engagement';
 import { Entry } from '@hive/common-hiveio-packages/wax';
@@ -88,7 +89,70 @@ import { StaleTime } from '@/blog/lib/react-query';
 // Maximum number of comments per page
 const MAX_COMMENTS_PER_PAGE = 50;
 
+/** How many thread nodes one `/api/lite/posts/replies` call may ask about. Must
+ *  match `MAX_PARENTS` in that route — asking about more is not an error there,
+ *  it is silently ignored, so the cap is enforced here and REPORTED (see
+ *  `parentsTruncated`) rather than applied blind. */
+const MAX_LITE_REPLY_PARENTS = 200;
+
 const logger = getLogger('app');
+
+/**
+ * ★ SECOND, INDEPENDENT COPY of the entity-decode this page's own `<h1>` and
+ * share buttons need (2026-08-13, audit O6 item 2). `postData.title` is the
+ * chain's raw bytes — some Hive clients write titles with un-decoded HTML
+ * entities (confirmed live: `don&#039;t stop journey`, byte for byte on
+ * chain) — and nothing on this page decoded them before putting the string
+ * in the `<h1 data-testid="article-title">` or handing it to
+ * Twitter/LinkedIn/Reddit/native share as the shared text. Same
+ * self-contained approach as `layout.tsx`'s `og:description` fix: not
+ * imported from `lib/utils.ts`, which is a different agent's file and whose
+ * `getPostSummary`/`htmlDecode` never ran on this path anyway.
+ */
+const TITLE_NAMED_ENTITY_DECODE_TABLE: Record<string, string> = {
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  quot: '"',
+  apos: "'",
+  nbsp: ' ',
+  copy: '©',
+  reg: '®',
+  trade: '™',
+  acute: '´',
+  ndash: '–',
+  mdash: '—',
+  hellip: '…',
+  lsquo: '‘',
+  rsquo: '’',
+  ldquo: '“',
+  rdquo: '”'
+};
+
+function decodeTitleEntities(text: string): string {
+  return text.replace(/&(#\d+|#x[0-9a-fA-F]+|[a-zA-Z]+);/g, (match, entity: string) => {
+    if (entity[0] === '#') {
+      const codePoint =
+        entity[1] === 'x' || entity[1] === 'X' ? parseInt(entity.slice(2), 16) : parseInt(entity.slice(1), 10);
+      // ★ RANGE-GUARDED (2026-08-13) — THE THIRD COPY OF THIS BUG.
+      // `Number.isFinite` alone lets an out-of-range code point through, and
+      // `String.fromCodePoint` THROWS on it: `&#1114112;`, `&#x110000;` and
+      // `&#99999999999999999999;` all do, and any Hive account can put those bytes
+      // in a title. This copy runs inside a `useMemo` DURING RENDER, so unlike the
+      // metadata twin — where the throw was swallowed and only cost the share
+      // preview — here it takes the whole post page down.
+      // `lib/utils.ts` had the guard from the start; `layout.tsx` was patched; this
+      // one was missed twice. Same bug, three files.
+      if (!Number.isFinite(codePoint) || codePoint < 0 || codePoint > 0x10ffff) return match;
+      try {
+        return String.fromCodePoint(codePoint);
+      } catch {
+        return match;
+      }
+    }
+    return TITLE_NAMED_ENTITY_DECODE_TABLE[entity] ?? match;
+  });
+}
 
 const PostContent = () => {
   const searchParams = useSearchParams();
@@ -225,7 +289,17 @@ const PostContent = () => {
     },
     enabled: !!author && !!permlink,
     initialData: initialPostData ?? undefined,
-    initialDataUpdatedAt: initialPostData ? Date.now() : undefined,
+    // ★ NOT `Date.now()` (2026-08-13, audit O2 item 2a). `initialPostData` is
+    // `getPostCached` (page.tsx) — a raw chain read that has never seen the
+    // Lumen-vote merge above (:209-219), which is the ONLY code on this page
+    // that applies it. Stamping the SSR data as fresh-now made React Query
+    // treat it as valid for the full `staleTime` (2 minutes) and skip the
+    // `queryFn` on mount, so the merge never ran on an ordinary page view — a
+    // reader's own Lumen vote reverted to the chain-only count on every
+    // reload. `0` still paints the SSR data instantly (no spinner, no layout
+    // shift) but marks it stale, so the merge runs one round trip later.
+    // `staleTime` still governs every fetch AFTER that first one.
+    initialDataUpdatedAt: 0,
     staleTime: StaleTime.MEDIUM,
     onError: (error) => {
       handleError(error, { method: 'getPost', params: { author, permlink, observer } });
@@ -245,6 +319,14 @@ const PostContent = () => {
   // identity on both, so compare against that too.
   const viewerIsAuthor = Boolean(
     identity.isLoggedIn && (postData?.author === identity.username || litePost?.author === identity.username)
+  );
+  // Decoded once, used everywhere the title is actually shown to a person —
+  // the <h1> and every share button below. Never applied to postData.title
+  // itself: other code on this page (the reshare check, e.g.) reads the raw
+  // chain value on purpose.
+  const displayTitle = useMemo(
+    () => (postData?.title ? decodeTitleEntities(postData.title) : ''),
+    [postData?.title]
   );
   const [mutedPost, setMutedPost] = useState<boolean>(postData?.stats?.gray || false);
   // ★ NSFW gate for the post page itself (2026-08-09) — see post-body-section.tsx.
@@ -405,7 +487,17 @@ const PostContent = () => {
     queryFn: () => fetchDiscussion(author, permlink, observer),
     enabled: isOnChain,
     initialData: initialDiscussion ?? undefined,
-    initialDataUpdatedAt: initialDiscussion ? Date.now() : undefined,
+    // ★ SEED IT STALE (2026-08-13) — WITHOUT THIS, TODAY'S COMMENT-VOTE FIX DOES
+    // NOTHING. `/api/discussion` gained `mergeLumenEngagement` today so a lite
+    // reader's vote on a COMMENT stops vanishing on reload. But this seed comes from
+    // `page.tsx`'s raw `getDiscussion` with no merge, and `Date.now()` told React
+    // Query it was freshly fetched — so for the whole `staleTime` window the
+    // merge-including `queryFn` never ran, and an ordinary page load is exactly that
+    // window. The fix was live in the route and inert on the path every reader takes.
+    //
+    // This is the inverse of the change made to `postData` 188 lines above, in this
+    // same file, for this same reason. Same bug, same file, missed twin.
+    initialDataUpdatedAt: initialDiscussion ? 0 : undefined,
     staleTime: StaleTime.MEDIUM,
     onError: (error) => {
       handleError(error, { method: 'getDiscussion', params: { author, permlink, observer } });
@@ -419,20 +511,75 @@ const PostContent = () => {
   // perfectly on their own profile. Merged in below so the thread shows what
   // Lumen actually knows, immediately, regardless of the publisher's state
   // (which is stalled on resource credits as this is written).
-  const { data: liteReplies } = useQuery({
-    queryKey: ['liteReplies', author, permlink],
-    queryFn: async (): Promise<Entry[]> => {
-      const res = await fetch(
-        `/api/lite/posts/replies?author=${encodeURIComponent(author)}&permlink=${encodeURIComponent(permlink)}`
-      );
-      if (!res.ok) return [];
-      const body = (await res.json()) as { entries?: Entry[] };
-      return body.entries ?? [];
+  // ★ SEND THE PARENT SET, NOT JUST THE ROOT (2026-08-13, audit O1 item 3).
+  //
+  // The route below matched replies whose `publish_parent_*` equals exactly
+  // ONE pair — the root post's `author`/`permlink`. A NESTED reply's parent
+  // is the comment it replied to, not the root post, so that row was never
+  // returned and never merged; the tree (which places children by
+  // `parent_author`/`parent_permlink`, see `paginatedDiscussionState` and
+  // `comment-list.tsx`) had nothing to hang it on. `discussionData` is
+  // `Record<'author/permlink', Entry>` — the whole chain thread, keyed by
+  // identity — so its own keys ARE the exact set of parents a reply on this
+  // page can have. The root key is included as element 0 unconditionally:
+  // `discussionData` may not have resolved yet on the first render.
+  // ★ SHAPE RECONCILED WITH THE ROUTE (2026-08-13). The client and the route were
+  // built in parallel and shipped two different contracts: this sent repeated
+  // `parent=<author>/<permlink>` params, while `/api/lite/posts/replies` reads a
+  // single `parents` param holding a JSON array of `[author, permlink, depth]`
+  // triples. Either half alone is inert — the route would have ignored the repeated
+  // params and silently kept its root-only behaviour, so nested replies would still
+  // never have appeared and both halves would have looked correct in review. This is
+  // the route's shape.
+  //
+  // `depth` is each node's own depth in the thread (root = 0, Hive convention). The
+  // route stamps every returned reply with the parent it ACTUALLY matched rather
+  // than the thread root, which is the whole point: `comment-list.tsx` places a
+  // reply by `parent_author`/`parent_permlink` equality, so a row attributed to the
+  // root can never attach under a comment.
+  // ★ THE PARENT CAP REPORTS ITSELF (2026-08-13, adversarial review S3). This was
+  // a bare `triples.slice(0, 200)` with the comment "the route's own cap" and no
+  // signal — the first of three stacked silent truncations on this path. A thread
+  // with more than 199 chain comments simply never asked about the nodes past the
+  // cut, so their lite replies were not hidden, they were never requested, and the
+  // page said nothing. `parentsTruncated` rides along so the reader is told.
+  const { parentKeys, parentsTruncated } = useMemo(() => {
+    const triples: [string, string, number][] = [[author, permlink, 0]];
+    for (const entry of Object.values(discussionData ?? {})) {
+      if (entry?.author && entry?.permlink) triples.push([entry.author, entry.permlink, entry.depth ?? 1]);
+    }
+    return {
+      parentKeys: triples.slice(0, MAX_LITE_REPLY_PARENTS), // the route's own cap
+      parentsTruncated: triples.length > MAX_LITE_REPLY_PARENTS
+    };
+  }, [author, permlink, discussionData]);
+  const { data: liteReplyResult } = useQuery({
+    // `parentKeys.length`, not the object itself: once `discussionData`
+    // lands the parent set grows and this must refetch to pick up replies
+    // nested under comments that were not known about yet.
+    queryKey: ['liteReplies', author, permlink, parentKeys.length],
+    queryFn: async (): Promise<{ entries: Entry[]; truncated: boolean }> => {
+      // `author`/`permlink` stay as top-level params — they are the THREAD's
+      // identity, which the route still needs for owner-block resolution
+      // (effect B applies thread-wide). Omitting `parents` entirely is defined
+      // by the route as an additive, non-breaking version of the old root-only
+      // behaviour, so this call degrades rather than breaking if the two ever
+      // drift again.
+      const qs = new URLSearchParams({ author, permlink, parents: JSON.stringify(parentKeys) });
+      const res = await fetch(`/api/lite/posts/replies?${qs.toString()}`);
+      if (!res.ok) return { entries: [], truncated: false };
+      const body = (await res.json()) as { entries?: Entry[]; truncated?: boolean };
+      return { entries: body.entries ?? [], truncated: !!body.truncated };
     },
     staleTime: StaleTime.MEDIUM,
     // A thread must not break because this optional merge failed.
     onError: () => undefined
   });
+  const liteReplies = liteReplyResult?.entries;
+  // Either half of the path can clip: this page's own parent list, or the route's
+  // per-parent / per-batch caps. Both mean the same thing to a reader — some
+  // replies exist that are not on this screen — so they surface as one line.
+  const liteRepliesTruncated = parentsTruncated || !!liteReplyResult?.truncated;
 
   // ★ EFFECT (A) IN THE THREAD — "if I block them I never see them", comments
   // included.
@@ -472,12 +619,48 @@ const PostContent = () => {
       .filter((entry) => !isBlockedEntry(entry, viewerBlocks));
     // Union, chain-first: once the publisher lands a reply it arrives from BOTH
     // sources, and the chain copy is the canonical one (it carries real votes
-    // and payout). Keyed on author/permlink, which is stable across the move.
+    // and payout).
+    //
+    // ★ THE AUTHOR IS NOT STABLE ACROSS THE MOVE — THIS KEY WAS NEVER MATCHING
+    // (2026-08-13). The comment here used to claim `author/permlink` was "stable
+    // across the move". It is not: a lite reply is authored by the reader's own
+    // Lumen handle before it publishes and by the frontend's Hive account after,
+    // so the two copies never shared a key and the de-duplication never fired
+    // once. Measured on a real mainnet thread, 3/3:
+    //
+    //   /api/lite/posts/replies -> newcomerql62c/lumen-01kzhcb8…
+    //   /api/discussion         -> hbd-temp/lumen-01kzhcb8…
+    //
+    // Every published lite reply therefore rendered TWICE, and the duplicate was
+    // the pre-publish copy that carries the "Publishing…" badge — so a reply that
+    // had long since landed still showed as in-flight beside itself.
+    //
+    // `litePostIdOf` recovers the Lumen row id from either permlink form
+    // (`lumen-<ULID>` published, `lite-<ULID>` not), which is what genuinely
+    // survives the move. Both keys are kept: the id catches the same row under two
+    // authors, and `author/permlink` still catches anything that arrived by a route
+    // with no Lumen id to recover.
     if (liteReplies && liteReplies.length > 0) {
       const seen = new Set(list.map((c) => `${c.author}/${c.permlink}`));
+      for (const chainCopy of list) {
+        const id = litePostIdOf(chainCopy);
+        if (id) seen.add(`id:${id}`);
+      }
       for (const reply of liteReplies) {
         if (isBlockedEntry(reply, viewerBlocks)) continue;
-        if (!seen.has(`${reply.author}/${reply.permlink}`)) list.push(reply);
+        const replyId = litePostIdOf(reply);
+        if (replyId && seen.has(`id:${replyId}`)) continue;
+        if (!seen.has(`${reply.author}/${reply.permlink}`)) {
+          // Depth from the reply's OWN parent, not from the query's args —
+          // now that a reply can be nested under any parent in `parentKeys`
+          // above, `author`/`permlink` (the root) no longer identify which
+          // parent a given row actually belongs to; only the row's own
+          // `parent_author`/`parent_permlink` do. `depth` only affects
+          // indentation and the depth-8 cap, never parent selection, so
+          // getting it wrong here mis-indents rather than hides the reply.
+          const parent = discussionData?.[`${reply.parent_author}/${reply.parent_permlink}`];
+          list.push({ ...reply, depth: (parent?.depth ?? 0) + 1 });
+        }
       }
     }
     const sortType = commentSort as SortOrder;
@@ -873,7 +1056,7 @@ const PostContent = () => {
                         className="font-sanspro text-2xl font-extrabold leading-tight tracking-tight text-foreground sm:text-3xl"
                         data-testid="article-title"
                       >
-                        {postData.title}
+                        {displayTitle}
                         {postData.percent_hbd === 0 && (
                           <TooltipProvider>
                             <Tooltip>
@@ -1331,10 +1514,10 @@ const PostContent = () => {
                     {/* Share buttons */}
                     <div className="flex items-center gap-1.5 rounded-md border border-border bg-background px-2 py-1">
                       <FacebookShare url={postData.url} />
-                      <TwitterShare title={postData.title} url={postData.url} />
-                      <LinkedInShare title={postData.title} url={postData.url} />
-                      <RedditShare title={postData.title} url={postData.url} />
-                      <SharePost path={postData.url} title={postData.title}>
+                      <TwitterShare title={displayTitle} url={postData.url} />
+                      <LinkedInShare title={displayTitle} url={postData.url} />
+                      <RedditShare title={displayTitle} url={postData.url} />
+                      <SharePost path={postData.url} title={displayTitle}>
                         <Link2 className="h-[18px] w-[18px] cursor-pointer text-muted-foreground transition-colors hover:text-destructive" data-testid="share-post" />
                       </SharePost>
                     </div>
@@ -1394,6 +1577,22 @@ const PostContent = () => {
               render through their own component with no NSFW awareness at all.
               Hiding the thread until the reader reveals the post is the coherent
               rule — "this post is marked NSFW" should mean the whole post. */}
+          {/* ★ A CLIPPED THREAD SAYS SO (2026-08-13, adversarial review S3). The
+              lite-reply merge is capped in three places — this page's parent list,
+              the route's `MAX_PARENTS`, and a per-parent row cap in the SQL — and
+              every one of them used to bind silently, so a thread that was missing
+              replies looked exactly like a thread that had none. It is a small
+              line deliberately: the replies that ARE here are correct and the
+              chain half of the thread is untouched, so this is a footnote, not an
+              error state. */}
+          {!!postData && !nsfwHidden && liteRepliesTruncated ? (
+            <p
+              className="px-4 py-2 font-sans text-[13px] text-[#6b7280]"
+              data-testid="lite-replies-truncated"
+            >
+              {t('post_content.lite_replies_truncated')}
+            </p>
+          ) : null}
           {!!postData && paginatedDiscussionState && !nsfwHidden ? (
             <CommentsSection
               postData={postData}

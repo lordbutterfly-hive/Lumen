@@ -1,6 +1,6 @@
 'use client';
 
-import { ReactNode, useState } from 'react';
+import { ComponentPropsWithoutRef, forwardRef, ReactNode, useState } from 'react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -14,15 +14,33 @@ import {
 } from '@ui/components/alert-dialog';
 import { useTranslation } from '@/blog/i18n/client';
 
-export function VoteRemovalDialog({
-  children,
-  voteType,
-  onConfirm
-}: {
+interface VoteRemovalDialogProps {
   children: ReactNode;
   voteType: 'upvote' | 'downvote';
   onConfirm: () => void;
-}) {
+}
+
+/**
+ * ★ FORWARDS REF + EXTRA PROPS (2026-08-13, votes keyboard-a11y fix,
+ * `votes-component.tsx`). The undo-vote control now nests a `TooltipContainer`
+ * OUTSIDE this component so both share one real `<button>`
+ * (`Tooltip -> AlertDialogTrigger -> button`, the documented Radix
+ * double-`asChild` composition). `TooltipTrigger asChild` clones its
+ * immediate child — this component — merging a `ref` and the hover/focus
+ * handlers that open the tooltip onto it. A plain, non-forwardRef function
+ * component can't accept a ref (the exact bug already found and fixed in
+ * `apps/blog/components/dialog-login.tsx`: "Function components cannot be
+ * given refs"), and without a `...rest` spread the merged handlers have
+ * nowhere to go either — so the tooltip would silently never open. This
+ * component's OWN job (opening the removal confirmation on click/Enter/Space)
+ * does not depend on this fix — `children` is threaded through directly to
+ * `AlertDialogTrigger` regardless — this fix is what makes the OUTER
+ * Tooltip's hover/focus behaviour work when this is nested inside it.
+ */
+export const VoteRemovalDialog = forwardRef<
+  HTMLButtonElement,
+  VoteRemovalDialogProps & Omit<ComponentPropsWithoutRef<'button'>, keyof VoteRemovalDialogProps>
+>(function VoteRemovalDialog({ children, voteType, onConfirm, ...triggerProps }, ref) {
   const { t } = useTranslation('common_blog');
   const [open, setOpen] = useState(false);
 
@@ -38,7 +56,9 @@ export function VoteRemovalDialog({
 
   return (
     <AlertDialog open={open} onOpenChange={setOpen}>
-      <AlertDialogTrigger asChild>{children}</AlertDialogTrigger>
+      <AlertDialogTrigger asChild ref={ref} {...triggerProps}>
+        {children}
+      </AlertDialogTrigger>
       <AlertDialogContent className="flex flex-col gap-8 sm:rounded-r-xl">
         <AlertDialogHeader className="gap-2">
           <div className="flex items-center justify-between">
@@ -74,4 +94,4 @@ export function VoteRemovalDialog({
       </AlertDialogContent>
     </AlertDialog>
   );
-}
+});

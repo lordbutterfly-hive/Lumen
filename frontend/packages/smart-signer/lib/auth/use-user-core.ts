@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { QUERY_KEY } from '@smart-signer/lib/query-keys';
 import * as userLocalStorage from './user-localstore';
@@ -14,6 +14,36 @@ export interface IUseUser {
   user: User;
   /** True when user state from localStorage is stable (after hydration completes) */
   isHydrated: boolean;
+  /** True once `/api/users/me` has actually answered in this tab. Subscribed, not peeked:
+   *  reading `dataUpdatedAt` off the query result registers it as a TRACKED prop, so an
+   *  answer that is deeply equal to the seed still re-renders. Reading it through
+   *  `queryClient.getQueryState()` did not, and that was the whole bug. */
+  clientAnswered: boolean;
+  /**
+   * ★★★ THE OTHER END OF `clientAnswered` (2026-08-13, adversarial review S4).
+   *
+   * True when `/api/users/me` has FAILED and has never once succeeded in this tab —
+   * i.e. `clientAnswered` is false and is not going to become true on its own.
+   * `clientAnswered` alone cannot express this: React Query's error reducer never
+   * touches `dataUpdatedAt` (verified in the installed `@tanstack/query-core@4.41.0`
+   * source, `query.js`, `case 'error'`), so with `initialDataUpdatedAt: 0` a query
+   * that has only ever failed keeps `dataUpdatedAt === 0` FOREVER. Ten components
+   * branch on `clientAnswered`, every one of them a loader or a blocked control, and
+   * not one had an error branch — three retries and ~93s worst case later the reader
+   * was still looking at a skeleton with nothing to click and no explanation.
+   *
+   * ★ THIS IS NOT A LICENCE TO OPEN A GATE. It is deliberately a THIRD state, not a
+   * second way of saying "answered". Four fail-closed capability gates hang off
+   * `clientAnswered` (`account_tier`-based lite checks in the proposal dialogs,
+   * account-lists' write gate, the wallet rail) and every one of them must stay shut
+   * on a failed read — "we could not check" resolves to "no", exactly as it does in
+   * the block filters. What this flag buys is the ability to say SO, and to offer a
+   * retry, instead of spinning.
+   */
+  sessionUnavailable: boolean;
+  /** Ask `/api/users/me` again, now. For the retry affordance the states above need;
+   *  a no-op-safe call on a query that is already fetching. */
+  retrySession: () => void;
 }
 
 export interface UseUserOptions {
@@ -40,7 +70,7 @@ export function useUserCore(
 ): IUseUser {
   const queryClient = useQueryClient();
   const [storedUser, storeUser] = useLocalStorage<User>('user', defaultUser);
-  const { data: user } = useQuery<User>({
+  const { data: user, dataUpdatedAt, isError, fetchStatus, refetch } = useQuery<User>({
     queryKey: [QUERY_KEY.user],
     queryFn: async (): Promise<User> => getUser(),
     // Seed from localStorage for the first paint, then always revalidate:
@@ -52,8 +82,23 @@ export function useUserCore(
     // added for the multi-tab case (signing in as someone else in tab 2) but it
     // propagated any transient wrong answer everywhere within seconds. Mount-only
     // is the safer trade; the multi-tab case is much rarer.
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
+    //
+    // ★★★ WITH ONE EXCEPTION, ADDED 2026-08-13 (adversarial review S4): a tab that
+    // has NEVER had an answer. The reasoning above is entirely about a session we
+    // already know — "don't re-ask about something settled, a transient wrong
+    // answer costs more than a stale right one". It says nothing about the case
+    // where the very first read failed, and there the trade inverts completely:
+    // there is no known-good answer to protect, `refetchOnMount` only fires on a
+    // NEW mount (so a reader sitting still on /submit.html or /@me/settings never
+    // retries), and the cost of not re-asking is ten components stuck on a
+    // skeleton permanently. `dataUpdatedAt === 0` is exactly "no successful
+    // response has ever landed in this tab" — with `initialDataUpdatedAt: 0` the
+    // localStorage seed does not count and an error never sets it. So: waking a
+    // laptop or getting the network back retries ONLY while we have nothing, and
+    // goes back to being off the instant a real answer arrives. The multi-tab
+    // behaviour the 2026-08-08 note protects is untouched.
+    refetchOnWindowFocus: (query) => query.state.dataUpdatedAt === 0,
+    refetchOnReconnect: (query) => query.state.dataUpdatedAt === 0,
     // ★ ONE SESSION CHECK PER PAGE, NOT ONE PER MOUNTING COMPONENT (2026-08-10).
     //
     // `initialDataUpdatedAt: 0` marks the localStorage seed stale so the FIRST
@@ -133,8 +178,26 @@ export function useUserCore(
     }
   }, [isMounted]);
 
+  const retrySession = useCallback(() => {
+    void refetch();
+  }, [refetch]);
+
   return {
     user: resolvedUser,
-    isHydrated: isMounted ? isHydrated : true // For Pages Router (no isMounted), always hydrated
+    isHydrated: isMounted ? isHydrated : true, // For Pages Router (no isMounted), always hydrated
+    clientAnswered: dataUpdatedAt > 0,
+    // All three conditions are required.
+    //  * `isError` alone would be true for a failed REFETCH that still has a
+    //    perfectly good earlier answer behind it (React Query keeps `data` on
+    //    error), and reporting that as "unavailable" would put an error card in
+    //    front of a reader whose session is known and fine.
+    //  * `dataUpdatedAt === 0` is what makes it "and it has never worked".
+    //  * `fetchStatus === 'idle'` means we are not asking RIGHT NOW. Without it a
+    //    `retrySession()` click would leave the error card up for the whole attempt
+    //    — a button that visibly does nothing — instead of falling back to the
+    //    consumer's ordinary loading branch, which is the truthful thing to show
+    //    while a request really is in flight.
+    sessionUnavailable: isError && dataUpdatedAt === 0 && fetchStatus === 'idle',
+    retrySession
   };
 }

@@ -93,6 +93,12 @@ const SearchResults = ({ query, sort }: { query: string; sort: SearchSort }) => 
     refetchOnReconnect: false,
     refetchOnMount: false,
     enabled: !!query,
+        // ★ A FAILED READ MUST SURFACE FAST (2026-08-13). This query never overrode
+    // React Query's default `retry: 3`, so a genuine failure sat behind three
+    // attempts and ~7s of backoff — measured at 5.4s / 9.1s on real failures —
+    // before the reader was told anything, behind an unlabelled spinner the whole
+    // time. One retry absorbs a transient blip; three only postpone bad news.
+    retry: 1,
     staleTime: StaleTime.MEDIUM
   });
 
@@ -190,7 +196,7 @@ const SearchResults = ({ query, sort }: { query: string; sort: SearchSort }) => 
           `LumenLoader` is what the home feed shows while it loads (2026-08-12;
           it was `PostListSkeleton` until the ghost cards were retired). */}
       {isLoading ? (
-        <LumenLoader size="lg" />
+        <LumenLoader size="lg" label={t('global.loading_search_results')} />
       ) : total === 0 ? (
         <p className="py-10 text-center font-sans text-sm text-muted-foreground">
           {t('search_page.no_results_for', { query })}
