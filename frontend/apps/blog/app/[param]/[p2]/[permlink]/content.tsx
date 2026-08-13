@@ -21,6 +21,7 @@ import { AlertDialogFlag } from '@/blog/features/post-rendering/alert-window-fla
 import CommentsSection from '@/blog/features/post-rendering/comments-section';
 import ContextLinks from '@/blog/features/post-rendering/context-links';
 import DetailsCardVoters from '@/blog/features/post-rendering/details-card-voters';
+import AuthorTitleText from '@/blog/features/post-rendering/author-title-text';
 import FlagIcon from '@/blog/features/post-rendering/flag-icon';
 import MutePostDialog from '@/blog/features/post-rendering/mute-post-dialog';
 import PostBodySection from '@/blog/features/post-rendering/post-body-section';
@@ -1284,9 +1285,14 @@ const PostContent = () => {
                                 : postData.blacklists
                           }
                         />
+                        {/* text-[#6b7280], not text-slate-500: slate is off-palette (the
+                            followers redesign removed the last of it) and this badge is
+                            one of the few places it survived. */}
                         {postData.author_title ? (
-                          <Badge variant="outline" className="ml-1 border-destructive text-slate-500">
-                            <span className="mr-1">{postData.author_title}</span>
+                          <Badge variant="outline" className="ml-1 border-destructive text-[#6b7280]">
+                            <span className="mr-1">
+                              <AuthorTitleText title={postData.author_title} />
+                            </span>
                             <ChangeTitleDialog
                               community={category}
                               moderateEnabled={!!userCanModerate}
@@ -1337,7 +1343,9 @@ const PostContent = () => {
                         <>
                           <span className="h-4 w-px bg-border" />
                           <DetailsCardVoters post={postData}>
-                            <span className="font-medium text-destructive">
+                            {/* Same nowrap/tabular-nums fix as the comment card's
+                                vote pill — this is the post footer's copy of it. */}
+                            <span className="whitespace-nowrap tabular-nums font-medium text-destructive">
                               {postData.stats?.total_votes > 1
                                 ? t('post_content.footer.votes', { votes: postData.stats?.total_votes })
                                 : t('post_content.footer.vote')}

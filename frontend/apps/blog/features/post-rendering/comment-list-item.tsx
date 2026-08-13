@@ -280,6 +280,14 @@ const CommentListItem = memo(function CommentListItem({
   const isOriginallyHidden = filteringEnabled && isGrayedByStats;
   const [hiddenComment, setHiddenComment] = useState(isOriginallyHidden);
   const [openState, setOpenState] = useState<string>(isOriginallyHidden ? '' : 'item-1');
+  /**
+   * What the READER sees, and therefore what the stub's label and reason must
+   * agree with. `openState` is what the Accordion actually renders from, so it
+   * is the authority; `hiddenComment` remains only as the moderation FLAG that
+   * decides whether a stub is offered at all (line ~579), never as a second
+   * opinion about whether the body is on screen.
+   */
+  const collapsed = openState !== 'item-1';
   const [tempraryHidden, setTemporaryHidden] = useState(false);
   // ★ BUG 1 FIX (2026-08-12, FX3) — local, per-comment, same reasoning
   // `medium-post-card.tsx`'s own `moderationRevealed` gives for its own copy of
@@ -616,12 +624,29 @@ const CommentListItem = memo(function CommentListItem({
                                 // whitespace-nowrap keeps it one line; the row itself is
                                 // free to wrap around it if the viewport is that narrow.
                                 className="cursor-pointer whitespace-nowrap text-xs sm:text-sm"
-                                onClick={() => setHiddenComment(!hiddenComment)}
+                                // ★★★ ONE SOURCE OF TRUTH (2026-08-13, reported: the
+                                // stub read "Hide Comment" while `aria-expanded="false"`,
+                                // and the filter reason never appeared).
+                                //
+                                // This span used to carry its OWN `onClick` toggling
+                                // `hiddenComment`, nested inside an `AccordionTrigger`
+                                // whose click toggles `openState`. A click on the span
+                                // bubbled and moved BOTH; a click anywhere else on the
+                                // trigger moved only `openState`. Two states for one row,
+                                // so they desynced — and because the label AND the
+                                // "(reason)" beside it were keyed off `hiddenComment`
+                                // while the actual collapse is driven by `openState`, the
+                                // row ended up labelled "Hide Comment" while collapsed,
+                                // with its explanation hidden. The reason strings were
+                                // wired all along; they were gated on the wrong state.
+                                //
+                                // The trigger is the only thing that toggles now, and
+                                // everything the reader sees is derived from `openState`.
                               >
-                                {hiddenComment
+                                {collapsed
                                   ? t('cards.comment_card.reveal_comment')
                                   : t('cards.comment_card.hide_comment')}
-                                {hiddenComment && (
+                                {collapsed && (
                                   <span className="ml-1 text-muted-foreground">
                                     (
                                     {t(
@@ -642,7 +667,7 @@ const CommentListItem = memo(function CommentListItem({
                                   Deliberately OUTSIDE the AccordionTrigger button above:
                                   an anchor nested inside a button is invalid HTML, so the
                                   link lives in this sibling row instead. */}
-                              {hiddenComment && hiddenReasonListHref && identity.isLoggedIn ? (
+                              {collapsed && hiddenReasonListHref && identity.isLoggedIn ? (
                                 <Link
                                   href={hiddenReasonListHref}
                                   className="whitespace-nowrap text-xs text-muted-foreground underline-offset-2 hover:text-destructive hover:underline sm:text-sm"
@@ -781,7 +806,16 @@ const CommentListItem = memo(function CommentListItem({
                             <>
                               <div className="flex items-center">
                                 <DetailsCardVoters post={comment}>
-                                  <span className="hover:text-destructive">
+                                  {/* ★ whitespace-nowrap + tabular-nums (2026-08-13,
+                                      reported). `votes` is ONE interpolated string
+                                      ("{{votes}} votes"), so with no nowrap the row's
+                                      `flex-wrap` was free to break it between the number
+                                      and the word once the count reached 4 digits and the
+                                      line ran out of room — the number wrapping up onto
+                                      the payout's line and reading as if it overlapped.
+                                      tabular-nums additionally stops the digits changing
+                                      width as the count revalidates. */}
+                                  <span className="whitespace-nowrap tabular-nums hover:text-destructive">
                                     {!!comment.stats && comment.stats.total_votes > 1
                                       ? t('cards.post_card.votes', { votes: comment.stats.total_votes })
                                       : t('cards.post_card.vote')}

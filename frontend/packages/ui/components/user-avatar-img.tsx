@@ -1,10 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { cn } from '@ui/lib/utils';
 import { getUserAvatarDirectUrl, getUserAvatarUrl } from '@ui/lib/avatar-utils';
 
 type AvatarApiSize = 'small' | 'medium' | 'large';
+
+/** How long the direct image gets before we stop waiting on it. See the effect below. */
+const DIRECT_TIMEOUT_MS = 2500;
 
 export interface UserAvatarImgProps {
   /** Hive (or Lumen-lite) account name. */
@@ -100,6 +103,37 @@ export function UserAvatarImg({
   // hard-fails — see the route), 'failed' -> even that request errored
   // (network down), so stop trying and let the monogram alone stand.
   const [stage, setStage] = useState<'direct' | 'proxy' | 'failed'>('direct');
+  const imgRef = useRef<HTMLImageElement>(null);
+
+  /**
+   * ★★★ A BLOCKED REQUEST NEVER FIRES `onError` (2026-08-13, reported: "follow
+   * notifications are missing profile pics in the bell").
+   *
+   * The direct-first strategy documented above only falls back to `/api/avatar`
+   * from the img's `onError`. That covers a 404 or a dead host — but a content
+   * blocker, a privacy extension or a DNS black-hole typically makes the request
+   * HANG rather than fail, so `onError` never fires, the fallback never runs, and
+   * the reader is left looking at the bare monogram letter forever. That is
+   * indistinguishable from "the avatars are missing", and it is invisible in a
+   * clean browser, which is why this could not be reproduced here.
+   *
+   * So the timeout is the fallback for the case `onError` cannot see. If the
+   * direct image has not completed within `DIRECT_TIMEOUT_MS`, promote to our own
+   * proxy — same-origin, so no blocker list has an entry for it.
+   *
+   * Only ever runs in the 'direct' stage, and clears on unmount, so a feed of 30
+   * avatars costs 30 timers for at most 2.5s and none after they load.
+   */
+  useEffect(() => {
+    if (stage !== 'direct') return;
+    const timer = setTimeout(() => {
+      const el = imgRef.current;
+      // `complete` is true for a LOADED image and for one that errored (whose
+      // onError already handled it). Still false means: still waiting.
+      if (el && !el.complete) setStage('proxy');
+    }, DIRECT_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [stage]);
 
   return (
     <span
@@ -129,6 +163,7 @@ export function UserAvatarImg({
       {(username || '?').trim().slice(0, 1)}
       {stage !== 'failed' ? (
         <img
+          ref={imgRef}
           src={stage === 'direct' ? getUserAvatarDirectUrl(username, apiSize) : getUserAvatarUrl(username, apiSize)}
           alt={alt}
           width={pixelSize}

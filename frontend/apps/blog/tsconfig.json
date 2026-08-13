@@ -40,7 +40,10 @@
     ".next-all/types/**/*.ts",
     ".next-scale/types/**/*.ts",
     ".next-final/types/**/*.ts",
-    ".next-stats/types/**/*.ts"
+    ".next-stats/types/**/*.ts",
+    ".next-fix/types/**/*.ts",
+    ".next-icon/types/**/*.ts",
+    ".next-final2/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",
