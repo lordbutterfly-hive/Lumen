@@ -532,6 +532,8 @@
     "edit_props": "Settings",
     "roles": "Roles",
     "user_roles": "User roles",
+    "roles_count_one": "{{count}} person has a role",
+    "roles_count_other": "{{count}} people have a role",
     "account": "Account",
     "role": "Role",
     "title": "Title",
@@ -1730,6 +1732,33 @@
   },
   "tags_page": {
     "no_posts_for_tag": "Nobody has posted under #{{tag}} yet."
+  },
+  "topic_page": {
+    "masthead": {
+      "eyebrow": "Topic",
+      "ranked_for_you": "Ranked for you",
+      "newest_first": "Newest first",
+      "post_count_one": "{{count}} post",
+      "post_count_other": "{{count}} posts",
+      "only_posts_tagged": "only posts tagged {{tag}}"
+    },
+    "load_error": {
+      "message": "We couldn't load this topic just now. Try again in a moment."
+    },
+    "degraded_state": {
+      "title": "We couldn't load this topic",
+      "description": "Something went wrong on our side, so we don't know what's under <tagName>#{{tag}}</tagName> right now. It isn't necessarily empty.",
+      "retry": "Try again"
+    },
+    "empty_state": {
+      "title": "Nothing here yet",
+      "description": "No posts carry the tag <tagName>{{tag}}</tagName> right now. This page only ever shows that one tag, so it stays empty until someone posts under it.",
+      "back_to_feed": "Back to your feed"
+    },
+    "pager": {
+      "loading_more": "Loading more…",
+      "end_of_topic": "That's everything under #{{tag}}."
+    }
   },
   "block_confirm_dialog": {
     "title": "Block @{{username}}?",

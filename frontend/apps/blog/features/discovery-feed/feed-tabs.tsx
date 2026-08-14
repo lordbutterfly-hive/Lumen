@@ -507,7 +507,11 @@ function ForYouFeed() {
             type="button"
             onClick={acceptNew}
             data-testid="for-you-new-posts"
-            className="rounded-full bg-[#c0392b] px-4 py-2 font-sans text-[14px] leading-[22px] font-semibold text-white shadow-[0_1px_3px_rgba(20,18,10,0.12)] transition-colors hover:bg-[#a5301f]"
+            // ★ `surface-brand-12`, not `#c0392b` (2026-08-14 token-migration
+            // pass): brand FILL role, matching `tailwind.config.js`'s own
+            // background → `surface-*` mapping. `hover:bg-[#a5301f]` is a
+            // separate, untokenised literal and is out of scope here.
+            className="rounded-full bg-surface-brand-12 px-4 py-2 font-sans text-[14px] leading-[22px] font-semibold text-white shadow-[0_1px_3px_rgba(20,18,10,0.12)] transition-colors hover:bg-[#a5301f]"
           >
             {offered.length === 1 ? LABELS.newPost : LABELS.newPosts(offered.length)}
           </button>
@@ -993,7 +997,7 @@ export default function FeedTabs() {
             <DialogLogin>
               <button
                 type="button"
-                className="rounded-[13px] bg-[#c0392b] px-5 py-2.5 font-sans text-[14px] leading-[22px] font-semibold text-white hover:bg-[#a5301f]"
+                className="rounded-[13px] bg-surface-brand-12 px-5 py-2.5 font-sans text-[14px] leading-[22px] font-semibold text-white hover:bg-[#a5301f]"
               >
                 {LABELS.loginCta}
               </button>

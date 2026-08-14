@@ -76,8 +76,10 @@ export function PostPreviewPanel({
       data-testid="preview-container"
     >
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-t-[14px] border border-b-0 border-[#ebebeb] bg-white px-4 py-2">
-        {/* Same section-label treatment as the metadata and publishing cards (C-14). */}
-        <span className="text-[12px] leading-[18px] font-semibold uppercase tracking-[0.14em] text-[#c0392b]/70">
+        {/* Same section-label treatment as the metadata and publishing cards
+            (C-14). ★ `ink-brand-6`, not `#c0392b` (2026-08-14): see
+            `PostMetadataSection.tsx` for the full reasoning. */}
+        <span className="text-[12px] leading-[18px] font-semibold uppercase tracking-[0.14em] text-ink-brand-6/70 dark:text-ink-brand-6">
           {t("submit_page.preview")}
         </span>
 
@@ -102,7 +104,11 @@ export function PostPreviewPanel({
                   <TooltipTrigger asChild>
                     <button
                       type="button"
-                      className="inline-flex items-center gap-1.5 rounded-[14px] border border-[#ebebeb] bg-white px-3 py-1.5 text-xs font-medium text-[#6b7280] transition-colors hover:border-[#c0392b] hover:text-[#c0392b] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c0392b]/40"
+                      // ★ `line-brand-10` / `ink-brand-6`, not `#c0392b`
+                      // (2026-08-14): rgb(192,57,43), byte-identical to the
+                      // literal in light mode. `--destructive` is a visibly
+                      // different red reserved for the vote control only.
+                      className="inline-flex items-center gap-1.5 rounded-[14px] border border-[#ebebeb] bg-white px-3 py-1.5 text-xs font-medium text-[#6b7280] transition-colors hover:border-line-brand-10 hover:text-ink-brand-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-line-brand-10/40"
                       onClick={() => setSyncScroll((prev) => !prev)}
                       data-testid="sync-scroll-toggle"
                       aria-pressed={syncScroll}
@@ -134,7 +140,7 @@ export function PostPreviewPanel({
             target="_blank"
             rel="noreferrer"
             href="https://docs.github.com/en/get-started/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax"
-            className="inline-flex items-center gap-1 text-xs text-[#6b7280] underline underline-offset-2 transition-colors hover:text-[#c0392b] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c0392b]/40"
+            className="inline-flex items-center gap-1 text-xs text-[#6b7280] underline underline-offset-2 transition-colors hover:text-ink-brand-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-line-brand-10/40"
           >
             {t("submit_page.markdown_styling_guide")}
             <Icons.externalLink className="h-3 w-3" aria-hidden />

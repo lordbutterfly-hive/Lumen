@@ -27,7 +27,18 @@ export default function HiveTokenCard({
 
   return (
     <div className={CARD_CLASS} data-testid="wallet-hive-card">
-      <div className="flex items-start justify-between gap-4">
+      {/* ★ MOBILE OVERFLOW FIX (2026-08-14). This row had no `flex-wrap`, so at
+          390px it forced the icon/name block on the left and the balance +
+          Send button on the right onto ONE unbreakable line — the balance is a
+          tabular-nums number with no spaces (can't line-break) and the Send
+          button doesn't shrink below its own padded text, so together they
+          were wider than the ~294px card content box (390 viewport - 48px
+          page gutter - 48px card padding) and rendered overlapping the name/
+          description text instead of dropping to their own line. Same
+          `flex-wrap` idiom already shipped for this exact shape in
+          savings-slot-card.tsx (2026-08-13). Desktop is unaffected: it only
+          wraps when content doesn't fit, and at >=1024px it always does. */}
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
         <div className="flex items-center gap-3.5">
           <TokenIcon currency="HIVE" />
           <div>
@@ -35,7 +46,14 @@ export default function HiveTokenCard({
             <div className="text-[14px] leading-[22px] text-ink-10">{t('wallet.hive_card.description')}</div>
           </div>
         </div>
-        <div className="flex items-center gap-3.5">
+        {/* ★ Inner wrap too, not just the outer row. Even once this group has
+            the whole card width to itself, a very large balance (whale
+            accounts run into 9-figure HIVE) plus the Send button can still
+            exceed 294px on one line — wrapping the number onto its own line
+            keeps it fully readable instead of pushing the button off-screen,
+            which is the required behaviour (no ellipsis truncation for a
+            balance). */}
+        <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2.5">
           <span
             className="font-sans text-2xl font-bold tabular-nums text-ink-2"
             data-testid="wallet-hive-balance"

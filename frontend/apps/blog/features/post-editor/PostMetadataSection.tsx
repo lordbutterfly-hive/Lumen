@@ -48,9 +48,12 @@ export function PostMetadataSection({
           "METADATA" and "PUBLISHING" were 12px/500 uppercase at 0.6px tracking
           in slate — a heading style that appears nowhere else in Lumen. These
           now reuse the masthead's eyebrow exactly (11px/600 uppercase, 0.14em,
-          #c0392b at 70%), see features/layouts/page-masthead.tsx, so the page
-          has one small-label style rather than one per component. */}
-      <span className="text-[12px] leading-[18px] font-semibold uppercase tracking-[0.14em] text-[#c0392b]/70">
+          `ink-brand-6` at 70%), see features/layouts/page-masthead.tsx, so the
+          page has one small-label style rather than one per component.
+          ★ `ink-brand-6`, not `#c0392b` (2026-08-14): matches the masthead's
+          own token, including its `dark:text-ink-brand-6` restore for the 70%
+          opacity's contrast floor. */}
+      <span className="text-[12px] leading-[18px] font-semibold uppercase tracking-[0.14em] text-ink-brand-6/70 dark:text-ink-brand-6">
         {t("submit_page.metadata_section")}
       </span>
 

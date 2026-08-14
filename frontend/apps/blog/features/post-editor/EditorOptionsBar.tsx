@@ -51,7 +51,12 @@ const EditorOptionsBar: FC<EditorOptionsBarProps> = ({
       className="flex flex-wrap items-center gap-x-5 gap-y-2 border-x border-t border-border bg-background-secondary/50 px-3 py-2"
       data-testid="editor-options-bar"
     >
-      <span className="text-[12px] leading-[18px] font-semibold uppercase tracking-[0.14em] text-[#c0392b]/70">
+      {/* ★ `ink-brand-6`, not `#c0392b` (2026-08-14): this reuses the masthead's
+          eyebrow treatment exactly (see `page-masthead.tsx`), including its
+          `dark:text-ink-brand-6` restore-to-full-strength override — 70% of
+          the brand ink cannot clear 4.5:1 on any dark-enough ground, which
+          the flat literal could never account for. */}
+      <span className="text-[12px] leading-[18px] font-semibold uppercase tracking-[0.14em] text-ink-brand-6/70 dark:text-ink-brand-6">
         {EDITOR_OPTIONS_LABEL}
       </span>
 

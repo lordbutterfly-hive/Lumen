@@ -379,7 +379,13 @@ const LaunchWizard: FC = () => {
                   <span
                     aria-hidden="true"
                     className="h-11 w-11 rounded-[13px]"
-                    style={{ background: 'linear-gradient(135deg,#c0392b,#e07b3e)' }}
+                    // ★ `rgb(var(--surface-brand-12))`, not `#c0392b` (2026-08-14):
+                    // a `style` attribute is real CSS, so the custom property
+                    // resolves exactly like the Tailwind `bg-surface-brand-12`
+                    // utility would — this is a brand FILL, which is the role the
+                    // token family documents as "stays red on dark" in
+                    // `tailwind.config.js`.
+                    style={{ background: 'linear-gradient(135deg,rgb(var(--surface-brand-12)),#e07b3e)' }}
                   />
                 )}
                 <div>

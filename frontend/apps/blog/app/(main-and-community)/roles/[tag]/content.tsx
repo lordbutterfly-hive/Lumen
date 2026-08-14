@@ -10,6 +10,7 @@ import TableItem from '@/blog/features/community-profile/table-item';
 import NoDataError from '@/blog/components/no-data-error';
 import { fetchCommunityRoles } from '@/blog/lib/chain-fetch';
 import { useTranslation } from '@/blog/i18n/client';
+import PageMasthead from '@/blog/features/layouts/page-masthead';
 
 const Content = ({ community }: { community: string }) => {
   /**
@@ -62,20 +63,59 @@ const Content = ({ community }: { community: string }) => {
   if (isError) return <NoDataError />;
 
   return (
-    <div className="my-4 flex w-full items-center justify-between" translate="no">
-      <div className="m-2 w-full bg-background px-8 py-6">
-        <h2 className="mb-1 text-2xl" data-testid="community-roles-heading">
-          {t('communities.user_roles')}
-        </h2>
-        <Table
-          className="w-full border-[1px] border-solid border-secondary"
-          data-testid="community-roles-table"
-        >
-          <TableHeader className="text-">
-            <TableRow className="bg-secondary">
-              <TableHead className="px-2">{t('communities.account')}</TableHead>
-              <TableHead className="w-48 px-2">{t('communities.role')}</TableHead>
-              <TableHead className="px-2">{t('communities.title')}</TableHead>
+    // ★ RESTYLE, 2026-08-14. `/roles/<community>` was the last route still
+    // wrapped by the pre-Lumen `CommunityLayout` sidebar — every OTHER
+    // community-scoped feed (trending/hot/created/muted/payout for a tag) now
+    // redirects to `/topics/<tag>` (see `trending/[tag]/page.tsx`), which is
+    // why this page alone still showed the legacy slate table header and blue
+    // Subscribe/New-post chrome. That outer sidebar + breadcrumb lives in
+    // `features/layouts/community/**`, outside this restyle's file ownership,
+    // and is left exactly as-is (see the delivery notes). Everything below is
+    // this route's own content, rebuilt to match `topic-shell.tsx` /
+    // `account-lists/follow-list/**`.
+    <div className="w-full pb-10" translate="no">
+      {/* No `mark` glyph: per page-masthead.tsx's own rule, a mark is only
+          assigned once somebody has reviewed a page for one — nobody has for
+          roles yet, so this stays unassigned like witnesses/proposals/wallet. */}
+      <PageMasthead
+        eyebrow={t('communities.roles')}
+        title={<span data-testid="community-roles-heading">{community}</span>}
+      >
+        <span data-testid="community-roles-count">
+          {t('communities.roles_count', { count: data.length })}
+        </span>
+      </PageMasthead>
+
+      {/* ★ WARM CARD + HAIRLINE, REPLACING `border-secondary`/`bg-secondary`
+          (the old header row). Both resolved through the legacy shadcn slate
+          ramp — `--secondary: 210 40% 96.1%`, a blue-tinted grey, verified in
+          `globals.css` — while every redesigned surface (this table's own
+          `page-masthead.tsx` above, `follow-list/tokens.ts`) reads through the
+          warm `line-9` / `surface-1` / `surface-10` tokens instead. These are
+          TOKEN NAMES (`tailwind.config.js` → `rgb(var(--line-9))` etc.), not a
+          fresh hardcoded literal — the same generated palette `PageMasthead`
+          already draws from, so this table stays correct if that palette is
+          ever re-tuned, and it responds to dark mode for free. */}
+      <div
+        className="w-full overflow-hidden rounded-[18px] border border-line-9 bg-surface-1"
+        data-testid="community-roles-table-card"
+      >
+        <Table className="w-full" data-testid="community-roles-table">
+          <TableHeader>
+            {/* `hover:bg-surface-10` repeats the row's own resting colour —
+                it exists only to CANCEL `TableRow`'s built-in
+                `hover:bg-muted/50` (the same slate ramp), not to add a new
+                hover effect on a header nobody meaningfully hovers. */}
+            <TableRow className="border-b border-line-9 bg-surface-10 hover:bg-surface-10">
+              <TableHead className="px-4 py-3 text-12 font-semibold uppercase tracking-[0.14em] text-ink-10">
+                {t('communities.account')}
+              </TableHead>
+              <TableHead className="w-48 px-4 py-3 text-12 font-semibold uppercase tracking-[0.14em] text-ink-10">
+                {t('communities.role')}
+              </TableHead>
+              <TableHead className="px-4 py-3 text-12 font-semibold uppercase tracking-[0.14em] text-ink-10">
+                {t('communities.title')}
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -84,17 +124,25 @@ const Content = ({ community }: { community: string }) => {
             ))}
           </TableBody>
         </Table>
-        {loggedUser.value >= 3 && <AddRole loggedUserLevel={loggedUser.value} community={community} />}
-        <div className="mt-12">
-          <h1>{t('communities.role_permissions')}</h1>
-          <div className="text-sm">
-            {rolesLevels.map((role) => (
-              <div key={role.name}>
-                <span className="font-bold"> {t(`communities.${role.name}`)}</span>
-                <span>- {t(`communities.description_${role.name}`)}</span>
-              </div>
-            ))}
-          </div>
+      </div>
+
+      {loggedUser.value >= 3 && <AddRole loggedUserLevel={loggedUser.value} community={community} />}
+
+      <div className="mt-8 rounded-[18px] border border-line-9 bg-surface-1 p-6">
+        {/* `<h2>`, not `<h1>` — `PageMasthead` above already renders this
+            page's one `<h1>`; the original bare `<h1>{t('communities.
+            role_permissions')}</h1>` gave the page two, which is its own
+            pre-existing a11y defect fixed as part of this restyle. */}
+        <h2 className="mb-3 font-serif text-20 font-semibold text-ink-2">
+          {t('communities.role_permissions')}
+        </h2>
+        <div className="flex flex-col gap-2">
+          {rolesLevels.map((role) => (
+            <div key={role.name} className="text-14 text-ink-10">
+              <span className="font-semibold text-ink-2">{t(`communities.${role.name}`)}</span>
+              <span> — {t(`communities.description_${role.name}`)}</span>
+            </div>
+          ))}
         </div>
       </div>
     </div>

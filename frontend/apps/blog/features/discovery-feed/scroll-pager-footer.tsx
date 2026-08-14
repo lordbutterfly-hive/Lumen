@@ -76,7 +76,9 @@ export default function ScrollPagerFooter({
               type="button"
               onClick={loadMore}
               data-testid={testId ? `${testId}-load-more` : undefined}
-              className="rounded-[13px] bg-[#c0392b] px-5 py-2.5 font-sans text-[14px] leading-[22px] font-semibold text-white transition-colors hover:bg-[#a5301f]"
+              // ★ `surface-brand-12`, not `#c0392b` (2026-08-14 token-migration
+              // pass): brand FILL role.
+              className="rounded-[13px] bg-surface-brand-12 px-5 py-2.5 font-sans text-[14px] leading-[22px] font-semibold text-white transition-colors hover:bg-[#a5301f]"
             >
               Load more
             </button>

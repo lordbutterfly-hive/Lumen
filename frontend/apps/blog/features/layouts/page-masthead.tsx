@@ -20,7 +20,7 @@ import MastheadGlyph, { type MastheadMark } from './masthead-glyph';
  * THE SHELL, and these numbers are the spec:
  *   width   inherited from the column, never hardcoded
  *   radius  20px
- *   border  1px #eee2dc, with a 3px #c0392b rule down the left edge
+ *   border  1px #eee2dc, with a 3px `line-brand-10` rule down the left edge
  *   fill    the warm radial wash (owner ruling: the gradient stays)
  *   padding 28px 28px 20px
  *   overflow hidden, so an oversized mark bleeds off the corner instead of

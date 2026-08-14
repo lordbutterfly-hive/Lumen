@@ -211,7 +211,11 @@ const BlockedList = ({ username }: { username: string }) => {
                   disabled={pending}
                 >
                   {pending ? (
-                    <CircleSpinner loading size={16} color="#c0392b" />
+                    // ★ NOT A LITERAL: this button's own idle state already reads
+                    // `text-ink-brand-6` two lines up — `rgb(var(--ink-brand-6))`
+                    // keeps the spinner the same red in light mode and picks up
+                    // the dark-mode lift automatically, which `#c0392b` never did.
+                    <CircleSpinner loading size={16} color="rgb(var(--ink-brand-6))" />
                   ) : (
                     t('settings_page.unblock_button')
                   )}

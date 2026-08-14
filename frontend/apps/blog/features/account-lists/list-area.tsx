@@ -129,7 +129,9 @@ const ListArea = ({
     <div data-testid="user-list-area" className="flex w-full flex-col gap-4">
       <Accordion type="single" collapsible className={LIST_CARD}>
         <AccordionItem value="item-1" className="border-none">
-          <AccordionTrigger className="py-0 text-sm font-medium text-[#6b7280] hover:text-[#c0392b] hover:no-underline">
+          {/* ★ `ink-brand-6`, not `#c0392b` (2026-08-14 token-migration pass) —
+              rgb(192,57,43), byte-identical to the literal in light mode. */}
+          <AccordionTrigger className="py-0 text-sm font-medium text-[#6b7280] hover:text-ink-brand-6 hover:no-underline">
             {t('user_profile.lists.list.what_is_this')}
           </AccordionTrigger>
           <AccordionContent className="pt-3 text-sm text-primary/70">
@@ -230,7 +232,7 @@ const ListArea = ({
       {accountOwner ? (
         <div className={LIST_CARD}>
           <h2 className={LIST_SECTION_HEADING}>
-            <UserPlus className="h-4 w-4 text-[#c0392b]" />
+            <UserPlus className="h-4 w-4 text-ink-brand-6" />
             {t('user_profile.lists.list.add_account_to_list')}
           </h2>
           <span className="mt-1 block text-xs text-[#6b7280]">{t('user_profile.lists.list.single_account')}</span>
@@ -314,7 +316,7 @@ const ListArea = ({
       {/* Search */}
       <div className={LIST_CARD}>
         <h2 className={LIST_SECTION_HEADING}>
-          <Search className="h-4 w-4 text-[#c0392b]" />
+          <Search className="h-4 w-4 text-ink-brand-6" />
           {t('user_profile.lists.list.search_this_list')}
         </h2>
         <div className="mt-3 w-full">

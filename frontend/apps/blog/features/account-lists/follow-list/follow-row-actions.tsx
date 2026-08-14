@@ -182,7 +182,13 @@ export default function FollowRowActions({
       >
         {followBusy ? (
           <span className="flex h-5 w-12 items-center justify-center">
-            <CircleSpinner loading size={16} color={isFollow ? '#c0392b' : '#ffffff'} />
+            {/* ★ NOT A LITERAL: the outline button this spinner sits on reads
+                `hover:text-ink-brand-6` above, and the solid button beside it
+                is `bg-surface-brand-12` — `rgb(var(--ink-brand-6))` keeps the
+                spinner in that same red family instead of the stale
+                `#c0392b`, and it is not a "danger" spinner (Follow, not
+                Block), so it takes the brand token, not `destructive`. */}
+            <CircleSpinner loading size={16} color={isFollow ? 'rgb(var(--ink-brand-6))' : '#ffffff'} />
           </span>
         ) : lumen.unknown ? (
           t('user_profile.follow_status_unknown')
@@ -232,7 +238,11 @@ export default function FollowRowActions({
                 else setConfirmOpen(true);
               }}
               disabled={block.busy}
-              className="cursor-pointer rounded-[10px] px-2.5 py-2 text-[13px] leading-[20px] font-medium text-[#c0392b] focus:bg-[#fdf2f0] focus:text-[#c0392b]"
+              // ★ `ink-brand-6`, not `#c0392b` (2026-08-14 token-migration
+              // pass) — rgb(192,57,43), byte-identical to the literal in
+              // light mode. `--destructive` renders a visibly different red
+              // (rgb(218,43,43)) and is reserved for the vote control only.
+              className="cursor-pointer rounded-[10px] px-2.5 py-2 text-[13px] leading-[20px] font-medium text-ink-brand-6 focus:bg-[#fdf2f0] focus:text-ink-brand-6"
               data-testid="follow-row-block-menu-item"
             >
               {block.isBlocking
@@ -278,7 +288,9 @@ export default function FollowRowActions({
             <AlertDialogAction
               disabled={block.busy}
               data-testid="follow-row-block-confirm"
-              className="rounded-[12px] bg-[#c0392b] text-white hover:bg-[#a93226]"
+              // ★ `bg-surface-brand-12`, not `#c0392b` (2026-08-14) —
+              // rgb(192,57,43), byte-identical to the literal in light mode.
+              className="rounded-[12px] bg-surface-brand-12 text-white hover:bg-[#a93226]"
               onClick={(event) => {
                 event.preventDefault();
                 void commitBlock();

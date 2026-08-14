@@ -11,6 +11,15 @@ import type { Bucket, BucketDirection } from './types';
 // the FIRST entry is the most extreme, and within the "up" group the LAST is.
 
 const UP_SCALE = ['#4f9e6a', '#2f7d4f', '#1e7a45']; // light → dark (more extreme up = darker)
+// ★ `#c0392b` SURVIVES HERE DELIBERATELY (2026-08-14 token-migration pass).
+// This is a fixed, hand-tuned 3-stop light→dark gradient with no dark-mode
+// variant of its own — `#e0663e` and `#8f1f14` on either side are plain
+// literals with no token equivalents (there is no "outcome down-scale" family
+// in `tailwind.config.js`, unlike `ink-brand-*`/`surface-brand-*`). Swapping
+// only the middle stop for `rgb(var(--line-brand-10))` would make it react to
+// dark mode while its neighbours stay fixed, breaking the evenly-stepped
+// light→dark ordering this array exists to guarantee. Matches `UP_SCALE`
+// beside it, which is entirely untokenised for the same reason.
 const DOWN_SCALE = ['#e0663e', '#c0392b', '#8f1f14']; // light → dark (more extreme down = darker)
 const FLAT_COLOR = '#b0870a'; // warm neutral gold
 

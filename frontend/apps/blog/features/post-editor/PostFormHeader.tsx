@@ -26,8 +26,13 @@ interface PostFormHeaderProps {
  * The `data-testid`s are unchanged — `playwright/tests/support/pages/
  * postEditorPage.ts` addresses both by testid.
  */
+// ★ `line-brand-10` / `ink-brand-6`, not `#c0392b` (2026-08-14 token-migration
+// pass): rgb(192,57,43), byte-identical to the literal in light mode, and
+// picks up the dark-mode lift the literal never had. `--destructive` renders
+// a visibly different red (rgb(218,43,43)) and is reserved for the vote
+// control only.
 const TOGGLE_CLASS =
-  "inline-flex items-center gap-1.5 rounded-[14px] border border-[#ebebeb] bg-white px-3 py-1.5 text-xs font-medium text-[#6b7280] transition-colors hover:border-[#c0392b] hover:text-[#c0392b] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c0392b]/40";
+  "inline-flex items-center gap-1.5 rounded-[14px] border border-[#ebebeb] bg-white px-3 py-1.5 text-xs font-medium text-[#6b7280] transition-colors hover:border-line-brand-10 hover:text-ink-brand-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-line-brand-10/40";
 
 export function PostFormHeader({ sideBySide, setSideBySide, preview, setPreview }: PostFormHeaderProps) {
   const { t } = useTranslation("common_blog");

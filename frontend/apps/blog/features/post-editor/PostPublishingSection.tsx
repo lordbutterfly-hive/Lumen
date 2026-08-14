@@ -106,8 +106,9 @@ export function PostPublishingSection({
   return (
     <div className="flex flex-col gap-4 rounded-[14px] border border-[#ebebeb] bg-white p-4">
       {/* Same one section-label treatment as the metadata card, which is the
-          masthead eyebrow. See PostMetadataSection.tsx for the reasoning (C-14). */}
-      <span className="text-[12px] leading-[18px] font-semibold uppercase tracking-[0.14em] text-[#c0392b]/70">
+          masthead eyebrow. See PostMetadataSection.tsx for the reasoning (C-14).
+          ★ `ink-brand-6`, not `#c0392b` (2026-08-14). */}
+      <span className="text-[12px] leading-[18px] font-semibold uppercase tracking-[0.14em] text-ink-brand-6/70 dark:text-ink-brand-6">
         {t("submit_page.publishing_section")}
       </span>
 
@@ -158,7 +159,9 @@ export function PostPublishingSection({
                 would submit it. */}
             <button
               type="button"
-              className="inline-flex w-fit items-center gap-1.5 rounded-[14px] border border-[#ebebeb] bg-white px-3 py-1.5 text-xs font-medium text-[#6b7280] transition-colors hover:border-[#c0392b] hover:text-[#c0392b] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c0392b]/40"
+              // ★ `line-brand-10` / `ink-brand-6`, not `#c0392b` (2026-08-14):
+              // rgb(192,57,43), byte-identical to the literal in light mode.
+              className="inline-flex w-fit items-center gap-1.5 rounded-[14px] border border-[#ebebeb] bg-white px-3 py-1.5 text-xs font-medium text-[#6b7280] transition-colors hover:border-line-brand-10 hover:text-ink-brand-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-line-brand-10/40"
               title={t("submit_page.advanced_tooltip")}
               data-testid="advanced-settings-button"
             >
@@ -261,12 +264,15 @@ export function PostPublishingSection({
                 inherited from somewhere else entirely. Blue appears nowhere
                 else in the product, so a gauge next to the Publish button was
                 the single loudest off-palette element on the page. Brand red
-                #c0392b for the fill, #ebebeb for the track, which is the same
-                pair every other bordered surface here uses. */}
+                brand red for the fill, #ebebeb for the track, which is the
+                same pair every other bordered surface here uses.
+                ★ `bg-surface-brand-12`, not `#c0392b` (2026-08-14
+                token-migration pass) — rgb(192,57,43), byte-identical to the
+                literal in light mode. */}
             <Progress
               value={manabarsData?.rc.percentageValue ?? 0}
               className="h-2 flex-1 bg-[#ebebeb]"
-              indicatorClassName="bg-[#c0392b]"
+              indicatorClassName="bg-surface-brand-12"
             />
             <span
               className="text-xs tabular-nums text-muted-foreground"

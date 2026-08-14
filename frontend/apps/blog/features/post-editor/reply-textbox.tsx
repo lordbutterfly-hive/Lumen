@@ -534,10 +534,14 @@ export function ReplyTextbox({
                   Lumen. Fixing only the composer would have left the identical
                   bar blue two clicks away, so both move to brand red on a
                   neutral track together. */}
+              {/* ★ `bg-surface-brand-12`, not `#c0392b` (2026-08-14
+                  token-migration pass) — rgb(192,57,43), byte-identical to the
+                  literal in light mode; same token `PostPublishingSection.tsx`
+                  uses for the identical gauge in the composer. */}
               <Progress
                 value={manabarsData?.rc.percentageValue ?? 0}
                 className="h-2 w-20 bg-[#ebebeb]"
-                indicatorClassName="bg-[#c0392b]"
+                indicatorClassName="bg-surface-brand-12"
               />
               <TooltipProvider>
                 <Tooltip>

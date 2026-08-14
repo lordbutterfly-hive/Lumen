@@ -28,7 +28,15 @@ export default function EstimatedValueStrip({ figures }: { figures: WalletFigure
 
   return (
     <div
-      className="mb-[18px] flex items-center justify-between rounded-[18px] border border-line-9 bg-surface-5 px-6 py-[22px]"
+      // ★ Preventive mobile-overflow fix (2026-08-14), same anti-pattern as
+      // hive-token-card.tsx/hbd-token-card.tsx/staked-hive-block.tsx right
+      // next to it on this page: an unwrapped `justify-between` row pairing
+      // wrapping prose against an unbreakable tabular-nums figure. Not one of
+      // the reported symptoms — at real-world account values it fits the
+      // ~294px content box unwrapped — but it's the identical shape as the
+      // three that didn't, so it gets the same `flex-wrap` rather than
+      // waiting for a whale account to file the same bug again.
+      className="mb-[18px] flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-[18px] border border-line-9 bg-surface-5 px-6 py-[22px]"
       data-testid="wallet-estimated-value"
     >
       <div>

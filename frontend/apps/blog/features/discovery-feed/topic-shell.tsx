@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef } from 'react';
+import { Trans } from 'react-i18next';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { FEED_AUTO_PAGE_CAP, useInfiniteScrollSentinel } from './hooks/use-infinite-scroll-sentinel';
 import ScrollPagerFooter from './scroll-pager-footer';
@@ -167,26 +168,30 @@ export default function TopicShell({ tag }: { tag: string }) {
             #c0392b accent — because the whole point of this page is that a topic
             is the feed, not a second product. The only new idea is the oversized
             hairline "#", which anchors the eye without adding a colour or a font. */}
-        <PageMasthead eyebrow="Topic" title={displayName} mark="hash">
+        <PageMasthead eyebrow={t('topic_page.masthead.eyebrow')} title={displayName} mark="hash">
           <span className="inline-flex items-center gap-1.5">
             <span
               className={`h-[6px] w-[6px] rounded-full ${ranked ? 'bg-[#2f7d4f]' : 'bg-[#c9a227]'}`}
               aria-hidden
             />
-            {ranked ? 'Ranked for you' : 'Newest first'}
+            {ranked ? t('topic_page.masthead.ranked_for_you') : t('topic_page.masthead.newest_first')}
           </span>
           {shown.length > 0 ? (
             <>
               <span className="text-[#dcd7d2]" aria-hidden>
                 ·
               </span>
-              <span className="tabular-nums">{shown.length} posts</span>
+              <span className="tabular-nums">
+                {t(shown.length === 1 ? 'topic_page.masthead.post_count_one' : 'topic_page.masthead.post_count_other', {
+                  count: shown.length
+                })}
+              </span>
             </>
           ) : null}
           <span className="text-[#dcd7d2]" aria-hidden>
             ·
           </span>
-          <span>only posts tagged {tag}</span>
+          <span>{t('topic_page.masthead.only_posts_tagged', { tag })}</span>
         </PageMasthead>
 
         {isLoading ? (
@@ -198,7 +203,7 @@ export default function TopicShell({ tag }: { tag: string }) {
           // background refetch rides out silently instead of replacing the topic
           // with an error line.
           <p className="py-12 text-center font-sans text-sm text-muted-foreground">
-            We couldn’t load this topic just now. Try again in a moment.
+            {t('topic_page.load_error.message')}
           </p>
         ) : shown.length === 0 && degradedPage ? (
           // ★ AN EMPTY DEGRADED ANSWER IS NOT AN EMPTY TOPIC. The server said it
@@ -207,33 +212,55 @@ export default function TopicShell({ tag }: { tag: string }) {
           // statement about the topic that we have no evidence for.
           <div className="rounded-[20px] border border-dashed border-[#e6e0da] bg-[#fdfcfb] px-8 py-14 text-center">
             <p className="mb-1 font-serif text-[20px] leading-[30px] font-semibold text-[#161511]">
-              We couldn’t load this topic
+              {t('topic_page.degraded_state.title')}
             </p>
             <p className="mx-auto mb-5 max-w-[42ch] text-[14px] leading-[22px] text-[#6b7280]">
-              Something went wrong on our side, so we don’t know what’s under{' '}
-              <span className="font-semibold text-[#161511]">#{tag}</span> right now. It isn’t necessarily empty.
+              <Trans
+                t={t}
+                i18nKey="topic_page.degraded_state.description"
+                values={{ tag }}
+                components={{ tagName: <span className="font-semibold text-[#161511]" /> }}
+              />
             </p>
             <button
               type="button"
               onClick={() => refetch()}
-              className="inline-block rounded-[13px] bg-[#c0392b] px-5 py-2.5 text-[14px] leading-[22px] font-bold text-white hover:bg-[#96271b]"
+              // ★ BRAND TOKENS, NOT `--destructive` — THEY ARE DIFFERENT REDS
+              // (corrected 2026-08-14 after this file briefly shipped the wrong one).
+              // `--surface-brand-12` is `192 57 43`, byte-identical to the
+              // `#c0392b` this used to hardcode, and `--surface-brand-17` is
+              // `150 39 27` = the `#96271b` hover it used to hardcode — so the
+              // rendered colour is unchanged and dark mode now works.
+              // `--destructive` is `hsl(0,70%,51%)` = `rgb(218,43,43)`, a
+              // VISIBLY different red that the vote control moved to
+              // deliberately on 2026-08-13/14; using it here would have
+              // silently restyled this button. globals.css annotates each brand
+              // token with the literal it was generated from, so this is a
+              // lookup, not a judgement call.
+              className="inline-block rounded-[13px] bg-surface-brand-12 px-5 py-2.5 text-[14px] leading-[22px] font-bold text-white hover:bg-surface-brand-17"
             >
-              Try again
+              {t('topic_page.degraded_state.retry')}
             </button>
           </div>
         ) : shown.length === 0 ? (
           // Never a bare dead end: an empty topic still offers a way onward.
           <div className="rounded-[20px] border border-dashed border-[#e6e0da] bg-[#fdfcfb] px-8 py-14 text-center">
-            <p className="mb-1 font-serif text-[20px] leading-[30px] font-semibold text-[#161511]">Nothing here yet</p>
+            <p className="mb-1 font-serif text-[20px] leading-[30px] font-semibold text-[#161511]">
+              {t('topic_page.empty_state.title')}
+            </p>
             <p className="mx-auto mb-5 max-w-[42ch] text-[14px] leading-[22px] text-[#6b7280]">
-              No posts carry the tag <span className="font-semibold text-[#161511]">{tag}</span> right now. This page
-              only ever shows that one tag, so it stays empty until someone posts under it.
+              <Trans
+                t={t}
+                i18nKey="topic_page.empty_state.description"
+                values={{ tag }}
+                components={{ tagName: <span className="font-semibold text-[#161511]" /> }}
+              />
             </p>
             <a
               href="/"
-              className="inline-block rounded-[13px] bg-[#c0392b] px-5 py-2.5 text-[14px] leading-[22px] font-bold text-white hover:bg-[#96271b]"
+              className="inline-block rounded-[13px] bg-surface-brand-12 px-5 py-2.5 text-[14px] leading-[22px] font-bold text-white hover:bg-surface-brand-17"
             >
-              Back to your feed
+              {t('topic_page.empty_state.back_to_feed')}
             </a>
           </div>
         ) : (
@@ -258,8 +285,8 @@ export default function TopicShell({ tag }: { tag: string }) {
           isFetchingNextPage={isFetchingNextPage}
           isError={isError}
           loadedCount={shown.length}
-          loadingLabel="Loading more…"
-          endLabel={shown.length > 0 ? `That’s everything under #${tag}.` : undefined}
+          loadingLabel={t('topic_page.pager.loading_more')}
+          endLabel={shown.length > 0 ? t('topic_page.pager.end_of_topic', { tag }) : undefined}
           className="py-8 text-center font-sans text-[13px] leading-[20px] text-[#6b7280]"
           testId="topic-pager"
         />

@@ -33,7 +33,24 @@ export default function StakedHiveBlock({
 
   return (
     <div className="mt-5 flex flex-col gap-5 border-l-2 border-line-2 pl-4">
-      <div className="flex items-start justify-between gap-4">
+      {/* ★ MOBILE OVERFLOW FIX (2026-08-14). No `flex-wrap` here meant the
+          description block on the left and the HP-figures/Stake/Unstake
+          column on the right were forced onto one line. The right column's
+          own min width is set by its Stake+Unstake button row (two padded,
+          non-breaking buttons) and by two tabular-nums lines that can't
+          break (`wallet-hp-balance`) or only break at word boundaries
+          (`wallet-hp-effective`, "{{value}} HP after delegations" as ONE
+          string) — none of that can shrink to fit the ~60-90px that was left
+          over after the badges row on the left took its share of a ~294px
+          card content box at 390px. Left without room to wrap, the right
+          column's box was pushed past x=390: the vestingHp headline number
+          ("74,888.31…") and the hp_effective line ("69,538.635 HP afte…")
+          are both right-aligned inside that pushed-out box, so their tails
+          are what fell off the viewport edge, and the Unstake button — last
+          in the row, so furthest right — went with them. `flex-wrap` lets
+          the right column drop to its own full-width line instead, where
+          all three of those fit comfortably unwrapped. */}
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-4">
         <div className="max-w-[520px]">
           <div className="mb-1 flex items-center gap-2">
             <span className="text-[15px] leading-[24px] font-bold text-ink-4">{t('wallet.staked.title')}</span>
@@ -93,7 +110,14 @@ export default function StakedHiveBlock({
               {t('profile.stats.hp_effective', { value: formatTokenAmount(netHp) })}
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          {/* ★ Defensive `flex-wrap` (2026-08-14). Not required to clear the
+              reported bug on English copy — once the outer row above wraps,
+              this pair fits the full ~294px card width unwrapped — but a
+              longer translated "Stake"/"Unstake" label pair could reopen the
+              same edge-clip on a narrower phone or a longer locale, and
+              wrapping two buttons costs nothing on the layouts where it
+              never triggers. */}
+          <div className="flex flex-wrap items-center gap-2">
             <PowerUpDialog
               username={username}
               hiveBalance={liquidHive}

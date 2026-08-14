@@ -46,7 +46,7 @@ type NavIcon = ComponentType<LucideProps>;
  * ★ HOVER IS WARM, AND IT IS THE SAME WARM AS EVERYWHERE ELSE (2026-08-10, owner).
  *
  * These rows highlighted to `#f1f3f5`, a neutral grey, while the topic pills in the
- * right rail highlight to `#fdf2f0` with `#c0392b` text. Two hover languages on one
+ * right rail highlight to `#fdf2f0` with `ink-brand-6` text. Two hover languages on one
  * screen, six inches apart: the grey read as system chrome and the warm one as the
  * product, so the nav felt like something the page was wearing rather than part of
  * it. Now both rails answer the cursor the same way, which is also the ink the red

@@ -42,7 +42,11 @@ export const MOCK_HOLDINGS: TokenHolding[] = [
   // match, so the fixture doesn't sit at a stale price a real reseed can't
   // reach. Superseded at render time by store.ts's live derivation either way.
   { handle: 'ada', what: 'Hive core-dev', avatarColor: 'linear-gradient(135deg,#3182ce,#4f9e6a)', tokens: 14.5, valueUsd: 17523.25, floorValueUsd: 6231.81, priceUsd: 1208.5, changePctWeek: 6.2, spark: [1064.63, 1093.4, 1079.02, 1136.57, 1165.34, 1208.5] },
-  { handle: 'delm', what: 'Witness ops & infra', avatarColor: 'linear-gradient(135deg,#c0392b,#e07b3e)', tokens: 9.2, valueUsd: 90.16, floorValueUsd: 55.2, priceUsd: 9.8, changePctWeek: 3.1, spark: [9.1, 9.3, 9.2, 9.5, 9.6, 9.8] },
+  // ★ `rgb(var(--surface-brand-12))`, not `#c0392b` (2026-08-14): a FILL swatch
+  // takes the same token `launch-wizard.tsx`'s placeholder avatar uses for the
+  // identical gradient shape, so this fixture's colour tracks the app's brand red
+  // (and its dark-mode lift) instead of staying pinned to the old literal.
+  { handle: 'delm', what: 'Witness ops & infra', avatarColor: 'linear-gradient(135deg,rgb(var(--surface-brand-12)),#e07b3e)', tokens: 9.2, valueUsd: 90.16, floorValueUsd: 55.2, priceUsd: 9.8, changePctWeek: 3.1, spark: [9.1, 9.3, 9.2, 9.5, 9.6, 9.8] },
   { handle: 'favour', what: 'Growth & newsletters', avatarColor: '#e07b3e', tokens: 12.0, valueUsd: 73.2, floorValueUsd: 42.0, priceUsd: 6.1, changePctWeek: -2.4, spark: [6.4, 6.3, 6.25, 6.2, 6.15, 6.1] },
   { handle: 'quill', what: 'Technical writing', avatarColor: '#3182ce', tokens: 8.6, valueUsd: 46.44, floorValueUsd: 27.9, priceUsd: 5.4, changePctWeek: 1.8, spark: [5.2, 5.25, 5.3, 5.35, 5.35, 5.4] },
   { handle: 'sora', what: 'Travel & film', avatarColor: '#2f7d4f', tokens: 18.1, valueUsd: 41.63, floorValueUsd: 24.44, priceUsd: 2.3, changePctWeek: -5.0, spark: [2.5, 2.45, 2.4, 2.35, 2.32, 2.3], windingDown: true }

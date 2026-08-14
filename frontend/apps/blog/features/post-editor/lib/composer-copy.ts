@@ -60,3 +60,45 @@ export const SYNC_SCROLL_OFF = 'Scrolling separately';
 /* ── C-9 · "Clean" for an unconfirmed destructive action ─────────────────── */
 export const DISCARD_DRAFT = 'Discard draft';
 export const DISCARD_DRAFT_CONFIRM_TITLE = 'Discard this draft?';
+
+/* ── 2026-08-14 · image upload failures all said "try again", even when that
+   is wrong advice ──────────────────────────────────────────────────────── */
+// ★ WHY. `uploadImg` (this file's sibling `utils.ts`) is the ONE image
+// pipeline (see `components/hooks/use-image-upload.ts`'s own header comment)
+// shared by this editor, the short-form composer and account settings, and
+// its catch block used to fold every failure into the SAME generic toast,
+// "try again" included. That is wrong for a Keychain user: retrying a signing
+// request Keychain just failed will fail the exact same way again until the
+// user unlocks Keychain (or installs it), not because our upload code hit a
+// blip.
+//
+// What `uploadImg`'s catch can actually tell apart, read from
+// `@hiveio/wax-signers-keychain`'s `KeychainProvider.encryptData` (only a
+// dependency of `packages/smart-signer`, not of this app — so `utils.ts`
+// matches these two exact strings rather than importing the class and doing
+// an `instanceof` check):
+//   - `Keychain is not installed` — thrown synchronously by
+//     `ensureKeychainInstalled()` before any request reaches the extension.
+//     Certain: the extension is not there at all.
+//   - `Keychain error: ` + whatever the extension's own response said —
+//     thrown for every OTHER way Keychain can fail a request: locked and the
+//     unlock prompt was cancelled, unlocked and the user declined to sign,
+//     the wrong account loaded, or an internal Keychain error. The extension
+//     is confirmed present and reachable; WHICH of those it was is not
+//     something this code can further divide without parsing undocumented
+//     text Keychain itself writes into that message. So this copy names the
+//     single most common, most actionable cause (locked) without claiming
+//     it is the only one — honest for all of them, not a guess dressed as a
+//     diagnosis.
+// Everything else that reaches this catch — a network failure reaching the
+// imagehoster, a bad response body, `signer` still `null` because
+// `SignerProvider`'s async setup has not finished yet (see that file: the
+// signer starts `null` and is built from a dynamic import) — is genuinely
+// worth retrying, so that copy still says so.
+export const IMAGE_UPLOAD_KEYCHAIN_MISSING =
+  'Hive Keychain is not installed, so this image could not be signed. Install the extension and try again.';
+export const IMAGE_UPLOAD_KEYCHAIN_DECLINED =
+  'Hive Keychain could not sign this image. If it is locked, unlock it and try again.';
+export const IMAGE_UPLOAD_ACCOUNT_NOT_READY =
+  'Your account was not ready to sign this image yet. Wait a moment and try again.';
+export const IMAGE_UPLOAD_FAILED_RETRY = 'Could not upload that image. Try again in a moment.';

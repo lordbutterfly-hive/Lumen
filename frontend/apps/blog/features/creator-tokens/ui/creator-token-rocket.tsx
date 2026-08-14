@@ -4,8 +4,8 @@
  *
  * Inlined rather than shipped as a file in `public/`: it is `stroke="currentColor"`,
  * so inlining is what lets it inherit the pill's colour through its hover state
- * (the launch CTA flips from `#c0392b` to white on hover — a linked `<img>` could
- * not follow that), and it costs no extra request.
+ * (the launch CTA flips from `ink-brand-6` to white on hover — a linked `<img>`
+ * could not follow that), and it costs no extra request.
  *
  * ★★★ NEVER RENDER THIS UNDER 20px. The handoff's README is explicit: below 20px
  * the three speed lines fuse into a smudge, and the stroke must not be scaled

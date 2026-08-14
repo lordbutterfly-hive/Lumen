@@ -305,7 +305,10 @@ export default function ShortFormComposer() {
       }}
       className={cn(
         'rounded-[18px] border bg-white p-[20px_22px] font-sans shadow-[0_1px_2px_rgba(20,18,10,0.03)] transition-colors',
-        dragActive ? 'border-dashed border-[#c0392b]/40' : 'border-[#ebebeb]'
+        // ★ `line-brand-10`, not `#c0392b` (2026-08-14 token-migration pass):
+        // brand LINE role (a border), matching `tailwind.config.js`'s own
+        // border → `line-*` mapping.
+        dragActive ? 'border-dashed border-line-brand-10/40' : 'border-[#ebebeb]'
       )}
     >
       <div className="flex gap-3">
@@ -410,8 +413,9 @@ export default function ShortFormComposer() {
       />
 
       {overLimit ? (
+        // ★ `ink-brand-6`, not `#c0392b` (2026-08-14 token-migration pass).
         <p
-          className="mt-2 pl-[56px] font-sans text-[13px] text-[#c0392b]"
+          className="mt-2 pl-[56px] font-sans text-[13px] text-ink-brand-6"
           data-testid="short-form-composer-over-limit"
         >
           {t('short_form_composer.over_limit', {
@@ -421,7 +425,7 @@ export default function ShortFormComposer() {
         </p>
       ) : null}
       {error ? (
-        <p className="mt-2 pl-[56px] font-sans text-[13px] text-[#c0392b]" data-testid="short-form-composer-error">
+        <p className="mt-2 pl-[56px] font-sans text-[13px] text-ink-brand-6" data-testid="short-form-composer-error">
           {error}
         </p>
       ) : null}

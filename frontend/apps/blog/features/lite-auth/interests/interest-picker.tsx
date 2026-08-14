@@ -333,8 +333,9 @@ const InterestPicker: FC<{ openSignal?: number }> = ({ openSignal = 0 }) => {
                            * Selected was `#161511` — the body ink, which is also the
                            * text colour of every UNSELECTED pill, so "chosen" and
                            * "not chosen" were the same colour in different places.
-                           * `#c0392b` is the mark the rest of the product uses for
-                           * "this one", and it is the only red on screen.
+                           * `surface-brand-12`/`line-brand-10` is the mark the rest
+                           * of the product uses for "this one", and it is the only
+                           * red on screen.
                            */
                           className={cn(
                             'rounded-full border px-4 py-2.5 font-sans text-[14px] leading-[22px] transition-colors',

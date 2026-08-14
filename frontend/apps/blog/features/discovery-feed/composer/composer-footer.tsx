@@ -102,7 +102,10 @@ export default function ComposerFooter({
         <span
           className={cn(
             'font-sans text-xs tabular-nums',
-            overLimit ? 'font-semibold text-[#c0392b]' : count >= limit * 0.9 ? 'text-[#c0392b]' : 'text-[#6b7280]'
+            // ★ `ink-brand-6`, not `#c0392b` (2026-08-14 token-migration pass):
+            // brand INK role, matching how the rest of the app names a coloured
+            // character count.
+            overLimit ? 'font-semibold text-ink-brand-6' : count >= limit * 0.9 ? 'text-ink-brand-6' : 'text-[#6b7280]'
           )}
           data-testid="short-form-composer-counter"
         >

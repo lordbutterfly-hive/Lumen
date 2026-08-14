@@ -16,7 +16,15 @@ export default function HbdTokenCard({ username, liquidHbd }: { username: string
 
   return (
     <div className={CARD_CLASS} data-testid="wallet-hbd-card">
-      <div className="flex items-start justify-between gap-4">
+      {/* ★ Same mobile-overflow fix as hive-token-card.tsx (2026-08-14): this
+          row had no `flex-wrap`, so the name/description block and the
+          balance + Send button were forced onto one unbreakable line at
+          390px — wider than the card's ~294px content box whenever the HBD
+          balance runs long. Preventive fix for the identical structure, not
+          just the reported HIVE card: this card was one large balance away
+          from the same overlap/clip. See hive-token-card.tsx for the full
+          measurement writeup. */}
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
         <div className="flex items-center gap-3.5">
           <TokenIcon currency="HBD" />
           <div>
@@ -24,7 +32,7 @@ export default function HbdTokenCard({ username, liquidHbd }: { username: string
             <div className="text-[14px] leading-[22px] text-ink-10">{t('wallet.hbd_card.description')}</div>
           </div>
         </div>
-        <div className="flex items-center gap-3.5">
+        <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2.5">
           <span className="font-sans text-2xl font-bold tabular-nums text-ink-2" data-testid="wallet-hbd-balance">
             {formatTokenAmount(liquidHbd)}
           </span>

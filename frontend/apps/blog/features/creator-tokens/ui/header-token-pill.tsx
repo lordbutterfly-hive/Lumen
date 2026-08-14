@@ -81,7 +81,7 @@ const HeaderTokenPill: FC = () => {
           2026-08-13). 20px is the handoff's own floor — below it the three speed
           lines fuse — and it fits the pill's 40px box (22px line + 9px padding
           each side) without changing the pill's height. `currentColor` is why it
-          follows the hover state from #c0392b to white; the glyph could not. */}
+          follows the hover state from `ink-brand-6` to white; the glyph could not. */}
       <CreatorTokenRocket size={20} className="shrink-0" />
       <span>{COPY.launch}</span>
     </Link>

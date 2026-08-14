@@ -362,7 +362,7 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
                 is real provenance and a useful way to browse, so it links to that
                 community's TAG FEED: the same Lumen feed, filtered. */}
             <span>{LABELS.in}</span>
-            <Link href={`/topics/${post.community}`} className="font-semibold text-[#c0392b] hover:underline">
+            <Link href={`/topics/${post.community}`} className="font-semibold text-ink-brand-6 hover:underline">
               {post.community_title}
             </Link>
           </>
@@ -497,7 +497,10 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
               className="mt-[10px] flex flex-wrap items-center gap-2 font-sans text-[13px] leading-[20px] text-[#6b7280]"
               data-testid="medium-card-nsfw-notice"
             >
-              <span className="rounded-[6px] border border-[#c0392b] px-1.5 py-0.5 text-[12px] font-semibold uppercase tracking-wide text-[#c0392b]">
+              {/* ★ `line-brand-10`/`ink-brand-6`, not `#c0392b` (2026-08-14
+                  token-migration pass): border → `line-*`, text → `ink-*`, per
+                  `tailwind.config.js`'s own role mapping. */}
+              <span className="rounded-[6px] border border-line-brand-10 px-1.5 py-0.5 text-[12px] font-semibold uppercase tracking-wide text-ink-brand-6">
                 {LABELS.nsfwBadge}
               </span>
               {nsfwPreference === 'show' ? null : (
@@ -506,7 +509,7 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
                   <button
                     type="button"
                     onClick={() => setRevealed((value) => !value)}
-                    className="font-medium text-[#c0392b] underline-offset-2 hover:underline"
+                    className="font-medium text-ink-brand-6 underline-offset-2 hover:underline"
                     data-testid="medium-card-nsfw-toggle"
                   >
                     {revealed ? LABELS.nsfwHide : LABELS.nsfwReveal}

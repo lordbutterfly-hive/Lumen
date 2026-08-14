@@ -32,7 +32,13 @@ export default function DelegatedOutPanel({
         onClick={() => setDelegatedOpen((prev) => !prev)}
         // W-3: `rounded-xl` is 12px, a third radius on a page that also had 10px
         // and 11px controls. The system radius for a row is 14px.
-        className="flex w-full items-center justify-between rounded-[14px] border border-line-9 bg-surface-1 px-3.5 py-2.5 transition-colors hover:bg-surface-16"
+        // ★ Preventive `flex-wrap` (2026-08-14): same "label" + unbreakable
+        // tabular-nums figure across one non-wrapping row shape as the token
+        // cards above it on this page. A large delegated-out total (exchange
+        // accounts delegate 7-figure HP) plus the chevron could push past
+        // this button's ~276px width (card padding + the section's own
+        // border-l/pl-4 indent) the same way the reported bugs did.
+        className="flex w-full flex-wrap items-center justify-between gap-x-2 gap-y-1 rounded-[14px] border border-line-9 bg-surface-1 px-3.5 py-2.5 transition-colors hover:bg-surface-16"
         data-testid="wallet-delegated-out-toggle"
       >
         <span className="flex items-center gap-2.5 text-[14px] leading-[22px] font-semibold text-ink-7">

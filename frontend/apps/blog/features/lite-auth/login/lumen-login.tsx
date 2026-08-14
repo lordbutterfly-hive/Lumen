@@ -275,7 +275,11 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
           : 'fixed inset-0 z-50 flex flex-col items-center overflow-y-auto bg-surface-1 px-5 pb-12 font-sans text-ink-2 [scrollbar-gutter:stable_both-edges]'
       }
     >
-      {embedded ? null : <div className="fixed inset-x-0 top-0 h-[3px] bg-[linear-gradient(90deg,#c0392b,#e07b3e)]" />}
+      {/* ★ `line-brand-10`, not `#c0392b` (2026-08-14): a Tailwind arbitrary value
+          accepts `rgb(var(--x))` the same as any other CSS, so this progress-bar
+          rule keeps the same red in light mode and gains the dark-mode lift the
+          literal never had. */}
+      {embedded ? null : <div className="fixed inset-x-0 top-0 h-[3px] bg-[linear-gradient(90deg,rgb(var(--line-brand-10)),#e07b3e)]" />}
 
       {/* Wordmark: Open Sans to match the app shell's committed identity
           (app-header design-handoff-v2: "no serif display face") — the login

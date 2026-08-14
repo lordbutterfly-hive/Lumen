@@ -338,17 +338,27 @@ export default function PostForm({
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
+                  {/* ★ `line-brand-10` / `ink-brand-6`, not `#c0392b`
+                      (2026-08-14): rgb(192,57,43), byte-identical to the
+                      literal in light mode. */}
                   <button
                     type="button"
-                    className="rounded-[14px] border border-[#ebebeb] bg-white px-3 py-1.5 text-xs font-medium text-[#6b7280] transition-colors hover:border-[#c0392b] hover:text-[#c0392b] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c0392b]/40"
+                    className="rounded-[14px] border border-[#ebebeb] bg-white px-3 py-1.5 text-xs font-medium text-[#6b7280] transition-colors hover:border-line-brand-10 hover:text-ink-brand-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-line-brand-10/40"
                     onClick={() => setRestoredFromDraft(false)}
                     data-testid="restored-draft-keep"
                   >
                     {RESTORED_DRAFT_KEEP}
                   </button>
+                  {/* ★ `line-brand-10` / `ink-brand-6` / `surface-brand-12`,
+                      not `#c0392b` (2026-08-14): this is the solid variant of
+                      the same brand token, per role (border/text/fill) —
+                      rgb(192,57,43) in every case, byte-identical to the
+                      literal in light mode. `--destructive` is a visibly
+                      different red (rgb(218,43,43)) reserved for the vote
+                      control only. */}
                   <button
                     type="button"
-                    className="rounded-[14px] border border-[#c0392b] bg-white px-3 py-1.5 text-xs font-medium text-[#c0392b] transition-colors hover:bg-[#c0392b] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c0392b]/40"
+                    className="rounded-[14px] border border-line-brand-10 bg-white px-3 py-1.5 text-xs font-medium text-ink-brand-6 transition-colors hover:bg-surface-brand-12 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-line-brand-10/40"
                     onClick={() => handleCancel()}
                     data-testid="restored-draft-discard"
                   >
@@ -459,7 +469,11 @@ export default function PostForm({
                      class win. `disabled:bg-*` needs its own override because a
                      modifier class is a different key to twMerge than the bare
                      one. */
-                  className="w-28 rounded-[14px] bg-[#c0392b] text-white shadow-none hover:bg-[#a93226] hover:shadow-none disabled:border disabled:border-[#ebebeb] disabled:bg-[#f5f5f5] disabled:text-[#6b7280] disabled:opacity-100"
+                  // ★ `bg-surface-brand-12`, not `#c0392b` (2026-08-14) —
+                  // rgb(192,57,43), byte-identical to the literal in light
+                  // mode. `hover:bg-[#a93226]` is a separate, untokenised
+                  // literal and is out of scope here.
+                  className="w-28 rounded-[14px] bg-surface-brand-12 text-white shadow-none hover:bg-[#a93226] hover:shadow-none disabled:border disabled:border-[#ebebeb] disabled:bg-[#f5f5f5] disabled:text-[#6b7280] disabled:opacity-100"
                   disabled={
                     // ★ GATE ON WHAT IS ON SCREEN, NOT ON THE SAVED DRAFT.
                     //
@@ -507,7 +521,10 @@ export default function PostForm({
                   onClick={() => handleCancel()}
                   type="reset"
                   variant="ghost"
-                  className="rounded-[14px] border border-[#ebebeb] text-[#6b7280] hover:border-[#c0392b] hover:bg-transparent hover:text-[#c0392b]"
+                  // ★ `line-brand-10` / `ink-brand-6`, not `#c0392b`
+                  // (2026-08-14): rgb(192,57,43), byte-identical to the
+                  // literal in light mode.
+                  className="rounded-[14px] border border-[#ebebeb] text-[#6b7280] hover:border-line-brand-10 hover:bg-transparent hover:text-ink-brand-6"
                   data-testid="clean-post-button"
                 >
                   {editMode ? t("submit_page.cancel") : DISCARD_DRAFT}

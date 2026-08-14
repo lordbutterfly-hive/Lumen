@@ -9,7 +9,13 @@ import { Dispatch, SetStateAction } from 'react';
 import { uploadLiteImage } from '@/blog/lib/lite/client/lite-profile';
 import { processImageForUpload } from './image-processing';
 import type { BatchFileItem, FileProcessingStatus, ProcessingOptions } from './image-processing-types';
-import { TAGS_REQUIRED } from './composer-copy';
+import {
+  TAGS_REQUIRED,
+  IMAGE_UPLOAD_KEYCHAIN_MISSING,
+  IMAGE_UPLOAD_KEYCHAIN_DECLINED,
+  IMAGE_UPLOAD_ACCOUNT_NOT_READY,
+  IMAGE_UPLOAD_FAILED_RETRY
+} from './composer-copy';
 
 const logger = getLogger('app');
 
@@ -124,6 +130,34 @@ export function maxAcceptedPayout(customValue: number | string | undefined, maxP
 }
 
 /**
+ * ★ WHICH FAILURE THIS WAS, NOT JUST THAT IT FAILED (2026-08-14). This used to
+ * be `handleError(error)` with no `toastOptions`, so every upload failure —
+ * Keychain locked, Keychain missing, no signer yet, a dead network — fell
+ * through to `transformError`'s generic guesswork and, most of the time,
+ * landed on "try again". That is wrong advice for a locked Keychain: signing
+ * will fail the same way on the next attempt too, until the user acts on
+ * Keychain itself. See the long comment above the constants this returns, in
+ * `./composer-copy.ts`, for exactly what is and is not distinguishable here
+ * and why.
+ */
+function classifyUploadFailure(error: unknown, signer: Signer): string {
+  // `!signer` covers two different real causes — a genuinely keyless lite
+  // account whose `/api/lite/upload` session the server just rejected, or a
+  // full account caught in the brief window before `SignerProvider` finishes
+  // building its signer object (packages/smart-signer/components/
+  // signer-provider.tsx: `signer` starts `null`, set later from an async
+  // dynamic import). Neither is a Keychain question, so this never guesses
+  // "locked" for it.
+  if (!signer) return IMAGE_UPLOAD_ACCOUNT_NOT_READY;
+
+  const message = error instanceof Error ? error.message : '';
+  if (message === 'Keychain is not installed') return IMAGE_UPLOAD_KEYCHAIN_MISSING;
+  if (message.startsWith('Keychain error: ')) return IMAGE_UPLOAD_KEYCHAIN_DECLINED;
+
+  return IMAGE_UPLOAD_FAILED_RETRY;
+}
+
+/**
  * Uploads image to Imagehoster, see
  * https://gitlab.syncad.com/hive/imagehoster. Function returns url to
  * image on server or empty string in case of any error.
@@ -183,7 +217,7 @@ export const uploadImg = async (file: File, username: string, signer: Signer): P
     return resJSON.url;
   } catch (error) {
     logger.error('Error when uploading file %s: %o', file.name, error);
-    handleError(error);
+    handleError(error, undefined, { description: classifyUploadFailure(error, signer) });
   }
   return '';
 };

@@ -131,7 +131,7 @@ export default function FollowListView({
                 type="button"
                 onClick={() => setRawQuery('')}
                 data-testid="follow-list-clear-search"
-                className="font-sans text-[13px] leading-[20px] font-semibold text-[#c0392b] hover:underline"
+                className="font-sans text-[13px] leading-[20px] font-semibold text-ink-brand-6 hover:underline"
               >
                 {t('user_profile.lists.clear_search')}
               </button>

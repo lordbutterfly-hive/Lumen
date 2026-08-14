@@ -10,8 +10,14 @@ export default function HeartIcon({ filled, className }: { filled: boolean; clas
       width="15"
       height="15"
       viewBox="0 0 24 24"
-      fill={filled ? '#c0392b' : 'none'}
-      stroke={filled ? '#c0392b' : '#9ca3af'}
+      // ★ `rgb(var(--ink-brand-6))`, not `#c0392b` (2026-08-14). `fill`/`stroke`
+      // are real CSS properties on an SVG element, so the custom property
+      // resolves the same way `text-ink-brand-6` would on any other element —
+      // this is icon INK (foreground content), the same role `proposal-card.tsx`
+      // and its siblings already draw `ink-brand-6` for elsewhere in this
+      // feature, and it picks up the dark-mode lift the literal never did.
+      fill={filled ? 'rgb(var(--ink-brand-6))' : 'none'}
+      stroke={filled ? 'rgb(var(--ink-brand-6))' : '#9ca3af'}
       strokeWidth="1.9"
       className={className}
       aria-hidden="true"

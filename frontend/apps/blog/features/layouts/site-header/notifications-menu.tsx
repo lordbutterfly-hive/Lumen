@@ -159,7 +159,10 @@ const NotificationsMenu = forwardRef<HTMLButtonElement, {
               data-testid="notifications-mark-all-read"
             >
               {markAllAsRead.isPending ? (
-                <CircleSpinner loading size={14} color="#c0392b" />
+                // ★ NOT A LITERAL: this button is `text-ink-brand-6` while idle
+                // (line above) — `rgb(var(--ink-brand-6))` keeps the spinner that
+                // same red instead of reintroducing the stale `#c0392b` hex.
+                <CircleSpinner loading size={14} color="rgb(var(--ink-brand-6))" />
               ) : (
                 t('navigation.profile_notifications_tab_navbar.mark_all')
               )}
