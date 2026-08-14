@@ -5,12 +5,50 @@
 }
 
 {$PUBLIC_HOSTNAME}:{$AUTH_PORT} {
+	# Same reasoning as the blog block below: the auth app is a second Next
+	# instance (its own `next.config.js` never sets `compress`, so it defaults
+	# to true), which leaves only its route handlers uncompressed. Caddy skips
+	# anything that already carries a Content-Encoding, so this cannot
+	# double-compress what Next already did.
+	encode zstd gzip
 	reverse_proxy denser-auth:{$AUTH_PORT}
 	tls internal
 	# tls /etc/caddy/certs/cert.pem /etc/caddy/certs/key.pem
 }
 
 {$PUBLIC_HOSTNAME}:{$BLOG_PORT} {
+	# ★★★ THIS EXISTS FOR ROUTE-HANDLER JSON, AND NOTHING ELSE (2026-08-14).
+	#
+	# The old note behind this fix ("the origin serves everything uncompressed")
+	# is STALE — `next.config.js` now sets `compress: NEXT_DISABLE_COMPRESSION
+	# !== 'true'`, so Next gzips what it renders and what it serves statically.
+	# Measured against the pushed build: HTML 72,519 -> 23,495, CSS 171,388 ->
+	# 28,959, and the 2.34 MB wasm -> 89,744, all already gzipped upstream.
+	#
+	# What Next's `compress` does NOT cover is App Router ROUTE HANDLERS — it
+	# compresses "rendered content and static files", and `/api/*` is neither.
+	# Measured: `/api/feed/for-you?limit=20` left the origin at 110,061 bytes
+	# with no Content-Encoding at all. That is the single largest request the
+	# product makes, on every feed load.
+	#
+	# Measured THROUGH this directive, against that same build:
+	#   /api/feed/for-you   110,061 -> 44,526 zstd  (43,784 gzip)   2.47x
+	#   /api/market-prices   18,081 ->  6,015 zstd                  3.00x
+	#   /  (already gzipped)  23,495 -> 23,495   <- NOT double-compressed
+	#   wasm (already gzipped) 89,744 -> 89,744  <- untouched
+	#   a 29-byte 400 body        29 ->     29   <- under `minimum_length`
+	#                                               (512): gzipping it would
+	#                                               have INFLATED it to 66
+	#
+	# `zstd gzip` in that order: Caddy negotiates per request, so Chrome/Firefox
+	# take zstd and everything else falls back to gzip (verified: a gzip-only
+	# client got gzip, an `Accept-Encoding: identity` client got a working 200
+	# at full size). Brotli is deliberately absent — it is not in Caddy 2.7.6's
+	# standard build, so naming it here would be a silent no-op.
+	#
+	# Verified with a real caddy:2.7.6 in front of the real build, not read off
+	# the documentation.
+	encode zstd gzip
 	reverse_proxy denser-blog:{$BLOG_PORT} {
 		# ECON-1 (PRUNED 2026-07-22): OVERWRITE any client-supplied X-Forwarded-For
 		# with the real remote host, so the lite-account per-IP rate limits (which
@@ -35,6 +73,15 @@
 		Access-Control-Allow-Headers "DNT,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Content-Range,Range"
 		Access-Control-Max-Age "3600"
 	}
+	# ★ NOT MEASURED HERE, unlike the two blocks above: the inner stack behind
+	# `docker:80` does not run on the box this was verified on, so the size win
+	# is unquantified — it is added because the API vhost serves JSON-RPC, which
+	# is the most compressible payload in the stack, and because the directive
+	# is safe by construction (Caddy skips any response that already carries a
+	# Content-Encoding, and `minimum_length` leaves small bodies alone — both
+	# proven against the blog block). Measure it on a host that runs the inner
+	# stack before quoting a number for it.
+	encode zstd gzip
 	reverse_proxy docker:80 {
 		header_up host {$PUBLIC_HOSTNAME}
 		# remove any CORS headers sent by stack's inner Caddy

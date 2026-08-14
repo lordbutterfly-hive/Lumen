@@ -408,6 +408,24 @@ const PostContent = () => {
 
   const { data: suggestionData } = useQuery({
     enabled: hiveSenseAvailable === true,
+    // ★ DO NOT RETRY: THE FAILURE THIS QUERY ACTUALLY SEES IS PERMANENT (2026-08-14).
+    //
+    // `getSimilarPostsByPost` funnels every failure through
+    // `logStandarizedError`, which ENDS IN `throw` — so a rejection here always
+    // reached React Query's default `retry: 3`. The rejection a short post
+    // produces is a 400 reading "has no stored embedding (too short or not yet
+    // processed)", and no amount of retrying inside one render changes whether
+    // an embedding exists. The cost was three wasted round trips plus three
+    // writes to the per-IP daily rate limiter in `app/api/hivesense/route.ts`
+    // on every short post.
+    //
+    // `false` rather than a smaller number because the status of the error is
+    // lost by the time it gets here (`logStandarizedError` rethrows a bare
+    // `Error`), so a transient blip cannot be told apart from the permanent
+    // case — and "You might also like" is a suggestion strip: the honest
+    // response to a failed fetch is to show nothing and try again on the next
+    // navigation, not to spend the reader's rate-limit budget guessing.
+    retry: false,
     queryKey: ['suggestions', author, permlink, observer],
     queryFn: async () => {
       const results = await getSimilarPostsByPost({

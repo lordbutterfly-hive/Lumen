@@ -1893,6 +1893,33 @@ function fetchFallbackOnce(key: string, load: () => Promise<Entry[]>): Promise<E
  * single-flight is shared: a warmer and a reader racing the same key collapse
  * into one upstream call instead of two.
  */
+/**
+ * ★ A TAG NOBODY HAS EVER USED IS AN ERROR UPSTREAM, NOT AN EMPTY LIST.
+ *
+ * `bridge.get_ranked_posts` answers an unknown tag with
+ * `Assert Exception:Tag <tag> does not exist` (code -32602) rather than `[]`
+ * — verified live against api.hive.blog on 2026-08-14, with a real tag
+ * returning posts as the control. That throw reaches `getRankedPaged`'s FIRST
+ * call, so it rethrows, and the caller cannot tell it apart from Hive being
+ * down.
+ *
+ * Matched on the tag NAME as well as the phrase, deliberately: the sibling
+ * assert on the paging path reads `Post <author>/<permlink> does not exist`
+ * and is a genuinely different condition that must keep its 503. The wax
+ * client's error shape is not contractual, so both the message and a
+ * serialised form are searched.
+ */
+function isUnknownTagError(error: unknown, tag: string): boolean {
+  const needle = `Tag ${tag} does not exist`;
+  if (error instanceof Error && error.message.includes(needle)) return true;
+  try {
+    return JSON.stringify(error ?? '').includes(needle);
+  } catch {
+    // A circular or unserialisable error is not evidence of a missing tag.
+    return false;
+  }
+}
+
 function loadFallbackPage(sort: string, tag: string, observer: string): Promise<Entry[]> {
   const cacheKey = `${sort}|${tag}|${observer}`;
   return fetchFallbackOnce(cacheKey, async () => {
@@ -2081,6 +2108,45 @@ async function fallback(
       nextCursor: cursorOf(sliced)
     }, viewer);
   } catch (error) {
+    // ★★★ A TAG THAT DOES NOT EXIST IS NOT AN OUTAGE (2026-08-14).
+    //
+    // Reproduced in a real browser on `/topics/zzzznonexistenttagxyz`: the page
+    // rendered "We couldn't load this topic just now. Try again in a moment."
+    // — a retry prompt for a condition no retry can ever fix — while
+    // `topic-shell.tsx` already had the honest "Nothing here yet / No posts
+    // carry the tag X" copy sitting unreachable behind it. The chain was
+    // upstream assert -> `getRankedPaged` rethrows on its first call -> this
+    // catch -> 503 -> the client's `if (!res.ok) throw` -> `isError`.
+    //
+    // ONLY this one assert is downgraded, and only when a tag was asked for.
+    // Everything below keeps its 503: that status is what stops an errored
+    // refetch from wiping a reader's rendered feed, and nothing here should
+    // weaken it. `nextCursor: null` so the infinite scroll does not then ask
+    // for page two of a tag that does not exist.
+    if (tag && isUnknownTagError(error, tag)) {
+      logger.info('for-you: tag %s does not exist upstream — serving an honest empty page', tag);
+      return NextResponse.json(
+        {
+          entries: [],
+          source: 'trending-fallback',
+          // ★ `degraded: null`, NOT the ambient `reason` — caught by rendering it:
+          // with `degraded` set, `topic-shell.tsx` takes its DEGRADED branch
+          // ("Something went wrong on our side… It isn't necessarily empty" plus
+          // a Try again button), because `degradedPage` is just
+          // `pages.some(p => !!p.degraded)`. Nothing here was degraded: the
+          // upstream answered definitively that this tag has no posts, and the
+          // ambient reason ("anonymous", i.e. nobody to personalise FOR) says
+          // nothing about a tag that does not exist. Null is what routes the
+          // reader to the honest "Nothing here yet" empty state.
+          degraded: null,
+          detail: `no posts carry the tag ${tag}`,
+          personalised: false,
+          nextCursor: null
+        },
+        { status: 200 }
+      );
+    }
+
     // Loud, because an empty feed and a broken feed look identical to a reader.
     logger.error(error, 'for-you: fallback to trending also failed (limit=%d, tag=%s)', limit, tag || '(none)');
 
