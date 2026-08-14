@@ -1,3 +1,5 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { appendFileSync } from 'node:fs';
 import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
 import { Entry } from '@hive/common-hiveio-packages/wax';
@@ -24,10 +26,12 @@ import { resolveRankedLiteBatch } from '@/blog/lib/lite/repositories/post-reposi
 import { liteConfig } from '@/blog/lib/lite/config';
 import { filterBannedEntries } from '@/blog/lib/moderation/banned-authors';
 import { DEFAULT_OBSERVER } from '@/blog/lib/utils';
+import { startTopicWarmer } from '@/blog/lib/feed/topic-warmer';
 import {
   FEED_FRESH_MS,
   type FeedLane,
   buildOnce,
+  feedStaleMs,
   feedVersion,
   inFailureCooldown,
   isRebuilding,
@@ -39,6 +43,34 @@ import {
 } from '@/blog/lib/feed/feed-cache';
 
 const logger = getLogger('app');
+
+/**
+ * ★ OPT-IN PER-REQUEST TIMING TRACE. Off unless `FEED_TRACE_FILE` is set, and
+ * when it is off `timed()` returns the caller's own promise with no wrapper and
+ * no clock read — this file's own history is full of whole-request numbers that
+ * could not say WHERE the time went, and every previous investigation here had
+ * to re-add throwaway file timers to find out (see the 2026-08-11 note at
+ * `FALLBACK_CACHE_MS`, which says so explicitly). `AsyncLocalStorage` rather
+ * than a module-scope object because this route serves concurrent requests and
+ * a shared accumulator would blend two readers' timings into one line.
+ */
+const TRACE_FILE = process.env.FEED_TRACE_FILE || '';
+const traceStore = new AsyncLocalStorage<Record<string, number>>();
+
+function mark(name: string, ms: number): void {
+  // Checked before touching the store: `mark` is called unconditionally on the
+  // hot path (once per Hive page in `getRankedPaged`), and with tracing off
+  // there is no store to look up.
+  if (!TRACE_FILE) return;
+  const bag = traceStore.getStore();
+  if (bag) bag[name] = (bag[name] ?? 0) + Math.round(ms);
+}
+
+function timed<T>(name: string, fn: () => Promise<T>): Promise<T> {
+  if (!TRACE_FILE) return fn();
+  const started = performance.now();
+  return fn().finally(() => mark(name, performance.now() - started));
+}
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 50;
@@ -90,10 +122,26 @@ const OVER_FETCH_RATIO = 1.5;
  * THE SERVING RULE, which is the owner's sentence turned into code: once a
  * viewer has ANY stored feed they are NEVER made to wait again. Fresh is served
  * as-is; anything else is served INSTANTLY and rebuilt behind the reader. There
- * is no age at which this route goes back to blocking — the old 24h
+ * is no age at which this route goes back to BLOCKING — the old 24h
  * `FEED_STALE_MS` cliff, which sent yesterday's reader back to a 16-second
  * spinner, is deleted. Only a viewer with nothing stored at all waits, and that
  * is the one spinner in the product.
+ *
+ * ★★★ WHAT AN AGE *DOES* DECIDE, SINCE 2026-08-14: not whether the reader waits,
+ * but whether a stored copy may still be PRESENTED AS THIS READER'S RANKING.
+ * Past `feedStaleMs` (2h) it may not, and the reader is served the cached
+ * trending page — instantly, labelled `degraded: 'stale'` — while the rebuild
+ * continues behind them. Read that as a labelling ceiling, not a return of the
+ * cliff: nothing about it reintroduces a spinner, which is the property the
+ * paragraph above is actually protecting.
+ *
+ * The failure that forced it: recsys is not a deployed service on this box
+ * (nothing listening on `RECSYS_FEED_URL`), so a build that succeeded once on
+ * 2026-08-11 01:58 UTC wrote a row that could never be replaced. Every request
+ * for the next three days served that row as `source: 'recsys'` and advertised a
+ * `stale-revalidating` rebuild that could not possibly complete. The route had
+ * no way to distinguish a dead upstream from a slow one, and no state for "this
+ * ranking is real but far too old", so the artifact simply never expired.
  *
  * `cache` on the response says exactly which of those happened, and a copy that
  * came off disk never claims the freshness of one that did not.
@@ -246,12 +294,30 @@ function cachePut(key: string, entry: Entry): void {
  * enforced against readers other than the blocker.
  */
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  const response = await serveForYou(req);
+  if (!TRACE_FILE) return handleGet(req);
+  const bag: Record<string, number> = {};
+  const started = performance.now();
+  return traceStore.run(bag, async () => {
+    const res = await handleGet(req);
+    bag.total = Math.round(performance.now() - started);
+    try {
+      appendFileSync(TRACE_FILE, `${JSON.stringify({ q: req.nextUrl.search, ...bag })}\n`);
+    } catch {
+      // A trace that cannot be written must never break the response it measures.
+    }
+    return res;
+  });
+}
+
+async function handleGet(req: NextRequest): Promise<NextResponse> {
+  const response = await timed('serveForYou', () => serveForYou(req));
 
   let blockedKeys: Set<string>;
   try {
-    const session = await getLiteSession();
-    const actor = await viewerBlockActor(session.user?.userId ?? '', session.user?.username ?? '');
+    const session = await timed('blk_session', () => getLiteSession());
+    const actor = await timed('blk_actor', () =>
+      viewerBlockActor(session.user?.userId ?? '', session.user?.username ?? '')
+    );
     if (actor) {
       // ★ CHAIN MUTES MERGED HERE TOO (owner ruling, 2026-08-12) — a PeakD mute
       // now removes the muted author from this reader's feed exactly like a Lumen
@@ -259,10 +325,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       // known right now" on failure rather than failing the whole feed closed —
       // effect (A) is the viewer's own preference, and the existing catch below
       // already accepts an unfiltered feed over none for the SAME reason.
-      const [lumenKeys, chainMutes] = await Promise.all([
-        listBlockedKeysOf(actor),
-        chainMutedKeysOfActor(actor)
-      ]);
+      const [lumenKeys, chainMutes] = await timed('blk_lists', () =>
+        Promise.all([listBlockedKeysOf(actor), chainMutedKeysOfActor(actor)])
+      );
       blockedKeys = new Set([...lumenKeys, ...chainMutes.keys]);
     } else {
       blockedKeys = new Set();
@@ -449,7 +514,16 @@ function feedJson(
   viewer: string,
   init?: { status?: number }
 ): NextResponse {
-  return NextResponse.json({ ...body, entries: trimFeedEntries(body.entries, viewer) }, init);
+  if (!TRACE_FILE) {
+    return NextResponse.json({ ...body, entries: trimFeedEntries(body.entries, viewer) }, init);
+  }
+  const t0 = performance.now();
+  const trimmed = trimFeedEntries(body.entries, viewer);
+  const t1 = performance.now();
+  const res = NextResponse.json({ ...body, entries: trimmed }, init);
+  mark('trim', t1 - t0);
+  mark('serialise', performance.now() - t1);
+  return res;
 }
 
 async function serveForYou(req: NextRequest): Promise<NextResponse> {
@@ -488,7 +562,7 @@ async function serveForYou(req: NextRequest): Promise<NextResponse> {
   let isLite = false;
   let userId = '';
   try {
-    const session = await getLiteSession();
+    const session = await timed('session', () => getLiteSession());
     viewer = session.user?.username ?? '';
     isLite = session.user?.account_tier === 'lite';
     userId = session.user?.userId ?? '';
@@ -523,6 +597,27 @@ async function serveForYou(req: NextRequest): Promise<NextResponse> {
       return feedJson({
         entries: merged,
         source: 'chain-page',
+        // ★★★ SAY WHAT THIS PAGE ACTUALLY IS (2026-08-14). Page 1 is ranked and
+        // reports `ranked`/`served`/`cache`/`builtAt`; page 2 onward is raw
+        // chronological chain paging and reported NONE of those — so the switch
+        // of mechanism mid-scroll was invisible to every consumer. A reader
+        // scrolls from a personalised list into an unpersonalised one with
+        // nothing in the payload marking the boundary.
+        //
+        // Ranking the whole scroll is not something this route can do: recsys
+        // returns ONE scored order with no cursor (see the note on `startAuthor`
+        // above), so there is no page 2 to ask it for. That is a real product
+        // limitation and the honest response is to LABEL it rather than let
+        // `source` be the only, easily-missed clue.
+        //
+        // `personalised` is deliberately the same field page 1 sets, so a
+        // consumer can read one boolean across every branch instead of learning
+        // the meaning of five `source` strings. `degraded` is deliberately NOT
+        // set: this page is working exactly as designed, and reusing the
+        // degradation channel would raise the "ranking is warming up" banner on
+        // every scroll.
+        personalised: false,
+        detail: 'continuation pages are chronological chain paging, not ranked',
         // Through `cursorOf` like every other branch, so the chain-coordinate
         // rule lives in exactly one place and a sixth return cannot forget it.
         nextCursor: cursorOf(merged)
@@ -614,9 +709,19 @@ async function serveForYou(req: NextRequest): Promise<NextResponse> {
     if (failedAt !== undefined && Date.now() - failedAt < TOPIC_FAIL_MS) {
       return fallback(chainObserver, limit, 'unavailable', 'recsys did not return a usable feed', topic, viewer);
     }
+    // ★ AND THE SAME ANSWER FOR A TAG THIS PROCESS HAS NEVER SEEN — see
+    // `RANKER_DOWN_MEMO_MS`. This is the branch the owner's report is actually
+    // about: `topicFailedAt` above can only help a REPEAT visit, so a first
+    // visit to any new tag paid a full ranker attempt (and, before the
+    // fast-fail fix, 1.5s of backoff) to be told what the previous tag had
+    // already established. Skipping it also skips `collectViewerState`'s
+    // database round trip, which exists only to feed the ranker.
+    if (!topicForceRefresh && rankerIsKnownDown()) {
+      return fallback(chainObserver, limit, 'unavailable', 'the ranker is not answering right now', topic, viewer);
+    }
 
     const built = await buildTopicOnce(topicKey, async () => {
-      const state = await collectViewerState(viewer, isLite, userId);
+      const state = await timed('viewerState', () => collectViewerState(viewer, isLite, userId));
       return assembleFeed({ viewer, limit, chainObserver, topic, ...state });
     });
     if (!built) {
@@ -682,8 +787,17 @@ async function serveForYou(req: NextRequest): Promise<NextResponse> {
   const stored = forceRefresh ? undefined : await readViewerFeed(viewer);
 
   if (stored) {
-    // ★ ANYTHING STORED IS SERVED IMMEDIATELY. Not "if recent enough" — the
-    // reader has waited for this feed once already and does not get asked twice.
+    // ★ THE READER NEVER WAITS. They waited for this feed once and do not get
+    // asked twice — every path out of this branch answers immediately.
+    //
+    // ★★ AMENDED 2026-08-14, because the sentence that stood here ("ANYTHING
+    // STORED IS SERVED IMMEDIATELY. Not 'if recent enough'") became false and is
+    // worth correcting precisely rather than deleting. Two different promises
+    // were being made in one line: "no spinner" and "the stored copy is always
+    // the answer". Only the first is the owner's rule, and only the first
+    // survives. Past `feedStaleMs` the stored copy is NOT the answer — but the
+    // reader still waits for nothing, because what replaces it is the cached
+    // trending page, not a rebuild they have to sit through.
     const age = Date.now() - stored.at;
     // Three separate ways a stored copy can be behind, and all three are
     // repaired the same way: serve it now, fix it behind them.
@@ -696,8 +810,88 @@ async function serveForYou(req: NextRequest): Promise<NextResponse> {
     const fresh =
       age < FEED_FRESH_MS && stored.version === feedVersion() && stored.builtLimit >= limit;
 
+    // ★★★ AND THE THIRD STATE THIS BRANCH DID NOT HAVE: TOO OLD TO BE A RANKING
+    // AT ALL (2026-08-14). See `feedStaleMs`. `age` was computed here already and
+    // spent entirely on a cache LABEL — the route knew the artifact was three
+    // days old and served it as `source:'recsys'` anyway.
+    const staleCeiling = feedStaleMs();
+    const expired = age >= staleCeiling;
+
     if (!fresh && !isRebuilding(viewer) && !inFailureCooldown(viewer)) {
-      void startBuild().catch((e) => logger.warn('for-you: background refresh failed: %o', e));
+      // ★ LOGGED ON BOTH EDGES (requirement: make the revalidation failure
+      // VISIBLE). A background refresh that starts and never lands left no trace
+      // whatsoever — which is why a dead ranker went unnoticed for three days
+      // while every response advertised `stale-revalidating`. The age it was
+      // trying to repair is the diagnostic that matters, so it rides along.
+      const startedAt = Date.now();
+      logger.info(
+        'for-you: background refresh started for %s (stored feed is %dms old, ceiling %dms, expired=%s)',
+        viewer,
+        age,
+        staleCeiling,
+        expired
+      );
+      void startBuild()
+        .then((built) => {
+          if (built) {
+            logger.info(
+              'for-you: background refresh for %s SUCCEEDED in %dms (ranked=%d) — replaced a feed that was %dms old',
+              viewer,
+              Date.now() - startedAt,
+              built.ranked,
+              age
+            );
+          } else {
+            // The case that was silent for three days: the build completed and
+            // produced nothing, so the stored artifact stays exactly as stale as
+            // it was and the next request advertises another revalidation.
+            logger.warn(
+              'for-you: background refresh for %s PRODUCED NOTHING after %dms — the ranker did not return a usable feed; the stored copy stays %dms old and will now be served as %s',
+              viewer,
+              Date.now() - startedAt,
+              age,
+              expired ? 'DEGRADED (past the staleness ceiling)' : 'stale-revalidating'
+            );
+          }
+        })
+        .catch((e) =>
+          logger.warn(
+            'for-you: background refresh for %s THREW after %dms: %o',
+            viewer,
+            Date.now() - startedAt,
+            e
+          )
+        );
+    }
+
+    // ★★★ PAST THE CEILING THE ARTIFACT IS NOT SERVED. The reader gets fresh
+    // trending — cached, instant, and labelled — instead of a frozen ranking
+    // wearing a ranking's name. Note what this deliberately does NOT do: it does
+    // not make the reader wait for the rebuild. That was the old 24h cliff the
+    // owner rejected, and `feedStaleMs`'s note explains the difference at length.
+    // The rebuild was started immediately above and continues behind them; the
+    // moment it lands, the next request is ranked and instant again.
+    //
+    // MEASURED before this existed, signed in as the owner: a 71.4-hour-old set
+    // whose newest post was 73.9h and whose median was 98.0h, served as
+    // `source:'recsys'` with no banner, while the SAME box logged out served a
+    // 1.6h/15.0h trending page. A signed-in reader was strictly worse off than a
+    // stranger, which is the inversion this closes.
+    if (expired) {
+      logger.warn(
+        'for-you: stored feed for %s is %dms old (ceiling %dms) — refusing to serve it as a ranking, falling back to trending while the rebuild runs',
+        viewer,
+        age,
+        staleCeiling
+      );
+      return fallback(
+        chainObserver,
+        limit,
+        'stale',
+        `the stored ranking is ${Math.round(age / 60_000)} minutes old and is being rebuilt`,
+        topic,
+        viewer
+      );
     }
 
     // ★ THE STORED FEED IS THE ONE PLACE A BAN CAN BE OUTRUN.
@@ -736,6 +930,18 @@ async function serveForYou(req: NextRequest): Promise<NextResponse> {
       // served from disk after a restart must not read as a warm-cache hit.
       cache: `${stored.origin === 'store' ? 'stored-' : ''}${fresh ? 'fresh' : 'stale-revalidating'}`,
       builtAt: new Date(stored.at).toISOString(),
+      // ★ FRESHNESS AS A FIELD, NOT AS AN INFERENCE (2026-08-14). `builtAt` was
+      // already here and every consumer ignored it, because using it meant
+      // parsing a timestamp and inventing a threshold — so each consumer would
+      // have picked its own, or (as happened) none at all. The server owns the
+      // threshold and states the verdict. `personalised` is the question the
+      // banner actually wants answered and `source` was standing in for it
+      // badly: `source` says WHICH MECHANISM produced the list, which is not the
+      // same claim as "this is current, ranked, and yours".
+      stale: !fresh,
+      ageMs: age,
+      staleAfterMs: staleCeiling,
+      personalised: true,
       nextCursor: cursorOf(entries)
     }, viewer);
   }
@@ -938,6 +1144,71 @@ async function collectViewerState(
 const RECSYS_ATTEMPTS = 3;
 const RECSYS_RETRY_DELAY_MS = 750;
 
+/**
+ * ★★★ THE BACKOFF WAS 62% OF A TOPIC PAGE, AND IT WAS SLEEPING ON A SOCKET THAT
+ * HAD ALREADY BEEN REFUSED — MEASURED 2026-08-14, PER STAGE, NOT GUESSED.
+ *
+ * Opening a tag nobody had opened before cost 2,290-3,285ms signed in. Traced
+ * through this route stage by stage (`FEED_TRACE_FILE`, see `timed`), on five
+ * tags:
+ *
+ *   recsys_sleep   1,501-1,518ms   <- THIS. Two `setTimeout`s. No work at all.
+ *   fb_upstream      770-1,594ms   <- three bridge.get_ranked_posts round trips
+ *   recsys_call         4-  11ms   <- all THREE attempts, together
+ *   everything else     8-  150ms  <- session, viewer state, engagement merge,
+ *                                     block filter, trim, serialise, COMBINED
+ *
+ * Read those first two lines together: the route slept for a second and a half
+ * BETWEEN three attempts that each failed in about two milliseconds. recsys was
+ * not slow, it was ABSENT — `ECONNREFUSED` on `RECSYS_FEED_URL` — and the retry
+ * loop treated "there is nothing listening" exactly like "it is warming up".
+ *
+ * The docstring above is right about WHY the retry exists, and that reason is
+ * specifically a TIMEOUT: attempt 1 aborts at `RECSYS_FEED_TIMEOUT_MS` having
+ * provoked recsys into building the viewer's profile, so attempt 2 rides the
+ * profile cache. That story requires the failed attempt to have COST something.
+ * A refusal that comes back in 2ms provoked nothing, warmed nothing, and will
+ * come back in 2ms again 750ms later — three times the connection attempts and
+ * 1.5s of the reader's life for an outcome that is already known.
+ *
+ * So the gate is the attempt's OWN DURATION, which is the honest discriminator
+ * between the two cases and needs no new failure taxonomy: slow failure => the
+ * documented retry, unchanged, timeout behaviour byte-for-byte as before; fast
+ * failure => there is nothing there, answer the reader now. Anything that fails
+ * this fast (connection refused, DNS, an instant 502 from a proxy) is a
+ * transport verdict, not a warm-up.
+ */
+const RECSYS_FAST_FAIL_MS = 1_000;
+
+/**
+ * ★★★ "IS THE RANKER ANSWERING" IS A PROPERTY OF THE RANKER, NOT OF THE TAG.
+ *
+ * `TOPIC_FAIL_MS` a few hundred lines up already makes exactly this argument —
+ * "that is a property of the RANKER's coverage... not per Hive block" — and then
+ * keys the memo on `viewer|topic`, so it can only ever help the SECOND visit to
+ * the SAME tag. The owner's complaint is about the FIRST visit to a tag, which
+ * by definition has no per-tag memo, so every new tag re-attempted a ranker that
+ * had just refused every other tag on the site.
+ *
+ * This is the same memo at the granularity the argument actually supports.
+ * Deliberately much shorter than `TOPIC_FAIL_MS` (60s vs 300s) because it is a
+ * much broader claim — it suppresses the ranker for tags it was never asked
+ * about — and because the cost of being wrong is one minute of topic pages
+ * serving the chronological fallback they were already serving anyway. It is
+ * set ONLY from a genuine ranker-level verdict (`unavailable`/`refused`), never
+ * from "this particular tag hydrated nothing", which is a tag fact and belongs
+ * in `topicFailedAt`.
+ *
+ * Success clears it immediately, so a ranker coming back is picked up by the
+ * next request rather than after a timer.
+ */
+const RANKER_DOWN_MEMO_MS = 60_000;
+let rankerDownUntil = 0;
+
+function rankerIsKnownDown(): boolean {
+  return Date.now() < rankerDownUntil;
+}
+
 async function fetchRankedWithRetry(opts: {
   viewer: string;
   limit: number;
@@ -951,20 +1222,44 @@ async function fetchRankedWithRetry(opts: {
     detail: 'no attempt was made'
   };
   for (let attempt = 1; attempt <= RECSYS_ATTEMPTS; attempt++) {
-    outcome = await fetchRankedFeed(opts);
+    const startedAt = Date.now();
+    outcome = await timed('recsys_call', () => fetchRankedFeed(opts));
     if (outcome.ok) {
+      // The ranker is answering. Anything this process learned to the contrary
+      // is now stale, and a reader must not keep being sent to the fallback by
+      // a memo that a live 200 has just disproved.
+      rankerDownUntil = 0;
       if (attempt > 1) {
         logger.info('for-you: recsys answered for %s on attempt %d', opts.viewer, attempt);
       }
       return outcome;
     }
+    // A refusal (FAIL_CLOSED 503) and an unreachable ranker are different
+    // causes with the SAME consequence for a topic page: no ranked answer
+    // exists right now, for this viewer or any other. `unconfigured` is not a
+    // failure and is deliberately not recorded.
+    if (outcome.reason !== 'unconfigured') rankerDownUntil = Date.now() + RANKER_DOWN_MEMO_MS;
     if (outcome.reason !== 'unavailable') return outcome;
+
+    const elapsed = Date.now() - startedAt;
     logger.warn(
-      'for-you: recsys attempt %d/%d for %s failed (%s: %s)',
-      attempt, RECSYS_ATTEMPTS, opts.viewer, outcome.reason, outcome.detail
+      'for-you: recsys attempt %d/%d for %s failed in %dms (%s: %s)',
+      attempt, RECSYS_ATTEMPTS, opts.viewer, elapsed, outcome.reason, outcome.detail
     );
+    // See `RECSYS_FAST_FAIL_MS`. A failure this quick provoked no warm-up, so
+    // there is nothing for a retry to ride and nothing for a backoff to wait on.
+    if (elapsed < RECSYS_FAST_FAIL_MS) {
+      logger.warn(
+        'for-you: recsys failed in %dms — not a warm-up, not retrying (see RECSYS_FAST_FAIL_MS)',
+        elapsed
+      );
+      return outcome;
+    }
     if (attempt < RECSYS_ATTEMPTS) {
-      await new Promise((resolve) => setTimeout(resolve, RECSYS_RETRY_DELAY_MS));
+      await timed(
+        'recsys_sleep',
+        () => new Promise((resolve) => setTimeout(resolve, RECSYS_RETRY_DELAY_MS))
+      );
     }
   }
   return outcome;
@@ -1012,7 +1307,9 @@ async function assembleFeed(args: AssembleArgs): Promise<BuiltFeed | null> {
   if (topic) tags = [topic];
 
   const overFetch = Math.min(Math.ceil(limit * OVER_FETCH_RATIO), MAX_LIMIT * 2);
-  const outcome = await fetchRankedWithRetry({ viewer, limit: overFetch, follows, mutes, tags });
+  const outcome = await timed('recsys', () =>
+    fetchRankedWithRetry({ viewer, limit: overFetch, follows, mutes, tags })
+  );
   if (!outcome.ok) return null;
 
   // ★ HYDRATE ONLY WHAT WE WILL SERVE, then top up if some dropped.
@@ -1377,13 +1674,16 @@ async function getRankedPaged(
      */
     let page: Entry[] | null;
     try {
-      page = await getPostsRanked(
-        sort,
-        tag,
-        startAuthor,
-        startPermlink,
-        observer,
-        Math.min(want - out.length + (startAuthor ? 1 : 0), HIVE_RANKED_MAX)
+      mark('hive_calls', 1);
+      page = await timed('hive_ms', () =>
+        getPostsRanked(
+          sort,
+          tag,
+          startAuthor,
+          startPermlink,
+          observer,
+          Math.min(want - out.length + (startAuthor ? 1 : 0), HIVE_RANKED_MAX)
+        )
       );
     } catch (error) {
       if (out.length === 0) throw error;
@@ -1581,6 +1881,51 @@ function fetchFallbackOnce(key: string, load: () => Promise<Entry[]>): Promise<E
   return started;
 }
 
+/**
+ * Build and store ONE fallback page. The single place that decides what a
+ * `(sort, tag, observer)` entry contains.
+ *
+ * ★ THE WARMER GOES THROUGH HERE TOO, and that is the point rather than a
+ * convenience. A warmer that assembled its own entry would be one edit away
+ * from writing a subtly different shape — a different fetch size, a missing
+ * engagement merge — and a warmed entry that a reader's branch does not accept
+ * warms nothing while looking like it works. One function, one shape, and the
+ * single-flight is shared: a warmer and a reader racing the same key collapse
+ * into one upstream call instead of two.
+ */
+function loadFallbackPage(sort: string, tag: string, observer: string): Promise<Entry[]> {
+  const cacheKey = `${sort}|${tag}|${observer}`;
+  return fetchFallbackOnce(cacheKey, async () => {
+    const posts = await timed('fb_upstream', () => getRankedPaged(sort, tag, observer, MAX_LIMIT));
+    const merged = await timed('fb_merge', () => mergeLumenEngagement(posts));
+    if (merged.length > 0) rememberFallback(cacheKey, merged);
+    return merged;
+  });
+}
+
+/**
+ * ★ WHAT THE WARMER WARMS: a topic page's chronological fallback, under the
+ * DEFAULT observer, which is the copy every reader can be served (see the
+ * shared-copy note in `fallback`). `created` rather than `trending` because that
+ * is what `fallback()` uses for a tag — warming the other sort would fill a key
+ * nobody reads.
+ */
+async function warmTopicFallback(tag: string): Promise<void> {
+  await loadFallbackPage('created', tag, DEFAULT_OBSERVER);
+}
+
+/**
+ * ★ STARTED FROM MODULE SCOPE, DELIBERATELY, rather than from
+ * `instrumentation.ts`. This is the only module that reads `fallbackCache`, so
+ * the moment this module is loaded is the earliest moment warming can help
+ * anybody — and it is loaded by the first request to this route, which on the
+ * home page is the first page load of the process. Starting it from the boot
+ * hook instead would mean importing a route module from instrumentation to
+ * reach a cache that is private to it, for a head start measured in one page
+ * load. `startTopicWarmer` is idempotent and no-ops outside the Node runtime.
+ */
+startTopicWarmer(warmTopicFallback);
+
 async function fallback(
   chainObserver: string,
   limit: number,
@@ -1632,13 +1977,7 @@ async function fallback(
   // identical call worked everywhere else in the app (every other caller
   // happens to ask for <= 20). Proven directly against api.hive.blog:
   // limit=20 -> 20 posts, limit=30 -> assert_exception.
-  const load = (): Promise<Entry[]> =>
-    fetchFallbackOnce(cacheKey, async () => {
-      const posts = await getRankedPaged(sort, tag, chainObserver, MAX_LIMIT);
-      const merged = await mergeLumenEngagement(posts);
-      if (merged.length > 0) rememberFallback(cacheKey, merged);
-      return merged;
-    });
+  const load = (): Promise<Entry[]> => loadFallbackPage(sort, tag, chainObserver);
 
   const cached = fallbackCache.get(cacheKey);
   if (cached) {
@@ -1660,8 +1999,69 @@ async function fallback(
       detail,
       cache: fresh ? 'fallback-cached' : 'fallback-stale-revalidating',
       builtAt: new Date(cached.at).toISOString(),
+      personalised: false,
       nextCursor: cursorOf(sliced)
     }, viewer);
+  }
+
+  // ---- THE SHARED TOPIC COPY: what makes warming reachable by a signed-in
+  // reader at all (2026-08-14).
+  //
+  // ★★★ THE KEY IS OBSERVER-SCOPED, AND FOR A TOPIC PAGE THAT SCOPING BUYS
+  // NOTHING — MEASURED, against api.hive.blog, before this was written.
+  // `bridge.get_ranked_posts { sort: 'created', tag }` was run twice per tag,
+  // once with `observer: ''` and once with `observer: 'lordbutterfly'` (an
+  // account with 22 on-chain mutes), and the two answers were compared field by
+  // field:
+  //
+  //   #photography  identical membership and order; ONE `active_votes` count
+  //                 differed by one (a vote that landed between the two calls)
+  //   #travel       byte-identical — zero differing fields
+  //
+  // So `chainObserver` in this key was not protecting a reader from anything; it
+  // was giving every signed-in reader a PRIVATE copy of a list that is the same
+  // for all of them. That is why warming could not work: a warmer necessarily
+  // runs with no session, writes `created|photography|hive.blog`, and the owner
+  // — signed in — reads `created|photography|lordbutterfly` and finds it empty.
+  //
+  // ★ WHY THIS IS SAFE, rather than "the diff looked small". The reason a
+  // per-observer fetch could matter at all is that Hivemind drops authors the
+  // OBSERVER has muted on chain. This route does not depend on that: `GET`
+  // filters every response it returns through the viewer's Lumen blocks AND
+  // their chain mutes (`chainMutedKeysOfActor`), by design — "Filtering the
+  // assembled response instead makes forgetting impossible". The shared copy
+  // therefore reaches the reader having been filtered by the same list
+  // Hivemind would have used, just by us instead of by the node.
+  //
+  // ★ AND IT IS A FIRST-VIEW APPROXIMATION, NOT A REPLACEMENT. What is genuinely
+  // observer-derived and not re-derived here is the per-observer annotation set
+  // (`blacklists`, `stats.gray`). So the shared copy is served for THIS request
+  // only, the reader's own properly-observed copy is fetched behind them, and
+  // every later request answers from it. Same stale-while-revalidate posture as
+  // the branch above; `cache: 'fallback-shared'` says which one happened rather
+  // than letting a shared copy claim to be the reader's own.
+  if (tag && chainObserver !== DEFAULT_OBSERVER) {
+    const sharedKey = `${sort}|${tag}|${DEFAULT_OBSERVER}`;
+    const shared = fallbackCache.get(sharedKey);
+    if (shared) {
+      touchFallback(sharedKey);
+      if (!fallbackInflight.has(cacheKey)) {
+        void load().catch((error) =>
+          logger.warn('for-you: own-observer topic refresh failed for %s: %o', cacheKey, error)
+        );
+      }
+      const sliced = shared.entries.slice(0, limit);
+      return feedJson({
+        entries: sliced,
+        source: 'trending-fallback',
+        degraded: reason,
+        detail,
+        cache: 'fallback-shared',
+        builtAt: new Date(shared.at).toISOString(),
+        personalised: false,
+        nextCursor: cursorOf(sliced)
+      }, viewer);
+    }
   }
 
   // ---- NOTHING CACHED FOR THIS KEY YET: the one case a request actually waits
@@ -1677,6 +2077,7 @@ async function fallback(
       detail,
       cache: 'fallback',
       builtAt: new Date().toISOString(),
+      personalised: false,
       nextCursor: cursorOf(sliced)
     }, viewer);
   } catch (error) {
@@ -1696,7 +2097,7 @@ async function fallback(
     // behaviour we want when the upstream blinks. The body keeps its shape so
     // any consumer that reads `degraded`/`detail` still can.
     return NextResponse.json(
-      { entries: [], source: 'trending-fallback', degraded: reason, detail },
+      { entries: [], source: 'trending-fallback', degraded: reason, detail, personalised: false },
       { status: 503 }
     );
   }

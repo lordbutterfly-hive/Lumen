@@ -32,6 +32,7 @@ import type { RankMark } from '@/blog/features/retention/hooks/use-rank-marks';
 import TokenAuthorChip from '@/blog/features/creator-tokens/ui/token-author-chip';
 import { Entry } from '@hive/common-hiveio-packages/wax';
 import { isNsfwPost, useNsfwPreference } from '@/blog/lib/nsfw';
+import { isNotePost } from '@/blog/lib/short-post-note';
 import { useModerationStatus } from '@/blog/features/mute-follow/hooks/use-moderation-status';
 import { classifyBlacklist } from '@/blog/lib/moderation/blacklist-reason';
 import { isOwnModerationHide } from '@/blog/lib/muted-reasons';
@@ -140,6 +141,23 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
 
   const href = `/${post.category}/@${displayAuthor}/${post.permlink}`;
   const dek = getPostSummary(post.json_metadata, post.body);
+  /**
+   * ★ A NOTE IS NOT AN ARTICLE (2026-08-14, composer audit finding 7 / §9.6).
+   *
+   * A short post has no title of its own — the composer derives one by
+   * truncating its first line — so this card printed the SAME SENTENCE twice:
+   * once as a 26px semibold headline and again as the excerpt directly under it.
+   * Measured on chain: `hbd-temp/testing-the-lumen-short-form-composer` has
+   * `title === body`.
+   *
+   * When the writer marked it (`json_metadata.type === 'note'`) the headline is
+   * dropped and the note's own text becomes the card's text, one step larger
+   * than a dek so it still reads as the primary content. Everything else — the
+   * byline, the thumbnail, the whole action bar — is untouched. Posts without
+   * the marker (every post written before today, and every post from any other
+   * Hive front end) take the article branch exactly as before.
+   */
+  const isNote = isNotePost(post.json_metadata);
   const reblogCount = post.reblogs ?? 0;
   const payoutDeclined = parseFloat(post.max_accepted_payout) === 0;
   const isReshare = post.title.includes('RE: ');
@@ -446,13 +464,19 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
           placeholder) the text column simply takes the full row on its own. */}
       <div className="mt-[13px] flex flex-wrap items-start gap-[26px]">
         <div className="min-w-0 flex-1 basis-[240px]">
-          <Link href={href} className="block" data-testid="medium-card-title">
-            <h2 className="line-clamp-2 font-sans text-[26px] font-semibold leading-[32px] tracking-[-0.015em] text-[#161511]">
-              {displayTitle}
-            </h2>
-          </Link>
+          {isNote ? null : (
+            <Link href={href} className="block" data-testid="medium-card-title">
+              <h2 className="line-clamp-2 font-sans text-[26px] font-semibold leading-[32px] tracking-[-0.015em] text-[#161511]">
+                {displayTitle}
+              </h2>
+            </Link>
+          )}
 
-          {dek ? (
+          {isNote && dek ? (
+            <Link href={href} className="block" data-testid="medium-card-note">
+              <p className="line-clamp-4 font-serif text-[19px] leading-[30px] text-[#2a2822]">{dek}</p>
+            </Link>
+          ) : dek ? (
             // ★ REDUNDANT TAB STOP REMOVED (2026-08-13, O5 a11y build map item
             // 8). This link, the title link above and the thumbnail link below
             // all go to the exact same `href` — three tab stops for one
@@ -659,7 +683,10 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
           <span
             className={cn(
               // Plain green figure, no chip — same reasoning as the vote group above.
-              'ml-auto flex items-center rounded-[10px] px-[6px] py-[6px] text-sm font-bold text-[#2f7d4f] transition-colors hover:cursor-pointer',
+              // ★ text-base, not text-sm (2026-08-14, owner-reported): the payout was 14px
+              // against a 14.5px vote tally, so the money was the SMALLEST number on
+              // the row. It is now 16px, one step above the 14px tally.
+              'ml-auto flex items-center rounded-[10px] px-[6px] py-[6px] text-base font-bold text-[#2f7d4f] transition-colors hover:cursor-pointer',
               payoutDeclined && 'bg-transparent text-muted-foreground line-through'
             )}
             data-testid="medium-card-payout"

@@ -146,6 +146,16 @@ export interface JsonMetadata {
   original_author?: string;
   original_permlink?: string;
   summary?: string;
+  /**
+   * What KIND of post this is, when the writer said so. Lumen's short-form
+   * composer stamps `'note'`; the permalink page and the feed card read it to
+   * render a compact layout with no article headline (a note's title is only a
+   * truncated copy of its own first line, so printing both says everything
+   * twice). Absent on every post written before 2026-08-14 and on every post
+   * from another Hive front end — absence means "ordinary article", never
+   * "unknown", so no reader needs a third branch.
+   */
+  type?: string;
 }
 
 export interface Community {

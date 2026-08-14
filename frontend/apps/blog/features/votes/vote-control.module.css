@@ -35,7 +35,12 @@
 .root {
   /* Handoff palette, light. */
   --lm-vote-muted: #8a827a;
-  --lm-vote-brand: #c0392b;
+  /* ★ THE APP'S OWN RED, NOT A LITERAL (2026-08-14). This was `#c0392b` from the
+     handoff, which is NOT `--destructive` (hsl(0,70%,51%)) — two nearly-identical
+     reds sitting on the same card is exactly the drift this codebase spent a day
+     removing. Using the token also means dark mode gets the lifted value
+     (hsl(0,90%,65%)) for free instead of staying at the light-mode red. */
+  --lm-vote-brand: hsl(var(--destructive));
   --lm-vote-slate: #5b6470;
   --lm-vote-ink: #161511;
 
@@ -188,10 +193,14 @@
 .tally {
   display: inline-block;
   min-width: 2ch;
-  /* Lora is already loaded by the root layout via next/font under this CSS
-     variable (app/layout.tsx). No new font request, no new bytes. */
-  font-family: var(--font-serif), Georgia, serif;
-  font-weight: 600;
+  /* ★ SANS, NOT SERIF (2026-08-14, owner-reported). The handoff specified Lora
+     for tallies, but on a feed card the tally sits inches from the payout
+     figure, the byline and the comment count — all Open Sans — and the serif
+     numeral read as a different product bolted on. Measured before the change:
+     tally Lora 14.5px/600 beside payout Open Sans 14px/700, on the same row.
+     The card's own face wins; the control is a guest on it. */
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  font-weight: 700;
   font-size: 18px;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
@@ -200,7 +209,10 @@
 }
 
 .sm .tally {
-  font-size: 14.5px;
+  /* 14px, not 14.5: whole pixels only (the 2026-08-13 type pass removed every
+     fractional size in the app), and one step BELOW the payout so the money is
+     the largest figure on the row. */
+  font-size: 14px;
 }
 
 .tallyUp {

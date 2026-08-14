@@ -50,7 +50,13 @@
     ".next-i18n/types/**/*.ts",
     ".next-scroll/types/**/*.ts",
     ".next-dark/types/**/*.ts",
-    ".next-combined/types/**/*.ts"
+    ".next-combined/types/**/*.ts",
+    ".next-tag/types/**/*.ts",
+    ".next-composer/types/**/*.ts",
+    ".next-fix2/types/**/*.ts",
+    ".next-fix3/types/**/*.ts",
+    ".next-recsys/types/**/*.ts",
+    ".next-all2/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",

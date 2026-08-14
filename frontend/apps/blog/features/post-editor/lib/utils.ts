@@ -133,7 +133,7 @@ export function maxAcceptedPayout(customValue: number | string | undefined, maxP
  * @param {Signer} signer
  * @returns {Promise<string>}
  */
-const uploadImg = async (file: File, username: string, signer: Signer): Promise<string> => {
+export const uploadImg = async (file: File, username: string, signer: Signer): Promise<string> => {
   try {
     if (!file)
       throw new Error("No file provided");

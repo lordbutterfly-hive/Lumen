@@ -8,23 +8,37 @@ import { Separator } from '@ui/components/separator';
 import { cn } from '@ui/lib/utils';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import BasePathLink from '../../components/base-path-link';
+import { useTranslation } from '@/blog/i18n/client';
 import DialogLogin from '@/blog/components/dialog-login';
 import { LeagueShowcase } from '@/blog/features/retention/components/league-showcase';
 
-// TODO: move to i18n (t('...'))
-const LABELS = {
-  primaryNav: 'Primary',
-  home: 'Home',
-  profile: 'Profile',
-  wallet: 'Wallet',
+/**
+ * ★★★ THESE WERE THE REASON THE LANGUAGE SWITCHER "DID NOTHING" (2026-08-14).
+ *
+ * The switcher works — cookie, localStorage and `<html lang>` all change, and
+ * strings that go through `t()` translate. But a capture of every header, nav,
+ * aside and footer line on `/` before and after switching to Polish came back
+ * **30 lines before, 30 after, 30 identical**, because the primary navigation —
+ * the most visible text on the page — never went through `t()` at all. It was
+ * this object, carrying its own "TODO: move to i18n" note.
+ *
+ * Now keyed off `navigation.left_rail.*`. English values are unchanged, so this
+ * is a no-op in the default locale and the only observable difference is that a
+ * translated locale can finally reach the nav.
+ */
+const labels = (t: (k: string) => string) => ({
+  primaryNav: t('navigation.left_rail.primary_nav'),
+  home: t('navigation.left_rail.home'),
+  profile: t('navigation.left_rail.profile'),
+  wallet: t('navigation.left_rail.wallet'),
   // ★ RENAMED (design brief "Also changed", creator-token-prominence pass,
   // 2026-08-11): "Creators" undersold what this row is — creator TOKENS, the
   // product's primary surface per owner ruling, not a people directory.
-  creators: 'Creator Tokens',
-  voteWitness: 'Witnesses',
-  voteProposals: 'Proposals',
-  settings: 'Settings'
-};
+  creators: t('navigation.left_rail.creators'),
+  voteWitness: t('navigation.left_rail.vote_witness'),
+  voteProposals: t('navigation.left_rail.proposals'),
+  settings: t('navigation.left_rail.settings')
+});
 
 type NavIcon = ComponentType<LucideProps>;
 
@@ -120,6 +134,8 @@ const InternalNavRow = ({
 );
 
 export default function LeftRail() {
+  const { t } = useTranslation('common_blog');
+  const LABELS = labels(t);
   /**
    * ★★★ THE RAIL KNEW WHO YOU WERE LAST (2026-08-10, N-3).
    *

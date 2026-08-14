@@ -98,6 +98,22 @@ export interface Authorizes {
   key_auths: { [key: string]: number };
 }
 
+/**
+ * The `images` wax wants for a post: real URLs only, or `undefined`.
+ *
+ * Returning `[]` would also make wax skip the key (it tests `length > 0`), but
+ * `undefined` says "there is no image" at the type level too, so a future reader
+ * of this call site cannot mistake an empty array for an intentional one. Blank
+ * and whitespace-only entries are dropped rather than trusted — `[""]` on chain
+ * is precisely the bug this exists to prevent.
+ */
+function normalizeImages(image?: string | string[]): string[] | undefined {
+  const list = (Array.isArray(image) ? image : [image]).filter(
+    (url): url is string => typeof url === 'string' && url.trim() !== ''
+  );
+  return list.length > 0 ? list : undefined;
+}
+
 export class TransactionService {
   /**
    * Options for Signer.
@@ -730,6 +746,37 @@ export class TransactionService {
     }, transactionOptions);
   }
 
+  /**
+   * ★★★ EMPTY IS NOT A VALUE — OMIT IT (2026-08-14, composer audit findings 9 and
+   * §9.6).
+   *
+   * This used to hand wax `images: [image ? image : '']`, `alternativeAuthor: ''`
+   * and `jsonMetadata: { summary: '' }` whenever the caller had nothing to put in
+   * them, and wax faithfully wrote all three onto the chain. Measured on the live
+   * :4100 build by capturing the transaction at the Keychain boundary (never
+   * broadcast), a plain note published:
+   *
+   *   json_metadata = {"format":"markdown+html","summary":"","app":"lumen/1.0",
+   *                    "tags":["lumen"],"image":[""],"author":""}
+   *
+   * `image: [""]` is the damaging one: it is a NON-EMPTY array, so every thumbnail
+   * reader downstream reads element 0 and gets an empty `src`. `author: ""` and
+   * `summary: ""` are merely noise, but they are noise permanently written to a
+   * public blockchain.
+   *
+   * wax only skips a field it is given as `undefined`, or an array it is given
+   * EMPTY (`CommentOperation`'s constructor: `void 0 !== data.images &&
+   * data.images.length > 0`) — so the fix is to pass nothing rather than to pass
+   * emptiness. `jsonMetadata` is `Object.assign`ed wholesale by wax, so an empty
+   * `summary` has to be dropped by us before it gets there.
+   *
+   * @param image one URL, or several. Several is what the short-form composer
+   *   needs; a single string is what the long-form editor already passed and it
+   *   keeps working byte-for-byte.
+   * @param extraJsonMetadata extra top-level `json_metadata` keys. The short-form
+   *   composer uses it for `type: 'note'`, the marker the permalink page and the
+   *   feed card read to choose a compact layout instead of an article one.
+   */
   async post(
     permlink: string,
     title: string,
@@ -741,10 +788,12 @@ export class TransactionService {
     summary: string,
     altAuthor: string,
     percentHbd: number,
-    image?: string,
+    image?: string | string[],
+    extraJsonMetadata?: Record<string, unknown>,
     transactionOptions: TransactionOptions = {}
   ) {
     const { BlogPostOperation } = await loadWax();
+    const images = normalizeImages(image);
     const blogPost = new BlogPostOperation({
       category: category !== 'blog' ? category : tags[0],
       beneficiaries,
@@ -755,10 +804,10 @@ export class TransactionService {
       title,
       body,
       permlink,
-      alternativeAuthor: altAuthor,
-      images: [image ? image : ''],
+      alternativeAuthor: altAuthor ? altAuthor : undefined,
+      images,
       jsonMetadata: {
-        summary,
+        ...(summary ? { summary } : {}),
         // ★ This fork is Lumen, and every post it broadcasts says so. It read
         // `hive.blog/0.9`, inherited from the upstream denser codebase, so every
         // post published from a Hive-keyed account announced itself on chain as
@@ -767,7 +816,8 @@ export class TransactionService {
         // about what app the reader was using. Changed 2026-08-06 at the owner's
         // instruction, kept identical to the lite string so anything grouping by
         // `app` sees one product.
-        app: 'lumen/1.0'
+        app: 'lumen/1.0',
+        ...(extraJsonMetadata ?? {})
       }
     });
     return await this.processHiveAppOperation((builder) => {
@@ -782,10 +832,12 @@ export class TransactionService {
     category: string,
     summary: string,
     altAuthor: string,
-    image?: string,
+    image?: string | string[],
+    extraJsonMetadata?: Record<string, unknown>,
     transactionOptions: TransactionOptions = {}
   ) {
     const { BlogPostOperation } = await loadWax();
+    const images = normalizeImages(image);
     const blogPost = new BlogPostOperation({
       category: category !== 'blog' ? category : tags[0],
       tags,
@@ -793,12 +845,13 @@ export class TransactionService {
       title,
       body,
       permlink,
-      alternativeAuthor: altAuthor,
-      images: [image ? image : ''],
+      alternativeAuthor: altAuthor ? altAuthor : undefined,
+      images,
       jsonMetadata: {
-        summary,
+        ...(summary ? { summary } : {}),
         // Same string as post() above — an edit must not relabel the post.
-        app: 'lumen/1.0'
+        app: 'lumen/1.0',
+        ...(extraJsonMetadata ?? {})
       }
     });
 

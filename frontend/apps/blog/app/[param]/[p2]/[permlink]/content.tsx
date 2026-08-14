@@ -82,7 +82,8 @@ import { StorageTTL } from '@ui/lib/storage-with-ttl';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import VotesComponentWrapper from '@/blog/features/votes/votes-component-wrapper';
-import { isCommunity } from '@ui/lib/utils';
+import { cn, isCommunity } from '@ui/lib/utils';
+import { isNotePost } from '@/blog/lib/short-post-note';
 import {
   useSSRObserver,
   useInitialPostData,
@@ -334,6 +335,8 @@ const PostContent = () => {
     () => (postData?.title ? decodeTitleEntities(postData.title) : ''),
     [postData?.title]
   );
+  /** See the `<h1>` below — a short-form note carries no headline of its own. */
+  const isNote = isNotePost(postData?.json_metadata);
   const [mutedPost, setMutedPost] = useState<boolean>(postData?.stats?.gray || false);
   // ★ NSFW gate for the post page itself (2026-08-09) — see post-body-section.tsx.
   // Same detector and same preference the feed card uses, so one setting governs
@@ -1091,8 +1094,23 @@ const PostContent = () => {
                 <div className="mb-5 border-b border-border pb-5">
                   {!commentSite ? (
                     <div className="flex items-start justify-between gap-3">
+                      {/* ★ A NOTE HAS NO HEADLINE (2026-08-14, composer audit
+                          finding 7 / §9.6). A short post's `title` is only a
+                          markdown-stripped, 60-character COPY of its own first
+                          line — Hive requires a title, the writer never wrote
+                          one. Printing it as a 30px extrabold H1 and then
+                          printing the identical sentence again as the article
+                          body is how a one-line note came to be presented as a
+                          magazine feature. When `json_metadata.type` is `note`
+                          the headline is dropped and the body speaks for itself;
+                          the payout-in-HBD marker keeps its place beside the
+                          flag control, and every post without the marker renders
+                          exactly as it did before. */}
                       <h1
-                        className="font-sans text-2xl font-extrabold leading-[30px] tracking-tight text-foreground sm:text-3xl sm:leading-[38px]"
+                        className={cn(
+                          'font-sans text-2xl font-extrabold leading-[30px] tracking-tight text-foreground sm:text-3xl sm:leading-[38px]',
+                          isNote && 'sr-only'
+                        )}
                         data-testid="article-title"
                       >
                         {displayTitle}
@@ -1374,7 +1392,11 @@ const PostContent = () => {
                       >
                         <span
                           data-testid="comment-payout"
-                          className={`font-bold text-destructive hover:cursor-pointer ${
+                          // ★ text-[20px] (2026-08-14, owner-reported): on the post page the
+                          // vote tally is 18px, and the payout carried no size class at all —
+                          // so it inherited smaller than the vote count. The money is the
+                          // headline figure on this row; it is now one step above the tally.
+                          className={`text-[20px] font-bold text-destructive hover:cursor-pointer ${
                             parseFloat(postData.max_accepted_payout) === 0
                               ? '!text-ink-8 line-through'
                               : ''

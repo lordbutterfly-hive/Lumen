@@ -38,7 +38,13 @@ export function usePostMutation() {
       category: string;
       summary: string;
       altAuthor: string;
-      image?: string;
+      /** One URL, or several — the short-form composer can attach up to four. */
+      image?: string | string[];
+      /**
+       * Extra top-level `json_metadata` keys. The short-form composer sends
+       * `{ type: 'note' }`; the long-form editor sends nothing and is unchanged.
+       */
+      extraJsonMetadata?: Record<string, unknown>;
       editMode: boolean;
       beneficiaries: Beneficiarie[];
       maxAcceptedPayout: NaiAsset;
@@ -54,6 +60,7 @@ export function usePostMutation() {
         summary,
         reputation,
         image,
+        extraJsonMetadata,
         editMode,
         beneficiaries,
         maxAcceptedPayout,
@@ -77,11 +84,18 @@ export function usePostMutation() {
           tags,
           json_metadata: {
             tags,
-            image: image ? [image] : [],
+            // Same shape the chain will end up with — see `normalizeImages` in
+            // packages/transaction/index.ts. An optimistic card that carried
+            // `[""]` while the real post carried nothing (or vice versa) is a
+            // card that flickers a broken thumbnail the moment Hivemind answers.
+            image: (Array.isArray(image) ? image : [image]).filter(
+              (url): url is string => typeof url === 'string' && url.trim() !== ''
+            ),
             description: summary,
             // Must match what transactionService.post actually broadcasts,
             // or the optimistic card and the real post disagree.
-            app: 'lumen/1.0'
+            app: 'lumen/1.0',
+            ...(extraJsonMetadata ?? {})
           },
           created: new Date().toISOString(),
           updated: new Date().toISOString(),
@@ -137,7 +151,8 @@ export function usePostMutation() {
       category: string;
       summary: string;
       altAuthor: string;
-      image?: string;
+      image?: string | string[];
+      extraJsonMetadata?: Record<string, unknown>;
       editMode: boolean;
       beneficiaries: Beneficiarie[];
       maxAcceptedPayout: NaiAsset;
@@ -156,6 +171,7 @@ export function usePostMutation() {
         altAuthor,
         percentHbd,
         image,
+        extraJsonMetadata,
         editMode
       } = params;
 
@@ -174,6 +190,7 @@ export function usePostMutation() {
           altAuthor,
           percentHbd,
           image,
+          extraJsonMetadata,
           { observe: true }
         );
         logger.info('Post broadcast successful: %o', { permlink, broadcastResult });
@@ -189,6 +206,7 @@ export function usePostMutation() {
           summary,
           altAuthor,
           image,
+          extraJsonMetadata,
           { observe: true }
         );
         logger.info('Post update broadcast successful: %o', { permlink, broadcastResult });

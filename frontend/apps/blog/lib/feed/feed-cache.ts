@@ -76,15 +76,51 @@ export interface CachedFeed {
 /**
  * Under this age a stored feed is served with no upstream work at all. Over it,
  * it is STILL SERVED INSTANTLY and rebuilt behind the reader.
- *
- * ★ THERE IS DELIBERATELY NO UPPER SERVING CUTOFF ANY MORE. There used to be a
- * `FEED_STALE_MS` of 24h, past which the route rebuilt SYNCHRONOUSLY — i.e. the
- * reader who came back after a day waited the full 7-16s again. That is the
- * exact behaviour the owner rejected. The only thing that removes a stored feed
- * now is the sweep (FEED_STORE_TTL_DAYS, default 14), and by then the row is
- * gone rather than slow.
  */
 export const FEED_FRESH_MS = 5 * 60_000;
+
+/**
+ * ★★★ THE AGE AT WHICH A STORED FEED STOPS COUNTING AS A RANKING (2026-08-14).
+ *
+ * MEASURED, signed in as `lordbutterfly`, against the running build: page 1 came
+ * back `source:"recsys" ranked:45 served:30 cache:"stale-revalidating"` with
+ * `builtAt:"2026-08-11T01:58:53.011Z"` — 71.4 HOURS old — and `builtAt` did not
+ * move across four calls in eighteen seconds. Newest post in the set 73.9h,
+ * median 98.0h. The same box, logged OUT, answered `trending-fallback` with a
+ * newest post of 1.6h and a median of 15.0h. **The signed-in owner's feed was
+ * three days old and a stranger's was current.**
+ *
+ * ★ WHY THE ROUTE COULD NOT SEE IT. The stored branch labels every copy
+ * `source: 'recsys'` regardless of age, and the client's banner reads exactly
+ * `source === 'recsys' ? null : …`. So the one signal that a ranking is three
+ * days stale — `builtAt`, sitting in the same payload — was serialised, sent,
+ * and read by nobody. A frozen artifact was indistinguishable from a fresh one
+ * to every consumer.
+ *
+ * ★★ WHY THIS IS NOT THE `FEED_STALE_MS` THE OWNER DELETED. The comment that
+ * stood here said "THERE IS DELIBERATELY NO UPPER SERVING CUTOFF ANY MORE",
+ * because the old 24h cliff made the route rebuild SYNCHRONOUSLY past it — the
+ * reader who came back after a day sat through the full 7-16s cold build again.
+ * That is the behaviour the owner rejected, and it is NOT what this
+ * reintroduces. Past this ceiling the reader waits for NOTHING: they are served
+ * the trending fallback, which is cached and measured in milliseconds, while the
+ * ranked rebuild continues behind them exactly as before. The rule the owner
+ * actually set — "once a viewer has a stored feed they are never made to wait
+ * again" — is intact. What changes is only WHAT a hopelessly old artifact is
+ * called and whether it is still passed off as this reader's live ranking.
+ *
+ * ★ TWO HOURS, and env-tunable. Long enough that the ordinary
+ * stale-while-revalidate window (`FEED_FRESH_MS` → here) still absorbs a ranker
+ * that is briefly slow, restarting, or rate-limited, so a healthy deployment
+ * never sees this path. Short enough that "my feed is yesterday's" cannot happen
+ * silently. The failure this closes is unbounded by nature — a dead upstream
+ * produces a stale flag that no amount of waiting clears — so the ceiling has to
+ * be an absolute one, not a multiple of the refresh interval.
+ */
+export function feedStaleMs(): number {
+  const raw = Number(process.env.FEED_STALE_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : 2 * 60 * 60_000;
+}
 
 /** Memory tier size. The durable tier's bound is FEED_STORE_MAX_ROWS. */
 const FEED_MAX_VIEWERS = 5_000;
@@ -395,7 +431,37 @@ export function invalidateViewerFeed(viewer: string): void {
 interface Inflight {
   generation: number;
   promise: Promise<unknown>;
+  /** When this build started, so a lock can EXPIRE. See `BUILD_LOCK_TIMEOUT_MS`. */
+  startedAt: number;
 }
+
+/**
+ * ★★★ A BUILD LOCK THAT CANNOT OUTLIVE ITS BUILD (2026-08-14).
+ *
+ * `inflight` is only ever cleared by the build's own `.finally`, so a build that
+ * never settles holds the lock for the life of the process — and the route asks
+ * `isRebuilding(viewer)` before starting a background refresh. One wedged
+ * promise therefore means that viewer's feed is NEVER rebuilt again, silently,
+ * while `cache: 'stale-revalidating'` keeps promising a revalidation that no
+ * longer exists. That is a permanent stale flag from a single hang.
+ *
+ * It is not hypothetical for the shape of work done here. `fetchRankedFeed` has
+ * an `AbortController` and is safe, but the rest of a build does not: the
+ * viewer-state queries and the `getPost` hydration calls are awaited with no
+ * deadline of their own, and a socket that is open but never answers is exactly
+ * the case a timeout exists for.
+ *
+ * Generous on purpose — a cold build was measured at 7.2-16.3s and the ranker's
+ * own timeout is 15s per attempt with up to three attempts, so anything under a
+ * minute would evict builds that were going to succeed. This is a DEADLOCK
+ * BREAKER, not a latency budget.
+ *
+ * Expiring the lock does not cancel the original build; nothing here can. It
+ * releases the SLOT so a later request may start a fresh one. The loser is
+ * harmless: `buildOnce`'s `.finally` only clears the slot if it is still its
+ * own, and a late write is refused by the generation fence.
+ */
+const BUILD_LOCK_TIMEOUT_MS = 90_000;
 
 const inflight = new Map<string, Inflight>();
 const failedAt = new Map<string, number>();
@@ -467,9 +533,27 @@ function pruneGenerations(protectViewer?: string): void {
  */
 const FAILED_BUILD_COOLDOWN_MS = 30_000;
 
-/** Is a rebuild for this viewer already running in this process? */
+/**
+ * Is a rebuild for this viewer already running in this process?
+ *
+ * An entry older than `BUILD_LOCK_TIMEOUT_MS` is treated as NOT running and
+ * dropped: see that constant for why a lock must be able to expire. Logged at
+ * `warn` because a build that overran a 90s ceiling is a real operational fact
+ * about the ranker, and this is the only place it becomes visible.
+ */
 export function isRebuilding(viewer: string): boolean {
-  return inflight.has(viewer);
+  const entry = inflight.get(viewer);
+  if (!entry) return false;
+  const age = Date.now() - entry.startedAt;
+  if (age < BUILD_LOCK_TIMEOUT_MS) return true;
+  logger.warn(
+    'feed-cache: build lock for %s expired after %dms (limit %dms) — releasing the slot so a rebuild can be started again; the original build is not cancelled and its write is still generation-fenced',
+    viewer,
+    age,
+    BUILD_LOCK_TIMEOUT_MS
+  );
+  inflight.delete(viewer);
+  return false;
 }
 
 /** Did this viewer's last build fail recently enough that we should not retry yet? */
@@ -496,14 +580,22 @@ export function inFailureCooldown(viewer: string): boolean {
  */
 export function buildOnce<T>(viewer: string, build: () => Promise<T>): Promise<T> {
   const era = viewerGeneration(viewer);
-  const existing = inflight.get(viewer);
+  // Through `isRebuilding` rather than `inflight.get` directly, so that joining
+  // an EXPIRED lock is impossible: a caller must never be handed a promise from
+  // a build that has already overrun its ceiling and been written off — it may
+  // never settle, and this promise is what the request awaits.
+  const existing = isRebuilding(viewer) ? inflight.get(viewer) : undefined;
   // Join only a build from the CURRENT era. One started before the reader
   // changed their interests is answering a question they no longer asked; it is
   // left to finish (its write is refused by the generation check) while this
   // request gets a build against the inputs that are true now.
   if (existing && existing.generation >= era) return existing.promise as Promise<T>;
 
-  const entry: Inflight = { generation: era, promise: Promise.resolve() as Promise<unknown> };
+  const entry: Inflight = {
+    generation: era,
+    promise: Promise.resolve() as Promise<unknown>,
+    startedAt: Date.now()
+  };
   const running = build().finally(() => {
     // Only clear the slot if it is still OURS — a superseded build finishing
     // late must not evict the current one and let a third build start.

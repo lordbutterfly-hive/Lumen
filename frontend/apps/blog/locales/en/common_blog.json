@@ -180,6 +180,16 @@
         "wif": "WIF Key",
         "hivesigner": "HiveSigner"
       }
+    },
+    "left_rail": {
+      "primary_nav": "Primary",
+      "home": "Home",
+      "profile": "Profile",
+      "wallet": "Wallet",
+      "creators": "Creator Tokens",
+      "vote_witness": "Witnesses",
+      "proposals": "Proposals",
+      "settings": "Settings"
     }
   },
   "select_sort": {
@@ -1725,5 +1735,35 @@
     "title": "Block @{{username}}?",
     "description": "They will disappear from your feeds, and their replies under your posts will stop being shown to anyone. You can undo this from their profile at any time.",
     "action": "Block account"
+  },
+  "short_form_composer": {
+    "placeholder": "What's on your mind?",
+    "aria_label": "Write a note",
+    "post_button": "Post",
+    "posting_button": "Posting…",
+    "login_prompt": "Start writing. Log in to post.",
+    "cancel": "Cancel",
+    "add_image": "Add image or GIF",
+    "add_emoji": "Add emoji",
+    "remove_image": "Remove image",
+    "over_limit": "A note can be at most {{limit}} characters. Remove {{over}}.",
+    "too_many_images": "A note can carry at most {{max}} images.",
+    "image_too_large": "“{{name}}” is over {{limit}}MB and was not attached.",
+    "image_not_an_image": "“{{name}}” is not an image.",
+    "image_upload_failed": "“{{name}}” could not be uploaded. Please try again.",
+    "image_blocked": "Image uploads are not available for this account.",
+    "uploading": "Uploading image…",
+    "uploaded": "Image attached.",
+    "published_title": "Post published",
+    "published_lite": "It's on your Lumen profile now, and queued to publish to Hive.",
+    "published_hive": "It is on its way to Hive.",
+    "publishing": "Publishing your note…",
+    "generic_error": "Could not post. Please try again.",
+    "timed_out": "Signing timed out — check your Keychain window. If you approved it there, the note may still publish; reload before posting again.",
+    "cancelled": "Stopped waiting for Keychain. If you approved the request, the note may still publish; reload before posting again.",
+    "emoji_search_label": "Search emoji",
+    "emoji_search_placeholder": "Search",
+    "emoji_no_results": "No emoji found.",
+    "emoji_recent": "Recent"
   }
 }

@@ -309,7 +309,12 @@ const PostListItem = memo(
                 legalBlockedUser={legalBlockedUser}
               />
               <CardFooter className="pb-2">
-                <div className="flex h-5 items-center space-x-2 text-sm" data-testid="post-card-footer">
+                {/* ★ h-5 (20px) could not contain the 38px vote control (Blade redesign,
+                    2026-08-14). Latent rather than broken — no live route renders this
+                    component today — but a fixed height smaller than its own child is a
+                    trap for whoever revives it. `min-h-[38px]` matches the control's hit
+                    target; the row grows with it instead of clipping. */}
+                <div className="flex min-h-[38px] items-center space-x-2 text-sm" data-testid="post-card-footer">
                   <VotesComponentWrapper post={post} type="post" />
 
                   <DetailsCardHover post={post} decline={parseFloat(post.max_accepted_payout) === 0}>

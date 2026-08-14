@@ -40,6 +40,12 @@ const LABELS = {
   empty: 'No posts yet.',
   degraded: 'Personalised ranking is warming up. Showing popular posts meanwhile.',
   degradedAnonymous: 'Showing trending. Log in for your own feed.',
+  // ★ A SEPARATE LINE FOR A SEPARATE FACT (2026-08-14). "Warming up" describes a
+  // ranking that has not been built yet. A ranking that WAS built and has since
+  // gone stale is a different situation for the reader, and telling them it is
+  // warming up when it is actually being refreshed is the kind of small
+  // inaccuracy that makes the rest of the UI hard to trust.
+  degradedStale: 'Your ranked feed is being refreshed. Showing recent posts meanwhile.',
   loginPrompt: 'Following shows the people you follow.',
   loginCta: 'Log in',
   // ★ The session read failed outright — see the Following-tab gate below.
@@ -86,8 +92,61 @@ interface ForYouResponse {
   degraded?: string;
   detail?: string;
   ranked?: number;
+  /**
+   * Is this a personalised ranking, as opposed to trending or chain paging?
+   * Optional because a response from a build older than 2026-08-14 will not
+   * carry it — see `isCurrentRanking` for the fallback.
+   */
+  personalised?: boolean;
+  /** When the served ranking was assembled. The freshness evidence. */
+  builtAt?: string;
+  /** The server's own verdict, so the client need not re-derive it. */
+  stale?: boolean;
+  /** The age at which the server stops treating a ranking as current. */
+  staleAfterMs?: number;
   /** Where the next page starts. Null when Hive has nothing further. */
   nextCursor?: { author: string; permlink: string } | null;
+}
+
+/**
+ * How old a ranking may be before this component stops calling it current, when
+ * the server did not say. Only a backstop: the server owns the real threshold
+ * and sends it as `staleAfterMs`.
+ */
+const RANKING_MAX_AGE_MS = 2 * 60 * 60_000;
+
+/**
+ * ★★★ `source === 'recsys'` IS NOT "THIS RANKING IS CURRENT" (2026-08-14).
+ *
+ * That equality was the whole banner condition, and it is what let a THREE-DAY-
+ * OLD feed render with no warning at all. Measured signed in as the owner: page
+ * 1 came back `source:"recsys"`, `cache:"stale-revalidating"`,
+ * `builtAt:"2026-08-11T01:58:53.011Z"` — 71.4 hours old, newest post 73.9h,
+ * median 98.0h — and because `source` was still literally `'recsys'` this test
+ * passed and `degradedMessage` was null. The evidence was in the same payload,
+ * one field away, and nothing looked at it.
+ *
+ * `source` answers "which mechanism produced this list". The banner is asking
+ * "is what I am showing this reader their current, personalised feed". Those
+ * came apart the moment a stored ranking could outlive its ranker, and the fix
+ * is to ask the second question directly rather than keep using the first as a
+ * proxy for it.
+ *
+ * Ordering of evidence, strongest first: the server's explicit `personalised`
+ * flag; then `builtAt` against the server's own ceiling; and only if neither is
+ * present, the old `source` test, so an older server build degrades to exactly
+ * the previous behaviour rather than to a blank banner.
+ */
+function isCurrentRanking(page: ForYouResponse | undefined): boolean {
+  if (!page) return false;
+  const personalised = page.personalised ?? page.source === 'recsys';
+  if (!personalised) return false;
+  if (!page.builtAt) return true;
+  const builtAt = Date.parse(page.builtAt);
+  // An unparseable timestamp is not evidence of staleness; do not invent a
+  // warning from a field we failed to read.
+  if (!Number.isFinite(builtAt)) return true;
+  return Date.now() - builtAt < (page.staleAfterMs ?? RANKING_MAX_AGE_MS);
 }
 
 /**
@@ -254,7 +313,9 @@ function ForYouFeed() {
   // page loads, which the `?? []` here covers.
   const pages = data?.pages ?? [];
   const firstPage = pages[0];
-  const ranked = firstPage?.source === 'recsys';
+  // Freshness-aware — see `isCurrentRanking`. A stored ranking that has outlived
+  // its ranker is no longer "ranked" for the purpose of what the reader is told.
+  const ranked = isCurrentRanking(firstPage);
   // De-duplicate across pages: the ranked first page can legitimately contain a
   // post the chain pages reach again later, and a feed that repeats itself reads
   // as broken. Accepted posts go first — the reader asked for them, so they belong
@@ -326,11 +387,19 @@ function ForYouFeed() {
   // for every other degraded reason regardless of `enabled`. Both are fixed by
   // reading `data.degraded` — the server's own reason — instead of client
   // login state, which can also be stale relative to the session cookie.
+  //
+  // ★ 2026-08-14: `ranked` is now a FRESHNESS-aware verdict rather than a
+  // `source` string comparison (see `isCurrentRanking`), which is what makes the
+  // three-day-old-feed case reach this at all. The `stale` reason is the server
+  // refusing to serve an expired stored ranking; it gets its own copy because
+  // "warming up" would be a false description of a feed that was already built.
   const degradedMessage = ranked
     ? null
     : firstPage?.degraded === 'anonymous'
       ? LABELS.degradedAnonymous
-      : LABELS.degraded;
+      : firstPage?.degraded === 'stale'
+        ? LABELS.degradedStale
+        : LABELS.degraded;
 
   return (
     <div>
