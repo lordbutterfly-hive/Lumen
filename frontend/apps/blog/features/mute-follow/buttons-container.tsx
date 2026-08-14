@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { IFollow } from '@hive/common-hiveio-packages/wax';
 import FollowButton from './follow-button';
 import BlockButton from './block-button';
@@ -8,6 +8,17 @@ import { User } from '@smart-signer/types/common';
 import { UseInfiniteQueryResult } from '@tanstack/react-query';
 import { useFollowMutation, useUnfollowMutation } from './hooks/use-follow-mutations';
 import { Button } from '@hive/ui';
+import { CircleSpinner } from 'react-spinners-kit';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle
+} from '@ui/components/alert-dialog';
 import DialogLogin from '@/blog/components/dialog-login';
 import { handleError } from '@ui/lib/handle-error';
 import { useTranslation } from '@/blog/i18n/client';
@@ -174,7 +185,33 @@ const ButtonsContainer = ({
     identity.isLoggedIn && username !== identity.username
   );
 
-  const handlerBlock = async () => {
+  /**
+   * ★★★ BLOCK ASKS FIRST — EVERYWHERE, NOT JUST IN THE FOLLOW LISTS (2026-08-14).
+   *
+   * This button was one click and done. A browser audit measured it on a post
+   * byline: a bare 62×36 `Block` sitting directly beside `Unfollow` and `Reblog`,
+   * and a single click fired `POST /api/lite/block` with no dialog, no undo
+   * affordance, nothing. The follow-list redesign shipped the SAME action on the
+   * SAME day behind a `…` menu AND a confirm dialog
+   * (`features/account-lists/follow-list/follow-row-actions.tsx`). Same
+   * destructive act, two opposite safety bars — and the unsafe one is the copy
+   * that sits on every byline in the product, right next to two harmless buttons
+   * it can be mis-clicked for.
+   *
+   * Blocking is not a preference toggle. It erases the other person's replies
+   * under your posts FOR EVERY OTHER READER, which is why the dialog says so.
+   *
+   * ★ ONLY THE BLOCKING DIRECTION IS GATED. Unblocking stays one click: it is the
+   * undo, it restores someone's voice rather than removing it, and putting a
+   * speed bump in front of the recovery path is exactly backwards.
+   *
+   * Deliberately reuses `block_confirm_dialog.*` rather than adding new keys — the
+   * two dialogs are the same question about the same action, and one wording that
+   * drifts is how two surfaces end up describing one feature differently.
+   */
+  const [blockConfirmOpen, setBlockConfirmOpen] = useState(false);
+
+  const commitBlock = async () => {
     const failure = await block.toggle();
     if (failure) {
       handleError(new Error(failure), {
@@ -182,6 +219,16 @@ const ButtonsContainer = ({
         params: { username }
       });
     }
+  };
+
+  const handlerBlock = async () => {
+    // `block.isBlocking` is read at CLICK time, not captured at render — an unblock
+    // that lands between render and click must not be confirmed as a block.
+    if (!block.isBlocking) {
+      setBlockConfirmOpen(true);
+      return;
+    }
+    await commitBlock();
   };
 
   const isFollow = lumen.applies
@@ -285,6 +332,40 @@ const ButtonsContainer = ({
               unknown={block.unknown}
             />
           ) : null}
+          <AlertDialog open={blockConfirmOpen} onOpenChange={setBlockConfirmOpen}>
+            <AlertDialogContent
+              className="flex flex-col gap-4 sm:max-w-md sm:rounded-[18px]"
+              data-testid="byline-block-dialog"
+            >
+              <AlertDialogHeader className="gap-2">
+                <AlertDialogTitle>{t('block_confirm_dialog.title', { username })}</AlertDialogTitle>
+                <AlertDialogDescription>{t('block_confirm_dialog.description')}</AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter className="gap-2 sm:flex-row-reverse">
+                <AlertDialogAction
+                  disabled={block.busy}
+                  data-testid="byline-block-confirm"
+                  className="rounded-[12px] bg-destructive text-white hover:bg-destructive/90"
+                  onClick={(event) => {
+                    // Radix closes the dialog on action by default; `preventDefault`
+                    // keeps the close explicit so it cannot race the mutation.
+                    event.preventDefault();
+                    void commitBlock();
+                    setBlockConfirmOpen(false);
+                  }}
+                >
+                  {block.busy ? (
+                    <CircleSpinner loading size={16} color="#ffffff" />
+                  ) : (
+                    t('block_confirm_dialog.action')
+                  )}
+                </AlertDialogAction>
+                <AlertDialogCancel className="rounded-[12px]" data-testid="byline-block-cancel">
+                  {t('global.cancel')}
+                </AlertDialogCancel>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </>
       ) : (
         <DialogLogin>
