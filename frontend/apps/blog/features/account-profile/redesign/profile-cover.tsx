@@ -16,7 +16,7 @@ import { UserAvatarImg } from '@ui/components';
 export default function ProfileCover({ username, coverImageUrl }: { username: string; coverImageUrl: string }) {
   return (
     <div className="relative">
-      <div className="h-[210px] overflow-hidden rounded-[22px] border border-[#ebebeb] bg-gradient-to-br from-[#c0392b] to-[#e07b3e]">
+      <div className="h-[210px] overflow-hidden rounded-[22px] border border-line-9 bg-gradient-to-br from-surface-brand-12 to-surface-warn-10">
         {coverImageUrl ? <img src={coverImageUrl} alt="" className="h-full w-full object-cover" /> : null}
       </div>
       <div className="absolute bottom-[-48px] left-8">
@@ -25,7 +25,7 @@ export default function ProfileCover({ username, coverImageUrl }: { username: st
           apiSize="large"
           pixelSize={120}
           radiusClassName="rounded-[26px]"
-          className="border-[5px] border-white bg-gradient-to-br from-[#c0392b] to-[#e07b3e] text-white/90 shadow-[0_6px_22px_rgba(20,18,10,0.14)]"
+          className="border-[5px] border-line-1 bg-gradient-to-br from-surface-brand-12 to-surface-warn-10 text-ink-27/90 shadow-[0_6px_22px_rgba(20,18,10,0.14)]"
           alt={username}
         />
       </div>

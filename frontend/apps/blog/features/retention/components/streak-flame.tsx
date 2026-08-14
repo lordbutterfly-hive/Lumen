@@ -25,7 +25,7 @@ export interface StreakFlameProps {
 
 export function StreakFlame({ days, active, isLowerBound = false, className }: StreakFlameProps) {
   const { t } = useTranslation('common_blog');
-  const color = active ? 'text-amber-500' : 'text-[#9ca3af]';
+  const color = active ? 'text-ink-warn-10' : 'text-ink-14';
   const label = isLowerBound ? t('retention.day_streak_at_least', { days }) : t('retention.day_streak', { days });
 
   return (

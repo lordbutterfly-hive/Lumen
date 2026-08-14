@@ -57,7 +57,7 @@ function LadderRow({ tier, current }: { tier: LeagueTier; current: boolean }) {
       data-testid={`ranks-row-${tier}`}
       data-current={current || undefined}
       className={`flex items-start gap-3.5 rounded-[14px] border p-3.5 transition-colors ${
-        current ? 'border-[#161511] bg-[#faf9f6]' : 'border-[#ebebeb] bg-white'
+        current ? 'border-line-28 bg-surface-12' : 'border-line-9 bg-surface-1'
       }`}
     >
       <span className="mt-0.5 shrink-0">
@@ -65,16 +65,16 @@ function LadderRow({ tier, current }: { tier: LeagueTier; current: boolean }) {
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
-          <h3 className="font-sans text-[18px] font-semibold leading-[28px] text-[#161511]">{name}</h3>
-          <span className="font-sans text-[13px] leading-[20px] font-medium tabular-nums text-[#6b7280]">{scale}</span>
+          <h3 className="font-sans text-[18px] font-semibold leading-[28px] text-ink-2">{name}</h3>
+          <span className="font-sans text-[13px] leading-[20px] font-medium tabular-nums text-ink-10">{scale}</span>
           {current ? (
-            <span className="rounded-full bg-[#161511] px-2 py-0.5 font-sans text-[12px] font-semibold uppercase tracking-[0.05em] text-white">
+            <span className="rounded-full bg-surface-43 px-2 py-0.5 font-sans text-[12px] font-semibold uppercase tracking-[0.05em] text-ink-27">
               {t('retention.ranks.you_are_here')}
             </span>
           ) : null}
         </div>
         {meaning ? (
-          <p className="mt-1 font-serif text-[16px] leading-[24px] text-[#3f4650]">{meaning}</p>
+          <p className="mt-1 font-serif text-[16px] leading-[24px] text-ink-7">{meaning}</p>
         ) : null}
       </div>
     </li>
@@ -104,7 +104,7 @@ function YouAreHere() {
 
   if (!identity.isLoggedIn) {
     return (
-      <p className="mt-4 font-sans text-[15px] leading-[24px] text-[#6b7280]" data-testid="ranks-signed-out">
+      <p className="mt-4 font-sans text-[15px] leading-[24px] text-ink-10" data-testid="ranks-signed-out">
         {t('retention.ranks.signed_out')}
       </p>
     );
@@ -112,7 +112,7 @@ function YouAreHere() {
   if (!summary) {
     return (
       <p
-        className="mt-4 font-sans text-[15px] leading-[24px] text-[#6b7280]"
+        className="mt-4 font-sans text-[15px] leading-[24px] text-ink-10"
         data-testid={isError ? 'ranks-position-error' : 'ranks-position-loading'}
       >
         {/* A failed read is stated, never rendered as an absent rank — an empty space
@@ -136,16 +136,16 @@ function YourPosition({ summary }: { summary: NonNullable<ReturnType<typeof useV
   const { core, glow } = TIERS[summary.rank.tier].color;
 
   return (
-    <section className="mt-6 rounded-[18px] border border-[#ebebeb] bg-white p-5" data-testid="ranks-your-position">
+    <section className="mt-6 rounded-[18px] border border-line-9 bg-surface-1 p-5" data-testid="ranks-your-position">
       <div className="flex items-center gap-4">
         <LeagueEmblem tier={summary.rank.tier} size="popover" />
         <div className="min-w-0 flex-1">
-          <p className="font-sans text-[13px] leading-[20px] font-semibold uppercase tracking-[0.06em] text-[#9ca3af]">
+          <p className="font-sans text-[13px] leading-[20px] font-semibold uppercase tracking-[0.06em] text-ink-14">
             {t('retention.ranks.your_position')}
           </p>
-          <p className="mt-0.5 font-sans text-[22px] font-semibold leading-[28px] text-[#161511]">
+          <p className="mt-0.5 font-sans text-[22px] font-semibold leading-[28px] text-ink-2">
             {t(TIERS[summary.rank.tier].labelKey)}
-            <span className="ml-2 text-[15px] leading-[24px] font-medium tabular-nums text-[#6b7280]">
+            <span className="ml-2 text-[15px] leading-[24px] font-medium tabular-nums text-ink-10">
               {t('retention.scale', { position, total })}
             </span>
           </p>
@@ -160,7 +160,7 @@ function YourPosition({ summary }: { summary: NonNullable<ReturnType<typeof useV
               reads as a load failure. The true value is on `data-pct` and `aria-valuenow`;
               see useRankProgress. */}
           <div
-            className="h-2 w-full overflow-hidden rounded-full bg-[#f1f3f5]"
+            className="h-2 w-full overflow-hidden rounded-full bg-surface-23"
             role="progressbar"
             aria-valuemin={0}
             aria-valuemax={100}
@@ -172,15 +172,15 @@ function YourPosition({ summary }: { summary: NonNullable<ReturnType<typeof useV
               style={{ width: `${progress.drawnPct}%`, background: `linear-gradient(90deg, ${core}, ${glow})` }}
             />
           </div>
-          <p className="mt-2 font-sans text-[14px] leading-[22px] font-semibold text-[#3f4650]">
+          <p className="mt-2 font-sans text-[14px] leading-[22px] font-semibold text-ink-7">
             {progress.distance}
             {progress.target ? (
-              <span className="font-normal text-[#6b7280]"> {t('retention.to_next', { tier: progress.target })}</span>
+              <span className="font-normal text-ink-10"> {t('retention.to_next', { tier: progress.target })}</span>
             ) : null}
           </p>
         </div>
       ) : (
-        <p className="mt-4 font-sans text-[14px] leading-[22px] font-semibold text-[#3f4650]">{t('retention.at_top')}</p>
+        <p className="mt-4 font-sans text-[14px] leading-[22px] font-semibold text-ink-7">{t('retention.at_top')}</p>
       )}
 
       {/* `showFootnote` is gone: the sample note is a tooltip on the one line it describes,
@@ -200,10 +200,10 @@ export default function RanksLadder() {
   return (
     <div className="mx-auto max-w-[720px] pb-16" data-testid="ranks-page">
       <header>
-        <h1 className="font-sans text-[34px] font-bold leading-[44px] tracking-[-0.02em] text-[#161511]">
+        <h1 className="font-sans text-[34px] font-bold leading-[44px] tracking-[-0.02em] text-ink-2">
           {t('retention.ranks.title', { total })}
         </h1>
-        <p className="mt-2.5 font-serif text-[18px] leading-[28px] text-[#3f4650]">
+        <p className="mt-2.5 font-serif text-[18px] leading-[28px] text-ink-7">
           {t('retention.ranks.subtitle')}
         </p>
       </header>
@@ -218,15 +218,15 @@ export default function RanksLadder() {
         ))}
       </ol>
 
-      <p className="mt-6 font-sans text-[14px] leading-[22px] text-[#6b7280]" data-testid="ranks-wont">
+      <p className="mt-6 font-sans text-[14px] leading-[22px] text-ink-10" data-testid="ranks-wont">
         {t('retention.ranks.wont')}
       </p>
 
       {/* Demotion, stated once, factually, in the one place a person came to READ
           about the ladder — and nowhere else. Nothing in this app notifies, badges or
           toasts a rank going down. */}
-      <p className="mt-3 font-sans text-[14px] leading-[22px] text-[#6b7280]" data-testid="ranks-down">
-        <span className="font-semibold text-[#3f4650]">{t('retention.ranks.down_title')}</span>{' '}
+      <p className="mt-3 font-sans text-[14px] leading-[22px] text-ink-10" data-testid="ranks-down">
+        <span className="font-semibold text-ink-7">{t('retention.ranks.down_title')}</span>{' '}
         {t('retention.ranks.down_body')}
       </p>
     </div>

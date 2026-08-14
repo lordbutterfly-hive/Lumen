@@ -26,7 +26,7 @@ interface WitnessTableRowProps {
   hpAprPercent: number | null;
 }
 
-const CELL_NUM_CLASS = 'text-right font-sans text-[13px] leading-[20px] tabular-nums text-[#6b7280]';
+const CELL_NUM_CLASS = 'text-right font-sans text-[13px] leading-[20px] tabular-nums text-ink-10';
 
 /**
  * ★★★ THE APR COLUMN WAS THE SAME NUMBER 250 TIMES (2026-08-10, fuckery list W-1).
@@ -85,19 +85,19 @@ export default function WitnessTableRow({
       // `group` so the two pinned cells, which need their own opaque background
       // to hide the columns scrolling underneath them, can still follow the
       // row's hover tint instead of staying flat while the rest of the row lifts.
-      className="group grid items-center gap-3 border-t border-[#f1f3f5] px-3.5 py-3.5 hover:bg-[#faf9f6]"
+      className="group grid items-center gap-3 border-t border-line-2 px-3.5 py-3.5 hover:bg-surface-12"
       style={{ gridTemplateColumns: gridTemplate }}
       data-testid="witness-row"
       data-witness={row.owner}
     >
       <span className={STICKY_RANK_CLASS}>
-        <span className="font-sans text-[16px] font-bold tabular-nums text-[#9ca3af]">{row.rank}</span>
+        <span className="font-sans text-[16px] font-bold tabular-nums text-ink-14">{row.rank}</span>
       </span>
 
       <WitnessIdentityCell row={row} className={STICKY_IDENTITY_CLASS} />
 
         <>
-          <span className={`${CELL_NUM_CLASS} font-bold text-[#161511]`} data-testid="witness-votes">
+          <span className={`${CELL_NUM_CLASS} font-bold text-ink-2`} data-testid="witness-votes">
             {formatHpVotes(row.hpVotes)}
           </span>
           <Link
@@ -118,7 +118,7 @@ export default function WitnessTableRow({
           <span
             className={
               row.isStale
-                ? 'text-right font-sans text-[13px] leading-[20px] tabular-nums text-[#c4c4c4] line-through'
+                ? 'text-right font-sans text-[13px] leading-[20px] tabular-nums text-ink-16 line-through'
                 : CELL_NUM_CLASS
             }
             title={row.isStale ? t('witnesses.stale_marker') : undefined}

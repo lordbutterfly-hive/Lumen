@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useRef } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
-import { useInView } from 'react-intersection-observer';
+import { FEED_AUTO_PAGE_CAP, useInfiniteScrollSentinel } from './hooks/use-infinite-scroll-sentinel';
+import ScrollPagerFooter from './scroll-pager-footer';
 import LeftRail from '@/blog/features/layouts/left-rail';
 import RightRail from '@/blog/features/layouts/right-rail';
 import PageMasthead from '@/blog/features/layouts/page-masthead';
@@ -38,7 +39,6 @@ const LIMIT = 30;
 
 export default function TopicShell({ tag }: { tag: string }) {
   const { t } = useTranslation('common_blog');
-  const { ref, inView } = useInView();
 
   // Same infinite scroll as the main feed — a topic is the feed, filtered, so it
   // must not stop after one page either.
@@ -85,9 +85,20 @@ export default function TopicShell({ tag }: { tag: string }) {
       refetchOnMount: false
     });
 
-  useEffect(() => {
-    if (inView && hasNextPage && !isFetchingNextPage) fetchNextPage();
-  }, [inView, hasNextPage, isFetchingNextPage, fetchNextPage]);
+  // ★ A TOPIC IS THE FEED, FILTERED — including its faults. This carried the
+  // same bare `inView` effect as `ForYouFeed`, so it fetched twice per scroll
+  // gesture and grew without limit: measured on :3000 before this change, forty
+  // scroll-to-bottom gestures on `/topics/hive-139531` left 191,617px of
+  // document, 36,628 DOM elements, 1,262 images and 1.06GB of JS heap.
+  // See hooks/use-infinite-scroll-sentinel.ts.
+  const sentinel = useInfiniteScrollSentinel({
+    hasNextPage,
+    isFetching: isFetchingNextPage,
+    isError,
+    fetchNextPage,
+    pagesLoaded: data?.pages?.length ?? 0,
+    autoPageCap: FEED_AUTO_PAGE_CAP
+  });
 
   const seen = new Set<string>();
   const nsfwPreference = useNsfwPreference();
@@ -241,14 +252,17 @@ export default function TopicShell({ tag }: { tag: string }) {
             alone; the effect above already guards against a request loop
             (`!isFetchingNextPage` before fetching, stops at `hasNextPage:
             false`), unchanged by this fix. */}
-        {hasNextPage ? (
-          <div ref={ref} className="py-8 text-center font-sans text-[13px] leading-[20px] text-[#6b7280]">
-            {isFetchingNextPage ? 'Loading more…' : ''}
-          </div>
-        ) : null}
-        {!hasNextPage && shown.length > 0 ? (
-          <p className="py-8 text-center font-sans text-[13px] leading-[20px] text-[#6b7280]">That’s everything under #{tag}.</p>
-        ) : null}
+        <ScrollPagerFooter
+          sentinel={sentinel}
+          hasNextPage={hasNextPage}
+          isFetchingNextPage={isFetchingNextPage}
+          isError={isError}
+          loadedCount={shown.length}
+          loadingLabel="Loading more…"
+          endLabel={shown.length > 0 ? `That’s everything under #${tag}.` : undefined}
+          className="py-8 text-center font-sans text-[13px] leading-[20px] text-[#6b7280]"
+          testId="topic-pager"
+        />
       </main>
 
       <aside className="sticky top-24 hidden h-fit bg-background-secondary xl:block">

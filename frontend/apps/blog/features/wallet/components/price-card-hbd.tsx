@@ -3,7 +3,7 @@
 import { useTranslation } from '@/blog/i18n/client';
 import { useHiveMarketPrices } from '../hooks/use-hive-market-prices';
 
-const CARD_CLASS = 'rounded-[18px] border border-[#ebebeb] bg-white p-5';
+const CARD_CLASS = 'rounded-[18px] border border-line-9 bg-surface-1 p-5';
 
 /**
  * HBD's "real" price on the wallet page is $1.000: the internal Hive market
@@ -22,9 +22,9 @@ export default function PriceCardHbd() {
 
   return (
     <div className={CARD_CLASS} data-testid="wallet-price-hbd">
-      <div className="font-sans text-[24px] font-bold tabular-nums text-[#161511]">$1.000</div>
-      <div className="mt-1.5 text-[13px] leading-[20px] text-[#6b7280]">{t('wallet.market.hbd_price_label')}</div>
-      <div className="mt-1.5 text-[12px] text-[#9ca3af]">
+      <div className="font-sans text-[24px] font-bold tabular-nums text-ink-2">$1.000</div>
+      <div className="mt-1.5 text-[13px] leading-[20px] text-ink-10">{t('wallet.market.hbd_price_label')}</div>
+      <div className="mt-1.5 text-[12px] text-ink-14">
         {isLoading || isError || !data
           ? t('wallet.market.unavailable')
           : t('wallet.market.hbd_source', { price: data.hbdUsd.toFixed(3) })}

@@ -16,19 +16,63 @@ import clsx from 'clsx';
 import { useTranslation } from '@/blog/i18n/client';
 import TooltipContainer from '@ui/components/tooltip-container';
 import { getLanguage, setLanguage } from '../../utils/language';
+import { languages as supportedLocales, defaultLocale } from '@/blog/i18n/settings';
 import { useRouter } from 'next/navigation';
 
-const languages = [
-  { locale: 'ar', label: 'عر' },
-  { locale: 'en', label: '🇬🇧' },
-  { locale: 'es', label: '🇪🇸' },
-  { locale: 'fr', label: '🇫🇷' },
-  { locale: 'it', label: '🇮🇹' },
-  { locale: 'ja', label: '🇯🇵' },
-  { locale: 'pl', label: '🇵🇱' },
-  { locale: 'ru', label: '🇷🇺' },
-  { locale: 'zh', label: '🇨🇳' }
-];
+/**
+ * ★★★ NAMES, NOT FLAGS AND NOT ISO CODES (2026-08-13, audit §1.2).
+ *
+ * This menu used to be nine flag emoji plus the bare ISO code — `🇵🇱 pl`,
+ * `🇯🇵 ja`, and `عر ar` for Arabic, which has no flag to borrow. Two separate
+ * problems, both confirmed live on the shipped build:
+ *
+ *  1. NOTHING NAMED A LANGUAGE. `pl` is not a word a Polish reader is looking
+ *     for; `Polski` is. The audit's whole read of this menu — "the menu lists
+ *     locales as raw ISO codes, not language names" — is that.
+ *  2. THE FLAGS DID NOT RENDER. On the audited machine every flag came out as
+ *     the two-letter regional-indicator fallback box, so the menu read as a
+ *     column of broken glyphs. That is a font question no CSS here can answer,
+ *     and it is not worth answering: a flag is a COUNTRY, and a language is not
+ *     one. 🇪🇸 is wrong for the ~90% of Spanish speakers outside Spain, 🇬🇧 is
+ *     wrong for most English speakers, and Arabic gets no flag at all — which is
+ *     precisely why the old list had to hand-write `عر` for that one row.
+ *
+ * So each row is now the language's own name in its own script (the endonym —
+ * what a reader who cannot read the current UI language will actually
+ * recognise), with the ISO code kept as a small muted tag beside it. The tag is
+ * not decoration: it keeps `data-testid={locale}` on a real element, which the
+ * e2e suite's `languageMenuPl` locator (`[data-testid="pl"]` -> parent) and the
+ * account-menu typeahead both already depend on.
+ *
+ * `lang`/`dir` on each name make the browser pick the right font and shape
+ * Arabic right-to-left inside an otherwise LTR menu.
+ */
+const LANGUAGE_ENDONYMS: Record<string, string> = {
+  ar: 'العربية',
+  en: 'English',
+  es: 'Español',
+  fr: 'Français',
+  it: 'Italiano',
+  ja: '日本語',
+  pl: 'Polski',
+  ru: 'Русский',
+  zh: '中文'
+};
+
+/** Right-to-left locales among the supported set — currently Arabic only, same test the root layout makes. */
+const RTL_LOCALES = new Set(['ar']);
+
+/**
+ * Derived from `i18n/settings.ts` rather than re-listed here, so a locale added
+ * to `languages` (the array `getOptions` validates against and `setLanguage`
+ * gates on) cannot silently fail to appear in the only UI that can select it.
+ */
+const languages = supportedLocales.map((locale) => ({
+  locale,
+  name: LANGUAGE_ENDONYMS[locale] ?? locale
+}));
+
+const META_CLASS = 'shrink-0 font-sans text-[13px] uppercase leading-[20px] text-ink-9';
 
 /**
  * ★ SUBMENU MODE (2026-08-13, QA V3-a11y item 2 / O5 build map item 1c
@@ -86,23 +130,51 @@ export default function LangToggle({
     router.refresh();
   };
 
-  const currentLabel = lang ? languages.find((language) => language.locale === lang)?.label : null;
+  const currentLocale = lang && LANGUAGE_ENDONYMS[lang] ? lang : defaultLocale;
+  const currentLabel = LANGUAGE_ENDONYMS[currentLocale];
 
-  const languageItems = languages.map(({ locale, label }) => (
-    <DropdownMenuItem key={label} onClick={() => handleLanguageChange(locale)}>
-      {label}
-      <span data-testid={locale}>&nbsp;{locale}</span>
+  const languageItems = languages.map(({ locale, name }) => (
+    <DropdownMenuItem
+      key={locale}
+      onClick={() => handleLanguageChange(locale)}
+      // The selected row has to be announceable, not just visually obvious --
+      // this list is the one place a reader who cannot read the current UI
+      // language has to be able to orient themselves.
+      aria-current={locale === currentLocale ? 'true' : undefined}
+      className="flex items-center justify-between gap-6"
+    >
+      <span lang={locale} dir={RTL_LOCALES.has(locale) ? 'rtl' : 'ltr'}>
+        {name}
+      </span>
+      <span data-testid={locale} className={META_CLASS}>
+        {locale}
+      </span>
     </DropdownMenuItem>
   ));
+
+  // The row reads like every other row in the account menu: what it is on the
+  // left, its current value quietly on the right ("Your tokens ... 3 held",
+  // "Language ... Polski"). Before this it led with the (unrenderable) flag and
+  // ran it straight into the word, giving "🇵🇱Language".
+  const currentValue = (
+    <span
+      lang={currentLocale}
+      dir={RTL_LOCALES.has(currentLocale) ? 'rtl' : 'ltr'}
+      className={clsx(META_CLASS, 'ml-auto normal-case')}
+      data-testid="current-language"
+    >
+      {currentLabel}
+    </span>
+  );
 
   if (renderAs === 'submenu') {
     return (
       <DropdownMenuSub>
         <DropdownMenuSubTrigger data-testid="toggle-language" className={className}>
-          <span>{currentLabel}</span>
-          {logged ? <span className="ml-2">{t('navigation.user_menu.toggle_lang')}</span> : null}
+          <span>{logged ? t('navigation.user_menu.toggle_lang') : t('navigation.main_nav_bar.language')}</span>
+          {currentValue}
         </DropdownMenuSubTrigger>
-        <DropdownMenuSubContent className="rounded-2xl border border-[#ebebeb] bg-white p-2 shadow-[0_12px_34px_rgba(20,18,10,0.12)]">
+        <DropdownMenuSubContent className="rounded-2xl border border-line-9 bg-surface-1 p-2 shadow-[0_12px_34px_rgba(20,18,10,0.12)]">
           {languageItems}
         </DropdownMenuSubContent>
       </DropdownMenuSub>
@@ -116,11 +188,13 @@ export default function LangToggle({
           <Button
             variant="ghost"
             size="sm"
-            className={clsx('flex h-10 w-full p-0 text-start font-normal', className, { 'h-6': logged })}
+            className={clsx('flex h-10 w-full gap-2 p-0 text-start font-normal', className, {
+              'h-6': logged
+            })}
             data-testid="toggle-language"
           >
-            <span>{currentLabel}</span>
-            {logged ? <span className="ml-2 w-full">{t('navigation.user_menu.toggle_lang')}</span> : null}
+            <span>{logged ? t('navigation.user_menu.toggle_lang') : t('navigation.main_nav_bar.language')}</span>
+            {currentValue}
           </Button>
         </DropdownMenuTrigger>
       </TooltipContainer>

@@ -26,7 +26,7 @@ const CommentSelectFilter = () => {
       }}
     >
       <SelectTrigger
-        className="h-5 w-fit border-none bg-transparent text-red-600"
+        className="h-5 w-fit border-none bg-transparent text-ink-brand-7"
         data-testid="posts-filter"
         aria-label="Sort comments"
       >

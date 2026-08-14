@@ -26,7 +26,6 @@ import VotesComponentWrapper from '@/blog/features/votes/votes-component-wrapper
 import { ReblogDialog } from '@/blog/features/list-of-posts/reblog-dialog';
 import { useReblogMutation } from '@/blog/features/list-of-posts/hooks/use-reblog-mutation';
 import PostCardCommentTooltip from '@/blog/features/list-of-posts/post-card-comment-tooltip';
-import PostCardUpvotesTooltip from '@/blog/features/list-of-posts/post-card-upvotes-tooltip';
 import DetailsCardHover from '@/blog/features/list-of-posts/details-card-hover';
 import { LeagueByline } from '@/blog/features/retention/components/league-byline';
 import type { RankMark } from '@/blog/features/retention/hooks/use-rank-marks';
@@ -610,12 +609,12 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
             not from a background. Hover still lights each control, matching the
             comment and reblog buttons beside it. */}
         <div className="flex items-center gap-1 rounded-[10px] px-1 py-1.5 [&_svg]:h-[20px] [&_svg]:w-[20px]">
+          {/* ★ The tally lives INSIDE the vote control now (Blade redesign,
+              2026-08-14). This sibling printed `total_votes` a second time, so every
+              card read "759 759" — measured on the Blade build before removal. The
+              control's own tally is the split up/down count Hive actually keeps; this
+              one was a single netted number and could never show a downvote. */}
           <VotesComponentWrapper post={post} type="post" />
-          {post.stats ? (
-            <span className="flex items-center pl-1 font-bold tabular-nums text-[#2a2822]">
-              <PostCardUpvotesTooltip votes={post.stats.total_votes} iconClassName="hidden" />
-            </span>
-          ) : null}
         </div>
 
         {/* Comments ghost button */}

@@ -74,7 +74,7 @@ const MainPageLayout = ({
   return (
     <div className="relative mx-auto grid max-w-[1720px] grid-cols-1 gap-11 px-6 pb-20 pt-[26px] md:grid-cols-[200px_minmax(0,1fr)] md:px-11 xl:grid-cols-[200px_minmax(0,1fr)_312px]">
       <div
-        className="pointer-events-none absolute bottom-20 left-[244px] top-[26px] hidden w-px bg-[#ececec] md:block"
+        className="pointer-events-none absolute bottom-20 left-[244px] top-[26px] hidden w-px bg-surface-26 md:block"
         aria-hidden
       />
 
@@ -87,7 +87,7 @@ const MainPageLayout = ({
           <div className="mb-5 flex w-full items-center justify-between" translate="no">
             <div className="mr-2 flex w-[320px] flex-col">
               <span
-                className="hidden font-sans text-[15px] leading-[24px] font-semibold text-[#161511] md:block"
+                className="hidden font-sans text-[15px] leading-[24px] font-semibold text-ink-2 md:block"
                 data-testid="community-name"
               >
                 {renderListName()}

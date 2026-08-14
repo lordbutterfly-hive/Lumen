@@ -195,11 +195,11 @@ export function RetentionNudge({ className }: { className?: string }) {
 
   return (
     <section
-      className={`relative flex items-start gap-3 rounded-[16px] border border-[#ebebeb] bg-[#faf9f6] px-5 py-3.5 ${className ?? ''}`}
+      className={`relative flex items-start gap-3 rounded-[16px] border border-line-9 bg-surface-12 px-5 py-3.5 ${className ?? ''}`}
       data-testid="retention-nudge"
       data-nudge-kind={nudge.kind}
     >
-      <p className="min-w-0 flex-1 pr-6 font-sans text-[15px] leading-[24px] text-[#3f4650]">
+      <p className="min-w-0 flex-1 pr-6 font-sans text-[15px] leading-[24px] text-ink-7">
         {t(key, vars)}
         {/* ★★ IT LINKED TO `/notifications`, WHICH DOES NOT EXIST (found 2026-08-09 by a UX
             agent: "the nudge's only CTA 404s"). Not a typo — `app/notifications` was never
@@ -216,7 +216,7 @@ export function RetentionNudge({ className }: { className?: string }) {
         {nudge.kind === 'unanswered' && replyHref ? (
           <>
             {' '}
-            <Link href={replyHref} className="font-semibold text-[#c0392b] hover:underline">
+            <Link href={replyHref} className="font-semibold text-ink-brand-6 hover:underline">
               {t('retention.nudge.open')}
             </Link>
           </>
@@ -227,7 +227,7 @@ export function RetentionNudge({ className }: { className?: string }) {
         onClick={dismiss}
         aria-label={t('retention.nudge.dismiss')}
         data-testid="retention-nudge-dismiss"
-        className="absolute right-3 top-3 rounded-full p-1.5 text-[#9ca3af] transition-colors hover:bg-[#f1f3f5] hover:text-[#3f4650]"
+        className="absolute right-3 top-3 rounded-full p-1.5 text-ink-14 transition-colors hover:bg-surface-23 hover:text-ink-7"
       >
         <Icons.close className="h-4 w-4" />
       </button>

@@ -28,11 +28,11 @@ export default function WitnessesHeader() {
       title={
         <>
           {t('witnesses.title')}{' '}
-          <span className="font-normal italic text-[#9ca3af]">{t('witnesses.subtitle')}</span>
+          <span className="font-normal italic text-ink-14">{t('witnesses.subtitle')}</span>
         </>
       }
     >
-      <p className="max-w-[620px] font-serif text-[13px] leading-[20px] text-[#6b7280]">{t('witnesses.intro')}</p>
+      <p className="max-w-[620px] font-serif text-[13px] leading-[20px] text-ink-10">{t('witnesses.intro')}</p>
     </PageMasthead>
   );
 }

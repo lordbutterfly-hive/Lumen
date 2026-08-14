@@ -83,7 +83,7 @@ const ProfileSubpageShell = ({
       }`}
     >
       <div
-        className="pointer-events-none absolute bottom-20 left-[244px] top-[26px] hidden w-px bg-[#ececec] md:block"
+        className="pointer-events-none absolute bottom-20 left-[244px] top-[26px] hidden w-px bg-surface-26 md:block"
         aria-hidden
       />
 
@@ -98,7 +98,7 @@ const ProfileSubpageShell = ({
               from that header a sub-page actually needed. */}
           <BasePathLink
             href={`/@${username}`}
-            className="font-semibold text-[#c0392b] hover:text-[#96271b]"
+            className="font-semibold text-ink-brand-6 hover:text-ink-brand-4"
             data-testid="profile-subpage-back"
           >
             {t('profile.subpage.back_to_profile')}

@@ -113,7 +113,7 @@ const HealthCheckersWrapper = () => {
         <h3 className='py-4 text-lg'>API switch and HealthChecker</h3>
         <p className='mb-4 text-center text-muted-foreground'>You can switch your provider here. Use &quot;Continuos Check&quot; to start evaluating them.</p>
         <p className=' mb-4 text-center text-muted-foreground'>
-          For the best experience run HealthChecker use only providers with <CircleCheck className='inline-block w-4 h-4 text-green-600' /> icon.
+          For the best experience run HealthChecker use only providers with <CircleCheck className='inline-block w-4 h-4 text-ink-ok-4' /> icon.
         </p>
         <p className='text-center text-muted-foreground'>
           Click &quot;Switch to Best&quot; button for Healthchecker to automatically select the best possible API.

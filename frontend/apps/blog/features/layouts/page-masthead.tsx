@@ -49,21 +49,29 @@ interface PageMastheadProps {
 }
 
 const PageMasthead: FC<PageMastheadProps> = ({ eyebrow, title, mark, children, actions }) => (
-  <header className="relative mb-7 overflow-hidden rounded-[20px] border border-[#eee2dc] border-l-[3px] border-l-[#c0392b] bg-[radial-gradient(125%_130%_at_0%_0%,#f7c9bd_0%,#fbdfd6_30%,#fdefe9_58%,#fffdfc_85%)] px-7 pb-5 pt-7">
+  // The gradient stops are tokens (see --masthead-* in globals.css): a
+  // `bg-[radial-gradient(...)]` is a background-IMAGE, so the colours live
+  // inline and nothing else can theme them. The light values are byte-identical
+  // to the hexes that were here.
+  <header className="relative mb-7 overflow-hidden rounded-[20px] border border-line-warn-3 border-l-[3px] border-l-line-brand-10 bg-[radial-gradient(125%_130%_at_0%_0%,rgb(var(--masthead-1))_0%,rgb(var(--masthead-2))_30%,rgb(var(--masthead-3))_58%,rgb(var(--masthead-4))_85%)] px-7 pb-5 pt-7">
     {mark ? <MastheadGlyph mark={mark} /> : null}
 
     {eyebrow ? (
-      <p className="relative z-10 mb-1.5 text-[12px] leading-[18px] font-semibold uppercase tracking-[0.14em] text-[#c0392b]/70">
+      // `/70` de-emphasises the eyebrow, which costs contrast: 70% of the brand
+      // ink cannot clear 4.5:1 over ANY ground dark enough to be a dark masthead
+      // (measured: 4.48:1 even at #231815). Light keeps the 70% it was designed
+      // with; dark restores full strength, which reads as the same weight there.
+      <p className="relative z-10 mb-1.5 text-[12px] leading-[18px] font-semibold uppercase tracking-[0.14em] text-ink-brand-6/70 dark:text-ink-brand-6">
         {eyebrow}
       </p>
     ) : null}
 
-    <h1 className="relative z-10 font-serif text-[34px] font-semibold leading-[38px] tracking-[-0.015em] text-[#161511]">
+    <h1 className="relative z-10 font-serif text-[34px] font-semibold leading-[38px] tracking-[-0.015em] text-ink-2">
       {title}
     </h1>
 
     {children || actions ? (
-      <div className="relative z-10 mt-3.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[13px] leading-[20px] text-[#6b7280]">
+      <div className="relative z-10 mt-3.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[13px] leading-[20px] text-ink-10">
         {children}
         {actions ? <div className="ml-auto flex items-center gap-2">{actions}</div> : null}
       </div>

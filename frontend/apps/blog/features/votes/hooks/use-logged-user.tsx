@@ -21,6 +21,12 @@ interface Manabars {
 type LoggedUserContextType = {
   loggedUser: FullAccount | undefined;
   net_vests: number;
+  /**
+   * Whether `net_vests` is an ANSWER or a PLACEHOLDER. See `vestsKnown` below —
+   * a consumer that branches on `net_vests` must read this too, or it is
+   * treating "we have not found out yet" as "the account has nothing".
+   */
+  vestsKnown: boolean;
   reputation: number;
   manabarsData: Manabars | null | undefined;
 };
@@ -82,8 +88,39 @@ export const LoggedUserProvider: FC<{ children: React.ReactNode }> = ({ children
   const net_vests = accountData?.vesting_shares ? netVests(accountData) : 0;
   const reputation = accountData?.reputation ?? 25;
 
+  /**
+   * ★★★ ZERO IS ALSO WHAT "I DON'T KNOW YET" LOOKS LIKE (2026-08-13, vote-%
+   * bug). The line above collapses four very different situations into the
+   * single number 0:
+   *
+   *   1. a lite account, which genuinely has no Hive account and no vests;
+   *   2. a chain account whose `/api/account` read has not come back YET;
+   *   3. a chain account whose `/api/account` read FAILED (502) — `data` stays
+   *      undefined and there is no retry that will ever change that;
+   *   4. nobody identified yet, because `/api/users/me` has not answered (or
+   *      never will — see `sessionUnavailable` in server-session.tsx). Then
+   *      `user.username` is empty, `enabled` is false, and this query does not
+   *      run AT ALL, so 0 is not a measurement, it is a default.
+   *
+   * Only (1) is an answer. `votes-component.tsx` compared `net_vests` against a
+   * 1,000,000-VESTS threshold to decide whether to offer a vote-percentage
+   * slider, so in cases 2-4 it silently rendered the one-shot 100% vote button
+   * instead — a live control that casts a full-power, on-chain vote on a single
+   * click, visually identical to the percentage picker it replaced. Measured on
+   * this box against a real account (lordbutterfly, net_vests 112,275,707.67,
+   * 112x the threshold): the arrow was the one-shot button for the first ~380ms
+   * of every page load, for ~5.9s when the chain read was slow, and PERMANENTLY
+   * when `/api/account` or `/api/users/me` failed.
+   *
+   * So publish whether the number is an answer. The consumer decides what to do
+   * with "unknown"; what it must not do is keep reading it as "zero".
+   */
+  const vestsKnown = user.account_tier === 'lite' || !!accountData?.vesting_shares;
+
   return (
-    <LoggedUserContext.Provider value={{ loggedUser: accountData, net_vests, reputation, manabarsData }}>
+    <LoggedUserContext.Provider
+      value={{ loggedUser: accountData, net_vests, vestsKnown, reputation, manabarsData }}
+    >
       {children}
     </LoggedUserContext.Provider>
   );

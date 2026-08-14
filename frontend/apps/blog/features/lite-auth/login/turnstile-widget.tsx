@@ -121,7 +121,7 @@ const TurnstileWidget: FC<Props> = ({ onToken }) => {
     <div className="mb-4">
       <div ref={holder} />
       {failed ? (
-        <p className="mt-2 text-[13px] leading-[20px] text-[#b45309]">
+        <p className="mt-2 text-[13px] leading-[20px] text-ink-warn-3">
           The human check couldn’t load. Please refresh and try again.
         </p>
       ) : null}

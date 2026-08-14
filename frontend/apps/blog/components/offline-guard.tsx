@@ -275,7 +275,7 @@ export default function OfflineGuard({ children }: { children: ReactNode }) {
           {offline ? (
             <div
               data-testid="offline-banner"
-              className="flex items-center gap-2 rounded-full border border-[#eee2dc] bg-[#161511] px-4 py-2 font-sans text-[13px] leading-[20px] text-white shadow-[0_2px_8px_rgba(20,18,10,0.25)]"
+              className="flex items-center gap-2 rounded-full border border-line-warn-3 bg-surface-43 px-4 py-2 font-sans text-[13px] leading-[20px] text-ink-27 shadow-[0_2px_8px_rgba(20,18,10,0.25)]"
             >
               <WifiOff className="h-4 w-4 shrink-0" aria-hidden="true" />
               <span>{t('global.offline_banner')}</span>

@@ -184,6 +184,28 @@ export function fetchCommunityRoles(community: string): Promise<string[][] | nul
   return fetchJson(`/api/community-roles?community=${encodeURIComponent(community)}`, 'community roles');
 }
 
+/** One account's row in one community, reduced server-side. See the route. */
+export interface CommunityRoleOfAccount {
+  account: string;
+  role: string | null;
+  title: string | null;
+}
+/**
+ * ★ THE POST PAGE ASKS ONE QUESTION, NOT FOR THE LIST (2026-08-13). Its only use
+ * of community roles is "may this viewer moderate here", which it computed by
+ * downloading every role row in the community and searching it in the browser —
+ * 593 rows for `hive-141359`, measured — to produce one boolean. The reduction
+ * belongs on the side that already holds the list. `fetchCommunityRoles` above is
+ * unchanged and still backs `/roles/[tag]`, which genuinely renders the table.
+ */
+export function fetchCommunityRoleOfAccount(
+  community: string,
+  account: string
+): Promise<CommunityRoleOfAccount> {
+  const params = new URLSearchParams({ community, account });
+  return fetchJson(`/api/community-roles?${params.toString()}`, 'community role');
+}
+
 export function fetchWitnesses(limit: number): Promise<IWitness[]> {
   return fetchJson(`/api/witnesses?limit=${limit}`, 'witnesses');
 }

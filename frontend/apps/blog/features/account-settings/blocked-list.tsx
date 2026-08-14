@@ -159,17 +159,17 @@ const BlockedList = ({ username }: { username: string }) => {
         // `undefined` on a failed read, so the empty branch below would otherwise
         // catch it and state, in plain language, that this reader has blocked nobody.
         <p
-          className="mt-4 rounded-[14px] border border-[#eee2dc] bg-[#fbfbfa] px-4 py-5 text-center text-[14px] leading-[22px] text-[#6b7280]"
+          className="mt-4 rounded-[14px] border border-line-warn-3 bg-surface-5 px-4 py-5 text-center text-[14px] leading-[22px] text-ink-10"
           data-testid="settings-blocked-accounts-error"
         >
           {t('settings_page.blocked_accounts_error')}
         </p>
       ) : !data || data.length === 0 ? (
-        <p className="mt-4 rounded-[14px] bg-[#f7f7f7] px-4 py-5 text-center text-[14px] leading-[22px] text-[#6b7280]">
+        <p className="mt-4 rounded-[14px] bg-surface-15 px-4 py-5 text-center text-[14px] leading-[22px] text-ink-10">
           {t('settings_page.blocked_accounts_empty')}
         </p>
       ) : (
-        <ul className="mt-4 divide-y divide-[#f1f3f5] border-t border-[#f1f3f5]">
+        <ul className="mt-4 divide-y divide-line-2 border-t border-line-2">
           {data.map((peer) => {
             const pending = pendingName === peer.name;
             const fromChain = peer.source === 'chain' || peer.source === 'both';
@@ -185,7 +185,7 @@ const BlockedList = ({ username }: { username: string }) => {
                 <div className="min-w-0 flex-1">
                   <BasePathLink
                     href={`/@${peer.name}`}
-                    className="block truncate text-[14px] leading-[22px] font-semibold text-[#161511] hover:text-[#c0392b]"
+                    className="block truncate text-[14px] leading-[22px] font-semibold text-ink-2 hover:text-ink-brand-6"
                   >
                     @{peer.name}
                   </BasePathLink>
@@ -195,7 +195,7 @@ const BlockedList = ({ username }: { username: string }) => {
                       everyone else. */}
                   {fromChain ? (
                     <p
-                      className="mt-0.5 truncate text-[12px] text-[#9ca3af]"
+                      className="mt-0.5 truncate text-[12px] text-ink-14"
                       data-testid="settings-blocked-chain-badge"
                     >
                       {t('settings_page.blocked_accounts_chain_hint')}
@@ -206,7 +206,7 @@ const BlockedList = ({ username }: { username: string }) => {
                 <button
                   type="button"
                   data-testid="settings-unblock-button"
-                  className="inline-flex h-9 min-w-[92px] items-center justify-center rounded-[14px] border border-[#e4e6e9] bg-white px-4 text-[13px] leading-[20px] font-bold text-[#c0392b] transition-colors hover:border-[#c0392b] hover:bg-[#fdf2f0] disabled:cursor-not-allowed disabled:opacity-60"
+                  className="inline-flex h-9 min-w-[92px] items-center justify-center rounded-[14px] border border-line-11 bg-surface-1 px-4 text-[13px] leading-[20px] font-bold text-ink-brand-6 transition-colors hover:border-line-brand-10 hover:bg-surface-brand-5 disabled:cursor-not-allowed disabled:opacity-60"
                   onClick={() => (fromChain ? handleChainRemove(peer) : handleUnblock(peer))}
                   disabled={pending}
                 >

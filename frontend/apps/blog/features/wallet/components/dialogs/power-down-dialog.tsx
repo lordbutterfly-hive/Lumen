@@ -117,7 +117,7 @@ export default function PowerDownDialog({
         error={form.formState.errors.amount?.message}
         testId="wallet-power-down-amount"
       />
-      <p className="text-[13px] leading-[20px] text-[#6b7280]">
+      <p className="text-[13px] leading-[20px] text-ink-10">
         {t('wallet.dialogs.power_down.per_week', {
           amount: new Big(amount).div(HIVE_VESTING_WITHDRAW_INTERVALS).toFixed(3)
         })}

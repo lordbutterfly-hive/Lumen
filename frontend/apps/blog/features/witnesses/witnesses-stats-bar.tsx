@@ -59,24 +59,24 @@ export default function WitnessesStatsBar({
 
   return (
     <div
-      className="my-5 flex flex-wrap items-center gap-[26px] rounded-2xl border border-[#ebebeb] bg-[#fbfbfa] px-[22px] py-4 font-sans text-[14px] leading-[22px] text-[#6b7280]"
+      className="my-5 flex flex-wrap items-center gap-[26px] rounded-2xl border border-line-9 bg-surface-5 px-[22px] py-4 font-sans text-[14px] leading-[22px] text-ink-10"
       data-testid="witnesses-stats-bar"
     >
       <span>
         {t('witnesses.stats.hp_apr')}{' '}
-        <strong className={`${STAT_VALUE_CLASS} text-[#2f7d4f]`}>
+        <strong className={`${STAT_VALUE_CLASS} text-ink-ok-2`}>
           {hpAprPercent !== null ? `${hpAprPercent.toFixed(2)}%` : <StatSkeleton />}
         </strong>
       </span>
       <span>
         {t('witnesses.stats.hbd_rate')}{' '}
-        <strong className={`${STAT_VALUE_CLASS} text-[#161511]`}>
+        <strong className={`${STAT_VALUE_CLASS} text-ink-2`}>
           {hbdInterestRatePercent !== null ? `${hbdInterestRatePercent.toFixed(2)}%` : <StatSkeleton />}
         </strong>
       </span>
       <span>
         {t('witnesses.stats.witness_count')}{' '}
-        <strong className={`${STAT_VALUE_CLASS} text-[#161511]`}>
+        <strong className={`${STAT_VALUE_CLASS} text-ink-2`}>
           {!totalWitnessCount ? (
             <StatSkeleton />
           ) : witnessCount === totalWitnessCount ? (
@@ -89,21 +89,21 @@ export default function WitnessesStatsBar({
 
       {!isLoggedIn ? (
         <DialogLogin>
-          <button type="button" className="ml-auto font-semibold text-[#c0392b] hover:text-[#96271b]">
+          <button type="button" className="ml-auto font-semibold text-ink-brand-6 hover:text-ink-brand-4">
             {t('witnesses.stats.log_in_to_vote')}
           </button>
         </DialogLogin>
       ) : hasProxy ? (
-        <span className="ml-auto font-semibold text-[#c0392b]" data-testid="witnesses-stats-proxy-active">
+        <span className="ml-auto font-semibold text-ink-brand-6" data-testid="witnesses-stats-proxy-active">
           {t('witnesses.stats.proxy_active', { proxy: proxyAccount })}
         </span>
       ) : votesLeft !== null ? (
-        <span className="ml-auto font-semibold text-[#c0392b]" data-testid="witnesses-stats-votes-left">
+        <span className="ml-auto font-semibold text-ink-brand-6" data-testid="witnesses-stats-votes-left">
           {t('witnesses.stats.votes_left', { count: votesLeft })}
         </span>
       ) : (
         <span
-          className={`ml-auto font-semibold text-[#9ca3af] ${STAT_VALUE_CLASS}`}
+          className={`ml-auto font-semibold text-ink-14 ${STAT_VALUE_CLASS}`}
           data-testid="witnesses-stats-votes-left-unavailable"
         >
           <StatSkeleton />

@@ -1,52 +1,35 @@
 import { useQuery } from '@tanstack/react-query';
-import { getChain } from '@transaction/lib/chain';
-import type { HiveOperation } from '@hive/common-hiveio-packages/wax';
-import { WALLET_HISTORY_OPERATION_NAMES } from '../lib/account-history';
-
-/** One page is enough for a "Recent activity" card — the full-history link
- * (see getTransfersUrl) is where someone goes for more than this. */
-export const HISTORY_PAGE_SIZE = 25;
+import type { DescribedHistoryEntry } from '../lib/account-history';
 
 export interface WalletHistoryPage {
-  operations: HiveOperation[];
+  entries: DescribedHistoryEntry[];
   totalOperations: number;
 }
 
 /**
- * Real on-chain wallet activity for `username`, via two REST calls — the
- * same two apps/wallet's pre-Lumen account-history feed made (see
- * apps/wallet/lib/hive.ts `getAccountOperations`):
+ * Real on-chain wallet activity for `username`, already described.
  *
- *  1. hafah-api/operation-types, to resolve the numeric op_type_ids the
- *     hivemind filter wants (they're not stable enough to hardcode).
- *  2. hivemind-api/accounts/{name}/operations, filtered to just the wallet-
- *     relevant types, so posting/voting activity doesn't crowd out transfers.
+ * ★★★ THROUGH OUR SERVER, NOT `chain.restApi` (2026-08-13, browser audit §1.5).
+ * This hook used to call `hafah-api/operation-types` and
+ * `hivemind-api/accounts/{name}/operations` straight from the browser — two of
+ * the nineteen direct api.hive.blog requests measured on `/wallet` — and then
+ * handed the raw operations to `describeHistoryOperation`, which needs a wax
+ * `Chain` for its vests->HP conversion AND for the asset symbols. Both calls and
+ * the describing now happen in `/api/wallet/history`; see that route for why the
+ * describing had to move with them rather than staying here.
  *
- * Both are real Hive REST APIs (not condenser JSON-RPC), so they hang off
- * `chain.restApi` — the same access pattern
- * packages/transaction/lib/hivesense-api.ts already uses in this app for the
- * AI-search endpoint.
+ * `lang` is passed through because one branch of the describer joins a
+ * multi-asset reward with `Intl.ListFormat`. Everything else it emits is already
+ * an i18n key, so the caller still decides the wording.
  */
-export function useAccountHistory(username: string) {
+export function useAccountHistory(username: string, lang: string) {
   return useQuery<WalletHistoryPage>({
-    queryKey: ['walletAccountHistory', username],
+    queryKey: ['walletAccountHistory', username, lang],
     queryFn: async () => {
-      const chain = await getChain();
-      const opTypes = await chain.restApi['hafah-api']['operation-types']();
-      const operationTypeIds = WALLET_HISTORY_OPERATION_NAMES.map(
-        (name) => opTypes.find((opType) => opType.operation_name === name)?.op_type_id
-      )
-        .filter((id): id is number => id !== undefined)
-        .join(',');
-
-      const response = await chain.restApi['hivemind-api'].accountsOperations({
-        'account-name': username,
-        'page-size': HISTORY_PAGE_SIZE,
-        'operation-types': operationTypeIds,
-        'observer-name': username
-      });
-
-      return { operations: response.operations_result, totalOperations: response.total_operations };
+      const params = new URLSearchParams({ username, lang });
+      const res = await fetch(`/api/wallet/history?${params.toString()}`);
+      if (!res.ok) throw new Error(`wallet history request failed: HTTP ${res.status}`);
+      return (await res.json()) as WalletHistoryPage;
     },
     enabled: !!username,
     refetchInterval: 60_000

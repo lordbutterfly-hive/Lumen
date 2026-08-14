@@ -233,7 +233,7 @@ const InterestPicker: FC<{ openSignal?: number }> = ({ openSignal = 0 }) => {
          * `p-4` gutter so the box never touches the window edge.
          */
         wrapperClassName="items-center p-4 sm:p-6"
-        className="relative flex max-h-[min(760px,90vh)] w-[min(680px,94vw)] flex-col overflow-hidden rounded-[16px] bg-white shadow-xl"
+        className="relative flex max-h-[min(760px,90vh)] w-[min(680px,94vw)] flex-col overflow-hidden rounded-[16px] bg-surface-1 shadow-xl"
         // ★ CLICKING AWAY MUST DISMISS IT (2026-08-07).
         //
         // This was `onInteractOutside={(e) => e.preventDefault()}` — a modal that
@@ -259,12 +259,12 @@ const InterestPicker: FC<{ openSignal?: number }> = ({ openSignal = 0 }) => {
             {/* The one honest wait in the product. */}
             <div
               aria-hidden
-              className="h-10 w-10 animate-spin rounded-full border-[3px] border-[#ecebe6] border-t-[#c0392b]"
+              className="h-10 w-10 animate-spin rounded-full border-[3px] border-line-10 border-t-line-brand-10"
             />
-            <DialogTitle className="font-serif text-[22px] leading-[34px] font-bold text-[#161511]">
+            <DialogTitle className="font-serif text-[22px] leading-[34px] font-bold text-ink-2">
               {COPY.building}
             </DialogTitle>
-            <DialogDescription className="font-sans text-[14px] leading-[22px] text-[#6b7280]">
+            <DialogDescription className="font-sans text-[14px] leading-[22px] text-ink-10">
               {COPY.buildingSub}
             </DialogDescription>
           </div>
@@ -272,10 +272,10 @@ const InterestPicker: FC<{ openSignal?: number }> = ({ openSignal = 0 }) => {
           <>
             {/* pr-14 keeps the title clear of the close button in the corner. */}
             <div className="shrink-0 px-7 pb-4 pr-14 pt-7">
-              <DialogTitle className="font-serif text-[26px] font-bold leading-[34px] text-[#161511]">
+              <DialogTitle className="font-serif text-[26px] font-bold leading-[34px] text-ink-2">
                 {COPY.title}
               </DialogTitle>
-              <DialogDescription className="mt-1.5 max-w-[52ch] font-sans text-[15px] leading-[24px] text-[#6b7280]">
+              <DialogDescription className="mt-1.5 max-w-[52ch] font-sans text-[15px] leading-[24px] text-ink-10">
                 {COPY.subtitle}
               </DialogDescription>
               {/* ★ NOTHING SAID HOW TO LEAVE (2026-08-10, T-3). Escape worked and
@@ -289,7 +289,7 @@ const InterestPicker: FC<{ openSignal?: number }> = ({ openSignal = 0 }) => {
                   "asked, declined" state rather than silently re-prompting. */}
               <DialogClose
                 aria-label={COPY.close}
-                className="absolute right-4 top-4 rounded-full p-2 text-[#9ca3af] transition-colors hover:bg-[#f4f5f7] hover:text-[#161511] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c0392b]"
+                className="absolute right-4 top-4 rounded-full p-2 text-ink-14 transition-colors hover:bg-surface-21 hover:text-ink-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-line-brand-10"
               >
                 <Icons.x className="h-[18px] w-[18px]" />
               </DialogClose>
@@ -299,7 +299,7 @@ const InterestPicker: FC<{ openSignal?: number }> = ({ openSignal = 0 }) => {
               {sectionsOf(options).map((section) => (
                 <div key={section.group || 'all'} className="mb-5">
                   {section.group ? (
-                    <h3 className="mb-2 font-sans text-[12px] font-semibold uppercase tracking-[0.08em] text-[#9ca3af]">
+                    <h3 className="mb-2 font-sans text-[12px] font-semibold uppercase tracking-[0.08em] text-ink-14">
                       {section.group}
                     </h3>
                   ) : null}
@@ -339,8 +339,8 @@ const InterestPicker: FC<{ openSignal?: number }> = ({ openSignal = 0 }) => {
                           className={cn(
                             'rounded-full border px-4 py-2.5 font-sans text-[14px] leading-[22px] transition-colors',
                             on
-                              ? 'border-[#c0392b] bg-[#c0392b] font-medium text-white'
-                              : 'border-[#e4e6e9] bg-white text-[#161511] hover:border-[#c0392b] hover:text-[#c0392b]',
+                              ? 'border-line-brand-10 bg-surface-brand-12 font-medium text-ink-27'
+                              : 'border-line-11 bg-surface-1 text-ink-2 hover:border-line-brand-10 hover:text-ink-brand-6',
                             full && 'cursor-not-allowed opacity-40'
                           )}
                         >
@@ -353,23 +353,23 @@ const InterestPicker: FC<{ openSignal?: number }> = ({ openSignal = 0 }) => {
               ))}
             </div>
 
-            <div className="flex shrink-0 items-center justify-between gap-4 border-t border-[#ebedf0] px-7 py-5">
+            <div className="flex shrink-0 items-center justify-between gap-4 border-t border-line-6 px-7 py-5">
               <button
                 type="button"
                 onClick={() => save([])}
-                className="font-sans text-[14px] leading-[22px] text-[#9ca3af] underline-offset-2 hover:text-[#161511] hover:underline"
+                className="font-sans text-[14px] leading-[22px] text-ink-14 underline-offset-2 hover:text-ink-2 hover:underline"
               >
                 {COPY.skip}
               </button>
               <div className="flex items-center gap-3">
-                <span className="font-sans text-[13px] leading-[20px] text-[#9ca3af]">
+                <span className="font-sans text-[13px] leading-[20px] text-ink-14">
                   {COPY.counter(picked.length, max)}
                 </span>
                 <Button
                   type="button"
                   disabled={picked.length < min}
                   onClick={() => save(picked)}
-                  className="rounded-[10px] bg-[#c0392b] px-5 py-2.5 font-sans text-[14px] leading-[22px] font-semibold text-white hover:bg-[#a83224] disabled:opacity-40"
+                  className="rounded-[10px] bg-surface-brand-12 px-5 py-2.5 font-sans text-[14px] leading-[22px] font-semibold text-ink-27 hover:bg-surface-brand-15 disabled:opacity-40"
                 >
                   {COPY.cta(picked.length, min)}
                 </Button>

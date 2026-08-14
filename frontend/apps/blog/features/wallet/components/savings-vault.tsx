@@ -56,16 +56,16 @@ export default function SavingsVault({
   return (
     <section id="savings-vault">
       <div className="mb-4 mt-[34px] flex items-center gap-3.5">
-        <span className="text-[12px] font-bold uppercase tracking-[0.09em] text-[#9ca3af]">
+        <span className="text-[12px] font-bold uppercase tracking-[0.09em] text-ink-14">
           {t('wallet.savings.label')}
         </span>
-        <div className="h-px flex-1 bg-[#ebebeb]" />
+        <div className="h-px flex-1 bg-surface-27" />
       </div>
 
-      <div className="mb-[18px] rounded-[20px] border-2 border-[#d7e6dd] bg-gradient-to-b from-[#f4faf6] to-[#fbfdfb] p-5">
+      <div className="mb-[18px] rounded-[20px] border-2 border-line-13 bg-gradient-to-b from-surface-13 to-surface-2 p-5">
         <div className="mb-4 flex items-start gap-3.5">
           <span
-            className="flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-xl bg-[#3a5a80]"
+            className="flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-xl bg-surface-info-9"
             aria-hidden
           >
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
@@ -76,8 +76,8 @@ export default function SavingsVault({
             </svg>
           </span>
           <div>
-            <div className="text-[20px] font-semibold text-[#161511]">{t('wallet.savings.heading')}</div>
-            <p className="mt-0.5 font-serif text-[13px] leading-[20px] text-[#6b7280]">{t('wallet.savings.description')}</p>
+            <div className="text-[20px] font-semibold text-ink-2">{t('wallet.savings.heading')}</div>
+            <p className="mt-0.5 font-serif text-[13px] leading-[20px] text-ink-10">{t('wallet.savings.description')}</p>
           </div>
         </div>
 
@@ -123,7 +123,7 @@ export default function SavingsVault({
               <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2.5">
                 {rewardHbd.gt(0) ? (
                   <div className="text-right">
-                    <div className="text-[12px] tabular-nums text-[#9ca3af]">
+                    <div className="text-[12px] tabular-nums text-ink-14">
                       {t('wallet.savings.claimable', { amount: formatTokenAmount(rewardHbd) })}
                     </div>
                   </div>
@@ -132,7 +132,7 @@ export default function SavingsVault({
                   type="button"
                   onClick={handleClaim}
                   disabled={!hasClaimableRewards || isClaiming}
-                  className="rounded-[14px] bg-[#1a1a17] px-4 py-2 text-[13px] leading-[20px] font-semibold text-white transition-colors hover:bg-black disabled:cursor-not-allowed disabled:opacity-40"
+                  className="rounded-[14px] bg-surface-42 px-4 py-2 text-[13px] leading-[20px] font-semibold text-ink-27 transition-colors hover:bg-surface-44 disabled:cursor-not-allowed disabled:opacity-40"
                   data-testid="wallet-claim-now-button"
                 >
                   {t('wallet.savings.claim_now')}

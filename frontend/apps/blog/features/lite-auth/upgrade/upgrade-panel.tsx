@@ -418,7 +418,7 @@ const UpgradePanel: FC = () => {
 
   if (!identity.isLoggedIn) {
     return (
-      <div className="mx-auto max-w-[560px] p-6 text-[15px] leading-[24px] text-[#4b5563]">
+      <div className="mx-auto max-w-[560px] p-6 text-[15px] leading-[24px] text-ink-8">
         Sign in with your Lumen account to upgrade.
       </div>
     );
@@ -437,24 +437,24 @@ const UpgradePanel: FC = () => {
     if (identity.sessionUnavailable) {
       return (
         <div className="mx-auto max-w-[560px] p-6">
-          <p className="text-[15px] leading-[24px] text-[#4b5563]">
+          <p className="text-[15px] leading-[24px] text-ink-8">
             Couldn’t check your account just now, so we can’t start an upgrade.
           </p>
           <button
             type="button"
             onClick={identity.retrySession}
-            className="mt-3 rounded-[10px] border border-[#e4e6e9] px-4 py-2 text-[14px] leading-[22px] font-semibold text-[#3f4650] hover:bg-[#f6f7f8]"
+            className="mt-3 rounded-[10px] border border-line-11 px-4 py-2 text-[14px] leading-[22px] font-semibold text-ink-7 hover:bg-surface-16"
           >
             Try again
           </button>
         </div>
       );
     }
-    return <div className="mx-auto max-w-[560px] p-6 text-[15px] leading-[24px] text-[#9ca3af]">Loading…</div>;
+    return <div className="mx-auto max-w-[560px] p-6 text-[15px] leading-[24px] text-ink-14">Loading…</div>;
   }
   if (!user?.isLoggedIn || user.account_tier !== 'lite') {
     return (
-      <div className="mx-auto max-w-[560px] p-6 text-[15px] leading-[24px] text-[#4b5563]">
+      <div className="mx-auto max-w-[560px] p-6 text-[15px] leading-[24px] text-ink-8">
         Sign in with your Lumen account to upgrade.
       </div>
     );
@@ -464,13 +464,13 @@ const UpgradePanel: FC = () => {
   if (stage === 'already') {
     return (
       <div className="mx-auto max-w-[560px] p-6" data-testid="upgrade-already">
-        <h1 className="font-serif text-2xl font-semibold text-[#161511]">{COPY.alreadyTitle}</h1>
-        <p className="mt-2 text-[15px] leading-[24px] text-[#4b5563]">
+        <h1 className="font-serif text-2xl font-semibold text-ink-2">{COPY.alreadyTitle}</h1>
+        <p className="mt-2 text-[15px] leading-[24px] text-ink-8">
           Your account is <strong>@{hiveName}</strong>. {COPY.alreadyBody}
         </p>
         <button
           onClick={() => router.replace('/')}
-          className="mt-5 h-12 w-full cursor-pointer rounded-xl bg-[#c0392b] text-[15px] leading-[24px] font-semibold text-white hover:bg-[#a5301f]"
+          className="mt-5 h-12 w-full cursor-pointer rounded-xl bg-surface-brand-12 text-[15px] leading-[24px] font-semibold text-ink-27 hover:bg-surface-brand-16"
         >
           {COPY.finish}
         </button>
@@ -482,8 +482,8 @@ const UpgradePanel: FC = () => {
   if (stage === 'notLinked') {
     return (
       <div className="mx-auto max-w-[560px] p-6" data-testid="upgrade-not-linked">
-        <h1 className="font-serif text-2xl font-semibold text-[#161511]">{COPY.notLinkedTitle}</h1>
-        <p className="mt-2 text-[15px] leading-[24px] text-[#4b5563]">
+        <h1 className="font-serif text-2xl font-semibold text-ink-2">{COPY.notLinkedTitle}</h1>
+        <p className="mt-2 text-[15px] leading-[24px] text-ink-8">
           <strong>@{hiveName}</strong> — {COPY.notLinkedBody}
         </p>
       </div>
@@ -494,20 +494,20 @@ const UpgradePanel: FC = () => {
   if (stage === 'done') {
     return (
       <div className="mx-auto max-w-[560px] p-6" data-testid="upgrade-done">
-        <h1 className="font-serif text-2xl font-semibold text-[#161511]">{COPY.doneTitle}</h1>
-        <p className="mt-2 text-[15px] leading-[24px] text-[#4b5563]">
+        <h1 className="font-serif text-2xl font-semibold text-ink-2">{COPY.doneTitle}</h1>
+        <p className="mt-2 text-[15px] leading-[24px] text-ink-8">
           <strong>@{hiveName}</strong> — {COPY.doneBody}
         </p>
-        {verifying ? <p className="mt-2 text-[13px] leading-[20px] text-[#9ca3af]">{COPY.verifying}</p> : null}
-        {notice ? <p className="mt-2 text-[13px] leading-[20px] text-[#b45309]">{notice}</p> : null}
+        {verifying ? <p className="mt-2 text-[13px] leading-[20px] text-ink-14">{COPY.verifying}</p> : null}
+        {notice ? <p className="mt-2 text-[13px] leading-[20px] text-ink-warn-3">{notice}</p> : null}
         {error ? (
-          <p className="mt-3 rounded-xl border border-[#f6c6c0] bg-[#fdf2f0] p-4 text-[14px] font-semibold leading-[22px] text-[#8c2b1e]">
+          <p className="mt-3 rounded-xl border border-line-brand-2 bg-surface-brand-5 p-4 text-[14px] font-semibold leading-[22px] text-ink-brand-2">
             {error}
           </p>
         ) : null}
         <button
           onClick={() => router.replace('/')}
-          className="mt-5 h-12 w-full cursor-pointer rounded-xl bg-[#c0392b] text-[15px] leading-[24px] font-semibold text-white hover:bg-[#a5301f]"
+          className="mt-5 h-12 w-full cursor-pointer rounded-xl bg-surface-brand-12 text-[15px] leading-[24px] font-semibold text-ink-27 hover:bg-surface-brand-16"
         >
           {COPY.finish}
         </button>
@@ -526,32 +526,32 @@ const UpgradePanel: FC = () => {
     ];
     return (
       <div className="mx-auto max-w-[640px] p-6" data-testid="upgrade-keys">
-        <h1 className="font-serif text-2xl font-semibold text-[#161511]">{COPY.keysTitle}</h1>
-        <p className="mt-2 text-[15px] leading-[24px] text-[#4b5563]">
+        <h1 className="font-serif text-2xl font-semibold text-ink-2">{COPY.keysTitle}</h1>
+        <p className="mt-2 text-[15px] leading-[24px] text-ink-8">
           For <strong>@{hiveName}</strong>. {COPY.keysIntro}
         </p>
-        <div className="mt-4 rounded-xl border border-[#f6c6c0] bg-[#fdf2f0] p-4 text-[14px] leading-[22px] text-[#8c2b1e]">
+        <div className="mt-4 rounded-xl border border-line-brand-2 bg-surface-brand-5 p-4 text-[14px] leading-[22px] text-ink-brand-2">
           {COPY.keysWarning}
         </div>
 
         <div className="mt-4 flex flex-col gap-3">
           {rows.map(([label, value]) => (
-            <div key={label} className="rounded-xl border border-[#e4e6e9] bg-white p-3">
+            <div key={label} className="rounded-xl border border-line-11 bg-surface-1 p-3">
               <div className="mb-1 flex items-center justify-between">
-                <span className="text-[13px] leading-[20px] font-semibold text-[#4b5563]">{label}</span>
+                <span className="text-[13px] leading-[20px] font-semibold text-ink-8">{label}</span>
                 <button
                   onClick={() => copy(label, value)}
-                  className="cursor-pointer rounded-md border border-[#e4e6e9] px-2 py-1 text-xs font-semibold text-[#4b5563] hover:bg-[#f9fafb]"
+                  className="cursor-pointer rounded-md border border-line-11 px-2 py-1 text-xs font-semibold text-ink-8 hover:bg-surface-8"
                 >
                   {copied === label ? COPY.copied : COPY.copy}
                 </button>
               </div>
-              <code className="block break-all font-mono text-[13px] leading-[20px] text-[#161511]">{value}</code>
+              <code className="block break-all font-mono text-[13px] leading-[20px] text-ink-2">{value}</code>
             </div>
           ))}
         </div>
 
-        <label className="mt-5 flex cursor-pointer items-start gap-2.5 text-[14px] leading-[22px] text-[#4b5563]">
+        <label className="mt-5 flex cursor-pointer items-start gap-2.5 text-[14px] leading-[22px] text-ink-8">
           <input
             type="checkbox"
             checked={acknowledged}
@@ -567,7 +567,7 @@ const UpgradePanel: FC = () => {
           cookie. The spec has always required this for account-security actions;
           the button below is where it is asked for.
         */}
-        <p className="mt-4 text-[13px] leading-[20px] text-[#4b5563]">{COPY.stepUpExplain}</p>
+        <p className="mt-4 text-[13px] leading-[20px] text-ink-8">{COPY.stepUpExplain}</p>
         {googleOnly ? (
           googleConfigured() && googleNonce ? (
             <div className="mt-3" data-testid="upgrade-stepup-google">
@@ -582,7 +582,7 @@ const UpgradePanel: FC = () => {
               />
             </div>
           ) : (
-            <p className="mt-3 text-[13px] leading-[20px] text-[#b45309]">{COPY.stepUpUnavailable}</p>
+            <p className="mt-3 text-[13px] leading-[20px] text-ink-warn-3">{COPY.stepUpUnavailable}</p>
           )
         ) : (
           (['btc', 'evm'] as WalletChain[])
@@ -608,13 +608,13 @@ const UpgradePanel: FC = () => {
                 }}
                 disabled={!acknowledged || busy}
                 data-testid={chain === 'btc' ? 'upgrade-create' : `upgrade-create-${chain}`}
-                className="mt-3 h-12 w-full cursor-pointer rounded-xl bg-[#c0392b] text-[15px] leading-[24px] font-semibold text-white hover:bg-[#a5301f] disabled:cursor-not-allowed disabled:opacity-50"
+                className="mt-3 h-12 w-full cursor-pointer rounded-xl bg-surface-brand-12 text-[15px] leading-[24px] font-semibold text-ink-27 hover:bg-surface-brand-16 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {busy ? COPY.creating : chain === 'btc' ? COPY.createWithBtc : COPY.createWithEvm}
               </button>
             ))
         )}
-        {error ? <p className="mt-3 text-[13px] leading-[20px] text-[#b45309]">{error}</p> : null}
+        {error ? <p className="mt-3 text-[13px] leading-[20px] text-ink-warn-3">{error}</p> : null}
       </div>
     );
   }
@@ -622,19 +622,19 @@ const UpgradePanel: FC = () => {
   // ── name pick ───────────────────────────────────────────────────────────────
   const border =
     nameStatus.state === 'available'
-      ? 'border-[#2f7d4f]'
+      ? 'border-line-ok-5'
       : nameStatus.state === 'unavailable'
-        ? 'border-[#b45309]'
-        : 'border-[#e4e6e9] focus-within:border-[#c0392b]';
+        ? 'border-line-warn-8'
+        : 'border-line-11 focus-within:border-line-brand-10';
 
   return (
     <div className="mx-auto max-w-[560px] p-6">
-      <h1 className="font-serif text-2xl font-semibold text-[#161511]">{COPY.title}</h1>
-      <p className="mt-2 text-[15px] leading-[24px] text-[#4b5563]">{COPY.intro}</p>
+      <h1 className="font-serif text-2xl font-semibold text-ink-2">{COPY.title}</h1>
+      <p className="mt-2 text-[15px] leading-[24px] text-ink-8">{COPY.intro}</p>
 
-      <label className="mt-6 block text-[13px] leading-[20px] font-semibold text-[#4b5563]">{COPY.namePick}</label>
+      <label className="mt-6 block text-[13px] leading-[20px] font-semibold text-ink-8">{COPY.namePick}</label>
       <div className={`mt-1.5 flex h-12 items-center gap-2 rounded-xl border-2 px-3.5 ${border}`}>
-        <span className="font-bold text-[#9ca3af]">@</span>
+        <span className="font-bold text-ink-14">@</span>
         <input
           value={name}
           onChange={(e) => {
@@ -643,15 +643,15 @@ const UpgradePanel: FC = () => {
           }}
           spellCheck={false}
           data-testid="upgrade-name"
-          className="min-w-0 flex-1 border-0 font-sans text-base font-semibold text-[#161511] outline-none"
+          className="min-w-0 flex-1 border-0 font-sans text-base font-semibold text-ink-2 outline-none"
         />
       </div>
       {nameStatus.state === 'unavailable' ? (
         <>
-          <p className="mt-2 text-[13px] leading-[20px] font-medium text-[#b45309]">{nameStatus.reason}</p>
+          <p className="mt-2 text-[13px] leading-[20px] font-medium text-ink-warn-3">{nameStatus.reason}</p>
           {nameStatus.suggestions.length > 0 ? (
             <div className="mt-2.5">
-              <p className="text-[13px] leading-[20px] text-[#4b5563]">{COPY.suggestionsLabel}</p>
+              <p className="text-[13px] leading-[20px] text-ink-8">{COPY.suggestionsLabel}</p>
               <div className="mt-1.5 flex flex-wrap gap-2">
                 {nameStatus.suggestions.map((suggestion) => (
                   <button
@@ -660,13 +660,13 @@ const UpgradePanel: FC = () => {
                       setName(suggestion);
                       checkName(suggestion);
                     }}
-                    className="cursor-pointer rounded-lg border border-[#e4e6e9] px-2.5 py-1 text-[13px] leading-[20px] font-semibold text-[#161511] hover:bg-[#f9fafb]"
+                    className="cursor-pointer rounded-lg border border-line-11 px-2.5 py-1 text-[13px] leading-[20px] font-semibold text-ink-2 hover:bg-surface-8"
                   >
                     @{suggestion}
                   </button>
                 ))}
               </div>
-              <p className="mt-2 text-xs text-[#4b5563]">{COPY.historyNote}</p>
+              <p className="mt-2 text-xs text-ink-8">{COPY.historyNote}</p>
             </div>
           ) : null}
         </>
@@ -680,23 +680,23 @@ const UpgradePanel: FC = () => {
           private keys for it. A name you cannot change later should never be
           altered without saying so. */}
       {name.trim() && name.trim() !== name.trim().toLowerCase() ? (
-        <p className="mt-2 text-xs leading-[20px] text-[#b45309]">
+        <p className="mt-2 text-xs leading-[20px] text-ink-warn-3">
           {COPY.nameLowercased(name.trim().toLowerCase())}
         </p>
       ) : null}
-      <p className="mt-2 text-xs text-[#9ca3af]">{COPY.nameHint}</p>
-      <p className="mt-2 text-xs leading-[20px] text-[#9ca3af]">{COPY.nameWarning}</p>
-      <p className="mt-2 text-xs leading-[20px] text-[#9ca3af]">{COPY.historyLimit}</p>
+      <p className="mt-2 text-xs text-ink-14">{COPY.nameHint}</p>
+      <p className="mt-2 text-xs leading-[20px] text-ink-14">{COPY.nameWarning}</p>
+      <p className="mt-2 text-xs leading-[20px] text-ink-14">{COPY.historyLimit}</p>
 
       <button
         onClick={generate}
         disabled={busy || nameStatus.state !== 'available'}
         data-testid="upgrade-continue"
-        className="mt-5 h-12 w-full cursor-pointer rounded-xl bg-[#c0392b] text-[15px] leading-[24px] font-semibold text-white hover:bg-[#a5301f] disabled:cursor-not-allowed disabled:opacity-50"
+        className="mt-5 h-12 w-full cursor-pointer rounded-xl bg-surface-brand-12 text-[15px] leading-[24px] font-semibold text-ink-27 hover:bg-surface-brand-16 disabled:cursor-not-allowed disabled:opacity-50"
       >
         {busy ? COPY.generating : COPY.continue}
       </button>
-      {error ? <p className="mt-3 text-[13px] leading-[20px] text-[#b45309]">{error}</p> : null}
+      {error ? <p className="mt-3 text-[13px] leading-[20px] text-ink-warn-3">{error}</p> : null}
     </div>
   );
 };

@@ -32,9 +32,9 @@ const NOTIFICATIONS_LIMIT = 50;
 /** Notice shown when user has reached the end of available notifications */
 function EndOfNotificationsNotice({ t }: { t: (key: string) => string }) {
   return (
-    <div className="my-6 flex flex-col items-center justify-center gap-2 text-center text-sm text-gray-500">
-      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-green-100">
-        <Icons.check className="h-4 w-4 text-green-600" />
+    <div className="my-6 flex flex-col items-center justify-center gap-2 text-center text-sm text-ink-10">
+      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-surface-ok-4">
+        <Icons.check className="h-4 w-4 text-ink-ok-4" />
       </div>
       <span>{t('navigation.profile_notifications_tab_navbar.end_of_notifications')}</span>
       <span className="text-xs">{t('navigation.profile_notifications_tab_navbar.notifications_90_day_limit')}</span>
@@ -248,23 +248,23 @@ const NotificationActivities = ({
       >
         <TabsTrigger value="all">{t('navigation.profile_notifications_tab_navbar.all')}</TabsTrigger>
         <TabsTrigger value="replies" className="gap-1.5">
-          <Icons.comment className="h-3 w-3 text-purple-500" />
+          <Icons.comment className="h-3 w-3 text-ink-violet-2" />
           {t('navigation.profile_notifications_tab_navbar.replies')}
         </TabsTrigger>
         <TabsTrigger value="mentions" className="gap-1.5">
-          <Icons.atSign className="h-3 w-3 text-amber-500" />
+          <Icons.atSign className="h-3 w-3 text-ink-warn-10" />
           {t('navigation.profile_notifications_tab_navbar.mentions')}
         </TabsTrigger>
         <TabsTrigger value="follows" className="gap-1.5">
-          <Icons.userPlus className="h-3 w-3 text-cyan-500" />
+          <Icons.userPlus className="h-3 w-3 text-ink-info-11" />
           {t('navigation.profile_notifications_tab_navbar.follows')}
         </TabsTrigger>
         <TabsTrigger value="upvotes" className="gap-1.5">
-          <Icons.arrowUpCircle className="h-3 w-3 text-green-500" />
+          <Icons.arrowUpCircle className="h-3 w-3 text-ink-ok-5" />
           {t('navigation.profile_notifications_tab_navbar.upvotes')}
         </TabsTrigger>
         <TabsTrigger value="reblogs" className="gap-1.5">
-          <Icons.forward className="h-3 w-3 text-blue-500" />
+          <Icons.forward className="h-3 w-3 text-ink-info-9" />
           {t('navigation.profile_notifications_tab_navbar.reblogs')}
         </TabsTrigger>
       </TabsList>

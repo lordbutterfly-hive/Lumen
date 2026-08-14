@@ -28,18 +28,18 @@ export default function EstimatedValueStrip({ figures }: { figures: WalletFigure
 
   return (
     <div
-      className="mb-[18px] flex items-center justify-between rounded-[18px] border border-[#ebebeb] bg-[#fbfbfa] px-6 py-[22px]"
+      className="mb-[18px] flex items-center justify-between rounded-[18px] border border-line-9 bg-surface-5 px-6 py-[22px]"
       data-testid="wallet-estimated-value"
     >
       <div>
-        <div className="text-[20px] font-semibold text-[#161511]">{t('wallet.estimated_value.title')}</div>
-        <div className="mt-0.5 text-[14px] leading-[22px] text-[#6b7280]">{t('wallet.estimated_value.description')}</div>
+        <div className="text-[20px] font-semibold text-ink-2">{t('wallet.estimated_value.title')}</div>
+        <div className="mt-0.5 text-[14px] leading-[22px] text-ink-10">{t('wallet.estimated_value.description')}</div>
       </div>
       {/* ★ W-4: this figure was #2f7d4f. A balance is a neutral fact, not good
           news — the same $5,147.82 renders identically whether it went up or
           down today. Green is reserved for a DELTA (the price card's 24h change
           chip, a credit in the activity ledger); a holding is body colour. */}
-      <span className="font-sans text-[30px] leading-[46px] font-bold tabular-nums text-[#161511]">
+      <span className="font-sans text-[30px] leading-[46px] font-bold tabular-nums text-ink-2">
         {valueUsd === null ? '—' : formatUsd(valueUsd)}
       </span>
     </div>

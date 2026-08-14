@@ -89,7 +89,7 @@ export default function WitnessesShell() {
   return (
     <div className="relative mx-auto grid max-w-[1720px] grid-cols-1 gap-11 px-6 pb-20 pt-[26px] md:grid-cols-[200px_minmax(0,1fr)] md:px-11 xl:grid-cols-[200px_minmax(0,1fr)_312px]">
       <div
-        className="pointer-events-none absolute bottom-20 left-[244px] top-[26px] hidden w-px bg-[#ececec] md:block"
+        className="pointer-events-none absolute bottom-20 left-[244px] top-[26px] hidden w-px bg-surface-26 md:block"
         aria-hidden
       />
 
@@ -116,16 +116,16 @@ export default function WitnessesShell() {
 
         {data.ownDataError && (
           <div
-            className="my-3 flex items-center justify-between gap-4 rounded-xl border border-[#f5c6c0] bg-[#fdf3f2] px-4 py-3"
+            className="my-3 flex items-center justify-between gap-4 rounded-xl border border-line-brand-4 bg-surface-brand-1 px-4 py-3"
             data-testid="witnesses-own-data-error"
           >
-            <span className="font-sans text-[13px] leading-[20px] text-[#c0392b]">
+            <span className="font-sans text-[13px] leading-[20px] text-ink-brand-6">
               {t('witnesses.own_data_error.message')}
             </span>
             <button
               type="button"
               onClick={data.refetch}
-              className="shrink-0 font-sans text-[13px] leading-[20px] font-semibold text-[#c0392b] underline hover:text-[#96271b]"
+              className="shrink-0 font-sans text-[13px] leading-[20px] font-semibold text-ink-brand-6 underline hover:text-ink-brand-4"
             >
               {t('witnesses.own_data_error.retry')}
             </button>

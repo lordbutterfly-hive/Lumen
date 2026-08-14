@@ -44,8 +44,8 @@ export default function StopPowerDownAlert({ trigger, username }: { trigger: Rea
       <AlertDialogTrigger asChild>{trigger}</AlertDialogTrigger>
       <AlertDialogContent className="rounded-[18px] font-sans">
         <AlertDialogHeader>
-          <AlertDialogTitle className="text-[#161511]">{t('wallet.dialogs.stop_power_down.title')}</AlertDialogTitle>
-          <AlertDialogDescription className="text-[#6b7280]">
+          <AlertDialogTitle className="text-ink-2">{t('wallet.dialogs.stop_power_down.title')}</AlertDialogTitle>
+          <AlertDialogDescription className="text-ink-10">
             {t('wallet.dialogs.stop_power_down.description')}
           </AlertDialogDescription>
         </AlertDialogHeader>
@@ -54,7 +54,7 @@ export default function StopPowerDownAlert({ trigger, username }: { trigger: Rea
           <AlertDialogAction
             onClick={handleConfirm}
             disabled={cancelMutation.isPending}
-            className="bg-[#c0392b] text-white hover:bg-[#96271b]"
+            className="bg-surface-brand-12 text-ink-27 hover:bg-surface-brand-17"
           >
             {cancelMutation.isPending ? (
               <CircleSpinner loading size={16} color="#fff" />

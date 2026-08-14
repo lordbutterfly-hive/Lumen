@@ -113,8 +113,8 @@ export default function ProfileIdentity({
 
   return (
     <div className={cn('min-w-0', moderated && 'opacity-60 grayscale')} data-testid="profile-identity-block">
-      <div className="flex flex-wrap items-center gap-2 font-sans text-[15px] leading-[24px] text-[#6b7280]">
-        <span className="font-semibold text-[#3f4650]">@{username}</span>
+      <div className="flex flex-wrap items-center gap-2 font-sans text-[15px] leading-[24px] text-ink-10">
+        <span className="font-semibold text-ink-7">@{username}</span>
         <ProfileLeagueChip username={username} chainAccount={chainAccount} />
         {showReputation ? (
           <button
@@ -122,8 +122,15 @@ export default function ProfileIdentity({
             onClick={() => setRepOpen((v) => !v)}
             aria-expanded={repOpen}
             // The accessible name carries what the pill cannot: what the number IS.
-            aria-label={`${t('user_profile.reputation_label')} ${accountReputationPrecise(reputation)}`}
-            className="rounded-full bg-[#f1f3f5] px-2 py-0.5 font-sans text-[13px] leading-[20px] font-semibold tabular-nums text-[#6b7280] transition-colors hover:bg-[#e8eaed]"
+            // ★ ROUNDED, LIKE THE PILL (2026-08-13, audit §7). This read
+            // `accountReputationPrecise` — measured live: the label said "Hive
+            // reputation 79.77" while the visible pill said "REP 80". A screen
+            // reader heard two decimal places nobody else was shown, and the
+            // two never matched. The accessible name must name what is on
+            // screen; the precise value is still one hover (`title`) or one tap
+            // (the explainer below) away, which is where it belongs.
+            aria-label={`${t('user_profile.reputation_label')} ${accountReputation(reputation)}`}
+            className="rounded-full bg-surface-23 px-2 py-0.5 font-sans text-[13px] leading-[20px] font-semibold tabular-nums text-ink-10 transition-colors hover:bg-surface-29"
             data-testid="profile-reputation"
             // A native title, on purpose: it is the same affordance hive.blog uses for
             // the same number, it survives without JS, and it needs no positioned
@@ -142,7 +149,7 @@ export default function ProfileIdentity({
                 and it is a button, so the sentence behind it is reachable by tapping.
                 The owner's spec is unaffected — the badge still shows the ROUNDED value
                 (76) and the precise one (76.11) is still what the hover reveals. */}
-            <span className="mr-1 font-medium uppercase tracking-[0.04em] text-[#9ca3af]">
+            <span className="mr-1 font-medium uppercase tracking-[0.04em] text-ink-14">
               {t('user_profile.reputation_short')}
             </span>
             {accountReputation(reputation)}
@@ -154,7 +161,7 @@ export default function ProfileIdentity({
           the touch and pointer paths can never drift apart. */}
       {showReputation && repOpen ? (
         <p
-          className="mt-1.5 max-w-[440px] font-sans text-[13px] leading-[20px] text-[#6b7280]"
+          className="mt-1.5 max-w-[440px] font-sans text-[13px] leading-[20px] text-ink-10"
           data-testid="profile-reputation-explainer"
         >
           {t('user_profile.reputation_title', {
@@ -165,24 +172,24 @@ export default function ProfileIdentity({
       ) : null}
 
       {profile?.about ? (
-        <p className="mt-3 max-w-[520px] font-serif text-[17px] leading-[26px] text-[#3f4650]">{profile.about}</p>
+        <p className="mt-3 max-w-[520px] font-serif text-[17px] leading-[26px] text-ink-7">{profile.about}</p>
       ) : null}
 
-      <div className="mt-3.5 flex flex-wrap gap-4 font-sans text-[14px] leading-[22px] text-[#6b7280]">
+      <div className="mt-3.5 flex flex-wrap gap-4 font-sans text-[14px] leading-[22px] text-ink-10">
         {profile?.location ? (
           <span className="flex items-center gap-1.5">
-            <Icons.mapPin className="h-[15px] w-[15px] text-[#9ca3af]" />
+            <Icons.mapPin className="h-[15px] w-[15px] text-ink-14" />
             {profile.location}
           </span>
         ) : null}
         {created ? (
           <span className="flex items-center gap-1.5">
-            <Icons.calendarHeart className="h-[15px] w-[15px] text-[#9ca3af]" />
+            <Icons.calendarHeart className="h-[15px] w-[15px] text-ink-14" />
             {t('user_profile.joined')} {dateToShow(created, t)}
           </span>
         ) : null}
         <span className="flex items-center gap-1.5">
-          <span className="h-[7px] w-[7px] rounded-full bg-[#2f7d4f]" />
+          <span className="h-[7px] w-[7px] rounded-full bg-surface-ok-7" />
           {t('user_profile.active')} <TimeAgo date={compareDates([created, lastVoteTime, lastPost])} />
         </span>
       </div>
@@ -206,7 +213,7 @@ export default function ProfileIdentity({
         same SIZE as the labels. `tabular-nums` stops the digits jittering when a
         count revalidates.
       */}
-      <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 font-sans text-[14px] leading-[22px] text-[#6b7280]">
+      <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 font-sans text-[14px] leading-[22px] text-ink-10">
         <Link href={`/@${username}/followers`} className="underline-offset-2 hover:underline">
           <StatNumber value={followerCount} />{' '}
           {t('user_profile.stats_line.followers', { count: followerCount ?? 0 })}
@@ -239,7 +246,7 @@ export default function ProfileIdentity({
                 tabIndex={0}
                 data-testid="profile-hp-effective"
               >
-                <span className="font-semibold tabular-nums tracking-[-0.01em] text-[#161511]">
+                <span className="font-semibold tabular-nums tracking-[-0.01em] text-ink-2">
                   {numberWithCommas(String(Math.round(Number(hp))))}
                 </span>{' '}
                 {t('profile.stats.hp')}
@@ -255,7 +262,7 @@ export default function ProfileIdentity({
 /** A count, or an em dash when the API did not return one — never a dropped item. */
 function StatNumber({ value }: { value?: number }) {
   return (
-    <span className="font-semibold tabular-nums tracking-[-0.01em] text-[#161511]">
+    <span className="font-semibold tabular-nums tracking-[-0.01em] text-ink-2">
       {typeof value === 'number' ? value.toLocaleString('en-US') : '—'}
     </span>
   );
@@ -264,7 +271,7 @@ function StatNumber({ value }: { value?: number }) {
 /** `aria-hidden` + `select-none` so copying the line yields clean text. */
 function StatDot() {
   return (
-    <span aria-hidden className="select-none text-[#d1d5db]">
+    <span aria-hidden className="select-none text-ink-23">
       ·
     </span>
   );

@@ -137,7 +137,10 @@ const PopoverCardData = ({ author, blacklist, authorReputation, liteName }: Popo
             <div className="flex-1" translate="no">
               <BasePathLink
                 href={`/@${author}`}
-                className="block text-base font-semibold text-foreground hover:text-destructive"
+                /* Same ink as the trigger that opened this card — see
+                   `user-popover-card.tsx` for why #161511 and not
+                   `text-foreground` (audit §5.3). */
+                className="block text-base font-semibold text-ink-2 hover:text-destructive"
                 data-testid="popover-card-user-name"
               >
                 {account.profile?.name || author}

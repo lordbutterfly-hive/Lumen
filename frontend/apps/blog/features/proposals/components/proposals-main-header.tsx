@@ -22,7 +22,7 @@ export default function ProposalsMainHeader() {
     <button
       type="button"
       disabled={isLiteBlocked}
-      className="flex shrink-0 items-center gap-1.5 rounded-[11px] bg-[#c0392b] px-[18px] py-[11px] font-sans text-sm font-semibold text-white transition-colors hover:bg-[#a5301f] disabled:cursor-not-allowed disabled:opacity-50"
+      className="flex shrink-0 items-center gap-1.5 rounded-[11px] bg-surface-brand-12 px-[18px] py-[11px] font-sans text-sm font-semibold text-ink-27 transition-colors hover:bg-surface-brand-16 disabled:cursor-not-allowed disabled:opacity-50"
       data-testid="new-proposal-open"
     >
       <Icons.add className="h-[15px] w-[15px]" />
@@ -45,7 +45,7 @@ export default function ProposalsMainHeader() {
       title={
         <>
           {t('proposals.header.title')}{' '}
-          <span className="font-normal italic text-[#9ca3af]">{t('proposals.header.subtitle')}</span>
+          <span className="font-normal italic text-ink-14">{t('proposals.header.subtitle')}</span>
         </>
       }
       actions={
@@ -56,9 +56,9 @@ export default function ProposalsMainHeader() {
         )
       }
     >
-      <p className="max-w-[620px] font-serif text-[13px] leading-[20px] text-[#6b7280]">
+      <p className="max-w-[620px] font-serif text-[13px] leading-[20px] text-ink-10">
         {t('proposals.header.intro')}{' '}
-        <a href="/help.html" className="text-[#c0392b] hover:underline">
+        <a href="/help.html" className="text-ink-brand-6 hover:underline">
           {t('proposals.header.faq_link')}
         </a>
         .

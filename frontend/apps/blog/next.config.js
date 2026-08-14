@@ -129,7 +129,25 @@ const nextConfig = {
     return [
       ...RETIRED_SORTS.flatMap((sort) => [
         { source: `/${sort}`, destination: '/', permanent: false },
-        { source: `/${sort}/my`, destination: '/', permanent: false },
+        /**
+         * ★ `/my` IS A SCOPE, AND IT SURVIVED THE RETIREMENT (2026-08-13, audit
+         * §3.1). The 2026-08-08 ruling retired the SORT. `/{sort}/my` also
+         * carries a second thing it never retired: on Hive `/my` means "only
+         * the accounts I follow". Sending it to plain `/` dropped that
+         * silently — the reader asked for their own circle and landed on the
+         * global For You feed with nothing to say so. Lumen has that surface:
+         * the home feed's Following tab (`features/discovery-feed/feed-tabs.tsx`,
+         * `?tab=feed`). Signed out, that tab shows its own "Following shows the
+         * people you follow" prompt with a Log in action, so nobody is dropped
+         * into a silently empty list.
+         *
+         * `muted` is the ONE exception and stays on `/`: `/muted` lists posts a
+         * moderator has HIDDEN, and Lumen has no surface that browses hidden
+         * content at all. Honouring only the `/my` half would serve ordinary
+         * posts under a URL that asked for muted ones — a worse lie than the
+         * redirect. The matching `page.tsx` stubs carry the same note.
+         */
+        { source: `/${sort}/my`, destination: sort === 'muted' ? '/' : '/?tab=feed', permanent: false },
         { source: `/${sort}/:tag`, destination: '/topics/:tag', permanent: false }
       ]),
       // The four legacy moderation lists — one Blocked list now (owner ruling,

@@ -62,7 +62,7 @@ export default function WalletRightRail() {
           href={marketStatsUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-center text-[13px] leading-[20px] font-semibold text-[#c0392b] hover:text-[#96271b]"
+          className="text-center text-[13px] leading-[20px] font-semibold text-ink-brand-6 hover:text-ink-brand-4"
           data-testid="wallet-view-more-market-stats"
         >
           {t('wallet.market.view_more')}
@@ -120,7 +120,7 @@ export default function WalletRightRail() {
           nothing. */}
       {identity.isLoggedIn && identity.sessionUnavailable && (
         <p
-          className="rounded-[14px] border border-dashed border-[#e6e0da] px-4 py-3 text-[13px] leading-[20px] text-[#6b7280]"
+          className="rounded-[14px] border border-dashed border-line-14 px-4 py-3 text-[13px] leading-[20px] text-ink-10"
           data-testid="wallet-rail-session-unavailable"
         >
           {t('wallet.session_unavailable')}

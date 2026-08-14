@@ -70,7 +70,7 @@ export default function MobileNav() {
         size="content"
         // A real scrim: the shared default overlay is fully transparent, which
         // reads as "two pages at once" when the panel covers most of a phone.
-        overlayClassName="bg-[#161511]/40"
+        overlayClassName="bg-surface-43/40"
         className="flex w-[290px] max-w-[85vw] flex-col overflow-y-auto px-3 pb-8 pt-12"
         data-testid="mobile-nav-content"
       >

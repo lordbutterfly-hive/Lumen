@@ -107,13 +107,13 @@ export default function HomeIntro() {
       <span>{COPY.claim}</span>
       <a
         href={withBasePath('/login')}
-        className="rounded-[11px] bg-[#c0392b] px-3.5 py-1.5 font-sans text-[13px] leading-[20px] font-semibold text-white hover:bg-[#a5301f]"
+        className="rounded-[11px] bg-surface-brand-12 px-3.5 py-1.5 font-sans text-[13px] leading-[20px] font-semibold text-ink-27 hover:bg-surface-brand-16"
       >
         {googleReady ? COPY.startFree : COPY.startWallet}
       </a>
       <a
         href={withBasePath('/help.html')}
-        className="font-sans text-[13px] leading-[20px] font-semibold text-[#6b7280] underline-offset-4 hover:text-[#161511] hover:underline"
+        className="font-sans text-[13px] leading-[20px] font-semibold text-ink-10 underline-offset-4 hover:text-ink-2 hover:underline"
       >
         {COPY.learn}
       </a>

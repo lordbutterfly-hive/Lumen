@@ -21,7 +21,7 @@ export default function ProposalsToolbar({ tab, onTabChange, sort, onSortChange 
 
   return (
     <div className="mb-4 flex flex-wrap items-center justify-between gap-4" data-testid="proposals-toolbar">
-      <div role="tablist" className="flex gap-1.5 rounded-xl border border-[#ebedf0] bg-[#f4f5f7] p-[5px]">
+      <div role="tablist" className="flex gap-1.5 rounded-xl border border-line-6 bg-surface-21 p-[5px]">
         {TABS.map((t2) => (
           <button
             key={t2}
@@ -33,8 +33,8 @@ export default function ProposalsToolbar({ tab, onTabChange, sort, onSortChange 
             className={cn(
               'rounded-lg px-[15px] py-2 font-sans text-[14px] leading-[22px] font-semibold transition-colors',
               tab === t2
-                ? 'bg-white text-[#161511] shadow-[0_1px_2px_rgba(20,18,10,0.08)]'
-                : 'bg-transparent text-[#6b7280] hover:text-[#161511]'
+                ? 'bg-surface-1 text-ink-2 shadow-[0_1px_2px_rgba(20,18,10,0.08)]'
+                : 'bg-transparent text-ink-10 hover:text-ink-2'
             )}
           >
             {t(`proposals.tabs.${t2}`)}
@@ -42,7 +42,7 @@ export default function ProposalsToolbar({ tab, onTabChange, sort, onSortChange 
         ))}
       </div>
 
-      <div className="flex items-center gap-2 font-sans text-[13px] leading-[20px] text-[#6b7280]">
+      <div className="flex items-center gap-2 font-sans text-[13px] leading-[20px] text-ink-10">
         <span id="proposals-sort-label">{t('proposals.toolbar.sort_label')}</span>
         <Select value={sort} onValueChange={(value) => onSortChange(value as ProposalSort)}>
           {/* Radix's SelectTrigger is role="combobox" and does not get an accessible
@@ -53,7 +53,7 @@ export default function ProposalsToolbar({ tab, onTabChange, sort, onSortChange 
               `aria-labelledby` wires that same text in for the accessibility tree
               instead of duplicating it. */}
           <SelectTrigger
-            className="h-auto w-auto gap-1.5 rounded-[10px] border-[#e4e6e9] px-3.5 py-2 font-sans text-[13px] leading-[20px] font-semibold text-[#3f4650]"
+            className="h-auto w-auto gap-1.5 rounded-[10px] border-line-11 px-3.5 py-2 font-sans text-[13px] leading-[20px] font-semibold text-ink-7"
             data-testid="proposals-sort-select"
             aria-labelledby="proposals-sort-label"
           >

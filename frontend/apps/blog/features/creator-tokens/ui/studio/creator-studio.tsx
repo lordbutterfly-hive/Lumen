@@ -23,7 +23,7 @@ const SECTIONS: { id: Section; label: string }[] = [
 const tok = (n: number) => n.toFixed(2);
 const Card: FC<{ children: React.ReactNode; className?: string }> = ({ children, className = '' }) => (
   <div
-    className={`rounded-[18px] border border-[#ebebeb] bg-white p-5 shadow-[0_1px_2px_rgba(20,18,10,0.03)] ${className}`}
+    className={`rounded-[18px] border border-line-9 bg-surface-1 p-5 shadow-[0_1px_2px_rgba(20,18,10,0.03)] ${className}`}
   >
     {children}
   </div>
@@ -35,11 +35,11 @@ const Stat: FC<{ label: string; value: string; sub?: string; green?: boolean }> 
   green
 }) => (
   <div>
-    <div className="text-[12px] font-semibold uppercase tracking-wide text-[#9ca3af]">{label}</div>
-    <div className={`mt-1 text-[22px] leading-[34px] font-bold tabular-nums ${green ? 'text-[#2f7d4f]' : 'text-[#161511]'}`}>
+    <div className="text-[12px] font-semibold uppercase tracking-wide text-ink-14">{label}</div>
+    <div className={`mt-1 text-[22px] leading-[34px] font-bold tabular-nums ${green ? 'text-ink-ok-2' : 'text-ink-2'}`}>
       {value}
     </div>
-    {sub ? <div className="mt-0.5 text-[13px] leading-[20px] text-[#6b7280]">{sub}</div> : null}
+    {sub ? <div className="mt-0.5 text-[13px] leading-[20px] text-ink-10">{sub}</div> : null}
   </div>
 );
 
@@ -91,7 +91,7 @@ const PriceInput: FC<{
           );
         }
       }}
-      className="ml-1 w-[70px] border-0 text-[15px] leading-[24px] font-bold tabular-nums text-[#161511] outline-none"
+      className="ml-1 w-[70px] border-0 text-[15px] leading-[24px] font-bold tabular-nums text-ink-2 outline-none"
     />
   );
 };
@@ -145,7 +145,7 @@ const TitleInput: FC<{
           );
         }
       }}
-      className="w-full truncate border-0 bg-transparent text-[14px] leading-[22px] font-semibold text-[#161511] outline-none focus:underline disabled:opacity-60"
+      className="w-full truncate border-0 bg-transparent text-[14px] leading-[22px] font-semibold text-ink-2 outline-none focus:underline disabled:opacity-60"
     />
   );
 };
@@ -162,15 +162,15 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
   const answerValid = text.trim().length > 0 && text.trim().length <= MAX_HASH_LEN && !answerHasPipe;
   return (
     <ModalShell width={500} onClose={onClose} title="Mark this job delivered" className="p-6">
-      <div className="mb-2 font-serif text-xl font-semibold text-[#161511]">Mark this job delivered</div>
+      <div className="mb-2 font-serif text-xl font-semibold text-ink-2">Mark this job delivered</div>
       {/* The contract carries a REFERENCE, not the brief (USER RULING
             2026-07-28): it facilitates payment and reputation, and the two
             parties arrange the work between themselves. Showing the reference is
             honest; pretending a message arrived here would not be. */}
-      <div className="mb-3 rounded-[10px] border border-[#ebebeb] bg-[#f6f7f8] px-3.5 py-3 text-[13px] leading-[20px] text-[#4b5563]">
+      <div className="mb-3 rounded-[10px] border border-line-9 bg-surface-16 px-3.5 py-3 text-[13px] leading-[20px] text-ink-8">
         Reference <strong className="font-mono">{ask.contentHash || '—'}</strong> · from @{ask.asker}
       </div>
-      <p className="mb-3 text-[13px] leading-[20px] text-[#6b7280]">
+      <p className="mb-3 text-[13px] leading-[20px] text-ink-10">
         Arrange and deliver the work with @{ask.asker} however you normally would. Marking it delivered
         releases the escrow to you — and the buyer then rates it, which is what your token’s reputation is
         built from.
@@ -189,10 +189,10 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
           setFailure(null);
         }}
         placeholder="Where did you deliver it? A link, a ticket number, “sent by email”…"
-        className="h-[130px] w-full resize-y rounded-xl border border-[#e4e6e9] px-4 py-3 font-serif text-[15px] leading-[24px] text-[#161511] outline-none focus:border-[#c0392b]"
+        className="h-[130px] w-full resize-y rounded-xl border border-line-11 px-4 py-3 font-serif text-[15px] leading-[24px] text-ink-2 outline-none focus:border-line-brand-10"
       />
-      <div className="mt-1 flex justify-between text-[12px] text-[#9ca3af]">
-        <span className={answerHasPipe ? 'font-semibold text-[#c0392b]' : ''}>
+      <div className="mt-1 flex justify-between text-[12px] text-ink-14">
+        <span className={answerHasPipe ? 'font-semibold text-ink-brand-6' : ''}>
           {answerHasPipe
             ? 'Remove the “|” — the chain refuses it in this field.'
             : 'Stored on chain as a public reference.'}
@@ -201,7 +201,7 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
           {text.length}/{MAX_HASH_LEN}
         </span>
       </div>
-      <div className="mt-3 rounded-[10px] bg-[#f0f7f2] px-3.5 py-2.5 text-[13px] leading-[20px] text-[#2f7d4f]">
+      <div className="mt-3 rounded-[10px] bg-surface-18 px-3.5 py-2.5 text-[13px] leading-[20px] text-ink-ok-2">
         This pays you <strong>{tok(ask.tokensEscrowed)} tokens</strong> and closes the job. It can’t be undone
         — and the buyer rates it afterwards.
       </div>
@@ -227,7 +227,7 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
             }
           }}
           disabled={busy}
-          className="flex-1 rounded-xl border border-[#e4e6e9] py-3 text-[14px] leading-[22px] font-semibold text-[#6b7280] disabled:opacity-50"
+          className="flex-1 rounded-xl border border-line-11 py-3 text-[14px] leading-[22px] font-semibold text-ink-10 disabled:opacity-50"
         >
           Decline &amp; refund
         </button>
@@ -254,13 +254,13 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
             }
           }}
           disabled={busy || !answerValid}
-          className="flex-1 rounded-xl bg-[#c0392b] py-3 text-[14px] leading-[22px] font-semibold text-white hover:bg-[#96271b] disabled:opacity-50"
+          className="flex-1 rounded-xl bg-surface-brand-12 py-3 text-[14px] leading-[22px] font-semibold text-ink-27 hover:bg-surface-brand-17 disabled:opacity-50"
         >
           {busy ? 'Confirm in your wallet…' : 'Mark as delivered'}
         </button>
       </div>
       {failure ? (
-        <div className="mt-3 text-center text-[13px] leading-[20px] font-semibold text-[#c0392b]">{failure}</div>
+        <div className="mt-3 text-center text-[13px] leading-[20px] font-semibold text-ink-brand-6">{failure}</div>
       ) : null}
     </ModalShell>
   );
@@ -280,10 +280,10 @@ const RetireModal: FC<{ handle: string; onConfirm: () => Promise<void>; onClose:
       width={500}
       onClose={onClose}
       title="End your creator token?"
-      className="border border-[#f0c9c2] p-6"
+      className="border border-line-brand-1 p-6"
     >
-      <div className="mb-2 font-serif text-xl font-semibold text-[#c0392b]">End your creator token?</div>
-      <ul className="mb-4 space-y-1.5 font-serif text-[14px] leading-[22px] text-[#4b5563]">
+      <div className="mb-2 font-serif text-xl font-semibold text-ink-brand-6">End your creator token?</div>
+      <ul className="mb-4 space-y-1.5 font-serif text-[14px] leading-[22px] text-ink-8">
         <li>· The market freezes now — no new buys or asks.</li>
         <li>· You’re removed from discovery.</li>
         <li>· Every holder is refunded at the floor.</li>
@@ -291,19 +291,19 @@ const RetireModal: FC<{ handle: string; onConfirm: () => Promise<void>; onClose:
         <li>· Your delivery record is lost — coming back means a new token.</li>
         <li>· This can’t be undone.</li>
       </ul>
-      <label className="mb-1.5 block text-[13px] leading-[20px] font-semibold text-[#6b7280]">
+      <label className="mb-1.5 block text-[13px] leading-[20px] font-semibold text-ink-10">
         Type your handle (@{handle}) to confirm
       </label>
       <input
         value={confirm}
         onChange={(e) => setConfirm(e.target.value)}
         placeholder={`@${handle}`}
-        className="mb-4 w-full rounded-xl border border-[#e4e6e9] px-4 py-3 text-[15px] leading-[24px] font-semibold outline-none focus:border-[#c0392b] focus:ring-1 focus:ring-[#c0392b]"
+        className="mb-4 w-full rounded-xl border border-line-11 px-4 py-3 text-[15px] leading-[24px] font-semibold outline-none focus:border-line-brand-10 focus:ring-1 focus:ring-line-brand-10"
       />
       <div className="flex gap-3">
         <button
           onClick={onClose}
-          className="flex-1 rounded-xl border border-[#e4e6e9] py-3 text-[14px] leading-[22px] font-semibold text-[#6b7280]"
+          className="flex-1 rounded-xl border border-line-11 py-3 text-[14px] leading-[22px] font-semibold text-ink-10"
         >
           Cancel
         </button>
@@ -327,13 +327,13 @@ const RetireModal: FC<{ handle: string; onConfirm: () => Promise<void>; onClose:
             }
           }}
           disabled={!ok || busy}
-          className="flex-1 rounded-xl bg-[#c0392b] py-3 text-[14px] leading-[22px] font-semibold text-white hover:bg-[#96271b] disabled:opacity-50"
+          className="flex-1 rounded-xl bg-surface-brand-12 py-3 text-[14px] leading-[22px] font-semibold text-ink-27 hover:bg-surface-brand-17 disabled:opacity-50"
         >
           End my token
         </button>
       </div>
       {failure ? (
-        <div className="mt-3 text-center text-[13px] leading-[20px] font-semibold text-[#c0392b]">{failure}</div>
+        <div className="mt-3 text-center text-[13px] leading-[20px] font-semibold text-ink-brand-6">{failure}</div>
       ) : null}
     </ModalShell>
   );
@@ -351,8 +351,8 @@ const NewOfferingRow: FC<{ studio: LiveStudio }> = ({ studio }) => {
   const usd = parseFloat(price.replace(/,/g, ''));
   const valid = title.trim().length > 0 && Number.isFinite(usd) && usd > 0;
   return (
-    <div className="mt-4 border-t border-[#f1f3f5] pt-4">
-      <div className="mb-2 text-[13px] leading-[20px] font-semibold text-[#6b7280]">Add a service</div>
+    <div className="mt-4 border-t border-line-2 pt-4">
+      <div className="mb-2 text-[13px] leading-[20px] font-semibold text-ink-10">Add a service</div>
       <div className="flex flex-wrap items-center gap-2">
         <input
           value={title}
@@ -361,10 +361,10 @@ const NewOfferingRow: FC<{ studio: LiveStudio }> = ({ studio }) => {
             setFailure(null);
           }}
           placeholder="e.g. Review my code"
-          className="min-w-[200px] flex-1 rounded-[10px] border border-[#e4e6e9] px-3 py-2 text-[14px] leading-[22px] outline-none focus:border-[#c0392b] focus:ring-1 focus:ring-[#c0392b]"
+          className="min-w-[200px] flex-1 rounded-[10px] border border-line-11 px-3 py-2 text-[14px] leading-[22px] outline-none focus:border-line-brand-10 focus:ring-1 focus:ring-line-brand-10"
         />
-        <div className="flex items-center rounded-[10px] border border-[#e4e6e9] px-3 py-2 focus-within:border-[#c0392b] focus-within:ring-1 focus-within:ring-[#c0392b]">
-          <span className="font-bold text-[#9ca3af]">$</span>
+        <div className="flex items-center rounded-[10px] border border-line-11 px-3 py-2 focus-within:border-line-brand-10 focus-within:ring-1 focus-within:ring-line-brand-10">
+          <span className="font-bold text-ink-14">$</span>
           <input
             value={price}
             onChange={(e) => {
@@ -390,12 +390,12 @@ const NewOfferingRow: FC<{ studio: LiveStudio }> = ({ studio }) => {
             }
           }}
           disabled={!valid || studio.isBusy}
-          className="rounded-[10px] bg-[#161511] px-4 py-2 text-[13px] leading-[20px] font-semibold text-white disabled:opacity-50"
+          className="rounded-[10px] bg-surface-43 px-4 py-2 text-[13px] leading-[20px] font-semibold text-ink-27 disabled:opacity-50"
         >
           Add
         </button>
       </div>
-      {failure ? <div className="mt-2 text-[12px] font-semibold text-[#c0392b]">{failure}</div> : null}
+      {failure ? <div className="mt-2 text-[12px] font-semibold text-ink-brand-6">{failure}</div> : null}
     </div>
   );
 };
@@ -436,10 +436,10 @@ const CreatorStudio: FC = () => {
     return (
       <TokenShell>
         <div className="mx-auto max-w-[560px] pt-16 text-center">
-          <h1 className="font-serif text-3xl font-semibold text-[#161511]">Creator studio</h1>
-          <p className="mt-3 font-serif text-[15px] leading-[24px] text-[#6b7280]">
+          <h1 className="font-serif text-3xl font-semibold text-ink-2">Creator studio</h1>
+          <p className="mt-3 font-serif text-[15px] leading-[24px] text-ink-10">
             This account can’t sign transactions yet, so it can’t run a creator token.{' '}
-            <a href="/upgrade" className="font-semibold text-[#c0392b] hover:underline">
+            <a href="/upgrade" className="font-semibold text-ink-brand-6 hover:underline">
               Upgrade to a full account
             </a>{' '}
             to launch one — you can look through the steps first.
@@ -451,7 +451,7 @@ const CreatorStudio: FC = () => {
               Both exits are real links now, matching launch-wizard.tsx:179. */}
           <a
             href="/creators/launch"
-            className="mt-6 inline-block rounded-[13px] border border-[#ebebeb] px-6 py-3 text-[15px] leading-[24px] font-bold text-[#161511] hover:bg-[#f7f7f5]"
+            className="mt-6 inline-block rounded-[13px] border border-line-9 px-6 py-3 text-[15px] leading-[24px] font-bold text-ink-2 hover:bg-surface-17"
           >
             Open the launch wizard
           </a>
@@ -472,14 +472,14 @@ const CreatorStudio: FC = () => {
     return (
       <TokenShell>
         <div className="mx-auto max-w-[560px] pt-16 text-center">
-          <h1 className="font-serif text-3xl font-semibold text-[#161511]">Launch your creator token</h1>
-          <p className="mt-3 font-serif text-[15px] leading-[24px] text-[#6b7280]">
+          <h1 className="font-serif text-3xl font-semibold text-ink-2">Launch your creator token</h1>
+          <p className="mt-3 font-serif text-[15px] leading-[24px] text-ink-10">
             One token, bound to your account, that trades on a live market and is spent on your services. Free
             to launch.
           </p>
           <a
             href="/creators/launch"
-            className="mt-6 inline-block rounded-[13px] bg-[#c0392b] px-6 py-3 text-[15px] leading-[24px] font-bold text-white hover:bg-[#96271b]"
+            className="mt-6 inline-block rounded-[13px] bg-surface-brand-12 px-6 py-3 text-[15px] leading-[24px] font-bold text-ink-27 hover:bg-surface-brand-17"
           >
             Open the launch wizard
           </a>
@@ -493,14 +493,14 @@ const CreatorStudio: FC = () => {
   const held = market.position?.tokens ?? 0;
 
   const banner = overdue ? (
-    <div className="mb-5 flex items-center justify-between gap-3 rounded-[14px] border border-[#f6e2c4] bg-[#fdf6ec] px-5 py-3.5">
-      <span className="text-[14px] leading-[22px] font-semibold text-[#b45309]">
+    <div className="mb-5 flex items-center justify-between gap-3 rounded-[14px] border border-line-warn-2 bg-surface-warn-4 px-5 py-3.5">
+      <span className="text-[14px] leading-[22px] font-semibold text-ink-warn-3">
         Your listing has lapsed — renew to stay in discovery. Answering and cashing out still work.
       </span>
       <button
         onClick={() => void runStudioAction(() => studio.renew(1), 'Renewing your listing didn’t go through.')}
         disabled={studio.isBusy}
-        className="rounded-[10px] bg-[#b45309] px-4 py-2 text-[13px] leading-[20px] font-semibold text-white disabled:opacity-50"
+        className="rounded-[10px] bg-surface-warn-11 px-4 py-2 text-[13px] leading-[20px] font-semibold text-ink-27 disabled:opacity-50"
       >
         Renew ~$10
       </button>
@@ -511,26 +511,26 @@ const CreatorStudio: FC = () => {
     <TokenShell>
       <div className="pt-[26px]">
         <div className="mb-1 flex items-center gap-3">
-          <span className="h-11 w-11 rounded-[13px] bg-[#e9ebee]" />
+          <span className="h-11 w-11 rounded-[13px] bg-surface-28" />
           <div>
-            <h1 className="font-serif text-2xl font-semibold text-[#161511]">Creator Studio</h1>
-            <p className="text-[14px] leading-[22px] text-[#6b7280]">Your token @{studio.creator} · your control room</p>
+            <h1 className="font-serif text-2xl font-semibold text-ink-2">Creator Studio</h1>
+            <p className="text-[14px] leading-[22px] text-ink-10">Your token @{studio.creator} · your control room</p>
           </div>
         </div>
 
         {/* Section tabs */}
-        <div className="mb-5 mt-4 flex flex-wrap gap-1.5 rounded-[14px] border border-[#ebedf0] bg-[#f4f5f7] p-[5px]">
+        <div className="mb-5 mt-4 flex flex-wrap gap-1.5 rounded-[14px] border border-line-6 bg-surface-21 p-[5px]">
           {SECTIONS.map((s) => (
             <button
               key={s.id}
               onClick={() => setSection(s.id)}
               className={`rounded-[9px] px-4 py-2 font-sans text-[14px] leading-[22px] font-semibold transition-colors ${
-                section === s.id ? 'bg-white text-[#161511] shadow-sm' : 'text-[#6b7280] hover:text-[#161511]'
+                section === s.id ? 'bg-surface-1 text-ink-2 shadow-sm' : 'text-ink-10 hover:text-ink-2'
               }`}
             >
               {s.label}
               {s.id === 'inbox' && inbox.length > 0 ? (
-                <span className="ml-1.5 rounded-full bg-[#c0392b] px-1.5 text-[12px] leading-[18px] text-white">
+                <span className="ml-1.5 rounded-full bg-surface-brand-12 px-1.5 text-[12px] leading-[18px] text-ink-27">
                   {inbox.length}
                 </span>
               ) : null}
@@ -540,7 +540,7 @@ const CreatorStudio: FC = () => {
 
         {banner}
         {actionFailure ? (
-          <div className="mb-5 rounded-[14px] border border-[#f3c7c0] bg-[#fdecea] px-5 py-3.5 text-[14px] leading-[22px] font-semibold text-[#c0392b]">
+          <div className="mb-5 rounded-[14px] border border-line-brand-3 bg-surface-brand-7 px-5 py-3.5 text-[14px] leading-[22px] font-semibold text-ink-brand-6">
             {actionFailure}
           </div>
         ) : null}
@@ -602,7 +602,7 @@ const CreatorStudio: FC = () => {
           <div className="flex flex-col gap-2.5">
             {inbox.length === 0 ? (
               <Card>
-                <p className="py-6 text-center font-serif text-sm text-[#9ca3af]">
+                <p className="py-6 text-center font-serif text-sm text-ink-14">
                   No requests waiting. Nice — you’re all caught up.
                 </p>
               </Card>
@@ -613,22 +613,22 @@ const CreatorStudio: FC = () => {
               // carries. Zipped by index: both lists come from the same filtered
               // array in the same order, so they cannot drift.
               inbox.map((a, i) => (
-                <Card key={a.id} className={a.urgent ? 'border-[#f6e2c4] bg-[#fdf6ec]' : ''}>
+                <Card key={a.id} className={a.urgent ? 'border-line-warn-2 bg-surface-warn-4' : ''}>
                   <div className="flex items-center justify-between gap-3">
-                    <div className="text-[15px] leading-[24px] font-semibold text-[#161511]">{a.service}</div>
+                    <div className="text-[15px] leading-[24px] font-semibold text-ink-2">{a.service}</div>
                     <div
-                      className={`text-[13px] leading-[20px] font-semibold ${a.urgent ? 'text-[#b45309]' : 'text-[#6b7280]'}`}
+                      className={`text-[13px] leading-[20px] font-semibold ${a.urgent ? 'text-ink-warn-3' : 'text-ink-10'}`}
                     >
                       {a.dueLabel}
                     </div>
                   </div>
-                  <div className="mt-1 text-[13px] leading-[20px] tabular-nums text-[#6b7280]">
+                  <div className="mt-1 text-[13px] leading-[20px] tabular-nums text-ink-10">
                     {usdWhole(a.costUsd)} · {tok(a.tokens)} tokens escrowed
                   </div>
                   <div className="mt-3">
                     <button
                       onClick={() => setAnswering(rawInbox[i])}
-                      className="rounded-[10px] bg-[#c0392b] px-4 py-2 text-[13px] leading-[20px] font-semibold text-white hover:bg-[#96271b]"
+                      className="rounded-[10px] bg-surface-brand-12 px-4 py-2 text-[13px] leading-[20px] font-semibold text-ink-27 hover:bg-surface-brand-17"
                     >
                       Answer or decline
                     </button>
@@ -641,10 +641,10 @@ const CreatorStudio: FC = () => {
 
         {section === 'offerings' ? (
           <Card>
-            <div className="mb-3 font-serif text-lg font-semibold text-[#161511]">
+            <div className="mb-3 font-serif text-lg font-semibold text-ink-2">
               Your services &amp; prices
             </div>
-            <p className="mb-4 text-[13px] leading-[20px] text-[#6b7280]">
+            <p className="mb-4 text-[13px] leading-[20px] text-ink-10">
               Buyers pay these in your token at the live price. Set the dollar price — the token amount
               follows the market. A price can move at most 2× in any 7 days, and that limit follows the
               SERVICE NAME, so renaming or re-creating one won’t reset it.
@@ -657,10 +657,10 @@ const CreatorStudio: FC = () => {
                 contract, the client and the tests all supported changing it; only
                 the screen did not. Same control and same 2x/7d band as the rows
                 below, so there is one way to price something, not two. */}
-            <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-[#e4e6e9] bg-[#fbfbfa] px-4 py-3">
+            <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-line-11 bg-surface-5 px-4 py-3">
               <div className="min-w-0">
-                <div className="text-[14px] leading-[22px] font-semibold text-[#161511]">Default ask price</div>
-                <div className="text-[12px] text-[#9ca3af]">
+                <div className="text-[14px] leading-[22px] font-semibold text-ink-2">Default ask price</div>
+                <div className="text-[12px] text-ink-14">
                   {studio.offerings === null
                     ? 'Shown on your token page as “Ask a question”.'
                     : studio.offerings.length === 0
@@ -668,8 +668,8 @@ const CreatorStudio: FC = () => {
                       : 'Used for “Ask a question”, alongside the named services below.'}
                 </div>
               </div>
-              <div className="flex flex-shrink-0 items-center rounded-[10px] border border-[#e4e6e9] px-3 py-2 focus-within:border-[#c0392b] focus-within:ring-1 focus-within:ring-[#c0392b]">
-                <span className="font-bold text-[#9ca3af]">$</span>
+              <div className="flex flex-shrink-0 items-center rounded-[10px] border border-line-11 px-3 py-2 focus-within:border-line-brand-10 focus-within:ring-1 focus-within:ring-line-brand-10">
+                <span className="font-bold text-ink-14">$</span>
                 <PriceInput
                   value={market.basePriceUsd}
                   // Returns the promise (not a void wrapper) so PriceInput can
@@ -687,25 +687,25 @@ const CreatorStudio: FC = () => {
                   collapsed a rejected read into an empty array. Retry, do not
                   reassure. */}
               {studio.offerings === null ? (
-                <div className="rounded-xl border border-dashed border-[#f6c6c0] px-4 py-5 text-center text-[13px] leading-[20px] text-[#8c2b1e]">
+                <div className="rounded-xl border border-dashed border-line-brand-2 px-4 py-5 text-center text-[13px] leading-[20px] text-ink-brand-2">
                   <p>Your services couldn’t be loaded just now — this is not an empty shop.</p>
                   <button
                     type="button"
                     onClick={() => studio.retry()}
-                    className="mt-2 rounded-[10px] border border-[#e2e4e7] bg-white px-3 py-1.5 text-[13px] leading-[20px] font-semibold text-[#161511] hover:border-[#161511]"
+                    className="mt-2 rounded-[10px] border border-line-12 bg-surface-1 px-3 py-1.5 text-[13px] leading-[20px] font-semibold text-ink-2 hover:border-line-28"
                   >
                     Try again
                   </button>
                 </div>
               ) : studio.offerings.length === 0 ? (
-                <p className="rounded-xl border border-dashed border-[#e4e6e9] px-4 py-5 text-center text-[13px] leading-[20px] text-[#9ca3af]">
+                <p className="rounded-xl border border-dashed border-line-11 px-4 py-5 text-center text-[13px] leading-[20px] text-ink-14">
                   You haven’t posted any services yet. Add one below and it appears on your token page.
                 </p>
               ) : (
                 studio.offerings.map((o) => (
                   <div
                     key={o.offeringId}
-                    className="flex items-center justify-between gap-3 rounded-xl border border-[#e4e6e9] px-4 py-3"
+                    className="flex items-center justify-between gap-3 rounded-xl border border-line-11 px-4 py-3"
                   >
                     <div className="min-w-0">
                       <TitleInput
@@ -714,15 +714,15 @@ const CreatorStudio: FC = () => {
                         onCommit={(title) => studio.setOfferingTitle({ offeringId: o.offeringId, title })}
                         onFailure={(m) => setActionFailure(m || null)}
                       />
-                      <div className="text-[12px] text-[#9ca3af]">
+                      <div className="text-[12px] text-ink-14">
                         {market.priceUsd > 0
                           ? `≈ ${tok(o.priceHbd / market.priceUsd)} tokens at today’s price`
                           : 'Token price unavailable'}
                       </div>
                     </div>
                     <div className="flex flex-shrink-0 items-center gap-2">
-                      <div className="flex items-center rounded-[10px] border border-[#e4e6e9] px-3 py-2 focus-within:border-[#c0392b] focus-within:ring-1 focus-within:ring-[#c0392b]">
-                        <span className="font-bold text-[#9ca3af]">$</span>
+                      <div className="flex items-center rounded-[10px] border border-line-11 px-3 py-2 focus-within:border-line-brand-10 focus-within:ring-1 focus-within:ring-line-brand-10">
+                        <span className="font-bold text-ink-14">$</span>
                         <PriceInput
                           value={o.priceHbd}
                           onCommit={(usd) =>
@@ -740,7 +740,7 @@ const CreatorStudio: FC = () => {
                         }
                         disabled={studio.isBusy}
                         title="Delist this service. Asks already made against it are unaffected."
-                        className="rounded-[10px] border border-[#e4e6e9] px-3 py-2 text-[13px] leading-[20px] font-semibold text-[#6b7280] hover:bg-[#f6f7f8] disabled:opacity-50"
+                        className="rounded-[10px] border border-line-11 px-3 py-2 text-[13px] leading-[20px] font-semibold text-ink-10 hover:bg-surface-16 disabled:opacity-50"
                       >
                         Remove
                       </button>
@@ -765,23 +765,23 @@ const CreatorStudio: FC = () => {
               <Stat label="Reserve" value={usdWhole(market.reserveUsd)} sub="Backs the floor" />
             </div>
             <div className="mt-5">
-              <div className="mb-1 flex justify-between text-[13px] leading-[20px] text-[#6b7280]">
+              <div className="mb-1 flex justify-between text-[13px] leading-[20px] text-ink-10">
                 <span>Supply</span>
                 <span className="tabular-nums">
                   {market.supply.toLocaleString('en-US')} / {market.cap.toLocaleString('en-US')}
                 </span>
               </div>
-              <div className="h-2 overflow-hidden rounded-full bg-[#f1f3f5]">
-                <div className="h-full bg-[#c0392b]" style={{ width: `${supplyPct}%` }} />
+              <div className="h-2 overflow-hidden rounded-full bg-surface-23">
+                <div className="h-full bg-surface-brand-12" style={{ width: `${supplyPct}%` }} />
               </div>
             </div>
             <div className="mt-5 flex items-center gap-2">
-              <span className="text-[13px] leading-[20px] text-[#6b7280]">Raise cap to</span>
+              <span className="text-[13px] leading-[20px] text-ink-10">Raise cap to</span>
               <input
                 value={capInput}
                 onChange={(e) => setCapInput(e.target.value)}
                 inputMode="numeric"
-                className="w-[110px] rounded-[10px] border border-[#e4e6e9] px-3 py-2 text-[14px] leading-[22px] font-semibold tabular-nums outline-none focus:border-[#c0392b] focus:ring-1 focus:ring-[#c0392b]"
+                className="w-[110px] rounded-[10px] border border-line-11 px-3 py-2 text-[14px] leading-[22px] font-semibold tabular-nums outline-none focus:border-line-brand-10 focus:ring-1 focus:ring-line-brand-10"
               />
               <button
                 onClick={async () => {
@@ -829,15 +829,15 @@ const CreatorStudio: FC = () => {
                     );
                   }
                 }}
-                className="rounded-[10px] bg-[#161511] px-4 py-2 text-[13px] leading-[20px] font-semibold text-white"
+                className="rounded-[10px] bg-surface-43 px-4 py-2 text-[13px] leading-[20px] font-semibold text-ink-27"
               >
                 Raise cap
               </button>
-              <span className="text-[12px] text-[#9ca3af]">
+              <span className="text-[12px] text-ink-14">
                 lower only down to {market.supply.toLocaleString('en-US')} issued
               </span>
             </div>
-            <p className="mt-4 rounded-[10px] bg-[#f6f7f8] px-3.5 py-3 text-[13px] leading-[20px] text-[#6b7280]">
+            <p className="mt-4 rounded-[10px] bg-surface-16 px-3.5 py-3 text-[13px] leading-[20px] text-ink-10">
               Your token’s price is set by the market — buys raise it, sells lower it. You don’t set the
               price; you set your <strong>service prices</strong> in dollars.
             </p>
@@ -846,33 +846,33 @@ const CreatorStudio: FC = () => {
 
         {section === 'billing' ? (
           <Card>
-            <div className="mb-1 font-serif text-lg font-semibold text-[#161511]">Subscription</div>
-            <div className="mb-4 text-[14px] leading-[22px] text-[#4b5563]">
+            <div className="mb-1 font-serif text-lg font-semibold text-ink-2">Subscription</div>
+            <div className="mb-4 text-[14px] leading-[22px] text-ink-8">
               {overdue ? 'Lapsed — renew to stay listed.' : `Paid up · ${subDaysLeft} days left.`} Staying
               listed is ~$10/month. First month’s on the house.
             </div>
             <button
               onClick={() => void runStudioAction(() => studio.renew(1), 'Renewing your listing didn’t go through.')}
               disabled={studio.isBusy}
-              className="rounded-[11px] bg-[#c0392b] px-5 py-2.5 text-[14px] leading-[22px] font-semibold text-white hover:bg-[#96271b] disabled:opacity-50"
+              className="rounded-[11px] bg-surface-brand-12 px-5 py-2.5 text-[14px] leading-[22px] font-semibold text-ink-27 hover:bg-surface-brand-17 disabled:opacity-50"
             >
               Renew ~$10
             </button>
-            <p className="mt-4 text-[13px] leading-[20px] text-[#9ca3af]">
+            <p className="mt-4 text-[13px] leading-[20px] text-ink-14">
               If you stop paying, your token’s market winds down, holders are refunded at the floor, and your
               delivery record resets — coming back means a new token. Answering and cashing out are never
               blocked by billing.
             </p>
-            <div className="mt-5 border-t border-[#f1f3f5] pt-4">
+            <div className="mt-5 border-t border-line-2 pt-4">
               {market.windingDown ? (
-                <div className="text-[13px] leading-[20px] font-semibold text-[#b45309]">
+                <div className="text-[13px] leading-[20px] font-semibold text-ink-warn-3">
                   This token is winding down — holders are being refunded at the floor. Answering and cashing
                   out still work.
                 </div>
               ) : (
                 <button
                   onClick={() => setRetireOpen(true)}
-                  className="rounded-[10px] border border-[#f0c9c2] px-4 py-2 text-[13px] leading-[20px] font-semibold text-[#c0392b] hover:bg-[#fef2f0]"
+                  className="rounded-[10px] border border-line-brand-1 px-4 py-2 text-[13px] leading-[20px] font-semibold text-ink-brand-6 hover:bg-surface-brand-3"
                 >
                   End this token
                 </button>
@@ -904,7 +904,7 @@ const CreatorStudio: FC = () => {
                 {tradeFeeClaimableUsd === null ? (
                   <button
                     onClick={() => studio.retry()}
-                    className="rounded-[11px] border border-[#e2e4e7] bg-white px-5 py-2.5 text-[14px] leading-[22px] font-semibold text-[#161511] hover:border-[#161511]"
+                    className="rounded-[11px] border border-line-12 bg-surface-1 px-5 py-2.5 text-[14px] leading-[22px] font-semibold text-ink-2 hover:border-line-28"
                   >
                     Try again
                   </button>
@@ -917,7 +917,7 @@ const CreatorStudio: FC = () => {
                       )
                     }
                     disabled={tradeFeeClaimableUsd <= 0 || studio.isBusy}
-                    className="rounded-[11px] bg-[#2f7d4f] px-5 py-2.5 text-[14px] leading-[22px] font-semibold text-white hover:bg-[#276b43] disabled:opacity-50"
+                    className="rounded-[11px] bg-surface-ok-7 px-5 py-2.5 text-[14px] leading-[22px] font-semibold text-ink-27 hover:bg-surface-ok-8 disabled:opacity-50"
                   >
                     {tradeFeeClaimableUsd <= 0 ? 'Claimed' : 'Claim'}
                   </button>
@@ -946,7 +946,7 @@ const CreatorStudio: FC = () => {
                 sub={`worth ${usdPrice(held * market.priceUsd)} · floor ${usdPrice(held * market.floorUsd)}`}
               />
               <div className="mt-4 flex items-center gap-2">
-                <span className="text-[13px] leading-[20px] text-[#6b7280]">Cash out</span>
+                <span className="text-[13px] leading-[20px] text-ink-10">Cash out</span>
                 <input
                   value={sellInput}
                   onChange={(e) => {
@@ -955,7 +955,7 @@ const CreatorStudio: FC = () => {
                   }}
                   placeholder="tokens"
                   inputMode="decimal"
-                  className="w-[110px] rounded-[10px] border border-[#e4e6e9] px-3 py-2 text-[14px] leading-[22px] font-semibold tabular-nums outline-none focus:border-[#c0392b] focus:ring-1 focus:ring-[#c0392b]"
+                  className="w-[110px] rounded-[10px] border border-line-11 px-3 py-2 text-[14px] leading-[22px] font-semibold tabular-nums outline-none focus:border-line-brand-10 focus:ring-1 focus:ring-line-brand-10"
                 />
                 <button
                   onClick={async () => {
@@ -970,15 +970,15 @@ const CreatorStudio: FC = () => {
                       setSellFailure(writeFailureMessage(err, 'That sell didn’t go through.'));
                     }
                   }}
-                  className="rounded-[10px] bg-[#161511] px-4 py-2 text-[13px] leading-[20px] font-semibold text-white"
+                  className="rounded-[10px] bg-surface-43 px-4 py-2 text-[13px] leading-[20px] font-semibold text-ink-27"
                 >
                   Sell
                 </button>
               </div>
               {sellFailure ? (
-                <div className="mt-2 text-[12px] font-semibold text-[#c0392b]">{sellFailure}</div>
+                <div className="mt-2 text-[12px] font-semibold text-ink-brand-6">{sellFailure}</div>
               ) : null}
-              <p className="mt-3 text-[12px] leading-[18px] text-[#9ca3af]">
+              <p className="mt-3 text-[12px] leading-[18px] text-ink-14">
                 Selling your own tokens returns them to dollars at the market price — it doesn’t affect anyone
                 else’s floor. Never blocked by billing.
               </p>

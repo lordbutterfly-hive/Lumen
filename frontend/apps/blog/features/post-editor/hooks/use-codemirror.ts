@@ -23,6 +23,11 @@ import {
   defaultHighlightStyle,
 } from "@codemirror/language";
 import { wrapSelection } from "../lib/codemirror-commands";
+import {
+  continueMarkup,
+  listContinuation,
+  markProvisional,
+} from "../lib/list-continuation";
 import { lightTheme, darkCompartment, isDarkMode } from "../lib/codemirror-theme";
 
 interface UseCodemirrorConfig {
@@ -129,9 +134,18 @@ export function useCodemirror(config: UseCodemirrorConfig) {
                 selection: { anchor: line.from + insert.length },
                 userEvent: "input",
               });
+              // The marker this branch just wrote is as automatic as the one
+              // `insertNewlineContinueMarkup` writes, so it gets the same
+              // provisional treatment -- type your own marker over it and
+              // yours wins. See ../lib/list-continuation.ts.
+              markProvisional(view);
               return true;
             }
-            return false; // Let markdown keymap handle all other cases
+            // Continue the markup AND remember what was inserted, so a marker
+            // typed straight after it replaces the automatic one instead of
+            // nesting under it (audit 1.3). Returns false in non-markdown
+            // context, leaving the rest of the Enter chain untouched.
+            return continueMarkup(view);
           },
         },
       ])
@@ -167,7 +181,15 @@ export function useCodemirror(config: UseCodemirrorConfig) {
                 userEvent: "input",
               })
             );
+            return true;
           }
+          // Tab on a still-empty bullet re-writes an AUTOMATIC marker (the
+          // indent, and for the ordered case the bullet character too), so it
+          // gets the same provisional treatment as one Enter wrote -- otherwise
+          // Tab then typing "- x" doubles again, the very bug fixed above.
+          // `keepIndent` because the indentation here is the thing the author
+          // just pressed Tab to get; typing their own marker must not undo it.
+          markProvisional(view, { keepIndent: true });
           return true;
         },
       },
@@ -187,6 +209,10 @@ export function useCodemirror(config: UseCodemirrorConfig) {
               userEvent: "delete",
             });
           }
+          // Same reason as Tab above: outdenting an empty bullet leaves an
+          // automatic marker sitting on the line, at the level the author just
+          // chose.
+          markProvisional(view, { keepIndent: true });
           return true;
         },
       },
@@ -234,6 +260,7 @@ export function useCodemirror(config: UseCodemirrorConfig) {
     ]);
 
     const extensions = [
+      listContinuation,
       enterKeymap,
       tabKeymap,
       boldItalicKeymap,

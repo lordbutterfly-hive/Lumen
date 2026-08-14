@@ -46,8 +46,8 @@ type NavIcon = ComponentType<LucideProps>;
  * the page you are on look identical, and the rail stops telling you where you are.
  */
 const ROW_CLASS =
-  'flex items-center gap-[14px] rounded-xl px-[14px] py-[11px] font-sans text-[15px] leading-[24px] text-[#4b5563] transition-colors hover:bg-[#fdf2f0] hover:text-[#c0392b]';
-const ROW_ACTIVE_CLASS = 'bg-[#f1f3f5] font-medium text-[#161511]';
+  'flex items-center gap-[14px] rounded-xl px-[14px] py-[11px] font-sans text-[15px] leading-[24px] text-ink-8 transition-colors hover:bg-surface-brand-5 hover:text-ink-brand-6';
+const ROW_ACTIVE_CLASS = 'bg-surface-23 font-medium text-ink-2';
 
 /**
  * ★★★ TWO ROWS CANNOT BOTH BE "WHERE YOU ARE" (2026-08-10, measured).
@@ -83,7 +83,7 @@ const NavRowContent = ({
       <IconTag className="h-5 w-5 shrink-0" />
       <span>{label}</span>
       {isPending ? (
-        <Loader2 className="ml-auto h-4 w-4 shrink-0 animate-spin text-[#c0392b]" aria-hidden="true" />
+        <Loader2 className="ml-auto h-4 w-4 shrink-0 animate-spin text-ink-brand-6" aria-hidden="true" />
       ) : null}
     </span>
   );
@@ -250,7 +250,7 @@ export default function LeftRail() {
         />
 
         <li aria-hidden="true">
-          <Separator className="mx-[6px] my-[14px] w-auto bg-[#ebebeb]" />
+          <Separator className="mx-[6px] my-[14px] w-auto bg-surface-27" />
         </li>
 
         <InternalNavRow

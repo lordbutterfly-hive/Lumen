@@ -12,7 +12,7 @@ interface WitnessesProxyCardProps {
 }
 
 const BUTTON_CLASS =
-  'w-full rounded-[11px] border border-[#e4e6e9] bg-white px-4 py-[11px] font-sans text-[14px] leading-[22px] font-semibold text-[#3f4650] transition-colors hover:bg-[#f6f7f8]';
+  'w-full rounded-[11px] border border-line-11 bg-surface-1 px-4 py-[11px] font-sans text-[14px] leading-[22px] font-semibold text-ink-7 transition-colors hover:bg-surface-16';
 
 /**
  * Right-rail "Set a proxy" card. Delegating votes and clearing a proxy
@@ -29,10 +29,10 @@ export default function WitnessesProxyCard({ isLoggedIn, hasProxy, proxyAccount 
 
   return (
     <div data-testid="witnesses-proxy-card">
-      <div className="mb-1.5 font-sans text-[15px] leading-[24px] font-bold text-[#161511]">
+      <div className="mb-1.5 font-sans text-[15px] leading-[24px] font-bold text-ink-2">
         {t('witnesses.proxy_card.title')}
       </div>
-      <p className="mb-3.5 font-serif text-[13px] leading-[20px] text-[#6b7280]">
+      <p className="mb-3.5 font-serif text-[13px] leading-[20px] text-ink-10">
         {isLite
           ? t('witnesses.lite_cannot_vote')
           : hasProxy

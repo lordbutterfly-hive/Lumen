@@ -104,7 +104,7 @@ export function AlertDialogFlag({
               </p>
             ) : (
               <AlertDialogAction
-                className="rounded-none bg-foreground text-secondary shadow-lg shadow-destructive hover:bg-destructive hover:shadow-foreground disabled:bg-gray-400 disabled:shadow-none"
+                className="rounded-none bg-foreground text-secondary shadow-lg shadow-destructive hover:bg-destructive hover:shadow-foreground disabled:bg-surface-34 disabled:shadow-none"
                 data-testid="flag-dialog-ok"
                 onClick={flag}
               >

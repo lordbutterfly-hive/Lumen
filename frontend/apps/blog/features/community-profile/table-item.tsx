@@ -71,7 +71,7 @@ const TableItem = ({
                   disabled={setRoleMutation.isPending}
                   data-testid="community-role-save-button"
                 >
-                  <Save className="h-4 w-4 text-green-500" />
+                  <Save className="h-4 w-4 text-ink-ok-5" />
                 </button>
                 <button
                   onClick={() => setEditMode((prev) => !prev)}

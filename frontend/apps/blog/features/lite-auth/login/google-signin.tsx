@@ -258,13 +258,13 @@ const GoogleSignIn: FC<Props> = ({ onIdToken, onError, nonce }) => {
     <div
       ref={shell}
       data-testid="google-signin-row"
-      className="relative mb-1 h-[64px] w-full overflow-hidden rounded-[14px] border border-[#e4e6e9] bg-white focus-within:border-[#c0392b]"
+      className="relative mb-1 h-[64px] w-full overflow-hidden rounded-[14px] border border-line-11 bg-surface-1 focus-within:border-line-brand-10"
     >
       <div
         aria-hidden="true"
         className="pointer-events-none flex h-full w-full items-center gap-3 px-4 text-left"
       >
-        <span className="flex h-[34px] w-[34px] flex-shrink-0 items-center justify-center rounded-[10px] bg-white">
+        <span className="flex h-[34px] w-[34px] flex-shrink-0 items-center justify-center rounded-[10px] bg-surface-1">
           <svg width="22" height="22" viewBox="0 0 48 48" aria-hidden>
             <path fill="#4285F4" d="M45.1 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h11.8c-.5 2.7-2 5-4.4 6.6v5.5h7.1c4.1-3.8 6.6-9.4 6.6-16.1z" />
             <path fill="#34A853" d="M24 46c5.9 0 10.9-2 14.5-5.4l-7.1-5.5c-2 1.3-4.5 2.1-7.4 2.1-5.7 0-10.5-3.8-12.2-9H4.5v5.7C8.1 41.1 15.4 46 24 46z" />
@@ -273,8 +273,8 @@ const GoogleSignIn: FC<Props> = ({ onIdToken, onError, nonce }) => {
           </svg>
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block font-sans text-[15px] leading-[24px] font-semibold text-[#161511]">Continue with Google</span>
-          <span className="block font-sans text-xs text-[#6b7280]">No wallet, no extension, nothing to install.</span>
+          <span className="block font-sans text-[15px] leading-[24px] font-semibold text-ink-2">Continue with Google</span>
+          <span className="block font-sans text-xs text-ink-10">No wallet, no extension, nothing to install.</span>
         </span>
       </div>
 

@@ -43,7 +43,14 @@
     ".next-stats/types/**/*.ts",
     ".next-fix/types/**/*.ts",
     ".next-icon/types/**/*.ts",
-    ".next-final2/types/**/*.ts"
+    ".next-final2/types/**/*.ts",
+    ".next-vote/types/**/*.ts",
+    ".next-layout/types/**/*.ts",
+    ".next-perf/types/**/*.ts",
+    ".next-i18n/types/**/*.ts",
+    ".next-scroll/types/**/*.ts",
+    ".next-dark/types/**/*.ts",
+    ".next-combined/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",

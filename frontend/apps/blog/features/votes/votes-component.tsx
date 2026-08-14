@@ -1,11 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useStorageWithTTL } from '@ui/hooks/useStorageWithTTL';
 import { StorageTTL } from '@ui/lib/storage-with-ttl';
 import clsx from 'clsx';
 import { CircleSpinner } from 'react-spinners-kit';
 import TooltipContainer from '@ui/components/tooltip-container';
 import { Slider } from '@ui/components/slider';
-import { Icons } from '@ui/components/icons';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import DialogLogin from '@/blog/components/dialog-login';
@@ -19,6 +18,8 @@ import { handleError } from '@ui/lib/handle-error';
 import { fetchLiteEngagement } from '@/blog/lib/lite/client/lite-engagement';
 import { useVoteMutation } from './hooks/use-vote-mutation';
 import { VoteRemovalDialog } from './vote-removal-dialog';
+import { BladeGlyph, CommitRing, VoteTally, useCommitRing, voteStyles, type VoteSize } from './blade';
+import { splitTally, type MyVote } from './vote-tallies';
 
 const VOTE_WEIGHT_DROPDOWN_THRESHOLD = 1.0 * 1000.0 * 1000.0;
 
@@ -48,7 +49,23 @@ const getVoteValue = (
   return stored?.[voteType]?.[direction] ?? DEFAULT_VOTES_VALUES[voteType][direction];
 };
 
-const VotesComponent = ({ post, type }: { post: Entry; type: 'comment' | 'post' }) => {
+const VotesComponent = ({
+  post,
+  type,
+  size = 'sm'
+}: {
+  post: Entry;
+  type: 'comment' | 'post';
+  /**
+   * Handoff sizes: `default` is the post page (28px glyph / 53x53 target / 18px
+   * tally), `sm` is feed density (22px / 38x38 / 14.5px). Defaults to `sm`
+   * because four of the five surfaces that mount this are cards or comments,
+   * and because the files those live in are owned by other agents this session
+   * — an untouched call site therefore gets the correct size for where it is.
+   * The post page passes `size="default"`.
+   */
+  size?: VoteSize;
+}) => {
   const { user, sessionUnavailable } = useUserClient();
   /**
    * ★★★ SAME DEFECT AS /witnesses, NOW ON EVERY SINGLE POST AND COMMENT
@@ -170,8 +187,53 @@ const VotesComponent = ({ post, type }: { post: Entry; type: 'comment' | 'post' 
     refetchOnReconnect: false,
     refetchOnMount: false
   });
-  const { net_vests } = useLoggedUserContext();
-  const enable_slider = net_vests > VOTE_WEIGHT_DROPDOWN_THRESHOLD;
+  const { net_vests, vestsKnown } = useLoggedUserContext();
+  /**
+   * ★★★ THE PERCENTAGE PICKER MUST NOT BE DECIDED BY A PLACEHOLDER
+   * (2026-08-13 — the "I can't set the % of a vote, it's either 100% or it
+   * doesn't work" report).
+   *
+   * This read `net_vests > THRESHOLD`, and `net_vests` is 0 both when the
+   * account really is below the threshold AND whenever the answer has not
+   * arrived — including for good, when `/api/account` or `/api/users/me`
+   * fails. See the long note in `use-logged-user.tsx` for the four states 0
+   * stands for. Every one of those non-answers fell through to the plain
+   * one-shot branch further down, which is not an inert placeholder: it is a
+   * live button whose onClick is `submitVote(10000)`. Same icon, same size,
+   * same position as the picker — nothing tells the reader that this click
+   * spends 100% of their voting power irreversibly instead of opening a
+   * slider.
+   *
+   * Measured on :3000 with a real signed-in account (lordbutterfly,
+   * net_vests = 112,275,707.67, i.e. 112x the threshold, so the picker was
+   * always the correct branch):
+   *   · normal load ....... one-shot button from t=731ms to t=1138ms
+   *   · slow chain read ... one-shot button from t=721ms to t=6592ms
+   *   · /api/account 502 .. one-shot button from t=818ms, permanently
+   *   · /api/users/me 500 . one-shot button from t=3537ms, permanently
+   * and a click in that state was confirmed to take the vote path, not to
+   * open a picker and not to open a login dialog.
+   *
+   * UNKNOWN THEREFORE RESOLVES TO "OFFER THE PICKER", not to "cast 100%".
+   * The threshold exists so accounts too small for the percentage to matter
+   * are not made to drag a slider — a convenience. Showing a picker to an
+   * account that turns out to be below it costs one extra click; withholding
+   * it from an account above it costs a full-power vote the reader never
+   * chose. Those are not comparable, so the fallback goes to the side that
+   * cannot destroy anything. This deliberately follows the same reasoning as
+   * `tierPending` above — never let "we could not check" silently become an
+   * action — while reaching the opposite conclusion about DISABLING, for the
+   * reason recorded there: refusing to vote is not a safe answer for voting.
+   *
+   * ★ Known cost, stated rather than hidden: an account BELOW the threshold
+   * now sees the picker until its own vests land, then settles to the plain
+   * arrow. If it had the popover open at that instant the popover closes. It
+   * needs a sub-threshold account (~530 HP) opening the picker inside the
+   * sub-second window before its own account read returns, and it resolves
+   * itself; the alternative was a live 100% button on every account above the
+   * threshold in the same window, and permanently whenever a read failed.
+   */
+  const enable_slider = !vestsKnown || net_vests > VOTE_WEIGHT_DROPDOWN_THRESHOLD;
 
   const userVote =
     userVotes?.votes[0] && userVotes?.votes[0].voter === voter ? userVotes.votes[0] : undefined;
@@ -179,8 +241,104 @@ const VotesComponent = ({ post, type }: { post: Entry; type: 'comment' | 'post' 
   // Single disabled expression for every vote control: in flight, or the
   // account tier is not yet known (see `tierPending` above).
   const voteDisabled = voteMutation.isLoading || tierPending;
-  const vote_upvoted = userVote ? userVote.vote_percent > 0 : false;
-  const vote_downvoted = userVote ? userVote.vote_percent < 0 : false;
+
+  /**
+   * ★★★ WHICH WAY I VOTED — AND WHY `checkVote` IS NOW A FALLBACK
+   * (2026-08-14, Blade rebuild).
+   *
+   * This used to read ONLY `userVote`, i.e. only the `['votes', …]` query. That
+   * query is `enabled: !!checkVote || !!clickedVoteButton`, so on a post I have
+   * already voted on it does fire — but it has to round-trip before it answers,
+   * and until it does, both flags below were false and the component rendered
+   * the NOT-YET-VOTED branch. Clicking in that window submits a fresh vote
+   * instead of opening the withdraw dialog. That is not a theory: the project's
+   * own fixture guide documents it as the "`list_votes` race" and tells test
+   * authors to wait for the filled icon before clicking
+   * (`playwright/tests/fixture/CLAUDE.md`).
+   *
+   * `checkVote` is the SAME fact, already present in the SSR payload —
+   * `active_votes` carries `{voter, rshares}` and the sign of `rshares` is the
+   * direction. Reading it as the fallback closes the race with data the page
+   * already had, and matters far more now than it did: the tallies below are
+   * derived from this, so getting it wrong would not just mis-target a click,
+   * it would print a wrong NUMBER (`stats.total_votes` already counts my vote,
+   * so failing to attribute it to me lands it on the wrong side of the split).
+   *
+   * Precedence is deliberate and must not be swapped: `userVote` FIRST. It is
+   * the one that goes optimistic the instant I click, and it is the only one
+   * that can represent "I just withdrew" — `active_votes` still holds the stale
+   * chain row at that moment, so a `checkVote`-first order would resurrect a
+   * vote I had just removed.
+   */
+  const myVote: MyVote = userVote
+    ? userVote.vote_percent > 0
+      ? 'up'
+      : userVote.vote_percent < 0
+        ? 'down'
+        : 'none'
+    : checkVote
+      ? Number(checkVote.rshares) < 0
+        ? 'down'
+        : Number(checkVote.rshares) > 0
+          ? 'up'
+          : 'none'
+      : 'none';
+  const vote_upvoted = myVote === 'up';
+  const vote_downvoted = myVote === 'down';
+
+  // Split tallies — see vote-tallies.ts for why `down` is scraped and `up` is
+  // the remainder of the authoritative total, and for the Hivemind 1000-vote
+  // cap that bounds it.
+  const tally = splitTally(post, voter, myVote);
+
+  const [upRing, fireUpRing, clearUpRing] = useCommitRing();
+  const [downRing, fireDownRing, clearDownRing] = useCommitRing();
+
+  /**
+   * ★★★ THE CAST ANIMATION FIRES ON THE TRANSITION, NOT ON THE CLICK
+   * (2026-08-14). Driving it from the click handlers looked simpler and was
+   * wrong three ways:
+   *
+   *  · the picker's confirm button UNMOUNTS the instant `voteMutation.isLoading`
+   *    swaps that side to the spinner, taking the ring with it, so the cast
+   *    through the percentage picker — the primary path for anyone above the
+   *    vests threshold — animated for a few frames and then vanished;
+   *  · nothing fired at all when a vote arrived from anywhere other than a click
+   *    on this instance;
+   *  · the ring's own safety timeout could expire during a slow broadcast, so
+   *    whether the animation played at all depended on chain latency.
+   *
+   * `myVote` is the single fact the whole control is drawn from, and it flips
+   * the moment the optimistic update lands. Watching it means the animation
+   * marks exactly the frame the blade fills, on every path, once.
+   *
+   * ★★★ A FIRST-RENDER GUARD ALONE IS NOT ENOUGH — MEASURED (2026-08-14).
+   * The obvious version of this was just `previous === null` as a mount guard.
+   * On `/@lordbutterfly` it fired 38 animations (19 pops + 19 rings) on page
+   * load, on the 19 posts this reader had voted on days earlier. The reason is
+   * that `myVote` is not `'up'` at the first render there: it depends on
+   * `voter`, which depends on `useSessionIdentity`, which needs a beat before it
+   * answers — so the sequence is a perfectly ordinary `'none' -> 'up'` a render
+   * or two in, indistinguishable from a cast by shape alone. The same is true of
+   * a lite account, whose vote arrives from `fetchLiteEngagement` after mount.
+   *
+   * So the test is not "did it change" but "did THIS READER change it".
+   * `clickedVoteButton` answers exactly that, and it is component state, so it
+   * survives the confirm button inside the picker being unmounted by the
+   * in-flight spinner — which is what made the click handlers themselves an
+   * unusable place to fire from.
+   */
+  const prevMyVote = useRef<MyVote | null>(null);
+  useEffect(() => {
+    const previous = prevMyVote.current;
+    prevMyVote.current = myVote;
+    if (previous === null || previous === myVote) return;
+    // Learning about an existing vote is not casting one.
+    if (!clickedVoteButton) return;
+    if (myVote === 'up') fireUpRing();
+    else if (myVote === 'down') fireDownRing();
+    // Withdrawing (-> 'none') deliberately animates nothing: nothing was cast.
+  }, [myVote]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (userVote && userVote.vote_percent > 0) {
@@ -206,26 +364,28 @@ const VotesComponent = ({ post, type }: { post: Entry; type: 'comment' | 'post' 
     }
   };
 
-  // ★ THUMB-SIZED TAP TARGET (2026-08-08, preserved). `p-2` grows the ~20px
-  // icon to a ~36px box and pushes upvote/downvote apart — was on a wrapper
-  // `<span>`, now lives directly on each real `<button>` below.
-  //
-  // ★ `group` ADDED (2026-08-13, A1 review V-3). Six icons below style their
-  // hover state with `group-hover:` — which Tailwind emits as the DESCENDANT
-  // selector `.group:hover .group-hover\:x` (confirmed in this app's own built
-  // CSS) — but no element in the tree carried the `group` class: not this tap
-  // target, and not any of the five ancestors that render this component
-  // (medium-post-card, post-list-item, comment-list-item,
-  // profile-comment-card, [permlink]/content). So those rules matched nothing
-  // and the vote arrows had NO hover feedback at all — but only when signed
-  // IN, because both signed-OUT branches put `group` on their own button. Same
-  // page, opposite behaviour depending on session state.
-  //
-  // Fixed by supplying the missing `group` rather than by rewriting the icons
-  // to plain `hover:`: the hover target is meant to be the whole ~36px tap
-  // box, not the ~20px icon inside it, which is exactly what the signed-out
-  // branches already do.
-  const tapTargetClass = 'group inline-flex items-center justify-center p-2';
+  /**
+   * ★ THE TAP TARGET IS NOW THE BUTTON ITSELF (2026-08-14, Blade rebuild).
+   *
+   * This used to be `'group inline-flex items-center justify-center p-2'` — a
+   * Tailwind string whose whole job was to grow a ~20px icon into a ~36px box
+   * and to supply the `group` that six `group-hover:` rules depended on. The
+   * Blade control sizes its own button (53x53, or 38x38 at `--sm`) and states
+   * its hover in plain CSS on that same element, so both problems the old
+   * string existed to solve are gone rather than re-solved. The measured floor
+   * from the handoff — never under a 38px target, never under a 20px glyph,
+   * because the concave flanks fuse below that — is enforced in
+   * `vote-control.module.css`, not here.
+   */
+  const rootClass = clsx(voteStyles.root, { [voteStyles.sm]: size === 'sm' });
+  const upBtnClass = clsx(voteStyles.btn, voteStyles.up, {
+    [voteStyles.mine]: vote_upvoted,
+    [voteStyles.casting]: upRing
+  });
+  const downBtnClass = clsx(voteStyles.btn, voteStyles.down, {
+    [voteStyles.mine]: vote_downvoted,
+    [voteStyles.casting]: downRing
+  });
 
   const upvoteUndoLabel =
     userVote && userVote.vote_percent === 10000 && !enable_slider
@@ -240,319 +400,415 @@ const VotesComponent = ({ post, type }: { post: Entry; type: 'comment' | 'post' 
           votePercent: (-(userVote?.vote_percent ?? 0) / 100).toFixed(2)
         });
 
+  /**
+   * ★★★ HOW THE PERCENTAGE PICKER AND THE BLADE COEXIST — the one thing the
+   * handoff does not answer (2026-08-14).
+   *
+   * The handoff says under "Not included": *"Vote-weight slider (Hive's
+   * percentage picker) — this is the 100% control only."* The owner, in the
+   * same breath, says the slider must still be there. So the design does not
+   * specify the join, and this is the decision taken, stated plainly:
+   *
+   *   **The Blade is the control. The percentage picker stays exactly where it
+   *   already is — behind the primary click, as the popover this component
+   *   already ships — for accounts above the vests threshold. Below it (and for
+   *   lite accounts) the primary click casts 100% directly, which is the
+   *   handoff's "100% control only" behaviour, unchanged and pixel-for-pixel as
+   *   drawn.**
+   *
+   * Both halves of the brief are therefore true at once, on the same control,
+   * with no new gesture to learn.
+   *
+   * ★ WHY NOT A LONG-PRESS, which was the suggested alternative. Because a
+   * long-press makes the plain click cast 100% — and that is precisely the
+   * defect this same session was opened to fix. The owner's report was "I can't
+   * set the % of a vote once I click vote. It's either 100% or it doesn't
+   * work"; measured, the cause was the control falling through to a one-shot
+   * 100% button (see `enable_slider` above). Demoting the picker to a hidden
+   * gesture would re-create that experience by design, on every click, for
+   * everyone — and long-press has no discoverable affordance on desktop and
+   * fights scroll on touch. The percentage step stays on the primary path.
+   *
+   * ★ WHERE THE CAST ANIMATION FIRES. On the action that actually casts. In the
+   * picker that is the confirm blade inside the popover, not the trigger — the
+   * trigger only opens a menu, and popping/ringing on it would be a lie about
+   * what just happened. On the one-shot branch the trigger IS the cast, so it
+   * fires there.
+   */
+
+  const upTally = (
+    <VoteTally value={tally.up} side="up" mine={vote_upvoted} testId="vote-tally-up" />
+  );
+  /**
+   * ★ ABSENT, NOT HIDDEN. The handoff is explicit that a post with no downvotes
+   * renders no down tally element at all — not an empty span, not
+   * `visibility: hidden` — so the UI never advertises downvoting. `null` here is
+   * the whole implementation; there is deliberately no CSS rule that could be
+   * "fixed" later into hiding an element that should not exist.
+   */
+  const downTally =
+    tally.down > 0 ? (
+      <VoteTally value={tally.down} side="down" mine={vote_downvoted} testId="vote-tally-down" />
+    ) : null;
+
   return (
-    <div className="flex items-center gap-1.5">
-      {/* Upvote with slider - trigger */}
-      {clickedVoteButton === 'up' && voteMutation.isLoading ? (
-        <CircleSpinner
-          loading={clickedVoteButton === 'up' && voteMutation.isLoading}
-          size={20}
-          color="#dc2626"
-        />
-      ) : identity.isLoggedIn && enable_slider && !vote_upvoted ? (
-        <Popover>
-          {/* ★ ONE REAL <button>, TWO NESTED `asChild` (2026-08-13, item 3).
-              `TooltipTrigger asChild` clones its child (`PopoverTrigger`);
-              `PopoverTrigger asChild` clones ITS child (the button). Both are
-              genuine Radix primitives that spread merged props all the way
-              down (verified against @radix-ui/react-primitive's `Primitive.button`
-              and @radix-ui/react-popover's `PopoverTrigger` source), so the
-              tooltip's hover/focus handlers AND the popover's click-to-open
-              both land on the same single, natively focusable element. */}
+    <div className={rootClass} data-testid="vote-control">
+      <span className={voteStyles.side}>
+        {/* Upvote */}
+        {clickedVoteButton === 'up' && voteMutation.isLoading ? (
+          <span className={voteStyles.pending}>
+            <CircleSpinner loading size={20} color="#c0392b" />
+          </span>
+        ) : identity.isLoggedIn && enable_slider && !vote_upvoted ? (
+          <Popover>
+            {/* ★ ONE REAL <button>, TWO NESTED `asChild` (2026-08-13, item 3).
+                `TooltipTrigger asChild` clones its child (`PopoverTrigger`);
+                `PopoverTrigger asChild` clones ITS child (the button). Both are
+                genuine Radix primitives that spread merged props all the way
+                down (verified against @radix-ui/react-primitive's `Primitive.button`
+                and @radix-ui/react-popover's `PopoverTrigger` source), so the
+                tooltip's hover/focus handlers AND the popover's click-to-open
+                both land on the same single, natively focusable element. */}
+            <TooltipContainer
+              side="top"
+              title={
+                <VoteTooltip
+                  text={t('cards.post_card.upvote')}
+                  afterPayout={pastPayout && !vote_upvoted}
+                />
+              }
+              contentTestId="upvote-button-tooltip"
+            >
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  data-testid="upvote-button"
+                  aria-label={t('cards.post_card.upvote')}
+                  aria-pressed={false}
+                  disabled={voteDisabled}
+                  className={upBtnClass}
+                >
+                  <BladeGlyph />
+                </button>
+              </PopoverTrigger>
+            </TooltipContainer>
+            <PopoverContent
+              className="z-50 max-w-xs rounded-lg bg-background-secondary p-4 shadow-lg"
+              sideOffset={offsetSlider.popoverSideOffset}
+              align="start"
+              alignOffset={offsetSlider.popoverAlignOfset}
+              data-testid="upvote-slider-modal"
+            >
+              <div className="flex h-full items-center gap-2">
+                <TooltipContainer
+                  side="top"
+                  title={
+                    <VoteTooltip
+                      text={t('cards.post_card.upvote')}
+                      afterPayout={pastPayout && !vote_upvoted}
+                    />
+                  }
+                  contentTestId="upvote-button-slider-tooltip"
+                >
+                  <button
+                    type="button"
+                    data-testid="upvote-button-slider"
+                    aria-label={t('cards.post_card.upvote')}
+                    className={clsx(voteStyles.btn, voteStyles.up)}
+                    disabled={voteDisabled}
+                    onClick={() => {
+                      setClickedVoteButton('up');
+                      submitVote(sliderUpvote[0] * 100);
+                      storeVotesValues((prev) => ({
+                        ...prev,
+                        [type]: {
+                          ...prev[type],
+                          upvote: sliderUpvote
+                        }
+                      }));
+                    }}
+                  >
+                    {upRing ? <CommitRing onDone={clearUpRing} /> : null}
+                    <BladeGlyph />
+                  </button>
+                </TooltipContainer>
+                <Slider
+                  dataTestId="upvote-slider"
+                  defaultValue={sliderUpvote}
+                  value={sliderUpvote}
+                  min={1}
+                  className="w-36"
+                  onValueChange={(e: number[]) => setSliderUpvote(e)}
+                />
+                <div className="w-fit" data-testid="upvote-slider-percentage-value">
+                  {sliderUpvote}%
+                </div>
+              </div>
+            </PopoverContent>
+          </Popover>
+        ) : identity.isLoggedIn && vote_upvoted ? (
+          // ★ BRANCH B WAS KEYBOARD-UNREACHABLE (2026-08-13, item 3). The old
+          // `AlertDialogTrigger asChild` landed on a bare, non-focusable
+          // `<span>` — removing your own upvote was impossible without a mouse.
+          // `VoteRemovalDialog` now forwards ref + extra props (see that file),
+          // so the same double-`asChild` composition as above works here too:
+          // Tooltip -> VoteRemovalDialog(AlertDialogTrigger) -> button.
           <TooltipContainer
             side="top"
-            title={<VoteTooltip text={t('cards.post_card.upvote')} afterPayout={pastPayout && !vote_upvoted} />}
+            title={<VoteTooltip text={upvoteUndoLabel} afterPayout={pastPayout && !vote_upvoted} />}
             contentTestId="upvote-button-tooltip"
           >
-            <PopoverTrigger asChild>
+            <VoteRemovalDialog
+              voteType="upvote"
+              onConfirm={() => {
+                setClickedVoteButton('up');
+                submitVote(0);
+              }}
+            >
               <button
                 type="button"
                 data-testid="upvote-button"
-                aria-label={t('cards.post_card.upvote')}
+                aria-label={upvoteUndoLabel}
+                aria-pressed={true}
                 disabled={voteDisabled}
-                className={tapTargetClass}
+                className={upBtnClass}
               >
-                <Icons.arrowUpCircle
-                  className={clsx(
-                    'h-5 w-5 rounded-xl text-destructive transition-colors group-hover:text-[#96271b]',
-                    { 'bg-destructive-icon text-white': userVote && userVote.vote_percent > 0 }
-                  )}
-                />
+                {upRing ? <CommitRing onDone={clearUpRing} /> : null}
+                <BladeGlyph />
               </button>
-            </PopoverTrigger>
+            </VoteRemovalDialog>
           </TooltipContainer>
-          <PopoverContent
-            className="z-50 max-w-xs rounded-lg bg-background-secondary p-4 shadow-lg"
-            sideOffset={offsetSlider.popoverSideOffset}
-            align="start"
-            alignOffset={offsetSlider.popoverAlignOfset}
-            data-testid="upvote-slider-modal"
-          >
-            <div className="flex h-full items-center gap-2">
-              <TooltipContainer
-                side="top"
-                title={<VoteTooltip text={t('cards.post_card.upvote')} afterPayout={pastPayout && !vote_upvoted} />}
-                contentTestId="upvote-button-slider-tooltip"
-              >
-                <button
-                  type="button"
-                  data-testid="upvote-button-slider"
-                  aria-label={t('cards.post_card.upvote')}
-                  className={clsx('group flex h-full items-center justify-center', 'p-2')}
-                  disabled={voteDisabled}
-                  onClick={() => {
-                    setClickedVoteButton('up');
-                    submitVote(sliderUpvote[0] * 100);
-                    storeVotesValues((prev) => ({
-                      ...prev,
-                      [type]: {
-                        ...prev[type],
-                        upvote: sliderUpvote
-                      }
-                    }));
-                  }}
-                >
-                  <Icons.arrowUpCircle className="h-[24px] w-[24px] cursor-pointer rounded-xl text-destructive transition-colors group-hover:text-[#96271b] sm:mr-1" />
-                </button>
-              </TooltipContainer>
-              <Slider
-                dataTestId="upvote-slider"
-                defaultValue={sliderUpvote}
-                value={sliderUpvote}
-                min={1}
-                className="w-36"
-                onValueChange={(e: number[]) => setSliderUpvote(e)}
+        ) : identity.isLoggedIn ? (
+          <TooltipContainer
+            side="top"
+            title={
+              <VoteTooltip
+                text={t('cards.post_card.upvote')}
+                afterPayout={pastPayout && !vote_upvoted}
               />
-              <div className="w-fit" data-testid="upvote-slider-percentage-value">
-                {sliderUpvote}%
-              </div>
-            </div>
-          </PopoverContent>
-        </Popover>
-      ) : identity.isLoggedIn && vote_upvoted ? (
-        // ★ BRANCH B WAS KEYBOARD-UNREACHABLE (2026-08-13, item 3). The old
-        // `AlertDialogTrigger asChild` landed on a bare, non-focusable
-        // `<span>` — removing your own upvote was impossible without a mouse.
-        // `VoteRemovalDialog` now forwards ref + extra props (see that file),
-        // so the same double-`asChild` composition as above works here too:
-        // Tooltip -> VoteRemovalDialog(AlertDialogTrigger) -> button.
-        <TooltipContainer
-          side="top"
-          title={<VoteTooltip text={upvoteUndoLabel} afterPayout={pastPayout && !vote_upvoted} />}
-          contentTestId="upvote-button-tooltip"
-        >
-          <VoteRemovalDialog
-            voteType="upvote"
-            onConfirm={() => {
-              setClickedVoteButton('up');
-              submitVote(0);
-            }}
+            }
+            contentTestId="upvote-button-tooltip"
           >
             <button
               type="button"
               data-testid="upvote-button"
-              aria-label={upvoteUndoLabel}
+              aria-label={t('cards.post_card.upvote')}
+              aria-pressed={false}
               disabled={voteDisabled}
-              className={tapTargetClass}
+              className={upBtnClass}
+              onClick={() => {
+                if (voteDisabled) return;
+                setClickedVoteButton('up');
+                submitVote(10000);
+              }}
             >
-              <Icons.arrowUpCircle className="h-5 w-5 cursor-pointer rounded-xl bg-destructive-icon text-white hover:bg-destructive-icon hover:text-white" />
+              {upRing ? <CommitRing onDone={clearUpRing} /> : null}
+              <BladeGlyph />
             </button>
-          </VoteRemovalDialog>
-        </TooltipContainer>
-      ) : identity.isLoggedIn ? (
-        <TooltipContainer
-          side="top"
-          title={<VoteTooltip text={t('cards.post_card.upvote')} afterPayout={pastPayout && !vote_upvoted} />}
-          contentTestId="upvote-button-tooltip"
-        >
-          <button
-            type="button"
-            data-testid="upvote-button"
-            aria-label={t('cards.post_card.upvote')}
-            disabled={voteDisabled}
-            className={tapTargetClass}
-            onClick={() => {
-              if (voteDisabled) return;
-              setClickedVoteButton('up');
-              submitVote(10000);
-            }}
-          >
-            <Icons.arrowUpCircle className="h-5 w-5 rounded-xl text-destructive transition-colors group-hover:text-[#96271b]" />
-          </button>
-        </TooltipContainer>
-      ) : (
-        // ★ BRANCHES D KEPT WITHOUT THE SHARED TOOLTIP (2026-08-13, item 3).
-        // `DialogLogin` (`apps/blog/components/dialog-login.tsx`) is outside
-        // this fix's owned files. It IS already `forwardRef`, so nesting a
-        // Tooltip outside it does not break DialogLogin's own job (its
-        // internal `DialogTrigger asChild` wires the real button directly,
-        // independent of props an outer wrapper injects onto DialogLogin
-        // itself) — verified against its source. But DialogLogin does not
-        // spread arbitrary extra props (only `children`/`redirectTo`), so
-        // the tooltip's own hover/focus handlers would never reach the real
-        // button and the popup would silently never open. Rather than ship
-        // a Tooltip wrapper that structurally cannot work, `aria-label` on
-        // the real button carries the same text a screen reader needs; the
-        // decorative hover tooltip is the one thing this branch does not
-        // get, and that is a deliberate, scoped trade-off, not an oversight.
-        <DialogLogin>
-          <button
-            type="button"
-            data-testid="upvote-button"
-            aria-label={t('cards.post_card.upvote')}
-            disabled={voteDisabled}
-            className={clsx(tapTargetClass, 'rounded-xl transition-colors hover:bg-[#fdf2f0]')}
-          >
-            <Icons.arrowUpCircle className="h-5 w-5 rounded-xl text-destructive transition-colors group-hover:text-[#96271b]" />
-          </button>
-        </DialogLogin>
-      )}
-      {/* Downvote with slider - trigger */}
-      {clickedVoteButton === 'down' && voteMutation.isLoading ? (
-        <CircleSpinner
-          loading={clickedVoteButton === 'down' && voteMutation.isLoading}
-          size={20}
-          color="#dc2626"
-        />
-      ) : identity.isLoggedIn && enable_slider && !vote_downvoted ? (
-        <Popover>
+          </TooltipContainer>
+        ) : (
+          // ★ BRANCHES D KEPT WITHOUT THE SHARED TOOLTIP (2026-08-13, item 3).
+          // `DialogLogin` (`apps/blog/components/dialog-login.tsx`) is outside
+          // this fix's owned files. It IS already `forwardRef`, so nesting a
+          // Tooltip outside it does not break DialogLogin's own job (its
+          // internal `DialogTrigger asChild` wires the real button directly,
+          // independent of props an outer wrapper injects onto DialogLogin
+          // itself) — verified against its source. But DialogLogin does not
+          // spread arbitrary extra props (only `children`/`redirectTo`), so
+          // the tooltip's own hover/focus handlers would never reach the real
+          // button and the popup would silently never open. Rather than ship
+          // a Tooltip wrapper that structurally cannot work, `aria-label` on
+          // the real button carries the same text a screen reader needs; the
+          // decorative hover tooltip is the one thing this branch does not
+          // get, and that is a deliberate, scoped trade-off, not an oversight.
+          <DialogLogin>
+            <button
+              type="button"
+              data-testid="upvote-button"
+              aria-label={t('cards.post_card.upvote')}
+              aria-pressed={false}
+              disabled={voteDisabled}
+              className={upBtnClass}
+            >
+              <BladeGlyph />
+            </button>
+          </DialogLogin>
+        )}
+        {upTally}
+      </span>
+
+      <span className={voteStyles.side}>
+        {/* Downvote */}
+        {clickedVoteButton === 'down' && voteMutation.isLoading ? (
+          <span className={voteStyles.pending}>
+            <CircleSpinner loading size={20} color="#5b6470" />
+          </span>
+        ) : identity.isLoggedIn && enable_slider && !vote_downvoted ? (
+          <Popover>
+            <TooltipContainer
+              side="top"
+              title={
+                <VoteTooltip
+                  text={t('cards.post_card.downvote')}
+                  afterPayout={pastPayout && !vote_downvoted}
+                />
+              }
+              contentTestId="downvote-button-tooltip"
+            >
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  data-testid="downvote-button"
+                  aria-label={t('cards.post_card.downvote')}
+                  aria-pressed={false}
+                  disabled={voteDisabled}
+                  className={downBtnClass}
+                >
+                  <BladeGlyph />
+                </button>
+              </PopoverTrigger>
+            </TooltipContainer>
+            <PopoverContent
+              className="z-50 max-w-xs rounded-lg bg-background-secondary p-4 shadow-lg"
+              sideOffset={offsetSlider.popoverSideOffset}
+              align="start"
+              alignOffset={offsetSlider.popoverAlignOfset}
+              data-testid="downvote-slider-modal"
+            >
+              <div className="flex h-full items-center gap-2">
+                <TooltipContainer
+                  side="top"
+                  title={
+                    <VoteTooltip
+                      text={t('cards.post_card.downvote')}
+                      afterPayout={pastPayout && !vote_downvoted}
+                    />
+                  }
+                  contentTestId="downvote-button-slider-tooltip"
+                >
+                  <button
+                    type="button"
+                    data-testid="downvote-button-slider"
+                    aria-label={t('cards.post_card.downvote')}
+                    className={clsx(voteStyles.btn, voteStyles.down)}
+                    disabled={voteDisabled}
+                    onClick={() => {
+                      setClickedVoteButton('down');
+                      submitVote(-sliderDownvote[0] * 100);
+                      storeVotesValues((prev) => ({
+                        ...prev,
+                        [type]: {
+                          ...prev[type],
+                          downvote: sliderDownvote
+                        }
+                      }));
+                    }}
+                  >
+                    {downRing ? <CommitRing onDone={clearDownRing} /> : null}
+                    <BladeGlyph />
+                  </button>
+                </TooltipContainer>
+                <Slider
+                  dataTestId="downvote-slider"
+                  defaultValue={sliderDownvote}
+                  value={sliderDownvote}
+                  min={1}
+                  className="w-36"
+                  onValueChange={(e: number[]) => setSliderDownvote(e)}
+                />
+                <div
+                  className="w-fit text-destructive"
+                  data-testid="downvote-slider-percentage-value"
+                >
+                  -{sliderDownvote}%
+                </div>
+              </div>
+              <div
+                className="flex flex-col gap-1 pt-2 text-sm"
+                data-testid="downvote-description-content"
+              >
+                <p>{t('cards.post_card.downvote_warning')}</p>
+                <ul>
+                  <li>{t('cards.post_card.reason_1')}</li>
+                  <li>{t('cards.post_card.reason_2')}</li>
+                  <li>{t('cards.post_card.reason_3')}</li>
+                  <li>{t('cards.post_card.reason_4')}</li>
+                </ul>
+              </div>
+            </PopoverContent>
+          </Popover>
+        ) : identity.isLoggedIn && vote_downvoted ? (
           <TooltipContainer
             side="top"
-            title={<VoteTooltip text={t('cards.post_card.downvote')} afterPayout={pastPayout && !vote_downvoted} />}
+            title={
+              <VoteTooltip text={downvoteUndoLabel} afterPayout={pastPayout && !vote_downvoted} />
+            }
             contentTestId="downvote-button-tooltip"
           >
-            <PopoverTrigger asChild>
+            <VoteRemovalDialog
+              voteType="downvote"
+              onConfirm={() => {
+                setClickedVoteButton('down');
+                submitVote(0);
+              }}
+            >
               <button
                 type="button"
                 data-testid="downvote-button"
-                aria-label={t('cards.post_card.downvote')}
+                aria-label={downvoteUndoLabel}
+                aria-pressed={true}
                 disabled={voteDisabled}
-                className={tapTargetClass}
+                className={downBtnClass}
               >
-                <Icons.arrowDownCircle
-                  className={clsx(
-                    'h-5 w-5 rounded-xl text-gray-600 transition-colors group-hover:bg-[#f1f3f5] group-hover:text-[#3f4650]',
-                    { 'bg-gray-600 text-white': userVote && userVote.vote_percent < 0 }
-                  )}
-                />
+                {downRing ? <CommitRing onDone={clearDownRing} /> : null}
+                <BladeGlyph />
               </button>
-            </PopoverTrigger>
+            </VoteRemovalDialog>
           </TooltipContainer>
-          <PopoverContent
-            className="z-50 max-w-xs rounded-lg bg-background-secondary p-4 shadow-lg"
-            sideOffset={offsetSlider.popoverSideOffset}
-            align="start"
-            alignOffset={offsetSlider.popoverAlignOfset}
-            data-testid="downvote-slider-modal"
-          >
-            <div className="flex h-full items-center gap-2">
-              <TooltipContainer
-                side="top"
-                title={<VoteTooltip text={t('cards.post_card.downvote')} afterPayout={pastPayout && !vote_downvoted} />}
-                contentTestId="downvote-button-slider-tooltip"
-              >
-                <button
-                  type="button"
-                  data-testid="downvote-button-slider"
-                  aria-label={t('cards.post_card.downvote')}
-                  className="group flex h-full items-center justify-center p-2"
-                  disabled={voteDisabled}
-                  onClick={() => {
-                    setClickedVoteButton('down');
-                    submitVote(-sliderDownvote[0] * 100);
-                    storeVotesValues((prev) => ({
-                      ...prev,
-                      [type]: {
-                        ...prev[type],
-                        downvote: sliderDownvote
-                      }
-                    }));
-                  }}
-                >
-                  <Icons.arrowDownCircle className="h-[24px] w-[24px] cursor-pointer rounded-xl text-gray-600 transition-colors group-hover:bg-[#f1f3f5] group-hover:text-[#3f4650] sm:mr-1" />
-                </button>
-              </TooltipContainer>
-              <Slider
-                dataTestId="downvote-slider"
-                defaultValue={sliderDownvote}
-                value={sliderDownvote}
-                min={1}
-                className="w-36"
-                onValueChange={(e: number[]) => setSliderDownvote(e)}
+        ) : identity.isLoggedIn ? (
+          <TooltipContainer
+            side="top"
+            title={
+              <VoteTooltip
+                text={t('cards.post_card.downvote')}
+                afterPayout={pastPayout && !vote_downvoted}
               />
-              <div className="w-fit text-destructive" data-testid="downvote-slider-percentage-value">
-                -{sliderDownvote}%
-              </div>
-            </div>
-            <div className="flex flex-col gap-1 pt-2 text-sm" data-testid="downvote-description-content">
-              <p>{t('cards.post_card.downvote_warning')}</p>
-              <ul>
-                <li>{t('cards.post_card.reason_1')}</li>
-                <li>{t('cards.post_card.reason_2')}</li>
-                <li>{t('cards.post_card.reason_3')}</li>
-                <li>{t('cards.post_card.reason_4')}</li>
-              </ul>
-            </div>
-          </PopoverContent>
-        </Popover>
-      ) : identity.isLoggedIn && vote_downvoted ? (
-        <TooltipContainer
-          side="top"
-          title={<VoteTooltip text={downvoteUndoLabel} afterPayout={pastPayout && !vote_downvoted} />}
-          contentTestId="downvote-button-tooltip"
-        >
-          <VoteRemovalDialog
-            voteType="downvote"
-            onConfirm={() => {
-              setClickedVoteButton('down');
-              submitVote(0);
-            }}
+            }
+            contentTestId="downvote-button-tooltip"
           >
             <button
               type="button"
               data-testid="downvote-button"
-              aria-label={downvoteUndoLabel}
+              aria-label={t('cards.post_card.downvote')}
+              aria-pressed={false}
               disabled={voteDisabled}
-              className={tapTargetClass}
+              className={downBtnClass}
+              onClick={() => {
+                if (voteDisabled) return;
+                setClickedVoteButton('down');
+                submitVote(-10000);
+              }}
             >
-              <Icons.arrowDownCircle className="h-5 w-5 cursor-pointer rounded-xl bg-destructive-icon text-white opacity-80 hover:bg-gray-600 hover:text-white" />
+              {downRing ? <CommitRing onDone={clearDownRing} /> : null}
+              <BladeGlyph />
             </button>
-          </VoteRemovalDialog>
-        </TooltipContainer>
-      ) : identity.isLoggedIn ? (
-        <TooltipContainer
-          side="top"
-          title={<VoteTooltip text={t('cards.post_card.downvote')} afterPayout={pastPayout && !vote_downvoted} />}
-          contentTestId="downvote-button-tooltip"
-        >
-          <button
-            type="button"
-            data-testid="downvote-button"
-            aria-label={t('cards.post_card.downvote')}
-            disabled={voteDisabled}
-            className={tapTargetClass}
-            onClick={() => {
-              if (voteDisabled) return;
-              setClickedVoteButton('down');
-              submitVote(-10000);
-            }}
-          >
-            <Icons.arrowDownCircle className="h-5 w-5 rounded-xl text-gray-600 transition-colors group-hover:bg-[#f1f3f5] group-hover:text-[#3f4650]" />
-          </button>
-        </TooltipContainer>
-      ) : (
-        <DialogLogin>
-          <button
-            type="button"
-            data-testid="downvote-button"
-            aria-label={t('cards.post_card.downvote')}
-            disabled={voteDisabled}
-            className={clsx(tapTargetClass, 'rounded-xl transition-colors hover:bg-[#f1f3f5]')}
-          >
-            <Icons.arrowDownCircle className="h-5 w-5 rounded-xl text-gray-600 transition-colors group-hover:bg-[#f1f3f5] group-hover:text-[#3f4650]" />
-          </button>
-        </DialogLogin>
-      )}
+          </TooltipContainer>
+        ) : (
+          <DialogLogin>
+            <button
+              type="button"
+              data-testid="downvote-button"
+              aria-label={t('cards.post_card.downvote')}
+              aria-pressed={false}
+              disabled={voteDisabled}
+              className={downBtnClass}
+            >
+              <BladeGlyph />
+            </button>
+          </DialogLogin>
+        )}
+        {downTally}
+      </span>
     </div>
   );
 };

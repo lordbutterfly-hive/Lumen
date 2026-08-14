@@ -7,17 +7,14 @@ import { Link } from '@hive/ui';
 import { proxifyImageSrc } from '@ui/lib/proxify-images';
 import { useState } from 'react';
 import { getDefaultImageUrl } from '@hive/ui';
-
-const truncateTitle = (title: string, maxLength: number = 50) => {
-  return title.length > maxLength ? `${title.substring(0, maxLength)}...` : title;
-};
+import type { SuggestionsVariant } from './list';
 
 interface SuggestionsCardProps {
   entry: Entry;
-  horizontal?: boolean;
+  variant?: SuggestionsVariant;
 }
 
-const SuggestionsCard = ({ entry, horizontal }: SuggestionsCardProps) => {
+const SuggestionsCard = ({ entry, variant = 'rail' }: SuggestionsCardProps) => {
   const cardImage = find_first_img(entry);
   const [image, setImage] = useState<string>(cardImage);
   // A Lumen proxy post reaches this card authored by the shared publishing account,
@@ -26,11 +23,12 @@ const SuggestionsCard = ({ entry, horizontal }: SuggestionsCardProps) => {
   const liteOverlay = useLiteOverlay(entry);
   const displayAuthor = liteOverlay?.author ?? entry.author;
   const displayTitle = liteOverlay?.title || entry.title;
+  const href = `/${entry.category}/@${displayAuthor}/${entry.permlink}`;
 
-  if (horizontal) {
+  if (variant === 'horizontal') {
     return (
       <div className="w-44 flex-shrink-0 snap-start overflow-hidden rounded-lg bg-background shadow-md">
-        <Link href={`/${entry.category}/@${displayAuthor}/${entry.permlink}`}>
+        <Link href={href}>
           {image ? (
             <div className="h-24 overflow-hidden bg-transparent">
               <img
@@ -55,33 +53,49 @@ const SuggestionsCard = ({ entry, horizontal }: SuggestionsCardProps) => {
     );
   }
 
+  /**
+   * ★ THE RAIL ROW (2026-08-13, audit §6.3.4).
+   *
+   * The rail used to stack the same shadowed image cards the strip uses: 186px
+   * tall each, measured. Ten of them is the 1,976px that forced the panel to
+   * grow an inner scroller. A 40px thumbnail with a two-line title is ~66px, so
+   * a capped list of five fits the pinned column beside the existing rail cards
+   * with nothing below the fold — no scroller, no max-height, no clipping.
+   *
+   * The title is a real `<a>`, and the author is a SECOND `<a>` to the author's
+   * profile rather than a third copy of the post link, so the row offers the two
+   * destinations a reader actually wants from it.
+   */
   return (
-    <div className="mx-4 mb-3 flex flex-col overflow-hidden rounded-lg bg-background shadow-md">
-      <Link href={`/${entry.category}/@${displayAuthor}/${entry.permlink}`} data-testid="post-image">
-        {image ? (
-          <div className="flex h-24 items-center overflow-hidden bg-transparent">
-            <picture className="articles__feature-img h-full w-full">
-              <source
-                srcSet={proxifyImageSrc(image, 256, 512)}
-                media="(min-width: 600px)"
-                onError={() => setImage(getDefaultImageUrl())}
-              />
-              <img
-                srcSet={image}
-                alt="Post image"
-                loading="lazy"
-                className="h-full w-full object-cover"
-                onError={() => setImage(getDefaultImageUrl())}
-              />
-            </picture>
-          </div>
-        ) : null}
-        <h2 className="p-1.5 text-xs font-semibold">{truncateTitle(displayTitle)}</h2>
-      </Link>
-      <div className="flex items-center gap-1.5 px-1.5 pb-1.5 text-xs text-muted-foreground">
-        <Link href={`/${entry.category}/@${displayAuthor}/${entry.permlink}`}>@{displayAuthor}</Link>
-        <span>·</span>
-        <time>{new Date(entry.created).toLocaleDateString()}</time>
+    <div className="border-b border-line-4 py-2.5 last:border-b-0 last:pb-0">
+      <div className="flex gap-3">
+        <Link href={href} tabIndex={-1} aria-hidden className="shrink-0" data-testid="post-image">
+          {image ? (
+            <img
+              src={proxifyImageSrc(image, 128, 128)}
+              alt=""
+              loading="lazy"
+              className="h-10 w-10 rounded-[10px] object-cover ring-1 ring-inset ring-line-9"
+              onError={() => setImage(getDefaultImageUrl())}
+            />
+          ) : (
+            <span className="block h-10 w-10 rounded-[10px] bg-surface-23 ring-1 ring-inset ring-line-9" />
+          )}
+        </Link>
+        <div className="flex min-w-0 flex-1 flex-col">
+          <Link
+            href={href}
+            className="line-clamp-2 font-sans text-[13px] font-semibold leading-[17px] text-ink-2 hover:underline"
+          >
+            {displayTitle}
+          </Link>
+          <Link
+            href={`/@${displayAuthor}`}
+            className="mt-0.5 truncate font-sans text-[12px] leading-[16px] text-ink-10 hover:text-ink-brand-6"
+          >
+            @{displayAuthor}
+          </Link>
+        </div>
       </div>
     </div>
   );

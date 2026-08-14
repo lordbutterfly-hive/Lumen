@@ -10,7 +10,6 @@ import { useTranslation } from '@/blog/i18n/client';
 import { getPostSummary, normalizeTitle } from '@/blog/lib/utils';
 import VotesComponentWrapper from '@/blog/features/votes/votes-component-wrapper';
 import PostCardCommentTooltip from '@/blog/features/list-of-posts/post-card-comment-tooltip';
-import PostCardUpvotesTooltip from '@/blog/features/list-of-posts/post-card-upvotes-tooltip';
 import DetailsCardHover from '@/blog/features/list-of-posts/details-card-hover';
 
 /**
@@ -31,14 +30,14 @@ export default function ProfileCommentCard({ post }: { post: Entry }) {
   const payoutDeclined = parseFloat(post.max_accepted_payout) === 0;
 
   return (
-    <article className="rounded-[18px] border border-[#ebebeb] bg-white p-[22px] transition-colors hover:border-[#e0ddd6]">
+    <article className="rounded-[18px] border border-line-9 bg-surface-1 p-[22px] transition-colors hover:border-line-17">
       {/* "replying to @x in community" header */}
-      <div className="mb-2.5 flex flex-wrap items-center gap-1.5 font-sans text-[13px] leading-[20px] text-[#9ca3af]">
-        <Icons.arrowBigUp className="h-[14px] w-[14px] -rotate-90 text-[#c8ccd2]" aria-hidden="true" />
+      <div className="mb-2.5 flex flex-wrap items-center gap-1.5 font-sans text-[13px] leading-[20px] text-ink-14">
+        <Icons.arrowBigUp className="h-[14px] w-[14px] -rotate-90 text-ink-19" aria-hidden="true" />
         {post.parent_author ? (
           <>
             <span>{t('profile.comment.replying_to_prefix')}</span>
-            <Link href={`/@${post.parent_author}`} className="font-semibold text-[#6b7280] hover:underline">
+            <Link href={`/@${post.parent_author}`} className="font-semibold text-ink-10 hover:underline">
               @{post.parent_author}
             </Link>
           </>
@@ -51,7 +50,7 @@ export default function ProfileCommentCard({ post }: { post: Entry }) {
             </Link>
           </>
         ) : null}
-        <span aria-hidden="true" className="text-[#cbd0d6]">
+        <span aria-hidden="true" className="text-ink-21">
           ·
         </span>
         <TimeAgo date={post.created} />
@@ -60,13 +59,13 @@ export default function ProfileCommentCard({ post }: { post: Entry }) {
       {post.title ? (
         <Link href={href} className="block">
           {/* Decoded for the same reason as the feed card — see medium-post-card.tsx. */}
-          <h3 className="mb-1.5 font-sans text-[18px] leading-[28px] font-semibold text-[#161511]">{normalizeTitle(post.title)}</h3>
+          <h3 className="mb-1.5 font-sans text-[18px] leading-[28px] font-semibold text-ink-2">{normalizeTitle(post.title)}</h3>
         </Link>
       ) : null}
 
       {body ? (
         <Link href={href} className="block">
-          <p className="line-clamp-3 font-serif text-[16px] leading-[24px] text-[#4b5563]">{body}</p>
+          <p className="line-clamp-3 font-serif text-[16px] leading-[24px] text-ink-8">{body}</p>
         </Link>
       ) : null}
 
@@ -79,15 +78,11 @@ export default function ProfileCommentCard({ post }: { post: Entry }) {
             background. This variant was missed the first time round, so the
             Comments tab kept the pill everywhere else had lost it. */}
         <div className="flex items-center gap-1 py-1.5 [&_svg]:h-[16px] [&_svg]:w-[16px]">
+          {/* Same duplicate tally as medium-post-card — see that file's note. */}
           <VotesComponentWrapper post={post} type="comment" />
-          {post.stats ? (
-            <span className="flex items-center pl-1 font-bold tabular-nums text-[#2a2822]">
-              <PostCardUpvotesTooltip votes={post.stats.total_votes} iconClassName="hidden" />
-            </span>
-          ) : null}
         </div>
 
-        <span className="flex items-center gap-1 rounded-[10px] px-2.5 py-1.5 font-medium text-[#6b7280] transition-colors hover:bg-[#f4f5f7] hover:text-[#2a2822]">
+        <span className="flex items-center gap-1 rounded-[10px] px-2.5 py-1.5 font-medium text-ink-10 transition-colors hover:bg-surface-21 hover:text-ink-4">
           <PostCardCommentTooltip comments={post.children} url={`${href}/#comments`} iconClassName="h-4 w-4" />
         </span>
 
@@ -95,7 +90,7 @@ export default function ProfileCommentCard({ post }: { post: Entry }) {
           <span
             className={cn(
               // Payout is flat too — same reason as the vote group above.
-              'ml-auto flex items-center px-[3px] py-[6px] text-[14px] leading-[22px] font-bold tabular-nums text-[#6b7280] transition-colors hover:cursor-pointer hover:text-[#2a2822]',
+              'ml-auto flex items-center px-[3px] py-[6px] text-[14px] leading-[22px] font-bold tabular-nums text-ink-10 transition-colors hover:cursor-pointer hover:text-ink-4',
               payoutDeclined && 'bg-transparent text-muted-foreground line-through'
             )}
           >

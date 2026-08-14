@@ -68,7 +68,7 @@ export function MagiFuelGauge({
     return (
       <div className={`flex items-center gap-3 ${className}`} data-testid="magi-fuel-loading">
         {ring(0, UNKNOWN)}
-        <span className="text-[13px] leading-[20px] text-[#6b7280]">Checking your Magi balance…</span>
+        <span className="text-[13px] leading-[20px] text-ink-10">Checking your Magi balance…</span>
       </div>
     );
   }
@@ -79,7 +79,7 @@ export function MagiFuelGauge({
     return (
       <div className={`flex items-center gap-3 ${className}`} data-testid="magi-fuel-failed">
         {ring(0, UNKNOWN)}
-        <span className="text-[13px] leading-[20px] text-[#6b7280]">
+        <span className="text-[13px] leading-[20px] text-ink-10">
           Couldn’t check your Magi balance just now — nothing is wrong with your funds.
         </span>
       </div>
@@ -97,8 +97,8 @@ export function MagiFuelGauge({
       <div className={`flex items-start gap-3 ${className}`} data-testid="magi-fuel-blocked">
         {ring(readiness, SHORT)}
         <div className="text-[13px] leading-[20px]">
-          <div className="font-semibold text-[#b45309]">Not enough on Magi to send a transaction</div>
-          <div className="text-[#6b7280]">
+          <div className="font-semibold text-ink-warn-3">Not enough on Magi to send a transaction</div>
+          <div className="text-ink-10">
             {/* Two genuinely different situations, measured on chain: a Hive
                 account is granted a small RC baseline and merely runs out,
                 while a wallet identity is granted none and has never been able
@@ -119,14 +119,14 @@ export function MagiFuelGauge({
     <div className={`flex items-start gap-3 ${className}`} data-testid="magi-fuel-ok">
       {ring(readiness, short ? SHORT : READY)}
       <div className="text-[13px] leading-[20px]">
-        <div className="font-semibold text-[#161511]">{hbd(balance.hbdBaseUnits)} HBD on Magi</div>
+        <div className="font-semibold text-ink-2">{hbd(balance.hbdBaseUnits)} HBD on Magi</div>
         {short ? (
-          <div className="text-[#b45309]">
+          <div className="text-ink-warn-3">
             This purchase needs {hbd(costBaseUnits)} HBD — {hbd(costBaseUnits - balance.hbdBaseUnits)} more
             than you hold.
           </div>
         ) : (
-          <div className="text-[#6b7280]">Available to spend on creator tokens.</div>
+          <div className="text-ink-10">Available to spend on creator tokens.</div>
         )}
       </div>
     </div>
@@ -192,7 +192,7 @@ export function MagiFundingHelp({
 
   return (
     <div
-      className={`rounded-[12px] border border-[#f6e2c4] bg-[#fdf6ec] px-4 py-3 text-[13px] leading-[20px] text-[#7c4a08] ${className}`}
+      className={`rounded-[12px] border border-line-warn-2 bg-surface-warn-4 px-4 py-3 text-[13px] leading-[20px] text-ink-warn-1 ${className}`}
       data-testid="magi-funding-help"
     >
       <div className="mb-1 font-semibold">Adding HBD to Magi</div>
@@ -209,7 +209,7 @@ export function MagiFundingHelp({
               href={transferUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="mt-2.5 inline-block rounded-[9px] bg-[#7c4a08] px-3.5 py-2 font-semibold text-white hover:bg-[#633a06]"
+              className="mt-2.5 inline-block rounded-[9px] bg-surface-warn-14 px-3.5 py-2 font-semibold text-ink-27 hover:bg-surface-warn-15"
               data-testid="magi-deposit-hive"
             >
               Send HBD to Magi
@@ -229,7 +229,7 @@ export function MagiFundingHelp({
               href={ALTERA_URL}
               target="_blank"
               rel="noopener noreferrer"
-              className="mt-2.5 inline-block rounded-[9px] bg-[#7c4a08] px-3.5 py-2 font-semibold text-white hover:bg-[#633a06]"
+              className="mt-2.5 inline-block rounded-[9px] bg-surface-warn-14 px-3.5 py-2 font-semibold text-ink-27 hover:bg-surface-warn-15"
               data-testid="magi-deposit-altera"
             >
               Open the Altera market

@@ -57,7 +57,7 @@ export default function OptimisticStatusBanner({
   }
 
   return (
-    <div className="my-2 flex items-center gap-2 rounded-md border border-blue-400/50 bg-blue-50 px-3 py-2 text-sm text-blue-700">
+    <div className="my-2 flex items-center gap-2 rounded-md border border-line-info-2/50 bg-surface-info-1 px-3 py-2 text-sm text-ink-info-2">
       <CircleSpinner size={14} color="#3b82f6" loading />
       <span>{message}</span>
     </div>

@@ -39,7 +39,16 @@ export function UserPopoverCard({
       <PopoverTrigger data-testid="author-name-link" asChild>
         <button className="flex items-center gap-1 hover:cursor-pointer">
           {withImage && <UserAvatar username={shownName} size="normal" />}
-          <span className="font-semibold text-foreground hover:text-destructive">{shownName}</span>
+          {/* ★ ONE INK FOR A USERNAME (2026-08-13, audit §5.3). `text-foreground`
+              computes rgb(51,51,51) — measured on the shipped build — while the
+              redesigned surfaces (the followers list, the profile masthead, the
+              settings cards, the rail cards) all print identity at #161511. Two
+              different blacks for the same thing, on pages a reader moves
+              between. #161511 is the one the redesign standardised on, so the
+              odd one out changes. Hex literal rather than a theme token for the
+              same reason `account-lists/follow-list/tokens.ts` documents: the
+              warm Lumen palette is not the legacy `bg-background-*` theme. */}
+          <span className="font-semibold text-ink-2 hover:text-destructive">{shownName}</span>
           <span
             title={t('post_content.reputation_title')}
             aria-label={`${t('post_content.reputation_title')} ${accountReputation(author_reputation)}`}

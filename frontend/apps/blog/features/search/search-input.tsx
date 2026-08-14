@@ -59,21 +59,21 @@ export function SearchInput({ className }: { className?: string }) {
 
   return (
     <div className={cn('w-full', className)}>
-      <div className="relative flex w-full items-center rounded-full border border-[#ebebeb] bg-white ring-offset-background focus-within:border-[#d9d9d9]">
+      <div className="relative flex w-full items-center rounded-full border border-line-9 bg-surface-1 ring-offset-background focus-within:border-line-19">
         <input
           type="search"
           placeholder={placeholder}
           aria-label={placeholder}
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value)}
-          className="z-10 block h-8 w-full bg-transparent p-2 pl-4 font-sans text-sm text-[#161511] ring-offset-background placeholder:text-[#6b7280] focus-visible:outline-none [&::-webkit-search-cancel-button]:hidden"
+          className="z-10 block h-8 w-full bg-transparent p-2 pl-4 font-sans text-sm text-ink-2 ring-offset-background placeholder:text-ink-10 focus-visible:outline-none [&::-webkit-search-cancel-button]:hidden"
           onKeyDown={onKeyDown}
           data-testid="header-search-input"
         />
         <button
           type="button"
           onClick={onSearchClick}
-          className="mr-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[#6b7280] transition-colors hover:bg-[#f4f5f7] hover:text-[#161511]"
+          className="mr-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-ink-10 transition-colors hover:bg-surface-21 hover:text-ink-2"
           aria-label={placeholder}
         >
           <Search className="h-4 w-4" />

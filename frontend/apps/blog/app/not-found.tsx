@@ -16,9 +16,9 @@ const COPY = {
 };
 
 const PRIMARY =
-  'inline-flex h-10 items-center justify-center rounded-[14px] bg-[#c0392b] px-5 font-sans text-[14px] leading-[22px] font-semibold text-white transition-colors hover:bg-[#a83224]';
+  'inline-flex h-10 items-center justify-center rounded-[14px] bg-surface-brand-12 px-5 font-sans text-[14px] leading-[22px] font-semibold text-ink-27 transition-colors hover:bg-surface-brand-15';
 const SECONDARY =
-  'inline-flex h-10 items-center justify-center rounded-[14px] border border-[#e4e6e9] px-5 font-sans text-[14px] leading-[22px] font-semibold text-[#3f4650] transition-colors hover:bg-[#f6f7f8]';
+  'inline-flex h-10 items-center justify-center rounded-[14px] border border-line-11 px-5 font-sans text-[14px] leading-[22px] font-semibold text-ink-7 transition-colors hover:bg-surface-16';
 
 /**
  * ★★★ THE 404 WAS THE ONE PAGE NOT BUILT IN THIS PRODUCT (2026-08-10).
@@ -41,7 +41,7 @@ export default function NotFound() {
       data-testid="not-found-page"
     >
       <div
-        className="pointer-events-none absolute bottom-20 left-[244px] top-[26px] hidden w-px bg-[#ececec] md:block"
+        className="pointer-events-none absolute bottom-20 left-[244px] top-[26px] hidden w-px bg-surface-26 md:block"
         aria-hidden
       />
 
@@ -50,13 +50,13 @@ export default function NotFound() {
       </aside>
 
       <main className="min-w-0 pt-6">
-        <p className="font-sans text-[12px] font-bold uppercase tracking-[0.14em] text-[#c0392b]">
+        <p className="font-sans text-[12px] font-bold uppercase tracking-[0.14em] text-ink-brand-6">
           {COPY.code}
         </p>
-        <h1 className="mt-3 max-w-[16ch] font-serif text-[34px] font-bold leading-[44px] text-[#161511]">
+        <h1 className="mt-3 max-w-[16ch] font-serif text-[34px] font-bold leading-[44px] text-ink-2">
           {COPY.title}
         </h1>
-        <p className="mt-4 max-w-[46ch] font-serif text-[15px] leading-[26px] text-[#6b7280]">
+        <p className="mt-4 max-w-[46ch] font-serif text-[15px] leading-[26px] text-ink-10">
           {COPY.body}
         </p>
         <div className="mt-7 flex flex-wrap items-center gap-3">

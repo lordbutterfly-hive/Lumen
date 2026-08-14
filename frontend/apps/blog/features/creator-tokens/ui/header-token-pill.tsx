@@ -53,16 +53,16 @@ const HeaderTokenPill: FC = () => {
     return (
       <Link
         href="/creators/studio"
-        className="flex items-center gap-2.5 rounded-full border border-[#e6dcd6] bg-[#FBF7F2] py-[7px] pl-3 pr-2 transition-colors hover:border-[#d9c8bf] hover:bg-[#f8f1ea]"
+        className="flex items-center gap-2.5 rounded-full border border-line-16 bg-surface-warn-2 py-[7px] pl-3 pr-2 transition-colors hover:border-line-23 hover:bg-surface-warn-7"
         data-testid="header-token-pill"
       >
         {/* Same mark as the launch state above: this is one control in two
             states, and showing it a rocket in one and a glyph in the other is
             the kind of twin this codebase has been clearing out all day. */}
-        <CreatorTokenRocket size={20} className="shrink-0 text-[#c0392b]" />
-        <span className="font-sans text-[14px] leading-[22px] font-bold leading-none text-[#161511]">@{identity.username}</span>
-        <span aria-hidden="true" className="h-[15px] w-px bg-[#e6dcd6]" />
-        <span className="pr-1.5 font-sans text-[14px] leading-[22px] font-bold leading-none tabular-nums text-[#161511]">
+        <CreatorTokenRocket size={20} className="shrink-0 text-ink-brand-6" />
+        <span className="font-sans text-[14px] leading-[22px] font-bold leading-none text-ink-2">@{identity.username}</span>
+        <span aria-hidden="true" className="h-[15px] w-px bg-surface-32" />
+        <span className="pr-1.5 font-sans text-[14px] leading-[22px] font-bold leading-none tabular-nums text-ink-2">
           {usdPrice(chip.priceUsd)}
         </span>
       </Link>
@@ -74,7 +74,7 @@ const HeaderTokenPill: FC = () => {
   return (
     <Link
       href="/creators/launch"
-      className="flex items-center gap-2 whitespace-nowrap rounded-full border border-[#c0392b] bg-white px-4 py-[9px] font-sans text-[14px] leading-[22px] font-bold text-[#c0392b] transition-colors hover:bg-[#c0392b] hover:text-white"
+      className="flex items-center gap-2 whitespace-nowrap rounded-full border border-line-brand-10 bg-surface-1 px-4 py-[9px] font-sans text-[14px] leading-[22px] font-bold text-ink-brand-6 transition-colors hover:bg-surface-brand-12 hover:text-ink-27"
       data-testid="header-token-launch-cta"
     >
       {/* ★ The Creator Tokens rocket replaces the ◈ glyph here (design handoff,

@@ -326,16 +326,70 @@ const notificationActor = (n: IAccountNotification): string => {
  * account, in parallel, independent of how large the community (or how many
  * communities the caller is about to render) is.
  */
+/**
+ * ★★★ MEMOISED (2026-08-13, browser audit §2.1 — the `/roles/[tag]` TTFB item).
+ *
+ * This correction is invisible at its call site and it is not cheap: `getCommunity`
+ * reads as ONE chain call and actually makes **seven** — `bridge.get_community`
+ * plus one `bridge.list_all_subscriptions` per banned account (six configured
+ * here: kgakakillerg, bpcvoter, bpcvoter1-4). Every community, topic and roles
+ * page server-renders `getCommunity` TWICE (once in `generateMetadata`, once in
+ * the community layout's `PrefetchComponent`), so a community page was paying
+ * **fourteen** upstream round trips before its first byte, twelve of which
+ * recomputed the same answer. Measured against api.hive.blog on 2026-08-13, a
+ * single `list_all_subscriptions` is 378-795ms.
+ *
+ * What is being cached is the safest thing in this file to cache. The INPUT is
+ * the ban list — a compile-time env value that cannot change without a restart —
+ * and each banned account's own community subscriptions, which are public chain
+ * state that changes when a troll joins a community. The OUTPUT is used for one
+ * thing only: subtracting banned members from a displayed subscriber COUNT, a
+ * correction that already fails open to the raw number on any error. Five minutes
+ * of staleness there is a subscriber count that is at most six too high for five
+ * minutes; the alternative was six chain calls per community lookup, forever.
+ *
+ * Deliberately a local memo rather than `apps/blog/lib/server-read-cache.ts`: a
+ * package must not import from an app. It is one value, not a keyed cache, so it
+ * needs no eviction. A failed read is NOT stored — `Promise.all` catches each call
+ * individually and a partial result would otherwise be frozen in for five minutes.
+ */
+const BANNED_SUBSCRIPTIONS_TTL_MS = 300_000;
+let bannedSubscriptionsMemo: { counts: Map<string, number>; expiresAt: number } | null = null;
+let bannedSubscriptionsInFlight: Promise<Map<string, number>> | null = null;
+
 const bannedSubscriptionCounts = async (): Promise<Map<string, number>> => {
-  const counts = new Map<string, number>();
-  if (!hasBannedAuthors()) return counts;
-  const lists = await Promise.all(
-    bannedAuthorList().map((name) => getSubscriptions(name).catch(() => null))
-  );
-  for (const rows of lists) {
-    for (const row of rows ?? []) counts.set(row[0], (counts.get(row[0]) ?? 0) + 1);
+  if (!hasBannedAuthors()) return new Map();
+
+  const now = Date.now();
+  if (bannedSubscriptionsMemo && bannedSubscriptionsMemo.expiresAt > now) {
+    return bannedSubscriptionsMemo.counts;
   }
-  return counts;
+  // Two page renders land in the same millisecond on every community route (the
+  // metadata pass and the layout pass) — without this they both miss and both
+  // fire six calls.
+  if (bannedSubscriptionsInFlight) return bannedSubscriptionsInFlight;
+
+  bannedSubscriptionsInFlight = (async () => {
+    try {
+      const counts = new Map<string, number>();
+      const lists = await Promise.all(
+        bannedAuthorList().map((name) => getSubscriptions(name).catch(() => null))
+      );
+      // A rejected lookup comes back as `null` above, so a node hiccup would
+      // otherwise be memoised as "this troll is in no communities" for 5 minutes.
+      const complete = lists.every((rows) => rows !== null);
+      for (const rows of lists) {
+        for (const row of rows ?? []) counts.set(row[0], (counts.get(row[0]) ?? 0) + 1);
+      }
+      if (complete) {
+        bannedSubscriptionsMemo = { counts, expiresAt: Date.now() + BANNED_SUBSCRIPTIONS_TTL_MS };
+      }
+      return counts;
+    } finally {
+      bannedSubscriptionsInFlight = null;
+    }
+  })();
+  return bannedSubscriptionsInFlight;
 };
 
 /** Apply the correction above to one `Community`'s `.subscribers` count. */
@@ -352,12 +406,42 @@ export const getCommunity = async (
   if (!community) return community;
   return withCorrectedSubscriberCount(community, await bannedSubscriptionCounts());
 };
-export const getListCommunityRoles = async (community: string): Promise<string[][] | null> => {
-  return (await getChain()).api.bridge
-    .list_community_roles({ community })
-    // Rows are `[account, role, title]`. A banned account keeps whatever role a
-    // community gave it on chain; Lumen simply does not show it holding one.
-    .then((resp) => (resp ? withoutBannedAuthors(resp, (row) => row[0]) : resp));
+/**
+ * ★ `limit` (2026-08-13, browser audit §2.4/§5.2). This never passed one, so it
+ * always got `bridge.list_community_roles`'s DEFAULT of 50 rows. Measured against
+ * api.hive.blog: `hive-141359` has **593** role rows, of which 50 were reaching
+ * the app — a silent truncation on the one page (`/roles/[tag]`) whose whole job
+ * is to list and edit them, so a moderator could not see, let alone change, the
+ * role of anyone outside the first fifty. Rows come back ordered by role rank
+ * (owner, admin/mod, member, muted) and then alphabetically, so the truncation
+ * never hid a moderator in practice — but that is an ordering accident, not a
+ * guarantee, and any community with more than 50 privileged accounts would have
+ * lost its own mods' tools.
+ *
+ * `limit` is real on the wire (verified live: `{community, limit: 1000}` returns
+ * every row, and returns only 72 for `hive-139531`, which has 72) but is missing
+ * from the `list_community_roles` signature in
+ * `packages/common-hiveio-packages/src/wax/extended-hive.chain.ts`, which declares
+ * only `{ community: string }`. Passed through a locally-narrowed view of the same
+ * call rather than widening a shared chain type from here. Optional so no existing
+ * caller changes behaviour by accident.
+ */
+type ListCommunityRolesParams = { community: string; limit?: number };
+
+export const getListCommunityRoles = async (
+  community: string,
+  limit?: number
+): Promise<string[][] | null> => {
+  const chain = await getChain();
+  const listRoles = chain.api.bridge.list_community_roles as unknown as (
+    params: ListCommunityRolesParams
+  ) => Promise<string[][] | null>;
+  return (
+    listRoles(limit === undefined ? { community } : { community, limit })
+      // Rows are `[account, role, title]`. A banned account keeps whatever role a
+      // community gave it on chain; Lumen simply does not show it holding one.
+      .then((resp) => (resp ? withoutBannedAuthors(resp, (row) => row[0]) : resp))
+  );
 };
 
 export const getDiscussion = async (

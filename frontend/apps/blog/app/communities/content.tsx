@@ -90,7 +90,7 @@ const CommunitiesContent = () => {
         </span>
         {identity.isLoggedIn ? (
           <Link
-            className="text-sm font-medium text-red-600"
+            className="text-sm font-medium text-ink-brand-7"
             href={`${walletHost}/@${identity.username}/communities`}
           >
             Create a Community
@@ -108,7 +108,7 @@ const CommunitiesContent = () => {
             value={inputQuery}
             placeholder={t('communities.search')}
             autoComplete="off"
-            className="block rounded-full bg-white p-4 pl-10 text-sm"
+            className="block rounded-full bg-surface-1 p-4 pl-10 text-sm"
             onChange={(e) => setInputQuery(e.target.value)}
             onKeyDown={(e) => handleSearchCommunity(e)}
           />

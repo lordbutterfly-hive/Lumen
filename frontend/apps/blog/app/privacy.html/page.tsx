@@ -773,7 +773,7 @@ const PrivacyPage = () => {
             <span>Click </span>
             <span className="c12  mb-4">
               <a
-                className="mb-4 text-sm text-red-600"
+                className="mb-4 text-sm text-ink-brand-7"
                 href="https://www.google.com/url?q=https://support.mozilla.org/en-US/kb/enable-and-disable-cookies-website-preferences&amp;sa=D&amp;ust=1527292847109000"
               >
                 here
@@ -791,7 +791,7 @@ const PrivacyPage = () => {
             <span>Click </span>
             <span className="c12  mb-4">
               <a
-                className="mb-4 text-sm text-red-600"
+                className="mb-4 text-sm text-ink-brand-7"
                 href="https://www.google.com/url?q=https://support.google.com/chrome/answer/95647?hl%3Den&amp;sa=D&amp;ust=1527292847109000"
               >
                 here
@@ -808,7 +808,7 @@ const PrivacyPage = () => {
             <span>Click </span>
             <span className="c12  mb-4">
               <a
-                className="mb-4 text-sm text-red-600"
+                className="mb-4 text-sm text-ink-brand-7"
                 href="https://www.google.com/url?q=https://support.microsoft.com/en-us/help/17442/windows-internet-explorer-delete-manage-cookies&amp;sa=D&amp;ust=1527292847110000"
               >
                 here
@@ -826,7 +826,7 @@ const PrivacyPage = () => {
             <span>Click </span>
             <span className="c12  mb-4">
               <a
-                className="mb-4 text-sm text-red-600"
+                className="mb-4 text-sm text-ink-brand-7"
                 href="https://www.google.com/url?q=https://support.apple.com/kb/ph21411?locale%3Den_US&amp;sa=D&amp;ust=1527292847110000"
               >
                 here

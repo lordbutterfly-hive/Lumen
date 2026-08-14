@@ -131,7 +131,7 @@ export default function SetProxyDialog({ children, currentProxy }: Props) {
         </DialogHeader>
 
         {currentProxy ? (
-          <p className="font-sans text-sm text-[#3f4650]" data-testid="set-proxy-current">
+          <p className="font-sans text-sm text-ink-7" data-testid="set-proxy-current">
             {t('proposals.proxy_dialog.current', { proxy: currentProxy })}
           </p>
         ) : null}

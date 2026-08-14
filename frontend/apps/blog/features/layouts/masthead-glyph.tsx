@@ -108,7 +108,7 @@ const MastheadGlyph: FC<{ mark: MastheadMark }> = ({ mark }) => {
         fontSize: `${FONT_SIZE}px`,
         fontStyle: g.italic ? 'italic' : 'normal'
       }}
-      className="pointer-events-none absolute z-0 select-none font-serif leading-none text-[#c0392b]/[0.22]"
+      className="pointer-events-none absolute z-0 select-none font-serif leading-none text-ink-brand-6/[0.22]"
     >
       {g.char}
     </span>

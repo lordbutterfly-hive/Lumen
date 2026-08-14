@@ -41,19 +41,19 @@ function ChipBody({ tier, className }: { tier: keyof typeof TIERS; className?: s
   return (
     <span
       title={`${name} · ${scale}`}
-      className={`inline-flex items-center gap-2 rounded-[13px] border border-[#ebebeb] bg-[#faf9f6] py-1 pl-1.5 pr-3 ${
+      className={`inline-flex items-center gap-2 rounded-[13px] border border-line-9 bg-surface-12 py-1 pl-1.5 pr-3 ${
         className ?? ''
       }`}
       data-testid="profile-league-chip"
     >
       <LeagueEmblem tier={tier} size="nav" />
-      <span className="font-sans text-[14px] leading-[22px] font-bold text-[#161511]">
+      <span className="font-sans text-[14px] leading-[22px] font-bold text-ink-2">
         {name}
-        <span aria-hidden="true" className="mx-1 font-medium text-[#cbd0d6]">
+        <span aria-hidden="true" className="mx-1 font-medium text-ink-21">
           ·
         </span>
         {/* THE SCALE IS NOT OPTIONAL. A rank without it is just a word. */}
-        <span className="font-medium tabular-nums text-[#6b7280]" data-testid="profile-league-chip-scale">
+        <span className="font-medium tabular-nums text-ink-10" data-testid="profile-league-chip-scale">
           {scale}
         </span>
       </span>

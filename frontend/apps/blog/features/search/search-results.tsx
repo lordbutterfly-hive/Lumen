@@ -138,7 +138,7 @@ const SearchResults = ({ query, sort }: { query: string; sort: SearchSort }) => 
 
   const header = (
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <p className="font-sans text-[14px] leading-[22px] text-[#6b7280]" data-testid="search-result-count">
+      <p className="font-sans text-[14px] leading-[22px] text-ink-10" data-testid="search-result-count">
         {isLoading
           ? t('search_page.searching_for', { query, defaultValue: 'Searching for “{{query}}”' })
           : t(countKey, { count: total, query, defaultValue: COUNT_FALLBACK[countKey] })}

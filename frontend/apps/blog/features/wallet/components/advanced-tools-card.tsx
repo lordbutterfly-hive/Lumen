@@ -8,18 +8,18 @@ import ConvertDialog from './dialogs/convert-dialog';
 import RecurringTransferDialog from './dialogs/recurring-transfer-dialog';
 import ClaimAccountDialog from './dialogs/claim-account-dialog';
 
-const CARD_CLASS = 'rounded-[18px] border border-[#ebebeb] bg-white p-5';
+const CARD_CLASS = 'rounded-[18px] border border-line-9 bg-surface-1 p-5';
 // W-3: was rounded-[11px]. Rows are 14px.
 const ROW_CLASS =
-  'flex w-full items-center gap-[11px] rounded-[14px] px-2 py-2.5 text-left text-[#2a2822] transition-colors hover:bg-[#f6f7f8]';
+  'flex w-full items-center gap-[11px] rounded-[14px] px-2 py-2.5 text-left text-ink-4 transition-colors hover:bg-surface-16';
 const ICON_WRAP_CLASS =
-  'flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[9px] bg-[#f1f3f5] text-[#4b5563]';
+  'flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[9px] bg-surface-23 text-ink-8';
 
 function RowLabel({ label, sub }: { label: string; sub: string }) {
   return (
     <span className="min-w-0 flex-1">
       <span className="block text-[14px] leading-[22px] font-semibold">{label}</span>
-      <span className="block text-[12px] text-[#9ca3af]">{sub}</span>
+      <span className="block text-[12px] text-ink-14">{sub}</span>
     </span>
   );
 }
@@ -64,10 +64,10 @@ export default function AdvancedToolsCard({
             two years, and it meant nothing about the card it sat on: this is a
             list of manual controls (delegate, convert, schedule a transfer).
             Sliders say "settings you operate yourself", which is what it is. */}
-        <SlidersHorizontal className="h-4 w-4 text-[#6b7280]" aria-hidden />
-        <span className="text-[15px] leading-[24px] font-bold text-[#161511]">{t('wallet.advanced.title')}</span>
+        <SlidersHorizontal className="h-4 w-4 text-ink-10" aria-hidden />
+        <span className="text-[15px] leading-[24px] font-bold text-ink-2">{t('wallet.advanced.title')}</span>
       </div>
-      <p className="mb-3.5 font-serif text-[13px] leading-[20px] text-[#9ca3af]">{t('wallet.advanced.description')}</p>
+      <p className="mb-3.5 font-serif text-[13px] leading-[20px] text-ink-14">{t('wallet.advanced.description')}</p>
 
       <div className="flex flex-col gap-0.5">
         <DelegateDialog
@@ -79,7 +79,7 @@ export default function AdvancedToolsCard({
                 <UserPlus className="h-4 w-4" />
               </span>
               <RowLabel label={t('wallet.advanced.delegate.label')} sub={t('wallet.advanced.delegate.sub')} />
-              <ChevronRight className="h-[15px] w-[15px] shrink-0 text-[#cbd0d6]" />
+              <ChevronRight className="h-[15px] w-[15px] shrink-0 text-ink-21" />
             </button>
           }
         />
@@ -95,7 +95,7 @@ export default function AdvancedToolsCard({
                 label={t('wallet.advanced.claim_account.label')}
                 sub={t('wallet.advanced.claim_account.sub')}
               />
-              <ChevronRight className="h-[15px] w-[15px] shrink-0 text-[#cbd0d6]" />
+              <ChevronRight className="h-[15px] w-[15px] shrink-0 text-ink-21" />
             </button>
           }
         />
@@ -109,7 +109,7 @@ export default function AdvancedToolsCard({
                 <ArrowLeftRight className="h-4 w-4" />
               </span>
               <RowLabel label={t('wallet.advanced.convert.label')} sub={t('wallet.advanced.convert.sub')} />
-              <ChevronRight className="h-[15px] w-[15px] shrink-0 text-[#cbd0d6]" />
+              <ChevronRight className="h-[15px] w-[15px] shrink-0 text-ink-21" />
             </button>
           }
         />
@@ -124,7 +124,7 @@ export default function AdvancedToolsCard({
                 <Repeat className="h-4 w-4" />
               </span>
               <RowLabel label={t('wallet.advanced.recurring.label')} sub={t('wallet.advanced.recurring.sub')} />
-              <ChevronRight className="h-[15px] w-[15px] shrink-0 text-[#cbd0d6]" />
+              <ChevronRight className="h-[15px] w-[15px] shrink-0 text-ink-21" />
             </button>
           }
         />
@@ -134,7 +134,7 @@ export default function AdvancedToolsCard({
             <PiggyBank className="h-4 w-4" />
           </span>
           <RowLabel label={t('wallet.advanced.savings.label')} sub={t('wallet.advanced.savings.sub')} />
-          <ChevronRight className="h-[15px] w-[15px] shrink-0 text-[#cbd0d6]" />
+          <ChevronRight className="h-[15px] w-[15px] shrink-0 text-ink-21" />
         </a>
       </div>
     </div>

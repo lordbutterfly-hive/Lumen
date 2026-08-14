@@ -19,10 +19,10 @@ export default function MarketStatusChip({
   const { t } = useTranslation('common_blog');
 
   const CONFIG: Record<MarketStatus, StatusConfig> = {
-    open: { label: t('prediction_market.status.live'), textClass: 'text-[#2f7d4f]', pillBgClass: 'bg-[#e9f5ee]', dotClass: 'bg-[#2f7d4f]', ring: true },
-    locked: { label: t('prediction_market.status.locked'), textClass: 'text-[#b45309]', pillBgClass: 'bg-[#fdf3e7]', dotClass: 'bg-[#b45309]' },
-    settled: { label: t('prediction_market.status.settled'), textClass: 'text-[#6b7280]', pillBgClass: 'bg-[#f1f3f5]', dotClass: 'bg-[#9ca3af]' },
-    void: { label: t('prediction_market.status.void'), textClass: 'text-[#c0392b]', pillBgClass: 'bg-[#fdecea]', dotClass: 'bg-[#c0392b]' }
+    open: { label: t('prediction_market.status.live'), textClass: 'text-ink-ok-2', pillBgClass: 'bg-surface-ok-5', dotClass: 'bg-surface-ok-7', ring: true },
+    locked: { label: t('prediction_market.status.locked'), textClass: 'text-ink-warn-3', pillBgClass: 'bg-surface-warn-6', dotClass: 'bg-surface-warn-11' },
+    settled: { label: t('prediction_market.status.settled'), textClass: 'text-ink-10', pillBgClass: 'bg-surface-23', dotClass: 'bg-surface-34' },
+    void: { label: t('prediction_market.status.void'), textClass: 'text-ink-brand-6', pillBgClass: 'bg-surface-brand-7', dotClass: 'bg-surface-brand-12' }
   };
   const config = CONFIG[status];
 

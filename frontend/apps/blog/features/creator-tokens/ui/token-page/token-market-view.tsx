@@ -86,7 +86,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
     live.isLite ? (
       <>
         This account has no Hive keys yet, so it can’t sign a transaction.{' '}
-        <a href="/upgrade" className="font-semibold text-[#c0392b] underline">
+        <a href="/upgrade" className="font-semibold text-ink-brand-6 underline">
           Upgrade to a full account
         </a>{' '}
         to trade.
@@ -267,8 +267,8 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
 
   const rightRail = (
     <div className="flex flex-col gap-5 pt-[26px]">
-      <div className="rounded-[18px] border border-[#ebebeb] bg-white p-5">
-        <div className="mb-3 text-[15px] leading-[24px] font-bold text-[#161511]">How this works</div>
+      <div className="rounded-[18px] border border-line-9 bg-surface-1 p-5">
+        <div className="mb-3 text-[15px] leading-[24px] font-bold text-ink-2">How this works</div>
         <div className="flex flex-col gap-3.5">
           {[
             'Buy the creator’s token — the price rises as more is bought.',
@@ -276,16 +276,16 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
             'As more people buy in, the token can appreciate. The floor is what the reserve would pay out per token if the market wound down — selling on the curve is a separate thing, at the curve’s price.'
           ].map((line, i) => (
             <div key={i} className="flex gap-3">
-              <span className="font-serif font-bold text-[#c0392b]">{i + 1}</span>
-              <span className="text-[13px] leading-[20px] text-[#3f4650]">{line}</span>
+              <span className="font-serif font-bold text-ink-brand-6">{i + 1}</span>
+              <span className="text-[13px] leading-[20px] text-ink-7">{line}</span>
             </div>
           ))}
         </div>
       </div>
-      <div className="rounded-[18px] border border-[#ebebeb] bg-white p-5">
-        <div className="mb-1.5 text-xs text-[#6b7280]">Reserve backing</div>
-        <div className="mb-0.5 text-[20px] font-bold tabular-nums text-[#161511]">{usdWhole(market.reserveUsd)}</div>
-        <p className="font-serif text-[13px] leading-[20px] text-[#9ca3af]">Held in reserve behind every token — the source of the floor.</p>
+      <div className="rounded-[18px] border border-line-9 bg-surface-1 p-5">
+        <div className="mb-1.5 text-xs text-ink-10">Reserve backing</div>
+        <div className="mb-0.5 text-[20px] font-bold tabular-nums text-ink-2">{usdWhole(market.reserveUsd)}</div>
+        <p className="font-serif text-[13px] leading-[20px] text-ink-14">Held in reserve behind every token — the source of the floor.</p>
       </div>
     </div>
   );
@@ -297,7 +297,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
         <span className="h-[60px] w-[60px] flex-shrink-0 rounded-2xl" style={{ background: avatarColor }} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2.5">
-            <span className="text-xl font-bold text-[#161511]">@{handle}</span>
+            <span className="text-xl font-bold text-ink-2">@{handle}</span>
           </div>
           {/* No bio and no reputation score here: neither is contract state, and
               the Hive profile is not read on this route yet. The demo showed
@@ -312,7 +312,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
             onClick={toggleFollow}
             disabled={followBusy}
             aria-busy={followBusy}
-            className={`rounded-[11px] border px-5 py-2.5 text-sm font-semibold disabled:opacity-50 ${following ? 'border-[#c0392b] bg-[#fef2f0] text-[#c0392b]' : 'border-[#e4e6e9] bg-white text-[#3f4650] hover:bg-[#f6f7f8]'}`}
+            className={`rounded-[11px] border px-5 py-2.5 text-sm font-semibold disabled:opacity-50 ${following ? 'border-line-brand-10 bg-surface-brand-3 text-ink-brand-6' : 'border-line-11 bg-surface-1 text-ink-7 hover:bg-surface-16'}`}
           >
             {following ? 'Following' : 'Follow'}
           </button>
@@ -324,7 +324,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
           and that selling stays open, rather than leaving the disabled Buy
           button to speak for itself. */}
       {market.windingDown ? (
-        <div className="mb-4 rounded-[14px] border border-[#f6e2c4] bg-[#fdf6ec] px-5 py-3.5 text-[14px] leading-[22px] font-semibold text-[#b45309]">
+        <div className="mb-4 rounded-[14px] border border-line-warn-2 bg-surface-warn-4 px-5 py-3.5 text-[14px] leading-[22px] font-semibold text-ink-warn-3">
           This creator’s market is winding down — buying and new asks are closed. Selling on the curve is closed too;
           use Redeem to take your pro-rata share of the reserve at the floor.
         </div>
@@ -341,7 +341,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
         // the floor $2.00 — a third of the position, turning on a clock nobody
         // was shown. This page already discloses wind-down and delinquency
         // plainly; overdue is the state that most needs it.
-        <div className="mb-4 rounded-[14px] border border-[#f6e2c4] bg-[#fdf6ec] px-5 py-3.5 text-[14px] leading-[22px] font-semibold text-[#b45309]">
+        <div className="mb-4 rounded-[14px] border border-line-warn-2 bg-surface-warn-4 px-5 py-3.5 text-[14px] leading-[22px] font-semibold text-ink-warn-3">
           This creator’s listing has lapsed. If it isn’t renewed the market freezes: buying and selling on the curve
           close, and the only way out becomes Redeem at the floor
           {market.floorUsd ? ` (currently ${usdPrice(market.floorUsd)} a token, against ${usdPrice(market.priceUsd)} now)` : ''}.
@@ -351,17 +351,17 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
         // DELINQUENT. Without this the Buy button would simply be dead with no
         // reason given, which reads as a broken page — and saying it out loud is
         // also what makes the gate do its job.
-        <div className="mb-4 rounded-[14px] border border-[#f6e2c4] bg-[#fdf6ec] px-5 py-3.5 text-[14px] leading-[22px] font-semibold text-[#b45309]">
+        <div className="mb-4 rounded-[14px] border border-line-warn-2 bg-surface-warn-4 px-5 py-3.5 text-[14px] leading-[22px] font-semibold text-ink-warn-3">
           This creator has left too many paid asks unanswered, so buying and new asks are paused for now. Selling,
           refunds and reclaims are unaffected.
         </div>
       ) : null}
 
       {/* 2. Token market — centerpiece */}
-      <div className="mb-4 rounded-[20px] border border-[#ebebeb] bg-white p-[26px] shadow-[0_1px_2px_rgba(20,18,10,0.03)]">
+      <div className="mb-4 rounded-[20px] border border-line-9 bg-surface-1 p-[26px] shadow-[0_1px_2px_rgba(20,18,10,0.03)]">
         <div className="mb-[18px] flex items-center gap-2.5">
           <span
-            className="flex h-6 w-6 items-center justify-center rounded-[7px] text-[12px] font-extrabold text-white"
+            className="flex h-6 w-6 items-center justify-center rounded-[7px] text-[12px] font-extrabold text-ink-27"
             style={{ background: avatarColor }}
           >
             ◆
@@ -370,12 +370,12 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
               every other page in the feature has exactly one — so a screen-reader
               user navigating by headings had nothing to land on for the single
               most important screen here. Styling unchanged; only the element is. */}
-          <h1 className="text-[15px] leading-[24px] font-bold text-[#161511]">@{market.handle} token</h1>
+          <h1 className="text-[15px] leading-[24px] font-bold text-ink-2">@{market.handle} token</h1>
         </div>
         <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
           <div>
             <div className="flex flex-wrap items-baseline gap-3">
-              <span className="text-[44px] font-extrabold tabular-nums tracking-[-0.02em] text-[#161511]">{usdPrice(market.priceUsd)}</span>
+              <span className="text-[44px] font-extrabold tabular-nums tracking-[-0.02em] text-ink-2">{usdPrice(market.priceUsd)}</span>
               {/* Weekly change needs price HISTORY, which only the indexer can
                   serve — the client method now exists (MagiIndexerClient
                   .priceHistoryOf) but this view is not wired to it yet, and
@@ -383,19 +383,19 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
                   changePctWeek null for exactly this reason). An arrow computed
                   from a single current price would be invented. */}
               {market.changePctWeek !== null ? (
-                <span className={`inline-flex items-center gap-1 text-[15px] leading-[24px] font-bold ${market.changePctWeek >= 0 ? 'text-[#2f7d4f]' : 'text-[#c0392b]'}`}>
+                <span className={`inline-flex items-center gap-1 text-[15px] leading-[24px] font-bold ${market.changePctWeek >= 0 ? 'text-ink-ok-2' : 'text-ink-brand-6'}`}>
                   {market.changePctWeek >= 0 ? '▲' : '▼'} {Math.abs(market.changePctWeek)}%
                 </span>
               ) : null}
             </div>
             <div className="mt-3 flex flex-wrap items-center gap-[18px]">
               <div>
-                <div className="mb-0.5 text-xs text-[#6b7280]">Market cap</div>
-                <div className="text-[20px] leading-[30px] font-bold tabular-nums text-[#161511]">{usdWhole(market.marketCapUsd)}</div>
+                <div className="mb-0.5 text-xs text-ink-10">Market cap</div>
+                <div className="text-[20px] leading-[30px] font-bold tabular-nums text-ink-2">{usdWhole(market.marketCapUsd)}</div>
               </div>
-              <div className="h-[34px] w-px bg-[#ececec]" />
+              <div className="h-[34px] w-px bg-surface-26" />
               <div>
-                <div className="mb-0.5 flex items-center gap-1.5 text-xs text-[#6b7280]">
+                <div className="mb-0.5 flex items-center gap-1.5 text-xs text-ink-10">
                   Floor
                   {/* Reachable and announced (2026-08-07): this explainer was a bare
                       <span title>, so it existed for a mouse and for nobody else. */}
@@ -404,24 +404,24 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
                     tabIndex={0}
                     aria-label="What the floor means: what the reserve would pay out per token if the market wound down. It is not a price you can sell at on demand."
                     title="What the reserve would pay out per token if the market wound down — not a price you can sell at on demand."
-                    className="flex h-3.5 w-3.5 cursor-help items-center justify-center rounded-full bg-[#f1f3f5] text-[12px] leading-[14px] text-[#9ca3af]"
+                    className="flex h-3.5 w-3.5 cursor-help items-center justify-center rounded-full bg-surface-23 text-[12px] leading-[14px] text-ink-14"
                   >
                     ?
                   </span>
                 </div>
                 {/* Floor beside price, equal size, muted — never colored. */}
-                <div className="text-[20px] leading-[30px] font-bold tabular-nums text-[#6b7280]">{usdPrice(market.floorUsd)}</div>
+                <div className="text-[20px] leading-[30px] font-bold tabular-nums text-ink-10">{usdPrice(market.floorUsd)}</div>
               </div>
             </div>
             <div className="mt-[18px]">
-              <div className="mb-1.5 flex justify-between text-xs tabular-nums text-[#6b7280]">
+              <div className="mb-1.5 flex justify-between text-xs tabular-nums text-ink-10">
                 <span>
                   {market.supply.toLocaleString('en-US')} of {market.cap.toLocaleString('en-US')} tokens issued
                 </span>
                 <span>{supplyPct}%</span>
               </div>
-              <div className="h-2 overflow-hidden rounded-md bg-[#f1f3f5]">
-                <div className="h-full bg-[#3a5a80]" style={{ width: `${supplyPct}%` }} />
+              <div className="h-2 overflow-hidden rounded-md bg-surface-23">
+                <div className="h-full bg-surface-info-9" style={{ width: `${supplyPct}%` }} />
               </div>
             </div>
             <div className="mt-5 flex gap-3">
@@ -429,7 +429,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
                 onClick={() => setDialog('buy')}
                 disabled={!market.canBuy || market.supply >= market.cap || writesBlocked}
                 title={writeBlockedReason ?? undefined}
-                className="flex-1 rounded-xl bg-[#c0392b] py-3.5 text-[15px] leading-[24px] font-bold text-white hover:bg-[#a5301f] disabled:opacity-50"
+                className="flex-1 rounded-xl bg-surface-brand-12 py-3.5 text-[15px] leading-[24px] font-bold text-ink-27 hover:bg-surface-brand-16 disabled:opacity-50"
               >
                 Buy
               </button>
@@ -442,13 +442,13 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
                 onClick={() => setDialog(market.windingDown ? 'redeem' : 'sell')}
                 disabled={writesBlocked}
                 title={writeBlockedReason ?? undefined}
-                className="flex-1 rounded-xl border border-[#e4e6e9] bg-white py-3.5 text-[15px] leading-[24px] font-semibold text-[#3f4650] hover:bg-[#f6f7f8] disabled:opacity-50"
+                className="flex-1 rounded-xl border border-line-11 bg-surface-1 py-3.5 text-[15px] leading-[24px] font-semibold text-ink-7 hover:bg-surface-16 disabled:opacity-50"
               >
                 {market.windingDown ? 'Redeem' : 'Sell'}
               </button>
             </div>
             {writeBlockedReason ? (
-              <div className="mt-2.5 text-center text-[13px] leading-[20px] text-[#6b7280]">{blockedNotice}</div>
+              <div className="mt-2.5 text-center text-[13px] leading-[20px] text-ink-10">{blockedNotice}</div>
             ) : null}
           </div>
           <div>
@@ -464,14 +464,14 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
             {market.chart ? (
               <>
                 <PriceChart points={market.chart} />
-                <div className="mt-2 text-center text-[12px] text-[#9ca3af]">
+                <div className="mt-2 text-center text-[12px] text-ink-14">
                   {market.chart.length} trades · price is set by the curve, not by a last-traded quote
                 </div>
               </>
             ) : (
-              <div className="flex h-full min-h-[160px] flex-col justify-center rounded-[14px] border border-dashed border-[#e4e6e9] px-5 py-6 text-center">
-                <div className="text-[14px] leading-[22px] font-semibold text-[#6b7280]">No price history yet</div>
-                <p className="mt-1 text-[13px] leading-[20px] text-[#9ca3af]">
+              <div className="flex h-full min-h-[160px] flex-col justify-center rounded-[14px] border border-dashed border-line-11 px-5 py-6 text-center">
+                <div className="text-[14px] leading-[22px] font-semibold text-ink-10">No price history yet</div>
+                <p className="mt-1 text-[13px] leading-[20px] text-ink-14">
                   The price above is live from the curve. A chart appears once this market has traded more than once.
                 </p>
               </div>
@@ -481,29 +481,29 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
       </div>
 
       {/* 3. Trust record */}
-      <div className="mb-4 rounded-[18px] border border-[#ebebeb] bg-white p-6 shadow-[0_1px_2px_rgba(20,18,10,0.03)]">
-        <div className="mb-3.5 font-serif text-[20px] leading-[30px] font-semibold text-[#161511]">Delivery record</div>
+      <div className="mb-4 rounded-[18px] border border-line-9 bg-surface-1 p-6 shadow-[0_1px_2px_rgba(20,18,10,0.03)]">
+        <div className="mb-3.5 font-serif text-[20px] leading-[30px] font-semibold text-ink-2">Delivery record</div>
         {d.available ? (
           <>
             <div className="mb-3 flex flex-wrap gap-1.5">
               {d.marks.map((answered, i) => (
-                <span key={i} className={`h-[18px] w-[18px] rounded-[5px] ${answered ? 'bg-[#2f7d4f]' : 'border-2 border-[#d5d8dd] bg-white'}`} />
+                <span key={i} className={`h-[18px] w-[18px] rounded-[5px] ${answered ? 'bg-surface-ok-7' : 'border-2 border-line-20 bg-surface-1'}`} />
               ))}
             </div>
-            <div className="text-base tabular-nums text-[#2a2822]">
+            <div className="text-base tabular-nums text-ink-4">
               <strong>{d.completionPct}% completion rate</strong> — completed {d.answered} of {d.total} · usually within{' '}
               <strong>{d.typicalResponse}</strong>.
             </div>
-            <div className="mt-1.5 text-[13px] leading-[20px] text-[#9ca3af]">Why the token is worth holding — this is what you’re really buying.</div>
+            <div className="mt-1.5 text-[13px] leading-[20px] text-ink-14">Why the token is worth holding — this is what you’re really buying.</div>
           </>
         ) : (
-          <div className="rounded-[11px] border border-dashed border-[#e4e6e9] px-4 py-3 text-[13px] leading-[20px] text-[#9ca3af]">Delivery record unavailable</div>
+          <div className="rounded-[11px] border border-dashed border-line-11 px-4 py-3 text-[13px] leading-[20px] text-ink-14">Delivery record unavailable</div>
         )}
       </div>
 
       {/* 4. Services */}
-      <div className="mb-4 rounded-[18px] border border-[#ebebeb] bg-white p-6 shadow-[0_1px_2px_rgba(20,18,10,0.03)]">
-        <div className="mb-3.5 text-xs font-bold uppercase tracking-[0.05em] text-[#9ca3af]">What you can do with the token</div>
+      <div className="mb-4 rounded-[18px] border border-line-9 bg-surface-1 p-6 shadow-[0_1px_2px_rgba(20,18,10,0.03)]">
+        <div className="mb-3.5 text-xs font-bold uppercase tracking-[0.05em] text-ink-14">What you can do with the token</div>
         <div className="mb-3.5 flex flex-col gap-2.5">
           {market.services.map((sv) => (
             <div
@@ -513,15 +513,15 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
               // and the Ask button. Measured on a real 390x844 viewport. Below
               // `sm` it stacks; from `sm` up the original row is unchanged.
               key={sv.key}
-              className="flex flex-col gap-3 rounded-[14px] border border-[#ebebeb] px-[18px] py-4 sm:flex-row sm:items-center sm:gap-3.5"
+              className="flex flex-col gap-3 rounded-[14px] border border-line-9 px-[18px] py-4 sm:flex-row sm:items-center sm:gap-3.5"
             >
-              <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[11px] bg-[#f4f5f7] text-[#c0392b]">◆</span>
+              <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[11px] bg-surface-21 text-ink-brand-6">◆</span>
               <div className="min-w-0 flex-1">
-                <div className="text-[15px] leading-[24px] font-bold text-[#161511]">{sv.name}</div>
-                <div className="text-[13px] leading-[20px] text-[#6b7280]">{sv.desc}</div>
+                <div className="text-[15px] leading-[24px] font-bold text-ink-2">{sv.name}</div>
+                <div className="text-[13px] leading-[20px] text-ink-10">{sv.desc}</div>
               </div>
               <div className="flex-shrink-0 text-left sm:text-right">
-                <div className="text-[15px] leading-[24px] font-bold tabular-nums text-[#161511]">{usdWhole(sv.usd)}</div>
+                <div className="text-[15px] leading-[24px] font-bold tabular-nums text-ink-2">{usdWhole(sv.usd)}</div>
                 {/* The TOKEN LEG only (88% of the posted price) — the other 12% is a
                     separate HBD commission (serviceQuote/ask.go splitFace, USER RULING
                     2026-07-27), never itself paid in tokens. */}
@@ -531,22 +531,22 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
                     a real $25 service advertised itself as free-ish. A price we
                     do not have must read as absent, never as zero. */}
                 {market.priceUsd > 0 ? (
-                  <div className="text-xs tabular-nums text-[#9ca3af]">≈ {tok(serviceQuote(sv.usd, market.priceUsd).tokens)} tokens</div>
+                  <div className="text-xs tabular-nums text-ink-14">≈ {tok(serviceQuote(sv.usd, market.priceUsd).tokens)} tokens</div>
                 ) : (
-                  <div className="text-xs text-[#9ca3af]">token cost unavailable</div>
+                  <div className="text-xs text-ink-14">token cost unavailable</div>
                 )}
               </div>
               {market.windingDown ? (
                 // ask.go Ask -> RequireInflowOpen: closed for the whole wind-down, the same gate Buy is behind.
-                <span className="flex-shrink-0 rounded-full bg-[#fdf6ec] px-3 py-1.5 text-[12px] font-semibold text-[#b45309]">Winding down</span>
+                <span className="flex-shrink-0 rounded-full bg-surface-warn-4 px-3 py-1.5 text-[12px] font-semibold text-ink-warn-3">Winding down</span>
               ) : !market.canAsk ? (
-                <span className="flex-shrink-0 rounded-full bg-[#fdf6ec] px-3 py-1.5 text-[12px] font-semibold text-[#b45309]">Paused</span>
+                <span className="flex-shrink-0 rounded-full bg-surface-warn-4 px-3 py-1.5 text-[12px] font-semibold text-ink-warn-3">Paused</span>
               ) : (
                 <button
                   onClick={() => openAsk(sv)}
                   disabled={writesBlocked}
                   title={writeBlockedReason ?? undefined}
-                  className="flex-shrink-0 rounded-[11px] bg-[#1a1a17] px-[18px] py-2.5 text-[14px] leading-[22px] font-semibold text-white hover:bg-black disabled:opacity-40"
+                  className="flex-shrink-0 rounded-[11px] bg-surface-42 px-[18px] py-2.5 text-[14px] leading-[22px] font-semibold text-ink-27 hover:bg-surface-44 disabled:opacity-40"
                 >
                   {sv.cta}
                 </button>
@@ -559,9 +559,9 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
             never appears on touch and is not announced. Buy/Sell state it in
             copy; this section now does too. */}
         {writeBlockedReason ? (
-          <p className="text-[13px] leading-[20px] font-semibold text-[#6b7280]">{blockedNotice}</p>
+          <p className="text-[13px] leading-[20px] font-semibold text-ink-10">{blockedNotice}</p>
         ) : null}
-        <p className="font-serif text-[13px] leading-[20px] text-[#6b7280]">
+        <p className="font-serif text-[13px] leading-[20px] text-ink-10">
           Prices are set in dollars — the total you’ll pay. 12% goes to Lumen as a separate platform commission, paid in
           HBD; the rest is spent in tokens, and as the token’s price rises a service costs fewer of them.
         </p>
@@ -569,19 +569,19 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
 
       {/* 5. Your position */}
       {market.position ? (
-        <div className="mb-4 rounded-[18px] border border-[#ebebeb] bg-[#faf9f6] px-6 py-[22px]">
+        <div className="mb-4 rounded-[18px] border border-line-9 bg-surface-12 px-6 py-[22px]">
           <div className="flex flex-wrap items-center justify-between gap-4">
-            <div className="text-[15px] leading-[24px] tabular-nums text-[#3f4650]">
-              You hold <strong className="text-[#161511]">{tok(market.position.tokens)} tokens</strong> · worth{' '}
-              <strong className="text-[#161511]">{usdPrice(market.position.valueUsd)}</strong> · floor value{' '}
-              <strong className="text-[#161511]">{usdPrice(market.position.floorValueUsd)}</strong>
+            <div className="text-[15px] leading-[24px] tabular-nums text-ink-7">
+              You hold <strong className="text-ink-2">{tok(market.position.tokens)} tokens</strong> · worth{' '}
+              <strong className="text-ink-2">{usdPrice(market.position.valueUsd)}</strong> · floor value{' '}
+              <strong className="text-ink-2">{usdPrice(market.position.floorValueUsd)}</strong>
             </div>
             <div className="flex gap-2.5">
               <button
                 onClick={() => setDialog('sell')}
                 disabled={writesBlocked}
                 title={writeBlockedReason ?? undefined}
-                className="rounded-[10px] border border-[#e4e6e9] bg-white px-4 py-2.5 text-[13px] leading-[20px] font-semibold text-[#3f4650] hover:bg-[#f1f3f5] disabled:opacity-50"
+                className="rounded-[10px] border border-line-11 bg-surface-1 px-4 py-2.5 text-[13px] leading-[20px] font-semibold text-ink-7 hover:bg-surface-23 disabled:opacity-50"
               >
                 Sell
               </button>
@@ -589,7 +589,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
                 onClick={() => setDialog('send')}
                 disabled={writesBlocked}
                 title={writeBlockedReason ?? undefined}
-                className="rounded-[10px] border border-[#e4e6e9] bg-white px-4 py-2.5 text-[13px] leading-[20px] font-semibold text-[#3f4650] hover:bg-[#f1f3f5] disabled:opacity-50"
+                className="rounded-[10px] border border-line-11 bg-surface-1 px-4 py-2.5 text-[13px] leading-[20px] font-semibold text-ink-7 hover:bg-surface-23 disabled:opacity-50"
               >
                 Send
               </button>
@@ -603,7 +603,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
       ) : null}
 
       {/* 6. Honest note */}
-      <p className="font-serif text-[13px] leading-[20px] text-[#9ca3af]">
+      <p className="font-serif text-[13px] leading-[20px] text-ink-14">
         This token’s price floats — it can go up or down, and you can lose money. Every trade pays a 10% fee (5% to the
         creator, 5% to Lumen), and selling soon after buying adds an early-exit fee on top, which fades to zero over 6
         weeks. The floor above is what the reserve would pay out per token if the market wound down — it is not a price

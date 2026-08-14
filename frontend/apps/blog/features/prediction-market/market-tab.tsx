@@ -102,7 +102,7 @@ export default function MarketTab() {
   // Honest, non-conflated failure states. Order matters: an unprovisioned market
   // is neither "loading" nor "no round"; a read error is not "no round open".
   if (isUnavailable) {
-    return <p className="py-16 text-center font-sans text-sm text-[#6b7280]">{t('prediction_market.unavailable')}</p>;
+    return <p className="py-16 text-center font-sans text-sm text-ink-10">{t('prediction_market.unavailable')}</p>;
   }
   if (isLoading) {
     return (
@@ -114,11 +114,11 @@ export default function MarketTab() {
   if (isError) {
     return (
       <div className="py-16 text-center">
-        <p className="font-sans text-sm text-[#6b7280]">{t('prediction_market.load_error')}</p>
+        <p className="font-sans text-sm text-ink-10">{t('prediction_market.load_error')}</p>
         <button
           type="button"
           onClick={() => void refetch()}
-          className="mt-3 rounded-[12px] border border-[#e2e4e7] bg-white px-4 py-2 font-sans text-sm font-semibold text-[#161511] transition-colors hover:border-[#161511]"
+          className="mt-3 rounded-[12px] border border-line-12 bg-surface-1 px-4 py-2 font-sans text-sm font-semibold text-ink-2 transition-colors hover:border-line-28"
         >
           {t('prediction_market.retry')}
         </button>
@@ -126,7 +126,7 @@ export default function MarketTab() {
     );
   }
   if (!round) {
-    return <p className="py-16 text-center font-sans text-sm text-[#6b7280]">{t('prediction_market.no_round')}</p>;
+    return <p className="py-16 text-center font-sans text-sm text-ink-10">{t('prediction_market.no_round')}</p>;
   }
 
   const isResolved = round.status === 'settled' || round.status === 'void';
@@ -134,35 +134,35 @@ export default function MarketTab() {
   const closesDate = new Date(round.closesAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 
   return (
-    <div className="pt-6 font-sans text-[#161511]">
-      <div className="overflow-hidden rounded-[20px] border border-[#ebebeb] bg-white shadow-[0_1px_3px_rgba(20,18,10,0.04)]">
+    <div className="pt-6 font-sans text-ink-2">
+      <div className="overflow-hidden rounded-[20px] border border-line-9 bg-surface-1 shadow-[0_1px_3px_rgba(20,18,10,0.04)]">
         {/* Header */}
-        <div className="border-b border-[#f0f0f0] px-7 pb-5 pt-[22px]">
+        <div className="border-b border-line-3 px-7 pb-5 pt-[22px]">
           <div className="flex items-start justify-between gap-4">
-            <h1 className="font-sans text-[30px] font-semibold leading-[38px] tracking-[-0.02em] text-[#161511]">
+            <h1 className="font-sans text-[30px] font-semibold leading-[38px] tracking-[-0.02em] text-ink-2">
               {round.question}
             </h1>
             <MarketStatusChip status={round.status} />
           </div>
-          <div className="mt-3 flex flex-wrap gap-x-[22px] gap-y-1 font-sans text-[14px] leading-[22px] text-[#6b7280]">
+          <div className="mt-3 flex flex-wrap gap-x-[22px] gap-y-1 font-sans text-[14px] leading-[22px] text-ink-10">
             <span>
-              <strong className="font-semibold text-[#2a2822]">{t('prediction_market.ref')}</strong> ${round.referencePrice.toFixed(3)}
+              <strong className="font-semibold text-ink-4">{t('prediction_market.ref')}</strong> ${round.referencePrice.toFixed(3)}
             </span>
             <span>
-              <strong className="font-semibold text-[#2a2822]">{t('prediction_market.pool')}</strong>{' '}
+              <strong className="font-semibold text-ink-4">{t('prediction_market.pool')}</strong>{' '}
               <span className="tabular-nums">{round.totalPool.toFixed(0)}</span> {round.asset}
             </span>
             {/* Omitted entirely when unknown (no indexer, or it is unreachable).
                 Rendering 0 there would assert that nobody has bet. */}
             {round.bettors !== null && (
               <span>
-                <strong className="font-semibold tabular-nums text-[#2a2822]">{round.bettors}</strong>{' '}
+                <strong className="font-semibold tabular-nums text-ink-4">{round.bettors}</strong>{' '}
                 {t('prediction_market.bettors')}
               </span>
             )}
             {round.status === 'open' && (
               <span>
-                <strong className="font-semibold text-[#2a2822]">{t('prediction_market.locks')}</strong>{' '}
+                <strong className="font-semibold text-ink-4">{t('prediction_market.locks')}</strong>{' '}
                 <Countdown closesAt={round.closesAt} className="tabular-nums" />
               </span>
             )}
@@ -171,13 +171,13 @@ export default function MarketTab() {
 
         {/* Body: bet panel (left) + odds chart (right) */}
         <div className="grid grid-cols-1 md:grid-cols-[300px_1fr]">
-          <div className="p-[26px] md:border-r md:border-[#f0f0f0]">
+          <div className="p-[26px] md:border-r md:border-line-3">
             {round.status === 'open' ? (
               <BetForm round={round} />
             ) : round.status === 'locked' ? (
-              <p className="font-sans text-sm text-[#6b7280]">{t('prediction_market.locked')}</p>
+              <p className="font-sans text-sm text-ink-10">{t('prediction_market.locked')}</p>
             ) : (
-              <p className="font-sans text-sm text-[#161511]">
+              <p className="font-sans text-sm text-ink-2">
                 {round.status === 'void'
                   ? t('prediction_market.round_voided', { reason: voidReasonText(t, round.voidReason) })
                   : t('prediction_market.settled_at', { price: round.settlementPrice ?? '', asset: round.asset })}
@@ -191,8 +191,8 @@ export default function MarketTab() {
               {round.buckets.map((bucket) => (
                 <div key={bucket.id} className="flex items-center gap-2">
                   <span className="h-[9px] w-[9px] rounded-full" style={{ backgroundColor: colors[bucket.id] }} aria-hidden="true" />
-                  <span className="font-sans text-[14px] leading-[22px] font-medium text-[#3f4650]">{bucket.label}</span>
-                  <span className="font-sans text-[14px] leading-[22px] font-bold tabular-nums text-[#161511]">{bucket.oddsPct}¢</span>
+                  <span className="font-sans text-[14px] leading-[22px] font-medium text-ink-7">{bucket.label}</span>
+                  <span className="font-sans text-[14px] leading-[22px] font-bold tabular-nums text-ink-2">{bucket.oddsPct}¢</span>
                 </div>
               ))}
             </div>
@@ -200,8 +200,8 @@ export default function MarketTab() {
             <PriceChart series={series} placeholder={isPlaceholder} />
 
             {/* Pool odds ladder */}
-            <div className="mt-[26px] border-t border-[#f0f0f0] pt-[22px]">
-              <div className="mb-3.5 font-sans text-[13px] leading-[20px] font-bold uppercase tracking-[0.05em] text-[#6b7280]">
+            <div className="mt-[26px] border-t border-line-3 pt-[22px]">
+              <div className="mb-3.5 font-sans text-[13px] leading-[20px] font-bold uppercase tracking-[0.05em] text-ink-10">
                 {t('prediction_market.pool_odds')}
               </div>
               <BucketBars buckets={round.buckets} size="full" />
@@ -210,7 +210,7 @@ export default function MarketTab() {
         </div>
 
         {/* Pool-safe key stats (no open-interest / 24h-vol) */}
-        <div className="grid grid-cols-2 border-t border-[#f0f0f0] sm:grid-cols-4">
+        <div className="grid grid-cols-2 border-t border-line-3 sm:grid-cols-4">
           <KeyStat label={t('prediction_market.pool')} value={`${round.totalPool.toFixed(0)} ${round.asset}`} />
           {/* An em dash, not 0 — this stat holds a slot in the grid, so it says
               "unknown" rather than disappearing. String(null) would print "null". */}
@@ -224,36 +224,36 @@ export default function MarketTab() {
       </div>
 
       {hasPosition && myPosition && (
-        <div className="mt-5 rounded-[18px] border border-[#ebebeb] bg-white p-5 shadow-[0_1px_2px_rgba(20,18,10,0.03)]">
-          <h3 className="mb-3 font-sans text-sm font-semibold text-[#161511]">{t('prediction_market.my_position')}</h3>
+        <div className="mt-5 rounded-[18px] border border-line-9 bg-surface-1 p-5 shadow-[0_1px_2px_rgba(20,18,10,0.03)]">
+          <h3 className="mb-3 font-sans text-sm font-semibold text-ink-2">{t('prediction_market.my_position')}</h3>
           <ul className="space-y-1 font-sans text-sm">
             {round.buckets
               .filter((bucket) => (myPosition.stakeByBucket[bucket.id] ?? 0) > 0)
               .map((bucket) => (
                 <li key={bucket.id} className="flex justify-between">
-                  <span className="text-[#6b7280]">{bucket.label}</span>
-                  <span className="tabular-nums text-[#161511]">
+                  <span className="text-ink-10">{bucket.label}</span>
+                  <span className="tabular-nums text-ink-2">
                     {(myPosition.stakeByBucket[bucket.id] ?? 0).toFixed(3)} {round.asset}
                   </span>
                 </li>
               ))}
           </ul>
-          <div className="mt-2 flex items-center justify-between border-t border-[#f0f0f0] pt-2 font-sans text-sm">
-            <span className="text-[#6b7280]">{t('prediction_market.total_staked')}</span>
-            <span className="font-semibold tabular-nums text-[#161511]">
+          <div className="mt-2 flex items-center justify-between border-t border-line-3 pt-2 font-sans text-sm">
+            <span className="text-ink-10">{t('prediction_market.total_staked')}</span>
+            <span className="font-semibold tabular-nums text-ink-2">
               {myPosition.totalStaked.toFixed(3)} {round.asset}
             </span>
           </div>
           {isResolved &&
             (myPosition.claimed ? (
-              <p className="mt-3 text-center font-sans text-sm text-[#6b7280]">{t('prediction_market.claimed')}</p>
+              <p className="mt-3 text-center font-sans text-sm text-ink-10">{t('prediction_market.claimed')}</p>
             ) : myPosition.claimable ? (
               <button
                 type="button"
                 onClick={() => void onClaim()}
                 disabled={isClaiming || isLite}
                 title={isLite ? t('prediction_market.upgrade_to_claim') : undefined}
-                className="mt-3 w-full rounded-[14px] bg-[#1a1a17] py-3 font-sans text-sm font-semibold text-white transition-colors hover:bg-black disabled:opacity-50"
+                className="mt-3 w-full rounded-[14px] bg-surface-42 py-3 font-sans text-sm font-semibold text-ink-27 transition-colors hover:bg-surface-44 disabled:opacity-50"
               >
                 {isLite ? t('prediction_market.upgrade_to_claim') : t('prediction_market.claim')}
               </button>
@@ -261,7 +261,7 @@ export default function MarketTab() {
               // F-P9: a SETTLED round where this position won nothing has no payout —
               // the contract would reject a Claim. Show that instead of a live button
               // whose only outcome is a confusing on-chain failure.
-              <p className="mt-3 text-center font-sans text-sm text-[#6b7280]">{t('prediction_market.no_payout')}</p>
+              <p className="mt-3 text-center font-sans text-sm text-ink-10">{t('prediction_market.no_payout')}</p>
             ))}
           {/* ★ THE FAIL-SAFE, previously unreachable from the app. A round stuck
               past its deadline never resolves on its own: `reclaim` lets any
@@ -270,8 +270,8 @@ export default function MarketTab() {
               in a dead round had no in-app way to get their money. Shown only
               when the position itself says the deadline has passed. */}
           {!isResolved && myPosition.reclaimable && (
-            <div className="mt-3 rounded-[14px] border border-[#f6e2c4] bg-[#fdf6ec] p-3">
-              <p className="font-sans text-[13px] leading-[20px] text-[#b45309]">
+            <div className="mt-3 rounded-[14px] border border-line-warn-2 bg-surface-warn-4 p-3">
+              <p className="font-sans text-[13px] leading-[20px] text-ink-warn-3">
                 {t('prediction_market.reclaim_explain')}
               </p>
               <button
@@ -279,7 +279,7 @@ export default function MarketTab() {
                 onClick={() => void onReclaim()}
                 disabled={isReclaiming || isLite}
                 title={isLite ? t('prediction_market.upgrade_to_reclaim') : undefined}
-                className="mt-2.5 w-full rounded-[12px] bg-[#b45309] py-2.5 font-sans text-sm font-semibold text-white transition-colors hover:bg-[#92400e] disabled:opacity-50"
+                className="mt-2.5 w-full rounded-[12px] bg-surface-warn-11 py-2.5 font-sans text-sm font-semibold text-ink-27 transition-colors hover:bg-surface-warn-12 disabled:opacity-50"
               >
                 {isLite ? t('prediction_market.upgrade_to_reclaim') : t('prediction_market.reclaim')}
               </button>
@@ -293,9 +293,9 @@ export default function MarketTab() {
 
 function KeyStat({ label, value, last }: { label: string; value: string; last?: boolean }) {
   return (
-    <div className={cn('px-6 py-[18px]', !last && 'border-r border-[#f0f0f0]')}>
-      <div className="mb-1.5 font-sans text-[12px] font-bold uppercase tracking-[0.05em] text-[#6b7280]">{label}</div>
-      <div className="font-sans text-[20px] leading-[30px] font-bold tabular-nums text-[#161511]">{value}</div>
+    <div className={cn('px-6 py-[18px]', !last && 'border-r border-line-3')}>
+      <div className="mb-1.5 font-sans text-[12px] font-bold uppercase tracking-[0.05em] text-ink-10">{label}</div>
+      <div className="font-sans text-[20px] leading-[30px] font-bold tabular-nums text-ink-2">{value}</div>
     </div>
   );
 }

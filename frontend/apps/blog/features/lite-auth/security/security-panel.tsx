@@ -104,24 +104,24 @@ function formatDate(value: string | null): string {
 const MethodRow: FC<{ method: LiteAuthMethod }> = ({ method }) => {
   const mark = METHOD_MARK[method.method] ?? { symbol: '•', bg: '#9ca3af' };
   return (
-    <li className="flex items-center gap-3 rounded-xl border border-[#e4e6e9] bg-white p-3">
+    <li className="flex items-center gap-3 rounded-xl border border-line-11 bg-surface-1 p-3">
       <span
-        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[15px] leading-[24px] font-bold text-white"
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[15px] leading-[24px] font-bold text-ink-27"
         style={{ backgroundColor: mark.bg }}
         aria-hidden
       >
         {mark.symbol}
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block text-[14px] leading-[22px] font-semibold text-[#161511]">
+        <span className="block text-[14px] leading-[22px] font-semibold text-ink-2">
           {METHOD_LABEL[method.method] ?? method.method}
           {method.isPrimary ? (
-            <span className="ml-2 rounded-md bg-[#f3f4f6] px-1.5 py-0.5 text-[12px] leading-[18px] font-semibold text-[#4b5563]">
+            <span className="ml-2 rounded-md bg-surface-22 px-1.5 py-0.5 text-[12px] leading-[18px] font-semibold text-ink-8">
               {COPY.primary}
             </span>
           ) : null}
         </span>
-        <span className="block truncate font-mono text-[13px] leading-[20px] text-[#9ca3af]">
+        <span className="block truncate font-mono text-[13px] leading-[20px] text-ink-14">
           {method.hint ?? ''}
           {method.hint && method.createdAt ? ' · ' : ''}
           {formatDate(method.createdAt)}
@@ -274,7 +274,7 @@ const SecurityPanel: FC = () => {
   };
 
   if (!identity.isLoggedIn) {
-    return <div className="mx-auto max-w-[560px] p-6 text-[15px] leading-[24px] text-[#4b5563]">{COPY.signedOut}</div>;
+    return <div className="mx-auto max-w-[560px] p-6 text-[15px] leading-[24px] text-ink-8">{COPY.signedOut}</div>;
   }
   if (!identity.clientAnswered) {
     // ★★★ "LOADING…" WAS PERMANENT ON A FAILED SESSION READ (2026-08-13,
@@ -288,29 +288,29 @@ const SecurityPanel: FC = () => {
     if (identity.sessionUnavailable) {
       return (
         <div className="mx-auto max-w-[560px] p-6">
-          <p className="text-[15px] leading-[24px] text-[#4b5563]">{COPY.sessionError}</p>
+          <p className="text-[15px] leading-[24px] text-ink-8">{COPY.sessionError}</p>
           <button
             type="button"
             onClick={identity.retrySession}
-            className="mt-3 rounded-[10px] border border-[#e4e6e9] px-4 py-2 text-[14px] leading-[22px] font-semibold text-[#3f4650] hover:bg-[#f6f7f8]"
+            className="mt-3 rounded-[10px] border border-line-11 px-4 py-2 text-[14px] leading-[22px] font-semibold text-ink-7 hover:bg-surface-16"
           >
             {COPY.loadRetry}
           </button>
         </div>
       );
     }
-    return <div className="mx-auto max-w-[560px] p-6 text-[15px] leading-[24px] text-[#9ca3af]">{COPY.loading}</div>;
+    return <div className="mx-auto max-w-[560px] p-6 text-[15px] leading-[24px] text-ink-14">{COPY.loading}</div>;
   }
   if (!isLite) {
-    return <div className="mx-auto max-w-[560px] p-6 text-[15px] leading-[24px] text-[#4b5563]">{COPY.signedOut}</div>;
+    return <div className="mx-auto max-w-[560px] p-6 text-[15px] leading-[24px] text-ink-8">{COPY.signedOut}</div>;
   }
 
   const connectorReady = walletConnectAvailable();
 
   return (
     <div className="mx-auto max-w-[560px] p-6">
-      <h1 className="font-serif text-2xl font-semibold text-[#161511]">{COPY.title}</h1>
-      <p className="mt-2 text-[15px] leading-[24px] text-[#4b5563]">{COPY.intro}</p>
+      <h1 className="font-serif text-2xl font-semibold text-ink-2">{COPY.title}</h1>
+      <p className="mt-2 text-[15px] leading-[24px] text-ink-8">{COPY.intro}</p>
 
       {methods === null && loadFailed ? (
         <div className="mt-6">
@@ -318,26 +318,26 @@ const SecurityPanel: FC = () => {
           <button
             type="button"
             onClick={() => void reload()}
-            className="mt-3 rounded-[10px] border border-[#e2e4e7] bg-white px-4 py-2 text-[14px] leading-[22px] font-semibold text-[#161511] hover:border-[#161511]"
+            className="mt-3 rounded-[10px] border border-line-12 bg-surface-1 px-4 py-2 text-[14px] leading-[22px] font-semibold text-ink-2 hover:border-line-28"
           >
             {COPY.loadRetry}
           </button>
         </div>
       ) : methods === null ? (
-        <p className="mt-6 text-[14px] leading-[22px] text-[#9ca3af]">{COPY.loading}</p>
+        <p className="mt-6 text-[14px] leading-[22px] text-ink-14">{COPY.loading}</p>
       ) : (
         <>
           <div
             className={`mt-5 rounded-xl border p-4 text-[14px] leading-[22px] ${
               atRisk
-                ? 'border-[#f6c6c0] bg-[#fdf2f0] text-[#8c2b1e]'
-                : 'border-[#cfe6d8] bg-[#f2f9f5] text-[#1f6340]'
+                ? 'border-line-brand-2 bg-surface-brand-5 text-ink-brand-2'
+                : 'border-line-15 bg-surface-ok-2 text-ink-ok-1'
             }`}
           >
             {atRisk ? COPY.atRisk : COPY.safe}
           </div>
 
-          <h2 className="mt-6 text-[13px] leading-[20px] font-semibold uppercase tracking-wide text-[#9ca3af]">
+          <h2 className="mt-6 text-[13px] leading-[20px] font-semibold uppercase tracking-wide text-ink-14">
             {COPY.linked}
           </h2>
           <ul className="mt-2 flex flex-col gap-2">
@@ -348,7 +348,7 @@ const SecurityPanel: FC = () => {
         </>
       )}
 
-      <h2 className="mt-7 text-[13px] leading-[20px] font-semibold uppercase tracking-wide text-[#9ca3af]">
+      <h2 className="mt-7 text-[13px] leading-[20px] font-semibold uppercase tracking-wide text-ink-14">
         {COPY.addTitle}
       </h2>
 
@@ -356,21 +356,21 @@ const SecurityPanel: FC = () => {
         <button
           onClick={() => linkWallet('btc')}
           disabled={!connectorReady || busy !== null}
-          className="flex h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-xl border-2 border-[#e4e6e9] bg-white text-[15px] leading-[24px] font-semibold text-[#161511] hover:border-[#161511] disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-xl border-2 border-line-11 bg-surface-1 text-[15px] leading-[24px] font-semibold text-ink-2 hover:border-line-28 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          <span className="text-[#f7931a]">₿</span>
+          <span className="text-ink-warn-9">₿</span>
           {busy === 'btc' ? COPY.connecting : COPY.addBtc}
         </button>
         <button
           onClick={() => linkWallet('evm')}
           disabled={!connectorReady || busy !== null}
-          className="flex h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-xl border-2 border-[#e4e6e9] bg-white text-[15px] leading-[24px] font-semibold text-[#161511] hover:border-[#161511] disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-xl border-2 border-line-11 bg-surface-1 text-[15px] leading-[24px] font-semibold text-ink-2 hover:border-line-28 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          <span className="text-[#627eea]">◈</span>
+          <span className="text-ink-info-7">◈</span>
           {busy === 'evm' ? COPY.connecting : COPY.addEvm}
         </button>
         {!connectorReady ? (
-          <p className="text-[13px] leading-[20px] text-[#9ca3af]">{COPY.connectorMissing}</p>
+          <p className="text-[13px] leading-[20px] text-ink-14">{COPY.connectorMissing}</p>
         ) : null}
 
         {googleConfigured() ? (
@@ -382,17 +382,17 @@ const SecurityPanel: FC = () => {
               onError={setError}
             />
           ) : (
-            <p className="text-[13px] leading-[20px] text-[#9ca3af]">{COPY.loading}</p>
+            <p className="text-[13px] leading-[20px] text-ink-14">{COPY.loading}</p>
           )
         ) : (
-          <p className="text-[13px] leading-[20px] text-[#9ca3af]">{COPY.googleMissing}</p>
+          <p className="text-[13px] leading-[20px] text-ink-14">{COPY.googleMissing}</p>
         )}
       </div>
 
-      <h2 className="mt-8 text-[13px] leading-[20px] font-semibold uppercase tracking-wide text-[#9ca3af]">
+      <h2 className="mt-8 text-[13px] leading-[20px] font-semibold uppercase tracking-wide text-ink-14">
         {COPY.signOutAllTitle}
       </h2>
-      <p className="mt-2 text-[14px] leading-[22px] text-[#4b5563]">{COPY.signOutAllBody}</p>
+      <p className="mt-2 text-[14px] leading-[22px] text-ink-8">{COPY.signOutAllBody}</p>
       {confirmSignOutAll ? (
         <div className="mt-2 flex flex-wrap gap-2">
           <button
@@ -400,7 +400,7 @@ const SecurityPanel: FC = () => {
             onClick={() => void signOutEverywhere()}
             disabled={signOutMutation.isLoading}
             data-testid="sign-out-everywhere-confirm"
-            className="rounded-[10px] border-2 border-[#b91c1c] bg-white px-4 py-2 text-[14px] leading-[22px] font-semibold text-[#b91c1c] hover:bg-[#fdf2f0] disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-[10px] border-2 border-line-brand-11 bg-surface-1 px-4 py-2 text-[14px] leading-[22px] font-semibold text-ink-brand-5 hover:bg-surface-brand-5 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {signOutMutation.isLoading ? COPY.signOutAllBusy : COPY.signOutAllConfirm}
           </button>
@@ -408,7 +408,7 @@ const SecurityPanel: FC = () => {
             type="button"
             onClick={() => setConfirmSignOutAll(false)}
             disabled={signOutMutation.isLoading}
-            className="rounded-[10px] border border-[#e2e4e7] bg-white px-4 py-2 text-[14px] leading-[22px] font-semibold text-[#161511] hover:border-[#161511] disabled:opacity-50"
+            className="rounded-[10px] border border-line-12 bg-surface-1 px-4 py-2 text-[14px] leading-[22px] font-semibold text-ink-2 hover:border-line-28 disabled:opacity-50"
           >
             {COPY.signOutAllCancel}
           </button>
@@ -418,7 +418,7 @@ const SecurityPanel: FC = () => {
           type="button"
           onClick={() => setConfirmSignOutAll(true)}
           data-testid="sign-out-everywhere"
-          className="mt-2 rounded-[10px] border border-[#e2e4e7] bg-white px-4 py-2 text-[14px] leading-[22px] font-semibold text-[#161511] hover:border-[#161511]"
+          className="mt-2 rounded-[10px] border border-line-12 bg-surface-1 px-4 py-2 text-[14px] leading-[22px] font-semibold text-ink-2 hover:border-line-28"
         >
           {COPY.signOutAll}
         </button>
@@ -427,9 +427,9 @@ const SecurityPanel: FC = () => {
         <p className="mt-2 text-[13px] leading-[20px] text-destructive">{signOutAllError}</p>
       ) : null}
 
-      {busy === 'google' ? <p className="mt-3 text-[13px] leading-[20px] text-[#4b5563]">{COPY.linking}</p> : null}
-      {done ? <p className="mt-3 text-[13px] leading-[20px] font-medium text-[#1f6340]">{COPY.linkedOk}</p> : null}
-      {error ? <p className="mt-3 text-[13px] leading-[20px] text-[#b45309]">{error}</p> : null}
+      {busy === 'google' ? <p className="mt-3 text-[13px] leading-[20px] text-ink-8">{COPY.linking}</p> : null}
+      {done ? <p className="mt-3 text-[13px] leading-[20px] font-medium text-ink-ok-1">{COPY.linkedOk}</p> : null}
+      {error ? <p className="mt-3 text-[13px] leading-[20px] text-ink-warn-3">{error}</p> : null}
     </div>
   );
 };

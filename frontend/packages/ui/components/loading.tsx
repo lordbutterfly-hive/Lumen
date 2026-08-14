@@ -9,7 +9,7 @@ import { LumenLoader } from './lumen-loader';
  * Replacing the skeletons would have left this behind, and it is not a small
  * surface: it is rendered on the POST page, the followers and followed lists, the
  * community roles page and a hover card in blog, plus roughly twenty places across
- * wallet. It drew `Icons.spinner` at 48px in `text-red-600`, spinning — so after the
+ * wallet. It drew `Icons.spinner` at 48px in `text-ink-brand-7`, spinning — so after the
  * skeleton work the app would have had a warm light bloom on one route and a hard
  * red spinner on the next, which is the specific failure this whole pass exists to
  * remove.

@@ -8,17 +8,17 @@
  * witnesses page: white, 1px #ebebeb, 18px radius, one-pixel lift.
  */
 export const SETTINGS_CARD =
-  'rounded-[18px] border border-[#ebebeb] bg-white p-6 shadow-[0_1px_2px_rgba(20,18,10,0.03)]';
+  'rounded-[18px] border border-line-9 bg-surface-1 p-6 shadow-[0_1px_2px_rgba(20,18,10,0.03)]';
 
 /** Card headline: Lora, the same weight and ink as the rest of the product. */
-export const SETTINGS_CARD_TITLE = 'font-serif text-[18px] font-semibold leading-[28px] text-[#161511]';
+export const SETTINGS_CARD_TITLE = 'font-serif text-[18px] font-semibold leading-[28px] text-ink-2';
 
 /** The line under a card headline that says what the card is for. */
-export const SETTINGS_CARD_HINT = 'mt-1.5 text-[13px] leading-[20px] text-[#6b7280]';
+export const SETTINGS_CARD_HINT = 'mt-1.5 text-[13px] leading-[20px] text-ink-10';
 
 /** Field label above an input or a select. */
-export const SETTINGS_LABEL = 'mb-1.5 block text-[13px] leading-[20px] font-semibold text-[#3f4650]';
+export const SETTINGS_LABEL = 'mb-1.5 block text-[13px] leading-[20px] font-semibold text-ink-7';
 
 /** Text input / select trigger. */
 export const SETTINGS_INPUT =
-  'h-10 w-full rounded-[10px] border border-[#e4e6e9] bg-white px-3 font-sans text-[14px] leading-[22px] text-[#161511] outline-none transition-colors placeholder:text-[#9ca3af] focus-visible:border-[#c0392b] focus-visible:ring-0';
+  'h-10 w-full rounded-[10px] border border-line-11 bg-surface-1 px-3 font-sans text-[14px] leading-[22px] text-ink-2 outline-none transition-colors placeholder:text-ink-14 focus-visible:border-line-brand-10 focus-visible:ring-0';

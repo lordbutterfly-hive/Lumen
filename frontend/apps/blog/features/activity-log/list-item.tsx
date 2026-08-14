@@ -17,38 +17,38 @@ function getNotificationIcon(type: string) {
     case 'vote':
       return {
         icon: <Icons.arrowUpCircle className="h-4 w-4" />,
-        color: 'text-green-600'
+        color: 'text-ink-ok-4'
       };
     case 'reblog':
       return {
         icon: <Icons.forward className="h-4 w-4" />,
-        color: 'text-blue-600'
+        color: 'text-ink-info-5'
       };
     case 'reply':
     case 'reply_comment':
       return {
         icon: <Icons.comment className="h-4 w-4" />,
-        color: 'text-purple-600'
+        color: 'text-ink-violet-1'
       };
     case 'mention':
       return {
         icon: <Icons.atSign className="h-4 w-4" />,
-        color: 'text-amber-600'
+        color: 'text-ink-warn-6'
       };
     case 'follow':
       return {
         icon: <Icons.userPlus className="h-4 w-4" />,
-        color: 'text-cyan-600'
+        color: 'text-ink-info-8'
       };
     case 'error':
       return {
         icon: <Icons.settings className="h-4 w-4" />,
-        color: 'text-red-600'
+        color: 'text-ink-brand-7'
       };
     default:
       return {
         icon: <Icons.info className="h-4 w-4" />,
-        color: 'text-gray-500'
+        color: 'text-ink-10'
       };
   }
 }
@@ -142,7 +142,7 @@ const NotificationListItem = ({
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <Link
           href={`/${fixedUrl}`}
-          className="line-clamp-2 text-sm hover:text-destructive visited:text-gray-500"
+          className="line-clamp-2 text-sm hover:text-destructive visited:text-ink-10"
         >
           <span data-testid="notification-account-and-message">
             <strong data-testid="subscriber-name">{msg.split(' ')[0]}</strong>
@@ -153,7 +153,7 @@ const NotificationListItem = ({
                 : null}
           </span>
         </Link>
-        <span className="flex items-center gap-2 text-xs text-gray-500" data-testid="notification-timestamp">
+        <span className="flex items-center gap-2 text-xs text-ink-10" data-testid="notification-timestamp">
           <span className={color}>{icon}</span>
           {/* One format for the whole list — see TimeAgo's `numeric` prop. */}
           <TimeAgo date={date} numeric="always" />
@@ -172,7 +172,7 @@ const NotificationListItem = ({
         <Tooltip>
           <TooltipTrigger asChild>
             <div
-              className="flex shrink-0 items-center gap-1 font-sans text-[12px] leading-[18px] text-[#6b7280]"
+              className="flex shrink-0 items-center gap-1 font-sans text-[12px] leading-[18px] text-ink-10"
               data-testid="notification-reputation-badge"
               title={t('navigation.profile_notifications_tab_navbar.reputation_at_time')}
               aria-label={`${t('navigation.profile_notifications_tab_navbar.reputation_label')} ${score}`}
@@ -180,7 +180,7 @@ const NotificationListItem = ({
               <span aria-hidden className="uppercase tracking-wide">
                 {t('navigation.profile_notifications_tab_navbar.reputation_label')}
               </span>
-              <span aria-hidden className="font-semibold tabular-nums text-[#161511]">
+              <span aria-hidden className="font-semibold tabular-nums text-ink-2">
                 {score}
               </span>
             </div>

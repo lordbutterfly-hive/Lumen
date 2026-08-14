@@ -87,10 +87,10 @@ export default function SetProxyDialog({ trigger, mode, currentProxy }: SetProxy
       <DialogTrigger asChild>{trigger}</DialogTrigger>
       <DialogContent className="rounded-2xl" data-testid="witnesses-proxy-dialog">
         <DialogHeader>
-          <DialogTitle className="font-sans text-lg font-bold text-[#161511]">
+          <DialogTitle className="font-sans text-lg font-bold text-ink-2">
             {mode === 'clear' ? t('witnesses.proxy_dialog.clear_title') : t('witnesses.proxy_dialog.set_title')}
           </DialogTitle>
-          <DialogDescription className="font-serif text-sm text-[#6b7280]">
+          <DialogDescription className="font-serif text-sm text-ink-10">
             {mode === 'clear'
               ? t('witnesses.proxy_dialog.clear_description', { proxy: currentProxy })
               : t('witnesses.proxy_dialog.set_description')}
@@ -111,7 +111,7 @@ export default function SetProxyDialog({ trigger, mode, currentProxy }: SetProxy
               autoFocus
             />
             {error && (
-              <p className="mt-1.5 font-sans text-xs text-[#c0392b]" data-testid="witnesses-proxy-error">
+              <p className="mt-1.5 font-sans text-xs text-ink-brand-6" data-testid="witnesses-proxy-error">
                 {error}
               </p>
             )}
@@ -124,7 +124,7 @@ export default function SetProxyDialog({ trigger, mode, currentProxy }: SetProxy
             onClick={handleSubmit}
             disabled={busy || (mode === 'set' && !account.trim())}
             data-testid="witnesses-proxy-submit"
-            className="flex items-center justify-center gap-2 rounded-[11px] bg-[#c0392b] px-4 py-2.5 font-sans text-sm font-semibold text-white transition-colors hover:bg-[#96271b] disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex items-center justify-center gap-2 rounded-[11px] bg-surface-brand-12 px-4 py-2.5 font-sans text-sm font-semibold text-ink-27 transition-colors hover:bg-surface-brand-17 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {busy && <Icons.spinner className="h-4 w-4 animate-spin" />}
             {mode === 'clear' ? t('witnesses.proxy_dialog.clear_confirm') : t('witnesses.proxy_dialog.set_confirm')}

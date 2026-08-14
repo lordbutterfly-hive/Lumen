@@ -17,9 +17,9 @@ import type { DescribedHistoryEntry } from '../lib/account-history';
  * judgement.
  */
 const TONE_CLASS: Record<DescribedHistoryEntry['tone'], string> = {
-  credit: 'text-[#2f7d4f]',
-  debit: 'text-[#c0392b]',
-  neutral: 'text-[#161511]'
+  credit: 'text-ink-ok-2',
+  debit: 'text-ink-brand-6',
+  neutral: 'text-ink-2'
 };
 
 const TONE_SIGN: Record<DescribedHistoryEntry['tone'], string> = {
@@ -72,11 +72,11 @@ export default function AccountHistoryRow({ entry }: { entry: DescribedHistoryEn
 
   return (
     <div
-      className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1 rounded-[14px] border border-[#f1f3f5] bg-white px-[18px] py-3.5 transition-colors hover:bg-[#fbfbfa]"
+      className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1 rounded-[14px] border border-line-2 bg-surface-1 px-[18px] py-3.5 transition-colors hover:bg-surface-5"
       data-testid="wallet-history-row"
     >
       <div className="min-w-0 flex-1">
-        <p className="break-words text-[14px] leading-[22px] text-[#2a2822]">
+        <p className="break-words text-[14px] leading-[22px] text-ink-4">
           {t(entry.labelKey, entry.labelParams)}
           {entry.counterparty ? (
             <>
@@ -84,7 +84,7 @@ export default function AccountHistoryRow({ entry }: { entry: DescribedHistoryEn
               {t(`wallet.history.direction.${entry.counterparty.direction}`)}{' '}
               <Link
                 href={`/@${entry.counterparty.name}`}
-                className="font-semibold text-[#2a2822] hover:underline"
+                className="font-semibold text-ink-4 hover:underline"
                 data-testid="wallet-history-counterparty"
               >
                 @{entry.counterparty.name}
@@ -93,19 +93,19 @@ export default function AccountHistoryRow({ entry }: { entry: DescribedHistoryEn
           ) : null}
         </p>
         <span
-          className="flex flex-wrap items-center gap-1.5 font-sans text-[12px] tabular-nums text-[#9ca3af]"
+          className="flex flex-wrap items-center gap-1.5 font-sans text-[12px] tabular-nums text-ink-14"
           data-testid="wallet-history-timestamp"
         >
           <time dateTime={date.toISOString()} title={date.toLocaleString(lang)}>
             {absoluteDate}
           </time>
-          <span aria-hidden className="text-[#dcd7d2]">
+          <span aria-hidden className="text-ink-24">
             ·
           </span>
           <TimeAgo date={entry.timestamp as string | number | Date} />
         </span>
         {entry.memo ? (
-          <p className="mt-0.5 break-all text-[12px] text-[#9ca3af]" data-testid="wallet-history-memo">
+          <p className="mt-0.5 break-all text-[12px] text-ink-14" data-testid="wallet-history-memo">
             {entry.memo}
           </p>
         ) : null}
@@ -126,7 +126,7 @@ export default function AccountHistoryRow({ entry }: { entry: DescribedHistoryEn
         // failed to load. These operations genuinely move nothing, so the row
         // says so instead of leaving the reader to guess which it was.
         <span
-          className="shrink-0 text-right font-sans text-[13px] leading-[20px] font-medium text-[#9ca3af]"
+          className="shrink-0 text-right font-sans text-[13px] leading-[20px] font-medium text-ink-14"
           data-testid="wallet-history-no-amount"
         >
           {t('wallet.history.no_amount')}

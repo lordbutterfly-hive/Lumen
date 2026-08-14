@@ -250,22 +250,74 @@ export const getAccount = (username: string): Promise<FullAccount> =>
  * Fails OPEN to the raw count on any error: a wrong-by-one follower number is
  * a cosmetic defect, and a profile page that will not load is not.
  */
+/**
+ * ★★★ MEMOISED (2026-08-13, browser audit §1.5). The cost estimate in the doc
+ * above — "2 * banList.length small parallel calls ... behind the same cache as
+ * the profile itself" — turned out to be the load-bearing claim, and the second
+ * half of it was not true everywhere. Measured in a browser on `/wallet`:
+ * **twelve** `bridge.get_relationship_between_accounts` requests, 140-280ms each,
+ * on one page load. They are invisible at the call site — `useWalletAccount`
+ * asked for `getAccountFull(username)` and got nineteen network requests — and
+ * they ride along with EVERY `getAccountFull`, which is the most-used read in the
+ * app (`/api/account`, every profile header, every hover card, the wallet).
+ *
+ * The `getAccountFullCached` the doc refers to does not cover the callers that
+ * matter here, so the correction is memoised at its own level instead. Same
+ * reasoning as `bannedSubscriptionCounts` in `bridge-api.ts`: the input is a
+ * compile-time ban list plus one public follow edge per banned account, and the
+ * output only ADJUSTS A DISPLAYED FOLLOWER COUNT — a correction that already
+ * fails open to the raw number. Five minutes of staleness is a follower count
+ * that can be off by at most the size of the ban list, for five minutes.
+ *
+ * Bounded and keyed by account, unlike its sibling: this one takes an argument.
+ * Nothing is stored when any edge lookup failed, so a node hiccup cannot freeze
+ * "no banned followers" in for five minutes.
+ */
+const BANNED_EDGES_TTL_MS = 300_000;
+const BANNED_EDGES_MAX = 500;
+const bannedEdgesMemo = new Map<string, { value: { followers: number; following: number }; expiresAt: number }>();
+const bannedEdgesInFlight = new Map<string, Promise<{ followers: number; following: number }>>();
+
 const bannedFollowEdges = async (username: string): Promise<{ followers: number; following: number }> => {
   if (!hasBannedAuthors()) return { followers: 0, following: 0 };
-  const names = bannedAuthorList();
-  const chain = await getChain();
-  const edge = (follower: string, followed: string) =>
-    chain.api.bridge.get_relationship_between_accounts([follower, followed]).catch(() => null);
-  const [inbound, outbound] = await Promise.all([
-    // banned -> username: inflates this account's FOLLOWER count
-    Promise.all(names.map((name) => edge(name, username))),
-    // username -> banned: inflates this account's FOLLOWING count
-    Promise.all(names.map((name) => edge(username, name)))
-  ]);
-  return {
-    followers: inbound.filter((r) => r?.follows).length,
-    following: outbound.filter((r) => r?.follows).length
-  };
+
+  const hit = bannedEdgesMemo.get(username);
+  if (hit && hit.expiresAt > Date.now()) return hit.value;
+  const pending = bannedEdgesInFlight.get(username);
+  if (pending) return pending;
+
+  const promise = (async () => {
+    try {
+      const names = bannedAuthorList();
+      const chain = await getChain();
+      const edge = (follower: string, followed: string) =>
+        chain.api.bridge.get_relationship_between_accounts([follower, followed]).catch(() => null);
+      const [inbound, outbound] = await Promise.all([
+        // banned -> username: inflates this account's FOLLOWER count
+        Promise.all(names.map((name) => edge(name, username))),
+        // username -> banned: inflates this account's FOLLOWING count
+        Promise.all(names.map((name) => edge(username, name)))
+      ]);
+      const value = {
+        followers: inbound.filter((r) => r?.follows).length,
+        following: outbound.filter((r) => r?.follows).length
+      };
+      if ([...inbound, ...outbound].every((r) => r !== null)) {
+        // Oldest-first eviction; this is a burst collapser, not an LRU.
+        if (bannedEdgesMemo.size >= BANNED_EDGES_MAX) {
+          const oldest = bannedEdgesMemo.keys().next().value;
+          if (oldest !== undefined) bannedEdgesMemo.delete(oldest);
+        }
+        bannedEdgesMemo.set(username, { value, expiresAt: Date.now() + BANNED_EDGES_TTL_MS });
+      }
+      return value;
+    } finally {
+      bannedEdgesInFlight.delete(username);
+    }
+  })();
+
+  bannedEdgesInFlight.set(username, promise);
+  return promise;
 };
 
 /**

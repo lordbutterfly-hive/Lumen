@@ -130,9 +130,9 @@ export default function WalletDialogShell({
       <DialogTrigger asChild>{trigger}</DialogTrigger>
       <DialogContent className="rounded-[18px] font-sans sm:max-w-[440px]">
         <DialogHeader>
-          <DialogTitle className="text-left text-xl text-[#161511]">{title}</DialogTitle>
+          <DialogTitle className="text-left text-xl text-ink-2">{title}</DialogTitle>
           {description ? (
-            <DialogDescription className="text-left text-[#6b7280]">{description}</DialogDescription>
+            <DialogDescription className="text-left text-ink-10">{description}</DialogDescription>
           ) : null}
         </DialogHeader>
         <form
@@ -150,7 +150,7 @@ export default function WalletDialogShell({
             <Button
               type="submit"
               disabled={busy || submitDisabled}
-              className={cn('rounded-[10px] bg-[#2f7d4f] text-white hover:bg-[#256640]')}
+              className={cn('rounded-[10px] bg-surface-ok-7 text-ink-27 hover:bg-surface-ok-9')}
             >
               {busy ? <CircleSpinner loading size={16} color="#fff" /> : submitLabel}
             </Button>

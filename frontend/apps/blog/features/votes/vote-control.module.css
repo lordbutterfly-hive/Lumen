@@ -1,0 +1,317 @@
+/**
+ * Lumen vote control — "Blade".
+ *
+ * Adapted from the owner's handoff (`handoff_vote_control/vote-control.css`)
+ * into a CSS Module so the class names cannot collide with anything else in the
+ * app and so no global stylesheet has to be touched — `packages/tailwindcss/**`
+ * is owned by another agent this session.
+ *
+ * ★ EVERY ANIMATED PROPERTY IS `transform` OR `opacity`, deliberately. Nothing
+ * here animates width, height, top/left, margin or padding, so no frame this
+ * control produces can trigger layout. That is the whole reason the feed can
+ * carry thirty of these without the animation showing up as a long task.
+ *
+ * ★ TWO DEVIATIONS FROM THE HANDOFF FILE, both bugs in it — recorded so nobody
+ * "restores" them:
+ *
+ * 1. THE POP ANIMATION WOULD HAVE FLIPPED THE DOWN BLADE UPRIGHT. The handoff
+ *    puts `transform: rotate(180deg)` on the down `svg` AND runs the cast pop
+ *    (`transform: scale(...)`) on that same `svg`. An animation's transform
+ *    replaces the static one outright, so for the 400ms of the pop the downvote
+ *    blade would rotate back to pointing UP — mid-cast, on the one frame the
+ *    reader is looking at. Fixed the way the owner's own live prototype does it
+ *    (`reference/VoteButtons.dc.html`, the `vb-pop` wrapper span): the rotation
+ *    lives on the `svg` and the scale on a wrapper element, so the two never
+ *    contend for the same property.
+ *
+ * 2. THE PALETTE IS TOKENISED rather than hard-coded, because this app has a
+ *    dark theme (`darkMode: ['class']`) and the handoff specifies light values
+ *    only. `#161511` ink on the dark card (`--background: 30 16% 15%`) is very
+ *    nearly invisible. The four custom properties below are the ENTIRE colour
+ *    surface of this control — the dark-mode agent can retheme it by overriding
+ *    those four and nothing else.
+ */
+
+.root {
+  /* Handoff palette, light. */
+  --lm-vote-muted: #8a827a;
+  --lm-vote-brand: #c0392b;
+  --lm-vote-slate: #5b6470;
+  --lm-vote-ink: #161511;
+
+  display: inline-flex;
+  align-items: center;
+  gap: 16px; /* between the up group and the down group */
+}
+
+.sm {
+  gap: 10px;
+}
+
+/**
+ * Dark values chosen to match tokens this app already ships, so the control
+ * sits in the same tonal family as everything around it:
+ * `--muted-foreground` dark is `#bab5b0`, `--foreground` dark is `#fdfbfa`,
+ * and `--destructive-icon` is lifted in dark mode for exactly this reason.
+ * Slate is lifted too — `#5b6470` on a `#2c2620` card is under 3:1.
+ */
+:global(.dark) .root {
+  --lm-vote-muted: #bab5b0;
+  --lm-vote-brand: #f2685b;
+  --lm-vote-slate: #a3adba;
+  --lm-vote-ink: #fdfbfa;
+}
+
+.side {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px; /* between glyph button and its tally */
+}
+
+.sm .side {
+  gap: 1px;
+}
+
+/* ---- button ---- */
+.btn {
+  position: relative;
+  width: 53px;
+  height: 53px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  color: var(--lm-vote-muted);
+  transition:
+    transform 200ms cubic-bezier(0.2, 0.8, 0.3, 1),
+    color 180ms ease;
+}
+
+.sm .btn {
+  width: 38px;
+  height: 38px;
+}
+
+.btn:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+/* The glyph wrapper owns SCALE; the svg inside owns ROTATION. See note 1 above. */
+.glyph {
+  display: grid;
+  place-items: center;
+}
+
+.btn svg {
+  display: block;
+  width: 28px;
+  height: 28px;
+}
+
+.sm .btn svg {
+  width: 22px;
+  height: 22px;
+}
+
+.down svg {
+  transform: rotate(180deg);
+}
+
+/* Directional hover — the gesture IS the affordance; there is no chrome. */
+.up:hover:not(:disabled) {
+  transform: translateY(-2.5px);
+  color: var(--lm-vote-brand);
+}
+
+.down:hover:not(:disabled) {
+  transform: translateY(2.5px);
+  color: var(--lm-vote-slate);
+}
+
+/* Keyboard users get the same lift, plus a real focus ring. */
+.up:focus-visible {
+  transform: translateY(-2.5px);
+  color: var(--lm-vote-brand);
+}
+
+.down:focus-visible {
+  transform: translateY(2.5px);
+  color: var(--lm-vote-slate);
+}
+
+.btn:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: -4px;
+  border-radius: 999px;
+}
+
+/* ---- cast state ---- */
+.up.mine {
+  color: var(--lm-vote-brand);
+}
+
+.down.mine {
+  color: var(--lm-vote-slate);
+}
+
+.mine svg path {
+  fill: currentColor;
+}
+
+/**
+ * ★ THE POP IS KEYED ON `casting`, NOT ON `mine` (2026-08-14 — measured).
+ * `.mine .glyph { animation }` runs the moment the element enters the document,
+ * so every post the reader had ALREADY voted on popped its blade on page load —
+ * on `/@lordbutterfly` that is 19 of 20 cards announcing a cast that happened
+ * days ago. `casting` is set only by an observed none/other -> up|down
+ * transition after mount (see votes-component.tsx), so the pop marks the event
+ * it is supposed to mark and nothing else.
+ */
+.casting .glyph {
+  animation: lm-vote-pop 400ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+/* Commit ring — mounted on the click that casts, unmounted on animationend. */
+.ring {
+  position: absolute;
+  inset: 2px;
+  border-radius: 999px;
+  border: 2px solid currentColor;
+  pointer-events: none;
+  animation: lm-vote-ring 620ms cubic-bezier(0.2, 0.7, 0.3, 1) forwards;
+}
+
+/* ---- tallies ---- */
+.tally {
+  display: inline-block;
+  min-width: 2ch;
+  /* Lora is already loaded by the root layout via next/font under this CSS
+     variable (app/layout.tsx). No new font request, no new bytes. */
+  font-family: var(--font-serif), Georgia, serif;
+  font-weight: 600;
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  line-height: 1;
+  transition: color 180ms ease;
+}
+
+.sm .tally {
+  font-size: 14.5px;
+}
+
+.tallyUp {
+  color: var(--lm-vote-ink);
+}
+
+.tallyUp.mine {
+  color: var(--lm-vote-brand);
+}
+
+/* Never brand red: disagreement is recorded, not celebrated. */
+.tallyDown {
+  color: var(--lm-vote-slate);
+}
+
+/* The roll direction differs per side, so direction reads without colour.
+   `.rolling` is added only once a tally has actually moved — see VoteTally. */
+.tallyUp .rolling {
+  animation: lm-vote-count-up 300ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+.tallyDown .rolling {
+  animation: lm-vote-count-down 300ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+.n {
+  display: inline-block;
+}
+
+/* Keeps the row from jumping while a vote is in flight: the spinner occupies
+   exactly the button's box. */
+.pending {
+  display: grid;
+  place-items: center;
+  width: 53px;
+  height: 53px;
+}
+
+.sm .pending {
+  width: 38px;
+  height: 38px;
+}
+
+@keyframes lm-vote-pop {
+  0% {
+    transform: scale(1);
+  }
+  38% {
+    transform: scale(1.34);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes lm-vote-ring {
+  0% {
+    transform: scale(0.55);
+    opacity: 0.55;
+  }
+  100% {
+    transform: scale(2);
+    opacity: 0;
+  }
+}
+
+@keyframes lm-vote-count-up {
+  0% {
+    transform: translateY(9px);
+    opacity: 0;
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes lm-vote-count-down {
+  0% {
+    transform: translateY(-9px);
+    opacity: 0;
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/**
+ * ★ Colour and fill still carry the whole state here — only motion is removed.
+ * `transform: none` on the buttons is deliberate rather than merely dropping the
+ * transition: without it the hover lift would still apply, instantly, which is
+ * the jump `prefers-reduced-motion` exists to prevent.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .btn,
+  .casting .glyph,
+  .tally .n,
+  .tally .rolling {
+    transition: none;
+    animation: none;
+  }
+
+  .up:hover:not(:disabled),
+  .down:hover:not(:disabled),
+  .up:focus-visible,
+  .down:focus-visible {
+    transform: none;
+  }
+
+  .ring {
+    display: none;
+  }
+}

@@ -37,7 +37,7 @@ import RightRail from './right-rail';
 export default function PageShell({
   children,
   rightRail,
-  leftRailExtra,
+  rightRailExtra,
   mainClassName = 'min-w-0'
 }: {
   children: ReactNode;
@@ -45,32 +45,58 @@ export default function PageShell({
    *  Pass `null` to drop the right rail and its grid column entirely
    *  (settings does this — it is account housekeeping, not a reading surface). */
   rightRail?: ReactNode;
-  /** Extra content stacked below the nav in the sticky left column (the post
-   *  page's "You Might Also Like" suggestion list lives here). */
-  leftRailExtra?: ReactNode;
+  /**
+   * Extra content stacked below the rail in the sticky RIGHT column — the post
+   * page's "You Might Also Like" suggestion list lives here.
+   *
+   * ★ THIS USED TO BE `leftRailExtra`, IN THE LEFT COLUMN (2026-08-13, audit
+   * §6). Measured on the shipped build: the panel sat in the 200px left aside
+   * alongside the primary navigation, as an `overflow-y-auto` scroller
+   * (`clientHeight 687` / `scrollHeight 1976`) inside a `md:sticky md:top-24`
+   * panel inside the `sticky top-24` aside. Two stickies at the SAME offset can
+   * never move relative to each other, so the inner one bought nothing and only
+   * created a second scroll context; and its `overscroll-behavior: auto` chained
+   * the wheel to the page the moment the inner scroller bottomed out — which is
+   * exactly the "it scrolls that part AND the page" complaint. The right column
+   * already computes to a real 312px track at this viewport (measured
+   * `200px 846px 312px` at 1534px wide), so discovery content no longer has to
+   * fight the navigation for the narrowest column on the page.
+   */
+  rightRailExtra?: ReactNode;
   mainClassName?: string;
 }) {
   const rail = rightRail === undefined ? <RightRail /> : rightRail;
+  // The right COLUMN exists if anything at all wants to live in it. Keeping this
+  // as one condition means `rightRailExtra` can never be silently dropped by a
+  // caller that also passed `rightRail={null}`.
+  const hasRightColumn = !!rail || !!rightRailExtra;
 
   return (
     <div
       className={`relative mx-auto grid max-w-[1720px] grid-cols-1 gap-11 px-6 pb-20 pt-[26px] md:grid-cols-[200px_minmax(0,1fr)] md:px-11 ${
-        rail ? 'xl:grid-cols-[200px_minmax(0,1fr)_312px]' : ''
+        hasRightColumn ? 'xl:grid-cols-[200px_minmax(0,1fr)_312px]' : ''
       }`}
     >
       <div
-        className="pointer-events-none absolute bottom-20 left-[244px] top-[26px] hidden w-px bg-[#ececec] md:block"
+        className="pointer-events-none absolute bottom-20 left-[244px] top-[26px] hidden w-px bg-surface-26 md:block"
         aria-hidden
       />
 
       <aside className="sticky top-24 hidden h-fit bg-background-secondary md:block">
         <LeftRail />
-        {leftRailExtra}
       </aside>
 
       <main className={mainClassName}>{children}</main>
 
-      {rail ? <aside className="sticky top-24 hidden h-fit bg-background-secondary xl:block">{rail}</aside> : null}
+      {/* ONE sticky, on the column wrapper, at ONE offset. Nothing inside this
+          column may add a second `sticky` or its own scroller — see the
+          `rightRailExtra` note above for what that cost the last time. */}
+      {hasRightColumn ? (
+        <aside className="sticky top-24 hidden h-fit flex-col gap-5 bg-background-secondary xl:flex">
+          {rail}
+          {rightRailExtra}
+        </aside>
+      ) : null}
     </div>
   );
 }

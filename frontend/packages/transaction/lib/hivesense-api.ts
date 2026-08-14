@@ -41,6 +41,30 @@ async function callHivesense<T>(operation: HivesenseOperation, params: Record<st
     body: JSON.stringify({ operation, params }),
     cache: 'no-store'
   });
+  return readHivesenseResponse<T>(res);
+}
+
+/**
+ * ★ THE STATUS PROBE GOES OVER GET (2026-08-13, browser audit §2.3).
+ *
+ * Every other operation here is a POST because it carries a body the proxy has
+ * to validate. `status` carries nothing at all — it asks "does this node offer
+ * hivesense", whose answer is the same for every reader and changes only when a
+ * node is reconfigured. Sending it as a POST made it uncacheable by definition,
+ * so every hard page load of every post page paid a round trip (measured 28-153ms
+ * even on a warm server memo, plus a rate-limiter row write) for an answer the
+ * browser could have kept. The proxy answers this one operation on GET with
+ * `public, max-age=300`, so from the second page load onward there is no request.
+ *
+ * No `cache: 'no-store'` here, deliberately — that flag is exactly what would
+ * throw the win away.
+ */
+async function getHivesenseStatusOverGet<T>(): Promise<T> {
+  const res = await fetch(`${HIVESENSE_PROXY_PATH}?operation=status`);
+  return readHivesenseResponse<T>(res);
+}
+
+async function readHivesenseResponse<T>(res: Response): Promise<T> {
   const text = await res.text();
   let data: unknown = null;
   if (text) {
@@ -78,7 +102,7 @@ async function callHivesense<T>(operation: HivesenseOperation, params: Record<st
  */
 export const getHiveSenseStatus = async (): Promise<boolean> => {
   try {
-    const response = await callHivesense<{ info: { title: string } }>('status', {});
+    const response = await getHivesenseStatusOverGet<{ info: { title: string } }>();
     return response?.info?.title === 'Hivesense';
   } catch (error) {
     logger.debug(error, 'hivesense-api not available on this node — AI search stays off');

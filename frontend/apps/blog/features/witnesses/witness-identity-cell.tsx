@@ -56,11 +56,11 @@ export default function WitnessIdentityCell({ row, className }: WitnessIdentityC
           <Link
             href={`/@${row.owner}`}
             data-testid="witness-name-link"
-            className={`font-sans text-[15px] leading-[24px] font-bold ${row.isDisabled ? 'text-[#9ca3af] line-through' : 'text-[#161511]'}`}
+            className={`font-sans text-[15px] leading-[24px] font-bold ${row.isDisabled ? 'text-ink-14 line-through' : 'text-ink-2'}`}
           >
             {row.owner}
           </Link>
-          <span className="rounded-md bg-[#eef2ff] px-[6px] py-px font-sans text-[12px] leading-[18px] font-bold tabular-nums text-[#4f5bd5]">
+          <span className="rounded-md bg-surface-info-2 px-[6px] py-px font-sans text-[12px] leading-[18px] font-bold tabular-nums text-ink-info-4">
             {row.running_version || t('witnesses.unknown_version')}
           </span>
           {externalUrl && (
@@ -69,7 +69,7 @@ export default function WitnessIdentityCell({ row, className }: WitnessIdentityC
               target="_blank"
               rel="noreferrer noopener"
               aria-label={t('witnesses.announcement_link_aria', { witness: row.owner })}
-              className="text-[#9ca3af] hover:text-[#c0392b]"
+              className="text-ink-14 hover:text-ink-brand-6"
             >
               <Icons.externalLink className="h-[13px] w-[13px]" />
             </Link>
@@ -81,7 +81,7 @@ export default function WitnessIdentityCell({ row, className }: WitnessIdentityC
             that can never be too long. One fixed width for both tabs, and the fallback
             is never clipped. */}
         <div
-          className={`max-w-[340px] font-sans text-[13px] leading-[20px] text-[#9ca3af] ${row.description ? 'truncate' : ''}`}
+          className={`max-w-[340px] font-sans text-[13px] leading-[20px] text-ink-14 ${row.description ? 'truncate' : ''}`}
         >
           {row.description || t('witnesses.no_description')}
         </div>

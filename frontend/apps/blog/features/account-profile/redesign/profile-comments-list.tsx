@@ -26,7 +26,8 @@ export default function ProfileCommentsList({
     isFetchingNextPage,
     hasNextPage,
     fetchNextPage,
-    loadMoreRef
+    loadMoreRef,
+    sentinel
   } = useAccountEntries(username, 'comments', observer, undefined, lite);
   // ★ THE SAME `hide` PROMISE AS THE POSTS TAB (2026-08-09). The Posts tab has
   // filtered since the NSFW work landed and this one never did, so a reader on
@@ -70,11 +71,19 @@ export default function ProfileCommentsList({
       {entries.map((entry) => (
         <ProfileCommentCard key={`${entry.author}-${entry.permlink}`} post={entry} />
       ))}
-      <div className="flex justify-center py-4">
+      {/* ★ THE PAGE CAP (2026-08-13). The sentinel below stops paging by itself
+          once FEED_AUTO_PAGE_CAP pages are held, so passive scrolling can no
+          longer grow this tab without limit — measured before the change:
+          `/@lordbutterfly/comments` went from 1,177 to 9,712 DOM elements and
+          25MB to 173MB of heap under forty scroll gestures. `loadMore()` grants
+          another window and hands paging back to the sentinel; it deliberately
+          does NOT fetch, or the reader's click and the sentinel would both fire.
+          See features/discovery-feed/hooks/use-infinite-scroll-sentinel.ts. */}
+      <div className="flex items-center justify-center gap-3 py-4">
         <button
           ref={loadMoreRef}
           type="button"
-          onClick={() => fetchNextPage()}
+          onClick={() => (sentinel.atPageCap ? sentinel.loadMore() : fetchNextPage())}
           disabled={isFetchingNextPage || (!hasNextPage && !isError)}
           className="font-sans text-sm text-muted-foreground hover:text-foreground disabled:cursor-default"
         >
@@ -85,10 +94,22 @@ export default function ProfileCommentsList({
             ? t('global.loading')
             : isError
               ? t('user_profile.load_failed_retry')
-              : hasNextPage
-                ? t('user_profile.load_newer')
-                : t('user_profile.nothing_more_to_load')}
+              : sentinel.atPageCap
+                ? t('cards.comment_card.load_more')
+                : hasNextPage
+                  ? t('user_profile.load_newer')
+                  : t('user_profile.nothing_more_to_load')}
         </button>
+        {sentinel.atPageCap ? (
+          <button
+            type="button"
+            onClick={sentinel.backToTop}
+            data-testid="profile-comments-back-to-top"
+            className="font-sans text-sm text-muted-foreground hover:text-foreground"
+          >
+            Back to top
+          </button>
+        ) : null}
       </div>
     </div>
   );

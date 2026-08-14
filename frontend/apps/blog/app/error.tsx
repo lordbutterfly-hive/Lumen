@@ -18,9 +18,9 @@ const COPY = {
 };
 
 const PRIMARY =
-  'inline-flex h-10 items-center justify-center rounded-[14px] bg-[#c0392b] px-5 font-sans text-[14px] leading-[22px] font-semibold text-white transition-colors hover:bg-[#a83224]';
+  'inline-flex h-10 items-center justify-center rounded-[14px] bg-surface-brand-12 px-5 font-sans text-[14px] leading-[22px] font-semibold text-ink-27 transition-colors hover:bg-surface-brand-15';
 const SECONDARY =
-  'inline-flex h-10 items-center justify-center rounded-[14px] border border-[#e4e6e9] px-5 font-sans text-[14px] leading-[22px] font-semibold text-[#3f4650] transition-colors hover:bg-[#f6f7f8]';
+  'inline-flex h-10 items-center justify-center rounded-[14px] border border-line-11 px-5 font-sans text-[14px] leading-[22px] font-semibold text-ink-7 transition-colors hover:bg-surface-16';
 
 /**
  * ★★★ ROOT ERROR BOUNDARY, LUMEN-STYLED, CHUNK-LOAD-AWARE (2026-08-11).
@@ -70,7 +70,7 @@ export default function Error({
     <div className="mx-auto flex min-h-[70vh] max-w-[520px] flex-col items-center justify-center px-6 text-center">
       <div className="w-full text-left">
         <PageMasthead title={chunkError ? COPY.updatingTitle : COPY.title}>
-          <p className="max-w-[460px] font-serif text-[13px] leading-[20px] text-[#6b7280]">
+          <p className="max-w-[460px] font-serif text-[13px] leading-[20px] text-ink-10">
             {chunkError ? COPY.updatingBody : COPY.body}
           </p>
         </PageMasthead>

@@ -97,7 +97,7 @@ export default function ProfileActions({
       <DialogLogin>
         <button
           type="button"
-          className="rounded-xl bg-[#1a1a17] px-7 py-3 font-sans text-[15px] leading-[24px] font-semibold text-white"
+          className="rounded-xl bg-surface-42 px-7 py-3 font-sans text-[15px] leading-[24px] font-semibold text-ink-27"
           data-testid="profile-follow-button"
         >
           {t('user_profile.follow_button')}
@@ -205,7 +205,7 @@ export default function ProfileActions({
         // reason — this pair may genuinely be clean), only that the primary CTA cannot
         // honestly say which right now.
         <span
-          className="rounded-xl border border-[#e4e6e9] bg-[#f9f7f5] px-4 py-3 font-sans text-[14px] leading-[22px] font-semibold text-[#6b7280]"
+          className="rounded-xl border border-line-11 bg-surface-14 px-4 py-3 font-sans text-[14px] leading-[22px] font-semibold text-ink-10"
           data-testid="profile-moderation-unknown-badge"
         >
           {t('user_profile.moderation_status_unknown_badge')}
@@ -222,8 +222,8 @@ export default function ProfileActions({
           className={cn(
             'rounded-xl px-7 py-3 font-sans text-[15px] leading-[24px] font-semibold transition-colors disabled:opacity-60',
             isFollow
-              ? 'border border-[#e4e6e9] bg-white text-[#3f4650] hover:bg-[#f6f7f8]'
-              : 'bg-[#1a1a17] text-white hover:bg-[#2a2822]'
+              ? 'border border-line-11 bg-surface-1 text-ink-7 hover:bg-surface-16'
+              : 'bg-surface-42 text-ink-27 hover:bg-surface-41'
           )}
         >
           {lumen.unknown
@@ -239,7 +239,7 @@ export default function ProfileActions({
           <button
             type="button"
             aria-label={t('profile.overflow_menu_label')}
-            className="flex h-11 w-11 items-center justify-center rounded-xl border border-[#e4e6e9] bg-white text-[#4b5563] hover:bg-[#f6f7f8]"
+            className="flex h-11 w-11 items-center justify-center rounded-xl border border-line-11 bg-surface-1 text-ink-8 hover:bg-surface-16"
           >
             <MoreHorizontal className="h-[18px] w-[18px]" />
           </button>

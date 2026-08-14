@@ -112,13 +112,42 @@ const hydrationCache = new Map<string, { entry: Entry; at: number }>();
  * visit. See the long comment at the `if (topic)` branch for the measurements
  * that made this necessary.
  */
-const TOPIC_CACHE_MS = 120_000;
+/**
+ * ★ RAISED 120s -> 300s (2026-08-13). See `TOPIC_FAIL_MS` below for the
+ * measurement that forced this pair to be re-thought. A topic page's ranked top
+ * 20 is not a per-block quantity: posts arrive in a tag at a rate of minutes to
+ * hours, while a cold build of one costs a measured 5,751ms. Five minutes is the
+ * longest window over which "the top of #photography has not meaningfully moved"
+ * is still an honest claim, and `?refresh=1` (honoured by the topic branch as of
+ * this change) is the escape hatch for anyone who needs to skip it.
+ */
+const TOPIC_CACHE_MS = 300_000;
 const TOPIC_CACHE_MAX = 200;
 const topicFeedCache = new Map<string, { entries: Entry[]; ranked: number; at: number }>();
 /** When the ranker last failed to serve a `viewer|topic`. See the branch that writes it. */
 const topicFailedAt = new Map<string, number>();
-/** How long that failure is trusted before the ranker is tried again. */
-const TOPIC_FAIL_MS = 20_000;
+/**
+ * How long that failure is trusted before the ranker is tried again.
+ *
+ * ★★★ RAISED 20s -> 300s (2026-08-13), MEASURED. At 20s this memo was doing
+ * almost nothing: signed in on `?tag=hive-110713`, cold 5,751ms, then 12ms /
+ * 13ms while the memo held — and **1,518ms again after a 25s idle**, answering
+ * `cache=fallback-cached` every time. i.e. any visitor arriving more than 20
+ * seconds after the last one paid a second and a half to rebuild the whole
+ * viewer state and re-attempt a ranker that then handed back the fallback page
+ * it already had. A 20s memory on a feed nobody can rank is a memory of nothing.
+ *
+ * The value is now EQUAL to `TOPIC_CACHE_MS`, deliberately. The old comment
+ * argued the negative deserved a much shorter leash than the positive, but the
+ * two answer the same question — "what can recsys serve for this viewer and this
+ * tag" — and that is a property of the RANKER's coverage, which changes when the
+ * ranker is redeployed or re-indexed, not per Hive block. Giving the negative
+ * six times less memory than the positive bought nothing and cost 1.5s a visit.
+ * Being wrong here still costs only what it cost before — one topic page serving
+ * the trending fallback for a few more minutes after a ranker comes back — and
+ * `?refresh=1` clears both memos immediately for anyone who cannot wait.
+ */
+const TOPIC_FAIL_MS = 300_000;
 const topicInflight = new Map<string, Promise<BuiltFeed | null>>();
 
 function rememberTopicFeed(key: string, entries: Entry[], ranked: number): void {
@@ -549,7 +578,17 @@ async function serveForYou(req: NextRequest): Promise<NextResponse> {
     // So this is a small cache and single-flight keyed by BOTH — `viewer|topic`.
     // Same viewer, same topic joins one build; different topic never does.
     const topicKey = `${viewer}|${topic}`;
-    const cached = topicFeedCache.get(topicKey);
+    // ★ `?refresh=1` REACHES THE TOPIC BRANCH TOO (2026-08-13). It used to be
+    // read ~80 lines below this early return, so a topic page had no way to skip
+    // its own cache at all. That was tolerable at a 20s TTL and is not at 300s:
+    // raising a cache without leaving a way past it is how a stale page becomes
+    // unreportable. Same parameter, same meaning, same single caller shape.
+    const topicForceRefresh = req.nextUrl.searchParams.get('refresh') === '1';
+    if (topicForceRefresh) {
+      topicFeedCache.delete(topicKey);
+      topicFailedAt.delete(topicKey);
+    }
+    const cached = topicForceRefresh ? undefined : topicFeedCache.get(topicKey);
     if (cached && Date.now() - cached.at < TOPIC_CACHE_MS) {
       return feedJson({
         entries: cached.entries, source: 'recsys', ranked: cached.ranked,

@@ -258,10 +258,10 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
 
   const nameBorder =
     nameStatus.state === 'available'
-      ? 'border-[#2f7d4f]'
+      ? 'border-line-ok-5'
       : nameStatus.state === 'unavailable'
-        ? 'border-[#b45309]'
-        : 'border-[#e4e6e9] focus-within:border-[#c0392b]';
+        ? 'border-line-warn-8'
+        : 'border-line-11 focus-within:border-line-brand-10';
 
   return (
     // Full-screen layer: /login is standalone (no three-column shell), but the
@@ -271,8 +271,8 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
     <div
       className={
         embedded
-          ? 'flex w-full flex-col items-center bg-white font-sans text-[#161511]'
-          : 'fixed inset-0 z-50 flex flex-col items-center overflow-y-auto bg-white px-5 pb-12 font-sans text-[#161511] [scrollbar-gutter:stable_both-edges]'
+          ? 'flex w-full flex-col items-center bg-surface-1 font-sans text-ink-2'
+          : 'fixed inset-0 z-50 flex flex-col items-center overflow-y-auto bg-surface-1 px-5 pb-12 font-sans text-ink-2 [scrollbar-gutter:stable_both-edges]'
       }
     >
       {embedded ? null : <div className="fixed inset-x-0 top-0 h-[3px] bg-[linear-gradient(90deg,#c0392b,#e07b3e)]" />}
@@ -282,10 +282,10 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
           mockup's Lora wordmark was the stray outlier. */}
       {embedded ? null : (
         <div className="mb-8 mt-16 text-center">
-          <Link href="/" className="font-sans text-[44px] leading-[52px] font-bold leading-none tracking-[-0.025em] text-[#161511]">
+          <Link href="/" className="font-sans text-[44px] leading-[52px] font-bold leading-none tracking-[-0.025em] text-ink-2">
             Lumen
           </Link>
-          <p className="mt-2 font-serif text-base text-[#6b7280]">{COPY.tagline}</p>
+          <p className="mt-2 font-serif text-base text-ink-10">{COPY.tagline}</p>
         </div>
       )}
 
@@ -299,18 +299,18 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
             <div
               className={
                 embedded
-                  ? 'overflow-hidden bg-white'
-                  : 'overflow-hidden rounded-[22px] border border-[#ebebeb] bg-white shadow-[0_12px_40px_rgba(192,57,43,0.07),0_1px_2px_rgba(20,18,10,0.04)]'
+                  ? 'overflow-hidden bg-surface-1'
+                  : 'overflow-hidden rounded-[22px] border border-line-9 bg-surface-1 shadow-[0_12px_40px_rgba(192,57,43,0.07),0_1px_2px_rgba(20,18,10,0.04)]'
               }
             >
               <div
                 className={
                   embedded
-                    ? 'border-b border-[#f3ede9] px-0 pb-4 pt-0'
-                    : 'border-b border-[#f3ede9] bg-[radial-gradient(120%_100%_at_0%_0%,#fdf1ee_0%,#fff_62%)] px-[30px] pb-6 pt-8'
+                    ? 'border-b border-line-5 px-0 pb-4 pt-0'
+                    : 'border-b border-line-5 bg-[radial-gradient(120%_100%_at_0%_0%,rgb(var(--login-wash-1))_0%,rgb(var(--login-wash-2))_62%)] px-[30px] pb-6 pt-8'
                 }
               >
-                <h1 className={`font-serif font-semibold tracking-[-0.01em] text-[#161511] ${embedded ? 'text-[22px] leading-[26px]' : 'text-center text-[30px] leading-[46px] leading-[34px]'}`}>
+                <h1 className={`font-serif font-semibold tracking-[-0.01em] text-ink-2 ${embedded ? 'text-[22px] leading-[26px]' : 'text-center text-[30px] leading-[46px] leading-[34px]'}`}>
                   {COPY.welcome}
                 </h1>
                 {/* Google is the only walletless way in, so it is what makes the
@@ -320,7 +320,7 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                     it shows the conservative sentence and the browser corrects
                     it. Erring that way round is deliberate — over-promising is
                     the failure this fixes. */}
-                <p className={`mt-2 text-[15px] leading-[24px] text-[#4b5563] ${embedded ? '' : 'text-center'}`}>
+                <p className={`mt-2 text-[15px] leading-[24px] text-ink-8 ${embedded ? '' : 'text-center'}`}>
                   {googleReady ? COPY.welcomeSub : COPY.welcomeSubWalletsOnly}
                 </p>
               </div>
@@ -343,7 +343,7 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                     <button
                       type="button"
                       disabled
-                      className="flex h-[64px] w-full items-center justify-center gap-[11px] rounded-[14px] border border-[#e4e6e9] bg-white text-[16px] font-semibold text-[#161511] opacity-60"
+                      className="flex h-[64px] w-full items-center justify-center gap-[11px] rounded-[14px] border border-line-11 bg-surface-1 text-[16px] font-semibold text-ink-2 opacity-60"
                     >
                       {COPY.google}
                     </button>
@@ -358,7 +358,7 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                       type="button"
                       disabled
                       aria-disabled="true"
-                      className="flex h-[64px] w-full cursor-not-allowed items-center justify-center gap-[11px] rounded-[14px] border border-[#e4e6e9] bg-white text-[16px] font-semibold text-[#161511] opacity-60"
+                      className="flex h-[64px] w-full cursor-not-allowed items-center justify-center gap-[11px] rounded-[14px] border border-line-11 bg-surface-1 text-[16px] font-semibold text-ink-2 opacity-60"
                     >
                       <svg width="20" height="20" viewBox="0 0 48 48" aria-hidden>
                         <path fill="#4285F4" d="M45.1 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h11.8c-.5 2.7-2 5-4.4 6.6v5.5h7.1c4.1-3.8 6.6-9.4 6.6-16.1z" />
@@ -368,7 +368,7 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                       </svg>
                       {COPY.google}
                     </button>
-                    <p className="mt-2 text-center text-[13px] leading-[20px] text-[#6b7280]">{COPY.googleSeam}</p>
+                    <p className="mt-2 text-center text-[13px] leading-[20px] text-ink-10">{COPY.googleSeam}</p>
                   </div>
                 )}
 
@@ -381,9 +381,9 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                     crypto section" to somebody who came here precisely because they
                     do not have a wallet. Its own divider separates them. */}
                 <div className="mx-0.5 my-4 flex items-center gap-3">
-                  <div className="h-px flex-1 bg-[#ececec]" />
-                  <span className="text-xs font-semibold text-[#9ca3af]">{COPY.orGoogle}</span>
-                  <div className="h-px flex-1 bg-[#ececec]" />
+                  <div className="h-px flex-1 bg-surface-26" />
+                  <span className="text-xs font-semibold text-ink-14">{COPY.orGoogle}</span>
+                  <div className="h-px flex-1 bg-surface-26" />
                 </div>
                 <div className="flex flex-col gap-2.5">
 
@@ -397,7 +397,7 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                       only fits when the copy is short is a row waiting to break. */}
                   <button
                     onClick={() => setWalletOpen('btc')}
-                    className="flex w-full cursor-pointer items-center gap-3 rounded-[14px] border border-[#e4e6e9] bg-white px-4 py-3 text-left hover:border-[#f7931a] hover:bg-[#fffaf3]"
+                    className="flex w-full cursor-pointer items-center gap-3 rounded-[14px] border border-line-11 bg-surface-1 px-4 py-3 text-left hover:border-line-warn-5 hover:bg-surface-warn-1"
                   >
                     {/* ★ THE REAL BITCOIN MARK (2026-08-09, owner-supplied).
                         History worth keeping: this was the character "₿", which
@@ -421,15 +421,15 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                       className="h-[34px] w-[34px] flex-shrink-0 rounded-[10px]"
                     />
                     <span className="min-w-0 flex-1">
-                      <span className="block text-[15px] leading-[24px] font-semibold text-[#161511]">{COPY.btcTitle}</span>
-                      <span className="block text-xs text-[#6b7280]">{COPY.btcSub}</span>
+                      <span className="block text-[15px] leading-[24px] font-semibold text-ink-2">{COPY.btcTitle}</span>
+                      <span className="block text-xs text-ink-10">{COPY.btcSub}</span>
                     </span>
                   </button>
 
                   {/* EVM wallet — Lumen Lite, no keys. Same proof shape as BTC. */}
                   <button
                     onClick={() => setWalletOpen('evm')}
-                    className="flex w-full cursor-pointer items-center gap-3 rounded-[14px] border border-[#e4e6e9] bg-white px-4 py-3 text-left hover:border-[#627eea] hover:bg-[#f8f9ff]"
+                    className="flex w-full cursor-pointer items-center gap-3 rounded-[14px] border border-line-11 bg-surface-1 px-4 py-3 text-left hover:border-line-info-3 hover:bg-surface-9"
                   >
                     {/* ★ A GENERIC WALLET MARK, NOT THE METAMASK FOX (2026-08-10, A2).
                         The row opens WalletConnect and genuinely accepts Rainbow,
@@ -447,7 +447,7 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                         the row actually is: an Ethereum wallet, any of them. */}
                     <span
                       aria-hidden
-                      className="flex h-[34px] w-[34px] flex-shrink-0 items-center justify-center rounded-[10px] bg-[#eef1fd]"
+                      className="flex h-[34px] w-[34px] flex-shrink-0 items-center justify-center rounded-[10px] bg-surface-info-3"
                     >
                       <svg width="20" height="20" viewBox="0 0 256 417" aria-hidden>
                         <path fill="#343434" d="M127.96 0l-2.8 9.5v275.7l2.8 2.8 127.96-75.6z" />
@@ -459,8 +459,8 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                       </svg>
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="block text-[15px] leading-[24px] font-semibold text-[#161511]">{COPY.evmTitle}</span>
-                      <span className="block text-xs text-[#6b7280]">{COPY.evmSub}</span>
+                      <span className="block text-[15px] leading-[24px] font-semibold text-ink-2">{COPY.evmTitle}</span>
+                      <span className="block text-xs text-ink-10">{COPY.evmSub}</span>
                     </span>
                   </button>
                 </div>
@@ -473,16 +473,16 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                     not belong in one undifferentiated list — the three lite
                     options carry equal weight, and this is its own step. */}
                 <div className="mx-0.5 my-4 flex items-center gap-3">
-                  <div className="h-px flex-1 bg-[#ececec]" />
-                  <span className="text-xs font-semibold text-[#9ca3af]">{COPY.orHive}</span>
-                  <div className="h-px flex-1 bg-[#ececec]" />
+                  <div className="h-px flex-1 bg-surface-26" />
+                  <span className="text-xs font-semibold text-ink-14">{COPY.orHive}</span>
+                  <div className="h-px flex-1 bg-surface-26" />
                 </div>
 
                 <KeychainSignin />
 
-                {error ? <p className="mt-4 text-center text-[13px] leading-[20px] text-[#b45309]">{error}</p> : null}
+                {error ? <p className="mt-4 text-center text-[13px] leading-[20px] text-ink-warn-3">{error}</p> : null}
 
-                <p className="mt-[18px] text-center text-xs text-[#9ca3af]">
+                <p className="mt-[18px] text-center text-xs text-ink-14">
                   By continuing you agree to Lumen’s <Link href="/tos.html">Terms</Link> and{' '}
                   <Link href="/privacy.html">Privacy Policy</Link>.
                 </p>
@@ -492,24 +492,24 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
             {/* Tier-2: full Hive account, secondary. */}
           </>
         ) : (
-          <div className="rounded-[18px] border border-[#ebebeb] bg-white p-6 shadow-[0_1px_2px_rgba(20,18,10,0.03)]">
+          <div className="rounded-[18px] border border-line-9 bg-surface-1 p-6 shadow-[0_1px_2px_rgba(20,18,10,0.03)]">
             <button
               onClick={() => {
                 setView('default');
                 setError(null);
               }}
-              className="mb-4 flex items-center gap-1.5 border-0 bg-transparent p-0 text-[13px] leading-[20px] font-semibold text-[#6b7280]"
+              className="mb-4 flex items-center gap-1.5 border-0 bg-transparent p-0 text-[13px] leading-[20px] font-semibold text-ink-10"
             >
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2">
                 <path d="M15 18l-6-6 6-6" />
               </svg>
               {COPY.back}
             </button>
-            <h1 className="font-serif text-2xl font-semibold text-[#161511]">{COPY.namePick}</h1>
-            <p className="mt-1.5 text-sm text-[#6b7280]">{COPY.namePickSub}</p>
+            <h1 className="font-serif text-2xl font-semibold text-ink-2">{COPY.namePick}</h1>
+            <p className="mt-1.5 text-sm text-ink-10">{COPY.namePickSub}</p>
 
             <div className={`mb-2 mt-[18px] flex h-12 items-center gap-2 rounded-xl border-2 px-3.5 ${nameBorder}`}>
-              <span className="font-bold text-[#9ca3af]">@</span>
+              <span className="font-bold text-ink-14">@</span>
               <input
                 value={name}
                 onChange={(e) => {
@@ -518,12 +518,12 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                 }}
                 autoFocus
                 spellCheck={false}
-                className="min-w-0 flex-1 border-0 font-sans text-base font-semibold text-[#161511] outline-none"
+                className="min-w-0 flex-1 border-0 font-sans text-base font-semibold text-ink-2 outline-none"
               />
               {nameStatus.state === 'checking' ? (
-                <span className="text-[13px] leading-[20px] font-semibold text-[#9ca3af]">{COPY.checking}</span>
+                <span className="text-[13px] leading-[20px] font-semibold text-ink-14">{COPY.checking}</span>
               ) : nameStatus.state === 'available' ? (
-                <span className="flex items-center gap-1.5 text-[13px] leading-[20px] font-semibold text-[#2f7d4f]">
+                <span className="flex items-center gap-1.5 text-[13px] leading-[20px] font-semibold text-ink-ok-2">
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2f7d4f" strokeWidth="2.4">
                     <path d="M20 6L9 17l-5-5" />
                   </svg>
@@ -532,9 +532,9 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
               ) : null}
             </div>
             {nameStatus.state === 'unavailable' ? (
-              <p className="mb-2 text-[13px] leading-[20px] font-medium text-[#b45309]">{nameStatus.reason}</p>
+              <p className="mb-2 text-[13px] leading-[20px] font-medium text-ink-warn-3">{nameStatus.reason}</p>
             ) : null}
-            <p className="mb-[18px] text-xs text-[#9ca3af]">{COPY.nameRules}</p>
+            <p className="mb-[18px] text-xs text-ink-14">{COPY.nameRules}</p>
 
             {/* Real Turnstile widget. Renders nothing when no site key is set — which
                 is also when the server passes the check through, so the two ends can
@@ -544,12 +544,12 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
             <button
               onClick={submitName}
               disabled={busy || nameStatus.state !== 'available' || (captchaRequired && !captchaToken)}
-              className="h-12 w-full cursor-pointer rounded-xl bg-[#c0392b] text-[15px] leading-[24px] font-semibold text-white hover:bg-[#a5301f] disabled:cursor-not-allowed disabled:opacity-50"
+              className="h-12 w-full cursor-pointer rounded-xl bg-surface-brand-12 text-[15px] leading-[24px] font-semibold text-ink-27 hover:bg-surface-brand-16 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {busy ? COPY.checking : COPY.create}
             </button>
-            {error ? <p className="mt-3 text-center text-[13px] leading-[20px] text-[#b45309]">{error}</p> : null}
-            <p className="mt-3 text-center text-xs text-[#6b7280]">{COPY.createReassure}</p>
+            {error ? <p className="mt-3 text-center text-[13px] leading-[20px] text-ink-warn-3">{error}</p> : null}
+            <p className="mt-3 text-center text-xs text-ink-10">{COPY.createReassure}</p>
           </div>
         )}
       </div>
@@ -563,7 +563,7 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
       {/* v8: this footer belongs to the standalone PAGE. Rendered inside the dialog it
           became a single orphaned "Help" link under the card, with no context and no
           sibling. The page keeps it; the dialog does not. */}
-      <div className={`my-9 flex gap-5 text-[13px] leading-[20px] text-[#9ca3af] ${embedded ? 'hidden' : ''}`}>
+      <div className={`my-9 flex gap-5 text-[13px] leading-[20px] text-ink-14 ${embedded ? 'hidden' : ''}`}>
         {/* ★ HELP FOR THE PERSON ACTUALLY ON THIS SCREEN (2026-08-08, UX tester).
             This pointed at /faq.html — the inherited "Hive.blog FAQ", which opens
             on master passwords, owner keys, Resource Credits and MVESTs and refers
@@ -571,7 +571,7 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
             someone who was just promised "without keys, wallets or setup" is worse
             than offering no help at all. /help.html is Lumen's own, and links on to
             the Hive FAQ at the bottom for anyone who wants it. */}
-        <Link href="/help.html" className="text-[#9ca3af]">Help</Link>
+        <Link href="/help.html" className="text-ink-14">Help</Link>
       </div>
 
       {walletOpen ? (

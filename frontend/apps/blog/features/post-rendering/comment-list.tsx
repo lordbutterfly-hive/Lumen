@@ -167,7 +167,7 @@ const CommentList = ({
                 <div
                   key={`parent-${commentKey}`}
                   className={clsx('flex min-w-0', {
-                    'my-2 rounded border-2 border-red-600 bg-green-50 p-2':
+                    'my-2 rounded border-2 border-line-brand-9 bg-surface-ok-1 p-2':
                       markedHash?.includes(`@${comment.author}/${comment.permlink}`) && comment.depth < 8
                   })}
                 >

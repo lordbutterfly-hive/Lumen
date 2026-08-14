@@ -1,53 +1,33 @@
 import { useQuery } from '@tanstack/react-query';
-import { getChain } from '@transaction/lib/chain';
-import { convertStringToBig } from '@ui/lib/helpers';
-import { convertToHP } from '@ui/lib/utils';
-import { GetDynamicGlobalPropertiesResponse } from '@hiveio/wax';
-import { Chain } from '@transaction/lib/chain';
 
 export interface DelegateeRow {
   name: string;
   hp: string;
 }
 
-const LIST_LIMIT = 100;
-
 /**
- * Real outgoing vesting delegations for `username`, via
- * database_api.list_vesting_delegations (order=by_delegation, which is
- * indexed by delegator so a start of [username, ''] returns only this
- * account's rows first — filtered defensively below too since the API
- * doesn't stop at an exact delegator boundary).
+ * Real outgoing vesting delegations for `username`, already converted to HP.
+ *
+ * ★ THROUGH OUR SERVER, NOT THE CHAIN CLIENT (2026-08-13, browser audit §1.5).
+ * This called `database_api.list_vesting_delegations` from the browser — one of
+ * the nineteen direct api.hive.blog requests on `/wallet` — and then ran
+ * `convertToHP` on every row, which needs a wax `Chain` instance and was one of
+ * the reasons the page held one at all. Both moved to
+ * `apps/blog/app/api/wallet/delegations/route.ts`, which also keeps the
+ * `order: 'by_delegation'` reasoning and the defensive delegator filter.
+ *
+ * The `dynamicGlobal` / `chain` parameters are gone with them: they existed only
+ * to feed that conversion, and every caller passed them straight through from
+ * `useWalletAccount`.
  */
-export function useDelegations(
-  username: string,
-  dynamicGlobal: GetDynamicGlobalPropertiesResponse | null,
-  chain: Chain | null
-) {
-  return useQuery({
+export function useDelegations(username: string) {
+  return useQuery<DelegateeRow[]>({
     queryKey: ['vestingDelegations', username],
-    queryFn: async (): Promise<DelegateeRow[]> => {
-      const hiveChain = await getChain();
-      const { delegations } = await hiveChain.api.database_api.list_vesting_delegations({
-        start: [username, ''],
-        limit: LIST_LIMIT,
-        order: 'by_delegation'
-      });
-
-      if (!dynamicGlobal || !chain) return [];
-
-      return delegations
-        .filter((d) => d.delegator === username)
-        .map((d) => ({
-          name: d.delegatee,
-          hp: convertToHP(
-            convertStringToBig(d.vesting_shares),
-            chain,
-            dynamicGlobal.total_vesting_shares,
-            dynamicGlobal.total_vesting_fund_hive
-          ).toFixed(3)
-        }));
+    queryFn: async () => {
+      const res = await fetch(`/api/wallet/delegations?username=${encodeURIComponent(username)}`);
+      if (!res.ok) throw new Error(`wallet delegations request failed: HTTP ${res.status}`);
+      return (await res.json()) as DelegateeRow[];
     },
-    enabled: !!username && !!dynamicGlobal && !!chain
+    enabled: !!username
   });
 }

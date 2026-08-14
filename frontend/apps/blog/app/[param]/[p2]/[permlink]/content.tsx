@@ -44,7 +44,12 @@ import sorter, { SortOrder } from '@/blog/lib/sorter';
 import { DEFAULT_OBSERVER, chainObserver } from '@/blog/lib/utils';
 import { getBasePath } from '@ui/lib/path-utils';
 import { useQuery } from '@tanstack/react-query';
-import { fetchCommunity, fetchCommunityRoles, fetchPost, fetchPostStatus } from '@/blog/lib/chain-fetch';
+import {
+  fetchCommunity,
+  fetchCommunityRoleOfAccount,
+  fetchPost,
+  fetchPostStatus
+} from '@/blog/lib/chain-fetch';
 import { fetchDiscussion } from '@/blog/lib/lite/client/discussion-fetch';
 import { isBlockedEntry, useLumenBlockList } from '@/blog/lib/lite/client/use-lumen-block';
 import { litePostIdOf } from '@/blog/lib/lite/render/lite-post-id';
@@ -848,25 +853,50 @@ const PostContent = () => {
   const commentSite = postDepth !== 0;
   const userFromDMCA = dmcaUserList.some((e) => e === postData?.author);
 
-  // ★ THROUGH OUR SERVER, NOT THE CHAIN CLIENT (2026-08-12). Unconditional
-  // (no `initialData`) on every community post — the highest-traffic page in
-  // the app. See `apps/blog/app/api/community-roles/route.ts`, which also
-  // backs `roles/[tag]/content.tsx`'s own, separately-broken instance of this
-  // same read (see that file for its own key-mismatch note).
+  /**
+   * ★ THROUGH OUR SERVER, NOT THE CHAIN CLIENT (2026-08-12). Unconditional
+   * (no `initialData`) on every community post — the highest-traffic page in
+   * the app. See `apps/blog/app/api/community-roles/route.ts`, which also
+   * backs `roles/[tag]/content.tsx`'s own, separately-broken instance of this
+   * same read (see that file for its own key-mismatch note).
+   *
+   * ★★★ IT ASKS FOR ONE ROW NOW, AND ONLY WHEN THE ANSWER CAN BE YES
+   * (2026-08-13, browser audit §2.4). Measured signed in on a community post:
+   * a flat 131-482ms, `private, no-store`, on every single load, to download
+   * every role row in the community (**593** of them for `hive-141359`) and
+   * reduce them here to the one boolean below. Three things were wrong with
+   * that and all three are fixed:
+   *
+   * - The reduction is now done by the route (`?account=`), so the response is
+   *   one small object instead of the whole table.
+   * - It is `enabled` only when there is a Hive account that could hold a role.
+   *   Signed out, `user.username` is `''`, `userRole` was always `undefined`
+   *   and the answer was always `false` — so every signed-out reader of every
+   *   community post paid that request for a foregone conclusion. A Lumen lite
+   *   account is not a Hive account at all and cannot hold a Hive community
+   *   role, the same gate `use-logged-user.tsx` and the follow-list query on
+   *   this very page already apply. `identity.clientAnswered` is required
+   *   because the tier is only known once the client has answered, and this
+   *   gate CLOSES a capability — the documented posture for that case
+   *   (`features/layouts/server-session.tsx`) is to keep it closed until then,
+   *   rather than fire a request against a name that may not be on chain.
+   * - The upstream read behind it is memoised server-side, so the loads that do
+   *   still make this request no longer pay the chain round trip.
+   *
+   * Its own query key, not `['rolesList', …]`: that key holds the FULL list for
+   * `/roles/[tag]` and its mutations (`use-set-role-mutations.ts` reads and
+   * writes it as `string[][]`). Two different shapes must never share one entry.
+   */
+  const canHoldCommunityRole =
+    identity.clientAnswered && !!user.username && user.account_tier !== 'lite';
   const { data: userCanModerate } = useQuery({
-    queryKey: ['rolesList', category],
-    queryFn: () => fetchCommunityRoles(category),
-    enabled: postInCommunity,
+    queryKey: ['communityRoleOfViewer', category, user.username],
+    queryFn: () => fetchCommunityRoleOfAccount(category, user.username),
+    enabled: postInCommunity && canHoldCommunityRole,
     onError: (error) => {
       handleError(error, { method: 'getListCommunityRoles', params: { category } });
     },
-    select: (data) => {
-      const userRole = data?.find((e) => e[0] === user.username);
-      const userCanModerate = userRole
-        ? userRole[1] === 'mod' || userRole[1] === 'admin' || userRole[1] === 'owner'
-        : false;
-      return userCanModerate;
-    }
+    select: (data) => data.role === 'mod' || data.role === 'admin' || data.role === 'owner'
   });
 
   // ★ THROUGH OUR SERVER, NOT THE CHAIN CLIENT (2026-08-12). Unconditional
@@ -1019,11 +1049,19 @@ const PostContent = () => {
           `PageShell` is that frame, extracted once and reused — see its own doc
           comment for why. The article card itself (`postContainerClasses`) is
           UNCHANGED: it was already `max-w-4xl mx-auto`, so its own width was never
-          the problem; only the chrome around it was. The suggestion list keeps its
-          previous position, sticky under the nav in the left column. */}
+          the problem; only the chrome around it was.
+
+          ★ THE SUGGESTION LIST MOVED TO THE RIGHT COLUMN (2026-08-13, audit §6).
+          It used to be `leftRailExtra` — stacked under the primary nav in the
+          200px left aside, as a scroller inside a sticky panel inside a sticky
+          aside. See `page-shell.tsx`'s `rightRailExtra` note for the measured
+          root cause. Below `xl` there is no right column, so the full strip
+          below the article (the `xl:hidden` block further down) is what a
+          narrow reader gets — it is no longer `md:hidden`, because between
+          `md` and `xl` the panel would otherwise be nowhere at all. */}
       <PageShell
         mainClassName="min-w-0 py-8 flex flex-col"
-        leftRailExtra={suggestionData ? <AnimatedList suggestions={suggestionData} /> : null}
+        rightRailExtra={suggestionData ? <AnimatedList suggestions={suggestionData} /> : null}
       >
         <div className={postContainerClasses}>
             {crossedPost ? (
@@ -1066,7 +1104,7 @@ const PostContent = () => {
                                   className="ml-2 inline-flex items-center align-middle"
                                   data-testid="powered-up-100-trigger"
                                 >
-                                  <Icons.hive className="h-5 w-5 text-red-500" />
+                                  <Icons.hive className="h-5 w-5 text-ink-brand-8" />
                                 </span>
                               </TooltipTrigger>
                               <TooltipContent data-testid="powered-up-100-tooltip">
@@ -1285,11 +1323,11 @@ const PostContent = () => {
                                 : postData.blacklists
                           }
                         />
-                        {/* text-[#6b7280], not text-slate-500: slate is off-palette (the
+                        {/* text-ink-10, not text-ink-info-6: slate is off-palette (the
                             followers redesign removed the last of it) and this badge is
                             one of the few places it survived. */}
                         {postData.author_title ? (
-                          <Badge variant="outline" className="ml-1 border-destructive text-[#6b7280]">
+                          <Badge variant="outline" className="ml-1 border-destructive text-ink-10">
                             <span className="mr-1">
                               <AuthorTitleText title={postData.author_title} />
                             </span>
@@ -1318,9 +1356,15 @@ const PostContent = () => {
                           our own vote table keys on the same value the read path sends.
                           A display name is neither stable (it changes at upgrade) nor a
                           Hive account. `author` here is a key, never display text. */}
+                      {/* ★ THE POST PAGE IS THE FULL-SIZE VARIANT (2026-08-14,
+                          Blade handoff): 28px glyph, 53x53 target, 18px tally.
+                          Everywhere else — feed cards, comments — takes the
+                          component's `sm` default. This is the ONLY call site
+                          that needs the prop. */}
                       <VotesComponentWrapper
                         post={{ ...postData, author: litePost?.chainAuthor || postData.author }}
                         type="post"
+                        size="default"
                       />
                       <span className="h-4 w-px bg-border" />
                       <DetailsCardHover
@@ -1332,7 +1376,7 @@ const PostContent = () => {
                           data-testid="comment-payout"
                           className={`font-bold text-destructive hover:cursor-pointer ${
                             parseFloat(postData.max_accepted_payout) === 0
-                              ? '!text-gray-600 line-through'
+                              ? '!text-ink-8 line-through'
                               : ''
                           }`}
                         >
@@ -1563,13 +1607,20 @@ const PostContent = () => {
                     </Link>
                   </div>
                 ) : null}
-                <div className="md:hidden">
+                {/* ★ `xl:hidden`, NOT `md:hidden` (2026-08-13, audit §6.4 check e).
+                    The rail that carries the suggestions only exists at `xl` and
+                    up. While this said `md:hidden`, a reader between 768px and
+                    1280px got them in the left nav column; now that the panel
+                    lives in the right column, that band would have had no
+                    suggestions at all. This strip is what falls BELOW the
+                    article instead — full list, not the rail's capped five. */}
+                <div className="xl:hidden">
                   {!!suggestionData ? (
                     <div className="mt-6 border-t border-border pt-4">
                       <h2 className="mb-3 px-4 font-sans text-lg font-bold">
                         You Might Also Like
                       </h2>
-                      <SuggestionsList suggestions={suggestionData} horizontal />
+                      <SuggestionsList suggestions={suggestionData} variant="horizontal" />
                     </div>
                   ) : null}
                 </div>
@@ -1595,7 +1646,7 @@ const PostContent = () => {
               error state. */}
           {!!postData && !nsfwHidden && liteRepliesTruncated ? (
             <p
-              className="px-4 py-2 font-sans text-[13px] leading-[20px] text-[#6b7280]"
+              className="px-4 py-2 font-sans text-[13px] leading-[20px] text-ink-10"
               data-testid="lite-replies-truncated"
             >
               {t('post_content.lite_replies_truncated')}

@@ -50,7 +50,7 @@ export const Drawer = ({
     >
       <div
         className={clsx(
-          "fixed inset-0 bg-gray-500 bg-opacity-50 transition-all",
+          "fixed inset-0 bg-surface-35 bg-opacity-50 transition-all",
           { "opacity-100 duration-500 ease-in-out visible": open },
           { "opacity-0 duration-500 ease-in-out invisible": !open }
         )}
@@ -74,7 +74,7 @@ export const Drawer = ({
             >
               <div
                 className={clsx(
-                  "flex flex-col h-full overflow-y-scroll bg-white p-1 shadow-xl rounded-lg"
+                  "flex flex-col h-full overflow-y-scroll bg-surface-1 p-1 shadow-xl rounded-lg"
                 )}
               >
                 {children}

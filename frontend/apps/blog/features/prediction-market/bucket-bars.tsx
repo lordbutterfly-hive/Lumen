@@ -25,14 +25,14 @@ export default function BucketBars({ buckets, size = 'compact' }: { buckets: Buc
             <span
               className={cn(
                 'flex-shrink-0 font-sans',
-                full ? 'w-28 text-[14px] leading-[22px] font-medium text-[#374151]' : 'w-24 text-[13px] leading-[20px] text-[#3f4650]'
+                full ? 'w-28 text-[14px] leading-[22px] font-medium text-ink-6' : 'w-24 text-[13px] leading-[20px] text-ink-7'
               )}
             >
               {bucket.label}
             </span>
             <span
               className={cn(
-                'relative flex-1 overflow-hidden rounded-md bg-[#f1f3f5]',
+                'relative flex-1 overflow-hidden rounded-md bg-surface-23',
                 full ? 'h-2' : 'h-1.5 rounded-[5px]'
               )}
             >
@@ -43,7 +43,7 @@ export default function BucketBars({ buckets, size = 'compact' }: { buckets: Buc
             </span>
             <span
               className={cn(
-                'flex-shrink-0 text-right font-sans font-bold tabular-nums text-[#161511]',
+                'flex-shrink-0 text-right font-sans font-bold tabular-nums text-ink-2',
                 full ? 'w-9 text-[14px] leading-[22px]' : 'w-[30px] text-xs'
               )}
             >

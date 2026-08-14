@@ -14,8 +14,10 @@ import { Entry } from '@hive/common-hiveio-packages/wax';
 import { LumenLoader } from '@hive/ui';
 import userIllegalContent from '@ui/config/lists/user-illegal-content';
 import { useParams } from 'next/navigation';
-import { useEffect } from 'react';
-import { useInView } from 'react-intersection-observer';
+import {
+  FEED_AUTO_PAGE_CAP,
+  useInfiniteScrollSentinel
+} from '@/blog/features/discovery-feed/hooks/use-infinite-scroll-sentinel';
 import { useStorageWithTTL } from '@ui/hooks/useStorageWithTTL';
 import { StorageTTL } from '@ui/lib/storage-with-ttl';
 import { QueryTypes } from './lib/utils';
@@ -26,14 +28,6 @@ const PostsContent = ({ query }: { query: QueryTypes }) => {
   const legalBlockedUser = userIllegalContent.includes(username);
   const ssrObserver = useSSRObserver();
   const initialPosts = useInitialPosts();
-  const { ref, inView } = useInView();
-  // Create a separate ref for prefetching - triggers earlier than the main ref
-  const { ref: prefetchRef, inView: prefetchInView } = useInView({
-    // Start prefetching when element is 1500px from entering viewport
-    rootMargin: '1500px 0px',
-    // Only trigger once per element
-    triggerOnce: false
-  });
   const { t } = useTranslation('common_blog');
   const { user, isHydrated } = useUserClient();
   // Use SSR observer before hydration to match prefetched cache keys,
@@ -93,18 +87,33 @@ const PostsContent = ({ query }: { query: QueryTypes }) => {
     staleTime: StaleTime.MEDIUM
   });
 
-  // Auto-fetch the next page when either the prefetch sentinel (1500px ahead)
-  // or the load-more button enters view. Guard on !isFetching so a single cycle
-  // can't fire while any fetch is in flight — otherwise empty/short pages keep
-  // the sentinel in view and we'd loop until exhausting the feed.
-  useEffect(() => {
-    if ((prefetchInView || inView) && hasNextPage && !isFetching) {
-      fetchNextPage();
-    }
-  }, [prefetchInView, inView, hasNextPage, isFetching, fetchNextPage]);
-
-  // Calculate total posts to determine when to show prefetch trigger
-  const totalPosts = data?.pages?.reduce((acc, page) => acc + (page?.length || 0), 0) || 0;
+  // ★★★ TWO OBSERVERS, ONE EFFECT, TWO FETCHES PER GESTURE (2026-08-13).
+  //
+  // This ran a 1500px "prefetch" observer AND a 0px observer on the load-more
+  // button through a single effect guarded on `!isFetching`. Neither guard was
+  // wrong; the input was. `inView` is delivered by IntersectionObserver in a
+  // later task, so when the page that just landed pushed both sentinels far
+  // below the viewport, the effect re-ran on `isFetching: false` while both
+  // booleans still read true and fired again. Measured on :3000 against
+  // `/@lordbutterfly/comments`: one scroll to the bottom, then twenty seconds
+  // of stillness, produced requests at t+21259ms AND t+21790ms.
+  //
+  // One sentinel now, at the same 1500px lead — the 0px observer was strictly
+  // redundant, since anything visible at 0px is visible at 1500px — and the
+  // decision reads the sentinel's live geometry instead of a boolean that is a
+  // task behind. The hook also caps how far passive scrolling grows this list.
+  // See features/discovery-feed/hooks/use-infinite-scroll-sentinel.ts.
+  const sentinel = useInfiniteScrollSentinel({
+    hasNextPage,
+    isFetching,
+    // ★ This list never had the "do not refire into a failure" guard its two
+    // siblings got; the shared hook applies the same one here.
+    isError,
+    fetchNextPage,
+    rootMarginPx: 1500,
+    pagesLoaded: data?.pages?.length ?? 0,
+    autoPageCap: FEED_AUTO_PAGE_CAP
+  });
 
   const getNoContentMessage = () => {
     if (query === 'posts' || query === 'comments')
@@ -149,10 +158,12 @@ const PostsContent = ({ query }: { query: QueryTypes }) => {
                     nsfwPreferences={preferences.nsfw}
                     testFilter="profile-blog-list"
                   />
-                  {/* Add prefetch trigger before the last page, when we have more than one page */}
-                  {pageIndex === data.pages.length - 1 && totalPosts > 10 && (
-                    <div ref={prefetchRef} className="h-1 w-full" aria-hidden="true" />
-                  )}
+                  {/* The separate 1px prefetch trigger that used to sit here is
+                      gone: it was the second of the two observers described
+                      above, and it only ever rendered when `totalPosts > 10`,
+                      so a short list had no prefetch lead at all. The single
+                      sentinel on the button below carries the 1500px lead
+                      unconditionally. */}
                 </div>
               ) : null;
             })
@@ -164,16 +175,27 @@ const PostsContent = ({ query }: { query: QueryTypes }) => {
               {getNoContentMessage()}
             </div>
           )}
-          <div>
-            <button ref={ref} onClick={() => fetchNextPage()} disabled={!hasNextPage || isFetchingNextPage}>
+          <div className="flex items-center gap-3">
+            <button
+              ref={sentinel.ref}
+              onClick={() => (sentinel.atPageCap ? sentinel.loadMore() : fetchNextPage())}
+              disabled={!hasNextPage || isFetchingNextPage}
+            >
               {isFetchingNextPage && data.pages.length > 0 ? (
                 <div>Loading...</div>
+              ) : sentinel.atPageCap ? (
+                t('cards.comment_card.load_more')
               ) : hasNextPage ? (
                 t('user_profile.load_newer')
               ) : data.pages[0] && data.pages[0].length > 0 ? (
                 t('user_profile.nothing_more_to_load')
               ) : null}
             </button>
+            {sentinel.atPageCap ? (
+              <button type="button" onClick={sentinel.backToTop} data-testid="posts-content-back-to-top">
+                Back to top
+              </button>
+            ) : null}
           </div>
           <div>{isFetching && !isFetchingNextPage ? 'Background Updating...' : null}</div>
         </>

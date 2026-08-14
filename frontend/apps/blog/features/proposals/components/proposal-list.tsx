@@ -55,7 +55,7 @@ export default function ProposalList({ proposals, votedIds, votesUnavailable, ta
 
   if (filtered.length === 0) {
     return (
-      <p className="py-12 text-center font-sans text-sm text-[#6b7280]" data-testid="proposal-list-empty">
+      <p className="py-12 text-center font-sans text-sm text-ink-10" data-testid="proposal-list-empty">
         {t('proposals.list.empty')}
       </p>
     );

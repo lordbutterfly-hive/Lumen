@@ -173,7 +173,7 @@ const Topics = () => {
 
   return (
     <section data-testid="right-rail-topics">
-      <h3 className="mb-[14px] text-[15px] leading-[24px] font-bold text-[#161511]">{t('right_rail.topics.heading')}</h3>
+      <h3 className="mb-[14px] text-[15px] leading-[24px] font-bold text-ink-2">{t('right_rail.topics.heading')}</h3>
       {isLoading ? (
         <div className="flex flex-wrap gap-2" data-testid="right-rail-topics-loading">
           {Array.from({ length: MAX_TOPICS }).map((_, index) => (
@@ -181,11 +181,11 @@ const Topics = () => {
           ))}
         </div>
       ) : isError ? (
-        <p className="text-xs text-[#8a8a8a]" data-testid="right-rail-topics-error">
+        <p className="text-xs text-ink-13" data-testid="right-rail-topics-error">
           {t('right_rail.topics.error')}
         </p>
       ) : topics.length === 0 ? (
-        <p className="text-xs text-[#8a8a8a]" data-testid="right-rail-topics-empty">
+        <p className="text-xs text-ink-13" data-testid="right-rail-topics-empty">
           {t('right_rail.topics.empty')}
         </p>
       ) : (
@@ -201,11 +201,11 @@ const Topics = () => {
                   className={cn(
                     'inline-flex items-center gap-0.5 rounded-full border px-[11px] py-[5px] text-[13px] leading-[20px] font-medium capitalize transition-colors',
                     current
-                      ? 'border-[#c0392b] bg-[#fdf2f0] text-[#c0392b]'
-                      : 'border-[#ececec] bg-[#faf9f7] text-[#4b5563] hover:border-[#c0392b] hover:bg-[#fdf2f0] hover:text-[#c0392b]'
+                      ? 'border-line-brand-10 bg-surface-brand-5 text-ink-brand-6'
+                      : 'border-line-8 bg-surface-11 text-ink-8 hover:border-line-brand-10 hover:bg-surface-brand-5 hover:text-ink-brand-6'
                   )}
                 >
-                  <span className={current ? 'text-[#c0392b]' : 'text-[#c0392b]/60'} aria-hidden="true">
+                  <span className={current ? 'text-ink-brand-6' : 'text-ink-brand-6/60'} aria-hidden="true">
                     #
                   </span>
                   {topic}

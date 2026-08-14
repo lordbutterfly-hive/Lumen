@@ -69,7 +69,7 @@ export default function ProfileTabs({
 
   return (
     <div>
-      <div role="tablist" className="mb-1 flex gap-1 border-b border-[#ebebeb]">
+      <div role="tablist" className="mb-1 flex gap-1 border-b border-line-9">
         <TabButton
           isActive={activeTab === 'posts'}
           onClick={() => selectTab('posts')}
@@ -100,7 +100,7 @@ function TabButton({ isActive, onClick, label }: { isActive: boolean; onClick: (
       onClick={onClick}
       className={cn(
         'flex items-center gap-2 border-b-[2px] px-1.5 py-3 font-sans text-[16px] font-semibold transition-colors',
-        isActive ? 'border-[#c0392b] text-[#161511]' : 'border-transparent text-[#6b7280] hover:text-[#161511]'
+        isActive ? 'border-line-brand-10 text-ink-2' : 'border-transparent text-ink-10 hover:text-ink-2'
       )}
     >
       {label}

@@ -64,7 +64,7 @@ export const VoteRemovalDialog = forwardRef<
           <div className="flex items-center justify-between">
             <AlertDialogTitle data-testid="vote-removal-dialog-header">{title}</AlertDialogTitle>
             <AlertDialogCancel
-              className="border-none hover:text-red-800"
+              className="border-none hover:text-ink-brand-3"
               data-testid="vote-removal-dialog-close"
             >
               X
@@ -75,12 +75,12 @@ export const VoteRemovalDialog = forwardRef<
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter className="gap-2 sm:flex-row-reverse">
-          <AlertDialogCancel className="hover:text-red-800" data-testid="vote-removal-dialog-cancel">
+          <AlertDialogCancel className="hover:text-ink-brand-3" data-testid="vote-removal-dialog-cancel">
             {t('vote_removal_dialog.cancel')}
           </AlertDialogCancel>
           <AlertDialogAction
             autoFocus
-            className="rounded-none bg-gray-800 text-base text-white shadow-lg shadow-destructive hover:bg-destructive hover:shadow-gray-800 disabled:bg-gray-400 disabled:shadow-none"
+            className="rounded-none bg-surface-39 text-base text-ink-27 shadow-lg shadow-destructive hover:bg-destructive hover:shadow-line-26 disabled:bg-surface-34 disabled:shadow-none"
             onClick={(e) => {
               e.preventDefault();
               onConfirm();

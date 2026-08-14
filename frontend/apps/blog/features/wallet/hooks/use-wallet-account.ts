@@ -1,62 +1,69 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { getAccountFull, getDynamicGlobalProperties, getFindAccounts } from '@transaction/lib/hive-api';
-import { getChain } from '@transaction/lib/chain';
-import { deriveWalletFigures, WalletFigures } from '../lib/wallet-derived';
+import type { GetDynamicGlobalPropertiesResponse } from '@hiveio/wax';
+import type { FullAccount } from '@hive/common-hiveio-packages/wax';
+import { WalletFigures } from '../lib/wallet-derived';
+import { fromWalletFiguresWire, WalletFiguresWire } from '../lib/wallet-figures-wire';
 
 /**
- * Fetches everything the wallet page needs for one account (balances,
- * dynamic global properties for the HP <-> vests rate, and the wax chain
- * instance) and derives the display figures. Same three-query shape
- * features/layouts/user-profile/profile-layout.tsx already uses for its own
- * HP math, so caches are shared across pages when the query keys line up.
+ * Everything the wallet page needs for one account: balances, the HP figures
+ * derived from them, and the dynamic global properties the dialogs read.
+ *
+ * ★★★ ONE SAME-ORIGIN REQUEST, NOT FIFTEEN TO api.hive.blog (2026-08-13, browser
+ * audit §1.5). This hook used to run four browser-side queries — `getAccountFull`,
+ * `getDynamicGlobalProperties`, `getFindAccounts` and `getChain` — which together
+ * produced fifteen of the nineteen direct requests the audit counted on `/wallet`
+ * (`getAccountFull` alone is find_accounts + bridge.get_profile + twelve
+ * `get_relationship_between_accounts`), and `getChain()` downloaded
+ * `wax.common.wasm`, 2.34 MB, purely so `convertToHP` could run in the browser.
+ *
+ * `/api/wallet/summary` makes the same reads server-side, derives the same
+ * figures with the same `deriveWalletFigures`, and sends the result. The return
+ * shape of this hook is unchanged apart from `chain`, which no consumer needs any
+ * more (see `use-delegations.ts` and `use-account-history.ts`, whose chain use
+ * moved to their own routes in the same pass).
+ *
+ * `refetchInterval: 60_000` is kept from the previous implementation — the same
+ * cadence, now costing one request instead of fifteen.
  */
+
+interface WalletSummaryWire {
+  account: FullAccount;
+  dynamicGlobal: GetDynamicGlobalPropertiesResponse;
+  figures: WalletFiguresWire;
+  pendingClaimedAccounts: number;
+}
+
+async function fetchWalletSummary(username: string): Promise<WalletSummaryWire> {
+  const res = await fetch(`/api/wallet/summary?username=${encodeURIComponent(username)}`);
+  if (!res.ok) throw new Error(`wallet summary request failed: HTTP ${res.status}`);
+  return (await res.json()) as WalletSummaryWire;
+}
+
 export function useWalletAccount(username: string) {
-  const accountQuery = useQuery({
-    queryKey: ['walletAccountData', username],
-    queryFn: () => getAccountFull(username),
+  const summaryQuery = useQuery({
+    queryKey: ['walletSummary', username],
+    queryFn: () => fetchWalletSummary(username),
     enabled: !!username,
     refetchInterval: 60_000
   });
 
-  const dynamicGlobalQuery = useQuery({
-    queryKey: ['dynamicGlobalData'],
-    queryFn: () => getDynamicGlobalProperties(),
-    refetchInterval: 60_000
-  });
+  const data = summaryQuery.data ?? null;
 
-  const chainQuery = useQuery({
-    queryKey: ['hiveChain'],
-    queryFn: () => getChain(),
-    staleTime: Infinity
-  });
-
-  // FullAccount (the app's trimmed account shape) doesn't carry
-  // pending_claimed_accounts, so it's fetched separately from the raw
-  // ApiAccount — used only for the "Claim account tokens" dialog's copy.
-  const rawAccountQuery = useQuery({
-    queryKey: ['walletRawAccountData', username],
-    queryFn: () => getFindAccounts(username),
-    enabled: !!username
-  });
-  const pendingClaimedAccounts = Number(rawAccountQuery.data?.accounts[0]?.pending_claimed_accounts ?? 0);
-
-  const isLoading = accountQuery.isLoading || dynamicGlobalQuery.isLoading || chainQuery.isLoading;
-  const isError = accountQuery.isError || dynamicGlobalQuery.isError || chainQuery.isError;
-
-  const figures: WalletFigures | null = useMemo(() => {
-    if (!accountQuery.data || !dynamicGlobalQuery.data || !chainQuery.data) return null;
-    return deriveWalletFigures(accountQuery.data, dynamicGlobalQuery.data, chainQuery.data);
-  }, [accountQuery.data, dynamicGlobalQuery.data, chainQuery.data]);
+  // `Big`/`Date` do not survive JSON — rebuilt once here so every consumer keeps
+  // the exact `WalletFigures` type it already expected. See the wire module.
+  const figures: WalletFigures | null = useMemo(
+    () => (data ? fromWalletFiguresWire(data.figures) : null),
+    [data]
+  );
 
   return {
-    account: accountQuery.data ?? null,
-    dynamicGlobal: dynamicGlobalQuery.data ?? null,
-    chain: chainQuery.data ?? null,
+    account: data?.account ?? null,
+    dynamicGlobal: data?.dynamicGlobal ?? null,
     figures,
-    pendingClaimedAccounts,
-    isLoading,
-    isError,
-    refetch: accountQuery.refetch
+    pendingClaimedAccounts: data?.pendingClaimedAccounts ?? 0,
+    isLoading: summaryQuery.isLoading,
+    isError: summaryQuery.isError,
+    refetch: summaryQuery.refetch
   };
 }

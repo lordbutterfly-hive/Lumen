@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { Link, UserAvatarImg } from '@hive/ui';
 import { Button, buttonVariants } from '@ui/components/button';
+import { cn } from '@ui/lib/utils';
 import { Icons } from '@ui/components/icons';
 import TooltipContainer from '@ui/components/tooltip-container';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@ui/components/tooltip';
@@ -162,7 +163,7 @@ const AppHeader: FC = () => {
   return (
     <header
       /* ★ OPAQUE, NO BACKDROP-BLUR (2026-08-13, typography audit item 2). Was
-         `bg-white/90 backdrop-blur-md`. `position: sticky` already promotes
+         `bg-surface-1/90 backdrop-blur-md`. `position: sticky` already promotes
          this header to its own composited layer, and Chrome will not use
          LCD/subpixel antialiasing for text painted into a composited layer that
          has no opaque background — it falls back to greyscale AA, which reads
@@ -170,8 +171,8 @@ const AppHeader: FC = () => {
          control were being antialiased by a DIFFERENT method than the centre
          column on every page. `backdrop-filter` forces the promotion on its own
          even without sticky, and 90% white over a 97% grey page background is a
-         ~0.3% tint nobody can see, so both are dropped for a flat `bg-white`. */
-      className="sticky top-0 z-40 w-full border-b border-[#ebebeb] bg-white font-sans"
+         ~0.3% tint nobody can see, so both are dropped for a flat `bg-surface-1`. */
+      className="sticky top-0 z-40 w-full border-b border-line-9 bg-surface-1 font-sans"
       translate="no"
     >
       {/* ★ gap-3 BELOW md, not gap-11 (2026-08-08). 44px is the desktop grid's
@@ -228,7 +229,7 @@ const AppHeader: FC = () => {
               Tracking relaxed from -0.025em to -0.01em. The tight negative tracking
               was tuned for Open Sans; a serif with real bracketed serifs collides
               at that value, and "Lumen" has an m-n pair that shows it first. */}
-          <span className="font-serif text-[24px] font-semibold leading-none tracking-[-0.01em] text-[#161511] sm:text-[30px] lg:text-[34px] lg:leading-[52px]">
+          <span className="font-serif text-[24px] font-semibold leading-none tracking-[-0.01em] text-ink-2 sm:text-[30px] lg:text-[34px] lg:leading-[52px]">
             Lumen
           </span>
         </Link>
@@ -318,11 +319,24 @@ const AppHeader: FC = () => {
                  renaming it is a routing change across the header, the
                  community new-post button, the editor's own `router.replace`
                  and a dozen Playwright specs — deliberately not bundled into a
-                 composer-defects pass. */
+                 composer-defects pass.
+
+                 ★ `rounded-[10px]`, ADDED 2026-08-13 (audit §4.2). The audit
+                 reported "three elements on the followers page still compute a
+                 6px radius: the Previous and Next buttons, and one link", on a
+                 surface whose own scale is 10/12/18px. Two of those three
+                 attributions were wrong — measured on the shipped build, both
+                 pager buttons compute 12px — and the 6px elements it did find
+                 are not part of the followers page at all: they are these
+                 header icon controls, which inherit `rounded-md` from
+                 `buttonVariants`, and which appear on EVERY page. Overridden at
+                 the three call sites rather than in the shared primitive,
+                 because 6px is still the default everywhere else and this is a
+                 header-chrome decision, not a global one. */
               <Link
                 href="/submit.html"
                 aria-label={LABELS.write}
-                className={buttonVariants({ variant: 'ghost', size: 'sm', className: 'h-10 w-10 px-0' })}
+                className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }), 'h-10 w-10 rounded-[10px] px-0')}
               >
                 <span data-testid="nav-pencil" className="flex items-center justify-center">
                   <Icons.pencil className="h-5 w-5" />
@@ -333,7 +347,7 @@ const AppHeader: FC = () => {
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-10 w-10 px-0"
+                  className="h-10 w-10 rounded-[10px] px-0"
                   aria-label={LABELS.write}
                   data-testid="nav-pencil"
                 >
@@ -358,7 +372,7 @@ const AppHeader: FC = () => {
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="relative h-10 w-10 px-0"
+                  className="relative h-10 w-10 rounded-[10px] px-0"
                   aria-label={
                     data && data.unread > 0
                       ? `${LABELS.notifications} (${data.unread} unread)`
@@ -368,7 +382,7 @@ const AppHeader: FC = () => {
                 >
                   <Icons.bell className="h-5 w-5" />
                   {data && data.unread !== 0 ? (
-                    <span className="absolute right-0 top-0.5 z-10 inline-block -translate-y-1/2 translate-x-2/4 rounded-full bg-destructive-icon px-1.5 py-1 text-center align-baseline text-xs font-bold leading-none text-white">
+                    <span className="absolute right-0 top-0.5 z-10 inline-block -translate-y-1/2 translate-x-2/4 rounded-full bg-destructive-icon px-1.5 py-1 text-center align-baseline text-xs font-bold leading-none text-ink-27">
                       {data.unread}
                     </span>
                   ) : null}
@@ -417,7 +431,7 @@ const AppHeader: FC = () => {
                   >
                     <div className="group relative inline-flex w-fit cursor-pointer items-center justify-center">
                       {data && data.unread !== 0 ? (
-                        <div className="absolute bottom-auto left-auto right-0 top-0.5 z-50 inline-block -translate-y-1/2 translate-x-2/4 rotate-0 skew-x-0 skew-y-0 scale-x-100 scale-y-100 whitespace-nowrap rounded-full bg-destructive-icon px-1.5 py-1 text-center align-baseline text-xs font-bold leading-none text-white">
+                        <div className="absolute bottom-auto left-auto right-0 top-0.5 z-50 inline-block -translate-y-1/2 translate-x-2/4 rotate-0 skew-x-0 skew-y-0 scale-x-100 scale-y-100 whitespace-nowrap rounded-full bg-destructive-icon px-1.5 py-1 text-center align-baseline text-xs font-bold leading-none text-ink-27">
                           {data.unread}
                         </div>
                       ) : null}
@@ -459,13 +473,13 @@ const AppHeader: FC = () => {
                 {manabarsData && (
                   <TooltipContent className="flex flex-col bg-background-tertiary">
                     <span>Resource Credits</span>
-                    <div className="flex flex-col text-blue-600">
+                    <div className="flex flex-col text-ink-info-5">
                       <span>(RC) level: {manabarsData.rc.percentageValue}%</span>
                       {manabarsData.rc.percentageValue !== 100 ? (
                         <span>Full in: {hoursAndMinutes(manabarsData.rc.cooldown, t)}</span>
                       ) : null}
                     </div>
-                    <div className="flex flex-col text-green-600">
+                    <div className="flex flex-col text-ink-ok-4">
                       <span> Voting Power: {manabarsData.upvote.percentageValue}%</span>
                       {manabarsData?.upvote.percentageValue !== 100 ? (
                         <span>Full in: {hoursAndMinutes(manabarsData.upvote.cooldown, t)}</span>
@@ -527,7 +541,7 @@ const AppHeader: FC = () => {
           of the two is ever on screen at a given width (`md:hidden` here,
           `hidden md:block` above), so there is still exactly one search
           field in the DOM's visible tree at any size. */}
-      <div className="border-t border-[#ebebeb] px-6 pb-3 pt-2.5 md:hidden">
+      <div className="border-t border-line-9 px-6 pb-3 pt-2.5 md:hidden">
         <SearchInput />
       </div>
     </header>

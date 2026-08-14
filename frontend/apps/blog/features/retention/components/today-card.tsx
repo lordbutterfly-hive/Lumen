@@ -185,7 +185,7 @@ export function TodayCard({ className, surface = 'rail' }: { className?: string;
 
   return (
     <section
-      className={`rounded-[18px] border border-[#ebebeb] bg-white ${surface === 'rail' ? 'p-5' : 'p-4'} ${className ?? ''}`}
+      className={`rounded-[18px] border border-line-9 bg-surface-1 ${surface === 'rail' ? 'p-5' : 'p-4'} ${className ?? ''}`}
       data-testid={base}
       data-surface={surface}
       data-goal={currentId ?? String(target)}
@@ -194,23 +194,23 @@ export function TodayCard({ className, surface = 'rail' }: { className?: string;
       <div className="flex items-center gap-4">
         <span className="relative inline-flex shrink-0 items-center justify-center">
           <ManabarRing percentage={pct} color={core} size={54} thickness={5} />
-          <span className="absolute inset-0 flex items-center justify-center font-sans text-[13px] leading-[20px] font-bold tabular-nums text-[#3f4650]">
+          <span className="absolute inset-0 flex items-center justify-center font-sans text-[13px] leading-[20px] font-bold tabular-nums text-ink-7">
             {acts}/{target}
           </span>
         </span>
 
         <div className="min-w-0 flex-1">
-          <p className="font-sans text-[13px] leading-[20px] font-semibold uppercase tracking-[0.06em] text-[#9ca3af]">
+          <p className="font-sans text-[13px] leading-[20px] font-semibold uppercase tracking-[0.06em] text-ink-14">
             {t('retention.today.title')}
           </p>
           <p
-            className="mt-0.5 font-sans text-[16px] font-semibold text-[#161511]"
+            className="mt-0.5 font-sans text-[16px] font-semibold text-ink-2"
             data-testid={tid('headline')}
           >
             {headline}
           </p>
           {deadlineLine ? (
-            <p className="mt-0.5 font-sans text-[13px] leading-[20px] text-[#6b7280]" data-testid={tid('deadline')}>
+            <p className="mt-0.5 font-sans text-[13px] leading-[20px] text-ink-10" data-testid={tid('deadline')}>
               {deadlineLine}
             </p>
           ) : null}
@@ -231,7 +231,7 @@ export function TodayCard({ className, surface = 'rail' }: { className?: string;
                 to remove anxiety cannot introduce a term and then withhold it — the clause
                 costs six words and turns jargon into a promise. */}
             {surface === 'rail' && today.freezesAvailable > 0 ? (
-              <span className="font-sans text-[13px] leading-[20px] text-[#6b7280]" data-testid={tid('freezes')}>
+              <span className="font-sans text-[13px] leading-[20px] text-ink-10" data-testid={tid('freezes')}>
                 {t('retention.today.freeze', { count: today.freezesAvailable })}
               </span>
             ) : null}
@@ -242,7 +242,7 @@ export function TodayCard({ className, surface = 'rail' }: { className?: string;
                 Saying "the streak held" beside a zero is the plainest self-contradiction this card
                 could make, and it took a date rollover to expose it. */}
             {surface === 'rail' && summary.streakDays > 0 && today.freezesUsedRecently > 0 ? (
-              <span className="font-sans text-[13px] leading-[20px] text-[#6b7280]" data-testid={tid('freeze-used')}>
+              <span className="font-sans text-[13px] leading-[20px] text-ink-10" data-testid={tid('freeze-used')}>
                 {t('retention.today.freeze_used')}
               </span>
             ) : null}
@@ -255,7 +255,7 @@ export function TodayCard({ className, surface = 'rail' }: { className?: string;
       <button
         type="button"
         onClick={() => setPicking((v) => !v)}
-        className="mt-3 font-sans text-[13px] leading-[20px] font-semibold text-[#c0392b] hover:underline"
+        className="mt-3 font-sans text-[13px] leading-[20px] font-semibold text-ink-brand-6 hover:underline"
         data-testid={tid('goal-toggle')}
       >
         {t('retention.today.goal_title')}
@@ -273,21 +273,21 @@ export function TodayCard({ className, surface = 'rail' }: { className?: string;
                 disabled={saving !== null}
                 className={`rounded-[11px] border px-3.5 py-2 text-left font-sans transition-colors ${
                   currentId === id
-                    ? 'border-[#161511] bg-[#faf9f6]'
-                    : 'border-[#e4e6e9] bg-white hover:bg-[#f4f5f7]'
+                    ? 'border-line-28 bg-surface-12'
+                    : 'border-line-11 bg-surface-1 hover:bg-surface-21'
                 }`}
               >
-                <span className="block text-[14px] leading-[22px] font-semibold text-[#161511]">
+                <span className="block text-[14px] leading-[22px] font-semibold text-ink-2">
                   {t(`retention.today.goal.${id}`)}
                 </span>
-                <span className="block text-[12px] text-[#6b7280]">{t(`retention.today.goal.${id}_sub`)}</span>
+                <span className="block text-[12px] text-ink-10">{t(`retention.today.goal.${id}_sub`)}</span>
               </button>
             ))}
           </div>
           {/* Says which acts count, because the answer is not obvious and the reason is
               not arbitrary: a Hive user's vote never touches this server, so a goal fed
               by votes would be completable by lite users and not by them. */}
-          <p className="mt-2 font-sans text-[12px] leading-[18px] text-[#9ca3af]">{t('retention.today.goal_hint')}</p>
+          <p className="mt-2 font-sans text-[12px] leading-[18px] text-ink-14">{t('retention.today.goal_hint')}</p>
 
         </div>
       ) : null}

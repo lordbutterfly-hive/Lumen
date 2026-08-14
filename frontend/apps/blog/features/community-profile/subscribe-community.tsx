@@ -44,7 +44,7 @@ const SubscribeCommunity = ({
             {!isSubscribed ? (
               <Button
                 size="sm"
-                className="w-full bg-blue-600 text-center text-slate-50 hover:bg-blue-700"
+                className="w-full bg-surface-info-7 text-center text-ink-26 hover:bg-surface-info-8"
                 data-testid="community-subscribe-button"
                 disabled={subscribeMutation.isPending || temprary}
                 onClick={async () => {
@@ -69,7 +69,7 @@ const SubscribeCommunity = ({
               <Button
                 size="sm"
                 variant="outline"
-                className="group relative w-full border-blue-600 text-center text-blue-600 hover:border-destructive hover:bg-transparent hover:text-destructive"
+                className="group relative w-full border-line-info-4 text-center text-ink-info-5 hover:border-destructive hover:bg-transparent hover:text-destructive"
                 data-testid="community-join-leave-button"
                 disabled={unsubscribeMutation.isPending || temprary}
                 onClick={async () => {
@@ -97,7 +97,7 @@ const SubscribeCommunity = ({
         <DialogLogin>
           <Button
             size="sm"
-            className="w-full bg-blue-600 text-center text-slate-50 hover:bg-blue-700"
+            className="w-full bg-surface-info-7 text-center text-ink-26 hover:bg-surface-info-8"
             data-testid="community-subscribe-button"
           >
             {t('communities.buttons.subscribe')}

@@ -1,10 +1,81 @@
 'use client';
 
+import { useEffect } from 'react';
 import SettingsForm from '@/blog/features/account-settings/form';
 import BlockedList from '@/blog/features/account-settings/blocked-list';
 import { SETTINGS_CARD, SETTINGS_CARD_HINT, SETTINGS_CARD_TITLE } from '@/blog/features/account-settings/lib/card';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { Skeleton } from '@ui/components';
+
+/** Written as one literal so Tailwind's source scanner generates all three. */
+const LANDED_RING = 'ring-2 ring-line-brand-10 ring-offset-4 ring-offset-transparent';
+
+/**
+ * ★ LAND ON THE SECTION THE READER ASKED FOR (2026-08-13, audit §3.1).
+ *
+ * The four `/@user/lists/{muted,blacklisted,followed_blacklists,followed_muted_lists}`
+ * routes redirect here with `#blocked-accounts`, because Lumen merged all four
+ * of those concepts into the single Block list on this page (see each route
+ * file, and `BlockedList`'s own header). The audit reported that they "all
+ * collapse onto /settings ... the user lands on the settings page with no
+ * indication which list they asked for" — that was measured with
+ * `fetch(redirect:'follow')`, which drops the fragment; a real browser does
+ * carry it, and does jump.
+ *
+ * What it does NOT do is stay there. Measured on the shipped build: the browser
+ * jumps to the anchor, then `SettingsForm` mounts ABOVE the section and pushes
+ * it down — landing at `scrollY 739` with the section 563px BELOW the top of
+ * the viewport. Visible, but not where the reader was sent, and nothing on
+ * screen says why they are on a settings page at all.
+ *
+ * So the jump is re-applied for as long as the page is still growing (the form,
+ * the block list and the avatar all resolve asynchronously), and the card is
+ * ringed briefly on arrival so the answer to "which list?" is the thing the eye
+ * lands on. `scroll-margin` alone cannot fix this: the target moves AFTER the
+ * browser has already scrolled.
+ */
+function useHashLanding() {
+  useEffect(() => {
+    const id = window.location.hash.slice(1);
+    if (!id) return;
+
+    let stop = false;
+    let lastTop: number | null = null;
+    const started = Date.now();
+
+    const settle = () => {
+      if (stop) return;
+      const el = document.getElementById(id);
+      if (el) {
+        const top = Math.round(el.getBoundingClientRect().top + window.scrollY);
+        // Only re-scroll when the target actually MOVED. Re-scrolling every
+        // frame would fight a reader who started scrolling away themselves.
+        if (lastTop === null || Math.abs(top - lastTop) > 4) {
+          lastTop = top;
+          // 96px clears the sticky site header, the same offset the rails pin to.
+          window.scrollTo({ top: Math.max(top - 96, 0) });
+          el.classList.add(...LANDED_RING.split(' '));
+        }
+      }
+      // Four seconds, not two: measured on a COLD first navigation the page was
+      // still growing at t=2s and the reader was left 535px short of the
+      // section, while a warm one had settled by 700ms. The loop costs one
+      // `getBoundingClientRect` every 120ms and stops as soon as the window
+      // closes, so the slow case is what the number has to cover.
+      if (Date.now() - started < 4000) {
+        window.setTimeout(settle, 120);
+      } else {
+        const el2 = document.getElementById(id);
+        if (el2) window.setTimeout(() => el2.classList.remove(...LANDED_RING.split(' ')), 1600);
+      }
+    };
+
+    settle();
+    return () => {
+      stop = true;
+    };
+  }, []);
+}
 
 /**
  * ★ THIS PAGE WAS THE LAST UNMIGRATED FRONT DOOR (2026-08-10, fuckery list L-2).
@@ -58,6 +129,7 @@ const SettingsContent = ({ username }: { username: string }) => {
    */
   const identity = useSessionIdentity();
   const isOwner = identity.isLoggedIn && identity.username === username;
+  useHashLanding();
 
   return (
     <div className="flex flex-col gap-5" data-testid="public-profile-settings">
@@ -89,7 +161,7 @@ const SettingsContent = ({ username }: { username: string }) => {
           </p>
           <a
             href={identity.isLoggedIn ? `/@${identity.username}/settings` : '/login'}
-            className="mt-5 inline-block rounded-[14px] bg-[#c0392b] px-5 py-2.5 text-[14px] leading-[22px] font-bold text-white transition-colors hover:bg-[#96271b]"
+            className="mt-5 inline-block rounded-[14px] bg-surface-brand-12 px-5 py-2.5 text-[14px] leading-[22px] font-bold text-ink-27 transition-colors hover:bg-surface-brand-17"
           >
             {identity.isLoggedIn ? 'Go to my settings' : 'Log in'}
           </a>
@@ -111,7 +183,7 @@ const SettingsContent = ({ username }: { username: string }) => {
           <button
             type="button"
             onClick={identity.retrySession}
-            className="mt-5 inline-block rounded-[14px] bg-[#c0392b] px-5 py-2.5 text-[14px] leading-[22px] font-bold text-white transition-colors hover:bg-[#96271b]"
+            className="mt-5 inline-block rounded-[14px] bg-surface-brand-12 px-5 py-2.5 text-[14px] leading-[22px] font-bold text-ink-27 transition-colors hover:bg-surface-brand-17"
           >
             Try again
           </button>

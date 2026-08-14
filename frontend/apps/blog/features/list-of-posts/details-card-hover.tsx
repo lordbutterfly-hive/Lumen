@@ -31,7 +31,7 @@ export default function DetailsCardHover({ post, children, decline, post_page }:
   if (decline) {
     return (
       <div
-        className={cn(`flex items-center line-through opacity-50`, { 'text-red-500': post_page })}
+        className={cn(`flex items-center line-through opacity-50`, { 'text-ink-brand-8': post_page })}
         data-testid="post-payout-decline"
         title="Payout Declined"
       >

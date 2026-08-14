@@ -63,7 +63,7 @@ export function PostDeleteDialog({
                 node with no `aria-label`/`sr-only`, so the accessibility tree
                 reported an unnamed button. Same `<X/> + sr-only` pattern the
                 shared dialog already uses (`packages/ui/components/dialog.tsx`). */}
-            <AlertDialogCancel className="border-none hover:text-red-800" data-testid="flag-dialog-close">
+            <AlertDialogCancel className="border-none hover:text-ink-brand-3" data-testid="flag-dialog-close">
               <X className="h-4 w-4" aria-hidden="true" />
               <span className="sr-only">{t('global.close')}</span>
             </AlertDialogCancel>
@@ -73,13 +73,13 @@ export function PostDeleteDialog({
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter className="gap-2 sm:flex-row-reverse">
-          <AlertDialogCancel className="hover:text-red-800" data-testid="flag-dialog-cancel">
+          <AlertDialogCancel className="hover:text-ink-brand-3" data-testid="flag-dialog-cancel">
             {t('global.cancel')}
           </AlertDialogCancel>
           {identity.isLoggedIn ? (
             <AlertDialogAction
               autoFocus
-              className="rounded-none bg-gray-800 text-base text-white shadow-lg shadow-red-600 hover:bg-red-600 hover:shadow-gray-800 disabled:bg-gray-400 disabled:shadow-none"
+              className="rounded-none bg-surface-39 text-base text-ink-27 shadow-lg shadow-line-brand-9 hover:bg-surface-brand-11 hover:shadow-line-26 disabled:bg-surface-34 disabled:shadow-none"
               data-testid="flag-dialog-ok"
               onClick={(e) => {
                 e.preventDefault();

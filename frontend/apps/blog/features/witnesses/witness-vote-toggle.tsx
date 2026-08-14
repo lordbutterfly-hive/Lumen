@@ -19,9 +19,9 @@ interface WitnessVoteToggleProps {
 
 const BASE_CLASS =
   'flex h-8 w-[38px] items-center justify-center rounded-[9px] transition-colors disabled:cursor-not-allowed disabled:opacity-60';
-const VOTED_CLASS = 'bg-[#2f7d4f] text-white';
-const UNVOTED_CLASS = 'bg-[#eef0f2] text-[#b8bcc4] hover:bg-[#e4e6e9] hover:text-[#6b7280]';
-const INDETERMINATE_CLASS = 'border border-dashed border-[#cbd0d6] bg-transparent text-[#9ca3af]';
+const VOTED_CLASS = 'bg-surface-ok-7 text-ink-27';
+const UNVOTED_CLASS = 'bg-surface-25 text-ink-15 hover:bg-surface-30 hover:text-ink-10';
+const INDETERMINATE_CLASS = 'border border-dashed border-line-22 bg-transparent text-ink-14';
 
 /**
  * The Vote cell: a real toggle that broadcasts `account_witness_vote`

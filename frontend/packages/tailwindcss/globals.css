@@ -63,43 +63,327 @@
        cool `--muted` grey the old skeletons pulsed in. */
     --lumen-stock: 242 239 234;
     --lumen-sweep: 255 255 255;
+
+    /* ★ THE INHERITED TEXT COLOUR. Nothing in this app ever set a colour on
+       <body>, so every element that does not name one of its own inherited the
+       UA default — plain black. On a white page that is invisible as a bug; the
+       audit found it the moment the page went dark, reporting body text still
+       at rgb(0,0,0) over rgb(34,38,42) (1.2:1). It was the single largest text
+       failure in dark mode: 1,463 elements on the rendered census inherit this.
+       The LIGHT value is literally black, so light mode is unchanged. */
+    --body-ink: 0 0 0;
+
+    /* ★ THE PAGE MASTHEAD GRADIENT (2026-08-13). `PageMasthead` renders on
+       TWELVE surfaces — home, wallet, witnesses, proposals, creators, profile
+       subpages, submit, error — and its background is a `bg-[radial-gradient(...)]`,
+       i.e. a background-IMAGE with the colours written inline. The rewrite only
+       reached `bg-[#hex]`, so this one hero stayed cream in dark mode while the
+       text on it had already gone light: white-on-cream, across a third of the
+       app. It is also why the contrast probe under-reported — a walker that
+       resolves `background-color` sees `transparent` here and falls through to
+       the page behind, so it scored the eyebrow against the page rather than
+       against the cream it actually sits on. Stops are tokens now. */
+    --masthead-1: 247 201 189; /* #f7c9bd */
+    --masthead-2: 251 223 214; /* #fbdfd6 */
+    --masthead-3: 253 239 233; /* #fdefe9 */
+    --masthead-4: 255 253 252; /* #fffdfc */
+
+    /* Same trap, one component over: the sign-in card's header wash. */
+    --login-wash-1: 253 241 238; /* #fdf1ee */
+    --login-wash-2: 255 255 255; /* #ffffff */
+
+    /**
+     * ★★★ THE LUMEN PALETTE — LIGHT HALF (2026-08-13, audit finding 1.1).
+     *
+     * Every value below is byte-identical to the literal colour it replaced in
+     * source. Nothing about the light product changes by adding this block; it
+     * exists so the SAME colours can be re-pointed under `.dark` sixty lines
+     * down. See tailwind.config.js for what the names mean.
+     */
+    /* ink / brand */
+    --ink-brand-1: 127 29 29; /* #7f1d1d x14 */
+    --ink-brand-2: 140 43 30; /* #8c2b1e x4 */
+    --ink-brand-3: 153 27 27; /* #991b1b x18 */
+    --ink-brand-4: 150 39 27; /* #96271b x17 */
+    --ink-brand-5: 185 28 28; /* #b91c1c x1 */
+    --ink-brand-6: 192 57 43; /* #c0392b x121 */
+    --ink-brand-7: 220 38 38; /* #dc2626 x37 */
+    --ink-brand-8: 239 68 68; /* #ef4444 x23 */
+    --ink-brand-9: 252 165 165; /* #fca5a5 x13 */
+    --ink-brand-10: 254 242 242; /* #fef2f2 x13 */
+    /* ink / info */
+    --ink-info-1: 71 85 105; /* #475569 x15 */
+    --ink-info-2: 29 78 216; /* #1d4ed8 x13 */
+    --ink-info-3: 76 81 191; /* #4c51bf x1 */
+    --ink-info-4: 79 91 213; /* #4f5bd5 x1 */
+    --ink-info-5: 37 99 235; /* #2563eb x15 */
+    --ink-info-6: 100 116 139; /* #64748b x18 */
+    --ink-info-7: 98 126 234; /* #627eea x1 */
+    --ink-info-8: 8 145 178; /* #0891b2 x13 */
+    --ink-info-9: 59 130 246; /* #3b82f6 x19 */
+    --ink-info-10: 148 163 184; /* #94a3b8 x14 */
+    --ink-info-11: 6 182 212; /* #06b6d4 x13 */
+    /* ink / neutral */
+    --ink-1: 0 0 0; /* #000000 x13 */
+    --ink-2: 22 21 17; /* #161511 x224 */
+    --ink-3: 17 24 39; /* #111827 x12 */
+    --ink-4: 42 40 34; /* #2a2822 x25 */
+    --ink-5: 31 41 55; /* #1f2937 x12 */
+    --ink-6: 55 65 81; /* #374151 x1 */
+    --ink-7: 63 70 80; /* #3f4650 x83 */
+    --ink-8: 75 85 99; /* #4b5563 x70 */
+    --ink-9: 111 105 99; /* #6f6963 x4 */
+    --ink-10: 107 114 128; /* #6b7280 x257 */
+    --ink-11: 122 114 104; /* #7a7268 x2 */
+    --ink-12: 138 130 122; /* #8a827a x5 */
+    --ink-13: 138 138 138; /* #8a8a8a x2 */
+    --ink-14: 156 163 175; /* #9ca3af x168 */
+    --ink-15: 184 188 196; /* #b8bcc4 x1 */
+    --ink-16: 196 196 196; /* #c4c4c4 x1 */
+    --ink-17: 193 199 206; /* #c1c7ce x1 */
+    --ink-18: 199 203 209; /* #c7cbd1 x1 */
+    --ink-19: 200 204 210; /* #c8ccd2 x1 */
+    --ink-20: 200 205 211; /* #c8cdd3 x1 */
+    --ink-21: 203 208 214; /* #cbd0d6 x9 */
+    --ink-22: 203 213 225; /* #cbd5e1 x12 */
+    --ink-23: 209 213 219; /* #d1d5db x1 */
+    --ink-24: 220 215 210; /* #dcd7d2 x3 */
+    --ink-25: 226 232 240; /* #e2e8f0 x13 */
+    --ink-26: 248 250 252; /* #f8fafc x15 */
+    --ink-27: 255 255 255; /* #ffffff x152 */
+    /* ink / ok */
+    --ink-ok-1: 31 99 64; /* #1f6340 x2 */
+    --ink-ok-2: 47 125 79; /* #2f7d4f x19 */
+    --ink-ok-3: 77 124 15; /* #4d7c0f x13 */
+    --ink-ok-4: 22 163 74; /* #16a34a x17 */
+    --ink-ok-5: 34 197 94; /* #22c55e x29 */
+    /* ink / violet */
+    --ink-violet-1: 147 51 234; /* #9333ea x13 */
+    --ink-violet-2: 168 85 247; /* #a855f7 x13 */
+    /* ink / warn */
+    --ink-warn-1: 124 74 8; /* #7c4a08 x1 */
+    --ink-warn-2: 138 90 32; /* #8a5a20 x3 */
+    --ink-warn-3: 180 83 9; /* #b45309 x55 */
+    --ink-warn-4: 154 123 46; /* #9a7b2e x3 */
+    --ink-warn-5: 234 88 12; /* #ea580c x13 */
+    --ink-warn-6: 217 119 6; /* #d97706 x14 */
+    --ink-warn-7: 201 138 43; /* #c98a2b x1 */
+    --ink-warn-8: 249 115 22; /* #f97316 x12 */
+    --ink-warn-9: 247 147 26; /* #f7931a x1 */
+    --ink-warn-10: 245 158 11; /* #f59e0b x14 */
+    /* line / brand */
+    --line-brand-1: 240 201 194; /* #f0c9c2 x3 */
+    --line-brand-2: 246 198 192; /* #f6c6c0 x4 */
+    --line-brand-3: 243 199 192; /* #f3c7c0 x1 */
+    --line-brand-4: 245 198 192; /* #f5c6c0 x2 */
+    --line-brand-5: 252 165 165; /* #fca5a5 x14 */
+    --line-brand-6: 221 153 153; /* #dd9999 x1 */
+    --line-brand-7: 248 113 113; /* #f87171 x13 */
+    --line-brand-8: 239 68 68; /* #ef4444 x66 */
+    --line-brand-9: 220 38 38; /* #dc2626 x40 */
+    --line-brand-10: 192 57 43; /* #c0392b x71 */
+    --line-brand-11: 185 28 28; /* #b91c1c x1 */
+    /* line / info */
+    --line-info-1: 191 219 254; /* #bfdbfe x12 */
+    --line-info-2: 96 165 250; /* #60a5fa x14 */
+    --line-info-3: 98 126 234; /* #627eea x1 */
+    --line-info-4: 37 99 235; /* #2563eb x13 */
+    --line-info-5: 71 85 105; /* #475569 x13 */
+    --line-info-6: 30 64 175; /* #1e40af x12 */
+    /* line / neutral */
+    --line-1: 255 255 255; /* #ffffff x26 */
+    --line-2: 241 243 245; /* #f1f3f5 x15 */
+    --line-3: 240 240 240; /* #f0f0f0 x8 */
+    --line-4: 240 239 236; /* #f0efec x1 */
+    --line-5: 243 237 233; /* #f3ede9 x2 */
+    --line-6: 235 237 240; /* #ebedf0 x6 */
+    --line-7: 231 238 233; /* #e7eee9 x1 */
+    --line-8: 236 236 236; /* #ececec x1 */
+    --line-9: 235 235 235; /* #ebebeb x99 */
+    --line-10: 236 235 230; /* #ecebe6 x1 */
+    --line-11: 228 230 233; /* #e4e6e9 x97 */
+    --line-12: 226 228 231; /* #e2e4e7 x9 */
+    --line-13: 215 230 221; /* #d7e6dd x1 */
+    --line-14: 230 224 218; /* #e6e0da x3 */
+    --line-15: 207 230 216; /* #cfe6d8 x1 */
+    --line-16: 230 220 214; /* #e6dcd6 x2 */
+    --line-17: 224 221 214; /* #e0ddd6 x3 */
+    --line-18: 224 220 212; /* #e0dcd4 x3 */
+    --line-19: 217 217 217; /* #d9d9d9 x1 */
+    --line-20: 213 216 221; /* #d5d8dd x4 */
+    --line-21: 209 213 219; /* #d1d5db x12 */
+    --line-22: 203 208 214; /* #cbd0d6 x1 */
+    --line-23: 217 200 191; /* #d9c8bf x2 */
+    --line-24: 75 85 99; /* #4b5563 x12 */
+    --line-25: 55 65 81; /* #374151 x12 */
+    --line-26: 31 41 55; /* #1f2937 x16 */
+    --line-27: 26 26 23; /* #1a1a17 x1 */
+    --line-28: 22 21 17; /* #161511 x11 */
+    --line-29: 0 0 0; /* #000000 x12 */
+    /* line / ok */
+    --line-ok-1: 233 245 238; /* #e9f5ee x1 */
+    --line-ok-2: 34 197 94; /* #22c55e x26 */
+    --line-ok-3: 22 163 74; /* #16a34a x13 */
+    --line-ok-4: 77 124 15; /* #4d7c0f x13 */
+    --line-ok-5: 47 125 79; /* #2f7d4f x2 */
+    /* line / warn */
+    --line-warn-1: 239 231 222; /* #efe7de x2 */
+    --line-warn-2: 246 226 196; /* #f6e2c4 x15 */
+    --line-warn-3: 238 226 220; /* #eee2dc x3 */
+    --line-warn-4: 236 223 216; /* #ecdfd8 x1 */
+    --line-warn-5: 247 147 26; /* #f7931a x1 */
+    --line-warn-6: 249 115 22; /* #f97316 x12 */
+    --line-warn-7: 234 88 12; /* #ea580c x13 */
+    --line-warn-8: 180 83 9; /* #b45309 x2 */
+    /* surface / brand */
+    --surface-brand-1: 253 243 242; /* #fdf3f2 x4 */
+    --surface-brand-2: 254 242 242; /* #fef2f2 x14 */
+    --surface-brand-3: 254 242 240; /* #fef2f0 x3 */
+    --surface-brand-4: 253 242 241; /* #fdf2f1 x1 */
+    --surface-brand-5: 253 242 240; /* #fdf2f0 x13 */
+    --surface-brand-6: 251 238 236; /* #fbeeec x1 */
+    --surface-brand-7: 253 236 234; /* #fdecea x2 */
+    --surface-brand-8: 251 233 231; /* #fbe9e7 x1 */
+    --surface-brand-9: 248 113 113; /* #f87171 x13 */
+    --surface-brand-10: 239 68 68; /* #ef4444 x12 */
+    --surface-brand-11: 220 38 38; /* #dc2626 x27 */
+    --surface-brand-12: 192 57 43; /* #c0392b x56 */
+    --surface-brand-13: 185 28 28; /* #b91c1c x12 */
+    --surface-brand-14: 169 50 38; /* #a93226 x3 */
+    --surface-brand-15: 168 50 36; /* #a83224 x3 */
+    --surface-brand-16: 165 48 31; /* #a5301f x17 */
+    --surface-brand-17: 150 39 27; /* #96271b x20 */
+    /* surface / gold */
+    --surface-gold-1: 255 251 235; /* #fffbeb x13 */
+    --surface-gold-2: 254 243 199; /* #fef3c7 x13 */
+    --surface-gold-3: 201 162 39; /* #c9a227 x1 */
+    /* surface / info */
+    --surface-info-1: 239 246 255; /* #eff6ff x13 */
+    --surface-info-2: 238 242 255; /* #eef2ff x2 */
+    --surface-info-3: 238 241 253; /* #eef1fd x1 */
+    --surface-info-4: 148 163 184; /* #94a3b8 x12 */
+    --surface-info-5: 0 136 254; /* #0088fe x2 */
+    --surface-info-6: 59 130 246; /* #3b82f6 x12 */
+    --surface-info-7: 37 99 235; /* #2563eb x15 */
+    --surface-info-8: 29 78 216; /* #1d4ed8 x15 */
+    --surface-info-9: 58 90 128; /* #3a5a80 x2 */
+    --surface-info-10: 23 37 84; /* #172554 x12 */
+    /* surface / neutral */
+    --surface-1: 255 255 255; /* #ffffff x196 */
+    --surface-2: 251 253 251; /* #fbfdfb x1 */
+    --surface-3: 253 252 251; /* #fdfcfb x6 */
+    --surface-4: 251 251 252; /* #fbfbfc x1 */
+    --surface-5: 251 251 250; /* #fbfbfa x8 */
+    --surface-6: 254 250 249; /* #fefaf9 x1 */
+    --surface-7: 250 250 250; /* #fafafa x1 */
+    --surface-8: 249 250 251; /* #f9fafb x2 */
+    --surface-9: 248 249 255; /* #f8f9ff x1 */
+    --surface-10: 250 249 248; /* #faf9f8 x3 */
+    --surface-11: 250 249 247; /* #faf9f7 x1 */
+    --surface-12: 250 249 246; /* #faf9f6 x13 */
+    --surface-13: 244 250 246; /* #f4faf6 x2 */
+    --surface-14: 249 247 245; /* #f9f7f5 x3 */
+    --surface-15: 247 247 247; /* #f7f7f7 x4 */
+    --surface-16: 246 247 248; /* #f6f7f8 x35 */
+    --surface-17: 247 247 245; /* #f7f7f5 x1 */
+    --surface-18: 240 247 242; /* #f0f7f2 x1 */
+    --surface-19: 245 245 245; /* #f5f5f5 x1 */
+    --surface-20: 246 245 242; /* #f6f5f2 x2 */
+    --surface-21: 244 245 247; /* #f4f5f7 x21 */
+    --surface-22: 243 244 246; /* #f3f4f6 x1 */
+    --surface-23: 241 243 245; /* #f1f3f5 x29 */
+    --surface-24: 240 240 238; /* #f0f0ee x1 */
+    --surface-25: 238 240 242; /* #eef0f2 x1 */
+    --surface-26: 236 236 236; /* #ececec x19 */
+    --surface-27: 235 235 235; /* #ebebeb x5 */
+    --surface-28: 233 235 238; /* #e9ebee x2 */
+    --surface-29: 232 234 237; /* #e8eaed x1 */
+    --surface-30: 228 230 233; /* #e4e6e9 x1 */
+    --surface-31: 230 226 223; /* #e6e2df x1 */
+    --surface-32: 230 220 214; /* #e6dcd6 x1 */
+    --surface-33: 203 213 225; /* #cbd5e1 x13 */
+    --surface-34: 156 163 175; /* #9ca3af x30 */
+    --surface-35: 107 114 128; /* #6b7280 x25 */
+    --surface-36: 75 85 99; /* #4b5563 x28 */
+    --surface-37: 55 65 81; /* #374151 x24 */
+    --surface-38: 30 41 59; /* #1e293b x14 */
+    --surface-39: 31 41 55; /* #1f2937 x17 */
+    --surface-40: 43 40 34; /* #2b2822 x1 */
+    --surface-41: 42 40 34; /* #2a2822 x1 */
+    --surface-42: 26 26 23; /* #1a1a17 x14 */
+    --surface-43: 22 21 17; /* #161511 x10 */
+    --surface-44: 0 0 0; /* #000000 x58 */
+    /* surface / ok */
+    --surface-ok-1: 240 253 244; /* #f0fdf4 x13 */
+    --surface-ok-2: 242 249 245; /* #f2f9f5 x1 */
+    --surface-ok-3: 238 247 241; /* #eef7f1 x1 */
+    --surface-ok-4: 220 252 231; /* #dcfce7 x13 */
+    --surface-ok-5: 233 245 238; /* #e9f5ee x5 */
+    --surface-ok-6: 22 163 74; /* #16a34a x13 */
+    --surface-ok-7: 47 125 79; /* #2f7d4f x11 */
+    --surface-ok-8: 39 107 67; /* #276b43 x1 */
+    --surface-ok-9: 37 102 64; /* #256640 x1 */
+    /* surface / warn */
+    --surface-warn-1: 255 250 243; /* #fffaf3 x1 */
+    --surface-warn-2: 251 247 242; /* #fbf7f2 x4 */
+    --surface-warn-3: 254 246 236; /* #fef6ec x1 */
+    --surface-warn-4: 253 246 236; /* #fdf6ec x16 */
+    --surface-warn-5: 253 246 231; /* #fdf6e7 x1 */
+    --surface-warn-6: 253 243 231; /* #fdf3e7 x1 */
+    --surface-warn-7: 248 241 234; /* #f8f1ea x2 */
+    --surface-warn-8: 240 234 217; /* #f0ead9 x1 */
+    --surface-warn-9: 244 227 200; /* #f4e3c8 x1 */
+    --surface-warn-10: 224 123 62; /* #e07b3e x2 */
+    --surface-warn-11: 180 83 9; /* #b45309 x5 */
+    --surface-warn-12: 146 64 14; /* #92400e x1 */
+    --surface-warn-13: 138 66 7; /* #8a4207 x1 */
+    --surface-warn-14: 124 74 8; /* #7c4a08 x2 */
+    --surface-warn-15: 99 58 6; /* #633a06 x2 */
   }
 
   .dark {
-    --background: 210, 10%, 19%;
-    --foreground: 213 31% 91%;
-    --background-secondary: 210, 11%, 15%;
-    --background-tertiary: 217, 19%, 27%;
+    /* ★ THE LEGACY shadcn TOKENS, RE-POINTED AT THE WARM PALETTE (2026-08-13).
+       These were a cool slate ramp inherited from the shadcn starter, and three
+       of them were outright wrong: `--card` was `0 0% 100%` — PURE WHITE — which
+       is a large part of what the audit saw as "cards stay white", and
+       `--popover` (224 71% 4%) with `--popover-foreground` (215 20.2% 65.1%)
+       put a 5.9:1 grey on near-black while every neighbouring surface was 15%
+       lighter. They are now the same warm ramp as the tokens further down, so
+       the two systems cannot drift apart. */
+    --background: 30 16% 15%; /* card #2c2620 */
+    --foreground: 20 43% 99%; /* ink #fdfbfa */
+    --background-secondary: 27 19% 9%; /* page #1c1713 - this is what <body> wears */
+    --background-tertiary: 30 14% 17%; /* raised #322c26 */
 
-    --muted: 223 47% 11%;
-    --muted-foreground: 215.4 16.3% 56.9%;
+    --muted: 27 22% 8%;
+    --muted-foreground: 30 7% 71%; /* #bab5b0, 7.4:1 on the card */
 
-    --popover: 224 71% 4%;
-    --popover-foreground: 215 20.2% 65.1%;
+    --popover: 30 16% 15%;
+    --popover-foreground: 20 43% 99%;
 
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 47.4% 11.2%;
-    --card-no-content: 207, 21%, 8%;
-    --card-empty-border: 210, 10%, 19%;
+    --card: 30 16% 15%; /* #2c2620 - was PURE WHITE */
+    --card-foreground: 20 43% 99%;
+    --card-no-content: 27 22% 8%;
+    --card-empty-border: 28 13% 20%;
 
-    --border: 216 34% 17%;
-    --thread-line: 216 15% 28%;
-    --input: 216 34% 17%;
+    --border: 26 11% 27%; /* #4e453e, 1.6:1 on the card */
+    --thread-line: 26 11% 27%;
+    --input: 26 11% 27%;
 
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 1.2%;
+    --primary: 20 43% 99%; /* prose body text resolves through this */
+    --primary-foreground: 27 19% 9%;
 
-    --secondary: 222.2 47.4% 11.2%;
-    --secondary-foreground: 210 40% 98%;
+    --secondary: 28 13% 20%;
+    --secondary-foreground: 20 43% 99%;
 
-    --accent: 216 34% 17%;
-    --accent-foreground: 210 40% 98%;
+    --accent: 30 14% 17%;
+    --accent-foreground: 20 43% 99%;
 
     --destructive: 0, 90%, 65%; /* red - higher lightness for dark mode readability */
     --destructive-foreground: 210 40% 98%;
     --destructive-icon: 350, 85%, 48%; /* darker red for icons/badges */
 
-    --link: 0, 90%, 65%;
+    --link: 6 64% 72%; /* #e59289, 5.8:1 on the card */
 
     /* ★ Dark-mode half of the same fix (item 7). Was `216 34% 17%` = `#1d283a`
        — a near-black ring on this theme's near-black surfaces, effectively
@@ -116,7 +400,305 @@
        anything more literal than on cream. */
     --lumen-stock: 44 42 40;
     --lumen-sweep: 255 246 238;
+    --body-ink: 253 251 250; /* #fdfbfa, 13.4:1 on the lightest dark surface */
+
+    /* Dark masthead: the same corner-lit sweep, but warm-brand deep to the card
+       colour, so the hero still reads as a hero instead of a flat panel.
+       Measured against the FIRST stop (#3a241e — the corner the text sits in):
+       title 14.03:1, meta 7.12:1, eyebrow 6.50:1. */
+    --masthead-1: 58 36 30;  /* #3a241e */
+    --masthead-2: 52 36 31;  /* #34241f */
+    --masthead-3: 47 38 32;  /* #2f2620 */
+    --masthead-4: 44 38 32;  /* #2c2620 = the card */
+
+    /* title 14.1:1, subtitle 7.2:1 against the first stop. */
+    --login-wash-1: 53 38 34;  /* #352622 */
+    --login-wash-2: 44 38 32;  /* #2c2620 = the card */
     --lumen-sweep-opacity: 0.26;
+
+    /**
+     * ★★★ THE LUMEN PALETTE — DARK HALF (2026-08-13, audit finding 1.1).
+     *
+     * The audit measured this theme half-converted: body and asides went to
+     * rgb(34,38,42) while the sticky header and cards stayed rgb(255,255,255)
+     * and body text stayed rgb(0,0,0). Reproduced before any of this was
+     * written — worst contrast on the rendered page was 1.2:1.
+     *
+     * HOW THESE VALUES WERE DERIVED (not picked by eye, and not a slate — the
+     * light palette is warm, #fbf7f2 / #eee2dc / #161511, and the dark half
+     * keeps that warmth: every neutral here runs r > g > b):
+     *
+     *  SURFACES preserve elevation order — whiter in light = more elevated in
+     *  dark — with one deliberate departure: the curve between the page
+     *  (#f7f7f7) and the card (#ffffff) is steepened, because those two are
+     *  only 1.06:1 apart in light and a card has to read as sitting ON the page.
+     *  Page #1c1713, card #2c2620, 1.19:1 apart. A surface that is DARK in light
+     *  mode (a black pill on a white page) becomes a RAISED dark surface, never
+     *  a light one, or the near-white label on it is destroyed.
+     *
+     *  INKS PRESERVE CONTRAST, NOT LUMINANCE. An ink rendering at ratio R
+     *  against white in light mode gets the value that renders at R against the
+     *  dark card, so the type hierarchy the designer built survives the flip.
+     *  Anything that lands under 4.5:1 is lifted to 4.6:1 and the neighbouring
+     *  steps are re-spaced so enforcing the floor does not collapse the ramp
+     *  into one grey. Measured floor over all 65 ink tokens: 4.60:1 against the
+     *  lightest surface any of them can land on.
+     *
+     *  LINES only have to be seen: 1.6:1 for neutral hairlines, 3:1 for
+     *  chromatic ones, since those are focus rings and state borders.
+     *
+     * NINETEEN COLOURS IN THE LIGHT PALETTE ALREADY FAIL 4.5:1 (#9ca3af at
+     * 2.54:1, used 167 times, is the worst-used). Those are NOT fixed here —
+     * fixing them would change the light product — but their dark counterparts
+     * are lifted to the floor, so dark mode is the more accessible of the two
+     * themes until someone takes the light half.
+     */
+    /* ink / brand */
+    --ink-brand-1: 249 228 228; /* #7f1d1d -> #f9e4e4 x14 */
+    --ink-brand-2: 245 214 209; /* #8c2b1e -> #f5d6d1 x4 */
+    --ink-brand-3: 245 198 198; /* #991b1b -> #f5c6c6 x18 */
+    --ink-brand-4: 241 184 178; /* #96271b -> #f1b8b2 x17 */
+    --ink-brand-5: 240 155 155; /* #b91c1c -> #f09b9b x1 */
+    /* ★ LIFTED from 229 146 137 (2026-08-13). The derivation enforces the
+       4.5:1 floor at FULL opacity, but 15 call sites de-emphasise a colour
+       with an alpha modifier, and `text-[#c0392b]/70` measured 4.29:1 on the
+       rendered /@user/followers page — the only pair under the floor in the
+       whole 9-route sweep. This lift takes that case to 4.56:1 and the
+       full-opacity case from 6.27:1 to 6.74:1. (The same class is 3.11:1 in
+       LIGHT mode, which this does not change.) */
+    --ink-brand-6: 231 154 146; /* #c0392b -> #e59289 x121 */
+    --ink-brand-7: 234 127 127; /* #dc2626 -> #ea7f7f x37 */
+    --ink-brand-8: 242 105 105; /* #ef4444 -> #f26969 x23 */
+    --ink-brand-9: 246 193 193; /* #fca5a5 -> #f6c1c1 x13 */
+    --ink-brand-10: 253 243 243; /* #fef2f2 -> #fdf3f3 x13 */
+    /* ink / info */
+    --ink-info-1: 214 226 242; /* #475569 -> #d6e2f2 x15 */
+    --ink-info-2: 200 212 248; /* #1d4ed8 -> #c8d4f8 x13 */
+    --ink-info-3: 201 202 238; /* #4c51bf -> #c9caee x1 */
+    --ink-info-4: 186 191 239; /* #4f5bd5 -> #babfef x1 */
+    --ink-info-5: 161 188 246; /* #2563eb -> #a1bcf6 x15 */
+    --ink-info-6: 154 182 223; /* #64748b -> #9ab6df x18 */
+    --ink-info-7: 157 174 242; /* #627eea -> #9daef2 x1 */
+    --ink-info-8: 18 182 222; /* #0891b2 -> #12b6de x13 */
+    --ink-info-9: 122 168 244; /* #3b82f6 -> #7aa8f4 x19 */
+    --ink-info-10: 122 160 213; /* #94a3b8 -> #7aa0d5 x14 */
+    --ink-info-11: 15 163 188; /* #06b6d4 -> #0fa3bc x13 */
+    /* ink / neutral */
+    --ink-1: 253 251 250; /* #000000 -> #fdfbfa x13 */
+    --ink-2: 253 251 250; /* #161511 -> #fdfbfa x224 */
+    --ink-3: 253 251 250; /* #111827 -> #fdfbfa x12 */
+    --ink-4: 253 251 250; /* #2a2822 -> #fdfbfa x25 */
+    --ink-5: 249 245 242; /* #1f2937 -> #f9f5f2 x12 */
+    --ink-6: 230 225 221; /* #374151 -> #e6e1dd x1 */
+    --ink-7: 220 213 208; /* #3f4650 -> #dcd5d0 x83 */
+    --ink-8: 208 202 197; /* #4b5563 -> #d0cac5 x70 */
+    --ink-9: 196 191 187; /* #6f6963 -> #c4bfbb x4 */
+    --ink-10: 186 181 176; /* #6b7280 -> #bab5b0 x257 */
+    --ink-11: 182 176 171; /* #7a7268 -> #b6b0ab x2 */
+    --ink-12: 172 167 162; /* #8a827a -> #aca7a2 x5 */
+    --ink-13: 163 157 152; /* #8a8a8a -> #a39d98 x2 */
+    --ink-14: 156 148 141; /* #9ca3af -> #9c948d x168 */
+    --ink-15: 217 218 222; /* #b8bcc4 -> #d9dade x1 */
+    --ink-16: 219 219 219; /* #c4c4c4 -> #dbdbdb x1 */
+    --ink-17: 216 219 223; /* #c1c7ce -> #d8dbdf x1 */
+    --ink-18: 216 219 222; /* #c7cbd1 -> #d8dbde x1 */
+    --ink-19: 216 219 222; /* #c8ccd2 -> #d8dbde x1 */
+    --ink-20: 216 219 222; /* #c8cdd3 -> #d8dbde x1 */
+    --ink-21: 216 219 223; /* #cbd0d6 -> #d8dbdf x9 */
+    --ink-22: 212 219 227; /* #cbd5e1 -> #d4dbe3 x12 */
+    --ink-23: 216 219 223; /* #d1d5db -> #d8dbdf x1 */
+    --ink-24: 223 219 216; /* #dcd7d2 -> #dfdbd8 x3 */
+    --ink-25: 227 232 239; /* #e2e8f0 -> #e3e8ef x13 */
+    --ink-26: 248 250 252; /* #f8fafc -> #f8fafc x15 */
+    --ink-27: 255 255 255; /* #ffffff -> #ffffff x152 */
+    /* ink / ok */
+    --ink-ok-1: 103 207 154; /* #1f6340 -> #67cf9a x2 */
+    --ink-ok-2: 78 199 128; /* #2f7d4f -> #4ec780 x19 */
+    --ink-ok-3: 115 186 22; /* #4d7c0f -> #73ba16 x13 */
+    --ink-ok-4: 25 182 82; /* #16a34a -> #19b652 x17 */
+    --ink-ok-5: 29 171 82; /* #22c55e -> #1dab52 x29 */
+    /* ink / violet */
+    --ink-violet-1: 193 138 243; /* #9333ea -> #c18af3 x13 */
+    --ink-violet-2: 183 120 244; /* #a855f7 -> #b778f4 x13 */
+    /* ink / warn */
+    --ink-warn-1: 245 199 137; /* #7c4a08 -> #f5c789 x1 */
+    --ink-warn-2: 229 189 141; /* #8a5a20 -> #e5bd8d x3 */
+    --ink-warn-3: 243 168 111; /* #b45309 -> #f3a86f x55 */
+    --ink-warn-4: 206 173 92; /* #9a7b2e -> #cead5c x3 */
+    --ink-warn-5: 243 156 110; /* #ea580c -> #f39c6e x13 */
+    --ink-warn-6: 240 160 67; /* #d97706 -> #f0a043 x14 */
+    --ink-warn-7: 220 168 90; /* #c98a2b -> #dca85a x1 */
+    --ink-warn-8: 240 143 76; /* #f97316 -> #f08f4c x12 */
+    --ink-warn-9: 230 135 19; /* #f7931a -> #e68713 x1 */
+    --ink-warn-10: 204 134 17; /* #f59e0b -> #cc8611 x14 */
+    /* line / brand */
+    --line-brand-1: 194 70 48; /* #f0c9c2 -> #c24630 x3 */
+    --line-brand-2: 207 53 34; /* #f6c6c0 -> #cf3522 x4 */
+    --line-brand-3: 202 61 38; /* #f3c7c0 -> #ca3d26 x1 */
+    --line-brand-4: 207 53 34; /* #f5c6c0 -> #cf3522 x2 */
+    --line-brand-5: 216 35 35; /* #fca5a5 -> #d82323 x14 */
+    --line-brand-6: 193 69 69; /* #dd9999 -> #c14545 x1 */
+    --line-brand-7: 217 35 35; /* #f87171 -> #d92323 x13 */
+    --line-brand-8: 227 85 85; /* #ef4444 -> #e35555 x66 */
+    --line-brand-9: 233 119 119; /* #dc2626 -> #e97777 x40 */
+    --line-brand-10: 227 139 130; /* #c0392b -> #e38b82 x71 */
+    --line-brand-11: 239 155 155; /* #b91c1c -> #ef9b9b x1 */
+    /* line / info */
+    --line-info-1: 34 110 206; /* #bfdbfe -> #226ece x12 */
+    --line-info-2: 33 110 205; /* #60a5fa -> #216ecd x14 */
+    --line-info-3: 98 125 229; /* #627eea -> #627de5 x1 */
+    --line-info-4: 123 157 233; /* #2563eb -> #7b9de9 x13 */
+    --line-info-5: 174 194 222; /* #475569 -> #aec2de x13 */
+    --line-info-6: 192 205 244; /* #1e40af -> #c0cdf4 x12 */
+    /* line / neutral */
+    --line-1: 79 69 60; /* #ffffff -> #4f453c x26 */
+    --line-2: 78 69 61; /* #f1f3f5 -> #4e453d x15 */
+    --line-3: 78 69 61; /* #f0f0f0 -> #4e453d x8 */
+    --line-4: 78 69 61; /* #f0efec -> #4e453d x1 */
+    --line-5: 78 69 62; /* #f3ede9 -> #4e453e x2 */
+    --line-6: 78 69 62; /* #ebedf0 -> #4e453e x6 */
+    --line-7: 78 69 62; /* #e7eee9 -> #4e453e x1 */
+    --line-8: 78 69 62; /* #ececec -> #4e453e x1 */
+    --line-9: 78 69 62; /* #ebebeb -> #4e453e x99 */
+    --line-10: 78 69 62; /* #ecebe6 -> #4e453e x1 */
+    --line-11: 77 69 62; /* #e4e6e9 -> #4d453e x97 */
+    --line-12: 77 69 62; /* #e2e4e7 -> #4d453e x9 */
+    --line-13: 77 69 62; /* #d7e6dd -> #4d453e x1 */
+    --line-14: 77 69 62; /* #e6e0da -> #4d453e x3 */
+    --line-15: 77 69 62; /* #cfe6d8 -> #4d453e x1 */
+    --line-16: 77 69 63; /* #e6dcd6 -> #4d453f x2 */
+    --line-17: 77 69 63; /* #e0ddd6 -> #4d453f x3 */
+    --line-18: 77 69 63; /* #e0dcd4 -> #4d453f x3 */
+    --line-19: 77 69 63; /* #d9d9d9 -> #4d453f x1 */
+    --line-20: 77 69 63; /* #d5d8dd -> #4d453f x4 */
+    --line-21: 77 69 63; /* #d1d5db -> #4d453f x12 */
+    --line-22: 80 72 66; /* #cbd0d6 -> #504842 x1 */
+    --line-23: 83 75 69; /* #d9c8bf -> #534b45 x2 */
+    --line-24: 198 190 184; /* #4b5563 -> #c6beb8 x12 */
+    --line-25: 209 202 197; /* #374151 -> #d1cac5 x12 */
+    --line-26: 209 202 197; /* #1f2937 -> #d1cac5 x16 */
+    --line-27: 209 202 197; /* #1a1a17 -> #d1cac5 x1 */
+    --line-28: 209 202 197; /* #161511 -> #d1cac5 x11 */
+    --line-29: 209 202 197; /* #000000 -> #d1cac5 x12 */
+    /* line / ok */
+    --line-ok-1: 51 125 82; /* #e9f5ee -> #337d52 x1 */
+    --line-ok-2: 22 128 61; /* #22c55e -> #16803d x26 */
+    --line-ok-3: 23 142 67; /* #16a34a -> #178e43 x13 */
+    --line-ok-4: 110 172 28; /* #4d7c0f -> #6eac1c x13 */
+    --line-ok-5: 66 176 111; /* #2f7d4f -> #42b06f x2 */
+    /* line / warn */
+    --line-warn-1: 143 104 59; /* #efe7de -> #8f683b x2 */
+    --line-warn-2: 152 101 25; /* #f6e2c4 -> #986519 x15 */
+    --line-warn-3: 158 96 65; /* #eee2dc -> #9e6041 x3 */
+    --line-warn-4: 157 97 64; /* #ecdfd8 -> #9d6140 x1 */
+    --line-warn-5: 158 98 26; /* #f7931a -> #9e621a x1 */
+    --line-warn-6: 175 89 29; /* #f97316 -> #af591d x12 */
+    --line-warn-7: 211 95 34; /* #ea580c -> #d35f22 x13 */
+    --line-warn-8: 224 134 65; /* #b45309 -> #e08641 x2 */
+    /* surface / brand */
+    --surface-brand-1: 39 16 13; /* #fdf3f2 -> #27100d x4 */
+    --surface-brand-2: 41 14 14; /* #fef2f2 -> #290e0e x14 */
+    --surface-brand-3: 37 16 12; /* #fef2f0 -> #25100c x3 */
+    --surface-brand-4: 39 15 13; /* #fdf2f1 -> #270f0d x1 */
+    --surface-brand-5: 37 16 12; /* #fdf2f0 -> #25100c x13 */
+    --surface-brand-6: 34 14 11; /* #fbeeec -> #220e0b x1 */
+    --surface-brand-7: 34 14 11; /* #fdecea -> #220e0b x2 */
+    --surface-brand-8: 32 13 11; /* #fbe9e7 -> #200d0b x1 */
+    --surface-brand-9: 227 134 134; /* #f87171 -> #e38686 x13 */
+    --surface-brand-10: 216 91 91; /* #ef4444 -> #d85b5b x12 */
+    --surface-brand-11: 207 51 51; /* #dc2626 -> #cf3333 x27 */
+    --surface-brand-12: 190 58 45; /* #c0392b -> #be3a2d x56 */
+    --surface-brand-13: 173 40 40; /* #b91c1c -> #ad2828 x12 */
+    --surface-brand-14: 168 51 39; /* #a93226 -> #a83327 x3 */
+    --surface-brand-15: 165 52 39; /* #a83224 -> #a53427 x3 */
+    --surface-brand-16: 159 53 37; /* #a5301f -> #9f3525 x17 */
+    --surface-brand-17: 143 44 34; /* #96271b -> #8f2c22 x20 */
+    /* surface / gold */
+    --surface-gold-1: 37 32 12; /* #fffbeb -> #25200c x13 */
+    --surface-gold-2: 24 21 8; /* #fef3c7 -> #181508 x13 */
+    --surface-gold-3: 194 159 46; /* #c9a227 -> #c29f2e x1 */
+    /* surface / info */
+    --surface-info-1: 12 23 37; /* #eff6ff -> #0c1725 x13 */
+    --surface-info-2: 13 20 40; /* #eef2ff -> #0d1428 x2 */
+    --surface-info-3: 13 19 40; /* #eef1fd -> #0d1328 x1 */
+    --surface-info-4: 148 163 184; /* #94a3b8 -> #94a3b8 x12 */
+    --surface-info-5: 48 133 206; /* #0088fe -> #3085ce x2 */
+    --surface-info-6: 89 137 216; /* #3b82f6 -> #5989d8 x12 */
+    --surface-info-7: 62 108 210; /* #2563eb -> #3e6cd2 x15 */
+    --surface-info-8: 47 86 198; /* #1d4ed8 -> #2f56c6 x15 */
+    --surface-info-9: 58 90 128; /* #3a5a80 -> #3a5a80 x2 */
+    --surface-info-10: 33 53 120; /* #172554 -> #213578 x12 */
+    /* surface / neutral */
+    --surface-1: 44 38 32; /* #ffffff -> #2c2620 x196 */
+    --surface-2: 40 34 29; /* #fbfdfb -> #28221d x1 */
+    --surface-3: 39 33 28; /* #fdfcfb -> #27211c x6 */
+    --surface-4: 37 31 27; /* #fbfbfc -> #251f1b x1 */
+    --surface-5: 37 31 26; /* #fbfbfa -> #251f1a x8 */
+    --surface-6: 37 31 26; /* #fefaf9 -> #251f1a x1 */
+    --surface-7: 35 30 25; /* #fafafa -> #231e19 x1 */
+    --surface-8: 35 29 24; /* #f9fafb -> #231d18 x2 */
+    --surface-9: 33 28 23; /* #f8f9ff -> #211c17 x1 */
+    --surface-10: 33 28 23; /* #faf9f8 -> #211c17 x3 */
+    --surface-11: 33 28 23; /* #faf9f7 -> #211c17 x1 */
+    --surface-12: 33 27 23; /* #faf9f6 -> #211b17 x13 */
+    --surface-13: 32 26 22; /* #f4faf6 -> #201a16 x2 */
+    --surface-14: 29 24 19; /* #f9f7f5 -> #1d1813 x3 */
+    --surface-15: 28 23 19; /* #f7f7f7 -> #1c1713 x4 */
+    --surface-16: 28 23 18; /* #f6f7f8 -> #1c1712 x35 */
+    --surface-17: 28 23 18; /* #f7f7f5 -> #1c1712 x1 */
+    --surface-18: 27 22 17; /* #f0f7f2 -> #1b1611 x1 */
+    --surface-19: 26 21 17; /* #f5f5f5 -> #1a1511 x1 */
+    --surface-20: 26 21 17; /* #f6f5f2 -> #1a1511 x2 */
+    --surface-21: 26 21 17; /* #f4f5f7 -> #1a1511 x21 */
+    --surface-22: 26 21 17; /* #f3f4f6 -> #1a1511 x1 */
+    --surface-23: 25 20 16; /* #f1f3f5 -> #191410 x29 */
+    --surface-24: 23 19 15; /* #f0f0ee -> #17130f x1 */
+    --surface-25: 23 19 14; /* #eef0f2 -> #17130e x1 */
+    --surface-26: 22 17 13; /* #ececec -> #16110d x19 */
+    --surface-27: 22 17 13; /* #ebebeb -> #16110d x5 */
+    --surface-28: 22 17 13; /* #e9ebee -> #16110d x2 */
+    --surface-29: 21 17 13; /* #e8eaed -> #15110d x1 */
+    --surface-30: 20 16 12; /* #e4e6e9 -> #14100c x1 */
+    --surface-31: 20 15 11; /* #e6e2df -> #140f0b x1 */
+    --surface-32: 19 14 11; /* #e6dcd6 -> #130e0b x1 */
+    --surface-33: 17 13 10; /* #cbd5e1 -> #110d0a x13 */
+    --surface-34: 35 29 24; /* #9ca3af -> #231d18 x30 */
+    --surface-35: 39 33 28; /* #6b7280 -> #27211c x25 */
+    --surface-36: 41 35 30; /* #4b5563 -> #29231e x28 */
+    --surface-37: 43 37 32; /* #374151 -> #2b2520 x24 */
+    --surface-38: 45 39 34; /* #1e293b -> #2d2722 x14 */
+    --surface-39: 45 39 34; /* #1f2937 -> #2d2722 x17 */
+    --surface-40: 45 39 34; /* #2b2822 -> #2d2722 x1 */
+    --surface-41: 45 39 34; /* #2a2822 -> #2d2722 x1 */
+    --surface-42: 46 40 35; /* #1a1a17 -> #2e2823 x14 */
+    --surface-43: 47 40 35; /* #161511 -> #2f2823 x10 */
+    --surface-44: 50 44 38; /* #000000 -> #322c26 x58 */
+    /* surface / ok */
+    --surface-ok-1: 11 34 19; /* #f0fdf4 -> #0b2213 x13 */
+    --surface-ok-2: 13 27 19; /* #f2f9f5 -> #0d1b13 x1 */
+    --surface-ok-3: 12 25 16; /* #eef7f1 -> #0c1910 x1 */
+    --surface-ok-4: 8 25 14; /* #dcfce7 -> #08190e x13 */
+    --surface-ok-5: 11 23 16; /* #e9f5ee -> #0b1710 x5 */
+    --surface-ok-6: 35 150 77; /* #16a34a -> #23964d x13 */
+    --surface-ok-7: 47 125 79; /* #2f7d4f -> #2f7d4f x11 */
+    --surface-ok-8: 41 112 70; /* #276b43 -> #297046 x1 */
+    --surface-ok-9: 41 112 70; /* #256640 -> #297046 x1 */
+    /* surface / warn */
+    --surface-warn-1: 41 30 14; /* #fffaf3 -> #291e0e x1 */
+    --surface-warn-2: 33 23 11; /* #fbf7f2 -> #21170b x4 */
+    --surface-warn-3: 32 22 11; /* #fef6ec -> #20160b x1 */
+    --surface-warn-4: 31 22 10; /* #fdf6ec -> #1f160a x16 */
+    --surface-warn-5: 29 23 10; /* #fdf6e7 -> #1d170a x1 */
+    --surface-warn-6: 29 20 10; /* #fdf3e7 -> #1d140a x1 */
+    --surface-warn-7: 28 19 9; /* #f8f1ea -> #1c1309 x2 */
+    --surface-warn-8: 21 17 8; /* #f0ead9 -> #151108 x1 */
+    --surface-warn-9: 21 16 7; /* #f4e3c8 -> #151007 x1 */
+    --surface-warn-10: 212 126 74; /* #e07b3e -> #d47e4a x2 */
+    --surface-warn-11: 153 87 36; /* #b45309 -> #995724 x5 */
+    --surface-warn-12: 130 68 30; /* #92400e -> #82441e x1 */
+    --surface-warn-13: 124 72 29; /* #8a4207 -> #7c481d x1 */
+    --surface-warn-14: 124 83 29; /* #7c4a08 -> #7c531d x2 */
+    --surface-warn-15: 124 82 29; /* #633a06 -> #7c521d x2 */
   }
 }
 
@@ -138,6 +720,7 @@
     font-feature-settings:
       'rlig' 1,
       'calt' 1;
+    color: rgb(var(--body-ink));
   }
 
   /**
@@ -423,8 +1006,9 @@ details {
 }
 
 .dark details {
-  background-color: #2c2c2c;
-  outline: dotted 1px #2c2c2c;
+  /* was #2c2c2c, a neutral-cool grey sitting on an otherwise warm dark palette */
+  background-color: rgb(var(--surface-16));
+  outline: dotted 1px rgb(var(--line-9));
 }
 summary {
   text-align: right;
@@ -446,7 +1030,10 @@ summary {
  * this is the floor, not a ceiling.
  */
 :focus-visible {
-  outline: 2px solid #c0392b;
+  /* Was the literal #c0392b, which is 2.9:1 against the dark card — a focus ring
+     you cannot find is not a focus ring. The token is byte-identical in light
+     (#c0392b) and lightens to #e38b82 in dark, 5.9:1. */
+  outline: 2px solid rgb(var(--line-brand-10));
   outline-offset: 2px;
   border-radius: 2px;
 }
@@ -740,5 +1327,277 @@ summary {
   }
   50% {
     opacity: 0.85;
+  }
+}
+
+/**
+ * ★★★ THE DARK BRIDGE — A DELIBERATE, TEMPORARY LAYER (2026-08-13).
+ *
+ * Every colour literal in this app was rewritten to a palette token EXCEPT in
+ * four feature directories that another agent owns this session and I must not
+ * edit: features/discovery-feed, features/post-editor, features/suggestions-posts
+ * and features/account-lists. Between them they hold 254 colour decisions, and
+ * they render on real routes — account-lists IS /@user/followers — so leaving
+ * them alone would have reproduced the exact defect this work exists to fix:
+ * a page that is half converted.
+ *
+ * So these rules re-point those literals, and ONLY those literals, under `.dark`.
+ * They are dark-only by construction, so the light product cannot be affected by
+ * anything in this block. Each selector is an enumerated class that genuinely
+ * appears in one of those four directories today.
+ *
+ * ★ HOW TO REMOVE IT, and please do. When those four directories are next
+ * touched, run the same rewrite over them (literal -> token, the mapping is the
+ * :root block at the top of this file, keyed by light hex + property role) and
+ * delete the corresponding rule here. The block shrinks to nothing on its own.
+ *
+ * ★ WHAT IT DOES NOT COVER: responsive variants (`md:bg-white`). Those compile
+ * inside a media query and would need the query duplicating here; none of the
+ * four directories uses one on a colour today, and if one appears it will simply
+ * stay light in dark mode rather than break.
+ */
+@layer utilities {
+  .dark .bg-\[\#0088FE\] {
+    background-color: rgb(var(--surface-info-5));
+  }
+  .dark .bg-\[\#1a1a17\] {
+    background-color: rgb(var(--surface-42));
+  }
+  .dark .bg-\[\#2f7d4f\] {
+    background-color: rgb(var(--surface-ok-7));
+  }
+  .dark .bg-\[\#c0392b\] {
+    background-color: rgb(var(--surface-brand-12));
+  }
+  .dark .bg-\[\#c9a227\] {
+    background-color: rgb(var(--surface-gold-3));
+  }
+  .dark .bg-\[\#ebebeb\] {
+    background-color: rgb(var(--surface-27));
+  }
+  .dark .bg-\[\#ececec\] {
+    background-color: rgb(var(--surface-26));
+  }
+  .dark .bg-\[\#f0ead9\] {
+    background-color: rgb(var(--surface-warn-8));
+  }
+  .dark .bg-\[\#f1f3f5\] {
+    background-color: rgb(var(--surface-23));
+  }
+  .dark .bg-\[\#f4f5f7\] {
+    background-color: rgb(var(--surface-21));
+  }
+  .dark .bg-\[\#f9f7f5\] {
+    background-color: rgb(var(--surface-14));
+  }
+  .dark .bg-\[\#fdf6e7\] {
+    background-color: rgb(var(--surface-warn-5));
+  }
+  .dark .bg-\[\#fdfcfb\] {
+    background-color: rgb(var(--surface-3));
+  }
+  .dark .bg-amber-100 {
+    background-color: rgb(var(--surface-gold-2));
+  }
+  .dark .bg-amber-50 {
+    background-color: rgb(var(--surface-gold-1));
+  }
+  .dark .bg-black\/50 {
+    background-color: rgb(var(--surface-44) / 0.5);
+  }
+  .dark .bg-red-400\/20 {
+    background-color: rgb(var(--surface-brand-9) / 0.2);
+  }
+  .dark .bg-red-50 {
+    background-color: rgb(var(--surface-brand-2));
+  }
+  .dark .bg-white {
+    background-color: rgb(var(--surface-1));
+  }
+  .dark .border-\[\#c0392b\] {
+    border-color: rgb(var(--line-brand-10));
+  }
+  .dark .border-\[\#e0dcd4\] {
+    border-color: rgb(var(--line-18));
+  }
+  .dark .border-\[\#e4e6e9\] {
+    border-color: rgb(var(--line-11));
+  }
+  .dark .border-\[\#e6e0da\] {
+    border-color: rgb(var(--line-14));
+  }
+  .dark .border-\[\#ebebeb\] {
+    border-color: rgb(var(--line-9));
+  }
+  .dark .border-\[\#ebedf0\] {
+    border-color: rgb(var(--line-6));
+  }
+  .dark .border-\[\#f0efec\] {
+    border-color: rgb(var(--line-4));
+  }
+  .dark .border-\[\#f1f3f5\] {
+    border-color: rgb(var(--line-2));
+  }
+  .dark .border-red-300 {
+    border-color: rgb(var(--line-brand-5));
+  }
+  .dark .border-red-500 {
+    border-color: rgb(var(--line-brand-8));
+  }
+  .dark .disabled\:bg-\[\#f5f5f5\]:disabled {
+    background-color: rgb(var(--surface-19));
+  }
+  .dark .disabled\:border-\[\#ebebeb\]:disabled {
+    border-color: rgb(var(--line-9));
+  }
+  .dark .disabled\:border-\[\#f0f0f0\]:disabled {
+    border-color: rgb(var(--line-3));
+  }
+  .dark .disabled\:text-\[\#6b7280\]:disabled {
+    color: rgb(var(--ink-10));
+  }
+  .dark .disabled\:text-\[\#c7cbd1\]:disabled {
+    color: rgb(var(--ink-18));
+  }
+  .dark .focus-visible\:ring-\[\#c0392b\]\/40:focus-visible {
+    --tw-ring-color: rgb(var(--line-brand-10) / 0.4);
+  }
+  .dark .focus-visible\:ring-red-500:focus-visible {
+    --tw-ring-color: rgb(var(--line-brand-8));
+  }
+  .dark .focus\:bg-\[\#faf9f8\]:focus {
+    background-color: rgb(var(--surface-10));
+  }
+  .dark .focus\:bg-\[\#fdf2f0\]:focus {
+    background-color: rgb(var(--surface-brand-5));
+  }
+  .dark .focus\:border-\[\#c0392b\]:focus {
+    border-color: rgb(var(--line-brand-10));
+  }
+  .dark .focus\:text-\[\#161511\]:focus {
+    color: rgb(var(--ink-2));
+  }
+  .dark .focus\:text-\[\#c0392b\]:focus {
+    color: rgb(var(--ink-brand-6));
+  }
+  .dark .hover\:bg-\[\#1a1a17\]\/90:hover {
+    background-color: rgb(var(--surface-42) / 0.9);
+  }
+  .dark .hover\:bg-\[\#96271b\]:hover {
+    background-color: rgb(var(--surface-brand-17));
+  }
+  .dark .hover\:bg-\[\#a5301f\]:hover {
+    background-color: rgb(var(--surface-brand-16));
+  }
+  .dark .hover\:bg-\[\#a93226\]:hover {
+    background-color: rgb(var(--surface-brand-14));
+  }
+  .dark .hover\:bg-\[\#c0392b\]:hover {
+    background-color: rgb(var(--surface-brand-12));
+  }
+  .dark .hover\:bg-\[\#f4f5f7\]:hover {
+    background-color: rgb(var(--surface-21));
+  }
+  .dark .hover\:bg-\[\#f6f7f8\]:hover {
+    background-color: rgb(var(--surface-16));
+  }
+  .dark .hover\:bg-\[\#faf9f8\]:hover {
+    background-color: rgb(var(--surface-10));
+  }
+  .dark .hover\:bg-\[\#fdf2f0\]:hover {
+    background-color: rgb(var(--surface-brand-5));
+  }
+  .dark .hover\:bg-\[\#fdfcfb\]:hover {
+    background-color: rgb(var(--surface-3));
+  }
+  .dark .hover\:border-\[\#c0392b\]:hover {
+    border-color: rgb(var(--line-brand-10));
+  }
+  .dark .hover\:text-\[\#161511\]:hover {
+    color: rgb(var(--ink-2));
+  }
+  .dark .hover\:text-\[\#2a2822\]:hover {
+    color: rgb(var(--ink-4));
+  }
+  .dark .hover\:text-\[\#3f4650\]:hover {
+    color: rgb(var(--ink-7));
+  }
+  .dark .hover\:text-\[\#4b5563\]:hover {
+    color: rgb(var(--ink-8));
+  }
+  .dark .hover\:text-\[\#c0392b\]:hover {
+    color: rgb(var(--ink-brand-6));
+  }
+  .dark .hover\:text-white:hover {
+    color: rgb(var(--ink-27));
+  }
+  .dark .placeholder\:text-\[\#9ca3af\]::placeholder {
+    color: rgb(var(--ink-14));
+  }
+  .dark .ring-\[\#ebebeb\] {
+    --tw-ring-color: rgb(var(--line-9));
+  }
+  .dark .text-\[\#161511\] {
+    color: rgb(var(--ink-2));
+  }
+  .dark .text-\[\#2a2822\] {
+    color: rgb(var(--ink-4));
+  }
+  .dark .text-\[\#2f7d4f\] {
+    color: rgb(var(--ink-ok-2));
+  }
+  .dark .text-\[\#3f4650\] {
+    color: rgb(var(--ink-7));
+  }
+  .dark .text-\[\#4b5563\] {
+    color: rgb(var(--ink-8));
+  }
+  .dark .text-\[\#6b7280\] {
+    color: rgb(var(--ink-10));
+  }
+  .dark .text-\[\#6f6963\] {
+    color: rgb(var(--ink-9));
+  }
+  .dark .text-\[\#7a7268\] {
+    color: rgb(var(--ink-11));
+  }
+  .dark .text-\[\#9a7b2e\] {
+    color: rgb(var(--ink-warn-4));
+  }
+  .dark .text-\[\#9ca3af\] {
+    color: rgb(var(--ink-14));
+  }
+  .dark .text-\[\#c0392b\] {
+    color: rgb(var(--ink-brand-6));
+  }
+  .dark .text-\[\#c0392b\]\/70 {
+    color: rgb(var(--ink-brand-6) / 0.7);
+  }
+  .dark .text-\[\#cbd0d6\] {
+    color: rgb(var(--ink-21));
+  }
+  .dark .text-\[\#dcd7d2\] {
+    color: rgb(var(--ink-24));
+  }
+  .dark .text-amber-700 {
+    color: rgb(var(--ink-warn-3));
+  }
+  .dark .text-green-600 {
+    color: rgb(var(--ink-ok-4));
+  }
+  .dark .text-red-500 {
+    color: rgb(var(--ink-brand-8));
+  }
+  .dark .text-red-600 {
+    color: rgb(var(--ink-brand-7));
+  }
+  .dark .text-red-900 {
+    color: rgb(var(--ink-brand-1));
+  }
+  .dark .text-slate-600 {
+    color: rgb(var(--ink-info-1));
+  }
+  .dark .text-white {
+    color: rgb(var(--ink-27));
   }
 }

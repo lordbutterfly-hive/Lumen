@@ -331,9 +331,9 @@ const LaunchWizard: FC = () => {
         <div className="mb-6 flex items-center gap-2">
           {STEPS.map((s, i) => (
             <div key={s} className="flex flex-1 items-center gap-2">
-              <span className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-[12px] font-bold ${i <= step ? 'bg-[#c0392b] text-white' : 'bg-[#f1f3f5] text-[#9ca3af]'}`}>{i + 1}</span>
-              <span className={`text-[13px] leading-[20px] font-semibold ${i === step ? 'text-[#161511]' : 'text-[#9ca3af]'}`}>{s}</span>
-              {i < STEPS.length - 1 ? <span className="h-px flex-1 bg-[#ececec]" /> : null}
+              <span className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-[12px] font-bold ${i <= step ? 'bg-surface-brand-12 text-ink-27' : 'bg-surface-23 text-ink-14'}`}>{i + 1}</span>
+              <span className={`text-[13px] leading-[20px] font-semibold ${i === step ? 'text-ink-2' : 'text-ink-14'}`}>{s}</span>
+              {i < STEPS.length - 1 ? <span className="h-px flex-1 bg-surface-26" /> : null}
             </div>
           ))}
         </div>
@@ -344,24 +344,24 @@ const LaunchWizard: FC = () => {
             bug), and has an explicit way out of it rather than the page's
             state being the only place that knowledge lives. */}
         {restoredFromDraft ? (
-          <div className="mb-4 flex items-center justify-between gap-3 rounded-[12px] border border-[#e4e6e9] bg-[#f6f7f8] px-4 py-3 text-[13px] leading-[20px] text-[#4b5563]">
+          <div className="mb-4 flex items-center justify-between gap-3 rounded-[12px] border border-line-11 bg-surface-16 px-4 py-3 text-[13px] leading-[20px] text-ink-8">
             <span>
               Picked up your saved draft at step {step + 1} of {STEPS.length}.
             </span>
             <button
               onClick={startOver}
-              className="flex-shrink-0 text-[13px] leading-[20px] font-semibold text-[#c0392b] hover:underline"
+              className="flex-shrink-0 text-[13px] leading-[20px] font-semibold text-ink-brand-6 hover:underline"
             >
               Start over
             </button>
           </div>
         ) : null}
 
-        <div className="rounded-[18px] border border-[#ebebeb] bg-white p-6 shadow-[0_1px_2px_rgba(20,18,10,0.03)]">
+        <div className="rounded-[18px] border border-line-9 bg-surface-1 p-6 shadow-[0_1px_2px_rgba(20,18,10,0.03)]">
           {step === 0 ? (
             <>
-              <h1 className="font-serif text-2xl font-semibold text-[#161511]">Confirm your account</h1>
-              <div className="mt-4 flex items-center gap-3 rounded-xl border border-[#e4e6e9] px-4 py-3.5">
+              <h1 className="font-serif text-2xl font-semibold text-ink-2">Confirm your account</h1>
+              <div className="mt-4 flex items-center gap-3 rounded-xl border border-line-11 px-4 py-3.5">
                 {/* ★ CONVERGED (F6 item 22). This was a flat gradient square that never
                     attempted a real avatar at all — every creator, regardless of
                     account, saw the same orange box on the first screen of their own
@@ -383,7 +383,7 @@ const LaunchWizard: FC = () => {
                   />
                 )}
                 <div>
-                  <div className="text-[15px] leading-[24px] font-bold text-[#161511]">
+                  <div className="text-[15px] leading-[24px] font-bold text-ink-2">
                     {/* ★ `@—` and "@your account" are placeholder strings that
                         reached real readers: a signed-OUT visitor was walked
                         through all four steps of a wizard whose entire premise
@@ -400,7 +400,7 @@ const LaunchWizard: FC = () => {
                       it reads live reputation/followers for the actual account. */}
                 </div>
               </div>
-              <p className="mt-3 font-serif text-[14px] leading-[22px] text-[#4b5563]">
+              <p className="mt-3 font-serif text-[14px] leading-[22px] text-ink-8">
                 {identity.isLoggedIn && studio.isLite ? (
                   <>
                     {/* ★ SAY IT ON STEP 1, NOT STEP 4.
@@ -412,7 +412,7 @@ const LaunchWizard: FC = () => {
                         spent, exactly as the Studio one click away already does. */}
                     Your token is bound to <strong>@{studio.creator}</strong> — one per account. But this account
                     can’t sign transactions yet, so it can’t launch one. You can look through the steps;{' '}
-                    <a href="/upgrade" className="font-semibold text-[#c0392b] hover:underline">
+                    <a href="/upgrade" className="font-semibold text-ink-brand-6 hover:underline">
                       upgrade to a full account
                     </a>{' '}
                     when you want to go ahead.
@@ -426,7 +426,7 @@ const LaunchWizard: FC = () => {
                   <>
                     A creator token is bound to one account, so you’ll need to be signed in to launch one. You can
                     look through the steps first —{' '}
-                    <a href="/login" className="font-semibold text-[#c0392b] hover:underline">
+                    <a href="/login" className="font-semibold text-ink-brand-6 hover:underline">
                       sign in
                     </a>{' '}
                     when you’re ready.
@@ -438,14 +438,14 @@ const LaunchWizard: FC = () => {
 
           {step === 1 ? (
             <>
-              <h1 className="font-serif text-2xl font-semibold text-[#161511]">What you offer</h1>
-              <p className="mt-1.5 text-[14px] leading-[22px] text-[#6b7280]">Set each service’s price in dollars — that is the total the buyer pays. 88% of it is spent in your token at the live price; the other 12% goes to Lumen as a commission, paid in HBD.</p>
+              <h1 className="font-serif text-2xl font-semibold text-ink-2">What you offer</h1>
+              <p className="mt-1.5 text-[14px] leading-[22px] text-ink-10">Set each service’s price in dollars — that is the total the buyer pays. 88% of it is spent in your token at the live price; the other 12% goes to Lumen as a commission, paid in HBD.</p>
               <div className="mt-4 flex flex-col gap-3">
                 {SERVICE_TEMPLATE.map((t) => (
-                  <div key={t.key} className="flex items-center justify-between gap-3 rounded-xl border border-[#e4e6e9] px-4 py-3">
-                    <div className="text-[14px] leading-[22px] font-semibold text-[#161511]">{t.name}</div>
-                    <div className="flex items-center rounded-[10px] border border-[#e4e6e9] px-3 py-2">
-                      <span className="font-bold text-[#9ca3af]">$</span>
+                  <div key={t.key} className="flex items-center justify-between gap-3 rounded-xl border border-line-11 px-4 py-3">
+                    <div className="text-[14px] leading-[22px] font-semibold text-ink-2">{t.name}</div>
+                    <div className="flex items-center rounded-[10px] border border-line-11 px-3 py-2">
+                      <span className="font-bold text-ink-14">$</span>
                       <input
                         value={prices[t.key] ?? ''}
                         // ★ Named for assistive tech (2026-08-07). Chromium's
@@ -455,15 +455,15 @@ const LaunchWizard: FC = () => {
                         aria-label={`${t.name} price in dollars`}
                         onChange={(e) => setPrices({ ...prices, [t.key]: sanitizeMoneyInput(e.target.value) })}
                         inputMode="decimal"
-                        className="ml-1 w-[70px] border-0 text-[15px] leading-[24px] font-bold tabular-nums text-[#161511] outline-none"
+                        className="ml-1 w-[70px] border-0 text-[15px] leading-[24px] font-bold tabular-nums text-ink-2 outline-none"
                       />
                     </div>
                   </div>
                 ))}
                 {['Unlock a post', 'Book a session', 'Tip'].map((n) => (
-                  <div key={n} className="flex items-center justify-between rounded-xl border border-dashed border-[#e4e6e9] px-4 py-3 opacity-60">
-                    <span className="text-[14px] leading-[22px] text-[#6b7280]">{n}</span>
-                    <span className="rounded-full bg-[#f1f3f5] px-2.5 py-1 text-[12px] leading-[18px] font-semibold text-[#9ca3af]">Rolling out</span>
+                  <div key={n} className="flex items-center justify-between rounded-xl border border-dashed border-line-11 px-4 py-3 opacity-60">
+                    <span className="text-[14px] leading-[22px] text-ink-10">{n}</span>
+                    <span className="rounded-full bg-surface-23 px-2.5 py-1 text-[12px] leading-[18px] font-semibold text-ink-14">Rolling out</span>
                   </div>
                 ))}
               </div>
@@ -472,7 +472,7 @@ const LaunchWizard: FC = () => {
 
           {step === 2 ? (
             <>
-              <h1 className="font-serif text-2xl font-semibold text-[#161511]">Launch</h1>
+              <h1 className="font-serif text-2xl font-semibold text-ink-2">Launch</h1>
               {/* ★ STATE THE CAP, DON'T ASK FOR IT (2026-08-08).
                   Choosing a supply was deliberately removed as a step — it is a
                   hard question to put to someone who has not launched anything
@@ -481,25 +481,25 @@ const LaunchWizard: FC = () => {
                   this whole wizard and was never told a cap existed at all,
                   then met it for the first time in the Studio after launching.
                   One sentence, no extra step, no decision to make. */}
-              <div className="mt-4 rounded-xl bg-[#f6f7f8] px-4 py-3.5 text-[14px] leading-[22px] text-[#4b5563]">
+              <div className="mt-4 rounded-xl bg-surface-16 px-4 py-3.5 text-[14px] leading-[22px] text-ink-8">
                 <strong>Launching is free.</strong> Staying listed is <strong>~$10/month</strong> — first month included.
                 <br />
                 Your token starts capped at <strong>{STANDARD_CAP.toLocaleString()} tokens</strong>, the standard for
                 every new creator. You can raise it later from your Studio.
               </div>
               <div className="mt-4">
-                <label className="mb-1.5 block text-[13px] leading-[20px] font-semibold text-[#6b7280]">Optional anti-snipe first buy</label>
-                <div className="flex items-center rounded-xl border border-[#e4e6e9] px-4 py-3">
-                  <span className="text-[18px] leading-[28px] font-bold text-[#161511]">$</span>
+                <label className="mb-1.5 block text-[13px] leading-[20px] font-semibold text-ink-10">Optional anti-snipe first buy</label>
+                <div className="flex items-center rounded-xl border border-line-11 px-4 py-3">
+                  <span className="text-[18px] leading-[28px] font-bold text-ink-2">$</span>
                   <input value={firstBuy} aria-label="Your own first buy, in dollars" onChange={(e) => setFirstBuy(sanitizeMoneyInput(e.target.value))} placeholder="0" inputMode="decimal" className="ml-1 flex-1 border-0 text-[18px] leading-[28px] font-bold tabular-nums outline-none" />
                 </div>
-                <div className="mt-1.5 text-[12px] text-[#9ca3af]">Buy some of your own token at launch, at full price — this stops a bot grabbing the cheap first tokens ahead of you.</div>
+                <div className="mt-1.5 text-[12px] text-ink-14">Buy some of your own token at launch, at full price — this stops a bot grabbing the cheap first tokens ahead of you.</div>
               </div>
-              <p className="mt-4 font-serif text-[13px] leading-[20px] text-[#9ca3af]">
+              <p className="mt-4 font-serif text-[13px] leading-[20px] text-ink-14">
                 If you ever stop paying, your token’s market winds down, holders are refunded at the floor, and your delivery record resets — coming back means a new token.
               </p>
               {firstBuySkipped ? (
-                <div className="mt-4 rounded-[12px] border border-[#f6e2c4] bg-[#fdf6ec] px-4 py-3.5 text-[14px] leading-[22px] font-semibold text-[#b45309]">
+                <div className="mt-4 rounded-[12px] border border-line-warn-2 bg-surface-warn-4 px-4 py-3.5 text-[14px] leading-[22px] font-semibold text-ink-warn-3">
                   Your token launched, but the first buy didn’t go through — that amount was too small to afford one whole
                   token, or it would have pushed past your cap. Nothing was charged; you can buy from the Studio.
                 </div>
@@ -508,12 +508,12 @@ const LaunchWizard: FC = () => {
                 // A failed launch must be LOUD and must not navigate: registering
                 // is the irreversible step, and a creator who lands in the Studio
                 // after a rejected signature would think they had a market.
-                <div className="mt-4 rounded-[12px] border border-[#f0c9c2] bg-[#fef2f0] px-4 py-3.5 text-[14px] leading-[22px] font-semibold text-[#c0392b]">
+                <div className="mt-4 rounded-[12px] border border-line-brand-1 bg-surface-brand-3 px-4 py-3.5 text-[14px] leading-[22px] font-semibold text-ink-brand-6">
                   Your token wasn’t launched. Nothing was charged. {failed}
                 </div>
               ) : null}
               {studio.isLite ? (
-                <div className="mt-4 rounded-[12px] border border-[#e4e6e9] bg-[#f6f7f8] px-4 py-3.5 text-[14px] leading-[22px] text-[#6b7280]">
+                <div className="mt-4 rounded-[12px] border border-line-11 bg-surface-16 px-4 py-3.5 text-[14px] leading-[22px] text-ink-10">
                   This account can’t sign transactions yet, so it can’t launch a token. Upgrade to a full account first.
                 </div>
               ) : null}
@@ -523,9 +523,9 @@ const LaunchWizard: FC = () => {
                   in the one flow where the lite path explains itself perfectly
                   one condition away. */}
               {!studio.loggedIn ? (
-                <div className="mt-4 rounded-[12px] border border-[#e4e6e9] bg-[#f6f7f8] px-4 py-3.5 text-[14px] leading-[22px] text-[#6b7280]">
+                <div className="mt-4 rounded-[12px] border border-line-11 bg-surface-16 px-4 py-3.5 text-[14px] leading-[22px] text-ink-10">
                   You’ll need to be signed in to launch a token —{' '}
-                  <a href="/login" className="font-semibold text-[#c0392b] hover:underline">
+                  <a href="/login" className="font-semibold text-ink-brand-6 hover:underline">
                     sign in
                   </a>{' '}
                   and your choices here stay as you set them.
@@ -542,19 +542,19 @@ const LaunchWizard: FC = () => {
                   read; the wizard must refuse to act on that same uncertainty,
                   or the two screens disagree about the same unknown. */}
               {cannotConfirmMarket ? (
-                <div className="mt-4 rounded-[12px] border border-[#f6e2c4] bg-[#fdf6ec] px-4 py-3.5 text-[14px] leading-[22px] text-[#b45309]">
+                <div className="mt-4 rounded-[12px] border border-line-warn-2 bg-surface-warn-4 px-4 py-3.5 text-[14px] leading-[22px] text-ink-warn-3">
                   We can’t reach the chain to check whether you already have a token, so launching is held back —
                   signing now could spend a transaction on a launch that cannot succeed. Nothing is wrong with your
                   account.{' '}
-                  <button onClick={studio.retry} className="font-semibold text-[#c0392b] underline">
+                  <button onClick={studio.retry} className="font-semibold text-ink-brand-6 underline">
                     Try again
                   </button>
                 </div>
               ) : null}
               {alreadyHasMarket ? (
-                <div className="mt-4 rounded-[12px] border border-[#e4e6e9] bg-[#f6f7f8] px-4 py-3.5 text-[14px] leading-[22px] text-[#6b7280]">
+                <div className="mt-4 rounded-[12px] border border-line-11 bg-surface-16 px-4 py-3.5 text-[14px] leading-[22px] text-ink-10">
                   You already have a live token — a creator can only have one.{' '}
-                  <a href="/creators/studio" className="font-semibold text-[#c0392b] hover:underline">
+                  <a href="/creators/studio" className="font-semibold text-ink-brand-6 hover:underline">
                     Open your studio
                   </a>{' '}
                   to manage it.
@@ -568,22 +568,22 @@ const LaunchWizard: FC = () => {
                   first and asking again, in words, is the smaller gate than a
                   second dialog and keeps the whole flow on one screen. */}
               {confirmArmed && !firstBuySkipped ? (
-                <div className="mt-5 rounded-[12px] border border-[#e4e6e9] bg-[#f6f7f8] px-4 py-3.5">
-                  <p className="text-[14px] leading-[22px] font-semibold text-[#161511]">
+                <div className="mt-5 rounded-[12px] border border-line-11 bg-surface-16 px-4 py-3.5">
+                  <p className="text-[14px] leading-[22px] font-semibold text-ink-2">
                     This launches your token on the chain. It can’t be undone.
                   </p>
                   <div className="mt-3 flex gap-2.5">
                     <button
                       onClick={() => setConfirmArmed(false)}
                       disabled={launching}
-                      className="flex-1 rounded-[11px] border border-[#e4e6e9] bg-white py-2.5 text-[14px] leading-[22px] font-semibold text-[#3f4650] disabled:opacity-60"
+                      className="flex-1 rounded-[11px] border border-line-11 bg-surface-1 py-2.5 text-[14px] leading-[22px] font-semibold text-ink-7 disabled:opacity-60"
                     >
                       Cancel
                     </button>
                     <button
                       onClick={launch}
                       disabled={launching}
-                      className="flex-1 rounded-[11px] bg-[#c0392b] py-2.5 text-[14px] leading-[22px] font-bold text-white hover:bg-[#96271b] disabled:opacity-60"
+                      className="flex-1 rounded-[11px] bg-surface-brand-12 py-2.5 text-[14px] leading-[22px] font-bold text-ink-27 hover:bg-surface-brand-17 disabled:opacity-60"
                     >
                       {launching ? 'Launching…' : 'Yes, launch my token'}
                     </button>
@@ -614,7 +614,7 @@ const LaunchWizard: FC = () => {
                             ? 'You already have a token. A creator can only have one.'
                             : undefined)
                   }
-                  className="mt-5 w-full rounded-[13px] bg-[#c0392b] py-[15px] text-[15px] leading-[24px] font-bold text-white hover:bg-[#96271b] disabled:opacity-60"
+                  className="mt-5 w-full rounded-[13px] bg-surface-brand-12 py-[15px] text-[15px] leading-[24px] font-bold text-ink-27 hover:bg-surface-brand-17 disabled:opacity-60"
                 >
                   {firstBuySkipped
                     ? 'Continue to Studio'
@@ -628,10 +628,10 @@ const LaunchWizard: FC = () => {
               `title` — a tooltip never appears on touch and is not read out.
               (Same defect was filed against the Ask button in the same QA round.) */}
           {step < 2 && stepError ? (
-            <p className="mt-5 text-[13px] leading-[20px] font-semibold text-[#c0392b]">{stepError}</p>
+            <p className="mt-5 text-[13px] leading-[20px] font-semibold text-ink-brand-6">{stepError}</p>
           ) : null}
           {step === 2 && formError ? (
-            <p className="mt-4 text-[13px] leading-[20px] font-semibold text-[#c0392b]">
+            <p className="mt-4 text-[13px] leading-[20px] font-semibold text-ink-brand-6">
               {formError} Go back and correct it before launching.
             </p>
           ) : null}
@@ -639,12 +639,12 @@ const LaunchWizard: FC = () => {
           {/* Nav */}
           {step < 2 ? (
             <div className="mt-6 flex items-center justify-between">
-              <button onClick={() => setStep((s) => Math.max(0, s - 1))} disabled={step === 0} className="text-[14px] leading-[22px] font-semibold text-[#6b7280] disabled:opacity-0">Back</button>
+              <button onClick={() => setStep((s) => Math.max(0, s - 1))} disabled={step === 0} className="text-[14px] leading-[22px] font-semibold text-ink-10 disabled:opacity-0">Back</button>
               <button
                 onClick={() => setStep((s) => Math.min(2, s + 1))}
                 disabled={stepError !== null}
                 title={stepError ?? undefined}
-                className="rounded-[11px] bg-[#161511] px-6 py-2.5 text-[14px] leading-[22px] font-semibold text-white hover:bg-black disabled:cursor-not-allowed disabled:opacity-40"
+                className="rounded-[11px] bg-surface-43 px-6 py-2.5 text-[14px] leading-[22px] font-semibold text-ink-27 hover:bg-surface-44 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 Continue
               </button>
@@ -656,7 +656,7 @@ const LaunchWizard: FC = () => {
                   setConfirmArmed(false);
                   setStep(1);
                 }}
-                className="text-[14px] leading-[22px] font-semibold text-[#6b7280]"
+                className="text-[14px] leading-[22px] font-semibold text-ink-10"
               >
                 Back
               </button>

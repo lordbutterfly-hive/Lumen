@@ -142,7 +142,7 @@ const KeychainSignin: FC<KeychainSigninProps> = ({ redirectTo = '/' }) => {
         onClick={() => setOpen((v) => !v)}
         data-testid="keychain-row"
         // Auto height with padding, matching the wallet rows above (fuckery list C4).
-        className="flex w-full cursor-pointer items-center gap-3 rounded-[14px] border border-[#e4e6e9] bg-white px-4 py-3 text-left hover:border-[#c0392b] hover:bg-[#fefaf9]"
+        className="flex w-full cursor-pointer items-center gap-3 rounded-[14px] border border-line-11 bg-surface-1 px-4 py-3 text-left hover:border-line-brand-10 hover:bg-surface-6"
       >
         {/* ★ THE REAL HIVE KEYCHAIN MARK (2026-08-09, owner-supplied) — was the
             letter "K" on a red plate. The official asset carries its own black
@@ -157,27 +157,27 @@ const KeychainSignin: FC<KeychainSigninProps> = ({ redirectTo = '/' }) => {
           className="h-[34px] w-[34px] flex-shrink-0 rounded-[10px]"
         />
         <span className="min-w-0 flex-1">
-          <span className="block text-[15px] leading-[24px] font-semibold text-[#161511]">{COPY.title}</span>
-          <span className="block text-xs text-[#6b7280]">{COPY.sub}</span>
+          <span className="block text-[15px] leading-[24px] font-semibold text-ink-2">{COPY.title}</span>
+          <span className="block text-xs text-ink-10">{COPY.sub}</span>
         </span>
         {/* ★ TOP-ALIGNED, NOT CENTRED (fuckery list C6). Centring a one-line chip
             against a two-line text block floated it between the title and the
             subtitle, so it read as a label for the subtitle. It describes the
             METHOD, so it sits level with the method's name. */}
         {detected ? (
-          <span className="mt-0.5 flex-shrink-0 self-start rounded-full bg-[#eef7f1] px-2.5 py-1 text-[12px] leading-[18px] font-semibold text-[#2f7d4f]">
+          <span className="mt-0.5 flex-shrink-0 self-start rounded-full bg-surface-ok-3 px-2.5 py-1 text-[12px] leading-[18px] font-semibold text-ink-ok-2">
             {COPY.detected}
           </span>
         ) : null}
       </button>
 
       {open ? (
-        <div className="mt-2.5 rounded-[14px] border border-[#f1f3f5] bg-[#fbfbfc] p-4">
-          <label htmlFor="keychain-username" className="block text-[13px] leading-[20px] font-medium text-[#4b5563]">
+        <div className="mt-2.5 rounded-[14px] border border-line-2 bg-surface-4 p-4">
+          <label htmlFor="keychain-username" className="block text-[13px] leading-[20px] font-medium text-ink-8">
             {COPY.usernameLabel}
           </label>
-          <div className="mt-1.5 flex items-center rounded-[10px] border border-[#e4e6e9] bg-white px-3 focus-within:border-[#c0392b]">
-            <span className="text-[15px] leading-[24px] text-[#9ca3af]">@</span>
+          <div className="mt-1.5 flex items-center rounded-[10px] border border-line-11 bg-surface-1 px-3 focus-within:border-line-brand-10">
+            <span className="text-[15px] leading-[24px] text-ink-14">@</span>
             <input
               id="keychain-username"
               value={username}
@@ -189,21 +189,21 @@ const KeychainSignin: FC<KeychainSigninProps> = ({ redirectTo = '/' }) => {
               autoComplete="username"
               spellCheck={false}
               data-testid="keychain-username"
-              className="h-11 w-full bg-transparent px-1.5 text-[15px] leading-[24px] text-[#161511] outline-none placeholder:text-[#9ca3af]"
+              className="h-11 w-full bg-transparent px-1.5 text-[15px] leading-[24px] text-ink-2 outline-none placeholder:text-ink-14"
             />
           </div>
           <button
             onClick={() => void signIn()}
             disabled={busy || detected === false}
             data-testid="keychain-signin"
-            className="mt-3 h-12 w-full cursor-pointer rounded-[12px] bg-[#161511] text-[15px] leading-[24px] font-semibold text-white hover:bg-[#2b2822] disabled:cursor-not-allowed disabled:opacity-50"
+            className="mt-3 h-12 w-full cursor-pointer rounded-[12px] bg-surface-43 text-[15px] leading-[24px] font-semibold text-ink-27 hover:bg-surface-40 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {busy ? COPY.working : COPY.submit}
           </button>
           {detected === false ? (
-            <p className="mt-2.5 text-[13px] leading-[20px] text-[#b45309]">{COPY.notDetected}</p>
+            <p className="mt-2.5 text-[13px] leading-[20px] text-ink-warn-3">{COPY.notDetected}</p>
           ) : null}
-          {error ? <p className="mt-2.5 text-[13px] leading-[20px] text-[#b45309]">{error}</p> : null}
+          {error ? <p className="mt-2.5 text-[13px] leading-[20px] text-ink-warn-3">{error}</p> : null}
         </div>
       ) : null}
     </div>

@@ -69,6 +69,9 @@ const STATUS_TIMEOUT_MS = 2_500;
  *  Node capability, not content: it changes when someone reconfigures a node. */
 const STATUS_CACHE_MS = 300_000;
 
+/** How long one "posts similar to this post" answer is reused. See the memo in `proxy`. */
+const SIMILAR_CACHE_MS = 600_000;
+
 /** Upstream's own documented bound for a single by-ids call (extended-hive.chain.ts's
  *  `HivesenseEndpointsPostsByIdsPayload`, `@maxItems 50`) — not a number invented here. */
 const MAX_BY_IDS_POSTS = 50;
@@ -141,6 +144,69 @@ function isPostRef(value: unknown): value is { author: string; permlink: string 
   );
 }
 
+/**
+ * ★★★ THE STATUS PROBE IS A GET NOW, SO THE BROWSER CAN STOP ASKING
+ * (2026-08-13, browser audit §2.3).
+ *
+ * The audit reported `/api/hivesense` "firing twice per page". Measured on the
+ * post page with the request bodies read, the two calls are NOT a duplicate —
+ * they are `status` and `similar`, and the node DOES offer hivesense (the
+ * trailing-slash fix in this file's own history is what made the probe start
+ * answering "yes"), so "similar posts" is a live feature now rather than the
+ * permanently-dead one the comments below describe. Three consecutive loads:
+ * `status 153ms`, then `status 28ms + similar 603ms`, then `status 31ms +
+ * similar 2,557ms`.
+ *
+ * The `status` half was still a POST, and a POST is uncacheable by definition —
+ * so every hard page load paid a round trip plus a rate-limiter row write for an
+ * answer that is the same for every reader for minutes at a time (its own server
+ * memo already says so: `STATUS_CACHE_MS`, 5 minutes). Measured after the move:
+ * **24-29ms -> 3-6ms** per post page.
+ *
+ * ★★★ BUT THE BROWSER IS STILL NOT CACHING IT, AND THAT IS DELIBERATE — READ
+ * THIS BEFORE "FIXING" THE HEADER. `middleware.ts` attaches `Set-Cookie`
+ * (`session_uid`, the login challenge) to every response it touches, and it
+ * therefore carries a STANDING RULE, written after this class of bug bit the
+ * project three times: *a route that sets `cache-control: public` MUST be
+ * excluded from the middleware `matcher`, or it must not be public* — otherwise
+ * a shared cache can replay one visitor's session cookies to the next. Because
+ * middleware runs BEFORE the handler, its own `private, no-store` lands on the
+ * response first and the `public` directive below is appended after it. Verified
+ * live on :3600: the response carries BOTH, and per RFC 9111 the combined value
+ * is `private, no-store, public, max-age=300, ...` — `no-store` wins, so nothing
+ * is cached anywhere.
+ *
+ * So the entire measured win above comes from the SERVER memo, not the browser.
+ * The header is left in place as the route's honest statement of intent, and
+ * turning it on for real is a one-line change to the `matcher` in
+ * `middleware.ts` — which is that file's decision to make, not this one's, and is
+ * NOT made here.
+ *
+ * Only `status` is exposed here. It takes no parameters, reads nothing
+ * viewer-specific and returns a node capability — the one operation of the four
+ * that could ever be safe to hand a shared cache. `search`, `similar` and `byIds`
+ * stay on POST exactly as they were.
+ */
+export async function GET(req: NextRequest): Promise<NextResponse> {
+  if (req.nextUrl.searchParams.get('operation') !== 'status') {
+    return NextResponse.json({ error: 'unsupported operation' }, { status: 400 });
+  }
+  const res = await proxy('status', {}, req);
+  // Same answer for everyone, so it is `public`. `max-age` matches the server
+  // memo's own TTL rather than inventing a second number; `stale-while-revalidate`
+  // means a node that goes down never turns this into a blocking request.
+  //
+  // ★ ONLY A SUCCESSFUL PROBE IS CACHED. The server memo above deliberately
+  // remembers a FAILED probe too (see its comment — a timeout is the answer), but
+  // that memo is ours to clear on a deploy; a `public, max-age=300` on a 502 would
+  // sit in a reader's browser cache where nothing can reach it, so a node coming
+  // back up would stay invisible to them for up to five more minutes on top of
+  // the server's own five.
+  if (res.ok) res.headers.set('cache-control', 'public, max-age=300, stale-while-revalidate=3600');
+  else res.headers.set('cache-control', 'no-store');
+  return res;
+}
+
 export async function POST(req: NextRequest): Promise<NextResponse> {
   let body: unknown;
   try {
@@ -157,6 +223,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const params =
     typeof record.params === 'object' && record.params !== null ? (record.params as Record<string, unknown>) : {};
 
+  return proxy(operation as Operation, params, req);
+}
+
+async function proxy(
+  operation: Operation,
+  params: Record<string, unknown>,
+  req: NextRequest
+): Promise<NextResponse> {
   const base = upstreamBase();
   // ★ THE AVAILABILITY PROBE GETS A SHORT LEASH (2026-08-13). Measured in a browser
   // on the post page: 4,485ms, the slowest single request in the app, and fired
@@ -252,19 +326,47 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // 502 shape returned here is byte-identical to what the outer catch produced
     // before, so `getHiveSenseStatus()` still reads it as "unavailable" and the
     // widget stays hidden exactly as it did.
+    //
+    // (Correction of fact, 2026-08-13: the configured node DOES offer hivesense —
+    // the trailing-slash fix in the module doc is what made the probe start
+    // answering "yes". The reasoning above about caching a negative still holds
+    // and is what keeps a node OUTAGE from costing 2.5s per post page, but the
+    // "which is the case here" aside no longer describes the live node.)
+    const readUpstream = async (): Promise<{ status: number; text: string }> => {
+      const res = await fetch(upstreamUrl.toString(), init);
+      return { status: res.status, text: await res.text() };
+    };
     const { status, text } = isStatusProbe
       ? await cachedRead(`hivesense:status:${base}`, STATUS_CACHE_MS, async () => {
           try {
-            const res = await fetch(upstreamUrl.toString(), init);
-            return { status: res.status, text: await res.text() };
+            return await readUpstream();
           } catch {
             return { status: 502, text: JSON.stringify({ error: 'upstream unreachable' }) };
           }
         })
-      : await (async () => {
-          const res = await fetch(upstreamUrl.toString(), init);
-          return { status: res.status, text: await res.text() };
-        })();
+      : // ★★★ "SIMILAR POSTS" IS MEMOISED TOO (2026-08-13, browser audit §2.3).
+        //
+        // This is the expensive half and it was going straight upstream on every
+        // single view of every single post: measured 603ms, 2,557ms and 4,235ms on
+        // three loads of ONE post — the slowest request left on the page, and the
+        // reason the post page's last request finishes up to 5.9s after navigation.
+        //
+        // "Which posts resemble this post" is a property of the POST, not of the
+        // reader, and the upstream recomputes the same answer for every visitor.
+        // The key is the fully-built upstream URL, so every parameter that can
+        // change the answer — author, permlink, `observer`, `result_limit`,
+        // `truncate`, `full_posts` — is part of it by construction, and no two
+        // different requests can collide on one entry. Ten minutes: a
+        // recommendation rail that is ten minutes behind the index is
+        // indistinguishable from a fresh one, and the widget is below the fold.
+        //
+        // Failures are deliberately NOT cached here (unlike the status probe):
+        // a rejection propagates to the outer catch and the next reader retries.
+        // A status timeout is an answer about the node; a failed `similar` is just
+        // a failed request, and remembering it would hide a recovery for 10 minutes.
+        operation === 'similar'
+        ? await cachedRead(`hivesense:similar:${upstreamUrl.toString()}`, SIMILAR_CACHE_MS, readUpstream)
+        : await readUpstream();
     const upstream = { status };
     // Pass the upstream BODY + status straight through, same posture as the
     // creator-tokens/prediction-market proxies: hivesense-api.ts already knows how

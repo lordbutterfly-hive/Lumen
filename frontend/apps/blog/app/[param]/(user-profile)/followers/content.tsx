@@ -23,7 +23,7 @@ import { FOLLOW_LIST_PAGE_SIZE } from '@/blog/features/account-lists/follow-list
  *   - two `<h1>` "Followers page 1 from 54" sentences: not grammatical, and a
  *     page counter is not a heading — the masthead already carries the h1.
  *   - two `<PrevNextButtons>` blocks: rendered above AND below, both in the
- *     `outlineRed` variant whose `text-slate-600` is rgb(71,85,105), a colour
+ *     `outlineRed` variant whose `text-ink-info-1` is rgb(71,85,105), a colour
  *     that appears nowhere else in the product.
  *   - the whole-list `isMutating` spinner overlay: every row's own Follow button
  *     already shows and disables itself while its mutation is in flight, so the

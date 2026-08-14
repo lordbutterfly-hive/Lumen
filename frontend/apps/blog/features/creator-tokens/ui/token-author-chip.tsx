@@ -117,16 +117,16 @@ const TokenAuthorChip: FC<{ handle: string }> = ({ handle }) => {
   return (
     <Link
       href={`/creators/${handle}`}
-      className="inline-flex shrink-0 items-center gap-[7px] rounded-full border border-[#e6dcd6] bg-[#FBF7F2] py-[3px] pl-[9px] pr-[4px] transition-colors hover:border-[#d9c8bf] hover:bg-[#f8f1ea]"
+      className="inline-flex shrink-0 items-center gap-[7px] rounded-full border border-line-16 bg-surface-warn-2 py-[3px] pl-[9px] pr-[4px] transition-colors hover:border-line-23 hover:bg-surface-warn-7"
       data-testid="token-author-chip"
     >
-      <span aria-hidden="true" className="text-[12px] leading-[18px] leading-none text-[#c0392b]">
+      <span aria-hidden="true" className="text-[12px] leading-[18px] leading-none text-ink-brand-6">
         ◈
       </span>
-      <span className="font-sans text-[13px] leading-[20px] font-bold leading-none tabular-nums text-[#161511]">
+      <span className="font-sans text-[13px] leading-[20px] font-bold leading-none tabular-nums text-ink-2">
         {usdPrice(priceUsd)}
       </span>
-      <span className="rounded-full border border-[#ecdfd8] bg-white px-[9px] py-[2px] font-sans text-[12px] font-bold leading-none text-[#c0392b]">
+      <span className="rounded-full border border-line-warn-4 bg-surface-1 px-[9px] py-[2px] font-sans text-[12px] font-bold leading-none text-ink-brand-6">
         {COPY.buy}
       </span>
     </Link>

@@ -57,7 +57,7 @@ const SubmitContent = () => {
     <>
       <div className="relative mx-auto grid max-w-[1720px] grid-cols-1 gap-11 px-6 pb-20 pt-[26px] md:grid-cols-[200px_minmax(0,1fr)] md:px-11">
         <div
-          className="pointer-events-none absolute bottom-20 left-[244px] top-[26px] hidden w-px bg-[#ececec] md:block"
+          className="pointer-events-none absolute bottom-20 left-[244px] top-[26px] hidden w-px bg-surface-26 md:block"
           aria-hidden
         />
 
@@ -77,7 +77,7 @@ const SubmitContent = () => {
             />
           ) : (
             <div
-              className="rounded-[14px] border border-[#ebebeb] bg-white px-4 py-6 text-sm text-[#6b7280]"
+              className="rounded-[14px] border border-line-9 bg-surface-1 px-4 py-6 text-sm text-ink-10"
               data-testid="log-in-to-make-post-message"
             >
               {t('submit_page.log_in_to_post')}

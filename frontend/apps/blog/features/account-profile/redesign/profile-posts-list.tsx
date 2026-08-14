@@ -34,7 +34,8 @@ export default function ProfilePostsList({
     isFetchingNextPage,
     hasNextPage,
     fetchNextPage,
-    loadMoreRef
+    loadMoreRef,
+    sentinel
   } = useAccountEntries(username, 'posts', observer, initialEntries, lite);
   // Same NSFW list-level filter as the feed (see lib/nsfw.ts): keeps
   // entries.length meaning "posts you will actually see".
@@ -73,11 +74,14 @@ export default function ProfilePostsList({
       {entries.map((entry) => (
         <MediumPostCard key={`${entry.author}-${entry.permlink}`} post={entry} />
       ))}
-      <div className="flex justify-center py-6">
+      {/* ★ THE PAGE CAP (2026-08-13) — same control, same reasoning, as the
+          Comments tab beside it. See
+          features/discovery-feed/hooks/use-infinite-scroll-sentinel.ts. */}
+      <div className="flex items-center justify-center gap-3 py-6">
         <button
           ref={loadMoreRef}
           type="button"
-          onClick={() => fetchNextPage()}
+          onClick={() => (sentinel.atPageCap ? sentinel.loadMore() : fetchNextPage())}
           disabled={isFetchingNextPage || (!hasNextPage && !isError)}
           className="font-sans text-sm text-muted-foreground hover:text-foreground disabled:cursor-default"
         >
@@ -88,10 +92,22 @@ export default function ProfilePostsList({
             ? t('global.loading')
             : isError
               ? t('user_profile.load_failed_retry')
-              : hasNextPage
-                ? t('user_profile.load_newer')
-                : t('user_profile.nothing_more_to_load')}
+              : sentinel.atPageCap
+                ? t('cards.comment_card.load_more')
+                : hasNextPage
+                  ? t('user_profile.load_newer')
+                  : t('user_profile.nothing_more_to_load')}
         </button>
+        {sentinel.atPageCap ? (
+          <button
+            type="button"
+            onClick={sentinel.backToTop}
+            data-testid="profile-posts-back-to-top"
+            className="font-sans text-sm text-muted-foreground hover:text-foreground"
+          >
+            Back to top
+          </button>
+        ) : null}
       </div>
     </div>
   );

@@ -100,6 +100,24 @@ interface CommentListProps {
 // the pixel grid — to an EVEN pixel, which is what keeps a centred flex row off
 // the half pixel (see `typo-codemod2` reasoning: `(26-21)/2 = 2.5`). Paragraph margins likewise: `mb-[9.6px] mt-[1.6px]
 // last:mb-[3.2px]` -> `10px / 2px / 4px` (audit item 8).
+//
+// ★★★ `text-[13px] leading-[24px]` IS NOT DEAD CODE — DO NOT DELETE IT
+// (2026-08-13). The 2026-08-13 browser audit (§4.3) reported it as "one piece
+// of dead code: the comment prose class still carries `text-[13px]
+// leading-[24px]` while actually computing 15px / 26px. Something later in the
+// cascade overrides it — delete the dead classes." It measured at a 1534px
+// viewport, where `lg:` wins. It is the base step of the three-step responsive
+// ramp described immediately above. Measured on the shipped build, same page,
+// same element, four widths:
+//
+//     390px -> 13px / 24px      (base wins)
+//     700px -> 14px / 24px      (`sm:` wins)
+//     900px -> 14px / 24px      (`sm:` wins)
+//    1200px -> 15px / 26px      (`lg:` wins)
+//
+// Deleting the base pair would hand every phone whatever `prose` defaults to
+// and take the comment ramp's smallest step with it. The claim was checked and
+// refused; leave the ramp intact.
 export const commentClassName =
   'font-serif text-[13px] leading-[24px] prose-h1:text-[20px] prose-h1:leading-[22px] prose-h2:text-[18px] prose-h2:leading-[24px] prose-h3:text-[15px] prose-h3:leading-[24px] prose-h4:text-[14px] prose-h4:leading-[22px] sm:text-[14px] sm:leading-[24px] sm:prose-h1:text-[22px] sm:prose-h1:leading-[24px] sm:prose-h2:text-[20px] sm:prose-h2:leading-[26px] sm:prose-h3:text-[16px] sm:prose-h3:leading-[26px] sm:prose-h4:text-[15px] sm:prose-h4:leading-[22px] lg:text-[15px] lg:leading-[26px] lg:prose-h1:text-[24px] lg:prose-h1:leading-[26px] lg:prose-h2:text-[20px] lg:prose-h2:leading-[28px] lg:prose-h3:text-[18px] lg:prose-h3:leading-[28px] lg:prose-h4:text-[16px] lg:prose-h4:leading-[24px] prose-p:mb-[10px] prose-p:mt-[2px] last:prose-p:mb-[4px] prose-img:max-w-full prose-img:h-auto prose-img:max-h-[400px]';
 
@@ -405,14 +423,14 @@ const CommentListItem = memo(function CommentListItem({
     return (
       <li data-testid="comment-list-item" className="w-full min-w-0">
         <div
-          className="mb-4 flex w-full min-w-0 flex-wrap items-center justify-between gap-3 rounded-[14px] border border-dashed border-[#e0dcd4] bg-[#f9f7f5] px-3 py-2.5 font-sans text-[13px] leading-[20px] text-[#6b7280]"
+          className="mb-4 flex w-full min-w-0 flex-wrap items-center justify-between gap-3 rounded-[14px] border border-dashed border-line-18 bg-surface-14 px-3 py-2.5 font-sans text-[13px] leading-[20px] text-ink-10"
           data-testid="comment-moderation-unknown"
         >
           <span>{t('cards.comment_card.moderation_status_unknown', { author: displayAuthor })}</span>
           <button
             type="button"
             onClick={() => setModerationRevealed(true)}
-            className="font-semibold text-[#2a2822] underline-offset-2 hover:underline"
+            className="font-semibold text-ink-4 underline-offset-2 hover:underline"
             data-testid="comment-moderation-unknown-reveal"
           >
             {t('cards.comment_card.moderation_status_unknown_reveal')}
@@ -451,11 +469,11 @@ const CommentListItem = memo(function CommentListItem({
                     14px radius, which is the radius the design system assigns to rows. */}
                 <Card
                   className={cn(
-                    `mb-4 w-full min-w-0 overflow-hidden rounded-[14px] border-[#ebebeb] bg-white text-primary depth-${comment.depth}`,
+                    `mb-4 w-full min-w-0 overflow-hidden rounded-[14px] border-line-9 bg-surface-1 text-primary depth-${comment.depth}`,
                     {
                       'opacity-50 hover:opacity-100': hiddenComment || tempraryHidden,
                       'border border-destructive': comment._temporary,
-                      'border border-blue-400/50': comment._optimistic
+                      'border border-line-info-2/50': comment._optimistic
                     }
                   )}
                 >
@@ -482,9 +500,9 @@ const CommentListItem = memo(function CommentListItem({
                                 {publishBadgeState && (
                                   <span
                                     className={cn('mr-2 flex items-center gap-1 text-xs', {
-                                      'text-blue-500': publishBadgeState === 'publishing' || publishBadgeState === 'queued',
+                                      'text-ink-info-9': publishBadgeState === 'publishing' || publishBadgeState === 'queued',
                                       'text-muted-foreground': publishBadgeState === 'waiting',
-                                      'text-amber-600': publishBadgeState === 'delayed'
+                                      'text-ink-warn-6': publishBadgeState === 'delayed'
                                     })}
                                     data-testid="comment-publish-status"
                                     data-publish-state={publishBadgeState}

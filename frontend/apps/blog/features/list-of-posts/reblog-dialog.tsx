@@ -98,7 +98,7 @@ export const ReblogDialog = forwardRef<HTMLButtonElement, ReblogDialogProps>(fun
             <AlertDialogTitle data-testid="reblog-dialog-header">
               {t('alert_dialog_reblog.title')}
             </AlertDialogTitle>
-            <AlertDialogCancel className="border-none hover:text-red-800" data-testid="reblog-dialog-close">
+            <AlertDialogCancel className="border-none hover:text-ink-brand-3" data-testid="reblog-dialog-close">
               X
             </AlertDialogCancel>
           </div>
@@ -113,14 +113,14 @@ export const ReblogDialog = forwardRef<HTMLButtonElement, ReblogDialogProps>(fun
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter className="gap-2 sm:flex-row-reverse">
-          <AlertDialogCancel className="hover:text-red-800" data-testid="reblog-dialog-cancel">
+          <AlertDialogCancel className="hover:text-ink-brand-3" data-testid="reblog-dialog-cancel">
             {t('alert_dialog_reblog.cancel')}
           </AlertDialogCancel>
           {identity.isLoggedIn ? (
             <AlertDialogAction
               autoFocus
               disabled={shouldDisableAction}
-              className="rounded-none bg-gray-800 text-base text-white shadow-lg shadow-destructive hover:bg-destructive hover:shadow-gray-800 disabled:bg-gray-400 disabled:shadow-none"
+              className="rounded-none bg-surface-39 text-base text-ink-27 shadow-lg shadow-destructive hover:bg-destructive hover:shadow-line-26 disabled:bg-surface-34 disabled:shadow-none"
               onClick={(e) => {
                 e.preventDefault();
                 action(true);

@@ -87,7 +87,7 @@ export function CommunitiesSelect({ title }: { title: string }) {
           this nameless (verified via the a11y tree). `title` itself is not a
           safe aria-label — it is the CURRENT selection/community, not the
           control's stable purpose — so this names the control generically. */}
-      <SelectTrigger className="bg-white" aria-label={t('communities.communities')}>
+      <SelectTrigger className="bg-surface-1" aria-label={t('communities.communities')}>
         <SelectValue placeholder={title} />
       </SelectTrigger>
       <SelectContent
@@ -107,7 +107,7 @@ export function CommunitiesSelect({ title }: { title: string }) {
             <SelectItem value={`/@${identity.username}/feed`}>My friends</SelectItem>
             <SelectItem value="/trending/my">My communities</SelectItem>
             {mySubsData && mySubsData.length > 0 ? (
-              <SelectItem disabled value="my-communities" className="text-slate-400">
+              <SelectItem disabled value="my-communities" className="text-ink-info-10">
                 My communities
               </SelectItem>
             ) : null}
@@ -121,7 +121,7 @@ export function CommunitiesSelect({ title }: { title: string }) {
           </SelectGroup>
         )}
         <SelectGroup>
-          <SelectItem disabled value="trending-communities" className="text-slate-400">
+          <SelectItem disabled value="trending-communities" className="text-ink-info-10">
             {t('navigation.communities_nav.trending_communities')}
           </SelectItem>
           {identity.isLoggedIn

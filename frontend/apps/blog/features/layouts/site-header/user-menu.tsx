@@ -34,14 +34,14 @@ const LABELS = {
 };
 
 const ROW_CLASS =
-  'flex cursor-pointer items-center justify-between gap-2.5 rounded-[11px] px-3 py-2.5 font-sans text-[14px] leading-[22px] font-medium text-[#3f4650] transition-colors hover:bg-[#f6f5f2] hover:text-[#161511] focus:bg-[#f6f5f2] focus:text-[#161511]';
+  'flex cursor-pointer items-center justify-between gap-2.5 rounded-[11px] px-3 py-2.5 font-sans text-[14px] leading-[22px] font-medium text-ink-7 transition-colors hover:bg-surface-20 hover:text-ink-2 focus:bg-surface-20 focus:text-ink-2';
 // ★ Contrast fix (2026-08-13, O5 a11y build map item 4). Was `#a29a92` at
 // 2.77:1 on white/against this row's `#f6f5f2` hover background — both fail
 // the 4.5:1 floor for real informational text ("N held", "◈ @handle"). This
 // row sits on the grey `#f6f5f2` hover ground, so it takes the darker
 // "grey-ground" replacement rather than the plain-white one: `#6f6963` is
 // 4.97:1 on `#f6f5f2` and 5.42:1 on white, independently measured.
-const META_CLASS = 'shrink-0 font-sans text-[13px] leading-[20px] tabular-nums text-[#6f6963]';
+const META_CLASS = 'shrink-0 font-sans text-[13px] leading-[20px] tabular-nums text-ink-9';
 
 /**
  * A small, self-contained avatar for the menu's OWN header block — the app's
@@ -107,7 +107,7 @@ const AccountMenuContent = ({ user }: { user: User }) => {
         <MenuAvatar username={user.username} />
         <div className="min-w-0">
           <div
-            className="truncate font-sans text-[15px] leading-[24px] font-bold text-[#161511]"
+            className="truncate font-sans text-[15px] leading-[24px] font-bold text-ink-2"
             data-testid="user-name-in-profile-menu"
           >
             {user.username}
@@ -117,13 +117,13 @@ const AccountMenuContent = ({ user }: { user: User }) => {
             // floor. This block sits on the header's plain white background
             // (not the `#f6f5f2` hover row), so it takes the plain-white
             // replacement: `#7a7268` measures 4.74:1 on white.
-            <div className="truncate font-sans text-[13px] leading-[20px] text-[#7a7268]">
+            <div className="truncate font-sans text-[13px] leading-[20px] text-ink-11">
               ◈ @{user.username} · {usdPrice(chip.priceUsd)}
             </div>
           ) : null}
         </div>
       </div>
-      <DropdownMenuSeparator className="mx-1 my-0 mb-1.5 h-px bg-[#f0f0ee]" />
+      <DropdownMenuSeparator className="mx-1 my-0 mb-1.5 h-px bg-surface-24" />
 
       <DropdownMenuGroup className="flex flex-col gap-0.5">
         <DropdownMenuItem asChild className={ROW_CLASS}>
@@ -246,7 +246,7 @@ const UserMenu = ({ children, user }: { children: ReactNode; user: User }) => {
           satisfied by using this primitive rather than a custom popover. */}
       <DropdownMenuContent
         align="end"
-        className="w-[262px] rounded-2xl border border-[#ebebeb] bg-white p-2 shadow-[0_12px_34px_rgba(20,18,10,0.12)]"
+        className="w-[262px] rounded-2xl border border-line-9 bg-surface-1 p-2 shadow-[0_12px_34px_rgba(20,18,10,0.12)]"
         data-testid="user-profile-menu-content"
         onKeyDown={(e) => {
           // ★ TAB TRAP FIX (2026-08-13, O5 a11y build map item 1a). Radix's

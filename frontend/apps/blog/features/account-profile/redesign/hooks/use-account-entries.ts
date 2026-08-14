@@ -1,8 +1,11 @@
 'use client';
 
-import { useEffect } from 'react';
 import { useInfiniteQuery, type UseInfiniteQueryResult } from '@tanstack/react-query';
-import { useInView } from 'react-intersection-observer';
+import {
+  FEED_AUTO_PAGE_CAP,
+  useInfiniteScrollSentinel,
+  type InfiniteScrollSentinel
+} from '@/blog/features/discovery-feed/hooks/use-infinite-scroll-sentinel';
 import { fetchAccountPosts } from '@/blog/lib/lite/client/account-posts-fetch';
 import { Entry } from '@hive/common-hiveio-packages/wax';
 import { StaleTime } from '@/blog/lib/react-query';
@@ -92,8 +95,11 @@ export function useAccountEntries(
   observer: string,
   initialEntries?: Entry[] | null,
   lite = false
-): UseInfiniteQueryResult<Entry[]> & { entries: Entry[]; loadMoreRef: (node?: Element | null) => void } {
-  const { ref, inView } = useInView({ rootMargin: '600px 0px' });
+): UseInfiniteQueryResult<Entry[]> & {
+  entries: Entry[];
+  loadMoreRef: (node?: Element | null) => void;
+  sentinel: InfiniteScrollSentinel;
+} {
   const seed = lite ? undefined : initialEntries;
 
   const result = useInfiniteQuery({
@@ -162,16 +168,32 @@ export function useAccountEntries(
   });
   const { hasNextPage, isFetching, isError, fetchNextPage } = result;
 
-  useEffect(() => {
-      // ★ DO NOT REFIRE INTO A FAILURE.
-      // The sentinel refired every time a failed attempt's retries exhausted —
-      // roughly one request every 2s, unbounded, for as long as the reader sat
-      // at the bottom of the list — while the control read "Loading". Adding
-      // `!isError` stops the storm and lets the button say what happened.
-    if (inView && hasNextPage && !isFetching && !isError) {
-      fetchNextPage();
-    }
-  }, [inView, hasNextPage, isFetching, isError, fetchNextPage]);
+  // ★ 2026-08-13. The effect that used to live here was
+  //     if (inView && hasNextPage && !isFetching && !isError) fetchNextPage();
+  // and it fetched TWICE for every scroll gesture — measured on :3000 against
+  // `/@lordbutterfly`: one scroll to the bottom produced requests at t+21548ms
+  // AND t+23675ms, then nothing for the remaining 18s of stillness. `inView` is
+  // an IntersectionObserver callback delivered a task late, so it still reads
+  // true for one commit after the page that landed pushed the sentinel 12,000px
+  // below the viewport. The shared hook reads the sentinel's live geometry at
+  // the moment of the decision instead, and caps how far passive scrolling can
+  // grow the list. Full reasoning and measurements:
+  // features/discovery-feed/hooks/use-infinite-scroll-sentinel.ts.
+  //
+  // ★ `!isError` IS NOT LOST — "do not refire into a failure" (the retry storm
+  // that used to hit once every ~2s while the reader sat at the bottom) is now
+  // the hook's `isError` option, same guard, one place.
+  const sentinel = useInfiniteScrollSentinel({
+    hasNextPage,
+    isFetching,
+    isError,
+    fetchNextPage,
+    // Unchanged from the `useInView({ rootMargin: '600px 0px' })` this replaced:
+    // this list still starts paging 600px before the sentinel is on screen.
+    rootMarginPx: 600,
+    pagesLoaded: result.data?.pages?.length ?? 0,
+    autoPageCap: FEED_AUTO_PAGE_CAP
+  });
 
   // ★ EFFECT (A) STAYS HERE, EVEN THOUGH THE CHAIN BRANCH NOW GOES THROUGH OUR
   // OWN SERVER (2026-08-12, see the `fetchAccountPosts` call above).
@@ -191,5 +213,5 @@ export function useAccountEntries(
   const blockList = useLumenBlockList(Boolean(username));
   const raw = result.data?.pages.flat() ?? [];
   const entries = blockList.loaded ? raw.filter((entry) => !isBlockedEntry(entry, blockList)) : raw;
-  return { ...result, entries, loadMoreRef: ref };
+  return { ...result, entries, loadMoreRef: sentinel.ref, sentinel };
 }

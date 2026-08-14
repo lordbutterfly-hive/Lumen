@@ -3,7 +3,6 @@
 import Big from 'big.js';
 import { AlertCircle } from 'lucide-react';
 import { GetDynamicGlobalPropertiesResponse } from '@hiveio/wax';
-import { Chain } from '@transaction/lib/chain';
 import { useTranslation } from '@/blog/i18n/client';
 import { WalletFigures } from '../lib/wallet-derived';
 import { formatTokenAmount } from '../lib/format-amount';
@@ -12,50 +11,48 @@ import PowerDownDialog from './dialogs/power-down-dialog';
 import StopPowerDownAlert from './dialogs/stop-power-down-alert';
 import DelegatedOutPanel from './delegated-out-panel';
 
-// W-2/W-3: both were rounded-[10px], and Stake was bg-[#2f7d4f].
+// W-2/W-3: both were rounded-[10px], and Stake was bg-surface-ok-7.
 const STAKE_BUTTON_CLASS =
-  'flex items-center gap-1.5 rounded-[14px] bg-[#c0392b] px-[15px] py-2 text-[13px] leading-[20px] font-semibold text-white transition-colors hover:bg-[#96271b]';
+  'flex items-center gap-1.5 rounded-[14px] bg-surface-brand-12 px-[15px] py-2 text-[13px] leading-[20px] font-semibold text-ink-27 transition-colors hover:bg-surface-brand-17';
 const UNSTAKE_BUTTON_CLASS =
-  'flex items-center gap-1.5 rounded-[14px] border border-[#e4e6e9] bg-white px-[15px] py-2 text-[13px] leading-[20px] font-semibold text-[#3f4650] transition-colors hover:bg-[#f6f7f8]';
+  'flex items-center gap-1.5 rounded-[14px] border border-line-11 bg-surface-1 px-[15px] py-2 text-[13px] leading-[20px] font-semibold text-ink-7 transition-colors hover:bg-surface-16';
 
 export default function StakedHiveBlock({
   username,
   figures,
   liquidHive,
-  dynamicGlobal,
-  chain
+  dynamicGlobal
 }: {
   username: string;
   figures: WalletFigures;
   liquidHive: Big;
   dynamicGlobal: GetDynamicGlobalPropertiesResponse | null;
-  chain: Chain | null;
 }) {
   const { t } = useTranslation('common_blog');
   const { vestingHp, netHp, movableHp, delegatedOutHp, hpApr, powerDown } = figures;
 
   return (
-    <div className="mt-5 flex flex-col gap-5 border-l-2 border-[#f1f3f5] pl-4">
+    <div className="mt-5 flex flex-col gap-5 border-l-2 border-line-2 pl-4">
       <div className="flex items-start justify-between gap-4">
         <div className="max-w-[520px]">
           <div className="mb-1 flex items-center gap-2">
-            <span className="text-[15px] leading-[24px] font-bold text-[#2a2822]">{t('wallet.staked.title')}</span>
-            <span className="rounded-[7px] bg-[#f1f3f5] px-2 py-[2px] text-[12px] font-bold text-[#6b7280]">
+            <span className="text-[15px] leading-[24px] font-bold text-ink-4">{t('wallet.staked.title')}</span>
+            <span className="rounded-[7px] bg-surface-23 px-2 py-[2px] text-[12px] font-bold text-ink-10">
               {t('wallet.staked.badge')}
             </span>
-            <span className="rounded-[7px] bg-[#e9f5ee] px-2 py-[2px] text-[12px] font-bold text-[#2f7d4f]">
+            <span className="rounded-[7px] bg-surface-ok-5 px-2 py-[2px] text-[12px] font-bold text-ink-ok-2">
               {t('wallet.staked.apr', { apr: hpApr.toFixed(2) })}
             </span>
           </div>
-          <p className="font-serif text-[14px] leading-[22px] text-[#6b7280]">{t('wallet.staked.description')}</p>
+          <p className="font-serif text-[14px] leading-[22px] text-ink-10">{t('wallet.staked.description')}</p>
 
           {powerDown.isActive ? (
             <div
               // W-3: was rounded-[10px]. A notice is a row; rows are 14px.
-              className="mt-2.5 flex items-center gap-2.5 rounded-[14px] border border-[#f6e2c4] bg-[#fef6ec] px-3 py-2.5 text-[13px] leading-[20px] text-[#8a5a20]"
+              className="mt-2.5 flex items-center gap-2.5 rounded-[14px] border border-line-warn-2 bg-surface-warn-3 px-3 py-2.5 text-[13px] leading-[20px] text-ink-warn-2"
               data-testid="wallet-power-down-notice"
             >
-              <AlertCircle className="h-[15px] w-[15px] shrink-0 text-[#c98a2b]" />
+              <AlertCircle className="h-[15px] w-[15px] shrink-0 text-ink-warn-7" />
               <span className="flex-1">
                 {t('wallet.staked.power_down_notice', {
                   days: powerDown.daysUntilNext,
@@ -68,7 +65,7 @@ export default function StakedHiveBlock({
                 trigger={
                   <button
                     type="button"
-                    className="shrink-0 rounded-[7px] border border-[#d99] bg-white px-2.5 py-[2px] text-[12px] leading-[18px] font-bold text-[#c0392b] hover:bg-[#fdf2f1]"
+                    className="shrink-0 rounded-[7px] border border-line-brand-6 bg-surface-1 px-2.5 py-[2px] text-[12px] leading-[18px] font-bold text-ink-brand-6 hover:bg-surface-brand-4"
                     data-testid="wallet-stop-power-down"
                   >
                     {t('wallet.staked.stop')}
@@ -81,7 +78,7 @@ export default function StakedHiveBlock({
 
         <div className="flex flex-col items-end gap-2.5">
           <div className="text-right">
-            <div className="font-sans text-[20px] font-bold tabular-nums text-[#161511]" data-testid="wallet-hp-balance">
+            <div className="font-sans text-[20px] font-bold tabular-nums text-ink-2" data-testid="wallet-hp-balance">
               {formatTokenAmount(vestingHp)}
             </div>
             {/* ★ W-11: ONE LABEL, ONE FORMAT, ON BOTH PAGES.
@@ -92,7 +89,7 @@ export default function StakedHiveBlock({
                 above, because it subtracts delegated-out HP). Both surfaces now
                 use `profile.stats.hp_effective` and the wallet's 3-decimal token
                 format. See features/account-profile/redesign/profile-stats-bar.tsx. */}
-            <div className="text-[12px] tabular-nums text-[#9ca3af]" data-testid="wallet-hp-effective">
+            <div className="text-[12px] tabular-nums text-ink-14" data-testid="wallet-hp-effective">
               {t('profile.stats.hp_effective', { value: formatTokenAmount(netHp) })}
             </div>
           </div>
@@ -141,8 +138,6 @@ export default function StakedHiveBlock({
       <DelegatedOutPanel
         username={username}
         delegatedOutHp={delegatedOutHp}
-        dynamicGlobal={dynamicGlobal}
-        chain={chain}
       />
     </div>
   );

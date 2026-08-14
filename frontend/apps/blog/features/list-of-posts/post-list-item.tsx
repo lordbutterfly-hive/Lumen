@@ -24,7 +24,6 @@ import PostImage from './post-img';
 import { ReblogDialog } from './reblog-dialog';
 import { useReblogMutation } from './hooks/use-reblog-mutation';
 import PostCardCommentTooltip from './post-card-comment-tooltip';
-import PostCardUpvotesTooltip from './post-card-upvotes-tooltip';
 import PostCardBlacklistMark from './post-card-blacklist-mark';
 import PostSummary from './summary';
 import { Preferences } from '@/blog/lib/utils';
@@ -146,12 +145,12 @@ const PostListItem = memo(
           // rule (`rounded-none border-0 border-b`), so the same post looked
           // like two different products depending on which page you found it
           // on. Borders only — nothing else about these rows changes.
-          className="mb-4 rounded-[18px] border border-[#ebebeb] bg-white px-[22px] py-[22px] text-primary shadow-[0_1px_2px_rgba(20,18,10,0.03)] transition-colors hover:bg-[#fdfcfb]"
+          className="mb-4 rounded-[18px] border border-line-9 bg-surface-1 px-[22px] py-[22px] text-primary shadow-[0_1px_2px_rgba(20,18,10,0.03)] transition-colors hover:bg-surface-3"
         >
           {post.original_entry ? (
             <div className="mt-2 rounded-sm bg-background-secondary px-2 py-1 text-sm" data-testid="cross-post-banner">
               <p className="flex items-center gap-1 text-xs md:text-sm">
-                <Icons.crossPost className="h-4 w-4 text-slate-500" />{' '}
+                <Icons.crossPost className="h-4 w-4 text-ink-info-6" />{' '}
                 <Link className="hover:cursor-pointer hover:text-destructive" href={`/@${post.author}`} data-testid="cross-post-author-link">
                   {post.author}
                 </Link>{' '}
@@ -274,7 +273,7 @@ const PostListItem = memo(
                     </span>
                   ) : null}
                   {post.stats && post.stats.is_pinned && isCommunityPage ? (
-                    <Badge className="ml-1 bg-destructive text-white hover:bg-destructive">
+                    <Badge className="ml-1 bg-destructive text-ink-27 hover:bg-destructive">
                       <Link
                         href={`/${post.category}/@${displayAuthor}/${post.permlink}`}
                         data-testid="post-pinned-tag"
@@ -316,7 +315,7 @@ const PostListItem = memo(
                   <DetailsCardHover post={post} decline={parseFloat(post.max_accepted_payout) === 0}>
                     <div
                       className={`flex items-center hover:cursor-pointer hover:text-destructive ${
-                        parseFloat(post.max_accepted_payout) === 0 ? 'text-gray-600 line-through' : ''
+                        parseFloat(post.max_accepted_payout) === 0 ? 'text-ink-8 line-through' : ''
                       }`}
                       data-testid="post-payout"
                     >
@@ -324,8 +323,7 @@ const PostListItem = memo(
                     </div>
                   </DetailsCardHover>
 
-                  <Separator orientation="vertical" />
-                  {post.stats ? <PostCardUpvotesTooltip votes={post.stats.total_votes} /> : null}
+                  {/* Tally is inside the vote control now — see medium-post-card. */}
                   <Separator orientation="vertical" />
                   <PostCardCommentTooltip
                     comments={post.children}

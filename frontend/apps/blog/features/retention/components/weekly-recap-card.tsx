@@ -102,7 +102,7 @@ export function WeeklyRecapCard({ className }: WeeklyRecapCardProps) {
 
   return (
     <section
-      className={`relative rounded-[18px] border border-[#ebebeb] bg-[#faf9f6] px-5 py-4 ${className ?? ''}`}
+      className={`relative rounded-[18px] border border-line-9 bg-surface-12 px-5 py-4 ${className ?? ''}`}
       data-testid="retention-weekly-recap"
     >
       <button
@@ -110,15 +110,15 @@ export function WeeklyRecapCard({ className }: WeeklyRecapCardProps) {
         onClick={dismiss}
         aria-label={t('retention.recap.dismiss')}
         data-testid="retention-weekly-recap-dismiss"
-        className="absolute right-3 top-3 rounded-full p-1.5 text-[#9ca3af] transition-colors hover:bg-[#f1f3f5] hover:text-[#3f4650]"
+        className="absolute right-3 top-3 rounded-full p-1.5 text-ink-14 transition-colors hover:bg-surface-23 hover:text-ink-7"
       >
         <Icons.close className="h-4 w-4" />
       </button>
 
-      <p className="pr-8 font-sans text-[13px] leading-[20px] font-semibold uppercase tracking-[0.06em] text-[#9ca3af]">
+      <p className="pr-8 font-sans text-[13px] leading-[20px] font-semibold uppercase tracking-[0.06em] text-ink-14">
         {t('retention.recap.title')}
       </p>
-      <p className="mt-1.5 font-sans text-[17px] font-semibold leading-[26px] text-[#161511]" data-testid="retention-weekly-recap-line">
+      <p className="mt-1.5 font-sans text-[17px] font-semibold leading-[26px] text-ink-2" data-testid="retention-weekly-recap-line">
         {segments.join(' · ')}
       </p>
       {/* ★ THE "note" LINE IS DELETED (2026-08-09). It read: "No trophy, no
@@ -128,7 +128,7 @@ export function WeeklyRecapCard({ className }: WeeklyRecapCardProps) {
           it. */}
       <Link
         href="/ranks"
-        className="mt-2.5 inline-block font-sans text-[14px] leading-[22px] font-semibold text-[#c0392b] hover:underline"
+        className="mt-2.5 inline-block font-sans text-[14px] leading-[22px] font-semibold text-ink-brand-6 hover:underline"
         data-testid="retention-weekly-recap-link"
       >
         {t('retention.recap.link')}

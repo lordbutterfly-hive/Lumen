@@ -23,9 +23,9 @@ import AccountHistoryList from './account-history-list';
  * brand red.
  */
 const PRIMARY_BUTTON_CLASS =
-  'rounded-[14px] bg-[#c0392b] px-5 py-2.5 text-[14px] leading-[22px] font-semibold text-white transition-colors hover:bg-[#96271b]';
+  'rounded-[14px] bg-surface-brand-12 px-5 py-2.5 text-[14px] leading-[22px] font-semibold text-ink-27 transition-colors hover:bg-surface-brand-17';
 const SECONDARY_BUTTON_CLASS =
-  'rounded-[14px] border border-[#e4e6e9] px-4 py-2 text-[13px] leading-[20px] font-semibold text-[#3f4650] transition-colors hover:bg-[#f6f7f8]';
+  'rounded-[14px] border border-line-11 px-4 py-2 text-[13px] leading-[20px] font-semibold text-ink-7 transition-colors hover:bg-surface-16';
 
 /**
  * Center column: fetches the logged-in user's real balances (see
@@ -73,7 +73,7 @@ export default function WalletContent() {
   // than guessing a tier. That is correct: it never shows a lite reader the
   // full-balance UI or a full reader the lite UI, it just waits one beat.
   const isLite = user.account_tier === 'lite';
-  const { account, figures, dynamicGlobal, chain, isLoading, isError } = useWalletAccount(
+  const { account, figures, dynamicGlobal, isLoading, isError } = useWalletAccount(
     isLite ? '' : user.username
   );
 
@@ -81,7 +81,7 @@ export default function WalletContent() {
     return (
       <div data-testid="wallet-content-logged-out">
         <PageMasthead title={t('wallet.page_title')}>
-          <p className="max-w-[620px] font-serif text-[13px] leading-[20px] text-[#6b7280]">
+          <p className="max-w-[620px] font-serif text-[13px] leading-[20px] text-ink-10">
             {t('wallet.login_required')}
           </p>
         </PageMasthead>
@@ -101,7 +101,7 @@ export default function WalletContent() {
     return (
       <div data-testid="wallet-content-lite">
         <PageMasthead title={t('wallet.lite_title')}>
-          <p className="max-w-[620px] font-serif text-[13px] leading-[20px] text-[#6b7280]">
+          <p className="max-w-[620px] font-serif text-[13px] leading-[20px] text-ink-10">
             {t('wallet.lite_body')}
           </p>
         </PageMasthead>
@@ -140,7 +140,7 @@ export default function WalletContent() {
     return (
       <div data-testid="wallet-content-loading">
         <PageMasthead title={t('wallet.page_title')}>
-          <p className="text-[13px] leading-[20px] text-[#6b7280]">{t('wallet.loading')}</p>
+          <p className="text-[13px] leading-[20px] text-ink-10">{t('wallet.loading')}</p>
         </PageMasthead>
       </div>
     );
@@ -160,12 +160,12 @@ export default function WalletContent() {
           </Link>
         }
       >
-        <p className="max-w-[620px] font-serif text-[13px] leading-[20px] text-[#6b7280]">
+        <p className="max-w-[620px] font-serif text-[13px] leading-[20px] text-ink-10">
           {t('wallet.masthead_meta', { username: user.username })}
         </p>
       </PageMasthead>
 
-      <HiveTokenCard username={user.username} figures={figures} dynamicGlobal={dynamicGlobal} chain={chain} />
+      <HiveTokenCard username={user.username} figures={figures} dynamicGlobal={dynamicGlobal} />
       <HbdTokenCard username={user.username} liquidHbd={figures.liquidHbd} />
 
       <SavingsVault
@@ -182,7 +182,7 @@ export default function WalletContent() {
 
       <EstimatedValueStrip figures={figures} />
 
-      <AccountHistoryList username={user.username} chain={chain} dynamicGlobal={dynamicGlobal} />
+      <AccountHistoryList username={user.username} />
     </div>
   );
 }

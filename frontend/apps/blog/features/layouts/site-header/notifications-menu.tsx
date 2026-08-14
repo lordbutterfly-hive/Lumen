@@ -138,14 +138,14 @@ const NotificationsMenu = forwardRef<HTMLButtonElement, {
         // to tell from the page behind it. 14px is the product's row/button
         // radius, and `overflow-hidden` makes the first and last rows follow
         // the corner instead of squaring it off.
-        className="w-[360px] overflow-hidden rounded-[14px] border-[#ebebeb] p-0 shadow-[0_12px_32px_rgba(20,18,10,0.14)]"
+        className="w-[360px] overflow-hidden rounded-[14px] border-line-9 p-0 shadow-[0_12px_32px_rgba(20,18,10,0.14)]"
         data-testid="notifications-popover-content"
       >
-        <div className="flex items-center justify-between gap-3 border-b border-[#ebebeb] px-4 py-2.5">
-          <span className="font-sans text-sm font-semibold text-[#161511]">
+        <div className="flex items-center justify-between gap-3 border-b border-line-9 px-4 py-2.5">
+          <span className="font-sans text-sm font-semibold text-ink-2">
             {t('navigation.user_menu.notifications')}
             {unreadCount > 0 ? (
-              <span className="ml-1.5 font-normal text-[#6b7280]">
+              <span className="ml-1.5 font-normal text-ink-10">
                 {t('navigation.profile_notifications_tab_navbar.unread_count', { count: unreadCount })}
               </span>
             ) : null}
@@ -155,7 +155,7 @@ const NotificationsMenu = forwardRef<HTMLButtonElement, {
               type="button"
               onClick={handleMarkAllAsRead}
               disabled={markAllAsRead.isPending}
-              className="shrink-0 rounded-[14px] px-2 py-1 font-sans text-[13px] leading-[20px] font-semibold text-[#c0392b] transition-colors hover:bg-[#fdf2f0] disabled:cursor-not-allowed disabled:opacity-50"
+              className="shrink-0 rounded-[14px] px-2 py-1 font-sans text-[13px] leading-[20px] font-semibold text-ink-brand-6 transition-colors hover:bg-surface-brand-5 disabled:cursor-not-allowed disabled:opacity-50"
               data-testid="notifications-mark-all-read"
             >
               {markAllAsRead.isPending ? (
@@ -174,13 +174,13 @@ const NotificationsMenu = forwardRef<HTMLButtonElement, {
           {lumenItems.length > 0 ? (
             <ul data-testid="lumen-notifications">
               {lumenItems.map((n) => (
-                <li key={`${n.url}-${n.date}`} className="border-b border-[#ebebeb] last:border-0">
+                <li key={`${n.url}-${n.date}`} className="border-b border-line-9 last:border-0">
                   <BasePathLink
                     href={`/${n.url}`}
-                    className="flex flex-col gap-0.5 px-4 py-3 font-sans text-sm hover:bg-[#f4f5f7]"
+                    className="flex flex-col gap-0.5 px-4 py-3 font-sans text-sm hover:bg-surface-21"
                   >
-                    <span className="text-[#161511]">{n.msg}</span>
-                    <span className="text-xs text-[#6b7280]">
+                    <span className="text-ink-2">{n.msg}</span>
+                    <span className="text-xs text-ink-10">
                       {/* Same single format as the chain rows below. */}
                       <TimeAgo date={n.date} numeric="always" />
                     </span>
@@ -190,7 +190,7 @@ const NotificationsMenu = forwardRef<HTMLButtonElement, {
             </ul>
           ) : null}
           {showSpinner ? (
-            <div className="flex items-center justify-center gap-2 py-10 text-sm text-[#6b7280]">
+            <div className="flex items-center justify-center gap-2 py-10 text-sm text-ink-10">
               <CircleSpinner loading size={16} color="#71717a" />
               {t('global.loading')}
             </div>
@@ -200,7 +200,7 @@ const NotificationsMenu = forwardRef<HTMLButtonElement, {
             <NotificationList data={notifications} lastRead={lastRead} isOwner />
           ) : lumenItems.length > 0 ? null : (
             <div
-              className="flex flex-col items-center justify-center px-4 py-10 text-center text-sm text-[#6b7280]"
+              className="flex flex-col items-center justify-center px-4 py-10 text-center text-sm text-ink-10"
               data-testid="notifications-popover-empty"
             >
               {t('navigation.profile_notifications_tab_navbar.no_notifications_yet')}

@@ -70,7 +70,7 @@ export default function ProposalsContent({
   return (
     <div className="relative mx-auto grid max-w-[1720px] grid-cols-1 gap-11 px-6 pb-20 pt-[26px] md:grid-cols-[200px_minmax(0,1fr)] md:px-11 xl:grid-cols-[200px_minmax(0,1fr)_312px]">
       <div
-        className="pointer-events-none absolute bottom-20 left-[244px] top-[26px] hidden w-px bg-[#ececec] md:block"
+        className="pointer-events-none absolute bottom-20 left-[244px] top-[26px] hidden w-px bg-surface-26 md:block"
         aria-hidden
       />
 
@@ -82,16 +82,16 @@ export default function ProposalsContent({
         <ProposalsMainHeader />
         {showError ? (
           <div
-            className="my-5 flex flex-col items-center gap-3 rounded-2xl border border-[#f5c6c0] bg-[#fdf3f2] px-6 py-12 text-center"
+            className="my-5 flex flex-col items-center gap-3 rounded-2xl border border-line-brand-4 bg-surface-brand-1 px-6 py-12 text-center"
             data-testid="proposals-error"
             role="alert"
           >
             <p className="font-sans text-sm font-semibold text-destructive">{t('global.something_went_wrong')}</p>
-            <p className="font-sans text-[13px] leading-[20px] text-[#6b7280]">{t('proposals.error.description')}</p>
+            <p className="font-sans text-[13px] leading-[20px] text-ink-10">{t('proposals.error.description')}</p>
             <button
               type="button"
               onClick={refetch}
-              className="rounded-[10px] border border-[#e4e6e9] bg-white px-4 py-2 font-sans text-[13px] leading-[20px] font-semibold text-[#3f4650] transition-colors hover:bg-[#f6f7f8]"
+              className="rounded-[10px] border border-line-11 bg-surface-1 px-4 py-2 font-sans text-[13px] leading-[20px] font-semibold text-ink-7 transition-colors hover:bg-surface-16"
             >
               {t('proposals.error.retry')}
             </button>
@@ -115,7 +115,7 @@ export default function ProposalsContent({
                 the same `tab` the list itself filters by, so it never asserts
                 something about the tab's contents that isn't true for entries with a
                 different status. */}
-            <div className="mb-1.5 font-sans text-xs font-bold uppercase tracking-[0.05em] text-[#9ca3af]">
+            <div className="mb-1.5 font-sans text-xs font-bold uppercase tracking-[0.05em] text-ink-14">
               {t(`proposals.list.heading.${tab}`)}
             </div>
             <ProposalList

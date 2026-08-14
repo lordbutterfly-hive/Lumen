@@ -19,7 +19,7 @@ const SubscriptionListItem = ({ community }: { community: string[] }) => {
       {community[3] ? (
         <Badge
           variant="outline"
-          className="ml-1 border-destructive text-slate-500"
+          className="ml-1 border-destructive text-ink-info-6"
           data-testid="author-affiliation-tag"
         >
           {community[3]}

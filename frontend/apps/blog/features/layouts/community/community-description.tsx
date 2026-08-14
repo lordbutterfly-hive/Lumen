@@ -130,7 +130,7 @@ const CommunityDescription = ({
                   <BasePathLink href={`/@${member[0]}`} className="text-destructive hover:cursor-pointer">
                     @{member[0]}
                   </BasePathLink>{' '}
-                  <span className="text-[12px] leading-[18px] text-slate-500">{member[1].toUpperCase()}</span>{' '}
+                  <span className="text-[12px] leading-[18px] text-ink-info-6">{member[1].toUpperCase()}</span>{' '}
                   {member[2] && member[2] !== '' ? (
                     <Badge variant="outline" className="ml-0.5 border-destructive py-0">
                       {member[2]}

@@ -27,7 +27,7 @@ const VotersDetailsData = ({ post }: { post: Entry }) => {
       {sliced &&
         sliced.map((vote: IVote, index: number) => (
           <li key={index}>
-            <BasePathLink href={`/@${vote.voter}`} className="hover:cursor-pointer hover:text-red-600">
+            <BasePathLink href={`/@${vote.voter}`} className="hover:cursor-pointer hover:text-ink-brand-7">
               {vote.voter}
               {vote.reward
                 ? Math.abs(parseFloat(vote.reward.toString())) < 0.0001
@@ -39,7 +39,7 @@ const VotersDetailsData = ({ post }: { post: Entry }) => {
           </li>
         ))}
       {votes && votes.length > 20 && post.stats ? (
-        <li className="pt-1.5 text-sm text-gray-500">
+        <li className="pt-1.5 text-sm text-ink-10">
           {t('post_content.footer.and_more', { value: post.stats.total_votes - 20 })}
         </li>
       ) : null}

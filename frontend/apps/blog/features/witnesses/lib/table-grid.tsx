@@ -74,10 +74,10 @@ export const GENERAL_MIN_WIDTH_CLASS = 'min-w-[820px] 2xl:min-w-0';
  * zero-width defect, just a readability regression instead of a collapse.
  */
 export const STICKY_RANK_CLASS =
-  'sticky left-0 z-10 -mr-3 flex items-center self-stretch bg-[#f7f7f7] group-hover:bg-[#faf9f6] 2xl:static 2xl:mr-0 2xl:bg-transparent';
+  'sticky left-0 z-10 -mr-3 flex items-center self-stretch bg-surface-15 group-hover:bg-surface-12 2xl:static 2xl:mr-0 2xl:bg-transparent';
 /** For the data rows, where `WitnessIdentityCell` supplies its own flex box. */
 export const STICKY_IDENTITY_CLASS =
-  'sticky left-[44px] z-10 self-stretch bg-[#f7f7f7] group-hover:bg-[#faf9f6] 2xl:static 2xl:bg-transparent';
+  'sticky left-[44px] z-10 self-stretch bg-surface-15 group-hover:bg-surface-12 2xl:static 2xl:bg-transparent';
 /** Same pin for the header row, which has a bare label rather than the cell. */
 export const STICKY_IDENTITY_HEADER_CLASS =
-  'sticky left-[44px] z-10 flex min-w-0 items-center self-stretch bg-[#f7f7f7] 2xl:static 2xl:bg-transparent';
+  'sticky left-[44px] z-10 flex min-w-0 items-center self-stretch bg-surface-15 2xl:static 2xl:bg-transparent';

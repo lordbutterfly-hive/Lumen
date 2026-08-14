@@ -25,7 +25,7 @@ const ErrorToastContent: React.FC<ErrorToastContentProps> = ({
   };
 
   return (
-    <div className={cn('text-white', className)} data-testid="error-toast-content">
+    <div className={cn('text-ink-27', className)} data-testid="error-toast-content">
       <div className="flex flex-row items-center justify-between gap-x-16">
         <h1 className="mr-6 font-semibold">{errorTitle}</h1>
         {displayControls && (

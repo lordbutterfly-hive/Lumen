@@ -48,19 +48,19 @@ export default function ClaimAccountDialog({
       <DialogTrigger asChild>{trigger}</DialogTrigger>
       <DialogContent className="rounded-[18px] font-sans sm:max-w-[440px]" data-testid="claim-account-dialog">
         <DialogHeader>
-          <DialogTitle className="text-left text-xl text-[#161511]">
+          <DialogTitle className="text-left text-xl text-ink-2">
             {t('wallet.dialogs.claim_account.title')}
           </DialogTitle>
-          <DialogDescription className="text-left text-[#6b7280]">
+          <DialogDescription className="text-left text-ink-10">
             {t('wallet.dialogs.claim_account.description')}
           </DialogDescription>
         </DialogHeader>
-        <p className="rounded-[10px] bg-[#f6f7f8] px-3 py-2 text-[13px] leading-[20px] text-[#3f4650]">
+        <p className="rounded-[10px] bg-surface-16 px-3 py-2 text-[13px] leading-[20px] text-ink-7">
           {pendingClaimedAccounts > 0
             ? t('wallet.dialogs.claim_account.pending', { count: pendingClaimedAccounts })
             : t('wallet.dialogs.claim_account.pending_none')}
         </p>
-        <p className="text-[13px] leading-[20px] text-[#6b7280]" data-testid="claim-account-todo-notice">
+        <p className="text-[13px] leading-[20px] text-ink-10" data-testid="claim-account-todo-notice">
           {t('wallet.dialogs.claim_account.todo_notice')}
         </p>
         <DialogFooter className="mt-2 flex-row items-center justify-end gap-2">

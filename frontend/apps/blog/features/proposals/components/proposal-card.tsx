@@ -11,9 +11,9 @@ import ProposalStatsColumn from './proposal-stats-column';
 import ProposalSupportFooter from './proposal-support-footer';
 
 const STATUS_STYLES: Record<string, string> = {
-  active: 'bg-[#e9f5ee] text-[#2f7d4f]',
-  inactive: 'bg-[#eef2ff] text-[#4c51bf]',
-  expired: 'bg-[#f4f5f7] text-[#6b7280]'
+  active: 'bg-surface-ok-5 text-ink-ok-2',
+  inactive: 'bg-surface-info-2 text-ink-info-3',
+  expired: 'bg-surface-21 text-ink-10'
 };
 
 interface Props {
@@ -63,13 +63,13 @@ export default function ProposalCard({ vm, isSupported, votesUnavailable }: Prop
 
   return (
     <article
-      className="rounded-2xl border border-[#ebebeb] bg-white p-[20px_22px] transition-colors hover:border-[#e0ddd6]"
+      className="rounded-2xl border border-line-9 bg-surface-1 p-[20px_22px] transition-colors hover:border-line-17"
       data-testid="proposal-card"
     >
       <div className="grid grid-cols-[1fr_190px] gap-[22px]">
         <div className="min-w-0">
           {/* Byline */}
-          <div className="mb-2 flex items-center gap-2.5 font-sans text-[13px] leading-[20px] text-[#6b7280]">
+          <div className="mb-2 flex items-center gap-2.5 font-sans text-[13px] leading-[20px] text-ink-10">
             {/* ★ CONVERGED (F6 item 22). This had no fallback at all — a dead
                 Steemit-era `profile_image` or a lite account with no Hive avatar
                 showed the browser's broken-image glyph next to the proposal's
@@ -80,11 +80,11 @@ export default function ProposalCard({ vm, isSupported, votesUnavailable }: Prop
             </Link>
             <span>
               {t('proposals.card.by')}{' '}
-              <Link href={`/@${proposal.creator}`} className="font-semibold text-[#2a2822] hover:underline">
+              <Link href={`/@${proposal.creator}`} className="font-semibold text-ink-4 hover:underline">
                 {proposal.creator}
               </Link>
             </span>
-            <span aria-hidden="true" className="text-[#cbd0d6]">
+            <span aria-hidden="true" className="text-ink-21">
               ·
             </span>
             <span>{parseChainDate(proposal.start_date).format('MMM D, YYYY')}</span>
@@ -92,13 +92,13 @@ export default function ProposalCard({ vm, isSupported, votesUnavailable }: Prop
 
           {/* Title */}
           <Link href={postHref} data-testid="proposal-card-title">
-            <h2 className="font-sans text-[22px] font-semibold leading-[28px] tracking-[-0.01em] text-[#161511]">
-              {proposal.subject} <span className="font-normal text-[#9ca3af]">#{id}</span>
+            <h2 className="font-sans text-[22px] font-semibold leading-[28px] tracking-[-0.01em] text-ink-2">
+              {proposal.subject} <span className="font-normal text-ink-14">#{id}</span>
             </h2>
           </Link>
 
           {/* Status pill + range + permlink */}
-          <div className="mt-[11px] flex flex-wrap items-center gap-2.5 font-sans text-[13px] leading-[20px] text-[#9ca3af]">
+          <div className="mt-[11px] flex flex-wrap items-center gap-2.5 font-sans text-[13px] leading-[20px] text-ink-14">
             <span
               className={cn(
                 'rounded-[7px] px-2.5 py-[3px] text-[12px] leading-[18px] font-bold uppercase tracking-[0.03em]',
@@ -108,7 +108,7 @@ export default function ProposalCard({ vm, isSupported, votesUnavailable }: Prop
               {t(`proposals.status.${proposal.status}`, proposal.status)}
             </span>
             <span>{formatDateRange(proposal.start_date, proposal.end_date)}</span>
-            <Link href={postHref} className="text-[#c0392b] hover:underline" data-testid="proposal-card-permlink">
+            <Link href={postHref} className="text-ink-brand-6 hover:underline" data-testid="proposal-card-permlink">
               @{proposal.creator}/{proposal.permlink}
             </Link>
           </div>

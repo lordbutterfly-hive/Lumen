@@ -37,7 +37,7 @@ const CommunitiesSelectFilter = ({
           visible label exists here, so a direct `aria-label` names the
           control rather than any one of its values. */}
       <SelectTrigger
-        className="w-fit bg-white"
+        className="w-fit bg-surface-1"
         data-testid="communities-filter"
         aria-label={t('search_page.sort_by')}
       >

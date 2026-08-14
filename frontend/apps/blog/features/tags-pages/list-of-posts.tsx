@@ -1,8 +1,10 @@
 'use client';
 
-import { useEffect } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
-import { useInView } from 'react-intersection-observer';
+import {
+  FEED_AUTO_PAGE_CAP,
+  useInfiniteScrollSentinel
+} from '@/blog/features/discovery-feed/hooks/use-infinite-scroll-sentinel';
 import { getPostsRanked } from '@transaction/lib/bridge-api';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
@@ -18,6 +20,22 @@ import { isCommunity } from '@ui/lib/utils';
 import { LumenLoader } from '@hive/ui';
 import { useSSRObserver, useInitialPosts } from '@/blog/components/observer-provider';
 
+/**
+ * ★★★ THIS COMPONENT IS NOT REACHABLE FROM ANY ROUTE (verified 2026-08-13).
+ *
+ * `/trending/[tag]`, `/hot/[tag]`, `/created/[tag]`, `/payout/[tag]` and
+ * `/muted/[tag]` are all one-line `redirect()` pages to `/topics/[tag]`, and
+ * their `/my` and bare variants redirect to `/`. Nothing under `app/` imports
+ * this file or `features/tags-pages/sort-page.tsx` — the same conclusion
+ * `features/votes/hooks/use-vote-mutation.ts` already records for the
+ * `entriesInfinite` query key it defines.
+ *
+ * So the infinite-scroll fixes below are applied for shape, not for a measured
+ * effect: this list carried the identical double-fetching, unbounded sentinel
+ * as its live siblings, and leaving the defect sitting in a file someone may
+ * revive is how it comes back. It is STRUCTURALLY UNREACHABLE and therefore
+ * UNTESTABLE in a browser — no before/after numbers are claimed for it.
+ */
 const SortedPagesPosts = ({ sort, tag = '' }: { sort: SortTypes; tag?: string }) => {
   const ssrObserver = useSSRObserver();
   const initialPosts = useInitialPosts();
@@ -41,14 +59,6 @@ const SortedPagesPosts = ({ sort, tag = '' }: { sort: SortTypes; tag?: string })
   const clientObserver = chainObserver(user);
   const observer = isHydrated ? clientObserver : ssrObserver;
   const { t } = useTranslation('common_blog');
-  const { ref, inView } = useInView();
-  // Create a separate ref for prefetching - triggers earlier than the main ref
-  const { ref: prefetchRef, inView: prefetchInView } = useInView({
-    // Start prefetching when element is 1500px from entering viewport
-    rootMargin: '1500px 0px',
-    // Only trigger once per element
-    triggerOnce: false
-  });
 
   const [preferences] = useStorageWithTTL<Preferences>(
     user.username ? `user-preferences-${user.username}` : '',
@@ -80,20 +90,21 @@ const SortedPagesPosts = ({ sort, tag = '' }: { sort: SortTypes; tag?: string })
     staleTime: StaleTime.MEDIUM
   });
 
-  // Auto-fetch the next page when either the prefetch sentinel (1500px ahead)
-  // or the load-more button enters view. Guard on !isFetching so a single cycle
-  // can't fire while any fetch is in flight — otherwise empty/short pages keep
-  // the sentinel in view and we'd loop until exhausting the feed.
-  useEffect(() => {
-      // ★ DO NOT REFIRE INTO A FAILURE.
-      // The sentinel refired every time a failed attempt's retries exhausted —
-      // roughly one request every 2s, unbounded, for as long as the reader sat
-      // at the bottom of the list — while the control read "Loading". Adding
-      // `!isError` stops the storm and lets the button say what happened.
-    if ((prefetchInView || inView) && hasNextPage && !isFetching && !isError) {
-      fetchNextPage();
-    }
-  }, [prefetchInView, inView, hasNextPage, isFetching, isError, fetchNextPage]);
+  // ★ ONE GEOMETRY-GATED, PAGE-CAPPED SENTINEL, at the same 1500px lead the
+  // prefetch observer used to have. Both the "do not refire into a failure"
+  // guard (`isError`) and the FX3 "keep paging through a fully filtered page"
+  // behaviour are preserved by the hook; the double fetch per gesture and the
+  // unbounded accumulation are not. See
+  // features/discovery-feed/hooks/use-infinite-scroll-sentinel.ts.
+  const sentinel = useInfiniteScrollSentinel({
+    hasNextPage,
+    isFetching,
+    isError,
+    fetchNextPage,
+    rootMarginPx: 1500,
+    pagesLoaded: data?.pages?.length ?? 0,
+    autoPageCap: FEED_AUTO_PAGE_CAP
+  });
 
   // Calculate total posts to determine when to show prefetch trigger
   const totalPosts = data?.pages?.reduce((acc, page) => acc + (page?.length || 0), 0) || 0;
@@ -161,23 +172,34 @@ const SortedPagesPosts = ({ sort, tag = '' }: { sort: SortTypes; tag?: string })
                   isCommunityPage={isCommunity(tag)}
                   testFilter={sort}
                 />
-                {/* Add prefetch trigger before the last page, when we have more than one page */}
-                {pageIndex === data.pages.length - 1 && totalPosts > 10 && (
-                  <div ref={prefetchRef} className="h-1 w-full" aria-hidden="true" />
-                )}
+                {/* The separate 1px prefetch trigger that sat here is gone —
+                    it was the second of two observers driving one effect, and
+                    it only rendered above 10 posts. The single sentinel on the
+                    button below carries the 1500px lead unconditionally. */}
               </div>
             ) : null;
           })}
-      <div>
-        <button ref={ref} onClick={() => fetchNextPage()} disabled={!hasNextPage || isFetchingNextPage}>
+      <div className="flex items-center gap-3">
+        <button
+          ref={sentinel.ref}
+          onClick={() => (sentinel.atPageCap ? sentinel.loadMore() : fetchNextPage())}
+          disabled={!hasNextPage || isFetchingNextPage}
+        >
           {isFetchingNextPage && !!data && data.pages.length > 0 ? (
             <div>Loading...</div>
+          ) : sentinel.atPageCap ? (
+            t('cards.comment_card.load_more')
           ) : hasNextPage ? (
             t('user_profile.load_newer')
           ) : data?.pages?.[0] && data.pages[0].length > 0 ? (
             t('user_profile.nothing_more_to_load')
           ) : null}
         </button>
+        {sentinel.atPageCap ? (
+          <button type="button" onClick={sentinel.backToTop}>
+            Back to top
+          </button>
+        ) : null}
       </div>
       <div>{isFetching && !isFetchingNextPage ? 'Background Updating...' : null}</div>
     </>

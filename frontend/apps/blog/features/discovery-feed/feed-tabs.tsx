@@ -3,8 +3,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
-import { useInView } from 'react-intersection-observer';
 import { fetchAccountPosts } from '@/blog/lib/lite/client/account-posts-fetch';
+import {
+  FEED_AUTO_PAGE_CAP,
+  useInfiniteScrollSentinel
+} from './hooks/use-infinite-scroll-sentinel';
+import ScrollPagerFooter from './scroll-pager-footer';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { isBlockedEntry, useLumenBlockList } from '@/blog/lib/lite/client/use-lumen-block';
 import { Entry } from '@hive/common-hiveio-packages/wax';
@@ -29,7 +33,9 @@ const LABELS = {
   feed: 'Following',
   predictions: 'Prediction Market',
   loadingMore: 'Loading…',
-  loadMore: 'Load more',
+  // `loadMore` lived here for the Following tab's manual button. That control is
+  // now `ScrollPagerFooter`, which owns its own copy of the label because all
+  // five infinite lists share it — see scroll-pager-footer.tsx.
   nothingMore: "You're all caught up",
   empty: 'No posts yet.',
   degraded: 'Personalised ranking is warming up. Showing popular posts meanwhile.',
@@ -112,7 +118,6 @@ async function fetchForYou(cursor?: { author?: string; permlink?: string }): Pro
 
 function ForYouFeed() {
   const { t } = useTranslation('common_blog');
-  const { ref, inView } = useInView();
 
   // ★ INFINITE SCROLL (2026-08-07). This was a single `useQuery` for one page of
   // 30, on the reasoning that a ranked feed is one scored ORDER with no cursor —
@@ -123,7 +128,7 @@ function ForYouFeed() {
   // feed from the last post of the previous page, using the `nextCursor` the API
   // now returns. Hive caps a single request at 20, so the server pages
   // underneath as well — the cursor is the only thing the client has to know.
-  const { data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage } =
+  const { data, isLoading, isError, fetchNextPage, hasNextPage, isFetchingNextPage } =
     useInfiniteQuery<ForYouResponse>({
       // ★ NOT keyed on `enabled` (2026-08-08). `enabled` is `loggedIn`, which is
       // false before hydration and true after — so the key changed mid-load and
@@ -222,9 +227,24 @@ function ForYouFeed() {
   /** New posts the reader accepted, kept above the pages they were already reading. */
   const [accepted, setAccepted] = useState<Entry[]>([]);
 
-  useEffect(() => {
-    if (inView && hasNextPage && !isFetchingNextPage) fetchNextPage();
-  }, [inView, hasNextPage, isFetchingNextPage, fetchNextPage]);
+  // ★ THE SENTINEL IS NO LONGER A BARE `inView` EFFECT (2026-08-13). It fired
+  // twice per scroll gesture and never stopped growing; both faults, the
+  // measurements behind them and why the fix is a geometry read rather than an
+  // edge latch are in hooks/use-infinite-scroll-sentinel.ts.
+  // ★ `isError` NOW STOPS AUTO-PAGING HERE TOO. This feed never had that guard,
+  // so a failed page-N fetch left the sentinel refiring roughly every two
+  // seconds for as long as the reader sat at the bottom — the retry storm the
+  // profile and tag lists were fixed for and this one was not. It stops, and
+  // `ScrollPagerFooter` says so and offers the retry, rather than dead-ending
+  // silently.
+  const sentinel = useInfiniteScrollSentinel({
+    hasNextPage,
+    isFetching: isFetchingNextPage,
+    isError,
+    fetchNextPage,
+    pagesLoaded: data?.pages?.length ?? 0,
+    autoPageCap: FEED_AUTO_PAGE_CAP
+  });
 
   // Hook must run unconditionally, above every early return (see lib/nsfw.ts).
   const nsfwPreference = useNsfwPreference();
@@ -391,17 +411,21 @@ function ForYouFeed() {
           Not a request loop: the existing effect already guards against
           fetching while one is in flight (`!isFetchingNextPage`) and against
           fetching past the last page (`hasNextPage`) — neither guard changed
-          here, only when this sentinel is allowed to exist in the DOM. */}
-      {hasNextPage ? (
-        <div ref={ref} className="py-8 text-center font-sans text-[13px] leading-[20px] text-muted-foreground">
-          {isFetchingNextPage ? 'Loading more…' : ''}
-        </div>
-      ) : null}
-      {!hasNextPage && shown.length > 0 ? (
-        <p className="py-8 text-center font-sans text-[13px] leading-[20px] text-muted-foreground">
-          That’s everything for now.
-        </p>
-      ) : null}
+          here, only when this sentinel is allowed to exist in the DOM.
+
+          ★ 2026-08-13: still mounted on `hasNextPage` alone, for exactly the
+          reason above — `ScrollPagerFooter` renders `null`/the end line only
+          when `hasNextPage` is false, never on `shown.length`. */}
+      <ScrollPagerFooter
+        sentinel={sentinel}
+        hasNextPage={hasNextPage}
+        isFetchingNextPage={isFetchingNextPage}
+        isError={isError}
+        loadedCount={shown.length}
+        loadingLabel={LABELS.loadingMore}
+        endLabel={shown.length > 0 ? 'That’s everything for now.' : undefined}
+        testId="for-you-pager"
+      />
     </div>
   );
 }
@@ -463,7 +487,6 @@ const LITE_FOLLOWING_LIMIT = 30;
 
 function EntryFeed({ sort, observer, lite = false }: { sort: string; observer: string; lite?: boolean }) {
   const { t } = useTranslation('common_blog');
-  const { ref, inView } = useInView();
   const { data, isFetching, isFetchingNextPage, fetchNextPage, hasNextPage, isError, isLoading } =
     useInfiniteQuery({
       queryKey: ['discoveryFeedEntries', sort, observer, lite],
@@ -518,11 +541,17 @@ function EntryFeed({ sort, observer, lite = false }: { sort: string; observer: s
       refetchOnMount: false
     });
 
-  useEffect(() => {
-    if (inView && hasNextPage && !isFetching) {
-      fetchNextPage();
-    }
-  }, [inView, hasNextPage, isFetching, fetchNextPage]);
+  // ★ Same geometry-gated, page-capped sentinel as ForYouFeed above — this tab
+  // had the identical `inView` effect and therefore the identical double fetch.
+  // See hooks/use-infinite-scroll-sentinel.ts.
+  const sentinel = useInfiniteScrollSentinel({
+    hasNextPage,
+    isFetching,
+    isError,
+    fetchNextPage,
+    pagesLoaded: data?.pages?.length ?? 0,
+    autoPageCap: FEED_AUTO_PAGE_CAP
+  });
 
   // Hook must run unconditionally, above every early return (see lib/nsfw.ts).
   const nsfwPreference = useNsfwPreference();
@@ -605,31 +634,23 @@ function EntryFeed({ sort, observer, lite = false }: { sort: string; observer: s
           />
         ))
       )}
-      {shown.length > 0 ? (
-        <div className="flex justify-center py-6">
-          <button
-            ref={ref}
-            type="button"
-            onClick={() => fetchNextPage()}
-            disabled={!hasNextPage || isFetchingNextPage}
-            className="font-sans text-sm text-muted-foreground hover:text-foreground disabled:cursor-default"
-          >
-            {isFetchingNextPage ? LABELS.loadingMore : hasNextPage ? LABELS.loadMore : LABELS.nothingMore}
-          </button>
-        </div>
-      ) : hasNextPage ? (
-        // Nothing rendered on this page after filtering, but the server still
-        // has more — an invisible-label sentinel (no "Load more" text inviting
-        // a click above an empty list) that still auto-fires via `inView`,
-        // mirroring ForYouFeed's own fully-filtered-page sentinel above.
-        <div
-          ref={ref}
-          className="py-8 text-center font-sans text-[13px] leading-[20px] text-muted-foreground"
-          data-testid="entry-feed-auto-sentinel"
-        >
-          {isFetchingNextPage ? LABELS.loadingMore : ''}
-        </div>
-      ) : null}
+      {/* ★ ONE FOOTER, NOT TWO (2026-08-13). This used to be a "Load more"
+          button when `shown.length > 0` and a separate invisible sentinel when
+          filtering had emptied the page — two elements, two mount points, one
+          observer ref moved between them. `ScrollPagerFooter` is a single node
+          in every state, so the sentinel is never unmounted and re-observed
+          mid-scroll, and the fully-filtered-page case (FX3) still keeps a
+          sentinel on `hasNextPage` alone. */}
+      <ScrollPagerFooter
+        sentinel={sentinel}
+        hasNextPage={hasNextPage}
+        isFetchingNextPage={isFetchingNextPage}
+        isError={isError}
+        loadedCount={shown.length}
+        loadingLabel={LABELS.loadingMore}
+        endLabel={shown.length > 0 ? LABELS.nothingMore : undefined}
+        testId="entry-feed-pager"
+      />
     </div>
   );
 }
