@@ -74,3 +74,22 @@ apps/blog/qa-profile-settings-proof.mjs
 # Caught by a sync dry-run on 2026-08-11 queued alongside real source changes.
 apps/blog/playwright-report/
 playwright-report/
+
+# ★ AGENT MEASUREMENT ARTIFACTS AT THE REPO ROOT (2026-08-14).
+#
+# Parallel audit agents write their network/timing captures next to the code they
+# are measuring. `net-in-1534.json` and `net-out-1534.json` (62 KB and 120 KB of
+# raw request logs) turned up as live staging candidates in a sync dry-run today
+# — the exclude list on `sync-frontend.sh` only covers `*.tmp.mjs` / `*.tmp.ts`,
+# so anything an agent names in JSON or PNG walks straight into the repo.
+#
+# Patterned rather than named, unlike the scratch probes above: those are a fixed
+# set of known-dangerous files, whereas these are generated fresh with a new
+# viewport number in the filename on every run, so naming them cannot keep up.
+/net-*.json
+/*.trace.json
+/*.png
+/*.jpg
+/*.jpeg
+/*.webm
+/*.har

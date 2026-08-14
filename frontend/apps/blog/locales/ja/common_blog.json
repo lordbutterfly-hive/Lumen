@@ -143,6 +143,16 @@
         "wif": "WIFキー",
         "hivesigner": "HiveSigner"
       }
+    },
+    "left_rail": {
+      "primary_nav": "メイン",
+      "home": "ホーム",
+      "profile": "プロフィール",
+      "wallet": "ウォレット",
+      "creators": "クリエイタートークン",
+      "vote_witness": "証人",
+      "proposals": "提案",
+      "settings": "設定"
     }
   },
   "select_sort": {

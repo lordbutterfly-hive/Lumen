@@ -357,8 +357,74 @@ function ForYouFeed() {
   // same way the list is, so the button can never offer posts that would render as
   // nothing.
   const shownKeys = new Set(shown.map(entryKey));
+
+  /**
+   * ★★★ "NEW" NOW MEANS NEWER THAN ANYTHING THE READER HAS SEEN — NOT MERELY
+   * ABSENT FROM THEIR PAGES (2026-08-14).
+   *
+   * ★ FIRST, THE HONEST HEADLINE: THIS DOES NOT MAKE THE PILL FIRE. Measured
+   * against the live route on :3000, signed in as a real reader, one sample a
+   * minute (probe: GET /api/feed/for-you?limit=30):
+   *
+   *   t=0m  src=trending-fallback  builtAt=02:31:57  novel_vs_t0=0  newest post 01:21:12
+   *   t=1m  src=trending-fallback  builtAt=02:31:57  novel_vs_t0=0  newest post 01:21:12
+   *   t=2m  src=trending-fallback  builtAt=02:33:46  novel_vs_t0=0  newest post 01:21:12
+   *   t=3m  src=trending-fallback  builtAt=02:33:46  novel_vs_t0=0  newest post 01:21:12
+   *   t=4m  src=trending-fallback  builtAt=02:35:35  novel_vs_t0=0  newest post 01:21:12
+   *   t=5m  src=trending-fallback  builtAt=02:37:24  novel_vs_t0=0  newest post 01:21:12
+   *
+   * Read that carefully, because it kills three plausible fixes at once. The
+   * artifact IS being rebuilt — `builtAt` advances about every 110 seconds,
+   * faster than this component polls. And every rebuild returns THE SAME
+   * THIRTY POSTS: not one key out of the top 30 changed in six samples, and
+   * the newest post in the feed stayed frozen at 01:21:12, already more than
+   * an hour old when the window opened. The diff below was never the problem.
+   * The input has nothing new in it.
+   *
+   * So, of the three options on the table:
+   *   · "poll a cheaper freshness probe" and "drive it from builtAt/cursor" —
+   *     REJECTED, and they are the same rejection. `builtAt` moved four times
+   *     while the content moved zero times. A pill driven off `builtAt` would
+   *     have announced new posts four times in six minutes with nothing behind
+   *     it. That is not a fix, it is the pill learning to lie.
+   *   · "compare against the newest item the reader has actually seen" —
+   *     TAKEN, and implemented here. It cannot manufacture content either, but
+   *     it is the only one of the three that makes the pill's CLAIM true on the
+   *     day the feed does turn over.
+   *
+   * ★ WHAT IT FIXES, THEN. The old test was "in the poll, absent from my
+   * pages", which on a RANKED feed is not a test for newness at all — it is a
+   * test for re-ranking. A three-day-old post that drifts into the top 30
+   * because someone upvoted it satisfies it perfectly, and the reader is told
+   * "Show 1 new post". This is not hypothetical for this feed: it is exactly
+   * how a slow candidate pool behaves, and the probe above shows the pool is
+   * very slow indeed. So a post must now ALSO be newer than the newest thing
+   * already on the reader's screen. Both conditions, or it is not offered.
+   *
+   * `newestShownAt` is the anchor rather than wall-clock load time on purpose:
+   * the reader's newest post was published at 01:21 while they loaded at 02:31,
+   * so a load-time anchor would demand a post newer than the reader's own
+   * session — an hour beyond anything this feed carries — and would gate out
+   * genuinely-newer-than-you've-seen posts for no benefit. Anchoring on what is
+   * actually on screen is both the weaker claim and the true one.
+   *
+   * An unparseable `created` resolves to NOT offered: we cannot prove it is
+   * new, so we do not say it is. Same principle as the rest of this file —
+   * "we could not check" never silently becomes a claim.
+   */
+  const newestShownAt = shown.reduce((max, e) => {
+    const at = Date.parse(`${e.created}Z`);
+    return Number.isNaN(at) ? max : Math.max(max, at);
+  }, 0);
+
   const offered = filterVisiblePosts(
-    (incoming?.entries ?? []).filter((e) => !shownKeys.has(entryKey(e))),
+    (incoming?.entries ?? []).filter((e) => {
+      if (shownKeys.has(entryKey(e))) return false;
+      // Nothing on screen to compare against yet — absence is all we have.
+      if (newestShownAt === 0) return true;
+      const at = Date.parse(`${e.created}Z`);
+      return Number.isNaN(at) ? false : at > newestShownAt;
+    }),
     nsfwPreference
   );
 

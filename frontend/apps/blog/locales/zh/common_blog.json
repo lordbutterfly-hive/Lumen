@@ -143,6 +143,16 @@
         "wif": "WIF密钥",
         "hivesigner": "HiveSigner"
       }
+    },
+    "left_rail": {
+      "primary_nav": "主要",
+      "home": "首页",
+      "profile": "个人资料",
+      "wallet": "钱包",
+      "creators": "创作者代币",
+      "vote_witness": "见证人",
+      "proposals": "提案",
+      "settings": "设置"
     }
   },
   "select_sort": {

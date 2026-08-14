@@ -144,6 +144,16 @@
         "wif": "مفتاح WIF",
         "hivesigner": "HiveSigner"
       }
+    },
+    "left_rail": {
+      "primary_nav": "أساسي",
+      "home": "الرئيسية",
+      "profile": "الملف الشخصي",
+      "wallet": "المحفظة",
+      "creators": "رموز المبدعين",
+      "vote_witness": "الشهود",
+      "proposals": "الاقتراحات",
+      "settings": "الإعدادات"
     }
   },
   "select_sort": {

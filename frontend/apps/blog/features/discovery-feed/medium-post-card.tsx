@@ -632,7 +632,18 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
             post got its own border. The vote count keeps its weight from type,
             not from a background. Hover still lights each control, matching the
             comment and reblog buttons beside it. */}
-        <div className="flex items-center gap-1 rounded-[10px] px-1 py-1.5 [&_svg]:h-[20px] [&_svg]:w-[20px]">
+        {/* ★ THE `[&_svg]:h-[20px]` OVERRIDE IS GONE (2026-08-14) — it was DEAD,
+            and dangerous while it looked alive. It compiles to
+            `.\[\&_svg\]\:h-\[20px\] svg` (one class + one type = 0,1,1); the
+            Blade's own rule is `.sm .btn svg` (two classes + type = 0,2,1) and
+            wins, so the glyph has always rendered at the handoff's 22px, not
+            the 20px this line asks for. Measured on :3000: box=22x22. Left in
+            place it is a tripwire — the next person to notice the rule "not
+            working" would raise its specificity and silently take the glyph to
+            20px, which is the handoff's stated floor, below which the concave
+            flanks fuse. The control sizes itself; the card does not get a
+            vote. */}
+        <div className="flex items-center gap-1 rounded-[10px] px-1 py-1.5">
           {/* ★ The tally lives INSIDE the vote control now (Blade redesign,
               2026-08-14). This sibling printed `total_votes` a second time, so every
               card read "759 759" — measured on the Blade build before removal. The
@@ -643,10 +654,46 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
 
         {/* Comments ghost button */}
         <span className="flex items-center gap-1 rounded-[10px] px-2.5 py-1.5 font-medium text-[#6b7280] transition-colors hover:bg-[#f4f5f7] hover:text-[#2a2822]">
+          {/* ★ 20px/1.75 -> 22px/2, TO MATCH THE BLADE (2026-08-14, owner:
+              "the comment icon has thinner borders than the blade upvote").
+              Measured on :3000, one card, same footer row:
+
+                upvote / downvote (Blade)  stroke 2     22x22
+                comment (post-children)    stroke 1.75  20x20
+                reblog                     stroke 1.75  20x20
+
+              The row is therefore drawn at two weights and two sizes, and the
+              heavier, larger one is the vote control, so it reads as bolted on.
+
+              THE NEIGHBOURS COME UP, THE BLADE DOES NOT COME DOWN. Three
+              reasons, in order of force:
+               1. The handoff pins the Blade — `stroke-width: 2`, 22px at feed
+                  density, "never below 20px glyph — the concave flanks fuse",
+                  never below a 38px target. Taking it to 20/1.75 would sit it
+                  exactly on the floor it was warned about, to match icons that
+                  have no such constraint.
+               2. Lowering it is not even a local edit. 1.75 is the DEFAULT of
+                  the whole house icon set — `make()` in
+                  packages/ui/components/custom-icons.tsx sets `strokeWidth={1.75}`
+                  once for ~80 icons. Matching downward means either a literal
+                  on the Blade (drift by hand) or moving that default, which
+                  repaints every icon in the app, most of them on surfaces
+                  other people own this session.
+               3. The vote control is the primary action on the card. Making
+                  the primary action the lightest mark on its own row to settle
+                  a consistency argument is the wrong trade.
+
+              So the fix is scoped to THIS ROW, in the file that owns it, via
+              className — `stroke-2` is a real Tailwind utility
+              (`stroke-width: 2`) and a CSS declaration beats the `stroke-width`
+              presentation attribute the factory sets, so no shared component
+              is touched. The overflow "…" in the card HEADER is deliberately
+              left alone: it is lucide, already stroke 2, and on a different
+              row from the one the owner is looking at. */}
           <PostCardCommentTooltip
             comments={post.children}
             url={`${href}/#comments`}
-            iconClassName="h-[20px] w-[20px]"
+            iconClassName="h-[22px] w-[22px] stroke-2"
             postTitle={displayTitle}
           />
         </span>
@@ -667,7 +714,8 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
                       data-testid="medium-card-reblog-count"
                       aria-label={`${LABELS.reblog} ${displayTitle}`}
                     >
-                      <Icons.reblog className="h-[20px] w-[20px]" aria-hidden="true" />
+                      {/* 20px/1.75 -> 22px/2 — see the note on the comment icon above. */}
+                      <Icons.reblog className="h-[22px] w-[22px] stroke-2" aria-hidden="true" />
                       {reblogCount}
                     </button>
                   </ReblogDialog>

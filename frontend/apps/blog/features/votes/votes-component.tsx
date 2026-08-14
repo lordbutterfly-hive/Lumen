@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import { useStorageWithTTL } from '@ui/hooks/useStorageWithTTL';
 import { StorageTTL } from '@ui/lib/storage-with-ttl';
 import clsx from 'clsx';
-import { CircleSpinner } from 'react-spinners-kit';
 import TooltipContainer from '@ui/components/tooltip-container';
 import { Slider } from '@ui/components/slider';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
@@ -437,7 +436,13 @@ const VotesComponent = ({
    */
 
   const upTally = (
-    <VoteTally value={tally.up} side="up" mine={vote_upvoted} testId="vote-tally-up" />
+    <VoteTally
+      value={tally.up}
+      side="up"
+      mine={vote_upvoted}
+      rollOnMount={upRing}
+      testId="vote-tally-up"
+    />
   );
   /**
    * ★ ABSENT, NOT HIDDEN. The handoff is explicit that a post with no downvotes
@@ -448,18 +453,66 @@ const VotesComponent = ({
    */
   const downTally =
     tally.down > 0 ? (
-      <VoteTally value={tally.down} side="down" mine={vote_downvoted} testId="vote-tally-down" />
+      // ★ `rollOnMount` is what makes the down side's "from above" roll reachable
+      // at all — the down tally's normal debut is a fresh mount at 1, where the
+      // change-detector inside VoteTally cannot fire. See the long note there.
+      <VoteTally
+        value={tally.down}
+        side="down"
+        mine={vote_downvoted}
+        rollOnMount={downRing}
+        testId="vote-tally-down"
+      />
     ) : null;
 
   return (
     <div className={rootClass} data-testid="vote-control">
       <span className={voteStyles.side}>
         {/* Upvote */}
-        {clickedVoteButton === 'up' && voteMutation.isLoading ? (
-          <span className={voteStyles.pending}>
-            <CircleSpinner loading size={20} color="#c0392b" />
-          </span>
-        ) : identity.isLoggedIn && enable_slider && !vote_upvoted ? (
+        {/**
+         * ★★★ THE IN-FLIGHT SPINNER IS WHAT ATE THE COMMIT RING — MEASURED
+         * (2026-08-14). This branch used to be
+         * `clickedVoteButton === 'up' && voteMutation.isLoading ? <CircleSpinner/> : …`,
+         * i.e. the entire up side was REPLACED by a spinner for the whole
+         * duration of the broadcast. The ring fires off the `myVote`
+         * transition, and that transition is the OPTIMISTIC update inside
+         * `onMutate` — which lands in the same tick that `isLoading` goes
+         * true. So the ring's `on` flag flipped at the exact instant the only
+         * elements that render `<CommitRing/>` were unmounted. It was
+         * structurally impossible for the ring to ever be seen.
+         *
+         * Measured on :3000 (the pushed build), one real cast attempt through
+         * the percentage picker, MutationObserver counting every node whose
+         * class matches `vote-control_ring`:
+         *
+         *   ring mounts observed : 0
+         *   spinner frames       : 13 / 88   (~520ms of spinner)
+         *   casting frames       : 11 / 88   (~440ms with `.casting` SET)
+         *   animations fired     : lm-vote-pop @ t+560ms, lm-vote-count-up, no ring
+         *
+         * `.casting` was set — the flag was doing its job — and the ring still
+         * never mounted, because `.casting` rides on `upBtnClass` (which the
+         * popover TRIGGER carries) while `<CommitRing/>` lived only on the
+         * other three branches. The pop therefore played ~560ms late, on an
+         * UNFILLED blade, after the spinner had come and gone.
+         *
+         * The spinner is not replaced with another spinner. The optimistic
+         * fill + the pop + the ring ARE the feedback the handoff specifies,
+         * and `voteDisabled` (which is `voteMutation.isLoading || tierPending`)
+         * already both blocks a double-submit and dims the control via
+         * `.btn:disabled`, so the in-flight state is still visible without
+         * unmounting the thing the reader is looking at. `.casting:disabled`
+         * exempts the blade being cast from that dimming so the ring plays at
+         * full strength — see vote-control.module.css.
+         *
+         * ★ Two hardcoded colour literals died with this branch, which is the
+         * second reason it is gone: `color="#c0392b"` here and `"#5b6470"` on
+         * the down side were the last two hardcoded reds/slates in this
+         * control after the palette was tokenised onto
+         * `--lm-vote-brand: hsl(var(--destructive))`. Both were wrong in dark
+         * mode, where brand lifts to `#f2685b` and slate to `#a3adba`.
+         */}
+        {identity.isLoggedIn && enable_slider && !vote_upvoted ? (
           <Popover>
             {/* ★ ONE REAL <button>, TWO NESTED `asChild` (2026-08-13, item 3).
                 `TooltipTrigger asChild` clones its child (`PopoverTrigger`);
@@ -488,6 +541,15 @@ const VotesComponent = ({
                   disabled={voteDisabled}
                   className={upBtnClass}
                 >
+                  {/* ★ THE RING MUST TRAVEL WITH `.casting`, ON EVERY BUTTON THAT
+                      CAN CARRY IT (2026-08-14). `upBtnClass` puts `.casting` on
+                      this trigger, and `.casting` is what runs the pop — so a
+                      trigger that has the class but not the element renders half
+                      the cast animation. Measured on :3000: `.casting` set for 11
+                      sampled frames on THIS button with 0 ring nodes in the
+                      document. The four `upBtnClass` buttons now all render the
+                      ring, so the class and the element can never disagree again. */}
+                  {upRing ? <CommitRing onDone={clearUpRing} /> : null}
                   <BladeGlyph />
                 </button>
               </PopoverTrigger>
@@ -638,12 +700,8 @@ const VotesComponent = ({
       </span>
 
       <span className={voteStyles.side}>
-        {/* Downvote */}
-        {clickedVoteButton === 'down' && voteMutation.isLoading ? (
-          <span className={voteStyles.pending}>
-            <CircleSpinner loading size={20} color="#5b6470" />
-          </span>
-        ) : identity.isLoggedIn && enable_slider && !vote_downvoted ? (
+        {/* Downvote — same removal, same reasons, as the up side above. */}
+        {identity.isLoggedIn && enable_slider && !vote_downvoted ? (
           <Popover>
             <TooltipContainer
               side="top"
@@ -664,6 +722,8 @@ const VotesComponent = ({
                   disabled={voteDisabled}
                   className={downBtnClass}
                 >
+                  {/* Same as the up trigger: `.casting` and the ring travel together. */}
+                  {downRing ? <CommitRing onDone={clearDownRing} /> : null}
                   <BladeGlyph />
                 </button>
               </PopoverTrigger>

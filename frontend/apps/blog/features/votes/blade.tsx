@@ -100,11 +100,44 @@ export function VoteTally({
   value,
   side,
   mine,
+  rollOnMount,
   testId
 }: {
   value: number;
   side: 'up' | 'down';
   mine: boolean;
+  /**
+   * ★★★ THE DOWN-SIDE ROLL WAS STRUCTURALLY UNREACHABLE WITHOUT THIS
+   * (2026-08-14 — measured, and it is the reason this prop exists).
+   *
+   * The roll is gated on `hasEverChanged` below, which is correct for the UP
+   * tally: that element is always in the DOM, so a change is always a change
+   * on a live element. The DOWN tally is not. The handoff requires it to be
+   * ABSENT at zero — "not an empty span, not visibility: hidden" — so the
+   * overwhelmingly common way a down tally appears is `absent -> 1`, i.e. a
+   * FRESH MOUNT, where `hasEverChanged` is false by construction and the
+   * number therefore pops in with no animation at all.
+   *
+   * Which means the whole down-side half of "the tally rolls from BELOW on the
+   * up side and from ABOVE on the down side" was unreachable in the case that
+   * matters most: the first downvote on a post. Measured on the new build,
+   * driving a real `up -> down` move on a card with no existing down tally:
+   * the up tally rolled (`lm-vote-count-up`), the down tally fired NO
+   * animation while going absent -> 1. The CSS was right the whole time; the
+   * element it was written for never lived long enough to hear about it.
+   *
+   * The obvious fix — always roll on mount — is the defect this gate was added
+   * to fix, pointed at a different element: 11 of the 20 cards on
+   * `/@lordbutterfly` carry a down tally, so every one of them would animate on
+   * page load, having signalled nothing.
+   *
+   * So the caller passes the one fact that separates the two: did THIS READER
+   * just cast this vote. That is the same fact the commit ring is driven from
+   * (`upRing` / `downRing` in votes-component.tsx), which is set only by an
+   * observed, reader-initiated transition after mount — never by learning about
+   * an existing vote, and never on load.
+   */
+  rollOnMount?: boolean;
   testId?: string;
 }) {
   /**
@@ -143,7 +176,10 @@ export function VoteTally({
     >
       {/* Keyed on the value so the roll replays only when the number actually
           changes, not on every unrelated re-render of the card. */}
-      <span key={value} className={clsx(styles.n, { [styles.rolling]: hasEverChanged.current })}>
+      <span
+        key={value}
+        className={clsx(styles.n, { [styles.rolling]: hasEverChanged.current || !!rollOnMount })}
+      >
         {value}
       </span>
     </span>

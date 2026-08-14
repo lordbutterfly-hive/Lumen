@@ -143,6 +143,16 @@
         "wif": "WIF ключ",
         "hivesigner": "HiveSigner"
       }
+    },
+    "left_rail": {
+      "primary_nav": "Основное",
+      "home": "Главная",
+      "profile": "Профиль",
+      "wallet": "Кошелек",
+      "creators": "Токены авторов",
+      "vote_witness": "Делегаты",
+      "proposals": "Предложения",
+      "settings": "Настройки"
     }
   },
   "select_sort": {

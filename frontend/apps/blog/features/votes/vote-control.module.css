@@ -179,6 +179,23 @@
   animation: lm-vote-pop 400ms cubic-bezier(0.2, 0.8, 0.3, 1);
 }
 
+/**
+ * ★ THE BLADE BEING CAST IS NOT DIMMED (2026-08-14). Every control here is
+ * `disabled` while the vote is in flight (`voteDisabled`), and `.btn:disabled`
+ * drops it to 0.55 — which is correct for the OTHER side (it really is
+ * unavailable) and wrong for the one that was just cast, whose whole job in
+ * that moment is to play the pop and the ring at full strength. Same
+ * specificity as `.btn:disabled` (two compound selectors), so this must stay
+ * BELOW it in source order to win.
+ *
+ * The dimming still arrives — `.casting` clears when the ring finishes at
+ * 620ms — so a slow broadcast still shows an in-flight control. That ordering
+ * is the point: animate first, then show it is still working.
+ */
+.casting:disabled {
+  opacity: 1;
+}
+
 /* Commit ring — mounted on the click that casts, unmounted on animationend. */
 .ring {
   position: absolute;
@@ -242,19 +259,14 @@
   display: inline-block;
 }
 
-/* Keeps the row from jumping while a vote is in flight: the spinner occupies
-   exactly the button's box. */
-.pending {
-  display: grid;
-  place-items: center;
-  width: 53px;
-  height: 53px;
-}
-
-.sm .pending {
-  width: 38px;
-  height: 38px;
-}
+/* ★ `.pending` (the in-flight spinner box) REMOVED 2026-08-14. The spinner it
+   sized replaced the whole blade for the duration of the broadcast, which is
+   exactly why the commit ring could never be seen — the ring mounts on the
+   optimistic `myVote` flip, in the same tick `isLoading` goes true. Measured on
+   the pushed build: 0 ring mounts, 13 spinner frames, `.casting` set on a
+   button that had no ring element. See the long note in votes-component.tsx.
+   Nothing references these rules any more; leaving them would invite the
+   spinner back. In-flight is now carried by `.btn:disabled`. */
 
 @keyframes lm-vote-pop {
   0% {

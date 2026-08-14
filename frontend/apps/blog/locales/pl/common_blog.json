@@ -145,6 +145,16 @@
         "wif": "Klucz WIF",
         "hivesigner": "HiveSigner"
       }
+    },
+    "left_rail": {
+      "primary_nav": "Główne",
+      "home": "Główna",
+      "profile": "Profil",
+      "wallet": "Portfel",
+      "creators": "Tokeny twórców",
+      "vote_witness": "Delegaci",
+      "proposals": "Propozycje",
+      "settings": "Ustawienia"
     }
   },
   "select_sort": {

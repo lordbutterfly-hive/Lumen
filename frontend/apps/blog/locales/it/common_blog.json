@@ -143,6 +143,16 @@
         "wif": "Chiave WIF",
         "hivesigner": "HiveSigner"
       }
+    },
+    "left_rail": {
+      "primary_nav": "Principale",
+      "home": "Home",
+      "profile": "Profilo",
+      "wallet": "Portafoglio",
+      "creators": "Token dei creator",
+      "vote_witness": "Witness",
+      "proposals": "Proposte",
+      "settings": "Impostazioni"
     }
   },
   "select_sort": {
