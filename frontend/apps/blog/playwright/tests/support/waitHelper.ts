@@ -144,8 +144,43 @@ export async function waitForSecondProcessedDownvoteLightMode(page: Page) {
   await waitForDownvoteColor(page, selectorFirstPostDownvoteButton, lightModeWhiteColor, timeout, interval);
 }
 
+/**
+ * ★★★ THIS WAITED ON AN ELEMENT THAT NO LONGER EXISTS, AND PASSED ANYWAY (2026-08-14).
+ *
+ * It was `page.waitForSelector('.circle__Wrapper-sc-16bbsoy-0', { state: 'detached' })`
+ * — the styled-components class of the `CircleSpinner` that used to REPLACE the
+ * whole up (or down) side of the vote control while a vote was in flight. That
+ * spinner was deleted on 2026-08-14: it unmounted the only element that could
+ * render the commit ring, at the exact instant the ring was asked to appear, so
+ * the cast animation was structurally impossible.
+ *
+ * Playwright resolves a `detached` wait IMMEDIATELY when the selector never
+ * matched anything. So this helper did not fail — it went green in 3ms instead
+ * of 807ms, and every assertion behind it (vote colour, tooltip text) began
+ * firing roughly 800ms early against a control that was still mid-flight. 18
+ * call sites across `votingPOM.spec.ts` and `votingSlider.spec.ts` lost their
+ * sync point without a single red test. A silent green is worse than a hang:
+ * a hang gets fixed.
+ *
+ * ★ The in-flight signal is now `disabled` ON the button, which stays mounted —
+ * measured present for 36-41 frames of a cast, where the spinner was present for
+ * 39. Waiting for it to CLEAR is the same sync point, expressed against the
+ * element that actually exists now.
+ *
+ * ★ `state: 'attached'` FIRST, deliberately. That is the half that cannot pass
+ * vacuously: if the vote button is missing entirely — wrong page, control not
+ * rendered, testid renamed — this throws instead of sailing through, which is
+ * exactly the failure the old helper hid. Only then do we wait for the disabled
+ * state to lift.
+ */
 export async function waitForCircleSpinnerIsDetatched(page: Page) {
-  await page.waitForSelector('.circle__Wrapper-sc-16bbsoy-0', { state: 'detached' });
+  const inFlight = '[data-testid="upvote-button"][disabled], [data-testid="downvote-button"][disabled]';
+
+  // The control must be on the page at all before "not in flight" means anything.
+  await page.waitForSelector('[data-testid="upvote-button"], [data-testid="downvote-button"]', {
+    state: 'attached'
+  });
+  await page.waitForSelector(inFlight, { state: 'detached' });
 }
 
 export async function waitForLifestyleMySubscriptionsLink(page: Page) {
