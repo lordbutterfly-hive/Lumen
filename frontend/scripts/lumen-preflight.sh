@@ -180,6 +180,44 @@ else
   amber "psql not available — database reachability not checked"
 fi
 
+# --- Creator-tokens indexer mapping ------------------------------------------
+#
+# ★ THE FAILURE THIS PREVENTS (2026-08-07 -> 2026-08-14, cost a week).
+#
+# The Magi indexer decodes a contract's logs using a mapping that is PINNED TO
+# ONE ADDRESS (creator_tokens_mappings.yaml `contracts[].address`). It files
+# events from the moment it first sees that contract and never goes back: there
+# is no automatic replay of logs that arrived before the mapping was installed.
+#
+# So if the contract is deployed (or relaunched) BEFORE its mapping is updated,
+# every event in that window is stored raw and never decoded. The symptom is
+# silent and misleading — `/creators` reads "No creators have launched a token
+# yet" while a live market sits on chain, and every view we read
+# (lumen_ct_discovery / balances / delivery_record / price_history) is empty,
+# because they are all built on `registered` and `bought`.
+#
+# That is exactly what happened: the contract went live at block 5,480,152 and
+# the mapping landed two days later. Three events were lost, and it took a
+# round trip with the indexer operator to establish that nothing was broken —
+# the mapping simply started late.
+#
+# The rule is: MAPPING FIRST, THEN DEPLOY. This check is here because "remember
+# to update the YAML" is not a control.
+MAPPING_YAML="/mnt/o/Lumen/creator-tokens/magi-indexer/creator_tokens_mappings.yaml"
+APP_CT_ID=$(grep -oE '^REACT_APP_CREATOR_TOKENS_CONTRACT_ID=.*' "$ENV_FILE" 2>/dev/null | cut -d= -f2-)
+if [ -n "$APP_CT_ID" ]; then
+  if [ -f "$MAPPING_YAML" ]; then
+    MAP_CT_ID=$(grep -oE 'address: "[^"]+"' "$MAPPING_YAML" 2>/dev/null | head -1 | cut -d'"' -f2)
+    if [ "$APP_CT_ID" = "$MAP_CT_ID" ]; then
+      green "creator-tokens mapping address matches the app's contract id"
+    else
+      red "creator-tokens mapping is for a DIFFERENT contract than the app points at — update creator_tokens_mappings.yaml (address AND fromBlockHeight) and reinstall it on the indexer BEFORE this contract sees traffic, or its events will never be decoded"
+    fi
+  else
+    amber "creator-tokens mapping not found at $MAPPING_YAML — cannot check it matches the app's contract id"
+  fi
+fi
+
 echo "---------------------------------------------------------------"
 if [ "$FAIL" -gt 0 ]; then
   echo "$FAIL blocking problem(s), $WARN warning(s). Do not start yet."
