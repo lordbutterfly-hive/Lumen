@@ -19,10 +19,23 @@ Mock data source is UNREACHABLE in this environment because
 reason to use the dev origin is the production-build inertness below, NOT a
 dead API. Do not repeat the 502 claim without re-curling it.
 
-The demo data source is deliberately INERT in a production build
+The DEMO data source is deliberately INERT in a production build
 (`isCreatorTokensDemoEnabled()` refuses when NODE_ENV=production — a real safety
 control, left alone). On the dev origin: judge FLOWS and COPY, never speed (dev
 compiles on first hit), and never report a demo figure as real market data.
+
+★★ CORRECTED 2026-08-15 — "creator tokens only work on :3010" IS WRONG, AND IT
+COSTS 45 SECONDS A PAGE. That inertness applies to the DEMO source only, and
+demo is OFF here (`REACT_APP_CREATOR_TOKENS_DEMO=0`), so the production build
+uses the REAL vsc-testnet source and the whole feature works on `:3443`. The
+seven `REACT_APP_CREATOR_TOKENS_*` vars reach the browser at RUNTIME via
+`@beam-australia/react-env` — verified by fetching `https://localhost:3443/__ENV.js`,
+which serves `CONTRACT_ID`, `NET_ID`, `GQL_URL` and the rest — so nothing about
+them is baked at build time. `/creators/launch` was driven signed-in on the
+production origin and rendered the coin, the bound-account panel and the strike
+button. MEASURED COST of believing otherwise: `/topics/photography` takes
+**45.8s on `:3010`** and **0.84s on `:3443`**. Use the production origin for
+creator-token work unless you specifically need a dev-only affordance.
 
 Also true and NOT a bug: a lite account cannot sign transactions, so it cannot
 trade a creator token. Judge how honestly the app says so.

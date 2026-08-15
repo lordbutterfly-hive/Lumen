@@ -137,7 +137,25 @@
     --ink-11: 122 114 104; /* #7a7268 x2 */
     --ink-12: 138 130 122; /* #8a827a x5 */
     --ink-13: 138 138 138; /* #8a8a8a x2 */
-    --ink-14: 156 163 175; /* #9ca3af x168 */
+    /*
+     * ★ DARKENED 2026-08-15 FROM #9ca3af (156 163 175). MEASURED, NOT PREFERENCE.
+     *
+     * `ink-14` is a TEXT token — 148 of its 150 usages across 49 files are
+     * `text-ink-14` on prose, labels and captions; only 2 are non-text. At
+     * #9ca3af it measured **2.54:1 on plain white** and 2.28:1 on the
+     * `surface-23` chips, i.e. it failed WCAG AA for normal text against every
+     * light ground in the product, everywhere it was used. That is not a
+     * per-component defect that can be patched 148 times; the token was wrong
+     * for the job it actually does.
+     *
+     * #6a6f77 is the LIGHTEST value on the same hue ramp that clears 4.5:1 on
+     * both white (5.06) and #f1f3f5 (4.55), so it stays visibly "faint" and
+     * changes the design as little as the standard allows.
+     *
+     * The dark-mode value below is untouched: #9c948d on the dark page ground
+     * already measures 5.95:1 and was never the problem.
+     */
+    --ink-14: 106 111 119; /* #6a6f77 — was #9ca3af (2.54:1 on white, failed AA) */
     --ink-15: 184 188 196; /* #b8bcc4 x1 */
     --ink-16: 196 196 196; /* #c4c4c4 x1 */
     --ink-17: 193 199 206; /* #c1c7ce x1 */
@@ -1415,7 +1433,7 @@ summary {
    NOTHING here touches width/height/top/left/margin, so no keyframe
    can force a reflow. Audited keyframe by keyframe on port: 17 of 17
    comply. Honest caveat on the handoff's "every keyframe runs on the
-   compositor" — transform and opacity do; box-shadow (mt-dot, mt-cta)
+   compositor" — transform and opacity do; box-shadow (mt-dot)
    and stroke-dashoffset (mt-charge-ring) repaint each frame. They do
    not lay out, they are small, and they are three elements, so the
    cost is real but bounded. Do not add a fourth.
@@ -1474,17 +1492,6 @@ summary {
   70% {
     opacity: 0.7;
     box-shadow: 0 0 0 9px rgba(192, 57, 43, 0);
-  }
-}
-
-/* The primary CTA. Same ring mechanic, slower and wider. */
-@keyframes mt-cta {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 rgba(192, 57, 43, 0.4);
-  }
-  70% {
-    box-shadow: 0 0 0 15px rgba(192, 57, 43, 0);
   }
 }
 
@@ -1677,9 +1684,6 @@ summary {
 .mt-dot {
   animation: mt-dot 1.7s ease-out infinite;
 }
-.mt-cta {
-  animation: mt-cta 2.6s ease-out infinite;
-}
 .mt-step {
   animation: mt-settle 460ms cubic-bezier(0.2, 0.8, 0.3, 1) both;
 }
@@ -1750,7 +1754,6 @@ summary {
   .mt-fade,
   .mt-tape,
   .mt-dot,
-  .mt-cta,
   .mt-step,
   .mt-coin-idle,
   .mt-coin-hint,

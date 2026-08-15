@@ -61,6 +61,7 @@
     "gate_lite": "This account cannot sign transactions yet. Upgrade to a full account first.",
     "gate_signed_out": "You need to be signed in to launch.",
     "gate_sign_in": "Sign in",
+    "gate_checking_market": "We’re checking whether you already have a Meritum. This clears in a moment.",
     "gate_unknown_market": "We cannot check whether you already have a token. Launching is held back.",
     "gate_retry": "Try again",
     "gate_has_market": "You already have a live token. A creator gets one.",
@@ -102,6 +103,7 @@
     "coin_alt": "Your Meritum coin",
     "error_needs_one_offer": "Price at least one offer before you continue.",
     "error_offer_needs_name": "Give every priced offer a name.",
+    "error_offer_duplicate_name": "Two offers have the same name. Give each one a name a buyer can tell apart.",
     "error_price_band": "Each price must be between {{min}} and {{max}}.",
     "error_first_buy_max": "Your first buy can be at most {{max}}.",
     "draft_restored": "Picked up your saved draft at step {{step}} of 3.",
@@ -109,7 +111,8 @@
     "classic_prompt": "Prefer a plain form?",
     "classic_link": "Open the classic launch page",
     "term_final_label": "One way",
-    "term_final_value": "Launching is permanent · the market cannot be closed, renamed, or moved to another account."
+    "term_final_value": "Launching is permanent · the market cannot be closed, renamed, or moved to another account.",
+    "error_launch_in_another_tab": "A launch is already running in another tab. Finish there — launching twice would spend a second signature on a token you already have."
   },
   "global": {
     "no_rewards": "No rewards pending redemption.",

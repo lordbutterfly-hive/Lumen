@@ -122,9 +122,11 @@ export interface HoldToStrikeApi {
   reset: () => void;
   handlers: {
     onPointerDown: (e: React.PointerEvent<HTMLElement>) => void;
-    onPointerUp: () => void;
-    onPointerLeave: () => void;
-    onPointerCancel: () => void;
+    /* These three take the event so the release can be matched to the pointer
+       that armed the hold — see `holdPointer` below. */
+    onPointerUp: (e: React.PointerEvent<HTMLElement>) => void;
+    onPointerLeave: (e: React.PointerEvent<HTMLElement>) => void;
+    onPointerCancel: (e: React.PointerEvent<HTMLElement>) => void;
     onKeyDown: (e: React.KeyboardEvent<HTMLElement>) => void;
     onKeyUp: (e: React.KeyboardEvent<HTMLElement>) => void;
     onBlur: () => void;
@@ -309,6 +311,12 @@ export const useHoldToStrike = (options: UseHoldToStrikeOptions = {}): HoldToStr
     }
   }, [fire, lockHeight, setPhaseSafe]);
 
+  /**
+   * The pointer that armed the current hold, or null when no pointer owns it
+   * (idle, or a keyboard hold). Compared on every release — see the handlers.
+   */
+  const holdPointer = useRef<number | null>(null);
+
   const abort = useCallback(() => {
     // ★ A COMMITTED STRIKE IS NOT ABORTABLE. Lifting the finger the instant the
     //   ring closes is the normal way to use this control; treating that as a
@@ -323,7 +331,23 @@ export const useHoldToStrike = (options: UseHoldToStrikeOptions = {}): HoldToStr
     optsRef.current.onAbort?.();
   }, [releaseHeight, setPhaseSafe]);
 
+  /**
+   * Release from a pointer gesture. Only the pointer that armed the hold can
+   * end it; every other pointer's up/leave/cancel is ignored. The id is cleared
+   * on a match so a duplicate event for the same pointer cannot abort a strike
+   * that has since committed.
+   */
+  const releaseFor = useCallback(
+    (pointerId: number) => {
+      if (holdPointer.current !== pointerId) return;
+      holdPointer.current = null;
+      abort();
+    },
+    [abort]
+  );
+
   const reset = useCallback(() => {
+    holdPointer.current = null;
     clearTimer(chargeTimer);
     clearTimer(strikeTimer);
     clearTimer(releaseTimer);
@@ -370,13 +394,35 @@ export const useHoldToStrike = (options: UseHoldToStrikeOptions = {}): HoldToStr
       onPointerDown: (e) => {
         // Primary button only; a right-click must not arm the strike.
         if (e.button !== 0) return;
+        holdPointer.current = e.pointerId;
         begin();
       },
-      onPointerUp: abort,
-      onPointerLeave: abort,
-      // Fires when the browser takes the gesture over (a scroll, a system
-      // gesture). Without it a touch hold can be left charging with no way back.
-      onPointerCancel: abort,
+      /*
+       * ★ THE RELEASE MUST COME FROM THE POINTER THAT ARMED THE HOLD.
+       *
+       * `onPointerDown` filtered on `e.button !== 0`, but the three release
+       * handlers took no event at all and aborted on ANY pointer. The gap is
+       * not theoretical and it is asymmetric by construction:
+       *
+       *   · mouse — press and hold with the left button, then press and release
+       *     the RIGHT button without moving. `pointerdown` was ignored (button
+       *     1), `pointerup` was not, so the right-click cancels a strike the
+       *     reader is still deliberately holding.
+       *   · touch — hold with one finger, rest or lift a second anywhere on the
+       *     coin. The second finger's `pointerup` kills the first one's charge.
+       *
+       * A strict `pointerId` match fixes both, and deliberately does NOT fall
+       * back to "abort if we have no id": during a KEYBOARD hold `holdPointer`
+       * is null, and a stray pointerup landing on the coin should not cancel a
+       * hold the keyboard owns — `onKeyUp` is that gesture's release.
+       *
+       * `pointercancel` is still honoured for the matching pointer only; the
+       * browser taking over the gesture (a scroll, a system gesture) is exactly
+       * the case where a touch hold would otherwise charge with no way back.
+       */
+      onPointerUp: (e) => releaseFor(e.pointerId),
+      onPointerLeave: (e) => releaseFor(e.pointerId),
+      onPointerCancel: (e) => releaseFor(e.pointerId),
       onKeyDown: (e) => {
         if (e.key === 'Escape') {
           abort();
@@ -398,7 +444,7 @@ export const useHoldToStrike = (options: UseHoldToStrikeOptions = {}): HoldToStr
       // hold would run to completion behind the user's back.
       onBlur: abort
     }),
-    [begin, abort]
+    [begin, abort, releaseFor]
   );
 
   return { phase, holdId, reducedMotion, chargeProgress, lockedHeight, begin, abort, reset, handlers };

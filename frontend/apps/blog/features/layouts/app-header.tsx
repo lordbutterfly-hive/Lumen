@@ -123,7 +123,15 @@ const AppHeader: FC = () => {
   // which is also why the bell could sit on "Loading". The bell degrades to
   // "No notifications yet" either way; this just stops asking a question whose
   // answer cannot exist.
-  const isChainAccount = !!user.username && user.account_tier !== 'lite';
+  // ★ POSITIVE CHECK, NOT `!== 'lite'` (2026-08-15). `account_tier` is undefined
+  // until the session resolves, and `undefined !== 'lite'` is TRUE — so for the
+  // first render of every page a lite reader DID fire this query, got
+  // `Account <name> does not exist`, and the route answered 502. Measured on
+  // production: 6 of them per page load on home/trending/hot/created/payout and
+  // even /login. The guard above was correct in intent and inverted in effect.
+  // `'full'` and `'lite'` are the only two tiers, so asking for the one that has
+  // a chain account is both narrower and honest about the undefined window.
+  const isChainAccount = !!user.username && user.account_tier === 'full';
   const { data } = useQuery({
     queryKey: ['unreadNotifications', user.username],
     queryFn: () => fetchUnreadNotifications(user.username),

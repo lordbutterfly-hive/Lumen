@@ -130,6 +130,10 @@ const LaunchStepTerms: FC<LaunchStepTermsProps> = ({
           </a>
         </Notice>
       ) : null}
+      {/* Still reading the chain. Plain tone and NO retry button on purpose:
+          this clears itself in a moment, and offering a retry for a request
+          that is still in flight teaches the reader to hammer it. */}
+      {block === 'checking-market' ? <Notice>{t('meritum_launch.gate_checking_market')}</Notice> : null}
       {canRetryRead ? (
         <Notice tone="alert">
           {t('meritum_launch.gate_unknown_market')}{' '}

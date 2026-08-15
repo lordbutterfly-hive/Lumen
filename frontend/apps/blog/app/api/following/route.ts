@@ -32,6 +32,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     );
     return NextResponse.json(following, { headers: { 'cache-control': 'private, no-store' } });
   } catch (error) {
+    // ★ A LITE ACCOUNT FOLLOWS NOBODY ON HIVE, AND THAT IS AN ANSWER
+    // (2026-08-15, same fix as /api/notifications/unread). A Lumen handle has no
+    // chain account, so `getFollowing` asserts `Account <name> does not exist`.
+    // Answering 502 made every profile view of a lite reader emit a red failed
+    // request for a question whose true answer is "an empty list". Anything else
+    // still 502s, so a genuinely broken chain stays loud.
+    const message = error instanceof Error ? error.message : String(error);
+    if (/Account .* does not exist/i.test(message)) {
+      logger.info('following: %s has no chain account (lite) — answering an empty list', account);
+      return NextResponse.json([], { headers: { 'cache-control': 'private, no-store' } });
+    }
     logger.error(error, 'following lookup failed for %s', account);
     return NextResponse.json({ error: 'following_unavailable' }, { status: 502 });
   }

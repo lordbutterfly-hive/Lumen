@@ -15,7 +15,8 @@ import styles from './meritum-intro.module.css';
  *
  * ★ WHITE ON WARM, ON PURPOSE. `bg-meritum-card` is `--surface-1`, the app's
  * plain card white — the same token the launch card uses. The colour change
- * against `bg-meritum-paper` above is the only thing separating the two halves
+ * against the masthead wash above (`--masthead-1..4`, the same gradient the
+ * app's own PageMasthead uses) is the only thing separating the two halves
  * apart from one hairline, so it is not decoration and must not be collapsed
  * into the paper to "tidy up" the card.
  */

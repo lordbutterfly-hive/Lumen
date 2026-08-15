@@ -124,8 +124,24 @@ export function UserAvatarImg({
    * Only ever runs in the 'direct' stage, and clears on unmount, so a feed of 30
    * avatars costs 30 timers for at most 2.5s and none after they load.
    */
+  /*
+   * ★ THE SAME GUARD NOW COVERS THE PROXY STAGE TOO (2026-08-15).
+   *
+   * This read `if (stage !== 'direct') return;`, so everything above applied to
+   * exactly one hop. But the proxy response is an image response like any other
+   * — it can be blocked, hang, or come back non-image — and in the proxy stage
+   * `onError` is the ONLY escape left, which is precisely the escape this whole
+   * comment exists to explain does not fire for a blocked or zero-pixel
+   * response. So the fix for the direct hop left the second hop with no way out
+   * at all: a reader whose proxy request stalls keeps the broken-image glyph
+   * forever, with no timer to promote them and no error to catch.
+   *
+   * Running in both stages makes the machine terminate: direct -> proxy ->
+   * failed, at most two timers per avatar, and `failed` renders the monogram
+   * deliberately rather than a broken image indefinitely.
+   */
   useEffect(() => {
-    if (stage !== 'direct') return;
+    if (stage === 'failed') return;
     const timer = setTimeout(() => {
       const el = imgRef.current;
       // `complete` is true for a LOADED image and for one that errored (whose
@@ -148,7 +164,9 @@ export function UserAvatarImg({
       // `naturalWidth === 0` on a completed image means exactly "produced no
       // pixels", so this can only ADD promotions to a path already proven good;
       // a genuinely loaded image has a non-zero width and is untouched.
-      if (el && (!el.complete || el.naturalWidth === 0)) setStage('proxy');
+      if (!el || (el.complete && el.naturalWidth > 0)) return;
+      // direct -> proxy -> failed. Never backwards, so this always terminates.
+      setStage((current) => (current === 'direct' ? 'proxy' : 'failed'));
     }, DIRECT_TIMEOUT_MS);
     return () => clearTimeout(timer);
   }, [stage]);

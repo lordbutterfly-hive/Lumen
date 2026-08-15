@@ -153,6 +153,8 @@ const MeritumLaunchFlow: FC = () => {
         return t('meritum_launch.error_needs_one_offer');
       case 'offer-needs-name':
         return t('meritum_launch.error_offer_needs_name');
+      case 'offer-duplicate-name':
+        return t('meritum_launch.error_offer_duplicate_name');
       case 'price-band':
         // Bounds come from the contract's own params, never from copy. The
         // minimum is printed at its own precision ($0.577, three decimals like

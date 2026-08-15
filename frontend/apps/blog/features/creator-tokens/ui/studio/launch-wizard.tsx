@@ -294,8 +294,16 @@ const LaunchWizard: FC = () => {
         <div className="mb-6 flex items-center gap-2">
           {STEPS.map((s, i) => (
             <div key={s} className="flex flex-1 items-center gap-2">
-              <span className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-[12px] font-bold ${i <= step ? 'bg-surface-brand-12 text-ink-27' : 'bg-surface-23 text-ink-14'}`}>{i + 1}</span>
-              <span className={`text-[13px] leading-[20px] font-semibold ${i === step ? 'text-ink-2' : 'text-ink-14'}`}>{s}</span>
+              {/*
+                ★ ink-10, NOT ink-14, for the UPCOMING steps (2026-08-15, pill audit).
+                `ink-14` is #9ca3af — measured 2.28:1 on this `surface-23` chip and
+                2.54:1 even on plain white, i.e. it fails WCAG AA for normal text
+                against ANY light ground. A step number and its label are read, not
+                decoration. `ink-10` (#6b7280) clears the bar and still reads as the
+                inactive state next to the active step's white-on-brand.
+              */}
+              <span className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-[12px] font-bold ${i <= step ? 'bg-surface-brand-12 text-ink-27' : 'bg-surface-23 text-ink-10'}`}>{i + 1}</span>
+              <span className={`text-[13px] leading-[20px] font-semibold ${i === step ? 'text-ink-2' : 'text-ink-10'}`}>{s}</span>
               {i < STEPS.length - 1 ? <span className="h-px flex-1 bg-surface-26" /> : null}
             </div>
           ))}

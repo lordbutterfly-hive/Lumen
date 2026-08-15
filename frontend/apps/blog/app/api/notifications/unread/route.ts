@@ -47,6 +47,26 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const unread = await getUnreadNotifications(account);
     return NextResponse.json(unread, { headers: { 'cache-control': 'private, no-store' } });
   } catch (error) {
+    // ★ THERE IS A THIRD ANSWER, AND IT IS NOT A FAILURE (2026-08-15).
+    //
+    // The note below is right that "no notifications" and "we could not ask"
+    // must not be collapsed. But a LITE account is neither: it has no Hive
+    // account at all, so `bridge.unread_notifications` asserts
+    // `Account <name> does not exist`. That is a definite, correct zero — the
+    // question does not apply — and answering 502 turned it into a red failed
+    // request on every signed-in page for the entire lite cohort.
+    //
+    // Matched on the assertion text rather than on the session, because this
+    // route is given an account name and never sees who is asking. Anything
+    // else still 502s, so a genuinely broken chain is still loud.
+    const message = error instanceof Error ? error.message : String(error);
+    if (/Account .* does not exist/i.test(message)) {
+      logger.info('unread notifications: %s has no chain account (lite) — answering zero', account);
+      return NextResponse.json(
+        { unread: 0, lastread: null },
+        { headers: { 'cache-control': 'private, no-store' } }
+      );
+    }
     logger.error(error, 'unread notifications lookup failed for %s', account);
     // A real status rather than an empty 200: "no notifications" and "we could
     // not ask" are different answers, and this codebase has repeatedly been

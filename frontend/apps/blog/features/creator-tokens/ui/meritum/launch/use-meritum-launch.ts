@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
+import { useTranslation } from '@/blog/i18n/client';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { useLiveStudio } from '../../../live/use-live-studio';
 import { buyQuote, displayPriceUsd } from '../../../market/curve';
@@ -10,6 +11,7 @@ import { usdPrice } from '../../../market/format';
 import { writeFailureMessage } from '../../write-failure';
 import { MAX_PRICE_USD, MIN_PRICE_USD, STANDARD_CAP, parseMoney, sanitizeMoneyInput } from '../../launch-money';
 import { MERITUM_STUD_COUNT } from '../coin';
+import { getStorageItem, removeStorageItem, setStorageItem } from '@ui/lib/storage-with-ttl';
 
 /**
  * THE MERITUM LAUNCH FLOW — all of its state, and the real launch write.
@@ -61,14 +63,91 @@ export type MeritumWriteState = 'idle' | 'pending' | 'ok' | 'failed';
 export type MeritumLaunchBlock =
   | 'signed-out'
   | 'lite'
+  /** The market read is still in flight — transient, clears itself, no retry offered. */
+  | 'checking-market'
   | 'unknown-market'
   | 'has-market'
   | 'no-offer'
   | 'offer-needs-name'
+  /** Two priced offers carry the same name — the buyer cannot tell them apart. */
+  | 'offer-duplicate-name'
   | 'price-band'
   | 'first-buy-max';
 
 const emptyOffers = (): MeritumOffer[] => Array.from({ length: MERITUM_OFFER_COUNT }, () => ({ name: '', price: '' }));
+
+/**
+ * ★ AN OFFER NAME IS ENGRAVED ON A MARKET AND SHOWN TO BUYERS, SO IT IS UNTRUSTED
+ * TEXT ON A MONEY SURFACE — even though the creator types it themselves.
+ *
+ * The creator is not the victim here; the BUYER is. What the buyer reads is what
+ * they think they are paying for, so any character that lets the rendered string
+ * differ from the stored one is a mis-selling vector, and it is written once, on
+ * chain, where nobody can edit it afterwards. Before this the only checks were
+ * `maxLength={120}` on the input and a `.trim()`.
+ *
+ * Three classes are stripped, all for the same reason — they are invisible or
+ * they reorder what is around them:
+ *
+ *   · BIDI overrides and isolates (U+202A-202E, U+2066-2069). These reverse the
+ *     visual order of neighbouring text: a name written as
+ *     `1 hour <U+202E>llac<U+202C> - $5` renders as "1 hour call - $5" while
+ *     storing something else. This is the Trojan-Source class of trick
+ *     (CVE-2021-42574) pointed at a price list. Written here as <U+202E>
+ *     rather than the character itself, because a literal one would be
+ *     invisible and would reorder this very comment.
+ *   · Zero-width and joiner characters (U+200B-U+200D, U+2060, U+FEFF). They
+ *     make two different stored names render identically, so a buyer cannot tell
+ *     two offers apart, and they let a name pass a "non-empty" check while
+ *     showing nothing at all.
+ *   · C0/C1 control characters, which have no business in a one-line label.
+ *
+ * Normalising to NFC first means the comparison below sees composed and
+ * decomposed spellings of the same word as the same word. Whitespace runs
+ * collapse so " a  b " and " a b" cannot be sold as two distinct offers.
+ *
+ * NOT stripped: ordinary non-Latin scripts, emoji, punctuation. Refusing those
+ * would be a different product decision, and a wrong one.
+ */
+export function sanitizeOfferName(raw: string): string {
+  return (
+    raw
+      .normalize('NFC')
+      // BIDI overrides + isolates. Escapes, never literals: a literal here would
+      // be invisible in this file and reorder the source you are reading.
+      .replace(/[\u202A-\u202E\u2066-\u2069]/g, '')
+      // zero-width space/non-joiner/joiner, word joiner, BOM
+      .replace(/[\u200B-\u200D\u2060\uFEFF]/g, '')
+      // C0 and C1 control characters
+      // eslint-disable-next-line no-control-regex
+      .replace(/[\u0000-\u001F\u007F-\u009F]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+  );
+}
+
+/**
+ * ★ THE ONE-MARKET RULE IS ENFORCED ON CHAIN; THIS STOPS US PAYING TO LEARN IT.
+ *
+ * `inFlight` next to it is a `useRef`, so it is per-COMPONENT. Two tabs open on
+ * step 3 — which the draft restore makes easy, since both tabs rehydrate the
+ * same saved flow — each hold their own coin and each fire `register`. The
+ * contract rejects the second for one-market-per-account, so the creator pays a
+ * signature and RC for a transaction that cannot succeed, and reads a launch
+ * failure for a token that in fact launched.
+ *
+ * The claim lives in localStorage, which is what tabs share, and goes through
+ * the repo's TTL wrapper rather than raw `localStorage` (see the app's own lint
+ * rule). It is keyed per creator so two accounts in two profiles never collide.
+ *
+ * ★ 90 SECONDS, AND WHY A TTL AT ALL. A tab that is closed or crashes mid-write
+ * never runs its own cleanup, and a claim with no expiry would lock the creator
+ * out of their own launch permanently — a worse failure than the one being
+ * prevented. 90s comfortably covers a signature prompt plus broadcast while
+ * self-healing if nobody clears it.
+ */
+const LAUNCH_CLAIM_TTL_MS = 90_000;
+const launchClaimKey = (creator: string): string => `meritum:launch-inflight:${creator}`;
 
 interface DraftShape {
   step: number;
@@ -176,6 +255,7 @@ export interface MeritumLaunchApi {
 }
 
 export function useMeritumLaunch(): MeritumLaunchApi {
+  const { t } = useTranslation('common_blog');
   const router = useRouter();
   const pathname = usePathname();
   const studio = useLiveStudio();
@@ -301,7 +381,10 @@ export function useMeritumLaunch(): MeritumLaunchApi {
 
   /** Offers that carry a usable price, in the order the reader wrote them. */
   const pricedOffers = useMemo(
-    () => offers.map((o, i) => ({ index: i, name: o.name.trim(), usd: parseMoney(o.price) })).filter((o) => o.usd > 0),
+    () =>
+      offers
+        .map((o, i) => ({ index: i, name: sanitizeOfferName(o.name), usd: parseMoney(o.price) }))
+        .filter((o) => o.usd > 0),
     [offers]
   );
   const offersPriced = pricedOffers.length;
@@ -322,6 +405,33 @@ export function useMeritumLaunch(): MeritumLaunchApi {
    */
   const priceBandBroken = pricedOffers.some((o) => o.usd < MIN_PRICE_USD || o.usd > MAX_PRICE_USD);
   const offerMissingName = pricedOffers.some((o) => o.name === '');
+
+  /**
+   * ★ TWO PRICED OFFERS MAY NOT CARRY THE SAME NAME.
+   *
+   * The three offers are engraved together and shown to a buyer as a list to
+   * choose from. Two rows reading "1 hour call" at $5 and $50 is not a typo the
+   * buyer can resolve — the label is the only thing distinguishing them, and the
+   * market is written once. It also defeats the point of the sanitiser above:
+   * strip the zero-width characters and two names that LOOKED different become
+   * genuinely identical, so this check has to run on the sanitised value, which
+   * it does (`pricedOffers` is already sanitised).
+   *
+   * Case-insensitive, because "1 Hour Call" and "1 hour call" are the same
+   * offer to every reader. Empty names are excluded — that is `offer-needs-name`
+   * above, and reporting one fault as two is how a form makes a reader chase
+   * their tail.
+   */
+  const offerNamesDuplicated = (() => {
+    const seen = new Set<string>();
+    for (const o of pricedOffers) {
+      if (o.name === '') continue;
+      const key = o.name.toLocaleLowerCase();
+      if (seen.has(key)) return true;
+      seen.add(key);
+    }
+    return false;
+  })();
   const capBroken = STANDARD_CAP < MIN_CAP_CREDITS_BASE_UNITS || STANDARD_CAP > MAX_CAP_CREDITS_BASE_UNITS;
   const firstBuyTooBig = firstBuyUsd > MAX_PRICE_USD;
 
@@ -329,9 +439,11 @@ export function useMeritumLaunch(): MeritumLaunchApi {
     ? 'price-band'
     : offerMissingName
       ? 'offer-needs-name'
-      : offersPriced === 0
-        ? 'no-offer'
-        : null;
+      : offerNamesDuplicated
+        ? 'offer-duplicate-name'
+        : offersPriced === 0
+          ? 'no-offer'
+          : null;
 
   /**
    * A failed market read is NOT "no market". `register` enforces one market per
@@ -342,16 +454,41 @@ export function useMeritumLaunch(): MeritumLaunchApi {
   const canRetryRead = studio.status === 'error';
   const alreadyHasMarket = Boolean(studio.market);
 
+  /**
+   * ★ "STILL READING" IS ALSO "WE DO NOT KNOW" (added 2026-08-15).
+   *
+   * The comment above is right and the gate under it was incomplete: it caught
+   * `status === 'error'` but not `status === 'loading'`, and `LiveMarketStatus`
+   * has both (`use-live-token-market.ts:30` — 'unavailable' | 'loading' |
+   * 'error' | 'missing' | ...). While the read is in flight `studio.market` is
+   * undefined, so `alreadyHasMarket` is false, so NOTHING blocked the strike.
+   *
+   * That is the ordinary first-paint state of this screen, not an edge case: a
+   * creator who already owns a market can arrive, hold the coin before the read
+   * lands, and spend a real signed transaction on a `register` the contract is
+   * guaranteed to reject for one-market-per-account. Exactly the loss the
+   * 'error' branch was written to prevent, through the door next to it.
+   *
+   * It is a SEPARATE reason from 'unknown-market' because the honest copy
+   * differs: 'error' means "we tried and failed, here is a retry", this means
+   * "hold on, we are still looking" and clears itself in a moment. Telling a
+   * reader the chain read failed while it is merely in flight is a lie that
+   * invites a pointless retry.
+   */
+  const marketStillUnknown = studio.status === 'loading';
+
   const block: MeritumLaunchBlock | null = !studio.loggedIn
     ? 'signed-out'
     : studio.isLite
       ? 'lite'
-      : canRetryRead
-        ? 'unknown-market'
-        : alreadyHasMarket
-          ? 'has-market'
-          : (offerBlock ??
-            (firstBuyTooBig ? 'first-buy-max' : capBroken ? 'price-band' : null));
+      : marketStillUnknown
+        ? 'checking-market'
+        : canRetryRead
+          ? 'unknown-market'
+          : alreadyHasMarket
+            ? 'has-market'
+            : (offerBlock ??
+              (firstBuyTooBig ? 'first-buy-max' : capBroken ? 'price-band' : null));
 
   const stepBlock: MeritumLaunchBlock | null = step === 2 ? offerBlock : null;
 
@@ -368,6 +505,19 @@ export function useMeritumLaunch(): MeritumLaunchApi {
     if (inFlight.current) return;
     const { pricedOffers: services, firstBuyUsd: budget, blocked } = launchArgs.current;
     if (blocked || services.length === 0) return;
+
+    // Cross-tab claim — see `launchClaimKey`. Taken BEFORE `pending` so a second
+    // tab cannot slip between the check and the write.
+    const claimKey = account ? launchClaimKey(account) : null;
+    if (claimKey && getStorageItem<number>(claimKey) !== null) {
+      setWrite('failed');
+      setFailure(t('meritum_launch.error_launch_in_another_tab'));
+      return;
+    }
+    if (claimKey) setStorageItem(claimKey, Date.now(), LAUNCH_CLAIM_TTL_MS);
+    const releaseClaim = () => {
+      if (claimKey) removeStorageItem(claimKey);
+    };
 
     inFlight.current = true;
     setWrite('pending');
@@ -402,6 +552,7 @@ export function useMeritumLaunch(): MeritumLaunchApi {
         });
       } catch (e) {
         inFlight.current = false;
+        releaseClaim();
         setWrite('failed');
         // Routed through the shared formatter so the CREATOR_TOKENS_* machine
         // code is stripped and any key-shaped text is redacted before it is
@@ -431,13 +582,18 @@ export function useMeritumLaunch(): MeritumLaunchApi {
       }
 
       inFlight.current = false;
+      // The market now exists, so `has-market` takes over as the real guard and
+      // the claim has done its job. Released rather than left to expire so a
+      // creator who launches and immediately opens Studio is not told, for the
+      // next 90 seconds, that a launch is running in another tab.
+      releaseClaim();
       setOffersFailed(!postedAll);
       setFirstBuySkipped(skipped);
       setWrite('ok');
     };
 
     void run();
-  }, [studio, draftKey]);
+  }, [studio, draftKey, account, t]);
 
   const dismissFailure = useCallback(() => {
     setWrite('idle');

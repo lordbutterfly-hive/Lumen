@@ -27,7 +27,7 @@ import styles from './meritum-intro.module.css';
  *                          by hex. `bg-meritum-surface-brand` (a fill) and
  *                          `text-meritum-ink-brand` (ink) are both `#c0392b`
  *                          today and diverge under dark mode on purpose.
- *   - motion             → the shared `mt-rise` / `mt-cta` classes in
+ *   - motion             → the shared `mt-rise` classes in
  *                          `packages/tailwindcss/globals.css`, which are also
  *                          where `prefers-reduced-motion` turns them off. No
  *                          keyframe is declared anywhere in this folder.
@@ -69,7 +69,32 @@ export default function MeritumIntro() {
   const { t } = useTranslation('common_blog');
 
   return (
-    <section className={`${styles.card} border border-meritum-line-paper bg-meritum-paper`}>
+    /*
+     * ★ THE HERO WEARS LUMEN'S OWN MASTHEAD WASH, NOT THE HANDOFF'S CREAM SLAB.
+     *
+     * This was `bg-meritum-paper` (a flat #fbf7f2 off `--surface-warn-2`) with a
+     * `--line-warn-1` border. Measured against the running app, that was the one
+     * thing making this screen read as a different product: the flat cream was
+     * the single largest painted surface here (760,272px, ~72% of the card), and
+     * `--surface-warn-2` is used 4x app-wide while `--line-warn-1` is used 2x —
+     * i.e. the screen's identity colour was one Lumen barely uses, taken off the
+     * WARNING ramp. Every other `--meritum-*` alias points at a token used
+     * 17-257x, so these two were the whole mismatch.
+     *
+     * Lumen already has a promotional-hero treatment and it is `PageMasthead`
+     * (`features/layouts/page-masthead.tsx`): the `--masthead-1..4` radial wash
+     * fading to near-white, a `--line-warn-3` edge and a 3px brand-red left
+     * rule. Those exact tokens are reused here, so this card now speaks the
+     * app's hero language and inherits its dark-mode mapping for free.
+     *
+     * `--meritum-paper` itself is deliberately NOT retired: as a small chip fill
+     * the cream is the established creator-token accent (token-author-chip,
+     * header-token-pill, profile-token-card all use `bg-surface-warn-2`). It was
+     * only wrong as a full-bleed page surface.
+     */
+    <section
+      className={`${styles.card} border border-line-warn-3 border-l-[3px] border-l-line-brand-10 bg-[radial-gradient(125%_130%_at_0%_0%,rgb(var(--masthead-1))_0%,rgb(var(--masthead-2))_30%,rgb(var(--masthead-3))_58%,rgb(var(--masthead-4))_85%)]`}
+    >
       {/* `mt-rise` is the 620ms entrance, transform + opacity only, and it is
           on the CONTENT rather than the card so the card's own border does not
           slide with it. */}
@@ -107,10 +132,19 @@ export default function MeritumIntro() {
             login door with `?next=` if not, so this link is correct for a
             logged-out reader too — which is most of the audience for a page
             whose whole job is to explain what Meritum is.
-            `h-16` is the reference's 64px; `mt-cta` is the shared ring pulse. */}
+            `h-16` is the reference's 64px.
+
+            ★ `mt-cta` (the handoff's pulsing ring) REMOVED. It measured as a
+            live `rgba(192,57,43,0.275) 0 0 0 4.65px` halo on this button, and
+            nothing else in Lumen carries one: the app's primary calls to action
+            — "Start free" on the home masthead, "Set up in Creator Studio" in
+            this page's own right rail — are flat red pills. An animated ring
+            unique to one button reads as a different design system, which is
+            the whole reason this pass exists. Hover/focus keep the app's
+            treatment. */}
         <Link
           href="/creators/launch"
-          className="mt-cta mt-[34px] inline-flex h-16 items-center gap-3 whitespace-nowrap rounded-[14px] bg-meritum-surface-brand px-10 text-18 font-bold text-meritum-ink-on-brand hover:bg-meritum-surface-brand-hover"
+          className="mt-[34px] inline-flex h-16 items-center gap-3 whitespace-nowrap rounded-[14px] bg-meritum-surface-brand px-10 text-18 font-bold text-meritum-ink-on-brand hover:bg-meritum-surface-brand-hover"
         >
           {t('meritum.intro.cta')}
           <ArrowIcon />

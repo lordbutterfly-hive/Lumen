@@ -8,8 +8,9 @@
  * not one colour and not one keyframe here, deliberately.
  *
  * PERFORMANCE. Nothing in this file animates. The three moving parts on the
- * screen are `mt-rise` (the card's entrance, transform + opacity), `mt-cta`
- * (the CTA ring, box-shadow) and `mt-dot` (the two live dots, box-shadow) —
+ * screen are `mt-rise` (the card's entrance, transform + opacity) and
+ * `mt-dot` (the two live dots, box-shadow) — the handoff's `mt-cta` ring pulse
+ * was removed because no other Lumen CTA has one —
  * all shared classes, all compositor-friendly, all already listed in that
  * file's `prefers-reduced-motion` block.
  */
