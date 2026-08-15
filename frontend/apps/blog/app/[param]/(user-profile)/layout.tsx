@@ -3,7 +3,11 @@ import { Metadata } from 'next';
 import { dehydrate, Hydrate } from '@tanstack/react-query';
 import { siteConfig } from '@ui/config/site';
 import { getQueryClient } from '@/blog/lib/react-query';
-import { getAccountFullCached } from '@/blog/lib/cached-api';
+import {
+  getAccountFullCached,
+  getAccountReputationsCached,
+  getDynamicGlobalPropertiesCached
+} from '@/blog/lib/cached-api';
 import { liteAccountAsProfile } from '@/blog/lib/lite/render/lite-account';
 import { getAccountFull, getAccountReputations, getDynamicGlobalProperties } from '@transaction/lib/hive-api';
 import { getTwitterInfo, isThirdPartyApiEnabled } from '@transaction/lib/custom-api';
@@ -189,11 +193,11 @@ const Layout = async ({ children, params }: { children: ReactNode; params: { par
       }),
       queryClient.prefetchQuery({
         queryKey: ['accountReputationData', username],
-        queryFn: () => getAccountReputations(username, 1)
+        queryFn: () => getAccountReputationsCached(username, 1)
       }),
       queryClient.prefetchQuery({
         queryKey: ['dynamicGlobalData'],
-        queryFn: () => getDynamicGlobalProperties()
+        queryFn: () => getDynamicGlobalPropertiesCached()
       })
     ];
 

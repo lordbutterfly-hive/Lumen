@@ -655,8 +655,22 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
           <VotesComponentWrapper post={post} type="post" />
         </div>
 
+        {/* ★ h-9 ON ALL THREE CHIPS IN THIS ROW (2026-08-15). Measured on the
+            production build, one card, same footer row: the comment and reblog
+            chips came out 34px and the payout 36px, all three with the same 6px
+            vertical padding and the same rounded-[10px]. The 2px came entirely
+            from type — the payout is deliberately `text-base` (owner, 2026-08-14:
+            the money must not be the smallest number on the row), which is a
+            24px line box against the chips' 22px.
+
+            So the fix is NOT to touch the type, which is intentional, but to
+            stop the box height being a by-product of it. A fixed 36px makes the
+            three hover targets identical without shrinking anything — and these
+            chips paint a hover background, so an uneven row is visible the
+            moment a reader moves the mouse across it. The Blade vote control
+            next to them is taller on purpose and is left alone. */}
         {/* Comments ghost button */}
-        <span className="flex items-center gap-1 rounded-[10px] px-2.5 py-1.5 font-medium text-[#6b7280] transition-colors hover:bg-[#f4f5f7] hover:text-[#2a2822]">
+        <span className="flex h-9 items-center gap-1 rounded-[10px] px-2.5 py-1.5 font-medium text-[#6b7280] transition-colors hover:bg-[#f4f5f7] hover:text-[#2a2822]">
           {/* ★ 20px/1.75 -> 22px/2, TO MATCH THE BLADE (2026-08-14, owner:
               "the comment icon has thinner borders than the blade upvote").
               Measured on :3000, one card, same footer row:
@@ -711,7 +725,7 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
                     <button
                       disabled={reblogMutation.isLoading}
                       className={cn(
-                        'flex items-center gap-1.5 rounded-[10px] px-2.5 py-1.5 font-medium text-[#6b7280] transition-colors hover:bg-[#f4f5f7] hover:text-[#2a2822]',
+                        'flex h-9 items-center gap-1.5 rounded-[10px] px-2.5 py-1.5 font-medium text-[#6b7280] transition-colors hover:bg-[#f4f5f7] hover:text-[#2a2822]',
                         { 'cursor-not-allowed opacity-50': reblogMutation.isLoading }
                       )}
                       data-testid="medium-card-reblog-count"
@@ -737,7 +751,7 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
               // ★ text-base, not text-sm (2026-08-14, owner-reported): the payout was 14px
               // against a 14.5px vote tally, so the money was the SMALLEST number on
               // the row. It is now 16px, one step above the 14px tally.
-              'ml-auto flex items-center rounded-[10px] px-[6px] py-[6px] text-base font-bold text-[#2f7d4f] transition-colors hover:cursor-pointer',
+              'ml-auto flex h-9 items-center rounded-[10px] px-[6px] py-[6px] text-base font-bold text-[#2f7d4f] transition-colors hover:cursor-pointer',
               payoutDeclined && 'bg-transparent text-muted-foreground line-through'
             )}
             data-testid="medium-card-payout"

@@ -28,8 +28,7 @@
     "../../packages/ui/components/time-ago.tsx",
     "../../packages/ui/components/card-skeleton.tsx",
     ".next*/types/**/*.ts",
-    ".next-lean/types/**/*.ts",
-    ".next-lean2/types/**/*.ts"
+    ".next-ship2/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",
