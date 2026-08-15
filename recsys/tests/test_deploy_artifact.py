@@ -340,6 +340,113 @@ def test_the_trust_batch_is_rescheduled_faster_than_the_snapshot_expires() -> No
     )
 
 
+def test_the_two_schedulers_carry_the_same_cadence() -> None:
+    """★★★ THE GATE THIS FILE WAS MISSING, AND IT MATTERS MORE THAN THE ONE
+    ABOVE (2026-08-15).
+
+    There are TWO copies of the trust-batch schedule and the test above reads
+    only one of them:
+
+      * `deploy/compose.recsys.yml` — parsed here, and the number the assertion
+        above is actually checking;
+      * `deploy/trust-cron-host.sh` — **the one that launched the running
+        container.** The deployed box is not compose-managed (`recsys-feed` was
+        started with `docker run --network host`; bringing the compose cron up
+        would put the batch on the bridge network where `127.0.0.1:55433` is the
+        container itself and the recsys Postgres is not there at all).
+
+    So a cadence changed in the compose file alone leaves this suite green while
+    the deployed schedule is untouched, and a cadence changed in the host script
+    alone leaves the suite pinning a number nobody runs. Either way the gate is
+    testing fiction. This refuses the split in both directions.
+
+    MUTANT: change `RECSYS_TRUST_BATCH_INTERVAL_S`'s default in one file only.
+    This fails.
+    """
+    host = (_ROOT / "deploy" / "trust-cron-host.sh").read_text()
+    compose = _COMPOSE.read_text()
+
+    pattern = r"RECSYS_TRUST_BATCH_INTERVAL_S:-(\d+)"
+    host_defaults = {int(m) for m in re.findall(pattern, host)}
+    compose_defaults = {int(m) for m in re.findall(pattern, compose)}
+
+    assert host_defaults, "no interval default in deploy/trust-cron-host.sh"
+    assert compose_defaults, "no interval default in deploy/compose.recsys.yml"
+    # ★ Internal consistency first. The host script names the default in three
+    # places (the initial read, and the two `NEXT_SLEEP_S` assignments in the
+    # generated loop) and the compose heredoc in two. One of them being missed
+    # is the realistic mistake — it would make the FIRST sleep and every LATER
+    # sleep different lengths, which is invisible until week two.
+    assert len(host_defaults) == 1, (
+        f"deploy/trust-cron-host.sh carries mixed interval defaults {host_defaults} "
+        "— the first sleep and the post-run sleeps would differ"
+    )
+    assert len(compose_defaults) == 1, (
+        f"deploy/compose.recsys.yml carries mixed interval defaults {compose_defaults}"
+    )
+    assert host_defaults == compose_defaults, (
+        f"the two schedulers disagree: host script {host_defaults}, compose "
+        f"{compose_defaults}. The host script is what launched the running "
+        "container, so the compose number is the one the suite above is "
+        "checking and the host number is the one that runs."
+    )
+
+    # And the host script's own refusal guard must still be above the value it
+    # ships with, or the script refuses to start at its own default.
+    guard = re.search(r'\[ "\$INTERVAL_S" -ge (\d+) \]', host)
+    assert guard, "the host script's interval guard has gone missing"
+    interval = next(iter(host_defaults))
+    assert interval < int(guard.group(1)), (
+        f"the shipped default {interval}s is at or above the script's own "
+        f"refusal threshold {guard.group(1)}s — it would refuse to start"
+    )
+
+
+def test_a_failed_run_retries_in_retry_s_not_retry_s_plus_interval_s() -> None:
+    """★★★ 2026-08-15 — THE RETRY PATH GUARANTEED THE OUTAGE IT EXISTS TO PREVENT.
+
+    The loop was `sleep INTERVAL; run; on failure sleep RETRY` and then looped
+    back to the top — which sleeps INTERVAL *again* before the retried attempt.
+    So a failure recovers in RETRY + INTERVAL, not RETRY.
+
+    That silently voids the headroom the test above asserts. Measured against the
+    shipped defaults (interval 604800s/7d, retry 3600s/1h, max_snapshot_age_days
+    14d = 1209600s): a single failure at the day-7 attempt pushes the retried
+    attempt to day 14.04 — 3600s AFTER the snapshot has expired and /feed has
+    gone FAIL_CLOSED. One bad run, guaranteed outage.
+
+    The fix is to track the NEXT sleep explicitly instead of nesting a second
+    sleep inside the loop body.
+
+    MUTANT: restore the old shape — a literal `sleep "${RECSYS_TRUST_BATCH_
+    INTERVAL_S:-...}"` as the loop's own first statement plus a nested retry
+    sleep. This test fails on it.
+    """
+    compose = (_ROOT / "deploy" / "compose.recsys.yml").read_text()
+    cron = compose.split("\n  recsys-trust-batch-cron:", 1)[1]
+
+    assert "NEXT_SLEEP_S" in cron, (
+        "the scheduler does not track its next sleep explicitly, so a failed run "
+        "falls back through the interval sleep and recovers in RETRY + INTERVAL"
+    )
+    assert re.search(r'sleep\s+"\$NEXT_SLEEP_S"', cron), (
+        "the loop does not sleep on the tracked variable"
+    )
+    # The loop must NOT sleep the interval literal as a statement of its own —
+    # that is precisely the bug: it re-applies on the retry pass.
+    assert not re.search(
+        r'^\s*sleep\s+"\$\{RECSYS_TRUST_BATCH_INTERVAL_S', cron, re.MULTILINE
+    ), (
+        "the interval is slept directly inside the loop, so a retry waits "
+        "RETRY + INTERVAL — the exact defect this test exists for"
+    )
+    # Both outcomes must re-arm the next sleep, or one branch inherits the other's.
+    assert cron.count("NEXT_SLEEP_S=") >= 3, (
+        "success and failure must each set the next sleep explicitly "
+        "(plus the initial value)"
+    )
+
+
 def test_a_cold_deploy_runs_the_trust_batch_before_serving() -> None:
     """★★★ ROUND-5 COUNCIL (Seat 1). `/feed` refuses to serve without a trust
     snapshot and the probe gates on `serving`, while the batch was documented as

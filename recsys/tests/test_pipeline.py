@@ -28,6 +28,8 @@ from recsys.contracts import (
     GraphCred,
     NormContext,
     Post,
+    ScoreBreakdown,
+    ScoredCandidate,
 )
 from recsys.core.als import train_als
 from recsys.core.coldstart import is_cold
@@ -41,6 +43,7 @@ from recsys.pipeline import (
     MissingTrustError,
     TrustPolicy,
     TrustSnapshot,
+    _charged_exploration_serves,
     _lineage_for,
     _organic_signal,
     _ring_exclusion,
@@ -49,6 +52,7 @@ from recsys.pipeline import (
     gather_candidates,
     rank_feed,
 )
+from recsys.serve_log import ExplorationServeLog
 from recsys.viewer import build_viewer_profile
 from tests.fakes import EPOCH, FakeGateway, make_post, make_viewer, make_vote, seeds_that_land
 
@@ -3349,3 +3353,224 @@ def test_the_pipeline_actually_excludes_curators_from_every_engagement_signal() 
         "curators are not in the ring_members union — their votes, comments and "
         "reblogs would mint breadth again"
     )
+
+
+# ---------------------------------------------------------------------------
+# THE PHANTOM SERVE (2026-08-15) — the exploration budget was charged for seats
+# that were built and never delivered.
+#
+# `insert_exploration` splices at ranked 13, 33 and 53 under shipped defaults
+# and `rank_feed` charged all three authors one of their three serves per seven
+# days. The only known caller asks for 45 posts, hydrates 30, and serves pages
+# 2-5 from Hive chain paging rather than from the ranking. Measured against the
+# live delivery log (`lumen_feed_served`, 8,508 rows, read-only 2026-08-15):
+# 169 rows with `source='exploration'`, at positions 3/11/12/13/14 and NEVER
+# above 14 — so seats 33 and 53 have not reached a reader once.
+# ---------------------------------------------------------------------------
+
+
+def _many_newcomers_world(n_established: int = 60, n_debuts: int = 3):
+    """A feed long enough to REACH seats 33 and 53, with enough distinct
+    newcomers to fill them.
+
+    The existing `_explore_world` cannot demonstrate this defect: it has one
+    debut, and `insert_exploration` allows at most one promotion per author per
+    feed, so only seat 13 is ever taken there. Length matters too — the splice
+    loop breaks once `at > len(out)`, so a 28-item feed never reaches 33.
+    """
+    in_network = [
+        make_post(
+            f"est{i:02d}", f"e{i}", category="photo", tags=("photo",),
+            created_min=i, children=2,
+            votes=[
+                make_vote(f"reader{i}", 50_000_000),
+                make_vote(f"reader{i + 1000}", 40_000_000),
+                make_vote(f"reader{i + 2000}", 30_000_000),
+            ],
+        )
+        for i in range(n_established)
+    ]
+    debuts = [
+        make_post(f"newcomer{d}", "debut", category="photo", tags=("photo",),
+                  created_min=200 + d)
+        for d in range(n_debuts)
+    ]
+    gateway = FakeGateway(in_network=in_network, tag=debuts)
+    viewer = make_viewer(
+        "me",
+        follows=frozenset(f"est{i:02d}" for i in range(n_established)),
+        interest_tags=frozenset({"photo"}),
+    )
+    seat_secret = hashlib.sha256(b"phantom-serve-fixture-secret").digest()
+    settings = Settings(exploration=ExplorationConfig(seat_secret=seat_secret))
+    return gateway, viewer, settings
+
+
+def _explore_positions(feed) -> list[int]:
+    return [i for i, sc in enumerate(feed) if sc.source is CandidateSource.EXPLORATION]
+
+
+def test_the_unbounded_charge_still_pays_for_seats_nobody_can_see() -> None:
+    """★ THE BASELINE, PINNED AS A FACT RATHER THAN DESCRIBED.
+
+    With no depth bound (the shipped default, and byte-identical to the
+    pre-2026-08-15 code) every spliced author is charged — including the ones at
+    ranked 33 and 53 that the live delivery log proves have never reached a
+    reader. This test exists so the fix below has something to be measured
+    against, and so that turning the bound OFF is provably a full revert.
+    """
+    gateway, viewer, settings = _many_newcomers_world()
+    log = ExplorationServeLog(store=None)
+    feed = rank_feed(viewer, gateway, _explore_norm(), now=NOW, since=EPOCH,
+                     settings=settings, trust_policy=_PERMISSIVE, serve_log=log)
+
+    positions = _explore_positions(feed)
+    assert positions == [13, 33, 53], positions
+    assert log.counts() == {"newcomer0": 1, "newcomer1": 1, "newcomer2": 1}, (
+        "expected the historic behaviour: three authors charged for three seats, "
+        "two of which are never delivered"
+    )
+
+
+def test_a_served_depth_charges_only_the_seats_inside_it() -> None:
+    """★★★ THE FIX. Two thirds of every newcomer's platform-wide budget was
+    being spent on impressions that physically did not happen.
+
+    MUTANT: drop the `index < served_depth` term in
+    `_charged_exploration_serves`. This fails — all three authors get charged.
+    """
+    gateway, viewer, settings = _many_newcomers_world()
+    log = ExplorationServeLog(store=None)
+    feed = rank_feed(viewer, gateway, _explore_norm(), now=NOW, since=EPOCH,
+                     settings=settings, trust_policy=_PERMISSIVE, serve_log=log,
+                     served_depth=30)
+
+    # The RANKING is untouched — this fix changes accounting, not placement.
+    positions = _explore_positions(feed)
+    assert positions == [13, 33, 53]
+    # WHICH newcomer holds seat 13 is the keyed MAC's business, so the expected
+    # charge is read off the feed rather than assumed — pinning a name here
+    # would make this a test of the shuffle.
+    assert log.counts() == {feed[13].post.author: 1}, (
+        "authors were charged for seats outside the delivered depth"
+    )
+
+
+def test_the_configured_assumption_is_used_when_the_caller_says_nothing() -> None:
+    """`service/app.py` parses `?limit=` in the HTTP handler and applies it to
+    the serialised payload AFTER `build_feed` returns, so the number never
+    reaches `rank_feed`. Threading it is a two-line change in a file this change
+    does not own — `assumed_served_depth` is how an operator gets the fix
+    without it."""
+    gateway, viewer, settings = _many_newcomers_world()
+    settings = dataclasses.replace(
+        settings,
+        exploration=dataclasses.replace(settings.exploration, assumed_served_depth=30),
+    )
+    log = ExplorationServeLog(store=None)
+    feed = rank_feed(viewer, gateway, _explore_norm(), now=NOW, since=EPOCH,
+                     settings=settings, trust_policy=_PERMISSIVE, serve_log=log)
+    assert log.counts() == {feed[13].post.author: 1}
+
+
+def test_a_background_build_charges_nothing_at_all() -> None:
+    """★★★ CONTRACT C1 — an impression counts only when a page is DELIVERED to a
+    reader in a foreground request.
+
+    A ranking assembled in the background and never opened was seen by nobody.
+    A warm loop over 200 active viewers on a 30-minute timer would otherwise
+    exhaust the entire eligible newcomer population in one cycle: the budget is
+    three serves per author per seven days, and the live drop counters already
+    show it running out for real (`served_out: 3` at both observed forfeits).
+
+    The FEED must be identical — this switch is about accounting only.
+    """
+    gateway, viewer, settings = _many_newcomers_world()
+    charged = ExplorationServeLog(store=None)
+    silent = ExplorationServeLog(store=None)
+
+    warm = rank_feed(viewer, gateway, _explore_norm(), now=NOW, since=EPOCH,
+                     settings=settings, trust_policy=_PERMISSIVE, serve_log=silent,
+                     record_serves=False)
+    live = rank_feed(viewer, gateway, _explore_norm(), now=NOW, since=EPOCH,
+                     settings=settings, trust_policy=_PERMISSIVE, serve_log=charged)
+
+    assert [sc.post.key for sc in warm] == [sc.post.key for sc in live]
+    assert silent.counts() == {}
+    assert charged.counts() != {}
+
+
+def test_the_per_20_served_ceiling_ships_inert_and_can_only_lower() -> None:
+    """★★★ DIRECTIVE B2 — BUILT, SHIPPED OFF.
+
+    The seat is ALREADY one per `page_size` (13, 33, 53); what keeps it off the
+    reader's screen is DELIVERY, not allocation. So this switch exists, and what
+    it does is refuse to build seats that provably cannot be delivered — a
+    `min()` against `max_slots_per_feed`, which makes it structurally incapable
+    of being the newcomer INCREASE that the standing 2026-08-08 ruling forbids
+    until the durable serve log is proven in production.
+
+    At a delivered depth of 30 the ceiling becomes `ceil(30/20)` = 2, so seat 53
+    is not built at all. Raising the lane needs a separate, explicit change to
+    `max_slots_per_feed`.
+    """
+    gateway, viewer, base = _many_newcomers_world()
+
+    off = rank_feed(viewer, gateway, _explore_norm(), now=NOW, since=EPOCH,
+                    settings=base, trust_policy=_PERMISSIVE, served_depth=30)
+    assert _explore_positions(off) == [13, 33, 53], "the flag is not off by default"
+
+    on = dataclasses.replace(
+        base,
+        exploration=dataclasses.replace(base.exploration,
+                                        derive_slots_from_served_depth=True),
+    )
+    derived = rank_feed(viewer, gateway, _explore_norm(), now=NOW, since=EPOCH,
+                        settings=on, trust_policy=_PERMISSIVE, served_depth=30)
+    assert _explore_positions(derived) == [13, 33]
+
+    # And it can never RAISE the ceiling: a 4000-post delivered depth would want
+    # 200 seats, and `max_slots_per_feed` still says 3.
+    deep = rank_feed(viewer, gateway, _explore_norm(), now=NOW, since=EPOCH,
+                     settings=on, trust_policy=_PERMISSIVE, served_depth=4000)
+    assert _explore_positions(deep) == [13, 33, 53]
+
+
+def test_a_zero_or_negative_served_depth_fails_shut_for_the_budget() -> None:
+    """A bound that a zero disables is a bound that a typo disables. Taken
+    literally, `served_depth = 0` charges nobody for anything — silently
+    removing the only bound on this lane an attacker cannot write. It is treated
+    as "no assumption" instead, which charges everything."""
+    gateway, viewer, settings = _many_newcomers_world()
+    log = ExplorationServeLog(store=None)
+    rank_feed(viewer, gateway, _explore_norm(), now=NOW, since=EPOCH,
+              settings=settings, trust_policy=_PERMISSIVE, serve_log=log,
+              served_depth=0)
+    assert log.counts() == {"newcomer0": 1, "newcomer1": 1, "newcomer2": 1}
+
+
+def test_charged_serves_reads_the_delivered_list_not_the_spliced_one() -> None:
+    """The unit, isolated: WHICH list the charge is read from is precisely the
+    question the defect was hiding in.
+
+    Unbounded reads `spliced` — the feed as it stood immediately after the
+    splice, before the popular reservation shifted it and before truncation —
+    because that is byte-for-byte what the pre-2026-08-15 code charged from.
+    Bounded reads `delivered`, which is the list the caller is handed.
+    """
+    def _sc(author: str, source: CandidateSource) -> ScoredCandidate:
+        return ScoredCandidate(
+            post=make_post(author, "p"),
+            source=source,
+            score=ScoreBreakdown(vote_norm=0.0, rep_norm=0.0, organic=0.1, final=0.1),
+        )
+
+    spliced = [_sc("merit", CandidateSource.IN_NETWORK), _sc("early", CandidateSource.EXPLORATION),
+               _sc("late", CandidateSource.EXPLORATION)]
+    # Delivery inserted one popular post above the seats, shifting both down.
+    delivered = [spliced[0], _sc("pop", CandidateSource.OON_POPULAR), spliced[1], spliced[2]]
+
+    assert _charged_exploration_serves(delivered, spliced, None) == ["early", "late"]
+    assert _charged_exploration_serves(delivered, spliced, 3) == ["early"]
+    assert _charged_exploration_serves(delivered, spliced, 4) == ["early", "late"]
+    assert _charged_exploration_serves(delivered, spliced, 2) == []

@@ -608,12 +608,38 @@ def engagement_received(candidates: Iterable[Candidate]) -> dict[str, set[str]]:
     received: dict[str, set[str]] = {}
     for candidate in candidates:
         post = candidate.post
-        engagers = {v.voter for v in post.votes if not v.lite}
-        engagers.update(getattr(post, "commenters", ()))
-        engagers.update(getattr(post, "rebloggers", ()))
-        engagers.discard(post.author)
-        received.setdefault(post.author, set()).update(engagers)
+        received.setdefault(post.author, set()).update(post_engagers(post))
     return received
+
+
+def post_engagers(post: Post) -> set[str]:
+    """Distinct identities that have engaged ONE post — voters, commenters and
+    rebloggers, minus the author, lite excluded.
+
+    ★ EXTRACTED FROM :func:`engagement_received` 2026-08-15, NOT COPIED, and the
+    distinction is the whole reason this function exists. Seen-suppression's
+    resurrection rule needs the engager count PER POST; the need bands and the
+    serve log need it PER AUTHOR (the union across everything they have written).
+    Those are two different aggregations of ONE rule, and hand-copying the rule to
+    get the second aggregation is precisely how this package's two previous
+    "engagement" definitions drifted apart — a failure `pipeline.py` names at its
+    `engagement_counts` construction ("two computations of how many people
+    engaged this author that could disagree is precisely how the previous two
+    designs broke"). One body, two callers.
+
+    ★★★ LITE VOTES STAY EXCLUDED, and here that is load-bearing in a new way. A
+    resurrection is a post earning its way back into a reader's feed. If a lite
+    vote counted, a costless identity could resurrect any suppressed post at
+    will — free engagement buying back the most valuable thing the ranker has,
+    which is a second impression. The measured consequence of counting them in
+    the need bands is recorded above ("3 lite likes: rank 33, seen by 0/10"); the
+    consequence here would be a suppression rule an attacker turns off.
+    """
+    engagers = {v.voter for v in post.votes if not v.lite}
+    engagers.update(getattr(post, "commenters", ()))
+    engagers.update(getattr(post, "rebloggers", ()))
+    engagers.discard(post.author)
+    return engagers
 
 
 def eligible_for_exploration(
@@ -1126,7 +1152,58 @@ def eligible_for_exploration(
             )
         authors = []
         for _, tier in sorted(tiers.items()):
-            authors.extend(sorted(tier, key=lambda a: _rotation_key(a, bucket, secret)))
+            # ★★★ SERVE COUNT IS THE PRIMARY KEY INSIDE THE TIER, MAC IS THE
+            # SHUFFLE (fixed 2026-08-15). THIS BLOCK USED TO SORT BY THE MAC
+            # ALONE, WHICH SILENTLY DISCARDED B1'S ORDERING HALF.
+            #
+            # The sort at the top of this section is
+            # `(need_tier, served_count, -created, name)`. This block then
+            # rebuilt `authors` from scratch, re-grouping by `_need_tier` ONLY
+            # and re-sorting each group by `_rotation_key`. The `served_count`
+            # component of the first sort therefore had NO EFFECT ON THE FINAL
+            # ORDER under the shipped defaults (`rotation_hours = 6`, bucket
+            # non-zero in production) — the whole intent recorded 60 lines above
+            # ("an author the system has ALREADY served ranks below one it has
+            # not … each sock sinks as it is spent") was inert, and only the
+            # serve CAP still did anything. The other place that key survives is
+            # `seat_order`'s `serves` tie-break, and `seat_order` ships OFF
+            # (`seat_by_score = False`), so nothing anywhere sank a spent
+            # author.
+            #
+            # This is the same "half-revert of B1" the round-3 council caught
+            # once already (the ordering left live while the cap was off);
+            # rotation reintroduced it from the other side. LIVE SYMPTOM, and it
+            # is the reason this is a defect rather than a tidy-up: one newcomer
+            # post held one reader's seat **66 times between 2026-08-13 01:01:41
+            # and 2026-08-14 01:01:42 — exactly 24h, four whole rotation
+            # periods, one occupant** (`lumen_feed_served`, read-only), while
+            # that viewer's entire exploration history was 2 distinct posts
+            # across 67 rows.
+            #
+            # WHY IT IS SAFE TO PUT SERVES FIRST INSIDE THE TIER. The MAC is a
+            # keyed TOTAL ORDER over the tier and it stays exactly that among
+            # equally-spent authors, so C1a's property is untouched: an attacker
+            # without `LUMEN_EXPLORE_SEAT_SECRET` still cannot evaluate the
+            # function to grind names, and the seat is still stable inside a
+            # bucket (serve counts change only when the system serves, which is
+            # not a refresh-reroll the viewer can drive). What changes is that
+            # being served now COSTS you position, which is the entire point of
+            # counting serves.
+            #
+            # ★ GATED ON THE SAME SWITCH AS THE SORT ABOVE. `0 now means OFF in
+            # both halves — the count and the ordering` is a rule this file
+            # already states and had already broken once; re-arming the ordering
+            # under a different condition than the cap would break it a third
+            # time.
+            authors.extend(
+                sorted(
+                    tier,
+                    key=lambda a: (
+                        (served_counts.get(a, 0) if config.max_serves_per_author > 0 else 0),
+                        _rotation_key(a, bucket, secret),
+                    ),
+                )
+            )
     for depth in range(config.max_posts_per_author_epoch):
         for author in authors:
             # `posts`, not `bucket` — the parameter of that name is the clock
@@ -1253,6 +1330,7 @@ def insert_exploration(
     config: ExplorationConfig,
     *,
     lineage: Mapping[str, frozenset[str]] | None = None,
+    ceiling: int | None = None,
 ) -> list[ScoredCandidate]:
     """Splice exploration picks into an already-ranked feed at a fixed position.
 
@@ -1367,7 +1445,20 @@ def insert_exploration(
     page = max(1, config.page_size)
     base = min(config.position, page - 1)
     inserted = 0
-    ceiling = config.max_slots_per_feed
+    # ★ ``ceiling`` OVERRIDE (2026-08-15, directive B2). ``None`` — every caller
+    # that does not pass it, which is every caller today — is the exact
+    # historic behaviour: the ceiling IS ``config.max_slots_per_feed``.
+    #
+    # The one production caller that may pass it (`pipeline.rank_feed`, behind
+    # `ExplorationConfig.derive_slots_from_served_depth`, default OFF) computes
+    # ``min(max_slots_per_feed, ceil(served_depth / page_size))``, i.e. it can
+    # only ever LOWER this number. The parameter deliberately has no clamp of
+    # its own: a bound that silently rewrites what its caller asked for is how
+    # `max_slots_per_feed` came to be described three different ways in this
+    # file. If a future caller wants a HIGHER ceiling it must raise
+    # `max_slots_per_feed` itself, in the open, where the 75.5%/83.6% farm-capture
+    # measurement recorded in that field's docstring is sitting.
+    ceiling = config.max_slots_per_feed if ceiling is None else ceiling
     # ★ C2c (2026-08-04): resolve ``None`` once, up front — every lookup below
     # treats an author absent from `lineage` as having no known siblings,
     # which is exactly the "not configured" fail-open posture this lane takes

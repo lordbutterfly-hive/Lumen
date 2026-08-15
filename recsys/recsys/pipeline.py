@@ -49,6 +49,7 @@ from recsys.core.exploration import (
     eligible_for_exploration,
     engagement_received,
     insert_exploration,
+    post_engagers,
     seat_order,
 )
 from recsys.core.flooding import cap_oon_flooding
@@ -64,6 +65,7 @@ from recsys.core.scoring import (
     score_candidates,
 )
 from recsys.core.second_degree import filter_eligible
+from recsys.core.seen import SeenSplit, SeenState, split_seen
 from recsys.core.viewer_affinity import (
     affinity_percentiles,
     candidate_affinity,
@@ -1684,6 +1686,73 @@ def _trust_is_fresh(
         and now - snapshot.built_at > timedelta(days=max_age_days)
     )
 
+
+def _charged_exploration_serves(
+    delivered: Sequence[ScoredCandidate],
+    spliced: Sequence[ScoredCandidate],
+    served_depth: int | None,
+) -> list[str]:
+    """Which authors this feed charges an exploration serve to.
+
+    ★★★ THE PHANTOM-SERVE FIX (2026-08-15), and it is a real, measured defect
+    rather than a tidying-up.
+
+    ``insert_exploration`` splices at ranked indices 13, 33 and 53 under the
+    shipped defaults, and every one of those three authors was charged one of
+    their ``max_serves_per_author`` (3) serves per 7 days. The reader gets one
+    of them. The only known caller asks recsys for 45 posts, hydrates the first
+    30, and serves pages 2-5 from Hive chain paging rather than from the ranking
+    at all — so seats 33 and 53 are built, charged, and thrown away.
+
+    Confirmed against the live delivery log, read-only, 2026-08-15
+    (``lumen_feed_served``, 8,508 rows): **169 rows with ``source =
+    'exploration'``, at delivered positions 3, 11, 12, 13 and 14 — and never
+    once above 14.** Roughly two thirds of every newcomer's platform-wide budget
+    was being spent on impressions that physically did not happen, and the live
+    drop counters show the consequence (``served_out: 3`` at both observed seat
+    forfeits: the newcomer supply for that viewer was four authors, three of
+    whom had already "spent" their budget).
+
+    THE TWO PATHS, and why there are two:
+
+    * ``served_depth is None`` — no bound. Charges every EXPLORATION-sourced
+      pick in ``spliced``, which is the feed exactly as it stood immediately
+      after the splice: the identical list, at the identical moment, that the
+      pre-2026-08-15 code charged from. Byte-identical, deliberately, because
+      the depth bound ships off and "off" must mean off.
+    * ``served_depth`` set — charges only picks landing inside that depth in
+      ``delivered``, i.e. in the list the caller is actually handed, after the
+      popular reservation has shifted the seat and after ``top_k`` truncation.
+
+    ★ WHAT THIS DOES **NOT** CLOSE, stated here rather than discovered later. A
+    depth is not a delivery. recsys charges when a feed is BUILT, so:
+
+      1. an over-fetching caller still over-charges — 45 asked, 30 hydrated,
+         and recsys cannot see the difference;
+      2. a build that is never opened is charged in full (``record_serves`` is
+         the switch for that, and a background warm loop must pass ``False``);
+      3. a delivered page that the reader never scrolls to position 13 of is
+         still charged.
+
+    Only the frontend knows (1) and (3). Its ``lumen_feed_served`` table is the
+    instrument — but it is an IMPRESSION log driven by a silent 3-minute poll
+    (78 exploration rows for one author from 2 viewers and 2 posts; one
+    post/viewer pair at 66 impressions in 24 hours), so feeding it back into a
+    3-per-7-days budget before that poll stops recording would retire every
+    newcomer in about nine minutes of an idle tab. That ordering is stated in
+    ``recsys.serve_log_store``'s header and it is not this function's to fix.
+    """
+    if served_depth is None:
+        return [
+            sc.post.author for sc in spliced if sc.source is CandidateSource.EXPLORATION
+        ]
+    return [
+        sc.post.author
+        for index, sc in enumerate(delivered)
+        if index < served_depth and sc.source is CandidateSource.EXPLORATION
+    ]
+
+
 def rank_feed(
     viewer: ViewerProfile,
     gateway: HafsqlGateway,
@@ -1713,6 +1782,77 @@ def rank_feed(
     #: fact about a SERVED FEED, and `rank_feed` is the only thing that knows
     #: which picks survived to the returned list.
     serve_log: ExplorationServeLog | None = None,
+    #: ★★★ HOW MANY POSTS THE CALLER WILL ACTUALLY DELIVER (2026-08-15).
+    #:
+    #: NOT `limit` above — that is candidate SOURCING breadth (default 400) and
+    #: says nothing about output length. Nothing in this function has ever known
+    #: how deep the served page goes, which is precisely why the exploration
+    #: serve budget has been charged for seats the reader could not reach: seats
+    #: are spliced at ranked 13/33/53, the only known caller hydrates 30 and
+    #: pages 2-5 from Hive chain paging, and the live delivery log has **169
+    #: `source='exploration'` rows, none above position 14, ever** (8,508 rows,
+    #: read-only 2026-08-15).
+    #:
+    #: Supplied, it bounds two things: which spliced picks are CHARGED a serve,
+    #: and — only when `ExplorationConfig.derive_slots_from_served_depth` is on —
+    #: how many seats are built at all. `None` falls back to
+    #: `ExplorationConfig.assumed_served_depth`, which is 0 (= no assumption, the
+    #: pre-2026-08-15 behaviour) by default.
+    #:
+    #: ★ NO CALLER PASSES THIS YET. `service/app.py` parses `?limit=` in the HTTP
+    #: handler and applies it to the SERIALISED payload after `build_feed` has
+    #: returned, so the number exists one layer above and is thrown away before
+    #: it reaches here. Threading it is a two-line change in that file, which
+    #: this change does not own; until it lands, an operator gets the same effect
+    #: by setting `RECSYS_EXPLORATION_ASSUMED_SERVED_DEPTH`.
+    served_depth: int | None = None,
+    #: ★★★ IS THIS BUILD A DELIVERY? (2026-08-15, contract C1.)
+    #:
+    #: `False` ranks exactly as normal but charges NOTHING to the exploration
+    #: serve budget. It exists for the never-wait/pre-warm feed work: a ranking
+    #: assembled in the background and never opened was seen by nobody, and
+    #: charging it retires real newcomers for impressions that did not happen —
+    #: the frontend's own delivery log states this rule in its header and is
+    #: written on serve for exactly that reason. A warm loop over 200 active
+    #: viewers on a 30-minute timer would otherwise exhaust the entire eligible
+    #: newcomer population in one cycle (`max_serves_per_author` is 3).
+    #:
+    #: Default `True` = today's behaviour for every existing caller.
+    record_serves: bool = True,
+    #: ★★★ SEEN-POST SUPPRESSION — THIS VIEWER'S IMPRESSION STATE (2026-08-15).
+    #:
+    #: `{Post.key: SeenState}`. Read by `recsys.io.seen_log.fetch_seen` from the
+    #: frontend's `lumen_feed_seen` aggregate and INJECTED here rather than
+    #: fetched inside, for the reason `core/seen.py` is pure: a ranking decision
+    #: must be reproducible offline, and a database outage must be able to change
+    #: nothing except how much is suppressed.
+    #:
+    #: `None` or empty = suppress nothing, which is also what an unreachable
+    #: store degrades to. The FEATURE switch is `settings.seen.enabled`
+    #: (contract C11, default OFF); this parameter only carries the data.
+    seen: Mapping[str, SeenState] | None = None,
+    #: ★★★ HOW MANY POSTS THE CALLER WILL DELIVER, for the STARVATION FLOOR.
+    #:
+    #: Distinct from `served_depth` above ON PURPOSE, even though both describe
+    #: "the served page", because they are consumed by two mechanisms with
+    #: opposite failure directions and one number silently doing both jobs is how
+    #: a bound gets disabled by a typo somewhere else:
+    #:
+    #:   * `served_depth` bounds a BUDGET (which exploration picks are charged).
+    #:     Its safe direction is SHUT — a non-positive value means "no assumption"
+    #:     and charges everything.
+    #:   * `serve_limit` bounds a FLOOR (how short a feed may get before
+    #:     suppression yields). Its safe direction is OPEN — absent, the floor
+    #:     falls back to `FallbackConfig.min_feed_size`, and a LARGER value only
+    #:     ever makes the floor higher, i.e. suppression yields sooner.
+    #:
+    #: The only caller sends `?limit=45` for a 30-post page (`OVER_FETCH_RATIO`
+    #: 1.5, measured in `route.ts`), so the floor is computed against the
+    #: over-fetch, not the page. That is deliberate and conservative: hydration
+    #: DROPS moderated/deleted/unfetchable posts, so a 30-post page genuinely
+    #: needs more than 30 ranked posts to come out of, and a floor of 45 is the
+    #: number that keeps it whole.
+    serve_limit: int | None = None,
 ) -> list[ScoredCandidate]:
     """Rank a viewer's discovery feed end to end (§3).
 
@@ -1839,6 +1979,79 @@ def rank_feed(
         lite_publishers=settings.lite.publisher_accounts,
     )
 
+    # ★★★★ SEEN-POST SUPPRESSION — THE SPLIT (2026-08-15).
+    #
+    # Owner's design: suppress a post only after it has been SERVED TWICE, and
+    # resurrect it if engagement grew. Deliberately NOT X's remove-on-first-sight
+    # — our supply is small enough that first-sight removal empties feeds. See
+    # `SeenConfig` for the measurement (80% top-20 repeat across 4h 39m; 44.5% of
+    # all live (viewer, post) pairs already at >= 2 impressions).
+    #
+    # ★★★ WHY HERE, AND NOT INSIDE `filter_eligible`, AND NOT AFTER SCORING.
+    #
+    #   * NOT inside `filter_eligible` (contract C10): `suppressed` on that
+    #     signature is §8.7 NETWORK SUPPRESSION, an abuse signal. This is reader
+    #     state. That function is where mutes, bans, the vouch gate, the author
+    #     floor and the self-post rule live, and a second frozenset of keys with
+    #     near-identical meaning on the same call is an invitation to pass the
+    #     wrong one. Decisively: a filter that DROPS leaves nothing for the
+    #     starvation valve below to re-admit.
+    #   * NOT after scoring: `_score` is where the diversity re-ranker runs —
+    #     lane quotas, the unchosen-source penalty, author spacing. Removing
+    #     already-scored items afterwards means every one of those budgets was
+    #     spent on posts that will not be served: a lane granted 4 slots, all of
+    #     them seen, contributes 0 to the page and its quota is LOST rather than
+    #     reallocated. It would also run after `_fallback_filler`, which sizes
+    #     its padding from `len(eligible)` — so the padding would be computed
+    #     against a pool about to shrink. Both faults are silent.
+    #   * HERE, pre-scoring: each lane's FRESH remainder competes normally, the
+    #     re-ranker allocates quota to posts that will actually be served, and a
+    #     lane that empties returns its quota to the lanes that still have supply.
+    #
+    # ★★★ AND HERE IS WHERE CONTRACT C5's EXEMPTION TAKES EFFECT, STRUCTURALLY.
+    # The split is applied to `eligible` and (below) to the fallback filler.
+    # `explore_pool` is built by `eligible_for_exploration(candidates, ...)` from
+    # the RAW gathered pool — it is not derived from `eligible` and therefore
+    # never passes through this split at all. `core/seen.py` ALSO refuses to
+    # suppress an EXPLORATION-sourced candidate explicitly, because this
+    # structural property is a fact about a call site 200 lines below in a
+    # function that has been re-ordered three times this month.
+    #
+    # ★ THE FLAG IS CHECKED HERE AND NOWHERE ELSE ON THE READ PATH. Off (the
+    # default, contract C11): `seen_split` is None, `fresh is eligible` by
+    # identity, `repeats` is empty, no counter moves and no line is logged — the
+    # returned feed is byte-identical to the pre-2026-08-15 one.
+    seen_state: Mapping[str, SeenState] = seen or {}
+    seen_split: SeenSplit | None = None
+    fresh = eligible
+    repeats: list[Candidate] = []
+    seen_on = bool(settings.seen.enabled and seen_state)
+
+    def _engagers_now(pool: Sequence[Candidate]) -> dict[str, int]:
+        """The `E_now` half of the resurrection rule, per post.
+
+        ★ `post_engagers` is the SAME body `engagement_received` uses (extracted
+        2026-08-15, not copied), so "how many distinct non-lite people engaged
+        this" has exactly ONE definition in the package — the rule this file
+        already states at `engagement_counts`.
+
+        ★ COMPUTED PER POOL, not once over `candidates`, because the fallback
+        filler's posts are NOT in `candidates`: `_fallback_filler` sources fresh
+        chain-wide popular posts through its own gateway call. Computing this
+        once over `candidates` would silently hand the filler split an EMPTY
+        `E_now` for every one of its posts, and an absent `E_now` resolves to
+        "cannot evaluate -> do not suppress" — i.e. the filler split would look
+        wired and suppress nothing, forever.
+        """
+        return {c.post.key: len(post_engagers(c.post)) for c in pool}
+
+    if seen_on:
+        seen_split = split_seen(
+            eligible, seen_state, settings.seen, _engagers_now(candidates)
+        )
+        fresh = seen_split.fresh
+        repeats = list(seen_split.repeats)
+
     # ★★ EXPLORATION POOL (cold-start spec §4.3, item B12). GRADUATION IS
     # POSITIONAL, not vouch-based — changed 2026-08-04 after both councils
     # measured the cliff it caused.
@@ -1883,6 +2096,40 @@ def rank_feed(
         if settings.exploration.rotation_hours > 0
         else 0
     )
+    # ★★★ HOW DEEP THIS FEED WILL ACTUALLY BE DELIVERED (2026-08-15). See the
+    # `served_depth` parameter's own note for the measurement.
+    #
+    # A caller's explicit value wins; otherwise the configured assumption; 0 or
+    # absent means "no assumption", which charges every spliced pick exactly as
+    # before this existed.
+    #
+    # ★ A NON-POSITIVE DEPTH IS TREATED AS "NO ASSUMPTION", NOT AS "DELIVER
+    # NOTHING". Taken literally, `served_depth = 0` would charge no author for
+    # any seat, i.e. it would silently remove the only bound on this lane that
+    # an attacker cannot write. A bound that a zero disables is a bound that a
+    # typo disables — the same rule `serve_window_days` and
+    # `max_serves_per_author` had to learn — so it fails SHUT for the budget.
+    effective_served_depth: int | None = (
+        served_depth
+        if served_depth is not None
+        else (settings.exploration.assumed_served_depth or None)
+    )
+    if effective_served_depth is not None and effective_served_depth <= 0:
+        effective_served_depth = None
+    # ★★★ DIRECTIVE B2 — the per-served-page seat ceiling, SHIPPED INERT.
+    # `derive_slots_from_served_depth` is False by default, so this stays None
+    # and `insert_exploration` uses `max_slots_per_feed` exactly as it always
+    # has. When on, `min()` means it can only ever LOWER the ceiling — it is
+    # structurally incapable of being a newcomer increase, which is what the
+    # standing 2026-08-08 ruling requires until the durable serve log is proven
+    # in production. See the config field for the whole argument.
+    seat_ceiling: int | None = None
+    if settings.exploration.derive_slots_from_served_depth and effective_served_depth is not None:
+        page_size = max(1, settings.exploration.page_size)
+        seat_ceiling = min(
+            settings.exploration.max_slots_per_feed,
+            max(1, -(-effective_served_depth // page_size)),
+        )
     # ★ ONE engagement map per request, shared by the serve log's `record` (the
     # baseline) and its `graduated` check (the comparison). Two computations of
     # "how many people engaged this author" that could disagree is precisely how
@@ -1999,8 +2246,17 @@ def rank_feed(
 
     # One stake-lineage memo for the whole request — see `_lineage_for`.
     lineage_cache: dict[str, frozenset[str]] = {}
+    # ★★★ SIZED AGAINST THE **FRESH** POOL, AND THAT DOES HALF THE RESCUE FOR FREE.
+    # `_fallback_filler` returns [] when `len(eligible) >= diversity.top_k` and
+    # otherwise sizes to `max(min_feed_size, min(|E| + |A|, top_k))`. Passing the
+    # post-suppression pool means `|E|` is the FRESH count, so a viewer whose
+    # fresh pool has collapsed automatically pulls MORE padding — the existing
+    # mechanism absorbs the shortfall before the valve below ever has to fire.
+    # Passing `eligible` here instead would compute the padding against a pool
+    # that is about to shrink, which is the silent version of this bug.
+    # With the flag off, `fresh is eligible`, so this is a no-op.
     filler = _fallback_filler(
-        eligible,
+        fresh,
         viewer,
         gateway,
         since,
@@ -2010,6 +2266,40 @@ def rank_feed(
         show_nsfw=show_nsfw,
         lineage_cache=lineage_cache,
     )
+    # ★ THE PADDING IS SPLIT TOO. `_fallback_filler` runs its output through the
+    # same `filter_eligible`, so without this a reader who has already seen the
+    # popular posts twice would be topped up with exactly those posts — the
+    # feature would work everywhere except on the starved viewer it matters most
+    # for. Its repeats join the same ordered pool the valve draws from.
+    if seen_on and filler:
+        filler_split = split_seen(
+            filler, seen_state, settings.seen, _engagers_now(filler)
+        )
+        filler = filler_split.fresh
+        repeats.extend(filler_split.repeats)
+        if seen_split is not None:
+            seen_split = SeenSplit(
+                fresh=seen_split.fresh,
+                repeats=repeats,
+                seen_count=seen_split.seen_count + filler_split.seen_count,
+                suppressed=seen_split.suppressed + filler_split.suppressed,
+                resurrected=seen_split.resurrected + filler_split.resurrected,
+                baseline_unknown=(
+                    seen_split.baseline_unknown + filler_split.baseline_unknown
+                ),
+                exempt=seen_split.exempt + filler_split.exempt,
+            )
+        # ★ ONE GLOBAL ORDER OVER BOTH BLOCKS' REPEATS. Each half arrived sorted,
+        # and concatenating two sorted lists is not a sorted list — the valve
+        # must re-admit the LEAST-SHOWN post in the whole feed first, not the
+        # least-shown merit post followed by the least-shown padding post.
+        _fallback_state = SeenState(impressions=0)
+        repeats.sort(
+            key=lambda c: (
+                seen_state.get(c.post.key, _fallback_state).impressions,
+                seen_state.get(c.post.key, _fallback_state).last_served_at,
+            )
+        )
     # One grouped author-prior read for BOTH blocks (§6): the prior is a
     # per-author window aggregate, so it is identical for the viewer's own
     # pool and for the popular padding, and fetching it once keeps the
@@ -2023,9 +2313,17 @@ def rank_feed(
     # build_trust_snapshot. LIVE-DATA-GATED: the horizon default is a placeholder
     # to tune against real HAFSQL — simworld has no multi-year history.
     quality_since = now - timedelta(days=settings.history.quality_prior_days)
+    # ★ `repeats` IS INCLUDED IN THE PRIOR SET. The starvation valve may score
+    # any of them below, and `_score` without a prior for an author is a silently
+    # different score, not an error. With the flag off `repeats` is empty and
+    # `fresh is eligible`, so this frozenset is identical to the pre-2026-08-15
+    # one; with it on, `fresh | repeats == eligible`, so the merit half is
+    # unchanged too and only the (larger) filler pool can add authors.
     priors = _author_priors(
         gateway,
-        frozenset(c.post.author for c in eligible) | frozenset(c.post.author for c in filler),
+        frozenset(c.post.author for c in fresh)
+        | frozenset(c.post.author for c in filler)
+        | frozenset(c.post.author for c in repeats),
         quality_since,
         snap,
         settings,
@@ -2038,8 +2336,10 @@ def rank_feed(
     # spaced as if unseen once the fallback filler ran. The counters are
     # documented as feed-scoped; now they are.
     feed_counters = _FeedCounters()
+    # ★ `fresh`, not `eligible` — the suppression split. Identical object when
+    # the flag is off.
     ranked = _score(
-        eligible, viewer, gateway, norm, now, snap, settings, priors, lineage_cache,
+        fresh, viewer, gateway, norm, now, snap, settings, priors, lineage_cache,
         carried=feed_counters,
     )
     if filler:
@@ -2052,6 +2352,11 @@ def rank_feed(
     # (a zero-engagement post sits at the 3rd-4th percentile by construction).
     # It is scored only so the returned objects carry a real ScoreBreakdown for
     # callers; its position is decided by the reserved slot, not by that score.
+    #
+    # An empty list here means "no exploration splice happened this request",
+    # which is the correct charge (none) either way — there is nothing sourced
+    # EXPLORATION in the feed for the charging step below to find.
+    spliced_ranked: list[ScoredCandidate] = []
     if explore_pool:
         # ★ The scored list is RE-ORDERED back into `explore_pool` order before
         # it is spliced (fixed 2026-08-04). `_score` sorts by score, and letting
@@ -2159,33 +2464,146 @@ def rank_feed(
         # from taking every one of 3 per-feed exploration slots to exactly
         # one (`test_c2c_at_most_one_promotion_per_lineage_group_per_feed`).
         lineage = _lineage_for(gateway, {c.post.author for c in ordered}, lineage_cache)
-        ranked = insert_exploration(ranked, ordered, settings.exploration, lineage=lineage)
-        # ★ B1: record the authors ACTUALLY SPLICED, not the ones that merely
-        # qualified. `insert_exploration` declines picks (per-author, per-page,
-        # ceiling), so counting `ordered` would charge authors for slots they
-        # never received — and an author charged for a slot they did not get is
-        # retired early, which would make the log a griefing vector instead of a
-        # defence. Read off the returned feed, which is the served truth.
-        if serve_log is not None:
-            # ★ Filter on SOURCE, not on membership of the pool. A post can be in
-            # the exploration pool AND independently eligible on merit — the pool
-            # is drawn from the raw candidate set, not from what failed. Matching
-            # pool KEYS against the served feed therefore charged authors for
-            # slots the lane never gave them, and an author charged for a slot
-            # they did not receive retires early, turning the log into a griefing
-            # vector. Caught by `attacks/exploration_capture.py`: served
-            # exploration slots collapsed 10 -> 3 because most "serves" were
-            # merit placements being miscounted.
-            serve_log.record(
-                (
-                    sc.post.author
-                    for sc in ranked
-                    if sc.source is CandidateSource.EXPLORATION
-                ),
-                engagement_counts,
-                now=now.timestamp(),
-                window_s=settings.exploration.serve_window_days * 86400.0,
-            )
+        ranked = insert_exploration(
+            ranked, ordered, settings.exploration, lineage=lineage, ceiling=seat_ceiling
+        )
+        # ★ The feed as it stood IMMEDIATELY after the splice, kept because the
+        # UNBOUNDED charging path below must stay byte-identical to what it did
+        # before 2026-08-15: that path charged from this exact list, before the
+        # popular reservation shifted anything and before truncation dropped
+        # anything. The BOUNDED path reads the delivered list instead, which is
+        # the honest one. Two lists rather than one branchy list because "which
+        # feed did we charge against" is precisely the question this defect was
+        # hiding in.
+        spliced_ranked = ranked
+
+    # ★★★ THE RESERVED POPULAR SLOT — AT TOP LEVEL, DELIBERATELY (2026-08-09).
+    #
+    # This first shipped INSIDE the `if explore_pool:` block above, which made it
+    # a silent no-op for every viewer whose candidate pool contained no newcomer.
+    # It measured 96/96 feeds only because simworld always generates one; with an
+    # empty explore pool the same run gives 38/96 — exactly the number the
+    # reservation was built to fix. A guarantee that depends on an unrelated
+    # lane having content is not a guarantee.
+    #
+    # It runs after exploration (so the two never claim the same index) and
+    # before truncation (so the promoted post is inside the served window).
+    ranked = insert_popular(ranked, settings.popular)
+
+    # ★★★★ THE STARVATION VALVE — SUPPRESSION YIELDS BEFORE A FEED GOES BELOW
+    # ONE SCREEN. ALWAYS. NO FLAG TURNS THIS FLOOR OFF (2026-08-15).
+    #
+    # It runs AFTER both reserved slots (the newcomer seat and the popular slot)
+    # and BEFORE truncation, which is the only position that is correct on all
+    # three counts:
+    #
+    #   * after `insert_exploration` / `insert_popular`, so neither reserved slot
+    #     can be evicted by a re-admitted repeat — a starved feed does not lose
+    #     its newcomer to make room for a post the reader has already seen;
+    #   * after the fallback padding, so the valve only ever pays for a shortfall
+    #     that `_fallback_filler`, the seat and the popular slot could not cover
+    #     between them. A valve that fires often means the thresholds are wrong,
+    #     and that has to be visible without a debug session;
+    #   * before `top_k`, so what it adds is inside the window the caller gets.
+    #
+    # ★★★ THE FLOOR IS `max(min_feed_size, serve_limit)`, AND `serve_limit` IS
+    # THE HALF THAT MATTERS. `min_feed_size` is 20 — one screen — but the only
+    # caller asks for 45 (a 30-post page at `OVER_FETCH_RATIO` 1.5) and `MAX_LIMIT`
+    # is 50. A 20-post floor would let a 45-post request come back with 20, and
+    # hydration drops moderated/deleted/unfetchable posts on top of that, so the
+    # reader would see a page well under one screen while every counter here read
+    # "floor honoured". Absent `serve_limit` the floor degrades to `min_feed_size`,
+    # which is the pre-existing guarantee and never weaker than it.
+    #
+    # ★ `repeats` is ordered ASCENDING by impressions, then OLDEST-served first:
+    # the least-shown, longest-ago post is the first thing a reader gets back.
+    # They are scored as a strict TAIL EXTENSION, exactly as the fallback padding
+    # is, sharing `feed_counters` so author spacing still accounts for them.
+    floor = max(settings.fallback.min_feed_size, serve_limit or 0)
+    valve_fired = 0
+    if repeats and len(ranked) < floor:
+        take = repeats[: floor - len(ranked)]
+        ranked = ranked + _score(
+            take, viewer, gateway, norm, now, snap, settings, priors, lineage_cache,
+            carried=feed_counters, top_k=len(take),
+        )
+        valve_fired = len(take)
+        logger.info(
+            "seen: STARVATION VALVE fired for viewer=%s — re-admitted %d "
+            "already-seen post(s) to keep the feed at the %d floor (had %d). "
+            "A valve that fires on ordinary traffic means the suppression "
+            "thresholds are wrong, not that the feed was rescued.",
+            viewer.account,
+            valve_fired,
+            floor,
+            len(ranked) - valve_fired,
+        )
+
+    delivered = ranked[: settings.diversity.top_k]
+
+    # ★★★ THE INSTRUMENT THE OWNER ASKED FOR: "a per-viewer measure of DISTINCT
+    # ELIGIBLE POSTS REMAINING, so starvation is visible BEFORE a reader hits it."
+    # Under this design it is free — it is `len(fresh)`.
+    #
+    # Logged at INFO on every build with the flag on, deliberately and at the
+    # same cadence `exploration.py` logs its newness lookup, and for the same
+    # reason: an empty `repeats` and a failed impression read produce IDENTICAL
+    # served output, so the counters are the ONLY thing that can tell an operator
+    # which happened. `baseline_unknown` separates "nothing grew" from "nothing
+    # was measurable"; `exempt` is the C5 exploration exemption proving it is
+    # live rather than trusted.
+    if seen_split is not None:
+        logger.info(
+            "seen: viewer=%s eligible=%d fresh=%d repeats=%d suppressed=%d "
+            "resurrected=%d baseline_unknown=%d exploration_exempt=%d "
+            "valve_fired=%d floor=%d served=%d",
+            viewer.account,
+            len(eligible),
+            len(fresh),
+            len(repeats),
+            seen_split.suppressed,
+            seen_split.resurrected,
+            seen_split.baseline_unknown,
+            seen_split.exempt,
+            valve_fired,
+            floor,
+            len(delivered),
+        )
+
+    # ★ B1: record the authors ACTUALLY SPLICED, not the ones that merely
+    # qualified. `insert_exploration` declines picks (per-author, per-page,
+    # ceiling), so counting `ordered` would charge authors for slots they
+    # never received — and an author charged for a slot they did not get is
+    # retired early, which would make the log a griefing vector instead of a
+    # defence. Read off the returned feed, which is the served truth.
+    #
+    # ★★★ MOVED HERE FROM INSIDE THE `if explore_pool:` BLOCK (2026-08-15) so
+    # that it can see the list the caller is actually handed — after the popular
+    # reservation has shifted the seat (live: position 13 becomes 14) and after
+    # `top_k` truncation. Charging before either of those is what made "which
+    # index did this seat land at" unanswerable at the one place it is needed.
+    # With no depth bound the charge is taken from `spliced_ranked`, i.e. from
+    # the identical list and at the identical moment as before, so the move is
+    # behaviour-preserving while the bound is off.
+    #
+    # ★ `record_serves=False` (contract C1) charges nothing at all: a ranking
+    # built in the background and never opened was seen by nobody.
+    if serve_log is not None and record_serves:
+        # ★ Filter on SOURCE, not on membership of the pool. A post can be in
+        # the exploration pool AND independently eligible on merit — the pool
+        # is drawn from the raw candidate set, not from what failed. Matching
+        # pool KEYS against the served feed therefore charged authors for
+        # slots the lane never gave them, and an author charged for a slot
+        # they did not receive retires early, turning the log into a griefing
+        # vector. Caught by `attacks/exploration_capture.py`: served
+        # exploration slots collapsed 10 -> 3 because most "serves" were
+        # merit placements being miscounted.
+        serve_log.record(
+            _charged_exploration_serves(delivered, spliced_ranked, effective_served_depth),
+            engagement_counts,
+            now=now.timestamp(),
+            window_s=settings.exploration.serve_window_days * 86400.0,
+        )
 
     # ★★★ GRADUATION — the serve budget is RETURNED to an author who has been
     # heard since it was spent. Third design; the first two are recorded in
@@ -2214,16 +2632,4 @@ def rank_feed(
     if serve_log is not None:
         for author in serve_log.graduated(engagement_counts):
             serve_log.clear(author)
-    # ★★★ THE RESERVED POPULAR SLOT — AT TOP LEVEL, DELIBERATELY (2026-08-09).
-    #
-    # This first shipped INSIDE the `if explore_pool:` block above, which made it
-    # a silent no-op for every viewer whose candidate pool contained no newcomer.
-    # It measured 96/96 feeds only because simworld always generates one; with an
-    # empty explore pool the same run gives 38/96 — exactly the number the
-    # reservation was built to fix. A guarantee that depends on an unrelated
-    # lane having content is not a guarantee.
-    #
-    # It runs after exploration (so the two never claim the same index) and
-    # before truncation (so the promoted post is inside the served window).
-    ranked = insert_popular(ranked, settings.popular)
-    return ranked[: settings.diversity.top_k]
+    return delivered

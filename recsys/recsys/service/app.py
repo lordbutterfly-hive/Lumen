@@ -75,6 +75,8 @@ from recsys.author_prior_cache import (
     build_warm_author_priors,
 )
 from recsys.config import DEFAULT_SETTINGS, HafsqlConfig, LiteConfig, Settings
+from recsys.core.exploration import post_engagers
+from recsys.io.seen_log import fetch_seen
 from recsys.contracts import NormContext, ScoredCandidate, ViewerProfile
 from recsys.db import store as recsys_store
 from recsys.io.hafsql import HafsqlClient
@@ -666,7 +668,19 @@ class ServiceState:
     #: ★ B1 (2026-08-05) — process-wide exploration serve counts. In-process by
     #: design (see `recsys.serve_log`): a restart forgets them, which fails OPEN
     #: (authors become eligible again) rather than shut, the correct direction
-    #: for a discovery lane. Persistence is NOT implemented.
+    #: for a discovery lane.
+    #:
+    #: ★★★ PERSISTENCE EXISTS SINCE 2026-08-15 — this comment used to end
+    #: "Persistence is NOT implemented" and that is now false. `recsys.
+    #: serve_log_store` provides a durable Postgres store and
+    #: `ExplorationServeLog` resolves it FROM THE ENVIRONMENT in its own
+    #: `__init__` (`RECSYS_EXPLORATION_SERVE_PERSIST`, default OFF), precisely so
+    #: the capability is reachable without editing this line — the repeated
+    #: defect in this package's history is a feature that is built and then
+    #: reached by nothing. With the flag off the behaviour above is unchanged.
+    #: It matters because FEED-BALANCE-RULING-2026-08-08 blocks any newcomer
+    #: increase "until the serve log is persisted", and an in-process log also
+    #: let a restart refund a spent budget.
     serve_log: ExplorationServeLog = field(default_factory=ExplorationServeLog)
     now_fn: Callable[[], datetime] = field(default=_default_now)
 
@@ -830,6 +844,18 @@ def build_feed(
     explicit_interest_tags: frozenset[str] | None = None,
     explicit_follows: frozenset[str] | None = None,
     explicit_mutes: frozenset[str] | None = None,
+    #: ★★★ HOW MANY POSTS THIS RANKING WILL ACTUALLY BE DELIVERED (2026-08-15).
+    #:
+    #: `?limit=` was parsed in the HTTP handler and applied to the SERIALISED
+    #: payload AFTER this function returned, so the number existed one layer above
+    #: the ranker and was thrown away before reaching it — which is why neither
+    #: the exploration seat rule ("1 per 20 SERVED posts") nor the seen-suppression
+    #: starvation floor could be expressed at all. Forwarded here ONCE, with one
+    #: agreed meaning, so the two features cannot build it twice with two.
+    #:
+    #: `None` = unknown; `rank_feed` then floors on `FallbackConfig.min_feed_size`
+    #: alone, which is the pre-existing guarantee.
+    serve_limit: int | None = None,
 ) -> FeedResult:
     """A10.2's assembly, in one function: cached NormContext + cached
     TrustSnapshot + a (per-viewer-cached) real ViewerProfile ->
@@ -965,6 +991,26 @@ def build_feed(
     # behaviour — and the cache counts and logs misses and reports them on
     # /health, because that degradation silently moves ~80% of the composite.
     try:
+        # ★★★ SEEN-POST SUPPRESSION — the one read, taken here and injected, not
+        # taken inside `rank_feed` (2026-08-15). Keeping the ranker free of I/O is
+        # what makes the rule reproducible offline and what stops a database
+        # outage from changing a ranking decision by anything except HOW MUCH is
+        # suppressed.
+        #
+        # ★ GATED ON THE FEATURE FLAG so that with `RECSYS_SEEN_SUPPRESSION` unset
+        # (the default, contract C11) this costs ZERO round trips — not a query
+        # whose result is then discarded. `fetch_seen` itself never raises and
+        # returns {} on an absent DSN or an unreachable store, and {} means
+        # "suppress nothing", so every degrade lands on the pre-suppression feed.
+        seen = (
+            fetch_seen(
+                state.settings.lite,
+                account,
+                window_days=state.settings.seen.window_days,
+            )
+            if state.settings.seen.enabled
+            else {}
+        )
         scored = rank_feed(
             viewer,
             state.gateway,
@@ -975,6 +1021,8 @@ def build_feed(
             trust_policy=TrustPolicy.FAIL_CLOSED,
             author_prior_cache=state.author_prior_cache.get,
             serve_log=state.serve_log,
+            seen=seen,
+            serve_limit=serve_limit,
         )
     except MissingTrustError as exc:
         # ★★ B5 (2026-08-05) — THIS PATH USED TO BE COMPLETELY SILENT. Compare
@@ -1055,6 +1103,25 @@ def serialize_scored(scored: ScoredCandidate) -> dict[str, Any]:
         "category": scored.post.category,
         "created": scored.post.created.isoformat(),
         "source": scored.source.value,
+        # ★★★ THE RESURRECTION BASELINE (2026-08-15) — distinct NON-LITE engagers
+        # this post carries right now.
+        #
+        # It is emitted so the frontend can record it ALONGSIDE the impression:
+        # seen-suppression resurrects a post on `E_now - engagers_at_last_serve`,
+        # and without a baseline captured AT SERVE TIME that rule is not strict,
+        # it is UNMEASURABLE. There is nowhere else it can be captured — recsys
+        # is the only party that computes it and the frontend is the only party
+        # that knows a page was delivered.
+        #
+        # ★ WHY NOT `score.final`, which is already carried end to end. Because
+        # `final` is a PERCENTILE RANK against a `NormContext` rebuilt from a
+        # rolling window, so a post's `final` moves when OTHER posts change.
+        # "Growth" measured on it would fire on other people's activity. A rule
+        # that resurrects on a number whose denominator moves is not measuring
+        # the post. This is a raw count, monotone inside the window, viewer-
+        # independent, and — because lite votes are excluded — not mintable by
+        # free identities.
+        "engagers": len(post_engagers(scored.post)),
         "score": {
             "vote_norm": scored.score.vote_norm,
             "rep_norm": scored.score.rep_norm,
@@ -1464,6 +1531,19 @@ class FeedRequestHandler(BaseHTTPRequestHandler):
                 explicit_interest_tags=explicit_tags,
                 explicit_follows=explicit_follows,
                 explicit_mutes=explicit_mutes,
+                # ★★★ THE SAME `limit` THAT SLICES THE PAYLOAD BELOW NOW ALSO
+                # REACHES THE RANKER (2026-08-15). Until this line it did not:
+                # it was parsed here and applied only at `payload["posts"][:limit]`
+                # after `build_feed` had returned, with the comment "`count`
+                # documents the payload, not the ranking" — so the ranker could
+                # not express any rule about the served page, and the
+                # seen-suppression starvation floor had nothing to floor ON.
+                #
+                # ONE parse, ONE meaning, BOTH consumers: the floor here and the
+                # payload slice below read the identical number, so they cannot
+                # drift. `None` stays `None` — "unknown depth", which floors on
+                # `min_feed_size` alone and slices nothing.
+                serve_limit=limit,
             )
         except FeedUnavailableError as exc:
             # R8: MissingTrustError -> 503, never 500 — "trust is stale/absent" is

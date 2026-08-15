@@ -1376,6 +1376,26 @@ class ExplorationConfig:
     #: already exists, so the work is a STORE (a table beside
     #: `recsys/db/schema.sql`, load-on-start, flush-on-timer), not a redesign.
     #: **Flip this to 9 the day serve counts are persisted and shared.**
+    #:
+    #: ★★★ 2026-08-15 — THE STORE NOW EXISTS, AND THIS IS STILL 13. The
+    #: prerequisite above is BUILT (`recsys.serve_log_store`: durable,
+    #: cross-replica, all three maps round-tripped, load-on-start,
+    #: write-through) but it ships behind `RECSYS_EXPLORATION_SERVE_PERSIST`
+    #: **OFF**, so as written this paragraph's premise still holds in the
+    #: deployed service. Two things must be true before 13 -> 9, and both are
+    #: runtime facts nobody can read off this file:
+    #:
+    #:   1. the flag is ON in production and a restart has been OBSERVED not to
+    #:      reset counts (query the table, restart, query it again);
+    #:   2. the ruling's other two conditions for moving the seat are attached —
+    #:      a promotion bar of >= 0.75x the page median and the right to forfeit
+    #:      (FEED-BALANCE-RULING-2026-08-08 §4: *"A slot that must be filled will
+    #:      be filled with junk"*). Neither is built. The third blocker,
+    #:      `seat_by_score` + rival suppression, is separately still open —
+    #:      `tests/test_rival_suppression.py` is still 2 strict xfails.
+    #:
+    #: So: the blocker moved from "impossible" to "flip a flag and prove it".
+    #: Do not read the store's existence as permission.
     position: int = 13
     #: ★★ SEAT OCCUPANT = THE BEST OF THE EQUALLY-UNHEARD (2026-08-08, owner:
     #: "the highest ranked one has an assured top 10 slot"). See
@@ -1522,6 +1542,68 @@ class ExplorationConfig:
     #: only ever has one eligible newcomer per feed, well under any cap 1; the
     #: cost above is a multi-newcomer/cohort effect, not visible in that panel.
     max_slots_per_feed: int = 3
+    #: ★★★ THE PHANTOM-SERVE BOUND (2026-08-15) — how deep the caller will
+    #: actually DELIVER, when the caller does not say. ``0`` means "no
+    #: assumption": every spliced pick is charged a serve exactly as before this
+    #: field existed, which is the shipped default and is byte-identical.
+    #:
+    #: THE DEFECT IT BOUNDS, measured rather than argued. ``insert_exploration``
+    #: splices at ranked indices 13, 33 and 53 (``position`` 13, ``page_size``
+    #: 20, ``max_slots_per_feed`` 3) and ``rank_feed`` then charges **all three**
+    #: authors one of their ``max_serves_per_author`` (3) serves. The reader
+    #: never sees seats 33 or 53: the only known caller asks for 45 posts,
+    #: hydrates 30, and serves pages 2-5 from Hive chain paging rather than from
+    #: the ranking at all. Read-only against the live delivery log
+    #: (``lumen_feed_served``, 8,508 rows, 2026-08-15): **169 rows with
+    #: ``source = 'exploration'``, at delivered positions 3/11/12/13/14 and never
+    #: once above 14.** So roughly two thirds of every newcomer's platform-wide
+    #: budget was being spent on impressions that physically did not happen —
+    #: and the live drop counters show that budget running out for real
+    #: (``served_out: 3`` at both observed seat forfeits).
+    #:
+    #: With this set (or with ``rank_feed(served_depth=...)`` passed, which wins),
+    #: only picks landing INSIDE that depth in the returned feed are charged.
+    #:
+    #: THE RESIDUAL, STATED HERE BECAUSE IT IS NOT CLOSED BY THIS FIELD: a depth
+    #: is not a delivery. recsys charges at BUILD time, so (a) an over-fetch —
+    #: the caller asks for 45 and hydrates 30 — still over-charges by the
+    #: difference, and (b) a feed that is built and never opened is charged in
+    #: full. ``rank_feed(record_serves=False)`` closes (b) for background/warm
+    #: rebuilds; (a) closes only when the delivery log feeds back, which cannot
+    #: happen until the frontend's 3-minute poll stops recording impressions
+    #: (see ``recsys.serve_log_store``'s header for the measurement that kills
+    #: the naive version of that).
+    assumed_served_depth: int = 0
+    #: ★★★ DIRECTIVE B2 — "ONE SEAT PER 20 **SERVED**" — BUILT, SHIPPED INERT
+    #: (2026-08-15). ``False`` is byte-identical to before this field existed.
+    #:
+    #: WHAT THE CODE ALREADY DOES, which is not what the directive assumed. The
+    #: seat is ALREADY allocated once per ``page_size`` positions:
+    #: ``insert_exploration``'s ``divmod(inserted, slots_per_page)`` puts them at
+    #: 13, 33, 53 … and ``max_slots_per_feed`` stops the walk at 3. The reason
+    #: the reader never meets a seat deeper than position 14 is **delivery**, not
+    #: allocation (see ``assumed_served_depth`` above). So there is nothing to
+    #: switch on here that would move a reader-visible number today, and this
+    #: field says so rather than pretending otherwise.
+    #:
+    #: WHAT IT DOES WHEN ON: the per-feed ceiling becomes
+    #: ``min(max_slots_per_feed, ceil(served_depth / page_size))`` instead of a
+    #: flat ``max_slots_per_feed``. Note the ``min``: turning this on can only
+    #: ever LOWER the ceiling, never raise it, so it cannot be the vehicle for a
+    #: newcomer increase. That is deliberate and it is the standing ruling, not a
+    #: preference — FEED-BALANCE-RULING-2026-08-08 §7 caps this lane at "1 until
+    #: the three blockers clear". Raising the lane requires a SECOND, explicit
+    #: change to ``max_slots_per_feed``, taken on its own evidence, with the
+    #: ruling's two extra conditions (a promotion bar of >= 0.75x the page
+    #: median, and the right to forfeit) attached.
+    #:
+    #: WHEN IT BECOMES MEANINGFUL: once the frontend serves pages 2..N out of the
+    #: stored ranking instead of Hive trending, ``served_depth`` becomes 150-200
+    #: rather than 30, ``ceil(depth / 20)`` stops being the binding term, and the
+    #: ceiling is once again whatever ``max_slots_per_feed`` says. Until then
+    #: this field's only effect is to stop the lane building seats that provably
+    #: cannot be delivered — which also stops charging for them.
+    derive_slots_from_served_depth: bool = False
     #: ★★★ B1 / THE SERVING LOG (2026-08-05) — how many exploration slots ONE
     #: author may be given before the lane stops offering them, unless engagement
     #: arrives. ``0`` disables the log entirely (exact pre-B1 behaviour).
@@ -1841,6 +1923,17 @@ class ExplorationConfig:
             raise ValueError(
                 f"max_slots_per_feed must be >= 0, got {self.max_slots_per_feed}"
             )
+        # ★ 0 is the documented "no assumption" state; negative is a typo, and a
+        # typo must never look like a policy (the same rule the 2026-08-05
+        # council applied to `serve_window_days` and `max_serves_per_author`).
+        # It matters more here than usual: a negative depth would charge NOTHING,
+        # silently removing the only bound on this lane that an attacker cannot
+        # write.
+        if self.assumed_served_depth < 0:
+            raise ValueError(
+                "assumed_served_depth must be >= 0 (0 means no assumption — "
+                f"charge every spliced pick), got {self.assumed_served_depth}"
+            )
         # ★ C1a — RAISE, never fall back to unkeyed (see seat_secret's docstring
         # for why). This is the loudest point this class can enforce it: the one
         # place every ExplorationConfig, however constructed, passes through.
@@ -1892,6 +1985,16 @@ class ExplorationConfig:
         activate FROM) is already handled the same as "no rollover in
         progress" by ``_resolve_seat_secret``, so it fails toward the current
         secret rather than toward an exception mid-rollout.
+
+        ``RECSYS_EXPLORATION_ASSUMED_SERVED_DEPTH`` (int, default 0 = off) and
+        ``RECSYS_EXPLORATION_DERIVE_SLOTS_FROM_SERVED_DEPTH`` (bool, default
+        off) — the 2026-08-15 new-author fields; see their own docstrings. The
+        third switch in that change, ``RECSYS_EXPLORATION_SERVE_PERSIST``, is
+        NOT read here on purpose: it configures a STORE, not a ranking
+        parameter, and the object that needs it
+        (:class:`recsys.serve_log.ExplorationServeLog`) is built by the service
+        without access to ``Settings``. It lives in
+        :func:`recsys.serve_log_store.store_from_env`.
         """
 
         def _hex32(name: str) -> bytes | None:
@@ -1904,12 +2007,25 @@ class ExplorationConfig:
                 raise ValueError(f"{name} is not valid hex: {exc}") from exc
 
         active_from_raw = os.environ.get("LUMEN_EXPLORE_SEAT_SECRET_ACTIVE_FROM_BUCKET")
+        # ★ 2026-08-15 — the two new-author fields are readable HERE because
+        # `recsys/service/app.py` builds production settings with
+        # `Settings.from_env(production=True)` and nothing else. A field that is
+        # only settable in code is a field an operator cannot turn on without a
+        # rebuild, and this package has repeatedly shipped capabilities that
+        # were unreachable for exactly that reason. Both are OFF/absent by
+        # default, so an environment that sets neither is byte-identical.
+        depth_raw = os.environ.get("RECSYS_EXPLORATION_ASSUMED_SERVED_DEPTH")
+        derive_raw = os.environ.get("RECSYS_EXPLORATION_DERIVE_SLOTS_FROM_SERVED_DEPTH", "")
         return cls(
             production=production,
             seat_secret=_hex32("LUMEN_EXPLORE_SEAT_SECRET"),
             previous_seat_secret=_hex32("LUMEN_EXPLORE_SEAT_SECRET_PREVIOUS"),
             seat_secret_active_from_bucket=(
                 int(active_from_raw) if active_from_raw is not None else 0
+            ),
+            assumed_served_depth=(int(depth_raw) if depth_raw is not None else 0),
+            derive_slots_from_served_depth=(
+                derive_raw.strip().lower() in {"1", "true", "yes", "on"}
             ),
         )
 
@@ -2893,6 +3009,126 @@ class PopularConfig:
 
 
 @dataclass(frozen=True)
+class SeenConfig:
+    """SEEN-POST SUPPRESSION (2026-08-15) — a post already SERVED TWICE steps
+    aside for one this reader has not been shown, and comes back only if it GREW.
+
+    ★★★ THE MEASUREMENT THAT FORCED IT. Top-20 for `lordbutterfly` at 18:25 and
+    again at 23:04 UTC on 2026-08-14 — 4h 39m apart, outliving the 2h ranking
+    presentation ceiling — was **16 of 20 identical, 80% repeat**. Independently,
+    the delivery log (`lumen_feed_served`, 8,508 rows, 44 viewers, read-only
+    2026-08-15) puts **44.5% of all (viewer, post) pairs at >= 2 impressions**
+    (531 of 1,192), with one pair at 66 and one post served 118 times.
+
+    ★★★ WHY TWO AND NOT ONE — THE OWNER'S DESIGN, NOT A TUNING CHOICE. X removes
+    a post on first sight. We deliberately do not: our supply is small enough
+    that first-sight removal is a feed that empties. Suppressing at the SECOND
+    delivery costs a reader one repeat and buys back the whole tail of a ranking
+    that is already computed and thrown away — recsys ranks 200
+    (`DiversityConfig.top_k`), the only caller transmits 45 and hydrates 30
+    (`route.ts` `OVER_FETCH_RATIO = 1.5`), so suppressing the top 30 does not
+    shrink a feed, it promotes posts 31-60 of a list that already exists.
+
+    ★★★ AND WHY IT IS SAFE TO ARM ONLY NOW. Until 2026-08-15 the 3-minute client
+    poll re-fetched page 1 through the recording path, so the counter this rule
+    consumes read **31-40 recorded impressions per distinct post per viewer** —
+    roughly 31 for 1. Arming a 2-impression rule against that instrument would
+    have suppressed 531 pairs on day one for posts nobody looked at. The poll now
+    carries `probe=1` and records nothing, so rows written from now on are
+    deliveries to a person. The 8,508 legacy rows are NOT impressions under this
+    rule and are versioned off, never read here — see migration
+    `0036_feed_seen.sql`, which starts a NEW, EMPTY aggregate rather than
+    backfilling a field (`was this a poll?`) that was never captured and cannot
+    be reconstructed: the poll and a real page-1 fetch were the same URL with the
+    same parameters, so the rows are byte-identical in every column the table has.
+    """
+
+    #: ★ OFF. Contract C11. With this False `rank_feed` takes the pre-2026-08-15
+    #: path exactly — no split, no valve, no read — and the returned feed is
+    #: byte-identical. Env: `RECSYS_SEEN_SUPPRESSION`.
+    enabled: bool = False
+
+    #: The owner's rule, verbatim: suppress on the THIRD build after the SECOND
+    #: delivery. Evaluated as `impressions >= suppress_after_impressions`.
+    suppress_after_impressions: int = 2
+
+    #: ★★★ RESURRECTION, ABSOLUTE ARM — AND WHY 2, NOT 1. `VoteSignalConfig.
+    #: unknown_free` is 1.0 and is validated to be >= 1.0 so "a genuine
+    #: newcomer's first upvote always counts". One unknown engager is, by this
+    #: system's own arithmetic, exactly the free budget — indistinguishable from
+    #: one costless identity. TWO distinct non-lite engagers is the smallest
+    #: delta that cannot be bought inside it. The number is anchored on a shipped
+    #: constant, not on taste.
+    resurrect_min_absolute: int = 2
+
+    #: ★★★ RESURRECTION, RELATIVE ARM. With an absolute-only rule a post sitting
+    #: at 80 engagers resurrects on +2, which is noise at that scale, so the
+    #: BIGGEST posts would resurrect constantly — reproducing the repetition this
+    #: feature exists to remove, on precisely the posts that repeat most today
+    #: (the 118-impression post above is a popular one). The measured reference
+    #: is that freshness is an ADDITIVE bonus and ~15-20% more engagement
+    #: overtakes a brand-new post; 25% sits just above that band, so a
+    #: resurrection is a post that would have out-ranked fresh content on merit
+    #: anyway. Set to 0.0 for pure-absolute behaviour.
+    resurrect_relative: float = 0.25
+
+    #: ★★★ THE WINDOW — 7 DAYS, AND THE C9 RECONCILIATION IS DELIBERATE.
+    #: `HistoryWindows.sourcing_freshness_days` is 3 and governs every discovery
+    #: lane; `HistoryWindows.in_network_freshness_days` is 7 and governs the
+    #: viewer's own follows. The impression window must cover the WIDEST sourcing
+    #: horizon, because a post outside it can never be a candidate and its
+    #: impressions cannot matter — so 7, the max of the two, not 3.
+    #:
+    #: This is a live trap in existing code and the reason the number is stated
+    #: here rather than defaulted anywhere: `countImpressions`
+    #: (`feed-served-repository.ts`) defaults to `withinDays ?? 3`, and at that
+    #: default a post from someone you follow, served five days ago, reports ZERO
+    #: impressions and is served as though new. Nothing in this feature consumes
+    #: that function; the aggregate is read with this window passed explicitly.
+    window_days: int = 7
+
+    def __post_init__(self) -> None:
+        if self.suppress_after_impressions < 1:
+            raise ValueError(
+                "suppress_after_impressions must be >= 1 — 0 would suppress a "
+                "post the reader has never been shown, which is not a "
+                "suppression rule, it is a deletion. Turn the feature off with "
+                f"`enabled=False` instead. Got {self.suppress_after_impressions}"
+            )
+        if self.resurrect_min_absolute < 1:
+            raise ValueError(
+                "resurrect_min_absolute must be >= 1 — at 0 every suppressed "
+                "post resurrects on zero growth, i.e. the feature silently "
+                f"becomes a no-op that looks shipped. Got {self.resurrect_min_absolute}"
+            )
+        if self.resurrect_relative < 0:
+            raise ValueError(
+                f"resurrect_relative must be >= 0, got {self.resurrect_relative}"
+            )
+        if self.window_days < 1:
+            raise ValueError(
+                f"seen window_days must be >= 1, got {self.window_days}"
+            )
+
+    @classmethod
+    def from_env(cls, base: SeenConfig | None = None) -> SeenConfig:
+        """Resolve the one switch an operator turns from the environment.
+
+        ★ SAME DOOR AS `ExplorationConfig.from_env` AND `LiteConfig.from_env`,
+        and threaded from `Settings.from_env` for the reason both of those
+        record: this package has twice shipped a `from_env` whose only reference
+        was inside its own error message, so the setting could never receive a
+        real value in production. A flag with no path from the environment is a
+        flag that is permanently at its default.
+        """
+        source = base if base is not None else cls()
+        raw = os.environ.get("RECSYS_SEEN_SUPPRESSION", "").strip().lower()
+        if not raw:
+            return source
+        return replace(source, enabled=raw in {"1", "true", "yes", "on"})
+
+
+@dataclass(frozen=True)
 class Settings:
     """Root config object threaded through the pipeline."""
 
@@ -2914,6 +3150,11 @@ class Settings:
     hafsql: HafsqlConfig = field(default_factory=HafsqlConfig)
     lite: LiteConfig = field(default_factory=LiteConfig)
     trust: TrustConfig = field(default_factory=TrustConfig)
+    #: ★ Seen-post suppression (2026-08-15). `enabled=False` by default, so every
+    #: existing `Settings()` — including `DEFAULT_SETTINGS`, which the whole test
+    #: suite and every measurement panel use — keeps the pre-2026-08-15 feed
+    #: byte-for-byte. See `SeenConfig`.
+    seen: SeenConfig = field(default_factory=SeenConfig)
     #: ★ C5/R2/R13 (2026-08-04). The curated trust-root seed list, loaded once
     #: from the package-data file at import time (see `_load_trusted_seeds`).
     #: `build_trust_snapshot` defaults its own `trusted_seeds` parameter from
@@ -2980,9 +3221,16 @@ class Settings:
         # passes its own tests and is unreachable where it matters, which is
         # this codebase's most-repeated failure. `LiteConfig.from_env` also
         # carries the L2 engagement DSN, so both halves come through one door.
+        # ★ `seen` comes through the SAME door, for the same reason (2026-08-15).
+        # `SeenConfig.enabled` is the whole rollout switch for seen-suppression;
+        # left unwired it would sit at its `False` default no matter what
+        # `RECSYS_SEEN_SUPPRESSION` held, and the feature would be un-armable in
+        # production while passing every test — this package's most-repeated
+        # failure, recorded twice already in the paragraphs above.
         return cls(
             exploration=ExplorationConfig.from_env(production=production),
             lite=LiteConfig.from_env(),
+            seen=SeenConfig.from_env(),
         )
 
 

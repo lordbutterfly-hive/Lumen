@@ -39,10 +39,43 @@
 # to the batch. Leave it unset ONLY against a data source you control.
 #
 # ★ INTERVAL MUST STAY STRICTLY BELOW `max_snapshot_age_days` IN SECONDS
-# (14d = 1209600). 7 days leaves a full extra cycle of headroom so one failed
-# run cannot age the snapshot out; `tests/test_deploy_artifact.py` enforces that
-# relationship against the compose file, and this script keeps the same numbers
-# rather than inventing its own.
+# (14d = 1209600). The guard below refuses anything at or above it;
+# `tests/test_deploy_artifact.py` enforces the same relationship mechanically,
+# and it now also enforces that THIS FILE and `deploy/compose.recsys.yml` carry
+# the SAME default — see below for why that matters.
+#
+# ★★★ 3 DAYS, NOT 7 (2026-08-15). What shortening the cadence actually buys a
+# new author, traced at source rather than assumed: being ABSENT from
+# `graph_creds` is already permissive for a newcomer AUTHOR
+# (`second_degree.filter_eligible` applies the author floor only when a cred row
+# exists), so a faster batch does nothing for their own eligibility. What IS
+# batch-gated is (a) THEIR SUPPORTERS' ABILITY TO VOUCH — `qualifying_engagers`
+# requires the engager to be PRESENT in `graph_creds`, so a reader who first
+# engaged after the last batch does not count, and that gate is what the
+# OON_ENGAGED lane runs on — and (b) CF presence, since ALS is trained inside
+# the batch. 3 days cuts the worst-case dead time for a newcomer's first
+# supporter from 7 days to 3.
+#
+# THE COSTS, BOTH OF THEM, because neither is a footnote:
+#
+#   * MIRROR LOAD is 2.33x the batch runs — roughly 12 min/week to 28 min/week
+#     against a shared third-party mirror this project was nearly banned from
+#     once already. Small in absolute terms; the risk is not the run count, it
+#     is that this workload does not degrade gracefully (see the 365-day
+#     planner cliff measured above), and a 3-day cadence hits that cliff 2.33x
+#     more often. 2 days was rejected for that reason: 3.5x load for a marginal
+#     freshness gain.
+#   * RIVAL SUPPRESSION LANDS 2.33x FASTER, and it is an OPEN bug. Two socks
+#     commenting on a newcomer's post plus the newcomer's polite replies floor
+#     their graph-cred to exactly 0.0, and `eligible_for_exploration` drops
+#     `cred.score <= 0.0` outright — i.e. suppression EVICTS a rival from the
+#     new-author lane. `tests/test_rival_suppression.py` is still 2 passed /
+#     2 xfail(strict=True), so no fix has landed; 51 of 15,855 live graph_cred
+#     rows sit at exactly 0.0. Shortening the cadence shortens the attacker's
+#     time-to-effect from up to 7 days to up to 3.
+#
+# Headroom is unaffected in the safe direction: at 3 days a failed run retries
+# in RETRY_S (1h) and still has ~11 days of the 14-day budget left.
 #
 # ★★★ A FAILED RUN USED TO BE INVISIBLE, AND THE RETRY MATH WAS WRONG
 # (2026-08-14). Two separate defects, found while making failure visible for
@@ -68,19 +101,22 @@
 #     `tests/test_deploy_artifact.py`'s "interval strictly below max_age, so
 #     one failed run cannot age the snapshot out") assumed a failure recovers
 #     in RETRY_S. It does not: it recovers in RETRY_S + INTERVAL_S. Measured
-#     against the shipped defaults (interval 604800s/7d, retry 3600s/1h,
+#     against the then-shipped defaults (interval 604800s/7d — the default is
+#     259200s/3d since 2026-08-15, which is why the numbers below read as
+#     history; retry 3600s/1h,
 #     `max_snapshot_age_days` 14d = 1209600s): a single failure at the day-7
 #     attempt pushes the retried attempt to day 14.04 — 3600s AFTER the
 #     snapshot has already expired and `/feed` has gone FAIL_CLOSED. The exact
 #     outage this design exists to prevent, guaranteed by its own retry path.
 #     Fixed below by tracking the NEXT sleep duration explicitly (INTERVAL_S
 #     after success, RETRY_S after failure) instead of nesting a second sleep
-#     inside the loop body. ★ The SAME bug is present in
-#     `deploy/compose.recsys.yml`'s `recsys-trust-batch-cron` heredoc — left
-#     unfixed there deliberately (out of this pass's stated scope, and
-#     changing that file's exact text risks the pinned string-matching tests
-#     in `tests/test_deploy_artifact.py`); flag it for a decision rather than
-#     editing untested.
+#     inside the loop body. ★ The SAME bug was present in
+#     `deploy/compose.recsys.yml`'s `recsys-trust-batch-cron` heredoc and is
+#     now FIXED there too (2026-08-15), with the same `NEXT_SLEEP_S` shape and
+#     a consecutive-failure `TRUST_BATCH_ALERT`. It is covered by
+#     `tests/test_deploy_artifact.py::test_a_failed_run_retries_in_retry_s_not_
+#     retry_s_plus_interval_s`, which was mutation-checked: restoring the old
+#     `sleep INTERVAL` + nested-retry shape fails it.
 #
 # ★★★ THE BATCH WINDOW NOW SURVIVES A FRESH HOST (2026-08-14).
 # `RECSYS_TRUST_SINCE_DAYS` used to exist only in whichever shell happened to
@@ -97,14 +133,14 @@
 # Usage:
 #   ./deploy/trust-cron-host.sh                 # build a snapshot now, then schedule
 #   ./deploy/trust-cron-host.sh --skip-initial  # schedule only (snapshot already fresh)
-#   RECSYS_TRUST_BATCH_INTERVAL_S=259200 ./deploy/trust-cron-host.sh   # 3-day cadence
+#   RECSYS_TRUST_BATCH_INTERVAL_S=604800 ./deploy/trust-cron-host.sh   # back to weekly
 #   ./deploy/trust-cron-status.sh               # is the batch actually healthy? (reads Postgres)
 set -euo pipefail
 
 IMAGE="${RECSYS_IMAGE:-recsys:latest}"
 ENV_FILE="${RECSYS_ENV_FILE:-$(cd "$(dirname "$0")/.." && pwd)/.env.local}"
 CONTAINER="${RECSYS_TRUST_CRON_NAME:-recsys-trust-batch-cron}"
-INTERVAL_S="${RECSYS_TRUST_BATCH_INTERVAL_S:-604800}"
+INTERVAL_S="${RECSYS_TRUST_BATCH_INTERVAL_S:-259200}"
 RETRY_S="${RECSYS_TRUST_BATCH_RETRY_S:-3600}"
 SINCE_DAYS="${RECSYS_TRUST_SINCE_DAYS:-}"
 SINCE_DAYS_SOURCE="shell (RECSYS_TRUST_SINCE_DAYS)"
@@ -277,7 +313,7 @@ docker run -d \
     # max_snapshot_age_days under the shipped defaults. Tracking the next
     # sleep explicitly makes a failure retry in RETRY_S, full stop; a success
     # returns to INTERVAL_S.
-    NEXT_SLEEP_S="${RECSYS_TRUST_BATCH_INTERVAL_S:-604800}"
+    NEXT_SLEEP_S="${RECSYS_TRUST_BATCH_INTERVAL_S:-259200}"
     while true; do
       sleep "$NEXT_SLEEP_S"
       START_TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -286,7 +322,7 @@ docker run -d \
       if python -m recsys.jobs.trust_batch ${RECSYS_TRUST_BATCH_ARGS}; then
         EXIT_CODE=0
         FAIL_STREAK=0
-        NEXT_SLEEP_S="${RECSYS_TRUST_BATCH_INTERVAL_S:-604800}"
+        NEXT_SLEEP_S="${RECSYS_TRUST_BATCH_INTERVAL_S:-259200}"
         echo "trust_batch: scheduled run OK"
       else
         EXIT_CODE=$?

@@ -287,22 +287,44 @@ services:
       recsys-trust-batch:
         condition: service_completed_successfully
     # RECSYS_TRUST_BATCH_INTERVAL_S must stay STRICTLY BELOW
-    # `max_snapshot_age_days` in seconds (14d = 1209600). 7 days leaves a full
-    # extra cycle of headroom, so one failed run cannot age the snapshot out.
+    # `max_snapshot_age_days` in seconds (14d = 1209600). 3 days leaves four
+    # whole cycles of headroom, so one failed run cannot age the snapshot out.
     # `tests/test_deploy_artifact.py` enforces that relationship mechanically —
     # raise this and the gate fails.
+    #
+    # ★★★ 3 DAYS SINCE 2026-08-15, AND THIS FILE IS NOT THE ONE THAT RUNS.
+    # The deployed cron was launched by `deploy/trust-cron-host.sh` (the box is
+    # not compose-managed; see that file's header). This default therefore
+    # governs only a future compose deploy — which is exactly what makes it
+    # dangerous to leave behind: the artifact test parses THIS FILE, so a
+    # cadence changed here and not there (or there and not here) leaves the gate
+    # pinning a number nobody runs. `test_the_two_schedulers_carry_the_same
+    # _cadence` now refuses that split, in both directions.
+    #
+    # The reasoning for 3 rather than 2 or 7 — what it buys a new author, the
+    # 2.33x mirror load against a source that fails off a planner cliff, and the
+    # 2.33x faster arrival of the still-open rival-suppression bug — is written
+    # out once, in `deploy/trust-cron-host.sh`'s header, rather than copied.
     command:
       - sh
       - -c
       - |
+        NEXT_SLEEP_S="${RECSYS_TRUST_BATCH_INTERVAL_S:-259200}"
+        FAILURES=0
         while true; do
-          sleep "${RECSYS_TRUST_BATCH_INTERVAL_S:-604800}"
+          sleep "$NEXT_SLEEP_S"
           echo "trust_batch: starting scheduled run"
           if python -m recsys.jobs.trust_batch; then
             echo "trust_batch: scheduled run OK"
+            FAILURES=0
+            NEXT_SLEEP_S="${RECSYS_TRUST_BATCH_INTERVAL_S:-259200}"
           else
-            echo "trust_batch: scheduled run FAILED — retrying in ${RECSYS_TRUST_BATCH_RETRY_S:-3600}s"
-            sleep "${RECSYS_TRUST_BATCH_RETRY_S:-3600}"
+            FAILURES=$((FAILURES + 1))
+            echo "trust_batch: scheduled run FAILED (consecutive=$FAILURES) — retrying in ${RECSYS_TRUST_BATCH_RETRY_S:-3600}s"
+            if [ "$FAILURES" -ge 2 ]; then
+              echo "TRUST_BATCH_ALERT: $FAILURES consecutive failures; the snapshot is aging toward max_snapshot_age_days and /feed will FAIL_CLOSE when it expires"
+            fi
+            NEXT_SLEEP_S="${RECSYS_TRUST_BATCH_RETRY_S:-3600}"
           fi
         done
     environment:

@@ -77,6 +77,11 @@ def _eligible(cands, viewer=None, **kw):
         show_nsfw=kw.pop("show_nsfw", True),
         config=kw.pop("config", _cfg()),
         bucket=kw.pop("bucket", 0),
+        # ★ 2026-08-15: `serves` was not threaded through this helper at all, so
+        # NO test in this file could exercise the serve-count ORDERING — which is
+        # exactly how that ordering came to be inert inside the rotation block
+        # for ten days without a single failure. `None` is the historic default.
+        serves=kw.pop("serves", None),
     )
 
 
@@ -933,6 +938,87 @@ def test_a_uniquely_neediest_author_keeps_the_seat_in_every_bucket() -> None:
         assert _eligible([newcomer, *others], bucket=bucket)[0].post.author == "newcomer"
 
 
+def test_rotation_still_sinks_an_author_the_system_has_already_served() -> None:
+    """★★★ THE INERT HALF OF B1 (found 2026-08-15, fixed in the same change).
+
+    The sort above the rotation block is
+    `(need_tier, served_count, -created, name)`. The rotation block then rebuilt
+    `authors` from scratch, re-grouping by `_need_tier` ONLY and re-sorting each
+    group by `_rotation_key` alone — so the `served_count` component had NO
+    EFFECT on the final order under the shipped defaults (`rotation_hours = 6`,
+    bucket non-zero in production). B1's stated intent — "an author the system
+    has ALREADY served ranks below one it has not … each sock sinks as it is
+    spent" — was dead code. Only the serve CAP still did anything, and the other
+    surviving copy of the key (`seat_order`'s `serves`) is behind
+    `seat_by_score`, which ships OFF.
+
+    LIVE SYMPTOM, which is why this is a defect and not a tidy-up: one newcomer
+    post held one reader's seat 66 times between 2026-08-13 01:01:41 and
+    2026-08-14 01:01:42 — exactly 24 hours, four whole rotation periods, one
+    occupant (`lumen_feed_served`, read-only).
+
+    ★ THE VACUITY GUARD IS THE POINT OF THE SEARCH. Asserting "the unspent
+    author is first" proves nothing unless the MAC would have put the SPENT one
+    first — otherwise the test passes identically with the bug present. So the
+    buckets are searched for exactly that adversarial condition and the search
+    is asserted to have found some. A check whose trigger is structurally
+    unreachable must FAIL, never quietly pass.
+
+    MUTANT (verified by reverting the fix in place and re-running): sort each
+    tier by `_rotation_key` alone. This fails on every adversarial bucket.
+    """
+    from recsys.core.exploration import _rotation_key
+
+    secret = hashlib.sha256(b"b1-rotation-serve-order").digest()
+    cfg = _cfg(seat_secret=secret, max_serves_per_author=3)
+    spent, unspent = "ann", "bob"
+    cands = [_cand(spent, "p"), _cand(unspent, "p")]
+
+    adversarial = [
+        bucket
+        for bucket in range(1, 400)
+        if _rotation_key(spent, bucket, secret) < _rotation_key(unspent, bucket, secret)
+    ]
+    assert adversarial, (
+        "VACUOUS: no bucket in 1..400 puts the spent author ahead on the MAC, so "
+        "this test cannot tell the fix from the bug. Change the secret."
+    )
+
+    for bucket in adversarial[:8]:
+        order = [
+            c.post.author
+            for c in _eligible(cands, bucket=bucket, config=cfg, serves={spent: 2})
+        ]
+        assert order[0] == unspent, (
+            f"bucket {bucket}: an author already served twice took the seat ahead "
+            "of one never served — B1's ordering half is inert again"
+        )
+    # And with the budget switched off, 0 means OFF IN BOTH HALVES: the MAC
+    # order stands untouched, which is the rule this file already states and has
+    # already broken once.
+    off = _cfg(seat_secret=secret, max_serves_per_author=0)
+    bucket = adversarial[0]
+    assert [
+        c.post.author for c in _eligible(cands, bucket=bucket, config=off, serves={spent: 2})
+    ] == [c.post.author for c in _eligible(cands, bucket=bucket, config=off)]
+
+
+def test_the_serve_ordering_is_a_tie_break_not_a_replacement_for_the_shuffle() -> None:
+    """Among EQUALLY-spent authors the keyed MAC must still decide, or the seat
+    stops rotating and becomes a function of name order — the free Sybil handle
+    (`aaa-`) the shuffle was built to remove."""
+    secret = hashlib.sha256(b"b1-rotation-tie-break").digest()
+    cfg = _cfg(seat_secret=secret, max_serves_per_author=3)
+    cands = [_cand(a, "p") for a in ("ann", "bob", "cass", "dan", "eve")]
+    serves = dict.fromkeys(("ann", "bob", "cass", "dan", "eve"), 1)
+
+    seats = {
+        _eligible(cands, bucket=b, config=cfg, serves=serves)[0].post.author
+        for b in range(101, 121)
+    }
+    assert len(seats) > 1, "the seat stopped rotating among equally-spent authors"
+
+
 def test_rotation_switches_off_cleanly() -> None:
     """`rotation_hours = 0` must reproduce the pre-rotation ordering exactly, so
     the behaviour can be reverted by config alone if it misbehaves live."""
@@ -1223,6 +1309,46 @@ def test_max_slots_per_feed_does_not_reduce_a_take_already_under_the_cap() -> No
     out = insert_exploration(ranked, pool, _cfg(max_slots_per_feed=3))
     inserted = sum(1 for c in out if c.source is CandidateSource.EXPLORATION)
     assert inserted == 2
+
+
+def test_the_ceiling_override_defaults_to_the_configured_cap(
+) -> None:
+    """B2 (2026-08-15): `ceiling=None` — every caller that does not pass it —
+    must be the exact historic behaviour, i.e. `config.max_slots_per_feed`."""
+    ranked = [_scored(_cand(f"est{i}", "p"), final=1.0 - i / 1000) for i in range(120)]
+    pool = _explore_pool(*[_cand(f"newcomer-{i:02d}", "d") for i in range(10)])
+    cfg = _cfg(max_slots_per_feed=3)
+    assert insert_exploration(ranked, pool, cfg) == insert_exploration(
+        ranked, pool, cfg, ceiling=None
+    )
+    assert insert_exploration(ranked, pool, cfg, ceiling=2) != insert_exploration(
+        ranked, pool, cfg
+    )
+    lowered = insert_exploration(ranked, pool, cfg, ceiling=2)
+    assert sum(1 for c in lowered if c.source is CandidateSource.EXPLORATION) == 2
+
+
+def test_more_seats_can_never_give_one_author_two_of_them() -> None:
+    """★★★ THE INVARIANT B2 MUST NOT BREAK, pinned before anyone widens the lane.
+
+    Widening the ceiling must spread reach across MORE authors — it must never
+    hand the SAME author a second seat in one feed. That property is enforced
+    positionally (`insert_exploration`'s `i < page_end` scan), not by a set, and
+    the honest record in that function's own comment is that a `promoted_authors`
+    set was added there once, proved to be dead code, and deleted. So the
+    property rests entirely on the scan, and a future edit to the ceiling
+    arithmetic could break it silently.
+
+    Ten seats, a pool holding exactly one author's three posts: EXACTLY ONE
+    insertion.
+    """
+    ranked = [_scored(_cand(f"est{i}", "p"), final=1.0 - i / 1000) for i in range(200)]
+    pool = _explore_pool(
+        _cand("solo", "d1"), _cand("solo", "d2"), _cand("solo", "d3")
+    )
+    assert len(pool) == 3, "the fixture must offer the author more than one post"
+    out = insert_exploration(ranked, pool, _cfg(max_slots_per_feed=10), ceiling=10)
+    assert sum(1 for c in out if c.source is CandidateSource.EXPLORATION) == 1
 
 
 # ---------------------------------------------------------------------------
