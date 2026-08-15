@@ -297,13 +297,31 @@ class _TimerCache(Generic[T]):
                 self._rebuild()
             except Exception:
                 self.build_failures += 1
-                logger.exception(
-                    "%s: background refresh failed — keeping the last-known-good "
-                    "cached value (age %.0fs); a transient failure must never "
-                    "silently discard a good cache.",
-                    self._name,
-                    self.age_s if self.age_s is not None else -1.0,
-                )
+                age = self.age_s
+                if age is None:
+                    # No value has EVER been built, so there is nothing being kept
+                    # and dependent requests stay refused. The single message this
+                    # replaced logged "keeping the last-known-good cached value
+                    # (age -1s)" in this case too, which reads as a benign transient
+                    # and hides a total outage. Observed 2026-08-15: it repeated
+                    # every 10 minutes for an hour after a reboot brought the
+                    # service up before its database, while /feed would have 503'd
+                    # the whole time and the container sat "unhealthy" unexplained.
+                    logger.exception(
+                        "%s: background refresh failed and there is NO cached value "
+                        "— dependent requests stay REFUSED until a build succeeds "
+                        "(consecutive failures: %d).",
+                        self._name,
+                        self.build_failures,
+                    )
+                else:
+                    logger.exception(
+                        "%s: background refresh failed — keeping the last-known-good "
+                        "cached value (age %.0fs); a transient failure must never "
+                        "silently discard a good cache.",
+                        self._name,
+                        age,
+                    )
 
     def _rebuild(self) -> None:
         value = self._builder()

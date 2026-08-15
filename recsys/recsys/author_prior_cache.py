@@ -582,13 +582,26 @@ class AuthorPriorCache:
                 self._rebuild()
             except Exception:
                 self.build_failures += 1
-                logger.exception(
-                    "%s: background refresh failed — keeping the last-known-good "
-                    "cached value (age %.0fs); a transient failure must never "
-                    "silently discard a good cache.",
-                    self._name,
-                    self.age_s if self.age_s is not None else -1.0,
-                )
+                age = self.age_s
+                if age is None:
+                    # See the same guard in recsys/service/app.py: with no value
+                    # ever built there is nothing to keep, and claiming otherwise
+                    # turns a total outage into a line that reads as routine.
+                    logger.exception(
+                        "%s: background refresh failed and there is NO cached value "
+                        "— dependent requests stay REFUSED until a build succeeds "
+                        "(consecutive failures: %d).",
+                        self._name,
+                        self.build_failures,
+                    )
+                else:
+                    logger.exception(
+                        "%s: background refresh failed — keeping the last-known-good "
+                        "cached value (age %.0fs); a transient failure must never "
+                        "silently discard a good cache.",
+                        self._name,
+                        age,
+                    )
 
     def _rebuild(self) -> None:
         value = self._builder()
