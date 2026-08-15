@@ -56,22 +56,6 @@ export const DEFAULT_PREFERENCES: Preferences = {
 };
 
 export type sortTypes = 'trending' | 'hot' | 'created' | 'payout' | 'muted';
-export const sortToTitle = (sort: sortTypes) => {
-  switch (sort) {
-    case 'trending':
-      return 'Trending';
-    case 'hot':
-      return 'Hot';
-    case 'created':
-      return 'New';
-    case 'payout':
-      return 'Pending';
-    case 'muted':
-      return 'Muted';
-    default:
-      return 'Trending';
-  }
-};
 
 export const debounce = (fn: Function, delay: number) => {
   let timer: ReturnType<typeof setTimeout>;
@@ -264,37 +248,6 @@ export function formatDecimal(value: number, decPlaces = 2, truncate0s = true) {
   ];
 }
 
-export function extractLinks(text: string): string[] {
-  const urlRegex = /https?:\\?\/\\?\/[^\s]+/g;
-  const markdownImageRegex = /!\[.*?\]\((https?:\\?\/\\?\/[^\s]+)\)/g;
-  const otherUrlRegex = /https?:\/\/[^\s\)]*\/[^\s\)]*/g;
-  const matches: string[] = [];
-  const otherMatches = text.match(otherUrlRegex);
-  if (otherMatches) {
-    otherMatches.forEach((match) => {
-      matches.push(match);
-    });
-  }
-  const standaloneMatches = text.match(urlRegex);
-  if (standaloneMatches) {
-    standaloneMatches.forEach((match) => {
-      const cleanedMatch = match.endsWith(')') ? match.slice(0, -1) : match;
-      matches.push(cleanedMatch);
-    });
-  }
-  const markdownImageMatches = text.match(markdownImageRegex);
-  if (markdownImageMatches) {
-    markdownImageMatches.forEach((match) => {
-      const urlMatch = match.match(/https?:\\?\/\\?\/[^\s]+/);
-      if (urlMatch) {
-        const cleanedMatch = urlMatch[0].endsWith(')') ? urlMatch[0].slice(0, -1) : urlMatch[0];
-        matches.push(cleanedMatch);
-      }
-    });
-  }
-  return matches;
-}
-
 export function extractPictureFromPostBody(urls: string[]): string[] {
   const picturesRegex = /(?:https?:\/\/)?(?:images\.hive\.blog)\/([a-zA-Z0-9_\/-]+\.(jpeg|png|jpg|webp))/i;
 
@@ -386,23 +339,6 @@ export function compareDates(dateStrings: string[]) {
   return closestDate.format('YYYY-MM-DDTHH:mm:ss');
 }
 
-export const getMutedComments = (list: string[], discussion: Record<string, Entry>) => {
-  const filteredByAuthorMuted: Record<string, Entry> = {};
-  Object.keys(discussion).map((key) => {
-    filteredByAuthorMuted[key] = {
-      ...discussion[key],
-      stats: {
-        flag_weight: discussion[key].stats?.flag_weight ?? 0,
-        gray: list.includes(discussion[key].author) ? true : (discussion[key].stats?.gray ?? false),
-        hide: discussion[key].stats?.hide ?? false,
-        total_votes: discussion[key].stats?.total_votes ?? 0,
-        is_pinned: discussion[key].stats?.is_pinned ?? false,
-        muted_reasons: discussion[key].stats?.muted_reasons
-      }
-    };
-  });
-  return filteredByAuthorMuted;
-};
 export function extractUrlsFromJsonString(jsonString: string): string[] {
   const urlRegex = /((?:https?:\/\/|www\.)[^\s]+)/g;
   const matches = jsonString.match(urlRegex);

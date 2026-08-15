@@ -3,7 +3,24 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { transactionService } from '@transaction/index';
 import { getAsset } from '@transaction/lib/utils';
-import { getPost } from '@transaction/lib/hive';
+/*
+ * ★ THE MODERATED `getPost`, NOT THE RAW ONE (2026-08-15).
+ *
+ * There are two `getPost`s. `@transaction/lib/hive`'s calls `bridge.get_post`
+ * and returns whatever the chain says; `@transaction/lib/bridge-api`'s wraps the
+ * same call with the ban list (`isBannedAuthor` short-circuit, `isBannedEntry`,
+ * `withoutBannedReblogger`). Six call sites across the app — resolve-post,
+ * post-status, the for-you feed, lite-entry, cached-api — use the moderated one.
+ * This hook was the only flow still importing the raw one, so proposal creation
+ * was the single surface where the ban list did not apply.
+ *
+ * Same signature, so this is an import swap. The effect is that Lumen will not
+ * help a banned author attach a post to a DHF proposal, which is the same stance
+ * Lumen takes everywhere else it renders that author's work. It is a statement
+ * about this frontend, not about the chain: the operation is signed with the
+ * user's own keys and remains available through any other Hive interface.
+ */
+import { getPost } from '@transaction/lib/bridge-api';
 import { toast } from '@ui/components/hooks/use-toast';
 import { handleError } from '@ui/lib/handle-error';
 import { scheduleInvalidations } from '@/blog/lib/react-query';

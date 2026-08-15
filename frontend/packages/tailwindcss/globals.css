@@ -1061,12 +1061,6 @@
   text-align: right;
 }
 
-.markdown-view {
-  word-wrap: break-word;
-  word-break: break-word;
-  hyphens: none;
-}
-
 /* Fix table cell content rendering - issue #632 */
 .prose table td a,
 .prose table th a {
@@ -1456,15 +1450,6 @@ summary {
     transform: translateY(0);
   }
 }
-@keyframes mt-fade {
-  0% {
-    opacity: 0;
-  }
-  100% {
-    opacity: 1;
-  }
-}
-
 /* ---------- 1. intro ---------- */
 
 /* The item list is rendered TWICE inside the track, so translating
@@ -1675,9 +1660,6 @@ summary {
 .mt-rise {
   animation: mt-rise 620ms cubic-bezier(0.2, 0.8, 0.3, 1) both;
 }
-.mt-fade {
-  animation: mt-fade 800ms ease-out both;
-}
 .mt-tape {
   animation: mt-tape 58s linear infinite;
 }
@@ -1751,7 +1733,6 @@ summary {
  */
 @media (prefers-reduced-motion: reduce) {
   .mt-rise,
-  .mt-fade,
   .mt-tape,
   .mt-dot,
   .mt-step,

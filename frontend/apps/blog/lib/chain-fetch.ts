@@ -206,10 +206,6 @@ export function fetchCommunityRoleOfAccount(
   return fetchJson(`/api/community-roles?${params.toString()}`, 'community role');
 }
 
-export function fetchWitnesses(limit: number): Promise<IWitness[]> {
-  return fetchJson(`/api/witnesses?limit=${limit}`, 'witnesses');
-}
-
 /** Matches `WitnessRow` (`features/witnesses/lib/types.ts`) except `hpVotes` travels as a string — see the route. */
 type WitnessRowWire<T> = Omit<T, 'hpVotes'> & { hpVotes: string };
 export interface WitnessesPageData<TRow> {
@@ -235,10 +231,6 @@ export async function fetchWitnessesPage<TRow extends { hpVotes: Big }>(): Promi
 export function fetchWitnessVotes(username: string, limit: number, order: string): Promise<IListWitnessVotes> {
   const params = new URLSearchParams({ username, limit: String(limit), order });
   return fetchJson(`/api/witness-votes?${params.toString()}`, 'witness votes');
-}
-
-export function fetchAccounts(usernames: string[]): Promise<FullAccount[]> {
-  return fetchJson(`/api/accounts?usernames=${encodeURIComponent(usernames.join(','))}`, 'accounts batch');
 }
 
 export interface SearchParams {

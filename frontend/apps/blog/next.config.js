@@ -220,14 +220,26 @@ const nextConfig = {
             from: path.join(__dirname, '../../node_modules/@hiveio/hb-auth/dist/assets'),
             to: path.join(__dirname, 'public/auth/assets')
           },
-          {
-            from: path.join(__dirname, './locales'),
-            to: path.join(__dirname, 'public/locales/')
-          },
-          {
-            from: path.join(__dirname, '../../packages/smart-signer/locales'),
-            to: path.join(__dirname, 'public/locales/')
-          },
+          /*
+           * ★ TWO LOCALE COPIES REMOVED 2026-08-15 — NOTHING EVER READ THEM.
+           *
+           * These published `apps/blog/locales/` and
+           * `packages/smart-signer/locales/` into `public/locales/` on every
+           * build, i.e. served them over HTTP. But translations are not fetched
+           * over HTTP here: both `i18n/client.ts` and `i18n/server.ts` use
+           * `i18next-resources-to-backend` with a webpack dynamic
+           * `import('../locales/<lang>/<ns>.json')`, so every namespace is
+           * bundled. There is no `loadPath`, no HTTP backend, and a repo-wide
+           * grep for `/locales` as a URL (apps AND packages) returns nothing.
+           *
+           * So this copied two source trees into every build output and every
+           * Docker image for a directory no code has ever requested. It is also
+           * where the stray `public/locales/ko/` came from — smart-signer ships
+           * a Korean bundle the blog has no locale for.
+           *
+           * The hb-auth worker/assets and smart-signer public copies below stay:
+           * those ARE fetched at runtime by URL.
+           */
           {
             from: path.join(__dirname, '../../packages/smart-signer/public/smart-signer'),
             to: path.join(__dirname, 'public/smart-signer/')

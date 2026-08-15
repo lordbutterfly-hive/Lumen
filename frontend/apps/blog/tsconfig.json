@@ -24,13 +24,12 @@
     "next-env.d.ts",
     "**/*.ts",
     "**/*.tsx",
-    ".next/types/**/*.ts",
     "../../packages/ui/elements/common/layout.tsx",
     "../../packages/ui/components/time-ago.tsx",
     "../../packages/ui/components/card-skeleton.tsx",
-    ".next-ctl/types/**/*.ts",
-    ".next-trt/types/**/*.ts",
-    ".next-block/types/**/*.ts"
+    ".next*/types/**/*.ts",
+    ".next-lean/types/**/*.ts",
+    ".next-lean2/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",
