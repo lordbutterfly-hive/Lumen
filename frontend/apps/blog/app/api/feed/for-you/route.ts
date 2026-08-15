@@ -27,11 +27,14 @@ import { liteConfig } from '@/blog/lib/lite/config';
 import { filterBannedEntries } from '@/blog/lib/moderation/banned-authors';
 import { DEFAULT_OBSERVER } from '@/blog/lib/utils';
 import { startTopicWarmer } from '@/blog/lib/feed/topic-warmer';
+import { noteViewerSeen } from '@/blog/lib/feed/viewer-seen';
+import type { WarmCandidate } from '@/blog/lib/feed/viewer-seen';
+import { startViewerWarmer } from '@/blog/lib/feed/viewer-warmer';
 import {
   FEED_FRESH_MS,
   type FeedLane,
   buildOnce,
-  feedStaleMs,
+  feedBands,
   feedVersion,
   inFailureCooldown,
   isRebuilding,
@@ -129,11 +132,19 @@ const OVER_FETCH_RATIO = 1.5;
  *
  * ★★★ WHAT AN AGE *DOES* DECIDE, SINCE 2026-08-14: not whether the reader waits,
  * but whether a stored copy may still be PRESENTED AS THIS READER'S RANKING.
- * Past `feedStaleMs` (2h) it may not, and the reader is served the cached
- * trending page — instantly, labelled `degraded: 'stale'` — while the rebuild
- * continues behind them. Read that as a labelling ceiling, not a return of the
- * cliff: nothing about it reintroduces a spinner, which is the property the
- * paragraph above is actually protecting.
+ * Past the ceiling it may not, and the reader is served the cached trending page
+ * — instantly, labelled `degraded: 'stale'` — while the rebuild continues behind
+ * them. Read that as a labelling ceiling, not a return of the cliff: nothing
+ * about it reintroduces a spinner, which is the property the paragraph above is
+ * actually protecting.
+ *
+ * ★★★ AND SINCE 2026-08-15, IT IS TWO AGES, NOT ONE (`feedBands`). A single 2h
+ * ceiling was answering both "may I present this as your ranking" (18h) and "is
+ * this still a ranking at all" (72h, the ranker's own sourcing window), and
+ * answering both with the smaller number is why 50 of the 52 stored rows on this
+ * box would have been served as trending. Off unless `FEED_BANDS_ENABLED=yes`,
+ * in which case both values collapse back to `feedStaleMs()` and this paragraph
+ * describes the code exactly as it stood on 2026-08-14.
  *
  * The failure that forced it: recsys is not a deployed service on this box
  * (nothing listening on `RECSYS_FEED_URL`), so a build that succeeded once on
@@ -548,6 +559,41 @@ async function serveForYou(req: NextRequest): Promise<NextResponse> {
   const rawTag = (req.nextUrl.searchParams.get('tag') ?? '').trim().toLowerCase();
   const topic = /^[a-z0-9-]{1,64}$/.test(rawTag) ? rawTag : '';
 
+  // ★★★ `probe=1` — THIS REQUEST IS A MACHINE POLL, NOT A READER LOOKING AT A
+  // PAGE (2026-08-15).
+  //
+  // MEASURED ON THIS BOX, and it is the reason this parameter exists rather
+  // than a nicety: the home feed runs a silent poll that fetches a FULL page 1
+  // every few minutes per open tab, purely to count how many posts the reader
+  // has not seen. Those entries are used only to decide whether to show a
+  // button — the reader is shown NONE of them unless they click it — and every
+  // one of those polls went through the ordinary stored branch and straight
+  // into `recordFeedServe`. The 60s coalesce floor does not stop a 180s poll.
+  // Live counts from `lumen_feed_served` on 2026-08-15:
+  //
+  //   lordbutterfly  2,000 rows over   64 distinct posts = 31.3 impressions/post
+  //   gtg            2,000 rows over   58 distinct posts = 34.5
+  //   hbd-temp       2,000 rows over   50 distinct posts = 40.0
+  //
+  // Against a suppression rule of the shape `0.85^impressions`, 0.85^31 is
+  // 0.0069 — a 99.3% demotion of a reader's entire feed, bought with pages
+  // nobody ever looked at. All three viewers are also at the 2,000-row
+  // per-viewer cap, so the machine traffic is evicting their real history.
+  //
+  // ★ ONE FLAG, ONE MEANING, BOTH LEDGERS. A probe records NEITHER an
+  // impression NOR a visit (`noteViewerSeen` below is withheld too). Deciding
+  // per-writer which half of "was a person here" a poll satisfies is how the
+  // two ledgers drift apart; a single rule is checkable, and it fails safe —
+  // the worst case is a reader whose only contact in 48h was a background poll
+  // not being warmed, and their next real page load re-marks them.
+  //
+  // ★ FORGEABLE, AND HARMLESS. A client can set this on a real page load and
+  // buy itself FEWER impressions of its own posts — self-harm, and the only
+  // direction this flag can be pushed. The inflating direction (reporting
+  // impressions somebody else's post did not get, to bury it) is not reachable
+  // from here, which is why the rejected alternative — having the client report
+  // back which posts it rendered — is strictly worse than this.
+  const probe = req.nextUrl.searchParams.get('probe') === '1';
 
   // Identity comes from the SESSION COOKIE, never from a query parameter. A
   // caller-supplied `?viewer=` would let anyone request anyone else's
@@ -580,6 +626,25 @@ async function serveForYou(req: NextRequest): Promise<NextResponse> {
   // observer is a separate thing — it only annotates posts with "did YOU vote on
   // this", and for a lite account the honest answer is the anonymous default.
   const chainObserver = viewer && !isLite ? viewer : DEFAULT_OBSERVER;
+
+  // ★★★ "THIS READER WAS HERE" — RECORDED ABOVE EVERY BRANCH, ON PURPOSE
+  // (2026-08-15). Same argument as the block filter's wrapper: this function
+  // answers from six places, and the branch that matters most for this signal is
+  // the one a reader hits when their stored ranking is too old — the trending
+  // fallback, which records nothing at all today.
+  //
+  // ★ THAT BLINDNESS IS THE BUG, MEASURED. `recordFeedServe` fires only on the
+  // two personal-ranked branches, so a returning daily reader — always served
+  // trending because their row is past the ceiling — is INVISIBLE to the served
+  // log. For `lordbutterfly` on 2026-08-14 the stored row was rebuilt at
+  // 20:03:06Z and the newest served row is 03:52:33Z, sixteen hours earlier. A
+  // warmer that looked for activity in the served log would never see the very
+  // readers it exists to serve, and one that looked at `built_at` would end up
+  // watching itself (see the migration).
+  //
+  // Detached, never awaited, and withheld for a probe — a reader waits for
+  // nothing here, and an activity-log outage costs nothing but a cold cycle.
+  if (viewer && !probe) noteViewerSeen({ viewer, isLite, userId });
 
   if (paging) {
     // Continuation pages come straight from the chain, in order, from the cursor.
@@ -759,29 +824,12 @@ async function serveForYou(req: NextRequest): Promise<NextResponse> {
    * VIEWER, not to this request — see `buildOnce`. It resolves the viewer's
    * ranking inputs itself, so nothing in here reaches for request scope, and it
    * stores its own result so a caller who stops waiting still gets the benefit.
+   *
+   * ★ THE BODY MOVED OUT TO `buildViewerFeed` (2026-08-15) so the warmer can
+   * call the IDENTICAL function rather than a copy of it. See that function.
    */
   const startBuild = (): Promise<BuiltFeed | null> =>
-    buildOnce(viewer, async () => {
-      // Stamped BEFORE any work: if the reader changes their interests while
-      // this runs, the write is refused rather than resurrecting the feed they
-      // just replaced.
-      const era = viewerGeneration(viewer);
-      const state = await collectViewerState(viewer, isLite, userId);
-      const built = await assembleFeed({ viewer, limit, chainObserver, ...state });
-      if (built) {
-        await writeViewerFeed({
-          viewer,
-          entries: built.entries,
-          ranked: built.ranked,
-          builtLimit: limit,
-          lanes: built.lanes,
-          startedAtGeneration: era
-        });
-      } else {
-        noteBuildFailure(viewer);
-      }
-      return built;
-    });
+    buildViewerFeed({ viewer, isLite, userId, limit, chainObserver });
 
   // ---- SERVE DECISION ----
   const stored = forceRefresh ? undefined : await readViewerFeed(viewer);
@@ -814,8 +862,20 @@ async function serveForYou(req: NextRequest): Promise<NextResponse> {
     // AT ALL (2026-08-14). See `feedStaleMs`. `age` was computed here already and
     // spent entirely on a cache LABEL — the route knew the artifact was three
     // days old and served it as `source:'recsys'` anyway.
-    const staleCeiling = feedStaleMs();
+    //
+    // ★★★ AND THE FOURTH, ADDED 2026-08-15: OLD, STILL YOURS (the AGING band).
+    // One ceiling was answering two different questions — "may I still present
+    // this as your ranking" and "is this so old it is no longer a ranking" — and
+    // answering both with 2h is why 50 of the 52 stored rows on this box would
+    // be served as trending. `feedBands()` splits them; with
+    // `FEED_BANDS_ENABLED` unset both values ARE `feedStaleMs()`, the aging band
+    // has zero width, and every byte below is what it is today.
+    const bands = feedBands();
+    const staleCeiling = bands.abandonMs;
     const expired = age >= staleCeiling;
+    // Their ranking, still served, but old enough that saying nothing would be a
+    // small lie. Unreachable unless the bands are on (see above).
+    const aging = !expired && age >= bands.presentMaxMs;
 
     if (!fresh && !isRebuilding(viewer) && !inFailureCooldown(viewer)) {
       // ★ LOGGED ON BOTH EDGES (requirement: make the revalidation failure
@@ -919,7 +979,13 @@ async function serveForYou(req: NextRequest): Promise<NextResponse> {
     // Note what is recorded: `entries`, AFTER the ban filter and AFTER the slice.
     // A post the reader never received is not an impression, and its position is
     // its position on the page as delivered, not its rank in the build.
-    recordFeedServe(viewer, entries, stored.lanes);
+    //
+    // ★ EXCEPT FOR A PROBE (2026-08-15). See the `probe` flag above: the silent
+    // client poll reaches this exact line every few minutes per open tab and
+    // recorded thirty impressions each time for a page the reader is shown none
+    // of. This is the whole C-2 fix, and it is one line because the boundary was
+    // already in the right place — it was just being crossed by machine traffic.
+    if (!probe) recordFeedServe(viewer, entries, stored.lanes);
 
     return feedJson({
       entries,
@@ -940,8 +1006,26 @@ async function serveForYou(req: NextRequest): Promise<NextResponse> {
       // same claim as "this is current, ranked, and yours".
       stale: !fresh,
       ageMs: age,
-      staleAfterMs: staleCeiling,
+      // ★ THE PRESENTATION CEILING, NOT THE ABANDON ONE — and that choice is the
+      // whole wire contract for the aging band. The client's verdict is
+      // `now - builtAt < (staleAfterMs ?? RANKING_MAX_AGE_MS)`, so whatever goes
+      // in this field BECOMES the client's definition of "current". Sending the
+      // abandon ceiling would make a 60-hour-old ranking report itself as
+      // current and silence the one line that tells the reader it is being
+      // refreshed. With the bands off this is `feedStaleMs()`, exactly as before.
+      staleAfterMs: bands.presentMaxMs,
       personalised: true,
+      // ★ A SEPARATE FIELD, NOT A `degraded` REASON. `degraded` is the
+      // degradation channel, and an aging ranking is a WORKING state — it was
+      // built, it is theirs, it is being refreshed. Reusing `degraded` would
+      // raise "Personalised ranking is warming up. Showing popular posts
+      // meanwhile." over a page that is neither warming up nor popular posts:
+      // false twice over. Same reasoning the chain-continuation branch already
+      // applies when it sets `personalised: false` and deliberately leaves
+      // `degraded` unset. Omitted entirely when false, so a response with the
+      // bands off is byte-for-byte what it is today.
+      ...(aging ? { aging: true } : {}),
+      ...(swapOfferEnabled() ? { swapOffer: true } : {}),
       nextCursor: cursorOf(entries)
     }, viewer);
   }
@@ -958,18 +1042,69 @@ async function serveForYou(req: NextRequest): Promise<NextResponse> {
     );
   }
 
+  // ★★★ THE PATIENCE WINDOW IS PAID ONCE PER BUILD, NOT ONCE PER REQUEST
+  // (2026-08-15, measured on production with a virgin account).
+  //
+  // Before this, a brand-new reader paid it TWICE:
+  //     load 1  12,038ms  trending-fallback, degraded:"building"
+  //     load 2  11,085ms  recsys, cache:"miss"
+  //     load 3      25ms  recsys, fresh
+  // ~23 seconds across two page loads before ever seeing a personalised feed.
+  //
+  // The cause is that `startBuild()` single-flights through `buildOnce`, so the
+  // second load JOINS the build the first one started — and then sits in
+  // `awaitWithPatience` for another full window waiting on it. The comment below
+  // promises "this reader's next load is ranked and instant", which is only true
+  // once the build has FINISHED; while it is still running the next load was
+  // just as slow as the first.
+  //
+  // A reader who arrives while a build is already in flight has, by definition,
+  // already been told to wait once. Serve them trending immediately instead. The
+  // build is untouched — it keeps running, stores its result, and the load after
+  // it lands is the 25ms one. `?refresh=1` still waits, because that is a
+  // deliberate user action asking for the real thing.
+  if (!forceRefresh && isRebuilding(viewer)) {
+    logger.info(
+      'for-you: a build for %s was already running when this request arrived — serving trending now rather than waiting a second patience window',
+      viewer
+    );
+    return fallback(
+      chainObserver, limit, 'building',
+      'a ranked build for this reader is already running; it will be stored and served instantly once it lands',
+      topic, viewer
+    );
+  }
+
   const outcome = await awaitWithPatience(startBuild(), firstBuildPatienceMs());
 
   if (outcome.settled && outcome.value) {
+    // ★ SLICED TO THE REQUESTED LIMIT (2026-08-15). `buildOnce` single-flights by
+    // VIEWER and knows nothing about `limit`, so this request can legitimately be
+    // handed a build somebody else started — and since today a warm build may be
+    // that somebody, it can be a build for `FEED_WARM_LIMIT` rather than for
+    // `limit`. The stored branch above has always sliced; this one never did,
+    // because before the warmer every build came from a request asking for the
+    // same 30. A no-op while `FEED_WARM_LIMIT` is 30, and the thing that stops a
+    // 60-entry warm row being served whole the day that number is raised.
+    const served = outcome.value.entries.slice(0, limit);
     // The cold path: this reader waited for the build and is being handed it.
     // Recorded HERE and not inside the build, because the same build also runs
     // to completion for a reader who stopped waiting (see `awaitWithPatience`) —
-    // and a page nobody was shown is not an impression.
-    recordFeedServe(viewer, outcome.value.entries, outcome.value.lanes);
+    // and a page nobody was shown is not an impression. That property is what
+    // the warmer depends on: it uses this same build function and therefore
+    // cannot record anything, because the recording lives out here, on the
+    // branch that hands a page to a person.
+    if (!probe) recordFeedServe(viewer, served, outcome.value.lanes);
     return feedJson({
-      entries: outcome.value.entries, source: 'recsys', ranked: outcome.value.ranked,
-      served: outcome.value.entries.length, cache: 'miss',
-      nextCursor: cursorOf(outcome.value.entries)
+      entries: served, source: 'recsys', ranked: outcome.value.ranked,
+      served: served.length, cache: 'miss',
+      // This branch never set `personalised` and relied on the client inferring
+      // it from `source === 'recsys'`. It is stated now because the swap offer
+      // below is a claim ABOUT it, and an offer resting on an inference is how
+      // the three-day-old feed passed the banner test.
+      personalised: true,
+      ...(swapOfferEnabled() ? { swapOffer: true } : {}),
+      nextCursor: cursorOf(served)
     }, viewer);
   }
   if (outcome.settled) {
@@ -1022,9 +1157,104 @@ interface BuiltFeed {
  * the problem, not its height. This number only decides how long a reader stares
  * at a spinner; it can no longer decide whether they EVER get a ranked feed.
  */
+/**
+ * ★★★ MAY THE CLIENT OFFER TO SWAP TRENDING FOR A READY RANKING? (2026-08-15)
+ *
+ * The flag lives on the SERVER and travels as a field, rather than as a
+ * `NEXT_PUBLIC_` constant baked into the browser bundle, for two reasons: it can
+ * be turned off without rebuilding the client, and it keeps every feed decision
+ * in the one place that already owns them. Default off.
+ */
+function swapOfferEnabled(): boolean {
+  return (process.env.FEED_READY_PILL || '').toLowerCase() === 'yes';
+}
+
+/**
+ * ★★★ 12s -> 2s, AND WHY THE TWO CHANGES ARE ONE SWITCH (2026-08-15).
+ *
+ * The honest cost of cutting the patience is recorded below: at 12s, `steevc`
+ * (7.2s) and `melinda010100` (9.3s) get their ranked feed SYNCHRONOUSLY on their
+ * very first request. At 2s they get one trending page instead. That is a
+ * regression for the 2-12s cohort and must be called one.
+ *
+ * It is only acceptable because the trending page now upgrades itself: the
+ * reader is offered "your feed is ready" within one poll interval and is one
+ * click from the ranking they would otherwise have waited for. Without that,
+ * cutting the patience STRICTLY worsens their first session — they lose the
+ * ranking and have nothing but a manual reload to get it back.
+ *
+ * So the two are wired to the same switch instead of being two independent
+ * defaults with a note in a document asking an operator to ship them in order.
+ * A deployment order that matters is a code invariant, not a memo. An explicit
+ * `FEED_FIRST_BUILD_PATIENCE_MS` still wins over both, for an operator who
+ * genuinely wants one without the other.
+ */
 function firstBuildPatienceMs(): number {
   const raw = Number(process.env.FEED_FIRST_BUILD_PATIENCE_MS);
-  return Number.isFinite(raw) && raw > 0 ? raw : 12_000;
+  if (Number.isFinite(raw) && raw > 0) return raw;
+  return swapOfferEnabled() ? 2_000 : 12_000;
+}
+
+/**
+ * ★★★ THE ONE BUILD, USED BY BOTH THE READER'S REQUEST AND THE WARMER
+ * (2026-08-15).
+ *
+ * This is the body that used to be inline in `serveForYou`'s `startBuild`,
+ * lifted out unchanged so the warmer can call the SAME function rather than a
+ * copy. `loadFallbackPage` makes the identical argument for the topic warmer:
+ * "a warmer that assembled its own entry would be one edit away from writing a
+ * subtly different shape… and a warmed entry that a reader's branch does not
+ * accept warms nothing while looking like it works."
+ *
+ * Four properties the warm path depends on, all of them already true here:
+ *
+ *   1. `buildOnce` — a warm build and a reader's own request for the same viewer
+ *      COLLAPSE into one, and `isRebuilding(viewer)` sees the warm build, so the
+ *      reader's branch does not start a second one behind it.
+ *   2. The generation fence — the era is stamped BEFORE any work, so a reader
+ *      who saves new interests mid-warm can never be served the preferences they
+ *      just replaced. Nothing extra is needed for the warmer; it inherits it.
+ *   3. It takes no session and no request. `collectViewerState` was split out
+ *      for exactly this reason; the identity arrives as three values.
+ *   4. A failed build WRITES NOTHING. `assembleFeed` returning null means the
+ *      stored row is untouched, so a warm failure leaves the reader exactly as
+ *      they were — never a delete, never a downgrade.
+ *
+ * ★★★ AND WHAT IT DOES NOT DO: RECORD A SERVE. That is not an omission, it is
+ * the contract. Recording lives on the two branches of `serveForYou` that hand a
+ * page to a person, and this function is reachable from a timer with no reader
+ * attached. If recording ever moved in here, every warm build would mark its
+ * whole page seen for somebody who saw none of it.
+ */
+function buildViewerFeed(opts: {
+  viewer: string;
+  isLite: boolean;
+  userId: string;
+  limit: number;
+  chainObserver: string;
+}): Promise<BuiltFeed | null> {
+  const { viewer, isLite, userId, limit, chainObserver } = opts;
+  return buildOnce(viewer, async () => {
+    // Stamped BEFORE any work: if the reader changes their interests while
+    // this runs, the write is refused rather than resurrecting the feed they
+    // just replaced.
+    const era = viewerGeneration(viewer);
+    const state = await collectViewerState(viewer, isLite, userId);
+    const built = await assembleFeed({ viewer, limit, chainObserver, ...state });
+    if (built) {
+      await writeViewerFeed({
+        viewer,
+        entries: built.entries,
+        ranked: built.ranked,
+        builtLimit: limit,
+        lanes: built.lanes,
+        startedAtGeneration: era
+      });
+    } else {
+      noteBuildFailure(viewer);
+    }
+    return built;
+  });
 }
 
 type Patience =
@@ -1387,7 +1617,25 @@ async function assembleFeed(args: AssembleArgs): Promise<BuiltFeed | null> {
       key,
       source: post?.source || null,
       score: Number(post?.score?.final) || 0,
-      rank: index
+      rank: index,
+      // ★★★ THE TWO FACTS SEEN-SUPPRESSION NEEDS, CAPTURED HERE BECAUSE THIS IS
+      // THE ONLY PLACE THEY BOTH EXIST (2026-08-15).
+      //
+      // `postByKey` is keyed by the SERVED identity and holds the ranker's own
+      // record, so this map is the single point in the system where a lite
+      // post's display handle, its ranked ULID and its engager count are all in
+      // scope at once. One line later the RecsysPost is gone and no downstream
+      // consumer can re-derive either — which is exactly how a suppression set
+      // built from `key` ends up matching zero Lumen-native posts forever, with
+      // no error (contract C8; 46 live rows prove the mismatch is real).
+      //
+      // ★ `null` WHERE THERE IS NO RecsysPost — a chain top-up on a topic page.
+      // That is the truth. Inheriting a neighbour's value, or defaulting the
+      // count to 0, would fabricate a baseline and make the resurrection rule
+      // strict on data it never had. Same rule the `source` line above already
+      // follows.
+      rankedKey: post?.key ?? null,
+      engagers: typeof post?.engagers === 'number' ? post.engagers : null
     };
   });
 
@@ -1952,6 +2200,43 @@ async function warmTopicFallback(tag: string): Promise<void> {
  * load. `startTopicWarmer` is idempotent and no-ops outside the Node runtime.
  */
 startTopicWarmer(warmTopicFallback);
+
+/**
+ * ★★★ WHAT THE PER-VIEWER WARMER WARMS: one reader's stored ranking, through
+ * the same `buildViewerFeed` a reader's own background refresh uses
+ * (2026-08-15).
+ *
+ * The identity comes from `lumen_feed_viewer_seen`, which recorded it at the
+ * moment the request read the sealed session cookie — so this never guesses a
+ * viewer's tier from their name, and `chainObserver` is derived by the same rule
+ * the request path uses a few hundred lines up: a lite handle is not a Hive
+ * account, and passing one to the bridge API asserts.
+ *
+ * ★ `FEED_WARM_LIMIT` MUST BE >= THE CLIENT'S `FOR_YOU_LIMIT` (30). The stored
+ * branch treats `stored.builtLimit < limit` as NOT FRESH, so a row warmed at 20
+ * would be rebuilt on its first read and the warmer would spend its whole budget
+ * producing rows that are stale on arrival — silently, while every log line said
+ * it was working. The coupling is stated on both sides; the default is 30.
+ */
+async function warmViewerFeed(candidate: WarmCandidate, limit: number): Promise<boolean> {
+  const { viewer, isLite, userId } = candidate;
+  if (!viewer) return false;
+  const chainObserver = !isLite ? viewer : DEFAULT_OBSERVER;
+  const built = await buildViewerFeed({ viewer, isLite, userId, limit, chainObserver });
+  return Boolean(built);
+}
+
+/**
+ * ★ REGISTERED FROM MODULE SCOPE FOR THE SAME REASON `startTopicWarmer` IS: the
+ * builder above closes over `collectViewerState` and `assembleFeed`, and a Next
+ * route file may export only route handlers, so they cannot be imported from
+ * anywhere else. Registration therefore happens the moment this module is
+ * loaded, which is the first feed request the process serves.
+ *
+ * Idempotent, a no-op outside the Node runtime and during `next build`, and it
+ * starts NOTHING unless `FEED_WARM_ENABLED=yes`.
+ */
+startViewerWarmer(warmViewerFeed);
 
 async function fallback(
   chainObserver: string,

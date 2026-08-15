@@ -4,9 +4,9 @@ import YourTokensView from '@/blog/features/creator-tokens/ui/your-tokens/your-t
 import { getServerSessionUser, loginRedirectFor } from '@/blog/lib/server-session';
 
 export const metadata: Metadata = {
-  title: 'Your tokens',
+  title: 'Your Meritum tokens',
   description:
-    'Your portfolio of creator tokens on Lumen: value, floor value, buy/sell/spend, and the services you’ve spent tokens on.'
+    'Your portfolio of Meritum tokens on Lumen: value, floor value, buy/sell/spend, and the services you’ve spent tokens on.'
 };
 
 // "Your tokens" is a portfolio: there is nothing to render for somebody with no

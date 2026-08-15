@@ -8,7 +8,7 @@ import { usdPrice } from '../market/format';
 import { CreatorTokenRocket } from './creator-token-rocket';
 
 // TODO i18n — staged copy, same precedent as the rest of this feature.
-const COPY = { launch: 'Launch your token' };
+const COPY = { launch: 'Launch your Meritum' };
 
 /**
  * The header's creator-token entry point (design brief §1) — owner ruling:

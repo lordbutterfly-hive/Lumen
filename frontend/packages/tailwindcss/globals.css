@@ -339,6 +339,71 @@
     --surface-warn-13: 138 66 7; /* #8a4207 x1 */
     --surface-warn-14: 124 74 8; /* #7c4a08 x2 */
     --surface-warn-15: 99 58 6; /* #633a06 x2 */
+
+    /**
+     * ★★★ THE MERITUM ONBOARDING TOKENS (2026-08-15).
+     *
+     * Scope: the two Meritum onboarding screens ONLY — the intro landing and
+     * the 3-step launch flow that ends in the coin strike. They are namespaced
+     * `--meritum-*` precisely so nobody mistakes them for global app colours
+     * and starts spending them elsewhere. If you want one of these values on a
+     * different screen, use the underlying palette token on the right-hand
+     * side, not the Meritum alias.
+     *
+     * ★ EVERY ONE OF THEM IS AN ALIAS. NOT ONE IS A NEW COLOUR.
+     * The design handoff listed fourteen hex values as "tokens to add if the
+     * app lacks an equivalent". Checked one at a time against the palette
+     * above: the app already had all fourteen, byte for byte. So this block
+     * adds ZERO new colour decisions — it is a naming layer over tokens that
+     * already ship. Three things follow from that, and they are the whole
+     * reason it is written this way rather than as a second palette:
+     *
+     *   1. Dark mode comes free and stays correct. Each alias resolves through
+     *      `var()` at computed-value time on the same element `:root` and
+     *      `.dark` both target (<html>), so re-pointing a palette token under
+     *      `.dark` re-points the Meritum screen with it. A forked `#FBF7F2`
+     *      literal would have stayed cream on a dark card forever.
+     *   2. The Meritum screens cannot drift from the product. `--meritum-paper`
+     *      IS the warm card `features/creator-tokens/ui/profile-token-card.tsx`
+     *      already renders (`bg-surface-warn-2 border-line-warn-1
+     *      rounded-[18px]`) — the same component family, now provably the same
+     *      colour rather than coincidentally the same hex.
+     *   3. Nothing to maintain. There is no second source of truth to keep in
+     *      sync, because there is no second value.
+     *
+     * ★ WHY THE ROLE SPLIT ON BRAND. `#c0392b` appears three times in the
+     * palette on purpose — `--ink-brand-6` (text), `--line-brand-10` (border),
+     * `--surface-brand-12` (fill) — because those three roles need three
+     * different dark values: a fill stays red, ink has to lighten to clear
+     * 4.5:1 on a dark card, a line only needs 3:1. The Meritum aliases keep
+     * that split. Use the one matching the CSS property you are setting;
+     * collapsing them is how a red button label becomes unreadable.
+     *
+     * ★ ON `warn`. `--surface-warn-2` / `--line-warn-1` are not warnings. The
+     * palette's family suffixes were assigned by HUE, and a warm cream binned
+     * as "warn". Their four existing call sites are all warm paper cards.
+     */
+    /* surfaces */
+    --meritum-paper: var(--surface-warn-2); /* #fbf7f2 warm paper card */
+    --meritum-rail: var(--surface-16); /* #f6f7f8 coin rail */
+    --meritum-card: var(--surface-1); /* #ffffff the white band + launch card */
+    --meritum-surface-brand: var(--surface-brand-12); /* #c0392b CTA fill */
+    --meritum-surface-brand-hover: var(--surface-brand-16); /* #a5301f */
+    --meritum-surface-brand-active: var(--surface-brand-17); /* #96271b */
+    /* inks */
+    --meritum-ink: var(--ink-2); /* #161511 headline, handles */
+    --meritum-ink-2: var(--ink-7); /* #3f4650 */
+    --meritum-ink-3: var(--ink-8); /* #4b5563 */
+    --meritum-ink-muted: var(--ink-10); /* #6b7280 tape sentences */
+    --meritum-ink-faint: var(--ink-14); /* #9ca3af */
+    --meritum-ink-brand: var(--ink-brand-6); /* #c0392b eyebrow, figures */
+    --meritum-ink-link: var(--ink-brand-4); /* #96271b links */
+    --meritum-ink-on-brand: var(--ink-27); /* #ffffff label on the red CTA */
+    /* lines */
+    --meritum-line-paper: var(--line-warn-1); /* #efe7de warm paper border */
+    --meritum-line-card: var(--line-9); /* #ebebeb */
+    --meritum-line-input: var(--line-11); /* #e4e6e9 */
+    --meritum-line-brand: var(--line-brand-10); /* #c0392b ring, active border */
   }
 
   .dark {
@@ -1327,6 +1392,378 @@ summary {
   }
   50% {
     opacity: 0.85;
+  }
+}
+
+/* ============================================================
+   MERITUM ONBOARDING — THE WHOLE MOTION LAYER (2026-08-15)
+
+   Ported from handoff_meritum_onboarding/css/meritum-animations.css.
+   Two screens use it: the intro tape/CTA and the launch flow's coin
+   strike. Nothing else should.
+
+   ★ WHY IT SITS OUTSIDE @layer. Tailwind purges `@layer components`
+   against the content globs. The strike drives these classes from a
+   state machine (`is-charging` / `is-striking` / `is-struck`), so a
+   class can be added at runtime by a name the JIT scanner never saw
+   as a literal — and a purged keyframe fails silently, which is the
+   worst possible failure for a 1100ms hold. Top level is passthrough:
+   it always ships. Same placement as the lumen-* keyframes above.
+
+   ★ PERFORMANCE CONTRACT. Only four properties animate anywhere in
+   this block: transform, opacity, stroke-dashoffset, box-shadow.
+   NOTHING here touches width/height/top/left/margin, so no keyframe
+   can force a reflow. Audited keyframe by keyframe on port: 17 of 17
+   comply. Honest caveat on the handoff's "every keyframe runs on the
+   compositor" — transform and opacity do; box-shadow (mt-dot, mt-cta)
+   and stroke-dashoffset (mt-charge-ring) repaint each frame. They do
+   not lay out, they are small, and they are three elements, so the
+   cost is real but bounded. Do not add a fourth.
+
+   ★ FOUR THINGS LOOP FOREVER: the tape, the LIVE dot, the CTA ring
+   and the coin idle. Everything else is a one-shot with fill both.
+   The tape MUST be paused off-screen with an IntersectionObserver
+   toggling animationPlayState — a 58s infinite translate keeps the
+   compositor awake on a long feed page even when it is not visible.
+   ============================================================ */
+
+/* ---------- shared: entrance ---------- */
+@keyframes mt-rise {
+  0% {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes mt-fade {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+/* ---------- 1. intro ---------- */
+
+/* The item list is rendered TWICE inside the track, so translating
+   -50% lands exactly on the duplicate and the loop is invisible.
+   Change the duplication count and you must change -50%. */
+@keyframes mt-tape {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  100% {
+    transform: translate3d(-50%, 0, 0);
+  }
+}
+
+/* The LIVE dot: an expanding ring, not an opacity blink. The rgba is
+   the brand red as a SHADOW, which cannot take a token — box-shadow
+   spread colours are not a palette role and there is no dark variant
+   of these two screens today (see the Meritum token block). */
+@keyframes mt-dot {
+  0%,
+  100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 rgba(192, 57, 43, 0.55);
+  }
+  70% {
+    opacity: 0.7;
+    box-shadow: 0 0 0 9px rgba(192, 57, 43, 0);
+  }
+}
+
+/* The primary CTA. Same ring mechanic, slower and wider. */
+@keyframes mt-cta {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(192, 57, 43, 0.4);
+  }
+  70% {
+    box-shadow: 0 0 0 15px rgba(192, 57, 43, 0);
+  }
+}
+
+/* ---------- 2. launch flow ---------- */
+
+@keyframes mt-settle {
+  0% {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* The coin at rest, breathing, so it reads as touchable. */
+@keyframes mt-coin-idle {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.014);
+  }
+}
+
+@keyframes mt-coin-hint {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.42;
+  }
+  50% {
+    transform: scale(1.055);
+    opacity: 0.12;
+  }
+}
+
+/* HOLD: the coin trembles harder the longer you hold. One pass across
+   the full charge duration, no iteration. */
+@keyframes mt-coin-tremble {
+  0% {
+    transform: translate(0, 0) scale(1);
+  }
+  30% {
+    transform: translate(0.5px, -0.5px) scale(0.995);
+  }
+  55% {
+    transform: translate(-1px, 0.5px) scale(0.99);
+  }
+  75% {
+    transform: translate(1px, 0.5px) scale(0.985);
+  }
+  88% {
+    transform: translate(-1.5px, -1px) scale(0.98);
+  }
+  100% {
+    transform: translate(1.5px, 1px) scale(0.976);
+  }
+}
+
+/* HOLD: the progress ring closing. 918 is the circle CIRCUMFERENCE:
+   2 x PI x 146. Change the coin radius and you must change this. */
+@keyframes mt-charge-ring {
+  0% {
+    stroke-dashoffset: 918;
+  }
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* HOLD: light gathering behind the coin. */
+@keyframes mt-gather {
+  0% {
+    opacity: 0;
+    transform: scale(1.55);
+  }
+  100% {
+    opacity: 0.85;
+    transform: scale(1);
+  }
+}
+
+/* STRIKE: front-loaded squash, overshoot, long settle. This curve is
+   the whole feeling of the interaction — do not "clean it up". */
+@keyframes mt-impact {
+  0% {
+    transform: scale(0.976);
+  }
+  5% {
+    transform: scale(0.87);
+  }
+  13% {
+    transform: scale(0.905);
+  }
+  38% {
+    transform: scale(1.038);
+  }
+  64% {
+    transform: scale(0.995);
+  }
+  82% {
+    transform: scale(1.004);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* STRIKE: one frame of white at the moment of contact. */
+@keyframes mt-flash {
+  0% {
+    opacity: 0;
+  }
+  12% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* STRIKE: shockwave rings leaving the rim. */
+@keyframes mt-shock {
+  0% {
+    transform: scale(0.9);
+    opacity: 0.5;
+  }
+  100% {
+    transform: scale(2.05);
+    opacity: 0;
+  }
+}
+
+/* STRIKE: a sheen crossing the struck face. */
+@keyframes mt-foil {
+  0% {
+    transform: translateX(-150%) skewX(-16deg);
+  }
+  100% {
+    transform: translateX(280%) skewX(-16deg);
+  }
+}
+
+/* STRIKE: embers off the rim. Each ember sets its own --dx / --dy. */
+@keyframes mt-ember {
+  0% {
+    transform: translate(0, 0) scale(1);
+    opacity: 0;
+  }
+  14% {
+    opacity: 0.95;
+  }
+  100% {
+    transform: translate(var(--dx), var(--dy)) scale(0.2);
+    opacity: 0;
+  }
+}
+
+/* STRIKE: the legend fading up out of the metal. */
+@keyframes mt-emboss {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+/* ============================================================
+   TIMINGS. Keep in sync with the JS constants: the charge timer is
+   1100ms and MUST equal .mt-charge-ring; the strike window is 2400ms;
+   the card height lock releases 900ms after the reveal. Drive the
+   strike from an explicit timer sharing those constants, NEVER from
+   the ring's animationend — a re-render of the ring subtree restarts
+   the animation at dashoffset 918 and the event never fires, so the
+   hold silently never completes.
+   ============================================================ */
+.mt-rise {
+  animation: mt-rise 620ms cubic-bezier(0.2, 0.8, 0.3, 1) both;
+}
+.mt-fade {
+  animation: mt-fade 800ms ease-out both;
+}
+.mt-tape {
+  animation: mt-tape 58s linear infinite;
+}
+.mt-dot {
+  animation: mt-dot 1.7s ease-out infinite;
+}
+.mt-cta {
+  animation: mt-cta 2.6s ease-out infinite;
+}
+.mt-step {
+  animation: mt-settle 460ms cubic-bezier(0.2, 0.8, 0.3, 1) both;
+}
+.mt-coin-idle {
+  animation: mt-coin-idle 4.6s ease-in-out infinite;
+}
+.mt-coin-hint {
+  animation: mt-coin-hint 3.4s ease-in-out infinite;
+}
+.mt-coin-tremble {
+  animation: mt-coin-tremble 1100ms linear both;
+}
+.mt-charge-ring {
+  animation: mt-charge-ring 1100ms cubic-bezier(0.4, 0, 0.7, 1) both;
+}
+.mt-gather {
+  animation: mt-gather 1100ms cubic-bezier(0.4, 0, 0.7, 1) both;
+}
+.mt-impact {
+  animation: mt-impact 1500ms cubic-bezier(0.2, 0.8, 0.3, 1) both;
+}
+.mt-flash {
+  animation: mt-flash 420ms ease-out both;
+}
+.mt-shock {
+  animation: mt-shock 1600ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.mt-foil {
+  animation: mt-foil 1400ms cubic-bezier(0.3, 0, 0.4, 1) 120ms both;
+}
+.mt-emboss {
+  animation: mt-emboss 1100ms ease-out 260ms both;
+}
+/* ★ THE ONE CLASS THE HANDOFF DID NOT SHIP. `mt-ember` had a keyframe
+   and no class, and no call site anywhere in the package — so nothing
+   could have fired it, and reduced motion could not have caught it.
+   Duration and easing are DERIVED, not specified: embers and the
+   shockwave leave the rim on the same impact frame, so this reuses
+   .mt-shock's curve. Per-particle stagger is the point, so the two
+   knobs are custom properties — set --mt-ember-ms / --mt-ember-delay
+   inline alongside the --dx / --dy each ember already carries. */
+.mt-ember {
+  animation: mt-ember var(--mt-ember-ms, 1600ms) cubic-bezier(0.16, 1, 0.3, 1) var(--mt-ember-delay, 0ms) both;
+}
+
+/**
+ * ★★★ REDUCED MOTION DISABLES EVERY ONE OF THEM, THE RING INCLUDED.
+ *
+ * All 17 classes above, with no exemption. The handoff exempted
+ * .mt-charge-ring on the grounds that it shows progress rather than
+ * decorating — but the build rule for these screens is that state must
+ * be readable from COLOUR AND FILL ALONE, never from motion, and a
+ * progress meter is exactly the case that rule was written for. So the
+ * ring stops with the rest and the coin owes the reader a non-animated
+ * charging cue instead.
+ *
+ * The hold itself still works and still completes: it is driven by a
+ * JS timer, not by these keyframes, and killing an animation does not
+ * touch the timer.
+ *
+ * ★ IF YOU ADD A KEYFRAME ABOVE, ADD ITS CLASS HERE. There is no
+ * wildcard — `[class*='mt-']` would also match Tailwind's margin-top
+ * utilities (`mt-4`) and silently freeze animations across the whole
+ * app. Enumeration is the only safe form, so it has to be maintained.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .mt-rise,
+  .mt-fade,
+  .mt-tape,
+  .mt-dot,
+  .mt-cta,
+  .mt-step,
+  .mt-coin-idle,
+  .mt-coin-hint,
+  .mt-coin-tremble,
+  .mt-charge-ring,
+  .mt-gather,
+  .mt-impact,
+  .mt-flash,
+  .mt-shock,
+  .mt-foil,
+  .mt-emboss,
+  .mt-ember {
+    animation: none !important;
   }
 }
 

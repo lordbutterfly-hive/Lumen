@@ -1,0 +1,284 @@
+/**
+ * MERITUM TICKER TAPE — geometry only.
+ *
+ * Adapted from `handoff_meritum_onboarding/ticker/ticker.css`. What lives here
+ * is deliberately narrow, because two of the three things the handoff's
+ * stylesheet did are now owned elsewhere:
+ *
+ *   MOTION  → `packages/tailwindcss/globals.css`. `@keyframes mt-tape` and the
+ *             `.mt-tape` class (58s linear infinite) already ship there, sit
+ *             OUTSIDE `@layer` so Tailwind cannot purge them, and are already
+ *             enumerated in that file's `prefers-reduced-motion` block. The
+ *             LIVE dot's pulse is `.mt-dot` in the same place. This file
+ *             defines NO keyframes — a second copy of `mt-tape` would be a
+ *             fork of the motion layer, and the first edit to one of them
+ *             would desync the two screens.
+ *   COLOUR  → the `--meritum-*` tokens, consumed as Tailwind utilities in
+ *             `meritum-ticker.tsx` (`text-meritum-ink`, `text-meritum-ink-muted`,
+ *             `text-meritum-ink-brand`, …). There is not one colour in this
+ *             file, so there is nothing here to drift from the palette and
+ *             nothing to re-point when dark mode changes.
+ *
+ * What is left is geometry: the clipping window, the symmetric edge mask, the
+ * max-content track, and the item box. Those are the parts the handoff got
+ * subtly right and that a Tailwind class string cannot explain.
+ *
+ * PERFORMANCE. The only animated property on this component is `transform`
+ * (the track, via `.mt-tape`) plus the LIVE dot's `box-shadow` (via `.mt-dot`).
+ * Nothing here animates width/height/top/left/margin, so no frame the tape
+ * produces can force a reflow, and the one piece of JS is the
+ * IntersectionObserver in `use-pause-offscreen.ts`.
+ *
+ * THE FOUR THINGS THAT BREAK THE TAPE:
+ *   1. the copy count / translate percentage pair → `meritum-ticker-items.ts`
+ *   2. duration is the speed control, not distance → `meritum-ticker-items.ts`
+ *   3. the edge mask must be symmetric              → `.window` below
+ *   4. `white-space: pre` on the item               → `.item` below
+ */
+
+.ticker {
+  /**
+   * ★ EDGE FADE, SYMMETRIC. Used by `.window`. The handoff is emphatic that the
+   * two sides must match: the tape travels LEFTWARD, so a shorter left fade
+   * means opening characters get clipped by the window while still at full
+   * opacity, and the line reads as broken text rather than as a tape dissolving
+   * off the edge. One custom property, used twice, so the two cannot drift.
+   */
+  --mt-tape-fade: 90px;
+
+  display: flex;
+  align-items: center;
+}
+
+/* ============================================================
+   THE "LIVE" BADGE
+   ============================================================ */
+
+.live {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 0 0 auto;
+  padding-right: 18px;
+}
+
+/**
+ * Geometry only. The fill is `bg-meritum-surface-brand` and the pulse is the
+ * shared `.mt-dot`, both applied in the component.
+ *
+ * `flex: 0 0 auto` because `.mt-dot`'s ring is a `box-shadow`, which is painted
+ * outside the border box and therefore cannot hold the dot's size open — a
+ * squeezed flex line would shrink the dot itself and the ring would follow it
+ * in, off-centre.
+ */
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+/* ============================================================
+   THE WINDOW
+   ============================================================ */
+
+/**
+ * The window clips, and the mask dissolves both edges evenly.
+ *
+ * `min-width: 0` is load-bearing on a flex child: without it the window's
+ * min-content width is the full max-content width of the track, so the tape
+ * shoves the LIVE badge off the card instead of being clipped.
+ *
+ * The `black` in the mask gradient is not a colour and must not be tokenised —
+ * a mask reads the alpha channel, so `black` means "fully opaque, keep this
+ * pixel" and `transparent` means "drop it". Nothing about it is themed, and it
+ * looks identical in light and dark.
+ */
+.window {
+  position: relative;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  padding: 4px 0;
+  -webkit-mask-image: linear-gradient(
+    90deg,
+    transparent 0,
+    black var(--mt-tape-fade),
+    black calc(100% - var(--mt-tape-fade)),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    90deg,
+    transparent 0,
+    black var(--mt-tape-fade),
+    black calc(100% - var(--mt-tape-fade)),
+    transparent 100%
+  );
+}
+
+/* ============================================================
+   THE TRACK — where the seamless loop happens
+   ============================================================ */
+
+/**
+ * ★ THE SEAMLESS LOOP. The item list is rendered TWICE inside this track (see
+ * `.copy`). The track is `width: max-content`, so its own box is exactly two
+ * copies wide, and `transform` percentages resolve against that box. The shared
+ * `@keyframes mt-tape` translates it `-50%`, which is therefore exactly one
+ * copy — and because the copies are identical, the picture at frame 100% is
+ * pixel-identical to frame 0. That is what makes the wrap invisible.
+ *
+ * `width: max-content` is the half of that contract that lives here, and it is
+ * why this rule cannot be dropped in favour of the utility class alone: `-50%`
+ * only means "one copy" while the track is sized to its content. Give the track
+ * a percentage or fixed width and the keyframe silently starts translating by
+ * some other distance.
+ *
+ * NO `animation` DECLARATION HERE, DELIBERATELY. The component adds the global
+ * `.mt-tape` class instead. Declaring `animation` in this module as well would
+ * put two equal-specificity rules in different stylesheets and let chunk order
+ * decide which one wins.
+ *
+ * NO `will-change`. `translate3d` in the shared keyframe already promotes the
+ * track to its own layer, and `will-change` would pin that layer even while the
+ * tape is paused off screen — the one thing this component goes out of its way
+ * to avoid.
+ */
+.track {
+  display: flex;
+  align-items: center;
+  width: max-content;
+}
+
+/** One rendering of the full item list. There are `MERITUM_TICKER_COPIES` of these. */
+.copy {
+  display: flex;
+  align-items: center;
+}
+
+/* ============================================================
+   THE ITEM
+   ============================================================ */
+
+/**
+ * ★ `white-space: pre` IS LOAD-BEARING. The spaces that separate the handle
+ * from the sentence and the sentence from the figure live INSIDE the strings in
+ * `meritum-ticker-items.ts` (`' has '`, `' on day one'`). Without `pre` they
+ * collapse away and `@luka: 12` renders as `@luka : 12`. It is set here and
+ * inherited by every child, so the child rules do not repeat it.
+ *
+ * Type (family, size, weight) and colour are Tailwind utilities on the element;
+ * this rule owns only the box.
+ */
+.item {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 22px;
+  white-space: pre;
+}
+
+/**
+ * The separator mark. 13px is the size of a decorative glyph rather than a step
+ * on the type scale, which is why it is here and not a `text-*` utility — the
+ * scale has no 13 and should not grow one for an ornament.
+ */
+.glyph {
+  font-size: 13px;
+  margin-right: 12px;
+}
+
+/* ============================================================
+   REDUCED MOTION — the part the shared stylesheet cannot cover
+   ============================================================ */
+
+/**
+ * `globals.css` already stops the animation: `.mt-tape` and `.mt-dot` are both
+ * in its `prefers-reduced-motion` enumeration, with `animation: none
+ * !important`. That is necessary and not sufficient. Stopping the tape and
+ * doing nothing else is a regression, not an accommodation: the track freezes
+ * at `translate(0)` inside an `overflow: hidden` window and items 3 to 13
+ * become permanently unreachable — content that is on the page and cannot be
+ * read by anyone.
+ *
+ * So this block covers what stopping the animation leaves behind. Under reduced
+ * motion the tape stops being a tape and becomes a plain horizontally
+ * scrollable strip:
+ *
+ *   - the window scrolls, so every item is reachable — and modern Chrome makes
+ *     scroll containers keyboard-focusable, so it is reachable without a mouse;
+ *   - the edge mask is removed, because a fade that made sense for content
+ *     dissolving past a boundary just hides the ends of something you are now
+ *     scrolling to read;
+ *   - the duplicate copy is hidden, so the reader does not scroll through the
+ *     same 13 items twice. It is `aria-hidden` already, so nothing is lost.
+ *
+ * Layout stays one line at very nearly the same height — the only change is 6px
+ * of extra bottom padding, and that is not cosmetic: on a platform with classic
+ * (space-taking) scrollbars rather than overlay ones, an `overflow-x: auto` box
+ * draws the scrollbar inside its own padding box, and with `overflow-y: hidden`
+ * there is nowhere for the displaced line to go — it gets clipped. The padding
+ * is the gutter. Nothing above or below the tape reflows.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .window {
+    overflow-x: auto;
+    padding-bottom: 10px;
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+
+  .copyDuplicate {
+    display: none;
+  }
+}
+
+/**
+ * ★ THE SEPARATOR BETWEEN ITEMS IS TEXT, NOT PADDING (2026-08-15).
+ *
+ * `.item` uses `padding: 0 22px` to space items apart, and the "◈" glyph that
+ * looks like a divider is `aria-hidden`. Box-model spacing is invisible to a
+ * screen reader and to the clipboard, so with nothing else between them the
+ * items ran together: "...4 seconds ago@biggusdickus answered 3 asks today".
+ * Twelve fused word-boundaries in the one copy that is exposed.
+ *
+ * A visually-hidden full stop restores the boundary for both. `white-space:
+ * nowrap` here does NOT fight the item's `white-space: pre` — this span carries
+ * only the separator, never the load-bearing internal spacing.
+ */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/**
+ * The WCAG 2.2.2 pause control. Deliberately small and quiet — it sits beside
+ * the LIVE badge and must not compete with the tape it governs — but it is a
+ * real, focusable, text-labelled button, not an icon-only affordance. Colour is
+ * a Tailwind utility on the element; this rule owns only the box.
+ */
+.pauseButton {
+  margin-left: 10px;
+  flex: 0 0 auto;
+  border: 0;
+  background: none;
+  padding: 2px 4px;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  opacity: 0.55;
+}
+
+.pauseButton:hover,
+.pauseButton:focus-visible {
+  opacity: 1;
+}

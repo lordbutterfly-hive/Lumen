@@ -64,7 +64,7 @@ const LaunchEscape: FC<{ href?: string }> = ({ href }) =>
 
 /** No contract provisioned in this build (REACT_APP_CREATOR_TOKENS_* unset). Not an error, and NOT a reason to show a mock. */
 export const MarketUnavailable: FC<{ launchHref?: string }> = ({ launchHref }) => (
-  <Panel title="Creator tokens aren’t available yet">
+  <Panel title="Meritum isn’t available yet">
     Nothing is deployed on this build, so there are no real markets to show. This page will fill in once a contract is
     connected — until then it deliberately shows nothing rather than example numbers.
     <LaunchEscape href={launchHref} />

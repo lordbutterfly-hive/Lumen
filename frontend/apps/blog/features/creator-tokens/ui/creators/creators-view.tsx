@@ -1,7 +1,7 @@
 'use client';
 
 import PageMasthead from '@/blog/features/layouts/page-masthead';
-import { FC, useMemo, useState } from 'react';
+import { FC, ReactNode, useMemo, useState } from 'react';
 import { Link, LumenLoader } from '@hive/ui';
 import { useTranslation } from '@/blog/i18n/client';
 import { useLiveDiscovery } from '../../live/use-live-discovery';
@@ -19,7 +19,7 @@ const COPY = {
   newHereSub: 'Just launched, so not ranked by reliability yet.',
   newNothing: 'New, nothing completed yet.',
   recordUnavailable: 'Delivery record unavailable',
-  launchTitle: 'Launch your creator token',
+  launchTitle: 'Launch your Meritum',
   launchSub: 'Let people hold your token and pay you for your time.',
   launchCta: 'Set up in Creator Studio →',
   howTitle: 'How it works',
@@ -121,7 +121,21 @@ const CreatorCard: FC<{ c: CreatorSummary }> = ({ c }) => {
   );
 };
 
-const CreatorsView: FC = () => {
+interface CreatorsViewProps {
+  /**
+   * Rendered inside the shell's centre column, ABOVE the masthead and the list.
+   * `app/creators/page.tsx` passes the Meritum intro here; the prop is optional
+   * so the view still renders standalone (and so a second entry point cannot be
+   * forced to carry the intro).
+   *
+   * It arrives as a node rather than being imported here on purpose: this view
+   * is the discovery list, and it should not grow a hard dependency on a
+   * marketing card that a different screen may want to omit.
+   */
+  intro?: ReactNode;
+}
+
+const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
   const { t } = useTranslation('common_blog');
   const [sort, setSort] = useState<Sort>('reliable');
   const [showNew, setShowNew] = useState(true);
@@ -177,10 +191,22 @@ const CreatorsView: FC = () => {
 
   return (
     <TokenShell rightRail={rightRail}>
+      {/* `mb-7` is the masthead's own bottom margin, applied HERE rather than
+          inside the intro so the intro stays a card and not a page section —
+          the two blocks sit the same distance apart as every other pair on the
+          page. */}
+      {intro ? <div className="mb-7">{intro}</div> : null}
+
       {/* X-1 / P0-3: /creators was a fourth page-header treatment, bare text with no
           shell. Same masthead as home, topics, witnesses and proposals now. No mark:
           /creators has no assigned glyph and R5 forbids inventing one. */}
-      <PageMasthead title={COPY.title}>
+      {/*
+        When the Meritum intro is present it carries the page's h1, so this
+        masthead steps down to h2 — otherwise the page ships two h1s and the
+        document outline screen readers navigate by is broken. With no intro
+        (any other caller) it stays the h1 it has always been.
+      */}
+      <PageMasthead title={COPY.title} headingLevel={intro ? 'h2' : 'h1'}>
         <p className="max-w-[660px] text-[13px] leading-[20px] text-ink-10">{COPY.sub}</p>
       </PageMasthead>
 
@@ -244,7 +270,7 @@ const CreatorsView: FC = () => {
 
       {discovery.unavailable ? (
         <div className="rounded-[14px] border border-dashed border-line-11 px-5 py-8 text-center text-[14px] leading-[22px] text-ink-14">
-          Creator tokens aren’t available on this build yet.
+          Meritum isn’t available on this build yet.
         </div>
       ) : discovery.isLoading ? (
         <LumenLoader size="md" label={t('global.loading_creators')} />

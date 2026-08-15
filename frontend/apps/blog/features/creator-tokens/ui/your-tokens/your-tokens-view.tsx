@@ -195,15 +195,15 @@ const YourTokensView: FC = () => {
 
   return (
     <TokenShell rightRail={rightRail}>
-      <h1 className="font-serif text-[34px] font-semibold tracking-[-0.015em] text-ink-2">Your tokens</h1>
+      <h1 className="font-serif text-[34px] font-semibold tracking-[-0.015em] text-ink-2">Your Meritum tokens</h1>
 
       {p.unavailable ? (
         <div className="mt-5">
-          <Unavailable>Creator tokens aren’t available on this build yet.</Unavailable>
+          <Unavailable>Meritum isn’t available on this build yet.</Unavailable>
         </div>
       ) : !p.loggedIn ? (
         <div className="mt-5">
-          <Unavailable>Sign in to see the creator tokens you hold.</Unavailable>
+          <Unavailable>Sign in to see the Meritum you hold.</Unavailable>
         </div>
       ) : p.accountsFailed ? (
         // The wallet lookup itself failed. NOT "you hold nothing" — that would
@@ -234,7 +234,7 @@ const YourTokensView: FC = () => {
         // data layer was correctly reading the ones they did hold.
         <div className="mt-5">
           <Unavailable>
-            This account signs in with Google only, so there is no wallet to hold creator tokens in. Link a Bitcoin or
+            This account signs in with Google only, so there is no wallet to hold Meritum tokens in. Link a Bitcoin or
             Ethereum wallet, or upgrade to a full Hive account.
           </Unavailable>
         </div>
@@ -302,7 +302,7 @@ const YourTokensView: FC = () => {
                   </Unavailable>
                 ) : p.holdings.length === 0 ? (
                   <p className="py-8 text-center font-serif text-sm text-ink-14">
-                    You don’t hold any creator tokens yet. Browse creators and buy in to start.
+                    You don’t hold any Meritum yet. Browse creators and buy in to start.
                   </p>
                 ) : (
                   p.holdings.map((h) => <HoldingRow key={h.creator} h={h} />)

@@ -22,7 +22,9 @@ import { usdPrice } from '@/blog/features/creator-tokens/market/format';
 // TODO i18n — staged copy for the rows added in the creator-token-prominence
 // pass (2026-08-11); same precedent as app-header.tsx's own LABELS one
 // directory up. The three PRE-EXISTING rows below (Profile/Wallet/Logout)
-// keep their real t('navigation.user_menu.*') keys unchanged.
+// keep their real navigation.user_menu.* keys unchanged (written without the
+// t() wrapper here on purpose: the usage checker scans comments too, and a
+// literal call inside prose is reported as a missing key).
 const LITE_LABELS = {
   security: 'Sign-in & recovery',
   upgrade: 'Upgrade to a Hive account'

@@ -13,6 +13,15 @@ import {
   sweepServedFeeds,
   type ServedItem
 } from '@/blog/lib/lite/repositories/feed-served-repository';
+import {
+  hardRatioBound,
+  markViewerTainted,
+  recordFeedSeen,
+  seenImpressionRatios,
+  sweepFeedSeen,
+  warnRatioBound,
+  type SeenItem
+} from '@/blog/lib/lite/repositories/feed-seen-repository';
 
 export type { FeedLane };
 
@@ -120,6 +129,101 @@ export const FEED_FRESH_MS = 5 * 60_000;
 export function feedStaleMs(): number {
   const raw = Number(process.env.FEED_STALE_MS);
   return Number.isFinite(raw) && raw > 0 ? raw : 2 * 60 * 60_000;
+}
+
+/**
+ * ★★★ ONE CEILING WAS DOING TWO JOBS (2026-08-15). `FEED_BANDS_ENABLED=yes`
+ * splits it in two; with the flag off every value below collapses back to
+ * `feedStaleMs()` and the route's behaviour is byte-identical to today's.
+ *
+ * The guard above is right that a stored ranking must not be passed off as
+ * current forever. It is wrong that "may I still PRESENT this as your ranking"
+ * and "is this so old it is no longer a ranking at all" are the same question,
+ * and answering both with 2h is what produced the state measured on this box on
+ * 2026-08-15: **52 stored rows, 1 younger than 18h, 2 younger than 72h, 50 past
+ * 72h** — i.e. essentially every signed-in reader here is served trending on
+ * their next visit, having already waited once for a ranking that exists.
+ *
+ *   FEED_FRESH_MS      < 5m    served as-is, no upstream work
+ *   presentMaxMs       < 18h   served as their ranking, rebuilt behind them
+ *   (the aging band)   < 72h   STILL served as their ranking, with a truthful
+ *                              "refreshing" line — this band is the change
+ *   abandonMs          >= 72h  cached trending, `degraded:'stale'`
+ *
+ * ★ NOTHING HERE REINTRODUCES A WAIT, which is the property the whole file
+ * exists to protect. Past the abandon ceiling the reader is answered from
+ * `fallbackCache` in milliseconds exactly as they are now, and the rebuild is
+ * still started before the branch returns. What moves is only WHERE the line
+ * between "your ranking" and "trending" sits.
+ *
+ * ★ AND THE PROTECTION IS PRESERVED. The incident this guard was written for was
+ * a row **71.4 hours old** (see the measurement above this function) served as
+ * `source:'recsys'` for three days while nothing was listening on
+ * `RECSYS_FEED_URL`. A 72h ceiling catches that row 0.6h later than a 2h ceiling
+ * does — it still catches it, which is the requirement. The argument that the
+ * ceiling must be ABSOLUTE rather than a multiple of the refresh interval is
+ * unchanged; only the number moves.
+ */
+function bandsEnabled(): boolean {
+  return (process.env.FEED_BANDS_ENABLED || '').toLowerCase() === 'yes';
+}
+
+function msFromEnv(name: string, fallback: number): number {
+  const raw = Number(process.env[name]);
+  return Number.isFinite(raw) && raw > 0 ? raw : fallback;
+}
+
+/**
+ * ★ 18h IS 3 × THE WARM CADENCE (`FEED_WARM_INTERVAL_MS`, 6h), NOT A ROUND
+ * NUMBER. That makes the band boundary mean something operational: the
+ * "refreshing" line appears only after the warmer has failed this viewer three
+ * consecutive times. If the warmer is healthy the aging band is unreachable; if
+ * it is not, the reader is told the truth and an operator has a signal. It also
+ * has to clear the return gap of a daily reader, who is not on a 24.00h clock —
+ * 18h covers a same-evening return and any next-morning return inside 18h, and
+ * a strict 24h reader lands in the aging band and STILL gets their ranking,
+ * which is the outcome that matters.
+ */
+const FEED_PRESENT_MAX_DEFAULT_MS = 18 * 60 * 60_000;
+
+/**
+ * ★ 72h IS DERIVED FROM THE RANKER, NOT CHOSEN. recsys sources candidates from a
+ * 3-day window (`sourcing_freshness_days: int = 3`, recsys/config.py:2393), so
+ * past 72h EVERY post in a stored row is outside the window the ranker itself
+ * would now consider. The row is not merely old; it is a list the ranker would
+ * refuse to build. That is the principled definition of "no longer a ranking",
+ * and this codebase already uses 3 days for exactly this meaning —
+ * `countImpressions`'s default window is `withinDays ?? 3`, commented "recsys's
+ * own sourcing window" (feed-served-repository.ts:257).
+ */
+const FEED_ABANDON_DEFAULT_MS = 72 * 60 * 60_000;
+
+export interface FeedBands {
+  /** Age at which a stored ranking stops being presented WITHOUT a banner. */
+  presentMaxMs: number;
+  /** Age at which a stored ranking stops being presented at all. */
+  abandonMs: number;
+  /** False = the single `feedStaleMs()` ceiling, unchanged. */
+  enabled: boolean;
+}
+
+export function feedBands(): FeedBands {
+  if (!bandsEnabled()) {
+    // ★ THE OFF PATH IS THE OLD PATH, EXACTLY. Both ceilings are the one ceiling,
+    // so the aging band has zero width (`age >= present` and `age >= abandon`
+    // become the same test) and `staleAfterMs` on the wire keeps the value the
+    // client already receives. Nothing downstream can tell the difference.
+    const stale = feedStaleMs();
+    return { presentMaxMs: stale, abandonMs: stale, enabled: false };
+  }
+  const presentMaxMs = msFromEnv('FEED_PRESENT_MAX_MS', FEED_PRESENT_MAX_DEFAULT_MS);
+  // ★ CLAMPED, because an operator who sets abandon BELOW present would create a
+  // band that cannot be entered and would then send the client a `staleAfterMs`
+  // larger than the age at which the server stops serving the row at all — the
+  // two sides disagreeing about what "current" means, which is the exact class
+  // of bug the `staleAfterMs` field was added to end.
+  const abandonMs = Math.max(presentMaxMs, msFromEnv('FEED_ABANDON_MS', FEED_ABANDON_DEFAULT_MS));
+  return { presentMaxMs, abandonMs, enabled: true };
 }
 
 /** Memory tier size. The durable tier's bound is FEED_STORE_MAX_ROWS. */
@@ -363,14 +467,108 @@ export function recordFeedServe(viewer: string, entries: Entry[], lanes: FeedLan
   const laneByKey = new Map(lanes.map((lane) => [lane.key, lane]));
   const items: ServedItem[] = entries.map((entry, index) => {
     const key = `${entry.author}/${entry.permlink}`;
-    return { postKey: key, position: index, source: laneByKey.get(key)?.source ?? null };
+    const lane = laneByKey.get(key);
+    return {
+      postKey: key,
+      position: index,
+      source: lane?.source ?? null,
+      // ★ Written to the LOG as well as to the aggregate (migration 0036), so
+      // `lumen_feed_seen` stays derived-and-disposable rather than becoming the
+      // only copy of a fact. Losing it must cost a colder filter, never data.
+      rankedKey: lane?.rankedKey ?? null,
+      engagers: lane?.engagers ?? null
+    };
   });
 
-  void recordServedPage({ viewer, items, minIntervalMs: servedMinIntervalMs() })
+  // ★ ONE FLAG DECIDES BOTH LEDGERS' SHAPE. `includeSeenColumns` names two
+  // columns that exist only after migration 0036; the aggregate write below is
+  // gated on the identical call. Off, this route touches nothing 0036 added and
+  // is byte-identical to its pre-2026-08-15 self — which matters because
+  // migrations here are an explicit ops step, not a boot step.
+  const withSeen = seenRecordEnabled();
+  void recordServedPage({
+    viewer,
+    items,
+    minIntervalMs: servedMinIntervalMs(),
+    includeSeenColumns: withSeen
+  })
     .then((result) => {
       if (result.recorded > 0) void maybeSweepServed();
+      // ★★★ THE IMPRESSION AGGREGATE IS WRITTEN ONLY WHEN THE LOG ACCEPTED THE
+      // PAGE (2026-08-15). `recordServedPage` returns `recorded: 0` when its
+      // minimum-interval coalesce rejected the delivery as machine noise — a
+      // remount, a StrictMode double-render, a focus refetch. Writing the
+      // aggregate anyway would count an impression the instrument itself just
+      // ruled was not a reading, and under a 2-impression rule that is a post
+      // suppressed by a component re-render.
+      //
+      // ★ ONE GATE, ONE MEANING, BOTH LEDGERS: probe -> neither, coalesced ->
+      // neither, delivered -> both. Hanging the second write off the first
+      // write's RESULT is what makes that true by construction rather than by
+      // two conditions that can drift apart.
+      if (result.recorded > 0 && withSeen) {
+        void recordSeenPage(viewer, entries, laneByKey);
+      }
     })
     .catch((error) => logger.warn('feed-cache: served-log write failed for %s: %o', viewer, error));
+}
+
+/**
+ * ★ THE INSTRUMENT'S OWN SWITCH, SEPARATE FROM THE RANKER'S (contract C11).
+ *
+ * Two flags, deliberately not one. `FEED_SEEN_RECORD` fills the aggregate;
+ * `RECSYS_SEEN_SUPPRESSION` (recsys-side) is what makes the ranker act on it.
+ * The instrument has to be able to run ALONE, because the resurrection rule is
+ * literally unevaluable until `engagers_at_last_serve` has been populated for a
+ * full window — arming the filter on day one would run it in baseline-unknown
+ * mode for every post, i.e. as a no-op that looks like a shipped feature.
+ *
+ * Both default OFF. With this off, `recordFeedSeen` is never called, no table is
+ * touched, and the served log behaves exactly as it did before 2026-08-15.
+ */
+function seenRecordEnabled(): boolean {
+  return storeEnabled() && process.env.FEED_SEEN_RECORD === 'yes';
+}
+
+/**
+ * Write one delivered page into `lumen_feed_seen`, then check the guard.
+ *
+ * ★ CONTRACT C1 LIVES AT THE CALL SITE, NOT HERE. This is reached only from
+ * `recordFeedServe`, which is reached only from the two serve branches of
+ * `/api/feed/for-you`, both already behind `if (!probe)`. Nothing in the build
+ * path, and nothing in `viewer-warmer.ts`, can reach it — the warmer calls the
+ * builder and `writeViewerFeed` and does not import this module's repository at
+ * all. A ranking assembled in the background and never opened was seen by
+ * nobody; under a 2-impression rule, counting it means a reader who never opened
+ * the app opens it to an empty page after two warm cycles.
+ */
+async function recordSeenPage(
+  viewer: string,
+  entries: Entry[],
+  laneByKey: Map<string, FeedLane>
+): Promise<void> {
+  const items: SeenItem[] = entries.map((entry, index) => {
+    const key = `${entry.author}/${entry.permlink}`;
+    const lane = laneByKey.get(key);
+    return {
+      postKey: key,
+      // ★ `null` REPAIRED BY THE READER, NOT GUESSED HERE. recsys resolves a
+      // NULL as `'@' || post_key`, which is exact for a Hive post and inert for
+      // a lite one. Guessing it here would put a wrong key in a durable table.
+      rankedKey: lane?.rankedKey ?? null,
+      engagers: lane?.engagers ?? null,
+      position: index
+    };
+  });
+
+  try {
+    await recordFeedSeen(viewer, items);
+  } catch (error) {
+    logger.warn('feed-cache: seen-aggregate write failed for %s: %o', viewer, error);
+    return;
+  }
+  void maybeGuardSeen(viewer);
+  void maybeSweepSeen();
 }
 
 /**
@@ -694,5 +892,119 @@ async function maybeSweepServed(): Promise<void> {
     }
   } catch (error) {
     logger.warn('feed-cache: served-log sweep failed: %o', error);
+  }
+}
+
+let lastSeenSweep = 0;
+let lastSeenGuard = 0;
+
+/**
+ * ★ THE AGGREGATE'S SWEEP — the TTL, and nothing else.
+ *
+ * ★★★ 8 DAYS, WHICH IS 7 + ONE. The suppression window is 7 (the max of
+ * `sourcing_freshness_days` 3 and `in_network_freshness_days` 7 — a post outside
+ * the widest sourcing horizon can never be a candidate, so its impressions
+ * cannot matter). The extra day is slack so a row is never swept mid-window by
+ * clock skew, and that is not theoretical on this box: the served log's own
+ * write carries a `served_at <= now()` bound added after the Postgres container
+ * was measured 3m24s AHEAD of the host and then snapped back.
+ *
+ * ★ IT DOES NOT TOUCH `lumen_feed_served`. Suppression must not shorten that
+ * table's TTL or its per-viewer cap — `countFeedsReachedWithPrior` reads it for
+ * the author-facing "your posts landed in N feeds", and the cap is already
+ * truncating the three heaviest viewers at exactly 2,000 rows. Reading the
+ * aggregate instead is precisely what makes the raw log's bounds a
+ * retention/analytics decision again rather than a ranking one.
+ *
+ * Rebuildable by observation: losing this table costs a colder filter for a few
+ * days, never data. That is what licenses a blunt TTL and no row cap.
+ */
+async function maybeSweepSeen(): Promise<void> {
+  const now = Date.now();
+  if (now - lastSeenSweep < SWEEP_INTERVAL_MS) return;
+  lastSeenSweep = now;
+  try {
+    const result = await sweepFeedSeen({
+      ttlDays: Number(process.env.FEED_SEEN_TTL_DAYS) || 8
+    });
+    if (result.expired > 0 || result.untainted > 0) {
+      logger.info(
+        'feed-cache: swept feed-seen (expired=%d untainted=%d)',
+        result.expired,
+        result.untainted
+      );
+    }
+  } catch (error) {
+    logger.warn('feed-cache: feed-seen sweep failed: %o', error);
+  }
+}
+
+/**
+ * ★★★★ THE GUARD — OVER-COUNTING MUST BE IMPOSSIBLE TO SHIP SILENTLY.
+ *
+ * THIS IS NOT A HYPOTHETICAL DEFENCE. It is the failure that already ran for six
+ * days: the 3-minute client poll re-fetched page 1 through the recording path,
+ * the counter read 31-40 impressions per DISTINCT post for the three heaviest
+ * viewers — roughly 31 for 1 — and NOTHING ANYWHERE SAID SO. The only reason it
+ * was ever noticed is that somebody went looking. The defence against that
+ * recurring is not review, it is an invariant that fails loudly.
+ *
+ * Under a rule that suppresses a post after 2 impressions, a reader cannot
+ * legitimately see the same post more than a small handful of times a day:
+ *
+ *   FEED_SEEN_MAX_IMPRESSIONS_PER_POST_PER_DAY   = 4   (warn)
+ *   FEED_SEEN_HARD_IMPRESSIONS_PER_POST_PER_DAY  = 8   (refuse)
+ *
+ * Above the warn bound: an ERROR naming the viewer and the ratio. Above the hard
+ * bound: the viewer's aggregate is marked `tainted`, which the ranker reads as
+ * "DO NOT SUPPRESS THIS VIEWER" and which the sweep clears once the window rolls
+ * clean. A counter that has provably lost its meaning must stop being a ranking
+ * input, and degrading to NO SUPPRESSION costs a reader repetition rather than
+ * an empty feed.
+ *
+ * ★ BOTH BOUNDS ARE CHOSEN, NOT MEASURED, AND THAT IS STATED WHERE THEY LIVE
+ * (`feed-seen-repository.hardRatioBound`). They are anchored on the rule — a
+ * post suppressed at 2 cannot legitimately reach 4 in a day — but the
+ * post-probe-fix distribution does not exist yet because the probe fix landed
+ * today. Replace them from `seenImpressionRatios` after a week.
+ *
+ * ★ THROTTLED TO THE SWEEP INTERVAL and detached from the response, so it costs
+ * one indexed aggregate every 10 minutes rather than one per delivered page.
+ */
+async function maybeGuardSeen(viewer: string): Promise<void> {
+  const now = Date.now();
+  if (now - lastSeenGuard < SWEEP_INTERVAL_MS) return;
+  lastSeenGuard = now;
+  try {
+    const rows = await seenImpressionRatios(24);
+    const warn = warnRatioBound();
+    const hard = hardRatioBound();
+    for (const row of rows) {
+      if (row.perPost <= warn) continue;
+      logger.error(
+        'feed-cache: SEEN COUNTER OVER-RECORDING for %s — %.1f impressions per ' +
+          'distinct post in 24h (%d impressions / %d posts). Warn bound %d, hard ' +
+          'bound %d. A reader cannot legitimately see the same post this often ' +
+          'under a 2-impression rule; something that is not a reader is recording.',
+        row.viewer,
+        row.perPost,
+        row.impressions,
+        row.distinctPosts,
+        warn,
+        hard
+      );
+      if (row.perPost > hard) {
+        const marked = await markViewerTainted(row.viewer);
+        logger.error(
+          'feed-cache: SUPPRESSION DISABLED for %s — %d aggregate rows marked ' +
+            'tainted. Their feed reverts to pre-suppression behaviour until the ' +
+            'window rolls clean. Fix the over-recording; do not raise the bound.',
+          row.viewer,
+          marked
+        );
+      }
+    }
+  } catch (error) {
+    logger.warn('feed-cache: feed-seen guard failed for %s: %o', viewer, error);
   }
 }

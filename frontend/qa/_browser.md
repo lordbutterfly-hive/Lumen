@@ -5,9 +5,21 @@
     https://localhost:3443   PRODUCTION build behind TLS — judge everything here
     http://localhost:3010    DEV build — CREATOR TOKENS ONLY, see below
 
-★ Creator tokens are served from the DEV origin today. The Magi testnet's
-GraphQL API is returning 502, so the deployed contract cannot be read, and the
-demo data source is deliberately INERT in a production build
+★ Creator tokens are served from the DEV origin today.
+
+★★ CORRECTION 2026-08-15: the "Magi testnet GraphQL is returning 502" claim
+below is STALE. `https://magi-test.techcoderx.com/api/v1/graphql` was curled
+directly during a launch-flow E2E and returns HTTP 200 with a working schema,
+and the app performed a genuine live contract read against it (a brand-new
+account correctly resolved to "no market"). The launch flow is REAL code
+against the REAL vsc-testnet contract `vsc1BcaD8JrwJPAAN5cU1cHKCBdZrd7jz2WGt8`
+(`.env.local`: `REACT_APP_CREATOR_TOKENS_DEMO=0`, `NET_ID=vsc-testnet`) — the
+Mock data source is UNREACHABLE in this environment because
+`getCreatorTokensDataSource()` checks for config before the demo flag. So the
+reason to use the dev origin is the production-build inertness below, NOT a
+dead API. Do not repeat the 502 claim without re-curling it.
+
+The demo data source is deliberately INERT in a production build
 (`isCreatorTokensDemoEnabled()` refuses when NODE_ENV=production — a real safety
 control, left alone). On the dev origin: judge FLOWS and COPY, never speed (dev
 compiles on first hit), and never report a demo figure as real market data.

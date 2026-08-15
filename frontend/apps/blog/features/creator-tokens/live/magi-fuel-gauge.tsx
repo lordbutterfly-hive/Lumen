@@ -126,7 +126,7 @@ export function MagiFuelGauge({
             than you hold.
           </div>
         ) : (
-          <div className="text-ink-10">Available to spend on creator tokens.</div>
+          <div className="text-ink-10">Available to spend on Meritum.</div>
         )}
       </div>
     </div>

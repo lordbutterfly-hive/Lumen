@@ -130,7 +130,25 @@ export function UserAvatarImg({
       const el = imgRef.current;
       // `complete` is true for a LOADED image and for one that errored (whose
       // onError already handled it). Still false means: still waiting.
-      if (el && !el.complete) setStage('proxy');
+      //
+      // ★ ...AND `complete` IS ALSO TRUE FOR A BLOCKED ONE, WHICH IS THE THIRD
+      // CASE THIS GUARD ORIGINALLY MISSED (2026-08-15). Chrome's Opaque Response
+      // Blocking (`ERR_BLOCKED_BY_ORB`) — which fires when the image host answers
+      // a missing avatar with a non-image body — COMPLETES the request with zero
+      // pixels and does NOT fire `onError`. So both escapes were shut: `onError`
+      // never ran, and `!el.complete` was false, so the promotion never happened
+      // and the reader kept the broken-image glyph indefinitely.
+      //
+      // Measured on `/creators/launch` with a fresh lite account, both avatars on
+      // ONE page: `size=small` promoted and resolved through the proxy
+      // (naturalWidth 96), while `size=medium` sat at `complete: true,
+      // naturalWidth: 0` forever. Same component, same account — so the proxy
+      // demonstrably works and only the trigger was missing.
+      //
+      // `naturalWidth === 0` on a completed image means exactly "produced no
+      // pixels", so this can only ADD promotions to a path already proven good;
+      // a genuinely loaded image has a non-zero width and is untouched.
+      if (el && (!el.complete || el.naturalWidth === 0)) setStage('proxy');
     }, DIRECT_TIMEOUT_MS);
     return () => clearTimeout(timer);
   }, [stage]);

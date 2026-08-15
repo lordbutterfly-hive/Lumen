@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import { fetchAccountPosts } from '@/blog/lib/lite/client/account-posts-fetch';
 import {
   FEED_AUTO_PAGE_CAP,
@@ -104,6 +104,20 @@ interface ForYouResponse {
   stale?: boolean;
   /** The age at which the server stops treating a ranking as current. */
   staleAfterMs?: number;
+  /**
+   * This IS the reader's ranking, and it is old enough to say so out loud.
+   *
+   * ★ A SEPARATE FIELD FROM `degraded`, AND THAT IS THE POINT. An aging ranking
+   * is a working state — built, personalised, being refreshed — so it must not
+   * travel down the degradation channel. Present only when true, and only when
+   * the server has the two-band ceiling enabled.
+   */
+  aging?: boolean;
+  /**
+   * The server permits offering a swap from trending to a ready ranking. Set on
+   * personalised responses only; absent means the feature is off.
+   */
+  swapOffer?: boolean;
   /** Where the next page starts. Null when Hive has nothing further. */
   nextCursor?: { author: string; permlink: string } | null;
 }
@@ -137,9 +151,31 @@ const RANKING_MAX_AGE_MS = 2 * 60 * 60_000;
  * present, the old `source` test, so an older server build degrades to exactly
  * the previous behaviour rather than to a blank banner.
  */
+/**
+ * ★★★ IS THIS PAGE THIS READER'S RANKING AT ALL — regardless of how old it is
+ * (2026-08-15).
+ *
+ * Split out of `isCurrentRanking` because the swap pill needs the WEAKER of the
+ * two questions and using the stronger one makes it lie. Once the server has an
+ * aging band, `isCurrentRanking` is false for a perfectly good 20-hour-old
+ * ranking (the server sends `staleAfterMs = 18h`), so a pill built on
+ * "!isCurrentRanking(current) && personalised(incoming)" would offer a reader
+ * who is ALREADY READING THEIR RANKING a swap to the same page. The claim the
+ * pill makes is "you are looking at trending and your ranking is ready", and
+ * that is exactly this test on both sides.
+ *
+ * Same evidence order as `isCurrentRanking`: the server's explicit flag first,
+ * the old `source` test only as a fallback for a response from a build that
+ * predates the flag.
+ */
+function isPersonalisedPage(page: ForYouResponse | undefined): boolean {
+  if (!page) return false;
+  return page.personalised ?? page.source === 'recsys';
+}
+
 function isCurrentRanking(page: ForYouResponse | undefined): boolean {
   if (!page) return false;
-  const personalised = page.personalised ?? page.source === 'recsys';
+  const personalised = isPersonalisedPage(page);
   if (!personalised) return false;
   if (!page.builtAt) return true;
   const builtAt = Date.parse(page.builtAt);
@@ -157,19 +193,45 @@ function isCurrentRanking(page: ForYouResponse | undefined): boolean {
  */
 const FOR_YOU_KEY = ['forYouRanked'];
 const FOR_YOU_INCOMING_KEY = ['forYouIncoming'];
-/** How often the silent poll below looks for posts the reader has not been shown. */
-const FEED_POLL_MS = 3 * 60_000;
+/**
+ * How often the silent poll below looks for posts the reader has not been shown.
+ *
+ * ★★★ 3 MINUTES -> 5 (2026-08-15), AND THE INTERVAL IS THE SMALLER HALF OF THE
+ * FIX. Measured in `lumen_feed_served` on that date, this poll had recorded
+ * **31.3 impressions per post for `lordbutterfly` (worst 44), 34.5 for `gtg`,
+ * 40.0 for `hbd-temp`** — all three at the 2,000-row per-viewer cap — because a
+ * full page-1 request every 180s went through the server's ordinary serve path
+ * and was counted as a reading. The server's 60s coalesce floor cannot see a
+ * 180s poll. The real fix is `probe` below, which stops the counting outright;
+ * this raises the floor so that if the probe flag is ever dropped by a future
+ * edit, the damage is two thirds of what it was rather than all of it.
+ *
+ * It also costs the reader almost nothing: the pill it feeds is an offer, not a
+ * ticker, and two minutes of latency on "there are new posts" is invisible on a
+ * feed whose candidate pool was measured turning over in hours.
+ */
+const FEED_POLL_MS = 5 * 60_000;
 
 function entryKey(entry: Entry): string {
   return `${entry.author}/${entry.permlink}`;
 }
 
-async function fetchForYou(cursor?: { author?: string; permlink?: string }): Promise<ForYouResponse> {
+/**
+ * `probe: true` marks a request as a MACHINE POLL: the server then records
+ * neither an impression nor a visit for it. Every call that puts a page in front
+ * of a person must leave it off — see the poll and the swap handler below, which
+ * are deliberately on opposite sides of that line.
+ */
+async function fetchForYou(
+  cursor?: { author?: string; permlink?: string },
+  opts?: { probe?: boolean }
+): Promise<ForYouResponse> {
   const params = new URLSearchParams({ limit: String(FOR_YOU_LIMIT) });
   if (cursor?.author && cursor?.permlink) {
     params.set('startAuthor', cursor.author);
     params.set('startPermlink', cursor.permlink);
   }
+  if (opts?.probe) params.set('probe', '1');
   const res = await fetch(`/api/feed/for-you?${params.toString()}`);
   if (!res.ok) throw new Error(`for-you ${res.status}`);
   return (await res.json()) as ForYouResponse;
@@ -177,6 +239,10 @@ async function fetchForYou(cursor?: { author?: string; permlink?: string }): Pro
 
 function ForYouFeed() {
   const { t } = useTranslation('common_blog');
+  // Hook, so it runs unconditionally above every early return. Used only by the
+  // swap handler below, which writes page 1 through instead of refetching the
+  // list — see `acceptRanking` for why the key must stay static.
+  const queryClient = useQueryClient();
 
   // ★ INFINITE SCROLL (2026-08-07). This was a single `useQuery` for one page of
   // 30, on the reasoning that a ranked feed is one scored ORDER with no cursor —
@@ -271,7 +337,12 @@ function ForYouFeed() {
 
   const { data: incoming } = useQuery<ForYouResponse>({
     queryKey: FOR_YOU_INCOMING_KEY,
-    queryFn: () => fetchForYou(),
+    // ★★★ `probe: true` — THE FIX FOR 31-40 RECORDED IMPRESSIONS PER POST
+    // (2026-08-15). This query fetches a full page 1 and the reader is shown
+    // NONE of it unless they click a button; every one of those pages was
+    // nevertheless recorded as delivered. See `FEED_POLL_MS` for the measured
+    // counts and `probe` in the route for what the server now does with it.
+    queryFn: () => fetchForYou(undefined, { probe: true }),
     refetchInterval: FEED_POLL_MS,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
@@ -434,6 +505,77 @@ function ForYouFeed() {
     if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  /**
+   * ★★★ "YOUR FEED IS READY" — A SECOND, DIFFERENT OFFER (2026-08-15).
+   *
+   * ★ FIRST, WHAT THIS IS NOT, because the obvious version of it was already
+   * tried here and rejected on measurement. The pill above answers "new content
+   * exists", and driving THAT off `builtAt` was killed by the six samples
+   * recorded further up this file: `builtAt` advanced four times in six minutes
+   * while not one of the top 30 keys changed. That verdict stands and is not
+   * being overturned — "a pill driven off `builtAt` would have announced new
+   * posts four times in six minutes with nothing behind it."
+   *
+   * This answers a DIFFERENT question, and it is not a content claim at all:
+   *
+   *     you are looking at TRENDING, and your personalised ranking now exists.
+   *
+   * Both halves are read straight out of the two payloads the component already
+   * holds — `personalised` on the page being rendered and on the page the poll
+   * fetched — so the claim cannot be false in the way the measured one could.
+   * There is nothing to announce about content; the offer is to stop showing the
+   * reader somebody else's feed.
+   *
+   * ★ IT NEEDS BOTH HALVES. `isPersonalisedPage` and not `isCurrentRanking`: an
+   * 18-72h-old ranking is still the reader's ranking (the server now says so
+   * with `aging`), and testing "is it current" would offer a reader who is
+   * already reading their own feed a swap to the page they are on.
+   */
+  const readyToSwap =
+    incoming?.swapOffer === true &&
+    isPersonalisedPage(incoming) &&
+    (incoming?.entries?.length ?? 0) > 0 &&
+    Boolean(firstPage) &&
+    !isPersonalisedPage(firstPage);
+
+  /**
+   * ★★★ ON CLICK ONLY. NEVER AUTOMATICALLY. This list has no virtualisation and
+   * no scroll anchoring — it is a plain `.map()` and the card keys are
+   * `author-permlink`, so replacing page 1 UNMOUNTS AND REMOUNTS every card
+   * above the reader's position and moves everything below it. Doing that
+   * silently is the 2026-08-10 defect this file's `staleTime: Infinity` comment
+   * was written about ("30 posts, then 30 DIFFERENT posts ~195s later"), and it
+   * would arrive in a new costume: an errored or slow swap under a scrolling
+   * reader is exactly the same wipe. The offer is rendered; the reader decides.
+   *
+   * ★ IT REFETCHES RATHER THAN REUSING WHAT THE POLL ALREADY HAS, and that is
+   * about the impression ledger, not about freshness. The poll's copy came back
+   * from a `probe` request, which by contract records nothing; this page is
+   * about to be put in front of a person, so it is fetched WITHOUT the probe and
+   * counted. If that fetch fails or comes back unpersonalised, the poll's copy
+   * is used instead — a reader who asked for their feed must get it, and an
+   * undercounted impression is a far smaller wrong than a dead button.
+   *
+   * ★ PAGE 1 ONLY, AND THE KEY NEVER CHANGES. Pages 2..n are chain continuation
+   * from a cursor that is still valid, so they are kept. Adding `builtAt` to
+   * `FOR_YOU_KEY` — the other obvious way to do this — would discard every
+   * loaded page the instant the ranking rebuilt, which is the wholesale
+   * replacement failure this component is armoured against.
+   */
+  const acceptRanking = async () => {
+    const fresh = await fetchForYou().catch(() => undefined);
+    const usable =
+      fresh && isPersonalisedPage(fresh) && (fresh.entries?.length ?? 0) > 0 ? fresh : incoming;
+    // Never paint over a rendered page with nothing. Same rule as `lastRendered`
+    // above, applied to the one place that writes the cache by hand.
+    if (!usable || (usable.entries?.length ?? 0) === 0) return;
+    queryClient.setQueryData<InfiniteData<ForYouResponse>>(FOR_YOU_KEY, (old) => {
+      if (!old || old.pages.length === 0) return old;
+      return { ...old, pages: [usable, ...old.pages.slice(1)] };
+    });
+    if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   if (isLoading) return <LumenLoader size="lg" label={t('global.loading_posts')} />;
   // ★ `isError` IS NO LONGER PART OF THIS GUARD. It is true for a failed REFETCH as
   // well as a failed first load, so an error on the poll-driven path used to throw
@@ -459,13 +601,25 @@ function ForYouFeed() {
   // three-day-old-feed case reach this at all. The `stale` reason is the server
   // refusing to serve an expired stored ranking; it gets its own copy because
   // "warming up" would be a false description of a feed that was already built.
+  //
+  // ★ 2026-08-15: THE AGING BAND GETS ITS OWN LINE, AND IT HAD TO. An aging page
+  // is `personalised: true` with `degraded` UNSET, and `isCurrentRanking` is
+  // false for it by design (the server sends the 18h presentation ceiling as
+  // `staleAfterMs`). So without this first test it fell through every branch
+  // below to the default — "Personalised ranking is warming up. Showing popular
+  // posts meanwhile." — which is false twice over: it WAS built, and these are
+  // not popular posts, they are the reader's own ranking. Selected on the
+  // dedicated `aging` field rather than on `degraded`, because a working state
+  // must not travel down the degradation channel.
   const degradedMessage = ranked
     ? null
-    : firstPage?.degraded === 'anonymous'
-      ? LABELS.degradedAnonymous
-      : firstPage?.degraded === 'stale'
-        ? LABELS.degradedStale
-        : LABELS.degraded;
+    : firstPage?.aging
+      ? t('discovery_feed.ranking_aging')
+      : firstPage?.degraded === 'anonymous'
+        ? LABELS.degradedAnonymous
+        : firstPage?.degraded === 'stale'
+          ? LABELS.degradedStale
+          : LABELS.degraded;
 
   return (
     <div>
@@ -500,8 +654,32 @@ function ForYouFeed() {
         </p>
       ) : null}
 
+      {/* ★ THE STRONGER OFFER WINS THE SLOT (2026-08-15). Both pills can be true
+          at once — the poll's page is the reader's ranking AND it contains posts
+          newer than anything on screen — and stacking two red buttons above the
+          feed is worse than either. "Your feed is ready" is the bigger upgrade
+          (the whole page becomes theirs, and the new posts come with it), so it
+          takes the slot and the content pill is suppressed for that render.
+
+          Behind `shown.length > 0`, exactly like the degraded banner two lines
+          up: an offer to swap something in above an empty list is the same
+          "posts are coming / there are none" contradiction that guard exists to
+          prevent. */}
+      {readyToSwap && shown.length > 0 ? (
+        <div className="mb-4 flex justify-center">
+          <button
+            type="button"
+            onClick={acceptRanking}
+            data-testid="for-you-ready-swap"
+            className="rounded-full bg-surface-brand-12 px-4 py-2 font-sans text-[14px] leading-[22px] font-semibold text-white shadow-[0_1px_3px_rgba(20,18,10,0.12)] transition-colors hover:bg-[#a5301f]"
+          >
+            {t('discovery_feed.ready_pill')}
+          </button>
+        </div>
+      ) : null}
+
       {/* The offer, never the swap: the poll found these, the reader decides. */}
-      {offered.length > 0 ? (
+      {offered.length > 0 && !readyToSwap ? (
         <div className="mb-4 flex justify-center">
           <button
             type="button"
@@ -822,7 +1000,7 @@ function TabButton({
         'whitespace-nowrap rounded-[9px] px-5 py-2.5 font-sans text-[14px] leading-[22px] font-semibold transition-colors',
         isActive
           ? 'bg-white text-[#161511] shadow-[0_1px_2px_rgba(20,18,10,0.08),0_1px_3px_rgba(20,18,10,0.05)]'
-          : 'bg-transparent text-[#6b7280] hover:text-[#161511]'
+          : 'bg-transparent text-[#5c6472] hover:text-[#161511]'
       )}
     >
       {children}

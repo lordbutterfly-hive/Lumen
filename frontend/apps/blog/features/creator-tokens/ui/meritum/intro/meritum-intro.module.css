@@ -1,0 +1,78 @@
+/**
+ * MERITUM INTRO — geometry only.
+ *
+ * Same split as the tape next door (`../ticker/meritum-ticker.module.css`):
+ * every colour is a `meritum-*` Tailwind utility on the element, every
+ * animation is a shared `mt-*` class from `packages/tailwindcss/globals.css`,
+ * and this file holds only the three boxes Tailwind describes badly. There is
+ * not one colour and not one keyframe here, deliberately.
+ *
+ * PERFORMANCE. Nothing in this file animates. The three moving parts on the
+ * screen are `mt-rise` (the card's entrance, transform + opacity), `mt-cta`
+ * (the CTA ring, box-shadow) and `mt-dot` (the two live dots, box-shadow) —
+ * all shared classes, all compositor-friendly, all already listed in that
+ * file's `prefers-reduced-motion` block.
+ */
+
+/**
+ * ★ `clip-path`, NOT `overflow: hidden`, AND IT IS LOAD-BEARING HERE.
+ *
+ * The white second band is the card's last child and paints its own
+ * background, so without clipping its two square bottom corners poke out past
+ * the card's 18px radius and the card reads as broken. `overflow: hidden`
+ * would also fix that — but the launch flow next door cannot use it (it makes
+ * the card the scrollport for its sticky coin, so the coin can never pin), and
+ * the two Meritum cards being clipped two different ways is exactly the kind
+ * of drift that gets one of them "tidied" into the other later. One technique,
+ * both cards.
+ *
+ * `border-radius` is still needed alongside it: `clip-path` cuts the paint but
+ * does not round the border the card draws, so dropping it leaves a square
+ * 1px outline around a rounded fill.
+ */
+.card {
+  border-radius: 18px;
+  clip-path: inset(0 round 18px);
+}
+
+/* ============================================================
+   THE SECOND BAND'S TWO COLUMNS
+   ============================================================ */
+
+/**
+ * Both columns are `flex-basis` + `min-width: min(100%, …)` rather than a
+ * grid, because the wrap point has to be driven by the CARD's width and not by
+ * a viewport breakpoint: this card sits in the shell's centre column, which is
+ * already ~500px narrower at `xl` than it is at `md` (the right rail appears).
+ * A `md:grid-cols-2` would put two 300px columns side by side inside a 436px
+ * box at exactly the width where the rail is absent and there is room for one.
+ *
+ * `min(100%, N)` is what keeps that honest at the bottom end: the column asks
+ * for N pixels, but never more than the line it is on actually has, so the
+ * narrowest phone gets one full-width column instead of a horizontal scrollbar.
+ *
+ * ★ THE FOUR NUMBERS ARE THE REFERENCE'S, SCALED TO THIS APP'S COLUMN. MEASURED.
+ * The handoff says `1 1 380px` / `0 1 340px` with a 48px gap, which needs 768px
+ * and fit its 940px-wide mock — but that mock had a left nav and no right rail.
+ * This card sits in the real shell, which has BOTH, so at a 1440px viewport the
+ * card is 752px and the band's content box is 662px. Measured in Chrome, not
+ * estimated. At the reference's numbers the band therefore wrapped to one
+ * column on the most common desktop width there is, which is not what
+ * `01-intro.png` shows and not what the second band is for: the quote and the
+ * three objections answer each other, and stacked they read as two unrelated
+ * blocks.
+ *
+ * 320 + 40 + 290 = 650 fits 662 with 12px to spare, so the two columns hold at
+ * 1440 and everything wider, and still wrap — properly, to full width — on a
+ * tablet or a phone. The proportion between the two columns is the reference's
+ * (roughly 53/47); only the absolute size moved.
+ */
+.copyColumn {
+  flex: 1 1 320px;
+  min-width: min(100%, 300px);
+}
+
+.listColumn {
+  flex: 0 1 290px;
+  min-width: min(100%, 260px);
+}

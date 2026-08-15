@@ -46,9 +46,34 @@ interface PageMastheadProps {
    * the witnesses General/Params tabs. Sits on the meta row, pushed right.
    */
   actions?: ReactNode;
+  /**
+   * Heading level for the title. Defaults to `h1` — the masthead IS the page
+   * heading on all nine of its other consumers, and none of them should change.
+   *
+   * `/creators` is the exception: it now leads with the Meritum intro, whose
+   * headline is the real page heading, and the masthead sits BELOW it. Two `h1`s
+   * on one page is not a style nit — it breaks the document outline that screen
+   * readers and search engines navigate by. Opt in per page rather than
+   * demoting the shared component, so the other nine are untouched.
+   */
+  headingLevel?: 'h1' | 'h2';
 }
 
-const PageMasthead: FC<PageMastheadProps> = ({ eyebrow, title, mark, children, actions }) => (
+const PageMasthead: FC<PageMastheadProps> = ({
+  eyebrow,
+  title,
+  mark,
+  children,
+  actions,
+  /*
+   * PascalCase is REQUIRED here, not a style choice: JSX resolves a lowercase
+   * tag name to a DOM element and only an uppercase identifier to a variable,
+   * so `<heading>` would render a literal <heading> element and silently drop
+   * the real heading. Hence the rename on destructure, and the disable below.
+   */
+  // eslint-disable-next-line @typescript-eslint/naming-convention
+  headingLevel: Heading = 'h1'
+}) => (
   // The gradient stops are tokens (see --masthead-* in globals.css): a
   // `bg-[radial-gradient(...)]` is a background-IMAGE, so the colours live
   // inline and nothing else can theme them. The light values are byte-identical
@@ -66,9 +91,9 @@ const PageMasthead: FC<PageMastheadProps> = ({ eyebrow, title, mark, children, a
       </p>
     ) : null}
 
-    <h1 className="relative z-10 font-serif text-[34px] font-semibold leading-[38px] tracking-[-0.015em] text-ink-2">
+    <Heading className="relative z-10 font-serif text-[34px] font-semibold leading-[38px] tracking-[-0.015em] text-ink-2">
       {title}
-    </h1>
+    </Heading>
 
     {children || actions ? (
       <div className="relative z-10 mt-3.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[13px] leading-[20px] text-ink-10">

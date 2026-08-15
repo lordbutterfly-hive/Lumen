@@ -1,0 +1,123 @@
+'use client';
+
+import { Link } from '@hive/ui';
+import { useTranslation } from '@/blog/i18n/client';
+import { MeritumTicker } from '../ticker/meritum-ticker';
+import MeritumHoldersBand from './meritum-holders-band';
+import styles from './meritum-intro.module.css';
+
+/**
+ * SCREEN 1 OF THE MERITUM ONBOARDING — the intro card.
+ *
+ * React port of `handoff_meritum_onboarding/reference/Intro.dc.html`, target
+ * `visuals/01-intro.png`. A warm paper card that sits at the top of
+ * `/creators`, ABOVE the discovery list, and hands off to `/creators/launch`.
+ *
+ * ★ THE ORDER IS FIXED AND LOAD-BEARING (README "Screen 1", checklist item 81).
+ * Eyebrow, headline, TAPE, subhead, CTA, then the white band. The tape sits
+ * directly under the headline and carries no box and no border — it is the
+ * proof that lets the subhead and the CTA make a claim, so moving it below
+ * them (the obvious "cleaner" arrangement) removes the reason to read on.
+ *
+ * ★ WHAT THIS FILE OWNS, AND WHAT IT MUST NOT.
+ *   - the tape           → `../ticker/meritum-ticker`. It renders its own 13
+ *                          owner-locked items AND its own LIVE badge behind
+ *                          `showLive` (default on). Do not build a second one.
+ *   - colour             → `meritum-*` utilities, picked by CSS PROPERTY, never
+ *                          by hex. `bg-meritum-surface-brand` (a fill) and
+ *                          `text-meritum-ink-brand` (ink) are both `#c0392b`
+ *                          today and diverge under dark mode on purpose.
+ *   - motion             → the shared `mt-rise` / `mt-cta` classes in
+ *                          `packages/tailwindcss/globals.css`, which are also
+ *                          where `prefers-reduced-motion` turns them off. No
+ *                          keyframe is declared anywhere in this folder.
+ *   - geometry           → `./meritum-intro.module.css`.
+ *
+ * ★ DARK MODE. Nothing here opts out of it. Every `--meritum-*` token is an
+ * alias of a palette token that already has a `.dark` value, so the card
+ * re-points with the theme instead of staying cream on a dark page — which is
+ * the whole reason the palette work landed before this screen did.
+ *
+ * TWO DELIBERATE DEPARTURES FROM THE REFERENCE, both noted at their call site:
+ * the eyebrow is `text-12` not 11px (the app's scale folded 11 -> 12), and the
+ * headline steps down to the 44px scale step below `md` so a 68px word cannot
+ * overflow a phone.
+ */
+
+/** The CTA's trailing arrow. Decorative — the label already says where it goes. */
+function ArrowIcon() {
+  return (
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="flex-none"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M4 12h15M13 6l6 6-6 6" />
+    </svg>
+  );
+}
+
+export default function MeritumIntro() {
+  const { t } = useTranslation('common_blog');
+
+  return (
+    <section className={`${styles.card} border border-meritum-line-paper bg-meritum-paper`}>
+      {/* `mt-rise` is the 620ms entrance, transform + opacity only, and it is
+          on the CONTENT rather than the card so the card's own border does not
+          slide with it. */}
+      <div className="mt-rise px-6 pb-12 pt-14 sm:px-11 sm:pb-[62px] sm:pt-[74px]">
+        {/* ★ `text-12`, NOT the reference's 11px. The type scale deliberately
+            folded 11 into 12 (see `packages/tailwindcss/tailwind.config.js`),
+            and the handoff's ground rule is that a value differing from an app
+            token by a hair loses to the token. Weight, tracking and colour are
+            the reference's. */}
+        <p className="font-sans text-12 font-bold uppercase tracking-meritum-eyebrow text-meritum-ink-brand">
+          {t('meritum.intro.eyebrow')}
+        </p>
+
+        {/* ★ `text-44` BELOW `md`. `text-meritum-display` is 68px/68px, which is
+            the reference and which this screen is built around — but the word
+            "Meritum" alone is ~266px at that size, and the card has 48px of its
+            own padding inside a 327px content column on a 375px phone. The
+            headline would overflow its own card. 44 is the next real step on
+            the scale, not a guess. */}
+        <h1 className="mt-[18px] max-w-[16ch] text-pretty font-serif text-44 font-bold tracking-meritum-display text-meritum-ink md:text-meritum-display">
+          {t('meritum.intro.headline')}
+        </h1>
+
+        {/* ★ THE TAPE, DIRECTLY UNDER THE HEADLINE. No box, no border, and no
+            LIVE badge added here — `MeritumTicker` renders its own behind
+            `showLive` (default on), so adding one would double it. The label
+            goes through `t()` because the badge is chrome; the 13 items inside
+            the tape are owner-locked verbatim copy and stay in the component. */}
+        <MeritumTicker className="mt-[30px]" liveLabel={t('meritum.intro.live')} />
+
+        <p className="mt-6 max-w-[44ch] font-serif text-18 text-meritum-ink-3">{t('meritum.intro.subhead')}</p>
+
+        {/* ★ THE REAL ROUTE, NOT A PLACEHOLDER. `/creators/launch` decides on
+            the server whether the visitor is signed in and sends them to the
+            login door with `?next=` if not, so this link is correct for a
+            logged-out reader too — which is most of the audience for a page
+            whose whole job is to explain what Meritum is.
+            `h-16` is the reference's 64px; `mt-cta` is the shared ring pulse. */}
+        <Link
+          href="/creators/launch"
+          className="mt-cta mt-[34px] inline-flex h-16 items-center gap-3 whitespace-nowrap rounded-[14px] bg-meritum-surface-brand px-10 text-18 font-bold text-meritum-ink-on-brand hover:bg-meritum-surface-brand-hover"
+        >
+          {t('meritum.intro.cta')}
+          <ArrowIcon />
+        </Link>
+      </div>
+
+      <MeritumHoldersBand />
+    </section>
+  );
+}

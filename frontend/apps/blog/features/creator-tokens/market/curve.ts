@@ -4,6 +4,7 @@ import {
   MAX_EXIT_TAX_BPS,
   TRADE_FEE_BPS,
   creditsForAskBaseUnits,
+  displayPricePerTokenBaseUnits,
   exitTaxBpsAt,
   exitTaxOnBaseUnits,
   quoteBuyBaseUnits,
@@ -102,6 +103,30 @@ function supplyTokens(m: CurveMarketInput): number {
  */
 export function spotPriceUsd(supply: number): number {
   return baseUnitsToUsd(spotRateBaseUnits(Math.max(0, Math.floor(supply))));
+}
+
+/**
+ * WHAT ONE TOKEN COSTS A BUYER AT THIS SUPPLY — the price to SHOW a person.
+ *
+ * ★★★ NOT `spotPriceUsd`, AND THE DIFFERENCE IS NOT COSMETIC (2026-08-15,
+ * caught rendering `$0.00` on the launch screen). `SpotRate` is the contract's
+ * ORACLE input and curve.go returns 0 at S == 0 deliberately, so that an empty
+ * market records no observation rather than a synthetic one. A market that has
+ * not opened yet is exactly S == 0, so the Meritum launch flow asked for its
+ * own opening price and was told the token was free — on the same screen that
+ * engraves that figure onto the coin.
+ *
+ * `displayPricePerTokenBaseUnits` is Area(S+1) − Area(S): the marginal cost of
+ * the next token, which is precisely what the Buy path charges. The headline
+ * and the buy quote therefore agree by construction. At S == 0 it is 1007 base
+ * units, i.e. the first token really costs $1.007.
+ *
+ * The same function already backs every live market price (`vsc-data-source`,
+ * `mock-data-source`); this wrapper only puts it in USD for a market that does
+ * not exist yet. Anything needing the oracle rate keeps calling `spotPriceUsd`.
+ */
+export function displayPriceUsd(supply: number): number {
+  return baseUnitsToUsd(displayPricePerTokenBaseUnits(Math.max(0, Math.floor(supply))));
 }
 
 /** The reserve the curve requires at a given supply — R === Area(S), the mechanism's core equality. */

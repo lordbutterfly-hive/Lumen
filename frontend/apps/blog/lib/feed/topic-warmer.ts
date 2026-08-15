@@ -1,6 +1,7 @@
 import 'server-only';
 import { getLogger } from '@ui/lib/logging';
 import { getTrendingTags } from '@transaction/lib/hive';
+import { acquireHiveWarm, hiveWarmHolder, releaseHiveWarm } from './hive-warm-gate';
 
 const logger = getLogger('app');
 
@@ -123,6 +124,14 @@ async function runCycle(warm: (tag: string) => Promise<void>, max: number): Prom
     logger.info('topic-warmer: previous cycle still running, skipping this one');
     return;
   }
+  // ★ AND SKIP IF THE OTHER WARMER HOLDS THE NODE (2026-08-15). Same rule this
+  // function already applies to itself, extended to the viewer warmer that now
+  // shares `api.hive.blog` with it — see `hive-warm-gate.ts` for the measured
+  // failure (a viewer build failing at 17.3s while this warmer was mid-cycle).
+  if (!acquireHiveWarm('topic-warmer')) {
+    logger.info('topic-warmer: %s holds the outbound warm budget, skipping this cycle', hiveWarmHolder());
+    return;
+  }
   running = true;
   const startedAt = Date.now();
   let ok = 0;
@@ -157,6 +166,7 @@ async function runCycle(warm: (tag: string) => Promise<void>, max: number): Prom
     logger.warn('topic-warmer: cycle failed: %o', error);
   } finally {
     running = false;
+    releaseHiveWarm('topic-warmer');
   }
 }
 
@@ -164,8 +174,19 @@ async function runCycle(warm: (tag: string) => Promise<void>, max: number): Prom
  * Start the warmer. Idempotent — a second call is ignored, so importing this
  * from more than one place cannot double the load on the node.
  *
- * Off entirely with `FEED_TOPIC_WARM=off`; `FEED_TOPIC_WARM_MAX` and
+ * ★ OPT-IN: on ONLY with `FEED_TOPIC_WARM=yes`. `FEED_TOPIC_WARM_MAX` and
  * `FEED_TOPIC_WARM_INTERVAL_MS` tune it without a deploy.
+ *
+ * This was `=off` to disable, i.e. ON BY DEFAULT, and it was the odd one out.
+ * Every other flag in this wave is `=== 'yes'` and defaults off, and the whole
+ * wave was described as shipping "behind six flags, all default off" — so
+ * merging it would have started a background Hive warmer on every deployment
+ * that never asked for one, firing a cycle of up to `FEED_TOPIC_WARM_MAX` calls
+ * on an interval. `viewer-warmer.ts` guards exactly this cost behind
+ * `FEED_WARM_ENABLED === 'yes'`, and its comment calls itself "the only piece of
+ * the never-wait work that adds outbound load, to a public Hive node and to a
+ * rate-limited ranker sharing one client-address budget with real readers".
+ * That was not true while this sibling defaulted on. Now the two match.
  */
 export function startTopicWarmer(warm: (tag: string) => Promise<void>): void {
   if (started) return;
@@ -180,8 +201,8 @@ export function startTopicWarmer(warm: (tag: string) => Promise<void>): void {
   // when the build process exits. Checked before `started` is set so a real
   // server start is not blocked by a build having "already started" it.
   if (process.env.NEXT_PHASE === 'phase-production-build') return;
-  if ((process.env.FEED_TOPIC_WARM || '').toLowerCase() === 'off') {
-    logger.info('topic-warmer: disabled by FEED_TOPIC_WARM=off');
+  if ((process.env.FEED_TOPIC_WARM || '').toLowerCase() !== 'yes') {
+    logger.info('topic-warmer: disabled — set FEED_TOPIC_WARM=yes to enable');
     return;
   }
   started = true;

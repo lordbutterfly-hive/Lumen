@@ -7,12 +7,12 @@ import { usdPrice } from '../market/format';
 
 // TODO i18n — staged copy, same precedent as the rest of this feature.
 const COPY = {
-  eyebrow: 'Creator token',
+  eyebrow: 'Meritum',
   currentPrice: 'current price',
   completionRate: 'Completion rate',
   medianReply: 'Median reply',
   buy: 'Buy',
-  launchTitle: 'No creator token yet',
+  launchTitle: 'No Meritum yet',
   launchBody: 'Let people hold your token and pay you for your time.',
   launchCta: 'Launch your token'
 };

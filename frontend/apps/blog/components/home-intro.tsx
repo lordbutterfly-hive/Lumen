@@ -102,8 +102,17 @@ const COPY = {
 };
 
 export default function HomeIntro() {
+  /*
+   * ★ h2, NOT h1 (2026-08-15, regression sweep). `home-shell.tsx` renders an
+   * sr-only `<h1>Home feed</h1>` unconditionally, and this intro only renders
+   * when signed OUT — so leaving the masthead at its default h1 gave the
+   * signed-out home page TWO h1s while the signed-in one had one. Stepping this
+   * down keeps "Home feed" as the single h1 in BOTH auth states, so the document
+   * outline does not change shape when a reader logs in. Same mechanism already
+   * used by creators-view.tsx:209.
+   */
   return (
-    <PageMasthead eyebrow={COPY.eyebrow} title={COPY.heading} mark="pilcrow">
+    <PageMasthead eyebrow={COPY.eyebrow} title={COPY.heading} mark="pilcrow" headingLevel="h2">
       <span>{COPY.claim}</span>
       <a
         href={withBasePath('/login')}

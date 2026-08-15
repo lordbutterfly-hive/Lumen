@@ -44,6 +44,41 @@ export interface FeedLane {
   score: number;
   /** 0-based position in the BUILT page (the served position can differ). */
   rank: number;
+  /**
+   * ★★★ THE RANKED IDENTITY, `@author/permlink` — recsys's `Post.key` (2026-08-15).
+   *
+   * CONTRACT C8, AND WITHOUT IT SEEN-SUPPRESSION SILENTLY NO-OPS ON OUR OWN
+   * CONTENT. `key` above is the SERVED identity, which for a Lumen-native post
+   * uses the writer's DISPLAY HANDLE; recsys ranks the same post under their
+   * `lumen_user_id` ULID. Different strings, so a suppression set built from
+   * `key` matches ZERO lite posts, forever, with no error.
+   *
+   * Proven against real rows 2026-08-15: 46 of the 8,508 rows in
+   * `lumen_feed_served` are lite and every one is handle-keyed
+   * (`bravouyuce/lumen-01kzchxgtzzg4ef6v9kyb694de`, ranked as
+   * `@01KZAC6C92G3MJ7QV8BN3B82EA/lumen-...`), and `post_key LIKE '@%'` returns 0.
+   *
+   * `null` for a post with no matching `RecsysPost` — a chain top-up on a topic
+   * page. That is the truth, and it is recorded as such rather than guessed.
+   */
+  rankedKey: string | null;
+  /**
+   * ★★★ DISTINCT NON-LITE ENGAGERS AT BUILD TIME — the resurrection baseline.
+   *
+   * Seen-suppression resurrects a post on `E_now - engagers_at_last_serve`.
+   * Without a baseline captured at the moment the post was SERVED, that rule is
+   * not strict, it is UNMEASURABLE — so this field is the difference between a
+   * shipped feature and one that quietly never fires.
+   *
+   * ★ NOT `score`, which is right here and would have been free. `score.final`
+   * is a PERCENTILE RANK against a rolling-window norm, so a post's value moves
+   * when OTHER posts change; "growth" measured on it would fire on other
+   * people's activity. This is a raw count.
+   *
+   * `null` = recsys did not report one (a build predating the field, or a chain
+   * top-up). Read as UNKNOWN, never as 0 — see `feed-seen-repository`.
+   */
+  engagers: number | null;
 }
 
 export interface StoredFeed {
@@ -88,13 +123,38 @@ function mapLanes(raw: unknown): FeedLane[] {
   const out: FeedLane[] = [];
   for (const item of raw) {
     if (!item || typeof item !== 'object') continue;
-    const lane = item as { key?: unknown; source?: unknown; score?: unknown; rank?: unknown };
+    const lane = item as {
+      key?: unknown;
+      source?: unknown;
+      score?: unknown;
+      rank?: unknown;
+      rankedKey?: unknown;
+      engagers?: unknown;
+    };
     if (typeof lane.key !== 'string' || lane.key.length === 0) continue;
     out.push({
       key: lane.key,
       source: typeof lane.source === 'string' && lane.source ? lane.source : null,
       score: Number(lane.score) || 0,
-      rank: Number(lane.rank) || 0
+      rank: Number(lane.rank) || 0,
+      // ★ EVERY ROW STORED BEFORE 2026-08-15 LACKS BOTH, and that is a supported
+      // state rather than a corrupt one — exactly as `lanes` itself was when
+      // migration 0027 introduced it, and for the same reason: no
+      // `FEED_STORE_VERSION` bump (and therefore no rebuild for every reader) is
+      // needed to add a field. A lane without them still serves.
+      //
+      // ★ THEY DEGRADE TO `null`, NOT TO A GUESS. `rankedKey` is repaired
+      // downstream as `'@' || key`, which is correct for a Hive post and
+      // harmlessly inert for a lite one; `engagers` stays UNKNOWN, which the
+      // resurrection rule resolves toward SHOWING the post. `Number(undefined)
+      // || 0` — the pattern used for `score` and `rank` above, where 0 is a
+      // meaningful default — would have turned "we do not know" into "it has
+      // never been engaged", which is the one reading that can empty a feed.
+      rankedKey:
+        typeof lane.rankedKey === 'string' && lane.rankedKey ? lane.rankedKey : null,
+      engagers: typeof lane.engagers === 'number' && Number.isFinite(lane.engagers)
+        ? lane.engagers
+        : null
     });
   }
   return out;

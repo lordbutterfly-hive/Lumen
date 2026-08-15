@@ -210,18 +210,18 @@ function assertCanSignWithActiveAuthority(op: CustomJsonOp): void {
     // Note this is a REFUSAL, not a downgrade: it fails closed, and the message
     // names the two ways in that never expose the key.
     throw new Error(
-      'CREATOR_TOKENS_KEY_IN_BROWSER_REFUSED: signing a creator-token operation with a private key held in this browser is not allowed — an active key pasted here would be stored in the browser in clear text. Use Hive Keychain or PeakVault, which sign inside the extension and never hand the key to this page.'
+      'CREATOR_TOKENS_KEY_IN_BROWSER_REFUSED: signing a Meritum operation with a private key held in this browser is not allowed — an active key pasted here would be stored in the browser in clear text. Use Hive Keychain or PeakVault, which sign inside the extension and never hand the key to this page.'
     );
   }
 
   if (loginType === LoginType.hiveauth) {
     throw new Error(
-      'CREATOR_TOKENS_SIGNER_UNSUPPORTED: HiveAuth cannot sign transactions in this app yet (its signTransaction is unimplemented), so it cannot authorize a creator-token operation. Use Hive Keychain, PeakVault, MetaMask (Hive Snap), Google Drive keys, or sign in with your active key.'
+      'CREATOR_TOKENS_SIGNER_UNSUPPORTED: HiveAuth cannot sign transactions in this app yet (its signTransaction is unimplemented), so it cannot authorize a Meritum operation. Use Hive Keychain, PeakVault, MetaMask (Hive Snap), Google Drive keys, or sign in with your active key.'
     );
   }
 
   throw new Error(
-    `CREATOR_TOKENS_SIGNER_UNSUPPORTED: the "${loginType}" sign-in method cannot produce an active-authority signature, which every creator-token operation requires. Use Hive Keychain, PeakVault, MetaMask (Hive Snap), Google Drive keys, or sign in with your active key.`
+    `CREATOR_TOKENS_SIGNER_UNSUPPORTED: the "${loginType}" sign-in method cannot produce an active-authority signature, which every Meritum operation requires. Use Hive Keychain, PeakVault, MetaMask (Hive Snap), Google Drive keys, or sign in with your active key.`
   );
 }
 

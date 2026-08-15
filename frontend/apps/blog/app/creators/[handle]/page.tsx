@@ -39,7 +39,7 @@ export function generateMetadata({ params }: { params: { handle: string } }): Me
   const handle = normalizeHandle(params.handle);
   return {
     title: `@${handle} token`,
-    description: `The live creator-token market for @${handle} on Lumen — price, market cap, floor, delivery record, and the services you spend the token on.`
+    description: `The live Meritum market for @${handle} on Lumen — price, market cap, floor, delivery record, and the services you spend the token on.`
   };
 }
 

@@ -46,6 +46,22 @@ export interface RecsysPost {
   created: string;
   source: string;
   score: RecsysScore;
+  /**
+   * ★★★ DISTINCT NON-LITE ENGAGERS THIS POST CARRIES RIGHT NOW (2026-08-15).
+   *
+   * Emitted by recsys's `serialize_scored` so the frontend can record it
+   * ALONGSIDE the impression: seen-suppression resurrects a post on
+   * `E_now - engagers_at_last_serve`, and without a baseline captured at serve
+   * time that rule is not strict, it is unmeasurable. recsys is the only party
+   * that computes the number; the frontend is the only party that knows a page
+   * was delivered. This field is the seam between them.
+   *
+   * ★ OPTIONAL ON PURPOSE. A recsys that predates the field simply omits it, and
+   * the baseline is then recorded as NULL = UNKNOWN, which the resurrection rule
+   * resolves toward SHOWING the post and which self-heals on the next serve.
+   * Requiring it would turn a version skew into a 500 on the feed.
+   */
+  engagers?: number;
 }
 
 export interface RecsysFeed {

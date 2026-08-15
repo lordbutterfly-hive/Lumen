@@ -279,10 +279,10 @@ const RetireModal: FC<{ handle: string; onConfirm: () => Promise<void>; onClose:
     <ModalShell
       width={500}
       onClose={onClose}
-      title="End your creator token?"
+      title="End your Meritum?"
       className="border border-line-brand-1 p-6"
     >
-      <div className="mb-2 font-serif text-xl font-semibold text-ink-brand-6">End your creator token?</div>
+      <div className="mb-2 font-serif text-xl font-semibold text-ink-brand-6">End your Meritum?</div>
       <ul className="mb-4 space-y-1.5 font-serif text-[14px] leading-[22px] text-ink-8">
         <li>· The market freezes now — no new buys or asks.</li>
         <li>· You’re removed from discovery.</li>
@@ -436,9 +436,9 @@ const CreatorStudio: FC = () => {
     return (
       <TokenShell>
         <div className="mx-auto max-w-[560px] pt-16 text-center">
-          <h1 className="font-serif text-3xl font-semibold text-ink-2">Creator studio</h1>
+          <h1 className="font-serif text-3xl font-semibold text-ink-2">Creator Studio</h1>
           <p className="mt-3 font-serif text-[15px] leading-[24px] text-ink-10">
-            This account can’t sign transactions yet, so it can’t run a creator token.{' '}
+            This account can’t sign transactions yet, so it can’t run a Meritum.{' '}
             <a href="/upgrade" className="font-semibold text-ink-brand-6 hover:underline">
               Upgrade to a full account
             </a>{' '}
@@ -472,7 +472,7 @@ const CreatorStudio: FC = () => {
     return (
       <TokenShell>
         <div className="mx-auto max-w-[560px] pt-16 text-center">
-          <h1 className="font-serif text-3xl font-semibold text-ink-2">Launch your creator token</h1>
+          <h1 className="font-serif text-3xl font-semibold text-ink-2">Launch your Meritum</h1>
           <p className="mt-3 font-serif text-[15px] leading-[24px] text-ink-10">
             One token, bound to your account, that trades on a live market and is spent on your services. Free
             to launch.

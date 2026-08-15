@@ -166,6 +166,32 @@ function validateTranslationUsage() {
   }
   console.log(`   Scanning ${sourceFiles.length} source files...\n`);
 
+
+/**
+ * Does this key resolve, allowing for i18next PLURAL SUFFIXES?
+ *
+ * ★ 2026-08-15. This checker reported four "missing" keys for months —
+ * `communities.roles_count`, `user_profile.stats_line.followers` and
+ * `.posts` — none of which were missing. i18next stores a pluralised key as
+ * `key_one` / `key_other` and `t('key', { count })` selects between them at
+ * runtime, so the bare name is CORRECT in code and never appears in the locale
+ * file. Comparing the literal string against the key set therefore fails on
+ * every correctly-pluralised call in the codebase.
+ *
+ * The cost of that is not the noise; it is that a validator which is always red
+ * gets ignored, and then a genuinely missing key hides in the same list. This
+ * makes the gate mean something again.
+ *
+ * Suffixes are the CLDR plural categories i18next v21+ emits, plus the legacy
+ * `_plural` from older versions still present in some locale files here.
+ */
+const PLURAL_SUFFIXES = ['_zero', '_one', '_two', '_few', '_many', '_other', '_plural'];
+
+function keyResolves(key, validKeys) {
+  if (validKeys.has(key)) return true;
+  return PLURAL_SUFFIXES.some((suffix) => validKeys.has(key + suffix));
+}
+
   // Extract and validate keys
   const usedKeys = new Set();
   const missingKeys = new Map(); // key -> [{file, lines}]
@@ -179,7 +205,7 @@ function validateTranslationUsage() {
       totalUsages += lineNumbers.length;
       usedKeys.add(key);
 
-      if (!validKeys.has(key)) {
+      if (!keyResolves(key, validKeys)) {
         if (!missingKeys.has(key)) {
           missingKeys.set(key, []);
         }

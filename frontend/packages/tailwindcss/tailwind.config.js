@@ -105,7 +105,38 @@ module.exports = {
         '3xl': ['30px', '38px'],
         '4xl': ['34px', '44px'],
         '5xl': ['44px', '52px'],
-        '6xl': ['60px', '1']
+        '6xl': ['60px', '1'],
+
+        /**
+         * ★ NOT A SCALE STEP. ONE HEADLINE, ONE SCREEN. (2026-08-15, Meritum.)
+         *
+         * Everything above this line is the scale, derived from what the
+         * product measurably already uses. This is not — it is the Meritum
+         * intro's h1 and nothing else, which is why it carries the feature's
+         * name instead of a number. Do not reach for it from another screen;
+         * pick a step above. If a second screen ever genuinely needs it, that
+         * is the moment to ask whether 68 belongs on the scale, not now.
+         *
+         * WHY IT EXISTS AT ALL. The scale tops out at 60px and the handoff
+         * specifies Lora 68px/700 for this headline. 13% is not the "off by a
+         * hair, use the app token" case the other reference values fall into
+         * (the eyebrow's 11px IS that case — the scale deliberately folded
+         * 11 -> 12, so the eyebrow uses `text-12`). It is a display headline
+         * the whole screen is built around, so the reference wins and becomes
+         * a token rather than a `text-[68px]` literal in a component.
+         *
+         * Leading is 68px because the handoff sets `line-height:1.0` and this
+         * file's rule is that both numbers are whole pixels — `1.0` on a 68px
+         * size IS 68px, written out so it cannot drift if the size changes.
+         */
+        'meritum-display': ['68px', '68px']
+      },
+      letterSpacing: {
+        /* The two tracking values the Meritum intro needs; neither is on
+           Tailwind's default scale, which stops at -0.05em / 0.1em. Scoped by
+           name for the same reason as `meritum-display` above. */
+        'meritum-display': '-0.035em', // the Lora headline
+        'meritum-eyebrow': '0.22em' // the 11px uppercase MERITUM eyebrow
       },
       colors: {
         /**
@@ -364,6 +395,48 @@ module.exports = {
         'surface-warn-7': 'rgb(var(--surface-warn-7) / <alpha-value>)',
         'surface-warn-8': 'rgb(var(--surface-warn-8) / <alpha-value>)',
         'surface-warn-9': 'rgb(var(--surface-warn-9) / <alpha-value>)',
+
+        /**
+         * ★★★ THE MERITUM ONBOARDING TOKENS — TWO SCREENS, NOT THE PRODUCT.
+         * (2026-08-15.)
+         *
+         * These name the palette for the Meritum intro and the 3-step launch
+         * flow. They are deliberately prefixed so a reader can tell at a glance
+         * that `bg-meritum-paper` is scoped to those screens while
+         * `bg-surface-warn-2` is the app-wide token underneath it.
+         *
+         * NONE OF THEM IS A NEW COLOUR. Every `--meritum-*` variable in
+         * globals.css is a `var()` alias of a palette token above — see the
+         * block at the foot of `:root` for which one and why. Adding a value
+         * here that is NOT such an alias forks the palette and breaks dark
+         * mode for that one screen; don't.
+         *
+         * PICK BY CSS PROPERTY, not by hex. `bg-meritum-surface-brand`,
+         * `text-meritum-ink-brand` and `border-meritum-line-brand` are all
+         * #c0392b in light mode and three different values in dark, for the
+         * same reason the surface-/ink-/line- families above split.
+         */
+        /* backgrounds */
+        'meritum-paper': 'rgb(var(--meritum-paper) / <alpha-value>)',
+        'meritum-rail': 'rgb(var(--meritum-rail) / <alpha-value>)',
+        'meritum-card': 'rgb(var(--meritum-card) / <alpha-value>)',
+        'meritum-surface-brand': 'rgb(var(--meritum-surface-brand) / <alpha-value>)',
+        'meritum-surface-brand-hover': 'rgb(var(--meritum-surface-brand-hover) / <alpha-value>)',
+        'meritum-surface-brand-active': 'rgb(var(--meritum-surface-brand-active) / <alpha-value>)',
+        /* text */
+        'meritum-ink': 'rgb(var(--meritum-ink) / <alpha-value>)',
+        'meritum-ink-2': 'rgb(var(--meritum-ink-2) / <alpha-value>)',
+        'meritum-ink-3': 'rgb(var(--meritum-ink-3) / <alpha-value>)',
+        'meritum-ink-muted': 'rgb(var(--meritum-ink-muted) / <alpha-value>)',
+        'meritum-ink-faint': 'rgb(var(--meritum-ink-faint) / <alpha-value>)',
+        'meritum-ink-brand': 'rgb(var(--meritum-ink-brand) / <alpha-value>)',
+        'meritum-ink-link': 'rgb(var(--meritum-ink-link) / <alpha-value>)',
+        'meritum-ink-on-brand': 'rgb(var(--meritum-ink-on-brand) / <alpha-value>)',
+        /* borders + rings */
+        'meritum-line-paper': 'rgb(var(--meritum-line-paper) / <alpha-value>)',
+        'meritum-line-card': 'rgb(var(--meritum-line-card) / <alpha-value>)',
+        'meritum-line-input': 'rgb(var(--meritum-line-input) / <alpha-value>)',
+        'meritum-line-brand': 'rgb(var(--meritum-line-brand) / <alpha-value>)',
 
         border: 'hsl(var(--border))',
         'thread-line': 'hsl(var(--thread-line))',

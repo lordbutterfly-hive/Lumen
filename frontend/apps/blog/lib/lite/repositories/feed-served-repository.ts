@@ -37,6 +37,23 @@ export interface ServedItem {
   position: number;
   /** The recsys lane, or null when the stored feed predates lane recording. */
   source: string | null;
+  /**
+   * `@author/permlink` — the RANKED identity (migration 0036).
+   *
+   * ★ THE LOG CARRIES IT SO THE AGGREGATE IS REBUILDABLE FROM THE LOG, which is
+   * the claim `0036_feed_seen.sql` makes and this field is what makes it true.
+   * `lumen_feed_seen` is derived and disposable; without these two columns here,
+   * losing it would mean losing history rather than losing a cache.
+   *
+   * Optional so a caller that has no ranked identity in scope stays valid —
+   * absent is recorded as NULL, i.e. UNKNOWN.
+   */
+  rankedKey?: string | null;
+  /**
+   * Distinct non-lite engagers at this serve — the resurrection baseline.
+   * See `rankedKey`. NULL is UNKNOWN, never 0.
+   */
+  engagers?: number | null;
 }
 
 export interface ServedRow extends ServedItem {
@@ -71,6 +88,29 @@ export interface RecordServedPageInput {
    * PAGE-level rule and not a per-post one.
    */
   minIntervalMs: number;
+  /**
+   * ★★★ WRITE THE TWO COLUMNS MIGRATION 0036 ADDS (`ranked_key`,
+   * `engagers_at_serve`). DEFAULT FALSE, AND THE DEFAULT IS LOAD-BEARING.
+   *
+   * Migrations in this app are an EXPLICIT OPS STEP, not a boot step —
+   * `run-migrations.ts` says so in its own header ("intentionally NOT wired into
+   * the request path"). So the code can, and routinely will, be running against
+   * a database that has not had 0036 applied yet.
+   *
+   * If this statement named those columns unconditionally, that window would
+   * turn every serve into an `UndefinedColumn` error. The caller catches it and
+   * logs a warning, so the visible symptom would be: THE SERVED LOG SILENTLY
+   * STOPS RECORDING — taking the feed instrument AND the author-facing "your
+   * posts landed in N feeds" number down with it, with nothing but a warn line
+   * to say so. That is the same shape of silent, deploy-ordering failure this
+   * table's own history is full of.
+   *
+   * So the columns are written only when the caller has affirmatively turned the
+   * feature on (`FEED_SEEN_RECORD=yes`), which is the deliberate act that also
+   * requires the migration. Off, this statement is byte-identical to the
+   * pre-2026-08-15 one and cannot care whether 0036 exists.
+   */
+  includeSeenColumns?: boolean;
 }
 
 export interface RecordServedPageResult {
@@ -121,10 +161,10 @@ export async function recordServedPage(
   // serve was coalesced away until real time caught up: the log went silent for
   // minutes, which reads exactly like "the reader stopped reading". An upper
   // bound costs nothing and turns an open-ended blackout into one skipped page.
-  const result = await query(
-    `INSERT INTO lumen_feed_served (viewer, post_key, served_at, "position", source)
-     SELECT $1, t.post_key, now(), t.position, t.source
-       FROM unnest($2::text[], $3::int[], $4::text[]) AS t(post_key, position, source)
+  // ★ THE COALESCE WINDOW, SHARED BY BOTH VARIANTS. Kept as one string so the
+  // two statements below cannot drift on the half that decides whether a page is
+  // recorded at all — only on which columns it carries.
+  const coalesceWindow = `
       WHERE $5::bigint = 0
          OR NOT EXISTS (
               SELECT 1 FROM lumen_feed_served x
@@ -133,17 +173,36 @@ export async function recordServedPage(
                  -- Clock jumped forward and back: see the note above.
                  AND x.served_at <= now()
             )
-     ON CONFLICT DO NOTHING`,
-    [
-      viewer,
-      items.map((i) => i.postKey),
-      items.map((i) => i.position),
-      // A null lane is recorded as a null lane. Not recording the row would cost
-      // an impression, which is the one thing this table must never get wrong.
-      items.map((i) => i.source),
-      gapMs
-    ]
-  );
+     ON CONFLICT DO NOTHING`;
+
+  const params: unknown[] = [
+    viewer,
+    items.map((i) => i.postKey),
+    items.map((i) => i.position),
+    // A null lane is recorded as a null lane. Not recording the row would cost
+    // an impression, which is the one thing this table must never get wrong.
+    items.map((i) => i.source),
+    gapMs
+  ];
+  // ★ `ranked_key` / `engagers_at_serve` exist only after migration 0036 — see
+  // `includeSeenColumns` for why naming them unconditionally would silently
+  // kill this log on any deploy that runs ahead of the migration.
+  let sql = `INSERT INTO lumen_feed_served (viewer, post_key, served_at, "position", source)
+     SELECT $1, t.post_key, now(), t.position, t.source
+       FROM unnest($2::text[], $3::int[], $4::text[]) AS t(post_key, position, source)${coalesceWindow}`;
+  if (input.includeSeenColumns) {
+    params.push(
+      items.map((i) => i.rankedKey ?? null),
+      items.map((i) => i.engagers ?? null)
+    );
+    sql = `INSERT INTO lumen_feed_served
+            (viewer, post_key, served_at, "position", source, ranked_key, engagers_at_serve)
+     SELECT $1, t.post_key, now(), t.position, t.source, t.ranked_key, t.engagers
+       FROM unnest($2::text[], $3::int[], $4::text[], $6::text[], $7::int[])
+            AS t(post_key, position, source, ranked_key, engagers)${coalesceWindow}`;
+  }
+
+  const result = await query(sql, params);
   const recorded = result.rowCount ?? 0;
   return { recorded, coalesced: recorded === 0 };
 }

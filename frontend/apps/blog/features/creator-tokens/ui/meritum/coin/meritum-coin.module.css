@@ -1,0 +1,514 @@
+/**
+ * ============================================================================
+ * MERITUM COIN — the metal. Structure and colour only.
+ * ============================================================================
+ *
+ * A CSS Module, for the same two reasons `features/votes/vote-control.module.css`
+ * is one: the class names cannot collide with anything else in the app, and no
+ * global stylesheet has to be touched. Tailwind is the wrong tool for this
+ * particular job anyway — a 120-groove `repeating-conic-gradient` and a
+ * five-shadow stack do not survive being written as arbitrary-value utilities.
+ *
+ * ---------------------------------------------------------------------------
+ * ★ THERE ARE NO KEYFRAMES IN THIS FILE, ON PURPOSE.
+ * ---------------------------------------------------------------------------
+ * The whole motion layer already ships in `packages/tailwindcss/globals.css`
+ * (`mt-coin-idle`, `mt-coin-tremble`, `mt-charge-ring`, `mt-gather`,
+ * `mt-impact`, `mt-flash`, `mt-shock`, `mt-foil`, `mt-ember`, `mt-emboss`),
+ * placed outside `@layer` so Tailwind cannot purge classes this component adds
+ * at runtime. Re-declaring any of them here would fork the motion layer, and
+ * two copies of a 1100ms hold is precisely the drift this build is trying to
+ * avoid. The components apply those global class names; this file supplies only
+ * the BASE state each animated element rests in.
+ *
+ * That base state is load-bearing, not decoration: under
+ * `prefers-reduced-motion: reduce` globals sets `animation: none !important` on
+ * every one of those classes, and what the reader is left looking at is exactly
+ * what is declared below. So `.flash`, `.shock`, `.ember` rest invisible and
+ * `.foil` rests off-field, while `.glow` rests at its full 0.85 — a static
+ * gather wash is a legitimate, motion-free "you are holding this" cue.
+ *
+ * Durations are not written here either. The three animations that must last
+ * exactly one charge get `MERITUM_CHARGE_DURATION_STYLE` inline from
+ * `timing.ts`, which outranks the class. See the note at the top of that file.
+ *
+ * ---------------------------------------------------------------------------
+ * WHERE THE COLOURS COME FROM
+ * ---------------------------------------------------------------------------
+ * Two kinds, and the difference matters:
+ *
+ * 1. THE MERITUM TOKENS. Everything in the checklist's colour table exists as a
+ *    `--meritum-*` alias in globals.css, so none of it is re-typed here. Picked
+ *    BY CSS PROPERTY, never by hex — `--meritum-surface-brand`,
+ *    `--meritum-ink-brand` and `--meritum-line-brand` are all #c0392b today and
+ *    three different values the moment dark mode has an opinion. They hold
+ *    space-separated triples, so the call form is `rgb(var(--x) / 0.4)`.
+ *
+ * 2. THE METAL RAMP. The silver and the oxblood have NO app equivalent — they
+ *    are not a surface, they are an object — so the coin owns them, defined
+ *    ONCE as named custom properties in the block below and never repeated.
+ *    That is the checklist's own rule: "add a token when the app has no
+ *    equivalent; never fork one that exists." Every rule further down reads a
+ *    name; there is no second place a metal colour is written, so re-pointing
+ *    the struck state or dark mode is a matter of redefining these names.
+ *
+ * ---------------------------------------------------------------------------
+ * THE PERFORMANCE CONTRACT
+ * ---------------------------------------------------------------------------
+ * Only `transform`, `opacity` and `stroke-dashoffset` are ever animated, and
+ * all three come from globals. Nothing here transitions. No rAF loop, no
+ * canvas, no Lottie, no sprite — and because the coin is inline SVG over CSS
+ * gradients, ZERO added network requests.
+ *
+ * ★ ONE TRANSFORM ANIMATION PER ELEMENT, ALWAYS. An animation's `transform`
+ *   replaces any other, so idle / tremble / impact can never share a node. All
+ *   three land on `.motion` and are mutually exclusive by phase; the shockwaves
+ *   and embers scale on their own elements. This is the bug the vote control
+ *   shipped with once and it is not being shipped twice.
+ */
+
+/* ==========================================================================
+   1. THE COLOUR SURFACE — every metal value in the component, once.
+   ========================================================================== */
+
+.wrap {
+  /* --- the metal ramp: silver. Owned here; no app equivalent. --- */
+  --mt-reed: repeating-conic-gradient(from 0deg, #aab2bb 0deg 1.5deg, #f1f4f7 1.5deg 3deg);
+  --mt-rim: conic-gradient(
+    from 212deg,
+    #ffffff 0deg,
+    #ccd2d9 58deg,
+    #ffffff 118deg,
+    #b4bbc4 188deg,
+    #f4f6f8 248deg,
+    #c6ccd4 312deg,
+    #ffffff 360deg
+  );
+  --mt-face: radial-gradient(68% 64% at 34% 26%, #ffffff 0%, #f5f7f9 46%, #e8ecf0 78%, #dbe0e6 100%);
+  --mt-thickness: 0 3px 0 #a9b1ba, 0 6px 0 #929aa4;
+  --mt-contact: 0 22px 28px -12px rgba(20, 18, 10, 0.38);
+  --mt-edge-bevel: inset 0 -3px 5px rgba(20, 18, 10, 0.22), inset 0 3px 4px rgba(255, 255, 255, 0.8);
+  --mt-field-bevel: inset 0 4px 8px rgba(20, 18, 10, 0.24), inset 0 -3px 5px rgba(255, 255, 255, 0.95);
+  --mt-engrave: #7d8792;
+  --mt-device: #2f3742;
+  --mt-exergue: #8f97a1;
+  --mt-device-relief: 0 1px 0 rgba(255, 255, 255, 0.95), 0 -1px 1px rgba(20, 18, 10, 0.26);
+
+  position: relative;
+  display: grid;
+  place-items: center;
+  /* A long press on touch must not select text or raise the callout menu. */
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+
+/**
+ * ★ THE STRUCK METAL. Same geometry, same names, oxblood values.
+ *
+ * Applied at the REVEAL, not at impact. The handoff's live component gates the
+ * oxblood on `step === 4` while `striking` is a separate flag, so the 2400ms of
+ * shockwaves and embers happen on silver and the coin turns over at the end.
+ * That is what "2400ms strike, THEN reveal" means, and it is what produced the
+ * reference screenshots.
+ *
+ * The two brand reds in the ramp are surfaces (a gradient stop and a solid
+ * shadow), so they come from the surface token rather than being re-typed.
+ * The pale oxbloods have no app equivalent and stay local.
+ */
+.struck {
+  --mt-reed: repeating-conic-gradient(
+    from 0deg,
+    rgb(var(--meritum-surface-brand-hover)) 0deg 1.5deg,
+    #e8a79c 1.5deg 3deg
+  );
+  --mt-rim: conic-gradient(
+    from 212deg,
+    #fff6f4 0deg,
+    #e3ab9f 58deg,
+    #ffffff 118deg,
+    #cd7a68 188deg,
+    #fdeeea 248deg,
+    #d98f7e 312deg,
+    #fff6f4 360deg
+  );
+  --mt-face: radial-gradient(68% 64% at 34% 26%, #ffffff 0%, #fdefeb 46%, #f6ded8 78%, #eecdc5 100%);
+  --mt-thickness: 0 3px 0 rgb(var(--meritum-surface-brand-hover)), 0 6px 0 #8b2617;
+  --mt-contact: 0 22px 30px -12px rgb(var(--meritum-surface-brand) / 0.45);
+  --mt-edge-bevel: inset 0 -3px 5px rgba(20, 18, 10, 0.28), inset 0 3px 4px rgba(255, 255, 255, 0.55);
+  --mt-field-bevel: inset 0 4px 8px rgba(139, 38, 23, 0.3), inset 0 -3px 5px rgba(255, 255, 255, 0.9);
+  --mt-engrave: #b3341f;
+  /* ★ Text, so it is picked from the INK ramp. The handoff uses #a5301f, which
+     exists in the app only as a SURFACE (`--meritum-surface-brand-hover`);
+     borrowing a fill token for type is how a palette starts drifting. The brand
+     ink one step lighter clears 4.9:1 on the pale oxblood face — enough for the
+     14.5px exergue, comfortable for the 27px device. */
+  --mt-device: rgb(var(--meritum-ink-brand));
+  --mt-exergue: rgb(var(--meritum-ink-brand));
+  --mt-device-relief: 0 1px 0 rgba(255, 255, 255, 0.9), 0 -1px 1px rgba(139, 38, 23, 0.28);
+}
+
+/**
+ * ★ DARK MODE. The checklist specifies these screens light-only and asks for a
+ * decision rather than an unreadable card, so: THE COIN STAYS A COIN. It is an
+ * object, not a surface, and a silver disc reads correctly on a dark card the
+ * way a real coin does on a dark table. Two things do change — a mid-grey
+ * contact shadow is invisible against a dark card, and a face running to pure
+ * white glares — so the face comes down a stop and the shadow deepens, with the
+ * engraving re-darkened to hold its contrast against it. Five names. The struck
+ * oxblood is left alone; it is already dark-card legible.
+ */
+:global(.dark) .wrap {
+  --mt-face: radial-gradient(68% 64% at 34% 26%, #eef1f4 0%, #dee3e9 46%, #c9d0d8 78%, #b5bdc7 100%);
+  --mt-contact: 0 22px 34px -14px rgba(0, 0, 0, 0.72);
+  --mt-engrave: #5d6773;
+  --mt-device: #21272f;
+  --mt-exergue: #6b7481;
+}
+
+/* ==========================================================================
+   2. THE THREE STACKED LAYERS
+   ========================================================================== */
+
+/**
+ * `HoldToStrike`'s outer container. `MeritumCoin` brings its own `.wrap`, so
+ * this exists only to give the charge overlay a positioning context — the
+ * overlay is a sibling of the coin, not a descendant, so it can be re-keyed per
+ * hold without touching the coin's own subtree.
+ */
+.holdRoot {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+}
+
+/** The press target. Carries no transform of its own — see `.motion`. */
+.coin {
+  display: block;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  /* Without this a long press scrolls the page, the browser fires
+     pointercancel, and the hold aborts on touch every single time. */
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.coin:disabled {
+  cursor: default;
+}
+
+.coin:focus-visible {
+  outline: none;
+}
+
+/** The transform layer. Exactly one global animation class lands on it. */
+.motion {
+  display: block;
+  will-change: transform;
+}
+
+/** 1. Reeded edge band, and the thickness of the coin. */
+.edge {
+  position: relative;
+  display: block;
+  width: 268px;
+  height: 268px;
+  border-radius: 50%;
+  padding: 9px;
+  background: var(--mt-reed);
+  /* The first two shadows are the SIDE of the coin, not a glow: hard, solid, no
+     blur. Then one soft contact shadow underneath, then the bevel. */
+  box-shadow: var(--mt-thickness), var(--mt-contact), var(--mt-edge-bevel);
+}
+
+/** 2. Raised rim, shaded round the turn so it reads as a torus, not a stroke. */
+.rim {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  padding: 10px;
+  background: var(--mt-rim);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.5);
+}
+
+/** 3. Sunken field: dark inset at the top edge, white at the bottom, so the
+       face sits BELOW the rim instead of flush with it. */
+.field {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--mt-face);
+  box-shadow: var(--mt-field-bevel);
+}
+
+/* ==========================================================================
+   3. THE ENGRAVING
+   ========================================================================== */
+
+/**
+ * Stamped relief is a DOUBLE drop-shadow: a white highlight one pixel below the
+ * line and a dark line half a pixel above it. One shadow reads as a sticker;
+ * two read as metal displaced by a die.
+ */
+.engraving {
+  position: absolute;
+  inset: 0;
+  filter: drop-shadow(0 1px 0.5px rgba(255, 255, 255, 0.92)) drop-shadow(0 -0.5px 0.5px rgba(20, 18, 10, 0.24));
+}
+
+.denticle {
+  stroke: var(--mt-engrave);
+  stroke-width: 3.4;
+  stroke-linecap: butt;
+  opacity: 0.12;
+}
+
+.reeded .denticle {
+  opacity: 0.5;
+}
+
+.struck .denticle {
+  opacity: 0.72;
+}
+
+.hairline {
+  fill: none;
+  stroke: var(--mt-engrave);
+  stroke-width: 1.2;
+  opacity: 0.28;
+}
+
+.bead {
+  fill: var(--mt-engrave);
+  opacity: 0.16;
+}
+
+.reeded .bead {
+  opacity: 0.42;
+}
+
+/** A stud is a bead cut deeper — one per offer priced. */
+.stud {
+  opacity: 0.95;
+}
+
+.legend {
+  fill: var(--mt-engrave);
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.17em;
+  opacity: 0.28;
+}
+
+.legible .legend {
+  opacity: 0.9;
+}
+
+.divider {
+  stroke: var(--mt-engrave);
+  stroke-width: 1.3;
+  opacity: 0.16;
+}
+
+.legible .divider {
+  opacity: 0.42;
+}
+
+/* ---- the device: HTML text, not SVG text ------------------------------- */
+
+/**
+ * The handle and the exergue are laid out with flexbox rather than positioned
+ * SVG `<text>`, exactly as the handoff's live component does it. It costs
+ * nothing and it means a 16-character Hive name re-centres itself instead of
+ * drifting off a hardcoded baseline.
+ */
+.device {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding-top: 8px;
+  pointer-events: none;
+}
+
+.deviceName {
+  font-family: var(--font-serif), Georgia, Cambria, serif;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+  text-align: center;
+  color: var(--mt-device);
+  text-shadow: var(--mt-device-relief);
+}
+
+.deviceExergue {
+  margin-top: 19px;
+  font-family: var(--font-serif), Georgia, Cambria, serif;
+  font-size: 14.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--mt-exergue);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+/* ==========================================================================
+   4. THE HOLD
+   ========================================================================== */
+
+/** Absolutely centred so nothing here can ever size the grid cell. */
+.overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+
+/**
+ * Light gathering behind the coin as the hold runs.
+ *
+ * ★ Rests at the animation's END opacity, not its start. With `mt-gather`
+ *   running this is invisible (the keyframe owns the property); with it
+ *   disabled under reduced motion the wash is simply THERE, which is the
+ *   colour half of the motion-free charging cue. Resting at 0 would have left
+ *   those readers with nothing.
+ *
+ * ★ ONE ACCENT. The handoff mixes a second orange into this gradient; the
+ *   checklist forbids a second accent on these screens, so the falloff runs
+ *   brand red into the warm paper instead.
+ */
+.glow {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 348px;
+  height: 348px;
+  margin: -174px 0 0 -174px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgb(var(--meritum-surface-brand) / 0.2) 0%,
+    rgb(var(--meritum-surface-brand) / 0.07) 44%,
+    rgb(var(--meritum-paper) / 0) 70%
+  );
+  opacity: 0.85;
+}
+
+.ring {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  /* rotated so the sweep starts at 12 o'clock rather than 3 */
+  transform: translate(-50%, -50%) rotate(-90deg);
+  overflow: visible;
+}
+
+.ringTrack {
+  fill: none;
+  stroke: rgb(var(--meritum-line-brand) / 0.16);
+}
+
+.ringSweep {
+  fill: none;
+  stroke: rgb(var(--meritum-line-brand));
+  stroke-linecap: round;
+}
+
+/* ==========================================================================
+   5. THE STRIKE
+   Base states only. Every one of these rests where the reader should be left
+   when globals disables the animation.
+   ========================================================================== */
+
+/** One frame of white at the moment of contact. */
+.flash {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle, #ffffff 0%, rgba(255, 245, 240, 0.8) 46%, rgba(255, 255, 255, 0) 74%);
+  opacity: 0;
+  pointer-events: none;
+}
+
+/** A sheen crossing the face. Clipped by `.field`'s overflow. */
+.foil {
+  position: absolute;
+  top: -20px;
+  bottom: -20px;
+  width: 42%;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.75) 46%,
+    rgba(255, 244, 240, 0.5) 62%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  transform: translateX(-150%) skewX(-16deg);
+  pointer-events: none;
+}
+
+/** Shockwaves leaving the rim. Slow and low-contrast, not a firework. */
+.shock {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 268px;
+  height: 268px;
+  margin: -134px 0 0 -134px;
+  border-radius: 50%;
+  border: 2px solid rgb(var(--meritum-line-brand) / 0.5);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.shockLate {
+  border-width: 6px;
+  border-color: rgb(var(--meritum-line-brand) / 0.22);
+}
+
+.ember {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  margin: -2px 0 0 -2px;
+  width: var(--mt-ember-size);
+  height: var(--mt-ember-size);
+  border-radius: 999px;
+  background: rgb(var(--meritum-surface-brand));
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ==========================================================================
+   6. FOCUS AND SCREEN READERS
+   ========================================================================== */
+
+/**
+ * The coin is a 268px circle, so a rectangular focus ring around it looks
+ * broken. A brand-red halo traced on the rim reads correctly. `box-shadow` is
+ * on the permitted list and this one does not animate at all — it appears.
+ */
+.coin:focus-visible .edge {
+  box-shadow: var(--mt-thickness), var(--mt-contact), var(--mt-edge-bevel),
+    0 0 0 3px rgb(var(--meritum-line-brand) / 0.55), 0 0 0 7px rgb(var(--meritum-line-brand) / 0.18);
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

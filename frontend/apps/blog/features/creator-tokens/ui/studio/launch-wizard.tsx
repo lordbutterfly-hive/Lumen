@@ -7,13 +7,13 @@ import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { useLiveStudio } from '../../live/use-live-studio';
 import { MarketUnavailable } from '../../live/market-states';
 import { buyQuote } from '../../market/curve';
-import {
-  MIN_FACE_BASE_UNITS,
-  MAX_FACE_BASE_UNITS,
-  MIN_CAP_CREDITS_BASE_UNITS,
-  MAX_CAP_CREDITS_BASE_UNITS
-} from '../../lib/contract-math';
+import { MIN_CAP_CREDITS_BASE_UNITS, MAX_CAP_CREDITS_BASE_UNITS } from '../../lib/contract-math';
 import { usdWhole } from '../../market/format';
+// ★ MOVED OUT, NOT CHANGED (2026-08-15). `STANDARD_CAP`, `sanitizeMoneyInput`
+// and the two price bounds used to be defined in this file; the Meritum launch
+// flow needs the identical rules, and two copies of the three-decimal HBD rule
+// is exactly how one screen starts accepting a price the chain refuses.
+import { MAX_PRICE_USD, MIN_PRICE_USD, STANDARD_CAP, sanitizeMoneyInput } from '../launch-money';
 import TokenShell from '../token-shell';
 import { writeFailureMessage } from '../write-failure';
 import { UserAvatarImg } from '@ui/components';
@@ -24,42 +24,6 @@ const SERVICE_TEMPLATE: { key: string; name: string; desc: string; cta: string }
   { key: 'ask', name: 'Ask a question', desc: 'One question, answered within your deadline. If it is not, the buyer can reclaim their tokens once the deadline and a short grace period have passed.', cta: 'Ask' },
   { key: 'review', name: 'Review my work', desc: 'A written review of a repo, doc or plan.', cta: 'Request' }
 ];
-/**
- * ★ ONE SUPPLY FOR EVERY TOKEN (owner ruling, 2026-08-08).
- *
- * The wizard used to make a creator choose between Tight / Balanced / Generous
- * (5,000 / 20,000 / 100,000) on a step of its own. That is a genuinely hard
- * question — it sets how fast the price climbs — asked of someone who has not yet
- * sold anything, and it bought nothing: the cap can be RAISED at any time from the
- * Studio, so a low start is strictly the safer default. The step is gone and every
- * token launches at the smallest of the three.
- */
-const STANDARD_CAP = 5000;
-
-/**
- * ★ A PRICE FIELD THAT ACCEPTS "banana".
- *
- * The service-price and first-buy inputs stored whatever was typed — `abc`,
- * `-50`, `999999999999` all survived into later steps and kept Continue
- * enabled. The Supply step one screen along already strips non-digits from its
- * own field, so the wizard disagreed with itself about whether its money inputs
- * are validated. Found by an exploratory UX tester 2026-08-06.
- *
- * Permissive on purpose: it never rejects a keystroke mid-typing (`1.` and ``
- * are both fine while the reader is still going), it only refuses what cannot
- * be a dollar amount — letters, symbols, a minus sign, a second decimal point,
- * and more than two decimal places.
- */
-function sanitizeMoneyInput(raw: string): string {
-  const cleaned = (raw ?? '').replace(/[^\d.]/g, '');
-  const [whole, ...rest] = cleaned.split('.');
-  // ★ THREE decimals, not two (2026-08-07). HBD carries 3dp and the contract's
-  // own minimum posted price is 577 base units = $0.577 — at 2dp a creator
-  // could not type the legal minimum at all; `0.577` silently became `0.57`,
-  // which is BELOW the floor and would be rejected on chain after signing.
-  return rest.length ? `${whole}.${rest.join('').slice(0, 3)}` : whole;
-}
-
 const LaunchWizard: FC = () => {
   const router = useRouter();
   const pathname = usePathname();
@@ -207,9 +171,8 @@ const LaunchWizard: FC = () => {
   // creator had approved a signature — the worst possible moment to find out.
   //
   // Bounds come from contract-math.ts's mirrors of core/params.go, never from
-  // literals here, so they cannot drift from the contract.
-  const MIN_PRICE_USD = MIN_FACE_BASE_UNITS / 1000;
-  const MAX_PRICE_USD = MAX_FACE_BASE_UNITS / 1000;
+  // literals here, so they cannot drift from the contract. (`MIN_PRICE_USD` /
+  // `MAX_PRICE_USD` now live in `../launch-money`, same derivation.)
   const capError =
     cap < MIN_CAP_CREDITS_BASE_UNITS || cap > MAX_CAP_CREDITS_BASE_UNITS
       ? `Choose between ${MIN_CAP_CREDITS_BASE_UNITS.toLocaleString('en-US')} and ${MAX_CAP_CREDITS_BASE_UNITS.toLocaleString('en-US')} tokens.`
@@ -430,7 +393,7 @@ const LaunchWizard: FC = () => {
                   </>
                 ) : (
                   <>
-                    A creator token is bound to one account, so you’ll need to be signed in to launch one. You can
+                    A Meritum is bound to one account, so you’ll need to be signed in to launch one. You can
                     look through the steps first —{' '}
                     <a href="/login" className="font-semibold text-ink-brand-6 hover:underline">
                       sign in
