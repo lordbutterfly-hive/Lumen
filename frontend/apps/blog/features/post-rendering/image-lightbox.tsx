@@ -32,13 +32,28 @@ export interface ImageLightboxProps {
 export default function ImageLightbox({ index, slides, onClose }: ImageLightboxProps) {
   return (
     <Lightbox
+      /*
+       * ★ ANNOUNCE IT AS A DIALOG (2026-08-16, QA pass).
+       *
+       * The viewer works — zoom, next/prev, thumbnails, Escape and the close
+       * button all restore scroll correctly — but its portal rendered with
+       * `role="presentation"` and no `aria-modal`, so a screen reader never
+       * learned that a modal had opened over the article. Everything a sighted
+       * reader gets from the black overlay was, to a screen-reader user, silent.
+       *
+       * A static label, because the slides carry no titles here.
+       */
       styles={{ container: { backgroundColor: 'rgba(0, 0, 0, .8)' } }}
       open={index >= 0}
       index={index}
       close={onClose}
       slides={slides}
       plugins={[Fullscreen, Thumbnails, Zoom]}
-      controller={{ closeOnBackdropClick: true }}
+      // `aria: true` is the library's own switch for putting ARIA attributes on
+      // the controller div. Passing role/aria-modal as loose props does NOT work
+      // — the component does not spread unknown attributes, and TypeScript
+      // rejects them outright, which is how that first attempt was caught.
+      controller={{ closeOnBackdropClick: true, aria: true }}
     />
   );
 }

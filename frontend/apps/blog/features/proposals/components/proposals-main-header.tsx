@@ -16,6 +16,12 @@ export default function ProposalsMainHeader() {
   // refuseIfLite), but the dialog used to open the whole multi-field form and let
   // it go client-side "valid" before refusing only on Submit. Gate it here instead
   // so the trigger itself is disabled with a reason, and the form never opens.
+  // ★ ITS OWN COPY, NOT THE VOTING COPY (2026-08-16, found by a QA pass).
+  // This tooltip reused `proposals.lite_cannot_vote` — "Voting on proposals
+  // needs a full Hive account. Upgrade to vote." — on a button that does not
+  // vote. It SUBMITS a proposal, which additionally costs a real HBD fee, so
+  // the reused sentence both named the wrong action and understated the
+  // requirement.
   const isLiteBlocked = user.isLoggedIn && user.account_tier === 'lite';
 
   const trigger = (
@@ -50,7 +56,7 @@ export default function ProposalsMainHeader() {
       }
       actions={
         isLiteBlocked ? (
-          <TooltipContainer title={t('proposals.lite_cannot_vote')}>{trigger}</TooltipContainer>
+          <TooltipContainer title={t('proposals.lite_cannot_create')}>{trigger}</TooltipContainer>
         ) : (
           <NewProposalDialog>{trigger}</NewProposalDialog>
         )

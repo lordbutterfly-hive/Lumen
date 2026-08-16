@@ -24,6 +24,7 @@ import { Entry } from '@hive/common-hiveio-packages/wax';
 import RendererContainer from '../post-rendering/rendererContainer';
 import { getLogger } from '@ui/lib/logging';
 import { useCommentMutation, useUpdateCommentMutation } from '../post-rendering/hooks/use-comment-mutations';
+import { useQueryClient } from '@tanstack/react-query';
 import { createLitePost } from '@/blog/lib/lite/client/lite-write';
 import { toast } from '@ui/components/hooks/use-toast';
 import { handleError } from '@ui/lib/handle-error';
@@ -134,6 +135,8 @@ export function ReplyTextbox({
     StorageTTL.PERMANENT
   );
   const { t } = useTranslation('common_blog');
+  // Used to refetch the thread after a lite reply — see the note at that call site.
+  const queryClient = useQueryClient();
 
   // Use hook for draft storage - provides cross-tab sync and SSR safety
   // Both reply and edit modes now use storage (with different keys)
@@ -336,6 +339,27 @@ export function ReplyTextbox({
         // posts have confirmed since this morning; replies never did. The wait
         // is real, so the message names it rather than claiming it is already
         // there.
+        /*
+         * ★ AND THEN SHOW IT (2026-08-16, found by a QA pass driving a reply).
+         *
+         * The comment above says a lite reply "genuinely is not in the thread
+         * yet". That was true of the CHAIN, and it is what the toast honestly
+         * reports — but it is not true of this page: the QA run posted a reply,
+         * got 201, saw nothing, RELOADED, and the reply was there, carrying its
+         * "Queued to publish to Hive" badge. So the thread can already render
+         * it, in the right state; the only thing missing was asking for it.
+         *
+         * Leaving it out means the visible result of replying is that the box
+         * closes and nothing changes — which a UX tester already read as the
+         * reply vanishing, and which this file's own comment cites as the reason
+         * the toast exists. A toast explaining an absence is a worse answer than
+         * not having the absence.
+         *
+         * Invalidate rather than optimistically insert: the server decides the
+         * permlink, the badge state and the ordering, and this path has no
+         * rollback story. One refetch of the thread it is already looking at.
+         */
+        queryClient.invalidateQueries({ queryKey: ['discussionData'] });
         toast({
           title: 'Reply sent',
           // ★ NO TIME PROMISE (2026-08-13). This said "usually within a minute".

@@ -134,7 +134,10 @@ export function MeritumTicker({
         </div>
       ) : null}
 
-      <div className={styles.window}>
+      {/* `paused` turns the tape into a scrollable strip so the frame it stops
+          on is readable rather than clipped by the edge mask — see the note in
+          the stylesheet. */}
+      <div className={clsx(styles.window, userPaused && styles.paused)}>
         {/* `mt-tape` is the shared keyframe class from packages/tailwindcss/globals.css.
             It sits outside @layer there, so the JIT cannot purge it, and it is already
             listed in that file's prefers-reduced-motion block. */}

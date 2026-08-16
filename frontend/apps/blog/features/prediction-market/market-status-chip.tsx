@@ -21,7 +21,8 @@ export default function MarketStatusChip({
   const CONFIG: Record<MarketStatus, StatusConfig> = {
     open: { label: t('prediction_market.status.live'), textClass: 'text-ink-ok-2', pillBgClass: 'bg-surface-ok-5', dotClass: 'bg-surface-ok-7', ring: true },
     locked: { label: t('prediction_market.status.locked'), textClass: 'text-ink-warn-3', pillBgClass: 'bg-surface-warn-6', dotClass: 'bg-surface-warn-11' },
-    settled: { label: t('prediction_market.status.settled'), textClass: 'text-ink-10', pillBgClass: 'bg-surface-23', dotClass: 'bg-surface-34' },
+    // ink-8 not ink-10: #6b7280 on the #f1f3f5 chip ground is 4.35:1, under the 4.5:1 AA floor. ink-8 is 6.79:1 on the same ground. Same fix as the REP pill on the profile (2026-08-16).
+    settled: { label: t('prediction_market.status.settled'), textClass: 'text-ink-8', pillBgClass: 'bg-surface-23', dotClass: 'bg-surface-34' },
     void: { label: t('prediction_market.status.void'), textClass: 'text-ink-brand-6', pillBgClass: 'bg-surface-brand-7', dotClass: 'bg-surface-brand-12' }
   };
   const config = CONFIG[status];

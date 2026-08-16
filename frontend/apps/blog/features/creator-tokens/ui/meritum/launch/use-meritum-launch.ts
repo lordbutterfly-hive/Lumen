@@ -149,6 +149,23 @@ export function sanitizeOfferName(raw: string): string {
 const LAUNCH_CLAIM_TTL_MS = 90_000;
 const launchClaimKey = (creator: string): string => `meritum:launch-inflight:${creator}`;
 
+/**
+ * ★ IS THERE ACTUALLY ANYTHING IN THIS DRAFT?
+ *
+ * The flow auto-saves on every settle, so without this test the blank default
+ * state is itself written to sessionStorage the moment the screen mounts — and
+ * the next reload reads it back and announces "Picked up your saved draft at
+ * step 1 of 3" to somebody who has never typed a character. Reproduced on a
+ * brand-new account with zero interaction, and again immediately after "Start
+ * over", which is the same lie arriving by a second route.
+ *
+ * `step` is deliberately NOT content. Clicking through to step 2 and entering
+ * nothing is not a draft, and restoring it is not worth telling somebody they
+ * saved something.
+ */
+const draftHasContent = (offers: MeritumOffer[], firstBuy: string): boolean =>
+  firstBuy.trim() !== '' || offers.some((o) => o.name.trim() !== '' || o.price.trim() !== '');
+
 interface DraftShape {
   step: number;
   /**
@@ -303,7 +320,8 @@ export function useMeritumLaunch(): MeritumLaunchApi {
         setFurthestStep(clampStep(draft.furthestStep));
         setOffers(draft.offers);
         setFirstBuyState(draft.firstBuy);
-        setRestoredFromDraft(true);
+        // Only a draft with something IN it is one the reader "saved".
+        setRestoredFromDraft(draftHasContent(draft.offers, draft.firstBuy));
       }
     } catch {
       // A corrupt or unreadable draft must never block a launch. Start fresh.
@@ -337,6 +355,19 @@ export function useMeritumLaunch(): MeritumLaunchApi {
       return;
     }
     try {
+      /*
+       * ★ A BLANK STATE CLEARS THE KEY RATHER THAN WRITING ITSELF INTO IT
+       * (2026-08-16, QA pass). The `skipNextPersist` guard above fixed exactly
+       * one route to the false banner — the tick after "Start over". This fixes
+       * the general case it missed: ANY reload of an untouched flow used to
+       * persist the blank default and then be told, next load, that a draft was
+       * picked up. Removing instead of writing also means "Start over" stays
+       * done, however many renders follow it.
+       */
+      if (!draftHasContent(offers, firstBuy)) {
+        window.sessionStorage.removeItem(draftKey);
+        return;
+      }
       window.sessionStorage.setItem(draftKey, JSON.stringify({ step, furthestStep, offers, firstBuy }));
     } catch {
       // Storage full or blocked (private mode). Persistence is a convenience,

@@ -593,6 +593,8 @@
       "empty_followers_body": "When someone follows @{{username}}, they show up here.",
       "empty_following_title": "Not following anyone yet",
       "empty_following_body": "Accounts @{{username}} follows show up here.",
+      "list_unavailable_title": "Couldn't load this list",
+      "list_unavailable_body": "The list is there — we just could not fetch it right now. Reload to try again.",
       "no_results_followers": "No followers match \"{{query}}\"",
       "no_results_following": "No followed accounts match \"{{query}}\"",
       "searching": "Searching the full list...",
@@ -1762,6 +1764,7 @@
       }
     },
     "lite_cannot_vote": "Voting on proposals needs a full Hive account. Upgrade to vote.",
+    "lite_cannot_create": "Creating a proposal needs a full Hive account — it costs a real HBD fee and must be signed. Upgrade to create one.",
     "session_unavailable": "We couldn’t check your account just now, so this is unavailable. Reload to try again."
   },
   "prediction_market": {

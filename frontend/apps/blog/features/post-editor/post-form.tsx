@@ -535,10 +535,21 @@ export default function PostForm({
                   settings dialog (C-3), so a bad value there could disable
                   Submit with nothing on screen to explain it. It is checked
                   first for that reason. */}
+              {/* ★ AND THE HINT READS THE SAME STATE THE BUTTON DOES (2026-08-16).
+                  The `disabled` gate above was moved to `watchedValues` on
+                  2026-08-06 for the reasons in its own note; this hint was left
+                  on `storedPost`, the localStorage draft, which lags the form by
+                  a debounce. A QA pass typed a full title and body, and the
+                  button correctly stayed off for a missing TAG while the line
+                  underneath it said "Enter content to submit" — naming a field
+                  that was visibly full. A disabled control with a wrong reason
+                  is worse than a disabled control with none: the reader fixes
+                  the thing that was never broken. Same source, same trim, so the
+                  two can no longer disagree. */}
               {!postMutation.isPending &&
                 (altUsernameCheck ||
-                  !storedPost?.title ||
-                  !storedPost?.postArea ||
+                  !watchedValues.title?.trim() ||
+                  !watchedValues.postArea?.trim() ||
                   tagsRequiredAndEmpty) && (
                   <p
                     className="text-xs text-muted-foreground"
@@ -546,11 +557,11 @@ export default function PostForm({
                   >
                     {altUsernameCheck
                       ? `${ALTERNATIVE_AUTHOR_LABEL}: ${altUsernameCheck}`
-                      : !storedPost?.title && !storedPost?.postArea
+                      : !watchedValues.title?.trim() && !watchedValues.postArea?.trim()
                         ? t("submit_page.enter_title_and_content")
-                        : !storedPost?.title
+                        : !watchedValues.title?.trim()
                           ? t("submit_page.enter_title")
-                          : !storedPost?.postArea
+                          : !watchedValues.postArea?.trim()
                             ? t("submit_page.enter_content")
                             : t("submit_page.enter_tags")}
                   </p>

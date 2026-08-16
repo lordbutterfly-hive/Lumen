@@ -83,10 +83,28 @@ export const HoldAction: FC<{
   onBegin: () => void;
   onRelease: () => void;
 }> = ({ label, disabled, title, onBegin, onRelease }) => {
+  /*
+   * ★ THE HANDLERS CHECK `disabled` THEMSELVES (2026-08-16, QA pass).
+   *
+   * A `disabled` <button> does not fire click, but it is NOT inert to pointer
+   * events unless something also removes them — and this one carries
+   * `touch-none select-none` and no `pointer-events` rule, so `pointerdown` and
+   * `pointerup` reached these handlers on a visibly disabled control. Driving it
+   * as a lite creator left the coin panel stuck reading "HOLDING" forever,
+   * because `onBegin` moved the caption while the coin's own machine correctly
+   * refused to start.
+   *
+   * Guarded in three places on purpose, because each catches a different route
+   * in: `disabled:pointer-events-none` stops the browser delivering the event at
+   * all, these checks stop a synthetic or programmatic one, and the flow's own
+   * `strikeDisabledRef` stops the caption moving even if both were bypassed.
+   */
   const press = (e: PointerEvent<HTMLButtonElement>): void => {
+    if (disabled) return;
     if (e.button === 0) onBegin();
   };
   const keyPress = (e: KeyboardEvent<HTMLButtonElement>): void => {
+    if (disabled) return;
     if (e.key === 'Enter' || e.key === ' ') {
       // Space would scroll the page out from under the coin mid-hold.
       e.preventDefault();
@@ -94,21 +112,26 @@ export const HoldAction: FC<{
     }
   };
   const keyRelease = (e: KeyboardEvent<HTMLButtonElement>): void => {
+    if (disabled) return;
     if (e.key === 'Enter' || e.key === ' ') onRelease();
+  };
+  const release = (): void => {
+    if (disabled) return;
+    onRelease();
   };
   return (
     <button
       type="button"
       disabled={disabled}
       title={title}
-      className={`${PRIMARY} touch-none select-none`}
+      className={`${PRIMARY} touch-none select-none disabled:pointer-events-none`}
       onPointerDown={press}
-      onPointerUp={onRelease}
-      onPointerLeave={onRelease}
-      onPointerCancel={onRelease}
+      onPointerUp={release}
+      onPointerLeave={release}
+      onPointerCancel={release}
       onKeyDown={keyPress}
       onKeyUp={keyRelease}
-      onBlur={onRelease}
+      onBlur={release}
     >
       {label}
     </button>

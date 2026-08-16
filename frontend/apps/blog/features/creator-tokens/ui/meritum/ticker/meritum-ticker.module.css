@@ -233,6 +233,36 @@
 }
 
 /**
+ * ★ PAUSING BY HAND GETS THE SAME TREATMENT, FOR THE SAME REASON (2026-08-16).
+ *
+ * Reported by a QA pass driving the page as a visitor: pressing "Pause the
+ * ticker" does stop the tape (verified frozen — three screenshots 1.5s apart
+ * were pixel-identical), but it freezes wherever the marquee happened to be,
+ * and that frame is clipped by the edge mask at BOTH ends. The visitor read
+ * `aximus launched her token - 4 seconds ago` with the leading `@m` cut off and
+ * a bare `@` sliced at the right edge.
+ *
+ * That is the reduced-motion regression this file already documents, arriving
+ * through the other door: stopping the tape without making it readable is not
+ * an accommodation, it is a worse state than moving. And it is sharper here,
+ * because someone who presses PAUSE is telling you the exact reason they
+ * pressed it — they want to read the thing that was moving.
+ *
+ * Same three moves as the block above, so the two paused states cannot drift:
+ * scroll the window, drop the mask, hide the duplicate copy.
+ */
+.paused.window {
+  overflow-x: auto;
+  padding-bottom: 10px;
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+.paused .copyDuplicate {
+  display: none;
+}
+
+/**
  * ★ THE SEPARATOR BETWEEN ITEMS IS TEXT, NOT PADDING (2026-08-15).
  *
  * `.item` uses `padding: 0 22px` to space items apart, and the "◈" glyph that

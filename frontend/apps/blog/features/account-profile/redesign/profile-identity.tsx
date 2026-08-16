@@ -130,7 +130,16 @@ export default function ProfileIdentity({
             // screen; the precise value is still one hover (`title`) or one tap
             // (the explainer below) away, which is where it belongs.
             aria-label={`${t('user_profile.reputation_label')} ${accountReputation(reputation)}`}
-            className="rounded-full bg-surface-23 px-2 py-0.5 font-sans text-[13px] leading-[20px] font-semibold tabular-nums text-ink-10 transition-colors hover:bg-surface-29"
+            // ★ ink-8, NOT ink-10 (2026-08-16, measured by a QA pass on /@holozing).
+            // `text-ink-10` (#6b7280) on `bg-surface-23` (#f1f3f5) measures
+            // 4.35:1 — under the 4.5:1 AA floor for normal text, and this is
+            // 13px text, so it is normal text by the standard's definition.
+            // ink-10 clears AA on WHITE (4.83:1); it is the grey chip ground
+            // underneath that costs the remaining margin, which is exactly the
+            // case a global token check on a white page never catches. ink-8
+            // (#4b5563) measures 6.79:1 on the same ground and is one step on
+            // the same ramp, so the pill stays secondary to the handle above it.
+            className="rounded-full bg-surface-23 px-2 py-0.5 font-sans text-[13px] leading-[20px] font-semibold tabular-nums text-ink-8 transition-colors hover:bg-surface-29"
             data-testid="profile-reputation"
             // A native title, on purpose: it is the same affordance hive.blog uses for
             // the same number, it survives without JS, and it needs no positioned

@@ -104,7 +104,28 @@ const MeritumLaunchFlow: FC = () => {
    * the documented second press target. Abort already self-healed through the
    * shared `onAbort`, so only the charging window was wrong.
    */
+  /*
+   * ★★ AND IT MUST REFUSE WHEN THE STRIKE IS DISABLED (2026-08-16, found by a
+   * QA pass driving the flow as a lite creator).
+   *
+   * This set `stage` unconditionally. The coin's own `useHoldToStrike.begin()`
+   * correctly no-ops while the strike is disabled, so the internal phase machine
+   * stayed `idle` — but the CAPTION had already been moved to "charging", and on
+   * release `abort()` also no-ops (it only acts on `phase === 'charging'`), so
+   * `onAbort` never fired and nothing ever put the caption back.
+   *
+   * The result on a screen captioned "Everything below is honest": a lite
+   * creator presses the visibly disabled control, and the panel reads
+   * "HOLDING... let go before the ring closes and nothing happens" FOREVER —
+   * recoverable only by leaving step 3 and coming back. No signature was ever at
+   * risk; the lie was.
+   *
+   * Read through a ref rather than a dependency so the handler keeps the stable
+   * identity the coin's memoised subtree relies on.
+   */
+  const strikeDisabledRef = useRef(false);
   const holdFromButton = useCallback(() => {
+    if (strikeDisabledRef.current) return;
     setStage('charging');
     strikeRef.current?.begin();
   }, []);
@@ -146,6 +167,8 @@ const MeritumLaunchFlow: FC = () => {
    * account, so a second hold could only buy a guaranteed on-chain failure.
    */
   const strikeDisabled = flow.block !== null || write === 'pending' || write === 'ok';
+  // Mirrored into the ref the hold handler reads — see `holdFromButton` above.
+  strikeDisabledRef.current = strikeDisabled;
 
   const blockMessage = (block: MeritumLaunchBlock | null): string | null => {
     switch (block) {

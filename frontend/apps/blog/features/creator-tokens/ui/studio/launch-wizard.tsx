@@ -302,7 +302,7 @@ const LaunchWizard: FC = () => {
                 decoration. `ink-10` (#6b7280) clears the bar and still reads as the
                 inactive state next to the active step's white-on-brand.
               */}
-              <span className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-[12px] font-bold ${i <= step ? 'bg-surface-brand-12 text-ink-27' : 'bg-surface-23 text-ink-10'}`}>{i + 1}</span>
+              <span className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-[12px] font-bold ${i <= step ? 'bg-surface-brand-12 text-ink-27' : 'bg-surface-23 text-ink-8'}`}>{i + 1}</span>
               <span className={`text-[13px] leading-[20px] font-semibold ${i === step ? 'text-ink-2' : 'text-ink-10'}`}>{s}</span>
               {i < STEPS.length - 1 ? <span className="h-px flex-1 bg-surface-26" /> : null}
             </div>

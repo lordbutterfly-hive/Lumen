@@ -201,7 +201,28 @@ export function UserAvatarImg({
         <img
           ref={imgRef}
           src={stage === 'direct' ? getUserAvatarDirectUrl(username, apiSize) : getUserAvatarUrl(username, apiSize)}
-          alt={alt}
+          /*
+           * ★ ALWAYS EMPTY ALT, EVEN WHEN A CALLER PASSED ONE (2026-08-16).
+           *
+           * A QA pass reported the composer avatar showing four overlapping
+           * characters ("SO2D") crammed into a circle sized for one, while the
+           * nav avatar beside it showed a clean "S". Nothing was wrong with the
+           * monogram — it is `slice(0, 1)` and cannot be four characters. What
+           * was on screen was the BROKEN IMAGE'S ALT TEXT: callers pass
+           * `alt={username}`, and a browser paints alt text where the picture
+           * would be. Over the monogram, in a 44px box, that is the mess that
+           * was reported.
+           *
+           * It is exactly the ORB case this component already fights: the
+           * response completes with zero pixels and fires no `onError`, so the
+           * element sits in the DOM as a broken image until a timeout promotes
+           * it. Emptying the alt costs nothing accessibly — the monogram behind
+           * it is the visual fallback, and the accessible name lives on the
+           * wrapping span, which already reads `aria-hidden` when the caller
+           * passed `alt=""`. `alt` is still honoured for that decision above;
+           * it just never becomes visible text on top of the letter.
+           */
+          alt=""
           width={pixelSize}
           height={pixelSize}
           loading={loading}

@@ -142,21 +142,44 @@ export default function FollowListView({
     }
 
     if (!search.active && rows.length === 0) {
+      /*
+       * ★ AN EMPTY LIST NEXT TO A NON-ZERO COUNT IS A FAILURE, NOT AN EMPTY LIST
+       * (2026-08-16, found by a QA pass).
+       *
+       * `/api/following` answered 502 — upstream rate-limiting under load — and
+       * this card rendered "Not following anyone yet. Accounts @lauramica
+       * follows show up here." directly beneath its OWN header reading "851
+       * following", with the pagination footer still offering "Page 1 of 18".
+       * Three parts of one screen disagreeing, and the one a reader believes is
+       * the sentence, because it is the one written in words.
+       *
+       * `totalCount` comes from a different call that had succeeded, so the
+       * contradiction is detectable right here without threading an error flag
+       * through four components: if the count says there are some and we have
+       * none, we did not learn that they have nobody — we failed to find out.
+       * Say that instead, because "nobody follows them" is a claim about another
+       * person that we have no evidence for.
+       */
+      const loadFailed = typeof totalCount === 'number' && totalCount > 0;
       return (
         <div className={LIST_CARD} data-testid="follow-list-card">
           <div
             className="flex flex-col items-center gap-1.5 px-6 py-14 text-center"
-            data-testid="follow-list-empty"
+            data-testid={loadFailed ? 'follow-list-unavailable' : 'follow-list-empty'}
           >
             <p className={EMPTY_TITLE}>
-              {t(
+              {loadFailed
+                ? t('user_profile.lists.list_unavailable_title')
+                : t(
                 variant === 'followers'
                   ? 'user_profile.lists.empty_followers_title'
                   : 'user_profile.lists.empty_following_title'
               )}
             </p>
             <p className="font-sans text-[13px] leading-[20px] font-normal text-[#6b7280]">
-              {t(
+              {loadFailed
+                ? t('user_profile.lists.list_unavailable_body')
+                : t(
                 variant === 'followers'
                   ? 'user_profile.lists.empty_followers_body'
                   : 'user_profile.lists.empty_following_body',

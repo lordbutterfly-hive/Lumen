@@ -54,7 +54,8 @@ export default function StakedHiveBlock({
         <div className="max-w-[520px]">
           <div className="mb-1 flex items-center gap-2">
             <span className="text-[15px] leading-[24px] font-bold text-ink-4">{t('wallet.staked.title')}</span>
-            <span className="rounded-[7px] bg-surface-23 px-2 py-[2px] text-[12px] font-bold text-ink-10">
+            {/* ink-8 not ink-10: #6b7280 on the #f1f3f5 chip ground is 4.35:1, under the 4.5:1 AA floor. ink-8 is 6.79:1 on the same ground. Same fix as the REP pill on the profile (2026-08-16). */}
+            <span className="rounded-[7px] bg-surface-23 px-2 py-[2px] text-[12px] font-bold text-ink-8">
               {t('wallet.staked.badge')}
             </span>
             <span className="rounded-[7px] bg-surface-ok-5 px-2 py-[2px] text-[12px] font-bold text-ink-ok-2">
