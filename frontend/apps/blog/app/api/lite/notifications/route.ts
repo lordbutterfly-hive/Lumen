@@ -80,6 +80,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         msg: `${name} followed you`,
         url: `@${name}`,
         date: f.at,
+        // ★ THE FOLLOWER'S HANDLE, SENT EXPLICITLY (2026-08-16, owner: "follow
+        // notifications still don't show profile pics"). The bell's Lumen rows
+        // rendered as bare text while the chain rows next to them carried a
+        // 40px avatar, so in one list the same event looked like two different
+        // kinds of thing. The panel needs a name to draw a face from, and
+        // slicing it back out of `url` or `msg` would break the moment either
+        // string is reworded or translated.
+        actor: name,
         source: 'lumen' as const
       };
     });

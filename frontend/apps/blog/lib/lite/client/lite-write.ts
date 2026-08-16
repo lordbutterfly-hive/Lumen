@@ -103,6 +103,17 @@ export async function liteVote(author: string, permlink: string, weight: number)
       if (weight !== 0) recordRetentionAct('vote');
       return { status: 'ok' };
     }
+    // ★ NAMED, NOT GENERIC (2026-08-16, QA H1). `checkEngagementTarget`
+    // (lib/lite/content/engagement-target.ts) 400s this with `{error:
+    // "self_engagement"}` and no `message` — so `friendly()` below fell
+    // through to its catch-all "Something went wrong — please try again.",
+    // which invites retrying a vote that can never succeed. Handled here
+    // rather than inside `friendly()` because that function is shared with
+    // `liteReblog`, and `self_engagement` there is a different action; this
+    // keeps the vote-specific wording scoped to the vote path only.
+    if (b?.error === 'self_engagement') {
+      return { status: 'error', message: 'You can’t vote on your own post.' };
+    }
     return { status: 'error', message: friendly(res.status, b?.error, b?.message) };
   } catch {
     return { status: 'error', message: 'Network error — please try again.' };

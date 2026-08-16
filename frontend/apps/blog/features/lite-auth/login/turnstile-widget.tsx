@@ -2,6 +2,7 @@
 
 import { FC, useEffect, useRef, useState } from 'react';
 import env from '@beam-australia/react-env';
+import { useTranslation } from '@/blog/i18n/client';
 
 /**
  * Cloudflare Turnstile widget for the signup step.
@@ -35,6 +36,14 @@ interface TurnstileApi {
       'error-callback'?: () => void;
       'expired-callback'?: () => void;
       theme?: 'light' | 'dark' | 'auto';
+      /**
+       * ISO 639-1 code, or 'auto' (Turnstile's own default) to follow the
+       * BROWSER's language. Unset, this widget was auto-detecting Croatian
+       * on an English UI (B4). Turnstile falls back to English itself for any
+       * code it doesn't recognise (per Cloudflare's docs), so passing the
+       * app's locale straight through, unmapped, is safe.
+       */
+      language?: string;
     }
   ) => string;
   remove: (id: string) => void;
@@ -66,6 +75,19 @@ const TurnstileWidget: FC<Props> = ({ onToken }) => {
   const holder = useRef<HTMLDivElement | null>(null);
   const widgetId = useRef<string | null>(null);
   const [failed, setFailed] = useState(false);
+  /**
+   * ★ B4 (partial): Turnstile auto-detects the BROWSER's language when no
+   * `language` option is passed, independently of what language the app
+   * itself is showing — measured rendering the widget in Croatian inside an
+   * otherwise-English page. `i18n.resolvedLanguage` is this app's own current
+   * locale (same accessor `wallet/components/account-history-row.tsx` and
+   * friends already use), so pinning to it keeps the widget in step with
+   * whatever language the reader actually chose here, not their OS/browser
+   * setting. Falls back to 'en' the same way those callers do, for the
+   * window before i18next has resolved a language.
+   */
+  const { i18n } = useTranslation('common_blog');
+  const language = i18n.resolvedLanguage ?? 'en';
 
   useEffect(() => {
     if (!siteKey || !holder.current) return;
@@ -77,6 +99,7 @@ const TurnstileWidget: FC<Props> = ({ onToken }) => {
       widgetId.current = api.render(holder.current, {
         sitekey: siteKey,
         theme: 'light',
+        language,
         callback: (token) => onToken(token),
         // Expiry and errors clear the token, so the submit button disables itself
         // again rather than sending a stale one the server will reject.
@@ -112,7 +135,11 @@ const TurnstileWidget: FC<Props> = ({ onToken }) => {
         widgetId.current = null;
       }
     };
-  }, [siteKey, onToken]);
+    // `language` included: a locale change mid-flow should re-render the
+    // widget in the new language rather than leave it pinned to the one that
+    // was active on mount (the widget itself is cheap to recreate, and the
+    // `widgetId` guard plus this cleanup's `api.remove` keep that safe).
+  }, [siteKey, onToken, language]);
 
   // Not configured: the server passes through too, so there is nothing to show.
   if (!siteKey) return null;

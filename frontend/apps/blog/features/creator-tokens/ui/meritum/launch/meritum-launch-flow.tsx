@@ -45,6 +45,31 @@ import type { MeritumLaunchBlock } from './use-meritum-launch';
 /** Where the reader is in the strike, as far as this screen can observe it. */
 type HoldStage = 'none' | 'charging' | 'striking' | 'revealed';
 
+/**
+ * ★ M9 — THE PRICE-BAND MINIMUM MUST NEVER DISPLAY BELOW THE REAL FLOOR
+ * (2026-08-16).
+ *
+ * `MIN_PRICE_USD` / `MAX_PRICE_USD` are derived (`base units / 1000`), not
+ * literals, so they carry ordinary floating-point noise (`577 / 1000` is
+ * `0.57699999999999995737` under the hood). This formats both to the cent —
+ * the finest grain a contract param expressed in base units can land on.
+ *
+ * The two edges round in OPPOSITE directions on purpose: `Math.ceil` for the
+ * minimum, `Math.floor` for the maximum. The contract enforces `price >=
+ * MIN_PRICE_USD` and `price <= MAX_PRICE_USD`. Rounding the minimum DOWN (or
+ * to nearest) could print a cent value below the real floor — a reader who
+ * types exactly what the copy told them would then get rejected on chain.
+ * Rounding the maximum UP has the same failure mode in reverse. Ceil/floor at
+ * the cent is the only pairing where the printed bound is always something
+ * the form actually accepts. With today's params neither changes the digits
+ * ($0.577 -> $0.58, $10,000 stays $10,000) — this only matters if the
+ * contract's params move to a less round number later.
+ */
+const formatPriceBound = (n: number, edge: 'min' | 'max'): string => {
+  const cents = edge === 'min' ? Math.ceil(n * 100) : Math.floor(n * 100);
+  return `$${(cents / 100).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+};
+
 const MeritumLaunchFlow: FC = () => {
   const { t } = useTranslation('common_blog');
   const flow = useMeritumLaunch();
@@ -179,12 +204,15 @@ const MeritumLaunchFlow: FC = () => {
       case 'offer-duplicate-name':
         return t('meritum_launch.error_offer_duplicate_name');
       case 'price-band':
-        // Bounds come from the contract's own params, never from copy. The
-        // minimum is printed at its own precision ($0.577, three decimals like
-        // HBD) — rounding it to $0.58 would hide a price the chain accepts.
+        // Bounds come from the contract's own params, never from copy. They
+        // used to be formatted two different ways: the max through `usdWhole`,
+        // the min interpolated raw ($0.577, whatever `MIN_PRICE_USD` happened
+        // to stringify to). `formatPriceBound` below replaces both so the pair
+        // reads consistently and neither side risks printing floating-point
+        // noise (`577 / 1000` is clean; not every contract param will be).
         return t('meritum_launch.error_price_band', {
-          min: `$${MIN_PRICE_USD}`,
-          max: usdWhole(MAX_PRICE_USD)
+          min: formatPriceBound(MIN_PRICE_USD, 'min'),
+          max: formatPriceBound(MAX_PRICE_USD, 'max')
         });
       case 'first-buy-max':
         return t('meritum_launch.error_first_buy_max', { max: usdWhole(MAX_PRICE_USD) });
@@ -399,18 +427,11 @@ const MeritumLaunchFlow: FC = () => {
         </div>
 
         {/*
-          ★ THE FORM THIS SCREEN REPLACED IS STILL REACHABLE. It is the flow
-          that has been launching real tokens, and it stays one click away until
-          this one has the same mileage.
+          ★ THE CLASSIC FORM AND ITS ESCAPE HATCH ARE GONE (2026-08-16, owner).
+          There is one launch flow now. Two doors to the same chain calls meant
+          two screens to keep correct, and the fallback link advertised that the
+          screen you were on was the unfinished one.
         */}
-        {live ? null : (
-          <p className="mt-6 text-13 text-meritum-ink-muted">
-            {t('meritum_launch.classic_prompt')}{' '}
-            <a href="/creators/launch/classic" className="font-semibold text-meritum-ink-link hover:underline">
-              {t('meritum_launch.classic_link')}
-            </a>
-          </p>
-        )}
       </div>
     </TokenShell>
   );

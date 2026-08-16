@@ -67,7 +67,7 @@ export function useNameSuggest() {
             state: 'unavailable',
             reason:
               res.status === 429
-                ? 'Too many checks — wait a moment and try again.'
+                ? 'Too many checks. Wait a moment and try again.'
                 : 'Could not check that name right now.',
             suggestions: []
           });

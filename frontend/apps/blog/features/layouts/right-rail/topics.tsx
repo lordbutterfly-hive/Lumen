@@ -148,7 +148,32 @@ const Topics = () => {
   // is decoration. We sample 9 out of the top ~40 browsable topics, so the card
   // turns over and surfaces the long tail instead of only the head. Deterministic
   // per UTC day (see mulberry32 above), so the hand is identical across routes.
-  const pool = (tags ?? []).filter((tag) => isBrowsableTopic(tag.name)).slice(0, TOPIC_POOL);
+  //
+  // ★ SORTED INTO ONE CANONICAL ORDER FIRST (2026-08-16, QA Low 2: "the
+  // right-rail Topics list reshuffles on every load — no stable ordering").
+  // `mulberry32` above IS a fixed, deterministic permutation — but a fixed
+  // seed only produces a fixed OUTPUT for a fixed INPUT order. `get_trending_tags`
+  // is documented (see `getTrendingTags` in `packages/transaction/lib/hive.ts`)
+  // as "ordered by top_posts descending", but that isn't guaranteed byte-stable
+  // across separate calls — two ties, or scores that shift by one between two
+  // nearly-simultaneous requests, reorder the raw array without changing its
+  // membership. Once the STARTING array order differs at all, Fisher-Yates with
+  // the same seed walks the same swap sequence over a different arrangement and
+  // lands on a different final order — which is exactly the reported symptom:
+  // overlapping but reordered lists ("Core/Engrave/Solar/Spanish" vs
+  // "Engrave/Core/Silvergoldstackers/Solar/Witness/Curangel"), not a fresh
+  // random hand each time.
+  //
+  // Sorting into one canonical order before the shuffle ever sees it removes
+  // that sensitivity: `top_posts` descending (the same "frequency" the raw API
+  // is meant to rank by in the first place), `name` ascending to break a tie
+  // deterministically rather than leaving it to whatever order the response
+  // happened to arrive in. For the same UTC day and the same qualifying set of
+  // tags, the shuffle's input is now always identical, so its output is too.
+  const pool = (tags ?? [])
+    .filter((tag) => isBrowsableTopic(tag.name))
+    .sort((a, b) => b.top_posts - a.top_posts || a.name.localeCompare(b.name))
+    .slice(0, TOPIC_POOL);
   const topics = useMemo(() => {
     const names = pool.map((tag) => tag.name);
     const rand = mulberry32(todaySeed());

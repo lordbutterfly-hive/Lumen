@@ -9,6 +9,8 @@ import NotificationList from '@/blog/features/activity-log/list';
 import { useMarkAllNotificationsAsReadMutation } from '@/blog/features/activity-log/hooks/use-notifications-read-mutation';
 import BasePathLink from '@/blog/components/base-path-link';
 import TimeAgo from '@ui/components/time-ago';
+import { UserAvatarImg } from '@ui/components';
+import type { LumenNotification } from './use-lumen-notifications';
 import { handleError } from '@ui/lib/handle-error';
 import { useTranslation } from '@/blog/i18n/client';
 
@@ -55,12 +57,32 @@ const NotificationsMenu = forwardRef<HTMLButtonElement, {
   /** False for a Lumen lite account — it has no chain notifications to fetch. */
   chainAccount?: boolean;
   /**
-   * From the header's own `bridge.unread_notifications` query — the same number
-   * the bell's badge shows, so the panel and the badge can never disagree.
+   * The bell's badge number — chain unread PLUS Lumen unread, so the panel and
+   * the badge can never disagree. See `use-lumen-notifications.ts` for why that
+   * used to be one half of the truth.
    */
   unreadCount?: number;
+  /**
+   * The CHAIN half alone. "Mark all as read" broadcasts a chain custom_json and
+   * therefore only clears chain notifications; offering it because Lumen follows
+   * are unread would be a button that visibly does nothing.
+   */
+  chainUnreadCount?: number;
+  /** Lumen-native rows, fetched once by the header. */
+  lumenItems?: LumenNotification[];
+  /** Advances the Lumen read mark. Fired when the panel actually opens. */
+  onOpened?: () => void;
 }>(function NotificationsMenu(
-  { username, lastRead, children, chainAccount = true, unreadCount = 0 },
+  {
+    username,
+    lastRead,
+    children,
+    chainAccount = true,
+    unreadCount = 0,
+    chainUnreadCount = unreadCount,
+    lumenItems = [],
+    onOpened
+  },
   ref
 ) {
   const [open, setOpen] = useState(false);
@@ -92,17 +114,11 @@ const NotificationsMenu = forwardRef<HTMLButtonElement, {
   // social action was silent for everyone — including a full Hive account
   // followed by a lite reader. Fetched for BOTH tiers for exactly that reason;
   // `chainAccount` gates only the CHAIN half.
-  const { data: liteNotifications } = useQuery({
-    queryKey: ['LumenNotifications', username],
-    queryFn: async (): Promise<{ msg: string; url: string; date: string }[]> => {
-      const res = await fetch(`/api/lite/notifications?hive=${encodeURIComponent(username)}`);
-      if (!res.ok) return [];
-      const body = (await res.json()) as { notifications?: { msg: string; url: string; date: string }[] };
-      return body.notifications ?? [];
-    },
-    enabled: open && !!username
-  });
-  const lumenItems = liteNotifications ?? [];
+  //
+  // ★ THE FETCH MOVED UP TO THE HEADER (2026-08-16). It used to live here with
+  // `enabled: open`, which meant the badge could not count these rows — it had
+  // no way to know they existed until after the panel it labels was already
+  // open. The header owns it now and passes the rows in.
   // ★ A DISABLED React Query still reports `isLoading: true` — status is
   //   'loading' whenever there is no data, whether or not it will ever fetch.
   //   Rendering the spinner off that alone left a lite reader's bell spinning
@@ -112,7 +128,7 @@ const NotificationsMenu = forwardRef<HTMLButtonElement, {
 
   // Only a chain account can sign the custom_json this broadcasts, and there is
   // nothing to mark when nothing is unread.
-  const canMarkAllRead = chainAccount && unreadCount > 0;
+  const canMarkAllRead = chainAccount && chainUnreadCount > 0;
 
   const handleMarkAllAsRead = async () => {
     if (markAllAsRead.isPending) return;
@@ -127,7 +143,15 @@ const NotificationsMenu = forwardRef<HTMLButtonElement, {
   };
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        // On OPEN only. Clearing on close would mean a panel dismissed by a
+        // stray Escape counts as read, and clearing on both fires it twice.
+        if (next) onOpened?.();
+      }}
+    >
       <PopoverTrigger asChild ref={ref}>{children}</PopoverTrigger>
       <PopoverContent
         align="end"
@@ -180,12 +204,27 @@ const NotificationsMenu = forwardRef<HTMLButtonElement, {
                 <li key={`${n.url}-${n.date}`} className="border-b border-line-9 last:border-0">
                   <BasePathLink
                     href={`/${n.url}`}
-                    className="flex flex-col gap-0.5 px-4 py-3 font-sans text-sm hover:bg-surface-21"
+                    className="flex items-center gap-3 px-4 py-3 font-sans text-sm hover:bg-surface-21"
                   >
-                    <span className="text-ink-2">{n.msg}</span>
-                    <span className="text-xs text-ink-10">
-                      {/* Same single format as the chain rows below. */}
-                      <TimeAgo date={n.date} numeric="always" />
+                    {/* ★ THE SAME FACE THE CHAIN ROWS SHOW (2026-08-16, owner).
+                        These rows were text only, sitting directly above 40px
+                        avatars from `activity-log/list-item.tsx`, so one list
+                        rendered the same kind of event two different ways and a
+                        new follower arrived anonymous. `UserAvatarImg` is that
+                        exact component, and it already resolves a lite account
+                        through `/api/avatar` to the reader's own initial rather
+                        than a shared default picture. */}
+                    <UserAvatarImg
+                      username={n.actor ?? n.url.replace(/^@/, '')}
+                      pixelSize={40}
+                      alt={`${n.actor ?? n.url.replace(/^@/, '')} profile picture`}
+                    />
+                    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                      <span className="text-ink-2">{n.msg}</span>
+                      <span className="text-xs text-ink-10">
+                        {/* Same single format as the chain rows below. */}
+                        <TimeAgo date={n.date} numeric="always" />
+                      </span>
                     </span>
                   </BasePathLink>
                 </li>

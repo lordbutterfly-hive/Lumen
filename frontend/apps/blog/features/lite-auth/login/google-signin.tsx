@@ -2,6 +2,7 @@
 
 import { FC, useEffect, useRef, useState } from 'react';
 import env from '@beam-australia/react-env';
+import { useTranslation } from '@/blog/i18n/client';
 
 /**
  * Google Identity Services sign-in button.
@@ -86,12 +87,81 @@ const SCRIPT_SRC = 'https://accounts.google.com/gsi/client?hl=en';
  * A module-level guard is the right scope because GIS itself is a page-global
  * singleton: there is exactly one `window.google.accounts.id`. Keyed by client id +
  * nonce so a genuine nonce rotation (which remounts via `key`) still re-initializes.
+ *
+ * ★ REMAINING GAP, OUT OF THIS FILE'S SCOPE (2026-08-16). The guard above stops
+ * THIS component's own StrictMode double-invoke from calling `initialize()` twice
+ * for the SAME (client id, nonce) — traced through both the cold-load path (script
+ * not yet on the page) and the warm path (script already loaded from an earlier
+ * mount): both land on exactly one real `initialize()` call. It cannot stop two
+ * genuinely different mounts: `lumen-login.tsx` renders this component keyed on
+ * `googleNonce` (`key={googleNonce}`), and the effect that fetches that nonce
+ * (`refreshGoogleNonce()` inside `useEffect(() => {...}, [refreshGoogleNonce])`)
+ * has no cancellation guard — so under `reactStrictMode: true` (next.config.js) it
+ * fires twice, fetches two distinct single-use nonces from the server, and mounts
+ * this component twice with two different keys. Each of those two mounts is
+ * individually correct (a new nonce genuinely does need a fresh `initialize()`),
+ * so what GIS is logging is two REAL, legitimately-different calls, not a bug in
+ * the guard above. Fixing the root cause means cancelling the second fetch's
+ * `setGoogleNonce` in that effect's cleanup — that effect lives in
+ * `lumen-login.tsx`, out of this fix's scope (see task boundary). Flagged here for
+ * whoever owns that file.
  */
 let initializedFor: string | null = null;
 
 /** GIS clamps rendered width to 200..400 CSS px; outside that it silently ignores it. */
 const GSI_MIN_WIDTH = 200;
 const GSI_MAX_WIDTH = 400;
+
+/**
+ * ★★★ A RENDERED BUTTON IS NOT A WORKING BUTTON (2026-08-16, defect B3).
+ *
+ * Measured: with the OAuth client's origin unauthorised, `initialize()` never
+ * throws and `renderButton()` never throws either — GSI logs the 403 from
+ * `accounts.google.com/gsi/button?...` to the console and quietly leaves the
+ * button iframe at 0x0. Nothing in this file's existing try/catch could ever see
+ * that: there is no exception to catch. The painted row below still renders (it
+ * is plain markup, independent of GSI), so the reader sees what looks like a
+ * normal, clickable "Continue with Google" card that is actually inert — the
+ * worst failure shape on a sign-up path, because it looks fine.
+ *
+ * Checked against Google's own JS API reference before reaching for geometry:
+ * `initialize()` takes a token `callback` and nothing documented that fires on a
+ * render failure, and a cross-origin iframe that comes back 403 still fires the
+ * DOM `load` event, not `error` — HTTP status isn't visible to the parent frame
+ * at all. Geometry is the only signal GSI leaves behind, and it matches exactly
+ * what was measured: the content GSI would have inserted never appears, so
+ * `isGoogleButtonRendered` below stays false and never flips true.
+ *
+ * Why this can't false-positive on a slow-but-working load: `watchAvailability`
+ * (below, in the mount effect) does not check geometry once after a timeout and
+ * stop there. It keeps a `MutationObserver` on the holder for the life of the
+ * component, so the moment content with real size actually appears — 50ms in or
+ * 15s in, it doesn't matter — it is picked up and any "unavailable" state already
+ * shown is cleared straight back. `RENDER_GRACE_MS` only controls how long we
+ * stay quiet before saying anything; a low value can make the warning fire a few
+ * seconds too eagerly on a very slow load, but the observer corrects that within
+ * one DOM mutation, it can never leave a working button stuck looking broken.
+ * The number itself is a conservative guess, not a measured one — this fix
+ * cannot run the app to time a real button fetch against a throttled connection
+ * (not runtime-verified) — picked to comfortably clear a slow-3G-class load
+ * without leaving a fast, genuinely broken load looking fine for too long.
+ */
+const RENDER_GRACE_MS = 6000;
+
+/**
+ * Measures whatever GSI actually put in the DOM rather than trusting the
+ * holder's own auto-size: if GSI positions its iframe absolutely (common for
+ * embedded-widget SDKs, precisely so they don't nudge host-page layout), the
+ * holder's own box can stay 0x0 even when the button rendered fine elsewhere in
+ * the viewport. Querying for the iframe first measures the thing that is
+ * actually clickable; falling back to the holder itself keeps this correct in
+ * the true-failure case too, where GSI inserts nothing at all.
+ */
+function isGoogleButtonRendered(container: HTMLElement): boolean {
+  const frame = container.querySelector('iframe');
+  const rect = (frame ?? container).getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0;
+}
 
 export function googleClientId(): string {
   try {
@@ -128,6 +198,13 @@ const GoogleSignIn: FC<Props> = ({ onIdToken, onError, nonce }) => {
   const shell = useRef<HTMLDivElement | null>(null);
   const rendered = useRef(false);
   const [loading, setLoading] = useState(true);
+  // B3: flips true only once `watchAvailability` (below) has given GSI a full
+  // RENDER_GRACE_MS and still sees a 0x0 button. Starts false so a fresh mount
+  // (or a remount on a fresh nonce) always gets that grace period before this
+  // says anything — see the comment above RENDER_GRACE_MS for why it's also
+  // safe to flip back false later if a slow load turns out to be a real one.
+  const [unavailable, setUnavailable] = useState(false);
+  const { t } = useTranslation('common_blog');
 
   /**
    * The parent re-creates both callbacks on every render, so depending on them
@@ -144,6 +221,44 @@ const GoogleSignIn: FC<Props> = ({ onIdToken, onError, nonce }) => {
   useEffect(() => {
     if (!googleConfigured() || !holder.current) return;
     let cancelled = false;
+    let stopWatching: (() => void) | null = null;
+
+    /**
+     * B3: once GSI has been asked to render, watch what it actually produced
+     * instead of trusting that `renderButton()` not throwing means it worked.
+     * See the RENDER_GRACE_MS comment above for why keeping the
+     * MutationObserver alive for the whole mount (not just until the grace
+     * timer fires) is what makes this safe against a slow-but-working load.
+     */
+    const watchAvailability = () => {
+      if (!holder.current) return;
+      const container = holder.current;
+      let graceTimer: ReturnType<typeof setTimeout> | null = null;
+
+      const check = () => {
+        if (!isGoogleButtonRendered(container)) return;
+        if (graceTimer) {
+          clearTimeout(graceTimer);
+          graceTimer = null;
+        }
+        setUnavailable(false);
+      };
+
+      const observer = new MutationObserver(check);
+      observer.observe(container, { childList: true, subtree: true, attributes: true });
+      check(); // covers a synchronous insert, so a fast load never waits on a mutation event
+
+      graceTimer = setTimeout(() => {
+        graceTimer = null;
+        if (cancelled || isGoogleButtonRendered(container)) return;
+        setUnavailable(true);
+      }, RENDER_GRACE_MS);
+
+      stopWatching = () => {
+        observer.disconnect();
+        if (graceTimer) clearTimeout(graceTimer);
+      };
+    };
 
     const render = () => {
       const api = gsi();
@@ -180,6 +295,7 @@ const GoogleSignIn: FC<Props> = ({ onIdToken, onError, nonce }) => {
           width
         });
         rendered.current = true;
+        watchAvailability();
       } catch {
         onErrorRef.current('Google sign-in couldn’t start. Please try another method.');
       } finally {
@@ -187,11 +303,22 @@ const GoogleSignIn: FC<Props> = ({ onIdToken, onError, nonce }) => {
       }
     };
 
+    const handleScriptError = () => {
+      setLoading(false);
+      onErrorRef.current('Couldn’t reach Google. Check your connection or use another method.');
+    };
+
     const existing = document.getElementById(SCRIPT_ID);
+    // Only removed in cleanup if THIS instance was the one that attached it —
+    // the script tag itself is deliberately never removed (it's a shared,
+    // page-global resource other mounts may still be waiting on).
+    let loadTarget: HTMLElement | null = null;
+    let ownedScript: HTMLScriptElement | null = null;
     if (gsi()) {
       render();
     } else if (existing) {
       existing.addEventListener('load', render, { once: true });
+      loadTarget = existing;
     } else {
       const script = document.createElement('script');
       script.id = SCRIPT_ID;
@@ -199,19 +326,21 @@ const GoogleSignIn: FC<Props> = ({ onIdToken, onError, nonce }) => {
       script.async = true;
       script.defer = true;
       script.addEventListener('load', render, { once: true });
-      script.addEventListener(
-        'error',
-        () => {
-          setLoading(false);
-          onErrorRef.current('Couldn’t reach Google. Check your connection or use another method.');
-        },
-        { once: true }
-      );
+      script.addEventListener('error', handleScriptError, { once: true });
       document.head.appendChild(script);
+      loadTarget = script;
+      ownedScript = script;
     }
 
     return () => {
       cancelled = true;
+      stopWatching?.();
+      // `{ once: true }` already self-removes a listener that FIRED; this only
+      // matters for one that unmounted before firing, so it doesn't keep this
+      // closure (and everything it captures) alive off a script tag that, per
+      // the comment above, is never itself removed.
+      loadTarget?.removeEventListener('load', render);
+      ownedScript?.removeEventListener('error', handleScriptError);
     };
     // Deliberately NOT depending on the callbacks: see the refs above. `nonce` is
     // fixed for the life of this component (the parent remounts via `key`).
@@ -253,12 +382,21 @@ const GoogleSignIn: FC<Props> = ({ onIdToken, onError, nonce }) => {
    * `scale(1.8)` on the holder: GIS renders at most 400x44 and the row is 412x65, so
    * an unscaled overlay would leave the top and bottom strips dead to the mouse. The
    * parent clips the overflow, so the hit area is exactly the row.
+   *
+   * ★ B3: the `holder` div below stays mounted in BOTH states, unavailable or not.
+   * It is the exact DOM node GSI's `renderButton` call was pointed at, and it's what
+   * `watchAvailability` keeps watching — swapping it out of the tree on "unavailable"
+   * would destroy the node GSI is using and make the self-heal described above
+   * impossible. Only the surrounding paint and interactivity change.
    */
   return (
     <div
       ref={shell}
       data-testid="google-signin-row"
-      className="relative mb-1 h-[64px] w-full overflow-hidden rounded-[14px] border border-line-11 bg-surface-1 focus-within:border-line-brand-10"
+      aria-disabled={unavailable}
+      className={`relative mb-1 h-[64px] w-full overflow-hidden rounded-[14px] border border-line-11 bg-surface-1 focus-within:border-line-brand-10 ${
+        unavailable ? 'opacity-60' : ''
+      }`}
     >
       <div
         aria-hidden="true"
@@ -274,13 +412,26 @@ const GoogleSignIn: FC<Props> = ({ onIdToken, onError, nonce }) => {
         </span>
         <span className="min-w-0 flex-1">
           <span className="block font-sans text-[15px] leading-[24px] font-semibold text-ink-2">Continue with Google</span>
-          <span className="block font-sans text-xs text-ink-10">No wallet, no extension, nothing to install.</span>
+          {/* B3: swaps to the detected-failure message in place of the normal
+              subtitle, right on the row the reader was about to click, rather
+              than only in a banner elsewhere on the page. */}
+          <span
+            className={`block font-sans text-xs ${unavailable ? 'text-ink-warn-3' : 'text-ink-10'}`}
+          >
+            {unavailable ? t('lite_auth.google_signin.unavailable') : 'No wallet, no extension, nothing to install.'}
+          </span>
         </span>
       </div>
 
       {/* Google's real button: invisible, on top, and the only thing that is
-          actually clickable or focusable in this row. */}
-      <div className="absolute inset-0 z-10 flex items-center justify-center opacity-0">
+          actually clickable or focusable in this row. `pointer-events-none`
+          while `unavailable` so a near-miss (tiny but nonzero) iframe can't
+          eat a click the row is now telling the reader not to make. */}
+      <div
+        className={`absolute inset-0 z-10 flex items-center justify-center opacity-0 ${
+          unavailable ? 'pointer-events-none' : ''
+        }`}
+      >
         <div ref={holder} style={{ transform: 'scale(1.8)' }} />
       </div>
     </div>

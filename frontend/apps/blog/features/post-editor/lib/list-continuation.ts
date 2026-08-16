@@ -1,6 +1,7 @@
 import { EditorView } from '@codemirror/view';
 import { Extension, StateEffect, StateField } from '@codemirror/state';
 import { insertNewlineContinueMarkup } from '@codemirror/lang-markdown';
+import { MARKER_ONLY_RE, TYPED_MARKER_RE } from './list-markers';
 
 /**
  * ★★★ THE COMPOSER USED TO DOUBLE EVERY LIST MARKER YOU TYPED (2026-08-13, audit §1.3).
@@ -45,14 +46,13 @@ import { insertNewlineContinueMarkup } from '@codemirror/lang-markdown';
  * else edits the document. It can never remove a character the author typed.
  */
 
-/** One markdown block marker: bullet, ordered, either with a task-list box, or a blockquote. */
-const MARKER = String.raw`(?:[-*+](?:[ \t]+\[[ xX]\])?|\d+[.)](?:[ \t]+\[[ xX]\])?|>)`;
-
-/** A line carrying nothing but indentation and one marker — i.e. a bullet nobody has written into yet. */
-const MARKER_ONLY_RE = new RegExp(`^[ \\t]*${MARKER}[ \\t]*$`);
-
-/** Exactly "indent + marker + one space" — the shape of a marker somebody has just finished typing. */
-const TYPED_MARKER_RE = new RegExp(`^[ \\t]*${MARKER}[ \\t]$`);
+/**
+ * `MARKER_ONLY_RE` / `TYPED_MARKER_RE` used to be defined here. Moved to
+ * `./list-markers` (2026-08-16, LOW 12) so `PostPreviewPanel.tsx` can reuse
+ * the exact same shape check without importing this file's `@codemirror/*`
+ * dependencies into its (statically-loaded) bundle — see that file's header
+ * comment for why the split matters.
+ */
 
 type ProvisionalMarker = {
   from: number;
@@ -212,6 +212,14 @@ const dropUnusedTrailingMarker = EditorView.domEventHandlers({
     return false;
   }
 });
+
+/**
+ * ★ LOW 12 (2026-08-16) — the live preview has the same "untouched auto-marker"
+ * problem this handler solves at blur, but on every debounced keystroke instead
+ * — see `stripUnfilledTrailingMarker` in `./list-markers` (kept out of this
+ * file specifically so `PostPreviewPanel.tsx` doesn't have to import
+ * `@codemirror/*` to use it).
+ */
 
 /** Everything above, minus the Enter binding — that one has to join the editor's existing Enter chain. */
 export const listContinuation: Extension = [

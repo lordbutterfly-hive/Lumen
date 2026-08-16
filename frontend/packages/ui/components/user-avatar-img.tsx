@@ -6,8 +6,17 @@ import { getUserAvatarDirectUrl, getUserAvatarUrl } from '@ui/lib/avatar-utils';
 
 type AvatarApiSize = 'small' | 'medium' | 'large';
 
-/** How long the direct image gets before we stop waiting on it. See the effect below. */
-const DIRECT_TIMEOUT_MS = 2500;
+/**
+ * How long the direct image gets before we stop waiting on it. See the effect
+ * below.
+ *
+ * Exported (2026-08-16, QA Low 9) so the feed thumbnail's own blocked/
+ * zero-pixel fallback (`medium-post-card.tsx`) waits the same window before
+ * concluding an image request is hung rather than picking a second, unrelated
+ * number for the same class of problem — a request an extension or ad
+ * blocker black-holes rather than 404s.
+ */
+export const DIRECT_TIMEOUT_MS = 2500;
 
 export interface UserAvatarImgProps {
   /** Hive (or Lumen-lite) account name. */
@@ -88,6 +97,40 @@ const TYPE_SCALE = [12, 13, 14, 15, 16, 17, 18, 20, 22, 24, 26, 30, 34, 44, 60];
  */
 function snapToScale(px: number): number {
   return TYPE_SCALE.reduce((best, step) => (Math.abs(step - px) < Math.abs(best - px) ? step : best));
+}
+
+/**
+ * ★ DETERMINISTIC PLACEHOLDER COLOUR, HASHED FROM THE USERNAME (2026-08-16,
+ * QA Low 1: same account rendered purple in one place and orange in another).
+ *
+ * `h = (h * 31 + charCode) % 360` is not a new formula here — it is already
+ * the hash three OTHER places in this app use to turn a handle into a colour:
+ * `avatarFill()` in `creator-tokens/ui/creators/creators-view.tsx`,
+ * the byte-identical `avatarFill()` in
+ * `creator-tokens/ui/token-page/token-market-view.tsx`, and again,
+ * independently, `initialAvatar()`'s `hash` in `app/api/avatar/route.ts`
+ * (the server-side SVG this component falls back to at the `proxy` stage).
+ * Reusing the formula here rather than a fourth reimplementation. It is not
+ * lifted into a shared export because every one of those call sites lives in
+ * an `apps/blog` feature module this fix is not scoped to touch, and
+ * `packages/ui` importing from `apps/blog` would also be a package-boundary
+ * violation the other direction — flagged for whoever next owns a shared
+ * `hashHue` util.
+ *
+ * Saturation/lightness are NOT copied from `avatarFill()` alongside the hash:
+ * that gradient decorates a bare swatch with no text on it, so it can afford
+ * a light second stop. This box always has a monogram letter drawn over it,
+ * so the colour has to hold contrast against ONE fixed text colour (white,
+ * matching `initialAvatar()`'s own `fill="#fff"`) at every one of the 360
+ * possible hues. Checked programmatically across the full hue range at
+ * `42% / 28%`: worst case is yellow/green (hue ~60), 6.06:1 white-on-fill —
+ * still comfortably clear of the 4.5:1 floor the neutral fallback below this
+ * was originally held to.
+ */
+function hashHue(username: string): number {
+  let h = 0;
+  for (let i = 0; i < username.length; i++) h = (h * 31 + username.charCodeAt(i)) % 360;
+  return h;
 }
 
 export function UserAvatarImg({
@@ -171,17 +214,23 @@ export function UserAvatarImg({
     return () => clearTimeout(timer);
   }, [stage]);
 
+  // Hashed once per render from the same trimmed value the letter below uses,
+  // so an empty username and the literal '?' glyph share one deterministic hue
+  // instead of the hash running on '' (still deterministic, but pointlessly a
+  // special case).
+  const hue = hashHue((username || '?').trim());
+
   return (
     <span
       aria-hidden={alt === '' ? true : undefined}
       className={cn(
-        // ★ Contrast fix (2026-08-13, O5 a11y build map item 4). `#9ca3af` on
-        // this box's own `#f1f3f5` background measured 2.28:1, well under the
-        // 4.5:1 floor (the fallback initial is never large/bold enough for
-        // the large-text exemption — max 14px at the biggest call site). This
-        // is the "grey-ground" replacement (`#6f6963`, 4.87:1 on `#f1f3f5`),
-        // not the plain-white one, because the background is baked into this
-        // same className.
+        // ★ Contrast (2026-08-16, revised for the hashed background above).
+        // White text is fixed rather than reading from a className because it
+        // has to hold 4.5:1 against a colour that is now username-dependent —
+        // see `hashHue`'s comment for the worst-hue measurement. The flat
+        // `#f1f3f5`/`#6f6963` pairing this replaced (2026-08-13, O5 a11y build
+        // map item 4) was tuned for a single fixed background and stops being
+        // valid the moment the background stops being fixed.
         // leading-none (2026-08-13, typography audit item 1): the monogram's
         // font-size is COMPUTED (`pixelSize * 0.36`), so it was frequently odd —
         // 43px at a 120px avatar — and Tailwind Preflight's inherited unitless
@@ -189,11 +238,16 @@ export function UserAvatarImg({
         // centred in a fixed square, so its line box only needs to be whole.
         // (Pass 2 additionally snaps the computed size to the type scale — see
         // `snapToScale` above — so it is now whole AND on-scale.)
-        'relative inline-flex shrink-0 items-center justify-center overflow-hidden bg-[#f1f3f5] font-sans font-bold uppercase leading-none text-[#6f6963]',
+        'relative inline-flex shrink-0 items-center justify-center overflow-hidden font-sans font-bold uppercase leading-none text-white',
         radiusClassName,
         className
       )}
-      style={{ width: pixelSize, height: pixelSize, fontSize: snapToScale(pixelSize * 0.36) }}
+      style={{
+        width: pixelSize,
+        height: pixelSize,
+        fontSize: snapToScale(pixelSize * 0.36),
+        backgroundColor: `hsl(${hue} 42% 28%)`
+      }}
       data-testid="user-avatar-img"
     >
       {(username || '?').trim().slice(0, 1)}

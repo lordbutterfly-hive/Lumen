@@ -102,7 +102,32 @@ function buildConnectSrcHosts(): Set<string> {
   // (`REACT_APP_VSC_MARKET_INDEXER_URL`, `magi-indexer.ts`'s `MagiIndexerClient`),
   // which is a genuinely separate host fetched directly from the client and is
   // NOT touched here — it keeps its grant below.
+  // ★★★ THE MAGI L1 NODE THE LAUNCH BROADCASTS TO (2026-08-16, owner, hit live:
+  // "Your token was not launched. Nothing was charged. ... (possible network or
+  // CORS error): POST https://testnet.techcoderx.com").
+  //
+  // It was not a CORS error. That node answers a cross-origin POST with
+  // `access-control-allow-origin: *` (verified against the live host the same
+  // day, HTTP/2 200). The request never reached it: `connect-src` did not list
+  // it, so the browser refused before any network call, and the wallet library
+  // reports a CSP refusal as the same generic "network or CORS" string — which
+  // is why this looked like someone else's server problem for a while.
+  //
+  // Two traps this sits between, both already live in this function:
+  //   * The grant CANNOT be a literal or a default-set entry, because
+  //     `REACT_APP_ALLOWED_HIVE_API_NODES` CLEARS the default set above. It has
+  //     to be added after that clear — here.
+  //   * It CANNOT be dropped the way the two GQL vars were. Those were removed
+  //     because their reads go through a same-origin proxy. This one is a
+  //     wallet-signed BROADCAST: `features/creator-tokens/lib/vsc/hive-chain.ts`
+  //     builds a wax chain in the BROWSER against this endpoint, and the
+  //     signature is produced there too. There is no server hop to move it to
+  //     without taking the user's signing out of their own browser.
+  //
+  // Derived from the var the feature itself reads, so a redeploy that repoints
+  // the network cannot leave the CSP behind on the old host.
   for (const varName of [
+    'REACT_APP_CREATOR_TOKENS_HIVE_API',
     'REACT_APP_CREATOR_TOKENS_INDEXER_URL',
     'REACT_APP_VSC_MARKET_INDEXER_URL'
   ]) {

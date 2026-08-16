@@ -8,6 +8,7 @@ import { dbPostToEntry } from '@/blog/lib/lite/render/db-post-to-entry';
 import { resolvePublicNames } from '@/blog/lib/lite/render/current-name';
 import { applyOwnerBlocksToAuthoredEntries } from '@/blog/lib/lite/social/block-filter';
 import { ParentRef } from '@/blog/lib/lite/types';
+import { litePostIdOf } from '@/blog/lib/lite/render/lite-post-id';
 import type { Entry } from '@hive/common-hiveio-packages/wax';
 
 const logger = getLogger('app');
@@ -75,7 +76,27 @@ function parseParentRef(v: unknown): ParentRef | undefined {
     HIVE_NAME.test(o.author.trim().toLowerCase()) &&
     isReferenceablePermlink(o.permlink.trim())
   ) {
-    return { type: 'chain', author: o.author.trim().toLowerCase(), permlink: o.permlink.trim() };
+    const permlink = o.permlink.trim();
+    // H5, 2026-08-16: a `type: 'chain'` ref whose permlink is actually OUR OWN
+    // synthetic identity (`lite-<id>` pre-publish, `lumen-<id>` published — see
+    // `render/lite-post-id.ts`) is a LITE parent wearing a chain parent's clothes.
+    // The client captures whatever identity a lite post is DISPLAYED under at
+    // reply time, and pre-publish that is `{author: <lite display name>,
+    // permlink: 'lite-<id>'}` — neither half is the real on-chain coordinate the
+    // parent will end up at. Sending that through as-is let `explicitParent`
+    // (post-service.ts) pin it VERBATIM as the permanent, un-changeable publish
+    // parent, which can never resolve: the real parent publishes under
+    // `lumen-<id>`, never `lite-<id>`, under the frontend account, never the
+    // author's own name. This is the exact failure worker.ts's
+    // `resolveParentOnChain` already has a name for and was written to prevent
+    // ("found 2026-08-08... the reply's parent read `hbd-temp/lite-<ulid>`") —
+    // recognising it HERE means it is pinned CORRECTLY the first time (deterministic
+    // `lumen-<id>` + the frontend account) instead of needing that worker-side
+    // rescue to even have a chance of working, and every caller downstream only
+    // ever sees the type the ref actually is.
+    const liteId = litePostIdOf({ permlink });
+    if (liteId) return { type: 'lite', id: liteId };
+    return { type: 'chain', author: o.author.trim().toLowerCase(), permlink };
   }
   return undefined;
 }

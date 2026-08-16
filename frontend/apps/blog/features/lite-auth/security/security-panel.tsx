@@ -1,10 +1,13 @@
 'use client';
 
 import { FC, useCallback, useEffect, useState } from 'react';
+import type { TFunction } from 'i18next';
 import { useRouter } from 'next/navigation';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { useSignOut } from '@smart-signer/lib/auth/use-sign-out';
+import { useTranslation } from '@/blog/i18n/client';
+import { dateToShow } from '@ui/lib/parse-date';
 import {
   bindGoogle,
   bindWallet,
@@ -46,7 +49,7 @@ import GoogleSignIn, { googleConfigured } from '../login/google-signin';
 const COPY = {
   title: 'Sign-in & recovery',
   intro:
-    'Your Lumen account has no password. Whatever is listed here is how you get back in — so it is worth having more than one.',
+    'Your Lumen account has no password. Whatever is listed here is how you get back in. So it is worth having more than one.',
   atRisk:
     'You have only one way to sign in. If you lose it, your account and everything you have written go with it. Nobody can restore it, including us.',
   safe: 'You have more than one way to sign in. If you lose one, you can still get back in with another.',
@@ -60,12 +63,12 @@ const COPY = {
   linkedOk: 'Linked. You can now sign in with this too.',
   connectorMissing: 'One-click wallet linking isn’t set up on this deployment yet.',
   googleMissing: 'Google linking isn’t set up on this deployment yet.',
-  stepUpFailed: 'Could not start linking — please try again.',
-  taproot: 'Taproot addresses aren’t supported yet — use a SegWit (bc1q…) or legacy (1…) address.',
+  stepUpFailed: 'Could not start linking. Please try again.',
+  taproot: 'Taproot addresses aren’t supported yet. Use a SegWit (bc1q…) or legacy (1…) address.',
   loading: 'Loading…',
   signOutAllTitle: 'Signed in somewhere else?',
   signOutAllBody:
-    'Signing out normally only signs out the device you are using. If you think someone else has access to your account, this ends every session everywhere — including this one.',
+    'Signing out normally only signs out the device you are using. If you think someone else has access to your account, this ends every session everywhere. Including this one.',
   signOutAll: 'Sign out on all devices',
   signOutAllConfirm: 'Yes, sign out everywhere',
   signOutAllCancel: 'Cancel',
@@ -95,13 +98,22 @@ const METHOD_MARK: Record<LiteAuthMethodName, { symbol: string; bg: string }> = 
   evm_wallet: { symbol: '◈', bg: '#627eea' }
 };
 
-function formatDate(value: string | null): string {
-  if (!value) return '';
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString();
+/**
+ * Low 5: this used to be `new Date(value).toLocaleDateString()` with no locale
+ * argument, so it rendered in whatever default locale the runtime falls back to
+ * (US-style "8/16/2026") regardless of the reader's actual browser locale — while
+ * the profile page's "Joined August 2026" (profile-identity.tsx) already goes
+ * through `dateToShow`, which formats via the app's own translated month names
+ * instead of trusting the runtime's locale guess. Reusing that helper here keeps
+ * both dates on the one presentation the app already has, rather than adding a
+ * second date format to keep in sync with it.
+ */
+function formatDate(value: string | null, t: TFunction<'common_blog', undefined>): string {
+  if (!value || Number.isNaN(new Date(value).getTime())) return '';
+  return dateToShow(value, t);
 }
 
-const MethodRow: FC<{ method: LiteAuthMethod }> = ({ method }) => {
+const MethodRow: FC<{ method: LiteAuthMethod; t: TFunction<'common_blog', undefined> }> = ({ method, t }) => {
   const mark = METHOD_MARK[method.method] ?? { symbol: '•', bg: '#9ca3af' };
   return (
     <li className="flex items-center gap-3 rounded-xl border border-line-11 bg-surface-1 p-3">
@@ -124,7 +136,7 @@ const MethodRow: FC<{ method: LiteAuthMethod }> = ({ method }) => {
         <span className="block truncate font-mono text-[13px] leading-[20px] text-ink-14">
           {method.hint ?? ''}
           {method.hint && method.createdAt ? ' · ' : ''}
-          {formatDate(method.createdAt)}
+          {formatDate(method.createdAt, t)}
         </span>
       </span>
     </li>
@@ -132,6 +144,7 @@ const MethodRow: FC<{ method: LiteAuthMethod }> = ({ method }) => {
 };
 
 const SecurityPanel: FC = () => {
+  const { t } = useTranslation('common_blog');
   const { user } = useUserClient();
   /**
    * ★★★ SAME RACE AS EVERY OTHER IDENTITY GATE, COMPOUNDED BY TIER
@@ -166,6 +179,12 @@ const SecurityPanel: FC = () => {
   const [loadFailed, setLoadFailed] = useState(false);
 
   const isLite = user?.isLoggedIn && user.account_tier === 'lite';
+  // M11: "Continue with Google" belongs in "Add another way to sign in" only while
+  // Google isn't already one of the ways in. Once it's bound it's already shown
+  // above as the Primary method, and offering it again here is the same option
+  // twice on one screen — confusing on a page whose entire job is being clear
+  // about what a reader's recovery options are.
+  const googleLinked = methods?.some((m) => m.method === 'google_passkey') ?? false;
 
   const reload = useCallback(async () => {
     setLoadFailed(false);
@@ -187,8 +206,11 @@ const SecurityPanel: FC = () => {
 
   // Pre-arm a step-up nonce for the Google button. It is single-use and short-lived,
   // so it is refreshed after every successful link.
+  // M11: skip once Google is already linked — there is no button left to arm a
+  // nonce for, and requesting one would just spend a single-use challenge on
+  // the server for nothing.
   useEffect(() => {
-    if (!isLite || !googleConfigured()) return;
+    if (!isLite || !googleConfigured() || googleLinked) return;
     let cancelled = false;
     (async () => {
       const stepUp = await requestStepUp();
@@ -197,7 +219,7 @@ const SecurityPanel: FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [isLite, done]);
+  }, [isLite, done, googleLinked]);
 
   const afterLink = async () => {
     setDone(true);
@@ -342,7 +364,7 @@ const SecurityPanel: FC = () => {
           </h2>
           <ul className="mt-2 flex flex-col gap-2">
             {methods.map((m) => (
-              <MethodRow key={m.credentialId} method={m} />
+              <MethodRow key={m.credentialId} method={m} t={t} />
             ))}
           </ul>
         </>
@@ -373,7 +395,13 @@ const SecurityPanel: FC = () => {
           <p className="text-[13px] leading-[20px] text-ink-14">{COPY.connectorMissing}</p>
         ) : null}
 
-        {googleConfigured() ? (
+        {googleLinked ? (
+          // M11: Google is already listed above as the linked Primary method —
+          // offering it again here as something to add is the same option twice.
+          <p className="text-[13px] leading-[20px] text-ink-14">
+            {t('lite_auth.security.google_already_linked')}
+          </p>
+        ) : googleConfigured() ? (
           googleNonce ? (
             <GoogleSignIn
               key={googleNonce}

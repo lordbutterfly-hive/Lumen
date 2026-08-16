@@ -8,7 +8,26 @@ const VotersDetailsData = ({ post }: { post: Entry }) => {
   const { t } = useTranslation('common_blog');
   const { data } = useActiveVotesQuery(post.author, post.permlink);
 
-  const votes = data && prepareVotes(post, data);
+  /**
+   * ★★★ DOWNVOTERS ARE NOT LISTED (2026-08-16, spec §3.7 of "Demote the downvote
+   * to an overflow-menu action").
+   *
+   * The downvote arrow and every downvote tally are gone from the UI, so a list
+   * that still named downvoters would be the one place the product advertised
+   * downvoting, and it would disagree with the number beside the upvote arrow:
+   * that tally counts upvotes only, while this list came straight from
+   * `active_votes`, which contains both.
+   *
+   * Filtered on `rshares > 0` rather than on the formatted value: `prepareVotes`
+   * derives a display amount from the reward pool, so a genuine upvote can round
+   * to $0.00 on a small post and would be dropped by an amount-based test. The
+   * sign of rshares is the actual direction of the vote.
+   *
+   * The MATHS is untouched: payout still reflects downvotes exactly as before
+   * (they reduce net_rshares upstream of any display code). Only the roster is
+   * filtered.
+   */
+  const votes = data && prepareVotes(post, data).filter((v) => v.rshares > 0);
 
   const sliced =
     votes &&

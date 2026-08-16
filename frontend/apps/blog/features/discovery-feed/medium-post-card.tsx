@@ -1,14 +1,18 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { MoreHorizontal, AlertTriangle } from 'lucide-react';
-import { Link, UserAvatarImg } from '@hive/ui';
+import { useEffect, useRef, useState } from 'react';
+import { MoreHorizontal, AlertTriangle, ImageOff } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { Link, UserAvatarImg, DIRECT_TIMEOUT_MS } from '@hive/ui';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger
 } from '@hive/ui/components/dropdown-menu';
+import { Popover, PopoverTrigger, PopoverContent } from '@ui/components/popover';
+import { Slider } from '@ui/components/slider';
 import { useTranslation } from '@/blog/i18n/client';
 import { useLiteOverlay } from '@/blog/lib/lite/client/use-lite-overlay';
 import { Icons } from '@ui/components/icons';
@@ -23,6 +27,11 @@ import { useLumenBlock } from '@/blog/lib/lite/client/use-lumen-block';
 import { getPostSummary, normalizeTitle } from '@/blog/lib/utils';
 import { find_first_img } from '@/blog/features/list-of-posts/post-img';
 import VotesComponentWrapper from '@/blog/features/votes/votes-component-wrapper';
+import { BladeGlyph, voteStyles } from '@/blog/features/votes/blade';
+import { useVoteMutation } from '@/blog/features/votes/hooks/use-vote-mutation';
+import type { MyVote } from '@/blog/features/votes/vote-tallies';
+import { fetchListVotesByCommentVoter } from '@/blog/lib/chain-fetch';
+import { fetchLiteEngagement } from '@/blog/lib/lite/client/lite-engagement';
 import { ReblogDialog } from '@/blog/features/list-of-posts/reblog-dialog';
 import { useReblogMutation } from '@/blog/features/list-of-posts/hooks/use-reblog-mutation';
 import PostCardCommentTooltip from '@/blog/features/list-of-posts/post-card-comment-tooltip';
@@ -58,7 +67,11 @@ const LABELS = {
  */
 export default function MediumPostCard({ post, mark }: { post: Entry; mark?: RankMark }) {
   const { t } = useTranslation('common_blog');
-  const { user } = useUserClient();
+  // ★ `sessionUnavailable` added alongside the pre-existing `user` (2026-08-16,
+  // downvote-in-overflow-menu). Both feed `tierPending` below — see that
+  // block's comment for why the raw client answer, not just `identity`, is
+  // needed to submit a vote safely.
+  const { user, sessionUnavailable } = useUserClient();
   /**
    * ★ GAP-2 FIX (owner ruling 2026-08-12, "Block does not render reliably").
    * `user.isLoggedIn` from raw `useUserClient()` cannot answer during SSR and
@@ -125,6 +138,125 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
     }
   };
 
+  /**
+   * ★★★ DOWNVOTE, MOVED HERE FROM THE INLINE ARROW (2026-08-16, spec "Demote
+   * the downvote to an overflow-menu action" — the other half of the
+   * `FEATURE_INLINE_DOWNVOTE` work already done in votes-component.tsx).
+   *
+   * That file's whole down side (Popover weight-picker, `VoteRemovalDialog`
+   * for an existing downvote) is UNMOUNTED while the flag is off — its
+   * `showDownvote` prop cannot be flipped on for just this card without
+   * bringing the inline arrow back everywhere at once, which is the exact
+   * thing that pass removed. So the popover below is a second Popover
+   * INSTANCE, never a second DESIGN: the same `Popover`/`PopoverContent`/
+   * `Slider` primitives, the same `voteStyles.btn`/`voteStyles.down` blade
+   * button (imported from `blade.tsx`, not redrawn), the same warning-copy
+   * translation keys, and the same `useVoteMutation()` write path — nothing
+   * downstream of "which weight got submitted" changes.
+   *
+   * The vote state below is RE-DERIVED, not imported — `votes-component.tsx`
+   * exports no hook for it, and this pass touches only this file — but it
+   * copies the exact precedence that file's own "WHICH WAY I VOTED" comment
+   * documents: `userVote` (the live, optimistic React Query row) FIRST,
+   * `checkVote` (the SSR `active_votes` snapshot) only as the fallback,
+   * because `active_votes` cannot represent "I just withdrew" and a
+   * `checkVote`-first read would resurrect a vote this reader just removed.
+   * Both read the SAME cache key (`['votes', author, permlink, voter]`)
+   * `useVoteMutation`'s `onMutate` already writes to, so a vote cast from
+   * THIS popover updates the tint/label here immediately, and is picked up
+   * by the footer's own `VotesComponentWrapper` below for free — same key,
+   * same cache, no extra plumbing.
+   */
+  const voter = identity.username;
+  const isLite = user?.account_tier === 'lite';
+  const checkVote = post.active_votes.find((entry) => entry.voter === voter);
+  const [downvoteActed, setDownvoteActed] = useState(false);
+  const { data: userVotes } = useQuery({
+    queryKey: ['votes', post.author, post.permlink, voter],
+    queryFn: () =>
+      isLite
+        ? fetchLiteEngagement(post.author, post.permlink)
+        : fetchListVotesByCommentVoter(post.author, post.permlink, voter),
+    enabled: isLite ? !!voter : !!checkVote || downvoteActed,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    refetchOnMount: false
+  });
+  const userVote =
+    userVotes?.votes[0] && userVotes.votes[0].voter === voter ? userVotes.votes[0] : undefined;
+  const myVote: MyVote = userVote
+    ? userVote.vote_percent > 0
+      ? 'up'
+      : userVote.vote_percent < 0
+        ? 'down'
+        : 'none'
+    : checkVote
+      ? Number(checkVote.rshares) < 0
+        ? 'down'
+        : Number(checkVote.rshares) > 0
+          ? 'up'
+          : 'none'
+      : 'none';
+  const vote_downvoted = myVote === 'down';
+  /**
+   * ★ `tierPending`, COPIED FROM votes-component.tsx (2026-08-13, A1 review
+   * V-2 there). On a cold tab, `identity.isLoggedIn` can answer TRUE from the
+   * server cookie before the client's OWN `account_tier` has loaded — voting
+   * in that window takes the full-Hive-chain path even for a keyless Lumen
+   * account, which has no keys and always fails. See that file's long
+   * comment for the three near-misses baked into this exact condition; it is
+   * reproduced verbatim rather than re-derived so the two surfaces cannot
+   * silently disagree about when a vote is safe to submit.
+   */
+  const tierPending =
+    identity.isLoggedIn && !identity.clientAnswered && !user.isLoggedIn && !sessionUnavailable;
+  const voteMutation = useVoteMutation();
+  const [downvoteSlider, setDownvoteSlider] = useState<number[]>([100]);
+  const [downvotePopoverOpen, setDownvotePopoverOpen] = useState(false);
+  const overflowTriggerRef = useRef<HTMLButtonElement>(null);
+  const downvoteMenuDisabled = voteMutation.isLoading || tierPending;
+  const submitDownvote = async (weight: number) => {
+    if (tierPending) return;
+    setDownvoteActed(true);
+    try {
+      await voteMutation.mutateAsync({ voter, author: post.author, permlink: post.permlink, weight });
+      // Closes the picker on a successful cast — this Popover, unlike
+      // votes-component.tsx's, is not unmounted by a branch swap when
+      // `vote_downvoted` flips (see the long note above), so it has to close
+      // itself. Left open on error so the reader can retry without
+      // re-opening the menu.
+      setDownvotePopoverOpen(false);
+    } catch (error) {
+      setDownvoteActed(false);
+      handleError(error, {
+        method: 'vote',
+        params: { voter, author: post.author, permlink: post.permlink, weight }
+      });
+    }
+  };
+  /**
+   * ★ RULE 2 (spec): NEVER NEST A RADIX OVERLAY INSIDE A `DropdownMenuItem` —
+   * it breaks focus return, because the item unmounts mid-interaction along
+   * with whatever Radix parented under it. `onSelect` here does nothing but
+   * flip state THIS COMPONENT owns; Radix closes the menu on its own default
+   * `onSelect` behaviour (not prevented below), and the `Popover` that
+   * actually shows the weight picker is a SIBLING of the `DropdownMenu`,
+   * controlled entirely by that state, not a descendant of the item.
+   */
+  const handleDownvoteSelect = () => {
+    if (downvoteMenuDisabled) return;
+    if (vote_downvoted) {
+      // Already downvoted: the item's own label already says the action
+      // ("Remove your downvote" — see the menu below), so selecting it is
+      // itself the confirmation. Same call `VoteRemovalDialog`'s onConfirm
+      // makes for the inline arrow (votes-component.tsx: `submitVote(0)`) —
+      // no second dialog for this branch, so rule 2 does not even apply here.
+      submitDownvote(0);
+    } else {
+      setDownvotePopoverOpen(true);
+    }
+  };
+
   // ★ NSFW GATE (2026-08-09) — see lib/nsfw.ts for why this lives here at all.
   // Every hook runs before the `hide` early-return below, so hook order stays
   // stable across renders of the same list even as the preference changes.
@@ -169,6 +301,51 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
   const extractedImage = find_first_img(post);
   const authorAvatarFallback = getUserAvatarUrl(displayAuthor, 'large');
   const thumbnail = extractedImage && extractedImage !== authorAvatarFallback ? extractedImage : '';
+
+  /**
+   * ★ AN HONEST FALLBACK FOR A FAILED THUMBNAIL (2026-08-16, QA Low 9).
+   *
+   * Before this, `onError` on the `<img>` below just set `visibility: hidden`
+   * — the 190x132 box, its rounded corners and its `bg-[#f4f5f7]` fill all
+   * stayed, so a dead thumbnail was a bare grey rectangle with nothing in it:
+   * indistinguishable from a slow-loading image, and with `alt=""` (correct
+   * while the image is showing — the headline beside it is the real label,
+   * per the X-7 fix below), a screen reader announces nothing there either.
+   *
+   * `onError` alone also isn't the whole story: exactly the failure mode
+   * `packages/ui/components/user-avatar-img.tsx` was hardened for on
+   * 2026-08-15 applies here too — Chrome's Opaque Response Blocking, a
+   * privacy extension, or a DNS black-hole can complete the request with
+   * ZERO pixels and never fire `onError` at all. So this mirrors that
+   * component's approach instead of only handling the `onError` half: a ref
+   * on the `<img>`, and a timeout (the SAME `DIRECT_TIMEOUT_MS` window, so a
+   * slow-but-real load on a bad connection isn't punished any harder than an
+   * avatar is) that checks `complete && naturalWidth > 0` and promotes to
+   * "failed" if the image never produced pixels.
+   */
+  const [thumbnailFailed, setThumbnailFailed] = useState(false);
+  const thumbnailImgRef = useRef<HTMLImageElement>(null);
+  useEffect(() => {
+    // `nsfwShown` guards the deliberate no-request-until-revealed case just
+    // below (an `<img>` never mounts while a flagged post is hidden, so the
+    // ref would just be null) — AND re-arms this effect the moment a reveal
+    // actually mounts the `<img>`, since it is a dependency here. Without it
+    // the one-shot timer from first mount (when the element was still
+    // absent) would never be replaced, and a blocked/zero-pixel image
+    // revealed after that would only ever be caught by `onError`, missing
+    // exactly the case this effect exists for.
+    if (!thumbnail || thumbnailFailed || !nsfwShown) return;
+    const timer = setTimeout(() => {
+      const el = thumbnailImgRef.current;
+      if (!el || (el.complete && el.naturalWidth > 0)) return;
+      setThumbnailFailed(true);
+    }, DIRECT_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+    // Re-arms if the post's thumbnail URL itself changes (a different card
+    // reusing this component instance under the same key never happens in
+    // this feed, but a stale timer racing a new `thumbnail` would otherwise
+    // be a subtle bug).
+  }, [thumbnail, thumbnailFailed, nsfwShown]);
 
   const handleReblog = async () => {
     try {
@@ -389,48 +566,172 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
             disabled" rule `useModerationStatus` used, now enforced by
             `useLumenBlock`'s own `available` answer instead. */}
         {block.available || block.unknown ? (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                aria-label={t('profile.overflow_menu_label')}
-                // ★ Contrast fix (2026-08-13, O5 a11y build map item 4). `#9aa1ab`
-                // measured 2.61:1 on this button's default white background —
-                // `#7a7268` (4.74:1 on white) is the plain-white replacement;
-                // the hover state already swaps to the higher-contrast
-                // `#4b5563` so the grey-ground variant isn't needed here.
-                className="ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[#7a7268] transition-colors hover:bg-[#f4f5f7] hover:text-[#4b5563]"
-                data-testid="medium-card-overflow-trigger"
-              >
-                <MoreHorizontal className="h-4 w-4" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-52">
-              {block.available ? (
+          // ★ THE POPOVER'S ANCHOR IS AN INVISIBLE SIBLING, NOT THE REAL
+          // BUTTON (2026-08-16). The obvious composition — wrap the same
+          // button in both `PopoverTrigger asChild` and `DropdownMenuTrigger
+          // asChild`, the way votes-component.tsx nests Tooltip inside a
+          // vote trigger — does NOT work here and was tried first: Radix's
+          // `Popover.Trigger` attaches its OWN click handler that calls
+          // `onOpenChange` regardless of whether `open` is controlled, so
+          // every click on "···" would also toggle the downvote popover.
+          // That composition is safe in votes-component.tsx only because
+          // Tooltip listens for hover/focus, never click — two click
+          // listeners on one element genuinely collide.
+          //
+          // So the Popover's anchor is a separate, `pointer-events-none`
+          // `<span>` absolutely positioned over the real button (via the
+          // `relative` wrapper below) — present only so Radix's Popper has a
+          // rect to pin the picker to. It can never receive a click itself
+          // (pointer-events: none), and being a SIBLING rather than an
+          // ancestor of the button, a click ON the button never bubbles
+          // through it either — so `open` changes only when
+          // `handleDownvoteSelect` or the Popover's own dismiss handling
+          // (outside click / Escape) call `setDownvotePopoverOpen`.
+          <div className="relative ml-auto flex shrink-0">
+            <Popover open={downvotePopoverOpen} onOpenChange={setDownvotePopoverOpen}>
+              <PopoverTrigger asChild>
+                <span aria-hidden="true" tabIndex={-1} className="pointer-events-none absolute inset-0" />
+              </PopoverTrigger>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    ref={overflowTriggerRef}
+                    type="button"
+                    aria-label={
+                      vote_downvoted
+                        ? t('profile.overflow_menu_label_downvoted')
+                        : t('profile.overflow_menu_label')
+                    }
+                    // ★ Contrast fix (2026-08-13, O5 a11y build map item 4). `#9aa1ab`
+                    // measured 2.61:1 on this button's default white background —
+                    // `#7a7268` (4.74:1 on white) is the plain-white replacement;
+                    // the hover state already swaps to the higher-contrast
+                    // `#4b5563` so the grey-ground variant isn't needed here.
+                    //
+                    // ★ DOWNVOTED TINT (2026-08-16, spec §4b) — `#5b6470` /
+                    // dark `#a3adba` are not new colours: they are
+                    // `--lm-vote-slate` from vote-control.module.css, the exact
+                    // shade the Blade's own down arrow already used for "this
+                    // is mine" (`.down.mine`). That file also documents WHY
+                    // the light value has a dark counterpart rather than
+                    // reusing one hex everywhere: `#5b6470` on the dark card
+                    // background measured under 3:1 contrast. This button
+                    // cannot reach that CSS custom property directly (it is
+                    // scoped to `.root`, which nothing here renders), so the
+                    // two literals are duplicated with this comment as the
+                    // pointer back to the source of truth — not
+                    // independently invented. Colour is not the only signal:
+                    // the aria-label above says so in words too, since a
+                    // colour-only change is not accessible on its own.
+                    className={cn(
+                      'flex h-6 w-6 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-[#f4f5f7] hover:text-[#4b5563]',
+                      vote_downvoted ? 'text-[#5b6470] dark:text-[#a3adba]' : 'text-[#7a7268]'
+                    )}
+                    data-testid="medium-card-overflow-trigger"
+                  >
+                    <MoreHorizontal className="h-4 w-4" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-52">
+                {/* ★ NOT `text-destructive` (spec §5) — on the post page this
+                    item sits beside `Flag post`, and colouring it the same red
+                    would make a routine curation action read as the same kind
+                    of act as reporting abuse. Plain item styling only. */}
                 <DropdownMenuItem
-                  onClick={handleBlockClick}
-                  disabled={block.busy}
-                  className="cursor-pointer text-destructive focus:text-destructive"
-                  data-testid="medium-card-block-menu-item"
+                  onSelect={handleDownvoteSelect}
+                  disabled={downvoteMenuDisabled}
+                  data-testid="medium-card-downvote-menu-item"
                 >
-                  {block.isBlocking ? t('user_profile.unblock_button') : t('user_profile.block_button')}
+                  {vote_downvoted ? t('cards.post_card.remove_downvote') : t('cards.post_card.downvote')}
                 </DropdownMenuItem>
-              ) : (
-                // `unknown`, not `available`: the read failed rather than "this pair
-                // cannot be blocked" (use-lumen-block.ts). A disabled item that says
-                // so, not a vanished menu, is the honest answer during a backend
-                // outage.
-                <DropdownMenuItem
-                  disabled
-                  className="cursor-not-allowed"
-                  data-testid="medium-card-block-menu-item-unknown"
-                  title={t('user_profile.block_status_unknown_hint')}
-                >
-                  {t('user_profile.block_status_unknown')}
-                </DropdownMenuItem>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
+                <DropdownMenuSeparator />
+                {block.available ? (
+                  <DropdownMenuItem
+                    onClick={handleBlockClick}
+                    disabled={block.busy}
+                    className="cursor-pointer text-destructive focus:text-destructive"
+                    data-testid="medium-card-block-menu-item"
+                  >
+                    {block.isBlocking ? t('user_profile.unblock_button') : t('user_profile.block_button')}
+                  </DropdownMenuItem>
+                ) : (
+                  // `unknown`, not `available`: the read failed rather than "this pair
+                  // cannot be blocked" (use-lumen-block.ts). A disabled item that says
+                  // so, not a vanished menu, is the honest answer during a backend
+                  // outage.
+                  <DropdownMenuItem
+                    disabled
+                    className="cursor-not-allowed"
+                    data-testid="medium-card-block-menu-item-unknown"
+                    title={t('user_profile.block_status_unknown_hint')}
+                  >
+                    {t('user_profile.block_status_unknown')}
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <PopoverContent
+              className="z-50 max-w-xs rounded-lg bg-background-secondary p-4 shadow-lg"
+              align="end"
+              data-testid="medium-card-downvote-popover"
+              // ★ RULE 3 (spec): FOCUS RETURNS TO THE "···" TRIGGER, EXPLICITLY.
+              // Radix's default `onCloseAutoFocus` restores focus to whatever
+              // was focused before the Popover opened — here that is whatever
+              // the DropdownMenu left focus on mid-close, not guaranteed to be
+              // this exact button since this Popover has no visible trigger of
+              // its own to fall back on. Rather than rely on that default,
+              // `preventDefault` it and focus the trigger ref directly: this
+              // fires on Escape, on an outside click, AND on a successful cast
+              // (see `submitDownvote`'s own close above) — the same, one place.
+              onCloseAutoFocus={(event) => {
+                event.preventDefault();
+                overflowTriggerRef.current?.focus();
+              }}
+            >
+              <div className="flex h-full items-center gap-2">
+                {/* `voteStyles.root` wraps just this button so the two custom
+                    properties `.down`/`.mine`/`.btn` read (`--lm-vote-muted`,
+                    `--lm-vote-slate`) resolve — those are scoped to `.root` in
+                    vote-control.module.css and this popover renders outside
+                    any `VoteControl` tree. `.sm` matches the density the
+                    footer's own `VotesComponentWrapper` already uses on this
+                    card (`size="sm"`, its default for `type="post"`). */}
+                <span className={cn(voteStyles.root, voteStyles.sm)}>
+                  <button
+                    type="button"
+                    data-testid="medium-card-downvote-confirm"
+                    aria-label={t('cards.post_card.downvote')}
+                    className={cn(voteStyles.btn, voteStyles.down)}
+                    disabled={downvoteMenuDisabled}
+                    onClick={() => submitDownvote(-downvoteSlider[0] * 100)}
+                  >
+                    <BladeGlyph />
+                  </button>
+                </span>
+                <Slider
+                  dataTestId="medium-card-downvote-slider"
+                  defaultValue={downvoteSlider}
+                  value={downvoteSlider}
+                  min={1}
+                  className="w-36"
+                  onValueChange={(value: number[]) => setDownvoteSlider(value)}
+                />
+                <div className="w-fit text-destructive" data-testid="medium-card-downvote-slider-percentage-value">
+                  -{downvoteSlider}%
+                </div>
+              </div>
+              <div className="flex flex-col gap-1 pt-2 text-sm" data-testid="medium-card-downvote-description">
+                <p>{t('cards.post_card.downvote_warning')}</p>
+                <ul>
+                  <li>{t('cards.post_card.reason_1')}</li>
+                  <li>{t('cards.post_card.reason_2')}</li>
+                  <li>{t('cards.post_card.reason_3')}</li>
+                  <li>{t('cards.post_card.reason_4')}</li>
+                </ul>
+              </div>
+            </PopoverContent>
+            </Popover>
+          </div>
         ) : null}
       </div>
 
@@ -464,7 +765,33 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
           placeholder) the text column simply takes the full row on its own. */}
       <div className="mt-[13px] flex flex-wrap items-start gap-[26px]">
         <div className="min-w-0 flex-1 basis-[240px]">
-          {isNote ? null : (
+          {/*
+           * ★★★ A NOTE WITH NOTHING TO SHOW MUST NOT RENDER AN EMPTY CARD
+           * (2026-08-16, owner: "the post looks like a comment").
+           *
+           * The note branch drops the headline and shows the note's own text
+           * instead. That is right when there IS text. When `dek` is empty the
+           * old shape rendered NEITHER: `{isNote ? null : title}` followed by
+           * `{isNote && dek ? note : ...}` leaves both arms empty, and the card
+           * collapsed to an avatar, a name, a timestamp and an action row. On
+           * the profile it read exactly like an empty comment.
+           *
+           * This is not hypothetical or rare: `lumen_post.body` is EMPTY for
+           * every row (`length(body) = 0` measured across all six of the QA
+           * account's posts), because the body travels in the publish payload
+           * and lives on chain, not in that column. So every Lumen short post
+           * hit this case.
+           *
+           * The title is the only text we have then, so show it in the note's
+           * own style. This cannot reintroduce the duplication the note marker
+           * exists to remove: that needed title AND body both present, and this
+           * branch only runs when the body is missing.
+           */}
+          {isNote && !dek ? (
+            <Link href={href} className="block" data-testid="medium-card-note-title">
+              <p className="line-clamp-4 font-serif text-[19px] leading-[30px] text-[#2a2822]">{displayTitle}</p>
+            </Link>
+          ) : isNote ? null : (
             <Link href={href} className="block" data-testid="medium-card-title">
               <h2 className="line-clamp-2 font-sans text-[26px] font-semibold leading-[32px] tracking-[-0.015em] text-[#161511]">
                 {displayTitle}
@@ -535,6 +862,27 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
           >
             {LABELS.nsfwBadge}
           </div>
+        ) : thumbnail && thumbnailFailed ? (
+          // ★ THE HONEST FALLBACK (2026-08-16, QA Low 9) — see the state/effect
+          // above. Same box, same dashed-border language as the NSFW-hidden
+          // placeholder just above (so a reader learns one shape for "nothing
+          // to show here" instead of two), but its OWN copy and icon: this is
+          // a failed load, not a flag the reader chose to hide.
+          <Link
+            href={href}
+            className="shrink-0"
+            data-testid="medium-card-thumbnail-failed"
+            aria-label={displayTitle}
+            tabIndex={-1}
+          >
+            <div
+              className="flex h-[132px] w-[190px] flex-col items-center justify-center gap-1.5 rounded-[14px] border border-dashed border-[#e0dcd4] bg-[#f4f5f7] font-sans text-[12px] font-medium text-[#6f6963]"
+              aria-hidden="true"
+            >
+              <ImageOff className="h-5 w-5" strokeWidth={1.75} />
+              {t('cards.post_card.thumbnail_unavailable')}
+            </div>
+          </Link>
         ) : thumbnail ? (
           // X-7: this link wrapped an image with an empty alt and nothing else, so it
           // announced itself as an unnamed link. The image stays decorative (the
@@ -549,6 +897,7 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
             tabIndex={-1}
           >
             <img
+              ref={thumbnailImgRef}
               src={thumbnail}
               alt=""
               // ★ CONTAIN, NOT COVER (F6 item 23). `find_first_img` requests
@@ -587,9 +936,7 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
               // never does. If a real reader still sees an imageless feed, look at
               // WHICH posts are in it (QA/test posts genuinely have no image), not
               // at this element.
-              onError={(e) => {
-                e.currentTarget.style.visibility = 'hidden';
-              }}
+              onError={() => setThumbnailFailed(true)}
             />
           </Link>
         ) : null}

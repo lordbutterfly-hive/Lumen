@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
+import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { liteBlock } from '@/blog/lib/lite/client/lite-write';
 import { useUnmuteMutation } from '@/blog/features/mute-follow/hooks/use-mute-mutations';
 import { useTranslation } from '@/blog/i18n/client';
@@ -74,6 +75,19 @@ const BlockedList = ({ username }: { username: string }) => {
   const { t } = useTranslation('common_blog');
   const identity = useSessionIdentity();
   const isOwner = identity.isLoggedIn && identity.username === username;
+  const { user } = useUserClient();
+  /**
+   * ★ M10 FIX (2026-08-16) — `blocked_accounts_hint` unconditionally said
+   * "including anyone you've muted on Hive from another app", which is wrong
+   * for a lite reader: this card's own doc comment above records the owner's
+   * ruling that "Lite accounts do not have Hive mutes. They only have Lumen
+   * blocks." — so `source` is never `'chain'`/`'both'` for a lite viewer's
+   * own list (confirmed by that same ruling, not assumed here), and the
+   * per-row `blocked_accounts_chain_hint` badge below is already unreachable
+   * for them. Only the card-level hint needed a lite-specific line. Same
+   * `isLite` predicate `SettingsForm`/`PostPublishingSection` already use.
+   */
+  const isLite = isOwner && user.account_tier === 'lite';
   const queryClient = useQueryClient();
   const [pendingName, setPendingName] = useState<string | null>(null);
   const unmuteMutation = useUnmuteMutation();
@@ -146,7 +160,9 @@ const BlockedList = ({ username }: { username: string }) => {
   return (
     <section id="blocked-accounts" className={SETTINGS_CARD} data-testid="settings-blocked-accounts">
       <h2 className={SETTINGS_CARD_TITLE}>{t('settings_page.blocked_accounts')}</h2>
-      <p className={SETTINGS_CARD_HINT}>{t('settings_page.blocked_accounts_hint')}</p>
+      <p className={SETTINGS_CARD_HINT}>
+        {isLite ? t('settings_page.blocked_accounts_hint_lite') : t('settings_page.blocked_accounts_hint')}
+      </p>
 
       {isLoading ? (
         <div className="mt-4 space-y-2" data-testid="settings-blocked-accounts-skeleton">

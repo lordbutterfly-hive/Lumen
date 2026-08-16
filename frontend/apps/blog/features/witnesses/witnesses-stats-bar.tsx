@@ -2,6 +2,7 @@
 
 import { useTranslation } from '@/blog/i18n/client';
 import DialogLogin from '@/blog/components/dialog-login';
+import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 
 interface WitnessesStatsBarProps {
   hpAprPercent: number | null;
@@ -56,6 +57,21 @@ export default function WitnessesStatsBar({
   proxyAccount
 }: WitnessesStatsBarProps) {
   const { t } = useTranslation('common_blog');
+  const { user } = useUserClient();
+  /**
+   * ★ M12 FIX (2026-08-16) — this slot used to go straight from `hasProxy` to
+   * `votesLeft !== null`, so a lite account (logged in, no proxy, `votesLeft`
+   * a real `MAX_WITNESS_VOTES - 0`) rendered "30 votes left" in brand-red right
+   * here, one column over from `WitnessesRightRail`'s `WitnessesProxyCard`,
+   * which correctly says voting needs a full Hive account
+   * (`witnesses.lite_cannot_vote`). Same page, two contradicting claims about
+   * the same capability. `isLite` is the exact predicate `WitnessesProxyCard`
+   * and `WitnessVoteToggle` already use (`useUserClient().user.account_tier
+   * === 'lite'`) — reused, not reinvented — and it is checked before
+   * `hasProxy`/`votesLeft` below, same ordering `WitnessesProxyCard` uses,
+   * because a lite account can have neither a proxy nor a vote allowance.
+   */
+  const isLite = isLoggedIn && user.account_tier === 'lite';
 
   return (
     <div
@@ -93,6 +109,15 @@ export default function WitnessesStatsBar({
             {t('witnesses.stats.log_in_to_vote')}
           </button>
         </DialogLogin>
+      ) : isLite ? (
+        // Same honest statement `WitnessesProxyCard` makes, same key — a lite
+        // account never has a witness-vote allowance to report, so this reads
+        // as a restriction, not a stat: plain ink-10, not the brand-red
+        // `votesLeft`/`proxy_active` treatment below, which is reserved for
+        // things the viewer can actually act on.
+        <span className="ml-auto font-sans text-[13px] leading-[20px] text-ink-10" data-testid="witnesses-stats-lite">
+          {t('witnesses.lite_cannot_vote')}
+        </span>
       ) : hasProxy ? (
         <span className="ml-auto font-semibold text-ink-brand-6" data-testid="witnesses-stats-proxy-active">
           {t('witnesses.stats.proxy_active', { proxy: proxyAccount })}

@@ -127,6 +127,21 @@ const nextConfig = {
   async redirects() {
     const RETIRED_SORTS = ['trending', 'hot', 'created', 'payout', 'muted'];
     return [
+      /**
+       * ★ THE BARE PATHS 404 WHILE ONLY THE `.html` ONES RESOLVE (QA report
+       * 2026-08-16, "Low/polish 3"). `/help`, `/tos` and `/privacy` are the
+       * spellings a human types and the spellings other sites link, and every
+       * one of them returned 404 while `/help.html`, `/tos.html` and
+       * `/privacy.html` rendered fine. Legal pages in particular get linked and
+       * indexed from outside, where a 404 is not recoverable by the reader.
+       *
+       * Permanent, unlike the retired-sort redirects below: these three are not
+       * a migration in progress, the `.html` spelling is the canonical one and
+       * is not going to move again.
+       */
+      { source: '/help', destination: '/help.html', permanent: true },
+      { source: '/tos', destination: '/tos.html', permanent: true },
+      { source: '/privacy', destination: '/privacy.html', permanent: true },
       ...RETIRED_SORTS.flatMap((sort) => [
         { source: `/${sort}`, destination: '/', permanent: false },
         /**

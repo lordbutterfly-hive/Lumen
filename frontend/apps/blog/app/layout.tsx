@@ -473,6 +473,30 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
 })();`
           }}
         />
+        {/* ★ CLEAR THE DEAD `theme` KEY (QA Low-4, 2026-08-16). This app has no
+            dark-mode control anywhere — features/layouts/providers.tsx:27-38
+            (owner ruling, 2026-08-11) records that next-themes and every
+            `dark:` variant were removed after the dark palette was found
+            broken when forced (header and cards stayed white, the sidebar
+            went unreadable dark-grey-on-dark), and that decision was final:
+            light-only, no toggle, no revisit. Grepping this app and its
+            shared packages turns up zero remaining code that reads or writes
+            a `theme` key — so a reader who still carries one in
+            localStorage (from before that removal, or from a shared-origin
+            visit to apps/wallet, which keeps its own real, separate
+            next-themes toggle) is holding a value nothing here has consulted
+            in months, and nothing here will ever act on again. Cheap,
+            one-time, best-effort removal rather than leaving stale state
+            sitting in a reader's browser forever; safe to run on every load
+            (removeItem on an already-missing key is a no-op), and a plain
+            script rather than a React effect so it runs even if a chunk
+            fails to load (same reasoning as the chunk-error guard above). */}
+        <script
+          id="lumen-clear-dead-theme-key"
+          dangerouslySetInnerHTML={{
+            __html: `(function () { try { localStorage.removeItem('theme'); } catch (e) {} })();`
+          }}
+        />
         {/* Use plain script tag for guaranteed synchronous loading of env globals.
             ★ suppressHydrationWarning (2026-08-11, audit item 7b): the Hive
             Keychain browser extension rewrites this tag's `src` in the live DOM

@@ -105,7 +105,13 @@ function buildCommentOp(job: PublishJob): CommentOp {
   // instead of an empty card — an empty body alone reads as a broken post.
   const body = deleting ? '' : `${p.body}${buildFooter(p.displayName)}`;
   const jsonMetadata = JSON.stringify({
-    ...buildJsonMetadata({ tags: p.tags, userId: p.userId, postId: p.postId, displayName: p.displayName }),
+    ...buildJsonMetadata({
+      tags: p.tags,
+      userId: p.userId,
+      postId: p.postId,
+      displayName: p.displayName,
+      isNote: p.isNote
+    }),
     ...(deleting ? { deleted: true } : {})
   });
   return {

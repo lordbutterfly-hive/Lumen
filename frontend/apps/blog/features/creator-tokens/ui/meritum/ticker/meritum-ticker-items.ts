@@ -17,6 +17,19 @@
  * rescales the animation so the tape keeps the same visual speed — but read the
  * note on that function before trusting it.
  *
+ * ★ EXCEPTION, 2026-08-16 (H9 fix): three items carried second-level timings
+ * ("4 seconds ago", "47 seconds") that paired with the `● LIVE` badge above
+ * the tape to read as a real-time feed of actual events, when this is a
+ * fixed, fictional example loop and the real Meritum data source returns
+ * nothing (see `meritum-intro.tsx`'s `liveLabel` and the "Meritum isn't
+ * available on this build yet" notice one section down on the same screen —
+ * a stopwatch-precise timestamp directly contradicting a build-not-live
+ * notice is the exact kind of thing this file's own copy has to stay honest
+ * about). Reworded to describe launch SPEED, which is the real, evergreen
+ * claim these three items make, rather than a specific elapsed time, which
+ * is not. Dollar amounts and holder counts are untouched — they read as
+ * example outcomes, not as a live clock.
+ *
  * ★ NOT TRANSLATED, DELIBERATELY. `CLAUDE.md` bans inline user-facing strings,
  * and this file breaks that rule on purpose: the owner specified these 13
  * strings verbatim, and routing them through `t()` would mean 52 locale keys
@@ -57,14 +70,14 @@ export interface MeritumTickerItem {
  * trailing-after. The separator is `·` (U+00B7), never an em dash.
  */
 export const MERITUM_TICKER_ITEMS: readonly MeritumTickerItem[] = [
-  { handle: '@maximus', sentence: ' launched her token · ', figure: '4 seconds ago', trailing: '' },
+  { handle: '@maximus', sentence: ' launched her token in ', figure: 'seconds', trailing: '' },
   { handle: '@biggusdickus', sentence: ' answered 3 asks today · ', figure: '$120', trailing: '' },
   { handle: '@cicero', sentence: ' got paid for his first ask · ', figure: '$40', trailing: '' },
   { handle: '@pontiuspilate', sentence: ' has ', figure: '12 holders', trailing: ' on day one' },
   { handle: '@seneca', sentence: ' got booked for a custom track · ', figure: '$75', trailing: '' },
   { handle: '@octavia', sentence: ' priced her first offer · ', figure: '$25', trailing: '' },
-  { handle: '@silliussoddus', sentence: ' launched in ', figure: '5 seconds', trailing: ' flat' },
-  { handle: '@agrippa', sentence: ' found his first holder in ', figure: '47 seconds', trailing: '' },
+  { handle: '@silliussoddus', sentence: ' launched in ', figure: 'seconds', trailing: ' flat' },
+  { handle: '@agrippa', sentence: ' found his first holder in ', figure: 'no time', trailing: '' },
   { handle: '@cassiusclay', sentence: ' got tipped · ', figure: '$12', trailing: '' },
   { handle: '@drusilla', sentence: ' just crossed ', figure: '100 holders', trailing: '' },
   { handle: '@naughtiusmaximus', sentence: ' got booked for a session · ', figure: '$90', trailing: '' },

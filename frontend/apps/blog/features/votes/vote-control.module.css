@@ -339,3 +339,22 @@
     display: none;
   }
 }
+
+/*
+ * ★ ONE SIDE, NO GAP (2026-08-16, spec §3.2 "upvote arrow pinned to its number").
+ *
+ * `.root`'s gap exists to separate the up side from the down side. With the down
+ * side omitted it has nothing to separate, but it still emits trailing space in a
+ * flex row, so everything to the right sat exactly one gap further out than it
+ * should: a hole precisely where the downvote arrow used to be, which reads as a
+ * deleted element rather than a deliberate layout.
+ *
+ * An explicit modifier rather than `:has(> .side:only-child)`. Both work in the
+ * target browsers; a class the component sets from the same boolean that omits
+ * the side cannot drift out of sync with it, and it is far easier to reason about
+ * when someone next reads this file.
+ *
+ * The `.side` internal gap (3px, 1px at sm) is untouched: that is what binds the
+ * glyph to its number, and the spec keeps it as-is.
+ */
+.upOnly { gap: 0; }

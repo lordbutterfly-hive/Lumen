@@ -10,6 +10,7 @@ import { useTranslation } from "@/blog/i18n/client";
 import RendererContainer from "@/blog/features/post-rendering/rendererContainer";
 import { postClassName } from "@/blog/features/post-editor/lib/utils";
 import { previewGateHolds } from "@/blog/features/post-editor/lib/preview-gate";
+import { stripUnfilledTrailingMarker } from "@/blog/features/post-editor/lib/list-markers";
 import { SYNC_SCROLL_OFF, SYNC_SCROLL_ON } from "@/blog/features/post-editor/lib/composer-copy";
 
 interface PostPreviewPanelProps {
@@ -190,7 +191,12 @@ export function PostPreviewPanel({
           </div>
         ) : previewContent ? (
           <RendererContainer
-            body={previewContent}
+            // ★ LOW 12 (2026-08-16): strip a still-empty auto-inserted list/quote
+            // marker off the last line before it reaches the renderer — see
+            // `stripUnfilledTrailingMarker` in `lib/list-markers.ts` for why this
+            // is safe (last line only) and why that helper lives in a
+            // `@codemirror/*`-free file rather than in `lib/list-continuation.ts`.
+            body={stripUnfilledTrailingMarker(previewContent)}
             author=""
             previewMode
             proxyAuthToken={proxyAuthToken}

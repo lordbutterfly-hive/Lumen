@@ -108,11 +108,9 @@
     "error_first_buy_max": "Your first buy can be at most {{max}}.",
     "draft_restored": "Picked up your saved draft at step {{step}} of 3.",
     "draft_start_over": "Start over",
-    "classic_prompt": "Prefer a plain form?",
-    "classic_link": "Open the classic launch page",
     "term_final_label": "One way",
     "term_final_value": "Launching is permanent · the market cannot be closed, renamed, or moved to another account.",
-    "error_launch_in_another_tab": "A launch is already running in another tab. Finish there — launching twice would spend a second signature on a token you already have."
+    "error_launch_in_another_tab": "A launch is already running in another tab. Finish there. Launching twice would spend a second signature on a token you already have."
   },
   "global": {
     "no_rewards": "No rewards pending redemption.",
@@ -347,6 +345,7 @@
       "muted_interstitial": "Post from @{{author}}, who you've muted, is hidden.",
       "moderation_status_unknown": "We couldn't confirm your mute list just now, so this post from @{{author}} is held back until we can.",
       "reveal_post": "Reveal post",
+      "thumbnail_unavailable": "Image unavailable",
       "in": "in",
       "downvote_warning": "Downvoting a post can decrease pending rewards and make it less visible. Common reasons:",
       "reason_1": "• Disagreement on rewards",
@@ -354,9 +353,11 @@
       "reason_3": "• Hate speech or trolling",
       "reason_4": "• Miscategorized content or spam",
       "upvote": "Upvote",
+      "own_post_vote_disabled": "You can’t vote on your own post",
       "undo_upvote": "Undo your upvote",
       "undo_upvote_percent": "Undo your upvote {{votePercent}}%",
       "downvote": "Downvote",
+      "remove_downvote": "Remove your downvote",
       "undo_downvote": "Undo your downvote",
       "undo_downvote_percent": "Undo your downvote {{votePercent}}%",
       "no_votes": "no votes",
@@ -392,6 +393,9 @@
       "reply": "Reply",
       "edit": "Edit",
       "delete": "Delete",
+      "downvote": "Downvote",
+      "remove_downvote": "Remove your downvote",
+      "overflow_menu_label_downvoted": "More options (you downvoted this)",
       "will_be_hidden": "Will be hidden due to low rating ",
       "load_more": "Load more",
       "reason_muted": "muted by you",
@@ -408,7 +412,7 @@
       "manage_list_link": "Manage list",
       "publish_queued": "Queued to publish to Hive.",
       "publish_waiting": "Saved on Lumen. Still waiting for its turn to reach Hive.",
-      "publish_delayed": "Saved on Lumen, but it hasn't reached Hive yet. Your writing is safe — nothing is lost."
+      "publish_delayed": "Saved on Lumen, but it hasn't reached Hive yet. Your writing is safe and nothing is lost."
     }
   },
   "alert_dialog_reblog": {
@@ -430,7 +434,7 @@
   "reset_all_lists_dialog": {
     "trigger": "Reset all lists",
     "title": "Reset every list?",
-    "description": "This clears your blacklist, muted list, followed blacklists, and followed muted lists — all in one on-chain transaction. It can't be undone from here.",
+    "description": "This clears your blacklist, muted list, followed blacklists, and followed muted lists, all in one on-chain transaction. It can't be undone from here.",
     "type_to_confirm": "Type RESET to confirm",
     "confirm_placeholder": "RESET",
     "action": "Reset everything",
@@ -558,11 +562,11 @@
         "error_already_on_list": "Already on this list: {{names}}",
         "error_invalid_format": "Not a valid Hive account name: {{names}}",
         "error_not_found": "No Hive account found for: {{names}}",
-        "error_api_error": "Couldn't verify {{names}} right now — please try again.",
+        "error_api_error": "Couldn't verify {{names}} right now. Please try again.",
         "error_timeout": "No response after 30 seconds. If a Hive Keychain window opened, check for it, or try again.",
         "error_rejected": "The request was declined.",
         "error_broadcast_failed": "Couldn't complete the request: {{message}}",
-        "error_cancelled": "Cancelled. If a Hive Keychain window is still open, closing it is safe — nothing has been submitted.",
+        "error_cancelled": "Cancelled. If a Hive Keychain window is still open, closing it is safe. Nothing has been submitted.",
         "description_not_added": "User hasn't added a description to their blacklist yet",
         "empty_list": "There are no users on this list yet",
         "search_this_list": "Search This List",
@@ -594,7 +598,7 @@
       "empty_following_title": "Not following anyone yet",
       "empty_following_body": "Accounts @{{username}} follows show up here.",
       "list_unavailable_title": "Couldn't load this list",
-      "list_unavailable_body": "The list is there — we just could not fetch it right now. Reload to try again.",
+      "list_unavailable_body": "The list is there. We just could not fetch it right now. Reload to try again.",
       "no_results_followers": "No followers match \"{{query}}\"",
       "no_results_following": "No followed accounts match \"{{query}}\"",
       "searching": "Searching the full list...",
@@ -738,6 +742,9 @@
     },
     "lite_cannot_subscribe": "Joining a community needs a full Hive account. Upgrade to join."
   },
+  "lite_account": {
+    "mark_tooltip": "Lite account: posts through Lumen, holds no Hive keys."
+  },
   "post_content": {
     "close_post_editor": "Are you sure you want to close the post editor?",
     "in": "in",
@@ -785,6 +792,7 @@
       "by": "by",
       "upvote": "Upvote",
       "downvote": "Downvote",
+      "remove_downvote": "Remove your downvote",
       "no_votes": "no votes",
       "vote": "1 vote",
       "votes": "{{votes}} votes",
@@ -840,7 +848,7 @@
       "lite_cannot_flag": "Reporting a post to its community moderators needs a full Hive account. Upgrade to report."
     },
     "a_community": "a community",
-    "lite_replies_truncated": "Some replies aren’t shown here — this thread is larger than we can load at once."
+    "lite_replies_truncated": "Some replies aren’t shown here. This thread is larger than we can load at once."
   },
   "submit_page": {
     "log_in_to_post": "Log in to make a post.",
@@ -1039,13 +1047,15 @@
     "settings_intro": "How your account looks to other people, and how Lumen behaves for you.",
     "blocked_accounts": "Blocked Accounts",
     "blocked_accounts_hint": "People you've blocked, including anyone you've muted on Hive from another app. You won't see them again, and their replies never reach your posts or anyone else's comments.",
+    "blocked_accounts_hint_lite": "People you've blocked on Lumen. You won't see them again, and their replies never reach your posts or anyone else's comments.",
     "blocked_accounts_empty": "You haven't blocked anyone.",
     "blocked_accounts_error": "We could not load your blocked accounts. Reload the page to try again.",
     "blocked_accounts_chain_hint": "Muted on Hive from another app. Unblocking here signs an on-chain transaction and needs Hive Keychain.",
     "unblock_button": "Unblock",
+    "reward_settings_lite_hint": "Lumen posts decline rewards, so there is nothing to choose here for blog rewards, comment rewards or referral beneficiaries. Upgrade to a full Hive account to set how your posts and comments get paid.",
     "update_hint": "Edit any field above to enable Update.",
     "preferences_device_scope": "These apply to this browser only. They are not saved to your account, and other devices keep their own.",
-    "saved_on_this_browser": "Saved — this browser only.",
+    "saved_on_this_browser": "Saved. This browser only.",
     "legal_title": "Legal & Help",
     "help_link": "Help"
   },
@@ -1434,8 +1444,8 @@
         "next": "Next",
         "recipient_not_found": "Account not found",
         "recipient_required": "Recipient is required",
-        "recipient_length": "Hive account names are 3–16 characters",
-        "recipient_check_failed": "Couldn't check this account — try again",
+        "recipient_length": "Hive account names are 3 to 16 characters",
+        "recipient_check_failed": "Couldn't check this account. Try again",
         "amount_positive": "Amount must be greater than 0",
         "amount_invalid": "Enter an amount using a dot for decimals, e.g. 1.5",
         "amount_exceeds_balance": "Amount exceeds available balance",
@@ -1511,6 +1521,8 @@
     },
     "creator_token": "View Meritum",
     "overflow_menu_label": "More options",
+    "overflow_menu_label_downvoted": "More options (you downvoted this)",
+    "overflow_menu_label_downvoted": "More options (you downvoted this)",
     "overflow": {
       "view_on_explorer": "View on chain explorer"
     },
@@ -1764,7 +1776,7 @@
       }
     },
     "lite_cannot_vote": "Voting on proposals needs a full Hive account. Upgrade to vote.",
-    "lite_cannot_create": "Creating a proposal needs a full Hive account — it costs a real HBD fee and must be signed. Upgrade to create one.",
+    "lite_cannot_create": "Creating a proposal needs a full Hive account. It costs a real HBD fee and must be signed. Upgrade to create one.",
     "session_unavailable": "We couldn’t check your account just now, so this is unavailable. Reload to try again."
   },
   "prediction_market": {
@@ -1906,7 +1918,7 @@
     "published_hive": "It is on its way to Hive.",
     "publishing": "Publishing your note…",
     "generic_error": "Could not post. Please try again.",
-    "timed_out": "Signing timed out — check your Keychain window. If you approved it there, the note may still publish; reload before posting again.",
+    "timed_out": "Signing timed out. Check your Keychain window. If you approved it there, the note may still publish, so reload before posting again.",
     "cancelled": "Stopped waiting for Keychain. If you approved the request, the note may still publish; reload before posting again.",
     "emoji_search_label": "Search emoji",
     "emoji_search_placeholder": "Search",
@@ -1953,6 +1965,25 @@
     "wallet_can_trade": "Your {{wallet}} can hold and trade Meritum tokens, but launching one of your own needs a full Hive account, because a Meritum is issued against a Hive identity.",
     "wallet_trade_lead": "Your {{wallet}} can hold Meritum tokens, but not trade them from Lumen yet.",
     "wallet_trade_why": "Tokens sent to you are held against your wallet identity on Magi and stay yours. Buying and selling needs a signature over the Magi transaction itself, which is a different signature from the one you signed in with, and that rail is still being built for your {{wallet}}. To trade today,",
-    "wallet_trade_tail": "."
+    "wallet_trade_tail": ".",
+    "check_failed": "We couldn't check your wallet just now. Try reloading the page."
+  },
+  "lite_auth": {
+    "name_check": {
+      "reserved_lumen": "Names containing 'lumen' are reserved.",
+      "reserved": "'{{name}}' is a reserved name.",
+      "too_short": "Too short. Needs at least 3 characters.",
+      "too_long": "Too long. The limit is 16 characters.",
+      "bad_chars": "Use lowercase letters, numbers and dashes only.",
+      "must_start_letter": "Must start with a letter.",
+      "must_end_alnum": "Must end with a letter or a number.",
+      "format_invalid": "That name doesn't meet Hive's naming rules."
+    },
+    "google_signin": {
+      "unavailable": "Google sign-in is unavailable right now. Use a Bitcoin or Ethereum wallet, or sign in with Hive below."
+    },
+    "security": {
+      "google_already_linked": "Google is already linked above as your Primary method. There is nothing more to add here."
+    }
   }
 }

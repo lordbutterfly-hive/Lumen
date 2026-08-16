@@ -14,7 +14,21 @@ const ToastViewport = React.forwardRef<
   <ToastPrimitives.Viewport
     ref={ref}
     className={cn(
-      'fixed  top-0 z-[100] flex max-h-screen w-fit flex-col-reverse items-end p-4 sm:bottom-0 sm:right-0 sm:top-auto',
+      /*
+       * ★ THE TOAST RAN PAST THE VIEWPORT EDGE (2026-08-16, QA report "Low 15").
+       *
+       * `w-fit` here fought `w-full` on the toast itself (`toaster.tsx`): a
+       * width:100% child inside a width:fit-content parent has no bound to
+       * resolve against, so a long message pushed the whole bar off-screen at
+       * the right. That is why the vote toast, a full-bleed green bar pinned
+       * bottom-right, ran past the edge.
+       *
+       * `w-full` with a `sm:max-w-[420px]` cap is the standard shadcn shape and
+       * the one this file was clearly derived from. It gives the child a real
+       * width to fill, keeps the bar inside the viewport on narrow screens, and
+       * caps it at a readable width on wide ones.
+       */
+      'fixed top-0 z-[100] flex max-h-screen w-full flex-col-reverse items-end p-4 sm:bottom-0 sm:right-0 sm:top-auto sm:max-w-[420px]',
       className
     )}
     {...props}

@@ -26,6 +26,7 @@ import { getLogger } from '@ui/lib/logging';
 import { useCommentMutation, useUpdateCommentMutation } from '../post-rendering/hooks/use-comment-mutations';
 import { useQueryClient } from '@tanstack/react-query';
 import { createLitePost } from '@/blog/lib/lite/client/lite-write';
+import { litePostIdOf } from '@/blog/lib/lite/render/lite-post-id';
 import { toast } from '@ui/components/hooks/use-toast';
 import { handleError } from '@ui/lib/handle-error';
 import { commentClassName } from '../post-rendering/comment-list-item';
@@ -322,9 +323,34 @@ export function ReplyTextbox({
       } else if (user.account_tier === 'lite') {
         // Keyless lite account can't sign a comment op — proxy the reply to Hive
         // via /api/lite/posts (frontend account broadcasts it under the parent).
+        //
+        // ★★★ THE PARENT MUST BE CLASSIFIED, NOT JUST FORWARDED (H5, 2026-08-16).
+        //
+        // `permlink` is whatever identity the post being replied to is CURRENTLY
+        // shown under — and for a lite post that has not reached Hive yet, that is
+        // its own synthetic `lite-<id>` (`render/db-post-to-entry.ts`), not a real
+        // chain coordinate. Sending it through as `{type: 'chain', author:
+        // username, permlink}` let the server pin it VERBATIM as the reply's
+        // permanent on-chain parent — permanent because Hive refuses to ever
+        // repoint a comment — and `lite-<id>` can never be a valid permlink: the
+        // real parent publishes as `lumen-<id>` under the FRONTEND account, never
+        // as `lite-<id>` under `username`. That is the exact failure worker.ts's
+        // `resolveParentOnChain` documents finding on 2026-08-08 ("the reply's
+        // parent read `hbd-temp/lite-<ulid>`"), and what a QA pass reproduced
+        // again here: 201, a reply that never appears anywhere, no error shown.
+        //
+        // `litePostIdOf` recognises both of our own permlink shapes — published
+        // (`lumen-<id>`) and not (`lite-<id>`) — and recovers the row id, which is
+        // what `{type: 'lite', id}` needs: the server derives the real,
+        // deterministic on-chain coordinate itself instead of trusting a name
+        // captured client-side. A genuine reply to someone else's real chain post
+        // still falls through to `type: 'chain'` exactly as before.
+        const liteParentId = litePostIdOf({ permlink });
         const result = await createLitePost({
           body: text,
-          parentRef: { type: 'chain', author: username, permlink }
+          parentRef: liteParentId
+            ? { type: 'lite', id: liteParentId }
+            : { type: 'chain', author: username, permlink }
         });
         if (result.status !== 'ok') {
           handleError(new Error(result.message), { method: 'lite-comment', params: { username, permlink } });
@@ -360,6 +386,17 @@ export function ReplyTextbox({
          * rollback story. One refetch of the thread it is already looking at.
          */
         queryClient.invalidateQueries({ queryKey: ['discussionData'] });
+        // ★ `liteReplies` IS A SEPARATE QUERY FROM `discussionData` (H5,
+        // 2026-08-16). `content.tsx` merges two sources into the thread: the
+        // chain-backed `discussionData` above, and this post's own lite replies,
+        // fetched under `['liteReplies', author, permlink, parentKeys.length]`.
+        // Invalidating only the first left a just-posted reply waiting on
+        // `staleTime` to elapse on its own — invisible until either that expired
+        // or the reader reloaded. `discussionAuthor`/`discussionPermlink` are the
+        // same thread identity `author`/`permlink` is keyed on there; the
+        // trailing `parentKeys.length` is left off on purpose so this matches
+        // every variant of the key (React Query v4 prefix-matches array keys).
+        queryClient.invalidateQueries({ queryKey: ['liteReplies', discussionAuthor, discussionPermlink] });
         toast({
           title: 'Reply sent',
           // ★ NO TIME PROMISE (2026-08-13). This said "usually within a minute".

@@ -106,14 +106,25 @@ const LaunchStepTerms: FC<LaunchStepTermsProps> = ({
           <span className="font-serif text-20 text-meritum-ink-faint" aria-hidden="true">
             $
           </span>
+          {/*
+            ★ LOW 10 (2026-08-16) — same fix as the offer price input in
+            `launch-step-offers.tsx`: the fixed `w-[84px] text-right` box
+            clipped a long typed value (`999999999` rendered as `9999`, scrolled
+            out of view) and left a gap between `$` and a short one
+            (right-aligned text sitting at the far edge of a box wider than the
+            value). `w-[10ch]` + `maxLength={9}` means the box never needs to
+            scroll for anything `sanitizeMoneyInput` would let through, and
+            `text-left` puts the digits right after the `$`.
+          */}
           <input
             type="text"
             value={firstBuy}
             onChange={(e) => onFirstBuy(e.target.value)}
             placeholder="0"
             inputMode="decimal"
+            maxLength={9}
             aria-label={t('meritum_launch.first_buy_aria')}
-            className="w-[84px] min-w-0 border-0 bg-transparent text-right font-serif text-30 font-semibold tabular-nums text-meritum-ink outline-none placeholder:text-meritum-ink-faint"
+            className="w-[10ch] min-w-0 border-0 bg-transparent text-left font-serif text-30 font-semibold tabular-nums text-meritum-ink outline-none placeholder:text-meritum-ink-faint"
           />
         </div>
       </div>

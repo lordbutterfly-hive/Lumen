@@ -33,7 +33,7 @@ const ServiceUnavailable: FC = () => {
           </li>
           <li className="flex items-start gap-2">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-            <span>Check back shortly — we&apos;re working on it</span>
+            <span>Check back shortly. We&apos;re working on it</span>
           </li>
         </ul>
       </div>

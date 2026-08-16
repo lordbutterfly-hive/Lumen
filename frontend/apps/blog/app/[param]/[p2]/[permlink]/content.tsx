@@ -21,7 +21,6 @@ import { AlertDialogFlag } from '@/blog/features/post-rendering/alert-window-fla
 import CommentsSection from '@/blog/features/post-rendering/comments-section';
 import ContextLinks from '@/blog/features/post-rendering/context-links';
 import DetailsCardVoters from '@/blog/features/post-rendering/details-card-voters';
-import AuthorTitleText from '@/blog/features/post-rendering/author-title-text';
 import FlagIcon from '@/blog/features/post-rendering/flag-icon';
 import MutePostDialog from '@/blog/features/post-rendering/mute-post-dialog';
 import PostBodySection from '@/blog/features/post-rendering/post-body-section';
@@ -47,19 +46,26 @@ import { useQuery } from '@tanstack/react-query';
 import {
   fetchCommunity,
   fetchCommunityRoleOfAccount,
+  fetchListVotesByCommentVoter,
   fetchPost,
   fetchPostStatus
 } from '@/blog/lib/chain-fetch';
 import { fetchDiscussion } from '@/blog/lib/lite/client/discussion-fetch';
-import { isBlockedEntry, useLumenBlockList } from '@/blog/lib/lite/client/use-lumen-block';
-import { litePostIdOf } from '@/blog/lib/lite/render/lite-post-id';
+import { isBlockedEntry, useLumenBlock, useLumenBlockList } from '@/blog/lib/lite/client/use-lumen-block';
+import { litePostIdOf, isLumenProxiedEntry } from '@/blog/lib/lite/render/lite-post-id';
 import { fetchLiteEntryByPermlink } from '@/blog/lib/lite/client/lite-post-fetch';
 import { fetchLiteEngagement } from '@/blog/lib/lite/client/lite-engagement';
 import { Entry } from '@hive/common-hiveio-packages/wax';
 import { fetchActiveVotes } from '@/blog/lib/chain-fetch';
 import { getSimilarPostsByPost, getHiveSenseStatus, isPostStub } from '@transaction/lib/hivesense-api';
-import { Badge } from '@ui/components/badge';
 import { Button } from '@ui/components/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger
+} from '@ui/components/dropdown-menu';
 import { Icons } from '@ui/components/icons';
 import Loading from '@ui/components/loading';
 import TimeAgo from '@ui/components/time-ago';
@@ -72,16 +78,18 @@ import { handleError } from '@ui/lib/handle-error';
 import { getLogger } from '@ui/lib/logging';
 import parseDate from '@ui/lib/parse-date';
 import { buildSafePath } from '@ui/lib/sanitize-url';
-import { Clock, Link2 } from 'lucide-react';
+import { Clock, Link2, MoreHorizontal } from 'lucide-react';
 import { Link } from '@hive/ui';
 import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CircleSpinner } from 'react-spinners-kit';
 import { useStorageWithTTL } from '@ui/hooks/useStorageWithTTL';
 import { StorageTTL } from '@ui/lib/storage-with-ttl';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import VotesComponentWrapper from '@/blog/features/votes/votes-component-wrapper';
+import VotesComponent from '@/blog/features/votes/votes-component';
+import { voteStyles } from '@/blog/features/votes/blade';
 import { cn, isCommunity } from '@ui/lib/utils';
 import { isNotePost } from '@/blog/lib/short-post-note';
 import {
@@ -92,6 +100,7 @@ import {
   useInitialFollowList
 } from '@/blog/components/observer-provider';
 import { StaleTime } from '@/blog/lib/react-query';
+import { authorTitleOf } from '@/blog/lib/author-title';
 
 // Maximum number of comments per page
 const MAX_COMMENTS_PER_PAGE = 50;
@@ -871,7 +880,51 @@ const PostContent = () => {
   const thisPost = discussionState?.find((post) => post.permlink === permlink && postData?.author === author);
   // Use thisPost.depth if available, fallback to postData.depth (for optimistic posts), default to 0
   const postDepth = thisPost?.depth ?? postData?.depth ?? 0;
-  const commentSite = postDepth !== 0;
+  /**
+   * ★★★ A LUMEN POST IS NOT "A COMMENT SOMEBODY LINKED TO" (2026-08-16, QA
+   * defect B1).
+   *
+   * `commentSite` used to be bare `postDepth !== 0` — condenser-era logic for
+   * "the URL points at a reply, so show the single-comment-thread banner
+   * instead of a normal post". True for an ordinary Hive reply; wrong for a
+   * Lumen "lite" post, which is ALWAYS broadcast as a depth-1 comment under a
+   * rolling container root owned by the gateway account (`hbd-temp`,
+   * permlink `lumen-c-<ulid>` — see `lib/lite/publisher/container.ts`) purely
+   * because Hive caps root posts at one per 5 minutes per account. To a Lumen
+   * reader this IS the post, not a reply buried in someone else's thread, so
+   * it was rendering the "You are viewing a single comment's thread from...
+   * itself" banner (root_title/title mixed up, see `ContextLinks`) with a
+   * "View the full context" link straight to `/lumen/@hbd-temp/lumen-c-...`
+   * — leaking the shared gateway account and container to every Lumen
+   * reader, with no `<h1>` on the page at all (the banner's own `<h1>` was
+   * the only one).
+   *
+   * `isLumenProxiedEntry` (shared with the lite badge/overlay logic —
+   * `lib/lite/render/lite-post-id.ts`) covers the first two conditions from
+   * the QA writeup: `json_metadata.app === "lumen/1.0"` and a
+   * `lumen_post_id` marker, plus the `lumen-`/`lite-` permlink shape as a
+   * third, stronger signal. The `parent_permlink` check below is the QA
+   * writeup's third, independent condition — depth-1 directly under a
+   * `lumen-c-` container — so a Lumen post is still recognised even if its
+   * `json_metadata` were ever stripped or unparsed somewhere upstream. The
+   * container namespace is exclusive to the gateway; no ordinary Hive
+   * comment can carry it.
+   */
+  const isLumenNativePost =
+    isLumenProxiedEntry(postData) ||
+    (postDepth === 1 && (thisPost?.parent_permlink ?? postData?.parent_permlink ?? '').startsWith('lumen-c-'));
+  // `postDepth !== 0` on its own, kept under its own name for the ONE place
+  // below that must still ask it directly: which EDITOR to open. A Lumen post
+  // genuinely IS a depth>0 Hive comment on chain (the whole reason it needs
+  // `isLumenNativePost` above at all), and its edit has to go through
+  // `ReplyTextbox`'s comment-update path — the one that knows how to proxy a
+  // keyless lite session's edit — never `PostForm`, which has no lite
+  // awareness at all (grepped: zero references to `chainAuthor`, lite or
+  // account_tier in post-form.tsx). Routing `commentSite` there instead would
+  // have swapped editors out from under a Lumen post the moment this fix
+  // landed, breaking Edit for every Lumen author to fix a display bug.
+  const isReplyOnChain = postDepth !== 0;
+  const commentSite = isReplyOnChain && !isLumenNativePost;
   const userFromDMCA = dmcaUserList.some((e) => e === postData?.author);
 
   /**
@@ -1041,6 +1094,120 @@ const PostContent = () => {
   }, []);
 
   /**
+   * ★★★ THE POST-HEADER "···" OVERFLOW MENU (2026-08-16) — replaces the
+   * standalone "Flag post" icon button that used to be alone in this slot.
+   * Three items, one trigger: Downvote (economic action, first), Flag post
+   * (moderation, second, only where flagging is even possible), a rule, then
+   * Block (user-level, last) — the spec's own ordering rationale.
+   *
+   * ★ WHY A HIDDEN SECOND `VotesComponent` RATHER THAN A NEW DIALOG. The
+   * brief is explicit: reuse the EXISTING downvote weight popover / removal
+   * dialog, never build a second one. That control (the Popover slider, the
+   * `VoteRemovalDialog` once already cast, the sub-threshold one-shot
+   * button, the signed-out `DialogLogin` prompt) only exists in the tree
+   * when `showDownvote` is true, and `showDownvote` is deliberately NOT
+   * passed to the visible footer `VotesComponentWrapper` below (see its own
+   * call site) — the inline arrow must stay gone from the footer. So a
+   * second, hidden instance is mounted here with `showDownvote` on, purely
+   * to host the real control this menu clicks through a ref. Every one of
+   * its four branches renders a real `data-testid="downvote-button"`
+   * element, so one click handler works regardless of which state is live,
+   * with zero vote logic duplicated — `features/votes/**` is untouched.
+   *
+   * ★ NEVER NEST THE TRIGGER INSIDE THE DROPDOWN ITEM. Both the vote
+   * popover/removal dialog and `AlertDialogFlag` below are Radix primitives
+   * with their own portalled Content. A `DropdownMenuItem` whose default
+   * select behaviour closes (and Radix unmounts) `DropdownMenuContent` would
+   * unmount a nested trigger in the same commit its own click is trying to
+   * open a dialog in — the mount race the brief warns about. Both proxies
+   * are mounted as SIBLINGS of the `DropdownMenu` instead (inside the same
+   * wrapper below, never inside `DropdownMenuContent`), so closing the menu
+   * cannot touch them; `onSelect` only clicks a ref.
+   *
+   * Focus return (req. 6) is forced rather than left to effect-ordering
+   * chance: `overflowTriggerRef.current?.focus()` runs synchronously in the
+   * same handler, BEFORE the proxy `.click()`. A `.click()` on a
+   * `className="hidden"` (`display:none`) node cannot itself take focus —
+   * browsers refuse to focus a non-rendered element — so by the time the
+   * opened dialog's own focus-scope captures "what to return to", it is
+   * already this trigger, deterministically, regardless of whether Radix's
+   * own close-then-restore effect on the dropdown has run yet. Not
+   * runtime-verified.
+   */
+  const overflowTriggerRef = useRef<HTMLButtonElement>(null);
+  const hiddenDownvoteControlRef = useRef<HTMLDivElement>(null);
+  const hiddenFlagTriggerRef = useRef<HTMLButtonElement>(null);
+
+  // Same author correction as the footer `VotesComponentWrapper` call just
+  // below (litePost carries the account that actually signed the post), so
+  // this hidden instance's vote query key and mutation target the identical
+  // row rather than a divergent one.
+  const votePost = postData ? { ...postData, author: litePost?.chainAuthor || postData.author } : null;
+  const voteVoter = identity.username;
+  const isLiteVoter = user.account_tier === 'lite';
+  // Same fallback `votes-component.tsx` itself uses ahead of its own
+  // authoritative query answering — sign of `rshares` on the chain row this
+  // page already has in `postData.active_votes`, no extra fetch needed.
+  const chainDownvoteRow = postData?.active_votes?.find((v) => v.voter === voteVoter);
+  const chainSaysDownvoted = !!chainDownvoteRow && Number(chainDownvoteRow.rshares) < 0;
+  // ★ SAME QUERY KEY AS `votes-component.tsx`'s OWN `userVotes` QUERY, ON
+  // PURPOSE — this is cache-SHARING, not a second, divergent read of the
+  // same fact. The footer instance (and the hidden one below, once a vote is
+  // cast through it) already populate this exact key via
+  // `useVoteMutation`'s optimistic write; this observer only reads it, so
+  // the trigger's tint/label stay live off that same write with no request
+  // of its own in the common case (`enabled` mirrors the same fallback gate
+  // `votes-component.tsx` uses).
+  const { data: viewerVoteData } = useQuery({
+    queryKey: ['votes', votePost?.author ?? '', votePost?.permlink ?? '', voteVoter],
+    queryFn: () =>
+      isLiteVoter
+        ? fetchLiteEngagement(votePost?.author ?? '', votePost?.permlink ?? '')
+        : fetchListVotesByCommentVoter(votePost?.author ?? '', votePost?.permlink ?? '', voteVoter),
+    enabled: !!votePost && (isLiteVoter ? !!voteVoter : !!chainDownvoteRow),
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    refetchOnMount: false
+  });
+  const viewerVote =
+    viewerVoteData?.votes?.[0] && viewerVoteData.votes[0].voter === voteVoter
+      ? viewerVoteData.votes[0]
+      : undefined;
+  const hasDownvoted = viewerVote ? viewerVote.vote_percent < 0 : chainSaysDownvoted;
+
+  const openDownvoteControl = () => {
+    overflowTriggerRef.current?.focus();
+    hiddenDownvoteControlRef.current
+      ?.querySelector<HTMLButtonElement>('[data-testid="downvote-button"]')
+      ?.click();
+  };
+  const openFlagDialog = () => {
+    overflowTriggerRef.current?.focus();
+    hiddenFlagTriggerRef.current?.click();
+  };
+
+  // Same target/name-space split as the byline's own Block (`ButtonsContainer`,
+  // rendered further below) and the identical control already on feed cards
+  // and comments (`medium-post-card.tsx`, `comment-list-item.tsx`):
+  // `postFollowTarget` already resolves to the REAL signer (never a shared
+  // Lumen publishing account) and is already `null` for "not logged in" or
+  // "this is me" — see its own definition above.
+  const overflowBlock = useLumenBlock(
+    postFollowTarget ?? '',
+    litePost?.author ? 'lumen' : 'hive',
+    !!postFollowTarget
+  );
+  const handleOverflowBlockClick = async () => {
+    const failure = await overflowBlock.toggle();
+    if (failure) {
+      handleError(new Error(failure), {
+        method: overflowBlock.isBlocking ? 'lumen-unblock' : 'lumen-block',
+        params: { username: postFollowTarget ?? '' }
+      });
+    }
+  };
+
+  /**
    * ★ LAND AT THE TOP OF THE POST (v8, post detail). Next's App Router keeps the
    * previous scroll offset across a client navigation, so opening a post from halfway
    * down the feed dropped the reader into the middle of the article, with no signal
@@ -1150,24 +1317,152 @@ const PostContent = () => {
                           </TooltipProvider>
                         )}
                       </h1>
-                      {postInCommunity && (
-                        <div className="mt-1 shrink-0 cursor-pointer rounded-full border border-transparent p-1.5 text-muted-foreground transition-colors hover:border-border hover:bg-background-secondary hover:text-destructive">
-                          {!identity.isLoggedIn ? (
-                            <DialogLogin>
-                              <FlagIcon onClick={() => {}} />
-                            </DialogLogin>
-                          ) : communityData ? (
-                            <AlertDialogFlag
-                              community={category}
-                              username={author}
-                              permlink={permlink}
-                              flagText={communityData.flag_text}
+                      {/* ★★★ THE "···" OVERFLOW MENU (2026-08-16) — replaces the
+                          standalone Flag button that used to be alone in this
+                          slot. Rendered whenever the post itself is (not gated
+                          on `postInCommunity` any more, unlike the button it
+                          replaces): Downvote is offered on every post, on or
+                          off a community, the same as the upvote arrow beside
+                          it always was, and gating the whole trigger on
+                          community membership would have made downvoting from
+                          this page impossible everywhere else. Flag post keeps
+                          its original `postInCommunity` gate below — reporting
+                          to community moderators only ever applied there. See
+                          the big comment above (before `isPending`) for why
+                          two Radix triggers are proxied through hidden
+                          siblings rather than nested inside the menu items. */}
+                      <div
+                        className={cn(
+                          voteStyles.root,
+                          'mt-1 shrink-0 cursor-pointer rounded-full border border-transparent p-1.5 text-muted-foreground transition-colors hover:border-border hover:bg-background-secondary hover:text-destructive'
+                        )}
+                      >
+                        <DropdownMenu>
+                          {/* ★ THE "MINE" DOWNVOTE TINT, NOT A NEW RED (req. 5 +
+                              req. 3). `--lm-vote-slate` is the exact token
+                              `vote-control.module.css` uses for `.down.mine` —
+                              slate, not `--destructive` — because the design
+                              records disagreement rather than celebrating it,
+                              and because a red trigger here would read as the
+                              SAME action as Flag post. Reusing the token (via
+                              `voteStyles` on the wrapper) keeps this
+                              byte-identical and dark-mode aware instead of a
+                              second, drifting hardcoded colour. */}
+                          <DropdownMenuTrigger asChild>
+                            <button
+                              ref={overflowTriggerRef}
+                              type="button"
+                              data-testid="post-header-overflow-trigger"
+                              aria-label={
+                                hasDownvoted
+                                  ? t('profile.overflow_menu_label_downvoted')
+                                  : t('profile.overflow_menu_label')
+                              }
+                              className="flex items-center justify-center"
+                              style={hasDownvoted ? { color: 'var(--lm-vote-slate)' } : undefined}
                             >
-                              <FlagIcon onClick={() => {}} />
-                            </AlertDialogFlag>
-                          ) : null}
-                        </div>
-                      )}
+                              <MoreHorizontal className="h-4 w-4" aria-hidden />
+                            </button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-56">
+                            {/* Downvote — economic action, first. */}
+                            <DropdownMenuItem
+                              data-testid="post-header-downvote-menu-item"
+                              onSelect={openDownvoteControl}
+                            >
+                              {hasDownvoted
+                                ? t('post_content.footer.remove_downvote')
+                                : t('post_content.footer.downvote')}
+                            </DropdownMenuItem>
+                            {/* Flag post — moderation, second. Same gate the
+                                standalone button always had: only where
+                                flagging is possible at all (a community post),
+                                and only once we know WHICH of the two states
+                                (signed out vs. signed in with community data
+                                loaded) applies, matching exactly what the old
+                                button rendered non-null for. Destructive
+                                styling reused from the design system (not
+                                invented here) so it stays the one item that
+                                visibly contacts moderation — Downvote above is
+                                deliberately NOT styled this way, see req. 3. */}
+                            {postInCommunity && (!identity.isLoggedIn || communityData) ? (
+                              <DropdownMenuItem
+                                data-testid="post-header-flag-menu-item"
+                                className="text-destructive focus:text-destructive"
+                                onSelect={openFlagDialog}
+                              >
+                                {t('post_content.flag.flag_post')}
+                              </DropdownMenuItem>
+                            ) : null}
+                            {/* Block — user-level, last, separated. Same
+                                control already offered on feed cards
+                                (medium-post-card.tsx) and comments
+                                (comment-list-item.tsx): a direct click, no
+                                nested confirm dialog, for the identical
+                                nesting-safety reason documented above. */}
+                            {postFollowTarget && (overflowBlock.available || overflowBlock.unknown) ? (
+                              <>
+                                <DropdownMenuSeparator />
+                                {overflowBlock.available ? (
+                                  <DropdownMenuItem
+                                    onClick={handleOverflowBlockClick}
+                                    disabled={overflowBlock.busy}
+                                    className="cursor-pointer text-destructive focus:text-destructive"
+                                    data-testid="post-header-block-menu-item"
+                                  >
+                                    {overflowBlock.isBlocking
+                                      ? t('user_profile.unblock_button')
+                                      : t('user_profile.block_button')}
+                                  </DropdownMenuItem>
+                                ) : (
+                                  <DropdownMenuItem
+                                    disabled
+                                    className="cursor-not-allowed"
+                                    data-testid="post-header-block-menu-item-unknown"
+                                    title={t('user_profile.block_status_unknown_hint')}
+                                  >
+                                    {t('user_profile.block_status_unknown')}
+                                  </DropdownMenuItem>
+                                )}
+                              </>
+                            ) : null}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+
+                        {/* Hidden proxy for the EXISTING downvote weight
+                            popover / removal dialog / one-shot control — see
+                            the big comment above `isPending`. `showDownvote`
+                            is passed ONLY to this instance, never to the
+                            visible footer `VotesComponentWrapper` below. */}
+                        {votePost ? (
+                          <div ref={hiddenDownvoteControlRef} className="hidden" aria-hidden="true">
+                            <VotesComponent post={votePost} type="post" size="sm" showDownvote />
+                          </div>
+                        ) : null}
+
+                        {/* Hidden proxy for the EXISTING flag dialog
+                            (AlertDialogFlag) / login prompt — the identical
+                            component and the identical branch the standalone
+                            button used to render, just not visible. */}
+                        {postInCommunity ? (
+                          <div className="hidden" aria-hidden="true">
+                            {!identity.isLoggedIn ? (
+                              <DialogLogin>
+                                <FlagIcon ref={hiddenFlagTriggerRef} onClick={() => {}} />
+                              </DialogLogin>
+                            ) : communityData ? (
+                              <AlertDialogFlag
+                                community={category}
+                                username={author}
+                                permlink={permlink}
+                                flagText={communityData.flag_text}
+                              >
+                                <FlagIcon ref={hiddenFlagTriggerRef} onClick={() => {}} />
+                              </AlertDialogFlag>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </div>
                     </div>
                   ) : (
                     <ContextLinks
@@ -1178,7 +1473,22 @@ const PostContent = () => {
                   {postData._optimistic && (
                     <OptimisticStatusBanner createdAt={postData.created} lite={!isOnChain} />
                   )}
-                  <div className="flex flex-wrap items-start justify-between gap-2">
+                  {/*
+                   * ★ items-CENTER, NOT items-start (2026-08-16, owner: "follow and
+                   * block are weirdly positioned").
+                   *
+                   * Measured on /blog/@tonyz/bretagne-monomad-challenge signed in:
+                   * the Follow/Block/Reblog cluster sat at y=202 with height 36
+                   * (centre 220) while the byline text sat at y=223 with height 22
+                   * (centre 234). The actions floated 14px ABOVE the line they
+                   * belong to, which is what reads as "weird" rather than the
+                   * spacing, which is a uniform 40px between all three.
+                   *
+                   * `items-start` only matters once this row WRAPS, and on wrap each
+                   * line is full width anyway, so centring costs nothing there and
+                   * fixes the common single-line case.
+                   */}
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     {/* ★ FOLLOW THE PERSON YOU JUST READ, WHERE YOU READ THEM.
                         The only follow control lived on the author's PROFILE, one
                         navigation away — so the natural moment ("I liked that,
@@ -1197,7 +1507,7 @@ const PostContent = () => {
                       author_reputation={
                         crossPostData?.author_reputation ?? postData.author_reputation
                       }
-                      author_title={postData.author_title}
+                      author_title={authorTitleOf(postData)}
                       authored={postData.json_metadata?.author}
                       community_title={
                         // ★ `postData.community_title` was missing from this chain
@@ -1247,7 +1557,7 @@ const PostContent = () => {
                 </div>
                 {postIsLoading ? (
                   <Loading loading={postIsLoading} />
-                ) : edit && commentSite && postData.parent_author && postData.parent_permlink ? (
+                ) : edit && isReplyOnChain && postData.parent_author && postData.parent_permlink ? (
                   <ReplyTextbox
                     editMode={edit}
                     onSetReply={setEdit}
@@ -1316,7 +1626,16 @@ const PostContent = () => {
                 >
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     {/* Meta info */}
-                    <div className="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
+                    {/* ★ text-ink-10, not text-muted-foreground (2026-08-16, QA
+                        defect H2). `text-muted-foreground` resolves to
+                        `hsl(215.4 16.3% 46.9%)` — measured rgb(100,116,139),
+                        byte-identical to raw Tailwind slate-500 — the same
+                        off-palette grey the author-title badge further down in
+                        this same row already moved off of. `ink-10` is the
+                        token that replaced it everywhere else in this file
+                        (see that badge's own comment, and the
+                        `liteRepliesTruncated` notice below). */}
+                    <div className="flex flex-wrap items-center gap-1.5 text-sm text-ink-10">
                       <Clock className="mr-1 h-4 w-4" />
                       <span title={String(parseDate(postData.created))} data-testid="post-footer-timestamp">
                         <TimeAgo date={postData.created} />
@@ -1362,32 +1681,36 @@ const PostContent = () => {
                         {/* text-ink-10, not text-ink-info-6: slate is off-palette (the
                             followers redesign removed the last of it) and this badge is
                             one of the few places it survived. */}
-                        {postData.author_title ? (
-                          <Badge variant="outline" className="ml-1 border-destructive text-ink-10">
-                            <span className="mr-1">
-                              <AuthorTitleText title={postData.author_title} />
-                            </span>
-                            <ChangeTitleDialog
-                              community={category}
-                              moderateEnabled={!!userCanModerate}
-                              userOnList={postData.author}
-                              title={postData.author_title ?? ''}
-                              permlink={permlink}
-                            />
-                          </Badge>
-                        ) : (
-                          <ChangeTitleDialog
-                            community={category}
-                            moderateEnabled={!!userCanModerate}
-                            userOnList={postData.author}
-                            title={postData.author_title ?? ''}
-                            permlink={permlink}
-                          />
-                        )}
+                        {/*
+                          ★ author_title BADGE REMOVED (2026-08-16, spec). It printed free text any
+                          community's moderators can set via `set_label`, in a slot that looked
+                          authoritative. Lumen shows a reputation score for Hive accounts and a quill
+                          mark for lite accounts, and wants no third identity signal.
+                          ChangeTitleDialog STAYS: it is the moderator's write control for that label,
+                          a real on-chain feature still visible on other front ends. It rendered
+                          unconditionally before (the falsy branch existed so a first title could be
+                          set), so un-nesting it from the badge changes no reachability.
+                        */}
+                        <ChangeTitleDialog
+                          community={category}
+                          moderateEnabled={!!userCanModerate}
+                          userOnList={postData.author}
+                          title={authorTitleOf(postData)}
+                          permlink={permlink}
+                        />
                       </div>
                     </div>
                     {/* Stats */}
-                    <div className="flex items-center gap-2 rounded-md border border-border bg-background px-2.5 py-1.5 text-sm">
+                    {/* ★ NO MORE INNER CARD (2026-08-16, QA defect H2). This used to
+                        be its own `rounded-md border border-border bg-background
+                        px-2.5 py-1.5` box sitting next to the plain-text meta info —
+                        measured as three different type sizes in one row (14px meta,
+                        18px vote tally, 20px payout) with three unaligned baselines,
+                        so it read as two unrelated components bolted together rather
+                        than one footer. The box is gone; `items-baseline` (not
+                        `items-center`) is what actually lines text baselines up,
+                        which centring the whole box never did. */}
+                    <div className="flex flex-wrap items-baseline gap-2 text-sm">
                       {/* The REAL signer: a full Hive user's vote is a chain op, and
                           our own vote table keys on the same value the read path sends.
                           A display name is neither stable (it changes at upgrade) nor a
@@ -1396,13 +1719,33 @@ const PostContent = () => {
                           Blade handoff): 28px glyph, 53x53 target, 18px tally.
                           Everywhere else — feed cards, comments — takes the
                           component's `sm` default. This is the ONLY call site
-                          that needs the prop. */}
+                          that needs the prop.
+                          ★ SUPERSEDED for this one call site by the note directly
+                          below: the owner ruled on H2 and the footer takes `sm`. The
+                          handoff still governs the control everywhere it is full
+                          size. */}
+                      {/*
+                       * ★ ONE TYPE SIZE IN THE FOOTER ROW (2026-08-16, owner, QA H2).
+                       *
+                       * `size="default"` renders a 53x53 target with an 18px tally,
+                       * beside a 14px meta line and a 14px payout: three sizes in one
+                       * row, and a bordered block roughly 3x the height of the text it
+                       * sits next to, which is why the row read as two unrelated
+                       * components bolted together. `sm` is 38x38 with a 14.5px tally,
+                       * so the whole row lands on one size.
+                       *
+                       * This deliberately overrides the earlier "the post page passes
+                       * size=default" handoff note on VotesComponent: that decision
+                       * predates the footer being measured as a row, and the owner has
+                       * called it directly. The prop still exists and nothing else
+                       * changes, so restoring it is one word.
+                       */}
                       <VotesComponentWrapper
                         post={{ ...postData, author: litePost?.chainAuthor || postData.author }}
                         type="post"
-                        size="default"
+                        size="sm"
                       />
-                      <span className="h-4 w-px bg-border" />
+                      <span className="h-4 w-px self-center bg-border" />
                       <DetailsCardHover
                         post={postData}
                         decline={parseFloat(postData.max_accepted_payout) === 0}
@@ -1410,11 +1753,23 @@ const PostContent = () => {
                       >
                         <span
                           data-testid="comment-payout"
-                          // ★ text-[20px] (2026-08-14, owner-reported): on the post page the
-                          // vote tally is 18px, and the payout carried no size class at all —
-                          // so it inherited smaller than the vote count. The money is the
-                          // headline figure on this row; it is now one step above the tally.
-                          className={`text-[20px] font-bold text-destructive hover:cursor-pointer ${
+                          // ★ text-sm, not text-[20px] (2026-08-16, QA defect H2,
+                          // supersedes the 2026-08-14 note below). Bumping the payout to
+                          // 20px "one step above the tally" fixed one mismatch (payout
+                          // vs. tally) by introducing a THIRD size into a row that
+                          // already had two — this is the "three type sizes in one row"
+                          // finding. `text-sm` matches the meta info line, `font-bold`
+                          // keeps the money figure the visually heaviest thing in the
+                          // row without giving it its own size step.
+                          //
+                          // ★ text-ink-brand-8, not text-destructive (same defect): the
+                          // measured colour was raw Tailwind red-500 (rgb(239,68,68)),
+                          // and `ink-brand-8` is the token that is byte-identical to it
+                          // (globals.css) — already used for this exact figure's
+                          // DECLINED state two lines below (`!text-ink-8`) and for the
+                          // `post_page` decline branch in `details-card-hover.tsx`, so
+                          // this is the same family, not a new one.
+                          className={`text-sm font-bold text-ink-brand-8 hover:cursor-pointer ${
                             parseFloat(postData.max_accepted_payout) === 0
                               ? '!text-ink-8 line-through'
                               : ''
@@ -1425,11 +1780,13 @@ const PostContent = () => {
                       </DetailsCardHover>
                       {activeVotesData && !!postData.stats?.total_votes && postData.stats?.total_votes !== 0 ? (
                         <>
-                          <span className="h-4 w-px bg-border" />
+                          <span className="h-4 w-px self-center bg-border" />
                           <DetailsCardVoters post={postData}>
                             {/* Same nowrap/tabular-nums fix as the comment card's
-                                vote pill — this is the post footer's copy of it. */}
-                            <span className="whitespace-nowrap tabular-nums font-medium text-destructive">
+                                vote pill — this is the post footer's copy of it.
+                                text-ink-brand-8, not text-destructive: same token
+                                swap as the payout span above, same defect (H2). */}
+                            <span className="whitespace-nowrap tabular-nums font-medium text-ink-brand-8">
                               {postData.stats?.total_votes > 1
                                 ? t('post_content.footer.votes', { votes: postData.stats?.total_votes })
                                 : t('post_content.footer.vote')}

@@ -399,7 +399,7 @@ const SellModal: FC<{
         <div className="mt-2.5 text-center text-xs text-ink-14">
           {redeem
             ? 'Redeeming pays your share of the reserve at the floor. Available even while this market winds down.'
-            : 'You can always exit — while this market is open by selling, and once it winds down by redeeming at the floor.'}
+            : 'You can always exit. While this market is open by selling, and once it winds down by redeeming at the floor.'}
         </div>
       </div>
     </ModalShell>
@@ -616,7 +616,7 @@ const InterstitialModal: FC<{ handle: string; onClose: () => void }> = ({ onClos
         {[
           'This is a real token whose price goes up and down.',
           'If you buy from the market above the floor, you can get back less than you paid.',
-          'The floor, shown next to the price, is what the reserve would pay out per token if the market wound down — not a price you can always sell at.',
+          'The floor, shown next to the price, is what the reserve would pay out per token if the market wound down. Not a price you can always sell at.',
           'Selling soon after buying has an early-exit fee that fades to zero over 6 weeks.'
         ].map((line, i) => (
           <p key={i} className="font-serif text-[14px] leading-[22px] text-ink-7">

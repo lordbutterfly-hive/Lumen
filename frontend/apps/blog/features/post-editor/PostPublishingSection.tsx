@@ -172,15 +172,23 @@ export function PostPublishingSection({
         </div>
       ) : (
         <div className="flex flex-col gap-2">
-          <span className="text-sm font-medium" id="post-publishing-reward-type-label">
-            {t("submit_page.author_rewards")}
-          </span>
           {post_s && parseFloat(post_s.max_accepted_payout) === 0 ? (
+            /* ★ LOW 11 (2026-08-16) — this branch used to render the bare
+               "Author rewards:" label (see the identical-looking label still
+               kept below, in the sibling branch, where it labels the Select)
+               above a disconnected second line giving the actual value —
+               "Payout has been declined and cannot be changed". No Select
+               renders when payout is already final, so nothing needed that
+               label's `id`, and a label with no value beside it just read as
+               broken copy. One line now carries both. */
             <span className="text-xs text-muted-foreground">
-              {t("submit_page.reward_options_final")}
+              {t("submit_page.author_rewards")} {t("submit_page.reward_options_final")}
             </span>
           ) : (
             <>
+              <span className="text-sm font-medium" id="post-publishing-reward-type-label">
+                {t("submit_page.author_rewards")}
+              </span>
               <FormField
                 control={form.control}
                 name="payoutType"
@@ -205,7 +213,7 @@ export function PostPublishingSection({
                             accessible name from its own visible content (verified via the
                             a11y tree — same class as the four Preferences comboboxes,
                             `apps/blog/features/account-settings/form.tsx`). The visible
-                            "Author rewards:" span two lines above already labels this
+                            "Author rewards:" label directly above already labels this
                             control for sighted users; `aria-labelledby` wires the same
                             text in for the accessibility tree instead of duplicating it. */}
                         <SelectTrigger

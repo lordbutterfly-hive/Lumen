@@ -537,86 +537,113 @@ const SettingsForm = ({ username }: { username: string }) => {
             </Select>
           </div>
 
-          <div data-testid="blog-post-rewards">
-            <label className={SETTINGS_LABEL} htmlFor="blog-post-rewards">
-              {t('settings_page.choose_default_blog_payout')}
-            </label>
-            <Select
-              value={preferences.blog_rewards}
-              onValueChange={(e: '0%' | '50%' | '100%') => updatePreference('blog_rewards', e)}
-              name="blog-post-rewards"
-            >
-              <SelectTrigger id="blog-post-rewards" className={SELECT_TRIGGER}>
-                <SelectValue placeholder={t('settings_page.choose_default_blog_payout')} />
-              </SelectTrigger>
-              <SelectContent className={SELECT_CONTENT}>
-                <SelectGroup>
-                  <SelectItem className={SELECT_ITEM} value="0%">
-                    {t('settings_page.decline_payout')}
-                  </SelectItem>
-                  <SelectItem className={SELECT_ITEM} value="50%">
-                    {'50% HBD / 50% HP'}
-                  </SelectItem>
-                  <SelectItem className={SELECT_ITEM} value="100%">
-                    {t('settings_page.power_up')}
-                  </SelectItem>
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          </div>
+          {/*
+            ★ M10 FIX (2026-08-16) — Blog/comment payout and the referral
+            beneficiaries toggle all choose how a HIVE POST gets paid.
+            `PostPublishingSection.tsx` already established that "a Lumen
+            lite post declines all rewards on chain (decision 2026-07-23)
+            and the lite submit path forwards none of these fields" — so for
+            a lite account these three controls are exactly as inert as the
+            blacklist/mute fields above, and for the same reason: nothing a
+            lite account can have. Same treatment (hidden, not disabled),
+            same `isLite` predicate already used for those fields and by
+            `PostPublishingSection`/`WitnessesProxyCard` elsewhere, reused
+            here rather than reinvented — plus one honest line explaining
+            why, since unlike the blacklist/mute fields (which just vanish
+            with the rest of the on-chain-only card) this replaces three
+            visible controls at once and a reader deserves to know why they
+            went away rather than wonder if the page half-loaded.
+          */}
+          {isLite ? (
+            <div className="md:col-span-2" data-testid="reward-settings-lite-hint">
+              <p className="text-[13px] leading-[20px] text-ink-10">
+                {t('settings_page.reward_settings_lite_hint')}
+              </p>
+            </div>
+          ) : (
+            <>
+              <div data-testid="blog-post-rewards">
+                <label className={SETTINGS_LABEL} htmlFor="blog-post-rewards">
+                  {t('settings_page.choose_default_blog_payout')}
+                </label>
+                <Select
+                  value={preferences.blog_rewards}
+                  onValueChange={(e: '0%' | '50%' | '100%') => updatePreference('blog_rewards', e)}
+                  name="blog-post-rewards"
+                >
+                  <SelectTrigger id="blog-post-rewards" className={SELECT_TRIGGER}>
+                    <SelectValue placeholder={t('settings_page.choose_default_blog_payout')} />
+                  </SelectTrigger>
+                  <SelectContent className={SELECT_CONTENT}>
+                    <SelectGroup>
+                      <SelectItem className={SELECT_ITEM} value="0%">
+                        {t('settings_page.decline_payout')}
+                      </SelectItem>
+                      <SelectItem className={SELECT_ITEM} value="50%">
+                        {'50% HBD / 50% HP'}
+                      </SelectItem>
+                      <SelectItem className={SELECT_ITEM} value="100%">
+                        {t('settings_page.power_up')}
+                      </SelectItem>
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </div>
 
-          <div data-testid="comment-post-rewards">
-            <label className={SETTINGS_LABEL} htmlFor="comment-post-rewards">
-              {t('settings_page.choose_default_comment_payout')}
-            </label>
-            <Select
-              name="comment-post-rewards"
-              value={preferences.comment_rewards}
-              onValueChange={(e: '0%' | '50%' | '100%') => updatePreference('comment_rewards', e)}
-            >
-              <SelectTrigger id="comment-post-rewards" className={SELECT_TRIGGER}>
-                <SelectValue placeholder={t('settings_page.choose_default_comment_payout')} />
-              </SelectTrigger>
-              <SelectContent className={SELECT_CONTENT}>
-                <SelectGroup>
-                  <SelectItem className={SELECT_ITEM} value="0%">
-                    {t('settings_page.decline_payout')}
-                  </SelectItem>
-                  <SelectItem className={SELECT_ITEM} value="50%">
-                    {'50% HBD / 50% HP'}
-                  </SelectItem>
-                  <SelectItem className={SELECT_ITEM} value="100%">
-                    {t('settings_page.power_up')}
-                  </SelectItem>
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          </div>
+              <div data-testid="comment-post-rewards">
+                <label className={SETTINGS_LABEL} htmlFor="comment-post-rewards">
+                  {t('settings_page.choose_default_comment_payout')}
+                </label>
+                <Select
+                  name="comment-post-rewards"
+                  value={preferences.comment_rewards}
+                  onValueChange={(e: '0%' | '50%' | '100%') => updatePreference('comment_rewards', e)}
+                >
+                  <SelectTrigger id="comment-post-rewards" className={SELECT_TRIGGER}>
+                    <SelectValue placeholder={t('settings_page.choose_default_comment_payout')} />
+                  </SelectTrigger>
+                  <SelectContent className={SELECT_CONTENT}>
+                    <SelectGroup>
+                      <SelectItem className={SELECT_ITEM} value="0%">
+                        {t('settings_page.decline_payout')}
+                      </SelectItem>
+                      <SelectItem className={SELECT_ITEM} value="50%">
+                        {'50% HBD / 50% HP'}
+                      </SelectItem>
+                      <SelectItem className={SELECT_ITEM} value="100%">
+                        {t('settings_page.power_up')}
+                      </SelectItem>
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </div>
 
-          <div data-testid="referral-system">
-            <label className={SETTINGS_LABEL} htmlFor="referral-system">
-              {t('settings_page.default_beneficiaries')}
-            </label>
-            <Select
-              name="referral-system"
-              value={preferences.referral_system}
-              onValueChange={(e: 'enabled' | 'disabled') => updatePreference('referral_system', e)}
-            >
-              <SelectTrigger id="referral-system" className={SELECT_TRIGGER}>
-                <SelectValue placeholder={t('settings_page.default_beneficiaries')} />
-              </SelectTrigger>
-              <SelectContent className={SELECT_CONTENT}>
-                <SelectGroup>
-                  <SelectItem className={SELECT_ITEM} value="enabled">
-                    {t('settings_page.default_beneficiaries_enabled')}
-                  </SelectItem>
-                  <SelectItem className={SELECT_ITEM} value="disabled">
-                    {t('settings_page.default_beneficiaries_disabled')}
-                  </SelectItem>
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          </div>
+              <div data-testid="referral-system">
+                <label className={SETTINGS_LABEL} htmlFor="referral-system">
+                  {t('settings_page.default_beneficiaries')}
+                </label>
+                <Select
+                  name="referral-system"
+                  value={preferences.referral_system}
+                  onValueChange={(e: 'enabled' | 'disabled') => updatePreference('referral_system', e)}
+                >
+                  <SelectTrigger id="referral-system" className={SELECT_TRIGGER}>
+                    <SelectValue placeholder={t('settings_page.default_beneficiaries')} />
+                  </SelectTrigger>
+                  <SelectContent className={SELECT_CONTENT}>
+                    <SelectGroup>
+                      <SelectItem className={SELECT_ITEM} value="enabled">
+                        {t('settings_page.default_beneficiaries_enabled')}
+                      </SelectItem>
+                      <SelectItem className={SELECT_ITEM} value="disabled">
+                        {t('settings_page.default_beneficiaries_disabled')}
+                      </SelectItem>
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </div>
+            </>
+          )}
         </div>
       </section>
 

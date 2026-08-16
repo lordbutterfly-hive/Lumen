@@ -1,6 +1,7 @@
 import { liteConfig } from '../config';
 import { Entry, JsonMetadata } from '@hive/common-hiveio-packages/wax';
 import { LumenPost } from '../types';
+import { NOTE_METADATA_TYPE } from '@/blog/lib/short-post-note';
 
 /**
  * Adapt a DB post to the bridge `Entry` shape the feed renders (spec §E.1).
@@ -24,7 +25,14 @@ export function dbPostToEntry(post: LumenPost, publicName?: string): Entry {
     author,
     tags: post.tags,
     app: 'lumen/1.0',
-    summary: post.summary ?? undefined
+    summary: post.summary ?? undefined,
+    // H4, 2026-08-16: mirrors `isNote` in `content/post-service.ts::buildPayload` —
+    // a top-level (no `parentRef`) normal-tier post's title is a derived stand-in,
+    // not real authorship, so `isNotePost` readers (medium-post-card.tsx, the
+    // permalink page) skip repeating it as the excerpt. Set here too, not only in
+    // the on-chain payload, so the card looks right from the moment it is created,
+    // before the publisher ever broadcasts it.
+    ...(post.tier === 'normal' && !post.parentRef ? { type: NOTE_METADATA_TYPE } : {})
   };
 
   return {
@@ -57,7 +65,15 @@ export function dbPostToEntry(post: LumenPost, publicName?: string): Entry {
     depth: post.parentRef ? 1 : 0,
     is_paidout: false,
     json_metadata,
-    max_accepted_payout: '1000000.000 HBD',
+    // ★ DECLINED, LIKE THE CHAIN SAYS (2026-08-16). This synthesizes the entry for a
+    // post that has NOT been broadcast yet, and it claimed the Hive default of
+    // 1,000,000 HBD accepted. Every Lumen post declines: `publisher/broadcaster.ts`
+    // sets `comment_options max_accepted_payout = 0.000 HBD`, and the published post
+    // reads back `"0.000 HBD"` from chain (verified on
+    // hbd-temp/lumen-01m05nvw0wvn7x33kb1dz33vmk). So the figure rendered as an
+    // ordinary payout before publishing and switched to the struck-through declined
+    // treatment afterwards, for one unchanged post. Say the true thing in both states.
+    max_accepted_payout: '0.000 HBD',
     net_rshares: 0,
     payout: 0,
     payout_at: created,

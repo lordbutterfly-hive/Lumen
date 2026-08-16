@@ -179,6 +179,16 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
   // Which wallet dialog is open (null = none). One dialog serves both chains.
   const [walletOpen, setWalletOpen] = useState<WalletChain | null>(null);
   const [name, setName] = useState('');
+  // ★ M1 FIX (2026-08-16): must stay neutral until the field is dirty or
+  // blurred. Before this, `nameBorder`'s default branch carried
+  // `focus-within:border-line-brand-10`, which fires on FOCUS ALONE — and
+  // this input has `autoFocus`, so the wrapper went brand-red the instant the
+  // "name" view rendered, before the reader had typed a single character.
+  // `nameTouched` gates that: false until the reader types (dirty) or leaves
+  // the field (blurred), matching every other validation state below it,
+  // which already cannot fire on an empty value (`checkName` short-circuits
+  // to `idle` for a blank string).
+  const [nameTouched, setNameTouched] = useState(false);
   const [busy, setBusy] = useState(false);
   // '' until the widget hands one over. Required only when a site key is configured,
   // which is exactly when the server has a secret to verify it against.
@@ -208,12 +218,32 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
   const refreshGoogleNonce = useCallback(() => {
     void googleChallenge().then((n) => setGoogleNonce(n));
   }, [googleChallenge]);
+  /**
+   * ★ ONE NONCE PER MOUNT, NOT TWO (2026-08-16, QA report B3).
+   *
+   * Every login page load logged:
+   *   [GSI_LOGGER]: google.accounts.id.initialize() is called multiple times.
+   *
+   * The cause was here, not in GoogleSignIn's own guard. `reactStrictMode` is on
+   * (next.config.js), so this effect runs, unmounts and runs again on mount. With
+   * no cancellation, BOTH runs completed and each set a different single-use
+   * nonce, so `<GoogleSignIn key={googleNonce}>` remounted with a new key and
+   * legitimately called `initialize()` a second time. Two correct calls caused by
+   * one uncancelled fetch, which is why hardening the callee could never fix it.
+   *
+   * The first nonce is also wasted: it is single-use and nothing ever redeems it.
+   */
   useEffect(() => {
-    if (googleConfigured()) {
-      setGoogleReady(true);
-      refreshGoogleNonce();
-    }
-  }, [refreshGoogleNonce]);
+    if (!googleConfigured()) return;
+    let cancelled = false;
+    setGoogleReady(true);
+    void googleChallenge().then((n) => {
+      if (!cancelled) setGoogleNonce(n);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [googleChallenge]);
 
   // Already signed in → leave the pre-auth page.
   useEffect(() => {
@@ -261,8 +291,9 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
     else setError(outcome.message);
   };
 
-  const nameBorder =
-    nameStatus.state === 'available'
+  const nameBorder = !nameTouched
+    ? 'border-line-11'
+    : nameStatus.state === 'available'
       ? 'border-line-ok-5'
       : nameStatus.state === 'unavailable'
         ? 'border-line-warn-8'
@@ -524,9 +555,16 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                 onChange={(e) => {
                   setName(e.target.value);
                   checkName(e.target.value);
+                  setNameTouched(true);
                 }}
+                onBlur={() => setNameTouched(true)}
                 autoFocus
                 spellCheck={false}
+                // M5 QA fix (2026-08-16): `nameRules` below has always said "3 to 16
+                // characters", but nothing stopped the field itself accepting more —
+                // the browser now enforces the upper bound (typed AND pasted) instead
+                // of only the copy claiming it.
+                maxLength={16}
                 className="min-w-0 flex-1 border-0 font-sans text-base font-semibold text-ink-2 outline-none"
               />
               {nameStatus.state === 'checking' ? (

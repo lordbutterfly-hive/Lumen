@@ -1,6 +1,5 @@
 import { Link } from '@hive/ui';
 import parseDate from '@ui/lib/parse-date';
-import { Badge } from '@ui/components/badge';
 import { useTranslation } from '@/blog/i18n/client';
 
 import ChangeTitleDialog from '../community-profile/change-title-dialog';
@@ -16,6 +15,15 @@ interface UserInfoProps extends UserPopoverCardProps {
   community: string;
   category: string;
   created: string;
+  /**
+   * A community moderator's free-text label for this member (`set_label`). No
+   * longer displayed: it is uncontrolled third-party text in a trusted-looking
+   * badge slot, spoofable and inconsistent between communities, and reputation
+   * plus the lite-account quill mark already cover author identity. Kept ONLY
+   * to prefill `ChangeTitleDialog`'s edit box with the current value, so a
+   * moderator opening it sees what is actually set on chain rather than a
+   * blank field that would erase it on save.
+   */
   author_title?: string;
   blacklist: string[];
 }
@@ -47,27 +55,27 @@ function UserInfo({
         withImage
         blacklist={blacklist}
       />
-      {author_title && (
-        <Badge variant="outline" className="border-destructive text-ink-info-6" translate="no">
-          <span className="mr-1">{author_title}</span>
-          <ChangeTitleDialog
-            permlink={permlink}
-            community={community}
-            moderateEnabled={moderateEnabled}
-            userOnList={author}
-            title={author_title ?? ''}
-          />
-        </Badge>
-      )}
-      {!author_title && (
-        <ChangeTitleDialog
-          permlink={permlink}
-          community={community}
-          moderateEnabled={moderateEnabled}
-          userOnList={author}
-          title=""
-        />
-      )}
+      {/* ★ AUTHOR_TITLE BADGE REMOVED (2026-08-16, display-only removal spec).
+          `author_title` is free text any community's moderators can set on a
+          member via `set_label` — arbitrary length, arbitrary content, and
+          spoofable ("✅ Verified", "Admin"). Reputation, just above, and the
+          lite-account quill mark (`user-popover-card.tsx`) are the product's
+          only author-identity signals; this was an unexplained third one,
+          sourced from a community moderator rather than Lumen, and it only
+          ever rendered on the post page, so it popped in and out as a reader
+          navigated. `ChangeTitleDialog` is NOT part of the badge — it is the
+          moderator's control for SETTING this label, and it already rendered
+          unconditionally before this change (the `!author_title` branch
+          existed specifically so a moderator could set a FIRST title on a
+          member who had none), so it stays, un-nested from the deleted
+          `Badge`, reachable exactly as before. */}
+      <ChangeTitleDialog
+        permlink={permlink}
+        community={community}
+        moderateEnabled={moderateEnabled}
+        userOnList={author}
+        title={author_title ?? ''}
+      />
       {authored && (
         <span className="text-muted-foreground">
           (authored by{' '}

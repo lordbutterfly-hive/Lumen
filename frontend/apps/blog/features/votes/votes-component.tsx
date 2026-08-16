@@ -19,6 +19,7 @@ import { useVoteMutation } from './hooks/use-vote-mutation';
 import { VoteRemovalDialog } from './vote-removal-dialog';
 import { BladeGlyph, CommitRing, VoteTally, useCommitRing, voteStyles, type VoteSize } from './blade';
 import { splitTally, type MyVote } from './vote-tallies';
+import { FEATURE_INLINE_DOWNVOTE } from './feature-flags';
 
 const VOTE_WEIGHT_DROPDOWN_THRESHOLD = 1.0 * 1000.0 * 1000.0;
 
@@ -48,10 +49,32 @@ const getVoteValue = (
   return stored?.[voteType]?.[direction] ?? DEFAULT_VOTES_VALUES[voteType][direction];
 };
 
+/**
+ * The per-post, per-author name stamped into a lite post's on-chain
+ * `json_metadata` at publish time (`publisher/footer.ts`'s `lite_display_name`).
+ *
+ * Unlike `post.author` — which for a lite post is either the SAME shared
+ * publishing account for every lite author in the app (once corrected on the
+ * post page, see `content.tsx`'s `litePost?.chainAuthor`) or that post's own
+ * uncorrected display name (on feed cards/comments, which do not apply that
+ * correction) — this value travels on the chain data itself and answers "who
+ * wrote THIS post" the same way everywhere `VotesComponent` mounts, with no
+ * extra fetch. `JsonMetadata` (packages/common-hiveio-packages) does not
+ * declare this field — it is Lumen-specific, not part of the shared chain
+ * type — hence the `unknown` narrowing instead of a direct property read.
+ */
+const liteDisplayNameOf = (post: Entry): string | undefined => {
+  const meta = post.json_metadata as unknown;
+  if (!meta || typeof meta !== 'object') return undefined;
+  const value = (meta as Record<string, unknown>).lite_display_name;
+  return typeof value === 'string' ? value : undefined;
+};
+
 const VotesComponent = ({
   post,
   type,
-  size = 'sm'
+  size = 'sm',
+  showDownvote = FEATURE_INLINE_DOWNVOTE
 }: {
   post: Entry;
   type: 'comment' | 'post';
@@ -64,6 +87,13 @@ const VotesComponent = ({
    * The post page passes `size="default"`.
    */
   size?: VoteSize;
+  /**
+   * Render the downvote button and its tally inline. Defaults to the
+   * FEATURE_INLINE_DOWNVOTE flag (false), so no call site has to pass it and no
+   * surface can disagree with another about whether the arrow exists. See
+   * `feature-flags.ts` for why this is a flag rather than a deletion.
+   */
+  showDownvote?: boolean;
 }) => {
   const { user, sessionUnavailable } = useUserClient();
   /**
@@ -105,6 +135,29 @@ const VotesComponent = ({
   }, [type, storedVotesValues]);
   const checkVote = post.active_votes.find((e) => e.voter === voter);
   const isLite = user?.account_tier === 'lite';
+  /**
+   * ★★★ A LITE VOTER CANNOT VOTE ON THEIR OWN POST — THE SERVER ALREADY
+   * REFUSES IT, THE BUTTON DID NOT KNOW (2026-08-16, QA H1).
+   *
+   * `checkEngagementTarget` (lib/lite/content/engagement-target.ts) 400s a
+   * lite vote on the caller's own post with `self_engagement`, correctly: a
+   * lite vote is Lumen-local and moves no money, so voting for yourself only
+   * inflates a ranking signal, which has no equivalent justification to the
+   * real-money case that makes self-voting legal on Hive proper. The button
+   * did not know this, so a lite author saw a live, enabled upvote arrow on
+   * their own post that could never succeed — clicking it always ended in a
+   * generic "Something went wrong" toast (see `lite-write.ts`'s `friendly()`
+   * for that half of the fix).
+   *
+   * Gated on `isLite`: a FULL Hive account voting on its own post is normal
+   * and legal (a self-vote pays on Hive), and must stay enabled — this only
+   * closes the one path that is actually refused server-side.
+   */
+  const isOwnLitePost = (() => {
+    if (!isLite || !voter) return false;
+    const authorName = liteDisplayNameOf(post);
+    return !!authorName && authorName.toLowerCase() === voter.toLowerCase();
+  })();
   /**
    * ★★★ THE TIER IS NOT KNOWN AS EARLY AS THE LOGIN IS (2026-08-13, A1 review
    * V-2). `identity` decides WHICH branch renders and answers from the server
@@ -237,9 +290,14 @@ const VotesComponent = ({
   const userVote =
     userVotes?.votes[0] && userVotes?.votes[0].voter === voter ? userVotes.votes[0] : undefined;
   const voteMutation = useVoteMutation();
-  // Single disabled expression for every vote control: in flight, or the
-  // account tier is not yet known (see `tierPending` above).
-  const voteDisabled = voteMutation.isLoading || tierPending;
+  // Single disabled expression for every vote control: in flight, the
+  // account tier is not yet known (see `tierPending` above), or this is a
+  // lite voter's own post (see `isOwnLitePost` above) — the one case the
+  // server refuses outright, so the control must not invite a click.
+  const voteDisabled = voteMutation.isLoading || tierPending || isOwnLitePost;
+  // Shown as a destructive sub-line in the vote tooltip when disabled for that
+  // reason (see `isOwnLitePost`). `undefined` renders nothing extra.
+  const ownPostVoteReason = isOwnLitePost ? t('cards.post_card.own_post_vote_disabled') : undefined;
 
   /**
    * ★★★ WHICH WAY I VOTED — AND WHY `checkVote` IS NOW A FALLBACK
@@ -376,7 +434,13 @@ const VotesComponent = ({
    * because the concave flanks fuse below that — is enforced in
    * `vote-control.module.css`, not here.
    */
-  const rootClass = clsx(voteStyles.root, { [voteStyles.sm]: size === 'sm' });
+  // ★ `upOnly` collapses the root gap when the down side is omitted (spec §3.2):
+  // that gap existed to separate two sides, and with one child it would leave a
+  // hole exactly where the arrow used to be, which reads as a deleted element.
+  const rootClass = clsx(voteStyles.root, {
+    [voteStyles.sm]: size === 'sm',
+    [voteStyles.upOnly]: !showDownvote
+  });
   const upBtnClass = clsx(voteStyles.btn, voteStyles.up, {
     [voteStyles.mine]: vote_upvoted,
     [voteStyles.casting]: upRing
@@ -528,6 +592,7 @@ const VotesComponent = ({
                 <VoteTooltip
                   text={t('cards.post_card.upvote')}
                   afterPayout={pastPayout && !vote_upvoted}
+                  disabledReason={ownPostVoteReason}
                 />
               }
               contentTestId="upvote-button-tooltip"
@@ -647,6 +712,7 @@ const VotesComponent = ({
               <VoteTooltip
                 text={t('cards.post_card.upvote')}
                 afterPayout={pastPayout && !vote_upvoted}
+                disabledReason={ownPostVoteReason}
               />
             }
             contentTestId="upvote-button-tooltip"
@@ -699,176 +765,188 @@ const VotesComponent = ({
         {upTally}
       </span>
 
-      <span className={voteStyles.side}>
-        {/* Downvote — same removal, same reasons, as the up side above. */}
-        {identity.isLoggedIn && enable_slider && !vote_downvoted ? (
-          <Popover>
+      {/*
+       * ★★★ ABSENT, NOT HIDDEN (2026-08-16, spec §3.1). When the downvote is
+       * demoted to the overflow menu the whole side is omitted from the tree,
+       * never `visibility:hidden` or `display:none`, so it is gone for screen
+       * readers and out of the keyboard tab order too. The branch itself stays
+       * behind FEATURE_INLINE_DOWNVOTE so restoring the inline control is a
+       * config change, not a revert (spec §8).
+       */}
+      {showDownvote ? (
+        <span className={voteStyles.side}>
+          {/* Downvote — same removal, same reasons, as the up side above. */}
+          {identity.isLoggedIn && enable_slider && !vote_downvoted ? (
+            <Popover>
+              <TooltipContainer
+                side="top"
+                title={
+                  <VoteTooltip
+                    text={t('cards.post_card.downvote')}
+                    afterPayout={pastPayout && !vote_downvoted}
+                    disabledReason={ownPostVoteReason}
+                  />
+                }
+                contentTestId="downvote-button-tooltip"
+              >
+                <PopoverTrigger asChild>
+                  <button
+                    type="button"
+                    data-testid="downvote-button"
+                    aria-label={t('cards.post_card.downvote')}
+                    aria-pressed={false}
+                    disabled={voteDisabled}
+                    className={downBtnClass}
+                  >
+                    {/* Same as the up trigger: `.casting` and the ring travel together. */}
+                    {downRing ? <CommitRing onDone={clearDownRing} /> : null}
+                    <BladeGlyph />
+                  </button>
+                </PopoverTrigger>
+              </TooltipContainer>
+              <PopoverContent
+                className="z-50 max-w-xs rounded-lg bg-background-secondary p-4 shadow-lg"
+                sideOffset={offsetSlider.popoverSideOffset}
+                align="start"
+                alignOffset={offsetSlider.popoverAlignOfset}
+                data-testid="downvote-slider-modal"
+              >
+                <div className="flex h-full items-center gap-2">
+                  <TooltipContainer
+                    side="top"
+                    title={
+                      <VoteTooltip
+                        text={t('cards.post_card.downvote')}
+                        afterPayout={pastPayout && !vote_downvoted}
+                      />
+                    }
+                    contentTestId="downvote-button-slider-tooltip"
+                  >
+                    <button
+                      type="button"
+                      data-testid="downvote-button-slider"
+                      aria-label={t('cards.post_card.downvote')}
+                      className={clsx(voteStyles.btn, voteStyles.down)}
+                      disabled={voteDisabled}
+                      onClick={() => {
+                        setClickedVoteButton('down');
+                        submitVote(-sliderDownvote[0] * 100);
+                        storeVotesValues((prev) => ({
+                          ...prev,
+                          [type]: {
+                            ...prev[type],
+                            downvote: sliderDownvote
+                          }
+                        }));
+                      }}
+                    >
+                      {downRing ? <CommitRing onDone={clearDownRing} /> : null}
+                      <BladeGlyph />
+                    </button>
+                  </TooltipContainer>
+                  <Slider
+                    dataTestId="downvote-slider"
+                    defaultValue={sliderDownvote}
+                    value={sliderDownvote}
+                    min={1}
+                    className="w-36"
+                    onValueChange={(e: number[]) => setSliderDownvote(e)}
+                  />
+                  <div
+                    className="w-fit text-destructive"
+                    data-testid="downvote-slider-percentage-value"
+                  >
+                    -{sliderDownvote}%
+                  </div>
+                </div>
+                <div
+                  className="flex flex-col gap-1 pt-2 text-sm"
+                  data-testid="downvote-description-content"
+                >
+                  <p>{t('cards.post_card.downvote_warning')}</p>
+                  <ul>
+                    <li>{t('cards.post_card.reason_1')}</li>
+                    <li>{t('cards.post_card.reason_2')}</li>
+                    <li>{t('cards.post_card.reason_3')}</li>
+                    <li>{t('cards.post_card.reason_4')}</li>
+                  </ul>
+                </div>
+              </PopoverContent>
+            </Popover>
+          ) : identity.isLoggedIn && vote_downvoted ? (
+            <TooltipContainer
+              side="top"
+              title={
+                <VoteTooltip text={downvoteUndoLabel} afterPayout={pastPayout && !vote_downvoted} />
+              }
+              contentTestId="downvote-button-tooltip"
+            >
+              <VoteRemovalDialog
+                voteType="downvote"
+                onConfirm={() => {
+                  setClickedVoteButton('down');
+                  submitVote(0);
+                }}
+              >
+                <button
+                  type="button"
+                  data-testid="downvote-button"
+                  aria-label={downvoteUndoLabel}
+                  aria-pressed={true}
+                  disabled={voteDisabled}
+                  className={downBtnClass}
+                >
+                  {downRing ? <CommitRing onDone={clearDownRing} /> : null}
+                  <BladeGlyph />
+                </button>
+              </VoteRemovalDialog>
+            </TooltipContainer>
+          ) : identity.isLoggedIn ? (
             <TooltipContainer
               side="top"
               title={
                 <VoteTooltip
                   text={t('cards.post_card.downvote')}
                   afterPayout={pastPayout && !vote_downvoted}
+                  disabledReason={ownPostVoteReason}
                 />
               }
               contentTestId="downvote-button-tooltip"
             >
-              <PopoverTrigger asChild>
-                <button
-                  type="button"
-                  data-testid="downvote-button"
-                  aria-label={t('cards.post_card.downvote')}
-                  aria-pressed={false}
-                  disabled={voteDisabled}
-                  className={downBtnClass}
-                >
-                  {/* Same as the up trigger: `.casting` and the ring travel together. */}
-                  {downRing ? <CommitRing onDone={clearDownRing} /> : null}
-                  <BladeGlyph />
-                </button>
-              </PopoverTrigger>
-            </TooltipContainer>
-            <PopoverContent
-              className="z-50 max-w-xs rounded-lg bg-background-secondary p-4 shadow-lg"
-              sideOffset={offsetSlider.popoverSideOffset}
-              align="start"
-              alignOffset={offsetSlider.popoverAlignOfset}
-              data-testid="downvote-slider-modal"
-            >
-              <div className="flex h-full items-center gap-2">
-                <TooltipContainer
-                  side="top"
-                  title={
-                    <VoteTooltip
-                      text={t('cards.post_card.downvote')}
-                      afterPayout={pastPayout && !vote_downvoted}
-                    />
-                  }
-                  contentTestId="downvote-button-slider-tooltip"
-                >
-                  <button
-                    type="button"
-                    data-testid="downvote-button-slider"
-                    aria-label={t('cards.post_card.downvote')}
-                    className={clsx(voteStyles.btn, voteStyles.down)}
-                    disabled={voteDisabled}
-                    onClick={() => {
-                      setClickedVoteButton('down');
-                      submitVote(-sliderDownvote[0] * 100);
-                      storeVotesValues((prev) => ({
-                        ...prev,
-                        [type]: {
-                          ...prev[type],
-                          downvote: sliderDownvote
-                        }
-                      }));
-                    }}
-                  >
-                    {downRing ? <CommitRing onDone={clearDownRing} /> : null}
-                    <BladeGlyph />
-                  </button>
-                </TooltipContainer>
-                <Slider
-                  dataTestId="downvote-slider"
-                  defaultValue={sliderDownvote}
-                  value={sliderDownvote}
-                  min={1}
-                  className="w-36"
-                  onValueChange={(e: number[]) => setSliderDownvote(e)}
-                />
-                <div
-                  className="w-fit text-destructive"
-                  data-testid="downvote-slider-percentage-value"
-                >
-                  -{sliderDownvote}%
-                </div>
-              </div>
-              <div
-                className="flex flex-col gap-1 pt-2 text-sm"
-                data-testid="downvote-description-content"
-              >
-                <p>{t('cards.post_card.downvote_warning')}</p>
-                <ul>
-                  <li>{t('cards.post_card.reason_1')}</li>
-                  <li>{t('cards.post_card.reason_2')}</li>
-                  <li>{t('cards.post_card.reason_3')}</li>
-                  <li>{t('cards.post_card.reason_4')}</li>
-                </ul>
-              </div>
-            </PopoverContent>
-          </Popover>
-        ) : identity.isLoggedIn && vote_downvoted ? (
-          <TooltipContainer
-            side="top"
-            title={
-              <VoteTooltip text={downvoteUndoLabel} afterPayout={pastPayout && !vote_downvoted} />
-            }
-            contentTestId="downvote-button-tooltip"
-          >
-            <VoteRemovalDialog
-              voteType="downvote"
-              onConfirm={() => {
-                setClickedVoteButton('down');
-                submitVote(0);
-              }}
-            >
               <button
                 type="button"
                 data-testid="downvote-button"
-                aria-label={downvoteUndoLabel}
-                aria-pressed={true}
+                aria-label={t('cards.post_card.downvote')}
+                aria-pressed={false}
                 disabled={voteDisabled}
                 className={downBtnClass}
+                onClick={() => {
+                  if (voteDisabled) return;
+                  setClickedVoteButton('down');
+                  submitVote(-10000);
+                }}
               >
                 {downRing ? <CommitRing onDone={clearDownRing} /> : null}
                 <BladeGlyph />
               </button>
-            </VoteRemovalDialog>
-          </TooltipContainer>
-        ) : identity.isLoggedIn ? (
-          <TooltipContainer
-            side="top"
-            title={
-              <VoteTooltip
-                text={t('cards.post_card.downvote')}
-                afterPayout={pastPayout && !vote_downvoted}
-              />
-            }
-            contentTestId="downvote-button-tooltip"
-          >
-            <button
-              type="button"
-              data-testid="downvote-button"
-              aria-label={t('cards.post_card.downvote')}
-              aria-pressed={false}
-              disabled={voteDisabled}
-              className={downBtnClass}
-              onClick={() => {
-                if (voteDisabled) return;
-                setClickedVoteButton('down');
-                submitVote(-10000);
-              }}
-            >
-              {downRing ? <CommitRing onDone={clearDownRing} /> : null}
-              <BladeGlyph />
-            </button>
-          </TooltipContainer>
-        ) : (
-          <DialogLogin>
-            <button
-              type="button"
-              data-testid="downvote-button"
-              aria-label={t('cards.post_card.downvote')}
-              aria-pressed={false}
-              disabled={voteDisabled}
-              className={downBtnClass}
-            >
-              <BladeGlyph />
-            </button>
-          </DialogLogin>
-        )}
-        {downTally}
-      </span>
+            </TooltipContainer>
+          ) : (
+            <DialogLogin>
+              <button
+                type="button"
+                data-testid="downvote-button"
+                aria-label={t('cards.post_card.downvote')}
+                aria-pressed={false}
+                disabled={voteDisabled}
+                className={downBtnClass}
+              >
+                <BladeGlyph />
+              </button>
+            </DialogLogin>
+          )}
+          {downTally}
+        </span>
+      ) : null}
     </div>
   );
 };
@@ -881,7 +959,16 @@ export default VotesComponent;
  * no trigger and creates no focusable node, so it is safe to pass as the
  * shared `TooltipContainer`'s `title` (now `ReactNode`, not `string`).
  */
-function VoteTooltip({ text, afterPayout }: { text: string; afterPayout?: boolean }) {
+function VoteTooltip({
+  text,
+  afterPayout,
+  disabledReason
+}: {
+  text: string;
+  afterPayout?: boolean;
+  /** e.g. `ownPostVoteReason` in votes-component.tsx — why the control is disabled. */
+  disabledReason?: string;
+}) {
   return (
     <div className="flex flex-col items-center justify-center">
       <div className="font-bold">{text}</div>
@@ -890,6 +977,7 @@ function VoteTooltip({ text, afterPayout }: { text: string; afterPayout?: boolea
           Voting on Content after their payout does not generate any new rewards
         </div>
       )}
+      {disabledReason && <div className="text-xs text-destructive opacity-80">{disabledReason}</div>}
     </div>
   );
 }

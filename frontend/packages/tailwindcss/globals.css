@@ -840,6 +840,79 @@
   small {
     font-size: 13px;
   }
+
+  /**
+   * ★ ONE FOCUS RING, IN THE BRAND (2026-08-10, fuckery list X-5).
+   *
+   * There was no custom focus style anywhere in the app, so every keyboard user got
+   * whatever the browser draws by default: a thin blue-black hairline in Chrome, a
+   * dotted line in Firefox, invisible against several of our own surfaces. On a
+   * product whose entire accent language is one red, that is both an accessibility
+   * gap and an inconsistency.
+   *
+   * `:focus-visible` only, never `:focus` — a mouse click must not leave a ring
+   * behind, which is the reason the rule was dropped from most codebases in the
+   * first place. Components that already define their own focus treatment keep it;
+   * this is the floor, not a ceiling.
+   *
+   * ★★★ RESCOPED, NOT JUST RECOLOURED (2026-08-16, M2 fix).
+   *
+   * This rule used to sit OUTSIDE every `@layer` block, as a plain rule appended
+   * after `@tailwind utilities`. That looked like "runs last, so it wins", but
+   * what actually decides it is CSS Cascade Layers, not source order or
+   * specificity: Tailwind compiles `focus-visible:outline-none`,
+   * `focus-visible:ring-2` etc. into `@layer utilities`, and an UNLAYERED rule
+   * beats EVERY layered rule regardless of specificity, full stop. So this rule
+   * was not "the floor" as the comment above claims — it sat ABOVE every
+   * component's own focus treatment and item 2's `Input`/`Checkbox`/`Button`
+   * `focus-visible:ring-2 focus-visible:ring-ring` never got a chance to run at
+   * all. Measured consequences: the lite-auth name-picker wrapper turns
+   * `border-line-ok-5` (green) for a valid name while this rule drew ANOTHER
+   * red outline on the `<input>` inside it, so a valid field still read as an
+   * error; the same doubling showed on the "Continue with Google" card, the
+   * reply Post button, and the Meritum price input, all of which already ship
+   * their own `focus-visible:ring-2`; and `border-radius: 2px` squared off any
+   * rounded control the instant it took focus, everywhere, with no way for a
+   * component to opt out short of overriding `border-radius` itself.
+   *
+   * Moving the rule INTO `@layer base` fixes the doubling by construction:
+   * `@layer base` is the lowest-priority layer Tailwind defines (declared
+   * first via `@tailwind base` at the top of this file), so any component's
+   * OWN `@layer utilities` focus-visible class now wins the way the original
+   * comment always intended, and only an element with NO such override falls
+   * through to this one. No per-component `:not()` list to maintain.
+   *
+   * `border-radius: 2px` is dropped rather than scoped: it never served the
+   * "visible focus ring" goal this rule exists for, and unlike the outline it
+   * is not one of the properties any `focus-visible:ring-*` utility resets, so
+   * a component could not have cancelled it even after the layer fix.
+   *
+   * `[contenteditable]` is excluded explicitly, on top of the layer move,
+   * because CodeMirror's `.cm-content` (the post editor's body textarea — see
+   * `features/post-editor/lib/codemirror-theme.ts`) carries no Tailwind class
+   * for `@layer utilities` to win with; it is plain DOM CodeMirror manages
+   * itself. That file already draws its OWN `.cm-focused` outline on the
+   * `.cm-editor` ANCESTOR (using this same `--ring` token) specifically
+   * because the library's default outline never reached the app's focus
+   * styling. Before this exclusion, BOTH rules fired on every keystroke
+   * session: this one directly on `.cm-content`, `codemirror-theme.ts`'s on
+   * `.cm-editor` wrapping it — two outlines, 2px apart, at nearly the same
+   * position, thickening into the single heavier red line reported directly
+   * under the toolbar. `.cm-focused` alone is the intended, sufficient
+   * indicator; this rule now steps aside for it the same way it steps aside
+   * for a `focus-visible:ring-2` component.
+   *
+   * Colour unchanged: `--line-brand-10` is byte-identical to the literal
+   * #c0392b in light mode and is ALREADY re-pointed to #e38b82 under `.dark`
+   * (see the palette block at the top of this file) — the same lift the
+   * `--ring` token above documents at 5.9:1 against the dark card. Checked
+   * directly rather than assumed: both values are visible against every
+   * surface token this rule can land on in either theme.
+   */
+  :focus-visible:not([contenteditable]) {
+    outline: 2px solid rgb(var(--line-brand-10));
+    outline-offset: 2px;
+  }
 }
 
 .prose :where(code):not(:where([class~='not-prose'], [class~='not-prose'] *)):after,
@@ -1090,29 +1163,6 @@ details {
 summary {
   text-align: right;
   cursor: pointer;
-}
-
-/**
- * ★ ONE FOCUS RING, IN THE BRAND (2026-08-10, fuckery list X-5).
- *
- * There was no custom focus style anywhere in the app, so every keyboard user got
- * whatever the browser draws by default: a thin blue-black hairline in Chrome, a
- * dotted line in Firefox, invisible against several of our own surfaces. On a
- * product whose entire accent language is one red, that is both an accessibility
- * gap and an inconsistency.
- *
- * `:focus-visible` only, never `:focus` — a mouse click must not leave a ring
- * behind, which is the reason the rule was dropped from most codebases in the
- * first place. Components that already define their own focus treatment keep it;
- * this is the floor, not a ceiling.
- */
-:focus-visible {
-  /* Was the literal #c0392b, which is 2.9:1 against the dark card — a focus ring
-     you cannot find is not a focus ring. The token is byte-identical in light
-     (#c0392b) and lightens to #e38b82 in dark, 5.9:1. */
-  outline: 2px solid rgb(var(--line-brand-10));
-  outline-offset: 2px;
-  border-radius: 2px;
 }
 
 /**

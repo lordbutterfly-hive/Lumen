@@ -75,7 +75,15 @@ const HeaderTokenPill: FC = () => {
   // registered a market.
   return (
     <Link
-      href="/creators/launch"
+      /*
+       * ★ THE HEADER CTA AND THE LEFT RAIL LAND ON THE SAME PAGE (2026-08-16,
+       * owner). The rail's "Meritum tokens" opened the tokens landing page while
+       * this one jumped straight into the launch flow, so the product's two most
+       * prominent Meritum entry points disagreed about where Meritum starts. The
+       * landing page is the one that explains what a Meritum is, and it carries
+       * its own launch call to action, so nobody loses a step by arriving there.
+       */
+      href="/creators"
       className="flex items-center gap-2 whitespace-nowrap rounded-full border border-line-brand-10 bg-surface-1 px-4 py-[9px] font-sans text-[14px] leading-[22px] font-bold text-ink-brand-6 transition-colors hover:bg-surface-brand-12 hover:text-ink-27"
       data-testid="header-token-launch-cta"
     >

@@ -153,6 +153,8 @@ export interface PublishPayload {
   displayName: string; // for the footer + metadata
   userId: string;
   postId: string;
+  /** A top-level short post with no title of its own (§H4) — see `buildJsonMetadata`. */
+  isNote: boolean;
 }
 
 export interface PublishJob {

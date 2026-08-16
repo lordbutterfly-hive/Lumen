@@ -2004,7 +2004,14 @@ class HafsqlClient:
         # (that relation is gone entirely as of B2 2026-08-05).
         self._popular_cache_lock = threading.Lock()
         self._popular_cache: dict[tuple[int, int], tuple[float, list[Post]]] = {}
+        # Keys with a background refresh in flight. Guarded by _popular_cache_lock.
+        self._popular_refreshing: set[tuple[int, int]] = set()
         self._popular_cache_ttl_s = _env_float("HAFSQL_POPULAR_CACHE_TTL_S")
+        # How old a borrowed answer from a NEIGHBOURING bucket may be before a
+        # reader is made to wait for a real one. Four TTLs: long enough that an
+        # idle process still answers instantly, short enough that a genuinely
+        # abandoned cache is not served for hours.
+        self._popular_max_stale_s = self._popular_cache_ttl_s * 4
         # Cache-key bucket width: requests within the same bucket share a
         # result. Must stay well under the sourcing freshness window (days),
         # which this module cannot see (`settings` lives in config.py) — a
@@ -2495,6 +2502,24 @@ class HafsqlClient:
             grouped.setdefault(follower, set()).add(following)
         return {follower: frozenset(followees) for follower, followees in grouped.items()}
 
+    def _refresh_popular_posts(self, key: tuple[int, int], since: datetime, limit: int) -> None:
+        """Off-request refill for :meth:`popular_posts`. Never raises into a caller:
+        it runs on a daemon thread with no one to catch it, and a failed refresh
+        must leave the existing stale entry in place rather than clear it."""
+        try:
+            rows = self._fetch_lite(
+                _SQL_POPULAR_POSTS,
+                {"since": since, "limit": limit, "per_author": _POPULAR_MAX_PER_AUTHOR},
+            )
+            posts = self._hydrate(rows)
+            with self._popular_cache_lock:
+                self._popular_cache[key] = (time.monotonic(), posts)
+        except Exception:
+            logger.exception("popular_posts: background refresh failed; serving the stale entry")
+        finally:
+            with self._popular_cache_lock:
+                self._popular_refreshing.discard(key)
+
     def popular_posts(self, since: datetime, limit: int) -> list[Post]:
         """Community-popular fallback for the fully-cold viewer (§13.5b), ranked
         by our own positive-engagement signals — never payout indexing.
@@ -2514,6 +2539,61 @@ class HafsqlClient:
             cached = self._popular_cache.get(key)
             if cached is not None and now - cached[0] < self._popular_cache_ttl_s:
                 return cached[1]
+            # ★★★ STALE-WHILE-REVALIDATE: A READER MUST NEVER PAY FOR A REFILL
+            # (2026-08-16, owner).
+            #
+            # Fixing the cache KEY earlier today stopped this query running once a
+            # minute, but it did not change who pays when it does run: the unlucky
+            # request that arrives first after the TTL lapses still blocked on the
+            # full query. Measured on this box the same day: warm calls 1.42s /
+            # 1.42s / 1.82s, then a single call after a 5 minute idle took 15.2s.
+            # One reader eating 15s so everyone else gets 1.4s is not a trade this
+            # data justifies -- it is global popularity, identical for every
+            # viewer, and the TTL already declares that minutes-old is acceptable.
+            #
+            # So a stale entry is SERVED immediately and refreshed off the request
+            # path. `_popular_refreshing` guards against N concurrent readers each
+            # starting their own refresh for the same key; the winner clears it in
+            # `finally` so a failed refresh cannot wedge the key forever (the next
+            # reader simply tries again, still on stale data meanwhile).
+            #
+            # Absent entirely (cold process, first ever call) still blocks: there is
+            # nothing stale to serve, and returning empty would silently drop the
+            # popular lane rather than make someone wait once.
+            # ★ THE KEY ROTATES, SO "STALE" IS USUALLY A DIFFERENT KEY (2026-08-16,
+            # second pass, caught by measuring rather than by the unit tests).
+            #
+            # `since` is rolling and the bucket is TTL-wide, so after idling past
+            # the TTL a reader lands on a bucket that has NO entry at all. Serving
+            # "the stale value for this key" therefore did nothing in the case it
+            # was written for: measured live, a read 330s after priming still cost
+            # 9.75s. The unit tests missed it because they reuse one key.
+            #
+            # What is actually wanted is the newest answer for this LIMIT, whatever
+            # bucket produced it. The data is global popularity over a multi-day
+            # window: a neighbouring bucket differs by minutes of `since` on a
+            # window measured in days, which is far inside what the TTL already
+            # declares acceptable. `_popular_max_stale_s` bounds how old that
+            # borrowed answer may be, so an idle process cannot serve something
+            # from hours ago forever.
+            fallback = cached
+            if fallback is None:
+                newest_ts, newest_posts = -1.0, None
+                for (b, lim), (ts, posts) in self._popular_cache.items():
+                    if lim == limit and ts > newest_ts:
+                        newest_ts, newest_posts = ts, posts
+                if newest_posts is not None and now - newest_ts < self._popular_max_stale_s:
+                    fallback = (newest_ts, newest_posts)
+            if fallback is not None:
+                if key not in self._popular_refreshing:
+                    self._popular_refreshing.add(key)
+                    threading.Thread(
+                        target=self._refresh_popular_posts,
+                        args=(key, since, limit),
+                        name=f"popular-refresh-{bucket}-{limit}",
+                        daemon=True,
+                    ).start()
+                return fallback[1]
         # ★ 2026-08-08: `per_author` bounds ONE author's share of the recall
         # set — see `_SQL_POPULAR_POSTS`'s note. 2, so filling a 150-row recall
         # needs 75 distinct authors rather than one account posting every five

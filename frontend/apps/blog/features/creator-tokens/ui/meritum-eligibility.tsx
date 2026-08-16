@@ -105,11 +105,40 @@ const Action: FC<{ href: string; children: ReactNode }> = ({ href, children }) =
  */
 export const MeritumEligibilityNotice: FC<{
   surface: MeritumSurface;
-  who: MeritumEligibility;
+  /**
+   * ★ M8 FIX (2026-08-16). Widened to the hook's FULL return shape rather than
+   * the bare `MeritumEligibility` the flags interface declares, because the
+   * `!who.canHold` branch below used to fire on `isLoading` and on `failed`
+   * exactly the same as it fires on a genuine Google-only account — those are
+   * three different situations wearing one sentence. Every call site already
+   * passes `useMeritumEligibility()`'s return value straight through
+   * (`token-market-view.tsx`, `your-tokens-view.tsx`, `launch-step-account.tsx`),
+   * so this is a type widening, not a breaking change to any caller.
+   */
+  who: MeritumEligibility & { isLoading: boolean; failed: boolean };
   className?: string;
   inline?: boolean;
 }> = ({ surface, who, className, inline }) => {
   const { t } = useTranslation('common_blog');
+
+  // The wallet lookup (`useTokenAccounts`, behind `canHold`/`canSign`) has not
+  // answered yet. `canHold` defaults false while it is in flight, which is
+  // indistinguishable from a genuine Google-only account further down — render
+  // nothing rather than flash a wrong verdict, the same first-paint mistake the
+  // launch gate made in August (see the doc comment on the hook below).
+  if (who.isLoading) return null;
+
+  // The lookup answered, but with an error, not a verdict. `canHold` is false
+  // here too, and `!who.canHold` below would tell a WALLET-BOUND account whose
+  // check merely failed that it "signed in with Google" — an assertion about
+  // how they authenticated that is simply false. Say what actually happened.
+  if (who.failed) {
+    return (
+      <Notice tone="blocked" testId="meritum-eligibility-check-failed" className={className} inline={inline}>
+        {t('meritum_eligibility.check_failed')}
+      </Notice>
+    );
+  }
 
   if (!who.loggedIn) {
     const key =

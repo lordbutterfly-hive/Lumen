@@ -51,7 +51,17 @@ export interface Entry {
   author_payout_value: string;
   author_reputation: number;
   author_role?: string;
-  author_title?: string;
+  /**
+   * ★ REMOVED `author_title` (2026-08-16, display-only removal spec). It was
+   * a community moderator's free-text `set_label` value, rendered as a
+   * trusted-looking badge next to the author's name — arbitrary length,
+   * arbitrary content, spoofable, and a third author-identity signal the
+   * product does not want alongside reputation and the lite-account quill
+   * mark. Dropped from this type on purpose so no display surface can type
+   * against it and silently bring the badge back. The raw Bridge API
+   * response still carries the field; only this app-facing type stopped
+   * naming it.
+   */
   beneficiaries: EntryBeneficiaryRoute[];
   blacklists: string[];
   body: string;

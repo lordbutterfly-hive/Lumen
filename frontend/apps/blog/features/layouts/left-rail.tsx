@@ -58,7 +58,7 @@ type NavIcon = ComponentType<LucideProps>;
  * className cannot shrink it under the floor either.
  */
 const MeritumTokensIcon: NavIcon = ({ className }) => (
-  <CreatorTokenRocket size={20} className={className} />
+  <CreatorTokenRocket size={22} className={className} />
 );
 
 /**
@@ -79,7 +79,21 @@ const MeritumTokensIcon: NavIcon = ({ className }) => (
  * the page you are on look identical, and the rail stops telling you where you are.
  */
 const ROW_CLASS =
-  'flex items-center gap-[14px] rounded-xl px-[14px] py-[11px] font-sans text-[15px] leading-[24px] text-ink-8 transition-colors hover:bg-surface-brand-5 hover:text-ink-brand-6';
+  /*
+   * ★ EVERYTHING IN THIS RAIL IS 10% LARGER (2026-08-16, owner).
+   *
+   * Applied to the row's own metrics rather than by scaling the container: a
+   * `transform: scale()` would blur text and would not move the hit target, and
+   * a font-size bump alone would leave the icon and padding behind, so the row
+   * would grow unevenly.
+   *
+   * 14 -> 15.4px gap, 14 -> 15.4px inline padding, 11 -> 12.1px block padding,
+   * 15 -> 16.5px text with leading raised 24 -> 26.4px to keep the same ratio.
+   * The icon moves with them (h-5 w-5 = 20px -> 22px) at the call site below.
+   * Fractional pixels are deliberate: rounding each one would drift the row off
+   * a clean 10%.
+   */
+  'flex items-center gap-[15.4px] rounded-xl px-[15.4px] py-[12.1px] font-sans text-[16.5px] leading-[26.4px] text-ink-8 transition-colors hover:bg-surface-brand-5 hover:text-ink-brand-6';
 const ROW_ACTIVE_CLASS = 'bg-surface-23 font-medium text-ink-2';
 
 /**
@@ -113,7 +127,7 @@ const NavRowContent = ({
   const IconTag = icon;
   return (
     <span className={cn(ROW_CLASS, (isActive || isPending) && ROW_ACTIVE_CLASS)}>
-      <IconTag className="h-5 w-5 shrink-0" />
+      <IconTag className="h-[22px] w-[22px] shrink-0" />
       <span>{label}</span>
       {isPending ? (
         <Loader2 className="ml-auto h-4 w-4 shrink-0 animate-spin text-ink-brand-6" aria-hidden="true" />

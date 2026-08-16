@@ -111,6 +111,49 @@ export async function getEngagement(
 }
 
 /**
+ * Individual Lumen-local voters for one post, shaped for merging into the
+ * chain's `active_votes` list.
+ *
+ * ★ WHY THIS EXISTS SEPARATELY FROM `getEngagement`/`getEngagementTotals`
+ * (2026-08-16, QA B2). Those two answer "how many" — exactly what a vote-count
+ * pill needs, and what `mergeLumenEngagement` already folds into
+ * `stats.total_votes` for feed/discussion/account-posts/search. `/api/active-
+ * votes` answers a different question — WHO voted — which Hivemind's
+ * `get_active_votes` can never include a lite voter in, because a lite vote
+ * never reaches the chain (see `castVote` above). Without this, the endpoint
+ * correctly stopped 502ing once the caller passes the right chain author (see
+ * the route), but a post that has only ever received lite votes would still
+ * come back empty.
+ *
+ * `voter` resolves the same way every other surface resolves a Lumen identity
+ * post-upgrade (`render/current-name.ts`'s `publicNameOf`): the account's
+ * current Hive name if it has upgraded, else its Lumen handle — never the
+ * shared publishing account, which is not a person and votes for no one.
+ */
+export interface LiteVoter {
+  voter: string;
+  /** -10000..10000, Hive convention (see `lumen_vote.weight`). */
+  weight: number;
+  /** When the vote was last cast/changed — the honest value, not "now". */
+  updatedAt: string;
+}
+
+export async function getLiteVotersForPost(author: string, permlink: string): Promise<LiteVoter[]> {
+  const { rows } = await query<{ voter: string; weight: number; updated_at: Date }>(
+    `SELECT COALESCE(u.hive_account_name, u.display_name) AS voter, v.weight, v.updated_at
+       FROM lumen_vote v
+       JOIN lumen_user u ON u.user_id = v.voter_user_id
+      WHERE v.target_author = $1 AND v.target_permlink = $2 AND v.active`,
+    [author, permlink]
+  );
+  return rows.map((r) => ({
+    voter: r.voter,
+    weight: Number(r.weight),
+    updatedAt: r.updated_at.toISOString()
+  }));
+}
+
+/**
  * Lumen-local vote and reblog totals for many posts at once.
  *
  * ★ WHY (owner report, 2026-08-07): a lite vote is Lumen-local by design — it

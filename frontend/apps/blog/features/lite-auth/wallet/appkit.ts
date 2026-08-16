@@ -99,7 +99,7 @@ async function getModal(): Promise<Modal> {
         projectId,
         metadata: {
           name: 'Lumen',
-          description: 'Sign in to Lumen with a wallet — no keys, no gas.',
+          description: 'Sign in to Lumen with a wallet. No keys, no gas.',
           url: origin,
           icons: [`${origin}/favicon.ico`]
         },
@@ -206,10 +206,10 @@ export function walletErrorMessage(error: unknown): string {
   if (/wallet_connect_unconfigured/.test(raw))
     return 'Wallet connect isn’t configured on this deployment yet.';
   if (/taproot_unsupported/.test(raw))
-    return 'Taproot addresses aren’t supported yet — use a SegWit (bc1q…) or legacy (1…) address.';
-  if (/wallet_connect_timeout/.test(raw)) return 'The wallet connection timed out — try again.';
+    return 'Taproot addresses aren’t supported yet. Use a SegWit (bc1q…) or legacy (1…) address.';
+  if (/wallet_connect_timeout/.test(raw)) return 'The wallet connection timed out. Try again.';
   if (/no_bitcoin_signer|no_evm_signer/.test(raw))
     return 'That wallet can’t sign messages. Try another wallet.';
   if (/User rejected|rejected|denied|4001/i.test(raw)) return 'You cancelled the signature request.';
-  return 'Couldn’t complete the wallet signature — please try again.';
+  return 'Couldn’t complete the wallet signature. Please try again.';
 }

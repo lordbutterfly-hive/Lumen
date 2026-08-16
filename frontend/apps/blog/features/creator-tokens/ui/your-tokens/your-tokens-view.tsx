@@ -46,7 +46,7 @@ const HoldingRow: FC<{ h: HolderPosition }> = ({ h }) => (
     </div>
     <div className="text-right tabular-nums">
       <div className="text-[15px] leading-[24px] font-bold text-ink-2">{tok(h.tokensHeld)} tokens</div>
-      {/* The FLOOR is net of this position's own exit tax — the least you're
+      {/* The FLOOR is net of this position's own exit tax. The least you're
           guaranteed back. There is deliberately no "current value" line: that
           needs the creator's live curve price, which is a per-market read this
           list does not make. The token page shows it. */}
@@ -87,7 +87,7 @@ const askStyle: Record<string, { label: string; cls: string }> = {
 const RateStrip: FC<{ onRate: (score: number) => Promise<void>; busy: boolean }> = ({ onRate, busy }) => {
   const [failure, setFailure] = useState<string | null>(null);
   const [done, setDone] = useState(false);
-  if (done) return <div className="mt-3 text-[13px] leading-[20px] font-semibold text-ink-ok-2">Thanks — your rating is recorded on-chain.</div>;
+  if (done) return <div className="mt-3 text-[13px] leading-[20px] font-semibold text-ink-ok-2">Thanks. Your rating is recorded on-chain.</div>;
   return (
     <div className="mt-3 border-t border-line-2 pt-3">
       <div className="mb-2 text-[13px] leading-[20px] text-ink-10">How did it go? Your rating is the creator’s public record.</div>
@@ -257,7 +257,7 @@ const YourTokensView: FC = () => {
               the honest one to lead with anyway. */}
           <div className="mt-4 flex flex-wrap items-end gap-x-6 gap-y-1">
             <div className="text-[34px] leading-[44px] font-extrabold tabular-nums text-ink-2">{p.holdingsUnavailable ? '—' : usdPrice(floorTotalUsd)}</div>
-            <div className="pb-1.5 text-[15px] leading-[24px] tabular-nums text-ink-10">Floor value — what the reserve would pay out if the market wound down</div>
+            <div className="pb-1.5 text-[15px] leading-[24px] tabular-nums text-ink-10">Floor value: what the reserve would pay out if the market wound down</div>
           </div>
           <p className="mt-1 text-[14px] leading-[22px] text-ink-10">
             {p.holdingsUnavailable ? 'Your holdings can’t be loaded right now.' : `You hold tokens from ${p.holdings.length} creators.`}

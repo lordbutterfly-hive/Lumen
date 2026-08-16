@@ -4,6 +4,7 @@ import { useCallback, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { QUERY_KEY } from '@smart-signer/lib/query-keys';
 import { csrfHeaderName } from '@smart-signer/lib/csrf-protection';
+import { useTranslation } from '@/blog/i18n/client';
 
 /**
  * Client wiring for the standalone /login page (Lumen Lite path). Talks to the
@@ -48,7 +49,7 @@ export type WalletChain = 'btc' | 'evm';
 // the app's other authed fetches send the same [name, '1'] pair.
 const JSON_POST: HeadersInit = { 'Content-Type': 'application/json', [csrfHeaderName]: '1' };
 
-const DISABLED = 'Lumen accounts aren’t available just yet — you can still sign in with a Hive account below.';
+const DISABLED = 'Lumen accounts aren’t available just yet. You can still sign in with a Hive account below.';
 const GENERIC = 'Something went wrong. Please try again.';
 
 async function friendlyError(res: Response): Promise<string> {
@@ -59,19 +60,77 @@ async function friendlyError(res: Response): Promise<string> {
     .catch(() => '');
   if (res.status === 503) return DISABLED;
   if (res.status === 429 || code === 'signup_rate_limited' || code === 'rate_limited')
-    return 'Too many sign-ups from your network right now — try again in a minute.';
+    return 'Too many sign-ups from your network right now. Try again in a minute.';
   if (code === 'captcha_failed') return 'Please complete the “I’m human” check and try again.';
   if (code === 'taproot_unsupported')
-    return 'Taproot addresses aren’t supported yet — use a SegWit (bc1q…) or legacy (1…) address.';
-  if (code === 'bad_signature') return 'That signature didn’t match — try again.';
+    return 'Taproot addresses aren’t supported yet. Use a SegWit (bc1q…) or legacy (1…) address.';
+  if (code === 'bad_signature') return 'That signature didn’t match. Try again.';
   if (code === 'address_mismatch' || code === 'invalid_or_expired_challenge')
-    return 'That sign-in request expired — please try again.';
+    return 'That sign-in request expired. Please try again.';
   if (code === 'invalid_token' || code === 'email_not_verified')
-    return 'Couldn’t verify your Google sign-in — try again.';
+    return 'Couldn’t verify your Google sign-in. Try again.';
   return GENERIC;
 }
 
+/**
+ * M5 QA fix (2026-08-16): the FORMAT half of Hive's account-name rule, checked
+ * locally so `checkName` below can reject an obviously-bad name before it ever
+ * reaches the network. Deliberately NOT imported from
+ * `validate-hive-account-name.ts` / `vetting.ts` (both out of scope for this fix,
+ * and the owner is editing vetting.ts directly right now): this only needs to
+ * cover length + charset + first/last character, exactly what this screen's own
+ * hint (`nameRules`) promises, and nothing about reserved words or on-chain
+ * existence, which still need the server.
+ *
+ * Takes the already-trimmed, already-lowercased name `checkName` builds, so it
+ * matches what actually gets sent to `/api/lite/name/check`.
+ *
+ * M4 QA fix, same edit: this also has to speak the same plain language as
+ * `nameRules` ("Lowercase letters, numbers and dashes"), so unlike
+ * `validate-hive-account-name.ts` it never talks about a "segment" — that word
+ * is Hive's internal vocabulary for the dot-separated parts of a sub-account
+ * name, and this screen's hint never even lists a dot as an allowed character.
+ * A dot just falls out of the charset check below like any other punctuation.
+ */
+function localFormatError(trimmedLower: string, t: (key: string) => string): string | null {
+  if (trimmedLower.length < 3) return t('lite_auth.name_check.too_short');
+  if (trimmedLower.length > 16) return t('lite_auth.name_check.too_long');
+  if (!/^[a-z0-9-]+$/.test(trimmedLower)) return t('lite_auth.name_check.bad_chars');
+  if (!/^[a-z]/.test(trimmedLower)) return t('lite_auth.name_check.must_start_letter');
+  if (!/[a-z0-9]$/.test(trimmedLower)) return t('lite_auth.name_check.must_end_alnum');
+  return null;
+}
+
+/**
+ * M4 QA fix, defense in depth. `localFormatError` above stops "segment" wording
+ * from ever being NEEDED — anything that would trigger it now fails locally,
+ * before the server is asked. This still guards the response path itself,
+ * because the actual source of that wording is
+ * `validate-hive-account-name.ts` (packages/smart-signer), out of scope for
+ * this fix, and it could change independently of this screen's local copy of
+ * the rule. Exact match only: guessing at server text this table does not
+ * recognise is how a mapper starts inventing meaning that was never there, so
+ * an unrecognised "segment" message falls back to one honest generic line
+ * instead of a guess, and anything that does not mention "segment" (reserved
+ * name, already taken, etc.) is already plain English and passes through
+ * untouched.
+ */
+const SEGMENT_REASON_KEYS: Record<string, string> = {
+  'Each account segment should have only lowercase letters, digits, or dashes.': 'bad_chars',
+  'Each account segment should start with a letter.': 'must_start_letter',
+  'Each account segment should end with a letter or digit.': 'must_end_alnum',
+  'Each account segment should be longer.': 'too_short'
+};
+
+function friendlyReason(raw: string, t: (key: string) => string): string {
+  const key = SEGMENT_REASON_KEYS[raw];
+  if (key) return t(`lite_auth.name_check.${key}`);
+  if (/\bsegment\b/i.test(raw)) return t('lite_auth.name_check.format_invalid');
+  return raw;
+}
+
 export function useLiteLogin() {
+  const { t } = useTranslation('common_blog');
   const queryClient = useQueryClient();
   const [nameStatus, setNameStatus] = useState<NameStatus>({ state: 'idle' });
   const checkTimer = useRef<ReturnType<typeof setTimeout>>();
@@ -213,35 +272,63 @@ export function useLiteLogin() {
   );
 
   // Debounced availability check for live name-pick feedback (read-only route).
-  const checkName = useCallback((name: string) => {
-    if (checkTimer.current) clearTimeout(checkTimer.current);
-    const trimmed = name.trim().toLowerCase();
-    if (!trimmed) {
-      setNameStatus({ state: 'idle' });
-      return;
-    }
-    setNameStatus({ state: 'checking' });
-    const seq = ++checkSeq.current;
-    checkTimer.current = setTimeout(async () => {
-      try {
-        const res = await fetch(`/api/lite/name/check?name=${encodeURIComponent(trimmed)}`);
-        if (seq !== checkSeq.current) return;
-        if (!res.ok) {
-          setNameStatus({ state: 'unavailable', reason: await friendlyError(res) });
-          return;
-        }
-        const body = (await res.json()) as { available?: boolean; reason?: string };
-        setNameStatus(
-          body.available
-            ? { state: 'available' }
-            : { state: 'unavailable', reason: body.reason || 'That name isn’t available.' }
-        );
-      } catch {
-        if (seq === checkSeq.current)
-          setNameStatus({ state: 'unavailable', reason: 'Could not verify availability right now — retry.' });
+  const checkName = useCallback(
+    (name: string) => {
+      if (checkTimer.current) clearTimeout(checkTimer.current);
+      const trimmed = name.trim().toLowerCase();
+      if (!trimmed) {
+        // Bump the sequence even though nothing is scheduled: it invalidates any
+        // request already in flight from an earlier, longer value, so that
+        // response cannot land after this and overwrite "idle" with a verdict
+        // about a name the reader has since erased.
+        checkSeq.current += 1;
+        setNameStatus({ state: 'idle' });
+        return;
       }
-    }, 350);
-  }, []);
+      // M5 QA fix (2026-08-16): reject an unfixably-bad name locally, before it
+      // ever costs a network round trip or a shared per-IP rate-limit unit.
+      // Before this, `Test_User!!` or a 36-character string both showed
+      // "Checking…" — a real fetch — for an answer the client already knew.
+      // `checkSeq.current` is still bumped here even though no fetch is
+      // scheduled: it invalidates any request already in flight from an
+      // earlier, format-valid prefix (e.g. the reader typed "abc", a fetch went
+      // out, then typed "abc!" before it returned), so that stale response
+      // cannot land after this and overwrite this newer, locally-certain
+      // "unavailable" verdict. Same guard the debounced fetch below uses for
+      // itself, just applied on the path that skips the fetch entirely.
+      const formatError = localFormatError(trimmed, t);
+      if (formatError) {
+        checkSeq.current += 1;
+        setNameStatus({ state: 'unavailable', reason: formatError });
+        return;
+      }
+      setNameStatus({ state: 'checking' });
+      const seq = ++checkSeq.current;
+      checkTimer.current = setTimeout(async () => {
+        try {
+          const res = await fetch(`/api/lite/name/check?name=${encodeURIComponent(trimmed)}`);
+          if (seq !== checkSeq.current) return;
+          if (!res.ok) {
+            setNameStatus({ state: 'unavailable', reason: await friendlyError(res) });
+            return;
+          }
+          const body = (await res.json()) as { available?: boolean; reason?: string };
+          setNameStatus(
+            body.available
+              ? { state: 'available' }
+              : {
+                  state: 'unavailable',
+                  reason: body.reason ? friendlyReason(body.reason, t) : 'That name isn’t available.'
+                }
+          );
+        } catch {
+          if (seq === checkSeq.current)
+            setNameStatus({ state: 'unavailable', reason: 'Could not verify availability right now. Retry.' });
+        }
+      }, 350);
+    },
+    [t]
+  );
 
   return {
     nameStatus,

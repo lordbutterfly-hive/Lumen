@@ -246,6 +246,34 @@ export function usePostMutation() {
       // post tick a daily goal repeatedly. Same rule lite-write already applies
       // (`if (!input.editOfPostId)`).
       if (user?.account_tier !== 'lite' && !data.editMode) recordRetentionAct('post');
+      // ★ H7: THE RANK CARD, THE DAILY-GOAL RING AND THE PROFILE'S POST COUNT ALL READ
+      // CACHES THIS MUTATION NEVER TOUCHED. Measured live: right after a successful
+      // publish, on the SAME profile screen, the header still read "1 post" (the count
+      // from before this post), the rank card said "Nothing published yet, so nothing
+      // to measure" / "Lumen has not counted a day for you yet", and the daily-goal
+      // ring sat at 0/1 — three React Query caches that had each already been read once
+      // this session and were never told a post landed. A hard reload fixed all three,
+      // which is exactly what these two invalidations reproduce without one.
+      //
+      // `['retention', username]` is the ONE key both `ProfileLeagueCard` (via
+      // `useProfileRetention`) and `TodayCard` (via `useViewerRetention`) read for a
+      // signed-in CHAIN account — see use-retention.ts / use-viewer-retention.ts.
+      // `['profileData', username]` is the key `ProfileMain` reads `post_count` from for
+      // the header stat line — the SAME key `use-follow-mutations.ts` and
+      // `use-mute-mutations.ts` already invalidate after their own writes, followed here
+      // rather than a new pattern.
+      //
+      // Gated on `!data.editMode` only, not the tier check above: this mutation's
+      // `mutationFn` only ever broadcasts a CHAIN post (a lite publish goes through
+      // `createLitePost` in use-post-form-actions.ts and never reaches this hook, and
+      // `useNotePublish`'s short-post path is the only other caller and is chain-only
+      // too), so `['lite-retention']` is never the right key here. An edit changes
+      // neither the post count nor anything the ladder measures, same reasoning as the
+      // `recordRetentionAct` guard just above.
+      if (!data.editMode) {
+        queryClient.invalidateQueries({ queryKey: ['retention', username] });
+        queryClient.invalidateQueries({ queryKey: ['profileData', username] });
+      }
       // Use validated refetch for post data to avoid overwriting optimistic cache
       // with stale Hivemind responses (Hivemind may not have indexed the post yet)
       //

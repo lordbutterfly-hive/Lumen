@@ -94,14 +94,31 @@ const LaunchStepOffers: FC<LaunchStepOffersProps> = ({
               <span className="font-serif text-20 text-meritum-ink-faint" aria-hidden="true">
                 $
               </span>
+              {/*
+                ★ LOW 10 (2026-08-16) — `w-[84px]` clipped its own value: typing
+                `999999999` rendered as `9999`, because the fixed pixel width was
+                narrower than nine tabular-nums digits at `text-30`, so the native
+                input scrolled and showed only what fit. `text-right` also read as
+                a gap between the `$` and the digits for every ordinary (short)
+                price, since right-aligned text sits at the box's far edge, away
+                from the `$` beside it, whenever the box is wider than the value.
+                Fixed both by sizing the box in `ch` — the longest a legitimate
+                price can be is `10000.000` (MAX_PRICE_USD to three decimals, see
+                `../../launch-money.ts`), nine characters, plus one for slack —
+                and left-aligning so the digits start right after the `$`.
+                Permissive parsing (`sanitizeMoneyInput`) still decides what
+                counts as a valid price; `maxLength` here only stops the box from
+                ever having to scroll.
+              */}
               <input
                 type="text"
                 value={offer.price}
                 onChange={(e) => onPrice(i, e.target.value)}
                 placeholder="0"
                 inputMode="decimal"
+                maxLength={9}
                 aria-label={t('meritum_launch.offer_price_aria', { n: i + 1 })}
-                className="w-[84px] min-w-0 border-0 border-b-[1.5px] border-meritum-line-input bg-transparent pb-1 text-right font-serif text-30 font-semibold tabular-nums text-meritum-ink outline-none placeholder:text-meritum-ink-faint"
+                className="w-[10ch] min-w-0 border-0 border-b-[1.5px] border-meritum-line-input bg-transparent pb-1 text-left font-serif text-30 font-semibold tabular-nums text-meritum-ink outline-none placeholder:text-meritum-ink-faint"
               />
             </div>
           </div>

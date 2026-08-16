@@ -69,8 +69,13 @@ interface StatusResponse {
 
 const COPY = {
   title: 'Upgrade to a full Hive account',
+  // ★ H8 (QA copy pass, 2026-08-16): was "...your own keys, your own name on
+  // chain, and you keep your posting history" — that last clause contradicted
+  // COPY.historyLimit rendered lower on this SAME screen (old posts do NOT
+  // carry over on other Hive front ends; only Lumen keeps showing them under
+  // the new name). Cut it here rather than let this screen argue with itself.
   intro:
-    'Your Lumen account posts through Lumen. A full Hive account is yours alone: your own keys, your own name on chain, and you keep your posting history.',
+    'Your Lumen account posts through Lumen. A full Hive account is yours alone: your own keys and your own name on chain.',
   namePick: 'Choose your Hive account name',
   nameHint: 'Lowercase letters, numbers and dashes. 3–16 characters. This cannot be changed later.',
   nameLowercased: (lower: string) =>
@@ -79,7 +84,7 @@ const COPY = {
   // handle on Hive — reserving one means creating the account, which permanently
   // spends a token — so a Hive account needs its own, different name.
   nameWarning:
-    'Your Hive account needs a new name — your Lumen name isn’t reserved on Hive and can’t carry over. Pick something close to it. On Lumen, your posts, followers and history all move to the new name.',
+    'Your Hive account needs a new name. Your Lumen name isn’t reserved on Hive and can’t carry over. Pick something close to it. On Lumen, your posts, followers and history all move to the new name.',
   suggestionsLabel: 'Available instead:',
   historyNote: 'On Lumen, your posts, your history and your profile all move to your new name.',
   // Honest about what upgrading does NOT do. Everything written before the upgrade was
@@ -91,11 +96,11 @@ const COPY = {
   continue: 'Continue',
   generating: 'Creating your keys…',
 
-  keysTitle: 'Save these keys — then we create your account',
+  keysTitle: 'Save these keys. Then we create your account',
   keysIntro:
     'These were just generated in your browser. Lumen never receives them and cannot make them again, so save them somewhere safe before continuing.',
   keysWarning:
-    'Whoever has your master password owns the account. Store it somewhere only you can reach — a password manager, or written down offline. If you lose it, nobody can get the account back for you.',
+    'Whoever has your master password owns the account. Store it somewhere only you can reach. A password manager, or written down offline. If you lose it, nobody can get the account back for you.',
   masterLabel: 'Master password (recovers everything)',
   acknowledge: 'I have saved these keys somewhere safe',
   create: 'Create my Hive account',
@@ -103,7 +108,7 @@ const COPY = {
   createWithEvm: 'Confirm with your Ethereum wallet & create',
   stepUpExplain:
     'One last check: confirm with the wallet or Google account you signed up with. Creating your Hive account cannot be undone, so we ask for it here rather than trusting the browser session alone.',
-  stepUpFailed: 'Could not confirm it was you — please try again.',
+  stepUpFailed: 'Could not confirm it was you. Please try again.',
   stepUpUnavailable: 'Sign-in confirmation is unavailable right now. Please try again later.',
   creating: 'Creating your account…',
   copy: 'Copy',
@@ -114,26 +119,26 @@ const COPY = {
   finish: 'Done',
   verifying: 'Checking your keys against Hive…',
   verifyUnknown:
-    'Your account is being written to Hive. We could not confirm your keys against it yet — reload this page in a minute to check.',
+    'Your account is being written to Hive. We could not confirm your keys against it yet. Reload this page in a minute to check.',
   // Shown only if the account on chain does NOT hold the key this browser derived —
   // which would mean the keys just saved open nothing. Loud on purpose.
   keyMismatch:
     'WARNING: the account that was created does not carry the keys shown on this page. Do not rely on them. Contact support with your account name before doing anything else.',
   notLinkedTitle: 'Your account was created',
   notLinkedBody:
-    'Your Hive account exists and the keys you saved are valid — but Lumen could not finish linking it to your profile. Reload this page in a moment; if it keeps happening, contact support rather than creating another account.',
+    'Your Hive account exists and the keys you saved are valid. But Lumen could not finish linking it to your profile. Reload this page in a moment; if it keeps happening, contact support rather than creating another account.',
 
   alreadyTitle: 'You already have a Hive account',
   alreadyBody:
-    'An earlier upgrade completed, so no new account was created. Sign in with the keys you saved then — Lumen never had a copy and cannot re-issue them.',
+    'An earlier upgrade completed, so no new account was created. Sign in with the keys you saved then. Lumen never had a copy and cannot re-issue them.',
 
   unavailable:
-    'Account creation isn’t switched on yet. Nothing has changed on your account — try again later.',
+    'Account creation isn’t switched on yet. Nothing has changed on your account. Try again later.',
   keygenFailed: 'Your browser could not generate the keys. Reload the page and try again.',
   settling:
     'Your last attempt is still settling on Hive. Give it a minute, then reload this page.',
-  rateLimited: 'Too many attempts today — please try again tomorrow.',
-  networkError: 'Network error — your account was not created. Please try again.'
+  rateLimited: 'Too many attempts today. Please try again tomorrow.',
+  networkError: 'Network error. Your account was not created. Please try again.'
 };
 
 /** Errors that mean "this name will not work" — the keys must be regenerated for a new one. */
@@ -168,6 +173,18 @@ const UpgradePanel: FC = () => {
   const { status: nameStatus, check: checkName } = useNameSuggest();
   const [stage, setStage] = useState<Stage>('name');
   const [name, setName] = useState('');
+  // ★ M1 FIX (2026-08-16): must stay neutral until the field is dirty or
+  // blurred. The mount effect below seeds `checkName(current)` with the
+  // reader's EXISTING Lumen handle to populate suggestions -- deliberately
+  // WITHOUT filling the visible `name` field (see that effect's comment) --
+  // so `nameStatus.state` could land on `unavailable` (amber `border-line-warn-8`,
+  // plus the "isn't available" message) while the box a reader is looking at
+  // is still empty and they have not touched it. `nameTouched` decouples the
+  // wrapper's colour/message from that background seed until the reader
+  // actually types (dirty) or leaves the field (blurred) -- at which point
+  // showing the already-fetched suggestions is exactly the fast feedback the
+  // seed exists to provide.
+  const [nameTouched, setNameTouched] = useState(false);
   const [started, setStarted] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -353,7 +370,7 @@ const UpgradePanel: FC = () => {
         setKeys(null);
         setAcknowledged(false);
         setStage('name');
-        setError(body.message || 'That name is not available — please choose another.');
+        setError(body.message || 'That name is not available. Please choose another.');
         return;
       }
       if (!res.ok || body?.status !== 'ok') {
@@ -620,8 +637,9 @@ const UpgradePanel: FC = () => {
   }
 
   // ── name pick ───────────────────────────────────────────────────────────────
-  const border =
-    nameStatus.state === 'available'
+  const border = !nameTouched
+    ? 'border-line-11'
+    : nameStatus.state === 'available'
       ? 'border-line-ok-5'
       : nameStatus.state === 'unavailable'
         ? 'border-line-warn-8'
@@ -640,13 +658,15 @@ const UpgradePanel: FC = () => {
           onChange={(e) => {
             setName(e.target.value);
             checkName(e.target.value);
+            setNameTouched(true);
           }}
+          onBlur={() => setNameTouched(true)}
           spellCheck={false}
           data-testid="upgrade-name"
           className="min-w-0 flex-1 border-0 font-sans text-base font-semibold text-ink-2 outline-none"
         />
       </div>
-      {nameStatus.state === 'unavailable' ? (
+      {nameTouched && nameStatus.state === 'unavailable' ? (
         <>
           <p className="mt-2 text-[13px] leading-[20px] font-medium text-ink-warn-3">{nameStatus.reason}</p>
           {nameStatus.suggestions.length > 0 ? (

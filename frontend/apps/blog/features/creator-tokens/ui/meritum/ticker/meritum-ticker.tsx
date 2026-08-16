@@ -64,6 +64,11 @@ export interface MeritumTickerProps {
    * `prefers-reduced-motion` satisfies a DIFFERENT criterion — it is an OS
    * setting, not something the reader can operate on the page.
    */
+  /**
+   * Retained on the type, unused since the pause control was removed
+   * (2026-08-16, owner). Kept so restoring that button is a JSX change rather
+   * than a signature change. See the WCAG note at the live badge.
+   */
   pauseLabel?: string;
   resumeLabel?: string;
 }
@@ -82,16 +87,17 @@ export function MeritumTicker({
   className,
   items = MERITUM_TICKER_ITEMS,
   showLive = true,
-  liveLabel = 'Live',
-  pauseLabel = 'Pause the ticker',
-  resumeLabel = 'Resume the ticker'
+  liveLabel = 'Live'
 }: MeritumTickerProps) {
   /**
    * The ref goes on the TRACK, not the window: the track is the element
    * carrying `.mt-tape`, and `animationPlayState` only means anything on the
    * animated element itself.
    */
-  const [userPaused, setUserPaused] = useState(false);
+  // Only the VALUE is read now that the pause button is gone (see the note in the
+  // live badge below). Restoring the control means re-adding the setter here and
+  // the <button> there; the `.paused` styling it drives is still wired.
+  const [userPaused] = useState(false);
   const trackRef = usePauseAnimationOffscreen<HTMLDivElement>(true, userPaused);
 
   /**
@@ -116,21 +122,18 @@ export function MeritumTicker({
             {liveLabel}
           </span>
           {/*
-            ★ WCAG 2.2.2 (Pause, Stop, Hide), Level A. Moving content that starts
-            automatically and runs longer than 5s needs a mechanism the READER
-            can operate. The offscreen IntersectionObserver is an optimisation
-            and `prefers-reduced-motion` is an OS preference; neither is that
-            mechanism. `aria-pressed` rather than a label swap so the state is
-            announced, and it carries a real text label rather than icon-only.
+            ★ THE PAUSE CONTROL IS REMOVED (2026-08-16, owner's direct call).
+            ★★★ THIS IS A KNOWN WCAG 2.2.2 (Pause, Stop, Hide) LEVEL A REGRESSION,
+            recorded here rather than quietly dropped.
+            It was added by the 2026-08-15 accessibility pass for exactly this
+            reason: content that moves automatically and runs longer than 5s must
+            offer the reader a mechanism to stop it, and this tape runs ~58s. The
+            offscreen IntersectionObserver is a performance optimisation and
+            `prefers-reduced-motion` is an OS-level preference, so neither one
+            satisfies the criterion for a reader who has not set it.
+            The `userPaused` state and the `.paused` styling are deliberately
+            KEPT below, so restoring the button is re-adding this element only.
           */}
-          <button
-            type="button"
-            aria-pressed={userPaused}
-            onClick={() => setUserPaused((p) => !p)}
-            className={styles.pauseButton}
-          >
-            {userPaused ? resumeLabel : pauseLabel}
-          </button>
         </div>
       ) : null}
 

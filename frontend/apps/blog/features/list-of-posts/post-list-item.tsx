@@ -217,11 +217,26 @@ const PostListItem = memo(
                 {post.author_role && post.author_role !== 'guest' && isCommunityPage ? (
                   <span className="text-xs md:text-sm">&nbsp;{post.author_role.toUpperCase()}&nbsp;</span>
                 ) : null}
-                {post.author_title ? (
-                  <Badge variant="outline" className="mr-1 border-destructive px-1 py-0 font-thin">
-                    {post.author_title}
-                  </Badge>
-                ) : null}
+                {/*
+                 * ★ THE author_title BADGE IS GONE (2026-08-16, spec "Remove the
+                 * author_title community badge").
+                 *
+                 * It rendered the raw `author_title` string from Hive's Bridge
+                 * API: free text that any community's moderators can set on a
+                 * member with the `set_label` op. Not Lumen data, arbitrary
+                 * length, arbitrary content, and trivially spoofable ("Verified",
+                 * "Admin") inside a badge slot that looks authoritative.
+                 *
+                 * Lumen already carries two author-identity signals and wants no
+                 * third: a reputation score for Hive accounts (just above), and
+                 * the quill mark for lite accounts.
+                 *
+                 * ★ THIS SITE WAS NOT IN THE SPEC. The spec stated feed cards
+                 * never receive `author_title`, which is true of
+                 * `medium-post-card.tsx` but NOT of this classic list, which
+                 * renders on `/[param]/feed` and the profile Comments tab.
+                 * Checked rather than assumed.
+                 */}
                 <span className="flex items-center text-xs md:text-sm">
                   {!isCommunityPage ? (
                     <>

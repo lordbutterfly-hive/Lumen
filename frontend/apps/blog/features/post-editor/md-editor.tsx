@@ -30,7 +30,6 @@ import { convertHiveUrlsInText, parseHiveBlogUrl } from './lib/hive-url-converte
 import { getToolbarButtons } from './lib/toolbar-config';
 import { useCodemirror } from './hooks/use-codemirror';
 import EditorToolbar from './EditorToolbar';
-import EditorOptionsBar from './EditorOptionsBar';
 
 interface MdEditorProps {
   onChange: (value: string) => void;
@@ -444,14 +443,25 @@ const MdEditor: FC<MdEditorProps> = ({ onChange, persistedValue = '', placeholde
         />
       )}
       {editorBody}
-      <EditorOptionsBar
-        isBlockedUser={isBlockedUser}
-        convertHiveLinks={convertHiveLinks}
-        setConvertHiveLinks={setConvertHiveLinks}
-        optimizeImages={optimizeImages}
-        setOptimizeImages={setOptimizeImages}
-        t={t}
-      />
+      {/*
+       * ★ THE OPTIONS STRIP IS GONE, THE BEHAVIOUR IS NOT (2026-08-16, owner).
+       *
+       * "Convert Hive links" and "Optimize images" were two persistent
+       * preferences shown under every editor, including a one-line reply box.
+       * Both already defaulted to TRUE and both stay TRUE: the state above is
+       * untouched, so pasting a peakd/ecency/hive.blog URL still rewrites to a
+       * frontend-agnostic `/@user/permlink`, and uploads still get compressed.
+       * Hiding the controls changes nothing a reader can observe except the
+       * clutter.
+       *
+       * Kept as state rather than hardcoded `true` so restoring the strip is
+       * one JSX block, and so `image-processing.ts` keeps its existing
+       * `optimize` parameter contract. Note that with `optimize` off images are
+       * still converted (HEIC) and still resized when oversized, so this is not
+       * a load-bearing safety switch either way.
+       *
+       * `EditorOptionsBar.tsx` is intentionally left on disk, unimported.
+       */}
     </div>
   );
 };

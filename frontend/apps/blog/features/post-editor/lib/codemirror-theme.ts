@@ -38,10 +38,10 @@ export const lightTheme = EditorView.theme({
   /**
    * ★ THE BRAND FOCUS RING, NOT CODEMIRROR'S OWN (a11y item 6/O5). Without
    * this, `@codemirror/view`'s baseTheme draws its library-default
-   * `1px dotted #212121` outline on `.cm-editor.cm-focused` -- the global
-   * `:focus-visible` rule in `globals.css` never reaches it, because that
-   * outline is drawn on the `.cm-editor` ANCESTOR, not on `.cm-content` (the
-   * node that actually receives focus). `EditorView.theme` extensions take
+   * `1px dotted #212121` outline on `.cm-editor.cm-focused` -- that outline
+   * is drawn on the `.cm-editor` ANCESTOR, not on `.cm-content` (the node
+   * that actually receives focus), so this needs its own rule rather than
+   * relying on the browser default. `EditorView.theme` extensions take
    * precedence over the library's `baseTheme`, so overriding it here (not in
    * globals.css) is deterministic regardless of CodeMirror's own StyleModule
    * injection order.
@@ -53,6 +53,17 @@ export const lightTheme = EditorView.theme({
    * `oneDark` (layered on top in dark mode, see `darkCompartment` in
    * `use-codemirror.ts`) defines no `.cm-focused` outline of its own, so
    * this rule is not shadowed there.
+   *
+   * ★ THIS IS NOW THE ONLY OUTLINE `.cm-content` GETS (2026-08-16, M3 fix).
+   * `globals.css`'s app-wide `:focus-visible` rule matches `.cm-content`
+   * directly (it is a real `contenteditable` node and receives real focus),
+   * and it used to fire ALONGSIDE this rule -- two outlines, both 2px, both
+   * offset 2px, one on `.cm-content` and one on its `.cm-editor` parent,
+   * landing close enough to read as one thicker red line directly under
+   * `EditorToolbar`. `globals.css` now excludes `[contenteditable]`
+   * specifically so this rule is the single source of the editor's focus
+   * indicator, the same way a `focus-visible:ring-2` component excludes
+   * itself by out-prioritising the global rule's `@layer base`.
    */
   "&.cm-focused": {
     outline: "2px solid hsl(var(--ring))",

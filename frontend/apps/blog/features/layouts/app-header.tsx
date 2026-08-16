@@ -34,6 +34,7 @@ import { useTranslation } from '@/blog/i18n/client';
 import { hoursAndMinutes } from '@/blog/lib/utils';
 import DialogLogin from '@/blog/components/dialog-login';
 import UserMenu from '@/blog/features/layouts/site-header/user-menu';
+import { useLumenNotifications } from '@/blog/features/layouts/site-header/use-lumen-notifications';
 import NotificationsMenu from '@/blog/features/layouts/site-header/notifications-menu';
 import { ManabarRing } from '@/blog/features/layouts/site-header/manabar-ring';
 import MobileNav from '@/blog/features/layouts/mobile-nav';
@@ -137,6 +138,17 @@ const AppHeader: FC = () => {
     queryFn: () => fetchUnreadNotifications(user.username),
     enabled: isChainAccount
   });
+  /**
+   * ★★★ THE BELL'S OTHER HALF (2026-08-16, owner). `data.unread` above is the
+   * CHAIN's count and nothing else, while the panel below also lists Lumen-native
+   * events — which is exactly how the badge came to say 1 over a list of 4, and
+   * why a lite reader's badge never left 0. Fetched HERE rather than inside the
+   * popover so the badge can count before anything is opened, and passed down so
+   * there is one request and one number behind both.
+   */
+  const lumen = useLumenNotifications(user.username ?? '');
+  const chainUnread = data?.unread ?? 0;
+  const unreadTotal = chainUnread + lumen.unread;
   const upvotePercent = manabarsData?.upvote.percentageValue ?? 0;
   const downvotePercent = manabarsData?.downvote.percentageValue ?? 0;
   const rcPercent = manabarsData?.rc.percentageValue ?? 0;
@@ -375,23 +387,26 @@ const AppHeader: FC = () => {
                 username={identity.username}
                 lastRead={lastRead}
                 chainAccount={isChainAccount}
-                unreadCount={data?.unread ?? 0}
+                unreadCount={unreadTotal}
+                chainUnreadCount={chainUnread}
+                lumenItems={lumen.items}
+                onOpened={lumen.markSeen}
               >
                 <Button
                   variant="ghost"
                   size="sm"
                   className="relative h-10 w-10 rounded-[10px] px-0"
                   aria-label={
-                    data && data.unread > 0
-                      ? `${LABELS.notifications} (${data.unread} unread)`
+                    unreadTotal > 0
+                      ? `${LABELS.notifications} (${unreadTotal} unread)`
                       : LABELS.notifications
                   }
                   data-testid="nav-notifications"
                 >
                   <Icons.bell className="h-5 w-5" />
-                  {data && data.unread !== 0 ? (
+                  {unreadTotal > 0 ? (
                     <span className="absolute right-0 top-0.5 z-10 inline-block -translate-y-1/2 translate-x-2/4 rounded-full bg-destructive-icon px-1.5 py-1 text-center align-baseline text-xs font-bold leading-none text-ink-27">
-                      {data.unread}
+                      {unreadTotal}
                     </span>
                   ) : null}
                 </Button>
@@ -438,11 +453,14 @@ const AppHeader: FC = () => {
                     className="cursor-pointer"
                   >
                     <div className="group relative inline-flex w-fit cursor-pointer items-center justify-center">
-                      {data && data.unread !== 0 ? (
-                        <div className="absolute bottom-auto left-auto right-0 top-0.5 z-50 inline-block -translate-y-1/2 translate-x-2/4 rotate-0 skew-x-0 skew-y-0 scale-x-100 scale-y-100 whitespace-nowrap rounded-full bg-destructive-icon px-1.5 py-1 text-center align-baseline text-xs font-bold leading-none text-ink-27">
-                          {data.unread}
-                        </div>
-                      ) : null}
+                      {/* ★ THE COUNT LIVES ON THE BELL, ONCE (2026-08-16, owner:
+                          "profile image top right shows 1 notification for some
+                          reason? why if the bell shows it"). This drew the SAME
+                          `data.unread` a hand's width from the bell's own badge,
+                          so one unread reply was reported twice by two different
+                          controls, and the avatar — which opens the account menu,
+                          not notifications — appeared to carry news of its own.
+                          The bell is the control that answers it. */}
                       {/* Default state: RC ring only */}
                       <ManabarRing
                         percentage={rcPercent}

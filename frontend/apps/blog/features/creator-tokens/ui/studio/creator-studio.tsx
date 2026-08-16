@@ -86,7 +86,7 @@ const PriceInput: FC<{
             `The price stayed at $${value}. ${
               error instanceof Error && error.message
                 ? error.message
-                : 'The chain refused the change — a price may only move 2x per 7 days.'
+                : 'The chain refused the change. A price may only move 2x per 7 days.'
             }`
           );
         }
@@ -194,7 +194,7 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
       <div className="mt-1 flex justify-between text-[12px] text-ink-14">
         <span className={answerHasPipe ? 'font-semibold text-ink-brand-6' : ''}>
           {answerHasPipe
-            ? 'Remove the “|” — the chain refuses it in this field.'
+            ? 'Remove the “|”. The chain refuses it in this field.'
             : 'Stored on chain as a public reference.'}
         </span>
         <span className="tabular-nums">
@@ -284,11 +284,11 @@ const RetireModal: FC<{ handle: string; onConfirm: () => Promise<void>; onClose:
     >
       <div className="mb-2 font-serif text-xl font-semibold text-ink-brand-6">End your Meritum?</div>
       <ul className="mb-4 space-y-1.5 font-serif text-[14px] leading-[22px] text-ink-8">
-        <li>· The market freezes now — no new buys or asks.</li>
+        <li>· The market freezes now. No new buys or asks.</li>
         <li>· You’re removed from discovery.</li>
         <li>· Every holder is refunded at the floor.</li>
-        <li>· Asks you’ve received still resolve — answer them to get paid.</li>
-        <li>· Your delivery record is lost — coming back means a new token.</li>
+        <li>· Asks you’ve received still resolve. Answer them to get paid.</li>
+        <li>· Your delivery record is lost. Coming back means a new token.</li>
         <li>· This can’t be undone.</li>
       </ul>
       <label className="mb-1.5 block text-[13px] leading-[20px] font-semibold text-ink-10">
@@ -688,7 +688,7 @@ const CreatorStudio: FC = () => {
                   reassure. */}
               {studio.offerings === null ? (
                 <div className="rounded-xl border border-dashed border-line-brand-2 px-4 py-5 text-center text-[13px] leading-[20px] text-ink-brand-2">
-                  <p>Your services couldn’t be loaded just now — this is not an empty shop.</p>
+                  <p>Your services couldn’t be loaded just now. This is not an empty shop.</p>
                   <button
                     type="button"
                     onClick={() => studio.retry()}
@@ -848,7 +848,7 @@ const CreatorStudio: FC = () => {
           <Card>
             <div className="mb-1 font-serif text-lg font-semibold text-ink-2">Subscription</div>
             <div className="mb-4 text-[14px] leading-[22px] text-ink-8">
-              {overdue ? 'Lapsed — renew to stay listed.' : `Paid up · ${subDaysLeft} days left.`} Staying
+              {overdue ? 'Lapsed. Renew to stay listed.' : `Paid up · ${subDaysLeft} days left.`} Staying
               listed is ~$10/month. First month’s on the house.
             </div>
             <button
@@ -891,7 +891,7 @@ const CreatorStudio: FC = () => {
                   green
                   sub={
                     tradeFeeClaimableUsd === null
-                      ? 'Could not be read just now — this is not a zero balance'
+                      ? 'Could not be read just now. This is not a zero balance'
                       : 'Your 5% of your token’s trades'
                   }
                 />
@@ -934,7 +934,7 @@ const CreatorStudio: FC = () => {
                 value={commissionEarnedUsd === null ? '—' : usdWhole(commissionEarnedUsd)}
                 sub={
                   commissionEarnedUsd === null
-                    ? 'Not available yet — needs the earnings index'
+                    ? 'Not available yet. Needs the earnings index'
                     : 'From answered requests'
                 }
               />

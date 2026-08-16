@@ -284,6 +284,28 @@ export function usePostFormActions({
             await router.push(withBasePath(`/${post_s.category}/@${post_s.author}/${post_s.permlink}`));
           }
         } else {
+          // ★ H7: THE LITE TWIN OF THE CHAIN INVALIDATION IN `usePostMutation`'s
+          // `onSuccess`. `createLitePost` above already returned `201` — the row is
+          // genuinely persisted in Lumen's own store at this point (the publish job to
+          // Hive is a separate, later step; the rank/streak/post-count reads below never
+          // touch it) — but nothing told the caches these two invalidate that it
+          // happened, so the profile this `router.push` is about to land on would show
+          // the same stale "0/1", "Nothing published yet" and pre-publish post count a
+          // chain publish did before this fix.
+          //
+          // `['lite-retention']` is the key `ProfileLeagueCard` (via `useProfileRetention`,
+          // `isOwnLiteProfile` branch) and `TodayCard` (via `useViewerRetention`, `isLite`
+          // branch) both read for a signed-in LITE account — see use-viewer-retention.ts.
+          // `['profileData', user.username]` is the same key the chain path invalidates:
+          // `ProfileMain` reads `post_count` from it regardless of tier, and for a lite
+          // account that count is `liteAccountAsProfile`'s own `countRootPostsByUser`, a
+          // DIFFERENT source from the retention query, not a re-read of it.
+          //
+          // Only reachable here (the `else` of `if (editMode)`), same reasoning as
+          // `recordRetentionAct`'s `!input.editOfPostId` guard in lite-write.ts: an edit
+          // changes neither the post count nor anything the ladder measures.
+          queryClient.invalidateQueries({ queryKey: ["lite-retention"] });
+          queryClient.invalidateQueries({ queryKey: ["profileData", user.username] });
           await router.push(withBasePath(`/@${user.username}`), undefined);
         }
       } else {

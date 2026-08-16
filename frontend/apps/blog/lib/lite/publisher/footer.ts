@@ -5,6 +5,8 @@
  * a Lumen-mediated post, not an unqualified authorship claim (§I impersonation).
  */
 
+import { NOTE_METADATA_TYPE } from '@/blog/lib/short-post-note';
+
 export function buildFooter(displayName: string): string {
   return `\n\n---\n*Posted via Lumen by ${displayName}*`;
 }
@@ -15,6 +17,7 @@ export function buildJsonMetadata(p: {
   userId: string;
   postId: string;
   displayName: string;
+  isNote: boolean;
 }): Record<string, unknown> {
   return {
     app: 'lumen/1.0',
@@ -22,6 +25,7 @@ export function buildJsonMetadata(p: {
     tags: p.tags,
     lumen_user_id: p.userId,
     lumen_post_id: p.postId,
-    lite_display_name: p.displayName
+    lite_display_name: p.displayName,
+    ...(p.isNote ? { type: NOTE_METADATA_TYPE } : {})
   };
 }

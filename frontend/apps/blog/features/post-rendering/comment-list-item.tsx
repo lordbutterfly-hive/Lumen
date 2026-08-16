@@ -10,17 +10,38 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger
 } from '@hive/ui/components/dropdown-menu';
 import { Separator } from '@ui/components/separator';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@ui/components/accordion';
+import { Popover, PopoverContent } from '@ui/components/popover';
+// ★ `PopoverAnchor` is not re-exported by `@ui/components/popover` (only
+// `Popover`/`PopoverTrigger`/`PopoverContent` are). Importing the primitive
+// directly for the one piece the wrapper does not carry is already this
+// directory's own pattern — `copy-from-input.tsx` imports `@radix-ui/react-label`
+// the same way, `dialog-login.tsx` imports `@radix-ui/react-visually-hidden` —
+// so this is not a new precedent. See the long note above `downvoteWeightOpen`
+// for why an Anchor (not a Trigger) is what this needs.
+import { PopoverAnchor } from '@radix-ui/react-popover';
+import { Slider } from '@ui/components/slider';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle
+} from '@ui/components/alert-dialog';
 import { memo, useEffect, useRef, useState, useCallback, type ReactNode } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import DetailsCardVoters from '@/blog/features/post-rendering/details-card-voters';
 import { ReplyTextbox } from '../post-editor/reply-textbox';
 import DetailsCardHover from '../list-of-posts/details-card-hover';
 import { IFollowList, Entry } from '@hive/common-hiveio-packages/wax';
 import clsx from 'clsx';
-import { Badge } from '@ui/components/badge';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import DialogLogin from '../../components/dialog-login';
@@ -48,6 +69,12 @@ import { getCommentMuteReasonKey, isOwnModerationHide } from '@/blog/lib/muted-r
 import { classifyBlacklist } from '@/blog/lib/moderation/blacklist-reason';
 import { useLiteOverlay } from '@/blog/lib/lite/client/use-lite-overlay';
 import { useLumenBlock } from '@/blog/lib/lite/client/use-lumen-block';
+import { fetchListVotesByCommentVoter } from '@/blog/lib/chain-fetch';
+import { fetchLiteEngagement } from '@/blog/lib/lite/client/lite-engagement';
+import { useVoteMutation } from '@/blog/features/votes/hooks/use-vote-mutation';
+import { useLoggedUserContext } from '@/blog/features/votes/hooks/use-logged-user';
+import { BladeGlyph } from '@/blog/features/votes/blade';
+import { authorTitleOf } from '@/blog/lib/author-title';
 
 interface CommentListProps {
   permissionToMute: Boolean;
@@ -176,6 +203,19 @@ const PUBLISH_BADGE_COPY_KEY: Record<Exclude<PublishBadgeState, null>, string> =
   delayed: 'cards.comment_card.publish_delayed'
 };
 
+// ★ SAME localStorage KEY, SHAPE AND STABLE-REFERENCE REQUIREMENT as
+// votes-component.tsx's own `DEFAULT_VOTES_VALUES` (module-scope there too,
+// not exported, so duplicated here) — `useStorageWithTTL`'s own doc comment
+// asks for a stable reference for object initial values, which an inline
+// literal inside the component body would not be. Reading/writing the SAME
+// `'votesValues'` key means the remembered downvote weight follows the reader
+// between this menu and the inline arrow on a post.
+const DEFAULT_DOWNVOTE_STORAGE_VALUES = {
+  post: { upvote: [100], downvote: [100] },
+  comment: { upvote: [100], downvote: [100] }
+};
+const DEFAULT_DOWNVOTE_WEIGHT = [100];
+
 const CommentListItem = memo(function CommentListItem({
   permissionToMute,
   comment,
@@ -194,7 +234,7 @@ const CommentListItem = memo(function CommentListItem({
   children
 }: CommentListProps) {
   const { t } = useTranslation('common_blog');
-  const { user } = useUserClient();
+  const { user, sessionUnavailable } = useUserClient();
   /**
    * ★ SAME BUG CLASS AS app-header.tsx ("NEVER SHOW A SIGNED-IN READER A
    * SIGNED-OUT HEADER", 2026-08-10, N-3). `user.isLoggedIn`/`user.username`
@@ -289,6 +329,171 @@ const CommentListItem = memo(function CommentListItem({
       });
     }
   };
+
+  /**
+   * ★★★ DOWNVOTE MOVED INTO THE "···" OVERFLOW MENU (2026-08-16, spec "Demote
+   * the downvote to an overflow-menu action", comment surface).
+   *
+   * The inline down arrow is already gone from the row below — `VotesComponentWrapper`
+   * never receives `showDownvote`, so it renders `VotesComponent`'s default
+   * (`FEATURE_INLINE_DOWNVOTE`, currently `false` — see `features/votes/feature-flags.ts`).
+   * This block gives the same ACTION a home in the existing overflow menu,
+   * reusing exactly what the inline arrow used to open rather than inventing a
+   * second one:
+   *
+   *   · `useVoteMutation` — the SAME mutation `votes-component.tsx`'s own
+   *     `submitVote` calls, so a cast from here shows the same toast, the same
+   *     optimistic `stats.total_votes` bump (`use-vote-mutation.ts`), and the
+   *     same manabar/discussion invalidations.
+   *   · the SAME `['votes', author, permlink, voter]` React Query cache key
+   *     `VotesComponentWrapper` right below already subscribes to — casting
+   *     here and reading there can never disagree, and `useVoteMutation`'s own
+   *     `onMutate` writes straight into that key, so this component's own
+   *     `vote_downvoted` (derived from the same key, below) updates the instant
+   *     a click here resolves, with no extra plumbing.
+   *   · the SAME copy: `cards.post_card.downvote_warning`/`reason_1..4` for the
+   *     weight popover, `vote_removal_dialog.remove_downvote_*` for the undo
+   *     confirmation — the exact strings the inline arrow's own popover and
+   *     `VoteRemovalDialog` already show.
+   *
+   * ★ WHY NOT PUPPET `VotesComponent` ITSELF FROM HERE, RATHER THAN REBUILDING
+   * THE POPOVER/DIALOG MARKUP. `showDownvote: false` does not just hide the
+   * down side with CSS — `feature-flags.ts`'s own note says it is "omitted from
+   * the tree entirely" — so there is no mounted Popover or VoteRemovalDialog
+   * instance anywhere to reach into, and neither one exposes a controlled
+   * `open` prop back to a caller even when it IS mounted (`VoteRemovalDialog`
+   * owns its `open` state internally; the weight popover in `votes-component.tsx`
+   * is a bare uncontrolled `<Popover>`). Rule 2 for this surface is exactly
+   * that gap: a dialog opened from a menu item needs its open state owned
+   * OUTSIDE the menu, with an explicit place to send focus back to on close —
+   * which an opaque, unreachable internal instance cannot offer no matter how
+   * it is triggered. So the Popover/AlertDialog below are assembled from the
+   * SAME primitives (`@ui/components/popover`, `@ui/components/alert-dialog`,
+   * `Slider`, `useVoteMutation`, `useLoggedUserContext`) `votes-component.tsx`
+   * itself is built from, controlled by state that lives on THIS component,
+   * rather than a second, divergent implementation of "ask before downvoting".
+   */
+  const voter = identity.username;
+  const isLiteVoter = user.account_tier === 'lite';
+  // Same non-answer-vs-zero trap `votes-component.tsx`'s own `tierPending` note
+  // documents at length: on a cold tab, signed in per the server cookie with no
+  // client seed yet, `user.account_tier` cannot be trusted either way. Blocks
+  // the mutation, not the menu item's visibility — an item that is briefly
+  // unclickable is honest; one that fires down the wrong tier's path is not.
+  const tierPending =
+    identity.isLoggedIn && !identity.clientAnswered && !user.isLoggedIn && !sessionUnavailable;
+  const downvoteMutation = useVoteMutation();
+  const voteActionDisabled = downvoteMutation.isLoading || tierPending;
+
+  // ★ THE SSR FALLBACK, SAME FIELD `vote-tallies.ts` READS. `comment.active_votes`
+  // is already on this `Entry` with no extra fetch — the sign of `rshares` on
+  // this voter's row is the same fact `votes-component.tsx` falls back to
+  // before its own `userVotes` query has answered.
+  const checkCommentVote = comment.active_votes?.find((v) => v.voter === voter);
+  // Mirrors `clickedVoteButton` in votes-component.tsx: the confirmed-vote query
+  // is enabled once there is SOMETHING to confirm (an SSR-known vote) or once
+  // this reader has actually touched the menu's downvote action this session —
+  // not on every mount, which would be one more `/api/comment-vote` request per
+  // rendered comment for no reason.
+  const [downvoteMenuActivated, setDownvoteMenuActivated] = useState(false);
+  const { data: myCommentVotes } = useQuery({
+    queryKey: ['votes', comment.author, comment.permlink, voter],
+    queryFn: () =>
+      isLiteVoter
+        ? fetchLiteEngagement(comment.author, comment.permlink)
+        : fetchListVotesByCommentVoter(comment.author, comment.permlink, voter),
+    enabled: isLiteVoter ? !!voter : !!checkCommentVote || downvoteMenuActivated,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    refetchOnMount: false
+  });
+  const myCommentVote =
+    myCommentVotes?.votes[0] && myCommentVotes.votes[0].voter === voter
+      ? myCommentVotes.votes[0]
+      : undefined;
+  // Precedence matches `myVote` in votes-component.tsx exactly, and for the
+  // same reason: `myCommentVote` is the one that goes optimistic the instant a
+  // click resolves and the only one that can represent "I just withdrew";
+  // `checkCommentVote` still holds the stale chain row at that moment.
+  const vote_downvoted = myCommentVote
+    ? myCommentVote.vote_percent < 0
+    : checkCommentVote
+      ? Number(checkCommentVote.rshares) < 0
+      : false;
+
+  const { net_vests, vestsKnown } = useLoggedUserContext();
+  // ★ DUPLICATED FROM `votes-component.tsx`'s own `VOTE_WEIGHT_DROPDOWN_THRESHOLD`
+  // (not exported there) — kept identical so the SAME account sees the SAME
+  // one-shot-vs-picker behaviour whichever surface it downvotes a comment from.
+  // If that threshold ever changes, this one must change with it.
+  const DOWNVOTE_WEIGHT_DROPDOWN_THRESHOLD = 1.0 * 1000.0 * 1000.0;
+  const enableDownvoteSlider = !vestsKnown || net_vests > DOWNVOTE_WEIGHT_DROPDOWN_THRESHOLD;
+
+  // See `DEFAULT_DOWNVOTE_STORAGE_VALUES` above for why the key/shape match
+  // votes-component.tsx's own (unexported) `storedVotesValues`.
+  const [storedDownvoteWeights, storeDownvoteWeights] = useStorageWithTTL(
+    'votesValues',
+    DEFAULT_DOWNVOTE_STORAGE_VALUES,
+    StorageTTL.PERMANENT
+  );
+  const [sliderDownvote, setSliderDownvote] = useState<number[]>(
+    storedDownvoteWeights?.comment?.downvote ?? DEFAULT_DOWNVOTE_WEIGHT
+  );
+  useEffect(() => {
+    setSliderDownvote(storedDownvoteWeights?.comment?.downvote ?? DEFAULT_DOWNVOTE_WEIGHT);
+  }, [storedDownvoteWeights]);
+
+  const submitCommentDownvote = async (weight: number) => {
+    if (tierPending) return;
+    try {
+      await downvoteMutation.mutateAsync({ voter, author: comment.author, permlink: comment.permlink, weight });
+    } catch (error) {
+      handleError(error, {
+        method: 'commentDownvote',
+        params: { voter, author: comment.author, permlink: comment.permlink, weight }
+      });
+    }
+  };
+
+  /**
+   * ★ RULE 2 — NEVER NEST A RADIX DIALOG INSIDE A DropdownMenuItem. Selecting
+   * the item does NOT open anything synchronously: `onSelect` is left to close
+   * the menu via Radix's own default behaviour (not prevented), and the
+   * Popover/AlertDialog below — both driven by state this component owns, not
+   * the menu — are opened a tick later via `setTimeout(…, 0)`. This is the
+   * documented workaround for the exact failure mode rule 2 names: opening a
+   * Dialog/Popover in the SAME tick the menu unmounts races the menu's own
+   * focus-return against the new overlay's focus-trap, and the menu wins,
+   * leaving the "just-opened" dialog with no focus inside it. Deferring one
+   * tick lets the menu's close (and its own focus handling) finish first.
+   */
+  const handleDownvoteSelect = () => {
+    setDownvoteMenuActivated(true);
+    if (vote_downvoted) {
+      setTimeout(() => setDownvoteRemovalOpen(true), 0);
+    } else if (enableDownvoteSlider) {
+      setTimeout(() => setDownvoteWeightOpen(true), 0);
+    } else {
+      // Same as votes-component.tsx's own one-shot branch (below the vests
+      // threshold): no popover, no dialog, a single full-power cast.
+      void submitCommentDownvote(-10000);
+    }
+  };
+
+  // ★ STATE OWNED BY THIS COMPONENT, NOT THE MENU (rule 2). `moreTriggerRef` is
+  // what `onCloseAutoFocus` below sends focus back to on Cancel/Escape/confirm
+  // (rule 3) — Radix's own default would return focus to whatever had it when
+  // the overlay opened, which after the `setTimeout` above is unpredictable
+  // (the closing menu may already have cleared it), so this is explicit rather
+  // than relied upon.
+  const moreTriggerRef = useRef<HTMLButtonElement>(null);
+  const [downvoteWeightOpen, setDownvoteWeightOpen] = useState(false);
+  const [downvoteRemovalOpen, setDownvoteRemovalOpen] = useState(false);
+  const returnFocusToOverflowTrigger = (event: Event) => {
+    event.preventDefault();
+    moreTriggerRef.current?.focus();
+  };
+
   // ★ THE VIEWER'S OWN MODERATION HARD-HIDES — NO COLLAPSE, NO REVEAL (owner
   // ruling 2026-08-12; see `isOwnModerationHide`'s doc for exactly which of the
   // 9 hidden-reason states this covers and which stay collapsed). This is
@@ -543,30 +748,15 @@ const CommentListItem = memo(function CommentListItem({
                                   author_reputation={comment.author_reputation}
                                   blacklist={comment.blacklists}
                                 />
-                                {comment.author_title ? (
-                                  <Badge
-                                    variant="outline"
-                                    className="mr-1 border-destructive"
-                                    data-testid="comment-user-affiliation-tag"
-                                  >
-                                    <span className="mr-1">{comment.author_title}</span>
-                                    <ChangeTitleDialog
-                                      permlink={parentPermlink}
-                                      moderateEnabled={permissionToMute}
-                                      userOnList={comment.author}
-                                      title={comment.author_title ?? ''}
-                                      community={comment.community ?? ''}
-                                    />
-                                  </Badge>
-                                ) : (
-                                  <ChangeTitleDialog
-                                    permlink={parentPermlink}
-                                    moderateEnabled={permissionToMute}
-                                    userOnList={comment.author}
-                                    title={comment.author_title ?? ''}
-                                    community={comment.community ?? ''}
-                                  />
-                                )}
+                                {/* ★ author_title badge removed (2026-08-16, spec). ChangeTitleDialog stays:
+                                    it is the moderator's set_label write control, not the display. */}
+                                <ChangeTitleDialog
+                                  permlink={parentPermlink}
+                                  moderateEnabled={permissionToMute}
+                                  userOnList={comment.author}
+                                  title={authorTitleOf(comment)}
+                                  community={comment.community ?? ''}
+                                />
                                 <Link
                                   href={`#@${comment.author}/${comment.permlink}`}
                                   className="ml-1 hover:text-destructive md:text-sm"
@@ -929,45 +1119,210 @@ const CommentListItem = memo(function CommentListItem({
                               blockable person — `useLumenBlock`'s own "not yourself"
                               check covers the rest. */}
                           {block.available || block.unknown ? (
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <button
-                                  type="button"
-                                  aria-label={t('profile.overflow_menu_label')}
-                                  className="flex items-center text-foreground/60 hover:cursor-pointer hover:text-destructive"
-                                  data-testid="comment-card-footer-overflow"
+                            <>
+                              {/* ★ THE POPOVER WRAPS THE TRIGGER (not the other way round)
+                                  so `PopoverAnchor` and `PopoverContent` share one `<Popover>`
+                                  root — Popper positions off the Anchor's ref, not DOM
+                                  nesting order, so the DropdownMenu living between them here
+                                  is fine. `PopoverAnchor` only registers a position; unlike
+                                  `PopoverTrigger` it adds no click handler, so clicking "···"
+                                  for Block never also toggles this popover — only
+                                  `handleDownvoteSelect` (via `downvoteWeightOpen`) does. */}
+                              <Popover open={downvoteWeightOpen} onOpenChange={setDownvoteWeightOpen}>
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <PopoverAnchor asChild>
+                                      <button
+                                        ref={moreTriggerRef}
+                                        type="button"
+                                        aria-label={
+                                          vote_downvoted
+                                            ? t('cards.comment_card.overflow_menu_label_downvoted')
+                                            : t('profile.overflow_menu_label')
+                                        }
+                                        className={cn(
+                                          'flex items-center hover:cursor-pointer hover:text-destructive',
+                                          // ★ item 4: colour alone is not an accessible signal —
+                                          // the aria-label above already carries the same fact —
+                                          // this is the SAME slate `--lm-vote-slate` resolves to
+                                          // for a cast downvote in `vote-control.module.css`
+                                          // (`.down.mine`), duplicated as literals because that
+                                          // custom property is scoped to `VotesComponent`'s own
+                                          // `.root` element, a sibling of this button, not an
+                                          // ancestor — `var()` would not inherit across to here.
+                                          vote_downvoted
+                                            ? 'text-[#5b6470] dark:text-[#a3adba]'
+                                            : 'text-foreground/60'
+                                        )}
+                                        data-testid="comment-card-footer-overflow"
+                                      >
+                                        <MoreHorizontal className="h-4 w-4" />
+                                      </button>
+                                    </PopoverAnchor>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end" className="w-52">
+                                    {identity.isLoggedIn ? (
+                                      <>
+                                        {/* ★ item 5: no destructive classes here — Downvote is
+                                            not styled destructive-red, unlike Block below. */}
+                                        <DropdownMenuItem
+                                          onSelect={handleDownvoteSelect}
+                                          disabled={voteActionDisabled}
+                                          className="cursor-pointer"
+                                          data-testid="comment-downvote-menu-item"
+                                        >
+                                          {vote_downvoted
+                                            ? t('cards.comment_card.remove_downvote')
+                                            : t('cards.comment_card.downvote')}
+                                        </DropdownMenuItem>
+                                        <DropdownMenuSeparator />
+                                      </>
+                                    ) : null}
+                                    {block.available ? (
+                                      <DropdownMenuItem
+                                        onClick={handleBlockClick}
+                                        disabled={block.busy}
+                                        className="cursor-pointer text-destructive focus:text-destructive"
+                                        data-testid="comment-block-menu-item"
+                                      >
+                                        {block.isBlocking
+                                          ? t('user_profile.unblock_button')
+                                          : t('user_profile.block_button')}
+                                      </DropdownMenuItem>
+                                    ) : (
+                                      // `unknown`, not `available`: the read failed rather than
+                                      // "this pair cannot be blocked" (use-lumen-block.ts). A
+                                      // disabled item that says so, not a vanished menu, is the
+                                      // honest answer during a backend outage.
+                                      <DropdownMenuItem
+                                        disabled
+                                        className="cursor-not-allowed"
+                                        data-testid="comment-block-menu-item-unknown"
+                                        title={t('user_profile.block_status_unknown_hint')}
+                                      >
+                                        {t('user_profile.block_status_unknown')}
+                                      </DropdownMenuItem>
+                                    )}
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                                {/* The weight picker — same Slider, same warning copy, same
+                                    reasons list the inline arrow's popover showed. Confirming
+                                    closes this popover explicitly (the original branch swaps
+                                    to the removal dialog once `vote_downvoted` flips instead,
+                                    which this component cannot do without unmounting the whole
+                                    Popover mid-open). */}
+                                <PopoverContent
+                                  className="z-50 max-w-xs rounded-lg bg-background-secondary p-4 shadow-lg"
+                                  align="end"
+                                  onCloseAutoFocus={returnFocusToOverflowTrigger}
+                                  data-testid="comment-downvote-slider-popover"
                                 >
-                                  <MoreHorizontal className="h-4 w-4" />
-                                </button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end" className="w-52">
-                                {block.available ? (
-                                  <DropdownMenuItem
-                                    onClick={handleBlockClick}
-                                    disabled={block.busy}
-                                    className="cursor-pointer text-destructive focus:text-destructive"
-                                    data-testid="comment-block-menu-item"
+                                  <div className="flex h-full items-center gap-2">
+                                    <button
+                                      type="button"
+                                      data-testid="comment-downvote-slider-confirm"
+                                      aria-label={t('cards.post_card.downvote')}
+                                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-foreground/70 hover:text-[#5b6470] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 dark:hover:text-[#a3adba]"
+                                      disabled={voteActionDisabled}
+                                      onClick={() => {
+                                        void submitCommentDownvote(-sliderDownvote[0] * 100);
+                                        storeDownvoteWeights((prev) => ({
+                                          ...prev,
+                                          comment: { ...prev.comment, downvote: sliderDownvote }
+                                        }));
+                                        setDownvoteWeightOpen(false);
+                                      }}
+                                    >
+                                      {/* Same blade glyph the inline arrow used, rotated the
+                                          same 180° `.down svg` applies in vote-control.module.css
+                                          — reproduced with a plain transform since that module's
+                                          rotation rule is scoped to a class this button does not
+                                          carry (see the colour note above). */}
+                                      <span className="inline-block rotate-180">
+                                        <BladeGlyph />
+                                      </span>
+                                    </button>
+                                    <Slider
+                                      dataTestId="comment-downvote-slider"
+                                      defaultValue={sliderDownvote}
+                                      value={sliderDownvote}
+                                      min={1}
+                                      className="w-36"
+                                      onValueChange={(v: number[]) => setSliderDownvote(v)}
+                                    />
+                                    <div
+                                      className="w-fit text-destructive"
+                                      data-testid="comment-downvote-slider-percentage-value"
+                                    >
+                                      -{sliderDownvote}%
+                                    </div>
+                                  </div>
+                                  <div
+                                    className="flex flex-col gap-1 pt-2 text-sm"
+                                    data-testid="comment-downvote-description-content"
                                   >
-                                    {block.isBlocking
-                                      ? t('user_profile.unblock_button')
-                                      : t('user_profile.block_button')}
-                                  </DropdownMenuItem>
-                                ) : (
-                                  // `unknown`, not `available`: the read failed rather than
-                                  // "this pair cannot be blocked" (use-lumen-block.ts). A
-                                  // disabled item that says so, not a vanished menu, is the
-                                  // honest answer during a backend outage.
-                                  <DropdownMenuItem
-                                    disabled
-                                    className="cursor-not-allowed"
-                                    data-testid="comment-block-menu-item-unknown"
-                                    title={t('user_profile.block_status_unknown_hint')}
-                                  >
-                                    {t('user_profile.block_status_unknown')}
-                                  </DropdownMenuItem>
-                                )}
-                              </DropdownMenuContent>
-                            </DropdownMenu>
+                                    <p>{t('cards.post_card.downvote_warning')}</p>
+                                    <ul>
+                                      <li>{t('cards.post_card.reason_1')}</li>
+                                      <li>{t('cards.post_card.reason_2')}</li>
+                                      <li>{t('cards.post_card.reason_3')}</li>
+                                      <li>{t('cards.post_card.reason_4')}</li>
+                                    </ul>
+                                  </div>
+                                </PopoverContent>
+                              </Popover>
+
+                              {/* Undo confirmation — same title/description/button copy as
+                                  `VoteRemovalDialog(voteType="downvote")`. That component is
+                                  not reused directly here because it owns its OWN trigger and
+                                  `open` state with no external control point; rule 2 needs the
+                                  open state owned by this component instead, so this is a
+                                  controlled AlertDialog built from the same primitives and the
+                                  same `vote_removal_dialog.*` keys. */}
+                              <AlertDialog open={downvoteRemovalOpen} onOpenChange={setDownvoteRemovalOpen}>
+                                <AlertDialogContent
+                                  className="flex flex-col gap-8 sm:rounded-r-xl"
+                                  onCloseAutoFocus={returnFocusToOverflowTrigger}
+                                >
+                                  <AlertDialogHeader className="gap-2">
+                                    <div className="flex items-center justify-between">
+                                      <AlertDialogTitle data-testid="comment-downvote-removal-dialog-header">
+                                        {t('vote_removal_dialog.remove_downvote_title')}
+                                      </AlertDialogTitle>
+                                      <AlertDialogCancel
+                                        className="border-none hover:text-ink-brand-3"
+                                        data-testid="comment-downvote-removal-dialog-close"
+                                      >
+                                        X
+                                      </AlertDialogCancel>
+                                    </div>
+                                    <AlertDialogDescription data-testid="comment-downvote-removal-dialog-description">
+                                      {t('vote_removal_dialog.remove_downvote_description')}
+                                    </AlertDialogDescription>
+                                  </AlertDialogHeader>
+                                  <AlertDialogFooter className="gap-2 sm:flex-row-reverse">
+                                    <AlertDialogCancel
+                                      className="hover:text-ink-brand-3"
+                                      data-testid="comment-downvote-removal-dialog-cancel"
+                                    >
+                                      {t('vote_removal_dialog.cancel')}
+                                    </AlertDialogCancel>
+                                    <AlertDialogAction
+                                      autoFocus
+                                      className="rounded-none bg-surface-39 text-base text-ink-27 shadow-lg shadow-destructive hover:bg-destructive hover:shadow-line-26 disabled:bg-surface-34 disabled:shadow-none"
+                                      onClick={(e) => {
+                                        e.preventDefault();
+                                        void submitCommentDownvote(0);
+                                        setDownvoteRemovalOpen(false);
+                                      }}
+                                      data-testid="comment-downvote-removal-dialog-ok"
+                                    >
+                                      {t('vote_removal_dialog.confirm')}
+                                    </AlertDialogAction>
+                                  </AlertDialogFooter>
+                                </AlertDialogContent>
+                              </AlertDialog>
+                            </>
                           ) : null}
                         </div>
                       )}

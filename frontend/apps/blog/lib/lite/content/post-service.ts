@@ -25,6 +25,14 @@ const logger = getLogger('app');
 const NORMAL_TAG = 'lumen';
 
 /**
+ * Is this request a reply (a comment under something), rather than a top-level
+ * short post? Drives both title and tags below — see each for why.
+ */
+function isReplyRequest(parentRef: ParentRef | null | undefined): boolean {
+  return Boolean(parentRef);
+}
+
+/**
  * ★★★ A NORMAL-TIER POST CARRIES THE AUTHOR'S DECLARED INTERESTS (2026-08-08,
  * owner: "authors declared interests carry into ranker for post").
  *
@@ -224,7 +232,15 @@ function buildPayload(post: LumenPost, parent: OnChainParent | null): PublishPay
     tags: post.tags,
     displayName: post.displayNameSnapshot,
     userId: post.userId,
-    postId: post.postId
+    postId: post.postId,
+    // H4, 2026-08-16: a top-level (no `parentRef`) normal-tier post keeps a
+    // real, non-empty title (see the note above `isReplyRequest`'s call site) —
+    // this says so, the same way `short-form-composer.tsx` marks its own short
+    // posts, so `isNotePost` (lib/short-post-note.ts) recognises this content on
+    // whichever renderer reads it, pre- or post-publish, and lays it out without
+    // repeating the title as the excerpt. A reply is never marked: nothing reads
+    // a reply's title as a headline, so there is nothing for the marker to fix.
+    isNote: post.tier === 'normal' && !post.parentRef
   };
 }
 
@@ -249,8 +265,28 @@ export async function createLitePost(
   }
 
   const body = typeof req.body === 'string' ? req.body : '';
-  const title = req.tier === 'normal' ? (req.title?.trim() || autoTitle(body)) : (req.title?.trim() ?? '');
-  if (req.tier === 'advanced' && title.length === 0) {
+  // H4, 2026-08-16: TITLE, BY WHETHER THIS IS A REPLY, NOT JUST BY TIER.
+  //
+  // Every normal-tier post used to get `autoTitle(body)` regardless of whether it
+  // was a top-level short post or a reply — so a reply's title was a copy of its
+  // own first line, and the post card printed the same sentence as both headline
+  // and excerpt (measured: `"title":"Third reply attempt.","body":"Third reply
+  // attempt."`). A comment's title is never rendered anywhere in this app
+  // (`comment-list-item.tsx`/`comment-list.tsx` never read `.title`) and Hive's
+  // own `ReplyOperation` defaults it to `""` when not given one — an empty title
+  // on a reply is the ecosystem-wide convention, not a hole. A top-level short
+  // post keeps its derived title: Hive requires one on what other front ends and
+  // our own share cards/search results treat as an article
+  // (`lib/short-post-note.ts` — "the fix is not to send an empty title"), so
+  // `dbPostToEntry`/`buildPayload` instead mark it `json_metadata.type: 'note'`
+  // for OUR renderers to lay out without repeating the headline as the excerpt.
+  const isReply = isReplyRequest(req.parentRef);
+  const title = isReply
+    ? ''
+    : req.tier === 'normal'
+      ? (req.title?.trim() || autoTitle(body))
+      : (req.title?.trim() ?? '');
+  if (req.tier === 'advanced' && !isReply && title.length === 0) {
     return { status: 'error', code: 'title_required', message: 'Advanced posts need a title.' };
   }
 
@@ -260,8 +296,18 @@ export async function createLitePost(
   }
   const feedVisibility = screen.feedVisibility;
 
-  const tags =
-    req.tier === 'normal'
+  // H3, 2026-08-16: TAGS, BY WHETHER THIS IS A REPLY.
+  //
+  // `normalTierTags` applied unconditionally to every normal-tier post, reply
+  // included — so a reply picked up its author's declared-interest tags
+  // (`photography, anime, nature, sports, lumen` for the account whose interests
+  // those are) exactly like a top-level short post does. That is deliberate and
+  // measured FOR a top-level post (see `normalTierTags`'s own doc — the ranker's
+  // interest lane needs it), but a reply is never fed to that lane and Hive
+  // convention carries no topic tags on a comment at all. Replies get none.
+  const tags = isReply
+    ? []
+    : req.tier === 'normal'
       ? normalTierTags(actor.user.interests)
       : req.tags?.length
         ? req.tags
@@ -273,6 +319,23 @@ export async function createLitePost(
     if (!existing || existing.userId !== userId) {
       return { status: 'error', code: 'not_found', message: 'Post not found.' };
     }
+    // A comment's parent can never change on chain, and the client does not resend
+    // it on an edit (`editLitePost` never sets `parentRef`) — so `isReply` above,
+    // derived from THIS request, is wrong for an edited reply. The row being
+    // edited is the only true record of whether it is one.
+    const editIsReply = isReplyRequest(existing.parentRef);
+    const editTitle = editIsReply
+      ? ''
+      : req.tier === 'normal'
+        ? (req.title?.trim() || autoTitle(body))
+        : (req.title?.trim() ?? '');
+    const editTags = editIsReply
+      ? []
+      : req.tier === 'normal'
+        ? normalTierTags(actor.user.interests)
+        : req.tags?.length
+          ? req.tags
+          : [NORMAL_TAG];
     // A deleted post takes no further edits. Nothing else enforced this, so an
     // edit could have resurrected content the user had removed.
     if (existing.deletedAt || existing.deletedLocally) {
@@ -302,9 +365,9 @@ export async function createLitePost(
       };
     }
     const updated = await posts.updatePostContent(req.editOfPostId, {
-      title,
+      title: editTitle,
       body,
-      tags,
+      tags: editTags,
       summary: req.summary ?? null,
       thumbnailUrl: req.thumbnailUrl ?? null,
       // F-L32: persist the edit's OWN screen result. Only reachable on an
@@ -335,6 +398,39 @@ export async function createLitePost(
       });
     }
     return { status: 'ok', post: updated };
+  }
+
+  // H5, 2026-08-16: A `type: 'lite'` PARENT MUST EXIST, OR THIS RETURNS AN ERROR,
+  // NOT A 201.
+  //
+  // `explicitParent` below pins whatever this names as the reply's permanent
+  // on-chain parent — permanent because Hive refuses to ever repoint a comment
+  // ("The parent of a comment cannot change", hive_evaluator_social.cpp:294/302).
+  // A `type: 'lite'` ref names one of OUR OWN rows (given directly by the client,
+  // or normalised from a `type: 'chain'` ref that was actually our own synthetic
+  // permlink — see `parseParentRef` in route.ts), so unlike a genuine external
+  // chain parent we can check it for certain, cheaply, before writing anything.
+  //
+  // Before this check, a reply against a parent id that matched nothing still got
+  // pinned and enqueued: 201, a real row, a job that would either wait forever (if
+  // `getPostById` started returning something later, which it never would for a
+  // bad id) or fail permanently once `resolveParentOnChain` (worker.ts) saw it was
+  // 'gone' — and the caller was told none of that. That is exactly what H5
+  // reproduced: a reply accepted for a parent that "had never reached chain"
+  // returned 201 and then never appeared, with no toast and no error.
+  //
+  // A parent that DOES exist but has not published YET is not rejected here — that
+  // is the ordinary, expected case for a reply to a fresh post, and
+  // `resolveParentOnChain` already knows how to wait for it rather than fail.
+  if (req.parentRef?.type === 'lite') {
+    const parent = await posts.getPostById(req.parentRef.id);
+    if (!parent || parent.deletedLocally || parent.feedVisibility !== 'visible') {
+      return {
+        status: 'error',
+        code: 'invalid_parent',
+        message: 'That post could not be identified.'
+      };
+    }
   }
 
   // Per-account rate cap on NEW posts/comments (edits above are exempt). Spec §H.

@@ -273,9 +273,9 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
         <div className="mb-3 text-[15px] leading-[24px] font-bold text-ink-2">How this works</div>
         <div className="flex flex-col gap-3.5">
           {[
-            'Buy the creator’s token — the price rises as more is bought.',
-            'Spend tokens on their work — a question, a code review, a day of building — priced in dollars.',
-            'As more people buy in, the token can appreciate. The floor is what the reserve would pay out per token if the market wound down — selling on the curve is a separate thing, at the curve’s price.'
+            'Buy the creator’s token. The price rises as more is bought.',
+            'Spend tokens on their work. A question, a code review, a day of building — priced in dollars.',
+            'As more people buy in, the token can appreciate. The floor is what the reserve would pay out per token if the market wound down. Selling on the curve is a separate thing, at the curve’s price.'
           ].map((line, i) => (
             <div key={i} className="flex gap-3">
               <span className="font-serif font-bold text-ink-brand-6">{i + 1}</span>
@@ -287,7 +287,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
       <div className="rounded-[18px] border border-line-9 bg-surface-1 p-5">
         <div className="mb-1.5 text-xs text-ink-10">Reserve backing</div>
         <div className="mb-0.5 text-[20px] font-bold tabular-nums text-ink-2">{usdWhole(market.reserveUsd)}</div>
-        <p className="font-serif text-[13px] leading-[20px] text-ink-14">Held in reserve behind every token — the source of the floor.</p>
+        <p className="font-serif text-[13px] leading-[20px] text-ink-14">Held in reserve behind every token: the source of the floor.</p>
       </div>
     </div>
   );
@@ -405,7 +405,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
                     role="note"
                     tabIndex={0}
                     aria-label="What the floor means: what the reserve would pay out per token if the market wound down. It is not a price you can sell at on demand."
-                    title="What the reserve would pay out per token if the market wound down — not a price you can sell at on demand."
+                    title="What the reserve would pay out per token if the market wound down. Not a price you can sell at on demand."
                     className="flex h-3.5 w-3.5 cursor-help items-center justify-center rounded-full bg-surface-23 text-[12px] leading-[14px] text-ink-14"
                   >
                     ?
@@ -496,7 +496,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
               <strong>{d.completionPct}% completion rate</strong> — completed {d.answered} of {d.total} · usually within{' '}
               <strong>{d.typicalResponse}</strong>.
             </div>
-            <div className="mt-1.5 text-[13px] leading-[20px] text-ink-14">Why the token is worth holding — this is what you’re really buying.</div>
+            <div className="mt-1.5 text-[13px] leading-[20px] text-ink-14">Why the token is worth holding. This is what you’re really buying.</div>
           </>
         ) : (
           <div className="rounded-[11px] border border-dashed border-line-11 px-4 py-3 text-[13px] leading-[20px] text-ink-14">Delivery record unavailable</div>
