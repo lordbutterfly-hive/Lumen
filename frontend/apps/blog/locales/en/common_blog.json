@@ -301,7 +301,7 @@
       "home": "Home",
       "profile": "Profile",
       "wallet": "Wallet",
-      "creators": "Meritum",
+      "creators": "Meritum tokens",
       "vote_witness": "Witnesses",
       "proposals": "Proposals",
       "settings": "Settings"
@@ -1932,5 +1932,27 @@
       "no_gatekeeping": "No pitch deck. No permission. No waiting.",
       "live_pill": "Live in seconds"
     }
+  },
+  "meritum_eligibility": {
+    "signed_out_launch": "Sign in to launch a Meritum token.",
+    "signed_out_trade": "Sign in to trade Meritum tokens.",
+    "signed_out_hold": "Sign in to hold Meritum tokens.",
+    "action_sign_in": "Sign in",
+    "action_upgrade": "Upgrade to a full Hive account",
+    "action_link_wallet": "Link a Bitcoin or Ethereum wallet",
+    "wallet_btc": "Bitcoin wallet",
+    "wallet_evm": "Ethereum wallet",
+    "wallet_generic": "wallet",
+    "google_lead": "You signed in with Google, so this account has no wallet yet.",
+    "google_why": "Meritum tokens are held on Magi against a wallet identity, and a Google sign-in has no keys behind it, so there is nothing here to hold, buy or sell tokens with. Launching your own needs a Hive account on top of that.",
+    "google_to_hold": "to hold tokens, or",
+    "google_to_launch": "to launch your own.",
+    "wallet_launch_lead": "A Meritum token is launched from a Hive account.",
+    "wallet_launch_why": "Your {{wallet}} gives you a Magi identity that can hold tokens, but a Meritum is issued against a Hive identity: that is the name readers buy into and the account that answers for it.",
+    "wallet_launch_tail": "to launch yours.",
+    "wallet_can_trade": "Your {{wallet}} can hold and trade Meritum tokens, but launching one of your own needs a full Hive account, because a Meritum is issued against a Hive identity.",
+    "wallet_trade_lead": "Your {{wallet}} can hold Meritum tokens, but not trade them from Lumen yet.",
+    "wallet_trade_why": "Tokens sent to you are held against your wallet identity on Magi and stay yours. Buying and selling needs a signature over the Magi transaction itself, which is a different signature from the one you signed in with, and that rail is still being built for your {{wallet}}. To trade today,",
+    "wallet_trade_tail": "."
   }
 }

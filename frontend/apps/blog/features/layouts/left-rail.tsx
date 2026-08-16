@@ -11,6 +11,7 @@ import BasePathLink from '../../components/base-path-link';
 import { useTranslation } from '@/blog/i18n/client';
 import DialogLogin from '@/blog/components/dialog-login';
 import { LeagueShowcase } from '@/blog/features/retention/components/league-showcase';
+import { CreatorTokenRocket } from '@/blog/features/creator-tokens/ui/creator-token-rocket';
 
 /**
  * ★★★ THESE WERE THE REASON THE LANGUAGE SWITCHER "DID NOTHING" (2026-08-14).
@@ -41,6 +42,24 @@ const labels = (t: (k: string) => string) => ({
 });
 
 type NavIcon = ComponentType<LucideProps>;
+
+/**
+ * ★ THE RAIL AND THE HEADER NOW SHOW THE SAME MARK (2026-08-16, owner). The rail
+ * carried `Icons.creatorTokens` (the ◈ coin) while the header pill carried the
+ * rocket — one product wearing two faces on one screen, which is the exact twin
+ * this codebase keeps clearing out.
+ *
+ * An adapter rather than a direct assignment because `NavIcon` is lucide's
+ * `LucideProps`, whose `size` is `string | number`, and the rocket takes a
+ * `number` — passing the component straight in does not typecheck.
+ *
+ * `size={20}` is deliberate and is the icon's documented FLOOR: below 20px its
+ * three speed lines fuse. It matches the rail's own `h-5 w-5` (20px), so the
+ * className cannot shrink it under the floor either.
+ */
+const MeritumTokensIcon: NavIcon = ({ className }) => (
+  <CreatorTokenRocket size={20} className={className} />
+);
 
 /**
  * ★ HOVER IS WARM, AND IT IS THE SAME WARM AS EVERYWHERE ELSE (2026-08-10, owner).
@@ -257,7 +276,7 @@ export default function LeftRail() {
             "shitty" (2026-08-11); see that icon's own doc for the reasoning. */}
         <InternalNavRow
           href="/creators"
-          icon={Icons.creatorTokens}
+          icon={MeritumTokensIcon}
           label={LABELS.creators}
           isActive={activeUnder('/creators')}
           isPending={navigatingTo === '/creators'}

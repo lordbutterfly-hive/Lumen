@@ -2009,7 +2009,26 @@ class HafsqlClient:
         # result. Must stay well under the sourcing freshness window (days),
         # which this module cannot see (`settings` lives in config.py) — a
         # constant well under any plausible window (hours) is a safe default.
-        self._popular_cache_bucket_s = 60
+        #
+        # ★★★ IT MUST ALSO BE >= THE TTL, OR THE TTL IS UNREACHABLE (2026-08-16).
+        #
+        # `since` is a ROLLING timestamp (now - window), so bucketing it at 60s
+        # rotated the cache KEY every minute while the TTL said 300s. The entry
+        # was still live and still correct; nothing could ever look it up again.
+        # Every request that arrived in a new minute therefore paid the full
+        # query, which this method's own docstring measures at 5.9s.
+        #
+        # Measured on this box 2026-08-16, /topics/photography signed in:
+        # a viewer with seen history 5.96s vs a viewer without 1.40s — the
+        # difference is that suppression causes a shortfall, the shortfall calls
+        # `_fallback_filler` -> `popular_fallback` -> here, and here always missed.
+        #
+        # Deriving the bucket from the TTL makes the two agree by construction,
+        # so tuning `HAFSQL_POPULAR_CACHE_TTL_S` cannot silently re-open the gap.
+        # A bucket at least as wide as the TTL means a hit is at most TTL old —
+        # exactly what the TTL already promises. A miss still queries with the
+        # caller's exact `since`; bucketing only ever affects the KEY.
+        self._popular_cache_bucket_s = max(60, int(self._popular_cache_ttl_s))
 
         # A15/logging hygiene: warn about the missing recsys DSN once per
         # process at construction (above); track whether we've ALSO warned

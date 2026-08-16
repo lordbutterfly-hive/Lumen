@@ -91,14 +91,24 @@ const COPY = {
    * is built from reading, so post number one and post number one thousand start in
    * the same place). Outcome first, mechanism second, no wordplay in either.
    */
-  heading: 'Get found without a following.',
-  // Kept short on purpose: this line shares its row with both calls to action, and
-  // the row has to end before the watermark begins at roughly x=760 in an 846px
-  // column. The first draft of it ran under the mark.
-  claim: 'The feed is built from reading, not from your follower count.',
-  startFree: 'Start free',
-  startWallet: 'Start with a wallet',
-  learn: 'How it works'
+  // ★★★ OWNER CALL 2026-08-16, and it overrides the essay above it. The
+  // outcome-first heading ("Get found without a following") was rejected as
+  // mechanism-talk aimed at people who already think in follower counts —
+  // naming the thing we refuse to be organised by keeps it on the page. The
+  // masthead now states what the place IS. The "three competitors could say
+  // this" objection is noted and overruled: it is what the owner wants said.
+  heading: 'A calmer place to read and write.',
+  // Same row-width constraint as before: this line shares its row with the call
+  // to action and must end before the watermark glyph begins at roughly x=760 in
+  // an 846px column, so it stays one short sentence.
+  claim: 'Read what is worth your time. Write without chasing an audience.',
+  // "Start here", not "Start free" — the free-ness was never the interesting
+  // part, and the word had to be kept honest against a login page that may ask
+  // for a wallet (see the googleReady note above).
+  startFree: 'Start here',
+  startWallet: 'Start here'
+  // `learn` ("How it works") deleted 2026-08-16, owner: one call to action on
+  // the card, not a primary and a secondary competing in the same row.
 };
 
 export default function HomeIntro() {
@@ -119,12 +129,6 @@ export default function HomeIntro() {
         className="rounded-[11px] bg-surface-brand-12 px-3.5 py-1.5 font-sans text-[13px] leading-[20px] font-semibold text-ink-27 hover:bg-surface-brand-16"
       >
         {googleReady ? COPY.startFree : COPY.startWallet}
-      </a>
-      <a
-        href={withBasePath('/help.html')}
-        className="font-sans text-[13px] leading-[20px] font-semibold text-ink-10 underline-offset-4 hover:text-ink-2 hover:underline"
-      >
-        {COPY.learn}
       </a>
     </PageMasthead>
   );

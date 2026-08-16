@@ -27,6 +27,7 @@ import type { Ask, HolderPosition } from '../../types';
 import { usdPrice } from '../../market/format';
 import TokenShell from '../token-shell';
 import { writeFailureMessage } from '../write-failure';
+import { MeritumEligibilityNotice, useMeritumEligibility } from '../meritum-eligibility';
 
 const tok = (n: number) => n.toFixed(1);
 
@@ -175,6 +176,7 @@ const AskCard: FC<{ a: Ask; onReclaim: () => Promise<void>; onRate: (score: numb
 };
 
 const YourTokensView: FC = () => {
+  const eligibility = useMeritumEligibility();
   const [tab, setTab] = useState<'holdings' | 'asks'>('holdings');
   const p = useLivePortfolio();
 
@@ -232,11 +234,11 @@ const YourTokensView: FC = () => {
         // moment balances started resolving per bound wallet: a Bitcoin- or
         // Ethereum-wallet holder was told they could not hold tokens while the
         // data layer was correctly reading the ones they did hold.
+        // ★ 2026-08-16, owner: one notice, one source of copy, and it names BOTH
+        // ways out (link a wallet to hold, upgrade to launch) instead of leaving
+        // the reader to work out which one they want.
         <div className="mt-5">
-          <Unavailable>
-            This account signs in with Google only, so there is no wallet to hold Meritum tokens in. Link a Bitcoin or
-            Ethereum wallet, or upgrade to a full Hive account.
-          </Unavailable>
+          <MeritumEligibilityNotice surface="hold" who={eligibility} />
         </div>
       ) : (
         <>
@@ -245,9 +247,8 @@ const YourTokensView: FC = () => {
               needs a signature over the transaction itself, which is a rail that
               is not ported. Stated up front rather than discovered on a click. */}
           {p.isLite && !p.canSign ? (
-            <div className="mt-5 rounded-[14px] border border-line-warn-2 bg-surface-warn-4 px-4 py-3 text-[13px] leading-[20px] text-ink-warn-3">
-              These are the tokens held by the wallet you signed in with. Selling and spending them from Lumen isn’t
-              available yet — the wallet signing for it is still being built.
+            <div className="mt-5">
+              <MeritumEligibilityNotice surface="hold" who={eligibility} />
             </div>
           ) : null}
           {/* The headline is the FLOOR total, not a market value: a market value

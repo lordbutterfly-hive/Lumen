@@ -4,6 +4,7 @@ import { FC } from 'react';
 import { UserAvatarImg } from '@ui/components';
 import { useTranslation } from '@/blog/i18n/client';
 import { PrimaryAction } from './launch-controls';
+import { MeritumEligibilityNotice, useMeritumEligibility } from '../../meritum-eligibility';
 
 /**
  * STEP 1 — the bound account.
@@ -30,6 +31,7 @@ export interface LaunchStepAccountProps {
 }
 
 const LaunchStepAccount: FC<LaunchStepAccountProps> = ({ handle, account, isLite, onConfirm }) => {
+  const eligibility = useMeritumEligibility();
   const { t } = useTranslation('common_blog');
   const known = handle !== '';
 
@@ -69,14 +71,21 @@ const LaunchStepAccount: FC<LaunchStepAccountProps> = ({ handle, account, isLite
         ))}
       </div>
 
-      {isLite ? (
-        <p className="mt-5 font-serif text-14 text-meritum-ink-3">
-          {t('meritum_launch.lite_note')}{' '}
-          <a href="/upgrade" className="font-semibold text-meritum-ink-link hover:underline">
-            {t('meritum_launch.lite_upgrade')}
-          </a>
-        </p>
-      ) : null}
+      {/* ★ 2026-08-16, owner. This used to say "This account cannot sign
+          transactions yet" to EVERY lite account, which is wrong twice: a
+          Google-only account has no Magi account at all (so there is nothing to
+          sign WITH, and nothing to hold either), and a wallet-bound account can
+          already hold — what it cannot do is issue a Meritum, because a Meritum
+          is issued against a Hive identity. One component now answers both, off
+          the rail's own capability flags. Meritum palette passed in, so the
+          notice does not import a `surface-warn-*` box onto this screen. */}
+      <div className="mt-5">
+        <MeritumEligibilityNotice
+          surface="launch"
+          who={eligibility}
+          className="rounded-[14px] border border-meritum-line-card bg-meritum-paper px-4 py-3 font-serif text-14 leading-[22px] text-meritum-ink-3"
+        />
+      </div>
 
       <div className="mt-7 flex justify-center">
         <PrimaryAction label={t('meritum_launch.confirm_identity')} onClick={onConfirm} />

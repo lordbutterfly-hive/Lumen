@@ -11,6 +11,7 @@ import { usdPrice, usdWhole } from '../../market/format';
 import TokenShell from '../token-shell';
 import PriceChart from './price-chart';
 import TokenModals, { type TokenDialog } from './token-modals';
+import { MeritumEligibilityNotice, useMeritumEligibility } from '../meritum-eligibility';
 
 const tok = (n: number) => n.toFixed(2);
 
@@ -70,6 +71,7 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
   // Extracted so the effects below depend on a plain boolean rather than a
   // complex expression React cannot statically check.
   const hasMarket = market !== null;
+  const eligibility = useMeritumEligibility();
 
   const writeBlockedReason: string | null = !live.loggedIn
     ? 'Sign in to trade this token.'
@@ -82,18 +84,18 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
   // they had just formed the intent to trade — while Studio and Wallet both
   // link to /upgrade. The only working route from here was an unrelated menu
   // three clicks away, which a reader has no reason to go looking for.
+  // ★ 2026-08-16, owner. One notice for every identity, derived from the rail's
+  // capability flags — a Google-only account is told it has no wallet at all,
+  // a wallet-bound account is told its tokens are safely held and only TRADING
+  // is unported. The old single sentence said "no Hive keys" to both.
+  // ★ SIGNED-OUT GOES THROUGH THE SAME NOTICE (2026-08-16, second pass). It was
+  // routed around it, which had two costs: the signed-out reader got "Sign in to
+  // trade this token." as flat text with nothing to click, exactly the defect the
+  // 08-07 note above fixed for lite readers; and the component's signed-out
+  // branch was unreachable from every call site — dormant code that no test
+  // could have caught, because the other two surfaces 307 to /login.
   const blockedNotice = writeBlockedReason ? (
-    live.isLite ? (
-      <>
-        This account has no Hive keys yet, so it can’t sign a transaction.{' '}
-        <a href="/upgrade" className="font-semibold text-ink-brand-6 underline">
-          Upgrade to a full account
-        </a>{' '}
-        to trade.
-      </>
-    ) : (
-      writeBlockedReason
-    )
+    <MeritumEligibilityNotice surface="trade" who={eligibility} inline />
   ) : null;
 
   // Set when the interstitial pre-empts a deep-linked action, so the action can

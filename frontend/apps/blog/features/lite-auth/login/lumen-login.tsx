@@ -51,9 +51,14 @@ const COPY = {
    * It reuses the home hero's angle on purpose. A stranger who clicked "Start free"
    * should land on the same promise they clicked, not a different pitch.
    */
-  welcome: 'Get found without a following.',
-  welcomeSub:
-    'The feed is built from reading, not from your follower count. Lumen never sees a private key.',
+  // ★ 2026-08-16, owner: "Get found without a following" is gone from the
+  // product, here as well as on the home masthead — the note above about
+  // reusing the home hero's angle still holds, the angle just changed. The
+  // tagline above is now the home heading too, so this line must NOT repeat it;
+  // it says what you do here instead. The rule the old comment set still stands:
+  // sell the place first, keep the custody reassurance one line down.
+  welcome: 'Read first. Write when you are ready.',
+  welcomeSub: 'Nothing to chase, nothing to install. Lumen never sees a private key.',
   /**
    * ★★★ THE PROMISE HAS TO DEGRADE WITH THE THING THAT KEEPS IT (2026-08-08, UX
    * tester on the new-user path).

@@ -8,7 +8,9 @@ import { usdPrice } from '../market/format';
 import { CreatorTokenRocket } from './creator-token-rocket';
 
 // TODO i18n — staged copy, same precedent as the rest of this feature.
-const COPY = { launch: 'Launch your Meritum' };
+// ★ "Meritum tokens" is the product name as of 2026-08-16 (owner) — the left
+// rail says the same. Singular here only because a creator launches exactly one.
+const COPY = { launch: 'Launch your Meritum token' };
 
 /**
  * The header's creator-token entry point (design brief §1) — owner ruling:

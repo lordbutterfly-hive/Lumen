@@ -39,7 +39,8 @@ const LABELS = {
   nothingMore: "You're all caught up",
   empty: 'No posts yet.',
   degraded: 'Personalised ranking is warming up. Showing popular posts meanwhile.',
-  degradedAnonymous: 'Showing trending. Log in for your own feed.',
+  // (removed 2026-08-16 — see the `degraded === 'anonymous'` branch below; the
+  // signed-out reader gets the posts with no banner over them.)
   // ★ A SEPARATE LINE FOR A SEPARATE FACT (2026-08-14). "Warming up" describes a
   // ranking that has not been built yet. A ranking that WAS built and has since
   // gone stale is a different situation for the reader, and telling them it is
@@ -615,8 +616,14 @@ function ForYouFeed() {
     ? null
     : firstPage?.aging
       ? t('discovery_feed.ranking_aging')
+      // ★ NOTHING IS SAID TO A SIGNED-OUT READER (2026-08-16, owner). This used
+      // to print "Showing trending. Log in for your own feed." above the list.
+      // Two things wrong with it: it is irrelevant to someone who has not asked
+      // for a personalised feed, and calling the fallback "trending" endorses
+      // Hive's payout-ranked list as if it were a trend. It is a payout ranking.
+      // A signed-out reader gets the posts with no label on them at all.
       : firstPage?.degraded === 'anonymous'
-        ? LABELS.degradedAnonymous
+        ? null
         : firstPage?.degraded === 'stale'
           ? LABELS.degradedStale
           : LABELS.degraded;
