@@ -27,6 +27,7 @@ import { scheduleInvalidations } from '@/blog/lib/react-query';
 import { useTranslation } from '@/blog/i18n/client';
 import { refuseIfLite } from '@/blog/lib/lite/client/require-full-account';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { KeyType } from '@smart-signer/types/common';
 
 export interface CreateProposalParams {
   creator: string;
@@ -81,7 +82,14 @@ export function useCreateProposalMutation() {
             extensions: []
           }
         });
-      });
+      },
+      // ★★★ ACTIVE AUTHORITY (2026-08-16). `create_proposal_operation` is a
+      // governance op and Hive requires ACTIVE for it. Without this the signer
+      // falls back to `requiredKeyType ?? this.keyType` (the session's POSTING
+      // key) and the transaction is rejected before broadcast. Same one-line
+      // omission as the other four governance hooks, all fixed together; the
+      // wallet hooks were fixed for the identical reason on 2026-08-01.
+      { requiredKeyType: KeyType.active });
 
       return result;
     },
