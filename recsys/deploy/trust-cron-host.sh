@@ -230,8 +230,10 @@ if [ "$SKIP_INITIAL" -eq 0 ]; then
     python -m recsys.jobs.trust_batch $BATCH_ARGS
   echo "==> initial snapshot OK"
 else
-  echo "==> --skip-initial: NOT building a snapshot. The loop sleeps ${INTERVAL_S}s BEFORE"
-  echo "    its first run, so only use this when the current snapshot is fresh."
+  echo "==> --skip-initial: NOT building a snapshot. The loop sleeps only the REMAINDER"
+  echo "    of ${INTERVAL_S}s, measured from the snapshot's real built_at (read from"
+  echo "    Postgres below), so an already-old snapshot is picked up promptly rather"
+  echo "    than granted a fresh full interval it has not earned."
 fi
 
 # ★★★ EVERY STEP THAT CAN FAIL RUNS *BEFORE* THE EXISTING SCHEDULER IS
@@ -267,6 +269,29 @@ if [ ! -w "$STATUS_DIR" ]; then
   exit 1
 fi
 
+# ★★★ THE STAMP THAT SURVIVES A REBOOT (2026-08-16). See the loop's own header
+# below for the defect. The loop needs to know WHEN the current snapshot was
+# built, and the only truthful answer lives in the recsys Postgres — the same
+# `load_snapshot()` that `trust-cron-status.sh` reads and that `/feed` itself
+# ages out on. `date +%s` would be a lie on the `--skip-initial` path, where the
+# snapshot can already be days old and stamping it "now" would buy it a fresh
+# full interval it has not earned. Unresolvable (DB down, image missing) falls
+# back to empty, and the loop then behaves exactly as it did before this change.
+SNAPSHOT_EPOCH="$(docker run --rm --network host --env-file "$ENV_FILE" "$IMAGE" python3 -c '
+from datetime import timezone
+try:
+    from recsys.db.store import load_snapshot
+    p = load_snapshot()
+    print(int(p.built_at.replace(tzinfo=p.built_at.tzinfo or timezone.utc).timestamp()) if p is not None else "")
+except Exception:
+    print("")
+' 2>/dev/null | tr -dc '0-9' || true)"
+if [ -n "$SNAPSHOT_EPOCH" ]; then
+  echo "==> current snapshot built_at epoch $SNAPSHOT_EPOCH ($(( ( $(date +%s) - SNAPSHOT_EPOCH ) / 3600 ))h old) — the loop will sleep only the REMAINDER of the interval"
+else
+  echo "WARNING: could not read the snapshot's built_at — the loop will sleep a full ${INTERVAL_S}s before its first run." >&2
+fi
+
 # Only now, with everything that can fail already done, replace an existing
 # scheduler — two loops on the same DSN would mean two concurrent batches
 # writing one snapshot.
@@ -294,6 +319,7 @@ docker run -d \
   -e RECSYS_TRUST_BATCH_INTERVAL_S="$INTERVAL_S" \
   -e RECSYS_TRUST_BATCH_RETRY_S="$RETRY_S" \
   -e RECSYS_TRUST_BATCH_ARGS="$BATCH_ARGS" \
+  -e RECSYS_TRUST_SNAPSHOT_EPOCH="$SNAPSHOT_EPOCH" \
   "$IMAGE" \
   sh -c '
     STATUS_FILE="/var/lib/recsys-trust-cron/status"
@@ -314,6 +340,43 @@ docker run -d \
     # sleep explicitly makes a failure retry in RETRY_S, full stop; a success
     # returns to INTERVAL_S.
     NEXT_SLEEP_S="${RECSYS_TRUST_BATCH_INTERVAL_S:-259200}"
+    # ★★★ A RESTART MUST NOT RESET THE CLOCK (2026-08-16). Found by reading the
+    # running deployment, not the script: `RestartCount=0` but
+    # `StartedAt=2026-08-16T13:30Z`, because `--restart unless-stopped` brings
+    # this container back after every host reboot -- and the loop had no memory
+    # of when the last run happened, so it re-armed a FULL interval from boot.
+    # This box reboots. Each reboot silently pushed the next batch out by
+    # another 3 days while the scheduler sat there looking perfectly healthy,
+    # and the status file below (the only operator-visible signal) stays empty
+    # the whole time because a run that never happens cannot report failure.
+    # Three reboots inside one interval and the snapshot ages past
+    # `max_snapshot_age_days = 14` -- `/feed` FAIL_CLOSED, no warning anywhere.
+    #
+    # So the first sleep is the REMAINDER of the interval, measured from the
+    # last thing that actually produced a snapshot: the last run of this loop
+    # (persisted on the HOST mount, so it survives the restart), or failing
+    # that the `built_at` the parent script read out of Postgres at creation.
+    # Neither available -- a genuinely fresh deployment -- keeps the old
+    # full-interval behaviour. The floor is 60s, never 0: an already-expired
+    # snapshot should be rebuilt promptly, not hammered in a tight loop.
+    LAST_EPOCH=""
+    if [ -f "$STATUS_FILE" ]; then
+      CAND=$(grep -E "^last_run_end_epoch=" "$STATUS_FILE" | tail -1 | cut -d= -f2)
+      case "$CAND" in ""|*[!0-9]*) ;; *) LAST_EPOCH="$CAND" ;; esac
+    fi
+    if [ -z "$LAST_EPOCH" ]; then
+      case "${RECSYS_TRUST_SNAPSHOT_EPOCH:-}" in ""|*[!0-9]*) ;; *) LAST_EPOCH="$RECSYS_TRUST_SNAPSHOT_EPOCH" ;; esac
+    fi
+    if [ -n "$LAST_EPOCH" ]; then
+      ELAPSED=$(( $(date +%s) - LAST_EPOCH ))
+      [ "$ELAPSED" -lt 0 ] && ELAPSED=0
+      REMAIN=$(( NEXT_SLEEP_S - ELAPSED ))
+      [ "$REMAIN" -lt 60 ] && REMAIN=60
+      echo "trust_batch: last snapshot ${ELAPSED}s old -- first run in ${REMAIN}s, not a full ${NEXT_SLEEP_S}s interval"
+      NEXT_SLEEP_S="$REMAIN"
+    else
+      echo "trust_batch: no last-run epoch and no RECSYS_TRUST_SNAPSHOT_EPOCH -- sleeping a full ${NEXT_SLEEP_S}s before the first run"
+    fi
     while true; do
       sleep "$NEXT_SLEEP_S"
       START_TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -339,6 +402,10 @@ docker run -d \
       {
         echo "last_run_start=$START_TS"
         echo "last_run_end=$END_TS"
+        # Epoch alongside the ISO string so the restart-clock logic above needs
+        # no date parsing (busybox and GNU `date -d` disagree) and cannot be
+        # broken by a locale or a format change to the human-readable field.
+        echo "last_run_end_epoch=$(date +%s)"
         echo "last_run_exit_code=$EXIT_CODE"
         echo "last_run_duration_s=$DURATION_S"
         echo "consecutive_failures=$FAIL_STREAK"
