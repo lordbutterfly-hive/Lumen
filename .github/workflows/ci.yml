@@ -1,0 +1,139 @@
+name: CI
+
+# One workflow, four path-filtered jobs — one per deploy unit in this monorepo.
+# A job only runs when its own subtree changed, so a frontend-only commit does
+# not pay for two Go toolchains and a Python install.
+#
+# Every command here is the subproject's OWN documented command (root README,
+# recsys/README.md, the Go module layout) rather than something invented for CI,
+# so a green run here means the same thing a green run on a developer's box does.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      frontend: ${{ steps.filter.outputs.frontend }}
+      recsys: ${{ steps.filter.outputs.recsys }}
+      creator_tokens: ${{ steps.filter.outputs.creator_tokens }}
+      prediction_market: ${{ steps.filter.outputs.prediction_market }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            frontend:
+              - 'frontend/**'
+              - '.github/workflows/ci.yml'
+            recsys:
+              - 'recsys/**'
+              - '.github/workflows/ci.yml'
+            creator_tokens:
+              - 'creator-tokens/**'
+              - '.github/workflows/ci.yml'
+            prediction_market:
+              - 'prediction-market/**'
+              - '.github/workflows/ci.yml'
+
+  frontend:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.0.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.11'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Typecheck
+        run: pnpm --filter @hive/blog exec tsc --noEmit
+      # This gate was red on four false positives until it learned i18next
+      # plural suffixes (2026-08-15). It is green now, so a red run here is a
+      # real missing-translation regression, not the gate's own bug.
+      - name: Translation usage gate
+        run: pnpm --filter @hive/blog run lint:translations:usage
+
+  recsys:
+    needs: changes
+    if: needs.changes.outputs.recsys == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: recsys
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -e . && pip install pytest
+      # The suite is pure — the live/DB suites skip themselves when no DSN is
+      # present (recsys/README.md), so this needs no Postgres service.
+      - run: pytest -q
+
+  creator-tokens:
+    needs: changes
+    if: needs.changes.outputs.creator_tokens == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: creator-tokens
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: creator-tokens/go.sum
+      # ★ NOT `./...`. `contract`, `sdk` and the `cmd/*` entry points reach
+      # `runtime`, which is `//go:build gc.custom` — TinyGo only — so stock Go
+      # excludes every file in it and `go build ./...` fails before running a
+      # single test. `go list` itself exits 1 on that package, hence `-e`.
+      # This covers the pure-Go trees (core/market, keeper, scheduler, sim,
+      # parse); compiling the contract to WASM needs TinyGo and is NOT covered
+      # here — add a TinyGo job if that build is ever worth gating.
+      - name: Build (pure-Go packages)
+        run: go build $(go list -e ./... | grep -vE '(/contract|/sdk|/cmd/keeper|/cmd/sim|/cmd/scheduler)$')
+      - name: Test (pure-Go packages)
+        run: go test $(go list -e ./... | grep -vE '(/contract|/sdk|/cmd/keeper|/cmd/sim|/cmd/scheduler)$')
+
+  prediction-market:
+    needs: changes
+    if: needs.changes.outputs.prediction_market == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: prediction-market
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: prediction-market/go.sum
+      # ★ NOT `./...`. `contract`, `sdk` and the `cmd/*` entry points reach
+      # `runtime`, which is `//go:build gc.custom` — TinyGo only — so stock Go
+      # excludes every file in it and `go build ./...` fails before running a
+      # single test. `go list` itself exits 1 on that package, hence `-e`.
+      # This covers the pure-Go trees (core/market, keeper, scheduler, sim,
+      # parse); compiling the contract to WASM needs TinyGo and is NOT covered
+      # here — add a TinyGo job if that build is ever worth gating.
+      - name: Build (pure-Go packages)
+        run: go build $(go list -e ./... | grep -vE '(/contract|/sdk|/cmd/keeper|/cmd/sim|/cmd/scheduler)$')
+      - name: Test (pure-Go packages)
+        run: go test $(go list -e ./... | grep -vE '(/contract|/sdk|/cmd/keeper|/cmd/sim|/cmd/scheduler)$')

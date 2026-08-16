@@ -37,3 +37,7 @@ Thumbs.db
 *.log
 .idea/
 .vscode/
+
+# Go binaries a local `go build ./...` drops in the module root
+/creator-tokens/simreport
+/prediction-market/marketsim

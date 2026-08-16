@@ -17,6 +17,31 @@ Monorepo for the Lumen platform — a Hive-based social/blogging application wit
 - **Compiled artifacts** (`bin/*.wasm`, `.next/`, `node_modules/`, Python/Go caches) are gitignored and rebuilt from source.
 - **Line endings** are normalized to LF via `.gitattributes` (the tree is authored across WSL and a Windows-mounted drive).
 
+## How `frontend/` is maintained
+
+`frontend/` is a **vendored fork**, not a normal subtree, and the history reads
+oddly unless you know that:
+
+- Day-to-day development happens in a separate clone of upstream
+  [denser](https://github.com/openhive-network/denser) (`~/hive-blog-rebuild`),
+  which keeps `git remote` pointed at upstream so fork merges stay possible.
+- That tree is copied into `frontend/` by
+  [`scripts/sync-frontend.sh`](scripts/sync-frontend.sh) — dry run by default,
+  `--go` to apply. It is the only sanctioned bridge; never hand-copy.
+- The split exists for two mundane reasons: small-file I/O on the Linux
+  filesystem is ~7× faster than the Windows mount, and the repo has to sit on
+  `/mnt/o` for GitHub Desktop to see it.
+
+Consequences worth knowing before you go looking:
+
+- **`git log frontend/` is a sync log, not development history**, and `git blame`
+  there points at the sync commit rather than the change. The real per-change
+  history lives in the dev clone.
+- The sync excludes build output, `.env*`, TLS keys and generated assets
+  (`public/locales/`, `public/__ENV.js`, …) — see the script's `--exclude` list.
+- Upstream denser merges are done in the dev clone and then synced, never
+  applied to `frontend/` directly.
+
 ## Build
 
 Each component builds independently:
