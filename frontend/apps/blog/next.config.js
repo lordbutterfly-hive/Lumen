@@ -51,6 +51,27 @@ const nextConfig = {
   experimental: {
     outputFileTracingRoot: path.join(__dirname, '../..'),
     instrumentationHook: true
+    // ★ `experimental.preloadEntriesOnStart` WAS TRIED HERE AND REMOVED — do not
+    // re-add it without re-measuring (2026-08-17).
+    //
+    // The theory was sound and the code backs it: Next `require()`s a route's
+    // compiled bundle lazily on its first request (next/dist/server/require.js
+    // `requirePage`, from next-server.js's `findPageComponents`), so the first
+    // reader after a restart pays parse + compile + top-level eval of that bundle
+    // plus the ~327KB shared app-page runtime. `preloadEntriesOnStart` is Next's
+    // own fix: at boot it requires every route up front.
+    //
+    // It did not move the number. A/B over 6 restart cycles each, same machine,
+    // first hit on /communities: WITHOUT 0.549-0.626s (one 1.020s outlier),
+    // WITH 0.516-0.563s. Medians 0.581s vs 0.550s — overlapping ranges, ~30ms
+    // apart, which is noise at this sample size. The first three cycles looked
+    // like a win purely because the control drew that one outlier.
+    //
+    // Removed rather than kept: an experimental flag that pays boot work for no
+    // measured gain is a liability across Next upgrades. The residual first-hit
+    // cost is the shared runtime, paid ONCE per process on whichever route is hit
+    // first (proven: /communities first hit ~0.55s, then /creators and / are
+    // ~30ms in the same process) — so it is one visitor per deploy, not per route.
     // DO NOT add `serverComponentsExternalPackages` for @hiveio/beekeeper or
     // @hiveio/wax. It makes the lite publisher's WASM signer work, but it also
     // makes EVERY page 500 ("Element type is invalid… got: undefined") — verified

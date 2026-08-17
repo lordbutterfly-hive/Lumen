@@ -83,10 +83,15 @@ const ProfileTokenCard: FC<{ username: string; isOwnProfile: boolean }> = ({ use
               and price + Buy on their own are still a complete, honest card. */}
           {d.available ? (
             <div className="mt-4 flex flex-wrap gap-[26px]">
-              <div className="flex flex-col gap-0.5">
-                <span className="font-sans text-[17px] leading-[26px] font-bold tabular-nums text-ink-2">{d.completionPct}%</span>
-                <span className="text-[13px] leading-[20px] text-ink-12">{COPY.completionRate}</span>
-              </div>
+              {/* Omitted, not shown as "0%", when there is no record yet — this
+                  card has no room to explain, and an unexplained 0% is read as a
+                  failure to deliver. Same rule as `typicalResponse` below. */}
+              {d.completionPct !== null ? (
+                <div className="flex flex-col gap-0.5">
+                  <span className="font-sans text-[17px] leading-[26px] font-bold tabular-nums text-ink-2">{d.completionPct}%</span>
+                  <span className="text-[13px] leading-[20px] text-ink-12">{COPY.completionRate}</span>
+                </div>
+              ) : null}
               {d.typicalResponse ? (
                 <div className="flex flex-col gap-0.5">
                   <span className="font-sans text-[17px] leading-[26px] font-bold tabular-nums text-ink-2">{d.typicalResponse}</span>

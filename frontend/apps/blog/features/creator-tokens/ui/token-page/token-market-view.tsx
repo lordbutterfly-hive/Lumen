@@ -493,8 +493,23 @@ const TokenMarketView: FC<{ handle: string }> = ({ handle }) => {
               ))}
             </div>
             <div className="text-base tabular-nums text-ink-4">
-              <strong>{d.completionPct}% completion rate</strong> — completed {d.answered} of {d.total} · usually within{' '}
-              <strong>{d.typicalResponse}</strong>.
+              {d.completionPct === null ? (
+                /* Read fine, nothing to report yet — never "0%", which reads as a
+                   failure to deliver and is what every brand-new market would say. */
+                <strong>No deliveries yet</strong>
+              ) : (
+                <>
+                  <strong>{d.completionPct}% completion rate</strong> — completed {d.answered} of {d.total}
+                  {/* Guarded: an empty median left the sentence ending "usually within ." */}
+                  {d.typicalResponse ? (
+                    <>
+                      {' '}
+                      · usually within <strong>{d.typicalResponse}</strong>
+                    </>
+                  ) : null}
+                  .
+                </>
+              )}
             </div>
             <div className="mt-1.5 text-[13px] leading-[20px] text-ink-14">Why the token is worth holding. This is what you’re really buying.</div>
           </>

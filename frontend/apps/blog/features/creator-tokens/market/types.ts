@@ -16,9 +16,37 @@
 export interface DeliveryRecord {
   answered: number;
   total: number;
-  /** 0–100, completion rate. */
-  completionPct: number;
-  /** Human "usually within ~6h". */
+  /**
+   * 0–100, completion rate — or **null when the creator has no deliveries yet**.
+   *
+   * ★ NULL IS NOT ZERO, AND CONFLATING THEM DEFAMED EVERY NEW CREATOR
+   * (found on the live testnet market 2026-08-17). This was a plain `number`,
+   * and `adaptDelivery` computed `total === 0 ? 0 : ...`, so a creator who had
+   * never sold a service rendered on their own token page as:
+   *
+   *     0% completion rate — completed 0 of 0 · usually within .
+   *
+   * A buyer reads "0% completion rate" as "this person does not deliver". It is
+   * the strongest negative claim on the page, it was asserted about people who
+   * had simply never been asked for anything, and it is the state EVERY market
+   * is in on the day it launches.
+   *
+   * `available` cannot express this: false already means "the indexer could not
+   * be reached", and rendering "record unavailable" for a creator whose record
+   * we read perfectly well is the same class of lie in the other direction. The
+   * three states are distinct and must stay distinct:
+   *
+   *     available:false                  -> "Delivery record unavailable"  (read failed)
+   *     available:true,  completionPct:null -> "No deliveries yet"         (read fine, nothing to report)
+   *     available:true,  completionPct:0    -> "0% completion rate"        (asked, and did not deliver)
+   *
+   * Nullable rather than a companion boolean so the compiler forces every
+   * consumer to answer the question — the same shape `CreatorSummary.completionPct`
+   * already uses for exactly this distinction, which the creators grid ranks on
+   * (`ui/creators/creators-view.tsx`'s `proven`).
+   */
+  completionPct: number | null;
+  /** Human "usually within ~6h". Empty string when there is nothing to summarise — callers MUST NOT render it unguarded, or the sentence ends "usually within .". */
   typicalResponse: string;
   /** ~12 recent marks, newest last. true = answered, false = missed. */
   marks: boolean[];

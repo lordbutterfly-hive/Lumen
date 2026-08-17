@@ -15,7 +15,26 @@ const logger = getLogger('app');
  *
  * @param txApiJson - Transaction in API JSON format (from txBuilder.toApiJson())
  * @param pack - Transaction pack type
- * @param keyType - The key type being verified (e.g. 'posting', 'active')
+ * @param keyType - The authority the transaction ACTUALLY REQUIRED (e.g. 'posting',
+ *   'active'). It is used only to word the error, and wording it wrong sends the
+ *   user to fix the wrong key.
+ *
+ *   ★ ALL FIVE SIGNERS GOT THIS WRONG (fixed 2026-08-17). Every signer signs with
+ *   `requiredKeyType ?? this.keyType` — the authority the CALLER asked for — but
+ *   each passed `this.keyType` here, which is the authority the SESSION was
+ *   created with. Those differ exactly when a caller needs to step up, which is
+ *   the case that fails and therefore the only case this message is ever read in.
+ *
+ *   Lumen makes that the normal path: a Hive login is hard-coded to POSTING
+ *   (`features/lite-auth/login/keychain-signin.tsx`), while a creator-token write
+ *   asks for ACTIVE. So a user whose Keychain holds no active key was told
+ *   "The provided key does not have POSTING authority for this account" — about a
+ *   posting key that was present and fine. The fix they needed was to add their
+ *   active key; the sentence pointed at the one thing that was not the problem.
+ *
+ *   Note this never affected the VERIFICATION: `verify_authority` below is passed
+ *   only `trx` and `pack`, and the chain derives the required authority from the
+ *   operations themselves. This was always and only a wrong sentence.
  * @param signerName - Name of the signer for logging (e.g. 'Google Drive', 'Keychain')
  */
 export async function verifyAuthorityOrThrow(

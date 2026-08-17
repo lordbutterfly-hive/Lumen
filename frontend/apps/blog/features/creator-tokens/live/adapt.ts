@@ -112,10 +112,14 @@ export interface LiveHolderPosition {
  */
 export function adaptDelivery(rec: ChainDeliveryRecord | null | undefined): UiDeliveryRecord {
   if (!rec || rec.source === 'unavailable') {
-    return { answered: 0, total: 0, completionPct: 0, typicalResponse: '', marks: [], available: false };
+    return { answered: 0, total: 0, completionPct: null, typicalResponse: '', marks: [], available: false };
   }
   const total = rec.answeredCount + rec.missedCount;
-  const completionPct = total === 0 ? 0 : Math.round((rec.answeredCount / total) * 100);
+  // ★ null, NOT 0, when nothing has been asked of this creator yet. Zero is a
+  // RESULT ("was asked, did not deliver"); no record is the absence of one, and
+  // every market is in this state on its launch day. See DeliveryRecord's own
+  // note in ../market/types.ts for what rendering it as 0% did to new creators.
+  const completionPct = total === 0 ? null : Math.round((rec.answeredCount / total) * 100);
   return {
     answered: rec.answeredCount,
     total,

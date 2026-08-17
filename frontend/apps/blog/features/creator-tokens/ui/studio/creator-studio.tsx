@@ -564,8 +564,15 @@ const CreatorStudio: FC = () => {
             <Card>
               <Stat
                 label="Delivery"
-                value={`${market.delivery.completionPct}%`}
-                sub={`${market.delivery.answered}/${market.delivery.total} answered · ${market.delivery.typicalResponse}`}
+                /* The creator's own dashboard read "0%" and "0/0 answered · " on
+                   the day they launched. Nothing has been asked of them yet; say
+                   that, rather than scoring them zero for it. */
+                value={market.delivery.completionPct === null ? '—' : `${market.delivery.completionPct}%`}
+                sub={
+                  market.delivery.completionPct === null
+                    ? 'No deliveries yet'
+                    : `${market.delivery.answered}/${market.delivery.total} answered${market.delivery.typicalResponse ? ` · ${market.delivery.typicalResponse}` : ''}`
+                }
               />
             </Card>
             <Card>

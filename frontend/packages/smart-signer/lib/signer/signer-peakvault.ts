@@ -55,7 +55,7 @@ export class SignerPeakvault extends Signer {
       );
       await provider.signTransaction(authTx);
 
-      await verifyAuthorityOrThrow(authTx.toApiJson(), TTransactionPackType.LEGACY, this.keyType, 'Peakvault');
+      await verifyAuthorityOrThrow(authTx.toApiJson(), TTransactionPackType.LEGACY, requiredKeyType ?? this.keyType, 'Peakvault');
       // F-L13 (sibling site) — logged the raw login signature at info.
       // This transaction is NEVER broadcast: it is the off-chain auth proof
       // the backend verifies, so the signature IS the credential and pino has

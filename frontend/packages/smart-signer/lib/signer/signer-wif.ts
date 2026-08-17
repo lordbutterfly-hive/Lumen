@@ -36,7 +36,7 @@ export class SignerWif extends SignerHbauth {
     const signature = await this.signDigest(digest, '', singleSignKeyType, requiredKeyType);
     txBuilder.addSignature(signature);
 
-    await verifyAuthorityOrThrow(txBuilder.toApiJson(), this.pack, this.keyType, 'WIF');
+    await verifyAuthorityOrThrow(txBuilder.toApiJson(), this.pack, requiredKeyType ?? this.keyType, 'WIF');
 
     return signature;
   }

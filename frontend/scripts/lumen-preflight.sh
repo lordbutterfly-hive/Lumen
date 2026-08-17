@@ -141,7 +141,23 @@ if has RECSYS_FEED_URL; then
   else
     red "RECSYS_FEED_URL set without RECSYS_API_TOKEN — recsys will 401 every request and For You silently serves trending instead"
   fi
-  has LITE_RECSYS_TOKEN || amber "LITE_RECSYS_TOKEN unset — recsys cannot pull the lite follow graph back"
+  # ★ WORDED THIS WAY ON PURPOSE (2026-08-17). This used to read "recsys cannot
+  # pull the lite follow graph back", which sounds like setting the variable
+  # fixes it. It does not, and someone was about to set it and move on.
+  #
+  # Verified across both repos: the token gates two frontend routes
+  # (`/api/lite/recsys/follow-edges`, `/api/lite/recsys/resolve`, via
+  # `lib/lite/http/guard.ts`'s guardRecsys), and recsys contains NO client for
+  # either — zero references to the routes, the header, or the variable. So the
+  # token unlocks a door nothing walks through, and setting it changes no
+  # behaviour whatsoever.
+  #
+  # What the gap actually costs: nothing learns the lite follow graph in BULK, so
+  # `graph_cred` (PageRank authority) is built from chain follows only and a lite
+  # user followed by other lite users gains no authority. A signed-in viewer's OWN
+  # follows do reach the ranker, by a different and already-wired path (the feed
+  # sends them per request), so personal in-network feeds are unaffected.
+  has LITE_RECSYS_TOKEN || amber "LITE_RECSYS_TOKEN unset — note: setting it alone does NOTHING, recsys has no client for the follow-edges endpoint. Bulk lite follow edges never reach graph_cred; per-viewer follows are unaffected."
 else
   amber "RECSYS_FEED_URL unset — 'For You' serves Hive trending, NOT the ranking engine"
 fi

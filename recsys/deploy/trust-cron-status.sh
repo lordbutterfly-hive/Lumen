@@ -169,12 +169,37 @@ fi
 echo
 LAST_RUN_FAILED=0
 if [ -f "$STATUS_FILE" ]; then
-  # Sourced, not eval'd on arbitrary text: this file is written ONLY by
-  # trust-cron-host.sh's own loop in fixed key=value lines, so this is safe --
-  # informational only, per the header above. It can only ever RAISE the
-  # final severity by one tier (below), never set it directly.
-  # shellcheck disable=SC1090
-  . "$STATUS_FILE"
+  # ★★★ PARSED, NEVER SOURCED (2026-08-17). This block used to be `. "$STATUS_FILE"`
+  # under a comment arguing it was safe because "this file is written ONLY by
+  # trust-cron-host.sh's own loop in fixed key=value lines". That is a claim about
+  # who SHOULD write it, and the filesystem disagreed: the directory the container
+  # bind-mounts for it is mode 1777 on this host --
+  #
+  #     drwxrwxrwt  clauderfly  /home/clauderfly/.local/share/recsys-trust-cron
+  #
+  # world-writable, so ANY local user can create or replace `status`. Sourcing
+  # executes whatever is in it, as whoever runs this script -- which is an
+  # operator investigating an incident, often with sudo. It is also not limited to
+  # running commands: a sourced file can overwrite ANY variable in this script,
+  # including `FRESH_SEVERITY` and the Postgres-verified verdict below, so a
+  # planted file could make a FAIL_CLOSED snapshot report as healthy. The header's
+  # promise that the verdict is "verified against Postgres, not trusted from this
+  # file" cannot survive sourcing the file.
+  #
+  # 1777 is not a mistake to chmod away, either: the container writes as its own
+  # uid, and tightening the mode is what would break the writer. So the fix
+  # belongs HERE, in the reader -- read the five fields and execute nothing.
+  # Control characters are stripped because these values are printed straight to
+  # a terminal, and a file an attacker controls should not be able to emit escape
+  # sequences into an operator's screen.
+  status_field() {
+    grep -E "^$1=" "$STATUS_FILE" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '\000-\037'
+  }
+  last_run_start=$(status_field last_run_start)
+  last_run_end=$(status_field last_run_end)
+  last_run_exit_code=$(status_field last_run_exit_code)
+  last_run_duration_s=$(status_field last_run_duration_s)
+  consecutive_failures=$(status_field consecutive_failures)
   echo "Last scheduled run ($STATUS_FILE, informational -- the verdict below is"
   echo "verified against Postgres, not trusted from this file):"
   echo "  start:                 ${last_run_start:-unknown}"

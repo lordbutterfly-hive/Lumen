@@ -308,23 +308,62 @@ services:
     command:
       - sh
       - -c
+      # ★★★ EVERY `$` IN THIS BLOCK IS `$$`, AND THE SINGLE `$` VERSION SHIPPED A
+      # TIGHT LOOP AGAINST A FREE PUBLIC DATABASE (found 2026-08-17 by running
+      # `docker compose config`, which prints what the container ACTUALLY gets).
+      #
+      # Compose interpolates `$VAR` and `${VAR}` inside `command:` from the HOST
+      # environment, at config time — before the container, and therefore before
+      # the `environment:` block below has given these variables any value. So a
+      # single `$` here does not reach the shell at all. What the container got:
+      #
+      #     sleep ""                     <- $NEXT_SLEEP_S, eaten
+      #     if [ "" -ge 2 ]              <- $FAILURES, eaten
+      #     echo "...(consecutive=)..."  <- the alert lost its count
+      #
+      # `sleep ""` is not a long sleep, it is an ERROR that returns immediately,
+      # so `while true` becomes a TIGHT LOOP re-running the whole trust batch
+      # back-to-back, forever, against `hafsql-sql.mahdiyari.info` — a free,
+      # community-run mirror that this entire ranker depends on and that we do
+      # not own. The failure mode is not a slow scheduler; it is hammering a
+      # volunteer's database until we are rate-limited or blocked, and taking
+      # `/feed` down with it when we are.
+      #
+      # `$$` is Compose's escape for a literal `$`, so the shell receives the
+      # variable reference and resolves it at RUNTIME from the container's own
+      # environment — which is where these values actually live.
+      #
+      # ★ HOW TO VERIFY, AND THE TRAP IN VERIFYING IT. `docker compose config` is
+      # NOT the check: its output is itself valid Compose input, so it re-escapes
+      # a literal `$` back to `$$` and prints `sleep "$$NEXT_SLEEP_S"` for the
+      # CORRECT file. Reading that as "still broken" and re-fixing it would take
+      # you straight back to the tight loop. `config` only tells you about the
+      # BROKEN form, which collapses to a visibly empty `sleep ""`.
+      #
+      # The real check runs a container and asks the shell what it got:
+      #
+      #     docker compose -f compose.recsys.yml run --rm --entrypoint sh \
+      #       recsys-trust-batch-cron -c 'echo "[$RECSYS_TRUST_BATCH_INTERVAL_S]"'
+      #
+      # Measured 2026-08-17 on a two-service busybox file, both forms side by
+      # side: single `$` printed `[]`, double `$$` printed `[259200]`.
       - |
-        NEXT_SLEEP_S="${RECSYS_TRUST_BATCH_INTERVAL_S:-259200}"
+        NEXT_SLEEP_S="$${RECSYS_TRUST_BATCH_INTERVAL_S:-259200}"
         FAILURES=0
         while true; do
-          sleep "$NEXT_SLEEP_S"
+          sleep "$$NEXT_SLEEP_S"
           echo "trust_batch: starting scheduled run"
           if python -m recsys.jobs.trust_batch; then
             echo "trust_batch: scheduled run OK"
             FAILURES=0
-            NEXT_SLEEP_S="${RECSYS_TRUST_BATCH_INTERVAL_S:-259200}"
+            NEXT_SLEEP_S="$${RECSYS_TRUST_BATCH_INTERVAL_S:-259200}"
           else
-            FAILURES=$((FAILURES + 1))
-            echo "trust_batch: scheduled run FAILED (consecutive=$FAILURES) — retrying in ${RECSYS_TRUST_BATCH_RETRY_S:-3600}s"
-            if [ "$FAILURES" -ge 2 ]; then
-              echo "TRUST_BATCH_ALERT: $FAILURES consecutive failures; the snapshot is aging toward max_snapshot_age_days and /feed will FAIL_CLOSE when it expires"
+            FAILURES=$$((FAILURES + 1))
+            echo "trust_batch: scheduled run FAILED (consecutive=$$FAILURES) — retrying in $${RECSYS_TRUST_BATCH_RETRY_S:-3600}s"
+            if [ "$$FAILURES" -ge 2 ]; then
+              echo "TRUST_BATCH_ALERT: $$FAILURES consecutive failures; the snapshot is aging toward max_snapshot_age_days and /feed will FAIL_CLOSE when it expires"
             fi
-            NEXT_SLEEP_S="${RECSYS_TRUST_BATCH_RETRY_S:-3600}"
+            NEXT_SLEEP_S="$${RECSYS_TRUST_BATCH_RETRY_S:-3600}"
           fi
         done
     environment:

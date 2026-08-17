@@ -1,6 +1,6 @@
 import { cache } from 'react';
 import { getAccountFull, getAccountReputations, getDynamicGlobalProperties } from '@transaction/lib/hive-api';
-import { getPost } from '@transaction/lib/bridge-api';
+import { getCommunities, getPost } from '@transaction/lib/bridge-api';
 import { withTtlCache } from '@/blog/lib/server-ttl-cache';
 
 /**
@@ -51,7 +51,22 @@ const accountFullTtl = withTtlCache(getAccountFull, (username: string) => userna
    * clean, completed answer of "no such account" is, and only for 10 seconds
    * (see `ttlFor`), so an account created seconds ago appears almost at once.
    */
-  ttlFor: (account) => (account && account.name ? 30_000 : 10_000)
+  ttlFor: (account) => (account && account.name ? 30_000 : 10_000),
+  /*
+   * ★ AND THE READER WHO LANDS ON THE EXPIRY PAYS NOTHING EITHER (2026-08-17).
+   *
+   * The 30s above removed the round trip for 29 of every 30 seconds. It could not
+   * remove it for the reader who arrives in the 30th — that one still waited the
+   * full ~360ms, and on a bad upstream minute a great deal more. Past the TTL the
+   * header is now served from what we hold while the refresh runs behind it.
+   *
+   * ★ ABSENCE GETS NO WINDOW, ON PURPOSE. `ttlFor` keeps "no such account" for
+   * only 10s so a just-created account appears almost at once — the lite signup
+   * path depends on it. A stale window on the absence would silently stretch that
+   * to 40s, undoing the thing the short TTL was for. So: a real account may be
+   * served stale, an absence never is.
+   */
+  staleWhileRevalidateMs: (account) => (account && account.name ? 30_000 : 0)
 });
 
 /**
@@ -99,17 +114,70 @@ export const getPostCached = cache(getPost);
  * if the dehydrated state lacks it. A stale one costs a reader nothing; a slow
  * one costs every reader 400ms.
  *
+ * ★ WHICH IS PRECISELY WHY BOTH SERVE STALE (2026-08-17). "A stale one costs a
+ * reader nothing" is the argument for the TTL and it is the same argument, only
+ * stronger, past the TTL: at expiry these two were still handing one reader per
+ * period the full 400ms budget back. Refreshing behind the reader is the whole
+ * benefit with none of that. The windows match the TTLs — a prefetch twice its
+ * intended age is still a prefetch, and the client refetches anyway.
+ *
  * NOT applied to the wallet, which calls `getDynamicGlobalProperties` directly
  * for money math and must keep doing so.
  */
 export const getDynamicGlobalPropertiesCached = withTtlCache(
   getDynamicGlobalProperties,
   () => 'dgp',
-  { ttlMs: 20_000, max: 1 }
+  { ttlMs: 20_000, max: 1, staleWhileRevalidateMs: 20_000 }
 );
 
 export const getAccountReputationsCached = withTtlCache(
   getAccountReputations,
   (username: string, limit: number) => `${username}|${limit}`,
-  { ttlMs: 60_000, max: 500 }
+  { ttlMs: 60_000, max: 500, staleWhileRevalidateMs: 60_000 }
+);
+
+/**
+ * ★★ THE COMMUNITY LIST IS THE OTHER 600ms (measured 2026-08-15).
+ *
+ * `features/layouts/sorts/server-side-layout.tsx` wraps the sorted-feed routes, so
+ * `getCommunities` runs on each of them. Timed from this box,
+ * `bridge.list_communities` answers in **629ms**, and `/communities` measured
+ * 990ms cold / 335ms warm TTFB — the second-slowest server route after the
+ * profile page, for the same reason: one slow upstream read with no
+ * cross-request memory.
+ *
+ * A ranked list of communities is about as static as anything this app fetches —
+ * names, titles and rank order, changing over hours. Five minutes of staleness
+ * is invisible to a reader and removes the call from almost every page view.
+ *
+ * ★ KEYED ON THE OBSERVER, not global. `getCommunities` takes the observer, and
+ * the response can carry viewer-dependent context; sharing one entry across
+ * accounts would leak one reader's view of the list to another. Signed-out
+ * readers all share `DEFAULT_OBSERVER`, which is where the bulk of cold traffic
+ * is anyway, so they get the benefit with no cross-account risk. 200 entries
+ * bounds it, and a failed read is never stored (see `server-ttl-cache.ts` — a
+ * cached failure would blank the community rail for everyone for five minutes).
+ *
+ * ★★★ THIS IS THE WORST PLACE IN THE APP TO LAND ON AN EXPIRY (2026-08-17), which
+ * is why it also serves stale. Two things compound here that do not compound
+ * anywhere else: the entry is keyed on the observer, so a signed-in reader can be
+ * the ONLY holder of their key and therefore pays every single expiry themselves;
+ * and that layout wraps the sorted-feed routes, so the wait lands on the feed, not
+ * on a page someone deliberately opened. Re-measured 2026-08-17 with a cold
+ * upstream: `bridge.list_communities` took **6.6s** against the 629ms recorded
+ * above, and `/communities` answered in 7.9s and 13.4s while the warm render is
+ * 61ms. Five minutes of staleness was already ruled invisible; ten is invisible
+ * for the same reason, and it means no reader ever waits for this list again.
+ *
+ * ★ IT LIVES HERE, NOT IN THE LAYOUT (moved 2026-08-17), for one reason: the
+ * FIRST reader after a deploy still found an empty cache and paid the whole cost,
+ * which serve-stale cannot help with — there is nothing stale to serve yet. Only
+ * a boot warm fixes that, and a boot warm must be able to import this without
+ * dragging a React layout and its client components into server startup. See
+ * `lib/warm-server-caches.ts`.
+ */
+export const getCommunitiesCached = withTtlCache(
+  getCommunities,
+  (_sort: string, _query: string | null, observer?: string) => `${_sort}|${_query ?? ''}|${observer ?? ''}`,
+  { ttlMs: 300_000, max: 200, staleWhileRevalidateMs: 300_000 }
 );
