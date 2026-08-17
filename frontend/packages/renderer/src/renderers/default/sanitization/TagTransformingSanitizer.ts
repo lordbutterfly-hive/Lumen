@@ -78,7 +78,15 @@ export class TagTransformingSanitizer {
                 // style is subject to attack, filtering more below
                 td: ['style'],
                 th: ['style'],
-                img: ['src', 'alt', 'loading', 'decoding'],
+                // 2026-08-17: width/height added so an <img> written directly as raw HTML in a
+                // post (Remarkable has `html: true`, so raw tags pass through renderMarkdown
+                // untouched) can keep its intrinsic size and avoid a layout-shift on load. This
+                // is filtered a second time below by the `img` transformTags fn, which is the
+                // real gate — allowedAttributes alone is not enough because transformTags rebuilds
+                // the attribute object from scratch and runs BEFORE allowedAttributes filtering
+                // (see sanitize-html's applyPerTagBaseAttributes ordering), so an unvalidated entry
+                // here would be silently dropped, not silently accepted.
+                img: ['src', 'alt', 'loading', 'decoding', 'width', 'height'],
 
                 // title is only set in the case of an external link warning
                 a: ['href', 'rel', 'title', 'class', 'target', 'id'],
@@ -144,6 +152,21 @@ export class TagTransformingSanitizer {
                     atts.src = src.replace(/^http:\/\//i, '//'); // replace http:// with // to force https when needed
                     if (alt && alt !== '') {
                         atts.alt = alt;
+                    }
+                    // 2026-08-17: preserve intrinsic width/height, presentational-only and
+                    // security-safe because we require a plain unsigned-integer string
+                    // (`/^\d+$/`, capped to a sane pixel range) before copying it through —
+                    // there is no way to smuggle a script/style/URL vector through a bare
+                    // digit string, and anything that isn't one (percentages, "auto",
+                    // `1" onerror=...`, huge numbers meant to force a giant CLS-inducing box)
+                    // is dropped rather than passed on. These two are the ONLY attributes this
+                    // sanitizer widens for <img>; src/alt/loading/decoding are unchanged.
+                    const isSafeDimension = (v: unknown): v is string => typeof v === 'string' && /^\d{1,4}$/.test(v) && v !== '0';
+                    if (isSafeDimension(attribs.width)) {
+                        atts.width = attribs.width;
+                    }
+                    if (isSafeDimension(attribs.height)) {
+                        atts.height = attribs.height;
                     }
                     // Lazy-load off-screen images to reduce layout shifts during scroll sync
                     // and avoid blocking the main thread with eager decoding of large images

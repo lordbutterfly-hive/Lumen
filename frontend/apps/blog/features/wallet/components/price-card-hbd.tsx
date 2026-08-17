@@ -25,9 +25,14 @@ export default function PriceCardHbd() {
       <div className="font-sans text-[24px] font-bold tabular-nums text-ink-2">$1.000</div>
       <div className="mt-1.5 text-[13px] leading-[20px] text-ink-10">{t('wallet.market.hbd_price_label')}</div>
       <div className="mt-1.5 text-[12px] text-ink-14">
-        {isLoading || isError || !data
-          ? t('wallet.market.unavailable')
-          : t('wallet.market.hbd_source', { price: data.hbdUsd.toFixed(3) })}
+        {/* ★ Loading is not a failure (2026-08-17). This said "Price unavailable"
+            for the whole of a healthy fetch — a verdict rendered before any
+            evidence. Only a real error earns that word now. */}
+        {isLoading
+          ? t('wallet.market.loading')
+          : isError || !data
+            ? t('wallet.market.unavailable')
+            : t('wallet.market.hbd_source', { price: data.hbdUsd.toFixed(3) })}
       </div>
     </div>
   );

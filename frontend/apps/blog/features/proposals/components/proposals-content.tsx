@@ -45,7 +45,12 @@ export default function ProposalsContent({
   // `user.isLoggedIn` here is a latent footgun if that seeding logic ever changes.
   const identity = useSessionIdentity();
   const { loggedUser } = useLoggedUserContext();
-  const [tab, setTab] = useState<ProposalTab>('all');
+  // ★ DEFAULT WAS A WALL OF EXPIRED PROPOSALS (2026-08-17). Measured live: 94
+  // expired vs 8 active. `status: 'all'` is still fetched (proposals-api.ts —
+  // every tab needs the full window to filter client-side), but the reader
+  // should land on what's actually fundable today, not the chain's full
+  // history. "All" stays one click away in the toolbar; it isn't removed.
+  const [tab, setTab] = useState<ProposalTab>('active');
   const [sort, setSort] = useState<ProposalSort>('votes');
 
   const { proposals, stats, returnProposalVoteValueHp, isLoading, isError, hasData, refetch } = useProposalsData({
@@ -65,7 +70,21 @@ export default function ProposalsContent({
   const showError = isError && !hasData;
   // Logged-in viewer whose own votes couldn't be loaded: the Support toggle's state is unknown,
   // so render it indeterminate rather than a confident (possibly wrong) "not supported".
-  const votesUnavailable = identity.isLoggedIn && !hasVotesData && (votesError || votesLoading);
+  /**
+   * ★★★ "UNAVAILABLE" IS A VERDICT, AND LOADING IS NOT ONE (2026-08-17).
+   *
+   * This included `votesLoading`, so every signed-in reader was told
+   * "Vote status unavailable" for the whole of a perfectly healthy fetch — the
+   * page asserting a failure it had no evidence for, on the ordinary path, every
+   * single visit. Same defect as the delivery record reporting "0% completion
+   * rate" for a creator nobody had asked anything of, and `/creators` announcing
+   * that nobody had launched a token: an absence of data reported as a fact.
+   *
+   * Now it means only what the word says — we asked and it failed. A fetch still
+   * in flight is `votesPending` and gets a pending affordance instead.
+   */
+  const votesUnavailable = identity.isLoggedIn && !hasVotesData && votesError;
+  const votesPending = identity.isLoggedIn && !hasVotesData && !votesError && votesLoading;
 
   return (
     <div className="relative mx-auto grid max-w-[1720px] grid-cols-1 gap-11 px-6 pb-20 pt-[26px] md:grid-cols-[200px_minmax(0,1fr)] md:px-11 xl:grid-cols-[200px_minmax(0,1fr)_312px]">
@@ -122,6 +141,7 @@ export default function ProposalsContent({
               proposals={proposals}
               votedIds={votedIds}
               votesUnavailable={votesUnavailable}
+              votesPending={votesPending}
               tab={tab}
               sort={sort}
               isLoading={isLoading}

@@ -153,7 +153,12 @@ export function formatHp(amount: number): string {
   return `${amount.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} HP`;
 }
 
-/** Compact "18.4M HP" style formatting, used only for the return-threshold card. */
+/**
+ * Compact "18.4M HP" style formatting. Originally the return-threshold card
+ * only; also used by proposal-support-footer.tsx's vote-value figure as of
+ * 2026-08-17 (full precision there is unreadable at mainnet scale — see that
+ * file for the `formatHp` title-attribute fallback).
+ */
 export function formatHpCompact(amount: number): string {
   const compact = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(
     amount

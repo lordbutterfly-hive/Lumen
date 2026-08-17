@@ -248,7 +248,17 @@ const MeritumLaunchFlow: FC = () => {
               subline: t('meritum_launch.subline_step2')
             }
           : {
-              eyebrow: t('meritum_launch.eyebrow_step3'),
+              /*
+                ★ NO EYEBROW ON STEP 3 (2026-08-17, verified UX defect #5).
+                `eyebrow_step3` reads "Everything below is honest" directly
+                above a screen whose own `subline_step3` reads "Nothing here
+                is hidden in a tooltip." Saying that about yourself is the
+                opposite of proving it — an honest screen does not need to
+                announce its own honesty, it just has to BE the terms list
+                underneath. The key stays in the locale file (unused here on
+                purpose); only the render drops it, and only for step 3.
+              */
+              eyebrow: '',
               headline: t('meritum_launch.headline_step3'),
               subline: t('meritum_launch.subline_step3')
             };
@@ -333,9 +343,24 @@ const MeritumLaunchFlow: FC = () => {
             330: the coin is 268px inside px-[30px], so 328px is its hard floor.
           */}
           <div className="min-w-[min(100%,340px)] flex-1 basis-[380px] px-9 pb-9 pt-[34px]">
-            <span className="text-12 font-bold uppercase tracking-[0.18em] text-meritum-ink-brand">
-              {header.eyebrow}
-            </span>
+            {/*
+              ★ "STEP X OF 3" (2026-08-17, verified UX defect #3). There was no
+              indicator anywhere in this flow telling a reader how much of it
+              was left — only three panels that silently swap for each other
+              inside the same card. Shown for the three real steps only: once
+              a signature is landing or the coin has struck, "step" is no
+              longer the right frame for what is on screen.
+            */}
+            {!live && !landing ? (
+              <div className="text-12 font-bold uppercase tracking-[0.14em] text-meritum-ink-faint">
+                {t('meritum_launch.step_indicator', { step: flow.step })}
+              </div>
+            ) : null}
+            {header.eyebrow ? (
+              <span className="mt-2 inline-block text-12 font-bold uppercase tracking-[0.18em] text-meritum-ink-brand">
+                {header.eyebrow}
+              </span>
+            ) : null}
             <h1 className="mt-3 max-w-[22ch] font-serif text-34 font-semibold tracking-[-0.02em] text-meritum-ink">
               {header.headline}
             </h1>

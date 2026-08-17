@@ -4,7 +4,7 @@ import { FullAccount, IWitness } from '@hive/common-hiveio-packages/wax';
 import { Chain } from '@transaction/lib/chain';
 import { DISABLED_SIGNING_KEY, STALE_BLOCK_AGE_SECONDS } from './constants';
 import { WitnessRow } from './types';
-import { blockAgeSeconds, parsePriceFeedUsd } from './witness-format';
+import { blockAgeSeconds, parsePriceFeedUsd, stripMarkdown } from './witness-format';
 
 export interface BuildWitnessRowsParams {
   witnesses: IWitness[];
@@ -39,7 +39,12 @@ export function buildWitnessRows({ witnesses, accounts, dgp, chain, ownVotes }: 
 
     const age = blockAgeSeconds(headBlock, witness.last_confirmed_block_num);
     const account = accounts.get(witness.owner);
-    const description = account?.profile?.witness_description || account?.profile?.about || '';
+    // ★ RAW MARKDOWN LEAKED INTO THE TABLE (2026-08-17). witness_description/
+    // about are free-form Markdown; stripping it here means every consumer
+    // of `row.description` (identity cell, search/filter matching) gets
+    // plain text once, instead of each caller re-deriving it.
+    const rawDescription = account?.profile?.witness_description || account?.profile?.about || '';
+    const description = stripMarkdown(rawDescription);
 
     return {
       ...witness,

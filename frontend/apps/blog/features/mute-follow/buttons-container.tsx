@@ -297,9 +297,45 @@ const ButtonsContainer = ({
   // render a spinner in place of `FollowButton`'s honest `unknown` label instead of
   // just disabling the control.
   const onLumenPath = lumen.applies || lumen.pending || lumen.unknown;
+  // ★ `follow.isFetching`, NOT INCLUDED HERE (2026-08-17, measured defect fix).
+  //
+  // `follow` is `useFollowingInfiniteQuery(user.username, 1000, 'blog', ...)`
+  // (content.tsx:510), and the effect above (`followHasNextPage` /
+  // `fetchNextFollowPage`) keeps paging it — SEQUENTIALLY, one 1000-row request
+  // at a time — for as long as the viewer's own follow list has more pages.
+  // React Query's `isFetching` on a `useInfiniteQuery` is true for EVERY one of
+  // those background page fetches, not just the first, so a viewer who follows
+  // more than 1000 accounts kept this button's spinner alive for the entire
+  // multi-page chain, serially, before it ever became clickable.
+  //
+  // Measured against this server (curl, `/api/following`, `type=blog`,
+  // `limit=1000`): a viewer following 3,747 accounts needs 4 sequential pages,
+  // 0.46s + 0.16s + 0.15s + 0.15s = 0.93s end-to-end even on this box's warm
+  // local network to the upstream node — and that number scales linearly and
+  // UNBOUNDED with however many accounts the viewer follows, with no cap. On a
+  // real deployment (higher per-request latency to a public Hive API node) that
+  // is exactly the multi-second spin reported.
+  //
+  // `follow.isLoading` is different: it is true only for the FIRST fetch (no
+  // page loaded yet at all), which this server measured at 0.15-0.46s for a
+  // single request regardless of the viewer's total follow count — bounded,
+  // not unbounded. Dropping `isFetching` here means the button stops spinning
+  // and becomes usable as soon as page 1 answers, while pagination keeps
+  // running in the background for `isFollow` (below) to pick up.
+  //
+  // This is an OPTIMISTIC render, not a corrected data source: if the account
+  // being viewed is followed but sits past page 1 of a 1000+ list, `isFollow`
+  // reads false (shows "Follow") until the background page containing it
+  // loads, then self-corrects. That window can only make an ALREADY-FOLLOWED
+  // click re-broadcast a follow (idempotent on chain — same end state) or an
+  // ALREADY-NOT-FOLLOWED click re-broadcast an unfollow (also idempotent) —
+  // never anything the mutation doesn't already handle. See
+  // `use-follow-mutations.ts`'s `onMutate`, which cancels in-flight
+  // `followingData` queries before writing its own optimistic entry, so a
+  // click landing mid-pagination does not race the background pages either.
   const loading = onLumenPath
     ? lumen.busy || lumen.pending
-    : follow.isLoading || follow.isFetching || followMutation.isPending || unfollowMutation.isPending;
+    : follow.isLoading || followMutation.isPending || unfollowMutation.isPending;
   return (
     <>
       {/* ★ `identity.isLoggedIn`, NOT `user.isLoggedIn` — see the big comment on

@@ -32,12 +32,14 @@ interface Props {
   votedIds: ReadonlySet<number>;
   /** True when the viewer's own votes couldn't be loaded — support state is unknown, not "no". */
   votesUnavailable: boolean;
+  /** The votes fetch is still in flight — not a failure. */
+  votesPending: boolean;
   tab: ProposalTab;
   sort: ProposalSort;
   isLoading: boolean;
 }
 
-export default function ProposalList({ proposals, votedIds, votesUnavailable, tab, sort, isLoading }: Props) {
+export default function ProposalList({ proposals, votedIds, votesUnavailable, votesPending, tab, sort, isLoading }: Props) {
   const { t } = useTranslation('common_blog');
 
   if (isLoading && proposals.length === 0) {
@@ -69,6 +71,7 @@ export default function ProposalList({ proposals, votedIds, votesUnavailable, ta
           vm={vm}
           isSupported={votedIds.has(vm.id)}
           votesUnavailable={votesUnavailable}
+          votesPending={votesPending}
         />
       ))}
     </div>

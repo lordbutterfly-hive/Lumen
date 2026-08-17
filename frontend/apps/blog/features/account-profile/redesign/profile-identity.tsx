@@ -37,6 +37,13 @@ interface ProfileIdentityProps {
    */
   moderated?: boolean;
   /**
+   * ★ DEFECT FIX (2026-08-17): drives the "add a bio" prompt below when
+   * `profile.about` is empty. Only the viewer's own profile gets a prompt —
+   * an empty bio on someone else's profile is just a fact about them, not
+   * something this page can offer to fix.
+   */
+  isOwnProfile?: boolean;
+  /**
    * The stats line under the meta row. Replaces the standalone 112px
    * `ProfileStatsBar` card (2026-08-13) — same four numbers, one line, no card
    * chrome. Counts are OPTIONAL on purpose: `follow_stats` can be absent from
@@ -95,8 +102,8 @@ export default function ProfileIdentity({
   lastPost,
   chainAccount = true,
   reputation,
-  moderated = false
-,
+  moderated = false,
+  isOwnProfile = false,
   followerCount,
   postCount,
   followingCount,
@@ -182,6 +189,18 @@ export default function ProfileIdentity({
 
       {profile?.about ? (
         <p className="mt-3 max-w-[520px] font-serif text-[17px] leading-[26px] text-ink-7">{profile.about}</p>
+      ) : isOwnProfile ? (
+        // ★ DEFECT FIX (2026-08-17): an empty bio on your own profile rendered
+        // nothing at all — no cue that a bio exists as a field, let alone that
+        // it's empty. Same settings destination as the Edit-profile CTA in
+        // `profile-actions.tsx`.
+        <Link
+          href={`/@${username}/settings`}
+          className="mt-3 inline-block max-w-[520px] font-serif text-[17px] leading-[26px] text-ink-14 underline-offset-2 hover:text-ink-10 hover:underline"
+          data-testid="profile-add-bio-prompt"
+        >
+          {t('user_profile.add_bio_prompt')}
+        </Link>
       ) : null}
 
       <div className="mt-3.5 flex flex-wrap gap-4 font-sans text-[14px] leading-[22px] text-ink-10">

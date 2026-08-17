@@ -8,7 +8,7 @@ import { StorageType } from '@smart-signer/lib/storage-mixin';
 // own '@hiveio/wax' names have to stay type-only or they reopen the same leak.
 // `TTransactionPackType` in particular IS a real runtime enum elsewhere
 // (auth/utils.ts builds a zod schema from it) — here it is only ever a type.
-import type { THexString, transaction, TTransactionPackType } from '@hiveio/wax';
+import type { THexString, transaction, TTransactionPackType, IHiveChainInterface } from '@hiveio/wax';
 
 import { getLogger } from '@hive/ui/lib/logging';
 const logger = getLogger('app');
@@ -20,6 +20,35 @@ export interface SignTransaction {
   // so we need to get the private key from the user
   singleSignKeyType?: 'owner' | 'active' | 'posting';
   requiredKeyType?: 'owner' | 'active' | 'posting';
+  /**
+   * The chain this transaction was BUILT on. Omit it — as every caller but one
+   * does — and the signer keeps using the app's global chain exactly as before.
+   *
+   * ★ WHY IT EXISTS (2026-08-17). A Hive signature digest is bound to the chain
+   * id, and the four wallet-backed signers cannot sign a bare digest: their
+   * providers take a transaction OBJECT, so each rebuilds one from the proto via
+   * `getChain()` — the single global chain. That silently re-stamps the
+   * transaction with the global network's id no matter which network the caller
+   * built it for.
+   *
+   * Meritum runs on Magi, an L2 over Hive: a write is an ordinary Hive L1
+   * `custom_json` that Magi reads back. So the signature must be bound to the
+   * L1 THAT MAGI READS — for Magi testnet that is the Hive TESTNET, not Hive
+   * mainnet. Creator-tokens builds on exactly that chain; the global chain is
+   * Hive mainnet, so every Meritum write reached the wallet stamped for the
+   * wrong L1 and could never be picked up. Measured, same transaction:
+   * testnet digest 77cc5e5c…, what the wallet signed 2f582dff…, and the same
+   * proto rebuilt on the testnet reproduced 77cc5e5c… exactly — the control that
+   * proves the chain id was the only variable.
+   *
+   * Passing the builder's own chain here makes the rebuild faithful. It is
+   * OPTIONAL and additive on purpose: no existing caller sets it, so no existing
+   * signature path changes by a single byte.
+   *
+   * Type-only import, like every other wax name in this file — see the note
+   * above; this module is statically reachable from every page.
+   */
+  chain?: IHiveChainInterface;
 }
 export interface SignChallenge {
   message: string | ArrayBufferView | ArrayBuffer;

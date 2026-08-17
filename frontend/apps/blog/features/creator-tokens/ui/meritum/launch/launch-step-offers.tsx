@@ -1,6 +1,6 @@
 'use client';
 
-import { FC } from 'react';
+import { FC, useState } from 'react';
 import { useTranslation } from '@/blog/i18n/client';
 import { COMMISSION_BPS } from '../../../lib/contract-math';
 import { usdPrice } from '../../../market/format';
@@ -61,6 +61,35 @@ const LaunchStepOffers: FC<LaunchStepOffersProps> = ({
     t('meritum_launch.offer_example_3')
   ];
 
+  /**
+   * ★ THE ERROR MESSAGE MUST NOT RENDER FROM AN UNTOUCHED, EMPTY MOUNT
+   * (2026-08-17, verified UX defect #2). `blockMessage` used to render the
+   * instant this panel appeared, because the empty default state (`no-offer`)
+   * IS a block — so a reader landed on step 2 and was told to fix a mistake
+   * they had not yet had the chance to make.
+   *
+   * Seeded from the offers themselves, not hardcoded `false`: a RESTORED draft
+   * can arrive here with a real problem already typed in (a priced offer
+   * missing a name, say), and that is not an empty mount, it is old, genuine
+   * input — the message should show for it immediately, same as it would have
+   * before this reader ever left the page. Any edit, or a Continue press,
+   * marks it touched from then on regardless of how it started.
+   */
+  const [touched, setTouched] = useState(() => offers.some((o) => o.name.trim() !== '' || o.price.trim() !== ''));
+
+  const handleName = (index: number, value: string): void => {
+    setTouched(true);
+    onName(index, value);
+  };
+  const handlePrice = (index: number, value: string): void => {
+    setTouched(true);
+    onPrice(index, value);
+  };
+  const handleContinue = (): void => {
+    setTouched(true);
+    onContinue();
+  };
+
   return (
     <div className="mt-step">
       <div className="mt-[26px] flex items-baseline gap-[18px] px-5 pb-0.5">
@@ -84,7 +113,7 @@ const LaunchStepOffers: FC<LaunchStepOffersProps> = ({
             <input
               type="text"
               value={offer.name}
-              onChange={(e) => onName(i, e.target.value)}
+              onChange={(e) => handleName(i, e.target.value)}
               placeholder={examples[i]}
               aria-label={t('meritum_launch.offer_name_aria', { n: i + 1 })}
               maxLength={120}
@@ -113,7 +142,7 @@ const LaunchStepOffers: FC<LaunchStepOffersProps> = ({
               <input
                 type="text"
                 value={offer.price}
-                onChange={(e) => onPrice(i, e.target.value)}
+                onChange={(e) => handlePrice(i, e.target.value)}
                 placeholder="0"
                 inputMode="decimal"
                 maxLength={9}
@@ -187,7 +216,7 @@ const LaunchStepOffers: FC<LaunchStepOffersProps> = ({
         </a>
       </div>
 
-      {blockMessage ? (
+      {touched && blockMessage ? (
         <p className="mt-5 text-13 font-semibold text-meritum-ink-brand" role="status">
           {blockMessage}
         </p>
@@ -196,7 +225,7 @@ const LaunchStepOffers: FC<LaunchStepOffersProps> = ({
       <div className="mt-7 flex flex-wrap items-center gap-5">
         <PrimaryAction
           label={t('meritum_launch.step2_continue')}
-          onClick={onContinue}
+          onClick={handleContinue}
           disabled={block !== null}
           title={blockMessage ?? undefined}
         />

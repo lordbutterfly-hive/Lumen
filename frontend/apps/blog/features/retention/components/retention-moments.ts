@@ -1,6 +1,7 @@
 'use client';
 
 import { getStorageItem, setStorageItem, StorageTTL } from '@ui/lib/storage-with-ttl';
+import { getUser } from '@smart-signer/lib/auth/user-localstore';
 
 /**
  * ★ THREE FEEDBACK MOMENTS. THREE. (owner ruling, 2026-08-08.)
@@ -71,6 +72,22 @@ type DayCounts = Partial<Record<RetentionActKind, number>>;
 interface ActLedger {
   /** UTC day (YYYY-MM-DD) → per-kind counts. */
   days: Record<string, DayCounts>;
+  /**
+   * The account these acts belong to.
+   *
+   * ★★★ ADDED 2026-08-17 AFTER THIS LEDGER WAS SHOWN TO THE WRONG PERSON. The
+   * Monday recap rendered "3 posts · 6 replies · active 3 of 7 days" to a
+   * LOGGED-OUT visitor, because this ledger is device-scoped, is never cleared on
+   * sign-out, and had nothing recording WHOSE acts it held. The render gate that
+   * let that happen is fixed in `weekly-recap-card.tsx`, but a gate is one line
+   * away from regressing and this data outlives any session — so the ledger now
+   * carries its owner and `weekTally` refuses to report someone else's.
+   *
+   * Absent on ledgers written before this change; those are treated as belonging
+   * to nobody and are never reported, which loses at most one week of counts for
+   * existing users and cannot show them to a stranger.
+   */
+  owner?: string;
 }
 
 interface ToastLedger {
@@ -100,14 +117,39 @@ function addUtcDays(day: string, delta: number): string {
   return new Date(ms + delta * 86_400_000).toISOString().slice(0, 10);
 }
 
+/**
+ * Who this browser currently believes is signed in. Read from the same
+ * localStorage the auth layer maintains, so the stamp written here matches the
+ * account whose write just succeeded. Deliberately tolerant: any failure yields
+ * '' (nobody), which `weekTally` reports nothing for.
+ */
+function currentOwner(): string {
+  try {
+    return getUser()?.username ?? '';
+  } catch {
+    return '';
+  }
+}
+
 function readActLedger(): ActLedger {
   const stored = getStorageItem<ActLedger>(ACTS_KEY);
   if (!stored || typeof stored !== 'object' || !stored.days) return { days: {} };
-  return { days: stored.days };
+  return { days: stored.days, owner: typeof stored.owner === 'string' ? stored.owner : undefined };
 }
 
 function writeActLedger(ledger: ActLedger): void {
   setStorageItem(ACTS_KEY, ledger, StorageTTL.UI_STATE);
+}
+
+/**
+ * A ledger belonging to somebody else — or to nobody — must not be added to, or
+ * one account's week would absorb the next account's acts on a shared browser.
+ * Switching owner starts a fresh ledger rather than merging.
+ */
+function ledgerForOwner(owner: string): ActLedger {
+  const ledger = readActLedger();
+  if (ledger.owner !== owner) return { days: {}, owner };
+  return ledger;
 }
 
 function readToastLedger(): ToastLedger {
@@ -138,7 +180,13 @@ function prune(ledger: ActLedger, today: string): ActLedger {
   for (const [day, counts] of Object.entries(ledger.days)) {
     if (day >= oldest) days[day] = counts;
   }
-  return { days };
+  // ★ CARRY THE OWNER THROUGH. This returned a bare `{ days }` and silently
+  // dropped it, so every act was written back un-owned and `weekTally` — which
+  // refuses an un-owned ledger — reported zero for everyone, including the
+  // person who had just posted. Caught by the ownership test's negative control,
+  // which is the only check in that file that fails if the recap is merely dead
+  // rather than correctly scoped.
+  return { days, owner: ledger.owner };
 }
 
 /**
@@ -194,9 +242,14 @@ export interface WeekTally {
  * this browser — a lower bound on what the person actually did, never an
  * upper one, so the card can never overstate a week.
  */
-export function weekTally(now: Date = new Date()): WeekTally {
+export function weekTally(viewer: string, now: Date = new Date()): WeekTally {
   const today = utcDayKey(now);
+  const empty: WeekTally = { posts: 0, replies: 0, votes: 0, follows: 0, activeDays: 0, windowDays: 7 };
   const ledger = readActLedger();
+  // ★ NEVER REPORT SOMEBODY ELSE'S WEEK. An anonymous viewer ('') matches no
+  // ledger, and a ledger written before owners existed (undefined) matches
+  // nobody — both report nothing rather than the last person's counts.
+  if (!viewer || ledger.owner !== viewer) return empty;
   const tally: WeekTally = { posts: 0, replies: 0, votes: 0, follows: 0, activeDays: 0, windowDays: 7 };
   for (let i = 0; i < tally.windowDays; i++) {
     const counts = ledger.days[addUtcDays(today, -i)];
@@ -288,7 +341,8 @@ function recordAct(kind: RetentionActKind): void {
   const now = new Date();
   const today = utcDayKey(now);
 
-  const ledger = prune(readActLedger(), today);
+  // Stamped with, and scoped to, whoever is signed in right now — see ActLedger.owner.
+  const ledger = prune(ledgerForOwner(currentOwner()), today);
   const counts: DayCounts = ledger.days[today] ?? {};
   counts[kind] = (counts[kind] ?? 0) + 1;
   ledger.days[today] = counts;

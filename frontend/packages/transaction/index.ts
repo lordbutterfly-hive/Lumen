@@ -239,10 +239,20 @@ export class TransactionService {
    * @return {*}  {Promise<string>}
    * @memberof TransactionService
    */
+  /**
+   * @param chain - the chain `txBuilder` was built on. Omit it (as every caller
+   *   but creator-tokens does) and the signer uses the app's global chain, which
+   *   is what it has always done. Pass it when the transaction belongs to a
+   *   DIFFERENT Hive L1 than the global one: the wallet-backed signers rebuild
+   *   the transaction to hand their provider an object, and rebuilding on the
+   *   wrong chain re-stamps it with the wrong chain id, producing a signature
+   *   that L1 must reject. See `SignTransaction.chain`.
+   */
   async signTransaction(
     txBuilder: ITransaction,
     singleSignKeyType?: SignTransaction['singleSignKeyType'],
-    requiredKeyType?: SignTransaction['requiredKeyType']
+    requiredKeyType?: SignTransaction['requiredKeyType'],
+    chain?: SignTransaction['chain']
   ): Promise<string> {
     const { getSigner } = await import('@smart-signer/lib/signer/get-signer');
     const signer = getSigner(this.signerOptions);
@@ -250,7 +260,8 @@ export class TransactionService {
       digest: txBuilder.sigDigest,
       transaction: txBuilder.transaction,
       singleSignKeyType,
-      requiredKeyType
+      requiredKeyType,
+      chain
     });
   }
 

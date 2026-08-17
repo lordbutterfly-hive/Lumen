@@ -1,6 +1,6 @@
 'use client';
 
-import { MoreHorizontal, ExternalLink } from 'lucide-react';
+import { MoreHorizontal, ExternalLink, Pencil } from 'lucide-react';
 import env from '@beam-australia/react-env';
 import { Link } from '@hive/ui';
 import {
@@ -106,7 +106,27 @@ export default function ProfileActions({
     );
   }
 
-  if (identity.username === username) return null;
+  // ★ DEFECT FIX (2026-08-17): this used to return null for your own profile —
+  // there was no way to reach the editor from the page that most needs it.
+  // Links to the same `/@you/settings` page the account menu's Settings row
+  // and `left-rail.tsx`'s settingsHref already use, rather than building a
+  // second editor. The hooks above (moderation/lumen/block) are still called
+  // unconditionally before this branch — they no-op for `username === identity
+  // .username` by their own internal checks — so this early return stays safe.
+  if (identity.username === username) {
+    return (
+      <div className="flex shrink-0 items-center gap-2.5">
+        <Link
+          href={`/@${username}/settings`}
+          className="flex items-center gap-1.5 rounded-xl border border-line-11 bg-surface-1 px-7 py-3 font-sans text-[15px] leading-[24px] font-semibold text-ink-7 transition-colors hover:bg-surface-16"
+          data-testid="profile-edit-button"
+        >
+          <Pencil className="h-4 w-4" />
+          {t('user_profile.edit_profile_button')}
+        </Link>
+      </div>
+    );
+  }
 
   const isFollow = lumen.applies
     ? lumen.isFollowing

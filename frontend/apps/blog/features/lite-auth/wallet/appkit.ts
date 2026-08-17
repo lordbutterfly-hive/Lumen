@@ -72,6 +72,8 @@ type Modal = {
     cb: (state: { address?: string; isConnected?: boolean; status?: string }) => void,
     namespace?: 'bip122' | 'eip155'
   ) => () => void;
+  /** Modal open/closed. Needed to tell "user closed it" from "still choosing" — see connectWallet. */
+  subscribeState: (cb: (state: { open?: boolean }) => void) => () => void;
 };
 
 let modalPromise: Promise<Modal> | null = null;
@@ -139,6 +141,7 @@ export async function connectWallet(chain: WalletChain): Promise<string> {
       done = true;
       clearTimeout(timer);
       unsubscribe();
+      unsubscribeState();
       fn();
     };
     const timer = setTimeout(
@@ -151,6 +154,39 @@ export async function connectWallet(chain: WalletChain): Promise<string> {
         finish(() => resolve(address));
       }
     }, namespace);
+
+    /**
+     * ★★★ CLOSING THE WALLET PICKER USED TO HANG THE PAGE FOR 3 MINUTES
+     * (owner-reported 2026-08-17, seen on /security as "both buttons are dead").
+     *
+     * This promise only settled on a connection or on CONNECT_TIMEOUT_MS. Dismissing
+     * the modal is not an error and does not connect anything, so it settled neither
+     * way — and the caller holds a single `busy` lock that disables EVERY wallet
+     * button while it waits. So one changed mind left "Waiting for your wallet…"
+     * stuck, both Link buttons disabled, and no way out but a reload. On the
+     * account-recovery page that reads as a broken product.
+     *
+     * `open` going true→false with nothing connected IS the user cancelling; reject
+     * so the caller can release the lock. Guarded on having actually seen it open,
+     * because the state starts closed and would otherwise self-cancel immediately.
+     */
+    let sawOpen = false;
+    const unsubscribeState = modal.subscribeState((state) => {
+      if (state?.open) {
+        sawOpen = true;
+        return;
+      }
+      if (!sawOpen) return;
+      // Re-read the account rather than trusting ordering: a wallet that connects
+      // as the modal closes must resolve, not be reported as a cancel.
+      const account = modal.getAccount(namespace);
+      if (account?.isConnected && account.address) {
+        const address = account.address;
+        finish(() => resolve(address));
+        return;
+      }
+      finish(() => reject(new Error('wallet_connect_cancelled')));
+    });
 
     modal.open({ namespace }).catch((error) => finish(() => reject(error)));
   });
@@ -208,6 +244,9 @@ export function walletErrorMessage(error: unknown): string {
   if (/taproot_unsupported/.test(raw))
     return 'Taproot addresses aren’t supported yet. Use a SegWit (bc1q…) or legacy (1…) address.';
   if (/wallet_connect_timeout/.test(raw)) return 'The wallet connection timed out. Try again.';
+  // Closing the picker is a decision, not a failure — say nothing alarming, and
+  // above all release the button (see connectWallet's cancel path).
+  if (/wallet_connect_cancelled/.test(raw)) return 'No wallet connected. You can try again whenever you like.';
   if (/no_bitcoin_signer|no_evm_signer/.test(raw))
     return 'That wallet can’t sign messages. Try another wallet.';
   if (/User rejected|rejected|denied|4001/i.test(raw)) return 'You cancelled the signature request.';

@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Link } from '@hive/ui';
 import { Icons } from '@ui/components/icons';
 import { fetchAccountNotifications, fetchUnreadNotifications } from '@/blog/lib/chain-fetch';
-import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { getStorageItem, setStorageItem, StorageTTL } from '@ui/lib/storage-with-ttl';
 import { useTranslation } from '@/blog/i18n/client';
 import { engagementCounts } from '@/blog/lib/moderation/engagement-exclusions';
@@ -67,7 +67,19 @@ function agoLabel(iso: string, now: number, t: (k: string, o?: Record<string, un
 
 export function RetentionNudge({ className }: { className?: string }) {
   const { t } = useTranslation('common_blog');
-  const { user } = useUserClient();
+  /**
+   * ★ SAME DEFECT AS `weekly-recap-card.tsx`, SAME FIX (2026-08-17). This was raw
+   * `useUserClient()`'s `user.isLoggedIn`, which is seeded from the localStorage
+   * `user` key the LAST login on this browser wrote, so a session that ended
+   * without an explicit sign-out left it reading `true`. Here that had a second
+   * edge: the two queries below are keyed on `user.username`, so a stale seed
+   * also fired notification reads for the PREVIOUS account and could surface
+   * their nudge to whoever is now looking. Waits for the real answer
+   * (`clientAnswered`) before treating anyone as signed in, and re-evaluates
+   * rather than latching. See that file's note for the full reasoning.
+   */
+  const identity = useSessionIdentity();
+  const signedIn = identity.clientAnswered && identity.isLoggedIn;
   const { summary } = useViewerRetention();
 
   // Everything below depends on the clock and on storage, so it must not run during
@@ -76,14 +88,19 @@ export function RetentionNudge({ className }: { className?: string }) {
   const [dismissedKinds, setDismissedKinds] = useState<string[]>([]);
 
   useEffect(() => {
-    if (!user.isLoggedIn) return;
+    if (!signedIn) {
+      // Re-hide on sign-out / session loss: `today` is the render gate below, so
+      // clearing it is what takes the nudge back. The old early-return could not.
+      setToday('');
+      return;
+    }
     const day = utcDayKey(new Date());
     const stored = getStorageItem<ShownLedger>(DISMISS_KEY);
     setToday(day);
     // A nudge already shown TODAY suppresses everything for the rest of the day.
     // Yesterday's kind is remembered too, so the same line never lands twice running.
     setDismissedKinds(stored && stored.day === day ? ['*'] : stored ? [stored.kind] : []);
-  }, [user.isLoggedIn]);
+  }, [signedIn]);
 
   // Warm from the app header on every page; costs nothing to read here.
   //
@@ -97,17 +114,17 @@ export function RetentionNudge({ className }: { className?: string }) {
   // `apps/blog/app/api/notifications/unread/route.ts` and
   // `.../api/notifications/account/route.ts`.
   const { data: unread } = useQuery({
-    queryKey: ['unreadNotifications', user.username],
-    queryFn: () => fetchUnreadNotifications(user.username),
-    enabled: Boolean(user.isLoggedIn && user.username),
+    queryKey: ['unreadNotifications', identity.username],
+    queryFn: () => fetchUnreadNotifications(identity.username),
+    enabled: Boolean(signedIn && identity.username),
     staleTime: 5 * 60 * 1000
   });
 
   // ONLY fetched when the count above says there is something to find.
   const { data: notifications } = useQuery({
-    queryKey: ['retention-nudge-notifications', user.username],
-    queryFn: () => fetchAccountNotifications(user.username, undefined, NOTIFICATION_SCAN),
-    enabled: Boolean(user.isLoggedIn && user.username && (unread?.unread ?? 0) > 0),
+    queryKey: ['retention-nudge-notifications', identity.username],
+    queryFn: () => fetchAccountNotifications(identity.username, undefined, NOTIFICATION_SCAN),
+    enabled: Boolean(signedIn && identity.username && (unread?.unread ?? 0) > 0),
     staleTime: 5 * 60 * 1000
   });
 

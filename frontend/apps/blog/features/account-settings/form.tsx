@@ -76,22 +76,43 @@ const Field = ({
   error?: string | null;
   isDirty?: boolean;
   children: ReactNode;
-}) => (
+}) => {
+  // ★ DEFECT FIX (2026-08-17): needed to give the dirty-dot below a real
+  // translated accessible name (see its own comment). `Field` had no hook
+  // calls before this, hence the switch from an implicit-return arrow body.
+  const { t } = useTranslation('common_blog');
+  return (
   <div data-dirty={isDirty ? 'true' : 'false'}>
     <label className={SETTINGS_LABEL} htmlFor={htmlFor}>
       {label}
       {isDirty ? (
+        // ★ DEFECT FIX (2026-08-17): this dot carried no accessible name at
+        // all (`aria-hidden`, no `title`) and, sitting beside a form label in
+        // the same brand-red used elsewhere for required-field markers, read
+        // to a sighted user as "this field is required" — it actually means
+        // "you changed this field from its saved value". `aria-hidden` is
+        // gone (a screen-reader user gets zero benefit from a `title`, which
+        // is hover-only) in favour of a real accessible name via `t()`, same
+        // pattern the reputation pill uses (`profile-identity.tsx`). Visible
+        // text stays hidden from sighted users with `sr-only` — the dot
+        // itself, plus `data-dirty` on the wrapper, are still the sighted/
+        // testable signal; this only fixes the screen-reader gap and the
+        // ambiguous "is that a required marker?" read.
         <span
           className="ml-1.5 inline-block h-[6px] w-[6px] rounded-full bg-surface-brand-12 align-middle"
-          aria-hidden="true"
           data-testid="field-dirty-dot"
-        />
+        >
+          {/* Deliberately NOT "Required": this dot means the field's value
+              differs from what was loaded, not that it must be filled in. */}
+          <span className="sr-only">{t('settings_page.field_changed_label')}</span>
+        </span>
       ) : null}
     </label>
     {children}
     {error ? <p className="mt-1.5 text-[12px] text-ink-brand-6">{error}</p> : null}
   </div>
-);
+  );
+};
 
 const SettingsForm = ({ username }: { username: string }) => {
   const { t } = useTranslation('common_blog');

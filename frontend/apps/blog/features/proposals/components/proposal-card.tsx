@@ -21,6 +21,7 @@ interface Props {
   isSupported: boolean;
   /** The viewer's own votes couldn't be loaded — render Support as indeterminate, not "not supported". */
   votesUnavailable: boolean;
+  votesPending: boolean;
 }
 
 /**
@@ -28,7 +29,7 @@ interface Props {
  * (linked to the underlying post), the funded-aware stats column, and the real
  * Support / Un-support footer. Matches Proposals.dc.html's card layout 1:1.
  */
-export default function ProposalCard({ vm, isSupported, votesUnavailable }: Props) {
+export default function ProposalCard({ vm, isSupported, votesUnavailable, votesPending }: Props) {
   const { t } = useTranslation('common_blog');
   /**
    * ★ SAME DEFECT AS /witnesses (2026-08-11, class sweep). `user.isLoggedIn` cannot
@@ -108,9 +109,12 @@ export default function ProposalCard({ vm, isSupported, votesUnavailable }: Prop
               {t(`proposals.status.${proposal.status}`, proposal.status)}
             </span>
             <span>{formatDateRange(proposal.start_date, proposal.end_date)}</span>
-            <Link href={postHref} className="text-ink-brand-6 hover:underline" data-testid="proposal-card-permlink">
-              @{proposal.creator}/{proposal.permlink}
-            </Link>
+            {/* ★ RAW PERMLINK REMOVED (2026-08-17). This used to print
+                `@creator/permlink` as its own prominent brand-red link — the
+                chain's internal slug, not something a reader needs to see.
+                The title above (`proposal-card-title`) already links to the
+                same `postHref`, so the click-through lives there instead of
+                being duplicated as a second, more cryptic-looking link. */}
           </div>
         </div>
 
@@ -122,6 +126,7 @@ export default function ProposalCard({ vm, isSupported, votesUnavailable }: Prop
         isLoggedIn={identity.isLoggedIn}
         isSupported={isSupported}
         votesUnavailable={votesUnavailable}
+        votesPending={votesPending}
         isPending={voteMutation.isLoading}
         voteValueHp={voteValueHp}
         onToggle={handleToggle}

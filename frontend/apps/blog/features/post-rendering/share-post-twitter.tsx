@@ -12,8 +12,11 @@ export default function TwitterShare({ title, url }: { title: string; url: strin
   const winLeft = 0;
   const q = 'text=' + encodeURIComponent(postTitle) + '&url=' + encodeURIComponent(href);
   const openWindow = () => {
+    // ★ DEFECT FIX (2026-08-17): was `http://twitter.com/...` — the only one
+    // of the four share popups (Facebook/LinkedIn/Reddit all use `https://`)
+    // opening an insecure connection to build the share intent.
     return window.open(
-      'http://twitter.com/share?' + q,
+      'https://twitter.com/share?' + q,
       'Share',
       'top=' + winTop + ',left=' + winLeft + ',toolbar=0,status=0,width=' + winWidth + ',height=' + winHeight
     );

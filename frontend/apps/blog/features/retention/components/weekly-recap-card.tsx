@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from '@hive/ui';
 import { Icons } from '@ui/components/icons';
 import { useTranslation } from '@/blog/i18n/client';
-import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { getStorageItem, setStorageItem, StorageTTL } from '@ui/lib/storage-with-ttl';
 import { useViewerRetention } from '../hooks/use-viewer-retention';
 import { weekTally, utcDayKey } from './retention-moments';
@@ -40,28 +40,67 @@ export interface WeeklyRecapCardProps {
 
 export function WeeklyRecapCard({ className }: WeeklyRecapCardProps) {
   const { t } = useTranslation('common_blog');
-  const { user } = useUserClient();
+  /**
+   * ★★★ THIS CARD WAS SHOWN TO LOGGED-OUT VISITORS, WITH THE PREVIOUS READER'S
+   * NUMBERS (owner-reported 2026-08-17, from a screenshot of `/` while signed
+   * out: "LAST WEEK · 3 posts · 6 replies · active 3 of 7 days").
+   *
+   * Two independent faults had to line up, and both are fixed here:
+   *
+   *  1. THE GATE READ A STALE ANSWER. It was raw `useUserClient()`'s
+   *     `user.isLoggedIn`, which `use-user-core.ts` seeds from the localStorage
+   *     `user` key written by the LAST successful login on this browser
+   *     (`initialDataUpdatedAt: 0`). An explicit sign-out clears that seed, but a
+   *     session that dies any other way — an expired or invalidated cookie, which
+   *     `app/page.tsx` documents happening — leaves `isLoggedIn: true` sitting in
+   *     storage. The card believed it.
+   *
+   *  2. IT COULD NEVER TAKE IT BACK. `visible` was a one-way latch: the effect
+   *     early-returns when logged out, so once it had been set true on the stale
+   *     seed, the real answer arriving moments later could not hide it again.
+   *
+   * ★ WHY `clientAnswered` AND NOT JUST `identity.isLoggedIn`. The sibling fix in
+   * `today-card.tsx` (G2) swapped to `useSessionIdentity()`, and that is the right
+   * source — but read `server-session.tsx`: until `clientAnswered`, it FALLS BACK
+   * to the same localStorage seed. For a card that hides a signed-in reader's
+   * daily loop, an optimistic seed is the safe way to be wrong. For a card that
+   * publishes one person's week to whoever opens the browser next, it is not.
+   * So this one waits for the real answer. The cost is that the card appears a
+   * beat later for a genuine returning reader; the alternative is showing their
+   * activity to a stranger, which is not a trade worth making.
+   *
+   * ★ VISIBILITY IS DERIVED, NOT LATCHED, so it self-corrects the moment the
+   * session answer changes — the same shape `today-card.tsx` uses.
+   */
+  const identity = useSessionIdentity();
+  const signedIn = identity.clientAnswered && identity.isLoggedIn;
   // Whichever ladder applies — a lite account's "N people engaged" is a real
   // measured number from our own database, and this card used to skip it purely
   // because the chain hook could not answer for them.
   const { summary } = useViewerRetention();
 
-  // Everything below depends on the clock and on storage, so it must not run
-  // during SSR — an unmounted first paint keeps hydration deterministic.
-  const [visible, setVisible] = useState(false);
+  // The clock and storage reads must not run during SSR — an unmounted first
+  // paint keeps hydration deterministic. This resolves only the CLIENT-ONLY
+  // facts (which day it is, whether this week's card was dismissed); whether the
+  // reader is signed in is decided separately, above, and re-evaluated freely.
   const [today, setToday] = useState('');
+  const [eligibleDay, setEligibleDay] = useState(false);
 
   useEffect(() => {
-    if (!user.isLoggedIn) return;
     const now = new Date();
     if (now.getDay() !== MONDAY) return;
     const day = utcDayKey(now);
     if (getStorageItem<string>(DISMISS_KEY) === day) return;
     setToday(day);
-    setVisible(true);
-  }, [user.isLoggedIn]);
+    setEligibleDay(true);
+  }, []);
 
-  const tally = useMemo(() => (visible ? weekTally() : null), [visible]);
+  const visible = signedIn && eligibleDay;
+
+  const tally = useMemo(
+    () => (visible ? weekTally(identity.username) : null),
+    [visible, identity.username]
+  );
 
   const segments = useMemo(() => {
     if (!tally) return [];
@@ -97,7 +136,10 @@ export function WeeklyRecapCard({ className }: WeeklyRecapCardProps) {
 
   const dismiss = () => {
     setStorageItem(DISMISS_KEY, today, StorageTTL.UI_STATE);
-    setVisible(false);
+    // Clears the day-eligibility, not a separate visibility latch — `visible` is
+    // derived, so dropping this is what hides the card, and it stays hidden for
+    // the rest of the day via the persisted DISMISS_KEY above.
+    setEligibleDay(false);
   };
 
   return (

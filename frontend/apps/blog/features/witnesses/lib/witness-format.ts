@@ -55,3 +55,30 @@ export function formatNaiAsset(asset: { amount: string; precision: number } | un
 export function formatInteger(value: number): string {
   return Number.isFinite(value) ? value.toLocaleString('en-US') : '—';
 }
+
+/**
+ * Strips common Markdown syntax down to plain text, e.g. `**gtg** witness -
+ * [details](url)` -> `gtg witness - details`. Witness statements
+ * (`profile.witness_description`/`.about`) are free-form Markdown, but the
+ * identity cell (2026-08-17) renders them as a plain, clamped one-liner —
+ * without this, readers saw raw `**`/`[]()`/`#` syntax leak through instead
+ * of prose. Regex-based on purpose: this is a table cell, not a renderer, so
+ * a full CommonMark parser is unnecessary weight for a best-effort strip.
+ */
+export function stripMarkdown(text: string): string {
+  return text
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1') // images -> alt text
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1') // links -> label
+    .replace(/(\*\*\*|___)(.*?)\1/g, '$2') // bold+italic
+    .replace(/(\*\*|__)(.*?)\1/g, '$2') // bold
+    .replace(/(\*|_)(.*?)\1/g, '$2') // italic
+    .replace(/~~(.*?)~~/g, '$1') // strikethrough
+    .replace(/`{1,3}([^`]*)`{1,3}/g, '$1') // inline/code
+    .replace(/^#{1,6}\s+/gm, '') // headers
+    .replace(/^>\s?/gm, '') // blockquotes
+    .replace(/^[-*+]\s+/gm, '') // bullet lists
+    .replace(/^\d+\.\s+/gm, '') // numbered lists
+    .replace(/<[^>]+>/g, '') // stray HTML tags
+    .replace(/\s+/g, ' ') // collapse newlines/whitespace to single spaces
+    .trim();
+}

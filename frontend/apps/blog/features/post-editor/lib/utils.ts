@@ -436,5 +436,12 @@ export type { BatchFileItem, FileProcessingStatus, ProcessingOptions };
 // redesign, not a rounding, and nobody has asked for one. Paragraph rhythm was a
 // collapsed 20.625px; `prose-p:my-5` is 20px (audit item 8: whole-pixel prose
 // margins).
+// 2026-08-17: `prose-img:max-h-[70vh] prose-img:object-contain` added. Article
+// bodies had no cap at all on image height, unlike comments (audit found
+// comments cap at 400px) — so a tall photo post (a portrait screenshot, a
+// full-length photo) could run to its native height and dominate the
+// viewport, pushing all following text off-screen. `object-contain` alongside
+// the cap keeps `max-w-full` intact (an image can still be capped by width or
+// height, whichever binds first) rather than cropping or distorting it.
 export const postClassName =
-  'font-serif text-[17px] leading-[28px] prose-p:my-5 prose-h1:text-[34px] prose-h1:leading-[40px] prose-h2:text-[26px] prose-h2:leading-[32px] prose-h3:text-[22px] prose-h3:leading-[32px] prose-h4:text-[17px] prose-h4:leading-[24px] prose-img:cursor-pointer prose-img:max-w-full prose-img:h-auto';
+  'font-serif text-[17px] leading-[28px] prose-p:my-5 prose-h1:text-[34px] prose-h1:leading-[40px] prose-h2:text-[26px] prose-h2:leading-[32px] prose-h3:text-[22px] prose-h3:leading-[32px] prose-h4:text-[17px] prose-h4:leading-[24px] prose-img:cursor-pointer prose-img:max-w-full prose-img:h-auto prose-img:max-h-[70vh] prose-img:object-contain';

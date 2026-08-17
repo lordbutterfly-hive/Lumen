@@ -15,6 +15,7 @@ import LangToggle from '../lang-toggle';
 import { useLogout } from '@smart-signer/lib/auth/use-logout';
 import { User } from '@smart-signer/types/common';
 import { useTranslation } from '@/blog/i18n/client';
+import { cn } from '@ui/lib/utils';
 import { useTokenPriceChip } from '@/blog/features/creator-tokens/live/use-token-price-chip';
 import { useLivePortfolio } from '@/blog/features/creator-tokens/live/use-live-portfolio';
 import { usdPrice } from '@/blog/features/creator-tokens/market/format';
@@ -44,6 +45,27 @@ const ROW_CLASS =
 // "grey-ground" replacement rather than the plain-white one: `#6f6963` is
 // 4.97:1 on `#f6f5f2` and 5.42:1 on white, independently measured.
 const META_CLASS = 'shrink-0 font-sans text-[13px] leading-[20px] tabular-nums text-ink-9';
+
+// ★ DEFECT FIX (2026-08-17): Upgrade previously shared ROW_CLASS with every
+// other row, including Language — so a lite reader's one CTA to leave the
+// free tier carried the exact same visual weight as picking a UI language.
+// Same brand-tint pairing (`bg-surface-brand-5` / `text-ink-brand-6`) already
+// used for other prominent CTAs in this app (`left-rail.tsx`'s hover state,
+// `upgrade-panel.tsx`'s own callout) — applied here as the RESTING state, not
+// just on hover, so it visually leads the lite-only group instead of blending
+// into it.
+const UPGRADE_ROW_CLASS = cn(
+  ROW_CLASS,
+  'bg-surface-brand-5 font-bold text-ink-brand-6 hover:bg-surface-brand-8 hover:text-ink-brand-4 focus:bg-surface-brand-8 focus:text-ink-brand-4'
+);
+
+// ★ DEFECT FIX (2026-08-17): Logout carried the exact same row style as
+// Profile/Wallet/Settings — nothing marked it as the one destructive,
+// session-ending action in a list of navigation links. Same `text-destructive`
+// token every other destructive control in this app already uses (see
+// `profile-actions.tsx`'s Block menu item, `context-links.tsx`,
+// `mute-follow/block-button.tsx`).
+const LOGOUT_ROW_CLASS = cn(ROW_CLASS, 'text-destructive hover:text-destructive focus:text-destructive');
 
 /**
  * A small, self-contained avatar for the menu's OWN header block — the app's
@@ -127,34 +149,54 @@ const AccountMenuContent = ({ user }: { user: User }) => {
       </div>
       <DropdownMenuSeparator className="mx-1 my-0 mb-1.5 h-px bg-surface-24" />
 
+      {/* ★ DEFECT FIX (2026-08-17): GROUPED, WITH SEPARATORS. This used to be 9
+          rows in one flat `DropdownMenuGroup` with no visual break anywhere —
+          Upgrade (a monetization CTA) read as equal weight to Language (a
+          preference), and Logout (irreversible, ends your session) sat flush
+          against Settings with nothing marking the seam. Splitting into
+          sibling `DropdownMenuGroup`s changes only the `role="group"`
+          boundaries for a11y tooling — Radix's roving-tabindex/typeahead
+          collection lives on the Content, not the Group, so ArrowUp/ArrowDown
+          still move through every row below exactly as the doc comment on
+          `LangToggle` (verified live) describes for the non-lite path, which
+          is unchanged: Profile → Your tokens → Creator Studio → Language. */}
       <DropdownMenuGroup className="flex flex-col gap-0.5">
         <DropdownMenuItem asChild className={ROW_CLASS}>
           <BasePathLink href={`/@${user.username}`} data-testid="user-profile-menu-profile-link">
             <span>{t('navigation.user_menu.profile')}</span>
           </BasePathLink>
         </DropdownMenuItem>
+      </DropdownMenuGroup>
 
-        {/*
-          The two doors a lite account needs and could not previously find. Both
-          pages existed with nothing anywhere linking to them — the same way /login
-          was unreachable for weeks. Lite-only: a full Hive account already has its
-          own keys and has nothing to upgrade to.
-        */}
-        {user.account_tier === 'lite' ? (
-          <>
+      {/*
+        The two doors a lite account needs and could not previously find. Both
+        pages existed with nothing anywhere linking to them — the same way /login
+        was unreachable for weeks. Lite-only: a full Hive account already has its
+        own keys and has nothing to upgrade to. Its own group + separator (2026-08-17)
+        so this reads as one cluster, and Upgrade (`UPGRADE_ROW_CLASS`) carries the
+        visual priority a paid-tier CTA should have instead of blending into Security.
+      */}
+      {user.account_tier === 'lite' ? (
+        <>
+          <DropdownMenuSeparator className="mx-1 my-1.5 h-px bg-surface-24" />
+          <DropdownMenuGroup className="flex flex-col gap-0.5">
             <DropdownMenuItem asChild className={ROW_CLASS}>
               <Link href="/security" data-testid="user-profile-menu-security-link">
                 <span>{LITE_LABELS.security}</span>
               </Link>
             </DropdownMenuItem>
-            <DropdownMenuItem asChild className={ROW_CLASS}>
+            <DropdownMenuItem asChild className={UPGRADE_ROW_CLASS}>
               <Link href="/upgrade" data-testid="user-profile-menu-upgrade-link">
                 <span>{LITE_LABELS.upgrade}</span>
               </Link>
             </DropdownMenuItem>
-          </>
-        ) : null}
+          </DropdownMenuGroup>
+        </>
+      ) : null}
 
+      <DropdownMenuSeparator className="mx-1 my-1.5 h-px bg-surface-24" />
+
+      <DropdownMenuGroup className="flex flex-col gap-0.5">
         {/* Your tokens (design brief §4) — the held-token count, real from
             useLivePortfolio, omitted (not rendered as "0 held" or a spinner)
             for as long as the read hasn't confidently answered. */}
@@ -215,8 +257,15 @@ const AccountMenuContent = ({ user }: { user: User }) => {
             <span>{LABELS.settings}</span>
           </Link>
         </DropdownMenuItem>
+      </DropdownMenuGroup>
 
-        <DropdownMenuItem asChild className={ROW_CLASS}>
+      <DropdownMenuSeparator className="mx-1 my-1.5 h-px bg-surface-24" />
+
+      {/* Own group + separator + destructive styling (2026-08-17) — see
+          `LOGOUT_ROW_CLASS` above. This is the one action in the menu that
+          ends the session; it now looks like it. */}
+      <DropdownMenuGroup className="flex flex-col gap-0.5">
+        <DropdownMenuItem asChild className={LOGOUT_ROW_CLASS}>
           <Link
             href=""
             onClick={async (e) => {

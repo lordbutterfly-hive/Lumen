@@ -283,8 +283,32 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
           unreachable. If you already know a creator, their token page still works: /creators/their-name.
         </div>
       ) : creators.length === 0 ? (
+        /*
+         * ★★★ AN EMPTY INDEX IS NOT AN EMPTY MARKET (2026-08-17).
+         *
+         * This said "No creators have launched a token yet." while
+         * `magi.contracts` was live on chain — ACTIVE, 8 of 100,000 tokens
+         * issued, reachable at /creators/magi.contracts. The lookup did not
+         * fail, so the `failed` branch above never fired: the indexer answered
+         * 200 with `{"data":{"lumen_ct_discovery":[]}}`. The view simply was
+         * never populated.
+         *
+         * So zero rows carries strictly less information than it appears to. It
+         * means "the index lists nobody", which is the same answer whether
+         * nobody has launched or nobody has been INDEXED — and this page cannot
+         * tell those apart, because the ranking it exists to show only exists in
+         * that index. Asserting the first reading is how the platform's only
+         * real market became invisible in the product's own browse surface.
+         *
+         * Same rule as the delivery record and the wallet reads: a screen may
+         * report what it knows, never a fact it merely inferred from an absence.
+         * The escape hatch from the `failed` branch is repeated here because it
+         * is exactly as useful — a direct handle still resolves.
+         */
         <div className="rounded-[14px] border border-dashed border-line-11 px-5 py-8 text-center text-[14px] leading-[22px] text-ink-14">
-          No creators have launched a token yet.
+          No creators to list yet. The index that ranks creators by their delivery record has nothing in it — that may
+          mean nobody has launched, or simply that no one has been indexed. If you already know a creator, their token
+          page still works: /creators/their-name.
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">

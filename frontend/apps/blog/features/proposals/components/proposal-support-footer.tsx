@@ -2,12 +2,12 @@
 
 import { cn } from '@ui/lib/utils';
 import TooltipContainer from '@ui/components/tooltip-container';
+import { Icons } from '@ui/components/icons';
 import { useTranslation } from '@/blog/i18n/client';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import DialogLogin from '@/blog/components/dialog-login';
-import { formatHp } from '../lib/proposals-format';
-import HeartIcon from './heart-icon';
+import { formatHp, formatHpCompact } from '../lib/proposals-format';
 
 interface Props {
   isLoggedIn: boolean;
@@ -21,6 +21,8 @@ interface Props {
   isSupported: boolean;
   /** The viewer's own votes couldn't be loaded — the toggle's state is unknown, not "not supported". */
   votesUnavailable: boolean;
+  /** Still fetching. Distinct from unavailable: nothing has failed yet. */
+  votesPending: boolean;
   isPending: boolean;
   voteValueHp: number;
   onToggle: () => void;
@@ -36,6 +38,7 @@ export default function ProposalSupportFooter({
   isExpired,
   isSupported,
   votesUnavailable,
+  votesPending,
   isPending,
   voteValueHp,
   onToggle
@@ -66,7 +69,13 @@ export default function ProposalSupportFooter({
 
   // Vote state unknown for a logged-in viewer: don't render a confident (possibly wrong)
   // "Support"/"Un-support" toggle — surface an honest "couldn't load your votes" note instead.
-  const showIndeterminate = isLoggedIn && votesUnavailable;
+  //
+  // ★ PENDING IS NOT UNAVAILABLE (2026-08-17). `votesUnavailable` used to be true
+  // while the fetch was merely in flight, so the ordinary healthy path announced a
+  // failure to every signed-in reader on every visit. Both states still refuse to
+  // render a confident toggle — that part was right — but only a genuine error is
+  // allowed to SAY anything failed.
+  const showIndeterminate = isLoggedIn && (votesUnavailable || votesPending);
 
   // The hover/focus -> "Remove vote" swap only promises an action that is actually
   // available right now — a supported-but-expired (or lite-blocked) proposal stays on
@@ -136,16 +145,33 @@ export default function ProposalSupportFooter({
   return (
     <div className="mt-4 flex items-center justify-between gap-4 border-t border-line-2 pt-3.5">
       <span className="flex items-center gap-2 font-sans text-[13px] leading-[20px] text-ink-10">
-        <HeartIcon filled={showIndeterminate ? false : isSupported} />
+        {/* ★ A HEART MISLABELS A STAKE FIGURE (2026-08-17). This is governance
+            vote WEIGHT (HP behind the proposal), not a "like" — a heart reads
+            as the wrong verb. `arrowBigUp` is already this app's icon for
+            voting (left-rail's "Vote Witness" row uses the same glyph), so
+            swapping to it is consistent with the app's own vocabulary instead
+            of inventing new SVG art. Colour still carries the supported/not
+            distinction the heart used to via `fill`. */}
+        <Icons.arrowBigUp
+          className={cn('h-[15px] w-[15px]', !showIndeterminate && isSupported ? 'text-ink-brand-6' : 'text-ink-14')}
+          aria-hidden="true"
+        />
         {t('proposals.card.vote_value')}{' '}
-        <strong className="tabular-nums text-ink-4">{formatHp(voteValueHp)}</strong>
+        {/* ★ FULL PRECISION WAS UNREADABLE (2026-08-17) — "64,790,469.25 HP"
+            on a card meant to be skimmed. `formatHpCompact` (already built
+            for return-threshold-card.tsx) renders "64.8M HP"; the exact
+            figure moves to `title` for a reader who actually needs it. */}
+        <strong className="tabular-nums text-ink-4" title={formatHp(voteValueHp)}>
+          {formatHpCompact(voteValueHp)}
+        </strong>
       </span>
       {showIndeterminate ? (
         <span
           className="font-sans text-[13px] leading-[20px] italic text-ink-14"
           data-testid="proposal-support-unavailable"
         >
-          {t('proposals.card.votes_unavailable')}
+          {/* Pending says it is still looking; unavailable says it failed. */}
+          {votesPending ? t('proposals.card.votes_pending') : t('proposals.card.votes_unavailable')}
         </span>
       ) : isLiteBlocked ? (
         /* ★ THE GATE STAYS SHUT, THE REASON STOPS LYING (2026-08-13, adversarial

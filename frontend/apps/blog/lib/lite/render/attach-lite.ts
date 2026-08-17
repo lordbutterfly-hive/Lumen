@@ -75,6 +75,43 @@ export async function attachLiteIdentities<T extends Entry>(entries: T[]): Promi
           // Without this the block filters would have to guess.
           userId: row.userId
         };
+
+        /**
+         * ★★★ AND THE ENTRY ITSELF, NOT JUST THE OVERLAY (2026-08-17).
+         *
+         * Owner: "lite account posts still look like comments on Lumen." They did.
+         * Every lite post is broadcast as a chain COMMENT on purpose — Hive caps root
+         * posts at one per 5 minutes per account but allows replies every 3 seconds,
+         * so `post-service.ts` nests them under a rolling container (the same trick
+         * as PeakD Snaps / Ecency Waves / InLeo Threads). That is permanent:
+         * `parent_author` cannot be edited on Hive.
+         *
+         * `db-post-to-entry.ts` already compensates — it derives `depth` from the
+         * row and restores the real title — which is why the author's own profile
+         * and the permalink page look right. This function did not: it wrote only
+         * `_lite`, leaving `depth: 1` and Hivemind's synthesised `"RE: <container
+         * title>"` on the entry. Everything that reads those raw fields therefore
+         * treated a person's post as a reply — the ranked feed, `/api/discussion`,
+         * and any comment thread — which is exactly the surfaces the owner sees.
+         *
+         * Corrected here rather than in each consumer because there is one truth and
+         * several readers, and because it repairs every ALREADY-PUBLISHED post the
+         * moment it ships: the values come from the row, not from the chain, so no
+         * backfill and no chain edit is possible or needed.
+         *
+         * Only the fields the chain got wrong ABOUT THE SHAPE are touched. Everything
+         * else the entry carries is left exactly as Hivemind presented it.
+         *
+         * ★ `parent_author`/`parent_permlink` ARE DELIBERATELY LEFT ALONE. Clearing
+         * them would describe the shape more truthfully and break real things: the
+         * comment tree nests children on the parent permlink, replies address a
+         * parent, and `bridge.get_discussion`'s map is keyed on it. `depth` is what
+         * the render paths actually branch on, and the title is what the reshare
+         * heuristic in `medium-post-card.tsx` misreads — those two are the whole
+         * defect. Narrow beats thorough on a shared read path.
+         */
+        if (!row.parentRef) entry.depth = 0;
+        if (row.title) entry.title = row.title;
       }
     }
     return entries;

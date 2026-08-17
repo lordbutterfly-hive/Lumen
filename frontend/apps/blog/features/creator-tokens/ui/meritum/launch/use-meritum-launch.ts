@@ -391,6 +391,31 @@ export function useMeritumLaunch(): MeritumLaunchApi {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [restored, step]);
 
+  /**
+   * ★ SCROLL TO THE TOP ON EVERY STEP CHANGE (2026-08-17, verified UX defect
+   * #3). Nothing in this tree called `scrollTo` at all — the URL-sync effect
+   * above passes `{ scroll: false }` deliberately (see its own comment), which
+   * only stops Next.js's router-driven scroll; it does not replace it with
+   * one of ours. Step 3's terms list routinely runs past the fold on a normal
+   * viewport, so paging forward or back left the reader wherever they had
+   * scrolled to on the PREVIOUS step, now looking at a different step's copy
+   * mid-way down it.
+   *
+   * `firstRun` skips the pass that fires the moment `restored` flips true —
+   * that is page load (or a draft restore straight onto step 2 or 3), not a
+   * step the reader chose to move to, and a scroll-jump on first paint would
+   * be the same "the page moved under me" surprise this fixes.
+   */
+  const firstScrollEffect = useRef(true);
+  useEffect(() => {
+    if (!restored) return;
+    if (firstScrollEffect.current) {
+      firstScrollEffect.current = false;
+      return;
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [restored, step]);
+
   const advance = useCallback((next: MeritumLaunchStep) => {
     setStep(next);
     setFurthestStep((high) => (next > high ? next : high));

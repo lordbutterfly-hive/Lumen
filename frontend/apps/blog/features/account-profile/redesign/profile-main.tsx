@@ -265,6 +265,11 @@ export default function ProfileMain() {
               // requests for the badge.
               reputation={profileData.reputation}
               moderated={moderation.isModerated}
+              // ★ DEFECT FIX (2026-08-17): feeds the empty-bio "add a bio" prompt
+              // in `profile-identity.tsx` — `isOwnProfile` was already computed
+              // here for the stats-line following count below, just not passed
+              // down to this component.
+              isOwnProfile={isOwnProfile}
               // ★ The stats line these feed used to be a separate 112px card
               // (`ProfileStatsBar`, deleted 2026-08-13). `follow_stats` is passed
               // WITHOUT a `?? 0` fallback on purpose: absent means absent, and the

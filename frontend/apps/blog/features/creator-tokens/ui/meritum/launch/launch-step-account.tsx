@@ -35,12 +35,6 @@ const LaunchStepAccount: FC<LaunchStepAccountProps> = ({ handle, account, isLite
   const { t } = useTranslation('common_blog');
   const known = handle !== '';
 
-  const facts = [
-    { id: 'one', value: '1', label: t('meritum_launch.fact_one_market') },
-    { id: 'zero', value: '0', label: t('meritum_launch.fact_no_rename') },
-    { id: 'name', value: known ? handle.slice(1) : '?', label: t('meritum_launch.fact_only_name') }
-  ];
-
   return (
     <div className="mt-step">
       <div className="mt-[26px] flex items-center gap-[15px] rounded-2xl border border-meritum-line-card bg-meritum-rail px-5 py-4">
@@ -60,15 +54,32 @@ const LaunchStepAccount: FC<LaunchStepAccountProps> = ({ handle, account, isLite
         </span>
       </div>
 
-      {/* Stat tiles, not a description list: the figure reads first and the
-          label explains it, which is the reverse of dt/dd's own semantics. */}
-      <div className="mt-[26px] grid grid-cols-3 gap-[34px] border-t border-meritum-line-card pt-[22px]">
-        {facts.map((fact) => (
-          <div key={fact.id}>
-            <div className="truncate font-serif text-24 font-semibold text-meritum-ink">{fact.value}</div>
-            <div className="mt-1 font-serif text-12 text-meritum-ink-muted">{fact.label}</div>
-          </div>
-        ))}
+      {/*
+        ★ THE 3-TILE STAT BLOCK IS GONE (2026-08-17, verified UX defect #4).
+        All three figures duplicated something already on this same screen:
+        "1 · token market per account" restated `bound_sub` above ("Signed in ·
+        one market per account"); "0 · ways to rename or move it" restated what
+        `term_final_value` already says on step 3 ("cannot be closed, renamed,
+        or moved to another account"); and the account-name tile just repeated
+        the handle already shown, full-width, in the card above it — except
+        `truncate` with no `title` clipped it (`testera…`) where the card above
+        does not. A tile that only repeats a neighbour, worse, is not
+        information, it is noise that also breaks.
+
+        ★ AND THIS IS WHERE THE $10/MONTH GOES INSTEAD (defect #1). The old
+        wizard only disclosed the recurring cost on step 3, inside the terms
+        list, after a reader had already written three offers. Steps 1-2 read
+        as free. Reusing the exact two strings step 3's terms list already
+        renders (`term_launch_value`, `term_listed_label` + `term_listed_value`)
+        — no new copy, same facts, just told on the screen where the reader
+        first decides to do this at all, as plain text, not a tooltip.
+      */}
+      <div className="mt-[26px] border-t border-meritum-line-card pt-[22px] font-serif text-13 text-meritum-ink-muted">
+        <p>{t('meritum_launch.term_launch_value')}</p>
+        <p className="mt-1.5">
+          <span className="font-semibold text-meritum-ink-3">{t('meritum_launch.term_listed_label')}:</span>{' '}
+          {t('meritum_launch.term_listed_value')}
+        </p>
       </div>
 
       {/* ★ 2026-08-16, owner. This used to say "This account cannot sign

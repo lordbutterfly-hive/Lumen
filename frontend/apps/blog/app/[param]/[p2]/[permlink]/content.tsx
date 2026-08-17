@@ -1364,7 +1364,39 @@ const PostContent = () => {
                               <MoreHorizontal className="h-4 w-4" aria-hidden />
                             </button>
                           </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="w-56">
+                          {/*
+                            ★★★ THE DOWNVOTE SLIDER OPENED AND VANISHED ~20ms LATER
+                            (owner-reported 2026-08-17: "shows then disappears, can't
+                            click it or the slider").
+
+                            Two Radix focus effects racing, both behaving as designed:
+                            selecting "Downvote" proxies a click to the real (hidden)
+                            downvote button, which is a PopoverTrigger — the Popover
+                            opens and its FocusScope pulls focus into the slider. This
+                            menu is closing at the same moment, and Radix's DEFAULT
+                            `onCloseAutoFocus` restores focus to the "…" trigger. The
+                            Popover's DismissableLayer sees focus land outside itself
+                            and dismisses. Instrumented trace, reproduced on a build
+                            predating any of today's changes:
+
+                              t+0.0ms   focus enters the slider   (Popover opened)
+                              t+7.4ms   trigger aria-expanded=true
+                              t+26.2ms  focus restored to "…"     (menu's close-autofocus)
+                              t+29.0ms  aria-expanded=false       (Popover dismissed)
+
+                            Silent — no error, no React warning — which is why it reads
+                            as "just broken". Preventing the menu's focus restoration is
+                            the same thing Radix's own MenuSubContent does internally for
+                            exactly this reason: a closing menu must not steal focus from
+                            whatever the selection just opened. Applies to every item in
+                            this menu, so it covers Flag post too, which proxies the same
+                            way.
+                          */}
+                          <DropdownMenuContent
+                            align="end"
+                            className="w-56"
+                            onCloseAutoFocus={(event) => event.preventDefault()}
+                          >
                             {/* Downvote — economic action, first. */}
                             <DropdownMenuItem
                               data-testid="post-header-downvote-menu-item"
@@ -2014,9 +2046,10 @@ const PostContent = () => {
                 <div className="xl:hidden">
                   {!!suggestionData ? (
                     <div className="mt-6 border-t border-border pt-4">
-                      <h2 className="mb-3 px-4 font-sans text-lg font-bold">
-                        You Might Also Like
-                      </h2>
+                      {/* ★ Was hardcoded English, outside i18n entirely (2026-08-17) —
+                          a direct breach of this repo's own rule against inline
+                          user-facing strings, and invisible to every locale. */}
+                      <h2 className="mb-3 px-4 font-sans text-lg font-bold">{t('post_content.you_might_also_like')}</h2>
                       <SuggestionsList suggestions={suggestionData} variant="horizontal" />
                     </div>
                   ) : null}

@@ -1,7 +1,7 @@
 'use client';
 
 import { FC } from 'react';
-import { Link } from '@hive/ui';
+import { Link, Skeleton } from '@hive/ui';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { useTokenPriceChip } from '../live/use-token-price-chip';
 import { usdPrice } from '../market/format';
@@ -49,7 +49,26 @@ const HeaderTokenPill: FC = () => {
   const chip = useTokenPriceChip(identity.isLoggedIn ? identity.username : '');
 
   if (!identity.isLoggedIn) return null;
-  if (chip.status === 'loading' || chip.status === 'unknown') return null;
+  if (chip.status === 'unknown') return null;
+
+  if (chip.status === 'loading') {
+    // 2026-08-17: reserve the pill's footprint instead of returning null.
+    // app-header.tsx's action cluster sits in the grid's `auto`-sized third
+    // column, right next to the search bar's `minmax(0,1fr)` column — so
+    // collapsing to zero width here and then popping in the real pill/CTA a
+    // moment later (both states resolve fast; see use-token-price-chip.ts)
+    // forced that `auto` column to grow on the spot and the search bar to
+    // shrink by ~260px out from under the reader on every load. 260px/h-10
+    // approximate the wider of the two real states — the "Launch your
+    // Meritum token" CTA (also the more common one: most accounts have not
+    // registered a market) — so a reader who turns out to have a market
+    // sees the slot shrink to the narrower price pill rather than grow.
+    // Loading -> resolved can still shift by a few px either way; what this
+    // removes is the old nothing -> ~260px pop. `Skeleton` (packages/ui) is
+    // this codebase's own "reserve the space, don't collapse to zero" loading
+    // primitive (see its doc), so this reuses it rather than a bespoke pulse.
+    return <Skeleton className="h-10 w-[260px] rounded-full" aria-hidden="true" data-testid="header-token-pill-skeleton" />;
+  }
 
   if (chip.status === 'ready' && chip.priceUsd !== null) {
     return (

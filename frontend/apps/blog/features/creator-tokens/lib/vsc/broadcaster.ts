@@ -253,7 +253,16 @@ export const hiveTransactionBroadcaster: Broadcaster = async (op: CustomJsonOp) 
     const txBuilder = await chain.createTransaction();
     txBuilder.pushOperation({ custom_json_operation: op });
     txBuilder.validate();
-    const signature = await transactionService.signTransaction(txBuilder, undefined, REQUIRED_KEY_TYPE);
+    // ★ `chain` PASSED (2026-08-17) — without it this whole override was defeated
+    // one step before the wallet. The four wallet-backed signers cannot sign a
+    // bare digest, so they rebuild the transaction to hand their provider an
+    // object, and they rebuilt it on the app's GLOBAL chain (Hive mainnet). That
+    // re-stamped it with mainnet's chain id, so the signature could never be
+    // valid on the Hive L1 that Magi testnet actually reads — verified live:
+    // Magi testnet's last_processed_block tracks the Hive TESTNET head, not
+    // mainnet's. Measured digests: this builder 77cc5e5c…, what the wallet was
+    // handed 2f582dff…, same proto rebuilt here 77cc5e5c… (the control).
+    const signature = await transactionService.signTransaction(txBuilder, undefined, REQUIRED_KEY_TYPE, chain);
     txBuilder.addSignature(signature);
     await chain.api.network_broadcast_api.broadcast_transaction({
       max_block_age: -1,

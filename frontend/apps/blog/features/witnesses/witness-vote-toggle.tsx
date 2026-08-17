@@ -44,12 +44,27 @@ export default function WitnessVoteToggle({
   const isPending = voteMutation.isLoading && voteMutation.variables?.witness === witness;
 
   if (!isLoggedIn) {
+    // ★ GREYED-OUT CONTROL, NO HOVER EXPLANATION (2026-08-17). Every other
+    // disabled/indeterminate branch below (lite, votesUnavailable, hasProxy)
+    // wraps its button in `TooltipContainer`. This one can't: `DialogLogin`
+    // (apps/blog/components/dialog-login.tsx, outside this fix's owned
+    // files) only destructures `children`/`redirectTo` and does not spread
+    // extra props onto its `DialogTrigger asChild` output, so a Tooltip's
+    // hover/focus handlers placed around it would never reach the real
+    // button — the popup would silently never open. Same structural
+    // conflict already diagnosed and documented at
+    // features/votes/votes-component.tsx:738-751 for the identical
+    // DialogLogin-wrapped case. A native `title` sidesteps it entirely
+    // (it's a plain attribute on the real DOM button, not a wrapper
+    // component), reusing the same reason string already computed for
+    // `aria-label` rather than inventing new copy.
     return (
       <DialogLogin>
         <button
           type="button"
           data-testid={`witness-vote-${witness}`}
           aria-label={t('witnesses.vote.login_required_aria')}
+          title={t('witnesses.vote.login_required_aria')}
           className={`${BASE_CLASS} ${UNVOTED_CLASS}`}
         >
           <Icons.check className="h-4 w-4" />

@@ -109,7 +109,20 @@ export default function WitnessTableRow({
           >
             {formatBlockAge(row.blockAgeSeconds, t)}
           </Link>
-          <span className={CELL_NUM_CLASS}>{formatInteger(row.total_missed)}</span>
+          {/* ★ THE MISS COLUMN HAD NO EXPLANATION (2026-08-17). A bare integer
+              with a two-letter header — a reader has no way to know "missed
+              WHAT". Same `TooltipContainer` convention as the APR column two
+              lines below (local convention for this table, per hasProxy'/
+              votes-unavailable elsewhere in the feature).
+              The English below stays as the `t()` fallback. */}
+          <TooltipContainer
+            title={t(
+              'witnesses.columns.miss_tooltip',
+              'Blocks this witness was scheduled to produce but missed. A few misses can be ordinary network jitter; a high or rising count usually means the witness node is unstable or offline.'
+            )}
+          >
+            <span className={CELL_NUM_CLASS}>{formatInteger(row.total_missed)}</span>
+          </TooltipContainer>
           {/* ★ W-7: under the stale filter this column showed $0.149, $0.197, $0.183
               and $0.370 against a live feed near $0.041, in the same weight and colour
               as current data. A 985-day-old feed that looks identical to today's is

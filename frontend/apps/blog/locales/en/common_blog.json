@@ -6,6 +6,7 @@
     "eyebrow_step2": "What you offer",
     "headline_step2": "Name three things you will actually do.",
     "subline_step2": "Write it in your own words. Each one is a promise. Price it so keeping it stays worth your while.",
+    "step_indicator": "Step {{step}} of 3",
     "eyebrow_step3": "Everything below is honest",
     "headline_step3": "Read it once, then strike it.",
     "subline_step3": "Nothing here is hidden in a tooltip. Hold the coin down and the market opens.",
@@ -125,6 +126,7 @@
     "loading_search_results": "Loading search results",
     "loading_creators": "Loading creators",
     "loading_market": "Loading market",
+    "loading_settings": "Loading settings",
     "loading_proposals": "Loading proposals",
     "home_feed": "Home feed",
     "close": "Close",
@@ -481,6 +483,8 @@
   },
   "user_profile": {
     "reputation": "Reputation",
+    "edit_profile_button": "Edit profile",
+    "add_bio_prompt": "Add a bio",
     "mute_button": "Mute",
     "block_button": "Block",
     "unblock_button": "Unblock",
@@ -746,6 +750,7 @@
     "mark_tooltip": "Lite account: posts through Lumen, holds no Hive keys."
   },
   "post_content": {
+    "you_might_also_like": "You might also like",
     "close_post_editor": "Are you sure you want to close the post editor?",
     "in": "in",
     "reputation_title": "Reputation",
@@ -1016,8 +1021,9 @@
     "update": "Update",
     "upload_image": "Upload an image",
     "uploading_image": "Uploading image",
-    "profile_image_url": "Profile picture url",
-    "cover_image_url": "Cover image url (Optimal: 2048 x 512 px)",
+    "field_changed_label": "Changed",
+    "profile_image_url": "Profile Picture URL",
+    "cover_image_url": "Cover Image URL (Recommended: 2048 x 512 px)",
     "profile_name": "Display Name",
     "profile_about": "About",
     "profile_location": "Location",
@@ -1406,7 +1412,8 @@
       "hbd_price_label": "The rate Hive itself uses for HBD, and what a conversion here pays out at.",
       "hbd_source": "Outside exchanges trade HBD at {{price}} USD (CoinGecko). Those markets are thin, so they drift from the Hive rate above.",
       "view_more": "View more market stats →",
-      "unavailable": "Price unavailable"
+      "unavailable": "Price unavailable",
+      "loading": "Fetching price\u2026"
     },
     "advanced": {
       "title": "Advanced",
@@ -1580,6 +1587,7 @@
       "witness": "Witness",
       "votes": "Votes",
       "last_block": "Last block",
+      "miss_tooltip": "Blocks this witness was scheduled to produce but missed. A few misses can be ordinary network jitter; a high or rising count usually means the witness node is unstable or offline.",
       "miss": "Miss",
       "price": "Price",
       "apr": "HBD APR",
@@ -1705,6 +1713,7 @@
       "remove_vote_aria": "Supported. Activate to remove your vote from this proposal.",
       "support_pending": "Submitting…",
       "votes_unavailable": "Vote status unavailable",
+      "votes_pending": "Checking your vote\u2026",
       "daily_pay": "Daily pay",
       "remaining": "Remaining {{count}} days",
       "paid": "Paid",

@@ -9,6 +9,28 @@ import { Button } from '@ui/components/button';
 import { Switch } from '@ui/components/switch';
 import { Label } from '@ui/components/label';
 import { Entry, IFollowList } from '@hive/common-hiveio-packages/wax';
+// ★ 2026-08-17 — the empty-state composer below (see `replyCount === 0`) reuses
+// the SAME composer/gate pieces `content.tsx` already wires up for the post's
+// own "Reply" action row, rather than inventing a second one:
+//  - `ReplyTextbox` is the one reply/edit composer in the app.
+//  - `DialogLogin` is the house pattern for gating a signed-out trigger (used
+//    ~24 places, including this exact "Reply" button one scroll up the page).
+//  - `useSessionIdentity` answers "is this reader logged in" correctly from
+//    the first paint (SSR cookie), unlike raw `useUserClient()` — see that
+//    file's own doc comment, and `left-rail.tsx`'s identical import.
+//  - `useLiteOverlay` resolves the REAL on-chain author for a Lumen-native
+//    post. `postData.author` alone is the wrong value there: it has already
+//    been rewritten to the lite display identity, and a reply addressed to
+//    it names a chain parent that does not exist (see `content.tsx`'s own
+//    `litePost?.chainAuthor || postData.author`, used at every one of its
+//    reply/vote/mute call sites for exactly this reason).
+import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
+import { useSessionIdentity } from '@/blog/features/layouts/server-session';
+import { useLiteOverlay } from '@/blog/lib/lite/client/use-lite-overlay';
+import { useStorageWithTTL } from '@ui/hooks/useStorageWithTTL';
+import { StorageTTL } from '@ui/lib/storage-with-ttl';
+import DialogLogin from '@/blog/components/dialog-login';
+import { ReplyTextbox } from '@/blog/features/post-editor/reply-textbox';
 
 interface CommentsSectionProps {
   postData: Entry;
@@ -49,6 +71,46 @@ const CommentsSection = memo(function CommentsSection({
   const sectionRef = useRef<HTMLDivElement>(null);
   const prevCommentsPageRef = useRef(commentsPage);
   const [filteringEnabled, setFilteringEnabled] = useState(true);
+
+  /**
+   * ★ 2026-08-17 — "Be the first to reply." had no composer anywhere near it:
+   * the empty state invited a reply and the only way to act on it was to
+   * scroll back up to the post's own Reply button. This wires the SAME
+   * composer in, right where the invitation is.
+   *
+   * `identity`/`user` double-gate matches `content.tsx`'s own mount gate for
+   * this exact composer (`{reply && postData && user.isLoggedIn ? ... }`,
+   * `content.tsx:2007`): `identity.isLoggedIn` answers instantly from the SSR
+   * session cookie and is what the trigger button itself is gated on, but
+   * `ReplyTextbox` calls `useUserClient()` internally for the draft storage
+   * key, the lite-vs-chain posting branch and the RC gauge — all of which
+   * need the real, HYDRATED client user, not the optimistic SSR guess. Only
+   * `user.isLoggedIn` proves that has landed.
+   */
+  const identity = useSessionIdentity();
+  const { user } = useUserClient();
+  const litePost = useLiteOverlay(postData);
+  // Own storage key, deliberately NOT `replybox-/${author}/${permlink}-...` —
+  // that is `content.tsx`'s key for the post-header Reply box. Sharing it
+  // would let this instance and that one silently fight over one persisted
+  // flag; two independent boxes (this one only ever mounts while there are
+  // zero replies) is the simpler, safer failure mode than a shared one this
+  // file cannot coordinate with `content.tsx` about.
+  const replyBoxStorageId = identity.username
+    ? `replybox-comments-empty-/${discussionAuthor}/${discussionPermlink}-${identity.username}`
+    : '';
+  const [replyBoxOpen, storeReplyBoxOpen, removeReplyBoxOpen] = useStorageWithTTL<boolean>(
+    replyBoxStorageId,
+    false,
+    StorageTTL.UI_STATE
+  );
+  const setReplyBoxOpen = useCallback(
+    (open: boolean) => {
+      if (open) storeReplyBoxOpen(true);
+      else removeReplyBoxOpen();
+    },
+    [storeReplyBoxOpen, removeReplyBoxOpen]
+  );
 
   // ★ ZERO REPLIES USED TO RENDER "Sort: Trending" AND THEN NOTHING (2026-08-08).
   //
@@ -119,6 +181,49 @@ const CommentsSection = memo(function CommentsSection({
           <p className="font-sans text-[13px] leading-[20px] text-muted-foreground">
             {t('select_sort.sort_comments.no_comments_body')}
           </p>
+          {/* Same trigger, same copy, same signed-out gate as the post's own
+              Reply button (`content.tsx`, "Actions Row") — collapses once the
+              box is open rather than sitting there as a second, redundant
+              toggle, since `ReplyTextbox` already has its own cancel control. */}
+          {!replyBoxOpen ? (
+            identity.isLoggedIn ? (
+              <button
+                type="button"
+                onClick={() => setReplyBoxOpen(true)}
+                className="mt-2 flex items-center font-medium text-destructive transition-colors hover:text-destructive/80"
+                data-testid="comments-empty-reply"
+              >
+                {t('post_content.footer.reply')}
+              </button>
+            ) : (
+              <DialogLogin>
+                <button
+                  type="button"
+                  className="mt-2 flex items-center font-medium text-destructive transition-colors hover:text-destructive/80"
+                  data-testid="comments-empty-reply"
+                >
+                  {t('post_content.footer.reply')}
+                </button>
+              </DialogLogin>
+            )
+          ) : null}
+          {replyBoxOpen && user.isLoggedIn ? (
+            <div className="mt-4 w-full text-left">
+              <ReplyTextbox
+                editMode={false}
+                onSetReply={setReplyBoxOpen}
+                // The real on-chain author, never the (possibly lite-rewritten)
+                // display name — see the import comment above.
+                username={litePost?.chainAuthor || postData.author}
+                permlink={postData.permlink}
+                storageId={replyBoxStorageId}
+                comment={postData}
+                discussionAuthor={discussionAuthor}
+                discussionPermlink={discussionPermlink}
+                observer={observer}
+              />
+            </div>
+          ) : null}
         </div>
       ) : (
         <>

@@ -3,6 +3,7 @@ import { TTransactionPackType } from '@hiveio/wax';
 
 import { getLogger } from '@hive/ui/lib/logging';
 import { getChain } from '@transaction/lib/chain';
+import { assertDigestMatches } from '@smart-signer/lib/signer/assert-digest';
 import { verifyAuthorityOrThrow } from '@smart-signer/lib/signer/verify-authority';
 import MetaMaskProvider from '@hiveio/wax-signers-metamask';
 import env from '@beam-australia/react-env';
@@ -54,9 +55,13 @@ export class SignerMetaMask extends Signer {
     }
   }
 
-  async signTransaction({ transaction, requiredKeyType }: SignTransaction): Promise<string> {
+  async signTransaction({ digest, transaction, requiredKeyType, chain }: SignTransaction): Promise<string> {
     try {
-      const authTx = (await getChain()).createTransactionFromProto(transaction);
+      // `chain` is the chain the CALLER built on; omitted by every caller but
+      // creator-tokens, which is on a different Hive L1. Falling back to the
+      // global chain keeps every existing path byte-identical.
+      const authTx = (chain ?? (await getChain())).createTransactionFromProto(transaction);
+      assertDigestMatches(digest, authTx.sigDigest, 'MetaMask');
 
       const provider = await MetaMaskProvider.for(
         0, // Explicitly always use first MetaMask account

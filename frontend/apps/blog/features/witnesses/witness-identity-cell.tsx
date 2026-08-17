@@ -56,7 +56,14 @@ export default function WitnessIdentityCell({ row, className }: WitnessIdentityC
           <Link
             href={`/@${row.owner}`}
             data-testid="witness-name-link"
-            className={`font-sans text-[15px] leading-[24px] font-bold ${row.isDisabled ? 'text-ink-14 line-through' : 'text-ink-2'}`}
+            // ★ HYPHENATED NAMES WRAPPED MID-WORD (2026-08-17). The browser's
+            // default line-break rules treat `-` as a valid break point, so a
+            // name like `some-witness` could split across two lines inside
+            // this narrow identity cell. `whitespace-nowrap` keeps it intact;
+            // the cell itself already scrolls (STICKY_IDENTITY_CLASS/table
+            // scroller), so a long name overflows into the scroll area
+            // instead of breaking.
+            className={`whitespace-nowrap font-sans text-[15px] leading-[24px] font-bold ${row.isDisabled ? 'text-ink-14 line-through' : 'text-ink-2'}`}
           >
             {row.owner}
           </Link>
@@ -80,8 +87,16 @@ export default function WitnessIdentityCell({ row, className }: WitnessIdentityC
             being truncated too ("No witness statement p..."), which is the one string
             that can never be too long. One fixed width for both tabs, and the fallback
             is never clipped. */}
+        {/* ★ MID-WORD TRUNCATION + RAW MARKDOWN (2026-08-17). Single-line `truncate`
+            chopped statements mid-word with no way to read the rest, and
+            `row.description` used to carry raw Markdown syntax straight into the
+            cell (fixed at the source in build-witness-rows.ts — see stripMarkdown).
+            `line-clamp-2` wraps at word boundaries over two lines instead of
+            slicing one; `title` gives a sighted mouse user the untruncated text on
+            hover, same mechanism as the stale-feed marker below in the table row. */}
         <div
-          className={`max-w-[340px] font-sans text-[13px] leading-[20px] text-ink-14 ${row.description ? 'truncate' : ''}`}
+          className={`max-w-[340px] font-sans text-[13px] leading-[20px] text-ink-14 ${row.description ? 'line-clamp-2' : ''}`}
+          title={row.description || t('witnesses.no_description')}
         >
           {row.description || t('witnesses.no_description')}
         </div>

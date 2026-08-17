@@ -14,7 +14,12 @@ export default function PriceCardHive() {
     return (
       <div className={CARD_CLASS} data-testid="wallet-price-hive">
         <span className="font-sans text-[26px] leading-[40px] font-bold tabular-nums text-ink-2">—</span>
-        <div className="mt-1.5 text-[13px] leading-[20px] text-ink-10">{t('wallet.market.unavailable')}</div>
+        {/* ★ Loading is not a failure (2026-08-17). Both states show the same dash
+            because we genuinely have no price either way — but only a real error
+            is allowed to SAY the price is unavailable. */}
+        <div className="mt-1.5 text-[13px] leading-[20px] text-ink-10">
+          {isLoading ? t('wallet.market.loading') : t('wallet.market.unavailable')}
+        </div>
       </div>
     );
   }
