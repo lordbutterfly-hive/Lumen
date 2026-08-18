@@ -209,7 +209,7 @@ export function MagiFundingHelp({
               href={transferUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="mt-2.5 inline-block rounded-[9px] bg-surface-warn-14 px-3.5 py-2 font-semibold text-ink-27 hover:bg-surface-warn-15"
+              className="lm-press mt-2.5 inline-block rounded-[9px] bg-surface-warn-14 px-3.5 py-2 font-semibold text-ink-27 hover:bg-surface-warn-15"
               data-testid="magi-deposit-hive"
             >
               Send HBD to Magi
@@ -229,7 +229,7 @@ export function MagiFundingHelp({
               href={ALTERA_URL}
               target="_blank"
               rel="noopener noreferrer"
-              className="mt-2.5 inline-block rounded-[9px] bg-surface-warn-14 px-3.5 py-2 font-semibold text-ink-27 hover:bg-surface-warn-15"
+              className="lm-press mt-2.5 inline-block rounded-[9px] bg-surface-warn-14 px-3.5 py-2 font-semibold text-ink-27 hover:bg-surface-warn-15"
               data-testid="magi-deposit-altera"
             >
               Open the Altera market

@@ -137,7 +137,14 @@ const PostListItem = memo(
   const displayCategory = post.original_entry?.category ?? post.category;
 
   return (
-    <li data-testid="post-list-item" className={post.stats?.gray ? 'opacity-50 hover:opacity-100' : ''}>
+    /* ★ Motion reaches the classic card too (2026-08-18). `.lm-card`/`.lm-enter`
+       shipped on the homepage's MediumPostCard only, so trending/hot/created —
+       which still render THIS component — had no entrance and no hover lift,
+       and the product felt inconsistent depending on which tab you were on. */
+    <li
+      data-testid="post-list-item"
+      className={cn('lm-card lm-enter', post.stats?.gray ? 'opacity-50 hover:opacity-100' : '')}
+    >
       {nsfw === 'hide' ? null : (
         <Card
           // ★ SAME CARD AS THE FEED (owner direction, 2026-08-08). Profile,

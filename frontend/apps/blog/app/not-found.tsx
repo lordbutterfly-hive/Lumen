@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { Link } from '@hive/ui';
 import LeftRail from '@/blog/features/layouts/left-rail';
+import { EmptyStateIllustration } from '@/blog/components/empty-state-illustration';
 
 export const metadata: Metadata = {
   title: 'Page not found'
@@ -50,6 +51,11 @@ export default function NotFound() {
       </aside>
 
       <main className="min-w-0 pt-6">
+        {/* ★ The drawn 404 (2026-08-18). The page was well built but wordless —
+            a code, a headline and two links. The illustration carries the press
+            vocabulary the rest of the identity uses, and is aria-hidden because
+            the headline beside it already says the same thing. */}
+        <EmptyStateIllustration name="not-found" size={148} className="mb-6" />
         <p className="font-sans text-[12px] font-bold uppercase tracking-[0.14em] text-ink-brand-6">
           {COPY.code}
         </p>

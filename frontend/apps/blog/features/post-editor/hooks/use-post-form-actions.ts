@@ -294,7 +294,7 @@ export function usePostFormActions({
           // chain publish did before this fix.
           //
           // `['lite-retention']` is the key `ProfileLeagueCard` (via `useProfileRetention`,
-          // `isOwnLiteProfile` branch) and `TodayCard` (via `useViewerRetention`, `isLite`
+          // `isOwnLiteProfile` branch) and `StreakCard` (via `useViewerRetention`, `isLite`
           // branch) both read for a signed-in LITE account — see use-viewer-retention.ts.
           // `['profileData', user.username]` is the same key the chain path invalidates:
           // `ProfileMain` reads `post_count` from it regardless of tier, and for a lite

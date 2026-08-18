@@ -102,10 +102,36 @@ const NotificationsMenu = forwardRef<HTMLButtonElement, {
   // reader who opens the bell. See
   // `apps/blog/app/api/notifications/account/route.ts`.
   const enabled = open && !!username && chainAccount;
-  const { data: notifications, isLoading } = useQuery({
+  /**
+   * ★★★ A FAILED LIST RENDERED AS AN EMPTY ONE (2026-08-18, owner: "shows 3 on
+   * the bell and there's nothing inside").
+   *
+   * This destructured only `data` and `isLoading`. There was no error branch
+   * anywhere in the component, so when `/api/notifications/account` failed the
+   * query settled with `data === undefined` and the render fell through to the
+   * SAME "No notifications yet" panel a reader with genuinely nothing sees.
+   * The badge, meanwhile, is fed by a different endpoint
+   * (`bridge.unread_notifications`) that had succeeded — so the two disagreed
+   * and the panel blamed the reader's empty inbox for a network failure.
+   *
+   * Verified 2026-08-18 that the route itself is healthy for this account
+   * (`unread: 3`, and 50 rows back from `/api/notifications/account`), which is
+   * exactly why the silent-failure path is the defect worth fixing: the data is
+   * there, so an empty panel can only ever mean the fetch did not land.
+   *
+   * `retry: 1` because the default 3 spends ~7s of backoff before the reader is
+   * told anything, behind a panel that claims to be empty the whole time.
+   */
+  const {
+    data: notifications,
+    isLoading,
+    isError,
+    refetch
+  } = useQuery({
     queryKey: ['AccountNotification', username],
     queryFn: () => fetchAccountNotifications(username),
-    enabled
+    enabled,
+    retry: 1
   });
 
   // ★★ LUMEN-NATIVE NOTIFICATIONS (2026-08-09, tester BASELINE-03). Following
@@ -240,6 +266,32 @@ const NotificationsMenu = forwardRef<HTMLButtonElement, {
             // The bell only ever renders for the signed-in reader, so this list
             // is always theirs — which the row itself has no way to know.
             <NotificationList data={notifications} lastRead={lastRead} isOwner />
+          ) : isError || (unreadCount > 0 && !notifications && lumenItems.length === 0) ? (
+            /* ★★★ THE PANEL MAY NEVER CONTRADICT ITS OWN BADGE (2026-08-18).
+               The reported bug was "3 unread" over "No notifications yet", and
+               it was NOT an error — the list query simply never ran, so it held
+               no data and fell through to the same empty state a reader with
+               genuinely nothing sees. An empty state that cannot tell "nothing
+               to show" apart from "never fetched" is unfalsifiable: it looks
+               calm while being wrong. If the badge counted something, this list
+               owes the reader either those rows or an honest failure. */
+            // Say what happened and offer the way out. Never the empty state:
+            // "you have nothing" and "we could not load your things" are
+            // different sentences and only one of them is ever true here.
+            <div
+              className="flex flex-col items-center justify-center gap-2 px-4 py-10 text-center text-sm text-ink-10"
+              data-testid="notifications-popover-error"
+            >
+              <span>{t('navigation.profile_notifications_tab_navbar.notifications_error')}</span>
+              <button
+                type="button"
+                onClick={() => refetch()}
+                className="font-sans text-[13px] leading-[20px] font-semibold text-ink-brand-6 underline-offset-2 hover:underline"
+                data-testid="notifications-popover-retry"
+              >
+                {t('navigation.profile_notifications_tab_navbar.notifications_retry')}
+              </button>
+            </div>
           ) : lumenItems.length > 0 ? null : (
             <div
               className="flex flex-col items-center justify-center px-4 py-10 text-center text-sm text-ink-10"

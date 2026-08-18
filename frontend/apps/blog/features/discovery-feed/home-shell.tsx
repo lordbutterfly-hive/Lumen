@@ -4,7 +4,7 @@ import ShortFormComposer from '@/blog/features/discovery-feed/short-form-compose
 import FeedTabs from '@/blog/features/discovery-feed/feed-tabs';
 import { WeeklyRecapCard } from '@/blog/features/retention/components/weekly-recap-card';
 import { RetentionNudge } from '@/blog/features/retention/components/retention-nudge';
-import { TodayCard } from '@/blog/features/retention/components/today-card';
+import { StreakCard } from '@/blog/features/retention/components/streak-card';
 import HomeIntro from '@/blog/components/home-intro';
 // ★ SERVER-SIDE t(), NOT `i18n/client` (a11y item 8/O5). This file has no
 // `'use client'` and is rendered directly by `app/page.tsx` (itself a Server
@@ -50,24 +50,23 @@ export default async function HomeShell({ showIntro = false }: { showIntro?: boo
             returned to. Anything added here later has to earn the same silence: three
             stacked retention cards above the composer is the wall of text this whole
             rework exists to undo. */}
-        {/* ★★ THE DAILY LOOP MUST EXIST ON A PHONE (2026-08-09, found by a council seat).
-            `TodayCard` was mounted ONLY in the right rail, which is `hidden xl:block` —
-            so the goal ring, the streak and the banked-freeze line did not render below
-            1280px. Not just phones: most laptops. I built a daily habit mechanic and put
-            it in furniture that disappears on the device people actually read on, which
+        {/* ★★ THE STREAK MUST EXIST ON A PHONE (2026-08-09, found by a council seat).
+            Its predecessor was mounted ONLY in the right rail, which is `hidden xl:block`,
+            so it did not render below 1280px. Not just phones: most laptops. A daily habit
+            mechanic put in furniture that disappears on the device people actually read on
             is the most expensive kind of quiet bug — it costs the whole feature for the
             majority of sessions and nothing looks broken.
             `xl:hidden` here, and the rail keeps its own copy from xl up, so exactly one
-            renders at every width. */}
-        {/* `surface="inline"` scopes this copy's testids — both mounts are in the DOM at
+            renders at every width.
+            `surface="inline"` scopes this copy's testids — both mounts are in the DOM at
             once, only one is visible, and sharing ids made every selector match two
-            elements. See TodaySurface in today-card.tsx. */}
+            elements. See StreakSurface in streak-card.tsx. */}
         {/* Signed-out orientation hero. FIRST in the column so it reads as the
             page's masthead, exactly as the topic header does on /topics/*, and it
             is absent entirely for a signed-in reader (decided server-side in
             app/page.tsx, so it is either in the first paint or not in the DOM). */}
         {showIntro ? <HomeIntro /> : null}
-        <TodayCard className="mb-4 xl:hidden" surface="inline" />
+        <StreakCard className="mb-4 xl:hidden" surface="inline" />
         <RetentionNudge className="mb-4" />
         <WeeklyRecapCard className="mb-6" />
         <ShortFormComposer />

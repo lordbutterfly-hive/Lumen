@@ -93,11 +93,9 @@ export interface ViewerRetention {
   /** The applicable query failed — the caller must say so, not render blank. */
   isError: boolean;
   /**
-   * Re-read this viewer's summary.
-   *
-   * Needed since the daily goal moved server-side: changing the goal changes what the
-   * streak was judged against, so the card must re-read the whole computation rather than
-   * patch the ring locally and hope the next answer agrees.
+   * Re-read this viewer's summary. The retry buttons on the surfaces that render an
+   * error state go through this (see `isError`), and it re-asks the session too when
+   * that is what failed.
    */
   refetch: () => Promise<unknown>;
 }
@@ -111,7 +109,7 @@ export function useViewerRetention(): ViewerRetention {
   const { user, isHydrated } = useUserClient();
   /**
    * ★ SAME RACE, ONE LEVEL DEEPER (2026-08-12, G2). Every consumer of this hook
-   * (TodayCard, RanksLadder, ProfileLeagueCard's own chip, the showcase, the
+   * (StreakCard, RanksLadder, ProfileLeagueCard's own chip, the showcase, the
    * nudge, the weekly recap) ultimately renders off `summary`/`isLoading`/
    * `isError`/`source` below, and all four used to gate on raw `user.isLoggedIn`
    * — which cannot answer during SSR and reports signed-out on the client until
@@ -142,7 +140,7 @@ export function useViewerRetention(): ViewerRetention {
   // adversarial review S4). `clientAnswered` is `dataUpdatedAt > 0` and React
   // Query's error reducer never touches `dataUpdatedAt`, so a `/api/users/me`
   // that only ever failed pinned `inFlight` true FOREVER — every rank surface in
-  // the app (TodayCard, RanksLadder, the profile chip, the nudge, the weekly
+  // the app (StreakCard, RanksLadder, the profile chip, the nudge, the weekly
   // recap) sat on `isLoading` with no error and no way out. "We don't know yet"
   // and "we asked and it failed" are different sentences and the consumers
   // already render them differently; this hook was only ever able to say the

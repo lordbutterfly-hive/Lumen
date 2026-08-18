@@ -2168,10 +2168,29 @@ function isUnknownTagError(error: unknown, tag: string): boolean {
   }
 }
 
+/**
+ * ★★★ ONE HIVE PAGE, NOT THREE (2026-08-18, owner: "any topic I pick is 12s").
+ *
+ * `getRankedPaged` cannot parallelise: each page's cursor comes from the last
+ * post of the previous one, so asking for `MAX_LIMIT` (50) against Hive's
+ * 20-per-call cap forced THREE sequential round trips to a public node. Measured
+ * on this box: ~3.2s per call, and cold topics landed at 5.5s / 7.8s / 9.4s /
+ * 12.7s / 14.7s across five real tags.
+ *
+ * Fetching exactly one page is the whole fix for the first paint. It is safe
+ * because this function only ever builds PAGE ONE — continuation pages come
+ * straight off the chain from the cursor (see the cursor-page branch above), not
+ * from this cache — and because the topic list decides "is there more" from
+ * `nextCursor`, never from comparing the page length to the limit it asked for
+ * (topic-shell.tsx `getNextPageParam`). A reader gets 20 posts, which is already
+ * more than one screen, and scrolling fetches the rest.
+ */
+const FALLBACK_FETCH_LIMIT = 20;
+
 function loadFallbackPage(sort: string, tag: string, observer: string): Promise<Entry[]> {
   const cacheKey = `${sort}|${tag}|${observer}`;
   return fetchFallbackOnce(cacheKey, async () => {
-    const posts = await timed('fb_upstream', () => getRankedPaged(sort, tag, observer, MAX_LIMIT));
+    const posts = await timed('fb_upstream', () => getRankedPaged(sort, tag, observer, FALLBACK_FETCH_LIMIT));
     const merged = await timed('fb_merge', () => mergeLumenEngagement(posts));
     if (merged.length > 0) rememberFallback(cacheKey, merged);
     return merged;

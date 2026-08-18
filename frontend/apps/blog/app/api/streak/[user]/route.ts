@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAccount, getActiveVotes } from '@transaction/lib/hive-api';
 import { getAccountPosts } from '@transaction/lib/bridge-api';
 import { computeStreak } from '@/blog/features/retention/lib/compute-streak';
-import { busiestWeekday, longestGap, longestRun } from '@/blog/features/retention/lib/act-stats';
+import { busiestWeekday, countWords, longestGap, longestRun } from '@/blog/features/retention/lib/act-stats';
 import { filterEngagers } from '@/blog/lib/moderation/engagement-exclusions';
 import {
   ESTABLISHED_VOTER_MIN_RSHARES,
@@ -10,7 +10,7 @@ import {
   creditedGivers,
   type VoteLike
 } from '@/blog/features/retention/lib/credited-givers';
-import { daySetCompleteFrom, isStreakLowerBound } from '@/blog/features/retention/lib/walk-coverage';
+import { daySetCompleteFrom } from '@/blog/features/retention/lib/walk-coverage';
 import { computeLeague } from '@/blog/features/retention/lib/compute-league';
 import { deriveGate, deriveLeagueInputs, utcDay } from '@/blog/features/retention/lib/derive-league-inputs';
 import { getLogger } from '@ui/lib/logging';
@@ -28,13 +28,11 @@ import {
   findHiveWalkCursor,
   listHiveActDays,
   newPeopleIsTrustworthy,
-  readDailyGoalFor,
-  readFreezeState,
-  recordFreezeSpent,
   recordRankMark,
+  sumAuthoredWords,
+  type AuthoredWords,
   recordHiveGivers,
   recordHiveWalk,
-  type FreezeState,
   type HiveWalkCursor
 } from '@/blog/lib/lite/repositories/hive-retention-repository';
 
@@ -93,13 +91,13 @@ const VOTE_SAMPLE_POSTS = 8;
  * `features/retention/lib/__tests__/ladder.test.ts` now asserts it directly.
  */
 
-// ★ THE CACHE MOVED OUT (2026-08-09): lib/lite/retention/streak-cache.ts.
+// ★ THE CACHE LIVES OUT OF LINE: lib/lite/retention/streak-cache.ts.
 //
-// It had to, so the goal write can invalidate it. A Next App Router route module may only
-// export HTTP handlers, so a cache private to this file was unreachable from
-// /api/retention/goal even in principle — and once the goal started GATING the streak, a
-// goal change had to be able to drop the cached answer. The TTLs, the LRU bound and the
-// negative-cache rule all moved with it unchanged; that module documents the measured bug.
+// It moved there on 2026-08-09 so the daily-goal write could invalidate it. The goal is
+// deleted (2026-08-18) and nothing invalidates the cache any more, but the module stays
+// where it is: the TTLs, the LRU bound, the negative-cache rule and the
+// stale-while-revalidate single-flight all live in it, and a Next App Router route module
+// may export nothing but HTTP handlers, so none of that would be testable back in here.
 
 // PERF: this route previously had NO overall deadline — a single slow public
 // Hive node turned a ~50-call fan-out into a 639,506ms (10.6 minute) response
@@ -147,6 +145,13 @@ interface PostLike {
   author?: string;
   created?: string;
   permlink?: string;
+  /**
+   * The full markdown, which `bridge.get_account_posts` returns whether we ask for it
+   * or not — so the word count (migration 0038) is free at the point of the walk and
+   * costs no extra upstream call. Optional because nothing else in this file needs it
+   * and a missing body must count as zero words, never break the walk.
+   */
+  body?: string;
 }
 
 /**
@@ -312,26 +317,13 @@ export async function GET(req: NextRequest, { params }: { params: { user: string
   // The net behaviour change is that an exhausted caller degrades to "only what
   // is already computed" instead of a hard 429, and can never obtain anything a
   // within-budget caller had not already paid for.
-  // ★★ THE GOAL IS READ BEFORE THE CACHE, AND IT HAS TO BE (2026-08-09).
-  //
-  // The goal GATES THE STREAK, so a cached body is only valid for the goal it was computed
-  // against. This is one indexed single-row read (`lumen_retention_goal`, PK lookup) against
-  // a cache hit that saves a ~50-call Hive fan-out, so paying it on every request — hit or
-  // miss — is not a trade worth thinking about. Before this, a goal change was invisible for
-  // up to five minutes: measured live, `POST /api/retention/goal {goal:2}` answered 200
-  // instantly while this route kept serving `goal: 4` through hard reloads at 19s, 47s,
-  // 122s and 256s, flipping at 320s. The picker looked broken.
-  //
-  // Best-effort: a datastore hiccup must not take a public read route down, so an
-  // unreadable goal falls through as `undefined` and the cache degrades to TTL-only —
-  // exactly the old behaviour, which is wrong-but-serving rather than down.
-  let currentGoal: number | undefined;
-  try {
-    currentGoal = await readDailyGoalFor(user);
-  } catch (err) {
-    logger.warn(err, 'streak: could not read the daily goal for %s before the cache check', user);
-  }
-  const hit = readStreakCache(user, currentGoal);
+  // ★ NO PER-REQUEST GOAL READ ANY MORE (2026-08-18). The daily goal used to GATE the
+  // streak, so a cached body was only valid for the goal it was computed against and
+  // every request — hit or miss — paid an indexed single-row Postgres lookup before it
+  // could trust the cache. The goal is deleted (see compute-streak.ts), so the cache is
+  // keyed on the account and the TTL alone, and a warm hit now touches no datastore at
+  // all.
+  const hit = readStreakCache(user);
   if (hit) {
     if (hit.notFound) {
       return NextResponse.json({ error: 'account not found' }, { status: 404, headers: { 'x-cache': 'neg' } });
@@ -385,10 +377,10 @@ export async function GET(req: NextRequest, { params }: { params: { user: string
   // already bounds it to at most one attempt per account per stale window regardless of
   // how many readers or IPs are viewing it, so it does not need (and deliberately does
   // not pay) the IP limiter built for the enumeration threat.
-  const stale = readStaleStreakCache(user, currentGoal);
+  const stale = readStaleStreakCache(user);
   if (stale) {
     if (tryStartRevalidation(user)) {
-      computeStreakBody(user, currentGoal)
+      computeStreakBody(user)
         .catch((err) => logger.warn(err, 'streak: background revalidation threw for %s', user))
         .finally(() => finishRevalidation(user));
     }
@@ -409,7 +401,7 @@ export async function GET(req: NextRequest, { params }: { params: { user: string
     /* limiter unavailable — proceed; the cache still bounds amplification */
   }
 
-  const result = await computeStreakBody(user, currentGoal);
+  const result = await computeStreakBody(user);
   return NextResponse.json(result.body, {
     status: result.status,
     headers: result.status === 200 ? { 'x-cache': 'miss' } : undefined
@@ -424,7 +416,7 @@ export async function GET(req: NextRequest, { params }: { params: { user: string
  * `GET`). FAIL LOUD is unchanged: a transient upstream failure still returns 502 and is
  * never cached; only a definitive not-found is cached, and only briefly.
  */
-async function computeStreakBody(user: string, currentGoal: number | undefined): Promise<{ status: number; body: unknown }> {
+async function computeStreakBody(user: string): Promise<{ status: number; body: unknown }> {
   try {
     const cutoffMs = Date.now() - WINDOW_WEEKS * 7 * 86_400_000;
     const cutoffDay = utcDay(new Date(cutoffMs).toISOString());
@@ -546,6 +538,21 @@ async function computeStreakBody(user: string, currentGoal: number | undefined):
       .map((p) => (p.created ? utcDay(p.created) : ''))
       .filter((d) => d !== '');
 
+    // ════ WORDS AUTHORED, PER DAY (migration 0038) ════
+    //
+    // The bodies are already in hand — `bridge.get_account_posts` returns them — so this
+    // is arithmetic over data the walk paid for, not a new upstream call. It is a TOTAL
+    // per day rather than a delta, because the store keeps `GREATEST(stored, incoming)`:
+    // the incremental walk re-reads three days of overlap on purpose, and a `+=` would
+    // charge those days again on every visit.
+    const wordsByDayUTC: Record<string, number> = {};
+    for (const item of [...posts, ...comments]) {
+      const day = item.created ? utcDay(item.created) : '';
+      if (!day) continue;
+      const words = countWords(item.body);
+      if (words > 0) wordsByDayUTC[day] = (wordsByDayUTC[day] ?? 0) + words;
+    }
+
     // How far back THIS walk proved the day set. `''` means neither feed was bounded,
     // so it is complete for everything the walk was asked to read.
     const walkBoundary = daySetCompleteFrom(
@@ -572,78 +579,19 @@ async function computeStreakBody(user: string, currentGoal: number | undefined):
     // disagreeing with another walk — and both were subsets of the same union.
     const actDaysUTC = [...new Set([...storedDays, ...walkDays])];
 
-    // ════ STREAK FREEZES — the Duolingo mercy, now with somewhere to bank one ════
-    //
-    // `computeStreak` has taken `freezeAvailable` since it was written, and both call
-    // sites passed a hardcoded 0 because no ledger existed. It exists now (migration
-    // 0028) and it is SERVER-side and chain-derived on purpose: a freeze changes the
-    // streak, and a forgeable freeze would quietly move the streak out of the measured
-    // half of this system.
-    //
-    // Already-spent days go in as COVERED days, which is a different input from act
-    // days on purpose: a covered day bridges the gap without incrementing the run and
-    // without being charged twice. Passing them as act-days instead made the streak
-    // idempotent but not STABLE — the same account read 4 on the request that spent the
-    // freeze and 5 on the next one, because a bridged day started counting as activity.
-    //
-    // ★ A FAILED READ DEFAULTS TO ZERO MERCY, AND THAT DEFAULT MUST NOT BE PUBLISHED AS
-    // EXACT (2026-08-12). `available: 0, spentDays: []` was always the conservative
-    // choice on the SPEND side — it can never grant a freeze that was not earned, so
-    // it is safe there. It is not conservative on the READ side: a gap a banked freeze
-    // or an already-covered day would have bridged is instead walked as a genuine
-    // break, so `streakDays` comes back SHORTER than the truth — a streak mercy should
-    // have protected breaks instead. That is the same direction `streakDays` is already
-    // allowed to be a floor for (a capped feed walk), but this route was still adding
-    // it to `provenance.exact` unconditionally, so a broken streak read as a hard fact
-    // with nothing signalling the ledger it depended on never loaded. `freezeReadFailed`
-    // forces the existing `streakDaysIsLowerBound` floor below — one flag, one meaning,
-    // whichever cause tripped it — rather than inventing a second "kind of exact".
-    let freeze: FreezeState = { spentDays: [], available: 0, earned: 0 };
-    let freezeReadFailed = false;
-    try {
-      freeze = await readFreezeState(user, actDaysUTC.length);
-    } catch (err) {
-      freezeReadFailed = true;
-      logger.warn(
-        err,
-        'streak: freeze ledger unavailable for %s — streak computed without mercy and marked a floor',
-        user
-      );
-    }
-
-    // Today's authored acts, needed BEFORE the streak now that the goal gates it.
+    // Today's authored acts. Chain-derived, exact, and the only thing left on the
+    // `today` block now that the goal and the freeze ledger are gone.
     const actsToday = walkDays.filter((d) => d === todayUTC).length;
-    // The reader's committed goal. Server-side since 2026-08-09 (migration 0029): it
-    // decides whether today counts, so it may not be client-supplied. Defaults to 1,
-    // which reproduces the old any-act behaviour exactly.
-    //
-    // ★ REUSES THE VALUE READ BEFORE THE CACHE CHECK, so the body is computed against
-    // EXACTLY the goal the cache was keyed on. Re-reading here would open a window where a
-    // concurrent write lands between the two reads and stores a body under a `goalUsed` it
-    // was not computed against — a stale entry that the `goalUsed` guard would then declare
-    // fresh. One read, one value, one meaning.
-    const dailyGoal = currentGoal ?? 1;
-    if (currentGoal === undefined) {
-      logger.warn('streak: daily goal unavailable for %s (defaulting to 1)', user);
-    }
 
-    const streak = computeStreak({
-      actDaysUTC,
-      coveredDaysUTC: freeze.spentDays,
-      todayUTC,
-      freezeAvailable: freeze.available,
-      todayActs: actsToday,
-      dailyGoal
-    });
-
-    if (streak.freezesUsedOn.length > 0) {
-      try {
-        await recordFreezeSpent(user, streak.freezesUsedOn);
-      } catch (err) {
-        logger.warn(err, 'streak: could not record spent freezes for %s', user);
-      }
-    }
-
+    // ★ THE FREEZE LEDGER AND THE DAILY GOAL ARE GONE (2026-08-18, owner). Both existed
+    // to soften a consecutive-day streak's all-or-nothing cliff; the streak decays now
+    // (+1 a day here, -2 a day away, floored at zero) so there is no cliff to soften.
+    // What used to sit here: a `readFreezeState` call, a `recordFreezeSpent` write, a
+    // `freezeReadFailed` flag that forced the streak's lower-bound floor, and a
+    // `readDailyGoalFor` value that decided whether today counted. All deleted, along
+    // with their two Postgres tables — see migration 0037. The streak itself is computed
+    // below, after `completeFrom` is known, because that boundary is now an INPUT to it
+    // rather than a flag applied afterwards.
 
     // Persist what this walk learned. Fire-and-forget on failure for the same reason
     // the read was: the answer below is already correct without it, and the only cost
@@ -655,10 +603,25 @@ async function computeStreakBody(user: string, currentGoal: number | undefined):
         actDaysUTC: walkDays,
         oldestWalked: walkCompleteFrom,
         newestWalked: todayUTC,
-        historyComplete
+        historyComplete,
+        wordsByDayUTC
       });
     } catch (err) {
       logger.warn(err, 'streak: could not persist retention history for %s', user);
+    }
+
+    // ★ READ AFTER THE WRITE, ON PURPOSE. The write above is what makes this walk's words
+    // part of the union, and the union is the only figure worth printing — a per-request
+    // total would say "words in the part of history this request happened to reach".
+    //
+    // Best-effort: `null` means "we could not measure this", and an ABSENT field renders
+    // no line, while a zero would render a false one ("you have written 0 words"). Same
+    // rule the rest of the stats block follows.
+    let wordsWritten: AuthoredWords | null = null;
+    try {
+      wordsWritten = await sumAuthoredWords(user);
+    } catch (err) {
+      logger.warn(err, 'streak: could not read authored volume for %s', user);
     }
 
     // ★ COMPLETENESS IS NOW A UNION, AND IT IS NARROWER THAN `capped`.
@@ -674,6 +637,53 @@ async function computeStreakBody(user: string, currentGoal: number | undefined):
       completeFrom = storeOldest;
     }
     const activeWeeksIsLowerBound = completeFrom !== '' && completeFrom > cutoffDay;
+
+    // ════ THE STREAK ════
+    //
+    // ★ IT ACCUMULATES FORWARD FROM THE DAY LUMEN STARTED COUNTING YOU, NOT BACKWARD
+    // FROM TODAY. +1 for a day with an authored act, -2 for a day without one, floored
+    // at zero (compute-streak.ts owns the rule and the reasoning). A decay has to start
+    // somewhere with a KNOWN value, and the only day whose value is known is the day the
+    // account was first observed — everybody is zero then, which is the same rule the
+    // RANK already uses (`firstObservedDayUTC` below, and /ranks says it in as many
+    // words). Starting anywhere else would make the number a floor rather than a
+    // measurement, because unread history could only ever have added to it.
+    //
+    // `completeFrom` is the oldest day the merged day set is COMPLETE from. When it is
+    // later than the first observed day — an account nobody has viewed for longer than
+    // the walk window, so there is a hole in the middle — the count has to start at the
+    // hole's edge and `isLowerBound` says so. That is the only remaining source of a
+    // streak floor; the freeze ledger that used to force one is gone.
+    const observedFromUTC = cursor?.firstBuiltAt ? utcDay(cursor.firstBuiltAt.toISOString()) : '';
+    // ★★★ AN ABSENT CURSOR MEANS "WE STARTED WATCHING TODAY", NOT "WE HAVE ALWAYS BEEN
+    // WATCHING" — the streak must FAIL CLOSED for exactly the reason the rank does.
+    //
+    // `cursor` is read BEFORE the walk, so it is null on an account's first-ever view.
+    // Without this fallback the accumulation would start at the oldest ACT DAY in the
+    // union — up to 26 weeks of imported Hive history — and a daily poster would be shown
+    // a ~180-day streak on their first request and ~1 on their second, once
+    // `recordHiveWalk` had written a cursor stamped today. That is the same shape as the
+    // bug that put @gtg, @tarazkp and @lordbutterfly on rank 8 of 9 before they had done
+    // anything here (see `firstObservedDayUTC` below), and it would have been worse: a
+    // number that is large once and then collapses reads as the product taking something
+    // away.
+    //
+    // `todayUTC` is not a guess — it is precisely what the cursor `recordHiveWalk` just
+    // wrote will say (`first_built_at DEFAULT now()`), so the first view and every view
+    // after it agree by construction, with no second read.
+    //
+    // The RANK deliberately keeps the raw `observedFromUTC`: `deriveLeagueInputs` treats
+    // an empty value as "nothing observed" and returns rank 0, which is its own documented
+    // fail-closed rule, and quietly handing it today's date would start counting a day it
+    // has never counted before.
+    const streakObservedFrom = observedFromUTC || todayUTC;
+    const streakCountFrom = completeFrom && completeFrom > streakObservedFrom ? completeFrom : streakObservedFrom;
+    const streak = computeStreak({
+      actDaysUTC,
+      todayUTC,
+      countFromUTC: streakCountFrom,
+      observedFromUTC: streakObservedFrom
+    });
 
     // Distinct voters over a bounded sample of recent posts. Sampled, not total —
     // labelled as such in the response so nobody reads it as lifetime breadth.
@@ -919,7 +929,9 @@ async function computeStreakBody(user: string, currentGoal: number | undefined):
     // rank nobody earned here.
     const inputs = deriveLeagueInputs({
       actDaysUTC,
-      firstObservedDayUTC: cursor?.firstBuiltAt ? utcDay(cursor.firstBuiltAt.toISOString()) : '',
+      // The same value the streak accumulates from — derived once, above, so the rank
+      // and the streak can never disagree about the day Lumen started counting.
+      firstObservedDayUTC: observedFromUTC,
       nowMs: Date.now()
     });
 
@@ -958,10 +970,12 @@ async function computeStreakBody(user: string, currentGoal: number | undefined):
     // on a PREVIOUS visit is observed and exact — which is the common case for a
     // returning reader and used to be reported as a floor every single time.
     const coveredFrom = completeFrom;
-    // ★ A FAILED FREEZE READ FORCES THIS FLOOR TOO, INDEPENDENT OF WALK COVERAGE.
-    // `isStreakLowerBound` only knows about the feed-walk boundary; it has no way to
-    // know mercy was unavailable this request. See the freeze-read block above.
-    const streakDaysIsLowerBound = freezeReadFailed || isStreakLowerBound(streak.streakBrokeOnUTC, coveredFrom);
+    // ★ ONE SOURCE OF A STREAK FLOOR NOW, AND `computeStreak` DECIDES IT.
+    // The decay accumulates forward from `countFromUTC` with the score at zero, so the
+    // answer is a floor exactly when that day is later than the day the account was
+    // first observed — the off-by-one lives in the pure function, where the test can
+    // reach it, rather than being re-derived here.
+    const streakDaysIsLowerBound = streak.isLowerBound;
 
     const exact = ['tenureYear'];
     if (!streakDaysIsLowerBound) exact.push('streakDays');
@@ -976,18 +990,14 @@ async function computeStreakBody(user: string, currentGoal: number | undefined):
       tenureYear,
       streakDays: streak.streakDays,
       activeWeeks: streak.activeWeeks,
-      // ════ THE DAILY LOOP ════
+      // ════ TODAY ════
       //
-      // `acts` is chain-derived and exact. The GOAL itself is a client preference —
-      // it changes nothing measured, so it does not need a server round trip or a
-      // migration column to live in.
+      // `acts` is chain-derived and exact, and it is all that is left here. The daily
+      // GOAL (a server-held target that decided whether today ticked the streak) and
+      // the FREEZE ledger are both deleted — owner ruling 2026-08-18, "no setting of
+      // anything... no freezes". Nothing on this block is a preference any more.
       today: {
-        acts: actsToday,
-        /** The server's goal — the card must draw this, not a local guess. */
-        goal: dailyGoal,
-        freezesAvailable: freeze.available,
-        /** Days a freeze covered inside the current run, so the UI can say so. */
-        freezesUsedRecently: streak.freezesUsedOn.length
+        acts: actsToday
       },
       // ════ THE INTERESTING NUMBERS ════
       //
@@ -1044,6 +1054,26 @@ async function computeStreakBody(user: string, currentGoal: number | undefined):
         // `inputs.observedActDays` now — the same figure the rank was computed from — so the two
         // agree by construction, and the stat explains the rank instead of contradicting it.
         activeDaysTotal: inputs.observedActDays,
+        /**
+         * ★ HOW MUCH THEY HAVE WRITTEN, OVER FIVE WINDOWS (2026-08-18, owner: "how many
+         * lines of text they wrote... the equivalent of a 100 page book", then "this needs
+         * to change with time look3d at. one day 7 days, one time all time").
+         *
+         * Words, not lines — a line in markdown counts how the author's editor wraps, not
+         * anything about the writing. Accumulated across every walk ever stored
+         * (migration 0038), so `all` grows toward a lifetime figure instead of describing
+         * whatever this request happened to reach.
+         *
+         * ★ ALL FIVE GO ON THE WIRE AND THE CLIENT PICKS. The choice rotates by day and by
+         * reader (`pickWordWindow`), and doing that at RENDER time rather than in the route
+         * is what keeps it correct behind the 5-minute response cache: a cached body would
+         * otherwise freeze yesterday's window until it expired.
+         *
+         * The client decides which of them may be stated as a measurement by comparing
+         * each window's start against `coverage.completeFrom` / `historyComplete`, both
+         * already on the wire. Absent (not zero) when the store could not be read.
+         */
+        ...(wordsWritten !== null && wordsWritten.all > 0 ? { wordsWritten } : {}),
         // Raw, for the RATIO only — never printed as counts. See the block above.
         postsInWindow,
         repliesInWindow,
@@ -1117,11 +1147,11 @@ async function computeStreakBody(user: string, currentGoal: number | undefined):
           /** The whole account history is stored: `longestStreakDays` is exact. */
           historyComplete,
           /**
-           * True when the streak's break day falls outside the part of history
-           * that was actually read, so `streakDays` is a floor and must be
+           * True when the decay could not be accumulated all the way from the day
+           * the account was first observed, so `streakDays` is a floor and must be
            * rendered "N+ day streak", never a bare N. Independent of
-           * `activeWeeksIsLowerBound`: a walk can be capped far enough back that
-           * activeWeeks is truncated while a short streak is still provable.
+           * `activeWeeksIsLowerBound`: the two answer different questions about
+           * different spans.
            */
           streakDaysIsLowerBound,
           /**
@@ -1135,14 +1165,6 @@ async function computeStreakBody(user: string, currentGoal: number | undefined):
           // The posts walk is load-bearing, so its reason wins when both capped.
           cappedReason: postWalk.cappedReason ?? commentWalk.cappedReason ?? null,
           commentsFeedUnavailable: commentsFailed,
-          /**
-           * The freeze ledger read failed this request, so `streakDays` may be a floor
-           * even where the feed walk itself was complete — see the freeze-read block
-           * above. `streakDaysIsLowerBound` already carries this into the render rule;
-           * published separately, same as `commentsFeedUnavailable`, so the REASON is
-           * stated rather than assumed.
-           */
-          freezeStateUnavailable: freezeReadFailed
         },
         // ★ `receivedEngagement` IS NO LONGER LISTED HERE, because it is no longer a
         // proxy. It read "reputation-derived proxy, not a measured per-post engagement
@@ -1169,11 +1191,10 @@ async function computeStreakBody(user: string, currentGoal: number | undefined):
       logger.warn(err, 'streak: could not snapshot rank mark for %s', user);
     }
 
-    // `goalUsed` is stored so a stale-goal hit is detected even on a worker that never
-    // saw the invalidation — see streak-cache.ts. This write is what makes the
-    // stale-while-revalidate block in `GET` correct: it refreshes `at`, so the very next
-    // read (fresh or, once STREAK_TTL_MS has passed again, stale) reflects THIS walk.
-    writeStreakCache(user, { at: Date.now(), body, goalUsed: dailyGoal });
+    // This write is what makes the stale-while-revalidate block in `GET` correct: it
+    // refreshes `at`, so the very next read (fresh or, once STREAK_TTL_MS has passed
+    // again, stale) reflects THIS walk.
+    writeStreakCache(user, { at: Date.now(), body });
     return { status: 200, body };
   } catch (error) {
     logger.error(error, 'streak route failed for %s', user);

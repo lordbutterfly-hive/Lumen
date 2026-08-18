@@ -8,6 +8,7 @@ import { fetchSearch } from '@/blog/lib/chain-fetch';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import SearchSortSelect from './sort-select';
 import { SearchSort } from '@ui/hooks/use-search';
+import { EmptyStateIllustration } from '@/blog/components/empty-state-illustration';
 import { useTranslation } from '@/blog/i18n/client';
 import { useSSRObserver } from '@/blog/components/observer-provider';
 import { chainObserver } from '@/blog/lib/utils';
@@ -98,7 +99,35 @@ const SearchResults = ({ query, sort }: { query: string; sort: SearchSort }) => 
     // attempts and ~7s of backoff — measured at 5.4s / 9.1s on real failures —
     // before the reader was told anything, behind an unlabelled spinner the whole
     // time. One retry absorbs a transient blip; three only postpone bad news.
-    retry: 1,
+    /**
+     * ★★★ A DETERMINISTIC TIMEOUT MUST NOT BE RETRIED (measured 2026-08-18).
+     *
+     * `retry: 1` is right for a transient blip and wrong for the one failure this
+     * search actually has. Sorting by Newest on a broad term ("bitcoin") makes
+     * Hivemind's own Postgres abort the query — `57014`, a statement timeout —
+     * and it does so every single time. Measured 3 of 3 at 5.1-5.4s.
+     *
+     * Retrying that cannot succeed; it just runs the identical doomed query
+     * again. End to end in the browser: first attempt 180ms -> 5,973ms (502),
+     * retry 6,974ms -> 12,378ms. **12.4 seconds** before the reader is told
+     * anything, and roughly half of it bought nothing. That is where the
+     * reported "search takes ~8 seconds" comes from.
+     *
+     * Verified across nodes, so this is not something a different provider or a
+     * failover would route around: of the six nodes in the server's own fallback
+     * list, only two run the search plugin at all, and both time out on the same
+     * query at ~5.1-5.4s. It is a backend limit, not a node choice.
+     *
+     * So: one retry for anything that might be transient, none for the failure
+     * we have proven is not. Halves the worst case to ~5.8s.
+     */
+    retry: (failureCount, error) => {
+      const message = error instanceof Error ? error.message : String(error ?? '');
+      // Hivemind surfaces the abort as a 502 carrying the Postgres code; match on
+      // either so a reworded upstream message still degrades to "retry once".
+      if (/57014|statement timeout|canceling statement/i.test(message)) return false;
+      return failureCount < 1;
+    },
     staleTime: StaleTime.MEDIUM
   });
 
@@ -198,9 +227,12 @@ const SearchResults = ({ query, sort }: { query: string; sort: SearchSort }) => 
       {isLoading ? (
         <LumenLoader size="lg" label={t('global.loading_search_results')} />
       ) : total === 0 ? (
-        <p className="py-10 text-center font-sans text-sm text-muted-foreground">
-          {t('search_page.no_results_for', { query })}
-        </p>
+        <div className="flex flex-col items-center gap-4 py-10 text-center">
+          {/* ★ Drawn empty state (2026-08-18) — a search that finds nothing was a
+              single grey line, which reads more like a failure than a result. */}
+          <EmptyStateIllustration name="no-results" size={128} />
+          <p className="font-sans text-sm text-muted-foreground">{t('search_page.no_results_for', { query })}</p>
+        </div>
       ) : (
         <div data-testid="search-results-list">
           {entries.map((entry) => (

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { MoreHorizontal, Link2 } from 'lucide-react';
+import { Icons } from '@ui/components/icons';
 import { CircleSpinner } from 'react-spinners-kit';
 import { UseInfiniteQueryResult } from '@tanstack/react-query';
 import { IFollow } from '@hive/common-hiveio-packages/wax';
@@ -212,7 +212,7 @@ export default function FollowRowActions({
             data-testid="follow-row-menu-trigger"
             className={OVERFLOW_BUTTON}
           >
-            <MoreHorizontal className="h-[18px] w-[18px]" />
+            <Icons.moreHorizontal className="h-[18px] w-[18px]" />
           </button>
         </DropdownMenuTrigger>
         {/* ★ THE SHARED MENU PRIMITIVE CARRIES THE OFF-PALETTE COLOUR TOO.
@@ -272,7 +272,7 @@ export default function FollowRowActions({
             className="flex cursor-pointer items-center gap-2 rounded-[10px] px-2.5 py-2 text-[13px] leading-[20px] font-medium text-[#3f4650] focus:bg-[#faf9f8] focus:text-[#161511]"
             data-testid="follow-row-copy-link"
           >
-            <Link2 className="h-4 w-4" />
+            <Icons.link className="h-4 w-4" />
             {copied ? t('user_profile.lists.profile_link_copied') : t('user_profile.lists.copy_profile_link')}
           </DropdownMenuItem>
         </DropdownMenuContent>

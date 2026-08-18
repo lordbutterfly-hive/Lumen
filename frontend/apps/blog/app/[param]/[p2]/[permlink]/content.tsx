@@ -78,7 +78,6 @@ import { handleError } from '@ui/lib/handle-error';
 import { getLogger } from '@ui/lib/logging';
 import parseDate from '@ui/lib/parse-date';
 import { buildSafePath } from '@ui/lib/sanitize-url';
-import { Clock, Link2, MoreHorizontal } from 'lucide-react';
 import { Link } from '@hive/ui';
 import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -1361,7 +1360,7 @@ const PostContent = () => {
                               className="flex items-center justify-center"
                               style={hasDownvoted ? { color: 'var(--lm-vote-slate)' } : undefined}
                             >
-                              <MoreHorizontal className="h-4 w-4" aria-hidden />
+                              <Icons.moreHorizontal className="h-4 w-4" aria-hidden />
                             </button>
                           </DropdownMenuTrigger>
                           {/*
@@ -1668,7 +1667,7 @@ const PostContent = () => {
                         (see that badge's own comment, and the
                         `liteRepliesTruncated` notice below). */}
                     <div className="flex flex-wrap items-center gap-1.5 text-sm text-ink-10">
-                      <Clock className="mr-1 h-4 w-4" />
+                      <Icons.clock className="mr-1 h-4 w-4" />
                       <span title={String(parseDate(postData.created))} data-testid="post-footer-timestamp">
                         <TimeAgo date={postData.created} />
                       </span>
@@ -1999,7 +1998,7 @@ const PostContent = () => {
                       <LinkedInShare title={displayTitle} url={postData.url} />
                       <RedditShare title={displayTitle} url={postData.url} />
                       <SharePost path={postData.url} title={displayTitle}>
-                        <Link2 className="h-[18px] w-[18px] cursor-pointer text-muted-foreground transition-colors hover:text-destructive" data-testid="share-post" />
+                        <Icons.link className="h-[18px] w-[18px] cursor-pointer text-muted-foreground transition-colors hover:text-destructive" data-testid="share-post" />
                       </SharePost>
                     </div>
                   </div>

@@ -43,6 +43,27 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json(merged, { headers: { 'cache-control': 'private, no-store' } });
   } catch (error) {
     logger.error(error, 'search lookup failed for "%s"', pattern);
-    return NextResponse.json({ error: 'search_unavailable' }, { status: 502 });
+    /**
+     * ★★★ SAY WHICH KIND OF FAILURE IT IS (2026-08-18).
+     *
+     * Everything used to collapse to `search_unavailable`, so the client could
+     * not tell a transient blip from the one failure this search reliably has:
+     * sorting by Newest on a broad term makes Hivemind's own Postgres abort with
+     * `57014`, a statement timeout, every single time (measured 3 of 3 at
+     * 5.1-5.4s, and on every node in the fallback list that runs the search
+     * plugin at all — it is a backend limit, not a node choice).
+     *
+     * Retrying that cannot succeed, and the retry is expensive: measured end to
+     * end in the browser, one attempt plus one retry took **12.4s** before the
+     * reader was told anything. Naming the cause here lets the client skip the
+     * retry for exactly this case and keep it for everything else, instead of
+     * having to give up retrying altogether.
+     */
+    const detail = error instanceof Error ? error.message : String(error ?? '');
+    const isStatementTimeout = /57014|statement timeout|canceling statement/i.test(detail);
+    return NextResponse.json(
+      { error: isStatementTimeout ? 'search_timeout' : 'search_unavailable' },
+      { status: 502 }
+    );
   }
 }

@@ -13,6 +13,8 @@ import HbdTokenCard from './hbd-token-card';
 import SavingsVault from './savings-vault';
 import EstimatedValueStrip from './estimated-value-strip';
 import AccountHistoryList from './account-history-list';
+import { useAccountHistory } from '../hooks/use-account-history';
+import { useDelegations } from '../hooks/use-delegations';
 
 /**
  * The wallet's two button shapes, defined once (W-2 / W-3). Every action button
@@ -25,7 +27,7 @@ import AccountHistoryList from './account-history-list';
 const PRIMARY_BUTTON_CLASS =
   'rounded-[14px] bg-surface-brand-12 px-5 py-2.5 text-[14px] leading-[22px] font-semibold text-ink-27 transition-colors hover:bg-surface-brand-17';
 const SECONDARY_BUTTON_CLASS =
-  'rounded-[14px] border border-line-11 px-4 py-2 text-[13px] leading-[20px] font-semibold text-ink-7 transition-colors hover:bg-surface-16';
+  'lm-press rounded-[14px] border border-line-11 px-4 py-2 text-[13px] leading-[20px] font-semibold text-ink-7 transition-colors hover:bg-surface-16';
 
 /**
  * Center column: fetches the logged-in user's real balances (see
@@ -41,7 +43,7 @@ const SECONDARY_BUTTON_CLASS =
  * forbids inventing one.
  */
 export default function WalletContent() {
-  const { t } = useTranslation('common_blog');
+  const { t, i18n } = useTranslation('common_blog');
   const { user } = useUserClient();
   /**
    * ★★★ THE PAGE ALREADY KNEW; THIS COMPONENT DID NOT ASK IT (2026-08-11).
@@ -76,6 +78,26 @@ export default function WalletContent() {
   const { account, figures, dynamicGlobal, isLoading, isError } = useWalletAccount(
     isLite ? '' : user.username
   );
+
+  /**
+   * ★★★ START THESE NOW, NOT AFTER THE BALANCES LAND (2026-08-18, owner:
+   * "wallet took 6 seconds").
+   *
+   * `AccountHistoryList` and the delegations panel live below the
+   * `isLoading` early-return, so their queries were not even MOUNTED until the
+   * balance summary resolved — a strictly serial second round trip, on a page
+   * where neither depends on the summary at all (history takes a username and a
+   * language; delegations takes a username). The price cards in
+   * `wallet-right-rail.tsx` already fire unconditionally for exactly this
+   * reason; this makes the rest of the page behave the same way.
+   *
+   * Same query keys and same arguments as the components below, so React Query
+   * dedupes: this warms the cache, it does not add a request. The components
+   * still own their own loading and error states.
+   */
+  const historyLang = i18n.resolvedLanguage ?? 'en';
+  useAccountHistory(isLite ? '' : user.username, historyLang);
+  useDelegations(isLite ? '' : user.username);
 
   if (!identity.isLoggedIn) {
     return (

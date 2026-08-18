@@ -1,6 +1,6 @@
 'use client';
 
-import { MoreHorizontal, ExternalLink, Pencil } from 'lucide-react';
+import { Icons } from '@ui/components/icons';
 import env from '@beam-australia/react-env';
 import { Link } from '@hive/ui';
 import {
@@ -121,7 +121,7 @@ export default function ProfileActions({
           className="flex items-center gap-1.5 rounded-xl border border-line-11 bg-surface-1 px-7 py-3 font-sans text-[15px] leading-[24px] font-semibold text-ink-7 transition-colors hover:bg-surface-16"
           data-testid="profile-edit-button"
         >
-          <Pencil className="h-4 w-4" />
+          <Icons.pencil className="h-4 w-4" />
           {t('user_profile.edit_profile_button')}
         </Link>
       </div>
@@ -261,7 +261,7 @@ export default function ProfileActions({
             aria-label={t('profile.overflow_menu_label')}
             className="flex h-11 w-11 items-center justify-center rounded-xl border border-line-11 bg-surface-1 text-ink-8 hover:bg-surface-16"
           >
-            <MoreHorizontal className="h-[18px] w-[18px]" />
+            <Icons.moreHorizontal className="h-[18px] w-[18px]" />
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-52">
@@ -336,7 +336,7 @@ export default function ProfileActions({
                 rel="noopener noreferrer"
                 className="flex cursor-pointer items-center gap-2"
               >
-                <ExternalLink className="h-4 w-4" />
+                <Icons.externalLink className="h-4 w-4" />
                 {t('profile.overflow.view_on_explorer')}
               </Link>
             </DropdownMenuItem>

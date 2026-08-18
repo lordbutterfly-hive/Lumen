@@ -41,11 +41,37 @@ interface CursorRow {
   first_built_at: Date;
 }
 
-/** DATE columns come back as a Date in node-postgres; we want the UTC day string. */
-function toDayString(v: Date | string | null): string | null {
+/**
+ * ★★★ EVERY `DATE` COLUMN IS READ AS TEXT, AND THIS FUNCTION IS NOW A GUARD RATHER THAN A
+ * CONVERSION (fixed 2026-08-18, runtime-proven — every stored day was one day early).
+ *
+ * node-postgres parses a `DATE` into a JS `Date` at LOCAL midnight. `toISOString()` then
+ * converts to UTC, so on any host east of Greenwich the calendar date moves BACK a day:
+ * `2026-08-13` came back as `'2026-08-12'` on a CEST box (UTC+2). It is invisible in a UTC
+ * container and wrong everywhere else, which is the worst shape a date bug can have.
+ *
+ * ★ THE DAMAGE WAS NOT A COSMETIC OFF-BY-ONE, IT WAS DOUBLE COUNTING. `/api/streak/[user]`
+ * unions the STORED day set with THIS request's walk, and the walk derives its days from
+ * ISO timestamps — correctly. So one real day of activity appeared twice in the merged
+ * set, once shifted and once not. Measured on @lordbutterfly before the fix: 8 observed
+ * act-days where the account had 6, `streakDays` 7 where the decay gives 3, and the RANK
+ * arm (`deriveLeagueInputs.observedActDays`) inflated by the same mechanism — so this was
+ * silently moving people up the ladder as well.
+ *
+ * `to_char(col, 'YYYY-MM-DD')` in the SQL means no `Date` is ever constructed and the
+ * process timezone cannot enter the answer. This function stays because the row types
+ * still allow a `Date` (a caller that forgets the cast gets the old behaviour rather than
+ * a crash), and because `null` still has to be handled.
+ */
+export function toDayString(v: Date | string | null): string | null {
   if (v === null) return null;
   if (typeof v === 'string') return v.slice(0, 10);
-  return v.toISOString().slice(0, 10);
+  // Local components, NOT `toISOString()`: node-postgres built this Date at LOCAL
+  // midnight, so its local calendar fields are the true stored date.
+  const y = v.getFullYear();
+  const m = String(v.getMonth() + 1).padStart(2, '0');
+  const d = String(v.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
 }
 
 function mapCursor(r: CursorRow): HiveWalkCursor {
@@ -60,7 +86,13 @@ function mapCursor(r: CursorRow): HiveWalkCursor {
 
 export async function findHiveWalkCursor(hiveAccount: string): Promise<HiveWalkCursor | null> {
   const { rows } = await query<CursorRow>(
-    `SELECT hive_account, oldest_walked, newest_walked, history_complete, first_built_at
+    // ★ `to_char`, NOT the bare DATE columns — see `toDayString`. A DATE parsed into a JS
+    // Date lands on LOCAL midnight and shifts a day under `toISOString()`.
+    `SELECT hive_account,
+            to_char(oldest_walked, 'YYYY-MM-DD') AS oldest_walked,
+            to_char(newest_walked, 'YYYY-MM-DD') AS newest_walked,
+            history_complete,
+            first_built_at
        FROM lumen_hive_walk_cursor
       WHERE hive_account = $1`,
     [hiveAccount]
@@ -78,6 +110,15 @@ export interface RecordWalkInput {
   newestWalked: string;
   /** This walk reached account creation. */
   historyComplete: boolean;
+  /**
+   * Words authored per UTC day, as this walk saw them (migration 0038).
+   *
+   * A TOTAL per day, not a delta: the row keeps `GREATEST(stored, incoming)`, which is
+   * what makes the incremental walk's deliberate three-day overlap re-writable without
+   * counting those days twice. Omit it and no volume row is touched at all — an older
+   * caller, or a walk that read no bodies, must not zero what a previous walk proved.
+   */
+  wordsByDayUTC?: Record<string, number>;
 }
 
 /**
@@ -113,6 +154,27 @@ export async function recordHiveWalk(input: RecordWalkInput): Promise<void> {
       );
     }
 
+    // Words per day (migration 0038). Same transaction as the day set and the cursor:
+    // a widened cursor is a claim to have read history, and the volume is part of what
+    // was read.
+    const volumeDays = Object.entries(input.wordsByDayUTC ?? {}).filter(
+      ([day, words]) => Boolean(day) && Number.isFinite(words) && words > 0
+    );
+    if (volumeDays.length > 0) {
+      await exec(
+        `INSERT INTO lumen_hive_authored_volume (hive_account, act_day, words)
+         SELECT $1, d.day::date, d.words::int
+           FROM unnest($2::text[], $3::int[]) AS d(day, words)
+         ON CONFLICT (hive_account, act_day) DO UPDATE
+           SET words = GREATEST(lumen_hive_authored_volume.words, EXCLUDED.words)`,
+        [
+          input.hiveAccount,
+          volumeDays.map(([day]) => day),
+          volumeDays.map(([, words]) => Math.floor(words))
+        ]
+      );
+    }
+
     await exec(
       `INSERT INTO lumen_hive_walk_cursor
               (hive_account, oldest_walked, newest_walked, history_complete)
@@ -134,6 +196,71 @@ export async function recordHiveWalk(input: RecordWalkInput): Promise<void> {
 }
 
 /**
+ * ════ WORDS AUTHORED, PER TIME WINDOW ════
+ *
+ * ★ FIVE WINDOWS FROM ONE INDEX SCAN (owner, 2026-08-18: "this needs to change with time
+ * look3d at. one day 7 days, one time all time... as long as it doesnt slow the load. if
+ * its quick and cheap to check").
+ *
+ * It is cheap, and this is why: the store is one row per (account, UTC day), so every
+ * window is a `SUM` over a contiguous prefix of the SAME primary-key scan. Five
+ * `FILTER (WHERE ...)` aggregates read the rows once and cost one comparison each — no
+ * extra round trip, no extra index, no second statement. The route already made this call;
+ * it now returns five numbers instead of one.
+ *
+ * ★ SHORTER WINDOWS ARE MORE TRUSTWORTHY THAN THE LONG ONE, WHICH IS THE OPPOSITE OF THE
+ * USUAL SHAPE. The feed walk runs NEWEST-FIRST under a clock, so the recent end is always
+ * read and the far end is what gets truncated. `all` is a floor until
+ * `lumen_hive_walk_cursor.history_complete`; `day` and `week` are exact for anyone whose
+ * walk has ever completed a page. The caller decides which windows it may present as
+ * measurements by comparing each window's start against `coverage.completeFrom`.
+ */
+export interface AuthoredWords {
+  /** Today, UTC. */
+  day: number;
+  /** The trailing 7 days, today included. */
+  week: number;
+  /** The trailing 30 days. */
+  month: number;
+  /** The trailing 365 days. */
+  year: number;
+  /** Everything the store holds. A floor until the walk has reached account creation. */
+  all: number;
+}
+
+export const EMPTY_AUTHORED_WORDS: AuthoredWords = { day: 0, week: 0, month: 0, year: 0, all: 0 };
+
+export async function sumAuthoredWords(hiveAccount: string): Promise<AuthoredWords> {
+  const { rows } = await query<{
+    d: string | null;
+    w: string | null;
+    m: string | null;
+    y: string | null;
+    a: string | null;
+  }>(
+    // The window boundaries are computed in SQL against the DATABASE's idea of the UTC
+    // day, deliberately: the day set stored here was written from UTC day strings, so
+    // comparing it against a day derived in the Node process would let the app server's
+    // timezone decide what "today" means. That is the exact bug `toDayString` above
+    // documents, one layer up.
+    `SELECT COALESCE(SUM(words) FILTER (WHERE act_day = (now() AT TIME ZONE 'utc')::date), 0)            AS d,
+            COALESCE(SUM(words) FILTER (WHERE act_day > (now() AT TIME ZONE 'utc')::date - 7), 0)        AS w,
+            COALESCE(SUM(words) FILTER (WHERE act_day > (now() AT TIME ZONE 'utc')::date - 30), 0)       AS m,
+            COALESCE(SUM(words) FILTER (WHERE act_day > (now() AT TIME ZONE 'utc')::date - 365), 0)      AS y,
+            COALESCE(SUM(words), 0)                                                                     AS a
+       FROM lumen_hive_authored_volume
+      WHERE hive_account = $1`,
+    [hiveAccount]
+  );
+  const r = rows[0];
+  const n = (v: string | null | undefined) => {
+    const x = Number(v ?? 0);
+    return Number.isFinite(x) ? x : 0;
+  };
+  return { day: n(r?.d), week: n(r?.w), month: n(r?.m), year: n(r?.y), all: n(r?.a) };
+}
+
+/**
  * Every stored act-day for an account, oldest first.
  *
  * Returned in full rather than aggregated in SQL because the arithmetic that
@@ -144,7 +271,13 @@ export async function recordHiveWalk(input: RecordWalkInput): Promise<void> {
  */
 export async function listHiveActDays(hiveAccount: string): Promise<string[]> {
   const { rows } = await query<{ act_day: Date | string }>(
-    `SELECT act_day FROM lumen_hive_act_day WHERE hive_account = $1 ORDER BY act_day ASC`,
+    // ★ AS TEXT. This is the read that was one day early on every non-UTC host, and the
+    // one whose damage compounded: the route unions these days with a walk that dates its
+    // items correctly, so a single day of activity was counted twice. See `toDayString`.
+    `SELECT to_char(act_day, 'YYYY-MM-DD') AS act_day
+       FROM lumen_hive_act_day
+      WHERE hive_account = $1
+      ORDER BY act_day ASC`,
     [hiveAccount]
   );
   return rows.map((r) => toDayString(r.act_day)).filter((d): d is string => d !== null);
@@ -233,64 +366,15 @@ export function newPeopleIsTrustworthy(cursor: HiveWalkCursor | null, windowDays
   return watchedMs >= windowDays * 86_400_000;
 }
 
-/**
- * ════ STREAK FREEZES ════
- *
- * One freeze earned per FREEZE_EARNED_PER_ACTIVE_DAYS active days, at most
- * FREEZE_MAX_HELD held at once. Earned from the act-day set, so it is chain-derived
- * and unforgeable — a freeze changes the streak, and the streak is the one number
- * here that is deliberately not client-supplied.
- *
- * ★ THE HOLD CAP IS WHAT MAKES IT MERCY RATHER THAN AN EXEMPTION. Without it, a
- * decade-old daily poster banks ~500 freezes and can be absent for over a year with
- * an unbroken streak, which stops the streak meaning anything. Two is what Duolingo
- * grants for the same reason: enough to survive a bad week, not enough to survive
- * losing interest.
- */
-export const FREEZE_EARNED_PER_ACTIVE_DAYS = 7;
-export const FREEZE_MAX_HELD = 2;
-
-export interface FreezeState {
-  /** Days a freeze has already covered. Fed back in as covered days. */
-  spentDays: string[];
-  /** How many are available to spend on NEW gaps right now. */
-  available: number;
-  /** Lifetime earned, for the "N freezes banked" line and for ops. */
-  earned: number;
-}
-
-/**
- * Read the freeze ledger and work out the budget.
- *
- * `activeDays` is the size of the stored act-day set, which is why this takes it as
- * a parameter rather than counting rows itself: the caller has already merged the
- * stored days with this request's walk, and the merged set is the honest total.
- */
-export async function readFreezeState(hiveAccount: string, activeDays: number): Promise<FreezeState> {
-  const { rows } = await query<{ covered_day: Date | string }>(
-    `SELECT covered_day FROM lumen_hive_freeze_spent WHERE hive_account = $1 ORDER BY covered_day DESC`,
-    [hiveAccount]
-  );
-  const spentDays = rows.map((r) => toDayString(r.covered_day)).filter((d): d is string => d !== null);
-  const earned = Math.floor(Math.max(0, activeDays) / FREEZE_EARNED_PER_ACTIVE_DAYS);
-  // `max(0, ...)` because the cap can shrink the entitlement below what has already
-  // been spent if the rules are ever retuned downward. A negative budget would then
-  // read as "you owe us a freeze", which is not a thing.
-  const available = Math.max(0, Math.min(FREEZE_MAX_HELD, earned - spentDays.length));
-  return { spentDays, available, earned };
-}
-
-/** Record the days a freeze covered. Idempotent: a covered day is covered once. */
-export async function recordFreezeSpent(hiveAccount: string, days: string[]): Promise<void> {
-  const distinct = [...new Set(days.filter(Boolean))];
-  if (distinct.length === 0) return;
-  await query(
-    `INSERT INTO lumen_hive_freeze_spent (hive_account, covered_day)
-     SELECT $1, d::date FROM unnest($2::text[]) AS d
-     ON CONFLICT DO NOTHING`,
-    [hiveAccount, distinct]
-  );
-}
+// ★ THE FREEZE LEDGER IS GONE (2026-08-18, owner: "no freezes. dump that").
+//
+// `FREEZE_EARNED_PER_ACTIVE_DAYS`, `FREEZE_MAX_HELD`, `FreezeState`, `readFreezeState`
+// and `recordFreezeSpent` lived here, backed by `lumen_hive_freeze_spent` (migration
+// 0028 §4). Their whole job was to bridge missed days so a single absence did not throw
+// away a consecutive-day streak. The streak decays instead of resetting now
+// (compute-streak.ts: +1 a day present, -2 a day absent, floored at zero), so there is
+// no cliff left to bridge and the mercy has nothing to protect. The table is dropped in
+// migration 0037.
 
 /**
  * How many distinct viewer feeds this author's posts landed in — for the current window
@@ -343,51 +427,14 @@ export async function countFeedsReachedWithPrior(
   return { current: Number(r?.current ?? 0), prior: Number(r?.prior ?? 0) };
 }
 
-/**
- * ════ THE DAILY GOAL (migration 0029) ════
- *
- * Server-side because it now GATES THE STREAK. While the picker was cosmetic it lived in
- * localStorage and `daily-goal.ts` said outright that it "measures nothing". Wiring it to
- * the streak makes it load-bearing, and a load-bearing input to a deliberately
- * unforgeable number cannot be client-supplied.
- *
- * `account` is a Hive name OR a lite ULID — one key domain for both identities, the same
- * way `lumen_feed_store.viewer` already spans them.
- */
-export const DAILY_GOAL_MIN = 1;
-export const DAILY_GOAL_MAX = 20;
-/** The smallest goal, and the default. See `readDailyGoalFor`. */
-export const DAILY_GOAL_DEFAULT = 1;
-
-/**
- * The reader's committed goal, or the smallest one.
- *
- * ★ THE DEFAULT MUST BE THE SMALLEST GOAL, AND THAT IS A CORRECTNESS PROPERTY NOW, NOT A
- * KINDNESS. With the goal gating the streak, defaulting to anything above 1 would mean a
- * reader who never opened the picker could silently fail a target they never chose and
- * lose a streak to it. At 1, behaviour is identical to the pre-gating rule, so nobody's
- * existing streak changes meaning until they deliberately raise their own bar.
- */
-export async function readDailyGoalFor(account: string): Promise<number> {
-  const { rows } = await query<{ goal: number }>(
-    `SELECT goal FROM lumen_retention_goal WHERE account = $1`,
-    [account]
-  );
-  const g = rows[0]?.goal;
-  return typeof g === 'number' && g >= DAILY_GOAL_MIN && g <= DAILY_GOAL_MAX ? g : DAILY_GOAL_DEFAULT;
-}
-
-/** Set the goal. Clamped here as well as by the CHECK, so a bad caller cannot 500. */
-export async function writeDailyGoalFor(account: string, goal: number): Promise<number> {
-  const clamped = Math.max(DAILY_GOAL_MIN, Math.min(DAILY_GOAL_MAX, Math.floor(goal)));
-  await query(
-    `INSERT INTO lumen_retention_goal (account, goal)
-     VALUES ($1, $2)
-     ON CONFLICT (account) DO UPDATE SET goal = EXCLUDED.goal, updated_at = now()`,
-    [account, clamped]
-  );
-  return clamped;
-}
+// ★ THE DAILY GOAL IS GONE (2026-08-18, owner: "no setting of anyhting").
+//
+// `DAILY_GOAL_MIN/MAX/DEFAULT`, `readDailyGoalFor` and `writeDailyGoalFor` lived here,
+// backed by `lumen_retention_goal` (migration 0029 §1) and written through
+// `/api/retention/goal`. The goal decided whether TODAY counted toward the streak, which
+// is why it had to be server-held at all. The streak no longer has a per-day target: a
+// day with any authored act is +1 and a day without one is -2. The route, the API and the
+// picker are deleted; the table is dropped in migration 0037.
 
 /**
  * ════ THE RANK SNAPSHOT, FOR THE BYLINE MARK (migration 0029) ════

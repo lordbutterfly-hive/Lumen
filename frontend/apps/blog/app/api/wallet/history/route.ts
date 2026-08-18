@@ -3,6 +3,7 @@ import { getLogger } from '@ui/lib/logging';
 import { getChain } from '@transaction/lib/chain';
 import { getDynamicGlobalProperties } from '@transaction/lib/hive-api';
 import { cachedRead } from '@/blog/lib/server-read-cache';
+import { withHiveRetry } from '@smart-signer/lib/hive-network-error';
 import {
   WALLET_HISTORY_OPERATION_NAMES,
   describeHistoryOperation,
@@ -63,7 +64,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
     const payload = await cachedRead(`wallet:history:${username}:${lang}`, HISTORY_MEMO_MS, async () => {
       const chain = await getChain();
-      const opTypes = await chain.restApi['hafah-api']['operation-types']();
+      // ★ RETRY + FAILOVER on both REST reads (2026-08-18). Neither had any, and
+      // this route was measured returning a flat HTTP 502 after a 7.72s stall —
+      // no retry, no failover, the timeout surfaced straight to the reader as a
+      // broken history panel. Same wrapper the account read already uses.
+      const opTypes = await withHiveRetry(
+        () => chain.restApi['hafah-api']['operation-types'](),
+        'hafah operation-types'
+      );
       const operationTypeIds = WALLET_HISTORY_OPERATION_NAMES.map(
         (name) => opTypes.find((opType) => opType.operation_name === name)?.op_type_id
       )
@@ -71,12 +79,16 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         .join(',');
 
       const [response, dynamicGlobal] = await Promise.all([
-        chain.restApi['hivemind-api'].accountsOperations({
-          'account-name': username,
-          'page-size': HISTORY_PAGE_SIZE,
-          'operation-types': operationTypeIds,
-          'observer-name': username
-        }),
+        withHiveRetry(
+          () =>
+            chain.restApi['hivemind-api'].accountsOperations({
+              'account-name': username,
+              'page-size': HISTORY_PAGE_SIZE,
+              'operation-types': operationTypeIds,
+              'observer-name': username
+            }),
+          'hivemind accountsOperations'
+        ),
         getDynamicGlobalProperties()
       ]);
 

@@ -1,78 +1,85 @@
 // Pure streak + rolling-active-weeks derivation. Input is the set of UTC days on
 // which the account did a genuine (streak-ticking) act — derived server-side from
-// on-chain history so it can't be self-inflated. A banked freeze bridges one
-// missed day (Duolingo mercy; prevents the churn cliff).
+// on-chain history so it can't be self-inflated.
 
 /** The chain ladder's rolling window, and the default for anyone who omits it. */
 export const DEFAULT_ACTIVE_WEEKS_WINDOW = 26;
 
 /**
- * ★ THE MOST FREEZES THAT MAY EVER SIT INSIDE ONE UNBROKEN RUN.
+ * ════ THE STREAK DOES NOT RESET. IT DECAYS, TWICE AS FAST AS IT GROWS ════
  *
- * RUNTIME-PROVEN NECESSARY, not defensive (2026-08-09, @lordbutterfly through the live
- * route). The ledger's "hold at most 2" cap bounds what is AVAILABLE PER READ, and the
- * streak is recomputed on every read — so with 80 stored act-days the account had
- * earned 11 freezes, spent 2 on the first two gaps, and had 2 available again on the
- * next cache miss five minutes later. Each read would bridge two more gaps and record
- * them, so the streak grew by two every five minutes, without the account doing
- * anything. A lifetime pool behind a per-read cap is not a cap.
+ * Owner ruling, 2026-08-18: "it doesnt reset to zero if you skip one day, it just
+ * degrades twice as fast than it grows. so if it goes up by 1 for being here that
+ * day, you lose 2 if youre not."
  *
- * Bounding the RUN fixes it at the only place that knows what the run is: days already
- * covered count against the same allowance as new ones, so a run can never contain more
- * than this many missed days however many freezes the account has banked.
+ * ★ WHAT THIS REPLACES, AND WHY THE REPLACEMENT IS SIMPLER RATHER THAN CLEVERER.
  *
- * Keep this equal to the ledger's `FREEZE_MAX_HELD`
- * (lib/lite/repositories/hive-retention-repository.ts) — the ladder test asserts it.
+ * The previous model was consecutive-days-backwards-until-a-break, plus a "freeze"
+ * ledger (a Duolingo mercy) that bridged up to two missed days, plus a per-reader
+ * daily GOAL that decided whether today counted at all. Three mechanics existed to
+ * soften one cliff: a single missed day threw away months of showing up, so a mercy
+ * had to be invented, and the mercy then needed a durable ledger, a per-run cap, a
+ * spend record and an idempotency argument — every one of which shipped a bug of its
+ * own (see migration 0028 and this file's own history).
+ *
+ * A decay removes the cliff instead of padding it. Miss one day out of thirty and the
+ * number goes 30 -> 28, which is a fact the reader can absorb; there is nothing to
+ * bank, nothing to spend, nothing to invalidate, and no state beyond the day set.
+ * The freeze ledger and the goal are DELETED, not disabled.
+ *
+ * ★ TWO-TO-ONE IS THE WHOLE MECHANIC. Showing up is worth +1 and a missed day costs
+ * -2, so holding a number steady means being here two days in three; growing it means
+ * more than that. That asymmetry is what stops the score from being a slow-moving
+ * attendance average nobody can lose.
+ *
+ * ★ IT FLOORS AT ZERO AND NEVER GOES NEGATIVE. A negative streak is a punishment, and
+ * a person coming back after a long absence is the last reader this product should
+ * put in a hole they have to climb out of before anything registers.
  */
-export const MAX_FREEZES_IN_RUN = 2;
+export const STREAK_GAIN_PER_ACTIVE_DAY = 1;
+export const STREAK_LOSS_PER_MISSED_DAY = 2;
+
+/**
+ * The longest span the accumulator will walk, in days.
+ *
+ * Ten years. Not a correctness bound — the real bound is `countFromUTC`, which no
+ * caller can set earlier than the day Lumen started watching the account — but a
+ * loop over caller-supplied dates gets a hard stop regardless of what the caller
+ * believes it is passing.
+ */
+export const MAX_STREAK_WALK_DAYS = 3650;
 
 export interface StreakInputs {
   actDaysUTC: string[]; // 'YYYY-MM-DD' days with a genuine act (unordered, may dup)
   todayUTC: string; // 'YYYY-MM-DD'
-  freezeAvailable: number; // banked freezes that can each bridge one gap
   /**
-   * Days a freeze ALREADY paid for on a previous read (`lumen_hive_freeze_spent`).
+   * The day the count starts from, with the score at zero.
    *
-   * ★ A SEPARATE INPUT FROM `actDaysUTC`, AND THE DISTINCTION IS THE WHOLE MECHANIC.
-   * The first version fed spent days back in as act-days, which made the streak
-   * IDEMPOTENT but not STABLE: a bridged day then counted as a day of activity, so the
-   * same account read 4 on the request that spent the freeze and 5 on the next one.
-   * Caught by the round-trip assertion in the ladder test, not by inspection.
+   * ★ EVERYBODY STARTS AT ZERO ON THE DAY LUMEN STARTED COUNTING THEM, which is the
+   * same rule the RANK already uses (`deriveLeagueInputs.firstObservedDayUTC`, and
+   * the /ranks page says it in as many words: "days you have shown up since Lumen
+   * started counting you"). It is what makes the number EXACT rather than a floor: a
+   * decay accumulated from an unknown starting value would only ever be a lower
+   * bound, because history we never read could only have added to it.
    *
-   * A covered day bridges the gap WITHOUT incrementing the run and WITHOUT spending
-   * budget again — which is also what a freeze means everywhere else it exists: it
-   * protects the streak, it does not pretend you showed up.
+   * The caller passes the LATER of "the day we started watching" (`observedFromUTC`)
+   * and "the oldest day our day set is complete from". Omitted (or empty) means "the
+   * oldest act day we hold", which is the right default for a path that observed
+   * every day of the account's life — the Lumen-native ladder, whose accounts were
+   * created here.
    */
-  coveredDaysUTC?: string[];
+  countFromUTC?: string;
   /**
-   * Authored acts recorded TODAY, and the goal they must reach for today to count.
+   * The day Lumen started counting this account, i.e. where the score IDEALLY starts.
    *
-   * ★ THE GOAL NOW GATES THE STREAK (2026-08-09, owner instruction). Until now the
-   * picker was decorative: `computeStreak` collapsed `actDaysUTC` to a SET, so a day
-   * counted on its first act and the chosen target changed only the ring's denominator.
-   * A council seat called that out against this feature's own design doc, which had
-   * always said "the streak ticks when the goal is met, not on the first act".
+   * Only ever compared against `countFromUTC` to decide `isLowerBound`. It is a
+   * separate input rather than a boolean the caller works out for itself because the
+   * comparison is a date off-by-one, and this codebase has already shipped that exact
+   * class of bug twice (see walk-coverage.ts). One place, one rule, one test.
    *
-   * ★ ONLY TODAY IS GATED, AND THAT IS DELIBERATE. The persisted act-day store
-   * (migration 0028) records DAYS, not per-day counts, so historical days cannot be
-   * re-judged against a goal — and re-judging them would retroactively destroy streaks
-   * people already earned under the old rule, which is a far worse outcome than a
-   * mechanic that starts applying from today. This is also exactly how the mechanic
-   * behaves elsewhere: your past is settled, today's target is the one you have to meet.
-   *
-   * Omit both to keep the old any-act behaviour.
+   * Omitted means "the caller has nothing earlier to wish for", so the count is exact.
    */
-  todayActs?: number;
-  dailyGoal?: number;
-  /**
-   * The most missed days that may sit inside this run, counting both already-covered
-   * days and newly bridged ones. Defaults to MAX_FREEZES_IN_RUN.
-   *
-   * This is the bound that makes the mercy finite. `freezeAvailable` alone cannot:
-   * it is spent and then replenished from a lifetime pool on the next read, which
-   * grows the streak forever (see MAX_FREEZES_IN_RUN for the runtime proof).
-   */
-  maxFreezesInRun?: number;
+  observedFromUTC?: string;
   /**
    * How many trailing weeks `activeWeeks` counts over. Defaults to the chain
    * ladder's 26.
@@ -83,106 +90,65 @@ export interface StreakInputs {
    * 60-day window and reports M = 9, while this function was hardcoded to 26 —
    * so an account with acts older than nine weeks would have produced
    * "active 12 of the last 9 weeks", a sentence that is false on its face.
-   * Not reachable while the platform is two days old; guaranteed reachable in
-   * ten weeks. One window, passed in, so N and M cannot disagree.
+   * One window, passed in, so N and M cannot disagree.
    */
   windowWeeks?: number;
 }
 
 export interface StreakResult {
+  /**
+   * The streak: +1 per day present, -2 per day missed, floored at zero.
+   *
+   * Still called `streakDays` on the wire and in every consumer. It is measured in
+   * days and it is the same quantity a consecutive-day streak was measured in — a
+   * rename would have touched every surface to say the same thing.
+   */
   streakDays: number;
   activeWeeks: number; // distinct ISO weeks in the trailing window with >= 1 act
+  /** The day the accumulation actually started from, 'YYYY-MM-DD'. */
+  countedFromUTC: string;
   /**
-   * The day the streak BROKE — the first day going backwards with no act, in
-   * 'YYYY-MM-DD'. `''` when nothing broke it inside the guard (i.e. the day set
-   * runs unbroken as far back as this function looked).
+   * The count started LATER than the day the account was first observed, so days
+   * before it were never read and could only have added to the score.
    *
-   * ★ WHY A CALLER NEEDS THIS AND CANNOT DERIVE IT. `streakDays` is only a
-   * MEASUREMENT if the day set is COMPLETE back past the break. The chain caller
-   * builds `actDaysUTC` from feed walks that stop on a 20-second wall-clock
-   * budget, so its day set is a newest-first PREFIX of history — and a break that
-   * falls in the part that was never walked is not a break, it is a hole in the
-   * data. Comparing this date against how far the walk actually got is the only
-   * way to tell "your streak is 32 days" from "your streak is AT LEAST 32 days".
-   * Without it a caller has to either guess, or mark every capped walk inexact —
-   * and the second option understates short streaks that are provably complete.
+   * ★ THE FLOOR IS REAL AND IT IS ONE-DIRECTIONAL. Clamping at zero makes the
+   * accumulation monotone in its starting value, so computing from zero can only
+   * ever UNDERSTATE. A caller that starts at the first observed day is exact; one
+   * that had to start later (a walk that never reached back that far) is publishing
+   * a floor and must say so — the same rule `activeWeeksIsLowerBound` already
+   * follows.
    */
-  streakBrokeOnUTC: string;
-  /**
-   * The missed days a banked freeze bridged on THIS run, newest first.
-   *
-   * The caller persists them (`lumen_hive_freeze_spent`, migration 0028) and feeds
-   * them back in as covered days on the next call. Without that the mercy is not
-   * durable: the streak is recomputed from scratch on every read, so a freeze
-   * accounted for as a bare counter would break the streak the moment the budget ran
-   * out — the exact churn cliff the mechanic exists to prevent.
-   */
-  freezesUsedOn: string[];
+  isLowerBound: boolean;
 }
 
 export function computeStreak(inp: StreakInputs): StreakResult {
-  const days = new Set(inp.actDaysUTC);
-  const covered = new Set(inp.coveredDaysUTC ?? []);
-  let streak = 0;
-  let freezes = Math.max(0, inp.freezeAvailable);
-  const maxInRun = Number.isFinite(inp.maxFreezesInRun as number)
-    ? Math.max(0, Math.floor(inp.maxFreezesInRun as number))
-    : MAX_FREEZES_IN_RUN;
-  /** Missed days bridged inside this run, already-covered ones included. */
-  let bridged = 0;
+  const days = new Set(inp.actDaysUTC.filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)));
+  const today = parse(inp.todayUTC);
 
-  // ★ TODAY ONLY COUNTS ONCE THE GOAL IS MET. With a goal of 1 (the default) this is
-  // identical to the old rule, so nobody's existing streak changes meaning until they
-  // raise their own bar. Above 1, a partial day behaves exactly like a day with no act
-  // yet: the run is counted as ending yesterday and is NOT broken mid-day.
-  const goal = Math.max(1, Math.floor(inp.dailyGoal ?? 1));
-  // ★ THE DAY SET AND THE COUNT CAN DISAGREE, AND THE DAY SET WINS ON "AT LEAST ONE".
-  //
-  // `actDaysUTC` is the MERGED history (stored + this request's walk) while `todayActs`
-  // comes from THIS request's walk alone. So an incremental walk that missed today's post
-  // — or a stored day written by an earlier visit — produces `todayActs: 0` for a day the
-  // set knows about. Read literally that withholds a day the reader genuinely earned, and
-  // at goal 1 it made the gated path disagree with the ungated one, which my own test
-  // caught. If the set contains today, that is at least one act.
-  const actsToday = Math.max(inp.todayActs ?? 0, days.has(inp.todayUTC) ? 1 : 0);
-  const todayMetGoal = inp.todayActs === undefined ? true : actsToday >= goal;
+  // Where the count begins. `countFromUTC` when the caller supplied one, else the
+  // oldest act day we hold — which for the Lumen-native path IS the first observed
+  // day, because Lumen created the account.
+  const oldestAct = [...days].sort()[0] ?? inp.todayUTC;
+  const requested = inp.countFromUTC && /^\d{4}-\d{2}-\d{2}$/.test(inp.countFromUTC) ? inp.countFromUTC : oldestAct;
+  // Never start after today, and never start before the loop guard reaches.
+  const guardFloor = fmt(addDays(today, -MAX_STREAK_WALK_DAYS));
+  const start = requested > inp.todayUTC ? inp.todayUTC : requested < guardFloor ? guardFloor : requested;
 
-  // If today has no act *yet* — or has some but not enough — don't break mid-day; count
-  // the run ending yesterday.
-  let cursor = parse(inp.todayUTC);
-  if (!days.has(fmt(cursor)) || !todayMetGoal) cursor = addDays(cursor, -1);
-
-  let brokeOn = '';
-  const freezesUsedOn: string[] = [];
-  for (let guard = 0; guard < 3650; guard++) {
+  let score = 0;
+  let cursor = parse(start);
+  for (let guard = 0; guard <= MAX_STREAK_WALK_DAYS; guard++) {
     const key = fmt(cursor);
     if (days.has(key)) {
-      streak++;
-    } else if (bridged >= maxInRun) {
-      // The run has already used all the mercy a run may contain. This branch comes
-      // BEFORE the covered/freeze checks on purpose: an already-covered day beyond the
-      // cap must break the run too, or a long-lived account walks backwards through
-      // history on freezes it banked years ago.
-      brokeOn = key;
-      break;
-    } else if (covered.has(key)) {
-      // Already paid for. Step over it: no increment (nothing happened that day) and
-      // no second charge against the earned budget — but it does count against the
-      // run's allowance.
-      bridged++;
-    } else if (freezes > 0) {
-      freezes--; // a banked freeze bridges one missed day
-      bridged++;
-      // ★ WHICH day it bridged, not just how many. The caller PERSISTS these so the
-      // same gap is not re-paid on the next read — the streak is recomputed from
-      // scratch every time, so a freeze that only decremented a counter would let the
-      // streak break the moment the budget ran out, undoing mercy already granted.
-      freezesUsedOn.push(key);
-    } else {
-      brokeOn = key;
-      break;
+      score += STREAK_GAIN_PER_ACTIVE_DAY;
+    } else if (key !== inp.todayUTC) {
+      // ★ TODAY IS NEVER CHARGED. The day is not over: a reader opening the app at
+      // 09:00 UTC has not missed it, and docking them for a day still in progress
+      // would show a number that goes back up later in the same session. A missed
+      // today is charged tomorrow, by the same rule as every other day.
+      score = Math.max(0, score - STREAK_LOSS_PER_MISSED_DAY);
     }
-    cursor = addDays(cursor, -1);
+    if (key === inp.todayUTC) break;
+    cursor = addDays(cursor, 1);
   }
 
   const windowWeeks =
@@ -205,9 +171,9 @@ export function computeStreak(inp: StreakInputs): StreakResult {
   // is an exact integer with no year-boundary special case. Exactly `windowWeeks`
   // buckets are in range, therefore `activeWeeks <= windowWeeks` ALWAYS, which is
   // the invariant the printed sentence depends on.
-  const todayThu = isoWeekThursdayMs(parse(inp.todayUTC));
+  const todayThu = isoWeekThursdayMs(today);
   const weeks = new Set<string>();
-  for (const d of inp.actDaysUTC) {
+  for (const d of days) {
     const dt = parse(d);
     if (Number.isNaN(dt.getTime())) continue;
     const weeksAgo = Math.round((todayThu - isoWeekThursdayMs(dt)) / (7 * 86_400_000));
@@ -216,7 +182,16 @@ export function computeStreak(inp: StreakInputs): StreakResult {
     if (weeksAgo < windowWeeks) weeks.add(isoWeek(dt));
   }
 
-  return { streakDays: streak, activeWeeks: weeks.size, streakBrokeOnUTC: brokeOn, freezesUsedOn };
+  return {
+    streakDays: score,
+    activeWeeks: weeks.size,
+    countedFromUTC: start,
+    // Exact when we began at or before the day the account was first observed;
+    // a floor whenever the walk forced a later start. Compared against `start` (the
+    // day actually used) rather than against what was requested, so the ten-year
+    // guard clamp is caught by the same test instead of hiding behind it.
+    isLowerBound: Boolean(inp.observedFromUTC) && start > (inp.observedFromUTC as string)
+  };
 }
 
 function parse(d: string): Date {

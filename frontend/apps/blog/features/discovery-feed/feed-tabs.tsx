@@ -748,6 +748,7 @@ function ForYouFeed() {
         loadedCount={shown.length}
         loadingLabel={LABELS.loadingMore}
         endLabel={shown.length > 0 ? 'That’s everything for now.' : undefined}
+        endIllustration
         testId="for-you-pager"
       />
     </div>
@@ -973,6 +974,7 @@ function EntryFeed({ sort, observer, lite = false }: { sort: string; observer: s
         loadedCount={shown.length}
         loadingLabel={LABELS.loadingMore}
         endLabel={shown.length > 0 ? LABELS.nothingMore : undefined}
+        endIllustration
         testId="entry-feed-pager"
       />
     </div>

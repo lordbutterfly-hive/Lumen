@@ -60,11 +60,24 @@ import {
   creditedGivers,
   type VoteLike
 } from '../credited-givers';
-import { computeStreak, DEFAULT_ACTIVE_WEEKS_WINDOW, MAX_FREEZES_IN_RUN } from '../compute-streak';
-// Cross-lane on purpose: the run cap and the ledger's hold cap must be the same
-// number, or one of them is decoration.
-import { FREEZE_MAX_HELD } from '@/blog/lib/lite/repositories/hive-retention-repository';
-import { MIN_ACTS_FOR_PATTERN, busiestWeekday, longestRun } from '../act-stats';
+import {
+  computeStreak,
+  DEFAULT_ACTIVE_WEEKS_WINDOW,
+  STREAK_GAIN_PER_ACTIVE_DAY,
+  STREAK_LOSS_PER_MISSED_DAY
+} from '../compute-streak';
+import {
+  MIN_ACTS_FOR_PATTERN,
+  MIN_WORDS_TO_MENTION,
+  WORDS_PER_PAGE,
+  WORD_WINDOW_ORDER,
+  busiestWeekday,
+  countWords,
+  longestRun,
+  pagesFromWords,
+  pickWordWindow,
+  windowIsFloor
+} from '../act-stats';
 import {
   engagementCounts,
   engagementExcludedList,
@@ -88,9 +101,12 @@ import {
 // erases at compile time and pulls in nothing at runtime.
 import { computeLiteRetention } from '@/blog/lib/lite/retention/compute';
 import type { RetentionFacts } from '@/blog/lib/lite/retention/facts-query';
-import { daySetCompleteFrom, isStreakLowerBound } from '../walk-coverage';
-import { reachTrend, todayHeadline } from '../copy-select';
-import { localDeadlineLabel, nextUtcMidnightMs } from '../deadline';
+import { daySetCompleteFrom } from '../walk-coverage';
+// Cross-lane on purpose: a stored DATE must survive the process timezone, and that
+// conversion is the only thing standing between the ladder and a day-shifted day set.
+// The pg pool is lazily constructed, so importing this opens no connection.
+import { toDayString } from '@/blog/lib/lite/repositories/hive-retention-repository';
+import { reachTrend } from '../copy-select';
 import { MIN_DRAWN_PCT } from '../../components/rank-scale';
 import { MAX_TIER_INDEX, TIERS, TIER_ORDER, TOTAL_RANKS, hasMark, nextTier, rankNumber, tierAtRank } from '../tiers';
 
@@ -489,38 +505,147 @@ section('8. the one gate meter');
   }
 }
 
-section('9. streak break day');
+/** `base` plus `n` days, as 'YYYY-MM-DD'. */
+function dayFrom(base: string, n: number): string {
+  return new Date(Date.parse(`${base}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+}
 
+section('9. the streak decays, it does not reset');
+
+// ★ THE MODEL, RESTATED AS ARITHMETIC (2026-08-18). +1 for a day with an authored act,
+// -2 for a day without one, floored at zero, accumulated FORWARD from the day Lumen
+// started counting the account. Nothing here is a run of consecutive days any more, and
+// the sections this replaces (a break day, freeze durability, the goal gate) are deleted
+// along with the mechanics they guarded.
 const days = (...d: string[]) => d;
+const streak = (actDays: string[], todayUTC: string, countFromUTC?: string, observedFromUTC?: string) =>
+  computeStreak({ actDaysUTC: actDays, todayUTC, countFromUTC, observedFromUTC });
+
+check('the two rates are the ones the copy promises', STREAK_GAIN_PER_ACTIVE_DAY === 1 && STREAK_LOSS_PER_MISSED_DAY === 2);
+
 {
-  const r = computeStreak({ actDaysUTC: days('2026-08-08', '2026-08-07', '2026-08-06'), todayUTC: '2026-08-08', freezeAvailable: 0 });
-  check('a 3-day streak reports the day it broke', r.streakDays === 3 && r.streakBrokeOnUTC === '2026-08-05', `${r.streakDays} / ${r.streakBrokeOnUTC}`);
+  const r = streak(days('2026-08-06', '2026-08-07', '2026-08-08'), '2026-08-08', '2026-08-06');
+  check('three days in a row is 3', r.streakDays === 3, `${r.streakDays}`);
 }
 {
-  const r = computeStreak({ actDaysUTC: days('2026-08-07'), todayUTC: '2026-08-08', freezeAvailable: 0 });
-  check('today with no act yet does not break the run', r.streakDays === 1 && r.streakBrokeOnUTC === '2026-08-06');
+  // The headline property: ONE missed day costs two, not everything.
+  const r = streak(days('2026-08-01', '2026-08-02', '2026-08-03', '2026-08-05'), '2026-08-05', '2026-08-01');
+  check('one missed day inside a run costs exactly 2', r.streakDays === 2, `${r.streakDays}`);
 }
 {
-  const r = computeStreak({ actDaysUTC: [], todayUTC: '2026-08-08', freezeAvailable: 0 });
-  check('an empty day set is a zero streak that broke yesterday', r.streakDays === 0 && r.streakBrokeOnUTC === '2026-08-07');
+  // The same set under the OLD rule would have been 1 (the run restarts at 08-05).
+  const r = streak(days('2026-08-01', '2026-08-02', '2026-08-03', '2026-08-05'), '2026-08-05', '2026-08-01');
+  check('and it is NOT the old reset-to-1 behaviour', r.streakDays !== 1, `${r.streakDays}`);
 }
 {
-  // The property the route relies on: the break day is always exactly one day before
-  // the oldest day counted, so a caller can compare it to its coverage.
-  let ok = true;
-  for (let len = 1; len <= 40; len++) {
+  const r = streak(days('2026-08-07'), '2026-08-08', '2026-08-07');
+  check('today with no act yet is not charged — the day is not over', r.streakDays === 1, `${r.streakDays}`);
+}
+{
+  const r = streak(days('2026-08-07'), '2026-08-09', '2026-08-07');
+  check('...but it IS charged once it is yesterday', r.streakDays === 0, `${r.streakDays}`);
+}
+{
+  const r = streak([], '2026-08-08', '2026-08-01');
+  check('an empty day set floors at zero, never negative', r.streakDays === 0, `${r.streakDays}`);
+}
+{
+  // 10 days present then 20 absent: 10 - 40 would be -30 without the floor.
+  const present: string[] = [];
+  for (let i = 0; i < 10; i++) present.push(dayFrom('2026-06-01', i));
+  const r = streak(present, dayFrom('2026-06-01', 29), '2026-06-01');
+  check('a long absence floors at zero rather than going negative', r.streakDays === 0, `${r.streakDays}`);
+}
+{
+  // ★ TWO IN THREE IS BREAK-EVEN, WHICH IS THE CLAIM THE COPY MAKES ("holding a number
+  // steady means being here about two days in three"). Break-even means it does not
+  // ACCUMULATE, not that it reads zero — inside each cycle it rises to 2 and falls back,
+  // so the value at any instant depends on the phase. Asserting a fixed number would be
+  // asserting the phase; asserting that thirty days and ninety days give the SAME answer
+  // is asserting the property.
+  const cadence = (n: number) => {
     const set: string[] = [];
-    for (let i = 0; i < len; i++) set.push(new Date(Date.UTC(2026, 7, 8) - i * 86_400_000).toISOString().slice(0, 10));
-    const r = computeStreak({ actDaysUTC: set, todayUTC: '2026-08-08', freezeAvailable: 0 });
-    const expected = new Date(Date.UTC(2026, 7, 8) - len * 86_400_000).toISOString().slice(0, 10);
-    if (r.streakDays !== len || r.streakBrokeOnUTC !== expected) ok = false;
-  }
-  check('break day === (oldest counted day - 1) for every streak length', ok);
+    for (let i = 0; i < n; i++) if (i % 3 !== 2) set.push(dayFrom('2026-06-01', i));
+    return streak(set, dayFrom('2026-06-01', n - 1), '2026-06-01').streakDays;
+  };
+  check('two days in three does not accumulate', cadence(30) === cadence(90) && cadence(90) === cadence(300), `${cadence(30)} / ${cadence(90)} / ${cadence(300)}`);
+  check('...and it stays inside one cycle of the rates', cadence(300) <= STREAK_LOSS_PER_MISSED_DAY, `${cadence(300)}`);
 }
-check('adding the field did not change streakDays', (() => {
-  const set = ['2026-08-08', '2026-08-07', '2026-08-05'];
-  return computeStreak({ actDaysUTC: set, todayUTC: '2026-08-08', freezeAvailable: 0 }).streakDays === 2;
-})());
+{
+  // Three-in-four grows it: +1 +1 +1 -2 = +1 per 4 days.
+  const set: string[] = [];
+  for (let i = 0; i < 40; i++) if (i % 4 !== 3) set.push(dayFrom('2026-06-01', i));
+  const r = streak(set, dayFrom('2026-06-01', 39), '2026-06-01');
+  check('three days in four grows it', r.streakDays >= 9, `${r.streakDays}`);
+}
+{
+  // A daily poster gains exactly one a day.
+  const set: string[] = [];
+  for (let i = 0; i < 50; i++) set.push(dayFrom('2026-06-01', i));
+  const r = streak(set, dayFrom('2026-06-01', 49), '2026-06-01');
+  check('a daily poster gains exactly one a day', r.streakDays === 50, `${r.streakDays}`);
+}
+{
+  // ★ THE ONE-DIRECTIONAL FLOOR. Clamping at zero makes the accumulation monotone in its
+  // starting value, so starting LATER than the truth can only ever UNDERSTATE — which is
+  // what licenses `isLowerBound` and the "N+" render. Proven by construction rather than
+  // asserted: start the same day set at every possible day and check the answer never
+  // exceeds the one computed from the true beginning.
+  const set: string[] = [];
+  for (let i = 0; i < 30; i++) if (i % 3 !== 2) set.push(dayFrom('2026-06-01', i));
+  const today = dayFrom('2026-06-01', 29);
+  const truth = streak(set, today, '2026-06-01').streakDays;
+  let overstated = 0;
+  for (let i = 1; i < 30; i++) {
+    if (streak(set, today, dayFrom('2026-06-01', i)).streakDays > truth) overstated++;
+  }
+  check('a later start can only UNDERSTATE, never overstate', overstated === 0, `${overstated} overstatements`);
+}
+{
+  const exact = streak(days('2026-08-08'), '2026-08-08', '2026-08-01', '2026-08-01');
+  check('starting where we began watching is exact', exact.isLowerBound === false);
+  const floored = streak(days('2026-08-08'), '2026-08-08', '2026-08-05', '2026-08-01');
+  check('starting later than we began watching is a FLOOR', floored.isLowerBound === true);
+  check('and it reports which day it actually counted from', floored.countedFromUTC === '2026-08-05', floored.countedFromUTC);
+}
+{
+  // No `countFromUTC`: the oldest act day is the start, which is what the lite path
+  // relies on (Lumen observed every day of the account's life).
+  const r = streak(days('2026-08-05', '2026-08-06', '2026-08-07', '2026-08-08'), '2026-08-08');
+  check('with no start day it counts from the oldest act day', r.streakDays === 4 && r.countedFromUTC === '2026-08-05', `${r.streakDays} from ${r.countedFromUTC}`);
+  check('and with no observed day it is never a floor', r.isLowerBound === false);
+}
+{
+  // ★★★ THE FAIL-CLOSED CASE, WHICH IS THE ONE THAT SHIPS A BUG IF IT IS WRONG.
+  //
+  // On an account's FIRST-EVER view the walk cursor does not exist yet (the route reads it
+  // before the walk that creates it), so the route has no "day we started watching". If it
+  // let the accumulation start at the oldest ACT DAY instead, a daily poster with 26 weeks
+  // of imported Hive history would be shown a ~180-day streak on request one and ~1 on
+  // request two — the same shape as the bug that put three real accounts on rank 8 of 9
+  // before they had done anything on Lumen, and worse, because a number that collapses
+  // reads as the product taking something away.
+  //
+  // The route substitutes `todayUTC`, which is exactly what the cursor it is about to
+  // write will say. This asserts the DIFFERENCE the substitution makes, so removing it
+  // fails here rather than on somebody's first profile view.
+  const history: string[] = [];
+  for (let i = 0; i < 180; i++) history.push(dayFrom('2026-02-19', i));
+  const today = dayFrom('2026-02-19', 179);
+  const failOpen = computeStreak({ actDaysUTC: history, todayUTC: today }).streakDays;
+  const failClosed = streak(history, today, today, today);
+  check('a full imported history WOULD produce a huge streak if started from its oldest day', failOpen >= 179, `${failOpen}`);
+  check('starting from today instead gives the day-one answer', failClosed.streakDays === 1, `${failClosed.streakDays}`);
+  check('and the day-one answer is not a floor — today is where counting really began', failClosed.isLowerBound === false);
+}
+{
+  // Idempotence: the same inputs give the same answer however many times it is called.
+  // The old model needed a freeze ledger to achieve this and got it wrong twice.
+  const set = days('2026-08-01', '2026-08-02', '2026-08-04', '2026-08-08');
+  const first = streak(set, '2026-08-08', '2026-08-01');
+  const second = streak(set, '2026-08-08', '2026-08-01');
+  check('recomputing from scratch gives the same number', first.streakDays === second.streakDays);
+}
 
 // ─── 10. walk coverage — when is streakDays a measurement? ─────────────────
 section('10. walk coverage');
@@ -541,29 +666,14 @@ check(
 );
 check('an UNcapped walk that read nothing contributes no boundary', daySetCompleteFrom([full('')], TODAY) === '');
 
-check('no boundary => the streak is exact', !isStreakLowerBound('2026-07-07', ''));
-check('a break INSIDE the covered part is observed => exact', !isStreakLowerBound('2026-07-20', '2026-07-13'));
-check('a break exactly AT the boundary is still observed => exact', !isStreakLowerBound('2026-07-13', '2026-07-13'));
-check('a break OLDER than the boundary is unverified => lower bound', isStreakLowerBound('2026-07-07', '2026-07-13'));
-check('no break found at all => lower bound', isStreakLowerBound('', '2026-07-13'));
+// ★ `isStreakLowerBound` IS DELETED (2026-08-18) AND SO ARE ITS CHECKS. It answered
+// "did the streak's BREAK DAY fall inside the part of history we read", which was the
+// right question for a consecutive-day run and is not a question the decay has: there is
+// no break day. The floor is now decided by `computeStreak` itself (does the count start
+// where Lumen started watching?) and is asserted in section 9. `daySetCompleteFrom`
+// survives unchanged — it still tells the route where the merged day set is complete
+// from, which is exactly the input that decides the streak's start day.
 
-// ★ THE LIVE CASES, captured from the shipped route on 2026-08-08.
-{
-  const b = daySetCompleteFrom([full('2026-01-07'), cut('2026-07-13')], TODAY);
-  check('@acidyo live: 32-day streak on a capped walk is a LOWER BOUND', isStreakLowerBound('2026-07-07', b), `boundary ${b}`);
-}
-{
-  const b = daySetCompleteFrom([cut('2026-02-04'), cut('2026-03-22')], TODAY);
-  check('@taskmaster4450 live: a break at today is observed even on a capped walk', !isStreakLowerBound('2026-08-07', b), `boundary ${b}`);
-}
-{
-  const b = daySetCompleteFrom([full('2023-10-09'), full('2026-01-30')], TODAY);
-  check('@gtg live: an uncapped walk publishes an exact streak', !isStreakLowerBound('2026-08-07', b) && b === '');
-}
-check(
-  'the rule is NOT just "capped" reused — a short provable streak stays exact',
-  !isStreakLowerBound('2026-08-05', daySetCompleteFrom([cut('2026-01-01')], TODAY))
-);
 // ★ THE STORE'S CONTRIBUTION, as arithmetic on the same boundary. A walk truncated at
 // 2026-07-13 is inside a 26-week window; the same account on a later visit, with the
 // store reaching 2025-01-01, is not. That difference is the whole point of migration
@@ -593,7 +703,7 @@ for (let offset = 0; offset < 371; offset++) {
   const todayUTC = dayAt(Date.parse('2026-01-01T00:00:00Z') + offset * 86_400_000);
   const actDaysUTC = dailyBack(todayUTC, 400);
   for (const windowWeeks of WINDOWS) {
-    const r = computeStreak({ actDaysUTC, todayUTC, freezeAvailable: 0, windowWeeks });
+    const r = computeStreak({ actDaysUTC, todayUTC, windowWeeks });
     if (r.activeWeeks > windowWeeks) weekWindowViolations++;
     if (r.activeWeeks === windowWeeks) weekWindowSaturated++;
     const cutoffMs = Date.parse(`${todayUTC}T00:00:00Z`) - windowWeeks * 7 * 86_400_000;
@@ -631,17 +741,16 @@ check(
 );
 {
   const sparse = ['2026-08-08', '2026-08-07', '2026-06-01', '2025-12-25'];
-  const base = computeStreak({ actDaysUTC: sparse, todayUTC: '2026-08-08', freezeAvailable: 0 });
+  const base = computeStreak({ actDaysUTC: sparse, todayUTC: '2026-08-08', countFromUTC: '2026-08-07' });
   check('windowWeeks does not disturb streakDays', base.streakDays === 2, `${base.streakDays}`);
   check('an act 7 months back is outside the 26-week window', base.activeWeeks === 2, `${base.activeWeeks}`);
   for (const bad of [0, -3, NaN]) {
-    const r = computeStreak({ actDaysUTC: sparse, todayUTC: '2026-08-08', freezeAvailable: 0, windowWeeks: bad });
+    const r = computeStreak({ actDaysUTC: sparse, todayUTC: '2026-08-08', countFromUTC: '2026-08-07', windowWeeks: bad });
     check(`a nonsense windowWeeks (${String(bad)}) falls back to the default`, r.activeWeeks === base.activeWeeks);
   }
   const future = computeStreak({
     actDaysUTC: ['2026-09-30', '2026-08-08'],
     todayUTC: '2026-08-08',
-    freezeAvailable: 0,
     windowWeeks: LITE_PRESENCE_WINDOW_WEEKS
   });
   check('a future-dated act still counts', future.activeWeeks === 2, `${future.activeWeeks}`);
@@ -707,6 +816,8 @@ section('11b. the lite activity arm reads the activity window, not the presence 
     actDaysUTC: [],
     activeDaysInWindow,
     activeDaysInActivityWindow,
+    wordsWritten: { day: 0, week: 0, month: 0, year: 0, all: 0 },
+    wordsCapped: false,
     vouchedGivers: 0,
     unknownGivers: 0,
     giversCapped: false,
@@ -737,142 +848,26 @@ section('11b. the lite activity arm reads the activity window, not the presence 
   );
 }
 
-// ─── 12. freeze durability ─────────────────────────────────────────────────
+// ════ SECTIONS 12 AND 12b ARE DELETED WITH THE MECHANICS THEY GUARDED (2026-08-18) ════
 //
-// ★ THE PROPERTY THAT MAKES THE MERCY REAL. The streak is recomputed from scratch on
-// every read. A freeze accounted for as a bare COUNTER would bridge a gap on the read
-// that spent it and then let the streak break on the next one, undoing mercy already
-// granted — the exact churn cliff the mechanic exists to prevent. So `freezesUsedOn`
-// reports the DAYS, the caller persists them, and they come back as covered days.
-section('12. freeze durability');
-
-{
-  // Gap at 08-06. One freeze bridges it.
-  const set = ['2026-08-08', '2026-08-07', '2026-08-05', '2026-08-04'];
-  const noMercy = computeStreak({ actDaysUTC: set, todayUTC: '2026-08-08', freezeAvailable: 0 });
-  check('without a freeze the streak stops at the gap', noMercy.streakDays === 2, `${noMercy.streakDays}`);
-  check('no freeze spent when none available', noMercy.freezesUsedOn.length === 0);
-
-  const first = computeStreak({ actDaysUTC: set, todayUTC: '2026-08-08', freezeAvailable: 1 });
-  check('one freeze bridges the gap', first.streakDays === 4, `${first.streakDays}`);
-  check('it reports WHICH day it bridged', first.freezesUsedOn.join(',') === '2026-08-06', first.freezesUsedOn.join(','));
-
-  // The round trip: spent days fed back as COVERED, budget now 0.
-  const later = computeStreak({
-    actDaysUTC: set,
-    coveredDaysUTC: first.freezesUsedOn,
-    todayUTC: '2026-08-08',
-    freezeAvailable: 0
-  });
-  check('the bridged day STAYS bridged on the next read', later.streakDays === 4, `${later.streakDays}`);
-  check('and no further freeze is spent re-paying it', later.freezesUsedOn.length === 0);
-
-  // MUTATION 1: counter-only accounting — the streak collapses when the budget runs out.
-  check(
-    'MUTATION: counter-only accounting loses the streak on the next read',
-    computeStreak({ actDaysUTC: set, todayUTC: '2026-08-08', freezeAvailable: 0 }).streakDays < first.streakDays
-  );
-  // ★ MUTATION 2: feeding covered days in as ACT days. This was the first
-  // implementation and it is why `coveredDaysUTC` exists — the streak stayed bridged
-  // but INFLATED, reading 4 then 5 for an account that did nothing in between.
-  check(
-    'MUTATION: covered days passed as act days inflate the streak',
-    computeStreak({ actDaysUTC: [...set, ...first.freezesUsedOn], todayUTC: '2026-08-08', freezeAvailable: 0 }).streakDays ===
-      later.streakDays + 1
-  );
-  // And the mercy must be STABLE, not merely durable: repeated reads agree.
-  const again = computeStreak({
-    actDaysUTC: set,
-    coveredDaysUTC: first.freezesUsedOn,
-    todayUTC: '2026-08-08',
-    freezeAvailable: 0
-  });
-  check('repeated reads report the same streak', again.streakDays === later.streakDays);
-}
-{
-  // Two gaps, one freeze: bridge the nearest and stop at the second.
-  const set = ['2026-08-08', '2026-08-06', '2026-08-04'];
-  const r = computeStreak({ actDaysUTC: set, todayUTC: '2026-08-08', freezeAvailable: 1 });
-  check('one freeze bridges one gap only', r.streakDays === 2 && r.freezesUsedOn.length === 1, `${r.streakDays} / ${r.freezesUsedOn.length}`);
-  const two = computeStreak({ actDaysUTC: set, todayUTC: '2026-08-08', freezeAvailable: 2 });
-  check('two freezes bridge two gaps', two.streakDays === 3 && two.freezesUsedOn.length === 2, `${two.streakDays}`);
-}
-
-// ★★ THE RUN CAP — RUNTIME-PROVEN NECESSARY, NOT DEFENSIVE.
+// §12 was FREEZE DURABILITY: ~25 checks proving that a banked "freeze" bridged a missed
+// day, that it recorded WHICH day so a recompute could not re-charge it, that a lifetime
+// pool behind a per-read cap grew the streak by two every five minutes until the cap was
+// moved onto the RUN, and that `MAX_FREEZES_IN_RUN` equalled the ledger's hold cap.
+// §12b was THE GOAL GATE: today counted only once the reader's chosen acts-per-day target
+// was met, with the default of 1 asserted to reproduce the old behaviour exactly.
 //
-// Driven live on 2026-08-09 through the route: @lordbutterfly had 80 stored act-days,
-// so 11 earned freezes; the ledger's "hold at most 2" let 2 be spent, and then 2 were
-// available AGAIN on the next cache miss. The streak grew by two every five minutes
-// while the account did nothing. A lifetime pool behind a per-read cap is not a cap.
-{
-  // A run riddled with gaps and a huge budget. Only MAX_FREEZES_IN_RUN may be bridged.
-  const gappy = ['2026-08-08', '2026-08-06', '2026-08-04', '2026-08-02', '2026-07-31'];
-  const greedy = computeStreak({ actDaysUTC: gappy, todayUTC: '2026-08-08', freezeAvailable: 99 });
-  check(
-    'a huge budget still bridges at most MAX_FREEZES_IN_RUN gaps',
-    greedy.freezesUsedOn.length === MAX_FREEZES_IN_RUN,
-    `${greedy.freezesUsedOn.length}`
-  );
-  check('so the run is bounded', greedy.streakDays === 3, `${greedy.streakDays}`);
-
-  // ★ THE ACTUAL RUNAWAY: covered days must count against the SAME allowance, or each
-  // read spends a fresh budget on the next gap and the streak grows forever.
-  let coveredSoFar: string[] = [];
-  let last = 0;
-  for (let read = 0; read < 6; read++) {
-    const r = computeStreak({
-      actDaysUTC: gappy,
-      coveredDaysUTC: coveredSoFar,
-      todayUTC: '2026-08-08',
-      freezeAvailable: MAX_FREEZES_IN_RUN
-    });
-    coveredSoFar = [...new Set([...coveredSoFar, ...r.freezesUsedOn])];
-    if (read > 0 && r.streakDays !== last) {
-      check('MUTATION GUARD: repeated reads must not grow the streak', false, `read ${read}: ${last} → ${r.streakDays}`);
-    }
-    last = r.streakDays;
-  }
-  check('six repeated reads leave the streak unchanged', last === 3, `${last}`);
-  check('and stop spending freezes', coveredSoFar.length === MAX_FREEZES_IN_RUN, `${coveredSoFar.length} spent`);
-  // The ledger constant and the run cap must agree, or one of them is decoration.
-  check('MAX_FREEZES_IN_RUN === the ledger hold cap', MAX_FREEZES_IN_RUN === FREEZE_MAX_HELD, `${MAX_FREEZES_IN_RUN} vs ${FREEZE_MAX_HELD}`);
-}
-
-// ─── 12b. the daily goal gates the streak ──────────────────────────────────
+// Every one of those checks passed, and two of them encode bugs that were runtime-proven
+// on a live account. They are deleted because their subjects are: the streak decays now
+// (+1 present, -2 absent, floored at zero), so there is no cliff to grant mercy against
+// and no per-day target to meet. `readFreezeState`, `recordFreezeSpent`, the goal route
+// and both Postgres tables are gone (migration 0037).
 //
-// ★ THE PICKER WAS DECORATIVE UNTIL 2026-08-09. `computeStreak` collapsed act-days to a
-// SET, so a day counted on its first act and the chosen target changed only the ring's
-// denominator — which a council seat caught against this feature's own design doc. Now
-// today counts only once the goal is met.
-section('12b. the daily goal gates the streak');
-
-{
-  const days = ['2026-08-09', '2026-08-08', '2026-08-07'];
-  const base = { actDaysUTC: days, todayUTC: '2026-08-09', freezeAvailable: 0 };
-  const run = (o: Partial<typeof base> & { todayActs?: number; dailyGoal?: number }) =>
-    computeStreak({ ...base, ...o });
-
-  check('goal 1 with one act: today counts', run({ todayActs: 1, dailyGoal: 1 }).streakDays === 3);
-  check('goal 4 with one act: today is withheld', run({ todayActs: 1, dailyGoal: 4 }).streakDays === 2);
-  check('goal 4 with three acts: still withheld', run({ todayActs: 3, dailyGoal: 4 }).streakDays === 2);
-  check('goal 4 with four acts: today counts', run({ todayActs: 4, dailyGoal: 4 }).streakDays === 3);
-
-  // ★ THE DEFAULT MUST NOT CHANGE ANYONE'S EXISTING STREAK. Omitting the goal, and
-  // passing the default of 1, must both reproduce the old any-act rule exactly.
-  check('omitting the goal preserves the old behaviour', run({}).streakDays === 3);
-  check('goal 1 is indistinguishable from no goal', run({ todayActs: 0, dailyGoal: 1 }).streakDays === run({}).streakDays);
-
-  // ★ A PARTIAL DAY IS NOT A BROKEN DAY. Falling short of the goal must behave like "no
-  // act yet" — the run ends yesterday and is NOT broken mid-day. Reporting today as the
-  // break day would make the streak flap every morning.
-  check(
-    'a partial day does not break the run mid-day',
-    run({ todayActs: 1, dailyGoal: 4 }).streakBrokeOnUTC !== '2026-08-09',
-    run({ todayActs: 1, dailyGoal: 4 }).streakBrokeOnUTC
-  );
-  // A nonsense goal must not silently withhold every day forever.
-  check('a goal below 1 is clamped to 1', run({ todayActs: 1, dailyGoal: 0 }).streakDays === 3);
-}
+// ★ THE LESSON WORTH KEEPING, and it is the third time this file has recorded it: a green
+// suite proves a mechanic does what it claims and says NOTHING about whether the mechanic
+// belongs in the product. The freeze existed only to soften a cliff that a simpler rule
+// removes outright — and softening it took a ledger, a spend record, a per-run cap, an
+// idempotency argument and two live bugs. Section 9 replaces all of it with arithmetic.
 
 // ─── 13. the interesting stats ─────────────────────────────────────────────
 section('13. act stats');
@@ -924,20 +919,177 @@ section('13. act stats');
 }
 
 // ─── 14. the nudge selector ────────────────────────────────────────────────
+// ─── 13b. how much somebody has written ────────────────────────────────────
+//
+// ★ THE STAT THE OWNER ASKED FOR ("you have written in 1 year the equivalent of a 100
+// page book"). What has to be true for that sentence to be honest: the count must be of
+// WORDS SOMEBODY WROTE, not of markup they pasted, and the page arithmetic must be the
+// arithmetic the copy claims.
+section('13b. words written');
+
+check('plain prose counts its words', countWords('one two three four five') === 5);
+check('an empty body is zero, not NaN', countWords('') === 0 && countWords(undefined) === 0);
+check('punctuation alone is not a word', countWords('--- | . *** >') === 0);
+check('markdown furniture does not inflate the count', countWords('## Hello there') === 2);
+check('a blockquote does not pay for its own marker', countWords('> quoted words here') === 3);
+{
+  // ★ THE CASE THAT MATTERS MOST: a post embedding a config file is not an essay.
+  // "Here is the config:" (4) + "That is all." (3) = 7. The eight words inside the fence
+  // contribute nothing.
+  const withCode = 'Here is the config:\n\n```\nfoo bar baz qux quux corge grault garply\n```\n\nThat is all.';
+  check('fenced code is not writing', countWords(withCode) === 7, `${countWords(withCode)}`);
+  // MUTATION GUARD: a naive whitespace split counts the fence markers and the eight words
+  // inside them. If the stripping is ever removed this fails, while every check above
+  // still passes individually — it is the one that proves they were doing work.
+  const naive = withCode.split(/\s+/).filter(Boolean).length;
+  check('MUTATION: a naive split really would over-count', naive > countWords(withCode) + 8, `${naive} vs ${countWords(withCode)}`);
+}
+check('inline code is not writing', countWords('run `npm install --frozen-lockfile` now') === 2, `${countWords('run `npm install --frozen-lockfile` now')}`);
+check('an image contributes nothing', countWords('![a very long alt text here](https://example.com/x.png)') === 0);
+check('a link keeps its label and drops its target', countWords('see [the docs](https://example.com/a/b/c) now') === 4, `${countWords('see [the docs](https://example.com/a/b/c) now')}`);
+check('a bare url is not writing', countWords('look https://example.com/a/b/c here') === 2, `${countWords('look https://example.com/a/b/c here')}`);
+check('html tags do not count', countWords('<div class="x">two words</div>') === 2, `${countWords('<div class="x">two words</div>')}`);
+check('accented and non-latin words still count', countWords('café naïve Здравствуйте') === 3, `${countWords('café naïve Здравствуйте')}`);
+check('pages are floor(words / WORDS_PER_PAGE)', pagesFromWords(WORDS_PER_PAGE * 100) === 100);
+check('a part page does not round up into a claim', pagesFromWords(WORDS_PER_PAGE * 3 - 1) === 2);
+check('nothing written is nothing to compare', pagesFromWords(0) === 0 && pagesFromWords(-5) === 0 && pagesFromWords(NaN) === 0);
+// ★ THE OWNER'S OWN EXAMPLE, AS ARITHMETIC. "a 100 page book" is 25,000 words at this
+// divisor — roughly a post a day for a year at 70 words a post. If WORDS_PER_PAGE is ever
+// retuned, this says out loud what the headline sentence starts costing.
+check('a 100-page book is 25,000 words at the stated divisor', WORDS_PER_PAGE * 100 === 25_000, `${WORDS_PER_PAGE * 100}`);
+
+// ─── 13b2. the word count names a period, and the period rotates ───────────
+//
+// ★ OWNER, 2026-08-18: "in what time period? this needs to change with time look3d at. one
+// day 7 days, one time all time, one time, last 10 days, as long as it doesnt slow the
+// load." The first version printed a lifetime figure with no scope, which is the same
+// defect as the vote-count lines this card already deleted — a number nobody can place.
+section('13b2. the word count rotates its window');
+
+{
+  const W = { day: 400, week: 2000, month: 8000, year: 60000, all: 90000 };
+  const pick = (today: string, seed = 'lordbutterfly') => {
+    const r = pickWordWindow(W, today, seed);
+    if (!r) throw new Error(`no window picked for ${today} / ${seed}`);
+    return r;
+  };
+
+  check('it picks something for a prolific account', pick('2026-08-18') !== null);
+  check('the choice is STABLE for the same reader on the same day',
+    pick('2026-08-18').window === pick('2026-08-18').window);
+  {
+    // Over a run of days every window must appear, or the "rotation" is a constant.
+    const seen = new Set();
+    for (let i = 0; i < 30; i++) {
+      const day = new Date(Date.UTC(2026, 7, 1) + i * 86_400_000).toISOString().slice(0, 10);
+      seen.add(pick(day).window);
+    }
+    check('every window is reachable across a month of days', seen.size === WORD_WINDOW_ORDER.length, [...seen].join(','));
+  }
+  {
+    // Two readers on the SAME day should not be locked to the same window, or the app is
+    // visibly on a cycle rather than telling each person something about themselves.
+    const day = '2026-08-18';
+    const windows = new Set(['lordbutterfly', 'acidyo', 'gtg', 'tarazkp', 'blocktrades'].map((u) => pick(day, u).window));
+    check('different readers can get different windows on one day', windows.size > 1, [...windows].join(','));
+  }
+  // ★ ABSENT, NEVER ZERO — applied to a quantity with five candidate scopes. A quiet day
+  // must widen to a window worth a sentence, not print "0 words today".
+  {
+    const quiet = { day: 0, week: 0, month: 0, year: 30000, all: 45000 };
+    const results = [];
+    for (let i = 0; i < 20; i++) {
+      const d = new Date(Date.UTC(2026, 7, 1) + i * 86_400_000).toISOString().slice(0, 10);
+      results.push(pickWordWindow(quiet, d, 'someone')?.window ?? 'none');
+    }
+    check('a window under the floor is never printed', results.every((w) => w === 'year' || w === 'all'), [...new Set(results)].join(','));
+  }
+  check('a tiny sub-paragraph count is not worth a line at all',
+    pickWordWindow({ day: 10, week: 10, month: 10, year: 10, all: 10 }, '2026-08-18', 'x') === null);
+  check('no data at all produces no line', pickWordWindow(undefined, '2026-08-18', 'x') === null);
+  check('the floor is a paragraph, not a word', MIN_WORDS_TO_MENTION >= 25);
+
+  // ★ FLOORNESS RUNS THE OPPOSITE WAY TO INTUITION. The walk reads NEWEST-FIRST under a
+  // clock, so the recent end is always covered and the far end truncates: a 7-day figure
+  // is exact where a lifetime one is a floor. Getting this backwards would print "at
+  // least 400 words today" (hedging a number we know exactly) and a bare lifetime total
+  // (stating a floor as a fact) — both wrong, in opposite directions.
+  check('a lifetime figure is a floor until the walk reached account creation',
+    windowIsFloor('all', '2026-08-18', '2026-01-01', false));
+  check('...and a total once it has', !windowIsFloor('all', '2026-08-18', '2026-01-01', true));
+  check('a 7-day figure is exact when the day set is complete past its start',
+    !windowIsFloor('week', '2026-08-18', '2026-08-01', false));
+  check('a 7-day figure is a floor when the walk stopped inside it',
+    windowIsFloor('week', '2026-08-18', '2026-08-15', false));
+  check('an unbounded walk makes every short window exact',
+    !windowIsFloor('day', '2026-08-18', '', false) && !windowIsFloor('year', '2026-08-18', '', false));
+  // Boundary: `completeFrom` exactly ON the window's first day is covered, not a floor.
+  check('a boundary exactly at the window start is still covered',
+    !windowIsFloor('week', '2026-08-18', '2026-08-12', false));
+  check('one day earlier than the window start is NOT', windowIsFloor('week', '2026-08-18', '2026-08-13', false));
+
+}
+
+// ─── 13c. a stored DATE is the day it was stored, on any host ──────────────
+//
+// ★★★ RUNTIME-PROVEN, NOT DEFENSIVE (2026-08-18). node-postgres parses a `DATE` into a JS
+// `Date` at LOCAL midnight; `toDayString` used to call `toISOString()` on it, so on a
+// CEST box (UTC+2) every stored act-day came back ONE DAY EARLY. Measured through the
+// live route on @lordbutterfly before the fix: the account's 6 observed act-days read as
+// 8 and `streakDays` read 7 where the decay gives 3 — because `/api/streak/[user]` unions
+// the STORED day set with THIS request's walk, and the walk dates its items correctly
+// from ISO timestamps, so one real day appeared twice.
+//
+// It is invisible in a UTC container and wrong everywhere else, which is why it survived:
+// the fix is `to_char(col,'YYYY-MM-DD')` in the SQL so no `Date` is built at all. This
+// asserts the FALLBACK path — a caller that hands over a Date must still get its calendar
+// day back — and it runs on whatever timezone the machine happens to be in, so it fails
+// on the CEST box that found it and passes on a UTC one either way.
+//
+// Cross-lane import, like `FREEZE_MAX_HELD` was before it: the pg pool is lazily
+// constructed (lib/lite/db/pool.ts), so importing this module opens no connection.
+section('13c. stored dates survive the process timezone');
+
+{
+  // Local midnight, exactly what node-postgres hands back for `DATE '2026-08-13'`.
+  const asPgWouldParse = new Date(2026, 7, 13, 0, 0, 0, 0);
+  check('a local-midnight Date keeps its calendar day', toDayString(asPgWouldParse) === '2026-08-13', String(toDayString(asPgWouldParse)));
+  // MUTATION GUARD: the old implementation. It only differs from the fix east of
+  // Greenwich, so this check also records whether THIS run could have caught the bug.
+  const old = asPgWouldParse.toISOString().slice(0, 10);
+  const offsetMinutes = asPgWouldParse.getTimezoneOffset();
+  check(
+    offsetMinutes < 0
+      ? 'MUTATION: on this (east-of-UTC) host the old toISOString path really did shift the day'
+      : 'MUTATION: this host is at or west of UTC, so the old path would not have shifted (bug is host-dependent)',
+    offsetMinutes < 0 ? old !== '2026-08-13' : old === '2026-08-13',
+    `offset ${offsetMinutes}min, old path gave ${old}`
+  );
+  check('a text day passes straight through', toDayString('2026-08-13') === '2026-08-13');
+  check('a timestamp string is truncated to its day', toDayString('2026-08-13T22:10:00Z') === '2026-08-13');
+  check('null stays null', toDayString(null) === null);
+  // ★ AND THE DOUBLE-COUNT THIS CAUSED, as arithmetic on the streak itself: a shifted
+  // stored day plus the correctly-dated walked day is two entries for one real day.
+  const real = ['2026-08-16', '2026-08-17', '2026-08-18'];
+  const shiftedUnion = [...new Set([...real, '2026-08-15', '2026-08-16', '2026-08-17'])];
+  const honest = computeStreak({ actDaysUTC: real, todayUTC: '2026-08-18', countFromUTC: '2026-08-15', observedFromUTC: '2026-08-15' }).streakDays;
+  const inflated = computeStreak({ actDaysUTC: shiftedUnion, todayUTC: '2026-08-18', countFromUTC: '2026-08-15', observedFromUTC: '2026-08-15' }).streakDays;
+  check('a shifted-day union really does inflate the streak', inflated > honest, `${inflated} vs ${honest}`);
+}
+
 section('14. nudge selection');
 
 const NUDGE_BASE: NudgeFacts = {
   streakDays: 1,
   streakIsLowerBound: false,
   actsToday: 1,
-  freezesAvailable: 0,
   todayWeekday: 3
 };
 const nudge = (o: Partial<NudgeFacts>) => selectNudge({ ...NUDGE_BASE, ...o });
 
 // ★ THE MOST IMPORTANT PROPERTY: IT SAYS NOTHING WHEN THERE IS NOTHING TO SAY.
 check('nothing interesting => no nudge at all', nudge({}) === null);
-check('a bare streak with no freeze is NOT a nudge (that would be a countdown)', nudge({ streakDays: 9, actsToday: 0 }) === null);
+check('a bare streak is NOT a nudge (that would be a countdown)', nudge({ streakDays: 9, actsToday: 0 }) === null);
 check('a reach number below the floor is not worth mentioning', nudge({ feedsReached: MIN_REACH_TO_MENTION - 1 }) === null);
 
 // Priority order, each step verified against the one below it.
@@ -949,25 +1101,26 @@ check('a first-time giver outranks everything', nudge({
   feedsReached: 900
 })?.kind === 'new_giver');
 check('a named giver needs a headcount to sit beside', nudge({ firstTimeGiverName: 'tarazkp' }) === null);
-check('an unanswered reply outranks a milestone', nudge({ unansweredReply: { author: 'alice', ago: '4h ago' }, streakDays: 30 })?.kind === 'unanswered');
-check('a milestone outranks reach', nudge({ streakDays: 30, feedsReached: 900 })?.kind === 'milestone');
+check('an unanswered reply outranks reach', nudge({ unansweredReply: { author: 'alice', ago: '4h ago' }, feedsReached: 900 })?.kind === 'unanswered');
 check('reach outranks the weekday pattern', nudge({ feedsReached: 900, busiestWeekday: 3, actsToday: 0 })?.kind === 'reach');
 check('the weekday pattern outranks the aggregate new-people line', nudge({ busiestWeekday: 3, actsToday: 0, newPeopleThisWeek: 3 })?.kind === 'weekday_today');
-check('new people still surface with a streak running', nudge({ newPeopleThisWeek: 3, streakDays: 5, actsToday: 0, freezesAvailable: 2 })?.kind === 'new_people_week');
+check('new people still surface with a streak running', nudge({ newPeopleThisWeek: 3, streakDays: 5, actsToday: 0 })?.kind === 'new_people_week');
 // The flat streak line ("Day N lands if you post today") was removed by owner ruling
 // 2026-08-11, so there is nothing left for it to rank last. It now returns null.
-check('the flat streak line no longer exists', nudge({ streakDays: 5, actsToday: 0, freezesAvailable: 2 }) === null);
+check('the flat streak line no longer exists', nudge({ streakDays: 5, actsToday: 0 }) === null);
 
 // The guards.
-check('a milestone we cannot PROVE is never celebrated', nudge({ streakDays: 30, streakIsLowerBound: true })?.kind !== 'milestone');
-check('every listed milestone fires', STREAK_MILESTONES.every((d) => nudge({ streakDays: d })?.kind === 'milestone'));
-check('a non-milestone day does not', nudge({ streakDays: 4 }) === null);
+// ★★ THE MILESTONE CHECKS ARE GONE, AND THEY WERE THE SUITE'S ONLY RED (2026-08-18).
+// Four of them ("a milestone outranks reach", "every listed milestone fires", "flags a
+// month", "a short milestone does not") had been FAILING since the milestone nudge was
+// deleted by owner ruling on 2026-08-10 — the branch went, the assertions stayed, and a
+// permanently-red suite is a suite nobody reads. `STREAK_MILESTONES` is still exported
+// and still consumed (retention-moments.ts's day-2 toast is derived from it), so the
+// constant is asserted below instead of the deleted branch.
+check('no streak length produces a nudge any more', STREAK_MILESTONES.every((d) => nudge({ streakDays: d }) === null));
+check('a milestone we cannot prove produces nothing either', nudge({ streakDays: 30, streakIsLowerBound: true }) === null);
 check('the weekday line only fires ON that weekday', nudge({ busiestWeekday: 5, actsToday: 0 }) === null);
 check('the weekday line does not fire once you have posted', nudge({ busiestWeekday: 3, actsToday: 1 }) === null);
-check('the flat streak line needs a real run', nudge({ streakDays: 1, actsToday: 0, freezesAvailable: 2 }) === null);
-check('the flat streak line needs a freeze to mention', nudge({ streakDays: 5, actsToday: 0, freezesAvailable: 0 }) === null);
-check('the milestone line flags a month for its own copy', Number(nudge({ streakDays: 30 })?.vars.month) === 1);
-check('a short milestone does not', Number(nudge({ streakDays: 3 })?.vars.month) === 0);
 
 // ─── 15. copy selection — voice, dormancy, and the keys ────────────────────
 //
@@ -1162,14 +1315,17 @@ for (const k of [
   'retention.ranks.wont',
   'retention.ranks.down_title',
   'retention.ranks.down_body',
-  'retention.today.title',
-  'retention.today.done',
-  'retention.today.open',
-  'retention.today.goal_only',
-  'retention.today.goal_hint',
+  // The streak's own explainer, on the page the product links to when somebody asks how
+  // any of this works. Added with the decay (2026-08-18): a number that can go DOWN has
+  // to be written down somewhere findable.
+  'retention.ranks.streak_title',
+  'retention.ranks.streak_body',
+  'retention.streak.title',
+  'retention.streak.rule',
+  'retention.streak.rule_zero',
+  'retention.day_streak_hint',
   'retention.nudge.dismiss',
   'retention.nudge.open',
-  'retention.moment.goal_hit.title',
   'retention.moment.milestone.title'
 ]) {
   check(`key exists: ${k}`, hasKey(k), k);
@@ -1178,10 +1334,36 @@ for (const k of [
 for (const kind of ['new_giver', 'unanswered', 'milestone', 'milestone_month', 'reach', 'weekday_today', 'new_people_week']) {
   check(`nudge line exists: ${kind}`, hasKey(`retention.nudge.${kind}`), kind);
 }
-// The three daily goals, each with a label and a subtitle.
-for (const g of ['casual', 'regular', 'serious']) {
-  check(`goal label exists: ${g}`, hasKey(`retention.today.goal.${g}`));
-  check(`goal subtitle exists: ${g}`, hasKey(`retention.today.goal.${g}_sub`));
+// The streak figure, in both the exact and the floor form, each with plurals.
+for (const k of ['retention.streak.days', 'retention.streak.days_floor']) {
+  check(`streak figure pluralises: ${k}`, hasPlural(k), k);
+}
+// ★ AND `retention.today.*` IS REALLY GONE. The whole namespace served the daily goal
+// (the ring, the picker, the three tiers, the deadline, the freeze lines). Asserting its
+// ABSENCE is what stops a surface quietly resurrecting the picker — the same guard the
+// dead-copy block below applies to `retention.ceiling` and friends.
+check('the daily-goal namespace is gone', !hasKey('retention.today.title') && !hasKey('retention.today.goal_hint'));
+
+  // Every window the picker can name needs copy in both voices, exact and floor.
+for (const w of WORD_WINDOW_ORDER) {
+  for (const suffix of ['', '_floor']) {
+    for (const voice of VOICES) {
+      const k = voiced(`retention.stats.written_${w}${suffix}`, voice);
+      check(`written copy exists: ${k}`, hasKey(k), k);
+    }
+  }
+}
+check('the page comparison pluralises', hasPlural('retention.stats.written_pages'));
+check('the book comparison exists', hasKey('retention.stats.written_book'));
+// ★ AND EVERY WINDOW SENTENCE ACTUALLY NAMES ITS PERIOD, which is the whole instruction.
+// A copy edit that dropped "today" or "in the last 7 days" would leave five strings that
+// are indistinguishable and four of them wrong.
+{
+  const writtenCopy = (EN as Record<string, Record<string, Record<string, string>>>).retention.stats;
+const written = Object.entries(writtenCopy).filter(([k]) => /^written_(day|week|month|year|all)$/.test(k));
+  check('there are five window sentences', written.length === WORD_WINDOW_ORDER.length, `${written.length}`);
+  const distinct = new Set(written.map(([, v]) => String(v)));
+  check('and no two of them say the same thing', distinct.size === written.length, `${distinct.size}`);
 }
 
 // ★ THE DEAD COPY IS REALLY DEAD. Each of these existed to serve a mechanism that no
@@ -1474,76 +1656,63 @@ section('16. the UX-pass fixes, as assertions');
 // not produce: a streak of zero, a reach figure that FELL, a sample with no engagement at
 // all, and a reader whose timezone is UTC.
 
-// ── 16a. the daily headline (the goal now gates the streak) ──────────────────
+// ── 16a. the streak card states the rule that produces the number ────────────
+//
+// ★ WHAT THIS REPLACES: ~20 assertions over `todayHeadline`, the four-branch selector
+// for the daily card's headline. Every branch existed because the card had a per-day
+// GOAL to describe, and three of those assertions were RED at the time of deletion (the
+// "Day N" wording they tested had been removed by owner ruling on 2026-08-11 and the
+// checks were never updated). Selector, copy and checks are gone together.
+//
+// What matters now is narrower and harder to get wrong by accident: the card must SAY
+// that the number can go down, and it must say it in the arithmetic the code actually
+// implements. A rule stated in copy that disagrees with `compute-streak.ts` is the same
+// class of defect as the invisible goal gate — the reader is told one thing and measured
+// by another.
 {
-  const H = (met: boolean, streakDays: number, goal: number) => todayHeadline({ met, streakDays, goal });
+  const streakCopy = (EN as Record<string, Record<string, Record<string, string>>>).retention.streak;
+  const rule = String(streakCopy.rule);
+  const ruleZero = String(streakCopy.rule_zero);
+  const hint = String((EN as Record<string, Record<string, string>>).retention.day_streak_hint);
+  const ranksBody = String(
+    (EN as Record<string, Record<string, Record<string, string>>>).retention.ranks.streak_body
+  );
 
-  check('goal met says done, whatever the streak', H(true, 0, 4).key === 'retention.today.done');
-  check('met ignores the goal size', H(true, 9, 1).key === 'retention.today.done');
-
-  // ★ "Day 0 holds until midnight" was reachable and shipped. It is the state of every
-  // returning reader on their first day back.
-  check('no streak and goal 1 names what STARTS one', H(false, 0, 1).key === 'retention.today.start');
-  check('no streak and goal 4 names the number too', H(false, 0, 4).key === 'retention.today.start_goal');
-  check('the start_goal line carries the goal', H(false, 0, 4).vars.goal === 4);
-  check('no headline ever prints day zero', !JSON.stringify(H(false, 0, 4)).includes('"days":0'));
-
-  // ★ THE GATE IS NAMED. The card said "Day 2 holds" while silently requiring four acts.
-  check('a goal of 1 states the day is open, with no deadline', H(false, 2, 1).key === 'retention.today.open');
-  check('a goal above 1 states the goal, with no day number', H(false, 2, 4).key === 'retention.today.goal_only');
-  // ★ THE DAY IS `streakDays + 1`: a run of 2 with nothing yet today means today would be
-  // day 3. Rendering 2 put the same integer on the card as the flame beside it while asking
-  // the reader to earn it — 'the streak is either already 2 or not yet 2'.
-  check('the goal line names the day today would REACH', H(false, 2, 4).vars.days === 3 && H(false, 2, 4).vars.goal === 4);
-  check('the plain hold line does the same', H(false, 2, 1).vars.days === 3, `${H(false, 2, 1).vars.days}`);
-  check('a 9-day run is asked for day 10', H(false, 9, 1).vars.days === 10);
-  // MUTATION GUARD: if the +1 is ever dropped, the headline and the flame agree again and
-  // the card contradicts itself. This is the assertion that catches it.
-  check('MUTATION: the headline never repeats the banked streak length', H(false, 2, 1).vars.days !== 2);
-  // MUTATION GUARD: if the goal branch is ever dropped, the two keys collapse and this
-  // fails. Without it, "holds_goal" could be quietly aliased back to "holds".
-  check('the two hold lines are genuinely different keys', H(false, 2, 1).key !== H(false, 2, 4).key);
-  // A fractional or zero goal must not be able to produce the "reach 0" sentence.
-  check('goal below 1 is treated as 1', H(false, 2, 0).key === 'retention.today.open');
-  check('a fractional goal floors rather than rounding up', H(false, 2, 1.9).key === 'retention.today.open');
-
-  for (const k of ['retention.today.done', 'retention.today.start', 'retention.today.start_goal', 'retention.today.open', 'retention.today.goal_only', 'retention.today.deadline', 'retention.today.deadline_midnight']) {
-    check(`today copy exists: ${k}`, hasKey(k), k);
+  for (const [where, text] of [
+    ['card rule', rule],
+    ['card rule (at zero)', ruleZero],
+    ['flame hint', hint],
+    ['/ranks explainer', ranksBody]
+  ] as const) {
+    // The gain and the loss, as the digits the code uses. Written as a search for the
+    // NUMBERS rather than for a phrase, so a rewrite of the sentence is free and a change
+    // to the RATES is not.
+    check(`${where} states the gain (${STREAK_GAIN_PER_ACTIVE_DAY})`, text.includes(String(STREAK_GAIN_PER_ACTIVE_DAY)), text);
+    check(`${where} states the loss (${STREAK_LOSS_PER_MISSED_DAY})`, text.includes(String(STREAK_LOSS_PER_MISSED_DAY)), text);
   }
-  // The old wording is gone from the file, so it cannot be reintroduced by a merge.
-  // `today.holds` itself was deleted with the "Day N lands if you post today" line
-  // (owner ruling 2026-08-11), so the UTC guard now runs over the line that replaced it.
-  const openText = String((EN as Record<string, Record<string, Record<string, string>>>).retention.today.open);
-  check('the daily card no longer says "UTC" at the reader', !/UTC/.test(openText), openText);
-  check('the deadline wording is gone from the card', !/lands if you post/i.test(JSON.stringify(EN)));
+  // ★ AND THE RULE'S HEADLINE PROMISE, which is the entire owner instruction: it does not
+  // reset. Two of the four surfaces have room to say so; the flame's tooltip does not, and
+  // is not asked to.
+  check('the card promises it does not reset', /never|not.*reset|does not.*zero/i.test(rule), rule);
+  check('/ranks promises it does not reset', /never|not everything|zero/i.test(ranksBody), ranksBody);
+
+  // The daily-goal vocabulary must not survive anywhere in the copy file. "Goal" is the
+  // one word that would let the picker come back by increments.
+  const raw = JSON.stringify(EN);
+  check('no daily-goal copy survives', !/daily goal/i.test(raw), 'daily goal');
+  check('no freeze copy survives', !/freeze/i.test(raw), 'freeze');
+  check('the deadline wording is gone from the card', !/lands if you post/i.test(raw));
+  check('nothing says "UTC" at the reader', !/UTC/.test(String(streakCopy.rule)) && !/UTC/.test(ruleZero));
 }
 
-// ── 16b. the deadline, in the reader's own clock ─────────────────────────────
-{
-  // 2026-08-09T22:10:00Z — the next UTC midnight is 2026-08-10T00:00:00Z.
-  const at = Date.UTC(2026, 7, 9, 22, 10, 0);
-  check('next UTC midnight is the following day at 00:00Z', new Date(nextUtcMidnightMs(at)).toISOString() === '2026-08-10T00:00:00.000Z');
-  // And from just after midnight it is a full day ahead, not the midnight just passed.
-  const justAfter = Date.UTC(2026, 7, 9, 0, 1, 0);
-  check('never returns a deadline in the past', nextUtcMidnightMs(justAfter) > justAfter);
-
-  const lisbon = localDeadlineLabel(at, 'en-GB', 'Europe/Lisbon');
-  check('Lisbon reads the UTC boundary as 01:00', lisbon?.time === '01:00', String(lisbon?.time));
-  check('Lisbon is not treated as midnight', lisbon?.isMidnight === false);
-
-  const tokyo = localDeadlineLabel(at, 'en-GB', 'Asia/Tokyo');
-  check('Tokyo reads the same instant as 09:00', tokyo?.time === '09:00', String(tokyo?.time));
-
-  // ★ THE ONE CASE WHERE THE OLD COPY WAS RIGHT: a reader actually on UTC.
-  const utc = localDeadlineLabel(at, 'en-GB', 'UTC');
-  check('a UTC reader is flagged so the word "midnight" is used instead of 00:00', utc?.isMidnight === true, String(utc?.time));
-  // MUTATION GUARD: the midnight test must not be locale-dependent. A 12-hour display
-  // locale renders "12:00 am", which is not the string the check compares.
-  const utcUS = localDeadlineLabel(at, 'en-US', 'UTC');
-  check('the midnight test survives a 12-hour display locale', utcUS?.isMidnight === true, String(utcUS?.time));
-  const lisbonUS = localDeadlineLabel(at, 'en-US', 'Europe/Lisbon');
-  check('a 12-hour locale still gets a real time', /1:00\s?AM/i.test(String(lisbonUS?.time)), String(lisbonUS?.time));
-}
+// ── 16b. THE DEADLINE CHECKS ARE DELETED WITH THE DEADLINE ───────────────────
+//
+// `lib/deadline.ts` and its ~10 assertions (next UTC midnight, the Lisbon/Tokyo/UTC
+// renderings, and the mutation guard proving the midnight test survived a 12-hour display
+// locale) existed for one line on the daily card: "You have until 01:00." The card no
+// longer has a deadline, because the streak no longer has a daily bar to clear by
+// midnight — a day you do not post costs 2 whenever it ends. Module and checks deleted
+// together.
 
 // ── 16c. the reach trend refuses to invent a direction ───────────────────────
 {
@@ -1623,17 +1792,12 @@ section('16. the UX-pass fixes, as assertions');
   check('the mechanism line no longer claims three numbers', !/three numbers/i.test(subtitle), subtitle);
 }
 
-// ── 16f. the freeze explains itself where it appears ─────────────────────────
-{
-  const today = (EN as Record<string, Record<string, Record<string, string>>>).retention.today;
-  for (const k of ['freeze', 'freeze_one', 'freeze_other']) {
-    const s = today[k] as unknown as string;
-    // "2 freezes banked." was the only invented vocabulary on the card, and a tester
-    // said outright they would not go looking for its meaning.
-    check(`the freeze line says what a freeze does: ${k}`, /cover/i.test(s), s);
-  }
-  check('the spent-freeze line says the streak survived', /streak held/i.test(today.freeze_used as unknown as string), today.freeze_used as unknown as string);
-}
+// ── 16f. THE FREEZE DISCLOSURE CHECKS ARE DELETED WITH THE FREEZE ────────────
+//
+// They asserted that "2 freezes banked." explained itself ("Each covers a missed day") —
+// a tester had read the bare phrase and said outright they would not go looking for its
+// meaning. The lesson survives as a rule and is enforced one section up: the streak card
+// must state the arithmetic that moves its own number. The freeze does not.
 
 section('16b. the card must not contradict itself');
 
@@ -1641,16 +1805,28 @@ section('16b. the card must not contradict itself');
 // BOTH BE TRUE. They are grouped because the failure MODE is the thing worth guarding, not the
 // individual strings: two numbers derived from different windows, printed adjacent.
 {
-  const today = (EN as Record<string, Record<string, Record<string, string>>>).retention.today;
   const stats = (EN as Record<string, Record<string, Record<string, string>>>).retention.stats;
 
-  // 1. "0-day streak" beside "A freeze covered yesterday. The streak held." A freeze that covered
-  //    a day inside a run that has since broken held nothing. The component gates the line on
-  //    `summary.streakDays > 0`; this asserts the claim it makes is strong enough to need that.
+  // 1. "0-day streak" beside "A freeze covered yesterday. The streak held." — DELETED with
+  //    the freeze. The same shape survives as a live guard on the streak card: it renders
+  //    the "+" floor only when the figure is above zero, because "0+ days" hedges a number
+  //    with nothing under it (see streak-card.tsx and section 9's floor assertions).
+  //
+  // ★★ 1b. "3-day streak" beside "Longest streak: 8+ days." — SAME WORD, TWO MEANINGS,
+  //    six lines apart on the same card (caught in a browser, 2026-08-18). The flame shows
+  //    the DECAYING score; `longestStreakDays` is the longest unbroken run of consecutive
+  //    days in stored history. Printed together they invite "your best was 8, you are on
+  //    3", a comparison between two quantities that are not comparable. The stat is a RUN
+  //    now, and only the flame may say "streak".
   check(
-    'the spent-freeze line claims the streak survived, so it must be gated on a live streak',
-    /streak held/i.test(today.freeze_used as unknown as string),
-    today.freeze_used as unknown as string
+    'the longest-run stat does not call itself a streak',
+    !/streak/i.test(stats.longest as unknown as string) && !/streak/i.test(stats.longest_floor as unknown as string),
+    `${stats.longest} / ${stats.longest_floor}`
+  );
+  check(
+    'and it says the days were consecutive, which the streak no longer implies',
+    /in a row/i.test(stats.longest_other as unknown as string),
+    stats.longest_other as unknown as string
   );
 
   // 2. "Nothing measured yet." beside "Shown up on 94+ days." The rank counts days Lumen observed;

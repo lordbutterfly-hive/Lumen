@@ -33,8 +33,11 @@ const RETRY_BACKOFF_MS = 200;
 // Matches app/layout.tsx's SITE_DESC — not imported (that constant isn't
 // exported) but kept word-for-word so the fallback title/description here
 // reads as the same site, not a second one.
+// ★ Was Hive's boilerplate, describing Hive (2026-08-18). Kept identical to the
+// root layout's string on purpose, so a shared profile or post reads as the same
+// site as a shared home page rather than a second one.
 const SITE_DESC =
-  'Communities without borders. A social network owned and operated by its users, powered by Hive.';
+  'A calmer place to read and write. Read what is worth your time. Write without chasing an audience.';
 
 // ★ NEVER `siteConfig.name` HERE (audit item 15). The root layout wraps every
 // page's title in `%s - ${siteConfig.name}` ("Lumen"), and a segment that
@@ -63,7 +66,7 @@ export async function generateMetadata({ params }: { params: { param: string } }
   try {
     // Use cached version - deduplicated with Layout's prefetch within the same request
     const account = await getAccountFullCached(username);
-    const image = account?.profile?.profile_image || 'https://hive.blog/images/hive-blog-share.png';
+    const image = account?.profile?.profile_image || '/lumen/og-plain.png';
     // "on Hive" here is a factual statement about the chain the account lives
     // on (Lumen is a Hive frontend), not a branding mismatch — left as-is.
     const about = account?.profile?.about || `Profile of @${username} on Hive.`;

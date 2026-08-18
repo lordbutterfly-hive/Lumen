@@ -121,7 +121,9 @@
       "mentions": "Mentions",
       "follows": "Follows",
       "upvotes": "Upvotes",
-      "reblogs": "Reblogs"
+      "reblogs": "Reblogs",
+      "notifications_error": "We couldn’t load your notifications.",
+      "notifications_retry": "Try again"
     },
     "user_menu": {
       "profile": "Profil",

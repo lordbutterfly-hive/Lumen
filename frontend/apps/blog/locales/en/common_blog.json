@@ -273,7 +273,9 @@
       "notifications_90_day_limit": "Notifications are only available for the last 90 days.",
       "reputation_at_time": "Reputation at time of notification",
       "reputation_label": "Rep",
-      "unread_count": "({{count}} unread)"
+      "unread_count": "({{count}} unread)",
+      "notifications_error": "We couldn’t load your notifications.",
+      "notifications_retry": "Try again"
     },
     "user_menu": {
       "profile": "Profile",
@@ -1161,8 +1163,8 @@
       "feeds_delta_down_other": "{{count}} fewer than last week.",
       "weekday": "You show up most on {{day}}.",
       "weekday_their": "Shows up most on {{day}}.",
-      "longest": "Longest streak: {{count}} days.",
-      "longest_floor": "Longest streak: {{count}}+ days.",
+      "longest": "Longest run: {{count}} days in a row.",
+      "longest_floor": "Longest run: {{count}}+ days in a row.",
       "weeks": "Active {{weeks}} of the last {{total}} weeks.",
       "weeks_at_least": "Active at least {{weeks}} of the last {{total}} weeks.",
       "since": "On Hive since {{year}}.",
@@ -1173,10 +1175,10 @@
       "footnote_all": "Counted across all {{count}} posts.",
       "footnote_all_one": "Counted across the only post.",
       "footnote_all_other": "Counted across all {{count}} posts.",
-      "longest_one": "Longest streak: 1 day.",
-      "longest_other": "Longest streak: {{count}} days.",
-      "longest_floor_one": "Longest streak: 1+ days.",
-      "longest_floor_other": "Longest streak: {{count}}+ days.",
+      "longest_one": "Longest run: 1 day.",
+      "longest_other": "Longest run: {{count}} days in a row.",
+      "longest_floor_one": "Longest run: 1+ days in a row.",
+      "longest_floor_other": "Longest run: {{count}}+ days in a row.",
       "bots_excluded": "Curation bots and blacklisted accounts excluded.",
       "replier": "Replies {{count}}x for every post.",
       "replier_one": "Posts and replies about equally.",
@@ -1192,37 +1194,37 @@
       "active_days_their_other": "Lumen has seen them show up on {{count}} days.",
       "quiet": "Longest quiet spell: {{count}} days.",
       "quiet_one": "Longest quiet spell: 1 day.",
-      "quiet_other": "Longest quiet spell: {{count}} days."
+      "quiet_other": "Longest quiet spell: {{count}} days.",
+      "written_note": "Posts and comments, counted at {{perPage}} words a printed page. Code blocks, links and image markup do not count.",
+      "written_day": "You have written {{words}} words today.",
+      "written_day_their": "They have written {{words}} words today.",
+      "written_day_floor": "You have written at least {{words}} words today.",
+      "written_day_floor_their": "They have written at least {{words}} words today.",
+      "written_week": "You have written {{words}} words in the last 7 days.",
+      "written_week_their": "They have written {{words}} words in the last 7 days.",
+      "written_week_floor": "You have written at least {{words}} words in the last 7 days.",
+      "written_week_floor_their": "They have written at least {{words}} words in the last 7 days.",
+      "written_month": "You have written {{words}} words in the last 30 days.",
+      "written_month_their": "They have written {{words}} words in the last 30 days.",
+      "written_month_floor": "You have written at least {{words}} words in the last 30 days.",
+      "written_month_floor_their": "They have written at least {{words}} words in the last 30 days.",
+      "written_year": "You have written {{words}} words in the last year.",
+      "written_year_their": "They have written {{words}} words in the last year.",
+      "written_year_floor": "You have written at least {{words}} words in the last year.",
+      "written_year_floor_their": "They have written at least {{words}} words in the last year.",
+      "written_all": "You have written {{words}} words, all time.",
+      "written_all_their": "They have written {{words}} words, all time.",
+      "written_all_floor": "You have written at least {{words}} words, all time.",
+      "written_all_floor_their": "They have written at least {{words}} words, all time.",
+      "written_pages": "That is {{count}} printed pages.",
+      "written_pages_one": "That is a printed page.",
+      "written_pages_other": "That is {{count}} printed pages.",
+      "written_book": "That is a {{pages}}-page book."
     },
     "day_streak": "{{days}}-day streak",
     "day_streak_at_least": "{{days}}+ day streak",
     "day_streak_floor_hint": "At least this many. Older history unread.",
     "member_since": "Member since {{year}}",
-    "today": {
-      "title": "Today",
-      "progress": "{{done}} of {{goal}}",
-      "done": "Done for today.",
-      "start": "One post or comment starts a streak.",
-      "start_goal": "{{goal}} posts or comments starts a streak.",
-      "deadline": "You have until {{time}}.",
-      "deadline_midnight": "You have until midnight.",
-      "freeze": "{{count}} freezes banked. Each covers a missed day.",
-      "freeze_one": "1 freeze banked. It covers a missed day.",
-      "freeze_other": "{{count}} freezes banked. Each covers a missed day.",
-      "freeze_used": "A freeze covered yesterday. The streak held.",
-      "goal_title": "Daily goal",
-      "goal_hint": "One post or comment counts. A Hive vote never reaches Lumen.",
-      "goal": {
-        "casual": "Casual",
-        "casual_sub": "1 a day",
-        "regular": "Regular",
-        "regular_sub": "2 a day",
-        "serious": "Serious",
-        "serious_sub": "4 a day"
-      },
-      "goal_only": "{{goal}} posts or comments today.",
-      "open": "Anything you post or comment counts today."
-    },
     "nudge": {
       "new_giver": "@{{name}} voted on you for the first time. That is {{count}} in all.",
       "unanswered": "@{{name}} replied {{ago}} and nobody has answered.",
@@ -1274,10 +1276,6 @@
           "body": "That one counts."
         }
       },
-      "goal_hit": {
-        "title": "Goal met. Day {{days}}.",
-        "body": "Nothing else needed today."
-      },
       "streak_2": {
         "title": "Two days. That is the hard one.",
         "body": "Day three is downhill."
@@ -1315,7 +1313,9 @@
       "down_title": "It goes down on its own.",
       "down_body": "A day stops counting a year after it happened. Go quiet and the number falls. No notification, nobody else told.",
       "unavailable": "Could not work this out just now. Your rank has not changed.",
-      "loading": "Working it out"
+      "loading": "Working it out",
+      "streak_title": "The streak is separate, and it does not reset.",
+      "streak_body": "A day you post or comment adds 1 to it. A day you do not takes 2 off. It stops at zero and never goes below. So one missed day costs two days of showing up, not everything you built, and holding a number steady means being here about two days in three. It buys no rank and nobody else is told when it falls."
     },
     "weekday_one": {
       "0": "Sunday",
@@ -1325,7 +1325,19 @@
       "4": "Thursday",
       "5": "Friday",
       "6": "Saturday"
-    }
+    },
+    "streak": {
+      "title": "Streak",
+      "days": "{{count}} days",
+      "days_one": "1 day",
+      "days_other": "{{count}} days",
+      "days_floor": "{{count}}+ days",
+      "days_floor_one": "1+ days",
+      "days_floor_other": "{{count}}+ days",
+      "rule": "A day you post or comment adds 1. A day you do not takes 2. Missing one day does not send it back to zero.",
+      "rule_zero": "Post or comment today and it goes to 1. A day you miss takes 2 off, so it moves slowly and never resets."
+    },
+    "day_streak_hint": "Up 1 for a day here, down 2 for a day away. It floors at zero."
   },
   "wallet": {
     "page_title": "Wallet",
@@ -1413,7 +1425,7 @@
       "hbd_source": "Outside exchanges trade HBD at {{price}} USD (CoinGecko). Those markets are thin, so they drift from the Hive rate above.",
       "view_more": "View more market stats →",
       "unavailable": "Price unavailable",
-      "loading": "Fetching price\u2026"
+      "loading": "Fetching price…"
     },
     "advanced": {
       "title": "Advanced",
@@ -1528,7 +1540,6 @@
     },
     "creator_token": "View Meritum",
     "overflow_menu_label": "More options",
-    "overflow_menu_label_downvoted": "More options (you downvoted this)",
     "overflow_menu_label_downvoted": "More options (you downvoted this)",
     "overflow": {
       "view_on_explorer": "View on chain explorer"
@@ -1713,7 +1724,7 @@
       "remove_vote_aria": "Supported. Activate to remove your vote from this proposal.",
       "support_pending": "Submitting…",
       "votes_unavailable": "Vote status unavailable",
-      "votes_pending": "Checking your vote\u2026",
+      "votes_pending": "Checking your vote…",
       "daily_pay": "Daily pay",
       "remaining": "Remaining {{count}} days",
       "paid": "Paid",
@@ -1994,5 +2005,24 @@
     "security": {
       "google_already_linked": "Google is already linked above as your Primary method. There is nothing more to add here."
     }
+  },
+  "healthchecker": {
+    "heading": "API switch and HealthChecker",
+    "intro_pin": "Pin a specific Hive API provider below, or turn on Continuous Check to keep testing them in the background.",
+    "intro_healthy": "For the best experience, only pin a provider that shows as healthy below.",
+    "tab_node": "HIVE API providers",
+    "tab_ai_search": "AI Search providers",
+    "check_find_accounts": "Account lookup",
+    "check_find_accounts_error": "Account lookup error",
+    "check_get_post": "Post lookup",
+    "check_get_post_error": "Post lookup error",
+    "check_list_communities": "Community list",
+    "check_list_communities_error": "Community list error",
+    "check_get_ranked_posts": "Ranked posts",
+    "check_get_ranked_posts_error": "Ranked posts error",
+    "check_ai_search": "AI search",
+    "check_ai_search_error": "AI search error",
+    "check_ai_similar_posts": "AI similar posts",
+    "check_ai_similar_posts_error": "AI similar posts error"
   }
 }

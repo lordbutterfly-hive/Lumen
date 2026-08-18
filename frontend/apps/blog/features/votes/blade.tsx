@@ -32,7 +32,26 @@ export type VoteSize = 'default' | 'sm';
 export function Blade() {
   return (
     <svg
-      viewBox="0 0 24 24"
+      /**
+       * ★★★ CENTRED ARTWORK, NOT A CENTRED BOX (2026-08-18, owner: "the upvote
+       * blade is not level with everything else on cards").
+       *
+       * The blade's ink occupies y 3.10-13.90 of a 0-24 box, so its visual
+       * centre is 8.50 while the BOX centre is 12.00 — the drawing sits 3.5
+       * units, or 4.1px at the 28px render size, ABOVE the middle of the element
+       * every neighbour aligns to. Flexbox centred the box perfectly and the
+       * blade still floated.
+       *
+       * The down side had the mirror of the same fault: `.down svg` rotates
+       * 180deg about the BOX centre, so its ink landed 3.5 units too LOW.
+       *
+       * Shifting the viewBox window up by 3.5 moves the artwork down into the
+       * true centre, which fixes both directions at once and needs no transform
+       * — deliberately, because `.glyph` already owns scale and the svg owns
+       * rotation (see vote-control.module.css), and a third transform here
+       * would contend with the cast animation.
+       */
+      viewBox="0 -3.5 24 24"
       fill="none"
       stroke="currentColor"
       strokeWidth={2}

@@ -18,7 +18,7 @@ import { useTranslation } from '@/blog/i18n/client';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { hiveChainService } from '@transaction/lib/hive-chain-service';
-import { AlertTriangle } from 'lucide-react';
+import { Icons } from '@ui/components/icons';
 import { accountReputation } from '@hive/ui';
 
 interface PopoverCardDataProps {
@@ -239,7 +239,7 @@ const PopoverCardData = ({ author, blacklist, authorReputation, liteName }: Popo
       {blacklist.length > 0 && (
         <div className="border-t border-destructive/20 bg-destructive/5 p-3">
           <div className="flex items-center gap-2 text-sm font-medium text-destructive">
-            <AlertTriangle className="mr-1 h-4 w-4" />
+            <Icons.warning className="mr-1 h-4 w-4" />
             <span>{t('post_content.blacklisted')}</span>
           </div>
           <p className="mt-1 text-xs text-muted-foreground">{blacklist[0]}</p>

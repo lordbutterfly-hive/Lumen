@@ -175,7 +175,28 @@ export const resetChain = (): void => {
  *
  * @returns the endpoint now in use, or undefined if nothing was changed.
  */
-export const advanceToNextRpcEndpoint = (): string | undefined => {
+/**
+ * When we last moved off the preferred node, and therefore when it is worth
+ * trying again. See `restorePreferredRpcEndpoint`.
+ */
+let lastFailoverAt = 0;
+const PREFERRED_RETRY_AFTER_MS = 60_000;
+
+/**
+ * ★★★ COMPARE-AND-SWAP, BECAUSE FAILURES ARRIVE IN CROWDS (2026-08-18).
+ *
+ * `failedEndpoint` is the endpoint the caller was actually talking to when it
+ * failed. Without it this function had a herd problem: a dead node does not fail
+ * one request, it fails every request in flight, and each of those callers used
+ * to advance the rotation independently. Thirty concurrent readers discovering
+ * the same dead node would step thirty times, sail past every healthy node, and
+ * quite possibly land back on the dead one — turning one bad node into an outage.
+ *
+ * Passing what you failed on makes the move idempotent: whoever gets there first
+ * moves the process off that node, and everyone else arriving with the same
+ * stale endpoint is told "already handled" and simply retries on the new one.
+ */
+export const advanceToNextRpcEndpoint = (failedEndpoint?: string): string | undefined => {
   if (typeof window === 'object') return undefined; // browser: respect the reader's node
   if (!hiveChain) return undefined;
 
@@ -183,14 +204,55 @@ export const advanceToNextRpcEndpoint = (): string | undefined => {
   if (rotation.length < 2) return undefined;
 
   const current = hiveChain.api.endpointUrl;
+  // Someone else already moved us off the node this caller failed on.
+  if (failedEndpoint && failedEndpoint !== current) return undefined;
+
   const index = rotation.findIndex((e) => e === current);
   const next = rotation[(index + 1) % rotation.length];
   if (!next || next === current) return undefined;
 
   logger.warn('Hive node %s unreachable — failing over to %s', current, next);
   hiveChain.api.endpointUrl = next;
+  lastFailoverAt = Date.now();
   return next;
 };
+
+/**
+ * ★★★ COME BACK TO THE PREFERRED NODE WHEN IT RECOVERS (2026-08-18).
+ *
+ * Failover alone is a one-way door: a single blip on the configured node moved
+ * the whole process onto a fallback and left it there for the life of the
+ * process. Nodes recover, and the head of the rotation is the head for a reason
+ * — it is what the deployment chose. Staying on a random fallback for days
+ * because of one timeout is not resilience, it is drift.
+ *
+ * So after a cooldown we go back and try the preferred node again. If it is still
+ * down, the next failure costs exactly one request and moves us off it again,
+ * which is the price of ever discovering that it recovered. If it is healthy, we
+ * are home with no operator involved.
+ *
+ * Called at the START of a guarded operation rather than on a timer: a timer
+ * would keep firing on an idle server, and there is nothing to recover for if
+ * nobody is asking.
+ */
+export const restorePreferredRpcEndpoint = (): void => {
+  if (typeof window === 'object') return;
+  if (!hiveChain) return;
+  if (!lastFailoverAt) return;
+  if (Date.now() - lastFailoverAt < PREFERRED_RETRY_AFTER_MS) return;
+
+  const preferred = getEndpointRotation()[0];
+  if (!preferred || hiveChain.api.endpointUrl === preferred) {
+    lastFailoverAt = 0;
+    return;
+  }
+  logger.info('Cooldown elapsed — trying the preferred Hive node %s again', preferred);
+  hiveChain.api.endpointUrl = preferred;
+  lastFailoverAt = 0;
+};
+
+/** The endpoint currently in use, for callers that need to report or compare it. */
+export const currentRpcEndpoint = (): string | undefined => hiveChain?.api.endpointUrl;
 
 export const setRpcEndpoint = (newEndpoint: string): void => {
   logger.info('Changing chain.api.endpointUrl with newEndpoint: %o', newEndpoint);

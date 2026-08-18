@@ -122,7 +122,9 @@
       "mentions": "الذكر",
       "follows": "المتابعة",
       "upvotes": "التصويتات الإيجابية",
-      "reblogs": "إعادة النشر"
+      "reblogs": "إعادة النشر",
+      "notifications_error": "We couldn’t load your notifications.",
+      "notifications_retry": "Try again"
     },
     "user_menu": {
       "profile": "الملف الشخصي",

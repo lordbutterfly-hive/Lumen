@@ -4,6 +4,7 @@ import { useTranslation } from '@/blog/i18n/client';
 import { useAccountHistory } from '../hooks/use-account-history';
 import { getTransfersUrl } from '../lib/wallet-endpoint';
 import AccountHistoryRow from './account-history-row';
+import { EmptyStateIllustration } from '@/blog/components/empty-state-illustration';
 
 const CARD_CLASS = 'rounded-[18px] border border-line-9 bg-surface-1 p-5 sm:p-6';
 
@@ -48,9 +49,12 @@ export default function AccountHistoryList({ username }: { username: string }) {
             {t('wallet.history.loading')}
           </p>
         ) : entries.length === 0 ? (
-          <p className="py-6 text-center text-[14px] leading-[22px] text-ink-14" data-testid="wallet-history-empty">
-            {t('wallet.history.empty')}
-          </p>
+          <div className="flex flex-col items-center gap-2 py-8 text-center" data-testid="wallet-history-empty">
+            {/* ★ Drawn empty state (2026-08-18) — a new wallet with no history
+                looked identical to a wallet that failed to load. */}
+            <EmptyStateIllustration name="empty-wallet" size={104} />
+            <p className="text-[14px] leading-[22px] text-ink-14">{t('wallet.history.empty')}</p>
+          </div>
         ) : (
           <>
             {/* Rows are discrete 14px blocks now (see account-history-row.tsx),

@@ -163,7 +163,6 @@ export function RetentionNudge({ className }: { className?: string }) {
       streakDays: summary.streakDays,
       streakIsLowerBound: coverage?.streakDaysIsLowerBound === true,
       actsToday: summary.today?.acts ?? 0,
-      freezesAvailable: summary.today?.freezesAvailable ?? 0,
       // The reader's LOCAL weekday, not UTC. "It is Tuesday" has to be true where the
       // person reading it is standing; the pattern itself is computed in UTC, and a
       // one-day disagreement at the edges is a far smaller lie than telling somebody

@@ -252,7 +252,11 @@ export class TransactionService {
     txBuilder: ITransaction,
     singleSignKeyType?: SignTransaction['singleSignKeyType'],
     requiredKeyType?: SignTransaction['requiredKeyType'],
-    chain?: SignTransaction['chain']
+    chain?: SignTransaction['chain'],
+    /** The node `chain` belongs to — see SignTransaction.rpcEndpoint. */
+    rpcEndpoint?: SignTransaction['rpcEndpoint'],
+    /** Chain id of `rpcEndpoint` — see SignTransaction.rpcChainId. */
+    rpcChainId?: SignTransaction['rpcChainId']
   ): Promise<string> {
     const { getSigner } = await import('@smart-signer/lib/signer/get-signer');
     const signer = getSigner(this.signerOptions);
@@ -261,7 +265,9 @@ export class TransactionService {
       transaction: txBuilder.transaction,
       singleSignKeyType,
       requiredKeyType,
-      chain
+      chain,
+      rpcEndpoint,
+      rpcChainId
     });
   }
 

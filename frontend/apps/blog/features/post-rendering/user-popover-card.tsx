@@ -3,7 +3,7 @@ import { accountReputation } from '@hive/ui';
 import { Popover, PopoverContent, PopoverTrigger } from '@ui/components/popover';
 import PopoverCardData from './popover-card-data';
 import { useTranslation } from '@/blog/i18n/client';
-import { AlertTriangle } from 'lucide-react';
+import { Icons } from '@ui/components/icons';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@ui/components/tooltip';
 import { QuillMark } from './quill-mark';
 
@@ -85,7 +85,7 @@ export function UserPopoverCard({
           )}
           {blacklist && blacklist[0] ? (
             <span title={blacklist[0]}>
-              <AlertTriangle className="ml-1 h-4 w-4 text-destructive" />
+              <Icons.warning className="ml-1 h-4 w-4 text-destructive" />
             </span>
           ) : null}
         </button>

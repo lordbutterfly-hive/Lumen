@@ -101,8 +101,6 @@ interface ToastLedger {
   day2Day: string;
   /** UTC day the first-act moment already fired on. */
   firstActDay: string;
-  /** UTC day the daily-goal moment already fired on. */
-  goalDay: string;
   /** UTC day a streak-milestone moment already fired on. */
   milestoneDay: string;
 }
@@ -155,7 +153,7 @@ function ledgerForOwner(owner: string): ActLedger {
 function readToastLedger(): ToastLedger {
   const stored = getStorageItem<ToastLedger>(TOASTS_KEY);
   if (!stored || typeof stored !== 'object') {
-    return { lastAt: 0, windowStart: 0, windowCount: 0, day2Day: '', firstActDay: '', goalDay: '', milestoneDay: '' };
+    return { lastAt: 0, windowStart: 0, windowCount: 0, day2Day: '', firstActDay: '', milestoneDay: '' };
   }
   return {
     lastAt: Number(stored.lastAt) || 0,
@@ -165,7 +163,6 @@ function readToastLedger(): ToastLedger {
     firstActDay: typeof stored.firstActDay === 'string' ? stored.firstActDay : '',
     // Absent on a ledger written before the daily loop existed. Defaulting to '' means
     // "has not fired today", which is the correct reading of a field that did not exist.
-    goalDay: typeof stored.goalDay === 'string' ? stored.goalDay : '',
     milestoneDay: typeof stored.milestoneDay === 'string' ? stored.milestoneDay : ''
   };
 }
@@ -189,33 +186,20 @@ function prune(ledger: ActLedger, today: string): ActLedger {
   return { days, owner: ledger.owner };
 }
 
-/**
- * Kinds that count toward the DAILY GOAL. Authored acts only.
- *
- * ★ NOT EVERY ACT KIND, AND THE REASON IS SYMMETRY RATHER THAN PURITY. The ring on the
- * Today card draws the server's `summary.today.acts`, which is chain-derived and
- * counts posts and comments — it cannot count votes, because a Hive user's vote
- * broadcasts from their browser and never touches this server. If this counted votes,
- * a lite user could fill the ring by voting while a Hive user doing the same thing
- * could not, and the goal-hit toast would fire on a ring that had not moved. One
- * currency, on both sides of the wire, or the two disagree in public.
- */
-const GOAL_KINDS: RetentionActKind[] = ['post', 'reply'];
+// ★ `GOAL_KINDS` AND `countToday` ARE DELETED (2026-08-18). They summed today's authored
+// acts so the 'goal-hit' toast could fire on the act that MET the reader's chosen daily
+// target. There is no target. Nothing else counted acts within a day.
 
 /**
- * Authored acts recorded today.
+ * Consecutive UTC days, ending today, on which at least one act was recorded IN THIS
+ * BROWSER.
  *
- * ★ IT COUNTS ACTS, NOT KINDS. The goal is "two things today", so two replies has to
- * count as two — summing the counters is the only reading that matches the sentence
- * the picker shows.
+ * ★ NOT THE STREAK. The streak is server-side, chain-derived, and decays (+1 a day
+ * present, -2 a day absent) — see compute-streak.ts. This is a purely local
+ * "did you come back" counter whose only consumer is the day-2 toast, which fires on the
+ * act itself, before any server round trip could answer. The two numbers are allowed to
+ * differ and are never shown side by side: this one is never rendered.
  */
-function countToday(ledger: ActLedger, today: string): number {
-  const counts = ledger.days[today];
-  if (!counts) return 0;
-  return GOAL_KINDS.reduce((sum, kind) => sum + (counts[kind] ?? 0), 0);
-}
-
-/** Consecutive UTC days, ending today, on which at least one act was recorded. */
 export function streakDaysFromLedger(ledger: ActLedger, today: string): number {
   let streak = 0;
   let cursor = today;
@@ -264,15 +248,17 @@ export function weekTally(viewer: string, now: Date = new Date()): WeekTally {
 }
 
 /**
- * ★ 'goal-hit' AND 'milestone' ADDED 2026-08-09, WITHOUT RAISING THE CEILINGS.
+ * ★ TWO MOMENTS, AND THE CEILINGS HAVE NEVER MOVED (one toast per session, three per
+ * rolling week). The priority order in `recordRetentionAct` decides which one wins, and
+ * it prefers the rarer event, because a rare event is the only kind worth a toast.
  *
- * The daily loop needs a moment when the goal is met and a moment at a real streak
- * milestone, but the hard limits below (one toast per session, three per rolling week)
- * are unchanged — more moments competing for the same budget, not a bigger budget. The
- * priority order in `recordRetentionAct` decides which one wins, and it prefers the
- * rarer event, because a rare event is the only kind worth a toast.
+ * ★ 'goal-hit' IS DELETED (2026-08-18, owner). It fired the moment the reader met their
+ * chosen daily GOAL — the moment the ring existed for. There is no goal and no ring; the
+ * first authored act of the day already gets 'first-act', whose copy is per-kind ("That
+ * is a post." / "Replied.") and is strictly better than a second toast saying the day
+ * counted. 'milestone' was deleted earlier for its own reason, recorded below.
  */
-export type RetentionMomentKey = 'first-act' | 'streak-2' | 'goal-hit';
+export type RetentionMomentKey = 'first-act' | 'streak-2';
 
 /**
  * Streak lengths worth a toast. Mirrors `lib/nudge.ts`'s STREAK_MILESTONES minus day
@@ -351,20 +337,6 @@ function recordAct(kind: RetentionActKind): void {
   const streakDays = streakDaysFromLedger(ledger, today);
   const toasts = readToastLedger();
   const nowMs = now.getTime();
-  // ★ THE GOAL LIVES ON THE SERVER NOW, SO THE TOAST NO LONGER GUESSES AT IT.
-  //
-  // This read `readDailyGoal()` from localStorage to decide when to fire the "goal met"
-  // toast. That value is gone (see lib/daily-goal.ts) because the goal became an input to
-  // the streak. The honest consequence: this client-side ledger cannot know the server's
-  // target, so the goal-hit toast fires on the FIRST act of the day — the smallest goal,
-  // which is also the default. A reader on a higher goal gets the first-act toast rather
-  // than a premature "goal met" one, which is the safe direction to be wrong in: a toast
-  // that congratulates work not yet done would contradict the ring sitting beside it.
-  //
-  // Firing it exactly on the real target needs the server's goal on the client, i.e. this
-  // ledger reading `summary.today.goal`. Worth doing; not worth guessing in the meantime.
-  const goalTarget = 1;
-
   // Rolling-week window.
   if (nowMs - toasts.windowStart > WEEK_MS) {
     toasts.windowStart = nowMs;
@@ -372,19 +344,14 @@ function recordAct(kind: RetentionActKind): void {
   }
 
   // ★ WHICH MOMENT IS EVEN ELIGIBLE, RAREST FIRST. Only one toast may fire, so the
-  // order is the whole policy: a 30-day milestone beats day 2, which beats the daily
-  // goal, which beats "you did a thing". Reversing any pair would spend the one
-  // available toast on the less interesting event.
+  // order is the whole policy: day 2 beats "you did a thing". Reversing the pair would
+  // spend the one available toast on the less interesting event.
   let key: RetentionMomentKey | null = null;
   // The 'milestone' toast carried the same "Nobody made you do it." line the feed
   // nudge did, and it is gone for the same reason (owner ruling 2026-08-10). Day 2
   // survives: "you came back" is an observation about the reader, not applause.
   if (streakDays === 2 && toasts.day2Day !== today) {
     key = 'streak-2';
-  } else if (goalTarget > 0 && countToday(ledger, today) === goalTarget && toasts.goalDay !== today) {
-    // EXACTLY the target, not >=, so this fires on the act that MET the goal and not
-    // on every act after it. The `!==` day guard is a second belt, not the mechanism.
-    key = 'goal-hit';
   } else if (toasts.firstActDay !== today) {
     key = 'first-act';
   }
@@ -397,7 +364,6 @@ function recordAct(kind: RetentionActKind): void {
   toasts.lastAt = nowMs;
   toasts.windowCount += 1;
   if (key === 'streak-2') toasts.day2Day = today;
-  else if (key === 'goal-hit') toasts.goalDay = today;
   else toasts.firstActDay = today;
   writeToastLedger(toasts);
 

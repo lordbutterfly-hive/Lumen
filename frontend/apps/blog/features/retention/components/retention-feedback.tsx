@@ -35,16 +35,9 @@ export function RetentionFeedback() {
       // The milestone toast is gone with the milestone nudge (owner ruling,
       // 2026-08-10): its body was "Nobody made you do it.", which is the app
       // congratulating a reader for choosing to be there. See lib/nudge.ts.
-      // The daily goal, met. This is the moment the ring exists for, and it is the one
-      // that should feel like a full stop rather than a prompt: "nothing else needed
-      // today" is the opposite of what a streak app usually says here.
-      if (moment.key === 'goal-hit') {
-        toast({
-          title: t('retention.moment.goal_hit.title', { days: moment.streakDays }),
-          description: t('retention.moment.goal_hit.body')
-        });
-        return;
-      }
+      // The goal-met toast is gone with the daily goal itself (owner ruling,
+      // 2026-08-18). The first act of the day is the only thing left worth a word, and
+      // it already has better copy than "goal met" ever did.
       // First genuine act of the session — copy is per-act, because "you did a
       // thing" is not feedback and a vote is not a post.
       toast({

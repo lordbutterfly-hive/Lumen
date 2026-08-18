@@ -123,7 +123,9 @@
       "mentions": "Wzmianki",
       "follows": "Obserwacje",
       "upvotes": "Głosy za",
-      "reblogs": "Reblogi"
+      "reblogs": "Reblogi",
+      "notifications_error": "We couldn’t load your notifications.",
+      "notifications_retry": "Try again"
     },
     "user_menu": {
       "profile": "Profil",

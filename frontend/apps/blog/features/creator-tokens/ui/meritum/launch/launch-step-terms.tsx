@@ -4,6 +4,7 @@ import { FC } from 'react';
 import { useTranslation } from '@/blog/i18n/client';
 import { BackAction, HoldAction, Notice } from './launch-controls';
 import type { MeritumLaunchBlock } from './use-meritum-launch';
+import { MagiFundingHelp } from '@/blog/features/creator-tokens/live/magi-fuel-gauge';
 
 /**
  * STEP 3 — the terms ledger, the optional first buy, and the strike.
@@ -37,6 +38,16 @@ export interface LaunchStepTermsProps {
   onHoldBegin: () => void;
   onHoldRelease: () => void;
   onBack: () => void;
+}
+
+/**
+ * Does this failure mean "you could not pay for it"? Matched on the wallet's and
+ * the contract's own wording rather than a code, because the refusal can come
+ * from either side — the Magi contract refusing the reserve payment, or the
+ * chain refusing the call for want of resource credits.
+ */
+function isFundingFailure(message: string): boolean {
+  return /insufficient|not enough|balance|resource credit|\brc\b|too low|cannot afford/i.test(message);
 }
 
 const LaunchStepTerms: FC<LaunchStepTermsProps> = ({
@@ -164,6 +175,22 @@ const LaunchStepTerms: FC<LaunchStepTermsProps> = ({
       {failure ? (
         <Notice tone="alert">
           {t('meritum_launch.failed_title')} {failure}
+          {/* ★★★ A FUNDING FAILURE MUST SAY HOW TO FUND (2026-08-18, owner).
+              Taking the first token yourself SPENDS: the launch buys `firstBuy`
+              worth of your own market, and on Magi HBD is ALSO the resource
+              credit, so a creator can fail for the cost, for the RCs, or both.
+              "Launch did not go through" alone leaves them with no idea that a
+              deposit is the answer, or how much to send. */}
+          {isFundingFailure(failure) ? (
+            <div className="mt-3">
+              <p className="mb-2 text-13">
+                {firstBuy.trim() !== ''
+                  ? `Your first buy costs ${firstBuy} HBD. Send that to your Magi account plus a little extra — on Magi, HBD also pays the resource credits every action needs, so deposit a bit more than the buy itself.`
+                  : 'Send HBD to your Magi account before launching — on Magi, HBD also pays the resource credits that every action needs.'}
+              </p>
+              <MagiFundingHelp kind="hive" />
+            </div>
+          ) : null}
         </Notice>
       ) : null}
       {blockMessage ? (

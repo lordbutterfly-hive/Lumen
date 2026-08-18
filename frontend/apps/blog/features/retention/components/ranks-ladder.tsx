@@ -229,6 +229,22 @@ export default function RanksLadder() {
         <span className="font-semibold text-ink-7">{t('retention.ranks.down_title')}</span>{' '}
         {t('retention.ranks.down_body')}
       </p>
+
+      {/* ★ HOW THE STREAK WORKS, AND IT IS HERE BECAUSE THIS IS THE PAGE THE PRODUCT
+          LINKS TO WHEN SOMEBODY ASKS "how does this work" (the showcase popover's own
+          link reads exactly that).
+
+          The rule changed on 2026-08-18: it was consecutive days with a reset to zero on
+          the first miss, and it is a decay now — +1 a day here, -2 a day away, floored at
+          zero. A mechanic that can take a number DOWN has to be written down somewhere a
+          reader can find it, or the first time it moves the wrong way it reads as a bug.
+          It sits under the demotion paragraph rather than above the ladder because the
+          streak buys no rank: it is a separate number, and the copy says so in its first
+          five words. */}
+      <p className="mt-3 font-sans text-[14px] leading-[22px] text-ink-10" data-testid="ranks-streak">
+        <span className="font-semibold text-ink-7">{t('retention.ranks.streak_title')}</span>{' '}
+        {t('retention.ranks.streak_body')}
+      </p>
     </div>
   );
 }

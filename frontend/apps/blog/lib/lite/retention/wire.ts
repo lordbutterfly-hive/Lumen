@@ -49,6 +49,12 @@ export interface LiteRetentionCoverage {
   commentsFeedUnavailable: boolean;
   /** True when the giver SCAN cap bit, so the giver counts are a lower bound. */
   giversAreLowerBound: boolean;
+  /**
+   * The whole history is held, so counts derived from it are totals rather than floors.
+   * True by construction here — Lumen owns every post a lite account ever made — except
+   * when the word-count body scan hits its bound (`WORDS_SCAN_LIMIT`).
+   */
+  historyComplete: boolean;
 }
 
 export interface LiteRetentionSampled {
@@ -105,14 +111,7 @@ export interface LiteRetentionResponse {
    * line; a zero renders a false one.
    */
   stats: LiteRetentionResult['summary']['stats'];
-  /**
-   * The daily loop, so the Today card works for a lite account too.
-   *
-   * `freezesAvailable` is 0 on this path: the freeze ledger (migration 0028) is keyed
-   * on a Hive account and there is no lite equivalent yet. Zero is honest here rather
-   * than misleading — it means "no mercy banked", which is exactly true, and the card
-   * simply renders no freeze line.
-   */
+  /** Today's authored acts, so the streak card works for a lite account too. */
   today: LiteRetentionResult['summary']['today'];
   provenance: LiteRetentionProvenance;
   /** The three arm positions, so a UI can name the binding arm's actual numbers. */
@@ -171,7 +170,13 @@ export function toLiteRetentionResponse(
         activeWeeksIsLowerBound: false,
         cappedReason: null,
         commentsFeedUnavailable: false,
-        giversAreLowerBound: detail.giversCapped
+        giversAreLowerBound: detail.giversCapped,
+        // ★ TRUE BY CONSTRUCTION ON THIS PATH: Lumen created the account and holds every
+        // post it ever made, so there is no unread history for anything to be a floor
+        // against. The one exception is a body scan that hit its bound — see
+        // `WORDS_SCAN_LIMIT` — which makes the word count (and only the word count) a
+        // lower bound, and this is the flag every consumer already reads for that.
+        historyComplete: !detail.wordsCapped
       },
       proxied: {}
     },

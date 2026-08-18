@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { MoreHorizontal, AlertTriangle, ImageOff } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, UserAvatarImg, DIRECT_TIMEOUT_MS } from '@hive/ui';
 import {
@@ -336,12 +335,65 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
     // revealed after that would only ever be caught by `onError`, missing
     // exactly the case this effect exists for.
     if (!thumbnail || thumbnailFailed || !nsfwShown) return;
-    const timer = setTimeout(() => {
-      const el = thumbnailImgRef.current;
-      if (!el || (el.complete && el.naturalWidth > 0)) return;
-      setThumbnailFailed(true);
-    }, DIRECT_TIMEOUT_MS);
-    return () => clearTimeout(timer);
+    const el = thumbnailImgRef.current;
+    if (!el) return;
+
+    /**
+     * ★★★ THIS TIMER WAS FAILING 80% OF THE FEED (measured 2026-08-18).
+     *
+     * Fresh browser context, home feed: **24 of 30 thumbnails** rendered
+     * "Image unavailable". They had not failed — they had never been REQUESTED.
+     * The network log showed exactly 6 image requests, all 200 OK in 89-133ms,
+     * matching the 6 cards that survived. The other 24 issued no request at all.
+     *
+     * The `<img>` is `loading="lazy"`, so the browser correctly defers anything
+     * below the fold. But this timer started on MOUNT and fired 2.5s later
+     * regardless of whether the browser had begun loading, found
+     * `complete === false` — which is simply true of a not-yet-started lazy
+     * image — and latched `thumbnailFailed` permanently. Scrolling the card
+     * into view afterwards could not clear it: there was no re-arm.
+     *
+     * So the check was measuring "has this loaded yet", 2.5s after mount, on an
+     * element deliberately designed not to load until it is scrolled to. It was
+     * guaranteed to fail for every card below the fold on a cold visit, which is
+     * most of them — and it looked exactly like a flaky image host, which is why
+     * it was blamed on the proxy and then on the API node. It is neither: same
+     * measurement, zero requests, zero console errors.
+     *
+     * The fix is to start counting when the browser starts LOADING, not when
+     * React mounts. `loadstart` is the honest signal for that; `complete` covers
+     * an image already served from cache before this effect ran. Anything that
+     * never starts loading is not failing — it is off-screen, and untouched.
+     */
+    if (el.complete && el.naturalWidth > 0) return;
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const armTimer = () => {
+      if (timer) return;
+      timer = setTimeout(() => {
+        const current = thumbnailImgRef.current;
+        if (!current || (current.complete && current.naturalWidth > 0)) return;
+        setThumbnailFailed(true);
+      }, DIRECT_TIMEOUT_MS);
+    };
+
+    /**
+     * ★ `complete === false` DOES NOT MEAN "LOADING" — it is equally true of a
+     * lazy image the browser has not touched yet, which is the whole bug above.
+     * The two signals that DO separate them:
+     *   · `currentSrc` is empty until the browser selects and begins a resource,
+     *     so a non-empty one means loading genuinely started (or finished).
+     *   · `loadstart` fires at the moment it begins, covering everything that
+     *     starts later — i.e. when the reader scrolls it into view.
+     * Anything that never starts never arms, and an off-screen card is left
+     * alone instead of being declared broken.
+     */
+    if (el.currentSrc) armTimer();
+    el.addEventListener('loadstart', armTimer);
+    return () => {
+      el.removeEventListener('loadstart', armTimer);
+      if (timer) clearTimeout(timer);
+    };
     // Re-arms if the post's thumbnail URL itself changes (a different card
     // reusing this component instance under the same key never happens in
     // this feed, but a stale timer racing a new `thumbnail` would otherwise
@@ -444,7 +496,15 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
       // same `rounded-[18px] border-[#ebebeb]` card the rest of Lumen already
       // uses, so this borrows the existing language rather than inventing a
       // second one. Borders only: type, spacing and colour are untouched.
-      className="mb-4 rounded-[18px] border border-[#ebebeb] bg-white p-[22px] shadow-[0_1px_2px_rgba(20,18,10,0.03)] transition-colors hover:bg-[#fdfcfb]"
+      /*
+        ★ `lm-card lm-enter` (2026-08-18) — the card now rises 2px toward the
+        cursor and the feed staggers in, using the same easing the vote control
+        already used. The product had 31 keyframes defined and zero running on
+        this screen; this is the first of them to reach the feed. Both are off
+        under prefers-reduced-motion. The flat 0.03-alpha shadow stays as the
+        resting state and `--lift-2` takes over on hover.
+      */
+      className="lm-card lm-enter mb-4 rounded-[18px] border border-[#ebebeb] bg-white p-[22px] shadow-[0_1px_2px_rgba(20,18,10,0.03)] transition-colors hover:bg-[#fdfcfb]"
     >
       {/* Reblog provenance line — only present when the underlying query supplies
           it. `EntryFeed` in feed-tabs.tsx fetches the Following tab via
@@ -538,7 +598,7 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
                 )}
                 data-testid="medium-card-blacklist-mark"
               >
-                <AlertTriangle className="h-3.5 w-3.5 text-destructive" aria-hidden="true" />
+                <Icons.warning className="h-3.5 w-3.5 text-destructive" aria-hidden="true" />
               </TooltipTrigger>
               <TooltipContent>
                 {t(
@@ -663,7 +723,7 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
                     )}
                     data-testid="medium-card-overflow-trigger"
                   >
-                    <MoreHorizontal className="h-4 w-4" />
+                    <Icons.moreHorizontal className="h-4 w-4" />
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-52">
@@ -910,10 +970,26 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
             tabIndex={-1}
           >
             <div
-              className="flex h-[132px] w-[190px] flex-col items-center justify-center gap-1.5 rounded-[14px] border border-dashed border-[#e0dcd4] bg-[#f4f5f7] font-sans text-[12px] font-medium text-[#6f6963]"
+              className="flex h-[132px] w-[190px] flex-col items-center justify-center gap-1.5 rounded-[14px] border border-dashed border-[#ded2c2] bg-[#f6efe6] font-sans text-[12px] font-medium text-[#8a7f72]"
               aria-hidden="true"
             >
-              <ImageOff className="h-5 w-5" strokeWidth={1.75} />
+              {/*
+                ★★★ TF9, THE DESIGNED FALLBACK (2026-08-18). This was a generic
+                broken-image glyph, which reads "this app is broken" rather than
+                "this one picture did not load" — and roughly half the feed's
+                thumbnails reach this state, so it was a large share of what the
+                product actually looked like. TF9 is a tinted paper block with a
+                dashed trim and the COMMUNITY's initial (the designer's answer to
+                which letter: communities repeat down a feed, so the block reads
+                as a category rather than noise). Falls back to the title's first
+                letter when a post has no community, per the same note.
+              */}
+              <span
+                className="font-serif text-[26px] leading-none text-[#8a7f72]"
+                data-testid="thumbnail-fallback-initial"
+              >
+                {(post.community_title || post.category || displayTitle || '?').trim().charAt(0).toUpperCase()}
+              </span>
               {t('cards.post_card.thumbnail_unavailable')}
             </div>
           </Link>

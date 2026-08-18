@@ -11,7 +11,7 @@ import { CircleSpinner } from 'react-spinners-kit';
 import { useResetAllListsMutation } from '@/blog/components/hooks/use-reset-mutations';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { LoginType } from '@smart-signer/types/common';
-import { Search, UserPlus } from 'lucide-react';
+import { Icons } from '@ui/components/icons';
 import ListItem from './list-item';
 import { useAddToListForm } from './hooks/use-add-to-list-form';
 import ResetAllListsDialog from './reset-all-lists-dialog';
@@ -232,7 +232,7 @@ const ListArea = ({
       {accountOwner ? (
         <div className={LIST_CARD}>
           <h2 className={LIST_SECTION_HEADING}>
-            <UserPlus className="h-4 w-4 text-ink-brand-6" />
+            <Icons.userPlus className="h-4 w-4 text-ink-brand-6" />
             {t('user_profile.lists.list.add_account_to_list')}
           </h2>
           <span className="mt-1 block text-xs text-[#6b7280]">{t('user_profile.lists.list.single_account')}</span>
@@ -316,7 +316,7 @@ const ListArea = ({
       {/* Search */}
       <div className={LIST_CARD}>
         <h2 className={LIST_SECTION_HEADING}>
-          <Search className="h-4 w-4 text-ink-brand-6" />
+          <Icons.search className="h-4 w-4 text-ink-brand-6" />
           {t('user_profile.lists.list.search_this_list')}
         </h2>
         <div className="mt-3 w-full">

@@ -61,19 +61,10 @@ export function daySetCompleteFrom(walks: WalkCoverage[], todayUTC: string): str
   return boundary;
 }
 
-/**
- * Is `streakDays` a floor rather than a measurement?
- *
- * @param streakBrokeOnUTC `computeStreak`'s break day — the first day going
- *   backwards with no act, or `''` when nothing broke it inside the guard.
- * @param completeFrom the boundary from {@link daySetCompleteFrom}.
- *
- * A break at or after the boundary was OBSERVED in data we actually hold, so the
- * streak is exact. A break older than the boundary — or no break found at all —
- * happened where we were not looking, so the true streak may be longer.
- */
-export function isStreakLowerBound(streakBrokeOnUTC: string, completeFrom: string): boolean {
-  if (completeFrom === '') return false; // nothing bounded the walk
-  if (streakBrokeOnUTC === '') return true; // ran to the guard without a break
-  return streakBrokeOnUTC < completeFrom;
-}
+// ★ `isStreakLowerBound` IS DELETED (2026-08-18). It took `computeStreak`'s BREAK DAY —
+// the first day going backwards with no act — and compared it against the boundary above
+// to decide whether the streak was exact. The streak decays now: it accumulates FORWARD
+// and has no break day at all, so the question has no subject. `computeStreak` decides the
+// floor itself, by comparing the day it counted from against the day Lumen started
+// counting the account, and `daySetCompleteFrom` above is what supplies the first of those
+// two. One boundary, still computed here, still tested.

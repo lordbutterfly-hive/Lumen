@@ -2,7 +2,7 @@
 
 import { getMarketDataSource } from '@/blog/features/prediction-market/lib/market-data-source';
 import MarketWidget from '@/blog/features/prediction-market/market-widget';
-import { TodayCard } from '@/blog/features/retention/components/today-card';
+import { StreakCard } from '@/blog/features/retention/components/streak-card';
 import Topics from './right-rail/topics';
 
 const CARD_CLASS =
@@ -27,10 +27,14 @@ export default function RightRail() {
   const marketAvailable = getMarketDataSource() !== null;
   return (
     <aside className="flex w-full flex-col gap-5 font-sans text-foreground" data-testid="right-rail">
-      {/* Top of the rail, and it brings its own card chrome — it renders nothing at
-          all for a signed-out reader or a server that predates the daily loop, and an
-          empty bordered box would be worse than an absent one. */}
-      <TodayCard />
+      {/* Top of the rail, and it brings its own card chrome — it renders nothing at all
+          for a signed-out reader or before the summary lands, and an empty bordered box
+          would be worse than an absent one.
+
+          ★ THE DAILY GOAL WENT WITH IT (owner, 2026-08-18). This was `TodayCard`: a
+          goal ring, a goal picker, a deadline, a freeze count. It is the streak and the
+          rule that produces it, and nothing else. */}
+      <StreakCard />
       {marketAvailable ? (
         <div className={CARD_CLASS}>
           <MarketWidget />

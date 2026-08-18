@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 120" width="160" height="120" aria-hidden="true" focusable="false">
+  <rect x="20" y="16" width="120" height="82" rx="6" fill="var(--lm-illo-paper)" stroke="var(--lm-illo-line)" stroke-width="2"></rect>
+  <path d="M20 36h120" stroke="var(--lm-illo-line)" stroke-width="2"></path>
+  <circle cx="32" cy="26" r="3" fill="var(--lm-illo-accent)"></circle><circle cx="44" cy="26" r="3" fill="var(--lm-illo-accent)"></circle>
+  <path d="M58 58l20 20M78 58l-20 20" stroke="var(--lm-illo-line-soft)" stroke-width="2" stroke-linecap="round"></path>
+  <path d="M92 58h26M92 70h18M92 82h26" stroke="var(--lm-illo-accent)" stroke-width="2" stroke-linecap="round"></path>
+</svg>

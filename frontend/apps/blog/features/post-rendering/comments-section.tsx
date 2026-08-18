@@ -31,6 +31,7 @@ import { useStorageWithTTL } from '@ui/hooks/useStorageWithTTL';
 import { StorageTTL } from '@ui/lib/storage-with-ttl';
 import DialogLogin from '@/blog/components/dialog-login';
 import { ReplyTextbox } from '@/blog/features/post-editor/reply-textbox';
+import { EmptyStateIllustration } from '@/blog/components/empty-state-illustration';
 
 interface CommentsSectionProps {
   postData: Entry;
@@ -175,6 +176,11 @@ const CommentsSection = memo(function CommentsSection({
     <div ref={sectionRef} className={commentsSectionClasses}>
       {replyCount === 0 ? (
         <div className="flex flex-col items-center gap-1.5 py-12 text-center" data-testid="comments-empty">
+          {/* ★ Drawn empty state (2026-08-18). A post with no replies was two
+              grey lines, which reads as "failed to load" rather than "be the
+              first". The drawing carries no meaning the text does not — it is
+              aria-hidden. */}
+          <EmptyStateIllustration name="empty-comments" size={112} className="mb-1.5" />
           <p className="font-sans text-sm font-semibold text-foreground">
             {t('select_sort.sort_comments.no_comments_title')}
           </p>

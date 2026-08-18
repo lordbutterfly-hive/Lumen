@@ -1,6 +1,5 @@
 'use client';
 
-import { MoreHorizontal } from 'lucide-react';
 import { Icons } from '@hive/ui/components/icons';
 import parseDate from '@hive/ui/lib/parse-date';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader } from '@hive/ui/components/card';
@@ -626,7 +625,7 @@ const CommentListItem = memo(function CommentListItem({
   // whether the parent should be shown at all.
   if (mutedListUnknown && !moderationRevealed) {
     return (
-      <li data-testid="comment-list-item" className="w-full min-w-0">
+      <li data-testid="comment-list-item" className="lm-enter w-full min-w-0">
         <div
           className="mb-4 flex w-full min-w-0 flex-wrap items-center justify-between gap-3 rounded-[14px] border border-dashed border-line-18 bg-surface-14 px-3 py-2.5 font-sans text-[13px] leading-[20px] text-ink-10"
           data-testid="comment-moderation-unknown"
@@ -661,7 +660,7 @@ const CommentListItem = memo(function CommentListItem({
   return (
     <>
       {currentDepth < 8 ? (
-        <li data-testid="comment-list-item" className="w-full min-w-0">
+        <li data-testid="comment-list-item" className="lm-enter w-full min-w-0">
           <div className="w-full min-w-0" id={commentId} ref={ref}>
             <Accordion type="single" collapsible value={openState} className="w-full min-w-0">
               <AccordionItem className="w-full min-w-0" value="item-1">
@@ -1156,7 +1155,7 @@ const CommentListItem = memo(function CommentListItem({
                                         )}
                                         data-testid="comment-card-footer-overflow"
                                       >
-                                        <MoreHorizontal className="h-4 w-4" />
+                                        <Icons.moreHorizontal className="h-4 w-4" />
                                       </button>
                                     </PopoverAnchor>
                                   </DropdownMenuTrigger>

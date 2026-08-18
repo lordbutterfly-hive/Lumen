@@ -42,6 +42,8 @@ export interface LiteRetentionResult {
     ageDays: number;
     activeDaysInWindow: number;
     postCount: number;
+    /** The body scan hit its bound, so `stats.wordsWritten` is a floor. */
+    wordsCapped: boolean;
     givers: GiverCredit;
     /** True when the giver scan hit its cost cap, so giver counts are a lower bound. */
     giversCapped: boolean;
@@ -71,17 +73,19 @@ export function computeLiteRetention(
     : 0;
 
   // The streak and active-weeks numbers come from the PURE, shared implementation.
-  // `freezeAvailable: 0` because no freeze ledger exists yet — granting phantom
-  // freezes would inflate every streak on the platform with a mechanic nobody earned.
   // `windowWeeks` is the Lumen presence window, NOT the chain ladder's 26 — the
   // wire reports the same constant as `coverage.windowWeeks`, and the shared UI
   // copy prints "active {activeWeeks} of the last {windowWeeks} weeks". Passing
   // it here is what stops those two numbers from being measured over different
   // spans (see PRESENCE_WINDOW_WEEKS in bands.ts).
+  // ★ NO `countFromUTC` AND NO `observedFromUTC` ON THIS PATH, AND THAT IS EXACT RATHER
+  // THAN SLOPPY. Lumen created this account, so it observed every day of its life: the
+  // day set has no holes and the decay's zero start IS the account's first day. The
+  // chain path has to pass both because a Hive account existed before Lumen saw it and
+  // its walk can leave gaps.
   const streak = computeStreak({
     actDaysUTC: facts.actDaysUTC,
     todayUTC: utcDayString(nowMs),
-    freezeAvailable: 0,
     windowWeeks: PRESENCE_WINDOW_WEEKS
   });
 
@@ -144,20 +148,24 @@ export function computeLiteRetention(
       // `provenance.source` to say "all N posts" instead of "the last N".
       stats: {
         people: givers.vouched + givers.unknown,
-        peopleOverPosts: facts.postCount
+        peopleOverPosts: facts.postCount,
+        // ★ ALL-TIME AND EXACT ON THIS PATH (unless the body scan capped — see
+        // `wordsCapped`, which the wire turns into `coverage.historyComplete: false`).
+        // Lumen holds every post a lite account ever wrote, so there is no walk to
+        // truncate and no window to caveat. ABSENT rather than zero when there is
+        // nothing: a "0 words" line would tell somebody who has just joined that they
+        // have written nothing, which is true and unkind and not worth a line.
+        ...(facts.wordsWritten.all > 0 ? { wordsWritten: facts.wordsWritten } : {})
       },
       today: {
         // Authored acts today, from the same day set the streak uses. Posts and
         // comments only, matching the chain path — one currency on both sides.
-        acts: facts.actDaysUTC.filter((d) => d === utcDayString(nowMs)).length,
-        // No lite freeze ledger yet: migration 0028's table is keyed on a Hive
-        // account. Zero is exactly true ("no mercy banked"), not a placeholder.
-        freezesAvailable: 0,
-        freezesUsedRecently: 0
+        acts: facts.actDaysUTC.filter((d) => d === utcDayString(nowMs)).length
       }
     },
     detail: {
       ageDays,
+      wordsCapped: facts.wordsCapped,
       activeDaysInWindow: facts.activeDaysInWindow,
       postCount: facts.postCount,
       givers,

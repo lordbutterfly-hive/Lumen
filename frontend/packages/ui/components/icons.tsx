@@ -5,6 +5,16 @@ import * as CI from './custom-icons';
 
 export type Icon = typeof LucideIcon;
 
+// ★★★ THE PRESS CUT IS LIVE HERE (2026-08-18). The keys below now resolve to the
+// filled, engraved-looking set delivered against the design brief
+// (`custom-icons.tsx`'s FILLED_PATHS) instead of the 1.75px line drawings. Doing
+// it at THIS map rather than at the ~174 call sites means every consumer picks
+// the new art up at once and none of them had to change — and it is reversible in
+// one line each if a shape turns out to read worse at 16px than the line version.
+//
+// Not swapped, on purpose: the vote blade (arrowBigUp/arrowBigDown) carries the
+// rhombus facet the whole set is built around, and the quill is a byline meaning,
+// not an icon. Both were delivered unchanged for exactly that reason.
 export const Icons = {
   eyeOff: CI.eyeOff,
   eye: CI.eye,
@@ -21,22 +31,22 @@ export const Icons = {
   horizontalRule: CI.horizontalRule,
   paperclip: CI.paperclip,
   quote: CI.quote,
-  imageIcon: CI.image,
+  imageIcon: CI.pressImage,
   info: CI.info,
-  flag: CI.flag,
-  marketChart: CI.marketChart,
+  flag: CI.pressFlag,
+  marketChart: CI.pressChart,
   unflag: CI.unflag,
   crossPost: CI.crossPost,
-  externalLink: CI.externalLink,
-  link: CI.link,
+  externalLink: CI.pressExternal,
+  link: CI.pressLink,
   link2: CI.link2,
   link2Off: CI.link2Off,
-  pencil: CI.pencil,
+  pencil: CI.pressCompose,
   sidebarClose: CI.sidebarClose,
   sidebarOpen: CI.sidebarOpen,
-  menu: CI.menu,
+  menu: CI.pressMenu,
   x: CI.x,
-  micOff: CI.micOff,
+  micOff: CI.pressMute,
   arrowBigUp: CI.arrowBigUp,
   arrowBigDown: CI.arrowBigDown,
   arrowUpCircle: CI.arrowUpCircle,
@@ -46,12 +56,12 @@ export const Icons = {
   star: CI.star,
   dollar: CI.dollar,
   circle: CI.circle,
-  comment: CI.comment,
-  search: CI.search,
-  forward: CI.forward,
+  comment: CI.pressComment,
+  search: CI.pressSearch,
+  forward: CI.pressShare,
   bell: CI.bell,
   reblog: CI.reblog,
-  moreHorizontal: CI.moreHorizontal,
+  moreHorizontal: CI.pressMore,
   layoutList: CI.layoutList,
   layoutGrid: CI.layoutGrid,
   sun: CI.sun,
@@ -67,33 +77,63 @@ export const Icons = {
   trash: CI.trash,
   atSign: CI.atSign,
   calendarActive: CI.calendarActive,
-  close: CI.x,
+  close: CI.pressClose,
   spinner: CI.spinner,
   chevronLeft: CI.chevronLeft,
   chevronRight: CI.chevronRight,
-  post: CI.post,
+  post: CI.pressPost,
   page: CI.page,
   media: CI.image,
-  settings: CI.settings,
+  settings: CI.pressSettings,
   billing: CI.billing,
   ellipsis: CI.moreVertical,
-  add: CI.add,
+  add: CI.pressAdd,
   warning: CI.warning,
-  user: CI.user,
+  user: CI.pressAccount,
   arrowRight: CI.arrowRight,
   help: CI.help,
   pizza: CI.pizza,
-  check: CI.check,
+  check: CI.pressCheck,
   copy: CI.copy,
   copyDone: CI.copyDone,
-  clock: CI.clock,
+  clock: CI.pressTime,
   undo: CI.undo,
   doorOpen: CI.doorOpen,
-  wallet: CI.wallet,
-  creatorTokens: CI.creatorTokens,
+  wallet: CI.pressWallet,
+  creatorTokens: CI.pressMeritum,
   messagesSquare: CI.messagesSquare,
-  keyRound: CI.keyRound,
-  house: CI.house,
+  keyRound: CI.pressKeys,
+  house: CI.pressHome,
+
+  /* ★★★ THE DELIVERED SET, NOW REACHABLE (2026-08-18).
+     These twelve shapes shipped with the press delivery and had `press*`
+     components built for them, but nothing imported those components — no key
+     in this object pointed at them, so they were dead code. Owner: "the rest
+     are old icons."
+
+     Two of the forty are deliberately still not here:
+       * `notifications` — the filled bell was rejected by the owner on sight;
+         `bell` above stays on the line cut.
+       * `upvote`/`downvote`/`upvoteCast`/`downvoteCast` — the vote control is
+         its own component (votes/blade.tsx) and the owner likes it as it is.
+         They also cannot go through `makeFilled`, which hardcodes a fill and so
+         cannot express the un-cast outline state these four need. */
+  reply: CI.pressReply,
+  save: CI.pressSave,
+  saveOutline: CI.pressSaveOutline,
+  voteValue: CI.pressVoteValue,
+  communities: CI.pressCommunities,
+  explore: CI.pressExplore,
+  refresh: CI.pressRefresh,
+  views: CI.pressViews,
+  stack: CI.pressStack,
+  stake: CI.pressStake,
+  swap: CI.pressSwap,
+  /* Deliberately NOT `chevronDown`: the delivered chevron is a solid triangle,
+     while `chevronDown` drives selects, accordions and the nav menu, where a
+     line chevron is the expected affordance. Offered under its own name so a
+     call site opts in. */
+  chevronFilled: CI.pressChevron,
   radix: (props: LucideProps) => (
     <svg viewBox="0 0 25 25" fill="none" {...props}>
       <path d="M12 25C7.58173 25 4 21.4183 4 17C4 12.5817 7.58173 9 12 9V25Z" fill="currentcolor"></path>

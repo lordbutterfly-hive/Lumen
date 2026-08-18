@@ -1,7 +1,7 @@
 'use client';
 
 import { TableCell, TableRow } from '@ui/components/table';
-import { Pen, Save, X } from 'lucide-react';
+import { Icons } from '@ui/components/icons';
 import { Roles, User } from './lib/utils';
 import BasePathLink from '@/blog/components/base-path-link';
 import { useSetRoleMutation } from '@/blog/features/community-profile/hooks/use-set-role-mutations';
@@ -112,7 +112,7 @@ const TableItem = ({
                   data-testid="community-role-save-button"
                   className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] text-ink-ok-5 transition-colors hover:bg-surface-ok-1 disabled:pointer-events-none disabled:opacity-50"
                 >
-                  <Save className="h-4 w-4" />
+                  <Icons.save className="h-4 w-4" />
                 </button>
                 <button
                   onClick={() => setEditMode((prev) => !prev)}
@@ -124,7 +124,7 @@ const TableItem = ({
                   // treatment — just the app's CURRENT red, not the old one.
                   className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] text-ink-brand-6 transition-colors hover:bg-surface-brand-1 disabled:pointer-events-none disabled:opacity-50"
                 >
-                  <X className="h-4 w-4" />
+                  <Icons.x className="h-4 w-4" />
                 </button>
               </>
             ) : (
@@ -143,7 +143,7 @@ const TableItem = ({
                   disabled={item.temprary}
                   data-testid="community-role-edit-button"
                 >
-                  <Pen className="h-3.5 w-3.5" />
+                  <Icons.pencil className="h-3.5 w-3.5" />
                 </button>
               </>
             )}

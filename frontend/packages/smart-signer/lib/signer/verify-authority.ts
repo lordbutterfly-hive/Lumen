@@ -1,3 +1,4 @@
+import type { IHiveChainInterface } from '@hiveio/wax';
 import { TTransactionPackType, ApiTransaction } from '@hiveio/wax';
 import { getLogger } from '@hive/ui/lib/logging';
 import { getChain } from '@transaction/lib/chain';
@@ -41,12 +42,21 @@ export async function verifyAuthorityOrThrow(
   txApiJson: ApiTransaction,
   pack: TTransactionPackType,
   keyType: string,
-  signerName: string
+  signerName: string,
+  /**
+   * ★ The chain to verify AGAINST (2026-08-18). Defaults to the global chain,
+   * so every existing caller is byte-identical. It exists because this check
+   * was actively MASKING the Meritum launch failure: a Keychain signature made
+   * for mainnet verifies fine on mainnet, so this passed and let a transaction
+   * through that the testnet node was always going to reject. A guard that
+   * checks a different chain than the one you broadcast to is worse than none.
+   */
+  chain?: IHiveChainInterface
 ): Promise<void> {
   try {
     await withHiveRetry(
       async () =>
-        (await getChain()).api.database_api.verify_authority({
+        (chain ?? (await getChain())).api.database_api.verify_authority({
           trx: txApiJson,
           pack
         }),

@@ -21,6 +21,35 @@ export interface SignTransaction {
   singleSignKeyType?: 'owner' | 'active' | 'posting';
   requiredKeyType?: 'owner' | 'active' | 'posting';
   /**
+   * The RPC node `chain` belongs to. Set it ONLY together with `chain`.
+   *
+   * ★★★ WHY THE `chain` FIX ALONE WAS NOT ENOUGH (2026-08-18). Threading
+   * `chain` made OUR digest correct, but a wallet-backed signer does not sign
+   * our digest — it is handed a transaction OBJECT and derives its own. Hive
+   * Keychain derives it against whatever node Keychain itself is pointed at,
+   * which is Hive mainnet. So the builder stamped Hive TESTNET, Keychain signed
+   * for MAINNET, and the testnet node recovered a public key that is not the
+   * account's active key: `tx_missing_active_auth`, from the chain, after the
+   * wallet had already said yes.
+   *
+   * `requestSignTx` takes an optional 5th `rpc` argument that selects the node
+   * Keychain signs against. `@hiveio/wax-signers-keychain` omits it
+   * (node_modules/@hiveio/wax-signers-keychain/dist/index.js:142), so this is
+   * the one case where we must bypass that provider and call Keychain directly.
+   */
+  rpcEndpoint?: string;
+  /**
+   * The chain id of `rpcEndpoint`. Set it with `rpcEndpoint`.
+   *
+   * ★ WHY A BARE URL WAS NOT ENOUGH (2026-08-18). Handing Keychain only the
+   * node URI still produced `The provided key does not have active authority`
+   * against the testnet — Keychain kept deriving the digest with the chain id
+   * it already knew (mainnet), because a URL alone does not tell it which
+   * chain that node speaks for. Keychain's `rpc` argument accepts an object
+   * carrying `chainId`, which is the field that actually moves the digest.
+   */
+  rpcChainId?: string;
+  /**
    * The chain this transaction was BUILT on. Omit it — as every caller but one
    * does — and the signer keeps using the app's global chain exactly as before.
    *

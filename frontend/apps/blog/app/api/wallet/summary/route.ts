@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
-import { getAccountFull, getDynamicGlobalProperties, getFindAccounts } from '@transaction/lib/hive-api';
+import { getAccount, getDynamicGlobalProperties, getFindAccounts } from '@transaction/lib/hive-api';
 import { getChain } from '@transaction/lib/chain';
 import { cachedRead } from '@/blog/lib/server-read-cache';
 import { deriveWalletFigures } from '@/blog/features/wallet/lib/wallet-derived';
@@ -43,7 +43,7 @@ const logger = getLogger('app');
 const SUMMARY_MEMO_MS = 3_000;
 
 export interface WalletSummaryResponse {
-  account: Awaited<ReturnType<typeof getAccountFull>>;
+  account: Awaited<ReturnType<typeof getAccount>>;
   dynamicGlobal: Awaited<ReturnType<typeof getDynamicGlobalProperties>>;
   figures: WalletFiguresWire;
   pendingClaimedAccounts: number;
@@ -58,7 +58,27 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
     const payload = await cachedRead(`wallet:summary:${username}`, SUMMARY_MEMO_MS, async () => {
       const [account, dynamicGlobal, raw, chain] = await Promise.all([
-        getAccountFull(username),
+        /**
+         * ★★★ `getAccount`, NOT `getAccountFull` (2026-08-18, owner: "wallet
+         * took 6 seconds").
+         *
+         * `getAccountFull` is `getAccount` PLUS `bridge.get_profile`
+         * (hive-api.ts:368-378), and it `await`s that second call even though it
+         * swallows its errors — so the wallet paid for it in full. The profile
+         * half yields `follow_stats` and `reputation`, and NOTHING under
+         * features/wallet or app/api/wallet reads either one (grepped).
+         *
+         * Worse, `getProfileInfo` calls `bannedFollowEdges`, which issues one
+         * `bridge.get_relationship_between_accounts` per banned author. This
+         * deployment configures six, so every cold wallet load fanned out to 12
+         * extra chain calls and then waited on the SLOWEST of them.
+         *
+         * Measured on this server: /api/wallet/summary ranged 0.42s-11.65s cold
+         * across real accounts, against a raw upstream find_accounts that is a
+         * steady ~0.37s. Dropping the unused half also inherits `withHiveRetry`,
+         * which `getAccounts` already has and `getProfileInfo` never did.
+         */
+        getAccount(username),
         getDynamicGlobalProperties(),
         // `FullAccount` (the app's trimmed shape) does not carry
         // `pending_claimed_accounts`, which the "Claim account tokens" dialog's

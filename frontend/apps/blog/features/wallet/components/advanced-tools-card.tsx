@@ -1,7 +1,8 @@
 'use client';
 
 import Big from 'big.js';
-import { ArrowLeftRight, ChevronRight, Gift, PiggyBank, Repeat, SlidersHorizontal, UserPlus } from 'lucide-react';
+import { Gift } from 'lucide-react';
+import { Icons } from '@ui/components/icons';
 import { useTranslation } from '@/blog/i18n/client';
 import DelegateDialog from './dialogs/delegate-dialog';
 import ConvertDialog from './dialogs/convert-dialog';
@@ -64,7 +65,7 @@ export default function AdvancedToolsCard({
             two years, and it meant nothing about the card it sat on: this is a
             list of manual controls (delegate, convert, schedule a transfer).
             Sliders say "settings you operate yourself", which is what it is. */}
-        <SlidersHorizontal className="h-4 w-4 text-ink-10" aria-hidden />
+        <Icons.settings className="h-4 w-4 text-ink-10" aria-hidden />
         <span className="text-[15px] leading-[24px] font-bold text-ink-2">{t('wallet.advanced.title')}</span>
       </div>
       <p className="mb-3.5 font-serif text-[13px] leading-[20px] text-ink-14">{t('wallet.advanced.description')}</p>
@@ -76,10 +77,10 @@ export default function AdvancedToolsCard({
           trigger={
             <button type="button" className={ROW_CLASS} data-testid="wallet-advanced-delegate">
               <span className={ICON_WRAP_CLASS}>
-                <UserPlus className="h-4 w-4" />
+                <Icons.userPlus className="h-4 w-4" />
               </span>
               <RowLabel label={t('wallet.advanced.delegate.label')} sub={t('wallet.advanced.delegate.sub')} />
-              <ChevronRight className="h-[15px] w-[15px] shrink-0 text-ink-21" />
+              <Icons.chevronRight className="h-[15px] w-[15px] shrink-0 text-ink-21" />
             </button>
           }
         />
@@ -95,7 +96,7 @@ export default function AdvancedToolsCard({
                 label={t('wallet.advanced.claim_account.label')}
                 sub={t('wallet.advanced.claim_account.sub')}
               />
-              <ChevronRight className="h-[15px] w-[15px] shrink-0 text-ink-21" />
+              <Icons.chevronRight className="h-[15px] w-[15px] shrink-0 text-ink-21" />
             </button>
           }
         />
@@ -106,10 +107,10 @@ export default function AdvancedToolsCard({
           trigger={
             <button type="button" className={ROW_CLASS} data-testid="wallet-advanced-convert">
               <span className={ICON_WRAP_CLASS}>
-                <ArrowLeftRight className="h-4 w-4" />
+                <Icons.swap className="h-4 w-4" />
               </span>
               <RowLabel label={t('wallet.advanced.convert.label')} sub={t('wallet.advanced.convert.sub')} />
-              <ChevronRight className="h-[15px] w-[15px] shrink-0 text-ink-21" />
+              <Icons.chevronRight className="h-[15px] w-[15px] shrink-0 text-ink-21" />
             </button>
           }
         />
@@ -121,20 +122,20 @@ export default function AdvancedToolsCard({
           trigger={
             <button type="button" className={ROW_CLASS} data-testid="wallet-advanced-recurring">
               <span className={ICON_WRAP_CLASS}>
-                <Repeat className="h-4 w-4" />
+                <Icons.swap className="h-4 w-4" />
               </span>
               <RowLabel label={t('wallet.advanced.recurring.label')} sub={t('wallet.advanced.recurring.sub')} />
-              <ChevronRight className="h-[15px] w-[15px] shrink-0 text-ink-21" />
+              <Icons.chevronRight className="h-[15px] w-[15px] shrink-0 text-ink-21" />
             </button>
           }
         />
 
         <a href="#savings-vault" className={ROW_CLASS} data-testid="wallet-advanced-savings">
           <span className={ICON_WRAP_CLASS}>
-            <PiggyBank className="h-4 w-4" />
+            <Icons.stake className="h-4 w-4" />
           </span>
           <RowLabel label={t('wallet.advanced.savings.label')} sub={t('wallet.advanced.savings.sub')} />
-          <ChevronRight className="h-[15px] w-[15px] shrink-0 text-ink-21" />
+          <Icons.chevronRight className="h-[15px] w-[15px] shrink-0 text-ink-21" />
         </a>
       </div>
     </div>

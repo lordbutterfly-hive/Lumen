@@ -26,7 +26,7 @@ const Arrow: FC = () => (
     <path
       d="M4 12h15M13 6l6 6-6 6"
       stroke="currentColor"
-      strokeWidth="2.1"
+      strokeWidth="2.6"
       strokeLinecap="round"
       strokeLinejoin="round"
     />

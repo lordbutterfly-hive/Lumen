@@ -9,10 +9,18 @@ import { PRESENCE_WINDOW_DAYS } from './bands';
 // or the two drift the way PRESENCE_WINDOW_DAYS and this arm did — see the header comment
 // below, and ladder.test.ts §11b.
 import { ACTIVITY_WINDOW_DAYS } from '@/blog/features/retention/lib/compute-league';
+// Cross-lane on purpose, and load-bearing: ONE word-count implementation serves both
+// ladders. See `RetentionFacts.wordsWritten`.
+import { countWords } from '@/blog/features/retention/lib/act-stats';
+import type { AuthoredWords } from '@/blog/lib/lite/repositories/hive-retention-repository';
 
 /**
- * The one-round-trip read behind the Lumen-native league. ONE statement, no chain call,
- * no second query, no N+1 — every arm is a CTE over an index added in migration 0025.
+ * The read behind the Lumen-native league. No chain call, no N+1 — every arm is a CTE
+ * over an index added in migration 0025.
+ *
+ * ★ TWO STATEMENTS SINCE 2026-08-18, NOT ONE. The second reads post BODIES for the
+ * word-count stat, because counting words in SQL would fork the rule that the chain path
+ * already owns in TypeScript. See `loadWordCount` for the trade and the bound.
  *
  * WHAT IT ANSWERS, and from where:
  *   tenure     <- lumen_user.created_at
@@ -81,6 +89,24 @@ export interface RetentionFacts {
   /** True when GIVER_SCAN_LIMIT bit, so the giver counts are a lower bound. */
   giversCapped: boolean;
   postCount: number;
+  /**
+   * Words this user has written, over the same five windows the chain path serves.
+   *
+   * ★ COUNTED IN TYPESCRIPT, NOT IN SQL, AND THAT IS THE WHOLE POINT. The chain path
+   * counts words with `act-stats.ts:countWords` (markdown furniture, code blocks, image
+   * markup and raw URLs stripped first). A `regexp_split_to_array(body, '\s+')` here
+   * would be a SECOND implementation of the same number, and the two would disagree on
+   * every post containing a code fence — which is exactly the "two numbers, both
+   * defensible, one of them wrong on screen" class this feature keeps having to fix. One
+   * function, both paths.
+   *
+   * The WINDOWING is done here in TS as well, off each row's `created_at`, for the same
+   * reason: the bucket boundaries have to agree with the chain path's, and they are
+   * cheaper to keep in one place than to mirror in two dialects.
+   */
+  wordsWritten: AuthoredWords;
+  /** The body scan hit `WORDS_SCAN_LIMIT`, so `wordsWritten` is a lower bound. */
+  wordsCapped: boolean;
 }
 
 interface FactsRow {
@@ -183,7 +209,66 @@ SELECT (SELECT created_at FROM me)                                        AS cre
        (SELECT count(*) FROM mine)                                        AS post_count
 `;
 
-export async function loadRetentionFacts(userId: string): Promise<RetentionFacts | null> {
+/**
+ * How many of a user's most recent bodies the word count reads.
+ *
+ * Lumen is weeks old and the busiest lite account has tens of posts, so this bites
+ * nothing today — it exists so the query stays bounded when that stops being true.
+ * When it does bite, `wordsCapped` makes the figure render as "at least N", which is the
+ * same floor phrasing the chain path already uses for a truncated walk.
+ */
+export const WORDS_SCAN_LIMIT = 2000;
+
+/**
+ * Total words, from the bodies themselves.
+ *
+ * ★ A SECOND STATEMENT, AND THE ROUTE'S "ONE ROUND TRIP" CLAIM IS UPDATED RATHER THAN
+ * QUIETLY BROKEN (see the header). It could not be folded into the statement above
+ * without either shipping every body as an aggregated array column (the same bytes, one
+ * fewer round trip, far worse to read) or counting words in SQL, which would fork the
+ * word-count rule in two. It is one index scan on `ix_lumen_post_user_created` and it is
+ * ordered newest-first so the cap, if it ever bites, drops the OLDEST posts — a floor
+ * that grows the right way.
+ */
+async function loadWordCount(
+  userId: string,
+  nowMs: number
+): Promise<{ words: AuthoredWords; capped: boolean }> {
+  const { rows } = await query<{ body: string | null; created_at: Date | null }>(
+    `SELECT body, created_at FROM lumen_post
+      WHERE user_id = $1 AND body <> ''
+      ORDER BY post_id DESC
+      LIMIT $2`,
+    [userId, WORDS_SCAN_LIMIT]
+  );
+  const words: AuthoredWords = { day: 0, week: 0, month: 0, year: 0, all: 0 };
+  const today = new Date(nowMs).toISOString().slice(0, 10);
+  const startOf = (days: number) => new Date(nowMs - (days - 1) * 86_400_000).toISOString().slice(0, 10);
+  const d1 = today;
+  const d7 = startOf(7);
+  const d30 = startOf(30);
+  const d365 = startOf(365);
+  for (const row of rows) {
+    const n = countWords(row.body ?? '');
+    if (n <= 0) continue;
+    words.all += n;
+    // `created_at` is a timestamptz, so `toISOString` is the true UTC day — unlike a bare
+    // DATE column, which node-postgres parses at LOCAL midnight (see
+    // hive-retention-repository.ts:toDayString for the day-shift that caused).
+    const day = row.created_at ? row.created_at.toISOString().slice(0, 10) : '';
+    if (!day) continue;
+    if (day >= d365) words.year += n;
+    if (day >= d30) words.month += n;
+    if (day >= d7) words.week += n;
+    if (day === d1) words.day += n;
+  }
+  return { words, capped: rows.length >= WORDS_SCAN_LIMIT };
+}
+
+export async function loadRetentionFacts(
+  userId: string,
+  nowMs: number = Date.now()
+): Promise<RetentionFacts | null> {
   const { rows } = await query<FactsRow>(SQL, [
     userId,
     PRESENCE_WINDOW_DAYS,
@@ -195,6 +280,10 @@ export async function loadRetentionFacts(userId: string): Promise<RetentionFacts
   const row = rows[0];
   if (!row || !row.created_at) return null;
 
+  // Only once the user is known to exist — a missing row above returns before this, so a
+  // bad user id costs one query rather than two.
+  const volume = await loadWordCount(userId, nowMs);
+
   const scanned = Number(row.scanned_givers);
   return {
     createdAt: row.created_at,
@@ -204,7 +293,9 @@ export async function loadRetentionFacts(userId: string): Promise<RetentionFacts
     vouchedGivers: Number(row.vouched_givers),
     unknownGivers: Number(row.unknown_givers),
     giversCapped: scanned >= GIVER_SCAN_LIMIT,
-    postCount: Number(row.post_count)
+    postCount: Number(row.post_count),
+    wordsWritten: volume.words,
+    wordsCapped: volume.capped
   };
 }
 

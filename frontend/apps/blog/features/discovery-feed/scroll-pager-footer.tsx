@@ -2,6 +2,7 @@
 
 import { useTranslation } from '@/blog/i18n/client';
 import type { InfiniteScrollSentinel } from './hooks/use-infinite-scroll-sentinel';
+import { EmptyStateIllustration } from '@/blog/components/empty-state-illustration';
 
 /**
  * The end of an infinite list, in one place.
@@ -24,6 +25,7 @@ export default function ScrollPagerFooter({
   isError = false,
   loadedCount,
   endLabel,
+  endIllustration = false,
   loadingLabel = 'Loading…',
   className = 'py-8 text-center font-sans text-[13px] leading-[20px] text-muted-foreground',
   testId
@@ -40,6 +42,12 @@ export default function ScrollPagerFooter({
   loadedCount?: number;
   /** Rendered when there is genuinely nothing more upstream. */
   endLabel?: string;
+  /**
+   * Draw the end-of-feed plate above `endLabel`. Opt-in, because this footer is
+   * also the bottom of short secondary lists (tags, a profile's posts) where a
+   * 96px drawing would outweigh the list it is ending.
+   */
+  endIllustration?: boolean;
   loadingLabel?: string;
   className?: string;
   testId?: string;
@@ -48,11 +56,17 @@ export default function ScrollPagerFooter({
   const { ref, atPageCap, loadMore, backToTop, retry } = sentinel;
 
   if (!hasNextPage) {
-    return endLabel ? (
+    if (!endLabel) return null;
+    return endIllustration ? (
+      <div className={`flex flex-col items-center gap-2 ${className}`} data-testid={testId ? `${testId}-end` : undefined}>
+        <EmptyStateIllustration name="end-of-feed" size={96} />
+        <span>{endLabel}</span>
+      </div>
+    ) : (
       <p className={className} data-testid={testId ? `${testId}-end` : undefined}>
         {endLabel}
       </p>
-    ) : null;
+    );
   }
 
   return (

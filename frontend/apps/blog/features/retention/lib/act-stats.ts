@@ -162,3 +162,176 @@ export function busiestWeekday(actDaysUTC: string[]): WeekdayPattern | null {
   if (counts[weekday] < evenSpread * MIN_LIFT) return null;
   return { weekday, acts: counts[weekday] };
 }
+
+/**
+ * ════ HOW MUCH SOMEBODY HAS ACTUALLY WRITTEN ════
+ *
+ * Owner, 2026-08-18: "maybe how many lines of text they wrote. that coul dbe good. you
+ * have written in 1 year the equivalent of a 100 page book, stuff like that thats
+ * interesting."
+ *
+ * WORDS RATHER THAN LINES, and the choice is not cosmetic. A "line" in a markdown body
+ * is a hard wrap, so it counts how the author's editor was configured rather than
+ * anything about the writing: the same paragraph is one line pasted from a word
+ * processor and nine typed in a narrow window. Words survive the round trip, and words
+ * are the only unit a page count can honestly be derived from.
+ *
+ * ★ WHAT IS DELIBERATELY NOT COUNTED. Fenced and inline code, image markup, raw URLs and
+ * HTML tags all inflate a word count without anybody having written a word — a post that
+ * embeds a 200-line config file is not a 900-word essay. Link TEXT is kept and the link
+ * TARGET is dropped, because the text is the part a person wrote. Markdown punctuation
+ * (`#`, `>`, `*`, table pipes) is stripped before the split so a heading does not pay for
+ * its own hashes.
+ *
+ * ★ ONE HONEST LIMITATION, STATED: this splits on whitespace, so it is a word count for
+ * space-separated scripts and a rough character-cluster count for languages that do not
+ * space their words (Chinese, Japanese, Thai). Every word counter in existence has this
+ * property; naming it here is cheaper than a reader discovering it.
+ */
+export function countWords(body: string | undefined): number {
+  if (!body) return 0;
+  const text = body
+    .replace(/```[\s\S]*?```/g, ' ') // fenced code blocks
+    .replace(/~~~[\s\S]*?~~~/g, ' ')
+    .replace(/`[^`\n]*`/g, ' ') // inline code
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ') // images: no words at all
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1') // links: keep the label, drop the target
+    .replace(/<[^>]{1,200}>/g, ' ') // html tags (bounded, so a stray `<` cannot eat the post)
+    .replace(/\bhttps?:\/\/\S+/gi, ' ') // bare urls
+    .replace(/[#>*_~|`]+/g, ' '); // markdown furniture
+  // A token counts when it contains at least one character that is not punctuation,
+  // whitespace or a symbol — so `---`, `|` and a lone `.` are not words.
+  return text.split(/\s+/).filter((tok) => /[^\s\p{P}\p{S}]/u.test(tok)).length;
+}
+
+/**
+ * Words on a printed page, for the book comparison.
+ *
+ * 250 is the manuscript-page convention (double-spaced, 12pt) and the figure most
+ * "how long is a novel" guidance is quoted in. A mass-market paperback sets closer to
+ * 300, so this errs toward the LARGER page count — which is why the copy that uses it
+ * says the divisor out loud rather than presenting the pages as a fact about a specific
+ * edition of a specific book. A comparison the reader cannot check is a boast.
+ */
+export const WORDS_PER_PAGE = 250;
+
+/** Printed pages, rounded down. Zero until there is genuinely a page of it. */
+export function pagesFromWords(words: number): number {
+  if (!Number.isFinite(words) || words <= 0) return 0;
+  return Math.floor(words / WORDS_PER_PAGE);
+}
+
+/**
+ * ════ WHICH TIME WINDOW THE WORD COUNT IS SHOWN OVER ════
+ *
+ * ★ IT ROTATES (owner, 2026-08-18: "this needs to change with time look3d at. one day
+ * 7 days, one time all time, one time, last 10 days").
+ *
+ * A single frozen lifetime figure is the flaw a UX tester named about this whole card:
+ * "every number is a single frozen figure, nothing to compare against". A lifetime word
+ * count is the worst offender — it can only go up, slowly, forever. Rotating the window
+ * turns one dead number into five live ones for the price of four extra SQL aggregates
+ * over a scan the route already pays for.
+ *
+ * ★ DETERMINISTIC, NOT RANDOM, AND SEEDED BY THE READER AS WELL AS THE DAY. Same reader,
+ * same day, same window — so the card does not change under somebody mid-read, and a
+ * cached response body renders identically to a fresh one (the choice is made at render
+ * time from data that is on the wire, never baked into the cached body). Mixing the
+ * username in means two people looking on the same day do not see the same window, which
+ * is the difference between "this app has a fact about me" and "this app is on a cycle".
+ * `Math.random()` would fail both properties.
+ */
+export type WordWindow = 'day' | 'week' | 'month' | 'year' | 'all';
+
+/** Rotation order. Shortest first, so the fallback below widens rather than narrows. */
+export const WORD_WINDOW_ORDER: WordWindow[] = ['day', 'week', 'month', 'year', 'all'];
+
+/** How many days back each window reaches. `all` has no start. */
+export const WORD_WINDOW_DAYS: Record<WordWindow, number | null> = {
+  day: 1,
+  week: 7,
+  month: 30,
+  year: 365,
+  all: null
+};
+
+/**
+ * Below this, a window is not worth a line.
+ *
+ * ★ NOT ZERO, AND THE DIFFERENCE MATTERS. "You have written 0 words today" is true,
+ * useless and slightly rude; so is "You have written 12 words today". The line exists to
+ * say something a reader would repeat, and the smallest number worth repeating is about a
+ * paragraph. Under this the picker widens to the next window rather than printing a
+ * deflation — the same ABSENT-NEVER-ZERO rule the rest of this card follows, applied to a
+ * quantity that has five candidate scopes instead of one.
+ */
+export const MIN_WORDS_TO_MENTION = 60;
+
+export interface WordWindowChoice {
+  window: WordWindow;
+  words: number;
+  /** The window reaches further back than the day set is complete from. */
+  isFloor: boolean;
+}
+
+/** Stable, order-independent hash. Only ever used to rotate a label. */
+function seedOf(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 100_000;
+  return h;
+}
+
+/**
+ * Pick the window to print, or `null` when none of them clears the floor.
+ *
+ * @param words      the five sums from the store
+ * @param todayUTC   'YYYY-MM-DD', the rotation's clock
+ * @param seed       the account name, so two readers differ on the same day
+ * @param completeFrom the oldest day the day set is COMPLETE from (`''` = no boundary)
+ * @param historyComplete the walk has reached account creation, so `all` is a total
+ */
+export function pickWordWindow(
+  words: Partial<Record<WordWindow, number>> | undefined,
+  todayUTC: string,
+  seed: string,
+  completeFrom = '',
+  historyComplete = false
+): WordWindowChoice | null {
+  if (!words) return null;
+  const dayNumber = Math.floor(Date.parse(`${todayUTC}T00:00:00Z`) / 86_400_000);
+  if (!Number.isFinite(dayNumber)) return null;
+  const start = (((dayNumber + seedOf(seed)) % WORD_WINDOW_ORDER.length) + WORD_WINDOW_ORDER.length) %
+    WORD_WINDOW_ORDER.length;
+
+  for (let i = 0; i < WORD_WINDOW_ORDER.length; i++) {
+    const window = WORD_WINDOW_ORDER[(start + i) % WORD_WINDOW_ORDER.length];
+    const value = words[window];
+    if (typeof value !== 'number' || value < MIN_WORDS_TO_MENTION) continue;
+    return { window, words: value, isFloor: windowIsFloor(window, todayUTC, completeFrom, historyComplete) };
+  }
+  return null;
+}
+
+/**
+ * Is this window's figure a floor rather than a total?
+ *
+ * ★ SHORT WINDOWS ARE THE TRUSTWORTHY ONES HERE. The feed walk runs newest-first under a
+ * clock, so it always reads the recent end and truncates the far one — the opposite of the
+ * usual assumption that a longer span is safer. `all` needs the walk to have reached
+ * account creation; every other window needs only that the day set is complete back to
+ * where that window starts.
+ */
+export function windowIsFloor(
+  window: WordWindow,
+  todayUTC: string,
+  completeFrom: string,
+  historyComplete: boolean
+): boolean {
+  if (window === 'all') return !historyComplete;
+  if (!completeFrom) return false; // nothing bounded the walk
+  const days = WORD_WINDOW_DAYS[window];
+  if (days === null) return !historyComplete;
+  const startMs = Date.parse(`${todayUTC}T00:00:00Z`) - (days - 1) * 86_400_000;
+  if (!Number.isFinite(startMs)) return true;
+  return completeFrom > new Date(startMs).toISOString().slice(0, 10);
+}

@@ -1,40 +1,21 @@
-import { getLogger } from '@ui/lib/logging';
-
-const logger = getLogger('app');
-
 /**
  * ════ THE STREAK ROUTE'S IN-PROCESS CACHE ════
  *
- * ★★ IT LIVES HERE, OUTSIDE THE ROUTE, FOR ONE REASON: THE GOAL WRITE HAS TO BE ABLE TO
- * INVALIDATE IT (bug found 2026-08-09 by a UX agent, runtime-proven).
+ * It lives here, outside `/api/streak/[user]`, because a Next App Router route module may
+ * export nothing but HTTP handlers — so a cache private to that file could not be reached
+ * by any other route and, more to the point, could not be unit-tested or cleared by one.
  *
- * Symptom, exactly as measured: `POST /api/retention/goal {goal:2}` answered
- * `200 {"goal":2}` instantly, and then the daily card AND the streak API kept reporting
- * `0/4` and "Day 2 holds when you reach 4 today" through hard reloads at 19s, 47s, 122s and
- * 256s, flipping only at 320s.
+ * ★ IT NO LONGER CARRIES A `goalUsed` DISCRIMINATOR (2026-08-18). The daily goal used to
+ * GATE the streak, so a cached body was only valid for the goal it was computed against;
+ * `/api/retention/goal` called `dropStreakCache` on every write and every entry carried
+ * the goal it had been computed under, because the drop is process-local and a
+ * multi-worker deployment can land the write on a worker that never filled the cache.
+ * The goal is deleted, so both defences are deleted with it — the body now depends on
+ * nothing but the account and the clock.
  *
- * Cause: the goal moved server-side the same day it started GATING THE STREAK, so a goal
- * change now changes a cached, chain-derived answer — and the cache was a module-private
- * `Map` inside the route with a 5-minute TTL and no invalidation path. A Next App Router
- * route module may only export HTTP handlers, so the goal route had no way to reach it even
- * in principle. The card's `refetch()` after a successful write dutifully re-requested a
- * route that handed back the stale body.
- *
- * The user-visible result is worse than a plain bug: the picker looks like it does nothing,
- * for a duration that depends on when the last cache fill happened. Sometimes it is
- * instant (a cache miss), sometimes it is five minutes. A tester who saw it change
- * instantly, as I did, concludes it works.
- *
- * ★ TWO INDEPENDENT DEFENCES, because one of them is best-effort by nature:
- *
- *   1. `dropStreakCache(account)` — the goal route calls this after a successful write, so
- *      the next read recomputes. One slow request, immediately after the user acted and is
- *      expecting something to change, which is the best possible moment to spend it.
- *   2. `goalUsed` on the entry — a stale-goal HIT is detected and discarded even if (1)
- *      never ran. It has to be here: (1) is process-local, and nothing guarantees the
- *      request that writes the goal lands on the same worker as the request that filled the
- *      cache. Without this the fix would work perfectly on one dev server and intermittently
- *      in production, which is the failure mode hardest to ever see again.
+ * What remains: the fresh TTL, the shorter negative TTL, the LRU bound (this is a public,
+ * unauthenticated route, so an unbounded Map keyed by username was a memory-exhaustion
+ * vector), and the stale-while-revalidate window with its single-flight lock.
  */
 
 export interface StreakCacheEntry {
@@ -42,14 +23,6 @@ export interface StreakCacheEntry {
   body: unknown;
   /** A negative (account-not-found) entry — see NEG_TTL_MS. */
   notFound?: boolean;
-  /**
-   * The daily goal this body was computed against.
-   *
-   * Undefined for a negative entry (nothing was computed) and for a body predating the
-   * field. A defined value that DISAGREES with the caller's current goal invalidates the
-   * entry — see `readStreakCache`.
-   */
-  goalUsed?: number;
 }
 
 export const STREAK_TTL_MS = 5 * 60 * 1000;
@@ -80,7 +53,7 @@ export const STREAK_MAX_ENTRIES = 10_000;
  * 30 minutes, deliberately much longer than the 5-minute fresh TTL: the fresh TTL is sized
  * for "don't recompute on every page view within a browsing session"; this one is sized for
  * "don't ever block a page load for an account anyone has looked at recently". A reader who
- * takes an action (posts, meets their goal) may see a stale number for up to one background
+ * takes an action (posts, comments) may see a stale number for up to one background
  * revalidation cycle — bounded by how often THIS account gets viewed, and self-correcting
  * within seconds of the next view once the background refresh lands.
  */
@@ -103,28 +76,12 @@ export function writeStreakCache(account: string, entry: StreakCacheEntry): void
   }
 }
 
-/**
- * A live entry, or undefined.
- *
- * `currentGoal` is the goal the CALLER just read from the datastore. Pass it and a
- * stale-goal entry is dropped rather than served; omit it and only the TTL applies.
- */
-export function readStreakCache(account: string, currentGoal?: number): StreakCacheEntry | undefined {
+/** A live entry, or undefined. */
+export function readStreakCache(account: string): StreakCacheEntry | undefined {
   const hit = cache.get(account);
   if (!hit) return undefined;
   const ttl = hit.notFound ? STREAK_NEG_TTL_MS : STREAK_TTL_MS;
   if (Date.now() - hit.at >= ttl) return undefined;
-  // A negative entry has no goal and is not affected by one.
-  if (!hit.notFound && typeof currentGoal === 'number' && typeof hit.goalUsed === 'number' && hit.goalUsed !== currentGoal) {
-    cache.delete(account);
-    logger.info(
-      'streak: cached body for %s was computed against goal %d but the goal is now %d — recomputing',
-      account,
-      hit.goalUsed,
-      currentGoal
-    );
-    return undefined;
-  }
   return hit;
 }
 
@@ -137,21 +94,12 @@ export function readStreakCache(account: string, currentGoal?: number): StreakCa
  * fails on the very first upstream call) while risking a renamed/recreated account being
  * told it does not exist for up to 30 minutes instead of 60 seconds.
  *
- * Same `currentGoal` guard as `readStreakCache`, kept here too rather than assumed from
- * call order: a goal-mismatched entry is not "a bit stale", it is computed against the
- * WRONG input, and must never be served as a good-enough answer. In practice
- * `readStreakCache` already deletes a goal-mismatched entry before this is ever reached
- * (both are always called with the same `currentGoal`), so this is defence in depth, not
- * the only thing standing between a caller and a wrong body.
  */
-export function readStaleStreakCache(account: string, currentGoal?: number): StreakCacheEntry | undefined {
+export function readStaleStreakCache(account: string): StreakCacheEntry | undefined {
   const hit = cache.get(account);
   if (!hit || hit.notFound) return undefined;
   const age = Date.now() - hit.at;
   if (age < STREAK_TTL_MS || age >= STREAK_STALE_TTL_MS) return undefined;
-  if (typeof currentGoal === 'number' && typeof hit.goalUsed === 'number' && hit.goalUsed !== currentGoal) {
-    return undefined;
-  }
   return hit;
 }
 
@@ -169,11 +117,6 @@ export function tryStartRevalidation(account: string): boolean {
 /** Release the single-flight lock. Safe to call even if never acquired. */
 export function finishRevalidation(account: string): void {
   revalidating.delete(account);
-}
-
-/** Forget this account's cached answer. Called by the goal write. Safe if absent. */
-export function dropStreakCache(account: string): boolean {
-  return cache.delete(account);
 }
 
 /** Test seam. */

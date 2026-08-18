@@ -262,7 +262,17 @@ export const hiveTransactionBroadcaster: Broadcaster = async (op: CustomJsonOp) 
     // Magi testnet's last_processed_block tracks the Hive TESTNET head, not
     // mainnet's. Measured digests: this builder 77cc5e5c…, what the wallet was
     // handed 2f582dff…, same proto rebuilt here 77cc5e5c… (the control).
-    const signature = await transactionService.signTransaction(txBuilder, undefined, REQUIRED_KEY_TYPE, chain);
+    const signature = await transactionService.signTransaction(
+      txBuilder,
+      undefined,
+      REQUIRED_KEY_TYPE,
+      chain,
+      // ★ 2026-08-18 — without this Keychain signs on ITS node (mainnet)
+      // while we broadcast to `override.apiEndpoint`, and the chain
+      // rejects the signature as a missing active authority.
+      override.apiEndpoint || undefined,
+      override.chainId || undefined
+    );
     txBuilder.addSignature(signature);
     await chain.api.network_broadcast_api.broadcast_transaction({
       max_block_age: -1,

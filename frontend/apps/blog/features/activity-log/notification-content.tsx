@@ -23,6 +23,7 @@ import { useClaimRewardsMutation } from './hooks/use-claim-reward-mutation';
 import { handleError } from '@ui/lib/handle-error';
 import { convertStringToBig } from '@ui/lib/helpers';
 import { CircleSpinner } from 'react-spinners-kit';
+import { EmptyStateIllustration } from '@/blog/components/empty-state-illustration';
 import { useTranslation } from '@/blog/i18n/client';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { Icons } from '@hive/ui/components/icons';
@@ -271,7 +272,9 @@ const NotificationActivities = ({
       <TabsContent value="all" data-testid="notifications-content-all">
         <NotificationList data={state} lastRead={lastRead} />
         {noNotifications ? (
-          <div className="flex h-64 flex-col items-center justify-center">
+          <div className="flex h-64 flex-col items-center justify-center gap-4">
+            {/* ★ Drawn empty state (2026-08-18) — this was a bare grey sentence. */}
+            <EmptyStateIllustration name="empty-notifications" size={112} />
             <span>{t('navigation.profile_notifications_tab_navbar.no_notifications_yet')}</span>
           </div>
         ) : showButton ? (
@@ -288,7 +291,9 @@ const NotificationActivities = ({
           lastRead={lastRead}
         />
         {noNotifications ? (
-          <div className="flex h-64 flex-col items-center justify-center">
+          <div className="flex h-64 flex-col items-center justify-center gap-4">
+            {/* ★ Drawn empty state (2026-08-18) — this was a bare grey sentence. */}
+            <EmptyStateIllustration name="empty-notifications" size={112} />
             <span>{t('navigation.profile_notifications_tab_navbar.no_notifications_yet')}</span>
           </div>
         ) : showButton ? (
@@ -303,7 +308,9 @@ const NotificationActivities = ({
           lastRead={lastRead}
         />
         {noNotifications ? (
-          <div className="flex h-64 flex-col items-center justify-center">
+          <div className="flex h-64 flex-col items-center justify-center gap-4">
+            {/* ★ Drawn empty state (2026-08-18) — this was a bare grey sentence. */}
+            <EmptyStateIllustration name="empty-notifications" size={112} />
             <span>{t('navigation.profile_notifications_tab_navbar.no_notifications_yet')}</span>
           </div>
         ) : showButton ? (
@@ -318,7 +325,9 @@ const NotificationActivities = ({
           lastRead={lastRead}
         />
         {noNotifications ? (
-          <div className="flex h-64 flex-col items-center justify-center">
+          <div className="flex h-64 flex-col items-center justify-center gap-4">
+            {/* ★ Drawn empty state (2026-08-18) — this was a bare grey sentence. */}
+            <EmptyStateIllustration name="empty-notifications" size={112} />
             <span>{t('navigation.profile_notifications_tab_navbar.no_notifications_yet')}</span>
           </div>
         ) : showButton ? (
@@ -333,7 +342,9 @@ const NotificationActivities = ({
           lastRead={lastRead}
         />
         {noNotifications ? (
-          <div className="flex h-64 flex-col items-center justify-center">
+          <div className="flex h-64 flex-col items-center justify-center gap-4">
+            {/* ★ Drawn empty state (2026-08-18) — this was a bare grey sentence. */}
+            <EmptyStateIllustration name="empty-notifications" size={112} />
             <span>{t('navigation.profile_notifications_tab_navbar.no_notifications_yet')}</span>
           </div>
         ) : showButton ? (
@@ -348,7 +359,9 @@ const NotificationActivities = ({
           lastRead={lastRead}
         />
         {noNotifications ? (
-          <div className="flex h-64 flex-col items-center justify-center">
+          <div className="flex h-64 flex-col items-center justify-center gap-4">
+            {/* ★ Drawn empty state (2026-08-18) — this was a bare grey sentence. */}
+            <EmptyStateIllustration name="empty-notifications" size={112} />
             <span>{t('navigation.profile_notifications_tab_navbar.no_notifications_yet')}</span>
           </div>
         ) : showButton ? (

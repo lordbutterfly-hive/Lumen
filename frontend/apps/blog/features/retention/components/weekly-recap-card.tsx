@@ -60,7 +60,7 @@ export function WeeklyRecapCard({ className }: WeeklyRecapCardProps) {
    *     seed, the real answer arriving moments later could not hide it again.
    *
    * ★ WHY `clientAnswered` AND NOT JUST `identity.isLoggedIn`. The sibling fix in
-   * `today-card.tsx` (G2) swapped to `useSessionIdentity()`, and that is the right
+   * `streak-card.tsx` (G2) swapped to `useSessionIdentity()`, and that is the right
    * source — but read `server-session.tsx`: until `clientAnswered`, it FALLS BACK
    * to the same localStorage seed. For a card that hides a signed-in reader's
    * daily loop, an optimistic seed is the safe way to be wrong. For a card that
@@ -70,7 +70,7 @@ export function WeeklyRecapCard({ className }: WeeklyRecapCardProps) {
    * activity to a stranger, which is not a trade worth making.
    *
    * ★ VISIBILITY IS DERIVED, NOT LATCHED, so it self-corrects the moment the
-   * session answer changes — the same shape `today-card.tsx` uses.
+   * session answer changes — the same shape `streak-card.tsx` uses.
    */
   const identity = useSessionIdentity();
   const signedIn = identity.clientAnswered && identity.isLoggedIn;

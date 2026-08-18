@@ -13,7 +13,7 @@ import {
 } from '@ui/components/alert-dialog';
 import { useSessionIdentity } from '@/blog/features/layouts/server-session';
 import { useTranslation } from '@/blog/i18n/client';
-import { X } from 'lucide-react';
+import { Icons } from '@ui/components/icons';
 import { ReactNode, useState } from 'react';
 
 export function PostDeleteDialog({
@@ -64,7 +64,7 @@ export function PostDeleteDialog({
                 reported an unnamed button. Same `<X/> + sr-only` pattern the
                 shared dialog already uses (`packages/ui/components/dialog.tsx`). */}
             <AlertDialogCancel className="border-none hover:text-ink-brand-3" data-testid="flag-dialog-close">
-              <X className="h-4 w-4" aria-hidden="true" />
+              <Icons.x className="h-4 w-4" aria-hidden="true" />
               <span className="sr-only">{t('global.close')}</span>
             </AlertDialogCancel>
           </div>

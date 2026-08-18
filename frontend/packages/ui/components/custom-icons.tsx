@@ -313,3 +313,123 @@ export const quote = make('quote');
 export const spinner = make('spinner');
 export const pencil = make('pencil');
 export const house = make('house');
+
+/**
+ * ★★★ THE PRESS SET (2026-08-18) — 40 icons delivered against the design brief.
+ *
+ * These are FILLED, not stroked, and that is the whole point of the cut: the
+ * house set above is 1.75px line work, and the brief asked for icons that look
+ * ENGRAVED or STAMPED rather than drawn with a modern rounded pen — higher
+ * contrast, solid where a stamp would ink, flat terminals. So they cannot share
+ * `make()`, which sets `fill="none" stroke="currentColor"`; a filled path
+ * rendered through it disappears. `makeFilled` is the same wrapper with the
+ * fill/stroke relationship inverted.
+ *
+ * Everything else is deliberately identical to the line set — 24 grid, 20 live
+ * area, `currentColor`, same props passthrough — so a caller swapping one for the
+ * other changes nothing but the drawing.
+ *
+ * ★ The vote blade and the quill are NOT here and must not be redrawn: the blade
+ * already carries the rhombus facet this product is built from, and the quill
+ * means "lite account" in a byline. Both were delivered as-is on purpose.
+ */
+export const FILLED_PATHS: Record<string, string> = {
+  account: '<circle cx="12" cy="7.4" r="3.8"></circle> <path d="M4 21.4c0-4.2 3.6-6.8 8-6.8s8 2.6 8 6.8Z"></path>',
+  add: '<path d="M10.6 3.4h2.8v7.2h7.2v2.8h-7.2v7.2h-2.8v-7.2H3.4v-2.8h7.2Z"></path>',
+  chart: '<path d="M3 20.4h18v2H3Z"></path> <path d="M5.4 10h3.2v9.2H5.4Zm5-5.6h3.2v14.8h-3.2Zm5 7.6h3.2v7.2h-3.2Z"></path>',
+  check: '<path d="M9.4 18.6 3 12.2l2.4-2.4 4 4L18.6 4.4 21 6.8Z"></path>',
+  chevron: '<path d="M12 16.8 4.2 8.6h15.6Z"></path>',
+  close: '<path d="M4.6 6.4 6.4 4.6 19.4 17.6 17.6 19.4Z"></path> <path d="M17.6 4.6 19.4 6.4 6.4 19.4 4.6 17.6Z"></path>',
+  comment: '<path fill-rule="evenodd" d="M2.6 3.2h18.8v13.6H9.4L4.4 21.4v-4.6H2.6ZM4.8 5.4H19.2V14.6H4.8Z"></path>',
+  communities: '<path d="M7.4 3.4a3.4 3.4 0 1 1 0 6.8 3.4 3.4 0 0 1 0-6.8Z"></path> <path d="M1.8 20.6c0-3.4 2.5-5.6 5.6-5.6s5.6 2.2 5.6 5.6Z"></path> <path d="M16.8 5.6a2.8 2.8 0 1 1 0 5.6 2.8 2.8 0 0 1 0-5.6Z"></path> <path d="M14.6 20.6h7.6c0-3-1.8-4.8-4.4-4.8-1.2 0-2.2.3-3 .9Z"></path>',
+  compose: '<path d="M15.6 2.6 21.4 8.4 10.4 19.4H4.6v-5.8Z"></path> <path d="M4.6 19.4h5.8l-2.9 2.2H2.4Z"></path>',
+  downvoteCast: '<path d="M12 3.1c3 3.8 5.4 7.4 7.2 10.8-2.3-1.4-4.7-2.1-7.2-2.1s-4.9.7-7.2 2.1C6.6 10.5 9 6.9 12 3.1z"></path>',
+  downvote: '<path d="M12 3.1c3 3.8 5.4 7.4 7.2 10.8-2.3-1.4-4.7-2.1-7.2-2.1s-4.9.7-7.2 2.1C6.6 10.5 9 6.9 12 3.1z"></path>',
+  explore: '<path fill-rule="evenodd" d="M12 1.6a10.4 10.4 0 1 0 0 20.8 10.4 10.4 0 0 0 0-20.8Zm0 2.8a7.6 7.6 0 1 1 0 15.2 7.6 7.6 0 0 1 0-15.2Z"></path> <path d="M15.6 8.4 13.4 13.4 8.4 15.6 10.6 10.6Z"></path>',
+  external: '<path d="M4.4 6.4h7v2.8H7.2v7.6h7.6v-4.2h2.8v7H4.4Z"></path> <path d="M13.6 2.6h7.8v7.8h-2.8V7.4l-4.8 4.8-2-2 4.8-4.8h-3Z"></path>',
+  flag: '<path d="M4.4 2.6h2.8v18.8H4.4Z"></path> <path d="M7.2 3.4h12.4l-2.6 4.4 2.6 4.4H7.2Z"></path>',
+  home: '<path d="M12 2.6 21.8 11.4h-2.8v10H14.6v-6.2H9.4v6.2H5V11.4H2.2Z"></path>',
+  image: '<path fill-rule="evenodd" d="M2.4 4.6h19.2v14.8H2.4Zm2.6 2.6v9.6h14v-9.6Z"></path> <path d="M5.4 16.8 9.6 11l3 3.6 2.6-2.2 3.8 4.4Z"></path> <circle cx="15.6" cy="9.8" r="1.5"></circle>',
+  keys: '<path d="M5.4 10.6h13.2v10.8H5.4Z"></path> <path d="M8.2 10.6V7.4a3.8 3.8 0 0 1 7.6 0v3.2h-2.8V7.4a1 1 0 0 0-2 0v3.2Z"></path>',
+  link: '<path d="M4.4 12a4.6 4.6 0 0 1 4.6-4.6h2.6v2.8H9A1.8 1.8 0 0 0 9 14h2.6v2.6H9A4.6 4.6 0 0 1 4.4 12Z"></path> <path d="M19.6 12a4.6 4.6 0 0 0-4.6-4.6h-2.6v2.8H15A1.8 1.8 0 0 1 15 14h-2.6v2.6H15A4.6 4.6 0 0 0 19.6 12Z"></path> <path d="M8.4 10.8h7.2v2.4H8.4Z"></path>',
+  menu: '<path d="M2.4 5h19.2v3.2H2.4Zm0 5.4h19.2v3.2H2.4Zm0 5.4h19.2v3.2H2.4Z"></path>',
+  meritum: '<path d="M12 1.8 19.2 12 12 22.2 4.8 12Z"></path>',
+  more: '<path d="M2.8 10.2h3.6v3.6H2.8Zm7.4 0h3.6v3.6h-3.6Zm7.4 0h3.6v3.6h-3.6Z"></path>',
+  mute: '<path d="M10.8 1.6h2.4v2.2h-2.4Z"></path> <path d="M12 4.2c4 0 5.4 3.4 5.4 7.4 0 3 .6 4.6 1.8 5.8H4.8c1.2-1.2 1.8-2.8 1.8-5.8 0-4 1.4-7.4 5.4-7.4Z"></path> <path d="M3.4 4.6 5.2 2.8 21.2 18.8 19.4 20.6Z"></path>',
+  notifications: '<path d="M10.8 1.6h2.4v2.2h-2.4Z"></path> <path d="M12 4.2c4 0 5.4 3.4 5.4 7.4 0 3 .6 4.6 1.8 5.8H4.8c1.2-1.2 1.8-2.8 1.8-5.8 0-4 1.4-7.4 5.4-7.4Z"></path> <path d="M9.6 18.6h4.8v1.4a2.4 2.4 0 0 1-4.8 0Z"></path>',
+  post: '<path fill-rule="evenodd" d="M4.6 2.6h14.8v18.8H4.6Zm1.8 1.8v15.2h11.2V4.4Z"></path> <path d="M7.4 6.4h9.2v1.8H7.4Zm0 4.2h9.2v1.8H7.4Zm0 4.2h5.6v1.8H7.4Z"></path>',
+  refresh: '<path d="M12 5.2a6.8 6.8 0 1 1-6.8 6.8H2.2a9.8 9.8 0 1 0 9.8-9.8Z"></path> <path d="M12 1.2v8L7.4 5.2Z"></path>',
+  reply: '<path d="M2.6 9 9.6 3.4v3.4h4.8a7 7 0 0 1 7 7v5.8h-3.6v-5a3.8 3.8 0 0 0-3.8-3.8H9.6v3.4Z"></path>',
+  saveOutline: '<path fill-rule="evenodd" d="M6 2.4h12v19.2l-6-4.8-6 4.8Zm2.8 2.8v10.6l3.2-2.6 3.2 2.6V5.2Z"></path>',
+  save: '<path d="M6 2.4h12v19.2l-6-4.8-6 4.8Z"></path>',
+  search: '<path fill-rule="evenodd" d="M10 1.6a8.4 8.4 0 1 0 0 16.8 8.4 8.4 0 0 0 0-16.8Zm0 3a5.4 5.4 0 1 1 0 10.8 5.4 5.4 0 0 1 0-10.8Z"></path> <path d="M15.9 17.9 17.9 15.9 22.6 20.6 20.6 22.6Z"></path>',
+  settings: '<path d="M2.4 6.4h19.2v2.4H2.4Zm0 8.4h19.2v2.4H2.4Z"></path> <path d="M13.4 4.6h3.6v6h-3.6ZM7 12.6h3.6v6.8H7Z"></path>',
+  share: '<path d="M6.4 7.6 12 1.4l5.6 6.2h-3.9v7.8h-3.4V7.6Z"></path> <path d="M3.4 12.6h3.4v6.2h10.4v-6.2h3.4v9.6H3.4Z"></path>',
+  stack: '<path d="M4 17.6h16v3.4H4Zm2-4.8h12v3.4H6Zm2-4.8h8v3.4H8Zm2-4.8h4v3.4h-4Z"></path>',
+  stake: '<path d="M12 2.2 18.4 9H5.6Z"></path> <path d="M10.6 8h2.8v9.6h-2.8Z"></path> <path d="M3 19.4h18v2.6H3Z"></path>',
+  swap: '<path d="M3.4 7.4h13.2V4.4L21.8 9l-5.2 4.6v-3H3.4Z"></path> <path d="M20.6 16.6H7.4v3L2.2 15l5.2-4.6v3h13.2Z"></path>',
+  time: '<path fill-rule="evenodd" d="M12 1.6a10.4 10.4 0 1 0 0 20.8 10.4 10.4 0 0 0 0-20.8Zm0 2.8a7.6 7.6 0 1 1 0 15.2 7.6 7.6 0 0 1 0-15.2Z"></path> <path d="M11 6h2.2v6.4l4.4 2.6-1.1 1.9-5.5-3.3Z"></path>',
+  upvoteCast: '<path d="M12 3.1c3 3.8 5.4 7.4 7.2 10.8-2.3-1.4-4.7-2.1-7.2-2.1s-4.9.7-7.2 2.1C6.6 10.5 9 6.9 12 3.1z"></path>',
+  upvote: '<path d="M12 3.1c3 3.8 5.4 7.4 7.2 10.8-2.3-1.4-4.7-2.1-7.2-2.1s-4.9.7-7.2 2.1C6.6 10.5 9 6.9 12 3.1z"></path>',
+  views: '<path fill-rule="evenodd" d="M12 4.6c5.2 0 9.4 4.2 11 7.4-1.6 3.2-5.8 7.4-11 7.4S2.6 15.2 1 12c1.6-3.2 5.8-7.4 11-7.4Zm0 4a3.4 3.4 0 1 0 0 6.8 3.4 3.4 0 0 0 0-6.8Z"></path>',
+  voteValue: '<path d="M3.6 3.4h16.8v2.4H3.6Z"></path> <path d="M10.8 5.8h2.4v4h-2.4Z"></path> <path d="M4.6 14.4a7.4 7.4 0 0 1 14.8 0Z"></path> <path d="M4.6 14.4h14.8v2.2H4.6Z"></path>',
+  wallet: '<path fill-rule="evenodd" d="M2.2 5.4h19.6v13.2H2.2Zm0 3.8h19.6v1.8H2.2Zm13.8 4.2a1.6 1.6 0 1 0 3.2 0 1.6 1.6 0 0 0-3.2 0Z"></path>',
+};
+
+const makeFilled = (name: string) => {
+  const Icon = forwardRef<SVGSVGElement, Omit<LucideProps, 'ref'>>((props, ref) => (
+    <svg
+      ref={ref}
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      width={24}
+      height={24}
+      fill="currentColor"
+      stroke="none"
+      {...props}
+      // eslint-disable-next-line react/no-danger -- house icon set: inner SVG geometry is a trusted constant from FILLED_PATHS, never user input
+      dangerouslySetInnerHTML={{ __html: FILLED_PATHS[name] }}
+    />
+  ));
+  Icon.displayName = `FilledIcon(${name})`;
+  return Icon;
+};
+
+/* The press cut, exported under `press*` names so a call site opts in explicitly
+   and the line set stays available for anything mid-migration. */
+export const pressSearch = makeFilled('search');
+export const pressMenu = makeFilled('menu');
+export const pressComment = makeFilled('comment');
+export const pressNotifications = makeFilled('notifications');
+export const pressClose = makeFilled('close');
+export const pressCheck = makeFilled('check');
+export const pressAdd = makeFilled('add');
+export const pressMore = makeFilled('more');
+export const pressExternal = makeFilled('external');
+export const pressLink = makeFilled('link');
+export const pressImage = makeFilled('image');
+export const pressFlag = makeFilled('flag');
+export const pressSettings = makeFilled('settings');
+export const pressWallet = makeFilled('wallet');
+export const pressMeritum = makeFilled('meritum');
+export const pressAccount = makeFilled('account');
+export const pressHome = makeFilled('home');
+export const pressCompose = makeFilled('compose');
+export const pressPost = makeFilled('post');
+export const pressChart = makeFilled('chart');
+export const pressTime = makeFilled('time');
+export const pressKeys = makeFilled('keys');
+export const pressMute = makeFilled('mute');
+export const pressShare = makeFilled('share');
+export const pressReply = makeFilled('reply');
+export const pressSave = makeFilled('save');
+export const pressSaveOutline = makeFilled('saveOutline');
+export const pressVoteValue = makeFilled('voteValue');
+export const pressCommunities = makeFilled('communities');
+export const pressExplore = makeFilled('explore');
+export const pressRefresh = makeFilled('refresh');
+export const pressViews = makeFilled('views');
+export const pressStack = makeFilled('stack');
+export const pressStake = makeFilled('stake');
+export const pressSwap = makeFilled('swap');
+export const pressChevron = makeFilled('chevron');

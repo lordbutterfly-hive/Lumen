@@ -221,7 +221,7 @@ const WalletConnectDialog: FC<Props> = ({ chain, onClose, onAuthenticated, onNee
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="#b45309"
-                  strokeWidth="2"
+                  strokeWidth="2.6"
                   className="mt-px flex-shrink-0"
                 >
                   <path d="M12 9v4M12 17h.01M10.3 3.9l-8 14A2 2 0 004 21h16a2 2 0 001.7-3l-8-14a2 2 0 00-3.4 0z" />

@@ -8,6 +8,7 @@ import {
   type RetentionSummaryResponse
 } from '../hooks/use-retention';
 import { voiced, type RetentionVoice } from '../lib/viewer-copy';
+import { WORDS_PER_PAGE, pagesFromWords, pickWordWindow } from '../lib/act-stats';
 import { reachTrend } from '../lib/copy-select';
 import type { RetentionStats } from '../types';
 
@@ -32,6 +33,11 @@ import type { RetentionStats } from '../types';
  *   busiest weekday     — free once history is stored, and quietly delightful
  *   longest streak      — a fact about you, unlike "0-day streak" which is a fact
  *                         about this week
+ *   words written       — added 2026-08-18 on the owner's request, with the book
+ *                         comparison they asked for. Free at the point of the walk (the
+ *                         bodies are already in the payload) and accumulated across walks
+ *                         so it is all-time rather than windowed, which is the only form
+ *                         a count of written things is allowed to take here
  *
  * ★★ WHAT THIS FILE USED TO ADVERTISE AND NO LONGER SHIPS. The list above once opened
  * with "votes received — computed by the route since forever, read by nothing" and called
@@ -52,6 +58,16 @@ import type { RetentionStats } from '../types';
  *    poster since 2018 used to be served 11 of 26 weeks and shown a bare 11. A
  *    number presented tighter than it really is, is a lie with better typography.
  */
+
+/**
+ * Pages below which the book comparison is not worth making.
+ *
+ * A pamphlet is not a book. Twenty pages at 250 words is 5,000 words — roughly a dozen
+ * substantial posts — which is the point where "that is a book's worth of writing" starts
+ * being a compliment rather than an accidental put-down. Under it, the word count is
+ * stated plainly and says more.
+ */
+export const MIN_PAGES_TO_COMPARE = 20;
 
 export interface StatLine {
   id: string;
@@ -250,6 +266,15 @@ export function useRetentionStatLines(
   if (typeof stats?.longestStreakDays === 'number' && stats.longestStreakDays > 1) {
     // A floor unless the whole history is stored: a personal record computed from
     // six months of history is not a personal record.
+    //
+    // ★★ IT IS CALLED A RUN, NOT A STREAK (2026-08-18, caught in a browser). This line
+    // renders directly under the flame, which now reads "3-day streak" — and the two
+    // numbers measure DIFFERENT THINGS. The streak is the decaying score (+1 a day here,
+    // -2 a day away); this is the longest unbroken run of consecutive days in the stored
+    // history. Printing "3-day streak" beside "Longest streak: 8+ days" invites the
+    // reading "your best was 8, you are on 3", which is a comparison between two
+    // quantities that are not comparable. Same word, two meanings, six lines apart — the
+    // exact class of contradiction section 16b of the ladder test exists to catch.
     const complete = coverage?.historyComplete === true;
     lines.push({
       id: 'longest',
@@ -283,6 +308,55 @@ export function useRetentionStatLines(
   // missing day inside a truncated walk is a hole in what was read and not a day off.
   if (typeof stats?.longestGapDays === 'number' && stats.longestGapDays > 1) {
     lines.push({ id: 'quiet', text: t('retention.stats.quiet', { count: stats.longestGapDays }) });
+  }
+
+  // ── HOW MUCH THEY HAVE WRITTEN, AND OVER WHAT ──────────────────────────
+  //
+  // ★★ THE PERIOD IS IN THE SENTENCE, AND IT ROTATES (owner, 2026-08-18: "in what time
+  // period? this needs to change with time look3d at. one day 7 days, one time all time").
+  //
+  // The first version of this line printed a lifetime figure with no scope at all, which
+  // is the same defect as the vote-count lines this card already deleted: a number nobody
+  // can place. It is also the dullest possible version of itself — a lifetime word count
+  // can only creep upward forever, and a UX pass had already named "every number is a
+  // single frozen figure" as this card's clearest structural gap.
+  //
+  // `pickWordWindow` chooses one of five (today / 7 / 30 / 365 days / all time),
+  // deterministically from the UTC day AND the account name, so the same reader sees the
+  // same window all day and two readers do not see the same one. It widens past any window
+  // too small to be worth a sentence rather than printing "0 words today".
+  //
+  // ★ AND THE CHOICE IS MADE HERE, NOT IN THE ROUTE. The response is cached for five
+  // minutes; a server-chosen window would freeze until the entry expired, which is the
+  // exact bug the daily goal shipped twice (see streak-cache.ts's history).
+  //
+  // Floorness is PER WINDOW and runs opposite to intuition — the walk reads newest-first,
+  // so the short windows are the trustworthy ones. `windowIsFloor` owns that rule.
+  const wordChoice = pickWordWindow(
+    stats?.wordsWritten,
+    new Date().toISOString().slice(0, 10),
+    summary.username || '',
+    coverage?.completeFrom ?? '',
+    coverage?.historyComplete === true
+  );
+  if (wordChoice) {
+    const pages = pagesFromWords(wordChoice.words);
+    const scope = `retention.stats.written_${wordChoice.window}${wordChoice.isFloor ? '_floor' : ''}`;
+    // ★ THE COMPARISON SCALES WITH THE FIGURE, or it is not made at all. "That is a 2-page
+    // book" is a deflation, and "that is 0 pages" is worse; under a page the words stand
+    // alone, and the book framing waits for a number that earns it.
+    const comparison =
+      pages >= MIN_PAGES_TO_COMPARE
+        ? t('retention.stats.written_book', { pages })
+        : pages >= 1
+          ? t('retention.stats.written_pages', { count: pages })
+          : '';
+    const headline = t(voiced(scope, voice), { words: wordChoice.words });
+    lines.push({
+      id: 'written',
+      text: comparison ? `${headline} ${comparison}` : headline,
+      tooltip: t('retention.stats.written_note', { perPage: WORDS_PER_PAGE })
+    });
   }
 
   if (summary.tenureYear) {

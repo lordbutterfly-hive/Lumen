@@ -1,6 +1,6 @@
 'use client';
 
-import { X } from 'lucide-react';
+import { Icons } from '@ui/components/icons';
 import { CircleSpinner } from 'react-spinners-kit';
 
 export interface ComposerMedia {
@@ -50,7 +50,7 @@ export default function ComposerMediaStrip({
             data-testid="short-form-composer-media-remove"
             className="absolute right-1 top-1 inline-flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-white transition-colors hover:bg-black/75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
           >
-            <X className="h-3.5 w-3.5" aria-hidden="true" />
+            <Icons.x className="h-3.5 w-3.5" aria-hidden="true" />
           </button>
         </div>
       ))}

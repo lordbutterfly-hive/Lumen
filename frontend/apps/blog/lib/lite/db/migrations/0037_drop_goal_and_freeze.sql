@@ -1,0 +1,45 @@
+-- 0037_drop_goal_and_freeze.sql — the daily goal and the streak freeze are gone
+-- (owner, 2026-08-18: "strip that out compeletely. no setting of anyhting. it should just
+-- show the streak, no additional features, no freezes. dump that.")
+--
+-- ═══ WHAT THESE TWO TABLES WERE FOR, AND WHY NEITHER HAS A JOB ANY MORE ═══
+--
+-- Both existed to soften ONE mechanic: a consecutive-day streak that dropped to zero the
+-- moment a day was missed.
+--
+--   `lumen_retention_goal`      (0029 §1) — the reader's chosen "acts per day" target. It
+--                               started as a cosmetic ring denominator in localStorage and
+--                               was moved server-side on 2026-08-09 precisely because it
+--                               began GATING the streak, and a client-held gate on a
+--                               deliberately unforgeable number is a streak you can grant
+--                               yourself from a devtools console.
+--   `lumen_hive_freeze_spent`   (0028 §4) — which missed days a banked "freeze" had already
+--                               paid for. Days rather than a counter, because the streak is
+--                               recomputed from scratch on every read and a bare counter
+--                               un-granted its own mercy the moment it ran out.
+--
+-- The streak now DECAYS instead of resetting: +1 for a day with an authored act, -2 for a
+-- day without one, floored at zero (apps/blog/features/retention/lib/compute-streak.ts).
+-- Missing one day out of thirty takes 30 to 28. There is no cliff to bridge, so there is no
+-- mercy to bank and no per-day target to fail.
+--
+-- ═══ WHAT IS LOST, STATED PLAINLY ═══
+--
+-- `lumen_retention_goal` held one preference per reader. Nothing reads a goal any more, so
+-- the rows describe a setting that no longer exists in the product.
+--
+-- `lumen_hive_freeze_spent` held bridged days. Under the old model those rows were
+-- load-bearing (dropping them would have broken streaks a freeze had already protected).
+-- Under the decay they are inert: the accumulator reads the ACT-DAY set
+-- (`lumen_hive_act_day`, untouched by this migration) and nothing else, so a bridged day
+-- is simply a day with no act, worth -2 like any other. No streak changes value because
+-- these rows went away; they change value because the model changed, which happens whether
+-- the tables are dropped or left standing.
+--
+-- FORWARD-ONLY, matching 0032's precedent: 0028 and 0029 stay in history because they were
+-- applied, and this drops what they created. If a goal or a mercy ever returns, write a new
+-- migration rather than resurrecting either — a spent-freeze row means nothing without the
+-- run-cap arithmetic that produced it, and that code is deleted.
+
+DROP TABLE IF EXISTS lumen_retention_goal;
+DROP TABLE IF EXISTS lumen_hive_freeze_spent;

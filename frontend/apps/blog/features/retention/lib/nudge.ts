@@ -17,10 +17,9 @@
  *
  * ★ AND IT NEVER APPLIES PRESSURE. Rejected on purpose, permanently: "Keep your
  * streak going!", any countdown clock, any exclamation mark, anything that reads as
- * loss aversion, and anything at all about a rank going down. The freeze mechanic
- * exists so that a missed day is designed in — a nudge that panics about a missed day
- * contradicts the system it is advertising. `streak_holds` states the deadline as a
- * fact and mentions the mercy in the same breath.
+ * loss aversion, and anything at all about a rank going down. The streak DECAYS rather
+ * than resetting, so a missed day is designed in — a nudge that panics about one would
+ * contradict the system it is advertising.
  *
  * Pure: no React, no i18n, no DOM, no clock of its own. The caller supplies today's
  * weekday and the component owns the once-per-day ledger, so every rule below is
@@ -43,7 +42,6 @@ export interface NudgeFacts {
   streakIsLowerBound: boolean;
   /** Authored acts today. Zero is what makes several candidates relevant. */
   actsToday: number;
-  freezesAvailable: number;
   /** 0 = Sunday … 6 = Saturday, in the READER's local week. */
   todayWeekday: number;
   /** The weekday this account acts on most, when there is a real pattern. */
@@ -146,14 +144,7 @@ export function selectNudge(facts: NudgeFacts): Nudge | null {
     return { kind: 'new_people_week', vars: { count: facts.newPeopleThisWeek } };
   }
 
-  // 7. THE STREAK, STATED FLAT. Only with a real run going, only before anything has
-  //    been written today, and only when a freeze is banked — so the sentence can
-  //    carry the mercy alongside the deadline instead of just the deadline. Without a
-  //    freeze to mention this is a bare countdown, which is the thing we refuse to
-  //    send.
-  //    ★ `streakDays + 1`, THE SAME OFF-BY-ONE THE CARD HAD. `actsToday === 0` is checked one
-  //    line up, so the run cannot include today: the day being talked about is the NEXT one.
-  //    The card said "Day 2 lands" beside a flame reading "2-day streak"; this said it too.
+  // 7. THE STREAK, STATED FLAT.
   // ★★★ THE FLAT STREAK LINE IS GONE (owner ruling, 2026-08-11).
   //
   // It rendered "Day 4 lands if you post or comment today." above the feed. Whatever
@@ -161,8 +152,8 @@ export function selectNudge(facts: NudgeFacts): Nudge | null {
   // did not ask for, sitting on top of the thing they came to read. The owner does not
   // want it over the feed again, so it is removed rather than reworded.
   //
-  // The streak itself is not hidden: the flame and the Today card still report what is
-  // banked. What is deleted is the app telling you what you owe it today.
+  // The streak itself is not hidden: the flame and the streak card still report where it
+  // stands. What is deleted is the app telling you what you owe it today.
 
   // Nothing true and interesting today. Say nothing.
   return null;

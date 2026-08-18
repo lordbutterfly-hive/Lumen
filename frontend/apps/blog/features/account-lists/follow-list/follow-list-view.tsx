@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Search, X } from 'lucide-react';
+import { Icons } from '@ui/components/icons';
 import { UseInfiniteQueryResult } from '@tanstack/react-query';
 import { IFollow } from '@hive/common-hiveio-packages/wax';
 import { User } from '@smart-signer/types/common';
@@ -220,7 +220,7 @@ export default function FollowListView({
     <div className="flex w-full flex-col" data-testid="follow-list-page">
       <div className="mb-4 flex h-12 items-center justify-between gap-4">
         <div className="relative w-full max-w-[300px]">
-          <Search
+          <Icons.search
             className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#9ca3af]"
             aria-hidden
           />
@@ -251,7 +251,7 @@ export default function FollowListView({
               data-testid="follow-list-search-clear"
               className="absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-[10px] text-[#9ca3af] transition-colors hover:bg-[#f4f5f7] hover:text-[#3f4650]"
             >
-              <X className="h-3.5 w-3.5" />
+              <Icons.x className="h-3.5 w-3.5" />
             </button>
           ) : null}
         </div>

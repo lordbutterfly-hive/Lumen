@@ -540,7 +540,7 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
               }}
               className="mb-4 flex items-center gap-1.5 border-0 bg-transparent p-0 text-[13px] leading-[20px] font-semibold text-ink-10"
             >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8">
                 <path d="M15 18l-6-6 6-6" />
               </svg>
               {COPY.back}
@@ -571,7 +571,7 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                 <span className="text-[13px] leading-[20px] font-semibold text-ink-14">{COPY.checking}</span>
               ) : nameStatus.state === 'available' ? (
                 <span className="flex items-center gap-1.5 text-[13px] leading-[20px] font-semibold text-ink-ok-2">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2f7d4f" strokeWidth="2.4">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2f7d4f" strokeWidth="2.8">
                     <path d="M20 6L9 17l-5-5" />
                   </svg>
                   @{name.trim().toLowerCase()} is available

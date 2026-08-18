@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Big from 'big.js';
-import { ChevronDown, ChevronUp, Repeat } from 'lucide-react';
+import { Icons } from '@ui/components/icons';
 import { Link, UserAvatarImg } from '@hive/ui';
 import { useTranslation } from '@/blog/i18n/client';
 import { useDelegations } from '../hooks/use-delegations';
@@ -42,7 +42,7 @@ export default function DelegatedOutPanel({
         data-testid="wallet-delegated-out-toggle"
       >
         <span className="flex items-center gap-2.5 text-[14px] leading-[22px] font-semibold text-ink-7">
-          <Repeat className="h-[15px] w-[15px] text-ink-14" />
+          <Icons.swap className="h-[15px] w-[15px] text-ink-14" />
           {t('wallet.delegated.out')}
         </span>
         <span className="flex items-center gap-2.5">
@@ -54,9 +54,9 @@ export default function DelegatedOutPanel({
             {formatTokenAmount(delegatedOutHp)} HP
           </span>
           {delegatedOpen ? (
-            <ChevronUp className="h-3.5 w-3.5 text-ink-14" />
+            <Icons.chevronUp className="h-3.5 w-3.5 text-ink-14" />
           ) : (
-            <ChevronDown className="h-3.5 w-3.5 text-ink-14" />
+            <Icons.chevronDown className="h-3.5 w-3.5 text-ink-14" />
           )}
         </span>
       </button>

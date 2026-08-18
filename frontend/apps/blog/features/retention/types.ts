@@ -235,6 +235,27 @@ export interface RetentionStats {
    */
   activeDaysTotal?: number;
   /**
+   * Words this account has been observed to write, across posts and comments, over five
+   * windows: today, 7 days, 30 days, 365 days, and everything stored.
+   *
+   * ★ WORDS, NOT LINES. A markdown "line" counts how the author's editor wraps; words
+   * survive the round trip and are the only unit a page count can honestly come from.
+   *
+   * ★ FIVE WINDOWS, NOT ONE, AND THE CLIENT ROTATES BETWEEN THEM (owner, 2026-08-18).
+   * Stored per (account, day) — migration 0038 — so every window is a `SUM` over a
+   * contiguous prefix of one primary-key scan and the whole set costs what the single
+   * lifetime figure cost. The rotation happens at RENDER time (`pickWordWindow`) rather
+   * than in the route, because the response is cached for five minutes and a
+   * server-chosen window would freeze until it expired.
+   *
+   * FLOORNESS IS PER WINDOW and runs the opposite way to intuition: the feed walk reads
+   * newest-first under a clock, so the recent end is always covered and the far end is
+   * what truncates. `all` is a floor until `coverage.historyComplete`; the rest are floors
+   * only when `coverage.completeFrom` is later than where they start. ABSENT, never a
+   * zeroed object, when it could not be measured.
+   */
+  wordsWritten?: AuthoredWordWindows;
+  /**
    * Posts and replies in the window.
    *
    * ★ FOR THE RATIO ONLY. These are 26-week counts, and a windowed count of comments may not
@@ -275,35 +296,50 @@ export interface RetentionStats {
 }
 
 /**
- * The daily loop. Small on purpose: a ring, a streak and a mercy.
+ * Today. ONE number, since 2026-08-18.
+ *
+ * ★ IT USED TO CARRY A GOAL AND A FREEZE BUDGET, AND BOTH ARE DELETED (owner: "strip
+ * that out compeletely. no setting of anyhting... no freezes"). `goal` was the reader's
+ * chosen acts-per-day target and it GATED the streak; `freezesAvailable` /
+ * `freezesUsedRecently` reported a banked mercy that bridged missed days. Neither has
+ * anything to do any more: the streak decays rather than resetting, so there is no cliff
+ * to soften and no target to fail.
  *
  * `acts` counts AUTHORED acts today — posts and comments, never votes. That is not a
  * simplification, it is the one currency both ladders can measure symmetrically: a
  * Hive user's vote broadcasts from their browser and never touches this server, and
- * reading it needs an API that is not registered. A goal fed by votes would be
- * completable by lite users and uncompletable by Hive users doing the same thing,
- * which is an inequity rather than a measurement. Their posts and comments are on
- * chain and this route already reads them.
+ * reading it needs an API that is not registered. A streak fed by votes would be
+ * tickable by lite users and untickable by Hive users doing the same thing, which is
+ * an inequity rather than a measurement. Their posts and comments are on chain and
+ * this route already reads them.
  */
+/** Words authored inside each window. See `RetentionStats.wordsWritten`. */
+export interface AuthoredWordWindows {
+  /** Today, UTC. */
+  day: number;
+  /** The trailing 7 days, today included. */
+  week: number;
+  /** The trailing 30 days. */
+  month: number;
+  /** The trailing 365 days. */
+  year: number;
+  /** Everything the store holds. */
+  all: number;
+}
+
 export interface RetentionToday {
   /** Authored acts today, UTC. Chain-derived and exact. */
   acts: number;
-  /**
-   * The goal today must reach for the streak to tick. Server-held (migration 0029)
-   * because it gates a chain-derived number — a client-supplied goal would make the
-   * streak forgeable. Optional: a server predating the gating omits it.
-   */
-  goal?: number;
-  /** Banked freezes available to bridge a future missed day. */
-  freezesAvailable: number;
-  /** How many missed days inside the current run a freeze is already covering. */
-  freezesUsedRecently: number;
 }
 
 export interface RetentionSummary {
   username: string;
   rank: LeagueRank;
-  /** Chain-derived: consecutive days with a genuine authored act. */
+  /**
+   * Chain-derived. +1 for each day with a genuine authored act, -2 for each day
+   * without one, floored at zero and accumulated forward from the day Lumen started
+   * counting the account. NOT a count of consecutive days — see compute-streak.ts.
+   */
   streakDays: number;
   /** Chain-derived: distinct active weeks in the trailing 26. Also a ladder arm. */
   activeWeeks: number;

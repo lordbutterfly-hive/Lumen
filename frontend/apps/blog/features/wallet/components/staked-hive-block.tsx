@@ -1,7 +1,7 @@
 'use client';
 
 import Big from 'big.js';
-import { AlertCircle } from 'lucide-react';
+import { Icons } from '@ui/components/icons';
 import { GetDynamicGlobalPropertiesResponse } from '@hiveio/wax';
 import { useTranslation } from '@/blog/i18n/client';
 import { WalletFigures } from '../lib/wallet-derived';
@@ -70,7 +70,7 @@ export default function StakedHiveBlock({
               className="mt-2.5 flex items-center gap-2.5 rounded-[14px] border border-line-warn-2 bg-surface-warn-3 px-3 py-2.5 text-[13px] leading-[20px] text-ink-warn-2"
               data-testid="wallet-power-down-notice"
             >
-              <AlertCircle className="h-[15px] w-[15px] shrink-0 text-ink-warn-7" />
+              <Icons.warning className="h-[15px] w-[15px] shrink-0 text-ink-warn-7" />
               <span className="flex-1">
                 {t('wallet.staked.power_down_notice', {
                   days: powerDown.daysUntilNext,

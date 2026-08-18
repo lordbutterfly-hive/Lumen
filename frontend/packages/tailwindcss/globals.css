@@ -2072,3 +2072,156 @@ summary {
     color: rgb(var(--ink-27));
   }
 }
+
+/* ════════════════════════════════════════════════════════════════════════════
+   MOTION — the app responds to touch (2026-08-18)
+
+   ★★★ THE MOTION SYSTEM WAS ALREADY BUILT AND WAS RUNNING ON NOTHING.
+   Measured on the home feed before this block existed: 31 keyframe animations
+   defined across the stylesheet, and `elementsCurrentlyAnimating = 0` on the
+   most-visited screen in the product. The one genuinely well-made piece — the
+   vote control — peaks at 38% rather than 50%, so it snaps and settles instead
+   of bouncing symmetrically, and nothing else in the app had been taught that.
+
+   These tokens are that gesture, generalised, so a card, a button and a feed all
+   move like the same hand made them.
+
+   ★ EVERY RULE HERE IS OFF UNDER `prefers-reduced-motion: reduce` (bottom of the
+   block). Motion is decoration; the app must be identical without it.
+   ════════════════════════════════════════════════════════════════════════════ */
+:root {
+  /* Things arriving settle; things confirming overshoot slightly, like the vote. */
+  --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --t-fast: 120ms; /* hover, press */ /* panels, menus, tabs */
+  --t-slow: 380ms; /* route change, reveal */
+  --lift-2: 0 2px 4px rgb(26 22 18 / 0.06), 0 8px 24px rgb(26 22 18 / 0.08);
+}
+
+/*
+ * The feed becomes physical: the card rises toward the cursor.
+ *
+ * ★★★ INSIDE `@layer utilities` ON PURPOSE (2026-08-18). Unlayered, this rule
+ * beat EVERY Tailwind utility regardless of specificity — the same trap the M2
+ * focus-ring fix documents further up this file. `medium-post-card.tsx` already
+ * carried `transition-colors hover:bg-[#fdfcfb]`, and the `transition`
+ * SHORTHAND here resets `transition-property` to just transform+box-shadow, so
+ * an unlayered version silently deleted the card's background fade that had
+ * worked before this block existed. Layering it puts it back on equal footing.
+ *
+ * The longhands below say the same thing without the shorthand's reset, so a
+ * utility that adds its own transitionable property is no longer evicted.
+ */
+@layer utilities {
+  .lm-card {
+    transition-property: transform, box-shadow, color, background-color, border-color;
+    transition-duration: var(--t-fast);
+    transition-timing-function: var(--ease-out);
+    will-change: transform;
+  }
+  @media (hover: hover) {
+    .lm-card:hover {
+      transform: translateY(-2px);
+      box-shadow: var(--lift-2);
+    }
+  }
+}
+
+/*
+ * ★ EVERY control acknowledges a click. Before this, nothing in the product
+ * responded to being pressed — the button you just hit looked identical to one
+ * you had not touched, which is the difference between an app that feels alive
+ * and one that feels like a web page from 2009.
+ *
+ * `:not(:disabled)` so a refused control stays visibly refused rather than
+ * springing helpfully; `:active` only, so it costs nothing until pressed.
+ */
+@layer utilities {
+  /*
+   * ★ NOT GATED ON `hover: hover` (2026-08-18). It was, which meant the one
+   * device class that actually PRESSES things — touch — got no press feedback
+   * at all. A phone reports `hover: none`, so the whole rule never matched and
+   * the block's own promise ("every control acknowledges a click") was false
+   * exactly where it mattered most.
+   *
+   * ★ The transition lives on the RESTING state, not inside `:active`. A
+   * transition is driven by the destination, so declaring it only within
+   * `:active` animated the press DOWN and snapped the release back instantly —
+   * half a gesture. Declared here, both halves are felt.
+   */
+  button:where(:not(:disabled)),
+  [role='button']:where(:not([aria-disabled='true'])),
+  a.lm-press {
+    transition-property: transform;
+    transition-duration: 90ms;
+    transition-timing-function: var(--ease-out);
+  }
+  button:where(:not(:disabled)):active,
+  [role='button']:where(:not([aria-disabled='true'])):active,
+  a.lm-press:active {
+    transform: scale(0.97);
+  }
+}
+
+/*
+ * Feed entrance. Capped at six because the seventh card is below the fold on
+ * every viewport this ships to, and staggering something nobody can see only
+ * delays it.
+ */
+@keyframes lm-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@layer utilities {
+  .lm-enter {
+    animation: lm-enter var(--t-slow) var(--ease-out) both;
+  }
+}
+.lm-enter:nth-of-type(1) { animation-delay: 0ms; }
+.lm-enter:nth-of-type(2) { animation-delay: 40ms; }
+.lm-enter:nth-of-type(3) { animation-delay: 80ms; }
+.lm-enter:nth-of-type(4) { animation-delay: 120ms; }
+.lm-enter:nth-of-type(5) { animation-delay: 160ms; }
+.lm-enter:nth-of-type(6) { animation-delay: 200ms; }
+.lm-enter:nth-of-type(n + 7) { animation-delay: 200ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  .lm-card,
+  .lm-card:hover,
+  button:not(:disabled):active,
+  [role='button']:not([aria-disabled='true']):active,
+  a.lm-press:active {
+    transform: none;
+    transition: none;
+  }
+  .lm-enter {
+    animation: none;
+  }
+}
+
+/* ── Empty-state illustration palette ────────────────────────────────────────
+   The six drawings ship painted in cream (#faf4ec paper, #a9a19a line). Held
+   as tokens instead so the artwork follows the theme — inlined as SVG in
+   apps/blog/components/empty-state-illustration.tsx, which is what lets these
+   resolve at all (an <img> cannot see this document's `dark` class).
+   Light values are the delivered colours verbatim, so light mode is unchanged. */
+:root {
+  --lm-illo-paper: #faf4ec;
+  --lm-illo-line: #a9a19a;
+  --lm-illo-line-soft: #c9c1b6;
+  --lm-illo-accent: #ded2c2;
+}
+
+.dark {
+  /* Paper goes to a raised surface rather than pure black, so the drawing still
+     reads as an object on the page; lines lift to stay legible against it. */
+  --lm-illo-paper: #24222180;
+  --lm-illo-line: #7c7570;
+  --lm-illo-line-soft: #5c5651;
+  --lm-illo-accent: #4a443f;
+}

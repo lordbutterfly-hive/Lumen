@@ -1,5 +1,9 @@
 import { getLogger } from '@hive/ui/lib/logging';
-import { advanceToNextRpcEndpoint } from '@hive/common-hiveio-packages';
+import {
+  advanceToNextRpcEndpoint,
+  restorePreferredRpcEndpoint,
+  currentRpcEndpoint
+} from '@hive/common-hiveio-packages';
 
 const logger = getLogger('app');
 
@@ -74,22 +78,54 @@ export function isHiveNetworkError(error: unknown): boolean {
  * node's connect path while a direct request to the same endpoint answered in
  * 0.375 s. A retry covers that; failover covers the node simply being down.
  */
+/**
+ * ★★★ THE ALL-NODES-DOWN CASE HAS TO FAIL FAST, NOT THOROUGHLY (2026-08-18).
+ *
+ * Without a wall-clock budget, "try harder" is indistinguishable from "hang".
+ * Each attempt can sit on the server's 8s socket timeout, so a rotation of six
+ * dead nodes is 48s of a reader staring at a spinner before being told anything —
+ * and every one of those seconds also pins a server request slot, so a total Hive
+ * outage would take this app down with it rather than degrading it.
+ *
+ * A deadline turns that into an honest error in a few seconds. Reaching it stops
+ * the loop even if attempts remain, because at that point what is missing is not
+ * more tries, it is a working node.
+ */
+const DEFAULT_DEADLINE_MS = 12_000;
+
 export async function withHiveRetry<T>(
   operation: () => Promise<T>,
   label: string,
   attempts = 3,
-  backoffMs = 250
+  backoffMs = 250,
+  deadlineMs = DEFAULT_DEADLINE_MS
 ): Promise<T> {
+  // A recovered preferred node is only discoverable by asking, and the start of a
+  // guarded call is the one moment we know somebody wants an answer anyway.
+  restorePreferredRpcEndpoint();
+
+  const startedAt = Date.now();
   let lastError: unknown;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    // Captured BEFORE the call so a failure is attributed to the node that
+    // actually served it, even if another request moves the process meanwhile.
+    const attemptedEndpoint = currentRpcEndpoint();
     try {
       return await operation();
     } catch (error) {
       lastError = error;
       if (!isHiveNetworkError(error) || attempt === attempts) throw error;
+      if (Date.now() - startedAt >= deadlineMs) {
+        logger.warn(
+          '%s: giving up after %dms — every Hive node tried was unreachable',
+          label,
+          Date.now() - startedAt
+        );
+        throw error;
+      }
       // First failure may just be a transient stall, so retry the same node once;
       // after that, assume the node is actually down and move off it.
-      const movedTo = attempt > 1 ? advanceToNextRpcEndpoint() : undefined;
+      const movedTo = attempt > 1 ? advanceToNextRpcEndpoint(attemptedEndpoint) : undefined;
       logger.warn(
         '%s: could not reach the Hive node (attempt %d of %d)%s',
         label,

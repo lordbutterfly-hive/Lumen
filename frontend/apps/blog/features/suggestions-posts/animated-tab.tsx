@@ -2,7 +2,8 @@ import SuggestionsList from '@/blog/features/suggestions-posts/list';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { Entry } from '@hive/common-hiveio-packages/wax';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Sparkles } from 'lucide-react';
+import { Sparkles } from 'lucide-react';
+import { Icons } from '@ui/components/icons';
 import { useStorageWithTTL } from '@ui/hooks/useStorageWithTTL';
 import { StorageTTL } from '@ui/lib/storage-with-ttl';
 
@@ -17,7 +18,7 @@ import { StorageTTL } from '@ui/lib/storage-with-ttl';
  * scroller was the symptom; the length was the cause. Five is what fits the
  * pinned column beside the existing rail cards without anything landing below
  * the fold: the column pins at `top-24` (96px), so at the audit's 855px viewport
- * it has 759px of reachable height, of which `TodayCard` + `Topics` already
+ * it has 759px of reachable height, of which `StreakCard` + `Topics` already
  * occupy 441px.
  */
 const RAIL_LIMIT = 5;
@@ -79,7 +80,7 @@ const AnimatedList = ({ suggestions }: { suggestions: Entry[] }) => {
                 aria-label="Hide suggestions"
                 className="-mr-1.5 -mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] text-ink-14 transition-colors hover:bg-surface-21 hover:text-ink-7"
               >
-                <X className="h-4 w-4" />
+                <Icons.x className="h-4 w-4" />
               </button>
             </div>
             <SuggestionsList suggestions={suggestions} variant="rail" limit={RAIL_LIMIT} />

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 232 145" width="232" height="145" aria-hidden="true" focusable="false">
+  <rect width="232" height="145" fill="#f6efe6"></rect>
+  <rect x="0.5" y="0.5" width="231" height="144" fill="none" stroke="#e6dcd0"></rect>
+  <rect x="10.5" y="10.5" width="211" height="124" fill="none" stroke="#ded2c2" stroke-dasharray="6 5"></rect>
+  <text x="116" y="76" text-anchor="middle" font-family="Lora, Georgia, serif" font-size="38" font-weight="700" fill="#b6a894">P</text>
+  <rect x="99" y="88" width="34" height="2" fill="#ded2c2"></rect>
+</svg>

@@ -132,10 +132,34 @@ const AppHeader: FC = () => {
   // even /login. The guard above was correct in intent and inverted in effect.
   // `'full'` and `'lite'` are the only two tiers, so asking for the one that has
   // a chain account is both narrower and honest about the undefined window.
-  const isChainAccount = !!user.username && user.account_tier === 'full';
+  /**
+   * ★★★ ONE IDENTITY FOR THE BELL, NOT TWO (2026-08-18, owner: badge said "3
+   * unread" over a panel reading "No notifications yet").
+   *
+   * The badge and the panel were driven by DIFFERENT sources. The badge's chain
+   * query keyed off `user.username` (this hook), while the panel below was
+   * handed `identity.username` (the cookie/localStorage-reconciled one) and
+   * gated additionally on `isChainAccount`. Whenever those two disagreed — the
+   * window before the client has answered, a cookie the client has not caught
+   * up with — the badge still rendered a COUNT from its own cached query while
+   * the panel's list query never became `enabled` at all, so it never fetched,
+   * held no data, and fell through to the same empty state a reader with
+   * nothing genuinely sees. Not an error, so no error state could catch it.
+   *
+   * ★ AND THE TIER TEST WAS THE OUTLIER. `=== 'full'` appears in exactly ONE
+   * place in this app — this line — while `!== 'lite'` is what the other five
+   * call sites use (content.tsx, the lite API routes, the feed route). The two
+   * are NOT equivalent: `account_tier` is absent on some sessions, and an
+   * `undefined` tier is a real Hive account everywhere else in the product but
+   * was "not a chain account" here, silently disabling both notification reads.
+   * Matching the majority spelling is what makes an undefined tier behave the
+   * same way here as it does everywhere else.
+   */
+  const bellUsername = user.username || identity.username;
+  const isChainAccount = !!bellUsername && user.account_tier !== 'lite';
   const { data } = useQuery({
-    queryKey: ['unreadNotifications', user.username],
-    queryFn: () => fetchUnreadNotifications(user.username),
+    queryKey: ['unreadNotifications', bellUsername],
+    queryFn: () => fetchUnreadNotifications(bellUsername),
     enabled: isChainAccount
   });
   /**
@@ -146,7 +170,7 @@ const AppHeader: FC = () => {
    * popover so the badge can count before anything is opened, and passed down so
    * there is one request and one number behind both.
    */
-  const lumen = useLumenNotifications(user.username ?? '');
+  const lumen = useLumenNotifications(bellUsername ?? '');
   const chainUnread = data?.unread ?? 0;
   const unreadTotal = chainUnread + lumen.unread;
   const upvotePercent = manabarsData?.upvote.percentageValue ?? 0;
@@ -384,7 +408,8 @@ const AppHeader: FC = () => {
                nothing to navigate to. Badge behaviour is unchanged. */
             <TooltipContainer title={LABELS.notifications}>
               <NotificationsMenu
-                username={identity.username}
+                // The SAME name the badge counted with — see `bellUsername`.
+                username={bellUsername}
                 lastRead={lastRead}
                 chainAccount={isChainAccount}
                 unreadCount={unreadTotal}

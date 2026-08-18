@@ -16,8 +16,11 @@ const logger = getLogger('app');
 // Matches app/layout.tsx's SITE_DESC — not imported (that constant isn't
 // exported) but kept word-for-word so the error-path fallback here reads as
 // the same site, not a second one.
+// ★ Was Hive's boilerplate, describing Hive (2026-08-18). Kept identical to the
+// root layout's string on purpose, so a shared profile or post reads as the same
+// site as a shared home page rather than a second one.
 const SITE_DESC =
-  'Communities without borders. A social network owned and operated by its users, powered by Hive.';
+  'A calmer place to read and write. Read what is worth your time. Write without chasing an audience.';
 
 // ★ NEVER `siteConfig.name` HERE (audit item 15) — see the long note at its
 // use below. The root layout's `%s - Lumen` template turns the bare site name
@@ -195,10 +198,31 @@ export async function generateMetadata({
     const rawDescription =
       post?.json_metadata?.summary || post?.json_metadata?.description || post?.body || '';
     const description = cleanForMeta(rawDescription).slice(0, 160).trimEnd();
+    /**
+     * ★★★ THE POST'S OWN LINK-PREVIEW CARD (2026-08-18).
+     *
+     * The post's first inline image is still preferred when it has one — a real
+     * photograph previews better than any generated card. What changed is the
+     * FALLBACK: a post without an image used to fall through to hive.blog's
+     * share artwork, so sharing a text post advertised a different product.
+     *
+     * Now it falls through to `/api/og`, which draws this post's own headline in
+     * Lora on Lumen's paper, to the delivered LP8 spec. Community is passed only
+     * when there is one; the card drops that segment and its separator rather
+     * than printing a stranded separator.
+     */
+    const generatedCard = (() => {
+      const params = new URLSearchParams();
+      if (title) params.set('title', String(title));
+      if (post?.author) params.set('author', String(post.author));
+      if (post?.community_title || post?.category) {
+        params.set('community', String(post.community_title || post.category));
+      }
+      return `/api/og?${params.toString()}`;
+    })();
+
     const image =
-      post?.json_metadata?.image?.[0] ||
-      post?.json_metadata?.images?.[0] ||
-      'https://hive.blog/images/hive-blog-share.png';
+      post?.json_metadata?.image?.[0] || post?.json_metadata?.images?.[0] || generatedCard;
 
     return {
       title,

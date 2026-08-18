@@ -11,6 +11,7 @@ import {
 } from '@hive/common-hiveio-packages/wax';
 import { GetDynamicGlobalPropertiesResponse } from '@hiveio/wax';
 import { getChain } from './chain';
+import { withHiveRetry } from '@smart-signer/lib/hive-network-error';
 import { bannedAuthorList, hasBannedAuthors } from '@ui/config/lists/banned-authors';
 import { ApiAccount, IManabarData } from '@hiveio/wax';
 import { DATA_LIMIT } from './bridge-api';
@@ -151,10 +152,25 @@ export const getManabar = async (accountName: string): Promise<Manabar | null> =
 };
 
 export const getAccounts = async (usernames: string[]): Promise<FullAccount[]> => {
-  const result = await (await getChain()).api.database_api.find_accounts({
-    accounts: usernames,
-    delayed_votes_active: false
-  });
+  /**
+   * ★★★ RETRY AND FAIL OVER TO ANOTHER HIVE NODE (2026-08-18).
+   *
+   * Before this, retry-and-failover existed in the codebase but was wired into
+   * three call sites, all sign-in. Every content read — this one included — went
+   * to a single node with no retry, so one unreachable node meant one failed
+   * read and a reader with no way to recover it.
+   *
+   * `withHiveRetry` retries ONLY when the node could not be reached; a node that
+   * answers "no such account" has done its job and is never asked twice.
+   */
+  const result = await withHiveRetry(
+    async () =>
+      (await getChain()).api.database_api.find_accounts({
+        accounts: usernames,
+        delayed_votes_active: false
+      }),
+    'database_api.find_accounts'
+  );
 
   return result.accounts.map((x) => {
     const account: FullAccount = {
@@ -453,7 +469,14 @@ export const getAccountReputations = async (
   ];
 };
 export const getDynamicGlobalProperties = async (): Promise<GetDynamicGlobalPropertiesResponse> => {
-  return (await getChain()).api.database_api.get_dynamic_global_properties({});
+  // ★ RETRY + FAILOVER (2026-08-18). Every wallet, every profile and every HP
+  // conversion waits on this one call, and it had neither — a single stalled
+  // node turned into an 8s timeout and a hard failure for the whole page. Same
+  // wrapper `getAccounts` already uses; see hive-network-error.ts.
+  return withHiveRetry(
+    async () => (await getChain()).api.database_api.get_dynamic_global_properties({}),
+    'get_dynamic_global_properties'
+  );
 };
 
 export const getFollowers = async (params?: Partial<IGetFollowParams>): Promise<IFollow[]> => {

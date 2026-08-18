@@ -64,38 +64,91 @@ const lora = Lora({
 // Get basePath from build-time environment
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH || '';
 
-const SITE_DESC =
-  'Communities without borders. A social network owned and operated by its users, powered by Hive.';
+/**
+ * ★★★ THIS WAS HIVE'S COPY, ON LUMEN'S MOST-SEEN SURFACE (2026-08-18).
+ *
+ * Every Lumen link pasted into X, Discord, Slack or iMessage rendered a preview
+ * carrying hive.blog's artwork AND this sentence, which is Hive's boilerplate
+ * about Hive. The people most likely to see it are the ones who have never used
+ * Lumen — so the product's main introduction to strangers was an advert for a
+ * different product.
+ */
+/**
+ * The absolute origin this deployment serves from. Share-card URLs are resolved
+ * against it, so getting it wrong makes every preview point at another host.
+ */
+function siteDomain(): string {
+  const configured = process.env.REACT_APP_SITE_DOMAIN;
+  if (configured) return configured;
+  // Loud, once, on the server: a missing value here is invisible in the UI and
+  // only shows up as a broken preview on someone else's timeline.
+  if (typeof window === 'undefined') {
+    // eslint-disable-next-line no-console
+    console.warn(
+      'REACT_APP_SITE_DOMAIN is not set — share-card image URLs will be resolved against http://localhost:3000 and will not work when shared.'
+    );
+  }
+  return 'http://localhost:3000';
+}
+
+const SITE_DESC = 'A calmer place to read and write. Read what is worth your time. Write without chasing an audience.';
 
 const metadata = {
-  metadataBase: new URL(process.env.REACT_APP_SITE_DOMAIN || 'https://hive.blog'),
+  /**
+   * ★★★ THE FALLBACK HERE DECIDES WHERE EVERY SHARE CARD IS FETCHED FROM
+   * (2026-08-18). Next resolves every relative `og:image` against this, so with
+   * `REACT_APP_SITE_DOMAIN` unset the card URL came out as
+   * `https://hive.blog/lumen/og-plain.png` — a path that exists on OUR server and
+   * not on theirs. The preview would 404, and the one surface this work exists to
+   * fix would be blank instead of merely wrong.
+   *
+   * Falling back to hive.blog was harmless while the images were literal
+   * hive.blog URLs; the moment they became ours it became a live bug. The
+   * fallback is now this app's own origin, and an unset variable is warned about
+   * at boot rather than silently pointing somewhere else.
+   */
+  metadataBase: new URL(siteDomain()),
   title: {
     default: siteConfig.name,
     template: `%s - ${siteConfig.name}`
   },
   description: SITE_DESC,
+  /**
+   * ★ NOTHING EXISTED BELOW 100px BEFORE THIS (2026-08-18). `favicon.ico` was the
+   * only file: no SVG, no apple-touch-icon, no maskable tiles, no manifest. So a
+   * pinned tab, an iOS home screen and an Android install all fell back to a
+   * screenshot or a blank. SQ9 (an ink nib on paper) is the small-size form of
+   * the wordmark — deliberately NOT the quill, which already means "lite account"
+   * in a byline and must never be confused with the app's own mark.
+   */
   icons: {
-    icon: '/favicon.ico'
+    icon: [
+      { url: '/favicon.svg', type: 'image/svg+xml' },
+      { url: '/favicon.ico', sizes: '16x16 32x32 48x48' }
+    ],
+    apple: '/apple-touch-icon.png'
   },
+  manifest: '/site.webmanifest',
   openGraph: {
     type: 'website',
     siteName: siteConfig.name,
     title: siteConfig.name,
     description: SITE_DESC,
-    // TODO(branding): these still point at hive.blog's own share images — no
-    // Lumen-branded og/twitter share image exists anywhere in public/images/
-    // yet. Left as a real, working image rather than a 404 on a guessed path;
-    // swap once a real asset exists.
-    images: ['https://hive.blog/images/hive-blog-share.png']
+    // The TODO that sat here is done: this is Lumen's own card now (LP8, warm
+    // paper, wordmark, masthead rule), not hive.blog's.
+    images: ['/lumen/og-plain.png']
   },
   twitter: {
-    card: 'summary',
+    // ★ `summary_large_image`, not `summary`: the card is a 1200x630 landscape
+    // design, and `summary` crops it to a small square thumbnail beside the text,
+    // throwing away the whole layout.
+    card: 'summary_large_image',
     // No real Lumen social handle exists anywhere in this codebase
     // (siteConfig.links.twitter is itself a dead '/' placeholder) — omitting
     // `site` rather than keeping the unrelated official @hiveblocks handle.
     title: siteConfig.name,
     description: SITE_DESC,
-    images: ['https://hive.blog/images/hive-blog-twshare.png']
+    images: ['/lumen/og-plain.png']
   },
   other: {
     // Real placeholder removed: no Facebook App ID is configured anywhere in

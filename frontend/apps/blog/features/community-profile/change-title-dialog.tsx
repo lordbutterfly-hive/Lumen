@@ -1,5 +1,5 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Separator } from '@ui/components';
-import { PenTool } from 'lucide-react';
+import { Icons } from '@ui/components/icons';
 import { useState } from 'react';
 import { useUserTitleMutation } from './hooks/use-user-title';
 import { CircleSpinner } from 'react-spinners-kit';
@@ -32,7 +32,7 @@ const ChangeTitleDialog = ({
           </div>
         ) : (
           <span title={t('communities.edit_title')}>
-            <PenTool className="h-3 w-3 -rotate-90" />
+            <Icons.pencil className="h-3 w-3 -rotate-90" />
           </span>
         )}
       </DialogTrigger>

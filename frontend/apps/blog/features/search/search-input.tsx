@@ -1,7 +1,7 @@
 'use client';
 
 import { KeyboardEvent, useCallback } from 'react';
-import { Search } from 'lucide-react';
+import { Icons } from '@ui/components/icons';
 import { cn } from '@ui/lib/utils';
 import { useSearch } from '@ui/hooks/use-search';
 import { useTranslation } from '@/blog/i18n/client';
@@ -76,7 +76,7 @@ export function SearchInput({ className }: { className?: string }) {
           className="mr-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-ink-10 transition-colors hover:bg-surface-21 hover:text-ink-2"
           aria-label={placeholder}
         >
-          <Search className="h-4 w-4" />
+          <Icons.search className="h-4 w-4" />
         </button>
       </div>
     </div>
