@@ -35,6 +35,7 @@ import { fetchLiteEngagement } from '@/blog/lib/lite/client/lite-engagement';
 import { ReblogDialog } from '@/blog/features/list-of-posts/reblog-dialog';
 import { useReblogMutation } from '@/blog/features/list-of-posts/hooks/use-reblog-mutation';
 import PostCardCommentTooltip from '@/blog/features/list-of-posts/post-card-comment-tooltip';
+import { QuillMark } from '@/blog/features/post-rendering/quill-mark';
 import DetailsCardHover from '@/blog/features/list-of-posts/details-card-hover';
 import { LeagueByline } from '@/blog/features/retention/components/league-byline';
 import type { RankMark } from '@/blog/features/retention/hooks/use-rank-marks';
@@ -488,6 +489,39 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
         >
           {displayAuthor}
         </Link>
+        {/*
+          ★★★ THE QUILL BELONGS IN THE BYLINE (2026-08-18, owner-reported: "no
+          feather quill on my profile feed").
+
+          The mark was built to the spec sheet and then wired into exactly ONE
+          place — `user-popover-card.tsx`, which only appears once you hover or
+          focus a handle. The spec says "18px in bylines", and a feed card IS the
+          byline a reader actually sees, so on every card — the home feed, the
+          profile Posts tab, anywhere `MediumPostCard` renders — a lite account
+          looked identical to a Hive one unless you went hunting with a mouse.
+
+          `liteOverlay` is the same signal the popover's `liteName` uses, and it
+          is already resolved above for the display name, so this needs no new
+          data. Rules kept verbatim from the spec: 18px, `currentColor` so it
+          tracks the handle, no motion, glyph aria-hidden with the accessible
+          name on the wrapper.
+        */}
+        {liteOverlay ? (
+          <TooltipProvider delayDuration={140} disableHoverableContent>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span
+                  tabIndex={0}
+                  data-testid="lite-account-mark"
+                  className="inline-flex items-center text-muted-foreground"
+                >
+                  <QuillMark size={18} />
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>{t('lite_account.mark_tooltip')}</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        ) : null}
         {/* ★ E2/E4 — the blacklist mark. Informational only (see the collapse note
             above for why blacklist does not hide the card the way Mute does).
             `reputation`/`none` render nothing: a merely low-reputation author is not
