@@ -4,7 +4,7 @@ import ShortFormComposer from '@/blog/features/discovery-feed/short-form-compose
 import FeedTabs from '@/blog/features/discovery-feed/feed-tabs';
 import { WeeklyRecapCard } from '@/blog/features/retention/components/weekly-recap-card';
 import { RetentionNudge } from '@/blog/features/retention/components/retention-nudge';
-import { StreakCard } from '@/blog/features/retention/components/streak-card';
+import { StreakCardNarrow } from '@/blog/features/retention/components/streak-card';
 import HomeIntro from '@/blog/components/home-intro';
 // ★ SERVER-SIDE t(), NOT `i18n/client` (a11y item 8/O5). This file has no
 // `'use client'` and is rendered directly by `app/page.tsx` (itself a Server
@@ -66,7 +66,7 @@ export default async function HomeShell({ showIntro = false }: { showIntro?: boo
             is absent entirely for a signed-in reader (decided server-side in
             app/page.tsx, so it is either in the first paint or not in the DOM). */}
         {showIntro ? <HomeIntro /> : null}
-        <StreakCard className="mb-4 xl:hidden" surface="inline" />
+        <StreakCardNarrow />
         <RetentionNudge className="mb-4" />
         <WeeklyRecapCard className="mb-6" />
         <ShortFormComposer />

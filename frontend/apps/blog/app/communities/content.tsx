@@ -85,9 +85,14 @@ const CommunitiesContent = () => {
   return (
     <>
       <div className="mt-4 flex items-center justify-between" data-testid="communities-header-title">
-        <span className="text-sm font-medium sm:text-xl" data-testid="communities-header">
+        {/* ★ AN h1, NOT A SPAN (A7, 2026-08-18). This is the page's title — it is what the
+            page is called, in the position a title goes, at title size — and it was
+            marked up as a generic inline span, so /communities shipped with ZERO h1 and a
+            heading outline that started at h3 (the community cards). Same classes, so
+            nothing moves; only the outline changes. */}
+        <h1 className="text-sm font-medium sm:text-xl" data-testid="communities-header">
           {t('communities.communities')}
-        </span>
+        </h1>
         {identity.isLoggedIn ? (
           <Link
             className="text-sm font-medium text-ink-brand-7"
@@ -107,6 +112,7 @@ const CommunitiesContent = () => {
             id="search"
             value={inputQuery}
             placeholder={t('communities.search')}
+            aria-label={t('communities.search_aria_label')}
             autoComplete="off"
             className="block rounded-full bg-surface-1 p-4 pl-10 text-sm"
             onChange={(e) => setInputQuery(e.target.value)}

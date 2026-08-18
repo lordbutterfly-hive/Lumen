@@ -115,7 +115,7 @@ export default function ComposerFooter({
           type="button"
           variant="default"
           size="sm"
-          className="rounded-[11px] bg-[#1a1a17] px-[22px] font-semibold text-white hover:bg-[#1a1a17]/90"
+          className="rounded-control bg-surface-brand-12 px-[22px] font-semibold text-white transition-colors hover:bg-surface-brand-16"
           disabled={!canSubmit || submitting || uploading || overLimit}
           onClick={onSubmit}
           data-testid="short-form-composer-post"

@@ -85,8 +85,8 @@ const Notice: FC<{
       className
         ? className
         : tone === 'blocked'
-        ? 'rounded-[14px] border border-line-warn-2 bg-surface-warn-4 px-4 py-3 text-[13px] leading-[20px] text-ink-warn-3'
-        : 'rounded-[14px] border border-line-16 bg-surface-23 px-4 py-3 text-[13px] leading-[20px] text-ink-8'
+        ? 'rounded-card border border-line-warn-2 bg-surface-warn-4 px-4 py-3 text-[13px] leading-[20px] text-ink-warn-3'
+        : 'rounded-card border border-line-16 bg-surface-23 px-4 py-3 text-[13px] leading-[20px] text-ink-8'
     }
   >
     {children}

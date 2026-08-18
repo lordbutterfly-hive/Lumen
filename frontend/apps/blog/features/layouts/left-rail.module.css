@@ -1,0 +1,113 @@
+/*
+ * ════ LEFT RAIL: THE BRAND-TINT SEAT AND ITS RULE ════
+ *
+ * Ported from the owner's `nav-2a` design (2026-08-18). Three things come from it: a
+ * brand-tinted seat on the current page, a 2px brand rule that grows in at the row's left
+ * edge, and a NEUTRAL hover.
+ *
+ * ★★★ IT INVERTS THE RAIL'S OLD SCHEME, AND THAT RESOLVES THE OBJECTION THE OLD CODE
+ * RAISED RATHER THAN IGNORING IT. left-rail.tsx used to argue: "ACTIVE stays neutral grey
+ * on purpose. Hover is a question ('this one?') and active is a statement ('you are
+ * here'); if both are warm, the row under your cursor and the page you are on look
+ * identical, and the rail stops telling you where you are."
+ *
+ * That reasoning is correct and it is exactly why the old pairing was weak: hover was the
+ * WARM one (`hover:bg-surface-brand-5 hover:text-ink-brand-6`) and active was grey, so the
+ * rail shouted about the row you were merely pointing at and whispered about the page you
+ * were on. The new pairing keeps the distinction and puts the emphasis the right way
+ * round: hover is a neutral paper wash, active carries the brand. The two are still
+ * unmistakably different; the statement is now louder than the question.
+ *
+ * ★★ THE ACTIVE LABEL IS NOT `--brand`, AND THAT IS A MEASUREMENT, NOT A PREFERENCE.
+ * The design specifies `color: rgb(var(--brand))` (#c0392b) on `--brand-tint` (#faeeeb).
+ * Measured, that is 4.35:1 - under the 4.5:1 AA floor, and this label does not qualify for
+ * the large-text exemption (16.5px at weight 600; the exemption needs 18.66px bold or 24px
+ * normal). `--ink-brand-4` (#96271b) is the same hue a step darker and measures 7.11:1 on
+ * the identical seat. The 2px RULE keeps the full `--brand`: it is a graphical object, so
+ * its floor is 3:1 and it clears that at 4.35:1.
+ *
+ * ★ SCOPED TO THIS COMPONENT ON PURPOSE. `--lm-nav-*` are declared here rather than in
+ * globals.css because they are two nav-specific tints, not additions to the product's
+ * palette - and globals.css is a file this rail has no business growing.
+ */
+
+.rail {
+  /* Light: the design's own values. */
+  --lm-nav-seat: 250 238 235; /* #faeeeb - the brand tint under the current page */
+  --lm-nav-hover: 242 239 234; /* #f2efea - neutral paper wash under the cursor */
+  --lm-nav-active-ink: var(--ink-brand-4); /* 7.11:1 on the seat; see above */
+  --lm-nav-hover-ink: 26 22 18;
+}
+
+/*
+ * Dark mode is class-based in this app (`darkMode: ['class']`), so it hangs off `.dark`
+ * rather than a media query. The seat is a desaturated crimson that still reads as the
+ * brand against the dark card, and the label returns to `--brand`, whose dark value
+ * (#e59289) measures 6.17:1 on it - so the darker ink the light theme needs would be
+ * wrong here, where the contrast runs the other way.
+ */
+:global(.dark) .rail {
+  --lm-nav-seat: 58 34 30;
+  --lm-nav-hover: 50 44 38; /* matches --background-tertiary dark */
+  --lm-nav-active-ink: var(--brand);
+  --lm-nav-hover-ink: 253 251 250;
+}
+
+.row {
+  position: relative;
+}
+
+.row:hover {
+  background-color: rgb(var(--lm-nav-hover));
+  color: rgb(var(--lm-nav-hover-ink));
+  /* The question answers faster than the statement settles. */
+  transition-duration: 140ms;
+}
+
+.row[data-active='true'] {
+  background-color: rgb(var(--lm-nav-seat));
+  color: rgb(var(--lm-nav-active-ink));
+  font-weight: 600;
+}
+
+/* Hover must not repaint the seat out from under the row you are already on. */
+.row[data-active='true']:hover {
+  background-color: rgb(var(--lm-nav-seat));
+  color: rgb(var(--lm-nav-active-ink));
+}
+
+.row[data-active='true']::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  translate: 0 -50%;
+  width: 2px;
+  height: 60%;
+  background: rgb(var(--brand));
+  border-radius: 999px;
+  animation: navRule 220ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+@keyframes navRule {
+  from {
+    height: 0;
+    opacity: 0;
+  }
+  to {
+    height: 60%;
+    opacity: 1;
+  }
+}
+
+/*
+ * ★ Motion is decoration; the rail must be identical without it. Same rule every other
+ * animation in this codebase follows.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .row,
+  .row[data-active='true']::before {
+    transition-duration: 0.01ms;
+    animation: none;
+  }
+}

@@ -656,7 +656,7 @@ function ForYouFeed() {
           promising posts and the next saying there are none. When there is
           nothing to show, the empty state is the only honest message on screen. */}
       {degradedMessage && shown.length > 0 ? (
-        <p className="mb-4 rounded-[9px] bg-[#fdf6e7] px-3 py-2 font-sans text-[13px] leading-[20px] text-[#9a7b2e]">
+        <p className="mb-4 rounded-control bg-[#fdf6e7] px-3 py-2 font-sans text-[13px] leading-[20px] text-[#9a7b2e]">
           {degradedMessage}
         </p>
       ) : null}
@@ -1006,7 +1006,7 @@ function TabButton({
         // slice of a list is showing. 14px is the scale's UI default step
         // (`text-14`/`text-sm`, 423 call sites) so the label now matches every
         // other button and tab in the product instead of being a size of one.
-        'whitespace-nowrap rounded-[9px] px-5 py-2.5 font-sans text-[14px] leading-[22px] font-semibold transition-colors',
+        'whitespace-nowrap rounded-control px-5 py-2.5 font-sans text-[14px] leading-[22px] font-semibold transition-colors',
         isActive
           ? 'bg-white text-[#161511] shadow-[0_1px_2px_rgba(20,18,10,0.08),0_1px_3px_rgba(20,18,10,0.05)]'
           : 'bg-transparent text-[#5c6472] hover:text-[#161511]'
@@ -1134,7 +1134,7 @@ export default function FeedTabs() {
            `w-fit` + `max-w-full` still hug the content at every larger width,
            where all three sit on one row exactly as before (820px: 674px of
            tabs in 820px of viewport — no wrap, no visual change). */
-        className="mb-5 inline-flex w-fit max-w-full flex-wrap gap-1.5 rounded-[14px] border border-[#ebedf0] bg-[#f4f5f7] p-[5px]"
+        className="mb-5 inline-flex w-fit max-w-full flex-wrap gap-1.5 rounded-card border border-[#ebedf0] bg-[#f4f5f7] p-[5px]"
       >
         <TabButton isActive={activeTab === 'for-you'} onClick={() => selectTab('for-you')}>
           {LABELS.forYou}
@@ -1184,7 +1184,7 @@ export default function FeedTabs() {
             <DialogLogin>
               <button
                 type="button"
-                className="rounded-[13px] bg-surface-brand-12 px-5 py-2.5 font-sans text-[14px] leading-[22px] font-semibold text-white hover:bg-[#a5301f]"
+                className="rounded-card bg-surface-brand-12 px-5 py-2.5 font-sans text-[14px] leading-[22px] font-semibold text-white hover:bg-[#a5301f]"
               >
                 {LABELS.loginCta}
               </button>
@@ -1203,7 +1203,7 @@ export default function FeedTabs() {
             <button
               type="button"
               onClick={identity.retrySession}
-              className="rounded-[13px] border border-[#e4e6e9] px-5 py-2.5 font-sans text-[14px] leading-[22px] font-semibold text-[#3f4650] hover:bg-[#f6f7f8]"
+              className="rounded-card border border-[#e4e6e9] px-5 py-2.5 font-sans text-[14px] leading-[22px] font-semibold text-[#3f4650] hover:bg-[#f6f7f8]"
             >
               {LABELS.sessionRetry}
             </button>

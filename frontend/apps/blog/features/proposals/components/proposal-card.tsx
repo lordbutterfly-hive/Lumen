@@ -102,7 +102,7 @@ export default function ProposalCard({ vm, isSupported, votesUnavailable, votesP
           <div className="mt-[11px] flex flex-wrap items-center gap-2.5 font-sans text-[13px] leading-[20px] text-ink-14">
             <span
               className={cn(
-                'rounded-[7px] px-2.5 py-[3px] text-[12px] leading-[18px] font-bold uppercase tracking-[0.03em]',
+                'rounded-control px-2.5 py-[3px] text-[12px] leading-[18px] font-bold uppercase tracking-[0.03em]',
                 statusClass
               )}
             >

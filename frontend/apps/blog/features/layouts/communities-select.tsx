@@ -78,7 +78,11 @@ export function CommunitiesSelect({ title }: { title: string }) {
         } else if (e.startsWith('/') || e.startsWith('@')) {
           router.push(withBasePath(e));
         } else {
-          router.push(withBasePath(`/trending/${e}`));
+          // ★ `/topics/`, not the retired `/trending/` (2026-08-18). This branch takes a
+          // bare community/tag name and builds a route for it; `/trending/:tag` is a 307
+          // to exactly this destination, so going straight there saves a redirect and
+          // stops this depending on a route that is slated for deletion.
+          router.push(withBasePath(`/topics/${e}`));
         }
       }}
     >
@@ -100,12 +104,12 @@ export function CommunitiesSelect({ title }: { title: string }) {
         }}
       >
         <SelectGroup>
-          <SelectItem value="/trending">{t('navigation.communities_nav.all_posts')}</SelectItem>
+          <SelectItem value="/">{t('navigation.communities_nav.all_posts')}</SelectItem>
         </SelectGroup>
         {identity.isLoggedIn && (
           <SelectGroup>
             <SelectItem value={`/@${identity.username}/feed`}>My friends</SelectItem>
-            <SelectItem value="/trending/my">My communities</SelectItem>
+            <SelectItem value="/?tab=feed">My communities</SelectItem>
             {mySubsData && mySubsData.length > 0 ? (
               <SelectItem disabled value="my-communities" className="text-ink-info-10">
                 My communities

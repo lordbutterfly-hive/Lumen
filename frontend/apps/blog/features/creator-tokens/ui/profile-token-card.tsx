@@ -58,7 +58,7 @@ const ProfileTokenCard: FC<{ username: string; isOwnProfile: boolean }> = ({ use
     const d = market.delivery;
     return (
       <div
-        className="mt-4 flex flex-wrap items-start justify-between gap-6 rounded-[18px] border border-line-warn-1 bg-surface-warn-2 px-6 py-[22px]"
+        className="mt-4 flex flex-wrap items-start justify-between gap-6 rounded-panel border border-line-warn-1 bg-surface-warn-2 px-6 py-[22px]"
         data-testid="profile-token-card"
       >
         <div className="min-w-0">
@@ -115,7 +115,7 @@ const ProfileTokenCard: FC<{ username: string; isOwnProfile: boolean }> = ({ use
   if (status === 'missing' && isOwnProfile) {
     return (
       <div
-        className="mt-4 flex flex-wrap items-center justify-between gap-4 rounded-[18px] border border-line-warn-1 bg-surface-warn-2 px-6 py-5"
+        className="mt-4 flex flex-wrap items-center justify-between gap-4 rounded-panel border border-line-warn-1 bg-surface-warn-2 px-6 py-5"
         data-testid="profile-token-card-launch"
       >
         <div className="flex items-center gap-2.5">

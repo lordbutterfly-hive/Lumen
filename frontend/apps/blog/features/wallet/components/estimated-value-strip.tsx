@@ -62,7 +62,7 @@ export default function EstimatedValueStrip({ figures }: { figures: WalletFigure
       // ~294px content box unwrapped — but it's the identical shape as the
       // three that didn't, so it gets the same `flex-wrap` rather than
       // waiting for a whale account to file the same bug again.
-      className="mb-[18px] flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-[18px] border border-line-9 bg-surface-5 px-6 py-[22px]"
+      className="mb-[18px] flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-panel border border-line-9 bg-surface-5 px-6 py-[22px]"
       data-testid="wallet-estimated-value"
     >
       <div>

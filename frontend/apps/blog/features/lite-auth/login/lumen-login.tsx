@@ -340,7 +340,7 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
               className={
                 embedded
                   ? 'overflow-hidden bg-surface-1'
-                  : 'overflow-hidden rounded-[22px] border border-line-9 bg-surface-1 shadow-[0_12px_40px_rgba(192,57,43,0.07),0_1px_2px_rgba(20,18,10,0.04)]'
+                  : 'overflow-hidden rounded-panel border border-line-9 bg-surface-1 shadow-[0_12px_40px_rgba(192,57,43,0.07),0_1px_2px_rgba(20,18,10,0.04)]'
               }
             >
               <div
@@ -383,7 +383,7 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                     <button
                       type="button"
                       disabled
-                      className="flex h-[64px] w-full items-center justify-center gap-[11px] rounded-[14px] border border-line-11 bg-surface-1 text-[16px] font-semibold text-ink-2 opacity-60"
+                      className="flex h-[64px] w-full items-center justify-center gap-[11px] rounded-card border border-line-11 bg-surface-1 text-[16px] font-semibold text-ink-2 opacity-60"
                     >
                       {COPY.google}
                     </button>
@@ -398,7 +398,7 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                       type="button"
                       disabled
                       aria-disabled="true"
-                      className="flex h-[64px] w-full cursor-not-allowed items-center justify-center gap-[11px] rounded-[14px] border border-line-11 bg-surface-1 text-[16px] font-semibold text-ink-2 opacity-60"
+                      className="flex h-[64px] w-full cursor-not-allowed items-center justify-center gap-[11px] rounded-card border border-line-11 bg-surface-1 text-[16px] font-semibold text-ink-2 opacity-60"
                     >
                       <svg width="20" height="20" viewBox="0 0 48 48" aria-hidden>
                         <path fill="#4285F4" d="M45.1 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h11.8c-.5 2.7-2 5-4.4 6.6v5.5h7.1c4.1-3.8 6.6-9.4 6.6-16.1z" />
@@ -437,7 +437,7 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                       only fits when the copy is short is a row waiting to break. */}
                   <button
                     onClick={() => setWalletOpen('btc')}
-                    className="flex w-full cursor-pointer items-center gap-3 rounded-[14px] border border-line-11 bg-surface-1 px-4 py-3 text-left hover:border-line-warn-5 hover:bg-surface-warn-1"
+                    className="flex w-full cursor-pointer items-center gap-3 rounded-card border border-line-11 bg-surface-1 px-4 py-3 text-left hover:border-line-warn-5 hover:bg-surface-warn-1"
                   >
                     {/* ★ THE REAL BITCOIN MARK (2026-08-09, owner-supplied).
                         History worth keeping: this was the character "₿", which
@@ -458,7 +458,7 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                       aria-hidden
                       width={34}
                       height={34}
-                      className="h-[34px] w-[34px] flex-shrink-0 rounded-[10px]"
+                      className="h-[34px] w-[34px] flex-shrink-0 rounded-control"
                     />
                     <span className="min-w-0 flex-1">
                       <span className="block text-[15px] leading-[24px] font-semibold text-ink-2">{COPY.btcTitle}</span>
@@ -469,7 +469,7 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                   {/* EVM wallet — Lumen Lite, no keys. Same proof shape as BTC. */}
                   <button
                     onClick={() => setWalletOpen('evm')}
-                    className="flex w-full cursor-pointer items-center gap-3 rounded-[14px] border border-line-11 bg-surface-1 px-4 py-3 text-left hover:border-line-info-3 hover:bg-surface-9"
+                    className="flex w-full cursor-pointer items-center gap-3 rounded-card border border-line-11 bg-surface-1 px-4 py-3 text-left hover:border-line-info-3 hover:bg-surface-9"
                   >
                     {/* ★ A GENERIC WALLET MARK, NOT THE METAMASK FOX (2026-08-10, A2).
                         The row opens WalletConnect and genuinely accepts Rainbow,
@@ -487,7 +487,7 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                         the row actually is: an Ethereum wallet, any of them. */}
                     <span
                       aria-hidden
-                      className="flex h-[34px] w-[34px] flex-shrink-0 items-center justify-center rounded-[10px] bg-surface-info-3"
+                      className="flex h-[34px] w-[34px] flex-shrink-0 items-center justify-center rounded-control bg-surface-info-3"
                     >
                       <svg width="20" height="20" viewBox="0 0 256 417" aria-hidden>
                         <path fill="#343434" d="M127.96 0l-2.8 9.5v275.7l2.8 2.8 127.96-75.6z" />
@@ -532,7 +532,7 @@ const LumenLogin: FC<{ embedded?: boolean }> = ({ embedded = false }) => {
             {/* Tier-2: full Hive account, secondary. */}
           </>
         ) : (
-          <div className="rounded-[18px] border border-line-9 bg-surface-1 p-6 shadow-[0_1px_2px_rgba(20,18,10,0.03)]">
+          <div className="rounded-panel border border-line-9 bg-surface-1 p-6 shadow-[0_1px_2px_rgba(20,18,10,0.03)]">
             <button
               onClick={() => {
                 setView('default');

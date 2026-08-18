@@ -30,7 +30,7 @@ import { useTranslation } from '@/blog/i18n/client';
  */
 const Panel: FC<{ title: string; children: ReactNode }> = ({ title, children }) => (
   <TokenShell>
-    <div className="mt-[26px] rounded-[18px] border border-line-9 bg-surface-1 p-8 shadow-[0_1px_2px_rgba(20,18,10,0.03)]">
+    <div className="mt-[26px] rounded-panel border border-line-9 bg-surface-1 p-8 shadow-[0_1px_2px_rgba(20,18,10,0.03)]">
       <h1 className="mb-2 font-serif text-[20px] leading-[30px] font-semibold text-ink-2">{title}</h1>
       <p className="max-w-[52ch] text-[14px] leading-[22px] text-ink-10">{children}</p>
     </div>
@@ -98,7 +98,7 @@ export const MarketReadFailed: FC<{ onRetry?: () => void; launchHref?: string }>
  */
 export const MarketMissing: FC<{ handle: string }> = ({ handle }) => (
   <TokenShell>
-    <div className="mt-[26px] rounded-[18px] border border-line-9 bg-surface-1 p-8 shadow-[0_1px_2px_rgba(20,18,10,0.03)]">
+    <div className="mt-[26px] rounded-panel border border-line-9 bg-surface-1 p-8 shadow-[0_1px_2px_rgba(20,18,10,0.03)]">
       <h1 className="mb-2 font-serif text-[20px] leading-[30px] font-semibold text-ink-2">
         @{handle} hasn’t launched a token
       </h1>
@@ -108,19 +108,19 @@ export const MarketMissing: FC<{ handle: string }> = ({ handle }) => (
       <div className="flex flex-wrap gap-3">
         <a
           href="/creators"
-          className="rounded-[13px] bg-surface-brand-12 px-5 py-2.5 text-[14px] leading-[22px] font-bold text-ink-27 hover:bg-surface-brand-17"
+          className="rounded-card bg-surface-brand-12 px-5 py-2.5 text-[14px] leading-[22px] font-bold text-ink-27 hover:bg-surface-brand-17"
         >
           Browse creators
         </a>
         <a
           href="/creators/launch"
-          className="rounded-[13px] border border-line-11 px-5 py-2.5 text-[14px] leading-[22px] font-bold text-ink-2 hover:bg-surface-16"
+          className="rounded-card border border-line-11 px-5 py-2.5 text-[14px] leading-[22px] font-bold text-ink-2 hover:bg-surface-16"
         >
           Launch your own token
         </a>
         <a
           href={`/@${handle}`}
-          className="rounded-[13px] border border-line-11 px-5 py-2.5 text-[14px] leading-[22px] font-bold text-ink-2 hover:bg-surface-16"
+          className="rounded-card border border-line-11 px-5 py-2.5 text-[14px] leading-[22px] font-bold text-ink-2 hover:bg-surface-16"
         >
           Back to @{handle}
         </a>
@@ -133,7 +133,7 @@ export const MarketLoading: FC = () => {
   const { t } = useTranslation('common_blog');
   return (
     <TokenShell>
-      <div className="mt-[26px] rounded-[20px] border border-line-9 bg-surface-1 p-[26px]">
+      <div className="mt-[26px] rounded-panel border border-line-9 bg-surface-1 p-[26px]">
         <LumenLoader size="md" label={t('global.loading_market')} />
       </div>
     </TokenShell>

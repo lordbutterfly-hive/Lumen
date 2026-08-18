@@ -1,3 +1,5 @@
+# Terms of Service
+
 Last Updated 13 August 2026
 
 This agreement (the “Agreement”) between you and Lumen

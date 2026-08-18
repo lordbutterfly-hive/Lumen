@@ -56,7 +56,7 @@ function LadderRow({ tier, current }: { tier: LeagueTier; current: boolean }) {
     <li
       data-testid={`ranks-row-${tier}`}
       data-current={current || undefined}
-      className={`flex items-start gap-3.5 rounded-[14px] border p-3.5 transition-colors ${
+      className={`flex items-start gap-3.5 rounded-card border p-3.5 transition-colors ${
         current ? 'border-line-28 bg-surface-12' : 'border-line-9 bg-surface-1'
       }`}
     >
@@ -65,7 +65,11 @@ function LadderRow({ tier, current }: { tier: LeagueTier; current: boolean }) {
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
-          <h3 className="font-sans text-[18px] font-semibold leading-[28px] text-ink-2">{name}</h3>
+          {/* ★ h2, NOT h3 (A8, 2026-08-18). This sits directly under the page's h1, so h3 skipped
+          a level — a screen reader announcing "heading level 3" after "heading level 1"
+          tells the listener a whole section is missing. Level is structure; size is the
+          class list, and the class list is unchanged. */}
+          <h2 className="font-sans text-[18px] font-semibold leading-[28px] text-ink-2">{name}</h2>
           <span className="font-sans text-[13px] leading-[20px] font-medium tabular-nums text-ink-10">{scale}</span>
           {current ? (
             <span className="rounded-full bg-surface-43 px-2 py-0.5 font-sans text-[12px] font-semibold uppercase tracking-[0.05em] text-ink-27">
@@ -136,7 +140,7 @@ function YourPosition({ summary }: { summary: NonNullable<ReturnType<typeof useV
   const { core, glow } = TIERS[summary.rank.tier].color;
 
   return (
-    <section className="mt-6 rounded-[18px] border border-line-9 bg-surface-1 p-5" data-testid="ranks-your-position">
+    <section className="mt-6 rounded-panel border border-line-9 bg-surface-1 p-5" data-testid="ranks-your-position">
       <div className="flex items-center gap-4">
         <LeagueEmblem tier={summary.rank.tier} size="popover" />
         <div className="min-w-0 flex-1">

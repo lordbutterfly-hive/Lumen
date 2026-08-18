@@ -37,7 +37,7 @@ const CommunitiesListItem = ({
             className="text-destructive"
             data-testid="community-list-item-title"
           >
-            <CardTitle>{community.title}</CardTitle>
+            <CardTitle as="h2">{community.title}</CardTitle>
           </Link>
         </CardHeader>
         <CardContent className="px-6">

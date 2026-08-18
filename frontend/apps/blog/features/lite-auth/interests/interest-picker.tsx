@@ -233,7 +233,7 @@ const InterestPicker: FC<{ openSignal?: number }> = ({ openSignal = 0 }) => {
          * `p-4` gutter so the box never touches the window edge.
          */
         wrapperClassName="items-center p-4 sm:p-6"
-        className="relative flex max-h-[min(760px,90vh)] w-[min(680px,94vw)] flex-col overflow-hidden rounded-[16px] bg-surface-1 shadow-xl"
+        className="relative flex max-h-[min(760px,90vh)] w-[min(680px,94vw)] flex-col overflow-hidden rounded-card bg-surface-1 shadow-xl"
         // ★ CLICKING AWAY MUST DISMISS IT (2026-08-07).
         //
         // This was `onInteractOutside={(e) => e.preventDefault()}` — a modal that
@@ -370,7 +370,7 @@ const InterestPicker: FC<{ openSignal?: number }> = ({ openSignal = 0 }) => {
                   type="button"
                   disabled={picked.length < min}
                   onClick={() => save(picked)}
-                  className="rounded-[10px] bg-surface-brand-12 px-5 py-2.5 font-sans text-[14px] leading-[22px] font-semibold text-ink-27 hover:bg-surface-brand-15 disabled:opacity-40"
+                  className="rounded-control bg-surface-brand-12 px-5 py-2.5 font-sans text-[14px] leading-[22px] font-semibold text-ink-27 hover:bg-surface-brand-15 disabled:opacity-40"
                 >
                   {COPY.cta(picked.length, min)}
                 </Button>

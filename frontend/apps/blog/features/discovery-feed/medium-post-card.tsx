@@ -446,7 +446,7 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
   if (moderation.muteStatusUnknown && !moderationRevealed) {
     return (
       <article
-        className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-[18px] border border-dashed border-[#e0dcd4] bg-[#f9f7f5] p-[18px] font-sans text-[14px] leading-[22px] text-[#6b7280]"
+        className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-panel border border-dashed border-[#e0dcd4] bg-[#f9f7f5] p-[18px] font-sans text-[14px] leading-[22px] text-[#6b7280]"
         data-testid="medium-card-moderation-unknown"
       >
         <span>{t('cards.post_card.moderation_status_unknown', { author: displayAuthor })}</span>
@@ -493,7 +493,7 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
       // ★ EACH POST IS ITS OWN CARD (owner direction, 2026-08-08). This was a
       // full-bleed row with a single hairline UNDER it, so posts read as one
       // continuous column. Now each sits in its own bordered, rounded box — the
-      // same `rounded-[18px] border-[#ebebeb]` card the rest of Lumen already
+      // same `rounded-panel border-[#ebebeb]` card the rest of Lumen already
       // uses, so this borrows the existing language rather than inventing a
       // second one. Borders only: type, spacing and colour are untouched.
       /*
@@ -504,7 +504,7 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
         under prefers-reduced-motion. The flat 0.03-alpha shadow stays as the
         resting state and `--lift-2` takes over on hover.
       */
-      className="lm-card lm-enter mb-4 rounded-[18px] border border-[#ebebeb] bg-white p-[22px] shadow-[0_1px_2px_rgba(20,18,10,0.03)] transition-colors hover:bg-[#fdfcfb]"
+      className="lm-card lm-enter mb-4 rounded-panel border border-[#ebebeb] bg-white p-[22px] shadow-[0_1px_2px_rgba(20,18,10,0.03)] transition-colors hover:bg-[#fdfcfb]"
     >
       {/* Reblog provenance line — only present when the underlying query supplies
           it. `EntryFeed` in feed-tabs.tsx fetches the Following tab via
@@ -719,7 +719,7 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
                     // colour-only change is not accessible on its own.
                     className={cn(
                       'flex h-6 w-6 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-[#f4f5f7] hover:text-[#4b5563]',
-                      vote_downvoted ? 'text-[#5b6470] dark:text-[#a3adba]' : 'text-[#7a7268]'
+                      vote_downvoted ? 'text-[#5b6470] dark:text-[#a3adba]' : 'text-ink-action'
                     )}
                     data-testid="medium-card-overflow-trigger"
                   >
@@ -765,7 +765,7 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
               </DropdownMenuContent>
             </DropdownMenu>
             <PopoverContent
-              className="z-50 max-w-xs rounded-lg bg-background-secondary p-4 shadow-lg"
+              className="z-50 max-w-xs rounded-card border border-line-9 bg-popover p-4 shadow-[var(--lift-3)]"
               align="end"
               data-testid="medium-card-downvote-popover"
               // ★ RULE 3 (spec): FOCUS RETURNS TO THE "···" TRIGGER, EXPLICITLY.
@@ -921,7 +921,7 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
               {/* ★ `line-brand-10`/`ink-brand-6`, not `#c0392b` (2026-08-14
                   token-migration pass): border → `line-*`, text → `ink-*`, per
                   `tailwind.config.js`'s own role mapping. */}
-              <span className="rounded-[6px] border border-line-brand-10 px-1.5 py-0.5 text-[12px] font-semibold uppercase tracking-wide text-ink-brand-6">
+              <span className="rounded-control border border-line-brand-10 px-1.5 py-0.5 text-[12px] font-semibold uppercase tracking-wide text-ink-brand-6">
                 {LABELS.nsfwBadge}
               </span>
               {nsfwPreference === 'show' ? null : (
@@ -951,7 +951,7 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
             // like any other item. Colour (item 4): `#9aa1ab` measured 2.61:1
             // on this box's own `#f4f5f7` background; `#6f6963` is the
             // grey-ground replacement, 4.97:1 on `#f4f5f7`.
-            className="flex h-[132px] w-[190px] shrink-0 items-center justify-center rounded-[14px] border border-dashed border-[#e0dcd4] bg-[#f4f5f7] font-sans text-[12px] font-medium uppercase tracking-wide text-[#6f6963]"
+            className="flex h-[132px] w-[190px] shrink-0 items-center justify-center rounded-card border border-dashed border-[#e0dcd4] bg-[#f4f5f7] font-sans text-[12px] font-medium uppercase tracking-wide text-[#6f6963]"
             data-testid="medium-card-nsfw-thumbnail-hidden"
           >
             {LABELS.nsfwBadge}
@@ -970,7 +970,7 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
             tabIndex={-1}
           >
             <div
-              className="flex h-[132px] w-[190px] flex-col items-center justify-center gap-1.5 rounded-[14px] border border-dashed border-[#ded2c2] bg-[#f6efe6] font-sans text-[12px] font-medium text-[#8a7f72]"
+              className="flex h-[132px] w-[190px] flex-col items-center justify-center gap-1.5 rounded-card border border-dashed border-[#ded2c2] bg-[#f6efe6] font-sans text-[12px] font-medium text-[#8a7f72]"
               aria-hidden="true"
             >
               {/*
@@ -1025,7 +1025,7 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
               // whole image — worst case it pillarboxes against the same
               // `bg-[#f4f5f7]` the box already carries for the pre-load
               // state, never slices content the post author chose to show.
-              className="h-[132px] w-[190px] rounded-[14px] bg-[#f4f5f7] object-contain"
+              className="h-[132px] w-[190px] rounded-card bg-[#f4f5f7] object-contain"
               loading="lazy"
               decoding="async"
               // ★ THE IMAGE PIPELINE IS HEALTHY — measured, 2026-08-08, after a
@@ -1103,7 +1103,7 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
             20px, which is the handoff's stated floor, below which the concave
             flanks fuse. The control sizes itself; the card does not get a
             vote. */}
-        <div className="flex items-center gap-1 rounded-[10px] px-1 py-1.5">
+        <div className="flex items-center gap-1 rounded-control px-1 py-1.5">
           {/* ★ The tally lives INSIDE the vote control now (Blade redesign,
               2026-08-14). This sibling printed `total_votes` a second time, so every
               card read "759 759" — measured on the Blade build before removal. The
@@ -1115,7 +1115,7 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
         {/* ★ h-9 ON ALL THREE CHIPS IN THIS ROW (2026-08-15). Measured on the
             production build, one card, same footer row: the comment and reblog
             chips came out 34px and the payout 36px, all three with the same 6px
-            vertical padding and the same rounded-[10px]. The 2px came entirely
+            vertical padding and the same rounded-control. The 2px came entirely
             from type — the payout is deliberately `text-base` (owner, 2026-08-14:
             the money must not be the smallest number on the row), which is a
             24px line box against the chips' 22px.
@@ -1127,7 +1127,7 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
             moment a reader moves the mouse across it. The Blade vote control
             next to them is taller on purpose and is left alone. */}
         {/* Comments ghost button */}
-        <span className="flex h-9 items-center gap-1 rounded-[10px] px-2.5 py-1.5 font-medium text-[#6b7280] transition-colors hover:bg-[#f4f5f7] hover:text-[#2a2822]">
+        <span className="flex h-9 items-center gap-1 rounded-control px-2.5 py-1.5 font-medium text-ink-action transition-colors hover:bg-[#f4f5f7] hover:text-brand">
           {/* ★ 20px/1.75 -> 22px/2, TO MATCH THE BLADE (2026-08-14, owner:
               "the comment icon has thinner borders than the blade upvote").
               Measured on :3000, one card, same footer row:
@@ -1182,7 +1182,7 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
                     <button
                       disabled={reblogMutation.isLoading}
                       className={cn(
-                        'flex h-9 items-center gap-1.5 rounded-[10px] px-2.5 py-1.5 font-medium text-[#6b7280] transition-colors hover:bg-[#f4f5f7] hover:text-[#2a2822]',
+                        'flex h-9 items-center gap-1.5 rounded-control px-2.5 py-1.5 font-medium text-ink-action transition-colors hover:bg-[#f4f5f7] hover:text-brand',
                         { 'cursor-not-allowed opacity-50': reblogMutation.isLoading }
                       )}
                       data-testid="medium-card-reblog-count"
@@ -1208,7 +1208,7 @@ export default function MediumPostCard({ post, mark }: { post: Entry; mark?: Ran
               // ★ text-base, not text-sm (2026-08-14, owner-reported): the payout was 14px
               // against a 14.5px vote tally, so the money was the SMALLEST number on
               // the row. It is now 16px, one step above the 14px tally.
-              'ml-auto flex h-9 items-center rounded-[10px] px-[6px] py-[6px] text-base font-bold text-[#2f7d4f] transition-colors hover:cursor-pointer',
+              'ml-auto flex h-9 items-center rounded-control px-[6px] py-[6px] text-base font-bold text-[#2f7d4f] transition-colors hover:cursor-pointer',
               payoutDeclined && 'bg-transparent text-muted-foreground line-through'
             )}
             data-testid="medium-card-payout"

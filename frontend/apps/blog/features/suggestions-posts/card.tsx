@@ -75,11 +75,11 @@ const SuggestionsCard = ({ entry, variant = 'rail' }: SuggestionsCardProps) => {
               src={proxifyImageSrc(image, 128, 128)}
               alt=""
               loading="lazy"
-              className="h-10 w-10 rounded-[10px] object-cover ring-1 ring-inset ring-line-9"
+              className="h-10 w-10 rounded-control object-cover ring-1 ring-inset ring-line-9"
               onError={() => setImage(getDefaultImageUrl())}
             />
           ) : (
-            <span className="block h-10 w-10 rounded-[10px] bg-surface-23 ring-1 ring-inset ring-line-9" />
+            <span className="block h-10 w-10 rounded-control bg-surface-23 ring-1 ring-inset ring-line-9" />
           )}
         </Link>
         <div className="flex min-w-0 flex-1 flex-col">

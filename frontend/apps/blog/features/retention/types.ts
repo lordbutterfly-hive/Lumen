@@ -256,6 +256,11 @@ export interface RetentionStats {
    */
   wordsWritten?: AuthoredWordWindows;
   /**
+   * Percentile of this account's lifetime word count against everyone we hold a count for.
+   * Absent when the population is too small to place anybody honestly.
+   */
+  wordsPercentile?: number;
+  /**
    * Posts and replies in the window.
    *
    * ★ FOR THE RATIO ONLY. These are 26-week counts, and a windowed count of comments may not
@@ -321,6 +326,8 @@ export interface AuthoredWordWindows {
   week: number;
   /** The trailing 30 days. */
   month: number;
+  /** The 30 days before that, so the month can carry a direction. */
+  monthPrior: number;
   /** The trailing 365 days. */
   year: number;
   /** Everything the store holds. */

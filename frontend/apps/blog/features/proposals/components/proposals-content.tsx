@@ -110,7 +110,7 @@ export default function ProposalsContent({
             <button
               type="button"
               onClick={refetch}
-              className="rounded-[10px] border border-line-11 bg-surface-1 px-4 py-2 font-sans text-[13px] leading-[20px] font-semibold text-ink-7 transition-colors hover:bg-surface-16"
+              className="rounded-control border border-line-11 bg-surface-1 px-4 py-2 font-sans text-[13px] leading-[20px] font-semibold text-ink-7 transition-colors hover:bg-surface-16"
             >
               {t('proposals.error.retry')}
             </button>

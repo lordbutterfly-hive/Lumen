@@ -152,7 +152,7 @@ const PostListItem = memo(
           // rule (`rounded-none border-0 border-b`), so the same post looked
           // like two different products depending on which page you found it
           // on. Borders only — nothing else about these rows changes.
-          className="mb-4 rounded-[18px] border border-line-9 bg-surface-1 px-[22px] py-[22px] text-primary shadow-[0_1px_2px_rgba(20,18,10,0.03)] transition-colors hover:bg-surface-3"
+          className="mb-4 rounded-panel border border-line-9 bg-surface-1 px-[22px] py-[22px] text-primary shadow-[0_1px_2px_rgba(20,18,10,0.03)] transition-colors hover:bg-surface-3"
         >
           {post.original_entry ? (
             <div className="mt-2 rounded-sm bg-background-secondary px-2 py-1 text-sm" data-testid="cross-post-banner">

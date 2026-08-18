@@ -12,6 +12,7 @@ import {
 import { GetDynamicGlobalPropertiesResponse } from '@hiveio/wax';
 import { getChain } from './chain';
 import { withHiveRetry } from '@smart-signer/lib/hive-network-error';
+import { withRetry } from './retry';
 import { bannedAuthorList, hasBannedAuthors } from '@ui/config/lists/banned-authors';
 import { ApiAccount, IManabarData } from '@hiveio/wax';
 import { DATA_LIMIT } from './bridge-api';
@@ -45,18 +46,28 @@ export const getManabars = async (accountName: string): Promise<IManabars | null
   try {
     const chain = await getChain();
 
+    // ★ A6 retry rollout (2026-08-18): the whole 3-call batch, retried together as
+    // one idempotent read. The outer `try/catch` below silently swallows ANY
+    // failure into `null` — before this, that meant a single fast transient blip
+    // gave up on manabars immediately with no chance to recover. Single caller
+    // (`getManabar`, used only by `/api/manabar`), so this cannot double anyone
+    // else's retry.
     const [dgpo, {
       accounts: [account]
     }, {
       rc_accounts: [rcAccount]
-    }] = await Promise.all([
-      chain.api.database_api.get_dynamic_global_properties({}),
-      chain.api.database_api.find_accounts({
-        accounts: [accountName],
-        delayed_votes_active: false
-      }),
-      chain.api.rc_api.find_rc_accounts({ accounts: [ accountName ] })
-    ]);
+    }] = await withRetry(
+      () =>
+        Promise.all([
+          chain.api.database_api.get_dynamic_global_properties({}),
+          chain.api.database_api.find_accounts({
+            accounts: [accountName],
+            delayed_votes_active: false
+          }),
+          chain.api.rc_api.find_rc_accounts({ accounts: [accountName] })
+        ]),
+      { label: `getManabars(${accountName})` }
+    );
 
     if (!account || !rcAccount) {
       return null;
@@ -343,7 +354,13 @@ const bannedFollowEdges = async (username: string): Promise<{ followers: number;
 export const getProfileInfo = async (
   username: string
 ): Promise<{ follow_stats: AccountFollowStats; reputation: number }> => {
-  const profile = await (await getChain()).api.bridge.get_profile({ account: username });
+  // ★ A6 retry rollout (2026-08-18): idempotent read. Callers (`getAccountFull`,
+  // `getFollowCount`) both already swallow a failure here into a fallback value
+  // with no retry of their own, so a fast transient blip previously had zero
+  // chance to recover before falling back.
+  const profile = await withRetry(async () => (await getChain()).api.bridge.get_profile({ account: username }), {
+    label: `get_profile(${username})`
+  });
   if (!profile || !profile.stats) {
     return {
       follow_stats: {
@@ -391,16 +408,42 @@ export const getFollowCount = async (username: string): Promise<AccountFollowSta
  * @returns
  */
 export const getRebloggedBy = async (author: string, permlink: string): Promise<string[]> => {
-  const rebloggers = await (await getChain()).api.condenser_api.get_reblogged_by([ author, permlink ]);
+  // ★ A6 retry rollout (2026-08-18): idempotent read, single caller (`/api/reblogged-by`).
+  const rebloggers = await withRetry(
+    async () => (await getChain()).api.condenser_api.get_reblogged_by([author, permlink]),
+    { label: `get_reblogged_by(${author}/${permlink})` }
+  );
   // A banned account is not credited with amplifying anybody's post, and does not
   // appear in the "reblogged by" attribution list.
   return withoutBannedAuthors(rebloggers, (name) => name);
 };
 
 export const getFeedHistory = async (): Promise<IFeedHistory> => {
-  return (await getChain()).api.database_api.get_feed_history();
+  // ★ A6 retry rollout (2026-08-18): idempotent read, single caller (`/api/feed-history`).
+  return withRetry(async () => (await getChain()).api.database_api.get_feed_history(), {
+    label: 'get_feed_history'
+  });
 };
 
+/**
+ * ★ DELIBERATELY NOT WRAPPED IN `withRetry` (A6 retry rollout, 2026-08-18).
+ *
+ * This is an idempotent read, but `getActiveVotes` below calls it in a
+ * sequential pagination loop, and THAT is called from `streak/[user]/route.ts`
+ * inside a `Promise.allSettled` fan-out where every call is individually raced
+ * against `withTimeout(..., Math.min(CALL_TIMEOUT_MS, budgetLeft), ...)` — a
+ * hand-rolled, shrinking wall-clock budget that route was specifically
+ * hardened to enforce (see its own history: a slow node was previously
+ * misread as "this account has no engagement"). `withTimeout` cannot cancel
+ * the underlying call, so a retry loop added here would only prolong orphaned
+ * background work in exactly the "node is slow, not down" case that route
+ * already treats carefully, without the route ever seeing the benefit.
+ *
+ * `/api/comment-vote` and `/api/comment-vote/bulk` — the two callers that call
+ * this directly, with no competing budget — get `withRetry` wired at their own
+ * route level instead. `/api/active-votes` wraps its whole `getActiveVotes`
+ * call the same way, without touching this shared primitive.
+ */
 // See https://developers.hive.io/apidefinitions/#database_api.list_votes
 export const getListVotesByCommentVoter = async (
   start: [string, string, string] | null, // should be [author, permlink, voter]
@@ -410,10 +453,19 @@ export const getListVotesByCommentVoter = async (
 };
 
 export const getFindAccounts = async (username: string): Promise<{ accounts: ApiAccount[] }> => {
-  return (await getChain()).api.database_api.find_accounts({
-    accounts: [username],
-    delayed_votes_active: false
-  });
+  // ★ A6 retry rollout (2026-08-18): idempotent read, single caller
+  // (`/api/wallet/summary`, where it already runs inside a `Promise.all`
+  // alongside `getAccount`/`getDynamicGlobalProperties` — both already covered by
+  // `withHiveRetry`'s much larger 12s budget, so this smaller retry cannot widen
+  // that parallel group's own worst case).
+  return withRetry(
+    async () =>
+      (await getChain()).api.database_api.find_accounts({
+        accounts: [username],
+        delayed_votes_active: false
+      }),
+    { label: `find_accounts(${username})` }
+  );
 };
 
 export interface IGetFollowParams {
@@ -437,12 +489,12 @@ export const getFollowing = async (params?: Partial<IGetFollowParams>): Promise<
     const type = params?.type || DEFAULT_PARAMS_FOR_FOLLOW.type;
     const limit = params?.limit || DEFAULT_PARAMS_FOR_FOLLOW.limit;
 
-    const following = await (await getChain()).api.condenser_api.get_following([
-      account,
-      start,
-      type,
-      limit
-    ]);
+    // ★ A6 retry rollout (2026-08-18): idempotent read, single caller (`/api/following`,
+    // already behind its own `cachedRead` memo).
+    const following = await withRetry(
+      async () => (await getChain()).api.condenser_api.get_following([account, start, type, limit]),
+      { label: `get_following(${account})` }
+    );
     // A banned account is nobody's "following" entry, and the account itself has
     // no following list to browse.
     if (isBannedAuthor(account)) return [];
@@ -486,12 +538,11 @@ export const getFollowers = async (params?: Partial<IGetFollowParams>): Promise<
     const type = params?.type || DEFAULT_PARAMS_FOR_FOLLOW.type;
     const limit = params?.limit || DEFAULT_PARAMS_FOR_FOLLOW.limit;
 
-    const followers = await (await getChain()).api.condenser_api.get_followers([
-      account,
-      start,
-      type,
-      limit
-    ]);
+    // ★ A6 retry rollout (2026-08-18): idempotent read, single caller (`/api/followers`).
+    const followers = await withRetry(
+      async () => (await getChain()).api.condenser_api.get_followers([account, start, type, limit]),
+      { label: `get_followers(${account})` }
+    );
     if (isBannedAuthor(account)) return [];
     // He can still follow you on chain — nothing Lumen does can stop that. What
     // Lumen can do is never show him in your followers list.
@@ -538,6 +589,28 @@ export function normalizeSearchPattern(pattern: string): string {
     .trim();
 }
 
+/**
+ * ★ DELIBERATELY NOT WRAPPED IN `withRetry` (A6 retry rollout, 2026-08-18).
+ *
+ * `/api/search`'s own catch block (2026-08-18, same day) already distinguishes
+ * a Postgres `57014` statement-timeout ("canceling statement due to statement
+ * timeout") from every other failure, specifically BECAUSE that one is
+ * deterministic — sorting by Newest on a broad term aborts the same way on
+ * every node that runs the search plugin, every time (measured 3/3) — and
+ * retrying it cannot succeed, it only adds ~2x the latency (measured 12.4s
+ * end-to-end for one attempt plus one retry) before the same failure.
+ *
+ * `retry.ts`'s own `isTransient` would misclassify exactly this case: its
+ * `TRANSPORT_FAULT` regex matches the bare substring `timeout`, which is
+ * present in both "statement timeout" (deterministic, Postgres) and a real
+ * network timeout (transient) — it cannot tell them apart from the message
+ * text alone. Wrapping this call would silently reintroduce the 12.4s
+ * regression `/api/search` was just fixed to avoid. Flagging this as a
+ * candidate to narrow `isTransient` itself (e.g. requiring `ETIMEDOUT`/
+ * "request timed out" rather than bare "timeout", or explicitly excluding
+ * "statement timeout"/"57014"/"canceling statement") rather than routing
+ * around it here.
+ */
 export const getByText = async ({
   pattern,
   sort = 'relevance',

@@ -101,7 +101,7 @@ function LeagueCardBody({
 
   return (
     <section
-      className={`rounded-[18px] border border-line-9 bg-surface-1 p-6 ${className ?? ''}`}
+      className={`rounded-panel border border-line-9 bg-surface-1 p-6 ${className ?? ''}`}
       data-testid="profile-league-card"
       data-voice={voice}
       data-standing={copy.kind}

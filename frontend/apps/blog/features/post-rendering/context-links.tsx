@@ -54,7 +54,7 @@ const ContentLinks = ({ data, noContext }: { data: Entry; noContext: boolean }) 
     // pairing this same feature directory already uses for an equivalent
     // "informational aside" card (see `comment-list-item.tsx`'s
     // `comment-moderation-unknown` block).
-    <div className="flex flex-col gap-2 rounded-[14px] border border-line-18 bg-surface-14 p-2">
+    <div className="flex flex-col gap-2 rounded-card border border-line-18 bg-surface-14 p-2">
       <h4 className="text-sm text-ink-10">
         {t('post_content.if_comment.you_are_viewing_a_single_comments_thread_from')}:
       </h4>

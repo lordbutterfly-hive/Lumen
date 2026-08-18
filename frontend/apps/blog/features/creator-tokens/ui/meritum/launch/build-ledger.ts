@@ -1,6 +1,7 @@
 import { usdPrice } from '../../../market/format';
 import { parseMoney } from '../../launch-money';
 import type { MeritumLedgerRow } from './meritum-rail-ledger';
+import { sanitizeOfferName } from './use-meritum-launch';
 import type { MeritumLaunchStep, MeritumOffer } from './use-meritum-launch';
 
 /**
@@ -32,6 +33,19 @@ import type { MeritumLaunchStep, MeritumOffer } from './use-meritum-launch';
  * on step 2 (`LaunchStepOffers`'s own input); this rail's job is only "which
  * of the three slots has a price", and "Offer N" says that consistently in
  * every step that shows it, which is what step 1 already did.
+ *
+ * ★ THE NAME COMES BACK AS `detail`, BESIDE THE PRICE, NOT AS THE LABEL (C9-3).
+ * This is the last screen before the strike registers a one-per-account,
+ * un-renameable market on chain, and until now this rail showed only the
+ * number ($1.00) with no way to check it was attached to the right promise —
+ * a reader with three offers priced could not tell which price was which
+ * without leaving this panel. Filling `detail` here with the SAME
+ * `sanitizeOfferName` (`use-meritum-launch.ts`'s `pricedOffers` memo runs it
+ * on every name before the on-chain write) means what this rail previews is
+ * exactly what gets engraved, BIDI/zero-width tricks and all stripped the
+ * same way — never a raw, uncommitted string. It only appears once the row
+ * itself is real (a price attached); `label` is untouched, so the M7 fix
+ * above still holds.
  *
  * Pure, and translated by its caller: the labels arrive already resolved so
  * this module can be reasoned about (and unit-tested) without i18n.
@@ -82,13 +96,15 @@ export function buildMeritumLedger(input: MeritumLedgerInput): MeritumLedgerRow[
   if (struck) return [boundTo, ...terms];
 
   // `label` is always `labels.offer(i + 1)` -- see the M7 note above. The
-  // offer's own wording is not read here at all any more.
+  // offer's own wording comes back only as `detail`, beside the price.
   const offerRows: MeritumLedgerRow[] = offers.map((offer, i) => {
     const usd = parseMoney(offer.price);
+    const priced = usd > 0;
     return {
       id: `offer-${i}`,
       label: labels.offer(i + 1),
-      value: usd > 0 ? usdPrice(usd) : null
+      value: priced ? usdPrice(usd) : null,
+      detail: priced ? sanitizeOfferName(offer.name) || null : null
     };
   });
 

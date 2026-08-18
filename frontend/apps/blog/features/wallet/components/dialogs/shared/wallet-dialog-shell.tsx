@@ -128,7 +128,7 @@ export default function WalletDialogShell({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>{trigger}</DialogTrigger>
-      <DialogContent className="rounded-[18px] font-sans sm:max-w-[440px]">
+      <DialogContent className="rounded-panel font-sans sm:max-w-[440px]">
         <DialogHeader>
           <DialogTitle className="text-left text-xl text-ink-2">{title}</DialogTitle>
           {description ? (
@@ -150,7 +150,7 @@ export default function WalletDialogShell({
             <Button
               type="submit"
               disabled={busy || submitDisabled}
-              className={cn('rounded-[10px] bg-surface-ok-7 text-ink-27 hover:bg-surface-ok-9')}
+              className={cn('rounded-control bg-surface-ok-7 text-ink-27 hover:bg-surface-ok-9')}
             >
               {busy ? <CircleSpinner loading size={16} color="#fff" /> : submitLabel}
             </Button>

@@ -1,4 +1,5 @@
 import { NaiAsset } from '@hiveio/wax';
+import { haptic } from '@/blog/lib/haptics';
 import { useUserClient } from '@smart-signer/lib/auth/use-user-client';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { transactionService } from '@transaction/index';
@@ -229,6 +230,8 @@ export function usePostMutation() {
     },
 
     onSuccess: (data) => {
+      // Two taps around a pause: the "it left the device" shape.
+      haptic('publish');
       const { permlink } = data;
       const { username } = user;
       toast({
@@ -345,6 +348,8 @@ export function useDeletePostMutation() {
       return response;
     },
     onSuccess: (data) => {
+      // Two taps around a pause: the "it left the device" shape.
+      haptic('publish');
       const { permlink } = data;
       const { username } = user;
       toast({

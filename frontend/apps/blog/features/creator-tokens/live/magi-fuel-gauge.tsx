@@ -192,7 +192,7 @@ export function MagiFundingHelp({
 
   return (
     <div
-      className={`rounded-[12px] border border-line-warn-2 bg-surface-warn-4 px-4 py-3 text-[13px] leading-[20px] text-ink-warn-1 ${className}`}
+      className={`rounded-control border border-line-warn-2 bg-surface-warn-4 px-4 py-3 text-[13px] leading-[20px] text-ink-warn-1 ${className}`}
       data-testid="magi-funding-help"
     >
       <div className="mb-1 font-semibold">Adding HBD to Magi</div>
@@ -209,7 +209,7 @@ export function MagiFundingHelp({
               href={transferUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="lm-press mt-2.5 inline-block rounded-[9px] bg-surface-warn-14 px-3.5 py-2 font-semibold text-ink-27 hover:bg-surface-warn-15"
+              className="lm-press mt-2.5 inline-block rounded-control bg-surface-warn-14 px-3.5 py-2 font-semibold text-ink-27 hover:bg-surface-warn-15"
               data-testid="magi-deposit-hive"
             >
               Send HBD to Magi
@@ -229,7 +229,7 @@ export function MagiFundingHelp({
               href={ALTERA_URL}
               target="_blank"
               rel="noopener noreferrer"
-              className="lm-press mt-2.5 inline-block rounded-[9px] bg-surface-warn-14 px-3.5 py-2 font-semibold text-ink-27 hover:bg-surface-warn-15"
+              className="lm-press mt-2.5 inline-block rounded-control bg-surface-warn-14 px-3.5 py-2 font-semibold text-ink-27 hover:bg-surface-warn-15"
               data-testid="magi-deposit-altera"
             >
               Open the Altera market

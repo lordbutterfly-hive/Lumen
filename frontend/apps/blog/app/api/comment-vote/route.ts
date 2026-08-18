@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
 import { getListVotesByCommentVoter } from '@transaction/lib/hive-api';
+import { withRetry } from '@transaction/lib/retry';
 import { isPermlinkValid } from '@/blog/utils/validate-links';
 
 const logger = getLogger('app');
@@ -35,7 +36,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'author_permlink_voter_required' }, { status: 400 });
   }
   try {
-    const result = await getListVotesByCommentVoter([author, permlink, voter], 1);
+    // ★ A6 retry rollout (2026-08-18): wired here, not inside `getListVotesByCommentVoter`
+    // itself — see that function's own comment (its `getActiveVotes`/`streak/[user]`
+    // path has a competing wall-clock budget this direct call has no part of).
+    const result = await withRetry(() => getListVotesByCommentVoter([author, permlink, voter], 1), {
+      label: `list_votes(${author}/${permlink})`
+    });
     return NextResponse.json(result, { headers: { 'cache-control': 'private, no-store' } });
   } catch (error) {
     logger.error(error, 'comment vote lookup failed for %s/%s (voter %s)', author, permlink, voter);

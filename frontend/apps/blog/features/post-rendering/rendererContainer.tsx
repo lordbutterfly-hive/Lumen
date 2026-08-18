@@ -34,8 +34,24 @@ import { isUrlWhitelisted } from '@hive/ui/config/lists/phishing';
  * level it's about to consume can no longer collide with a tag a previous
  * step just produced (previous steps always produce a HIGHER number than any
  * level still to be consumed).
+ *
+ * ★ ONLY WHEN THE BODY ACTUALLY OPENS WITH ITS OWN H1 (2026-08-18,
+ * accessibility sweep). The unconditional +1 above assumed every post's
+ * markdown starts at h1 — true when it does, but a post whose own top
+ * heading is already h2 (a very common pattern: many authors' first `##`)
+ * got demoted anyway, landing at h3 directly under the page's real h1 and
+ * skipping h2 entirely. Measured live on
+ * `/hive-139531/@ecency/ecency-scaling-hive-access-infrastructure`:
+ * sequence read h1 -> h3, a real heading-level-skip defect for screen reader
+ * users. Demotion only needs to run at all to avoid the two-h1 collision
+ * this function exists for; a body with no h1 of its own has nothing to
+ * collide with, so it is left exactly as the author wrote it — which, for
+ * the common "starts at h2" case, now nests with zero gap under the page's
+ * h1 instead of skipping one.
  */
 function demoteHeadings(html: string): string {
+  const hasOwnH1 = /<h1[\s>]/.test(html);
+  if (!hasOwnH1) return html;
   let out = html;
   for (let level = 5; level >= 1; level--) {
     const from = `h${level}`;

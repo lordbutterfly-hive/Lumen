@@ -28,7 +28,7 @@ export default function ProposalsMainHeader() {
     <button
       type="button"
       disabled={isLiteBlocked}
-      className="flex shrink-0 items-center gap-1.5 rounded-[11px] bg-surface-brand-12 px-[18px] py-[11px] font-sans text-sm font-semibold text-ink-27 transition-colors hover:bg-surface-brand-16 disabled:cursor-not-allowed disabled:opacity-50"
+      className="flex shrink-0 items-center gap-1.5 rounded-control bg-surface-brand-12 px-[18px] py-[11px] font-sans text-sm font-semibold text-ink-27 transition-colors hover:bg-surface-brand-16 disabled:cursor-not-allowed disabled:opacity-50"
       data-testid="new-proposal-open"
     >
       <Icons.add className="h-[15px] w-[15px]" />

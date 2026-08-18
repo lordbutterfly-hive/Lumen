@@ -65,7 +65,7 @@ export default function PriceChart({
         {GRIDLINES.map((g) => (
           <g key={g}>
             <line x1={0} y1={toY(g)} x2={W} y2={toY(g)} stroke="#f2f2f2" strokeWidth={1} />
-            <text x={W + 8} y={toY(g) + 4} fontSize={12} fill="#9ca3af">
+            <text x={W + 8} y={toY(g) + 4} fontSize={12} fill="rgb(var(--ink-14))">
               {g}¢
             </text>
           </g>
@@ -92,7 +92,7 @@ export default function PriceChart({
             x={toX(i, xLabels.length)}
             y={H + 20}
             fontSize={12}
-            fill="#9ca3af"
+            fill="rgb(var(--ink-14))"
             textAnchor={i === 0 ? 'start' : i === xLabels.length - 1 ? 'end' : 'middle'}
           >
             {d}

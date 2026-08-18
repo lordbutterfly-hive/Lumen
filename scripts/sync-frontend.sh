@@ -49,6 +49,7 @@ rsync -rlic $MODE --delete \
   --exclude='*.tmp.ts' \
   --exclude='test-results/' \
   --exclude='.tls/' \
+  --exclude='qa/harness/reports/' \
   --exclude='.env' \
   --exclude='.env.blog' \
   --exclude='.env.local' \

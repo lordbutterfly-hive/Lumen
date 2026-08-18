@@ -55,11 +55,18 @@ const PostCardCommentTooltip = ({
           <TooltipTrigger className="flex items-center">
             <>
               <Link href={url} className="flex cursor-pointer items-center" aria-label={accessibleLabel}>
-                {comments > 1 ? (
-                  <Icons.messagesSquare className={cn(iconClassName, 'sm:mr-1')} aria-hidden="true" />
-                ) : (
-                  <Icons.comment className={cn(iconClassName, 'sm:mr-1')} aria-hidden="true" />
-                )}
+                {/* ★ ONE GLYPH, WHATEVER THE COUNT (owner, 2026-08-18). This used to swap
+                    between `messagesSquare` (stacked bubbles) above 1 and `comment` (a
+                    single bubble) at 0 or 1, so the same control changed shape as a post
+                    gained its second reply - the icon appeared to mean two different
+                    things while doing one job, and two cards side by side in the same feed
+                    showed two different marks for the same action.
+
+                    Plurality is already carried by the NUMBER rendered right beside it,
+                    and by the tooltip and the accessible name, all three of which still
+                    say one/none/many correctly. The icon's job is to say "responses", and
+                    that does not change with the count. */}
+                <Icons.comment className={cn(iconClassName, 'sm:mr-1')} aria-hidden="true" />
               </Link>
               <Link
                 href={url}

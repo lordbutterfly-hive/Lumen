@@ -79,10 +79,10 @@ const CreatorCard: FC<{ c: CreatorSummary }> = ({ c }) => {
   return (
     <Link
       href={`/creators/${c.creator}`}
-      className="block rounded-[18px] border border-line-9 bg-surface-1 p-5 shadow-[0_1px_2px_rgba(20,18,10,0.03)] transition-colors hover:bg-surface-12"
+      className="block rounded-panel border border-line-9 bg-surface-1 p-5 shadow-[0_1px_2px_rgba(20,18,10,0.03)] transition-colors hover:bg-surface-12"
     >
       <div className="mb-3.5 flex items-center gap-3">
-        <span className="h-[46px] w-[46px] flex-shrink-0 rounded-[13px]" style={{ background: avatarFill(c.creator) }} />
+        <span className="h-[46px] w-[46px] flex-shrink-0 rounded-card" style={{ background: avatarFill(c.creator) }} />
         <div className="min-w-0 flex-1">
           <div className="text-[16px] font-bold text-ink-2">@{c.creator}</div>
           {/* No bio: not contract state, not indexed, and inventing one under
@@ -106,7 +106,7 @@ const CreatorCard: FC<{ c: CreatorSummary }> = ({ c }) => {
       ) : (
         // No record YET — this creator simply has not been hired. Deliberately
         // not dressed up as a positive, and it is why they sort last.
-        <div className="rounded-[11px] border border-dashed border-line-11 px-3.5 py-3 text-[13px] leading-[20px] text-ink-14">
+        <div className="rounded-control border border-dashed border-line-11 px-3.5 py-3 text-[13px] leading-[20px] text-ink-14">
           {COPY.recordUnavailable}
         </div>
       )}
@@ -165,17 +165,17 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
 
   const rightRail = (
     <div className="flex flex-col gap-5 pt-[26px]">
-      <div className="rounded-[18px] border border-line-9 bg-surface-1 p-5 shadow-[0_1px_2px_rgba(20,18,10,0.03)]">
+      <div className="rounded-panel border border-line-9 bg-surface-1 p-5 shadow-[0_1px_2px_rgba(20,18,10,0.03)]">
         <div className="mb-1.5 font-serif text-lg font-semibold text-ink-2">{COPY.launchTitle}</div>
         <p className="mb-4 font-serif text-[14px] leading-[22px] text-ink-10">{COPY.launchSub}</p>
         <Link
           href="/creators/studio"
-          className="block rounded-[11px] bg-surface-brand-12 py-3 text-center text-sm font-semibold text-ink-27 hover:bg-surface-brand-16"
+          className="block rounded-control bg-surface-brand-12 py-3 text-center text-sm font-semibold text-ink-27 hover:bg-surface-brand-16"
         >
           {COPY.launchCta}
         </Link>
       </div>
-      <div className="rounded-[18px] border border-line-9 bg-surface-1 p-5">
+      <div className="rounded-panel border border-line-9 bg-surface-1 p-5">
         <div className="mb-3.5 text-[15px] leading-[24px] font-bold text-ink-2">{COPY.howTitle}</div>
         <div className="flex flex-col gap-3.5">
           {[COPY.how1, COPY.how2, COPY.how3].map((line, i) => (
@@ -255,7 +255,7 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
                 className="block min-w-[240px] rounded-2xl border border-line-9 bg-surface-1 p-4 transition-colors hover:border-line-17"
               >
                 <div className="mb-3 flex items-center gap-3">
-                  <span className="h-10 w-10 rounded-[11px]" style={{ background: avatarFill(c.creator) }} />
+                  <span className="h-10 w-10 rounded-control" style={{ background: avatarFill(c.creator) }} />
                   <div>
                     <div className="text-[15px] leading-[24px] font-bold text-ink-2">@{c.creator}</div>
                   </div>
@@ -269,7 +269,7 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
       ) : null}
 
       {discovery.unavailable ? (
-        <div className="rounded-[14px] border border-dashed border-line-11 px-5 py-8 text-center text-[14px] leading-[22px] text-ink-14">
+        <div className="rounded-card border border-dashed border-line-11 px-5 py-8 text-center text-[14px] leading-[22px] text-ink-14">
           Meritum isn’t available on this build yet.
         </div>
       ) : discovery.isLoading ? (
@@ -278,7 +278,7 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
         // NOT "no creators" — this page must never render a failed lookup as an
         // empty market. It is the same unavailable-vs-empty rule the wallet and
         // delivery reads follow.
-        <div className="rounded-[14px] border border-dashed border-line-11 px-5 py-8 text-center text-[14px] leading-[22px] text-ink-14">
+        <div className="rounded-card border border-dashed border-line-11 px-5 py-8 text-center text-[14px] leading-[22px] text-ink-14">
           We can’t load the creator list right now. The index that ranks creators by their delivery record is
           unreachable. If you already know a creator, their token page still works: /creators/their-name.
         </div>
@@ -305,7 +305,7 @@ const CreatorsView: FC<CreatorsViewProps> = ({ intro }) => {
          * The escape hatch from the `failed` branch is repeated here because it
          * is exactly as useful — a direct handle still resolves.
          */
-        <div className="rounded-[14px] border border-dashed border-line-11 px-5 py-8 text-center text-[14px] leading-[22px] text-ink-14">
+        <div className="rounded-card border border-dashed border-line-11 px-5 py-8 text-center text-[14px] leading-[22px] text-ink-14">
           No creators to list yet. The index that ranks creators by their delivery record has nothing in it — that may
           mean nobody has launched, or simply that no one has been indexed. If you already know a creator, their token
           page still works: /creators/their-name.

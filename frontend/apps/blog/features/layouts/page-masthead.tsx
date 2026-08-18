@@ -15,7 +15,7 @@ import MastheadGlyph, { type MastheadMark } from './masthead-glyph';
  * re-typed per route is not a house style, it is a coincidence that decays.
  *
  * So the shell lives here once and takes slots. A new page header is a call to this
- * component, never a new `<header className="rounded-[20px] border...">`.
+ * component, never a new `<header className="rounded-panel border...">`.
  *
  * THE SHELL, and these numbers are the spec:
  *   width   inherited from the column, never hardcoded
@@ -78,7 +78,7 @@ const PageMasthead: FC<PageMastheadProps> = ({
   // `bg-[radial-gradient(...)]` is a background-IMAGE, so the colours live
   // inline and nothing else can theme them. The light values are byte-identical
   // to the hexes that were here.
-  <header className="relative mb-7 overflow-hidden rounded-[20px] border border-line-warn-3 border-l-[3px] border-l-line-brand-10 bg-[radial-gradient(125%_130%_at_0%_0%,rgb(var(--masthead-1))_0%,rgb(var(--masthead-2))_30%,rgb(var(--masthead-3))_58%,rgb(var(--masthead-4))_85%)] px-7 pb-5 pt-7">
+  <header className="relative mb-7 overflow-hidden rounded-panel border border-line-warn-3 border-l-[3px] border-l-line-brand-10 bg-[radial-gradient(125%_130%_at_0%_0%,rgb(var(--masthead-1))_0%,rgb(var(--masthead-2))_30%,rgb(var(--masthead-3))_58%,rgb(var(--masthead-4))_85%)] px-7 pb-5 pt-7">
     {mark ? <MastheadGlyph mark={mark} /> : null}
 
     {eyebrow ? (

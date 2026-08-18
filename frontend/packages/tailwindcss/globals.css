@@ -6,7 +6,21 @@
   :root {
     --background: 0 0% 100%;
     --foreground: 0, 0%, 20%;
-    --background-secondary: 0 0% 97%;
+    /**
+     * ★★ PAPER, NOT GREY (C4, 2026-08-18). This was `0 0% 97%` — rgb(247,247,247),
+     * a perfectly neutral grey, and the audit named it "the cheapest perceptual change
+     * available" across three consecutive passes.
+     *
+     * `36 45% 98%` resolves to rgb(252,250,248) - measured in the browser, not computed
+     * on paper; an earlier note here said 247 on the blue channel and was one off. Nobody will ever consciously see it. What they see is that every
+     * white card now sits ON something instead of floating in the same value as itself —
+     * a 5-point luminance gap where there were 8 points of dead neutral, and a warm
+     * ground under a crimson product instead of a cold one fighting it.
+     *
+     * Light mode only. The dark palette's page value is set separately below and is
+     * already warm (`27 19% 9%`).
+     */
+    --background-secondary: 36 45% 98%;
     --background-tertiary: 214, 32%, 91%;
 
     --muted: 210 40% 96.1%;
@@ -37,7 +51,26 @@
     --destructive-foreground: 210 40% 98%;
     --destructive-icon: 0, 70%, 51%; /* same as destructive in light mode */
 
-    --link: 0, 70%, 45%;
+    /**
+     * ★★★ ONE BRAND RED, AND IT IS THE ONE THAT SHIPS (C7, 2026-08-18).
+     *
+     * This was `--link: 0, 70%, 45%` — rgb(196,34,34), #c42222. Every other brand token
+     * in this file is #c0392b (`--ink-brand-6`, `--surface-brand-12`, `--line-brand-10`).
+     * So post-body links rendered in a SECOND crimson that appears nowhere else in the
+     * product, and the audit's note that "`--link` is now lying about what ships" was
+     * exactly right: it is consumed by the typography plugin's `a` colour, so it ships on
+     * every article body on the site.
+     *
+     * ★★ THE COLOUR SPACE IS THE TRAP, NOT THE VALUE. `--link` was an HSL triplet read
+     * through `hsl(var(--link))`; every brand token here is an RGB triplet read through
+     * `rgb(var(--token))`. Swapping the number without swapping the wrapper would have
+     * produced `hsl(192 57 43)` — a valid declaration, no console error, no lint failure,
+     * and a completely different colour on screen. Both consumers in tailwind.config.js
+     * were changed to `rgb()` in the same edit; if you ever move this token, move them too.
+     *
+     * Contrast is unchanged-or-better: #c0392b on white measures 4.94:1, still AA.
+     */
+    --brand: 192 57 43; /* #c0392b — the single brand red */
 
     /* ★ THE ONE FOCUS-RING OVERRIDE (2026-08-13, O5 a11y build map item 7).
        `outline-none` (Tailwind) does not remove a focus outline — it sets
@@ -156,12 +189,47 @@
      * already measures 5.95:1 and was never the problem.
      */
     --ink-14: 106 111 119; /* #6a6f77 — was #9ca3af (2.54:1 on white, failed AA) */
+
+    /**
+     * ★★★ ONE RESTING COLOUR FOR EVERY NEUTRAL ACTION ICON (owner, 2026-08-18).
+     *
+     * MEASURED on one feed card's action row - same 22px box, same 2px stroke, same
+     * outline treatment, three different colours:
+     *
+     *     upvote (blade)   rgb(138,130,122)   warm taupe    3.78:1
+     *     comment          rgb(107,114,128)   cool blue-grey
+     *     reblog           rgb(107,114,128)   cool blue-grey
+     *     ... menu         rgb(122,114,104)   a THIRD warm value
+     *
+     * 138,130,122 has red > blue; 107,114,128 has blue > red. They sit on OPPOSITE sides
+     * of neutral, which is why the blade reads faded or "off" beside its neighbours even
+     * though it is the lighter of the two. Worse, it made the upvote the lowest-contrast
+     * control in the row - backwards, since it is the primary act.
+     *
+     * Three near-identical greys doing one job is not a palette, it is drift. This is the
+     * one value all four now use.
+     *
+     * ★ WARM, BECAUSE THE PAGE IS. The ground is `36 45% 98%` and the brand is #c0392b;
+     * a cool blue-grey icon fights both. 5.78:1 on white, so it is also a contrast
+     * improvement on all three values it replaces.
+     *
+     * ★ AND IT LETS COLOUR MEAN SOMETHING AGAIN: this at rest, `--brand` on hover and
+     * when voted. Before, the upvote already looked like a different state when it was
+     * not in one.
+     */
+    --ink-action: 110 100 90; /* #6e645a - the resting colour of every neutral action icon */
     --ink-15: 184 188 196; /* #b8bcc4 x1 */
     --ink-16: 196 196 196; /* #c4c4c4 x1 */
     --ink-17: 193 199 206; /* #c1c7ce x1 */
-    --ink-18: 199 203 209; /* #c7cbd1 x1 */
-    --ink-19: 200 204 210; /* #c8ccd2 x1 */
-    --ink-20: 200 205 211; /* #c8cdd3 x1 */
+    /* ★ COLLAPSED 2026-08-18 (audit C6): ink-18 (199 203 209), ink-19
+       (200 204 210) and ink-20 (200 205 211) measured 1.0-1.03:1 contrast
+       against EACH OTHER and against ink-21 (203 208 214) - the audit's own
+       cited example of indistinguishable neighbours. Real usage measured by
+       grep: ink-18=1, ink-19=1, ink-20=1, ink-21=9 (8 class + 1 dark shim).
+       All three retired into ink-21, the highest-use survivor; every call
+       site rewritten. None of the four were ever used as primary reading
+       text (icon fill, disabled state, placeholder hint) so the ~0.05
+       contrast shift at these values is not a regression. */
     --ink-21: 203 208 214; /* #cbd0d6 x9 */
     --ink-22: 203 213 225; /* #cbd5e1 x12 */
     --ink-23: 209 213 219; /* #d1d5db x1 */
@@ -384,7 +452,7 @@
      *   2. The Meritum screens cannot drift from the product. `--meritum-paper`
      *      IS the warm card `features/creator-tokens/ui/profile-token-card.tsx`
      *      already renders (`bg-surface-warn-2 border-line-warn-1
-     *      rounded-[18px]`) — the same component family, now provably the same
+     *      rounded-panel`) — the same component family, now provably the same
      *      colour rather than coincidentally the same hex.
      *   3. Nothing to maintain. There is no second source of truth to keep in
      *      sync, because there is no second value.
@@ -466,7 +534,7 @@
     --destructive-foreground: 210 40% 98%;
     --destructive-icon: 350, 85%, 48%; /* darker red for icons/badges */
 
-    --link: 6 64% 72%; /* #e59289, 5.8:1 on the card */
+    --brand: 229 146 137; /* #e59289, 5.8:1 on the card — the dark-mode brand red */
 
     /* ★ Dark-mode half of the same fix (item 7). Was `216 34% 17%` = `#1d283a`
        — a near-black ring on this theme's near-black surfaces, effectively
@@ -581,12 +649,11 @@
     --ink-12: 172 167 162; /* #8a827a -> #aca7a2 x5 */
     --ink-13: 163 157 152; /* #8a8a8a -> #a39d98 x2 */
     --ink-14: 156 148 141; /* #9ca3af -> #9c948d x168 */
+    --ink-action: 186 181 176; /* #bab5b0 - the value the blade already used in dark mode */
     --ink-15: 217 218 222; /* #b8bcc4 -> #d9dade x1 */
     --ink-16: 219 219 219; /* #c4c4c4 -> #dbdbdb x1 */
     --ink-17: 216 219 223; /* #c1c7ce -> #d8dbdf x1 */
-    --ink-18: 216 219 222; /* #c7cbd1 -> #d8dbde x1 */
-    --ink-19: 216 219 222; /* #c8ccd2 -> #d8dbde x1 */
-    --ink-20: 216 219 222; /* #c8cdd3 -> #d8dbde x1 */
+    /* ink-18/19/20 collapsed into ink-21 (audit C6) - see light block. */
     --ink-21: 216 219 223; /* #cbd0d6 -> #d8dbdf x9 */
     --ink-22: 212 219 227; /* #cbd5e1 -> #d4dbe3 x12 */
     --ink-23: 216 219 223; /* #d1d5db -> #d8dbdf x1 */
@@ -1179,7 +1246,7 @@ summary {
  * shape the real content will take, so nothing moves when it arrives. Ours stopped
  * doing that at the redesign: `PostListItemSkeleton` drew a `Card` with a 150x105
  * thumbnail on the left, while a real Lumen feed card is
- * `rounded-[18px] border-[#ebebeb] bg-white p-[22px]` with a 190x132 image on the
+ * `rounded-panel border-[#ebebeb] bg-white p-[22px]` with a 190x132 image on the
  * right. So for the ~500ms between shell paint (~140ms) and first card (~675ms) we
  * flashed a layout that never arrives, and then shifted. A wrong skeleton is worse
  * than no skeleton — it is a promise the page breaks.
@@ -1550,7 +1617,7 @@ summary {
     transform: scale(1);
   }
   50% {
-    transform: scale(1.014);
+    transform: scale(1.03);
   }
 }
 
@@ -1927,9 +1994,6 @@ summary {
   .dark .disabled\:text-\[\#6b7280\]:disabled {
     color: rgb(var(--ink-10));
   }
-  .dark .disabled\:text-\[\#c7cbd1\]:disabled {
-    color: rgb(var(--ink-18));
-  }
   .dark .focus-visible\:ring-\[\#c0392b\]\/40:focus-visible {
     --tw-ring-color: rgb(var(--line-brand-10) / 0.4);
   }
@@ -2094,7 +2158,78 @@ summary {
   --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
   --t-fast: 120ms; /* hover, press */ /* panels, menus, tabs */
   --t-slow: 380ms; /* route change, reveal */
+  /**
+   * ★★★ THE ELEVATION LADDER (C5, 2026-08-18). `--lift-2` used to be the ONLY shadow
+   * token, and the audit's measurement was blunt: exactly one shadow value in use across
+   * the whole page. So the card's hover lift had nothing to lift FROM — it jumped from
+   * flat to elevated, which reads as a state change rather than as depth.
+   *
+   * Three steps, one light source (top-down, warm-black, never pure black — a neutral
+   * shadow on a warm ground reads as dirt):
+   *
+   *   --lift-1  resting. A card is a physical object even when nobody is touching it.
+   *   --lift-2  hover/raised. Unchanged, so nothing that already used it moves.
+   *   --lift-3  detached — menus, popovers, dialogs, things floating over the page.
+   *
+   * Each step roughly doubles blur and offset, which is what makes the ladder read as
+   * ONE surface at three heights instead of three unrelated effects.
+   */
+  --lift-1: 0 1px 2px rgb(26 22 18 / 0.04), 0 2px 8px rgb(26 22 18 / 0.04);
+
+  /**
+   * ★★ THE HEADER'S REAL HEIGHT, AS A NUMBER ANYTHING CAN READ (A4, 2026-08-18).
+   *
+   * MEASURED, not assumed: 126px below 768px, 69–81px above it. The header gains a whole
+   * second row on a phone (the search field moves out of the cramped icon cluster onto
+   * its own line), and every `sticky top-24` in the app was written against the DESKTOP
+   * height. 96px of offset under a 126px header does not pin below it — it pins THIRTY
+   * PIXELS INSIDE it, so the pinned element is simply gone.
+   *
+   * That is how `/creators/launch` put "Yes, that's me" — the button that advances an
+   * irreversible three-step flow — permanently behind the header on a phone.
+   *
+   * The desktop value is deliberately 81 + 15 = 96, i.e. EXACTLY the offset every
+   * existing `top-24` already produced, so this changes nothing above 768px.
+   */
+  --header-h: 126px;
   --lift-2: 0 2px 4px rgb(26 22 18 / 0.06), 0 8px 24px rgb(26 22 18 / 0.08);
+  --lift-3: 0 4px 8px rgb(26 22 18 / 0.08), 0 16px 48px rgb(26 22 18 / 0.12);
+}
+
+/*
+ * ════ ELEVATION IN DARK MODE IS A DIFFERENT SIGNAL ════
+ *
+ * ★★★ A REGRESSION I SHIPPED, CAUGHT BY A DARK-MODE AUDIT (2026-08-18).
+ *
+ * The three lift tokens above were defined ONCE, in a bare `:root`, with no dark
+ * override - so the shadow colour rgb(26 22 18) applied in dark mode too, where the page
+ * is rgb(27 23 19) and the card is rgb(44 38 32). The shadow is ONE UNIT darker than the
+ * page it is cast on. Blended at its real alphas, all three levels round to exactly the
+ * unshadowed colour: a contrast ratio of 1.000:1, literally imperceptible. Over the card
+ * the strongest layer manages 1.026:1.
+ *
+ * Measured, not reasoned: a card at rest and the same card under a real hover were
+ * screenshotted and are indistinguishable. So `.lm-card`'s new resting shadow AND the
+ * hover lift it was meant to give a floor to were BOTH invisible - the ladder I added to
+ * make hover read as a rise made nothing happen at all in dark.
+ *
+ * ★ WHY THE VALUES ARE NOT JUST "DARKER". You cannot cast a dark shadow on a dark
+ * ground; there is no room below it. Dark mode conveys height the other way round, with
+ * a LIGHT RIM - the higher the surface, the more light catches its edge. So each step
+ * carries both: a near-black shadow at a much higher alpha (for the soft drop) and a
+ * 1px light ring that grows with elevation (the part that actually reads). The rim is
+ * the signal; the shadow is the atmosphere.
+ *
+ * ★ THIS IS NOT DEAD CODE EVEN THOUGH apps/blog CANNOT REACH DARK MODE. That app had
+ * `next-themes` and every `dark:` variant removed by owner ruling on 2026-08-11, and
+ * strips a stray `theme` key on load. But `apps/wallet` ships a real toggle and consumes
+ * this exact stylesheet, so this is live for its users.
+ */
+:root.dark,
+.dark {
+  --lift-1: 0 1px 2px rgb(0 0 0 / 0.45), 0 0 0 1px rgb(253 251 250 / 0.04);
+  --lift-2: 0 2px 6px rgb(0 0 0 / 0.55), 0 0 0 1px rgb(253 251 250 / 0.07);
+  --lift-3: 0 6px 20px rgb(0 0 0 / 0.65), 0 0 0 1px rgb(253 251 250 / 0.1);
 }
 
 /*
@@ -2113,6 +2248,9 @@ summary {
  */
 @layer utilities {
   .lm-card {
+    /* ★ THE FLOOR THE HOVER LIFTS FROM (C5). Without a resting shadow the hover was a
+       0 -> elevated jump; with one it is a rise. */
+    box-shadow: var(--lift-1);
     transition-property: transform, box-shadow, color, background-color, border-color;
     transition-duration: var(--t-fast);
     transition-timing-function: var(--ease-out);
@@ -2225,3 +2363,142 @@ summary {
   --lm-illo-line-soft: #5c5651;
   --lm-illo-accent: #4a443f;
 }
+
+/* ════════════════════════════════════════════════════════════════════════════
+ * TYPOGRAPHIC POLISH — three rules, disproportionate effect
+ * ════════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * ★ TABULAR FIGURES ON ANYTHING WHOSE NUMBER CHANGES IN PLACE.
+ *
+ * Proportional digits have different widths, so a vote count going 138 -> 139 physically
+ * reshuffles the row it sits in. The eye reads that as the interface being unsure of
+ * itself. Tabular figures lock every digit to one advance width, so the number changes
+ * and nothing else moves.
+ *
+ * ★ DELIBERATELY NOT GLOBAL. Tabular digits in running prose look mechanical and slightly
+ * wrong — they are a UI-chrome choice, not a body-copy one. This targets the places a
+ * number is a READOUT: counts, payouts, balances, timestamps, stats. 54 components in
+ * this app already opt in via Tailwind's `tabular-nums`; these selectors close the gap
+ * for the ones that never did, chiefly the vote counts.
+ */
+/* ★ THE SELECTOR LIST IS MEASURED, NOT GUESSED. The first version matched
+   `[data-testid*='count']` and missed every number on a post card, because this app names
+   them `post-children`, `post-payout` and `vote-tally-*`. Verified in the live DOM: the
+   vote tallies already carried `tabular-nums` from their CSS module, while the payout
+   figure and the comment/reblog counts beside them did not — which is exactly the row the
+   owner reported as "numbers jumping around". */
+[data-count],
+[data-testid*='count'],
+[data-testid*='votes'],
+[data-testid*='payout'],
+[data-testid*='balance'],
+[data-testid*='children'],
+[data-testid*='tally'],
+[data-testid*='reblog'],
+[data-testid^='post-'],
+.lm-nums,
+time {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
+/**
+ * ★ NO WIDOWS ON HEADINGS.
+ *
+ * `text-wrap: balance` evens the line lengths of a wrapped heading instead of leaving one
+ * orphaned word on the last line. Browsers cap it at a small number of lines (~6 in
+ * Chromium), which is exactly why it is safe to apply to headings and not to paragraphs —
+ * on long body copy it silently does nothing anyway, so scoping it is honest rather than
+ * cautious.
+ *
+ * `pretty` on lead paragraphs is the paragraph-shaped sibling: it only fixes the LAST
+ * line, so it stays cheap on long text.
+ */
+h1,
+h2,
+h3,
+h4,
+.lm-balance {
+  text-wrap: balance;
+}
+
+/**
+ * ★ SELECTION IS PART OF THE BRAND.
+ *
+ * The default is the OS blue, which is the one moment the product visibly stops being
+ * itself. `--ink-brand-6` is the same warm red the rails, the masthead rule and the topic
+ * pills already use.
+ *
+ * The alpha is deliberate: a solid brand fill at full strength makes selected text hard to
+ * read, which trades one polish win for a legibility loss. 22% keeps the text as the
+ * subject and the highlight as the frame.
+ */
+::selection {
+  /* ★★ `rgb()`, NOT `hsl()`. These tokens are RGB TRIPLETS (`--ink-brand-6: 192 57 43`,
+     which is #c0392b) and `tailwind.config.js` consumes every one of them as
+     `rgb(var(--token) / <alpha-value>)`. Wrapping them in `hsl()` would parse fine and
+     then fail at computed-value time, silently painting nothing — the exact IACVT class
+     the harness detector was built for this week. Checked the token before writing the
+     rule rather than after. */
+  background-color: rgb(var(--ink-brand-6) / 0.22);
+  color: rgb(var(--ink-2));
+}
+
+
+/* ════════════════════════════════════════════════════════════════════════════
+   STICKY, BELOW THE HEADER, AT EVERY WIDTH (A4, 2026-08-18)
+   ════════════════════════════════════════════════════════════════════════════ */
+@media (min-width: 768px) {
+  :root {
+    --header-h: 81px;
+  }
+}
+
+/*
+ * Use this instead of a hand-written `sticky top-24` for anything that must clear the
+ * app header. `top-24` is a desktop-only constant; this is the same 96px on desktop and
+ * correct on a phone, where the header is 126px tall.
+ */
+.lm-sticky-below-header {
+  position: sticky;
+  top: calc(var(--header-h) + 15px);
+}
+
+
+/* ════════════════════════════════════════════════════════════════════════════
+   POST-BODY IMAGE RESERVATION: REMOVED, BECAUSE IT DID NOTHING (C3, 2026-08-18)
+   ════════════════════════════════════════════════════════════════════════════
+
+   A `.prose img { aspect-ratio: auto 3 / 2 }` rule lived here for a few hours. It was
+   added on the belief that post-page layout shift came from body images shipping without
+   intrinsic dimensions - the audit's #1 roadmap item for three consecutive passes.
+
+   ★★★ THAT BELIEF IS FALSE, AND IT IS RECORDED HERE SO NOBODY ADDS THE RULE BACK.
+
+   Two independent measurements killed it:
+
+     1. A/B on the same URL, rule on vs rule off: CLS 0.3405 both times. Identical.
+     2. Images DELAYED 400-900ms, then ABORTED ENTIRELY: 0.3207 -> 0.3138. Also
+        identical - and across 7 routes, 3 viewports and 3 network conditions, no
+        `<img>` ever appeared in a single `layout-shift` entry's `sources[]`.
+
+   Not one pixel of measured shift on this app is attributable to an image. The feed's
+   images are CSS-pinned on both axes, `post-img.tsx` reserves a fixed height at every
+   breakpoint, `user-avatar-img.tsx` carries width AND height, and body embeds already
+   reserve 16:9 through `.videoWrapper`. The attribute count the audit was tracking was
+   never a proxy for the harm it was attributed to.
+
+   The real sources, found by attributing shifts to their DOM nodes:
+     - the post page (~0.32): a client-side refetch replacing SSR content with a
+       different-height render, moving the tags row, the post footer and the comments
+       wrapper. Deterministic once the route is warm, absent on a cold compile.
+     - the profile page (0.07 desktop / 0.17 mobile): `ProfileLeagueChip` renders `null`
+       while loading and then mounts at full height - a pop-in, the same species as the
+       accordion-on-mount bug, and equally not an image.
+
+   Shipping CSS that measurably changes nothing, with a confident story attached, is worse
+   than shipping nothing: the next person reads the story instead of taking the
+   measurement. So the rule is gone and the measurement stays.
+   ════════════════════════════════════════════════════════════════════════════ */
+

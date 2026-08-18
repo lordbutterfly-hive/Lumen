@@ -50,10 +50,10 @@ import {
  *  redundant now that the real ring is back, so it goes too rather than
  *  stacking a red border UNDER a red ring. */
 const SELECT_TRIGGER =
-  'h-10 w-full rounded-[10px] border border-line-11 bg-surface-1 px-3 font-sans text-[14px] leading-[22px] text-ink-2 [&>svg]:opacity-100 [&>svg]:text-ink-10';
-const SELECT_CONTENT = 'rounded-[12px] border border-line-11 bg-surface-1 p-1 shadow-[0_8px_24px_rgba(20,18,10,0.10)]';
+  'h-10 w-full rounded-control border border-line-11 bg-surface-1 px-3 font-sans text-[14px] leading-[22px] text-ink-2 [&>svg]:opacity-100 [&>svg]:text-ink-10';
+const SELECT_CONTENT = 'rounded-control border border-line-11 bg-surface-1 p-1 shadow-[0_8px_24px_rgba(20,18,10,0.10)]';
 const SELECT_ITEM =
-  'cursor-pointer rounded-[9px] py-2 font-sans text-[14px] leading-[22px] text-ink-2 focus:bg-surface-brand-5 focus:text-ink-brand-6';
+  'cursor-pointer rounded-control py-2 font-sans text-[14px] leading-[22px] text-ink-2 focus:bg-surface-brand-5 focus:text-ink-brand-6';
 
 /**
  * ★ S7 — DIRTY-FIELD CUE (2026-08-11). The Update button already goes from
@@ -482,7 +482,7 @@ const SettingsForm = ({ username }: { username: string }) => {
           type="button"
           onClick={() => onSubmit()}
           data-testid="pps-update-button"
-          className="mt-6 inline-flex h-11 min-w-[176px] items-center justify-center rounded-[14px] bg-surface-brand-12 px-6 text-[14px] leading-[22px] font-bold text-ink-27 transition-colors hover:bg-surface-brand-17 disabled:cursor-not-allowed disabled:bg-surface-31 disabled:text-ink-14"
+          className="mt-6 inline-flex h-11 min-w-[176px] items-center justify-center rounded-card bg-surface-brand-12 px-6 text-[14px] leading-[22px] font-bold text-ink-27 transition-colors hover:bg-surface-brand-17 disabled:cursor-not-allowed disabled:bg-surface-31 disabled:text-ink-14"
           disabled={
             sameData ||
             disabledBtn ||

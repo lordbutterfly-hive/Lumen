@@ -224,7 +224,7 @@ export default function FollowRowActions({
             which every other menu in the app renders. */}
         <DropdownMenuContent
           align="end"
-          className="w-56 rounded-[12px] border-[#ebebeb] bg-white p-1.5 shadow-[0_8px_24px_rgba(20,18,10,0.10)]"
+          className="w-56 rounded-control border-[#ebebeb] bg-white p-1.5 shadow-[0_8px_24px_rgba(20,18,10,0.10)]"
         >
           {block.available ? (
             <DropdownMenuItem
@@ -242,7 +242,7 @@ export default function FollowRowActions({
               // pass) — rgb(192,57,43), byte-identical to the literal in
               // light mode. `--destructive` renders a visibly different red
               // (rgb(218,43,43)) and is reserved for the vote control only.
-              className="cursor-pointer rounded-[10px] px-2.5 py-2 text-[13px] leading-[20px] font-medium text-ink-brand-6 focus:bg-[#fdf2f0] focus:text-ink-brand-6"
+              className="cursor-pointer rounded-control px-2.5 py-2 text-[13px] leading-[20px] font-medium text-ink-brand-6 focus:bg-[#fdf2f0] focus:text-ink-brand-6"
               data-testid="follow-row-block-menu-item"
             >
               {block.isBlocking
@@ -256,7 +256,7 @@ export default function FollowRowActions({
             // `profile-actions.tsx` gives it.
             <DropdownMenuItem
               disabled
-              className="cursor-not-allowed rounded-[10px] px-2.5 py-2 text-[13px] leading-[20px] font-medium focus:bg-[#faf9f8]"
+              className="cursor-not-allowed rounded-control px-2.5 py-2 text-[13px] leading-[20px] font-medium focus:bg-[#faf9f8]"
               data-testid="follow-row-block-menu-item-unknown"
               title={t('user_profile.block_status_unknown_hint')}
             >
@@ -269,7 +269,7 @@ export default function FollowRowActions({
               setMenuOpen(false);
               void copyProfileLink();
             }}
-            className="flex cursor-pointer items-center gap-2 rounded-[10px] px-2.5 py-2 text-[13px] leading-[20px] font-medium text-[#3f4650] focus:bg-[#faf9f8] focus:text-[#161511]"
+            className="flex cursor-pointer items-center gap-2 rounded-control px-2.5 py-2 text-[13px] leading-[20px] font-medium text-[#3f4650] focus:bg-[#faf9f8] focus:text-[#161511]"
             data-testid="follow-row-copy-link"
           >
             <Icons.link className="h-4 w-4" />
@@ -279,7 +279,7 @@ export default function FollowRowActions({
       </DropdownMenu>
 
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <AlertDialogContent className="flex flex-col gap-4 sm:max-w-md sm:rounded-[18px]" data-testid="follow-row-block-dialog">
+        <AlertDialogContent className="flex flex-col gap-4 sm:max-w-md sm:rounded-panel" data-testid="follow-row-block-dialog">
           <AlertDialogHeader className="gap-2">
             <AlertDialogTitle>{t('block_confirm_dialog.title', { username })}</AlertDialogTitle>
             <AlertDialogDescription>{t('block_confirm_dialog.description')}</AlertDialogDescription>
@@ -290,7 +290,7 @@ export default function FollowRowActions({
               data-testid="follow-row-block-confirm"
               // ★ `bg-surface-brand-12`, not `#c0392b` (2026-08-14) —
               // rgb(192,57,43), byte-identical to the literal in light mode.
-              className="rounded-[12px] bg-surface-brand-12 text-white hover:bg-[#a93226]"
+              className="rounded-control bg-surface-brand-12 text-white hover:bg-[#a93226]"
               onClick={(event) => {
                 event.preventDefault();
                 void commitBlock();
@@ -299,7 +299,7 @@ export default function FollowRowActions({
             >
               {block.busy ? <CircleSpinner loading size={16} color="#ffffff" /> : t('block_confirm_dialog.action')}
             </AlertDialogAction>
-            <AlertDialogCancel className="rounded-[12px]" data-testid="follow-row-block-cancel">
+            <AlertDialogCancel className="rounded-control" data-testid="follow-row-block-cancel">
               {t('global.cancel')}
             </AlertDialogCancel>
           </AlertDialogFooter>

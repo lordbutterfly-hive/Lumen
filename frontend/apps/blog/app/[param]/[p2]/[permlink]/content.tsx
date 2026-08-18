@@ -26,10 +26,6 @@ import MutePostDialog from '@/blog/features/post-rendering/mute-post-dialog';
 import PostBodySection from '@/blog/features/post-rendering/post-body-section';
 import { PostDeleteDialog } from '@/blog/features/post-rendering/post-delete-dialog';
 import { SharePost } from '@/blog/features/post-rendering/share-post-dialog';
-import FacebookShare from '@/blog/features/post-rendering/share-post-facebook';
-import LinkedInShare from '@/blog/features/post-rendering/share-post-linkedin';
-import RedditShare from '@/blog/features/post-rendering/share-post-reddit';
-import TwitterShare from '@/blog/features/post-rendering/share-post-twitter';
 import UserInfo from '@/blog/features/post-rendering/user-info';
 import ButtonsContainer from '@/blog/features/mute-follow/buttons-container';
 import { useFollowingInfiniteQuery } from '@/blog/features/account-lists/hooks/use-following-infinitequery';
@@ -1741,7 +1737,18 @@ const PostContent = () => {
                         than one footer. The box is gone; `items-baseline` (not
                         `items-center`) is what actually lines text baselines up,
                         which centring the whole box never did. */}
-                    <div className="flex flex-wrap items-baseline gap-2 text-sm">
+                    {/* ★ items-center, NOT items-baseline (owner, 2026-08-18: "upvotes on
+                        post are still not in line with dollar amount and vote numbers").
+                        `items-baseline` aligns every child on its own TEXT baseline. That
+                        is right for three runs of text and wrong the moment one child is a
+                        38px control: the vote component's baseline is its tally's, so the
+                        blade glyph above that tally was pushed up out of the row while the
+                        digits themselves looked correct. The dividers already carried
+                        `self-center` to escape this - a per-child override is the tell
+                        that the container rule was fighting its own contents. All three
+                        groups are the same 14px type, so centring them lines the text up
+                        exactly as baseline did, and lines the glyph up too. */}
+                    <div className="flex flex-wrap items-center gap-2 text-sm">
                       {/* The REAL signer: a full Hive user's vote is a chain op, and
                           our own vote table keys on the same value the read path sends.
                           A display name is neither stable (it changes at upgrade) nor a
@@ -1809,22 +1816,22 @@ const PostContent = () => {
                           ${postData.payout?.toFixed(2)}
                         </span>
                       </DetailsCardHover>
-                      {activeVotesData && !!postData.stats?.total_votes && postData.stats?.total_votes !== 0 ? (
-                        <>
-                          <span className="h-4 w-px self-center bg-border" />
-                          <DetailsCardVoters post={postData}>
-                            {/* Same nowrap/tabular-nums fix as the comment card's
-                                vote pill — this is the post footer's copy of it.
-                                text-ink-brand-8, not text-destructive: same token
-                                swap as the payout span above, same defect (H2). */}
-                            <span className="whitespace-nowrap tabular-nums font-medium text-ink-brand-8">
-                              {postData.stats?.total_votes > 1
-                                ? t('post_content.footer.votes', { votes: postData.stats?.total_votes })
-                                : t('post_content.footer.vote')}
-                            </span>
-                          </DetailsCardVoters>
-                        </>
-                      ) : null}
+                      {/* ★★ THE SECOND VOTE COUNT IS GONE (owner, 2026-08-18: "we dont need
+                          both upvote numbers there. remove the one on the right").
+                          
+                          This row showed TWO counts that disagreed: the blade's tally (296)
+                          and `stats.total_votes` (297). Both were correct and they measure
+                          different things - the tally is upvotes, `total_votes` is every
+                          vote on the post including downvotes and zero-weight ones - but
+                          nothing on the row said so, so it read as the same number rendered
+                          twice and wrong once. One count, and it is the one attached to the
+                          control that changes it.
+
+                          ★ WHAT WENT WITH IT: this span was the trigger for
+                          `DetailsCardVoters`, the click-through to the full voter list.
+                          That affordance no longer exists anywhere on this row. It is a
+                          real loss, not a tidy-up - if it should come back, the place for
+                          it is the blade's own tally, not a second number. */}
                     </div>
                   </div>
                   {/* Actions Row */}
@@ -1837,14 +1844,17 @@ const PostContent = () => {
                         dataTestidTooltipIcon="post-footer-reblog-icon"
                         isReblogged={isReblogged}
                       />
-                      <span className="text-border">|</span>
                       {identity.isLoggedIn ? (
                         <>
                           <button
                             onClick={() => {
                               setReply(!reply);
                             }}
-                            className="flex items-center font-medium text-destructive transition-colors hover:text-destructive/80"
+                            /* Was `text-destructive` - raw Tailwind red-500, which is
+                               neither Lumen's brand red nor a colour used anywhere else
+                               here. Now the same chip every other action on this row
+                               wears. */
+                            className="flex h-9 items-center rounded-control px-2.5 py-1.5 font-medium text-ink-action transition-colors hover:bg-[#f4f5f7] hover:text-brand"
                             data-testid="comment-reply"
                           >
                             {t('post_content.footer.reply')}
@@ -1854,7 +1864,7 @@ const PostContent = () => {
                               <CircleSpinner
                                 loading={pinMutations.isLoading || unpinMutation.isLoading}
                                 size={18}
-                                color="#dc2626"
+                                color="rgb(var(--brand))"
                               />
                             </div>
                           ) : userCanModerate && postData.depth === 0 ? (
@@ -1943,7 +1953,7 @@ const PostContent = () => {
                                 <CircleSpinner
                                   loading={deletePostMutation.isLoading}
                                   size={18}
-                                  color="#dc2626"
+                                  color="rgb(var(--brand))"
                                 />
                               ) : (
                                 t('cards.comment_card.delete')
@@ -1966,16 +1976,17 @@ const PostContent = () => {
                           </button>
                         </>
                       ) : null}
-                      <span className="text-border">|</span>
                       <TooltipProvider>
                         <Tooltip>
                           <TooltipTrigger className="flex items-center" data-testid="comment-respons">
                             <Link href={postData.url} className="flex cursor-pointer items-center text-muted-foreground transition-colors hover:text-foreground">
-                              {postData.children > 1 ? (
-                                <Icons.messagesSquare className="mr-1 h-4 w-4" />
-                              ) : (
-                                <Icons.comment className="mr-1 h-4 w-4" />
-                              )}
+                              {/* ★ SAME SINGLE GLYPH AS THE FEED (owner, 2026-08-18). The
+                                  post page carried the identical count-dependent swap that
+                                  `post-card-comment-tooltip.tsx` did, so a reader clicking
+                                  a card watched the comment mark change shape on arrival
+                                  as well as between cards. The count beside it already
+                                  says how many. */}
+                              <Icons.comment className="mr-1 h-4 w-4" />
                               <span className="font-medium">{postData.children}</span>
                             </Link>
                           </TooltipTrigger>
@@ -1991,16 +2002,29 @@ const PostContent = () => {
                         </Tooltip>
                       </TooltipProvider>
                     </div>
-                    {/* Share buttons */}
-                    <div className="flex items-center gap-1.5 rounded-md border border-border bg-background px-2 py-1">
-                      <FacebookShare url={postData.url} />
-                      <TwitterShare title={displayTitle} url={postData.url} />
-                      <LinkedInShare title={displayTitle} url={postData.url} />
-                      <RedditShare title={displayTitle} url={postData.url} />
-                      <SharePost path={postData.url} title={displayTitle}>
-                        <Icons.link className="h-[18px] w-[18px] cursor-pointer text-muted-foreground transition-colors hover:text-destructive" data-testid="share-post" />
-                      </SharePost>
-                    </div>
+                    {/* ★★ ONE SHARE CONTROL, NOT A STRIP OF BRAND LOGOS (owner, 2026-08-18:
+                        "the post card needs updating. its still on old hiveblog design").
+
+                        This was a bordered pill holding four social-network logos plus a
+                        link icon - the single most dated element on the page, and the one
+                        thing on this row that looked borrowed from another product. The
+                        four networks were not deleted: they moved INTO the share dialog,
+                        which previously offered only copy-link and copy-markdown. Every
+                        destination a reader could reach before, they can still reach.
+
+                        The chip matches the feed card's action chips exactly - same 36px
+                        box, same `rounded-control`, same `text-ink-action` at rest and
+                        brand on hover - so the post page and the feed now speak one
+                        language instead of two. */}
+                    <SharePost path={postData.url} title={displayTitle}>
+                      <span
+                        className="flex h-9 items-center gap-1.5 rounded-control px-2.5 py-1.5 font-medium text-ink-action transition-colors hover:bg-[#f4f5f7] hover:text-brand"
+                        data-testid="share-post"
+                      >
+                        <Icons.link className="h-[18px] w-[18px]" />
+                        {t('post_content.footer.share_form.share_this_link')}
+                      </span>
+                    </SharePost>
                   </div>
                 </div>
                 {reply && postData && user.isLoggedIn ? (

@@ -66,7 +66,7 @@ export default function BetForm({ round }: { round: RoundState }) {
           onClick={() => setSelectorOpen((open) => !open)}
           aria-haspopup="listbox"
           aria-expanded={selectorOpen}
-          className="flex w-full items-center justify-between rounded-[14px] border border-line-12 bg-surface-7 px-4 py-3.5 text-left"
+          className="flex w-full items-center justify-between rounded-card border border-line-12 bg-surface-7 px-4 py-3.5 text-left"
         >
           <span className="flex items-center gap-2.5">
             {selected && (
@@ -84,7 +84,7 @@ export default function BetForm({ round }: { round: RoundState }) {
             <div className="fixed inset-0 z-10" onClick={() => setSelectorOpen(false)} aria-hidden="true" />
             <ul
               role="listbox"
-              className="absolute inset-x-0 top-full z-20 mt-1 overflow-hidden rounded-[14px] border border-line-12 bg-surface-1 shadow-[0_6px_20px_rgba(20,18,10,0.10)]"
+              className="absolute inset-x-0 top-full z-20 mt-1 overflow-hidden rounded-card border border-line-12 bg-surface-1 shadow-[0_6px_20px_rgba(20,18,10,0.10)]"
             >
               {round.buckets.map((bucket) => (
                 <li key={bucket.id}>
@@ -116,7 +116,7 @@ export default function BetForm({ round }: { round: RoundState }) {
 
       {/* Backing strip — replaces the fixed-odds Yes/No pair (pool framing) */}
       {selected && (
-        <div className="mb-5 flex items-center justify-between rounded-[13px] border border-line-ok-1 bg-surface-13 px-4 py-3">
+        <div className="mb-5 flex items-center justify-between rounded-card border border-line-ok-1 bg-surface-13 px-4 py-3">
           <span className="flex items-center gap-2.5">
             <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: colors[selected.id] }} aria-hidden="true" />
             <span className="font-sans text-[14px] leading-[22px] text-ink-7">
@@ -151,7 +151,7 @@ export default function BetForm({ round }: { round: RoundState }) {
               onChange={(event) => setAmount(event.target.value)}
               placeholder="0"
               aria-label={t('prediction_market.buy_in_aria', { asset: round.asset })}
-              className="w-full min-w-0 flex-1 appearance-none bg-transparent font-sans text-[30px] leading-[46px] font-bold tracking-[-0.02em] tabular-nums text-ink-2 outline-none placeholder:text-ink-20 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+              className="w-full min-w-0 flex-1 appearance-none bg-transparent font-sans text-[30px] leading-[46px] font-bold tracking-[-0.02em] tabular-nums text-ink-2 outline-none placeholder:text-ink-21 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
             />
             <span className="shrink-0 font-sans text-[14px] font-semibold leading-[22px] text-ink-10">
               {round.asset}
@@ -180,7 +180,7 @@ export default function BetForm({ round }: { round: RoundState }) {
               type="button"
               onClick={() => setAmount(String(chip))}
               className={cn(
-                'flex-1 rounded-[11px] border py-2.5 font-sans text-[14px] leading-[22px] font-semibold tabular-nums transition-colors',
+                'flex-1 rounded-control border py-2.5 font-sans text-[14px] leading-[22px] font-semibold tabular-nums transition-colors',
                 on
                   ? 'border-line-27 bg-surface-42 text-ink-27'
                   : 'border-line-12 bg-surface-1 text-ink-7 hover:border-line-28'
@@ -196,7 +196,7 @@ export default function BetForm({ round }: { round: RoundState }) {
         type="button"
         disabled={!loggedIn || isLite || !isValid || isPlacingBet}
         onClick={submit}
-        className="mt-5 w-full rounded-[14px] bg-surface-42 py-[15px] font-sans text-[16px] font-semibold text-ink-27 transition-colors hover:bg-surface-44 disabled:opacity-50"
+        className="mt-5 w-full rounded-card bg-surface-42 py-[15px] font-sans text-[16px] font-semibold text-ink-27 transition-colors hover:bg-surface-44 disabled:opacity-50"
       >
         {!loggedIn
           ? t('prediction_market.login_to_bet')

@@ -323,7 +323,7 @@ const MeritumLaunchFlow: FC = () => {
         {/* ★ `clip-path`, NOT `overflow-hidden`. See the file header. */}
         <div
           ref={cardRef}
-          className="flex flex-wrap items-stretch rounded-[18px] border border-meritum-line-card bg-meritum-card [clip-path:inset(0_round_18px)]"
+          className="flex flex-wrap items-stretch rounded-panel border border-meritum-line-card bg-meritum-card [clip-path:inset(0_round_18px)]"
         >
           {/*
             ★ BASIS PAIR IS MEASURED, NOT COPIED FROM THE MOCK (2026-08-15).
@@ -419,9 +419,12 @@ const MeritumLaunchFlow: FC = () => {
           {/* Basis lowered 360 -> 330 with the copy column; see the note above.
               330 is the floor: 268px coin + 2 x 30px padding = 328. */}
           <div className="min-w-[min(100%,330px)] flex-1 basis-[330px] border-l border-meritum-line-card bg-meritum-rail px-[30px] pb-9">
-            {/* ★ 96px, the app's own sticky offset. The card above must not clip
-                with `overflow`, or this never pins. */}
-            <div className="sticky top-24">
+            {/* ★ 96px on desktop — the app's own sticky offset, unchanged — and 141px on a
+                phone, where the header is 126px tall and a bare `top-24` pinned this rail
+                THIRTY PIXELS INSIDE the header instead of below it, taking the "Yes,
+                that's me" button with it. See `--header-h` in globals.css. The card above
+                must not clip with `overflow`, or this never pins. */}
+            <div className="lm-sticky-below-header">
               <MeritumCoinRail
                 handle={flow.handle}
                 offersPriced={flow.offersPriced}

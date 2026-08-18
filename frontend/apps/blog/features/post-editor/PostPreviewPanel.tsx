@@ -76,7 +76,7 @@ export function PostPreviewPanel({
       })}
       data-testid="preview-container"
     >
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-t-[14px] border border-b-0 border-[#ebebeb] bg-white px-4 py-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-t-card border border-b-0 border-[#ebebeb] bg-white px-4 py-2">
         {/* Same section-label treatment as the metadata and publishing cards
             (C-14). ★ `ink-brand-6`, not `#c0392b` (2026-08-14): see
             `PostMetadataSection.tsx` for the full reasoning. */}
@@ -109,7 +109,7 @@ export function PostPreviewPanel({
                       // (2026-08-14): rgb(192,57,43), byte-identical to the
                       // literal in light mode. `--destructive` is a visibly
                       // different red reserved for the vote control only.
-                      className="inline-flex items-center gap-1.5 rounded-[14px] border border-[#ebebeb] bg-white px-3 py-1.5 text-xs font-medium text-[#6b7280] transition-colors hover:border-line-brand-10 hover:text-ink-brand-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-line-brand-10/40"
+                      className="inline-flex items-center gap-1.5 rounded-card border border-[#ebebeb] bg-white px-3 py-1.5 text-xs font-medium text-[#6b7280] transition-colors hover:border-line-brand-10 hover:text-ink-brand-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-line-brand-10/40"
                       onClick={() => setSyncScroll((prev) => !prev)}
                       data-testid="sync-scroll-toggle"
                       aria-pressed={syncScroll}
@@ -151,7 +151,7 @@ export function PostPreviewPanel({
       <div
         ref={previewContainerRef}
         data-testid="preview-scroller"
-        className="flex h-full overflow-y-auto overscroll-contain rounded-b-[14px] border border-[#ebebeb] bg-white"
+        className="flex h-full overflow-y-auto overscroll-contain rounded-b-card border border-[#ebebeb] bg-white"
       >
         {previewContent && previewBlocked ? (
           /* ★★★ THE FREEZE, STOPPED AT ITS SOURCE (2026-08-09).

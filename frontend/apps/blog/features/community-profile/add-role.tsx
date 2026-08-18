@@ -43,7 +43,7 @@ const AddRole = ({ community, loggedUserLevel }: { loggedUserLevel: number; comm
     // unfinished, so this wraps it in the same card treatment. `border-b-0`
     // on `AccordionItem` below cancels the component's own line so there
     // isn't a second, redundant one drawn inside this outer card.
-    <div className="mt-4 overflow-hidden rounded-[18px] border border-line-9 bg-surface-1">
+    <div className="mt-4 overflow-hidden rounded-panel border border-line-9 bg-surface-1">
       <Accordion
         type="single"
         collapsible
@@ -69,7 +69,7 @@ const AddRole = ({ community, loggedUserLevel }: { loggedUserLevel: number; comm
                   id="community-add-role-username"
                   value={inputValue}
                   onChange={(e) => setInputChange(e.target.value)}
-                  className="rounded-[12px] border-line-9"
+                  className="rounded-control border-line-9"
                   data-testid="community-add-role-username"
                 />
               </div>
@@ -104,7 +104,7 @@ const AddRole = ({ community, loggedUserLevel }: { loggedUserLevel: number; comm
               <Button
                 onClick={onUpdateRole}
                 size="sm"
-                className="w-fit justify-self-end rounded-[13px] bg-surface-brand-12 px-5 text-ink-27 hover:bg-surface-brand-14 hover:opacity-100"
+                className="w-fit justify-self-end rounded-card bg-surface-brand-12 px-5 text-ink-27 hover:bg-surface-brand-14 hover:opacity-100"
                 disabled={setRoleMutation.isLoading}
                 data-testid="community-add-role-save"
               >

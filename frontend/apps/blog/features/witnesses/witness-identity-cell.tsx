@@ -46,7 +46,7 @@ export default function WitnessIdentityCell({ row, className }: WitnessIdentityC
           username={row.owner}
           apiSize="medium"
           pixelSize={38}
-          radiusClassName="rounded-[11px]"
+          radiusClassName="rounded-control"
           className={row.isDisabled ? 'opacity-40 grayscale' : undefined}
         />
         <span className="sr-only">{t('witnesses.profile_link_aria', { witness: row.owner })}</span>

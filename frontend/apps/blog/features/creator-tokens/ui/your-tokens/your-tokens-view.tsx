@@ -32,12 +32,12 @@ import { MeritumEligibilityNotice, useMeritumEligibility } from '../meritum-elig
 const tok = (n: number) => n.toFixed(1);
 
 const Unavailable: FC<{ children: React.ReactNode }> = ({ children }) => (
-  <div className="rounded-[14px] border border-dashed border-line-11 px-5 py-6 text-center text-[14px] leading-[22px] text-ink-14">{children}</div>
+  <div className="rounded-card border border-dashed border-line-11 px-5 py-6 text-center text-[14px] leading-[22px] text-ink-14">{children}</div>
 );
 
 const HoldingRow: FC<{ h: HolderPosition }> = ({ h }) => (
-  <div className="flex flex-wrap items-center gap-4 rounded-[16px] border border-line-9 bg-surface-1 px-5 py-4">
-    <span className="h-11 w-11 flex-shrink-0 rounded-[12px] bg-surface-28" />
+  <div className="flex flex-wrap items-center gap-4 rounded-card border border-line-9 bg-surface-1 px-5 py-4">
+    <span className="h-11 w-11 flex-shrink-0 rounded-control bg-surface-28" />
     <div className="min-w-0 flex-1">
       <Link href={`/creators/${h.creator}`} className="text-[15px] leading-[24px] font-bold text-ink-2 hover:text-ink-brand-6">
         @{h.creator}
@@ -57,7 +57,7 @@ const HoldingRow: FC<{ h: HolderPosition }> = ({ h }) => (
         <Link
           key={label}
           href={`/creators/${h.creator}?a=${label.toLowerCase()}`}
-          className="rounded-[9px] border border-line-11 bg-surface-1 px-3 py-2 text-[13px] leading-[20px] font-semibold text-ink-7 hover:bg-surface-23"
+          className="rounded-control border border-line-11 bg-surface-1 px-3 py-2 text-[13px] leading-[20px] font-semibold text-ink-7 hover:bg-surface-23"
         >
           {label}
         </Link>
@@ -106,7 +106,7 @@ const RateStrip: FC<{ onRate: (score: number) => Promise<void>; busy: boolean }>
                 setFailure(writeFailureMessage(err, 'Your rating didn’t go through.'));
               }
             }}
-            className="h-8 w-8 rounded-[9px] border border-line-11 bg-surface-1 text-[13px] leading-[20px] font-bold text-ink-7 hover:bg-surface-23 disabled:opacity-50"
+            className="h-8 w-8 rounded-control border border-line-11 bg-surface-1 text-[13px] leading-[20px] font-bold text-ink-7 hover:bg-surface-23 disabled:opacity-50"
           >
             {score}
           </button>
@@ -131,7 +131,7 @@ const AskCard: FC<{ a: Ask; onReclaim: () => Promise<void>; onRate: (score: numb
   const reclaimable = a.status === 'reclaimable';
   const [failure, setFailure] = useState<string | null>(null);
   return (
-    <div className={`rounded-[16px] border bg-surface-1 px-5 py-4 ${reclaimable ? 'border-line-warn-2 bg-surface-warn-4' : 'border-line-9'}`}>
+    <div className={`rounded-card border bg-surface-1 px-5 py-4 ${reclaimable ? 'border-line-warn-2 bg-surface-warn-4' : 'border-line-9'}`}>
       <div className="flex items-center justify-between gap-3">
         <div className="text-[15px] leading-[24px] font-semibold text-ink-2">
           Ask · <span className="text-ink-8">@{a.creator}</span>
@@ -162,7 +162,7 @@ const AskCard: FC<{ a: Ask; onReclaim: () => Promise<void>; onRate: (score: numb
               }
             }}
             disabled={busy}
-            className="rounded-[10px] bg-surface-warn-11 px-4 py-2 text-[13px] leading-[20px] font-semibold text-ink-27 hover:bg-surface-warn-13 disabled:opacity-50"
+            className="rounded-control bg-surface-warn-11 px-4 py-2 text-[13px] leading-[20px] font-semibold text-ink-27 hover:bg-surface-warn-13 disabled:opacity-50"
           >
             {busy ? 'Confirm in your wallet…' : 'Get your tokens back'}
           </button>
@@ -185,10 +185,10 @@ const YourTokensView: FC = () => {
 
   const rightRail = (
     <div className="flex flex-col gap-5 pt-[26px]">
-      <div className="rounded-[18px] border border-line-9 bg-surface-1 p-5">
+      <div className="rounded-panel border border-line-9 bg-surface-1 p-5">
         <div className="mb-1.5 font-serif text-lg font-semibold text-ink-2">Find more creators</div>
         <p className="mb-4 font-serif text-[14px] leading-[22px] text-ink-10">Hold their token, spend it on their work.</p>
-        <Link href="/creators" className="block rounded-[11px] bg-surface-brand-12 py-3 text-center text-sm font-semibold text-ink-27 hover:bg-surface-brand-16">
+        <Link href="/creators" className="block rounded-control bg-surface-brand-12 py-3 text-center text-sm font-semibold text-ink-27 hover:bg-surface-brand-16">
           Discover creators →
         </Link>
       </div>
@@ -264,7 +264,7 @@ const YourTokensView: FC = () => {
           </p>
 
           {reclaimable > 0 ? (
-            <div className="mt-4 flex items-center justify-between gap-3 rounded-[12px] border border-line-warn-2 bg-surface-warn-4 px-4 py-3">
+            <div className="mt-4 flex items-center justify-between gap-3 rounded-control border border-line-warn-2 bg-surface-warn-4 px-4 py-3">
               <span className="text-[14px] leading-[22px] font-semibold text-ink-warn-3">
                 You have {reclaimable} ask{reclaimable > 1 ? 's' : ''} with tokens to reclaim.
               </span>

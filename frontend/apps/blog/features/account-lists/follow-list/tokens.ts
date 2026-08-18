@@ -27,7 +27,7 @@
  */
 
 /** The list card: one surface, hairline border, corners clip the first/last row. */
-export const LIST_CARD = 'w-full overflow-hidden rounded-[18px] border border-[#ebebeb] bg-white';
+export const LIST_CARD = 'w-full overflow-hidden rounded-panel border border-[#ebebeb] bg-white';
 
 /** A 60px identity row with a 1px divider; the last row drops its divider. */
 export const LIST_ROW =
@@ -38,23 +38,23 @@ export const LIST_ROW_HOVER = 'hover:bg-[#faf9f8]';
 
 /** Follow (not yet following): the one accent-red control in the row. */
 export const FOLLOW_BUTTON_PRIMARY =
-  'inline-flex h-9 shrink-0 items-center justify-center rounded-[12px] bg-surface-brand-12 px-4 font-sans text-[13px] leading-[20px] font-semibold text-white transition-colors hover:bg-[#a93226] disabled:pointer-events-none disabled:opacity-60';
+  'inline-flex h-9 shrink-0 items-center justify-center rounded-control bg-surface-brand-12 px-4 font-sans text-[13px] leading-[20px] font-semibold text-white transition-colors hover:bg-[#a93226] disabled:pointer-events-none disabled:opacity-60';
 
 /** Following (already following): quiet outline that turns red on hover. */
 export const FOLLOW_BUTTON_OUTLINE =
-  'group inline-flex h-9 shrink-0 items-center justify-center rounded-[12px] border border-[#e4e6e9] bg-transparent px-4 font-sans text-[13px] leading-[20px] font-semibold text-[#3f4650] transition-colors hover:border-line-brand-10 hover:text-ink-brand-6 disabled:pointer-events-none disabled:opacity-60';
+  'group inline-flex h-9 shrink-0 items-center justify-center rounded-control border border-[#e4e6e9] bg-transparent px-4 font-sans text-[13px] leading-[20px] font-semibold text-[#3f4650] transition-colors hover:border-line-brand-10 hover:text-ink-brand-6 disabled:pointer-events-none disabled:opacity-60';
 
 /** The `...` trigger. 32x32, radius 10 — never a bare destructive sibling. */
 export const OVERFLOW_BUTTON =
-  'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] text-[#9ca3af] transition-colors hover:bg-[#f4f5f7] hover:text-[#3f4650] disabled:pointer-events-none disabled:opacity-60';
+  'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-control text-ink-14 transition-colors hover:bg-[#f4f5f7] hover:text-[#3f4650] disabled:pointer-events-none disabled:opacity-60';
 
 /** Pagination buttons, rendered ONCE below the list. */
 export const PAGER_BUTTON =
-  'inline-flex h-9 items-center justify-center rounded-[12px] border border-[#e4e6e9] bg-white px-4 font-sans text-[13px] leading-[20px] font-semibold text-[#3f4650] transition-colors hover:border-line-brand-10 hover:text-ink-brand-6 disabled:pointer-events-none disabled:border-[#f0f0f0] disabled:text-[#c7cbd1]';
+  'inline-flex h-9 items-center justify-center rounded-control border border-[#e4e6e9] bg-white px-4 font-sans text-[13px] leading-[20px] font-semibold text-[#3f4650] transition-colors hover:border-line-brand-10 hover:text-ink-brand-6 disabled:pointer-events-none disabled:border-[#f0f0f0] disabled:text-ink-21';
 
 /** The toolbar search field. */
 export const SEARCH_INPUT =
-  'h-9 w-full rounded-[12px] border border-[#ebebeb] bg-white pl-9 pr-3 font-sans text-[13px] leading-[20px] text-[#161511] outline-none transition-colors placeholder:text-[#9ca3af] focus:border-line-brand-10';
+  'h-9 w-full rounded-control border border-[#ebebeb] bg-white pl-9 pr-3 font-sans text-[13px] leading-[20px] text-[#161511] outline-none transition-colors placeholder:text-ink-14 focus:border-line-brand-10';
 
 /** Muted meta text: the toolbar count, the pager label, empty-state body copy. */
 export const META_TEXT = 'font-sans text-[13px] leading-[20px] font-medium text-[#6b7280]';

@@ -8,6 +8,7 @@ import * as posts from '@/blog/lib/lite/repositories/post-repository';
 import { dbPostToEntry } from '@/blog/lib/lite/render/db-post-to-entry';
 import { resolvePublicNames } from '@/blog/lib/lite/render/current-name';
 import { getAccountPosts } from '@transaction/lib/bridge-api';
+import { withRetry } from '@transaction/lib/retry';
 import type { Entry } from '@hive/common-hiveio-packages/wax';
 
 const logger = getLogger('app');
@@ -140,7 +141,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           // 'blog' (which folds in their reblogs) — a reblog by someone you
           // follow is a different product decision, and silently including it
           // here would make the feed disagree with what the follow promised.
-          const r = await getAccountPosts('posts', author, author, '', '');
+          // ★ A6 retry rollout (2026-08-18): wired here, not inside `getAccountPosts`
+          // itself — see that function's own comment (its `streak/[user]` caller has
+          // a competing wall-clock budget). This route's per-author calls already run
+          // in parallel via `Promise.all` below, so a bounded retry per author cannot
+          // multiply the whole batch's worst case beyond the slowest single author.
+          const r = await withRetry(() => getAccountPosts('posts', author, author, '', ''), {
+            label: `getAccountPosts(posts,${author})`
+          });
           return { ok: true, entries: (r ?? []).slice(0, PER_CHAIN_AUTHOR) };
         } catch (error) {
           // One unreachable author must not empty the whole feed.

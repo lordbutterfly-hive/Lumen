@@ -5,9 +5,56 @@ import ClipboardCopy from './copy-from-input';
 import { Icons } from '@ui/components/icons';
 import { useTranslation } from '@/blog/i18n/client';
 import { blogUrl } from '@hive/ui/config/public-vars';
+import FacebookShare from './share-post-facebook';
+import LinkedInShare from './share-post-linkedin';
+import RedditShare from './share-post-reddit';
+import TwitterShare from './share-post-twitter';
 
+/**
+ * ════ SHARE ════
+ *
+ * ★★★ REBUILT OUT OF THE hive.blog IDIOM (owner, 2026-08-18: "the post card needs
+ * updating. its still on old hiveblog design" -> "all of it").
+ *
+ * What this was: a `text-3xl` heading over a `border-b-2`, then two stacked copy fields,
+ * then SIX external links rendered as literal `{'•'}` bullet characters in flex rows,
+ * every one of them coloured `text-destructive` - raw Tailwind red-500, a colour that
+ * appears nowhere in Lumen's palette. It read as a 2016 blog footer, and the four social
+ * networks were not even in here: they lived as a separate bordered icon strip out on the
+ * post's action row, which is the single most dated element on the page.
+ *
+ * ★ THE NETWORKS MOVED IN HERE RATHER THAN BEING DELETED. Collapsing the action row to
+ * one Share control is the whole point of the redesign, but this dialog only offered
+ * copy-link and copy-markdown - so removing the strip without moving its four buttons
+ * would have quietly deleted the ability to share to Facebook, X, LinkedIn or Reddit.
+ * Nothing about what a reader can DO changed here; only where they reach it.
+ *
+ * ★ THE EXTERNAL FRONTENDS ARE A GRID OF CHIPS, NOT A BULLET LIST. Six links that all do
+ * the same kind of thing are a set, and a set reads as a set. They also stop being red:
+ * red is Lumen's action colour, and "open this post on waivio" is not an action worth
+ * shouting.
+ */
 export function SharePost({ children, path, title }: { children: ReactNode; path: string; title: string }) {
   const { t } = useTranslation('common_blog');
+
+  /**
+   * The other Hive frontends, and the block explorers. One shape for both, because to a
+   * reader they are the same offer: "see this somewhere else".
+   */
+  const ALTERNATIVES = [
+    { host: 'peakd.com', testId: 'share-dialog-peakd' },
+    { host: 'ecency.com', testId: 'share-dialog-ecency' },
+    { host: 'waivio.com', testId: 'share-dialog-waivio' }
+  ];
+  const EXPLORERS = [
+    { host: 'hiveblocks.com' },
+    { host: 'hive.ausbit.dev' },
+    { host: 'hiveblockexplorer.com' }
+  ];
+
+  const chip =
+    'flex items-center justify-between gap-2 rounded-control border border-line-9 px-3 py-2 font-sans text-[13px] leading-[20px] text-ink-8 transition-colors hover:border-line-brand-10 hover:bg-surface-brand-5 hover:text-ink-brand-6';
+
   return (
     <Dialog>
       {/* ★ KEYBOARD-UNREACHABLE TRIGGER FIX (2026-08-13, O5 a11y build map item 2).
@@ -22,12 +69,14 @@ export function SharePost({ children, path, title }: { children: ReactNode; path
           {children}
         </button>
       </DialogTrigger>
-      <DialogContent className="flex flex-col gap-4 sm:max-w-[600px]" data-testid="share-post-dialog">
+
+      <DialogContent className="flex flex-col gap-6 sm:max-w-[560px]" data-testid="share-post-dialog">
         <DialogHeader>
-          <DialogTitle className="border-b-2 pb-2 text-3xl">
+          <DialogTitle className="font-serif text-2xl font-semibold text-ink-2">
             {t('post_content.footer.share_form.share_this_link')}
           </DialogTitle>
         </DialogHeader>
+
         <div className="flex w-full flex-col gap-4">
           <ClipboardCopy
             copyText={blogUrl(path)}
@@ -40,57 +89,54 @@ export function SharePost({ children, path, title }: { children: ReactNode; path
             testId="share-dialog-copy-markdown"
           />
         </div>
-        <div>
-          <div className="flex flex-col gap-1 text-sm">
-            <DialogTitle className="my-2">
-              {t('post_content.footer.share_form.open_in_alternative')}
-            </DialogTitle>
-            <Link
-              target="_blank"
-              className="flex gap-2"
-              href={`https://peakd.com${path}`}
-              data-testid="share-dialog-peakd"
-            >
-              {'•'}
-              <span className="text-destructive">https://peakd.com</span>
-              <Icons.forward />
-            </Link>
-            <Link
-              target="_blank"
-              href={`https://ecency.com${path}`}
-              className="flex gap-2"
-              data-testid="share-dialog-ecency"
-            >
-              {'•'}
-              <span className="text-destructive">https://ecency.com</span>
-              <Icons.forward />
-            </Link>
-            <Link
-              target="_blank"
-              href={`https://waivio.com${path}`}
-              className="flex gap-2"
-              data-testid="share-dialog-waivio"
-            >
-              {'•'} <span className="text-destructive">https://waivio.com </span>
-              <Icons.forward />
-            </Link>
+
+        {/* The four networks, moved here from the action row's bordered icon strip. */}
+        <div className="flex flex-col gap-2">
+          <h3 className="font-sans text-[13px] leading-[20px] font-semibold uppercase tracking-wide text-ink-14">
+            {t('post_content.footer.share_form.share_this_link')}
+          </h3>
+          <div
+            className="flex items-center gap-1 rounded-control border border-line-9 px-2 py-1.5"
+            data-testid="share-dialog-networks"
+          >
+            <FacebookShare url={path} />
+            <TwitterShare title={title} url={path} />
+            <LinkedInShare title={title} url={path} />
+            <RedditShare title={title} url={path} />
           </div>
         </div>
-        <div>
-          <div className="flex flex-col gap-1 text-sm">
-            <DialogTitle className="my-2">{t('post_content.footer.share_form.open_in')}</DialogTitle>
-            <Link target="_blank" className="flex gap-2" href={`https://hiveblocks.com${path}`}>
-              {'•'} <span className="text-destructive">https://hiveblocks.com </span>
-              <Icons.forward />
-            </Link>
-            <Link target="_blank" href={`https://hive.ausbit.dev${path}`} className="flex gap-2">
-              {'•'} <span className="text-destructive">https://hive.ausbit.dev </span>
-              <Icons.forward />
-            </Link>
-            <Link target="_blank" href={`https://hiveblockexplorer.com${path}`} className="flex gap-2">
-              {'•'} <span className="text-destructive">https://hiveblockexplorer.com </span>
-              <Icons.forward />
-            </Link>
+
+        <div className="flex flex-col gap-2">
+          <h3 className="font-sans text-[13px] leading-[20px] font-semibold uppercase tracking-wide text-ink-14">
+            {t('post_content.footer.share_form.open_in_alternative')}
+          </h3>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            {ALTERNATIVES.map((a) => (
+              <Link
+                key={a.host}
+                target="_blank"
+                href={`https://${a.host}${path}`}
+                className={chip}
+                data-testid={a.testId}
+              >
+                <span className="truncate">{a.host}</span>
+                <Icons.forward className="h-3.5 w-3.5 shrink-0" />
+              </Link>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <h3 className="font-sans text-[13px] leading-[20px] font-semibold uppercase tracking-wide text-ink-14">
+            {t('post_content.footer.share_form.open_in')}
+          </h3>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            {EXPLORERS.map((e) => (
+              <Link key={e.host} target="_blank" href={`https://${e.host}${path}`} className={chip}>
+                <span className="truncate">{e.host}</span>
+                <Icons.forward className="h-3.5 w-3.5 shrink-0" />
+              </Link>
+            ))}
           </div>
         </div>
       </DialogContent>

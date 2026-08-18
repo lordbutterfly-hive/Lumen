@@ -3,6 +3,7 @@ import { getLogger } from '@ui/lib/logging';
 import { getClientIp } from '@/blog/lib/lite/http/ip';
 import { enforceHivesenseRate } from '@/blog/lib/lite/antispam/rate-limit';
 import { cachedRead } from '@/blog/lib/server-read-cache';
+import { withRetry } from '@transaction/lib/retry';
 
 const logger = getLogger('app');
 
@@ -332,8 +333,17 @@ async function proxy(
     // answering "yes". The reasoning above about caching a negative still holds
     // and is what keeps a node OUTAGE from costing 2.5s per post page, but the
     // "which is the case here" aside no longer describes the live node.)
+    // ★ A6 retry rollout (2026-08-18): idempotent read, wired into this one shared
+    // primitive rather than at each of its three call sites below — so the
+    // `status` probe, `similar`, and the direct `search`/`byIds` path all benefit
+    // without risking a doubled retry anywhere. `init.signal`'s own timeout
+    // (2.5s for `status`, 10s otherwise) already bounds a genuine hang below the
+    // default 2.5s retry budget, so a full timeout still costs one attempt, not
+    // three — only a FAST transient failure (reset, DNS) gets a second try.
     const readUpstream = async (): Promise<{ status: number; text: string }> => {
-      const res = await fetch(upstreamUrl.toString(), init);
+      const res = await withRetry(() => fetch(upstreamUrl.toString(), init), {
+        label: `hivesense.${operation}`
+      });
       return { status: res.status, text: await res.text() };
     };
     const { status, text } = isStatusProbe

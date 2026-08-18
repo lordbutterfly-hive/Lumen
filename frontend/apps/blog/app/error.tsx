@@ -18,9 +18,9 @@ const COPY = {
 };
 
 const PRIMARY =
-  'inline-flex h-10 items-center justify-center rounded-[14px] bg-surface-brand-12 px-5 font-sans text-[14px] leading-[22px] font-semibold text-ink-27 transition-colors hover:bg-surface-brand-15';
+  'inline-flex h-10 items-center justify-center rounded-card bg-surface-brand-12 px-5 font-sans text-[14px] leading-[22px] font-semibold text-ink-27 transition-colors hover:bg-surface-brand-15';
 const SECONDARY =
-  'inline-flex h-10 items-center justify-center rounded-[14px] border border-line-11 px-5 font-sans text-[14px] leading-[22px] font-semibold text-ink-7 transition-colors hover:bg-surface-16';
+  'inline-flex h-10 items-center justify-center rounded-card border border-line-11 px-5 font-sans text-[14px] leading-[22px] font-semibold text-ink-7 transition-colors hover:bg-surface-16';
 
 /**
  * ★★★ ROOT ERROR BOUNDARY, LUMEN-STYLED, CHUNK-LOAD-AWARE (2026-08-11).

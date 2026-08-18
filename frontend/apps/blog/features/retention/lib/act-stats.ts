@@ -291,7 +291,10 @@ function seedOf(s: string): number {
  * @param historyComplete the walk has reached account creation, so `all` is a total
  */
 export function pickWordWindow(
-  words: Partial<Record<WordWindow, number>> | undefined,
+  // `monthPrior` rides along on the same object but is NOT a selectable window — it exists
+  // only to give `month` a direction (`wordsTrend`). Widening the parameter rather than
+  // adding it to `WordWindow` keeps it unpickable by construction.
+  words: (Partial<Record<WordWindow, number>> & { monthPrior?: number }) | undefined,
   todayUTC: string,
   seed: string,
   completeFrom = '',
@@ -334,4 +337,22 @@ export function windowIsFloor(
   const startMs = Date.parse(`${todayUTC}T00:00:00Z`) - (days - 1) * 86_400_000;
   if (!Number.isFinite(startMs)) return true;
   return completeFrom > new Date(startMs).toISOString().slice(0, 10);
+}
+
+/**
+ * The month-on-month direction of somebody's writing, or `null` when none may be claimed.
+ *
+ * ★ A MISSING OR ZERO PRIOR MONTH IS NOT A TREND — the same guard, for the same reason, as
+ * `reachTrend`: the store only holds what has been walked, so "0 last month" means EITHER
+ * they wrote nothing OR we had not read that far back yet, and those license opposite
+ * claims. A flat month is silent too; "the same as last month" is copy to report an
+ * absence of news.
+ */
+export const MIN_WORD_TREND_PCT = 10;
+
+export function wordsTrend(month: number, monthPrior: number): { up: boolean; pct: number } | null {
+  if (!(monthPrior > 0) || !(month > 0)) return null;
+  const pct = Math.round(((month - monthPrior) / monthPrior) * 100);
+  if (Math.abs(pct) < MIN_WORD_TREND_PCT) return null;
+  return { up: pct > 0, pct: Math.abs(pct) };
 }

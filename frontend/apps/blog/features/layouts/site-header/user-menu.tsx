@@ -37,7 +37,7 @@ const LABELS = {
 };
 
 const ROW_CLASS =
-  'flex cursor-pointer items-center justify-between gap-2.5 rounded-[11px] px-3 py-2.5 font-sans text-[14px] leading-[22px] font-medium text-ink-7 transition-colors hover:bg-surface-20 hover:text-ink-2 focus:bg-surface-20 focus:text-ink-2';
+  'flex cursor-pointer items-center justify-between gap-2.5 rounded-control px-3 py-2.5 font-sans text-[14px] leading-[22px] font-medium text-ink-7 transition-colors hover:bg-surface-20 hover:text-ink-2 focus:bg-surface-20 focus:text-ink-2';
 // ★ Contrast fix (2026-08-13, O5 a11y build map item 4). Was `#a29a92` at
 // 2.77:1 on white/against this row's `#f6f5f2` hover background — both fail
 // the 4.5:1 floor for real informational text ("N held", "◈ @handle"). This

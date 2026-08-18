@@ -37,11 +37,11 @@ function SidebarSkeleton() {
  *  so the card's size/border/gradient don't change when the real one lands. */
 function MastheadSkeleton() {
   return (
-    <header className="relative mb-7 overflow-hidden rounded-[20px] border border-line-warn-3 border-l-[3px] border-l-line-brand-10 bg-[radial-gradient(125%_130%_at_0%_0%,rgb(var(--masthead-1))_0%,rgb(var(--masthead-2))_30%,rgb(var(--masthead-3))_58%,rgb(var(--masthead-4))_85%)] px-7 pb-5 pt-7">
+    <header className="relative mb-7 overflow-hidden rounded-panel border border-line-warn-3 border-l-[3px] border-l-line-brand-10 bg-[radial-gradient(125%_130%_at_0%_0%,rgb(var(--masthead-1))_0%,rgb(var(--masthead-2))_30%,rgb(var(--masthead-3))_58%,rgb(var(--masthead-4))_85%)] px-7 pb-5 pt-7">
       <Skeleton className="h-[38px] w-[300px]" />
       <div className="mt-3.5 flex flex-wrap items-center gap-3">
         <Skeleton className="h-4 w-[420px] max-w-full" />
-        <Skeleton className="ml-auto h-11 w-[152px] shrink-0 rounded-[11px]" />
+        <Skeleton className="ml-auto h-11 w-[152px] shrink-0 rounded-control" />
       </div>
     </header>
   );
@@ -59,21 +59,21 @@ function ToolbarSkeleton() {
       </div>
       <div className="flex items-center gap-2">
         <Skeleton className="h-4 w-14" />
-        <Skeleton className="h-9 w-32 rounded-[10px]" />
+        <Skeleton className="h-9 w-32 rounded-control" />
       </div>
     </div>
   );
 }
 
 /** Stand-in for `ProposalsRightRail`'s two cards (`ReturnThresholdCard`,
- *  `ProxyCard`) -- both share this exact `rounded-[18px] border ... p-5` shell. */
+ *  `ProxyCard`) -- both share this exact `rounded-panel border ... p-5` shell. */
 function RightRailCardSkeleton() {
   return (
-    <div className="rounded-[18px] border border-line-9 bg-surface-1 p-5">
+    <div className="rounded-panel border border-line-9 bg-surface-1 p-5">
       <Skeleton className="mb-1.5 h-[19px] w-32" />
       <Skeleton className="mb-1 h-[13px] w-full" />
       <Skeleton className="mb-3.5 h-[13px] w-4/5" />
-      <Skeleton className="h-11 w-full rounded-[11px]" />
+      <Skeleton className="h-11 w-full rounded-control" />
     </div>
   );
 }

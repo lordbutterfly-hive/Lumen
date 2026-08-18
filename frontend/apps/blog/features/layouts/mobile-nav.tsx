@@ -61,7 +61,7 @@ export default function MobileNav() {
           aria-label={t('navigation.mobile_nav.open')}
           data-testid="mobile-nav-trigger"
         >
-          <Icons.menu className="h-6 w-6" />
+          <Icons.menu className="h-6 w-6 text-ink-2" />
         </Button>
       </SheetTrigger>
 

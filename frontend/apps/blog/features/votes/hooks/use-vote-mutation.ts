@@ -1,4 +1,5 @@
 import { useRef } from 'react';
+import { haptic } from '@/blog/lib/haptics';
 import { useMutation, QueryClient, useQueryClient } from '@tanstack/react-query';
 import { TransactionBroadcastResult, transactionService } from '@transaction/index';
 import { fetchListVotesByCommentVoter } from '@/blog/lib/chain-fetch';
@@ -288,6 +289,9 @@ export function useVoteMutation() {
     },
 
     onSuccess: async (data) => {
+      // A tick in the hand the instant the vote lands. Fired on SUCCESS, never on click:
+      // buzzing "done" for a broadcast that then fails is worse than no haptic at all.
+      haptic('vote');
       const { voter, author, permlink, weight } = data;
       const isLiteVote = user.account_tier === 'lite';
       // Chain upvotes, for the act ledger. POSITIVE direction only: an undo-shaped call

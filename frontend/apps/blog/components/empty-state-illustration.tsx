@@ -84,13 +84,19 @@ export const EmptyStateIllustration: FC<{ name: EmptyIllustration; size?: number
     <svg
       viewBox={art.viewBox}
       width={size}
-      height="auto"
       role="presentation"
       aria-hidden="true"
       focusable="false"
       className={className}
       // Intrinsic viewBox above keeps the aspect ratio, so the drawing never
       // shifts the layout as the page settles.
+      //
+      // ★ HEIGHT IS SET HERE AND ONLY HERE (A2, 2026-08-18). There used to be a
+      // `height="auto"` ATTRIBUTE beside `width` above. `auto` is a CSS keyword; the SVG
+      // presentation attribute takes a <length>, so Chrome rejected the whole attribute
+      // and logged it on every page that renders an empty state. The CSS form below is
+      // the correct one and was already doing the work — the attribute contributed
+      // nothing but the error.
       style={{ width: size, height: 'auto' }}
       // eslint-disable-next-line react/no-danger -- generated house artwork from a trusted constant, never user input
       dangerouslySetInnerHTML={{ __html: art.markup }}

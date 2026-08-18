@@ -1,6 +1,7 @@
 'use client';
 
 import { MutableRefObject, RefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { haptic } from '@/blog/lib/haptics';
 import {
   MERITUM_CHARGE_MS,
   MERITUM_HEIGHT_RELEASE_MS,
@@ -230,6 +231,9 @@ export const useHoldToStrike = (options: UseHoldToStrikeOptions = {}): HoldToStr
   /** The reveal: oxblood, callback, then let the card breathe again. */
   const reveal = useCallback(() => {
     clearTimer(strikeTimer);
+    // Heavier, and it ends heavy: a creator token mints once, bound to one account,
+    // forever. The last thing the hand feels is the longest pulse.
+    haptic('strike');
     setPhaseSafe('struck');
     optsRef.current.onStruck?.();
     releaseTimer.current = setTimeout(releaseHeight, MERITUM_HEIGHT_RELEASE_MS);

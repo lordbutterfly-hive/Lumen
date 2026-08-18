@@ -33,11 +33,11 @@ export default function BucketBars({ buckets, size = 'compact' }: { buckets: Buc
             <span
               className={cn(
                 'relative flex-1 overflow-hidden rounded-md bg-surface-23',
-                full ? 'h-2' : 'h-1.5 rounded-[5px]'
+                full ? 'h-2' : 'h-1.5 rounded-control'
               )}
             >
               <span
-                className={cn('absolute inset-y-0 left-0 rounded-md', !full && 'rounded-[5px]')}
+                className={cn('absolute inset-y-0 left-0 rounded-md', !full && 'rounded-control')}
                 style={{ width: `${Math.max(bucket.oddsPct, 1.5)}%`, backgroundColor: color }}
               />
             </span>

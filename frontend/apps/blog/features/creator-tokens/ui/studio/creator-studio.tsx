@@ -23,7 +23,7 @@ const SECTIONS: { id: Section; label: string }[] = [
 const tok = (n: number) => n.toFixed(2);
 const Card: FC<{ children: React.ReactNode; className?: string }> = ({ children, className = '' }) => (
   <div
-    className={`rounded-[18px] border border-line-9 bg-surface-1 p-5 shadow-[0_1px_2px_rgba(20,18,10,0.03)] ${className}`}
+    className={`rounded-panel border border-line-9 bg-surface-1 p-5 shadow-[0_1px_2px_rgba(20,18,10,0.03)] ${className}`}
   >
     {children}
   </div>
@@ -167,7 +167,7 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
             2026-07-28): it facilitates payment and reputation, and the two
             parties arrange the work between themselves. Showing the reference is
             honest; pretending a message arrived here would not be. */}
-      <div className="mb-3 rounded-[10px] border border-line-9 bg-surface-16 px-3.5 py-3 text-[13px] leading-[20px] text-ink-8">
+      <div className="mb-3 rounded-control border border-line-9 bg-surface-16 px-3.5 py-3 text-[13px] leading-[20px] text-ink-8">
         Reference <strong className="font-mono">{ask.contentHash || '—'}</strong> · from @{ask.asker}
       </div>
       <p className="mb-3 text-[13px] leading-[20px] text-ink-10">
@@ -201,7 +201,7 @@ const AnswerModal: FC<{ ask: Ask; studio: LiveStudio; onClose: () => void }> = (
           {text.length}/{MAX_HASH_LEN}
         </span>
       </div>
-      <div className="mt-3 rounded-[10px] bg-surface-18 px-3.5 py-2.5 text-[13px] leading-[20px] text-ink-ok-2">
+      <div className="mt-3 rounded-control bg-surface-18 px-3.5 py-2.5 text-[13px] leading-[20px] text-ink-ok-2">
         This pays you <strong>{tok(ask.tokensEscrowed)} tokens</strong> and closes the job. It can’t be undone
         — and the buyer rates it afterwards.
       </div>
@@ -361,9 +361,9 @@ const NewOfferingRow: FC<{ studio: LiveStudio }> = ({ studio }) => {
             setFailure(null);
           }}
           placeholder="e.g. Review my code"
-          className="min-w-[200px] flex-1 rounded-[10px] border border-line-11 px-3 py-2 text-[14px] leading-[22px] outline-none focus:border-line-brand-10 focus:ring-1 focus:ring-line-brand-10"
+          className="min-w-[200px] flex-1 rounded-control border border-line-11 px-3 py-2 text-[14px] leading-[22px] outline-none focus:border-line-brand-10 focus:ring-1 focus:ring-line-brand-10"
         />
-        <div className="flex items-center rounded-[10px] border border-line-11 px-3 py-2 focus-within:border-line-brand-10 focus-within:ring-1 focus-within:ring-line-brand-10">
+        <div className="flex items-center rounded-control border border-line-11 px-3 py-2 focus-within:border-line-brand-10 focus-within:ring-1 focus-within:ring-line-brand-10">
           <span className="font-bold text-ink-14">$</span>
           <input
             value={price}
@@ -390,7 +390,7 @@ const NewOfferingRow: FC<{ studio: LiveStudio }> = ({ studio }) => {
             }
           }}
           disabled={!valid || studio.isBusy}
-          className="rounded-[10px] bg-surface-43 px-4 py-2 text-[13px] leading-[20px] font-semibold text-ink-27 disabled:opacity-50"
+          className="rounded-control bg-surface-43 px-4 py-2 text-[13px] leading-[20px] font-semibold text-ink-27 disabled:opacity-50"
         >
           Add
         </button>
@@ -451,7 +451,7 @@ const CreatorStudio: FC = () => {
               Both exits are real links now, matching launch-wizard.tsx:179. */}
           <a
             href="/creators/launch"
-            className="mt-6 inline-block rounded-[13px] border border-line-9 px-6 py-3 text-[15px] leading-[24px] font-bold text-ink-2 hover:bg-surface-17"
+            className="mt-6 inline-block rounded-card border border-line-9 px-6 py-3 text-[15px] leading-[24px] font-bold text-ink-2 hover:bg-surface-17"
           >
             Open the launch wizard
           </a>
@@ -479,7 +479,7 @@ const CreatorStudio: FC = () => {
           </p>
           <a
             href="/creators/launch"
-            className="mt-6 inline-block rounded-[13px] bg-surface-brand-12 px-6 py-3 text-[15px] leading-[24px] font-bold text-ink-27 hover:bg-surface-brand-17"
+            className="mt-6 inline-block rounded-card bg-surface-brand-12 px-6 py-3 text-[15px] leading-[24px] font-bold text-ink-27 hover:bg-surface-brand-17"
           >
             Open the launch wizard
           </a>
@@ -493,14 +493,14 @@ const CreatorStudio: FC = () => {
   const held = market.position?.tokens ?? 0;
 
   const banner = overdue ? (
-    <div className="mb-5 flex items-center justify-between gap-3 rounded-[14px] border border-line-warn-2 bg-surface-warn-4 px-5 py-3.5">
+    <div className="mb-5 flex items-center justify-between gap-3 rounded-card border border-line-warn-2 bg-surface-warn-4 px-5 py-3.5">
       <span className="text-[14px] leading-[22px] font-semibold text-ink-warn-3">
         Your listing has lapsed — renew to stay in discovery. Answering and cashing out still work.
       </span>
       <button
         onClick={() => void runStudioAction(() => studio.renew(1), 'Renewing your listing didn’t go through.')}
         disabled={studio.isBusy}
-        className="rounded-[10px] bg-surface-warn-11 px-4 py-2 text-[13px] leading-[20px] font-semibold text-ink-27 disabled:opacity-50"
+        className="rounded-control bg-surface-warn-11 px-4 py-2 text-[13px] leading-[20px] font-semibold text-ink-27 disabled:opacity-50"
       >
         Renew ~$10
       </button>
@@ -511,7 +511,7 @@ const CreatorStudio: FC = () => {
     <TokenShell>
       <div className="pt-[26px]">
         <div className="mb-1 flex items-center gap-3">
-          <span className="h-11 w-11 rounded-[13px] bg-surface-28" />
+          <span className="h-11 w-11 rounded-card bg-surface-28" />
           <div>
             <h1 className="font-serif text-2xl font-semibold text-ink-2">Creator Studio</h1>
             <p className="text-[14px] leading-[22px] text-ink-10">Your token @{studio.creator} · your control room</p>
@@ -519,12 +519,12 @@ const CreatorStudio: FC = () => {
         </div>
 
         {/* Section tabs */}
-        <div className="mb-5 mt-4 flex flex-wrap gap-1.5 rounded-[14px] border border-line-6 bg-surface-21 p-[5px]">
+        <div className="mb-5 mt-4 flex flex-wrap gap-1.5 rounded-card border border-line-6 bg-surface-21 p-[5px]">
           {SECTIONS.map((s) => (
             <button
               key={s.id}
               onClick={() => setSection(s.id)}
-              className={`rounded-[9px] px-4 py-2 font-sans text-[14px] leading-[22px] font-semibold transition-colors ${
+              className={`rounded-control px-4 py-2 font-sans text-[14px] leading-[22px] font-semibold transition-colors ${
                 section === s.id ? 'bg-surface-1 text-ink-2 shadow-sm' : 'text-ink-10 hover:text-ink-2'
               }`}
             >
@@ -540,7 +540,7 @@ const CreatorStudio: FC = () => {
 
         {banner}
         {actionFailure ? (
-          <div className="mb-5 rounded-[14px] border border-line-brand-3 bg-surface-brand-7 px-5 py-3.5 text-[14px] leading-[22px] font-semibold text-ink-brand-6">
+          <div className="mb-5 rounded-card border border-line-brand-3 bg-surface-brand-7 px-5 py-3.5 text-[14px] leading-[22px] font-semibold text-ink-brand-6">
             {actionFailure}
           </div>
         ) : null}
@@ -635,7 +635,7 @@ const CreatorStudio: FC = () => {
                   <div className="mt-3">
                     <button
                       onClick={() => setAnswering(rawInbox[i])}
-                      className="rounded-[10px] bg-surface-brand-12 px-4 py-2 text-[13px] leading-[20px] font-semibold text-ink-27 hover:bg-surface-brand-17"
+                      className="rounded-control bg-surface-brand-12 px-4 py-2 text-[13px] leading-[20px] font-semibold text-ink-27 hover:bg-surface-brand-17"
                     >
                       Answer or decline
                     </button>
@@ -675,7 +675,7 @@ const CreatorStudio: FC = () => {
                       : 'Used for “Ask a question”, alongside the named services below.'}
                 </div>
               </div>
-              <div className="flex flex-shrink-0 items-center rounded-[10px] border border-line-11 px-3 py-2 focus-within:border-line-brand-10 focus-within:ring-1 focus-within:ring-line-brand-10">
+              <div className="flex flex-shrink-0 items-center rounded-control border border-line-11 px-3 py-2 focus-within:border-line-brand-10 focus-within:ring-1 focus-within:ring-line-brand-10">
                 <span className="font-bold text-ink-14">$</span>
                 <PriceInput
                   value={market.basePriceUsd}
@@ -699,7 +699,7 @@ const CreatorStudio: FC = () => {
                   <button
                     type="button"
                     onClick={() => studio.retry()}
-                    className="mt-2 rounded-[10px] border border-line-12 bg-surface-1 px-3 py-1.5 text-[13px] leading-[20px] font-semibold text-ink-2 hover:border-line-28"
+                    className="mt-2 rounded-control border border-line-12 bg-surface-1 px-3 py-1.5 text-[13px] leading-[20px] font-semibold text-ink-2 hover:border-line-28"
                   >
                     Try again
                   </button>
@@ -728,7 +728,7 @@ const CreatorStudio: FC = () => {
                       </div>
                     </div>
                     <div className="flex flex-shrink-0 items-center gap-2">
-                      <div className="flex items-center rounded-[10px] border border-line-11 px-3 py-2 focus-within:border-line-brand-10 focus-within:ring-1 focus-within:ring-line-brand-10">
+                      <div className="flex items-center rounded-control border border-line-11 px-3 py-2 focus-within:border-line-brand-10 focus-within:ring-1 focus-within:ring-line-brand-10">
                         <span className="font-bold text-ink-14">$</span>
                         <PriceInput
                           value={o.priceHbd}
@@ -747,7 +747,7 @@ const CreatorStudio: FC = () => {
                         }
                         disabled={studio.isBusy}
                         title="Delist this service. Asks already made against it are unaffected."
-                        className="rounded-[10px] border border-line-11 px-3 py-2 text-[13px] leading-[20px] font-semibold text-ink-10 hover:bg-surface-16 disabled:opacity-50"
+                        className="rounded-control border border-line-11 px-3 py-2 text-[13px] leading-[20px] font-semibold text-ink-10 hover:bg-surface-16 disabled:opacity-50"
                       >
                         Remove
                       </button>
@@ -788,7 +788,7 @@ const CreatorStudio: FC = () => {
                 value={capInput}
                 onChange={(e) => setCapInput(e.target.value)}
                 inputMode="numeric"
-                className="w-[110px] rounded-[10px] border border-line-11 px-3 py-2 text-[14px] leading-[22px] font-semibold tabular-nums outline-none focus:border-line-brand-10 focus:ring-1 focus:ring-line-brand-10"
+                className="w-[110px] rounded-control border border-line-11 px-3 py-2 text-[14px] leading-[22px] font-semibold tabular-nums outline-none focus:border-line-brand-10 focus:ring-1 focus:ring-line-brand-10"
               />
               <button
                 onClick={async () => {
@@ -836,7 +836,7 @@ const CreatorStudio: FC = () => {
                     );
                   }
                 }}
-                className="rounded-[10px] bg-surface-43 px-4 py-2 text-[13px] leading-[20px] font-semibold text-ink-27"
+                className="rounded-control bg-surface-43 px-4 py-2 text-[13px] leading-[20px] font-semibold text-ink-27"
               >
                 Raise cap
               </button>
@@ -844,7 +844,7 @@ const CreatorStudio: FC = () => {
                 lower only down to {market.supply.toLocaleString('en-US')} issued
               </span>
             </div>
-            <p className="mt-4 rounded-[10px] bg-surface-16 px-3.5 py-3 text-[13px] leading-[20px] text-ink-10">
+            <p className="mt-4 rounded-control bg-surface-16 px-3.5 py-3 text-[13px] leading-[20px] text-ink-10">
               Your token’s price is set by the market — buys raise it, sells lower it. You don’t set the
               price; you set your <strong>service prices</strong> in dollars.
             </p>
@@ -861,7 +861,7 @@ const CreatorStudio: FC = () => {
             <button
               onClick={() => void runStudioAction(() => studio.renew(1), 'Renewing your listing didn’t go through.')}
               disabled={studio.isBusy}
-              className="rounded-[11px] bg-surface-brand-12 px-5 py-2.5 text-[14px] leading-[22px] font-semibold text-ink-27 hover:bg-surface-brand-17 disabled:opacity-50"
+              className="rounded-control bg-surface-brand-12 px-5 py-2.5 text-[14px] leading-[22px] font-semibold text-ink-27 hover:bg-surface-brand-17 disabled:opacity-50"
             >
               Renew ~$10
             </button>
@@ -879,7 +879,7 @@ const CreatorStudio: FC = () => {
               ) : (
                 <button
                   onClick={() => setRetireOpen(true)}
-                  className="rounded-[10px] border border-line-brand-1 px-4 py-2 text-[13px] leading-[20px] font-semibold text-ink-brand-6 hover:bg-surface-brand-3"
+                  className="rounded-control border border-line-brand-1 px-4 py-2 text-[13px] leading-[20px] font-semibold text-ink-brand-6 hover:bg-surface-brand-3"
                 >
                   End this token
                 </button>
@@ -911,7 +911,7 @@ const CreatorStudio: FC = () => {
                 {tradeFeeClaimableUsd === null ? (
                   <button
                     onClick={() => studio.retry()}
-                    className="rounded-[11px] border border-line-12 bg-surface-1 px-5 py-2.5 text-[14px] leading-[22px] font-semibold text-ink-2 hover:border-line-28"
+                    className="rounded-control border border-line-12 bg-surface-1 px-5 py-2.5 text-[14px] leading-[22px] font-semibold text-ink-2 hover:border-line-28"
                   >
                     Try again
                   </button>
@@ -924,7 +924,7 @@ const CreatorStudio: FC = () => {
                       )
                     }
                     disabled={tradeFeeClaimableUsd <= 0 || studio.isBusy}
-                    className="rounded-[11px] bg-surface-ok-7 px-5 py-2.5 text-[14px] leading-[22px] font-semibold text-ink-27 hover:bg-surface-ok-8 disabled:opacity-50"
+                    className="rounded-control bg-surface-ok-7 px-5 py-2.5 text-[14px] leading-[22px] font-semibold text-ink-27 hover:bg-surface-ok-8 disabled:opacity-50"
                   >
                     {tradeFeeClaimableUsd <= 0 ? 'Claimed' : 'Claim'}
                   </button>
@@ -962,7 +962,7 @@ const CreatorStudio: FC = () => {
                   }}
                   placeholder="tokens"
                   inputMode="decimal"
-                  className="w-[110px] rounded-[10px] border border-line-11 px-3 py-2 text-[14px] leading-[22px] font-semibold tabular-nums outline-none focus:border-line-brand-10 focus:ring-1 focus:ring-line-brand-10"
+                  className="w-[110px] rounded-control border border-line-11 px-3 py-2 text-[14px] leading-[22px] font-semibold tabular-nums outline-none focus:border-line-brand-10 focus:ring-1 focus:ring-line-brand-10"
                 />
                 <button
                   onClick={async () => {
@@ -977,7 +977,7 @@ const CreatorStudio: FC = () => {
                       setSellFailure(writeFailureMessage(err, 'That sell didn’t go through.'));
                     }
                   }}
-                  className="rounded-[10px] bg-surface-43 px-4 py-2 text-[13px] leading-[20px] font-semibold text-ink-27"
+                  className="rounded-control bg-surface-43 px-4 py-2 text-[13px] leading-[20px] font-semibold text-ink-27"
                 >
                   Sell
                 </button>

@@ -23,6 +23,39 @@ import {
 
 const logger = getLogger('app');
 
+/**
+ * ════ WHY THIS ROUTE HAS NO `loading.tsx` ════
+ *
+ * ★★★ IT HAD ONE, AND IT WAS THE POST PAGE'S LAYOUT SHIFT.
+ *
+ * A route-level `loading.tsx` is a Suspense boundary around the WHOLE segment. Next
+ * streams the fallback first and the real content afterwards, into a container that stays
+ * hidden until React's bootstrap reveals it. Measured on this route, warm:
+ *
+ *     JS off   the article IS in the HTML - `h1` present, body present - but visible
+ *              text is 25 characters ("Loading post") and the document is 900px tall.
+ *     JS on    content revealed at ~580ms, document 5974px, CLS 0.326.
+ *
+ * So the post body was always server-rendered. It was just never VISIBLE until
+ * JavaScript ran, and the reveal swapped a 540px loader for 5974px of article. That
+ * single swap is the whole of this page's layout shift, and it is what "post pages jump
+ * thousands of pixels mid-read" always meant.
+ *
+ * ★ IT ALSO MEANT THE ARTICLE WAS INVISIBLE TO ANYTHING THAT DOES NOT RUN SCRIPTS.
+ * The markup was there, so a naive "is it in the HTML?" check passed, which is why this
+ * survived: the page looks server-rendered to curl and is blank to a reader without JS.
+ *
+ * ★ THE COST, STATED HONESTLY. Without a fallback this segment cannot stream: Next holds
+ * the response until the awaits below resolve, so TTFB becomes the data-fetch time rather
+ * than instant-loader-then-content. Warm that is ~140ms. Cold it is bounded by the
+ * slowest call in the `Promise.allSettled` below. That is the trade being made here:
+ * a slightly later first byte in exchange for a first paint that is the actual article,
+ * for every reader and every crawler.
+ *
+ * If a loader is ever wanted back, it must NOT be a route-level `loading.tsx` - it has to
+ * be a `<Suspense>` around the COMMENTS only, so the article never sits behind it.
+ */
+
 const PostPage = async ({
   params: { param, p2, permlink },
   searchParams

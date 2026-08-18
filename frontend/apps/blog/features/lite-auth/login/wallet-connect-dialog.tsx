@@ -150,7 +150,7 @@ const WalletConnectDialog: FC<Props> = ({ chain, onClose, onAuthenticated, onNee
       <DialogContentBare
         overlayClassName="bg-[rgba(20,18,10,0.4)] backdrop-blur-[2px]"
         wrapperClassName="p-5 py-12"
-        className="w-[420px] max-w-full rounded-[20px] bg-surface-1 p-6 shadow-[0_20px_60px_rgba(20,18,10,0.25)] focus:outline-none"
+        className="w-[420px] max-w-full rounded-panel bg-surface-1 p-6 shadow-[0_20px_60px_rgba(20,18,10,0.25)] focus:outline-none"
       >
         <DialogTitle className="sr-only">{copy.title}</DialogTitle>
         <DialogDescription className="sr-only">{copy.title}</DialogDescription>
@@ -214,7 +214,7 @@ const WalletConnectDialog: FC<Props> = ({ chain, onClose, onAuthenticated, onNee
             </div>
 
             {taproot ? (
-              <div className="mb-4 flex gap-2.5 rounded-[11px] border border-line-warn-2 bg-surface-warn-4 px-3.5 py-3">
+              <div className="mb-4 flex gap-2.5 rounded-control border border-line-warn-2 bg-surface-warn-4 px-3.5 py-3">
                 <svg
                   width="16"
                   height="16"
@@ -240,7 +240,7 @@ const WalletConnectDialog: FC<Props> = ({ chain, onClose, onAuthenticated, onNee
               <div className="rounded-xl border border-line-9 bg-surface-12 p-4">
                 <div className="mb-2 text-sm font-semibold text-ink-2">{S.signHeading}</div>
                 <p className="mb-3 text-[13px] leading-[20px] text-ink-10">{S.signHelp}</p>
-                <div className="mb-3 whitespace-pre-wrap break-all rounded-[9px] border border-line-11 bg-surface-1 px-3 py-2.5 font-mono text-[13px] leading-[20px] text-ink-2">
+                <div className="mb-3 whitespace-pre-wrap break-all rounded-control border border-line-11 bg-surface-1 px-3 py-2.5 font-mono text-[13px] leading-[20px] text-ink-2">
                   {challenge.message}
                 </div>
                 <textarea
@@ -248,7 +248,7 @@ const WalletConnectDialog: FC<Props> = ({ chain, onClose, onAuthenticated, onNee
                   onChange={(e) => setSignature(e.target.value)}
                   placeholder={S.sigPlaceholder}
                   rows={3}
-                  className="w-full resize-none rounded-[9px] border border-line-11 bg-surface-1 px-3 py-2.5 font-mono text-[12px] text-ink-2 outline-none placeholder:text-ink-14 focus-visible:outline-2 focus-visible:outline-line-brand-10"
+                  className="w-full resize-none rounded-control border border-line-11 bg-surface-1 px-3 py-2.5 font-mono text-[12px] text-ink-2 outline-none placeholder:text-ink-14 focus-visible:outline-2 focus-visible:outline-line-brand-10"
                 />
                 <button
                   onClick={verifyManual}

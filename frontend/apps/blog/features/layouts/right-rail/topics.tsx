@@ -198,7 +198,11 @@ const Topics = () => {
 
   return (
     <section data-testid="right-rail-topics">
-      <h3 className="mb-[14px] text-[15px] leading-[24px] font-bold text-ink-2">{t('right_rail.topics.heading')}</h3>
+      {/* ★ h2, NOT h3 (A8, 2026-08-18). This sits directly under the page's h1, so h3 skipped
+      a level — a screen reader announcing "heading level 3" after "heading level 1"
+      tells the listener a whole section is missing. Level is structure; size is the
+      class list, and the class list is unchanged. */}
+      <h2 className="mb-[14px] text-[15px] leading-[24px] font-bold text-ink-2">{t('right_rail.topics.heading')}</h2>
       {isLoading ? (
         <div className="flex flex-wrap gap-2" data-testid="right-rail-topics-loading">
           {Array.from({ length: MAX_TOPICS }).map((_, index) => (

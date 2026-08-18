@@ -20,11 +20,23 @@ const CardHeader = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDiv
 );
 CardHeader.displayName = 'CardHeader';
 
-const CardTitle = React.forwardRef<HTMLParagraphElement, React.HTMLAttributes<HTMLHeadingElement>>(
-  ({ className, ...props }, ref) => (
-    <h3 ref={ref} className={cn('text-lg font-semibold leading-none tracking-tight', className)} {...props} />
-  )
-);
+/**
+ * ★ THE LEVEL IS A PROP NOW (A8, 2026-08-18). `CardTitle` was hard-coded to `h3`, which
+ * is right in a card that sits under an h2 and wrong the moment a page puts cards
+ * directly under its h1 - `/communities` does exactly that, so its outline read h1 then
+ * h3 and skipped a level. A screen reader announcing "heading level 3" straight after
+ * "heading level 1" tells the listener a whole section is missing.
+ *
+ * Default stays `h3`, so every existing caller is byte-identical. Only a page that knows
+ * its own nesting passes something else. Level is structure; size is the class list, and
+ * the class list does not change with the level.
+ */
+const CardTitle = React.forwardRef<
+  HTMLHeadingElement,
+  React.HTMLAttributes<HTMLHeadingElement> & { as?: 'h2' | 'h3' | 'h4' }
+>(({ className, as: Tag = 'h3', ...props }, ref) => (
+  <Tag ref={ref} className={cn('text-lg font-semibold leading-none tracking-tight', className)} {...props} />
+));
 CardTitle.displayName = 'CardTitle';
 
 const CardDescription = React.forwardRef<HTMLParagraphElement, React.HTMLAttributes<HTMLParagraphElement>>(

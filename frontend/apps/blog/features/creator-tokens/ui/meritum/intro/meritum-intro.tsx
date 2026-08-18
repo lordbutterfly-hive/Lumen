@@ -144,7 +144,7 @@ export default function MeritumIntro() {
             treatment. */}
         <Link
           href="/creators/launch"
-          className="mt-[34px] inline-flex h-16 items-center gap-3 whitespace-nowrap rounded-[14px] bg-meritum-surface-brand px-10 text-18 font-bold text-meritum-ink-on-brand hover:bg-meritum-surface-brand-hover"
+          className="mt-[34px] inline-flex h-16 items-center gap-3 whitespace-nowrap rounded-card bg-meritum-surface-brand px-10 text-18 font-bold text-meritum-ink-on-brand hover:bg-meritum-surface-brand-hover"
         >
           {t('meritum.intro.cta')}
           <ArrowIcon />

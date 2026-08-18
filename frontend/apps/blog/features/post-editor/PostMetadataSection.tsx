@@ -43,7 +43,7 @@ export function PostMetadataSection({
   const summaryCheck = validateSummaryInput(watchedValues.postSummary, t);
 
   return (
-    <div className="flex flex-col gap-4 rounded-[14px] border border-[#ebebeb] bg-white p-4">
+    <div className="flex flex-col gap-4 rounded-card border border-[#ebebeb] bg-white p-4">
       {/* ★ ONE SECTION-LABEL TREATMENT, NOT A FIFTH ONE (2026-08-10, C-14).
           "METADATA" and "PUBLISHING" were 12px/500 uppercase at 0.6px tracking
           in slate — a heading style that appears nowhere else in Lumen. These

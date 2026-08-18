@@ -103,7 +103,7 @@ export default function ProposalSupportFooter({
        */
       aria-label={canRemoveOnHover ? t('proposals.card.remove_vote_aria') : undefined}
       className={cn(
-        'group rounded-[10px] px-5 py-2.5 font-sans text-[13px] leading-[20px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60',
+        'group rounded-control px-5 py-2.5 font-sans text-[13px] leading-[20px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60',
         isSupported
           ? 'border border-line-11 bg-surface-1 text-ink-7 hover:border-line-brand-10 hover:bg-surface-brand-1 hover:text-ink-brand-6 focus-visible:border-line-brand-10 focus-visible:bg-surface-brand-1 focus-visible:text-ink-brand-6'
           : 'border border-line-11 bg-surface-1 text-ink-7 hover:bg-surface-16'

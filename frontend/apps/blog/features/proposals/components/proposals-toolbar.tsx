@@ -53,7 +53,7 @@ export default function ProposalsToolbar({ tab, onTabChange, sort, onSortChange 
               `aria-labelledby` wires that same text in for the accessibility tree
               instead of duplicating it. */}
           <SelectTrigger
-            className="h-auto w-auto gap-1.5 rounded-[10px] border-line-11 px-3.5 py-2 font-sans text-[13px] leading-[20px] font-semibold text-ink-7"
+            className="h-auto w-auto gap-1.5 rounded-control border-line-11 px-3.5 py-2 font-sans text-[13px] leading-[20px] font-semibold text-ink-7"
             data-testid="proposals-sort-select"
             aria-labelledby="proposals-sort-label"
           >

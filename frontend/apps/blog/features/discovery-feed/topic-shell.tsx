@@ -13,6 +13,7 @@ import { filterVisiblePosts, useNsfwPreference } from '@/blog/lib/nsfw';
 import { LumenLoader } from '@hive/ui';
 import { useTranslation } from '@/blog/i18n/client';
 import { Entry } from '@hive/common-hiveio-packages/wax';
+import { StreakCardNarrow } from '@/blog/features/retention/components/streak-card';
 
 /**
  * A TOPIC IS THE FEED, FILTERED — not a different, older-looking page.
@@ -163,6 +164,7 @@ export default function TopicShell({ tag }: { tag: string }) {
       </aside>
 
       <main className="min-w-0">
+        <StreakCardNarrow />
         {/* Masthead. Deliberately the SAME vocabulary as the rest of Lumen —
             Lora display, the warm radial wash the login card uses, the single
             #c0392b accent — because the whole point of this page is that a topic
@@ -210,7 +212,7 @@ export default function TopicShell({ tag }: { tag: string }) {
           // could not serve this properly, so this page says that and offers a
           // retry — it does NOT assert "no posts carry this tag", which is a
           // statement about the topic that we have no evidence for.
-          <div className="rounded-[20px] border border-dashed border-[#e6e0da] bg-[#fdfcfb] px-8 py-14 text-center">
+          <div className="rounded-panel border border-dashed border-[#e6e0da] bg-[#fdfcfb] px-8 py-14 text-center">
             <p className="mb-1 font-serif text-[20px] leading-[30px] font-semibold text-[#161511]">
               {t('topic_page.degraded_state.title')}
             </p>
@@ -237,14 +239,14 @@ export default function TopicShell({ tag }: { tag: string }) {
               // silently restyled this button. globals.css annotates each brand
               // token with the literal it was generated from, so this is a
               // lookup, not a judgement call.
-              className="inline-block rounded-[13px] bg-surface-brand-12 px-5 py-2.5 text-[14px] leading-[22px] font-bold text-white hover:bg-surface-brand-17"
+              className="inline-block rounded-card bg-surface-brand-12 px-5 py-2.5 text-[14px] leading-[22px] font-bold text-white hover:bg-surface-brand-17"
             >
               {t('topic_page.degraded_state.retry')}
             </button>
           </div>
         ) : shown.length === 0 ? (
           // Never a bare dead end: an empty topic still offers a way onward.
-          <div className="rounded-[20px] border border-dashed border-[#e6e0da] bg-[#fdfcfb] px-8 py-14 text-center">
+          <div className="rounded-panel border border-dashed border-[#e6e0da] bg-[#fdfcfb] px-8 py-14 text-center">
             <p className="mb-1 font-serif text-[20px] leading-[30px] font-semibold text-[#161511]">
               {t('topic_page.empty_state.title')}
             </p>
@@ -258,7 +260,7 @@ export default function TopicShell({ tag }: { tag: string }) {
             </p>
             <a
               href="/"
-              className="inline-block rounded-[13px] bg-surface-brand-12 px-5 py-2.5 text-[14px] leading-[22px] font-bold text-white hover:bg-surface-brand-17"
+              className="inline-block rounded-card bg-surface-brand-12 px-5 py-2.5 text-[14px] leading-[22px] font-bold text-white hover:bg-surface-brand-17"
             >
               {t('topic_page.empty_state.back_to_feed')}
             </a>

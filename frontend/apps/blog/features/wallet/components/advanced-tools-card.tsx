@@ -9,12 +9,12 @@ import ConvertDialog from './dialogs/convert-dialog';
 import RecurringTransferDialog from './dialogs/recurring-transfer-dialog';
 import ClaimAccountDialog from './dialogs/claim-account-dialog';
 
-const CARD_CLASS = 'rounded-[18px] border border-line-9 bg-surface-1 p-5';
-// W-3: was rounded-[11px]. Rows are 14px.
+const CARD_CLASS = 'rounded-panel border border-line-9 bg-surface-1 p-5';
+// W-3: was rounded-control. Rows are 14px.
 const ROW_CLASS =
-  'flex w-full items-center gap-[11px] rounded-[14px] px-2 py-2.5 text-left text-ink-4 transition-colors hover:bg-surface-16';
+  'flex w-full items-center gap-[11px] rounded-card px-2 py-2.5 text-left text-ink-4 transition-colors hover:bg-surface-16';
 const ICON_WRAP_CLASS =
-  'flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[9px] bg-surface-23 text-ink-8';
+  'flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-control bg-surface-23 text-ink-8';
 
 function RowLabel({ label, sub }: { label: string; sub: string }) {
   return (

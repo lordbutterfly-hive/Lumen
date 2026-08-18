@@ -75,8 +75,10 @@ import {
   countWords,
   longestRun,
   pagesFromWords,
+  MIN_WORD_TREND_PCT,
   pickWordWindow,
-  windowIsFloor
+  windowIsFloor,
+  wordsTrend
 } from '../act-stats';
 import {
   engagementCounts,
@@ -816,7 +818,7 @@ section('11b. the lite activity arm reads the activity window, not the presence 
     actDaysUTC: [],
     activeDaysInWindow,
     activeDaysInActivityWindow,
-    wordsWritten: { day: 0, week: 0, month: 0, year: 0, all: 0 },
+    wordsWritten: { day: 0, week: 0, month: 0, monthPrior: 0, year: 0, all: 0 },
     wordsCapped: false,
     vouchedGivers: 0,
     unknownGivers: 0,
@@ -967,7 +969,7 @@ check('a 100-page book is 25,000 words at the stated divisor', WORDS_PER_PAGE * 
 section('13b2. the word count rotates its window');
 
 {
-  const W = { day: 400, week: 2000, month: 8000, year: 60000, all: 90000 };
+  const W = { day: 400, week: 2000, month: 8000, monthPrior: 6000, year: 60000, all: 90000 };
   const pick = (today: string, seed = 'lordbutterfly') => {
     const r = pickWordWindow(W, today, seed);
     if (!r) throw new Error(`no window picked for ${today} / ${seed}`);
@@ -996,7 +998,7 @@ section('13b2. the word count rotates its window');
   // ★ ABSENT, NEVER ZERO — applied to a quantity with five candidate scopes. A quiet day
   // must widen to a window worth a sentence, not print "0 words today".
   {
-    const quiet = { day: 0, week: 0, month: 0, year: 30000, all: 45000 };
+    const quiet = { day: 0, week: 0, month: 0, monthPrior: 0, year: 30000, all: 45000 };
     const results = [];
     for (let i = 0; i < 20; i++) {
       const d = new Date(Date.UTC(2026, 7, 1) + i * 86_400_000).toISOString().slice(0, 10);
@@ -1005,7 +1007,7 @@ section('13b2. the word count rotates its window');
     check('a window under the floor is never printed', results.every((w) => w === 'year' || w === 'all'), [...new Set(results)].join(','));
   }
   check('a tiny sub-paragraph count is not worth a line at all',
-    pickWordWindow({ day: 10, week: 10, month: 10, year: 10, all: 10 }, '2026-08-18', 'x') === null);
+    pickWordWindow({ day: 10, week: 10, month: 10, monthPrior: 10, year: 10, all: 10 }, '2026-08-18', 'x') === null);
   check('no data at all produces no line', pickWordWindow(undefined, '2026-08-18', 'x') === null);
   check('the floor is a paragraph, not a word', MIN_WORDS_TO_MENTION >= 25);
 
@@ -1029,6 +1031,21 @@ section('13b2. the word count rotates its window');
   check('one day earlier than the window start is NOT', windowIsFloor('week', '2026-08-18', '2026-08-13', false));
 
 }
+
+// ─── 13b3. the two lines that MOVE ─────────────────────────────────────────
+section('13b3. word trend and percentile');
+
+check('a real rise is reported up', wordsTrend(8000, 6000)?.up === true);
+check('and carries the size', wordsTrend(8000, 6000)?.pct === 33, `${wordsTrend(8000, 6000)?.pct}`);
+check('a real fall is reported down', wordsTrend(6000, 8000)?.up === false);
+// ★ NO PRIOR MONTH IS NOT A TREND. The store only holds what has been walked, so "0 last
+// month" means EITHER they wrote nothing OR we had not read that far back — opposite
+// claims. Same guard, same reason, as reachTrend.
+check('a missing prior month claims nothing', wordsTrend(8000, 0) === null);
+check('a missing current month claims nothing', wordsTrend(0, 8000) === null);
+check('a flat month says nothing rather than "the same"', wordsTrend(8000, 8000) === null);
+check('noise under the floor is not a direction', wordsTrend(8400, 8000) === null, `${MIN_WORD_TREND_PCT}%`);
+check('the floor is a real change, not a rounding artefact', MIN_WORD_TREND_PCT >= 5);
 
 // ─── 13c. a stored DATE is the day it was stored, on any host ──────────────
 //
@@ -1355,6 +1372,11 @@ for (const w of WORD_WINDOW_ORDER) {
 }
 check('the page comparison pluralises', hasPlural('retention.stats.written_pages'));
 check('the book comparison exists', hasKey('retention.stats.written_book'));
+for (const voice of VOICES) {
+  for (const k of ['retention.stats.words_up', 'retention.stats.words_down', 'retention.stats.words_percentile']) {
+    check(`moving-line copy exists: ${voiced(k, voice)}`, hasKey(voiced(k, voice)), voiced(k, voice));
+  }
+}
 // ★ AND EVERY WINDOW SENTENCE ACTUALLY NAMES ITS PERIOD, which is the whole instruction.
 // A copy edit that dropped "today" or "in the last 7 days" would leave five strings that
 // are indistinguishable and four of them wrong.

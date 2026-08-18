@@ -36,7 +36,7 @@ export default function ComposerMediaStrip({
       {media.map((item) => (
         <div
           key={item.url}
-          className="relative h-[84px] w-[84px] overflow-hidden rounded-[10px] border border-[#ebebeb] bg-[#f4f5f7]"
+          className="relative h-[84px] w-[84px] overflow-hidden rounded-control border border-[#ebebeb] bg-[#f4f5f7]"
         >
           {/* Decorative: the note's own text is the label, and the remove button
               beside it carries the accessible name. */}
@@ -57,7 +57,7 @@ export default function ComposerMediaStrip({
       {Array.from({ length: pendingCount }).map((_, index) => (
         <div
           key={`pending-${index}`}
-          className="relative flex h-[84px] w-[84px] items-center justify-center overflow-hidden rounded-[10px] border border-dashed border-[#ebebeb] bg-white/70"
+          className="relative flex h-[84px] w-[84px] items-center justify-center overflow-hidden rounded-control border border-dashed border-[#ebebeb] bg-white/70"
           data-testid="short-form-composer-media-pending"
         >
           <CircleSpinner size={20} color="#6b7280" loading />

@@ -51,7 +51,7 @@ export default function FollowListRow({
         <UserAvatarImg
           username={username}
           pixelSize={40}
-          radiusClassName="rounded-[12px]"
+          radiusClassName="rounded-control"
           className="ring-1 ring-inset ring-[#ebebeb]"
         />
       </BasePathLink>

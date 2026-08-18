@@ -39,9 +39,9 @@ const LaunchStepAccount: FC<LaunchStepAccountProps> = ({ handle, account, isLite
     <div className="mt-step">
       <div className="mt-[26px] flex items-center gap-[15px] rounded-2xl border border-meritum-line-card bg-meritum-rail px-5 py-4">
         {account ? (
-          <UserAvatarImg username={account} apiSize="medium" pixelSize={46} radiusClassName="rounded-[13px]" />
+          <UserAvatarImg username={account} apiSize="medium" pixelSize={46} radiusClassName="rounded-card" />
         ) : (
-          <span aria-hidden="true" className="h-[46px] w-[46px] flex-shrink-0 rounded-[13px] bg-meritum-line-input" />
+          <span aria-hidden="true" className="h-[46px] w-[46px] flex-shrink-0 rounded-card bg-meritum-line-input" />
         )}
         <div className="min-w-0">
           <div className="truncate font-serif text-20 font-semibold text-meritum-ink">
@@ -94,7 +94,7 @@ const LaunchStepAccount: FC<LaunchStepAccountProps> = ({ handle, account, isLite
         <MeritumEligibilityNotice
           surface="launch"
           who={eligibility}
-          className="rounded-[14px] border border-meritum-line-card bg-meritum-paper px-4 py-3 font-serif text-14 leading-[22px] text-meritum-ink-3"
+          className="rounded-card border border-meritum-line-card bg-meritum-paper px-4 py-3 font-serif text-14 leading-[22px] text-meritum-ink-3"
         />
       </div>
 

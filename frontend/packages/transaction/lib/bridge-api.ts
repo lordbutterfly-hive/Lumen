@@ -9,6 +9,7 @@ import {
   IUnreadNotifications
 } from '@hive/common-hiveio-packages/wax';
 import { getChain } from './chain';
+import { withRetry } from './retry';
 import {
   bannedAuthorList,
   hasBannedAuthors,
@@ -45,8 +46,10 @@ export const getPostHeader = async (author: string, permlink: string): Promise<I
   });
 };
 export const getUnreadNotifications = async (account: string): Promise<IUnreadNotifications | null> => {
-  return (await getChain()).api.bridge.unread_notifications({
-    account
+  // ★ A6 retry rollout (2026-08-18): idempotent read, single caller
+  // (`/api/notifications/unread`), no existing retry anywhere in the chain.
+  return withRetry(async () => (await getChain()).api.bridge.unread_notifications({ account }), {
+    label: `unread_notifications(${account})`
   });
 };
 
@@ -55,11 +58,12 @@ export const getCommunities = async (
   query?: string | null,
   observer: string = 'hive.blog'
 ): Promise<Community[] | null> => {
-  const communities = await (await getChain()).api.bridge.list_communities({
-    query,
-    sort,
-    observer
-  });
+  // ★ A6 retry rollout (2026-08-18): idempotent list read, single caller
+  // (`/api/communities`).
+  const communities = await withRetry(
+    async () => (await getChain()).api.bridge.list_communities({ query, sort, observer }),
+    { label: `list_communities(${sort})` }
+  );
   // Same correction as `getCommunity` — this list is what feeds each card's
   // `.subscribers` figure on `/communities` (`communities-list-item.tsx`), so
   // it gets the identical fix rather than leaving that surface inconsistent
@@ -72,8 +76,11 @@ export const getCommunities = async (
 };
 
 export const getSubscriptions = async (account: string): Promise<string[][] | null> => {
-  return (await getChain()).api.bridge.list_all_subscriptions({
-    account
+  // ★ A6 retry rollout (2026-08-18): idempotent read. Used directly by
+  // `/api/subscriptions` and internally by `bannedSubscriptionCounts` below —
+  // both benefit, and neither has a competing retry of its own.
+  return withRetry(async () => (await getChain()).api.bridge.list_all_subscriptions({ account }), {
+    label: `list_all_subscriptions(${account})`
   });
 };
 
@@ -85,24 +92,30 @@ export const getPostsRanked = async (
   observer: string,
   limit: number = DATA_LIMIT
 ): Promise<Entry[] | null> => {
-  return (await getChain()).api.bridge
-    .get_ranked_posts({
-      sort,
-      start_author,
-      start_permlink,
-      limit,
-      tag,
-      observer
-    })
-    .then((resp) => {
-      // logger.info('getPostsRanked result: %o', resp);
-      if (resp) {
-        return resolvePosts(dropBannedEntries(resp), observer);
-      }
-      console.log('response', resp);
+  // ★ A6 retry rollout (2026-08-18): idempotent read. Sole caller is
+  // `/api/feed/for-you`, which tolerates a page-2+ failure by returning the
+  // short page it already has (see that route's own comment) but does not
+  // itself retry `get_ranked_posts` — so this does not double anything.
+  return withRetry(
+    async () =>
+      (await getChain()).api.bridge.get_ranked_posts({
+        sort,
+        start_author,
+        start_permlink,
+        limit,
+        tag,
+        observer
+      }),
+    { label: `get_ranked_posts(${sort},${tag})` }
+  ).then((resp) => {
+    // logger.info('getPostsRanked result: %o', resp);
+    if (resp) {
+      return resolvePosts(dropBannedEntries(resp), observer);
+    }
+    console.log('response', resp);
 
-      return resp;
-    });
+    return resp;
+  });
 };
 
 /**
@@ -189,6 +202,21 @@ const resolvePost = (post: Entry, observer: string): Promise<Entry> => {
   });
 };
 
+/**
+ * ★ DELIBERATELY NOT WRAPPED IN `withRetry` (A6 retry rollout, 2026-08-18).
+ *
+ * This is the one shared read that already has a caller-level retry:
+ * `/api/feed/for-you` fans this out to ~30 posts per page and wraps each call
+ * in its own "ONE retry, short backoff" (see that route's comment on why it
+ * stops at one — more would turn a real outage into a slow one, multiplied
+ * across ~30 concurrent posts). Adding a second, independent retry budget here
+ * would nest under that one and multiply attempts (up to 3x the caller's own
+ * 2x) across every one of those ~30 calls at once.
+ *
+ * `/api/post-status` and `/api/resolve-post/[user]/[permlink]` — the other two
+ * callers — have no such conflict and get `withRetry` wired at their own route
+ * level instead, around this same function, so they still benefit.
+ */
 export const getPost = async (
   author: string = '',
   permlink: string = '',
@@ -216,6 +244,21 @@ export const getPost = async (
     });
 };
 
+/**
+ * ★ DELIBERATELY NOT WRAPPED IN `withRetry` (A6 retry rollout, 2026-08-18).
+ *
+ * `streak/[user]/route.ts`'s `walkFeed` calls this inside its own
+ * `withTimeout(..., Math.min(CALL_TIMEOUT_MS, remaining), ...)` — a hand-rolled,
+ * shrinking wall-clock budget across up to `MAX_PAGES` sequential calls, built
+ * (per that file's own history) specifically to stop a slow/flaky node from
+ * being misread as "this account has no activity". `withTimeout` cannot cancel
+ * the underlying call, so adding a retry loop underneath would only prolong
+ * work that route has already decided to stop waiting on, not speed anything up.
+ *
+ * `/api/account-posts` and `/api/lite/feed/following` — the other two callers —
+ * have no such budget and get `withRetry` wired at their own route level
+ * instead, around this same function.
+ */
 export const getAccountPosts = async (
   sort: string,
   account: string,
@@ -251,20 +294,22 @@ export const getFollowList = async (
   observer: string,
   follow_type: FollowListType
 ): Promise<IFollowList[]> => {
-  return (await getChain()).api.bridge.get_follow_list({
-    observer,
-    follow_type
+  // ★ A6 retry rollout (2026-08-18): idempotent read, single caller (`/api/follow-list`).
+  return withRetry(async () => (await getChain()).api.bridge.get_follow_list({ observer, follow_type }), {
+    label: `get_follow_list(${observer})`
   });
 };
 
 export const getSubscribers = async (community: string): Promise<string[][] | null> => {
-  return (await getChain()).api.bridge
-    .list_subscribers({
-      community
-    })
+  // ★ A6 retry rollout (2026-08-18): idempotent read, single caller
+  // (`/api/community/subscribers`).
+  return withRetry(async () => (await getChain()).api.bridge.list_subscribers({ community }), {
+    label: `list_subscribers(${community})`
+  }).then((resp) =>
     // Rows are `[account, role, title, joined]` — a banned account is not listed
     // as a member of anything.
-    .then((resp) => (resp ? withoutBannedAuthors(resp, (row) => row[0]) : resp));
+    resp ? withoutBannedAuthors(resp, (row) => row[0]) : resp
+  );
 };
 
 export const getAccountNotifications = async (
@@ -280,9 +325,11 @@ export const getAccountNotifications = async (
   if (lastId) {
     params.last_id = lastId;
   }
-  return (await getChain()).api.bridge
-    .account_notifications(params)
-    .then((resp) => (resp ? withoutBannedAuthors(resp, notificationActor) : resp));
+  // ★ A6 retry rollout (2026-08-18): idempotent read, single caller
+  // (`/api/notifications/account`).
+  return withRetry(async () => (await getChain()).api.bridge.account_notifications(params), {
+    label: `account_notifications(${account})`
+  }).then((resp) => (resp ? withoutBannedAuthors(resp, notificationActor) : resp));
 };
 
 /**
@@ -402,7 +449,12 @@ export const getCommunity = async (
   name: string,
   observer: string | undefined = ''
 ): Promise<Community | null> => {
-  const community = await (await getChain()).api.bridge.get_community({ name, observer });
+  // ★ A6 (2026-08-18): a dropped socket to a public Hive node used to become a 502 on the
+  // reader's community page. `withRetry` retries transport faults and 5xx only — a "no
+  // such community" answer is returned, not retried. See lib/retry.ts.
+  const community = await withRetry(async () => (await getChain()).api.bridge.get_community({ name, observer }), {
+    label: `get_community(${name})`
+  });
   if (!community) return community;
   return withCorrectedSubscriberCount(community, await bannedSubscriptionCounts());
 };
@@ -436,11 +488,14 @@ export const getListCommunityRoles = async (
   const listRoles = chain.api.bridge.list_community_roles as unknown as (
     params: ListCommunityRolesParams
   ) => Promise<string[][] | null>;
-  return (
-    listRoles(limit === undefined ? { community } : { community, limit })
-      // Rows are `[account, role, title]`. A banned account keeps whatever role a
-      // community gave it on chain; Lumen simply does not show it holding one.
-      .then((resp) => (resp ? withoutBannedAuthors(resp, (row) => row[0]) : resp))
+  // ★ A6 retry rollout (2026-08-18): idempotent read, single caller
+  // (`/api/community-roles`, itself already sitting behind a `cachedRead` memo).
+  return withRetry(() => listRoles(limit === undefined ? { community } : { community, limit }), {
+    label: `list_community_roles(${community})`
+  }).then((resp) =>
+    // Rows are `[account, role, title]`. A banned account keeps whatever role a
+    // community gave it on chain; Lumen simply does not show it holding one.
+    resp ? withoutBannedAuthors(resp, (row) => row[0]) : resp
   );
 };
 
@@ -451,12 +506,12 @@ export const getDiscussion = async (
 ): Promise<Record<string, Entry> | null> => {
   // A banned author's own post has no discussion to show.
   if (isBannedAuthor(author)) return null;
-  return (await getChain()).api.bridge
-    .get_discussion({
-      author,
-      permlink,
-      observer
-    })
+  // ★ A6 retry rollout (2026-08-18): idempotent read, single caller (`/api/discussion`,
+  // which may call this twice for a Lumen permlink fallback — both calls benefit,
+  // neither has a competing retry).
+  return withRetry(async () => (await getChain()).api.bridge.get_discussion({ author, permlink, observer }), {
+    label: `get_discussion(${author}/${permlink})`
+  })
     // ★ THE COMMENT TREE IS THE POINT. A troll's replies under OTHER people's
     // posts are the surface he actually lives on — he does not need his own post
     // to reach every reader on the site, he needs yours. `withoutBannedDiscussion`

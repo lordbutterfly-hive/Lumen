@@ -281,7 +281,21 @@ const UpgradePanel: FC = () => {
    * `methods` null and the wallet path is offered, which is what every account
    * created so far has.
    */
+  /**
+   * ★ GATED ON THE SAME CONDITION THAT LETS THIS PANEL RENDER AT ALL (A3, 2026-08-18).
+   *
+   * This ran on mount for EVERYONE. `/api/lite/auth/methods` requires an active *lite*
+   * session, so a signed-out visitor and a native Hive account both got a guaranteed 401
+   * — 5 of 5, deterministic — on a page they were about to be turned away from anyway.
+   *
+   * It was harmless (the null branch already falls back to the wallet path) and that is
+   * exactly the problem: a permanent, expected 401 in the console is noise that teaches
+   * everyone reading it to ignore 401s, which is where a real auth regression goes to
+   * hide. The request is now made only when it can succeed.
+   */
+  const canFetchAuthMethods = !!user?.isLoggedIn && user.account_tier === 'lite';
   useEffect(() => {
+    if (!canFetchAuthMethods) return;
     let cancelled = false;
     (async () => {
       const list = await fetchAuthMethods();
@@ -291,7 +305,7 @@ const UpgradePanel: FC = () => {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [canFetchAuthMethods]);
 
   // The Google button captures its nonce when it initialises, so unlike the
   // wallet path it cannot be fetched at click time. Held ready while the keys
@@ -434,9 +448,17 @@ const UpgradePanel: FC = () => {
   };
 
   if (!identity.isLoggedIn) {
+    /* ★ THIS is the gate a signed-out visitor actually reaches (measured 2026-08-18, after
+       the first attempt put the heading on the `user?.isLoggedIn` gate further down and
+       /upgrade still reported h1=0). `identity` answers from the session cookie during
+       SSR, so it short-circuits before the client `user` object exists at all. Both gates
+       now carry the heading; this one is the one that renders. */
     return (
-      <div className="mx-auto max-w-[560px] p-6 text-[15px] leading-[24px] text-ink-8">
-        Sign in with your Lumen account to upgrade.
+      <div className="mx-auto max-w-[560px] p-6">
+        <h1 className="font-serif text-2xl font-semibold text-ink-2">{COPY.title}</h1>
+        <p className="mt-2 text-[15px] leading-[24px] text-ink-8">
+          Sign in with your Lumen account to upgrade.
+        </p>
       </div>
     );
   }
@@ -460,7 +482,7 @@ const UpgradePanel: FC = () => {
           <button
             type="button"
             onClick={identity.retrySession}
-            className="mt-3 rounded-[10px] border border-line-11 px-4 py-2 text-[14px] leading-[22px] font-semibold text-ink-7 hover:bg-surface-16"
+            className="mt-3 rounded-control border border-line-11 px-4 py-2 text-[14px] leading-[22px] font-semibold text-ink-7 hover:bg-surface-16"
           >
             Try again
           </button>
@@ -469,10 +491,57 @@ const UpgradePanel: FC = () => {
     }
     return <div className="mx-auto max-w-[560px] p-6 text-[15px] leading-[24px] text-ink-14">Loading…</div>;
   }
-  if (!user?.isLoggedIn || user.account_tier !== 'lite') {
+  /**
+   * ★★ TWO DIFFERENT PEOPLE WERE BEING TOLD THE SAME WRONG THING (A1, 2026-08-18).
+   *
+   * This was ONE branch: `!user?.isLoggedIn || user.account_tier !== 'lite'` → "Sign in
+   * with your Lumen account to upgrade." That is correct for a signed-OUT visitor and
+   * plainly false for the other half of the condition: a fully signed-in Hive/Keychain
+   * reader, whose session cookie the server already validated, was told to sign in. On a
+   * CONVERSION page. The only action offered was one they had already taken, so the page
+   * was a dead end that read as a bug in the login they had just completed.
+   *
+   * The two states are now answered separately, because they are opposites:
+   *   signed out            → there is nothing to upgrade YET; offer the way in.
+   *   signed in, not lite   → there is nothing to upgrade EVER; they already own a Hive
+   *                           account, which is the exact thing this page produces.
+   *
+   * ★ THE SECOND BRANCH DELIBERATELY REUSES THE `already` COPY. "You already have a Hive
+   * account" is precisely true of a native Hive user, and it is the same sentence this
+   * panel shows a lite user who finished the upgrade — the end state is identical, so
+   * saying it twice differently would be inventing a distinction the reader does not have.
+   */
+  if (!user?.isLoggedIn) {
     return (
-      <div className="mx-auto max-w-[560px] p-6 text-[15px] leading-[24px] text-ink-8">
-        Sign in with your Lumen account to upgrade.
+      <div className="mx-auto max-w-[560px] p-6">
+        {/* ★ A GATE IS STILL A PAGE, AND A PAGE NEEDS ITS NAME (A7, 2026-08-18). Measured
+              live: /security and /upgrade returned ZERO headings of any level to a
+              signed-out visitor, because the panel early-returns one sentence. A
+              document with no h1 gives a screen-reader user nothing to orient by and
+              gives a crawler nothing to index — and these two are exactly the pages
+              someone lands on cold from a link. The heading is the page's identity,
+              not a decoration on its happy path. */}
+        <h1 className="font-serif text-2xl font-semibold text-ink-2">{COPY.title}</h1>
+        <p className="mt-2 text-[15px] leading-[24px] text-ink-8">
+          Sign in with your Lumen account to upgrade.
+        </p>
+      </div>
+    );
+  }
+  if (user.account_tier !== 'lite') {
+    return (
+      <div className="mx-auto max-w-[560px] p-6" data-testid="upgrade-not-applicable">
+        <h1 className="font-serif text-2xl font-semibold text-ink-2">{COPY.alreadyTitle}</h1>
+        <p className="mt-2 text-[15px] leading-[24px] text-ink-8">
+          You are signed in as <strong>@{user.username}</strong>, which is already a full
+          Hive account. There is nothing here to upgrade.
+        </p>
+        <button
+          onClick={() => router.replace('/')}
+          className="mt-5 h-12 w-full cursor-pointer rounded-xl bg-surface-brand-12 text-[15px] leading-[24px] font-semibold text-ink-27 hover:bg-surface-brand-16"
+        >
+          {COPY.finish}
+        </button>
       </div>
     );
   }

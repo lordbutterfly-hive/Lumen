@@ -222,19 +222,22 @@ export interface AuthoredWords {
   week: number;
   /** The trailing 30 days. */
   month: number;
+  /** The 30 days BEFORE that, so the month can be reported as a direction. */
+  monthPrior: number;
   /** The trailing 365 days. */
   year: number;
   /** Everything the store holds. A floor until the walk has reached account creation. */
   all: number;
 }
 
-export const EMPTY_AUTHORED_WORDS: AuthoredWords = { day: 0, week: 0, month: 0, year: 0, all: 0 };
+export const EMPTY_AUTHORED_WORDS: AuthoredWords = { day: 0, week: 0, month: 0, monthPrior: 0, year: 0, all: 0 };
 
 export async function sumAuthoredWords(hiveAccount: string): Promise<AuthoredWords> {
   const { rows } = await query<{
     d: string | null;
     w: string | null;
     m: string | null;
+    mp: string | null;
     y: string | null;
     a: string | null;
   }>(
@@ -246,6 +249,8 @@ export async function sumAuthoredWords(hiveAccount: string): Promise<AuthoredWor
     `SELECT COALESCE(SUM(words) FILTER (WHERE act_day = (now() AT TIME ZONE 'utc')::date), 0)            AS d,
             COALESCE(SUM(words) FILTER (WHERE act_day > (now() AT TIME ZONE 'utc')::date - 7), 0)        AS w,
             COALESCE(SUM(words) FILTER (WHERE act_day > (now() AT TIME ZONE 'utc')::date - 30), 0)       AS m,
+            COALESCE(SUM(words) FILTER (WHERE act_day > (now() AT TIME ZONE 'utc')::date - 60
+                                          AND act_day <= (now() AT TIME ZONE 'utc')::date - 30), 0)     AS mp,
             COALESCE(SUM(words) FILTER (WHERE act_day > (now() AT TIME ZONE 'utc')::date - 365), 0)      AS y,
             COALESCE(SUM(words), 0)                                                                     AS a
        FROM lumen_hive_authored_volume
@@ -257,7 +262,36 @@ export async function sumAuthoredWords(hiveAccount: string): Promise<AuthoredWor
     const x = Number(v ?? 0);
     return Number.isFinite(x) ? x : 0;
   };
-  return { day: n(r?.d), week: n(r?.w), month: n(r?.m), year: n(r?.y), all: n(r?.a) };
+  return { day: n(r?.d), week: n(r?.w), month: n(r?.m), monthPrior: n(r?.mp), year: n(r?.y), all: n(r?.a) };
+}
+
+/**
+ * Where this account's lifetime word count sits in the population, as a percentile.
+ *
+ * ★ ONE GROUPED SCAN OF A TABLE WITH ONE ROW PER (ACCOUNT, DAY). Bounded by the calendar
+ * rather than by how prolific anyone is, and the route caches its whole response for five
+ * minutes, so this is paid at most once per account per TTL.
+ *
+ * `null` when the population is too small to place anybody honestly — a percentile over
+ * eleven accounts is a ranking, not a statistic, and "you have written more than 90% of
+ * Lumen" would mean "more than nine people".
+ */
+export const PERCENTILE_MIN_POPULATION = 20;
+
+export async function authoredWordsPercentile(words: number): Promise<number | null> {
+  if (!(words > 0)) return null;
+  const { rows } = await query<{ n: string; below: string }>(
+    `WITH totals AS (
+       SELECT hive_account, SUM(words) AS w FROM lumen_hive_authored_volume GROUP BY 1
+     )
+     SELECT (SELECT count(*) FROM totals) AS n,
+            (SELECT count(*) FROM totals WHERE w < $1) AS below`,
+    [words]
+  );
+  const n = Number(rows[0]?.n ?? 0);
+  const below = Number(rows[0]?.below ?? 0);
+  if (!Number.isFinite(n) || n < PERCENTILE_MIN_POPULATION) return null;
+  return Math.round((below / n) * 100);
 }
 
 /**

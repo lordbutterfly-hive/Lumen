@@ -13,7 +13,7 @@ import { useTranslation } from '@/blog/i18n/client';
  * an honest picture of that — so it survives, now carrying the warm light sweep from
  * the same "first light" language as the loader rather than the old grey pulse.
  * `PostListSkeleton` was the other kind: a 150x105 thumbnail on the left of a `Card`,
- * against a real Lumen feed card that is `rounded-[18px] bg-surface-1 p-[22px]` with a
+ * against a real Lumen feed card that is `rounded-panel bg-surface-1 p-[22px]` with a
  * 190x132 image on the right. See `packages/tailwindcss/globals.css`.
  */
 function SidebarSkeleton() {

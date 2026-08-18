@@ -97,7 +97,7 @@ const Content = ({ community }: { community: string }) => {
           already draws from, so this table stays correct if that palette is
           ever re-tuned, and it responds to dark mode for free. */}
       <div
-        className="w-full overflow-hidden rounded-[18px] border border-line-9 bg-surface-1"
+        className="w-full overflow-hidden rounded-panel border border-line-9 bg-surface-1"
         data-testid="community-roles-table-card"
       >
         <Table className="w-full" data-testid="community-roles-table">
@@ -128,7 +128,7 @@ const Content = ({ community }: { community: string }) => {
 
       {loggedUser.value >= 3 && <AddRole loggedUserLevel={loggedUser.value} community={community} />}
 
-      <div className="mt-8 rounded-[18px] border border-line-9 bg-surface-1 p-6">
+      <div className="mt-8 rounded-panel border border-line-9 bg-surface-1 p-6">
         {/* `<h2>`, not `<h1>` — `PageMasthead` above already renders this
             page's one `<h1>`; the original bare `<h1>{t('communities.
             role_permissions')}</h1>` gave the page two, which is its own

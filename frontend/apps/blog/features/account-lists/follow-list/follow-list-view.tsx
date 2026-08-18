@@ -221,7 +221,7 @@ export default function FollowListView({
       <div className="mb-4 flex h-12 items-center justify-between gap-4">
         <div className="relative w-full max-w-[300px]">
           <Icons.search
-            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#9ca3af]"
+            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-14"
             aria-hidden
           />
           <input
@@ -249,7 +249,7 @@ export default function FollowListView({
               onClick={() => setRawQuery('')}
               aria-label={t('user_profile.lists.clear_search')}
               data-testid="follow-list-search-clear"
-              className="absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-[10px] text-[#9ca3af] transition-colors hover:bg-[#f4f5f7] hover:text-[#3f4650]"
+              className="absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-control text-ink-14 transition-colors hover:bg-[#f4f5f7] hover:text-[#3f4650]"
             >
               <Icons.x className="h-3.5 w-3.5" />
             </button>

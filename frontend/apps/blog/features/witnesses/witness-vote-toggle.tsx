@@ -18,7 +18,7 @@ interface WitnessVoteToggleProps {
 }
 
 const BASE_CLASS =
-  'flex h-8 w-[38px] items-center justify-center rounded-[9px] transition-colors disabled:cursor-not-allowed disabled:opacity-60';
+  'flex h-8 w-[38px] items-center justify-center rounded-control transition-colors disabled:cursor-not-allowed disabled:opacity-60';
 const VOTED_CLASS = 'bg-surface-ok-7 text-ink-27';
 const UNVOTED_CLASS = 'bg-surface-25 text-ink-15 hover:bg-surface-30 hover:text-ink-10';
 const INDETERMINATE_CLASS = 'border border-dashed border-line-22 bg-transparent text-ink-14';

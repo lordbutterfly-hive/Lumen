@@ -29,6 +29,7 @@ import {
   listHiveActDays,
   newPeopleIsTrustworthy,
   recordRankMark,
+  authoredWordsPercentile,
   sumAuthoredWords,
   type AuthoredWords,
   recordHiveGivers,
@@ -618,8 +619,10 @@ async function computeStreakBody(user: string): Promise<{ status: number; body: 
     // no line, while a zero would render a false one ("you have written 0 words"). Same
     // rule the rest of the stats block follows.
     let wordsWritten: AuthoredWords | null = null;
+    let wordsPercentile: number | null = null;
     try {
       wordsWritten = await sumAuthoredWords(user);
+      wordsPercentile = await authoredWordsPercentile(wordsWritten.all);
     } catch (err) {
       logger.warn(err, 'streak: could not read authored volume for %s', user);
     }
@@ -1074,6 +1077,7 @@ async function computeStreakBody(user: string): Promise<{ status: number; body: 
          * already on the wire. Absent (not zero) when the store could not be read.
          */
         ...(wordsWritten !== null && wordsWritten.all > 0 ? { wordsWritten } : {}),
+        ...(wordsPercentile !== null ? { wordsPercentile } : {}),
         // Raw, for the RATIO only — never printed as counts. See the block above.
         postsInWindow,
         repliesInWindow,

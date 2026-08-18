@@ -68,7 +68,6 @@
         "test/**/*.tsx"
       ]
     },
-    "test:jest": {},
     "pw:test:local": {},
     "pw:test:local:chromium": {},
     "pw:test:local:firefox": {},

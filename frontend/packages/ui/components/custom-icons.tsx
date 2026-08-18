@@ -50,7 +50,20 @@ export const PATHS: Record<string, string> = {
   // to a panel; on a phone, where there is no visible panel to expand, only the
   // three bars are understood without being taught.
   menu: '<path d="M4 7h16"/><path d="M4 12h16"/><path d="M4 17h16"/>',
-  bell: '<path d="M18 8.5a6 6 0 0 0-12 0c0 5-2 6.5-2 6.5h16s-2-1.5-2-6.5z"/><path d="M10.4 18.5a1.9 1.9 0 0 0 3.2 0"/>',
+  // ★★ REDRAWN TO SIT ON THE SAME OPTICAL LINE AS ITS NEIGHBOURS (owner, 2026-08-18:
+  // "fix the bell so its in line").
+  //
+  // The button boxes were never the problem — measured in the live header, the pencil,
+  // bell and avatar controls all centre on exactly the same Y. The misalignment was
+  // INSIDE the artwork: the old bell's ink ran y=2.5..19.4, putting its optical centre
+  // at 10.94 — a full 1.06 units above the grid centre, while `pencil` sat at -0.20 and
+  // `search` at +0.25. It also stood 16.9 units tall against their ~15, so it read as
+  // both higher AND bigger than everything beside it.
+  //
+  // Body radius 6 -> 5.6, arc centre dropped 8.5 -> 9.5, skirt and clapper followed.
+  // Ink is now y=3.9..19.5: centre -0.32, height 15.6. That puts all three header glyphs
+  // inside a 0.6-unit band instead of a 1.3-unit one.
+  bell: '<path d="M17.6 9.5a5.6 5.6 0 0 0-11.2 0c0 4.7-1.9 6.1-1.9 6.1h15s-1.9-1.4-1.9-6.1z"/><path d="M10.5 18.7a1.85 1.85 0 0 0 3 0"/>',
   user: '<circle cx="12" cy="8.5" r="3.75"/><path d="M5.5 19.5a6.5 6.5 0 0 1 13 0"/>',
   userPlus:
     '<circle cx="9.5" cy="8.5" r="3.5"/><path d="M3.5 19.5a6 6 0 0 1 12 0"/><path d="M18.5 7.5v5"/><path d="M16 10h5"/>',
@@ -183,7 +196,25 @@ export const PATHS: Record<string, string> = {
   spinner: '<path d="M12 3.5a8.5 8.5 0 1 0 8.5 8.5"/>',
 
   // ── compose ──────────────────────────────────────────────────────────────
-  pencil: '<path d="M16.4 4.4l3.2 3.2L9 18.2l-4.2 1 1-4.2z"/><path d="M14.3 6.5l3.2 3.2"/>',
+  // ★ A PEN THAT IS WRITING, NOT A PENCIL THAT IS SITTING THERE (owner, 2026-08-18:
+  // "recreate the icon for writing a post to actually look like a pen writing").
+  //
+  // The old glyph was the universal EDIT pencil — a body, a tip, a rubber. It is the
+  // right icon for "change this thing" and the wrong one for "write something new",
+  // which is what the header control actually does (it links to /submit.html). Three
+  // subpaths now: the barrel, the nib facet, and — the part that carries the meaning —
+  // a stroke of writing left behind underneath it. Without that stroke it is still just
+  // a pen; with it, the pen is mid-sentence.
+  //
+  // ★ MEASURED, NOT EYEBALLED. Ink centre sits at 12.2 on the 24 grid (offset +0.23)
+  // against `search` at +0.25 and the redrawn `bell` at -0.32, so the three header
+  // glyphs share an optical baseline. Ink height 16.2 against search's 15.5. Checked
+  // rendered at BOTH 44px and the real shipped 20px, because this set's own doc warns
+  // that fine detail fuses below 20px — a glyph only checked large is not checked.
+  // Only consumer is the header write button (`Icons.pencil` in app-header.tsx); every
+  // other hit for "pencil" in the repo is a test id or a comment.
+  pencil:
+    '<path d="M16.8 4.1l2.9 2.9L11 15.7l-3.8.9.9-3.8z"/><path d="M14.9 6l2.9 2.9"/><path d="M4.9 19.6q3.3-1.5 6.6 0t6.6 0"/>',
 
   // ── home ─────────────────────────────────────────────────────────────────
   house:
@@ -349,6 +380,22 @@ export const FILLED_PATHS: Record<string, string> = {
   external: '<path d="M4.4 6.4h7v2.8H7.2v7.6h7.6v-4.2h2.8v7H4.4Z"></path> <path d="M13.6 2.6h7.8v7.8h-2.8V7.4l-4.8 4.8-2-2 4.8-4.8h-3Z"></path>',
   flag: '<path d="M4.4 2.6h2.8v18.8H4.4Z"></path> <path d="M7.2 3.4h12.4l-2.6 4.4 2.6 4.4H7.2Z"></path>',
   home: '<path d="M12 2.6 21.8 11.4h-2.8v10H14.6v-6.2H9.4v6.2H5V11.4H2.2Z"></path>',
+  // ★ FILLED TWINS FOR THE LEFT RAIL, ADDED 2026-08-18 (uniformity audit).
+  //
+  // The rail was running two icon systems in one seven-item list: Home, Profile, Wallet
+  // and Settings render through `press*` (filled, 1px), while Witnesses, Proposals and
+  // Meritum render outline at 1.75/1.9px. Measured in the live DOM, not inferred. Four
+  // solid and three outline reads as if the bottom group is disabled.
+  //
+  // ★★ THE SHARED OUTLINE GLYPHS ARE DELIBERATELY NOT TOUCHED. `arrowBigUp` is the VOTE
+  // BLADE — this file's own header calls it out as carrying the Hive rhombus signature
+  // and says it was not swapped on purpose — and `listChecks` has consumers beyond the
+  // rail. Changing either would silently restyle post actions across the app. These are
+  // new, additive, rail-only entries with the SAME geometry as their outline twins, so
+  // the glyph still reads identically; only the fill changes.
+  witnessVote: '<path d="M12 3.4 20.6 12H15.4v7.8H8.6V12H3.4Z"></path>',
+  proposals:
+    '<path d="M10.6 5.8h9.8v2.4h-9.8Zm0 10h9.8v2.4h-9.8Z"></path> <path d="M5.2 5.9 6.4 7.1 8.9 4.6l1.7 1.7-4.2 4.2L3.5 7.6Zm0 9 1.2 1.2 2.5-2.5 1.7 1.7-4.2 4.2-2.9-2.9Z"></path>',
   image: '<path fill-rule="evenodd" d="M2.4 4.6h19.2v14.8H2.4Zm2.6 2.6v9.6h14v-9.6Z"></path> <path d="M5.4 16.8 9.6 11l3 3.6 2.6-2.2 3.8 4.4Z"></path> <circle cx="15.6" cy="9.8" r="1.5"></circle>',
   keys: '<path d="M5.4 10.6h13.2v10.8H5.4Z"></path> <path d="M8.2 10.6V7.4a3.8 3.8 0 0 1 7.6 0v3.2h-2.8V7.4a1 1 0 0 0-2 0v3.2Z"></path>',
   link: '<path d="M4.4 12a4.6 4.6 0 0 1 4.6-4.6h2.6v2.8H9A1.8 1.8 0 0 0 9 14h2.6v2.6H9A4.6 4.6 0 0 1 4.4 12Z"></path> <path d="M19.6 12a4.6 4.6 0 0 0-4.6-4.6h-2.6v2.8H15A1.8 1.8 0 0 1 15 14h-2.6v2.6H15A4.6 4.6 0 0 0 19.6 12Z"></path> <path d="M8.4 10.8h7.2v2.4H8.4Z"></path>',
@@ -427,6 +474,9 @@ export const pressSaveOutline = makeFilled('saveOutline');
 export const pressVoteValue = makeFilled('voteValue');
 export const pressCommunities = makeFilled('communities');
 export const pressExplore = makeFilled('explore');
+// Rail-only filled twins — see FILLED_PATHS above for why the shared outline glyphs stay.
+export const pressWitnessVote = makeFilled('witnessVote');
+export const pressProposals = makeFilled('proposals');
 export const pressRefresh = makeFilled('refresh');
 export const pressViews = makeFilled('views');
 export const pressStack = makeFilled('stack');

@@ -6,10 +6,10 @@ import { formatTokenAmount } from '../lib/format-amount';
 import TokenIcon from './token-icon';
 import SendDialog from './dialogs/send-dialog';
 
-const CARD_CLASS = 'mb-[18px] rounded-[18px] border border-line-9 bg-surface-1 p-6';
+const CARD_CLASS = 'mb-[18px] rounded-panel border border-line-9 bg-surface-1 p-6';
 // Same button as the HIVE card's Send — see hive-token-card.tsx (W-2/W-3).
 const SEND_BUTTON_CLASS =
-  'flex items-center gap-1.5 rounded-[14px] bg-surface-brand-12 px-[18px] py-2.5 text-[14px] leading-[22px] font-semibold text-ink-27 transition-colors hover:bg-surface-brand-17';
+  'flex items-center gap-1.5 rounded-card bg-surface-brand-12 px-[18px] py-2.5 text-[14px] leading-[22px] font-semibold text-ink-27 transition-colors hover:bg-surface-brand-17';
 
 export default function HbdTokenCard({ username, liquidHbd }: { username: string; liquidHbd: Big }) {
   const { t } = useTranslation('common_blog');

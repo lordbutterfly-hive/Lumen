@@ -108,9 +108,9 @@ const CommunityDescription = ({
             <NewPost name={data.name} disabled={!isSubscribed} />
           </div>
           <div data-testid="community-leadership" className="my-6 flex flex-col">
-            <h6 className="my-1.5 font-semibold leading-none tracking-tight">
+            <h4 className="my-1.5 font-semibold leading-none tracking-tight">
               {t('communities.titles.leadership')}
-            </h6>
+            </h4>
             <div className="flex items-center gap-1 self-end">
               {userRole ? (
                 <BasePathLink href={`/roles/${username}`} className="text-sm text-destructive">
@@ -155,9 +155,9 @@ const CommunityDescription = ({
       >
         <CardContent className="py-4">
           <div data-testid="community-description">
-            <h6 className="my-1.5 font-semibold leading-none tracking-tight">
+            <h4 className="my-1.5 font-semibold leading-none tracking-tight">
               {t('communities.titles.description')}
-            </h6>
+            </h4>
 
             <RendererContainer
               body={data.description}
@@ -169,9 +169,9 @@ const CommunityDescription = ({
 
           {data.flag_text.trim() !== '' ? (
             <div data-testid="community-rules" className="my-6">
-              <h6 className="my-1.5 font-semibold leading-none tracking-tight">
+              <h4 className="my-1.5 font-semibold leading-none tracking-tight">
                 {t('communities.titles.rules')}
-              </h6>
+              </h4>
               <div
                 className="preview-rules prose-sm whitespace-normal break-words"
                 data-testid="community-rules-content"
@@ -184,9 +184,9 @@ const CommunityDescription = ({
           ) : null}
           {data.lang ? (
             <div data-testid="community-language">
-              <h6 className="my-1.5 font-semibold leading-none tracking-tight">
+              <h4 className="my-1.5 font-semibold leading-none tracking-tight">
                 {t('communities.titles.language')}
-              </h6>
+              </h4>
               <div className="preview-rules" data-testid="community-choosen-language">
                 {data.lang}
               </div>

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
 import { getChain } from '@transaction/lib/chain';
 import { getDynamicGlobalProperties } from '@transaction/lib/hive-api';
+import { withRetry } from '@transaction/lib/retry';
 import { convertStringToBig } from '@ui/lib/helpers';
 import { convertToHP } from '@ui/lib/utils';
 import { cachedRead } from '@/blog/lib/server-read-cache';
@@ -41,11 +42,20 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       DELEGATIONS_MEMO_MS,
       async () => {
         const [chain, dynamicGlobal] = await Promise.all([getChain(), getDynamicGlobalProperties()]);
-        const { delegations } = await chain.api.database_api.list_vesting_delegations({
-          start: [username, ''],
-          limit: LIST_LIMIT,
-          order: 'by_delegation'
-        });
+        // ★ A6 retry rollout (2026-08-18): idempotent read, previously with no retry
+        // of any kind — a single blip on this call was an unconditional 502. Runs
+        // AFTER the Promise.all above (already up to ~12s worst case from
+        // `getDynamicGlobalProperties`'s own `withHiveRetry`), so this adds up to
+        // its own ~2.5s budget on top rather than multiplying that ceiling.
+        const { delegations } = await withRetry(
+          () =>
+            chain.api.database_api.list_vesting_delegations({
+              start: [username, ''],
+              limit: LIST_LIMIT,
+              order: 'by_delegation'
+            }),
+          { label: `list_vesting_delegations(${username})` }
+        );
         return delegations
           .filter((d) => d.delegator === username)
           .map((d) => ({

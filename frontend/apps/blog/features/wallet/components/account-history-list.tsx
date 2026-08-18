@@ -6,7 +6,7 @@ import { getTransfersUrl } from '../lib/wallet-endpoint';
 import AccountHistoryRow from './account-history-row';
 import { EmptyStateIllustration } from '@/blog/components/empty-state-illustration';
 
-const CARD_CLASS = 'rounded-[18px] border border-line-9 bg-surface-1 p-5 sm:p-6';
+const CARD_CLASS = 'rounded-panel border border-line-9 bg-surface-1 p-5 sm:p-6';
 
 /**
  * "Recent activity" — the transaction/account-history list that used to sit

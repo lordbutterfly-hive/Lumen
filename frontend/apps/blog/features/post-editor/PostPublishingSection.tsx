@@ -104,7 +104,7 @@ export function PostPublishingSection({
       : undefined;
 
   return (
-    <div className="flex flex-col gap-4 rounded-[14px] border border-[#ebebeb] bg-white p-4">
+    <div className="flex flex-col gap-4 rounded-card border border-[#ebebeb] bg-white p-4">
       {/* Same one section-label treatment as the metadata card, which is the
           masthead eyebrow. See PostMetadataSection.tsx for the reasoning (C-14).
           ★ `ink-brand-6`, not `#c0392b` (2026-08-14). */}
@@ -161,7 +161,7 @@ export function PostPublishingSection({
               type="button"
               // ★ `line-brand-10` / `ink-brand-6`, not `#c0392b` (2026-08-14):
               // rgb(192,57,43), byte-identical to the literal in light mode.
-              className="inline-flex w-fit items-center gap-1.5 rounded-[14px] border border-[#ebebeb] bg-white px-3 py-1.5 text-xs font-medium text-[#6b7280] transition-colors hover:border-line-brand-10 hover:text-ink-brand-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-line-brand-10/40"
+              className="inline-flex w-fit items-center gap-1.5 rounded-card border border-[#ebebeb] bg-white px-3 py-1.5 text-xs font-medium text-[#6b7280] transition-colors hover:border-line-brand-10 hover:text-ink-brand-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-line-brand-10/40"
               title={t("submit_page.advanced_tooltip")}
               data-testid="advanced-settings-button"
             >

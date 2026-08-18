@@ -124,7 +124,7 @@ export default function SetProxyDialog({ trigger, mode, currentProxy }: SetProxy
             onClick={handleSubmit}
             disabled={busy || (mode === 'set' && !account.trim())}
             data-testid="witnesses-proxy-submit"
-            className="flex items-center justify-center gap-2 rounded-[11px] bg-surface-brand-12 px-4 py-2.5 font-sans text-sm font-semibold text-ink-27 transition-colors hover:bg-surface-brand-17 disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex items-center justify-center gap-2 rounded-control bg-surface-brand-12 px-4 py-2.5 font-sans text-sm font-semibold text-ink-27 transition-colors hover:bg-surface-brand-17 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {busy && <Icons.spinner className="h-4 w-4 animate-spin" />}
             {mode === 'clear' ? t('witnesses.proxy_dialog.clear_confirm') : t('witnesses.proxy_dialog.set_confirm')}

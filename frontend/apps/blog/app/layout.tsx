@@ -2,6 +2,7 @@ import '@hive/tailwindcss-config/globals.css';
 import * as Sentry from '@sentry/nextjs';
 import { ReactNode } from 'react';
 import { Metadata } from 'next';
+import type { Viewport } from 'next';
 import { cookies } from 'next/headers';
 import AppHeader from '../features/layouts/app-header';
 import ClientEffects from '../features/layouts/site-header/client-effects';
@@ -170,6 +171,27 @@ export function generateMetadata(): Metadata {
     }
   };
 }
+
+/**
+ * ★ `theme-color`, THE ONE MISSING PIECE OF THE ICON/MANIFEST SET (uniformity audit,
+ * 2026-08-18). The favicon set, apple-touch-icon and webmanifest all landed; this did
+ * not, so on Android Chrome and an installed PWA the browser chrome stays default grey
+ * instead of continuing the page — which is the whole visual point of having shipped a
+ * manifest.
+ *
+ * ★★ IT IS A SEPARATE `viewport` EXPORT, NOT A `metadata` FIELD. Next.js 14 moved
+ * `themeColor` out of `metadata`; leaving it in the metadata object logs a deprecation
+ * and, more to the point, does not emit the tag. The value here would be silently
+ * ignored if it were added ten lines up with the icons.
+ *
+ * ★ THE VALUE IS MEASURED, NOT ASSUMED: `getComputedStyle(document.body).backgroundColor`
+ * on the running production build returns `rgb(247, 247, 247)`. If the page background
+ * moves to paper (`252 250 247`, an open item on the same audit) this MUST move with it,
+ * or the browser chrome and the page will disagree by a visible step.
+ */
+export const viewport: Viewport = {
+  themeColor: '#f7f7f7'
+};
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
   // Server-side locale and language handling

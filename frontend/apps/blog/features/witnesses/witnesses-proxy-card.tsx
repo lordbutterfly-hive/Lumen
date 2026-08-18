@@ -12,7 +12,7 @@ interface WitnessesProxyCardProps {
 }
 
 const BUTTON_CLASS =
-  'w-full rounded-[11px] border border-line-11 bg-surface-1 px-4 py-[11px] font-sans text-[14px] leading-[22px] font-semibold text-ink-7 transition-colors hover:bg-surface-16';
+  'w-full rounded-control border border-line-11 bg-surface-1 px-4 py-[11px] font-sans text-[14px] leading-[22px] font-semibold text-ink-7 transition-colors hover:bg-surface-16';
 
 /**
  * Right-rail "Set a proxy" card. Delegating votes and clearing a proxy

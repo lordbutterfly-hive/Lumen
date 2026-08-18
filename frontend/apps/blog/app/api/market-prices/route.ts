@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
 import { cachedRead } from '@/blog/lib/server-read-cache';
+import { withRetry } from '@transaction/lib/retry';
 
 const logger = getLogger('app');
 
@@ -34,21 +35,41 @@ const CACHE_MS = 60_000;
  *
  * Cached `public`: this is a public market price with no per-viewer component.
  */
+/**
+ * ★ A6 retry rollout (2026-08-18): each leg retried independently so a blip on
+ * one does not force re-fetching the other, which already succeeded. Throws an
+ * error carrying `.status` on a non-ok response so `isTransient` can see the
+ * 5xx (a 4xx from CoinGecko — e.g. a bad ids param, which never happens here
+ * with fixed query strings — is correctly left un-retried).
+ */
+async function fetchCoingecko(url: string, label: string, init: RequestInit): Promise<unknown> {
+  return withRetry(
+    async () => {
+      const res = await fetch(url, init);
+      if (!res.ok) {
+        const error = new Error(`${label} request failed: ${res.status}`) as Error & { status?: number };
+        error.status = res.status;
+        throw error;
+      }
+      return res.json();
+    },
+    { label }
+  );
+}
+
 export async function GET(): Promise<NextResponse> {
   try {
     const data = await cachedRead('market-prices', CACHE_MS, async () => {
       const init = { signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS), cache: 'no-store' as const };
-      const [simpleRes, chartRes] = await Promise.all([
-        fetch(
+      const [simple, chart] = await Promise.all([
+        fetchCoingecko(
           `${COINGECKO_BASE}/simple/price?ids=hive,hive_dollar&vs_currencies=usd,btc&include_24hr_change=true`,
+          'coingecko.simple',
           init
         ),
-        fetch(`${COINGECKO_BASE}/coins/hive/market_chart?vs_currency=usd&days=7`, init)
+        fetchCoingecko(`${COINGECKO_BASE}/coins/hive/market_chart?vs_currency=usd&days=7`, 'coingecko.chart', init)
       ]);
-      if (!simpleRes.ok || !chartRes.ok) {
-        throw new Error(`coingecko request failed: ${simpleRes.status}/${chartRes.status}`);
-      }
-      return { simple: await simpleRes.json(), chart: await chartRes.json() };
+      return { simple, chart };
     });
     return NextResponse.json(data, {
       headers: { 'cache-control': 'public, max-age=60, stale-while-revalidate=300' }

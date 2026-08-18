@@ -188,7 +188,7 @@ const NotificationsMenu = forwardRef<HTMLButtonElement, {
         // to tell from the page behind it. 14px is the product's row/button
         // radius, and `overflow-hidden` makes the first and last rows follow
         // the corner instead of squaring it off.
-        className="w-[360px] overflow-hidden rounded-[14px] border-line-9 p-0 shadow-[0_12px_32px_rgba(20,18,10,0.14)]"
+        className="w-[360px] overflow-hidden rounded-card border-line-9 p-0 shadow-[0_12px_32px_rgba(20,18,10,0.14)]"
         data-testid="notifications-popover-content"
       >
         <div className="flex items-center justify-between gap-3 border-b border-line-9 px-4 py-2.5">
@@ -205,7 +205,7 @@ const NotificationsMenu = forwardRef<HTMLButtonElement, {
               type="button"
               onClick={handleMarkAllAsRead}
               disabled={markAllAsRead.isPending}
-              className="shrink-0 rounded-[14px] px-2 py-1 font-sans text-[13px] leading-[20px] font-semibold text-ink-brand-6 transition-colors hover:bg-surface-brand-5 disabled:cursor-not-allowed disabled:opacity-50"
+              className="shrink-0 rounded-card px-2 py-1 font-sans text-[13px] leading-[20px] font-semibold text-ink-brand-6 transition-colors hover:bg-surface-brand-5 disabled:cursor-not-allowed disabled:opacity-50"
               data-testid="notifications-mark-all-read"
             >
               {markAllAsRead.isPending ? (

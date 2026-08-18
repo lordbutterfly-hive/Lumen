@@ -54,7 +54,16 @@ Causes: the wallet fetched `bridge.get_profile` it never reads, which fans out t
 ## OPEN — needs the owner
 
 1. **Keychain / Meritum launch.** Talk to stoodkev. The ask is *not* "add testnet" — Keychain already does `HiveTxConfig.chain_id = rpc.chainId` internally, and the testnet id in its own source example is exactly ours. The gap is that the public `requestSignTx` documents `rpc` as a plain **string**, so a site cannot pass a chain id. Expect the diff to be small but the **review slow**, because "any website can tell your wallet which chain to sign for" is a security-sensitive surface they will want a prompt around. Given a custom RPC bricked the extension once already, **Option B (move Meritum to Magi mainnet, where Keychain signs natively with zero config) is the lower-risk path.**
-2. **Set `FEED_TOPIC_WARM=yes` on the real server.** `.env.local` is excluded from `sync-frontend.sh`, so this cannot travel in the sync. Now enabled in `.env.blog.example` for fresh deployments. What it does: every 10 minutes a background timer pre-fetches the post list for the top ~60 topics into **RAM** (a `Map` capped at 200 entries — nothing is written to disk, nothing touches C:). Cost is outbound calls to the Hive node per cycle, which is why it is a flag.
+2. ~~**Set `FEED_TOPIC_WARM=yes` on the real server.**~~ **DONE — no production server exists yet; local is the only one, and it is live there.** Verified running, not just configured:
+   ```
+   topic-warmer: starting — 60 tags every 600000ms
+   topic-warmer: warmed 14/14 tags in 24788ms (0 failed)   13:58
+   topic-warmer: warmed 14/14 tags in 23997ms (0 failed)   14:08
+   topic-warmer: warmed 14/14 tags in 25033ms (0 failed)   14:27
+   ```
+   Note it warms **14** tags, not 60 — 60 is a ceiling, and the warmer only takes tags it considers browsable from the current trending list. Every other tag relies on the one-upstream-call fix instead, which is why obscure tags still return in under 0.7s.
+   **Carry forward:** when a production server does exist, this must be set there by hand — `.env.local` is excluded from `sync-frontend.sh`, so it cannot travel in the sync. It is enabled in `.env.blog.example` so a fresh deployment inherits it.
+
 3. **Feed quality — not touched, needs a decision.** The flower post that reached the For You feed pays **0.341 HBD** across **125 votes**, is not from anyone followed, sits in a community about petrol, and carries 9 unrelated tags (`pob, neoxian, pepe, waiv, leo, lolz, sportstalk…`). That is tag-farming. Grepped the feed route: there is **no dust-vote floor, no minimum payout, and no tag-spam check** anywhere. Vote *count* is being read as signal when vote *value* is what separates real engagement from farming. A payout-per-vote floor would drop it without hurting genuine small creators. **Not implemented — ranking changes need your go.**
 
 ---

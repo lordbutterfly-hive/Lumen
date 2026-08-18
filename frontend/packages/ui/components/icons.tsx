@@ -28,6 +28,11 @@ export const Icons = {
   list: CI.list,
   listOrdered: CI.listOrdered,
   listChecks: CI.listChecks,
+  // Filled twins, used ONLY by the left rail so its seven items share one icon system.
+  // The outline originals above stay: `arrowBigUp` is the vote blade, `listChecks` has
+  // other consumers. See FILLED_PATHS in custom-icons.tsx.
+  proposalsFilled: CI.pressProposals,
+  witnessVoteFilled: CI.pressWitnessVote,
   horizontalRule: CI.horizontalRule,
   paperclip: CI.paperclip,
   quote: CI.quote,

@@ -327,7 +327,7 @@ export default function PostForm({
               <div
                 role="status"
                 data-testid="restored-draft"
-                className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-[14px] border border-[#ebebeb] bg-white px-4 py-3 text-sm"
+                className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-card border border-[#ebebeb] bg-white px-4 py-3 text-sm"
               >
                 <div className="min-w-[240px] flex-1">
                   <strong className="font-semibold text-[#161511]">
@@ -343,7 +343,7 @@ export default function PostForm({
                       literal in light mode. */}
                   <button
                     type="button"
-                    className="rounded-[14px] border border-[#ebebeb] bg-white px-3 py-1.5 text-xs font-medium text-[#6b7280] transition-colors hover:border-line-brand-10 hover:text-ink-brand-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-line-brand-10/40"
+                    className="rounded-card border border-[#ebebeb] bg-white px-3 py-1.5 text-xs font-medium text-[#6b7280] transition-colors hover:border-line-brand-10 hover:text-ink-brand-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-line-brand-10/40"
                     onClick={() => setRestoredFromDraft(false)}
                     data-testid="restored-draft-keep"
                   >
@@ -358,7 +358,7 @@ export default function PostForm({
                       control only. */}
                   <button
                     type="button"
-                    className="rounded-[14px] border border-line-brand-10 bg-white px-3 py-1.5 text-xs font-medium text-ink-brand-6 transition-colors hover:bg-surface-brand-12 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-line-brand-10/40"
+                    className="rounded-card border border-line-brand-10 bg-white px-3 py-1.5 text-xs font-medium text-ink-brand-6 transition-colors hover:bg-surface-brand-12 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-line-brand-10/40"
                     onClick={() => handleCancel()}
                     data-testid="restored-draft-discard"
                   >
@@ -473,7 +473,7 @@ export default function PostForm({
                   // rgb(192,57,43), byte-identical to the literal in light
                   // mode. `hover:bg-[#a93226]` is a separate, untokenised
                   // literal and is out of scope here.
-                  className="w-28 rounded-[14px] bg-surface-brand-12 text-white shadow-none hover:bg-[#a93226] hover:shadow-none disabled:border disabled:border-[#ebebeb] disabled:bg-[#f5f5f5] disabled:text-[#6b7280] disabled:opacity-100"
+                  className="w-28 rounded-card bg-surface-brand-12 text-white shadow-none hover:bg-[#a93226] hover:shadow-none disabled:border disabled:border-[#ebebeb] disabled:bg-[#f5f5f5] disabled:text-[#6b7280] disabled:opacity-100"
                   disabled={
                     // ★ GATE ON WHAT IS ON SCREEN, NOT ON THE SAVED DRAFT.
                     //
@@ -524,7 +524,7 @@ export default function PostForm({
                   // ★ `line-brand-10` / `ink-brand-6`, not `#c0392b`
                   // (2026-08-14): rgb(192,57,43), byte-identical to the
                   // literal in light mode.
-                  className="rounded-[14px] border border-[#ebebeb] text-[#6b7280] hover:border-line-brand-10 hover:bg-transparent hover:text-ink-brand-6"
+                  className="rounded-card border border-[#ebebeb] text-[#6b7280] hover:border-line-brand-10 hover:bg-transparent hover:text-ink-brand-6"
                   data-testid="clean-post-button"
                 >
                   {editMode ? t("submit_page.cancel") : DISCARD_DRAFT}

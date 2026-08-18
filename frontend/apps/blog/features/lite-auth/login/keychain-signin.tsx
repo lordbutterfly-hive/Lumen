@@ -142,7 +142,7 @@ const KeychainSignin: FC<KeychainSigninProps> = ({ redirectTo = '/' }) => {
         onClick={() => setOpen((v) => !v)}
         data-testid="keychain-row"
         // Auto height with padding, matching the wallet rows above (fuckery list C4).
-        className="flex w-full cursor-pointer items-center gap-3 rounded-[14px] border border-line-11 bg-surface-1 px-4 py-3 text-left hover:border-line-brand-10 hover:bg-surface-6"
+        className="flex w-full cursor-pointer items-center gap-3 rounded-card border border-line-11 bg-surface-1 px-4 py-3 text-left hover:border-line-brand-10 hover:bg-surface-6"
       >
         {/* ★ THE REAL HIVE KEYCHAIN MARK (2026-08-09, owner-supplied) — was the
             letter "K" on a red plate. The official asset carries its own black
@@ -154,7 +154,7 @@ const KeychainSignin: FC<KeychainSigninProps> = ({ redirectTo = '/' }) => {
           aria-hidden
           width={34}
           height={34}
-          className="h-[34px] w-[34px] flex-shrink-0 rounded-[10px]"
+          className="h-[34px] w-[34px] flex-shrink-0 rounded-control"
         />
         <span className="min-w-0 flex-1">
           <span className="block text-[15px] leading-[24px] font-semibold text-ink-2">{COPY.title}</span>
@@ -172,11 +172,11 @@ const KeychainSignin: FC<KeychainSigninProps> = ({ redirectTo = '/' }) => {
       </button>
 
       {open ? (
-        <div className="mt-2.5 rounded-[14px] border border-line-2 bg-surface-4 p-4">
+        <div className="mt-2.5 rounded-card border border-line-2 bg-surface-4 p-4">
           <label htmlFor="keychain-username" className="block text-[13px] leading-[20px] font-medium text-ink-8">
             {COPY.usernameLabel}
           </label>
-          <div className="mt-1.5 flex items-center rounded-[10px] border border-line-11 bg-surface-1 px-3 focus-within:border-line-brand-10">
+          <div className="mt-1.5 flex items-center rounded-control border border-line-11 bg-surface-1 px-3 focus-within:border-line-brand-10">
             <span className="text-[15px] leading-[24px] text-ink-14">@</span>
             <input
               id="keychain-username"
@@ -196,7 +196,7 @@ const KeychainSignin: FC<KeychainSigninProps> = ({ redirectTo = '/' }) => {
             onClick={() => void signIn()}
             disabled={busy || detected === false}
             data-testid="keychain-signin"
-            className="mt-3 h-12 w-full cursor-pointer rounded-[12px] bg-surface-43 text-[15px] leading-[24px] font-semibold text-ink-27 hover:bg-surface-40 disabled:cursor-not-allowed disabled:opacity-50"
+            className="mt-3 h-12 w-full cursor-pointer rounded-control bg-surface-43 text-[15px] leading-[24px] font-semibold text-ink-27 hover:bg-surface-40 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {busy ? COPY.working : COPY.submit}
           </button>

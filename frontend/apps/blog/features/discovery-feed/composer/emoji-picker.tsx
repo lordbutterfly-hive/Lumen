@@ -87,7 +87,7 @@ export default function EmojiPicker({
           onClose();
         }
       }}
-      className="absolute bottom-[calc(100%+8px)] left-0 z-30 w-[360px] rounded-[14px] border border-[#ebebeb] bg-white p-3 shadow-[0_8px_24px_rgba(20,18,10,0.10)]"
+      className="absolute bottom-[calc(100%+8px)] left-0 z-30 w-[360px] rounded-card border border-[#ebebeb] bg-white p-3 shadow-[0_8px_24px_rgba(20,18,10,0.10)]"
     >
       <input
         type="text"
@@ -97,12 +97,12 @@ export default function EmojiPicker({
         onChange={(event) => setQuery(event.target.value)}
         onMouseDown={(event) => event.stopPropagation()}
         data-testid="short-form-composer-emoji-search"
-        className="mb-2 w-full rounded-[10px] border border-[#ebebeb] bg-white px-3 py-2 font-sans text-[14px] leading-[22px] text-[#333] outline-none placeholder:text-[#9ca3af] focus:border-[#d5d5d5]"
+        className="mb-2 w-full rounded-control border border-[#ebebeb] bg-white px-3 py-2 font-sans text-[14px] leading-[22px] text-[#333] outline-none placeholder:text-ink-14 focus:border-[#d5d5d5]"
       />
 
       {!query.trim() && recent.length > 0 ? (
         <div className="mb-2">
-          <div className="mb-1 px-1 font-sans text-[11px] font-semibold uppercase tracking-wide text-[#9ca3af]">
+          <div className="mb-1 px-1 font-sans text-[11px] font-semibold uppercase tracking-wide text-ink-14">
             {labels.recent}
           </div>
           <div className="grid grid-cols-8 gap-1">
@@ -112,7 +112,7 @@ export default function EmojiPicker({
                 type="button"
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => pick(glyph)}
-                className="flex h-9 w-9 items-center justify-center rounded-[8px] text-[20px] leading-none transition-colors hover:bg-[#f1f3f5]"
+                className="flex h-9 w-9 items-center justify-center rounded-control text-[20px] leading-none transition-colors hover:bg-[#f1f3f5]"
               >
                 {glyph}
               </button>
@@ -134,7 +134,7 @@ export default function EmojiPicker({
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => setCategoryId(c.id)}
               className={cn(
-                'flex h-8 w-8 items-center justify-center rounded-[8px] text-[17px] leading-none transition-colors hover:bg-[#f1f3f5]',
+                'flex h-8 w-8 items-center justify-center rounded-control text-[17px] leading-none transition-colors hover:bg-[#f1f3f5]',
                 c.id === categoryId && 'bg-[#f1f3f5]'
               )}
             >
@@ -158,7 +158,7 @@ export default function EmojiPicker({
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => pick(entry.glyph)}
                 data-testid="short-form-composer-emoji-option"
-                className="flex h-9 w-9 items-center justify-center rounded-[8px] text-[20px] leading-none transition-colors hover:bg-[#f1f3f5]"
+                className="flex h-9 w-9 items-center justify-center rounded-control text-[20px] leading-none transition-colors hover:bg-[#f1f3f5]"
               >
                 {entry.glyph}
               </button>

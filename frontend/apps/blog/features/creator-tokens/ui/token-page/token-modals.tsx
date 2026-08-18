@@ -95,7 +95,7 @@ const BuyModal: FC<{
                 setAmt(v);
                 setFailure(null);
               }}
-              className="flex-1 rounded-[9px] border border-line-11 py-2 text-[13px] leading-[20px] font-semibold text-ink-7 hover:border-line-brand-10 hover:text-ink-brand-6"
+              className="flex-1 rounded-control border border-line-11 py-2 text-[13px] leading-[20px] font-semibold text-ink-7 hover:border-line-brand-10 hover:text-ink-brand-6"
             >
               ${v}
             </button>
@@ -121,7 +121,7 @@ const BuyModal: FC<{
         {adv ? (
           <div className="mb-3.5">
             <label className="mb-1.5 block text-xs text-ink-10">Max price per token</label>
-            <div className="flex items-center rounded-[10px] border border-line-11 px-3.5 py-2.5 focus-within:border-line-brand-10 focus-within:ring-1 focus-within:ring-line-brand-10">
+            <div className="flex items-center rounded-control border border-line-11 px-3.5 py-2.5 focus-within:border-line-brand-10 focus-within:ring-1 focus-within:ring-line-brand-10">
               <span className="font-bold text-ink-14">$</span>
               <input
                 value={maxPrice}
@@ -144,7 +144,7 @@ const BuyModal: FC<{
         {/* What you can actually spend, and whether you can send anything at all. */}
         <MagiFuelGauge state={spending} costBaseUnits={costBaseUnits} kind={payer?.kind} className="mb-3" />
         {blockedBySpending && payer ? <MagiFundingHelp kind={payer.kind} className="mb-3" /> : null}
-        <div className="mb-3 rounded-[10px] bg-surface-16 px-3.5 py-3 text-[13px] leading-[20px] text-ink-10">
+        <div className="mb-3 rounded-control bg-surface-16 px-3.5 py-3 text-[13px] leading-[20px] text-ink-10">
           Includes a 10% trade fee (5% to @{m.handle}, 5% to Lumen).
         </div>
         <p className="mb-3.5 font-serif text-[13px] leading-[20px] text-ink-14">
@@ -178,7 +178,7 @@ const BuyModal: FC<{
           // Note it does NOT block on `affordability === 'unknown'`: a failed
           // balance read must not stop a user who may well be able to afford this.
           disabled={!Number.isFinite(usd) || usd <= 0 || overMax || busy || blockedBySpending}
-          className="w-full rounded-[13px] bg-surface-brand-12 py-[15px] text-[15px] leading-[24px] font-bold text-ink-27 hover:bg-surface-brand-16 disabled:opacity-50"
+          className="w-full rounded-card bg-surface-brand-12 py-[15px] text-[15px] leading-[24px] font-bold text-ink-27 hover:bg-surface-brand-16 disabled:opacity-50"
         >
           {busy
             ? 'Confirm in your wallet…'
@@ -378,7 +378,7 @@ const SellModal: FC<{
             }
           }}
           disabled={!Number.isFinite(tokens) || tokens <= 0 || held <= 0 || tokens > held || busy}
-          className="w-full rounded-[13px] bg-surface-42 py-[15px] text-[15px] leading-[24px] font-bold text-ink-27 hover:bg-surface-44 disabled:opacity-50"
+          className="w-full rounded-card bg-surface-42 py-[15px] text-[15px] leading-[24px] font-bold text-ink-27 hover:bg-surface-44 disabled:opacity-50"
         >
           {busy
             ? 'Confirm in your wallet…'
@@ -501,7 +501,7 @@ const AskModal: FC<{
             }
           }}
           disabled={!canAsk || busy}
-          className="w-full rounded-[13px] bg-surface-42 py-[15px] text-[15px] leading-[24px] font-semibold text-ink-27 hover:bg-surface-44 disabled:opacity-50"
+          className="w-full rounded-card bg-surface-42 py-[15px] text-[15px] leading-[24px] font-semibold text-ink-27 hover:bg-surface-44 disabled:opacity-50"
         >
           {busy
             ? 'Confirm in your wallet…'
@@ -587,7 +587,7 @@ const SendModal: FC<{
             }
           }}
           disabled={!valid || busy}
-          className="w-full rounded-[13px] bg-surface-42 py-[15px] text-[15px] leading-[24px] font-bold text-ink-27 hover:bg-surface-44 disabled:opacity-50"
+          className="w-full rounded-card bg-surface-42 py-[15px] text-[15px] leading-[24px] font-bold text-ink-27 hover:bg-surface-44 disabled:opacity-50"
         >
           {busy
             ? 'Confirm in your wallet…'

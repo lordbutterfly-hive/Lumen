@@ -25,9 +25,9 @@ import { useDelegations } from '../hooks/use-delegations';
  * brand red.
  */
 const PRIMARY_BUTTON_CLASS =
-  'rounded-[14px] bg-surface-brand-12 px-5 py-2.5 text-[14px] leading-[22px] font-semibold text-ink-27 transition-colors hover:bg-surface-brand-17';
+  'rounded-card bg-surface-brand-12 px-5 py-2.5 text-[14px] leading-[22px] font-semibold text-ink-27 transition-colors hover:bg-surface-brand-17';
 const SECONDARY_BUTTON_CLASS =
-  'lm-press rounded-[14px] border border-line-11 px-4 py-2 text-[13px] leading-[20px] font-semibold text-ink-7 transition-colors hover:bg-surface-16';
+  'lm-press rounded-card border border-line-11 px-4 py-2 text-[13px] leading-[20px] font-semibold text-ink-7 transition-colors hover:bg-surface-16';
 
 /**
  * Center column: fetches the logged-in user's real balances (see

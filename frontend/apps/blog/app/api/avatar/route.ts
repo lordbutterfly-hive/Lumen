@@ -15,6 +15,7 @@ import { configuredImagesEndpoint } from '@hive/ui/config/public-vars';
 // `@transaction/lib/chain` in packages/smart-signer/lib/signer/*.ts) skips
 // the barrel, and with it the signer/UI stack this route never needed.
 import { isHiveAccountNameValid } from '@transaction/lib/validate-hive-account';
+import { withRetry } from '@transaction/lib/retry';
 import { liteAvatar } from '@/blog/lib/lite/render/lite-identity';
 
 /**
@@ -72,11 +73,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     }
 
     // Fetch the image from the image hoster and stream it to the client
-    const response = await fetch(imageUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0',
-      },
-    });
+    // ★ A6 retry rollout (2026-08-18): idempotent read of a public image. `fetch`
+    // only throws on a transport failure — an ordinary 404 (no avatar) resolves
+    // normally below and is never retried, exactly as before.
+    const response = await withRetry(
+      () => fetch(imageUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } }),
+      { label: `avatar(${username})` }
+    );
 
     if (!response.ok || !response.body) {
       // A Lumen lite account has no Hive account and therefore no hosted avatar, so
@@ -92,7 +95,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         // every byline.
         if (lite.imageUrl) {
           const resized = `${configuredImagesEndpoint}/${avatarBox(size, width, height)}/${lite.imageUrl}`;
-          const picture = await fetch(resized, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+          // ★ A6 retry rollout (2026-08-18): same reasoning as the primary fetch above.
+          const picture = await withRetry(
+            () => fetch(resized, { headers: { 'User-Agent': 'Mozilla/5.0' } }),
+            { label: `avatar-resized(${username})` }
+          );
           if (picture.ok && picture.body) {
             return new NextResponse(picture.body, {
               status: 200,

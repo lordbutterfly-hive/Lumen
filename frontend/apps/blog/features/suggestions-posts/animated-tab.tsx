@@ -68,7 +68,7 @@ const AnimatedList = ({ suggestions }: { suggestions: Entry[] }) => {
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -16 }}
             transition={{ duration: 0.2, ease: 'easeOut' }}
-            className="rounded-[18px] border border-line-9 bg-surface-1 p-5 shadow-[0_1px_2px_rgba(20,18,10,0.03)]"
+            className="rounded-panel border border-line-9 bg-surface-1 p-5 shadow-[0_1px_2px_rgba(20,18,10,0.03)]"
           >
             <div className="flex items-start justify-between gap-2">
               <h2 className="font-serif text-[18px] font-semibold leading-[28px] text-ink-2">
@@ -78,7 +78,7 @@ const AnimatedList = ({ suggestions }: { suggestions: Entry[] }) => {
                 type="button"
                 onClick={() => storeShowSuggestions(false)}
                 aria-label="Hide suggestions"
-                className="-mr-1.5 -mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] text-ink-14 transition-colors hover:bg-surface-21 hover:text-ink-7"
+                className="-mr-1.5 -mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-control text-ink-14 transition-colors hover:bg-surface-21 hover:text-ink-7"
               >
                 <Icons.x className="h-4 w-4" />
               </button>

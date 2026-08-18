@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getPost } from '@transaction/lib/bridge-api';
+import { withRetry } from '@transaction/lib/retry';
 import { getObserver } from '@/blog/lib/auth-utils';
 import { isPermlinkValid, isUsernameValid, isValidUserParam } from '@/blog/utils/validate-links';
 import { getLogger } from '@ui/lib/logging';
@@ -46,7 +47,12 @@ export async function GET(request: Request, { params }: { params: { user: string
 
     let post;
     try {
-      post = await getPost(username, String(params?.permlink), observer);
+      // ★ A6 retry rollout (2026-08-18): wired here, not inside `getPost` itself —
+      // see that function's own comment on why (its other caller, `/api/feed/for-you`,
+      // already has its own hand-rolled retry across a ~30-way fan-out).
+      post = await withRetry(() => getPost(username, String(params?.permlink), observer), {
+        label: `getPost(${username})`
+      });
     } catch (fetchErr) {
       logger.error(fetchErr, 'Failed to fetch post');
 

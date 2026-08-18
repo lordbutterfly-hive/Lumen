@@ -370,7 +370,7 @@ const ButtonsContainer = ({
           ) : null}
           <AlertDialog open={blockConfirmOpen} onOpenChange={setBlockConfirmOpen}>
             <AlertDialogContent
-              className="flex flex-col gap-4 sm:max-w-md sm:rounded-[18px]"
+              className="flex flex-col gap-4 sm:max-w-md sm:rounded-panel"
               data-testid="byline-block-dialog"
             >
               <AlertDialogHeader className="gap-2">
@@ -381,7 +381,7 @@ const ButtonsContainer = ({
                 <AlertDialogAction
                   disabled={block.busy}
                   data-testid="byline-block-confirm"
-                  className="rounded-[12px] bg-destructive text-white hover:bg-destructive/90"
+                  className="rounded-control bg-destructive text-white hover:bg-destructive/90"
                   onClick={(event) => {
                     // Radix closes the dialog on action by default; `preventDefault`
                     // keeps the close explicit so it cannot race the mutation.
@@ -396,7 +396,7 @@ const ButtonsContainer = ({
                     t('block_confirm_dialog.action')
                   )}
                 </AlertDialogAction>
-                <AlertDialogCancel className="rounded-[12px]" data-testid="byline-block-cancel">
+                <AlertDialogCancel className="rounded-control" data-testid="byline-block-cancel">
                   {t('global.cancel')}
                 </AlertDialogCancel>
               </AlertDialogFooter>

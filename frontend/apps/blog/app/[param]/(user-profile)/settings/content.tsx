@@ -161,7 +161,7 @@ const SettingsContent = ({ username }: { username: string }) => {
           </p>
           <a
             href={identity.isLoggedIn ? `/@${identity.username}/settings` : '/login'}
-            className="mt-5 inline-block rounded-[14px] bg-surface-brand-12 px-5 py-2.5 text-[14px] leading-[22px] font-bold text-ink-27 transition-colors hover:bg-surface-brand-17"
+            className="mt-5 inline-block rounded-card bg-surface-brand-12 px-5 py-2.5 text-[14px] leading-[22px] font-bold text-ink-27 transition-colors hover:bg-surface-brand-17"
           >
             {identity.isLoggedIn ? 'Go to my settings' : 'Log in'}
           </a>
@@ -183,7 +183,7 @@ const SettingsContent = ({ username }: { username: string }) => {
           <button
             type="button"
             onClick={identity.retrySession}
-            className="mt-5 inline-block rounded-[14px] bg-surface-brand-12 px-5 py-2.5 text-[14px] leading-[22px] font-bold text-ink-27 transition-colors hover:bg-surface-brand-17"
+            className="mt-5 inline-block rounded-card bg-surface-brand-12 px-5 py-2.5 text-[14px] leading-[22px] font-bold text-ink-27 transition-colors hover:bg-surface-brand-17"
           >
             Try again
           </button>

@@ -188,7 +188,7 @@ export default function WitnessesTable({
                 <button
                   type="button"
                   onClick={onRetry}
-                  className="rounded-[10px] border border-line-11 bg-surface-1 px-4 py-2 font-sans text-[13px] leading-[20px] font-semibold text-ink-7 transition-colors hover:bg-surface-16"
+                  className="rounded-control border border-line-11 bg-surface-1 px-4 py-2 font-sans text-[13px] leading-[20px] font-semibold text-ink-7 transition-colors hover:bg-surface-16"
                 >
                   {t('witnesses.error.retry')}
                 </button>

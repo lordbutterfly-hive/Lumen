@@ -4,7 +4,7 @@ import { useTranslation } from '@/blog/i18n/client';
 import { useHiveMarketPrices } from '../hooks/use-hive-market-prices';
 import Sparkline from './sparkline';
 
-const CARD_CLASS = 'rounded-[18px] border border-line-9 bg-surface-1 p-5';
+const CARD_CLASS = 'rounded-panel border border-line-9 bg-surface-1 p-5';
 
 export default function PriceCardHive() {
   const { t } = useTranslation('common_blog');

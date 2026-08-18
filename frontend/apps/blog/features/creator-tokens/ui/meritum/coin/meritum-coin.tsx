@@ -2,7 +2,7 @@
 
 import { FC, useId } from 'react';
 import styles from './meritum-coin.module.css';
-import { MERITUM_CHARGE_DURATION_STYLE, MeritumCssVars, MeritumStrikePhase } from './timing';
+import { MERITUM_CHARGE_DURATION_STYLE, MERITUM_IDLE_FOIL_STYLE, MeritumCssVars, MeritumStrikePhase } from './timing';
 import {
   COIN_BEADS,
   COIN_DENTICLES,
@@ -49,6 +49,18 @@ export interface MeritumCoinProps extends MeritumCoinFlowState {
    * Exergue text before the strike. USER-FACING COPY — pass a translated
    * string. The default is the handoff's English so the component renders
    * standalone.
+   *
+   * ★ MUST NOT READ AS A NEGATIVE (C9-2). This one string sits under every
+   * pre-strike caption the launch flow shows -- "Blank", "Engraving",
+   * "Ready. Hold the coin", "Holding", "Striking", "Landing" -- so it has to
+   * be neutral enough to coexist with all of them. `'unstruck'` failed that
+   * on the "Ready" screen (the coin flatly contradicting the caption above
+   * it), and swapping in `'ready'` would have then contradicted "Blank" and
+   * "Engraving" instead: this is one shared string across many captions, not
+   * a per-caption one. `'blank'` is the actual state name this prop's own
+   * name already carries (`blankLabel`) and the numismatic term for a
+   * planchet before it is struck -- descriptive of the coin, not a verdict
+   * on the reader's progress, so it cannot contradict any of them.
    */
   blankLabel?: string;
   /** Shown in place of the handle when nothing is bound yet. Also copy. */
@@ -78,7 +90,7 @@ const MeritumCoin: FC<MeritumCoinProps> = ({
   step,
   openingPrice,
   phase = 'idle',
-  blankLabel = 'unstruck',
+  blankLabel = 'blank',
   unboundLabel = '@you',
   legendLabel = 'LUMEN MERITUM',
   alt = 'Your Meritum coin',
@@ -181,6 +193,14 @@ const MeritumCoin: FC<MeritumCoinProps> = ({
 
               {/* strike only: the sheen crossing the face, clipped by the field */}
               {striking ? <span className={`${styles.foil} mt-foil`} /> : null}
+              {/* whenever mt-coin-idle itself is breathing (idle + struck): the
+                  SAME mt-foil class, re-timed to a slow ~6s loop via inline style
+                  (see MERITUM_IDLE_FOIL_STYLE), so the resting coin does not read
+                  as static (C9-1). Never both at once -- this phase and `striking`
+                  are mutually exclusive. */}
+              {MOTION_CLASS[phase] === 'mt-coin-idle' ? (
+                <span className={`${styles.foil} mt-foil`} style={MERITUM_IDLE_FOIL_STYLE} />
+              ) : null}
               {/* strike only: one frame of white at the moment of contact */}
               {striking ? <span className={`${styles.flash} mt-flash`} /> : null}
             </span>

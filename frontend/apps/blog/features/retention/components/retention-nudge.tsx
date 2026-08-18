@@ -211,7 +211,7 @@ export function RetentionNudge({ className }: { className?: string }) {
 
   return (
     <section
-      className={`relative flex items-start gap-3 rounded-[16px] border border-line-9 bg-surface-12 px-5 py-3.5 ${className ?? ''}`}
+      className={`relative flex items-start gap-3 rounded-card border border-line-9 bg-surface-12 px-5 py-3.5 ${className ?? ''}`}
       data-testid="retention-nudge"
       data-nudge-kind={nudge.kind}
     >

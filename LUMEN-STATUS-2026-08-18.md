@@ -92,5 +92,5 @@ There is no third option that keeps Magi **testnet** and an unconfigured mainnet
 ## 4. Owner actions
 
 1. **Decide A or B on the Keychain question above.** Nothing else unblocks the launch.
-2. **Set `FEED_TOPIC_WARM=yes` on the real server.** `.env.local` is excluded from staging, so this cannot travel in the sync. It is now enabled in `.env.blog.example` for fresh deployments.
+2. ~~**Set `FEED_TOPIC_WARM=yes` on the real server.**~~ **DONE.** There is no production server yet — local is the only one, and the warmer is live there, verified by its own log (`warmed 14/14 tags`, cycling every 10 min, 0 failed) rather than by the env var alone. When production exists it must be set there by hand: `.env.local` is excluded from the sync, so it cannot travel. Already enabled in `.env.blog.example`.
 3. `/api/wallet/*` accepts any account name with no auth. The data is public on-chain so nothing leaks, but anyone can make the server do that work for any account — which mattered more when that work was 12 chain calls.

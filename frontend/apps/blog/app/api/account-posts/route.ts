@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
 import type { Entry } from '@hive/common-hiveio-packages/wax';
 import { getAccountPosts } from '@transaction/lib/bridge-api';
+import { withRetry } from '@transaction/lib/retry';
 import { attachLiteIdentities } from '@/blog/lib/lite/render/attach-lite';
 import { applyOwnerBlocksToAuthoredEntries } from '@/blog/lib/lite/social/block-filter';
 import { mergeLumenEngagement } from '@/blog/lib/lite/repositories/engagement-repository';
@@ -120,13 +121,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 100) : undefined;
 
   try {
-    let entries: Entry[] | null = await getAccountPosts(
-      sort,
-      account,
-      observer,
-      startAuthor,
-      startPermlink,
-      limit
+    // ★ A6 retry rollout (2026-08-18): wired here, not inside `getAccountPosts`
+    // itself — that function's other caller (`streak/[user]/route.ts`) already
+    // wraps it in its own wall-clock budget; see `getAccountPosts`'s own comment.
+    let entries: Entry[] | null = await withRetry(
+      () => getAccountPosts(sort, account, observer, startAuthor, startPermlink, limit),
+      { label: `getAccountPosts(${sort},${account})` }
     ).catch(() => null);
     // ★ THE READ FAILED -- SAY SO. See the doc comment above: this used to be
     // indistinguishable from "this account genuinely has nothing posted".

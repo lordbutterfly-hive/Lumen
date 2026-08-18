@@ -1,12 +1,26 @@
 ---
 name: blog-smoke-tests
-description: Run Playwright smoke tests for Denser blog application. Executes 15 tests (SMOKE-01 to SMOKE-15) against configurable environment (production, dev, or localhost) with retry support (max 3 attempts per failing test). Supports headed (visible browser) and headless modes. Collects artifacts (screenshots, trace.zip) on failures and generates HTML report. Use when testing blog functionality, verifying deployments, checking UI/API consistency, or when user requests smoke tests, playwright tests, or blog testing.
+description: Run Playwright smoke tests for Denser blog application. Executes 21 tests (SMOKE-01 to SMOKE-21) against configurable environment (production, dev, or localhost) with retry support (max 3 attempts per failing test). Supports headed (visible browser) and headless modes. Collects artifacts (screenshots, trace.zip) on failures and generates HTML report. Use when testing blog functionality, verifying deployments, checking UI/API consistency, or when user requests smoke tests, playwright tests, or blog testing.
 allowed-tools:
   - Bash
   - Read
   - Write
   - Glob
 ---
+
+> **Paths are repo-relative (B7, 2026-08-18).** This document used to hard-code
+> `/storage1/denser`, which is one machine's checkout path and does not exist on any other
+> — every command in it failed on a fresh clone. Set `REPO_ROOT` first:
+>
+> ```bash
+> REPO_ROOT="$(git rev-parse --show-toplevel)"
+> ```
+>
+> The test count was also wrong: the doc advertised 15 tests (SMOKE-01..15) while
+> `scripts/` holds **21** `smoke-*.mjs` files. Six tests existed and were never listed, so
+> anyone following the doc ran 71% of the suite believing they had run all of it.
+
+
 
 # Blog Smoke Tests Skill
 
@@ -37,7 +51,7 @@ Before running tests, ask user:
    - **Headless** - faster, for CI/CD
 
 3. **Test scope**:
-   - **All** - run all 15 tests
+   - **All** - run all 21 tests
    - **P0** - critical tests only (SMOKE-01, 04, 08)
    - **P1** - important tests (SMOKE-05, 06, 07)
    - **P2** - tooltip tests (SMOKE-02, 03, 09)
@@ -48,11 +62,11 @@ Before running tests, ask user:
 
 ```bash
 # Create temp and report directories
-mkdir -p /storage1/denser/apps/blog/playwright/temp_ai_script_tests
-mkdir -p /storage1/denser/apps/blog/playwright/temp_ai_report_tests
+mkdir -p "$REPO_ROOT"/apps/blog/playwright/temp_ai_script_tests
+mkdir -p "$REPO_ROOT"/apps/blog/playwright/temp_ai_report_tests
 
 # Copy test scripts
-cp /storage1/denser/.claude/skills/blog-smoke-tests/scripts/smoke-*.mjs /storage1/denser/apps/blog/playwright/temp_ai_script_tests/
+cp "$REPO_ROOT"/.claude/skills/blog-smoke-tests/scripts/smoke-*.mjs "$REPO_ROOT"/apps/blog/playwright/temp_ai_script_tests/
 ```
 
 ### Step 3: Run Tests with Retry Logic
@@ -66,7 +80,7 @@ For each test:
 
 **Command to run single test:**
 ```bash
-cd /storage1/denser/apps/blog
+cd "$REPO_ROOT"/apps/blog
 BASE_URL=https://blog.openhive.network HEADLESS=false REPORT_DIR=./playwright/temp_ai_report_tests pnpm exec node playwright/temp_ai_script_tests/smoke-XX-name.mjs
 ```
 
@@ -86,8 +100,8 @@ After running all tests, collect results and generate HTML report:
 
 ```bash
 # Option 1: Using generate-report.mjs script
-cd /storage1/denser/apps/blog
-pnpm exec node /storage1/denser/.claude/skills/blog-smoke-tests/scripts/generate-report.mjs '[results-json-array]'
+cd "$REPO_ROOT"/apps/blog
+pnpm exec node "$REPO_ROOT"/.claude/skills/blog-smoke-tests/scripts/generate-report.mjs '[results-json-array]'
 ```
 
 Alternatively, create report manually based on collected results.
@@ -98,7 +112,7 @@ Alternatively, create report manually based on collected results.
 
 After all tests complete:
 ```bash
-rm -f /storage1/denser/apps/blog/playwright/temp_ai_script_tests/smoke-*.mjs
+rm -f "$REPO_ROOT"/apps/blog/playwright/temp_ai_script_tests/smoke-*.mjs
 ```
 
 Keep report directory with:
@@ -140,7 +154,7 @@ When a test fails, the following artifacts are saved:
 
 **Viewing Traces:**
 ```bash
-cd /storage1/denser/apps/blog
+cd "$REPO_ROOT"/apps/blog
 npx playwright show-trace ./playwright/temp_ai_report_tests/SMOKE-04-trace.zip
 ```
 
@@ -228,8 +242,8 @@ for (const test of tests) {
 ## Reference Documentation
 
 - **Test patterns and selectors**: See [references/test-selectors.md](references/test-selectors.md)
-- **Full documentation**: `/storage1/denser/docs/playwright-testing-notes.md`
-- **Blog architecture**: `/storage1/denser/docs/denser-blog-architecture.md`
+- **Full documentation**: `"$REPO_ROOT"/docs/playwright-testing-notes.md`
+- **Blog architecture**: `"$REPO_ROOT"/docs/denser-blog-architecture.md`
 
 ## Directories
 
@@ -239,7 +253,7 @@ for (const test of tests) {
 | Dev URL | https://blog.dev.openhive.network |
 | Localhost URL | http://localhost:3000 |
 | API URL | https://api.hive.blog |
-| Working directory | /storage1/denser/apps/blog |
+| Working directory | "$REPO_ROOT"/apps/blog |
 | Temp scripts | playwright/temp_ai_script_tests/ |
 | Reports & artifacts | playwright/temp_ai_report_tests/ |
-| Skill scripts | /storage1/denser/.claude/skills/blog-smoke-tests/scripts/ |
+| Skill scripts | "$REPO_ROOT"/.claude/skills/blog-smoke-tests/scripts/ |

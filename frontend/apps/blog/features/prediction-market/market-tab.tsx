@@ -118,7 +118,7 @@ export default function MarketTab() {
         <button
           type="button"
           onClick={() => void refetch()}
-          className="mt-3 rounded-[12px] border border-line-12 bg-surface-1 px-4 py-2 font-sans text-sm font-semibold text-ink-2 transition-colors hover:border-line-28"
+          className="mt-3 rounded-control border border-line-12 bg-surface-1 px-4 py-2 font-sans text-sm font-semibold text-ink-2 transition-colors hover:border-line-28"
         >
           {t('prediction_market.retry')}
         </button>
@@ -135,7 +135,7 @@ export default function MarketTab() {
 
   return (
     <div className="pt-6 font-sans text-ink-2">
-      <div className="overflow-hidden rounded-[20px] border border-line-9 bg-surface-1 shadow-[0_1px_3px_rgba(20,18,10,0.04)]">
+      <div className="overflow-hidden rounded-panel border border-line-9 bg-surface-1 shadow-[0_1px_3px_rgba(20,18,10,0.04)]">
         {/* Header */}
         <div className="border-b border-line-3 px-7 pb-5 pt-[22px]">
           <div className="flex items-start justify-between gap-4">
@@ -224,7 +224,7 @@ export default function MarketTab() {
       </div>
 
       {hasPosition && myPosition && (
-        <div className="mt-5 rounded-[18px] border border-line-9 bg-surface-1 p-5 shadow-[0_1px_2px_rgba(20,18,10,0.03)]">
+        <div className="mt-5 rounded-panel border border-line-9 bg-surface-1 p-5 shadow-[0_1px_2px_rgba(20,18,10,0.03)]">
           <h3 className="mb-3 font-sans text-sm font-semibold text-ink-2">{t('prediction_market.my_position')}</h3>
           <ul className="space-y-1 font-sans text-sm">
             {round.buckets
@@ -253,7 +253,7 @@ export default function MarketTab() {
                 onClick={() => void onClaim()}
                 disabled={isClaiming || isLite}
                 title={isLite ? t('prediction_market.upgrade_to_claim') : undefined}
-                className="mt-3 w-full rounded-[14px] bg-surface-42 py-3 font-sans text-sm font-semibold text-ink-27 transition-colors hover:bg-surface-44 disabled:opacity-50"
+                className="mt-3 w-full rounded-card bg-surface-42 py-3 font-sans text-sm font-semibold text-ink-27 transition-colors hover:bg-surface-44 disabled:opacity-50"
               >
                 {isLite ? t('prediction_market.upgrade_to_claim') : t('prediction_market.claim')}
               </button>
@@ -270,7 +270,7 @@ export default function MarketTab() {
               in a dead round had no in-app way to get their money. Shown only
               when the position itself says the deadline has passed. */}
           {!isResolved && myPosition.reclaimable && (
-            <div className="mt-3 rounded-[14px] border border-line-warn-2 bg-surface-warn-4 p-3">
+            <div className="mt-3 rounded-card border border-line-warn-2 bg-surface-warn-4 p-3">
               <p className="font-sans text-[13px] leading-[20px] text-ink-warn-3">
                 {t('prediction_market.reclaim_explain')}
               </p>
@@ -279,7 +279,7 @@ export default function MarketTab() {
                 onClick={() => void onReclaim()}
                 disabled={isReclaiming || isLite}
                 title={isLite ? t('prediction_market.upgrade_to_reclaim') : undefined}
-                className="mt-2.5 w-full rounded-[12px] bg-surface-warn-11 py-2.5 font-sans text-sm font-semibold text-ink-27 transition-colors hover:bg-surface-warn-12 disabled:opacity-50"
+                className="mt-2.5 w-full rounded-control bg-surface-warn-11 py-2.5 font-sans text-sm font-semibold text-ink-27 transition-colors hover:bg-surface-warn-12 disabled:opacity-50"
               >
                 {isLite ? t('prediction_market.upgrade_to_reclaim') : t('prediction_market.reclaim')}
               </button>

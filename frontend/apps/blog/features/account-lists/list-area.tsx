@@ -25,7 +25,7 @@ import ResetAllListsDialog from './reset-all-lists-dialog';
 // page is also no longer force-narrowed to `max-w-lg` (512px) — it now fills
 // the same main-column width settings does.
 const LIST_CARD =
-  'w-full rounded-[18px] border border-[#ebebeb] bg-white p-6 shadow-[0_1px_2px_rgba(20,18,10,0.03)]';
+  'w-full rounded-panel border border-[#ebebeb] bg-white p-6 shadow-[0_1px_2px_rgba(20,18,10,0.03)]';
 const LIST_CARD_TITLE = 'font-serif text-[18px] font-semibold leading-[28px] text-[#161511]';
 const LIST_SECTION_HEADING = 'flex items-center gap-2 text-[15px] leading-[24px] font-semibold text-[#161511]';
 
@@ -160,7 +160,7 @@ const ListArea = ({
         {/* List */}
         <ul
           data-testid="user-list-container"
-          className="mt-4 w-full overflow-hidden rounded-[14px] border border-[#ebebeb]"
+          className="mt-4 w-full overflow-hidden rounded-card border border-[#ebebeb]"
         >
           {data && data.length === 0 && !isLoading ? (
             <li

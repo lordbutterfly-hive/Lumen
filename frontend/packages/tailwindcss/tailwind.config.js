@@ -182,10 +182,7 @@ module.exports = {
         'ink-15': 'rgb(var(--ink-15) / <alpha-value>)',
         'ink-16': 'rgb(var(--ink-16) / <alpha-value>)',
         'ink-17': 'rgb(var(--ink-17) / <alpha-value>)',
-        'ink-18': 'rgb(var(--ink-18) / <alpha-value>)',
-        'ink-19': 'rgb(var(--ink-19) / <alpha-value>)',
         'ink-2': 'rgb(var(--ink-2) / <alpha-value>)',
-        'ink-20': 'rgb(var(--ink-20) / <alpha-value>)',
         'ink-21': 'rgb(var(--ink-21) / <alpha-value>)',
         'ink-22': 'rgb(var(--ink-22) / <alpha-value>)',
         'ink-23': 'rgb(var(--ink-23) / <alpha-value>)',
@@ -479,12 +476,53 @@ module.exports = {
           noContent: 'hsl(var(--card-no-content))',
           emptyBorder: 'hsl(var(--card-empty-border))'
         },
-        link: 'hsl(var(--link))'
+        // Both names resolve to the one brand red (see --brand in globals.css).
+        // `link` is kept so no existing class has to change.
+        link: 'rgb(var(--brand))',
+        // The single resting colour of every neutral action icon. See --ink-action.
+        'ink-action': 'rgb(var(--ink-action))',
+        brand: 'rgb(var(--brand))'
       },
       borderRadius: {
-        lg: 'var(--radius)',
-        md: 'calc(var(--radius) - 2px)',
-        sm: 'calc(var(--radius) - 4px)'
+        /**
+         * ★★ THE BUILT-IN SCALE IS PART OF THE LADDER, NOT AN EXCEPTION TO IT
+         * (C2 follow-up, 2026-08-18). Collapsing the 15 arbitrary `rounded-[Npx]` values
+         * was only half the job: a live sweep of the rebuilt page still found 6px and
+         * 12px corners, and they came from Tailwind's OWN keys - `rounded-md`
+         * (calc(--radius - 2px) = 6px) and `rounded-xl` (0.75rem = 12px), neither of
+         * which is an arbitrary value and so neither of which the source sweep could see.
+         * One button carried `rounded-md` AND `rounded-control` at once, with `md`
+         * winning on source order - the collapse had been quietly reverted on that
+         * element by a class nobody edited.
+         *
+         * So every key now lands on the ladder. `rounded-md` and `rounded-control` are
+         * the same 10px whichever one a component reaches for, which is the whole point:
+         * you cannot pick a value off the ladder by accident any more.
+         */
+        none: '0px',
+        sm: '10px',
+        DEFAULT: '10px',
+        md: '10px',
+        lg: '14px',
+        xl: '14px',
+        '2xl': '18px',
+        '3xl': '18px',
+        full: '9999px',
+        /**
+         * ★★ THE THREE-STEP LADDER (C2, 2026-08-18). The audit counted 9 radii; the real
+         * measurement across `apps/blog` + `packages` found FIFTEEN distinct
+         * `rounded-[Npx]` values (5,6,7,8,9,10,11,12,13,14,16,18,20,22,26) plus
+         * `rounded-full`. Nothing rhymes at fifteen values, and `--radius: 0.5rem` was
+         * defined and ignored by every one of them.
+         *
+         * Each step is anchored on a value the codebase ALREADY used most — 10px (159
+         * uses), 14px (83), 18px (73) — so the collapse moves no corner by more than 4px
+         * and no component changes character. Named by ROLE, not size, so the next
+         * person reaches for the meaning rather than inventing a sixteenth number.
+         */
+        control: '10px',
+        card: '14px',
+        panel: '18px'
       },
       keyframes: {
         'accordion-down': {
@@ -522,7 +560,7 @@ module.exports = {
               }
             },
             a: {
-              color: 'hsl(var(--link))',
+              color: 'rgb(var(--brand))',
               textDecoration: 'none',
               whiteSpace: 'pre-wrap',
               wordBreak: 'break-word'

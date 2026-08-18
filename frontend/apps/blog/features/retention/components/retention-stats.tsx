@@ -8,7 +8,7 @@ import {
   type RetentionSummaryResponse
 } from '../hooks/use-retention';
 import { voiced, type RetentionVoice } from '../lib/viewer-copy';
-import { WORDS_PER_PAGE, pagesFromWords, pickWordWindow } from '../lib/act-stats';
+import { WORDS_PER_PAGE, pagesFromWords, pickWordWindow, wordsTrend } from '../lib/act-stats';
 import { reachTrend } from '../lib/copy-select';
 import type { RetentionStats } from '../types';
 
@@ -356,6 +356,27 @@ export function useRetentionStatLines(
       id: 'written',
       text: comparison ? `${headline} ${comparison}` : headline,
       tooltip: t('retention.stats.written_note', { perPage: WORDS_PER_PAGE })
+    });
+  }
+
+  // ── THE TWO LINES THAT MOVE ────────────────────────────────────────────
+  //
+  // Everything else on this card is a still figure. These two are the only ones that
+  // compare — against the reader's own last month, and against everybody else.
+  const trend = wordsTrend(stats?.wordsWritten?.month ?? 0, stats?.wordsWritten?.monthPrior ?? 0);
+  if (trend) {
+    lines.push({
+      id: 'words-trend',
+      text: t(voiced(trend.up ? 'retention.stats.words_up' : 'retention.stats.words_down', voice), { pct: trend.pct })
+    });
+  }
+
+  // Absent below a real population — see PERCENTILE_MIN_POPULATION. A percentile over a
+  // dozen accounts is a ranking wearing a statistic's clothes.
+  if (typeof stats?.wordsPercentile === 'number' && stats.wordsPercentile >= 50) {
+    lines.push({
+      id: 'words-percentile',
+      text: t(voiced('retention.stats.words_percentile', voice), { pct: stats.wordsPercentile })
     });
   }
 

@@ -50,7 +50,7 @@ const ModalShell: FC<ModalShellProps> = ({ width, onClose, title, className, chi
       wrapperClassName="p-5 py-12"
       style={{ width }}
       className={cn(
-        'max-w-full rounded-[20px] bg-surface-1 shadow-[0_20px_60px_rgba(20,18,10,0.25)] focus:outline-none',
+        'max-w-full rounded-panel bg-surface-1 shadow-[0_20px_60px_rgba(20,18,10,0.25)] focus:outline-none',
         className
       )}
     >

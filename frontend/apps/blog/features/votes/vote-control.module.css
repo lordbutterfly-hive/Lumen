@@ -34,13 +34,23 @@
 
 .root {
   /* Handoff palette, light. */
-  --lm-vote-muted: #8a827a;
+  /* ★ THE ROW'S ONE RESTING COLOUR (owner, 2026-08-18). This was #8a827a, a warm taupe,
+     while the comment and reblog icons beside it were #6b7280, a cool blue-grey - opposite
+     sides of neutral at the same size and stroke, which is why the blade read "off" next
+     to them, and at 3.78:1 it was the LOWEST-contrast control in the row despite being the
+     primary act. `--ink-action` is the single value all four now share (5.78:1). */
+  --lm-vote-muted: rgb(var(--ink-action));
   /* ★ THE APP'S OWN RED, NOT A LITERAL (2026-08-14). This was `#c0392b` from the
      handoff, which is NOT `--destructive` (hsl(0,70%,51%)) — two nearly-identical
      reds sitting on the same card is exactly the drift this codebase spent a day
      removing. Using the token also means dark mode gets the lifted value
      (hsl(0,90%,65%)) for free instead of staying at the light-mode red. */
-  --lm-vote-brand: hsl(var(--destructive));
+  /* ★ AND THE STATE COLOUR IS THE BRAND RED, NOT `--destructive` (2026-08-18). The note
+     above is still right that two nearly-identical reds on one card is drift - it just
+     picked the wrong survivor. `--brand` (#c0392b) is now the product's single red and
+     carries its own dark value, so the voted state matches every other brand surface
+     instead of being hsl(0,70%,51%), a red that appears nowhere else. */
+  --lm-vote-brand: rgb(var(--brand));
   --lm-vote-slate: #5b6470;
   --lm-vote-ink: #161511;
 
@@ -61,8 +71,8 @@
  * Slate is lifted too — `#5b6470` on a `#2c2620` card is under 3:1.
  */
 :global(.dark) .root {
-  --lm-vote-muted: #bab5b0;
-  --lm-vote-brand: #f2685b;
+  /* `--lm-vote-muted` and `--lm-vote-brand` are intentionally absent here: both now
+     resolve through `--ink-action` / `--brand`, which already switch in dark mode. */
   --lm-vote-slate: #a3adba;
   --lm-vote-ink: #fdfbfa;
 }

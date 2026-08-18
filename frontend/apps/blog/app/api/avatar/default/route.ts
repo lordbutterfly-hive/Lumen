@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { configuredImagesEndpoint } from '@hive/ui/config/public-vars';
+import { withRetry } from '@transaction/lib/retry';
 
 /**
  * Proxy endpoint for the default avatar image.
@@ -26,11 +27,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const defaultUrl = `${configuredImagesEndpoint}/DQmb2HNSGKN3pakguJ4ChCRjgkVuDN9WniFRPmrxoJ4sjR4`;
 
     // Fetch the image from the image hoster and stream it to the client
-    const response = await fetch(defaultUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0',
-      },
-    });
+    // ★ A6 retry rollout (2026-08-18): idempotent read of one immutable, content-
+    // addressed image — the safest possible retry target in this codebase.
+    const response = await withRetry(
+      () => fetch(defaultUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } }),
+      { label: 'avatar-default' }
+    );
 
     if (!response.ok || !response.body) {
       return NextResponse.json({ error: 'Failed to fetch default avatar' }, { status: response.status });

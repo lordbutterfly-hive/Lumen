@@ -62,7 +62,7 @@ export default function SavingsVault({
         <div className="h-px flex-1 bg-surface-27" />
       </div>
 
-      <div className="mb-[18px] rounded-[20px] border-2 border-line-13 bg-gradient-to-b from-surface-13 to-surface-2 p-5">
+      <div className="mb-[18px] rounded-panel border-2 border-line-13 bg-gradient-to-b from-surface-13 to-surface-2 p-5">
         <div className="mb-4 flex items-start gap-3.5">
           <span
             className="flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-xl bg-surface-info-9"
@@ -132,7 +132,7 @@ export default function SavingsVault({
                   type="button"
                   onClick={handleClaim}
                   disabled={!hasClaimableRewards || isClaiming}
-                  className="rounded-[14px] bg-surface-42 px-4 py-2 text-[13px] leading-[20px] font-semibold text-ink-27 transition-colors hover:bg-surface-44 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="rounded-card bg-surface-42 px-4 py-2 text-[13px] leading-[20px] font-semibold text-ink-27 transition-colors hover:bg-surface-44 disabled:cursor-not-allowed disabled:opacity-40"
                   data-testid="wallet-claim-now-button"
                 >
                   {t('wallet.savings.claim_now')}

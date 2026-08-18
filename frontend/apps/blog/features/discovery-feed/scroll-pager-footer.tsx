@@ -92,7 +92,7 @@ export default function ScrollPagerFooter({
               data-testid={testId ? `${testId}-load-more` : undefined}
               // ★ `surface-brand-12`, not `#c0392b` (2026-08-14 token-migration
               // pass): brand FILL role.
-              className="rounded-[13px] bg-surface-brand-12 px-5 py-2.5 font-sans text-[14px] leading-[22px] font-semibold text-white transition-colors hover:bg-[#a5301f]"
+              className="rounded-card bg-surface-brand-12 px-5 py-2.5 font-sans text-[14px] leading-[22px] font-semibold text-white transition-colors hover:bg-[#a5301f]"
             >
               Load more
             </button>
@@ -100,7 +100,7 @@ export default function ScrollPagerFooter({
               type="button"
               onClick={backToTop}
               data-testid={testId ? `${testId}-back-to-top` : undefined}
-              className="rounded-[13px] border border-[#e4e6e9] px-5 py-2.5 font-sans text-[14px] leading-[22px] font-semibold text-[#3f4650] transition-colors hover:bg-[#f6f7f8]"
+              className="rounded-card border border-[#e4e6e9] px-5 py-2.5 font-sans text-[14px] leading-[22px] font-semibold text-[#3f4650] transition-colors hover:bg-[#f6f7f8]"
             >
               Back to top
             </button>

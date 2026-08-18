@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
 import { getListVotesByCommentVoter } from '@transaction/lib/hive-api';
+import { withRetry } from '@transaction/lib/retry';
 import { isPermlinkValid } from '@/blog/utils/validate-links';
 
 const logger = getLogger('app');
@@ -84,7 +85,16 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       if (index >= targets.length) return;
       const [author, permlink] = targets[index];
       try {
-        const result = await getListVotesByCommentVoter([author, permlink, voter], 1);
+        // ★ A6 retry rollout (2026-08-18): wired here, not inside
+        // `getListVotesByCommentVoter` itself (see that function's own comment).
+        // Tighter budget than the default: up to `MAX_TARGETS` (100) of these run
+        // through `CONCURRENCY` (8) workers, so a full-default 2.5s retry budget on
+        // every failing item could compound across ~13 sequential rounds per worker.
+        const result = await withRetry(() => getListVotesByCommentVoter([author, permlink, voter], 1), {
+          label: `list_votes(${author}/${permlink})`,
+          attempts: 2,
+          budgetMs: 800
+        });
         votes[`${author}/${permlink}`] = result?.votes?.[0] ?? null;
       } catch (error) {
         // Deliberately not fatal — see the doc above.

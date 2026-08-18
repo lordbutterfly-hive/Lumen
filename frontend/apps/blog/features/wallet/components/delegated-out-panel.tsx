@@ -38,7 +38,7 @@ export default function DelegatedOutPanel({
         // accounts delegate 7-figure HP) plus the chevron could push past
         // this button's ~276px width (card padding + the section's own
         // border-l/pl-4 indent) the same way the reported bugs did.
-        className="flex w-full flex-wrap items-center justify-between gap-x-2 gap-y-1 rounded-[14px] border border-line-9 bg-surface-1 px-3.5 py-2.5 transition-colors hover:bg-surface-16"
+        className="flex w-full flex-wrap items-center justify-between gap-x-2 gap-y-1 rounded-card border border-line-9 bg-surface-1 px-3.5 py-2.5 transition-colors hover:bg-surface-16"
         data-testid="wallet-delegated-out-toggle"
       >
         <span className="flex items-center gap-2.5 text-[14px] leading-[22px] font-semibold text-ink-7">
@@ -62,7 +62,7 @@ export default function DelegatedOutPanel({
       </button>
 
       {delegatedOpen ? (
-        <div className="rounded-[14px] border border-line-9 bg-surface-5 px-4 py-3.5" data-testid="wallet-delegated-out-list">
+        <div className="rounded-card border border-line-9 bg-surface-5 px-4 py-3.5" data-testid="wallet-delegated-out-list">
           <div className="mb-2.5 flex items-center justify-between">
             <span className="text-[13px] leading-[20px] font-bold text-ink-4">
               {t('wallet.delegated.accounts_count', { count: delegatees?.length ?? 0 })}

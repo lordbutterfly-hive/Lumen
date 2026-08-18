@@ -241,13 +241,14 @@ async function loadWordCount(
       LIMIT $2`,
     [userId, WORDS_SCAN_LIMIT]
   );
-  const words: AuthoredWords = { day: 0, week: 0, month: 0, year: 0, all: 0 };
+  const words: AuthoredWords = { day: 0, week: 0, month: 0, monthPrior: 0, year: 0, all: 0 };
   const today = new Date(nowMs).toISOString().slice(0, 10);
   const startOf = (days: number) => new Date(nowMs - (days - 1) * 86_400_000).toISOString().slice(0, 10);
   const d1 = today;
   const d7 = startOf(7);
   const d30 = startOf(30);
   const d365 = startOf(365);
+  const d60 = startOf(60);
   for (const row of rows) {
     const n = countWords(row.body ?? '');
     if (n <= 0) continue;
@@ -259,6 +260,7 @@ async function loadWordCount(
     if (!day) continue;
     if (day >= d365) words.year += n;
     if (day >= d30) words.month += n;
+    else if (day >= d60) words.monthPrior += n;
     if (day >= d7) words.week += n;
     if (day === d1) words.day += n;
   }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
 import { getPost } from '@transaction/lib/bridge-api';
+import { withRetry } from '@transaction/lib/retry';
 import { isPermlinkValid } from '@/blog/utils/validate-links';
 
 const logger = getLogger('app');
@@ -26,7 +27,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'author_and_permlink_required' }, { status: 400 });
   }
   try {
-    const post = await getPost(author, permlink, observer).catch(() => null);
+    // ★ A6 retry rollout (2026-08-18): wired here, not inside `getPost` itself —
+    // that function's other caller (`/api/feed/for-you`) already has its own
+    // hand-rolled retry across a ~30-way fan-out; see `getPost`'s own comment.
+    const post = await withRetry(() => getPost(author, permlink, observer), {
+      label: `getPost(${author}/${permlink})`
+    }).catch(() => null);
     return NextResponse.json({ post: post ?? null }, { headers: { 'cache-control': 'private, no-store' } });
   } catch (error) {
     logger.error(error, 'post status lookup failed for %s/%s', author, permlink);

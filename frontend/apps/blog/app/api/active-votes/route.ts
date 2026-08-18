@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLogger } from '@ui/lib/logging';
 import { getActiveVotes } from '@transaction/lib/hive-api';
+import { withRetry } from '@transaction/lib/retry';
 import type { IVote } from '@hive/common-hiveio-packages/wax';
 import { litePostIdOf } from '@/blog/lib/lite/render/lite-post-id';
 import { getPostById } from '@/blog/lib/lite/repositories/post-repository';
@@ -88,7 +89,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // response — see the doc block above for why "quiet empty" beats a 502.
   let chainVotes: IVote[] = [];
   try {
-    chainVotes = await getActiveVotes(author, permlink);
+    // ★ A6 retry rollout (2026-08-18): wraps the whole call here rather than
+    // touching `getActiveVotes`/`getListVotesByCommentVoter` themselves — those
+    // are also used by `streak/[user]/route.ts`'s own wall-clock-budgeted fan-out,
+    // which this route has no part of.
+    chainVotes = await withRetry(() => getActiveVotes(author, permlink), {
+      label: `getActiveVotes(${author}/${permlink})`
+    });
   } catch (error) {
     logger.error(error, 'active votes lookup failed for %s/%s', author, permlink);
   }

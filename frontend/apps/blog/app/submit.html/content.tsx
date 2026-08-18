@@ -77,7 +77,7 @@ const SubmitContent = () => {
             />
           ) : (
             <div
-              className="rounded-[14px] border border-line-9 bg-surface-1 px-4 py-6 text-sm text-ink-10"
+              className="rounded-card border border-line-9 bg-surface-1 px-4 py-6 text-sm text-ink-10"
               data-testid="log-in-to-make-post-message"
             >
               {t('submit_page.log_in_to_post')}

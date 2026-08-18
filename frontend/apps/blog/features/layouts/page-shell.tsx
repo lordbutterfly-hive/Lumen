@@ -3,6 +3,7 @@
 import { ReactNode } from 'react';
 import LeftRail from './left-rail';
 import RightRail from './right-rail';
+import { StreakCardNarrow } from '@/blog/features/retention/components/streak-card';
 
 /**
  * ★★★ THE ONE APP FRAME (F9, 2026-08-11, buildmap item 12 / P3 "container widths").
@@ -66,6 +67,12 @@ export default function PageShell({
   mainClassName?: string;
 }) {
   const rail = rightRail === undefined ? <RightRail /> : rightRail;
+  /**
+   * ★ ONLY WHEN THIS SHELL IS USING THE DEFAULT RAIL. A caller that passed
+   * `rightRail={null}` (/settings does) declined the feed rail; it did not ask for the
+   * rail's contents to reappear inside the content column at narrow widths instead.
+   */
+  const usesDefaultRail = rightRail === undefined;
   // The right COLUMN exists if anything at all wants to live in it. Keeping this
   // as one condition means `rightRailExtra` can never be silently dropped by a
   // caller that also passed `rightRail={null}`.
@@ -86,7 +93,10 @@ export default function PageShell({
         <LeftRail />
       </aside>
 
-      <main className={mainClassName}>{children}</main>
+      <main className={mainClassName}>
+        {usesDefaultRail ? <StreakCardNarrow /> : null}
+        {children}
+      </main>
 
       {/* ONE sticky, on the column wrapper, at ONE offset. Nothing inside this
           column may add a second `sticky` or its own scroller — see the

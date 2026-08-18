@@ -8,11 +8,11 @@ import TokenIcon from './token-icon';
 import SendDialog from './dialogs/send-dialog';
 import StakedHiveBlock from './staked-hive-block';
 
-const CARD_CLASS = 'mb-[18px] rounded-[18px] border border-line-9 bg-surface-1 p-6';
-// W-2/W-3: was rounded-[11px] bg-surface-ok-7 — the success green used as an
+const CARD_CLASS = 'mb-[18px] rounded-panel border border-line-9 bg-surface-1 p-6';
+// W-2/W-3: was rounded-control bg-surface-ok-7 — the success green used as an
 // action colour, at a radius no other control on the page shared.
 const SEND_BUTTON_CLASS =
-  'flex items-center gap-1.5 rounded-[14px] bg-surface-brand-12 px-[18px] py-2.5 text-[14px] leading-[22px] font-semibold text-ink-27 transition-colors hover:bg-surface-brand-17';
+  'flex items-center gap-1.5 rounded-card bg-surface-brand-12 px-[18px] py-2.5 text-[14px] leading-[22px] font-semibold text-ink-27 transition-colors hover:bg-surface-brand-17';
 
 export default function HiveTokenCard({
   username,

@@ -249,7 +249,7 @@ export default function ShortFormComposer() {
   if (!loggedIn) {
     return (
       <DialogLogin>
-        <div className="cursor-pointer rounded-[18px] border border-[#ebebeb] bg-white p-[20px_22px] font-sans text-[18px] leading-[30px] text-[#9ca3af] shadow-[0_1px_2px_rgba(20,18,10,0.03)] transition-colors hover:bg-background-secondary">
+        <div className="cursor-pointer rounded-panel border border-[#ebebeb] bg-white p-[20px_22px] font-sans text-[18px] leading-[30px] text-ink-14 shadow-[0_1px_2px_rgba(20,18,10,0.03)] transition-colors hover:bg-background-secondary">
           {t('short_form_composer.login_prompt')}
         </div>
       </DialogLogin>
@@ -261,20 +261,20 @@ export default function ShortFormComposer() {
       <div
         data-testid="short-form-composer"
         data-state="collapsed"
-        className="flex items-center gap-4 rounded-[18px] border border-[#ebebeb] bg-white p-[20px_22px] shadow-[0_1px_2px_rgba(20,18,10,0.03)]"
+        className="flex items-center gap-4 rounded-panel border border-[#ebebeb] bg-white p-[20px_22px] shadow-[0_1px_2px_rgba(20,18,10,0.03)]"
       >
         <UserAvatarImg username={displayUsername} pixelSize={44} alt={displayUsername} />
         <button
           type="button"
           onClick={expandAndFocus}
-          className="flex-1 text-left font-sans text-[18px] leading-[30px] text-[#9ca3af]"
+          className="flex-1 text-left font-sans text-[18px] leading-[30px] text-ink-14"
         >
           {t('short_form_composer.placeholder')}
         </button>
         <button
           type="button"
           onClick={expandAndFocus}
-          className="ml-auto rounded-[11px] bg-[#1a1a17] px-[22px] py-[10px] text-sm font-semibold text-white"
+          className="ml-auto rounded-control bg-surface-brand-12 px-[22px] py-[10px] text-sm font-semibold text-white transition-colors hover:bg-surface-brand-16"
         >
           {t('short_form_composer.post_button')}
         </button>
@@ -304,7 +304,7 @@ export default function ShortFormComposer() {
         void images.handleFiles(files);
       }}
       className={cn(
-        'rounded-[18px] border bg-white p-[20px_22px] font-sans shadow-[0_1px_2px_rgba(20,18,10,0.03)] transition-colors',
+        'rounded-panel border bg-white p-[20px_22px] font-sans shadow-[0_1px_2px_rgba(20,18,10,0.03)] transition-colors',
         // ★ `line-brand-10`, not `#c0392b` (2026-08-14 token-migration pass):
         // brand LINE role (a border), matching `tailwind.config.js`'s own
         // border → `line-*` mapping.
@@ -351,7 +351,7 @@ export default function ShortFormComposer() {
           // scrollHeight 1552, `overflow-y: hidden`, `resize: none` — the text
           // existed and a person had no wheel, no scrollbar and no drag handle to
           // reach it. Everything past roughly line 10 was invisible while typing.
-          className="max-h-[420px] min-h-[56px] flex-1 resize-none overflow-y-auto border-none bg-transparent py-2 font-sans text-[18px] leading-[30px] text-foreground placeholder:text-[#9ca3af] focus:outline-none focus-visible:ring-0"
+          className="max-h-[420px] min-h-[56px] flex-1 resize-none overflow-y-auto border-none bg-transparent py-2 font-sans text-[18px] leading-[30px] text-foreground placeholder:text-ink-14 focus:outline-none focus-visible:ring-0"
         />
       </div>
 

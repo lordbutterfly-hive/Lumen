@@ -46,7 +46,7 @@ export default function ClaimAccountDialog({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>{trigger}</DialogTrigger>
-      <DialogContent className="rounded-[18px] font-sans sm:max-w-[440px]" data-testid="claim-account-dialog">
+      <DialogContent className="rounded-panel font-sans sm:max-w-[440px]" data-testid="claim-account-dialog">
         <DialogHeader>
           <DialogTitle className="text-left text-xl text-ink-2">
             {t('wallet.dialogs.claim_account.title')}
@@ -55,7 +55,7 @@ export default function ClaimAccountDialog({
             {t('wallet.dialogs.claim_account.description')}
           </DialogDescription>
         </DialogHeader>
-        <p className="rounded-[10px] bg-surface-16 px-3 py-2 text-[13px] leading-[20px] text-ink-7">
+        <p className="rounded-control bg-surface-16 px-3 py-2 text-[13px] leading-[20px] text-ink-7">
           {pendingClaimedAccounts > 0
             ? t('wallet.dialogs.claim_account.pending', { count: pendingClaimedAccounts })
             : t('wallet.dialogs.claim_account.pending_none')}

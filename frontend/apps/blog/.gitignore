@@ -55,3 +55,9 @@ public/auth/assets/
 
 # Sentry Config File
 .env.sentry-build-plugin
+
+# QA harness output. Regenerated on every sweep, one JSON per run per viewport per
+# auth state - it is evidence for a run, not source. Committing it buries the real
+# diff (the same reason .next-dev/ and test-results/ are excluded from the O-drive
+# sync bridge in scripts/sync-frontend.sh).
+qa/harness/reports/

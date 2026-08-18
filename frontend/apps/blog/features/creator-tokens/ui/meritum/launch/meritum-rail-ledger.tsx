@@ -22,6 +22,14 @@ export interface MeritumLedgerRow {
   label: string;
   /** The value on the right, or null while it is genuinely not known. */
   value: string | null;
+  /**
+   * Secondary text shown beside `value`, never in place of `label` (C9-3).
+   * Used for an offer's own wording next to its price, so the reader can
+   * verify what they wrote before an irreversible strike -- already
+   * sanitized by the caller (`build-ledger.ts`). Null/absent renders exactly
+   * as before this field existed.
+   */
+  detail?: string | null;
   /** Renders the value in the brand ink. Used for Lumen's cut, nothing else. */
   brand?: boolean;
 }
@@ -47,12 +55,24 @@ const MeritumRailLedger: FC<MeritumRailLedgerProps> = ({ rows, emptyLabel }) => 
           ~7.1:1 on the same ground and still reads as secondary.
         */}
         <dt className="text-12 font-bold uppercase tracking-[0.1em] text-meritum-ink-3">{row.label}</dt>
+        {/*
+          ★ THE NAME NEVER PUSHES THE PRICE OUT OF VIEW (C9-3). `detail` can be
+          as long as a 120-character offer name; the price is the number the
+          reader is here to confirm, so it stays `flex-none` (always shown in
+          full) while `detail` is what shrinks and truncates when the row runs
+          out of room.
+        */}
         <dd
-          className={`truncate font-serif text-15 font-semibold tabular-nums ${
+          className={`flex min-w-0 flex-1 items-baseline justify-end gap-2 font-serif text-15 font-semibold tabular-nums ${
             row.value === null ? 'text-meritum-ink-faint' : row.brand ? 'text-meritum-ink-brand' : 'text-meritum-ink'
           }`}
         >
-          {row.value ?? emptyLabel}
+          {row.detail ? (
+            <span className="min-w-0 truncate text-13 font-normal normal-case tracking-normal text-meritum-ink-muted">
+              {row.detail}
+            </span>
+          ) : null}
+          <span className="flex-none truncate">{row.value ?? emptyLabel}</span>
         </dd>
       </div>
     ))}

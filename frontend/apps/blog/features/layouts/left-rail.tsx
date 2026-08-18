@@ -12,6 +12,7 @@ import { useTranslation } from '@/blog/i18n/client';
 import DialogLogin from '@/blog/components/dialog-login';
 import { LeagueShowcase } from '@/blog/features/retention/components/league-showcase';
 import { CreatorTokenRocket } from '@/blog/features/creator-tokens/ui/creator-token-rocket';
+import styles from './left-rail.module.css';
 
 /**
  * ★★★ THESE WERE THE REASON THE LANGUAGE SWITCHER "DID NOTHING" (2026-08-14).
@@ -93,8 +94,15 @@ const ROW_CLASS =
    * Fractional pixels are deliberate: rounding each one would drift the row off
    * a clean 10%.
    */
-  'flex items-center gap-[15.4px] rounded-xl px-[15.4px] py-[12.1px] font-sans text-[16.5px] leading-[26.4px] text-ink-8 transition-colors hover:bg-surface-brand-5 hover:text-ink-brand-6';
-const ROW_ACTIVE_CLASS = 'bg-surface-23 font-medium text-ink-2';
+  'flex items-center gap-[15.4px] rounded-xl px-[15.4px] py-[12.1px] font-sans text-[16.5px] leading-[26.4px] text-ink-8 transition-colors';
+/*
+ * ★ THE ACTIVE TREATMENT MOVED TO left-rail.module.css (owner design `nav-2a`,
+ * 2026-08-18): a brand-tinted seat, the brand label, and a 2px rule that grows in at the
+ * row's left edge. Hover moved with it, from warm to neutral - see that file for why the
+ * inversion answers the objection the comment above raises rather than overruling it.
+ * Nothing is left here: a second source of truth for the same state is how the two
+ * treatments drift apart.
+ */
 
 /**
  * ★★★ TWO ROWS CANNOT BOTH BE "WHERE YOU ARE" (2026-08-10, measured).
@@ -126,7 +134,7 @@ const NavRowContent = ({
 }) => {
   const IconTag = icon;
   return (
-    <span className={cn(ROW_CLASS, (isActive || isPending) && ROW_ACTIVE_CLASS)}>
+    <span className={cn(ROW_CLASS, styles.row)} data-active={isActive || isPending ? 'true' : undefined}>
       <IconTag className="h-[22px] w-[22px] shrink-0" />
       <span>{label}</span>
       {isPending ? (
@@ -234,7 +242,11 @@ export default function LeftRail() {
         !except.some((ex) => pathname === ex || pathname.startsWith(`${ex}/`))));
 
   return (
-    <nav aria-label={LABELS.primaryNav} className="flex flex-col py-4" data-testid="left-rail-nav">
+    <nav
+      aria-label={LABELS.primaryNav}
+      className={cn('flex flex-col py-4', styles.rail)}
+      data-testid="left-rail-nav"
+    >
       <ul className="flex flex-col gap-1">
         {/* League status block — gates on logged-in internally, renders null otherwise. */}
         <LeagueShowcase />
@@ -304,7 +316,7 @@ export default function LeftRail() {
 
         <InternalNavRow
           href="/witnesses"
-          icon={Icons.arrowBigUp}
+          icon={Icons.witnessVoteFilled}
           label={LABELS.voteWitness}
           isActive={activeIs('/witnesses')}
           isPending={navigatingTo === '/witnesses'}
@@ -313,7 +325,7 @@ export default function LeftRail() {
         />
         <InternalNavRow
           href="/proposals"
-          icon={Icons.listChecks}
+          icon={Icons.proposalsFilled}
           label={LABELS.voteProposals}
           isActive={activeIs('/proposals')}
           isPending={navigatingTo === '/proposals'}

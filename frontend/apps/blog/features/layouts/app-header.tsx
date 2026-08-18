@@ -365,7 +365,7 @@ const AppHeader: FC = () => {
                  and a dozen Playwright specs — deliberately not bundled into a
                  composer-defects pass.
 
-                 ★ `rounded-[10px]`, ADDED 2026-08-13 (audit §4.2). The audit
+                 ★ `rounded-control`, ADDED 2026-08-13 (audit §4.2). The audit
                  reported "three elements on the followers page still compute a
                  6px radius: the Previous and Next buttons, and one link", on a
                  surface whose own scale is 10/12/18px. Two of those three
@@ -380,10 +380,10 @@ const AppHeader: FC = () => {
               <Link
                 href="/submit.html"
                 aria-label={LABELS.write}
-                className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }), 'h-10 w-10 rounded-[10px] px-0')}
+                className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }), 'h-10 w-10 rounded-control px-0')}
               >
                 <span data-testid="nav-pencil" className="flex items-center justify-center">
-                  <Icons.pencil className="h-5 w-5" />
+                  <Icons.pencil className="h-5 w-5 text-ink-2" />
                 </span>
               </Link>
             ) : (
@@ -391,11 +391,11 @@ const AppHeader: FC = () => {
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-10 w-10 rounded-[10px] px-0"
+                  className="h-10 w-10 rounded-control px-0"
                   aria-label={LABELS.write}
                   data-testid="nav-pencil"
                 >
-                  <Icons.pencil className="h-5 w-5" />
+                  <Icons.pencil className="h-5 w-5 text-ink-2" />
                 </Button>
               </DialogLogin>
             )}
@@ -420,7 +420,7 @@ const AppHeader: FC = () => {
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="relative h-10 w-10 rounded-[10px] px-0"
+                  className="relative h-10 w-10 rounded-control px-0"
                   aria-label={
                     unreadTotal > 0
                       ? `${LABELS.notifications} (${unreadTotal} unread)`
@@ -428,7 +428,7 @@ const AppHeader: FC = () => {
                   }
                   data-testid="nav-notifications"
                 >
-                  <Icons.bell className="h-5 w-5" />
+                  <Icons.bell className="h-5 w-5 text-ink-2" />
                   {unreadTotal > 0 ? (
                     <span className="absolute right-0 top-0.5 z-10 inline-block -translate-y-1/2 translate-x-2/4 rounded-full bg-destructive-icon px-1.5 py-1 text-center align-baseline text-xs font-bold leading-none text-ink-27">
                       {unreadTotal}

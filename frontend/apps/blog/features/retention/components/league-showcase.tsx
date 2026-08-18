@@ -192,7 +192,7 @@ function ShowcaseBlock({ summary }: { summary: RetentionSummaryResponse }) {
         <PopoverContent
           side="right"
           align="start"
-          className="w-[340px] rounded-[18px] border border-line-9 bg-surface-1 p-5 text-ink-2 shadow-lg"
+          className="w-[340px] rounded-panel border border-line-9 bg-surface-1 p-5 text-ink-2 shadow-lg"
         >
           <div className="flex items-center gap-3">
             <LeagueEmblem tier={rank.tier} size="popover" />

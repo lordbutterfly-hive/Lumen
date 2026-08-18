@@ -72,7 +72,7 @@ export default function AccountHistoryRow({ entry }: { entry: DescribedHistoryEn
 
   return (
     <div
-      className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1 rounded-[14px] border border-line-2 bg-surface-1 px-[18px] py-3.5 transition-colors hover:bg-surface-5"
+      className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1 rounded-card border border-line-2 bg-surface-1 px-[18px] py-3.5 transition-colors hover:bg-surface-5"
       data-testid="wallet-history-row"
     >
       <div className="min-w-0 flex-1">

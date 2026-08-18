@@ -6,6 +6,7 @@ import RightRail from '@/blog/features/layouts/right-rail';
 import PageMasthead from '@/blog/features/layouts/page-masthead';
 import BasePathLink from '@/blog/components/base-path-link';
 import { useTranslation } from '@/blog/i18n/client';
+import { StreakCardNarrow } from '@/blog/features/retention/components/streak-card';
 
 /**
  * The one chrome for every `/@username/<sub-page>` route.
@@ -75,6 +76,12 @@ const ProfileSubpageShell = ({
   };
 
   const rail = rightRail === undefined ? <RightRail /> : rightRail;
+  /**
+   * ★ ONLY WHEN THIS SHELL IS USING THE DEFAULT RAIL. A caller that passed
+   * `rightRail={null}` (/settings does) declined the feed rail; it did not ask for the
+   * rail's contents to reappear inside the content column at narrow widths instead.
+   */
+  const usesDefaultRail = rightRail === undefined;
 
   return (
     <div
@@ -105,6 +112,7 @@ const ProfileSubpageShell = ({
           </BasePathLink>
         </PageMasthead>
 
+        {usesDefaultRail ? <StreakCardNarrow /> : null}
         {children}
       </main>
 

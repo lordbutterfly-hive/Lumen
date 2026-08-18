@@ -120,7 +120,7 @@ export default function WalletRightRail() {
           nothing. */}
       {identity.isLoggedIn && identity.sessionUnavailable && (
         <p
-          className="rounded-[14px] border border-dashed border-line-14 px-4 py-3 text-[13px] leading-[20px] text-ink-10"
+          className="rounded-card border border-dashed border-line-14 px-4 py-3 text-[13px] leading-[20px] text-ink-10"
           data-testid="wallet-rail-session-unavailable"
         >
           {t('wallet.session_unavailable')}

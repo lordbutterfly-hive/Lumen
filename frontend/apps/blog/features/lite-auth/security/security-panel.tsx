@@ -296,7 +296,19 @@ const SecurityPanel: FC = () => {
   };
 
   if (!identity.isLoggedIn) {
-    return <div className="mx-auto max-w-[560px] p-6 text-[15px] leading-[24px] text-ink-8">{COPY.signedOut}</div>;
+    return (
+      <div className="mx-auto max-w-[560px] p-6">
+        {/* ★ A GATE IS STILL A PAGE, AND A PAGE NEEDS ITS NAME (A7, 2026-08-18). Measured
+              live: /security and /upgrade returned ZERO headings of any level to a
+              signed-out visitor, because the panel early-returns one sentence. A
+              document with no h1 gives a screen-reader user nothing to orient by and
+              gives a crawler nothing to index — and these two are exactly the pages
+              someone lands on cold from a link. The heading is the page's identity,
+              not a decoration on its happy path. */}
+        <h1 className="font-serif text-2xl font-semibold text-ink-2">{COPY.title}</h1>
+        <p className="mt-2 text-[15px] leading-[24px] text-ink-8">{COPY.signedOut}</p>
+      </div>
+    );
   }
   if (!identity.clientAnswered) {
     // ★★★ "LOADING…" WAS PERMANENT ON A FAILED SESSION READ (2026-08-13,
@@ -314,7 +326,7 @@ const SecurityPanel: FC = () => {
           <button
             type="button"
             onClick={identity.retrySession}
-            className="mt-3 rounded-[10px] border border-line-11 px-4 py-2 text-[14px] leading-[22px] font-semibold text-ink-7 hover:bg-surface-16"
+            className="mt-3 rounded-control border border-line-11 px-4 py-2 text-[14px] leading-[22px] font-semibold text-ink-7 hover:bg-surface-16"
           >
             {COPY.loadRetry}
           </button>
@@ -324,7 +336,19 @@ const SecurityPanel: FC = () => {
     return <div className="mx-auto max-w-[560px] p-6 text-[15px] leading-[24px] text-ink-14">{COPY.loading}</div>;
   }
   if (!isLite) {
-    return <div className="mx-auto max-w-[560px] p-6 text-[15px] leading-[24px] text-ink-8">{COPY.signedOut}</div>;
+    return (
+      <div className="mx-auto max-w-[560px] p-6">
+        {/* ★ A GATE IS STILL A PAGE, AND A PAGE NEEDS ITS NAME (A7, 2026-08-18). Measured
+              live: /security and /upgrade returned ZERO headings of any level to a
+              signed-out visitor, because the panel early-returns one sentence. A
+              document with no h1 gives a screen-reader user nothing to orient by and
+              gives a crawler nothing to index — and these two are exactly the pages
+              someone lands on cold from a link. The heading is the page's identity,
+              not a decoration on its happy path. */}
+        <h1 className="font-serif text-2xl font-semibold text-ink-2">{COPY.title}</h1>
+        <p className="mt-2 text-[15px] leading-[24px] text-ink-8">{COPY.signedOut}</p>
+      </div>
+    );
   }
 
   const connectorReady = walletConnectAvailable();
@@ -340,7 +364,7 @@ const SecurityPanel: FC = () => {
           <button
             type="button"
             onClick={() => void reload()}
-            className="mt-3 rounded-[10px] border border-line-12 bg-surface-1 px-4 py-2 text-[14px] leading-[22px] font-semibold text-ink-2 hover:border-line-28"
+            className="mt-3 rounded-control border border-line-12 bg-surface-1 px-4 py-2 text-[14px] leading-[22px] font-semibold text-ink-2 hover:border-line-28"
           >
             {COPY.loadRetry}
           </button>
@@ -428,7 +452,7 @@ const SecurityPanel: FC = () => {
             onClick={() => void signOutEverywhere()}
             disabled={signOutMutation.isLoading}
             data-testid="sign-out-everywhere-confirm"
-            className="rounded-[10px] border-2 border-line-brand-11 bg-surface-1 px-4 py-2 text-[14px] leading-[22px] font-semibold text-ink-brand-5 hover:bg-surface-brand-5 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-control border-2 border-line-brand-11 bg-surface-1 px-4 py-2 text-[14px] leading-[22px] font-semibold text-ink-brand-5 hover:bg-surface-brand-5 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {signOutMutation.isLoading ? COPY.signOutAllBusy : COPY.signOutAllConfirm}
           </button>
@@ -436,7 +460,7 @@ const SecurityPanel: FC = () => {
             type="button"
             onClick={() => setConfirmSignOutAll(false)}
             disabled={signOutMutation.isLoading}
-            className="rounded-[10px] border border-line-12 bg-surface-1 px-4 py-2 text-[14px] leading-[22px] font-semibold text-ink-2 hover:border-line-28 disabled:opacity-50"
+            className="rounded-control border border-line-12 bg-surface-1 px-4 py-2 text-[14px] leading-[22px] font-semibold text-ink-2 hover:border-line-28 disabled:opacity-50"
           >
             {COPY.signOutAllCancel}
           </button>
@@ -446,7 +470,7 @@ const SecurityPanel: FC = () => {
           type="button"
           onClick={() => setConfirmSignOutAll(true)}
           data-testid="sign-out-everywhere"
-          className="mt-2 rounded-[10px] border border-line-12 bg-surface-1 px-4 py-2 text-[14px] leading-[22px] font-semibold text-ink-2 hover:border-line-28"
+          className="mt-2 rounded-control border border-line-12 bg-surface-1 px-4 py-2 text-[14px] leading-[22px] font-semibold text-ink-2 hover:border-line-28"
         >
           {COPY.signOutAll}
         </button>

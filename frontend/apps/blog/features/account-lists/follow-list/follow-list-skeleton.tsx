@@ -29,17 +29,17 @@ export default function FollowListSkeleton({ rows = 8, label }: { rows?: number;
       <ul>
         {Array.from({ length: rows }, (_, index) => (
           <li key={index} className={LIST_ROW} aria-hidden>
-            <div className={`h-10 w-10 shrink-0 rounded-[12px] ${SKELETON_FILL}`} />
+            <div className={`h-10 w-10 shrink-0 rounded-control ${SKELETON_FILL}`} />
             <div className="flex min-w-0 flex-1 flex-col gap-1">
               {/* Staggered widths so eight identical rows do not read as a
                   rendering artefact. */}
               <div
-                className={`h-3 rounded-[10px] ${SKELETON_FILL}`}
+                className={`h-3 rounded-control ${SKELETON_FILL}`}
                 style={{ width: `${110 + ((index * 37) % 90)}px` }}
               />
             </div>
-            <div className={`h-9 w-[92px] shrink-0 rounded-[12px] ${SKELETON_FILL}`} />
-            <div className={`h-8 w-8 shrink-0 rounded-[10px] ${SKELETON_FILL}`} />
+            <div className={`h-9 w-[92px] shrink-0 rounded-control ${SKELETON_FILL}`} />
+            <div className={`h-8 w-8 shrink-0 rounded-control ${SKELETON_FILL}`} />
           </li>
         ))}
       </ul>

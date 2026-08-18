@@ -71,7 +71,7 @@ const TableItem = ({
             <UserAvatarImg
               username={item.name}
               pixelSize={32}
-              radiusClassName="rounded-[10px]"
+              radiusClassName="rounded-control"
               className="ring-1 ring-inset ring-line-9"
             />
           </BasePathLink>
@@ -110,7 +110,7 @@ const TableItem = ({
                   onClick={onUpdateRole}
                   disabled={setRoleMutation.isPending}
                   data-testid="community-role-save-button"
-                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] text-ink-ok-5 transition-colors hover:bg-surface-ok-1 disabled:pointer-events-none disabled:opacity-50"
+                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-control text-ink-ok-5 transition-colors hover:bg-surface-ok-1 disabled:pointer-events-none disabled:opacity-50"
                 >
                   <Icons.save className="h-4 w-4" />
                 </button>
@@ -122,7 +122,7 @@ const TableItem = ({
                   // account link above): Cancel is the one control on this row
                   // that should still read as "stop/undo", so it keeps a red
                   // treatment — just the app's CURRENT red, not the old one.
-                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] text-ink-brand-6 transition-colors hover:bg-surface-brand-1 disabled:pointer-events-none disabled:opacity-50"
+                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-control text-ink-brand-6 transition-colors hover:bg-surface-brand-1 disabled:pointer-events-none disabled:opacity-50"
                 >
                   <Icons.x className="h-4 w-4" />
                 </button>
@@ -139,7 +139,7 @@ const TableItem = ({
                 </span>
                 <button
                   onClick={() => setEditMode(true)}
-                  className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[10px] text-ink-14 transition-colors hover:bg-surface-21 hover:text-ink-7 disabled:pointer-events-none disabled:opacity-40"
+                  className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-control text-ink-14 transition-colors hover:bg-surface-21 hover:text-ink-7 disabled:pointer-events-none disabled:opacity-40"
                   disabled={item.temprary}
                   data-testid="community-role-edit-button"
                 >

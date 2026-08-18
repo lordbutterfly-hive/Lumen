@@ -175,13 +175,13 @@ const BlockedList = ({ username }: { username: string }) => {
         // `undefined` on a failed read, so the empty branch below would otherwise
         // catch it and state, in plain language, that this reader has blocked nobody.
         <p
-          className="mt-4 rounded-[14px] border border-line-warn-3 bg-surface-5 px-4 py-5 text-center text-[14px] leading-[22px] text-ink-10"
+          className="mt-4 rounded-card border border-line-warn-3 bg-surface-5 px-4 py-5 text-center text-[14px] leading-[22px] text-ink-10"
           data-testid="settings-blocked-accounts-error"
         >
           {t('settings_page.blocked_accounts_error')}
         </p>
       ) : !data || data.length === 0 ? (
-        <p className="mt-4 rounded-[14px] bg-surface-15 px-4 py-5 text-center text-[14px] leading-[22px] text-ink-10">
+        <p className="mt-4 rounded-card bg-surface-15 px-4 py-5 text-center text-[14px] leading-[22px] text-ink-10">
           {t('settings_page.blocked_accounts_empty')}
         </p>
       ) : (
@@ -222,7 +222,7 @@ const BlockedList = ({ username }: { username: string }) => {
                 <button
                   type="button"
                   data-testid="settings-unblock-button"
-                  className="inline-flex h-9 min-w-[92px] items-center justify-center rounded-[14px] border border-line-11 bg-surface-1 px-4 text-[13px] leading-[20px] font-bold text-ink-brand-6 transition-colors hover:border-line-brand-10 hover:bg-surface-brand-5 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="inline-flex h-9 min-w-[92px] items-center justify-center rounded-card border border-line-11 bg-surface-1 px-4 text-[13px] leading-[20px] font-bold text-ink-brand-6 transition-colors hover:border-line-brand-10 hover:bg-surface-brand-5 disabled:cursor-not-allowed disabled:opacity-60"
                   onClick={() => (fromChain ? handleChainRemove(peer) : handleUnblock(peer))}
                   disabled={pending}
                 >

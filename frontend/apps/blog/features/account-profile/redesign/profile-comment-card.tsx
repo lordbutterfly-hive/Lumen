@@ -30,10 +30,10 @@ export default function ProfileCommentCard({ post }: { post: Entry }) {
   const payoutDeclined = parseFloat(post.max_accepted_payout) === 0;
 
   return (
-    <article className="rounded-[18px] border border-line-9 bg-surface-1 p-[22px] transition-colors hover:border-line-17">
+    <article className="rounded-panel border border-line-9 bg-surface-1 p-[22px] transition-colors hover:border-line-17">
       {/* "replying to @x in community" header */}
       <div className="mb-2.5 flex flex-wrap items-center gap-1.5 font-sans text-[13px] leading-[20px] text-ink-14">
-        <Icons.arrowBigUp className="h-[14px] w-[14px] -rotate-90 text-ink-19" aria-hidden="true" />
+        <Icons.arrowBigUp className="h-[14px] w-[14px] -rotate-90 text-ink-21" aria-hidden="true" />
         {post.parent_author ? (
           <>
             <span>{t('profile.comment.replying_to_prefix')}</span>
@@ -82,7 +82,7 @@ export default function ProfileCommentCard({ post }: { post: Entry }) {
           <VotesComponentWrapper post={post} type="comment" />
         </div>
 
-        <span className="flex items-center gap-1 rounded-[10px] px-2.5 py-1.5 font-medium text-ink-10 transition-colors hover:bg-surface-21 hover:text-ink-4">
+        <span className="flex items-center gap-1 rounded-control px-2.5 py-1.5 font-medium text-ink-10 transition-colors hover:bg-surface-21 hover:text-ink-4">
           <PostCardCommentTooltip comments={post.children} url={`${href}/#comments`} iconClassName="h-4 w-4" />
         </span>
 

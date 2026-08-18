@@ -144,7 +144,7 @@ export function WeeklyRecapCard({ className }: WeeklyRecapCardProps) {
 
   return (
     <section
-      className={`relative rounded-[18px] border border-line-9 bg-surface-12 px-5 py-4 ${className ?? ''}`}
+      className={`relative rounded-panel border border-line-9 bg-surface-12 px-5 py-4 ${className ?? ''}`}
       data-testid="retention-weekly-recap"
     >
       <button

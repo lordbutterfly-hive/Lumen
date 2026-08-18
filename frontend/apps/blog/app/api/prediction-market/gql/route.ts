@@ -3,6 +3,7 @@ import { getLogger } from '@ui/lib/logging';
 import { STATE_QUERY, HEAD_QUERY } from '@/blog/features/prediction-market/lib/vsc-gql';
 import { getClientIp } from '@/blog/lib/lite/http/ip';
 import { enforceMagiGqlRate } from '@/blog/lib/lite/antispam/rate-limit';
+import { withRetry } from '@transaction/lib/retry';
 
 const logger = getLogger('app');
 
@@ -149,8 +150,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     /* limiter unavailable — proceed */
   }
 
-  try {
-    const upstream = await fetch(gqlUrl, {
+  // Pinned after the guard above: TypeScript does not carry that narrowing into
+  // a nested function, and `fetchUpstream` closes over this — same fix as the
+  // creator-tokens proxy's own `upstreamUrl`.
+  const upstreamUrl: string = gqlUrl;
+
+  async function fetchUpstream(): Promise<{ status: number; text: string; contentType: string }> {
+    const upstream = await fetch(upstreamUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ query, variables: typeof variables === 'object' && variables !== null ? variables : {} }),
@@ -165,13 +171,30 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       cache: 'no-store'
     });
     const text = await upstream.text();
+    return {
+      status: upstream.status,
+      text,
+      contentType: upstream.headers.get('content-type') ?? 'application/json'
+    };
+  }
+
+  try {
+    // ★ A6 retry rollout (2026-08-18): idempotent read (GraphQL STATE/HEAD query,
+    // never a mutation — see `ALLOWED_QUERIES` above). Kept tight (2 attempts, 1s
+    // budget) against this route's own 10s `UPSTREAM_TIMEOUT_MS`, matching the
+    // creator-tokens proxy this route deliberately mirrors.
+    const { status, text, contentType } = await withRetry(fetchUpstream, {
+      label: 'prediction_market_gql',
+      attempts: 2,
+      budgetMs: 1_000
+    });
     // Pass the upstream body + status straight through. The client's own
     // postGql (vsc-gql.ts) already knows how to read a GraphQL {data,errors}
     // envelope and treat a non-ok status as a failure — duplicating that
     // parsing here would be a second copy that could disagree with the first.
     return new NextResponse(text, {
-      status: upstream.status,
-      headers: { 'Content-Type': upstream.headers.get('content-type') ?? 'application/json' }
+      status,
+      headers: { 'Content-Type': contentType }
     });
   } catch (error) {
     logger.error(error, 'Prediction market GQL proxy: upstream unreachable');

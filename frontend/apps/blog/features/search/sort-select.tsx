@@ -60,7 +60,7 @@ function SearchSortSelect({ query }: { query: string }) {
           data-testid="search-sort-by-dropdown-list"
           value={(sortQuery as SearchSort) ?? 'relevance'}
           onChange={(event) => handleSearch(query, event.target.value as SearchSort)}
-          className="h-9 appearance-none rounded-[14px] border border-line-9 bg-surface-1 py-0 pl-3 pr-8 font-sans text-[13px] leading-[20px] text-ink-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-line-brand-10/30"
+          className="h-9 appearance-none rounded-card border border-line-9 bg-surface-1 py-0 pl-3 pr-8 font-sans text-[13px] leading-[20px] text-ink-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-line-brand-10/30"
         >
           <option value="relevance">{t('search_page.sort_relevance', { defaultValue: 'Relevance' })}</option>
           <option value="created">{t('search_page.sort_newest', { defaultValue: 'Newest' })}</option>

@@ -14,7 +14,7 @@ export default function ProxyCard({ currentProxy }: { currentProxy: string }) {
   const isLite = user.isLoggedIn && user.account_tier === 'lite';
 
   return (
-    <div className="rounded-[18px] border border-line-9 bg-surface-1 p-5" data-testid="proxy-card">
+    <div className="rounded-panel border border-line-9 bg-surface-1 p-5" data-testid="proxy-card">
       <div className="mb-1.5 font-sans text-[15px] leading-[24px] font-bold text-ink-2">
         {t('proposals.proxy_card.title')}
       </div>
@@ -26,7 +26,7 @@ export default function ProxyCard({ currentProxy }: { currentProxy: string }) {
           type="button"
           disabled
           title={t('proposals.lite_cannot_vote')}
-          className="w-full cursor-not-allowed rounded-[11px] border border-line-11 bg-surface-1 p-[11px] font-sans text-[14px] leading-[22px] font-semibold text-ink-7 opacity-60"
+          className="w-full cursor-not-allowed rounded-control border border-line-11 bg-surface-1 p-[11px] font-sans text-[14px] leading-[22px] font-semibold text-ink-7 opacity-60"
           data-testid="proxy-card-lite-blocked"
         >
           {currentProxy ? t('proposals.proxy_card.change_button') : t('proposals.proxy_card.set_button')}
@@ -35,7 +35,7 @@ export default function ProxyCard({ currentProxy }: { currentProxy: string }) {
         <SetProxyDialog currentProxy={currentProxy}>
           <button
             type="button"
-            className="w-full rounded-[11px] border border-line-11 bg-surface-1 p-[11px] font-sans text-[14px] leading-[22px] font-semibold text-ink-7 transition-colors hover:bg-surface-16"
+            className="w-full rounded-control border border-line-11 bg-surface-1 p-[11px] font-sans text-[14px] leading-[22px] font-semibold text-ink-7 transition-colors hover:bg-surface-16"
             data-testid="proxy-card-open"
           >
             {currentProxy ? t('proposals.proxy_card.change_button') : t('proposals.proxy_card.set_button')}

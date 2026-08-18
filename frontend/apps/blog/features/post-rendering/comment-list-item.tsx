@@ -627,7 +627,7 @@ const CommentListItem = memo(function CommentListItem({
     return (
       <li data-testid="comment-list-item" className="lm-enter w-full min-w-0">
         <div
-          className="mb-4 flex w-full min-w-0 flex-wrap items-center justify-between gap-3 rounded-[14px] border border-dashed border-line-18 bg-surface-14 px-3 py-2.5 font-sans text-[13px] leading-[20px] text-ink-10"
+          className="mb-4 flex w-full min-w-0 flex-wrap items-center justify-between gap-3 rounded-card border border-dashed border-line-18 bg-surface-14 px-3 py-2.5 font-sans text-[13px] leading-[20px] text-ink-10"
           data-testid="comment-moderation-unknown"
         >
           <span>{t('cards.comment_card.moderation_status_unknown', { author: displayAuthor })}</span>
@@ -673,7 +673,7 @@ const CommentListItem = memo(function CommentListItem({
                     14px radius, which is the radius the design system assigns to rows. */}
                 <Card
                   className={cn(
-                    `mb-4 w-full min-w-0 overflow-hidden rounded-[14px] border-line-9 bg-surface-1 text-primary depth-${comment.depth}`,
+                    `mb-4 w-full min-w-0 overflow-hidden rounded-card border-line-9 bg-surface-1 text-primary depth-${comment.depth}`,
                     {
                       'opacity-50 hover:opacity-100': hiddenComment || tempraryHidden,
                       'border border-destructive': comment._temporary,

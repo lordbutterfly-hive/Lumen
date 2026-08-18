@@ -140,3 +140,23 @@ export type MeritumCssVars = CSSProperties & Record<`--${string}`, string | numb
 export const MERITUM_CHARGE_DURATION_STYLE: CSSProperties = {
   animationDuration: `${MERITUM_CHARGE_MS}ms`
 };
+
+/**
+ * ★ THE SAME BRIDGE, FOR THE COIN'S RESTING SHEEN (C9-1). `.mt-foil` in
+ * globals.css is written for the strike -- 1400ms, one pass, 120ms delay --
+ * because that file is owned by another agent this session and its classes
+ * cannot be made to read a custom property (same constraint that put
+ * `MERITUM_CHARGE_DURATION_STYLE` above here rather than in the stylesheet).
+ * Put this alongside the identical `mt-foil` class instead, whenever it plays
+ * as the idle coin's companion sweep rather than the strike's one-shot sheen:
+ * inline `animation-duration` / `animation-iteration-count` outrank the
+ * class, so a slow ~6s loop runs off the SAME keyframe with no second copy of
+ * it declared anywhere. Reduced motion still wins over this unchanged --
+ * `.mt-foil` is already in globals' disable list, by class name, regardless
+ * of which duration is currently inline.
+ */
+export const MERITUM_IDLE_FOIL_STYLE: CSSProperties = {
+  animationDuration: '6s',
+  animationIterationCount: 'infinite',
+  animationDelay: '0ms'
+};

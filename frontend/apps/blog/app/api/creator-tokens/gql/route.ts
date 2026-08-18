@@ -4,6 +4,7 @@ import { STATE_QUERY, STATE_QUERY_HEX, HEAD_QUERY } from '@/blog/features/creato
 import { getClientIp } from '@/blog/lib/lite/http/ip';
 import { enforceMagiGqlRate } from '@/blog/lib/lite/antispam/rate-limit';
 import { cachedRead } from '@/blog/lib/server-read-cache';
+import { withRetry } from '@transaction/lib/retry';
 
 const logger = getLogger('app');
 
@@ -245,7 +246,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   try {
-    const direct = await fetchUpstream();
+    // ★ A6 retry rollout (2026-08-18): only this LAST-RESORT call is retried, not
+    // the one inside `cachedRead` above. That first call already runs on every
+    // cache miss and this is the fallback for when IT failed — retrying both
+    // would mean up to two independent retry groups back to back on one request.
+    // Kept tight (2 attempts, 1s budget): `UPSTREAM_TIMEOUT_MS` here is 5s,
+    // deliberately lowered (see its own comment) to cut the "bare spinner"
+    // wait — a full default 3-attempt/2.5s-budget retry on top of that would
+    // partially undo that fix for a genuinely wedged node.
+    const direct = await withRetry(fetchUpstream, {
+      label: 'creator_tokens_gql',
+      attempts: 2,
+      budgetMs: 1_000
+    });
     return new NextResponse(direct.text, {
       status: direct.status,
       headers: { 'Content-Type': direct.contentType }

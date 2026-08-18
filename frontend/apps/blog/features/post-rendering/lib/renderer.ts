@@ -66,7 +66,21 @@ const renderDefaultOptions = {
   // downscale and a meaningfully smaller file.
   imageProxyFn: (url: string) => proxifyImageSrc(url, 1420, 0),
   usertagUrlFn: (account: string) => (basePath ? `${basePath}/@${account}` : `/@${account}`),
-  hashtagUrlFn: (hashtag: string) => (basePath ? `${basePath}/trending/${hashtag}` : `/trending/${hashtag}`),
+  /**
+   * ★★ `/topics/`, NOT `/trending/` (2026-08-18).
+   *
+   * This built `/trending/<hashtag>` for EVERY hashtag in EVERY rendered post body, and
+   * `/trending/:tag` is a retired route: it survives only as a 307 in `next.config.js`.
+   * So the most-clicked link type in the product paid a redirect round trip on every
+   * click, and an investigation into deleting those 15 dead page files found this pointing
+   * straight at them - deleting the redirect would have broken every hashtag in every post
+   * ever written, which is not a thing anyone would have predicted from the page files
+   * themselves looking unreachable.
+   *
+   * The mapping is not a guess: it is exactly what the redirect's own `Location` header
+   * returns, verified by request.
+   */
+  hashtagUrlFn: (hashtag: string) => (basePath ? `${basePath}/topics/${hashtag}` : `/topics/${hashtag}`),
   isLinkSafeFn: (url: string) => isLinkSafe(url),
   addExternalCssClassToMatchingLinksFn: (url: string) => !isLinkSafe(url)
 };

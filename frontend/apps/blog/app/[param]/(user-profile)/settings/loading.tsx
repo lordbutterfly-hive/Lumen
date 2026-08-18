@@ -45,7 +45,7 @@ function SidebarSkeleton() {
  *  row. Same header shell classes as `page-masthead.tsx`. */
 function MastheadSkeleton() {
   return (
-    <header className="relative mb-7 overflow-hidden rounded-[20px] border border-line-warn-3 border-l-[3px] border-l-line-brand-10 bg-[radial-gradient(125%_130%_at_0%_0%,rgb(var(--masthead-1))_0%,rgb(var(--masthead-2))_30%,rgb(var(--masthead-3))_58%,rgb(var(--masthead-4))_85%)] px-7 pb-5 pt-7">
+    <header className="relative mb-7 overflow-hidden rounded-panel border border-line-warn-3 border-l-[3px] border-l-line-brand-10 bg-[radial-gradient(125%_130%_at_0%_0%,rgb(var(--masthead-1))_0%,rgb(var(--masthead-2))_30%,rgb(var(--masthead-3))_58%,rgb(var(--masthead-4))_85%)] px-7 pb-5 pt-7">
       <Skeleton className="mb-1.5 h-[18px] w-24" />
       <Skeleton className="h-[38px] w-40" />
       <div className="mt-3.5">
@@ -96,7 +96,7 @@ export default async function Loading() {
             <Skeleton className="h-[19px] w-64" />
             <Skeleton className="mt-2 h-[13px] w-[28rem] max-w-full" />
             <FieldGridSkeleton fields={8} />
-            <Skeleton className="mt-6 h-11 w-[176px] rounded-[14px]" />
+            <Skeleton className="mt-6 h-11 w-[176px] rounded-card" />
           </section>
 
           {/* Preferences -- NSFW + the three reward/beneficiary selects. */}
