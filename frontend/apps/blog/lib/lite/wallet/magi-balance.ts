@@ -67,7 +67,13 @@ export function getsFreeResourceCredits(account: string): boolean {
   return account.startsWith('hive:');
 }
 
-const BALANCE_QUERY = `query MagiAccountBalance($account: String!) {
+/**
+ * ★ EXPORTED so the same-origin proxy can allowlist it by exact string.
+ * `app/api/creator-tokens/gql/route.ts` imports this and matches on identity,
+ * the same single-source-of-truth arrangement it already has with reads.ts's
+ * three query constants — so the proxy and this caller can never drift.
+ */
+export const BALANCE_QUERY = `query MagiAccountBalance($account: String!) {
   getAccountBalance(account: $account) { account block_height hbd }
   getAccountRC(account: $account) { account amount max_rcs }
 }`;
@@ -93,11 +99,35 @@ function prop(value: unknown, key: string): unknown {
  * has never seen. Callers must distinguish that from an account that genuinely
  * holds nothing; see the note at the top of this file.
  */
+/**
+ * The same-origin proxy every other creator-tokens read already goes through.
+ *
+ * ★ DEFECT FIX 2026-08-19. This function used to `fetch(gqlUrl)` — the Magi node
+ * directly from the browser — and it could never have worked:
+ *
+ *   - the node sends no `Access-Control-Allow-Origin`, so the browser refuses at
+ *     the CORS preflight (this is the whole reason reads.ts was proxied), and
+ *   - `REACT_APP_CREATOR_TOKENS_GQL_URL` was removed from `connect-src` on
+ *     2026-08-11 (packages/middleware/lib/csp.ts), so CSP blocks it too.
+ *
+ * That removal was made after grepping for the only browser-reachable caller —
+ * and this file, written on 08-09, was two days younger than the grep and was
+ * missed. The failure is SILENT AND DANGEROUS in exactly the direction this
+ * module was written to avoid: the read throws, `useMagiSpendingPower` reports
+ * `failed`, affordability degrades to 'unknown', `blockedBySpending` becomes
+ * false, and the Buy button stays ENABLED for someone who cannot pay — while
+ * the funding help that would tell them why never renders.
+ *
+ * `gqlUrl` is kept in the signature for call-site compatibility and is no longer
+ * used to fetch, exactly as reads.ts's own client does.
+ */
+const CREATOR_TOKENS_GQL_PROXY_PATH = '/api/creator-tokens/gql';
+
 export async function readMagiSpendingPower(gqlUrl: string, account: string): Promise<MagiSpendingPower> {
   if (!gqlUrl) throw new Error('Magi balance read: no GraphQL endpoint configured');
   if (!account) throw new Error('Magi balance read: no account given');
 
-  const res = await fetch(gqlUrl, {
+  const res = await fetch(CREATOR_TOKENS_GQL_PROXY_PATH, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ query: BALANCE_QUERY, variables: { account } }),
